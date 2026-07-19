@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useCallback, useState } from 'react';
-import { PanelResizeHandle } from '../../../components/layout/PanelResizeHandle.js';
+import { PanelResizeHandle } from '../../../components/layout/shared/PanelResizeHandle.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { ReviewPanelCollapsedRail } from './ReviewPanelCollapsedRail.js';
 import { ReviewPanelContent } from './ReviewPanelContent.js';

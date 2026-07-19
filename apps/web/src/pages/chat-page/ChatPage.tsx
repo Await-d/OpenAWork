@@ -51,6 +51,7 @@ import {
   type UnifiedComposerActivity,
 } from '../../components/chat/composer/UnifiedComposer.js';
 import { ChatTopBar } from '../../components/chat/session/ChatTopBar.js';
+import { QuickTerminalToggle } from '../../components/chat/terminal/QuickTerminalToggle.js';
 import { SessionTerminalsChip } from '../../components/chat/terminal/SessionTerminalsChip.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
 import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminalPanel.js';
@@ -315,7 +316,6 @@ import { useChatKeyboardShortcuts } from '../../hooks/chat/useChatKeyboardShortc
 import { ChatConversationView } from './conversation/ChatConversationView.js';
 import { TerminalPanel } from './panels/TerminalPanel.js';
 import { ChatTerminalToggle } from './panels/ChatTerminalToggle.js';
-import { ChatWorkbenchStatusStrip } from './panels/ChatWorkbenchStatusStrip.js';
 import { SessionHeaderBar } from './panels/SessionHeaderBar.js';
 import { SessionPanelFrame } from './panels/SessionPanelFrame.js';
 import { FusionDockedSidePanel } from './panels/FusionDockedSidePanel.js';
@@ -323,8 +323,8 @@ import type {
   FusionContextOverviewProps,
   FusionContextRuntimeSummary,
 } from './panels/FusionContextTab.js';
-import { resolveConversationLayoutState } from './layout/conversation-layout-state.js';
 import { FusionChatMainShell } from './layout/FusionChatMainShell.js';
+import { useFusionChatLayout } from './layout/use-fusion-chat-layout.js';
 import { useFusionDockedPanelViewport } from './layout/use-fusion-docked-panel-viewport.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
@@ -565,7 +565,6 @@ export default function ChatPage() {
   const layoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const reviewPanelOpened = useUIStateStore((s) => s.reviewPanelOpened);
   const setReviewPanelOpened = useUIStateStore((s) => s.setReviewPanelOpened);
-  const toggleReviewPanelOpened = useUIStateStore((s) => s.toggleReviewPanelOpened);
   const terminalPanelOpened = useUIStateStore((s) => s.terminalPanelOpened);
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const toggleTerminalPanelOpened = useUIStateStore((s) => s.toggleTerminalPanelOpened);
@@ -645,8 +644,6 @@ export default function ChatPage() {
   // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
   // decision-relevant inputs actually change (not on every token delta).
   const attachEligibilitySignatureRef = useRef<string | null>(null);
-  const autoOpenedTerminalPanelRef = useRef(false);
-  const previousTerminalRunningCountRef = useRef(0);
 
   // 点击导航栏 Chat 图标时（已在 /chat 路由），清除当前会话回到欢迎页面。
   useEffect(() => {
@@ -711,38 +708,21 @@ export default function ChatPage() {
     gatewayUrl,
     token,
   });
-  useEffect(() => {
-    const previousRunningCount = previousTerminalRunningCountRef.current;
-    const runningCount = sessionTerminals.runningCount;
-
-    if (!isFusionLayout || !currentSessionId) {
-      autoOpenedTerminalPanelRef.current = false;
-      previousTerminalRunningCountRef.current = runningCount;
-      return;
-    }
-
-    if (previousRunningCount === 0 && runningCount > 0 && !terminalPanelOpened) {
-      autoOpenedTerminalPanelRef.current = true;
-      setTerminalPanelOpened(true);
-    }
-
-    if (runningCount === 0 && autoOpenedTerminalPanelRef.current && terminalPanelOpened) {
-      autoOpenedTerminalPanelRef.current = false;
-      setTerminalPanelOpened(false);
-    }
-
-    if (runningCount === 0) {
-      autoOpenedTerminalPanelRef.current = false;
-    }
-
-    previousTerminalRunningCountRef.current = runningCount;
-  }, [
+  const fusionChatLayout = useFusionChatLayout({
+    canDockSidePanel: canDockFusionSidePanel,
     currentSessionId,
-    isFusionLayout,
-    sessionTerminals.runningCount,
+    editorFullScreen,
+    editorMode,
+    enabled: isFusionLayout,
+    isNarrowViewport,
+    reviewPanelOpened,
+    setReviewPanelOpened,
+    setSidePanelActiveTab,
     setTerminalPanelOpened,
+    sidePanelActiveTab,
     terminalPanelOpened,
-  ]);
+    terminalRunningCount: sessionTerminals.runningCount,
+  });
   const availableImageEditReferenceArtifacts = useMemo(() => {
     if (!latestGeneratedImageResult) {
       return sessionImageEditReferenceArtifacts;
@@ -1005,7 +985,6 @@ export default function ChatPage() {
     ],
   );
   const handleTerminalPanelToggle = useCallback(() => {
-    autoOpenedTerminalPanelRef.current = false;
     toggleTerminalPanelOpened();
   }, [toggleTerminalPanelOpened]);
   const lastToolName = useMemo(() => {
@@ -4423,27 +4402,6 @@ export default function ChatPage() {
     childSessions.length,
     sessionTasks.length,
   ]);
-  const handleFusionReviewPanelToggle = useCallback(() => {
-    if (!isFusionLayout) {
-      toggleReviewPanelOpened();
-      return;
-    }
-
-    if (!reviewPanelOpened || sidePanelActiveTab !== 'review') {
-      setSidePanelActiveTab('review');
-      setReviewPanelOpened(true);
-      return;
-    }
-
-    setReviewPanelOpened(false);
-  }, [
-    isFusionLayout,
-    reviewPanelOpened,
-    setReviewPanelOpened,
-    setSidePanelActiveTab,
-    sidePanelActiveTab,
-    toggleReviewPanelOpened,
-  ]);
   const handleFusionContextCompactSession = useCallback(() => {
     void handleCompactCurrentSession();
   }, [handleCompactCurrentSession]);
@@ -4636,19 +4594,19 @@ export default function ChatPage() {
       {
         id: 'toggle-right-panel',
         label: isFusionLayout
-          ? reviewPanelOpened
-            ? '收起审查侧栏'
-            : '展开审查侧栏'
+          ? fusionChatLayout.rightPanelCommandLabel
           : rightOpen
             ? '收起右侧面板'
             : '展开右侧面板',
-        description: isFusionLayout ? '切换审查/文件/Context 侧栏' : '切换计划/工具/概览面板',
+        description: isFusionLayout
+          ? fusionChatLayout.rightPanelCommandDescription
+          : '切换计划/工具/概览面板',
         category: '视图',
         shortcut: '⌘\\',
         icon: '📊',
         onExecute: () => {
           if (isFusionLayout) {
-            handleFusionReviewPanelToggle();
+            fusionChatLayout.toggleReviewPanel();
             return;
           }
           setRightOpen((v) => !v);
@@ -4707,7 +4665,9 @@ export default function ChatPage() {
       bookmarkStore,
       handleCopyMessage,
       handleCompactCurrentSession,
-      handleFusionReviewPanelToggle,
+      fusionChatLayout.rightPanelCommandDescription,
+      fusionChatLayout.rightPanelCommandLabel,
+      fusionChatLayout.toggleReviewPanel,
       isFusionLayout,
       navigate,
       navigateToHome,
@@ -4778,7 +4738,7 @@ export default function ChatPage() {
       },
       onToggleRightPanel: () => {
         if (isFusionLayout) {
-          handleFusionReviewPanelToggle();
+          fusionChatLayout.toggleReviewPanel();
           return;
         }
         setRightOpen((v) => !v);
@@ -4792,20 +4752,8 @@ export default function ChatPage() {
   );
 
   const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
-  const showDockedReviewPanel =
-    isFusionLayout &&
-    reviewPanelOpened &&
-    canDockFusionSidePanel &&
-    !isNarrowViewport &&
-    !(editorMode && editorFullScreen) &&
-    !!currentSessionId;
   const dialogueModeLabel =
     DIALOGUE_MODE_OPTIONS.find((option) => option.value === dialogueMode)?.label ?? dialogueMode;
-  const conversationLayoutState = resolveConversationLayoutState({
-    editorMode,
-    isFusionLayout,
-    showDockedReviewPanel,
-  });
 
   // Listen for custom events from slash commands
   useEffect(() => {
@@ -4848,19 +4796,10 @@ export default function ChatPage() {
 
   return (
     <div
-      className={`page-root ${isFusionLayout ? 'page-root-fusion-col' : 'page-root-row'}`}
+      className={fusionChatLayout.pageRootClassName}
       style={{
         position: 'relative',
-        ...(isFusionLayout
-          ? {
-              display: 'flex',
-              flex: 1,
-              flexDirection: 'column',
-              gap: 0,
-              minHeight: 0,
-              overflow: 'hidden',
-            }
-          : {}),
+        ...fusionChatLayout.pageRootStyle,
       }}
     >
       {/* ─── Command Palette ─── */}
@@ -4880,98 +4819,97 @@ export default function ChatPage() {
         }}
       />
 
-      <FusionChatMainShell
-        editorFullScreen={editorFullScreen}
-        editorMode={editorMode}
-        editorPane={
-          <ChatEditorPane
-            editorMode={editorMode}
-            splitPos={splitPos}
-            splitDragging={splitDragging}
-            editorPaneRef={editorPaneRef}
-            handleSplitMouseDown={handleSplitMouseDown}
-            fileEditor={fileEditor}
-            saving={saving}
-            handleSaveFile={handleSaveFile}
-            browserPreviewUrl={browserPreviewUrl}
-            workspacePath={effectiveWorkingDirectory}
-            activeTab={editorPaneTab}
-            onTabChange={setEditorPaneTab}
-            fullScreen={editorFullScreen}
-            onToggleFullScreen={() =>
-              startSessionSwitchTransition(() => {
-                if (editorFullScreen) {
-                  setEditorFullScreen(false);
-                  return;
-                }
-                setEditorMode(true);
-                setEditorFullScreen(true);
-              })
-            }
-            fileTree={
-              <WorkspaceFileTreePanel
-                workspacePath={effectiveWorkingDirectory}
-                sessionId={currentSessionId}
-                onOpenFile={(path) => void fileEditor.openFile(path)}
-                fetchTree={workspace.fetchTree}
-                active={editorMode}
-                variant="embedded"
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  background: 'var(--bg-surface)',
-                  overflow: 'hidden',
-                }}
-              />
-            }
-          />
-        }
-        hasSession={currentSessionId !== null}
-        isFusionLayout={isFusionLayout}
-        showDockedSidePanel={showDockedReviewPanel}
-        sidePanel={
-          <FusionDockedSidePanel
-            activeEditorFilePath={fileEditor.activeFilePath}
-            activeTab={sidePanelActiveTab}
-            contextUsageSnapshot={contextUsageSnapshot}
-            currentSessionId={currentSessionId}
-            editorMode={editorMode}
-            editorFileState={fileEditor}
-            editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
-            effectiveWorkingDirectory={effectiveWorkingDirectory}
-            fetchTree={workspace.fetchTree}
-            gatewayUrl={gatewayUrl}
-            handleSaveFile={handleSaveFile}
-            onCompactSession={() => void handleCompactCurrentSession()}
-            onOpenFileInEditor={handleOpenFusionEditorFile}
-            onOpenWorkspace={() => setShowWorkspaceSelector(true)}
-            onShowEditor={handleShowFusionEditor}
-            onTabChange={setSidePanelActiveTab}
-            overview={fusionContextOverview}
-            runtimeSummary={fusionContextRuntimeSummary}
-            saving={saving}
-            token={token}
-            workspaceFileItems={workspaceFileItems}
-          />
-        }
-        splitContainerRef={splitContainerRef}
-        splitDragging={splitDragging}
-        splitPos={splitPos}
-        terminal={
-          <TerminalPanel
-            workspacePath={effectiveWorkingDirectory}
-            gatewayUrl={gatewayUrl}
-            token={token}
-            sessionId={currentSessionId}
-            terminals={sessionTerminals.terminals}
-            loading={sessionTerminals.loading}
-            onReload={sessionTerminals.reload}
-            onRenameTerminal={sessionTerminals.renameTerminal}
-            onDismissTerminal={sessionTerminals.dismissTerminal}
-          />
-        }
-      >
-        {isFusionLayout ? (
+      {isFusionLayout ? (
+        <FusionChatMainShell
+          editorFullScreen={editorFullScreen}
+          editorMode={editorMode}
+          editorPane={
+            <ChatEditorPane
+              editorMode={editorMode}
+              splitPos={splitPos}
+              splitDragging={splitDragging}
+              editorPaneRef={editorPaneRef}
+              handleSplitMouseDown={handleSplitMouseDown}
+              fileEditor={fileEditor}
+              saving={saving}
+              handleSaveFile={handleSaveFile}
+              browserPreviewUrl={browserPreviewUrl}
+              workspacePath={effectiveWorkingDirectory}
+              activeTab={editorPaneTab}
+              onTabChange={setEditorPaneTab}
+              fullScreen={editorFullScreen}
+              onToggleFullScreen={() =>
+                startSessionSwitchTransition(() => {
+                  if (editorFullScreen) {
+                    setEditorFullScreen(false);
+                    return;
+                  }
+                  setEditorMode(true);
+                  setEditorFullScreen(true);
+                })
+              }
+              fileTree={
+                <WorkspaceFileTreePanel
+                  workspacePath={effectiveWorkingDirectory}
+                  sessionId={currentSessionId}
+                  onOpenFile={(path) => void fileEditor.openFile(path)}
+                  fetchTree={workspace.fetchTree}
+                  active={editorMode}
+                  variant="embedded"
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    background: 'var(--bg-surface)',
+                    overflow: 'hidden',
+                  }}
+                />
+              }
+            />
+          }
+          hasSession={currentSessionId !== null}
+          showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
+          sidePanel={
+            <FusionDockedSidePanel
+              activeEditorFilePath={fileEditor.activeFilePath}
+              activeTab={sidePanelActiveTab}
+              contextUsageSnapshot={contextUsageSnapshot}
+              currentSessionId={currentSessionId}
+              editorMode={editorMode}
+              editorFileState={fileEditor}
+              editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
+              effectiveWorkingDirectory={effectiveWorkingDirectory}
+              fetchTree={workspace.fetchTree}
+              gatewayUrl={gatewayUrl}
+              handleSaveFile={handleSaveFile}
+              onCompactSession={() => void handleCompactCurrentSession()}
+              onOpenFileInEditor={handleOpenFusionEditorFile}
+              onOpenWorkspace={() => setShowWorkspaceSelector(true)}
+              onShowEditor={handleShowFusionEditor}
+              onTabChange={setSidePanelActiveTab}
+              overview={fusionContextOverview}
+              runtimeSummary={fusionContextRuntimeSummary}
+              saving={saving}
+              token={token}
+              workspaceFileItems={workspaceFileItems}
+            />
+          }
+          splitContainerRef={splitContainerRef}
+          splitDragging={splitDragging}
+          splitPos={splitPos}
+          terminal={
+            <TerminalPanel
+              workspacePath={effectiveWorkingDirectory}
+              gatewayUrl={gatewayUrl}
+              token={token}
+              sessionId={currentSessionId}
+              terminals={sessionTerminals.terminals}
+              loading={sessionTerminals.loading}
+              onReload={sessionTerminals.reload}
+              onRenameTerminal={sessionTerminals.renameTerminal}
+              onDismissTerminal={sessionTerminals.dismissTerminal}
+            />
+          }
+        >
           <SessionPanelFrame>
             <WorkspacePickerModal
               isOpen={showWorkspaceSelector}
@@ -4998,8 +4936,8 @@ export default function ChatPage() {
                 sessionId={currentSessionId}
                 sessionSource="chat"
                 compact={isFusionLayout}
-                centerContent={conversationLayoutState.centerContent}
-                contentMaxWidth={conversationLayoutState.contentMaxWidth}
+                centerContent={fusionChatLayout.conversationLayoutState.centerContent}
+                contentMaxWidth={fusionChatLayout.conversationLayoutState.contentMaxWidth}
                 currentUserEmail={currentUserEmail}
                 currentUserDisplayName={currentUserDisplayName}
                 gatewayUrl={gatewayUrl}
@@ -5014,7 +4952,7 @@ export default function ChatPage() {
                         workspacePath={effectiveWorkingDirectory}
                         reviewPanelOpened={reviewPanelOpened}
                         terminalPanelOpened={terminalPanelOpened}
-                        onToggleReviewPanel={handleFusionReviewPanelToggle}
+                        onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
                         onToggleTerminalPanel={handleTerminalPanelToggle}
                         onMore={commandPalette.open}
                       />
@@ -5066,13 +5004,8 @@ export default function ChatPage() {
                       quickTerminalToggle={
                         currentSessionId ? (
                           <ChatTerminalToggle
-                            isFusionLayout={isFusionLayout}
                             terminalPanelOpened={terminalPanelOpened}
-                            quickTerminalOpen={quickTerminalOpen}
-                            onToggleTerminalPanelOpened={handleTerminalPanelToggle}
-                            onSetQuickTerminalOpen={(open) =>
-                              setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, open)
-                            }
+                            onToggleTerminalPanel={handleTerminalPanelToggle}
                           />
                         ) : null
                       }
@@ -5421,499 +5354,478 @@ export default function ChatPage() {
               />
             </LatestAssistantMessageContext>
           </SessionPanelFrame>
-        ) : (
-          <>
-            <WorkspacePickerModal
-              isOpen={showWorkspaceSelector}
-              onClose={() => setShowWorkspaceSelector(false)}
-              onSelect={async (path) => {
-                if (currentSessionId) {
-                  await workspace.setWorkspace(path);
-                }
-                addSavedWorkspacePath(path);
-                setSelectedWorkspacePath(path);
-                setFileTreeRootPath(path);
-                setShowWorkspaceSelector(false);
-              }}
-              fetchRootPath={workspace.fetchRootPath}
-              fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
-              fetchTree={workspace.fetchTree}
-              createDirectory={workspace.createDirectory}
-              initialPath={effectiveWorkingDirectory ?? undefined}
-              validatePath={workspace.validatePath}
-              loading={workspace.loading}
-            />
-            <LatestAssistantMessageContext value={latestAssistantMessageId}>
-              <ChatConversationView
-                sessionId={currentSessionId}
-                sessionSource="chat"
-                compact={isFusionLayout}
-                centerContent={conversationLayoutState.centerContent}
-                contentMaxWidth={conversationLayoutState.contentMaxWidth}
-                currentUserEmail={currentUserEmail}
-                currentUserDisplayName={currentUserDisplayName}
-                gatewayUrl={gatewayUrl}
-                token={token}
-                topBar={
-                  <>
-                    {isFusionLayout && currentSessionId ? (
-                      <SessionHeaderBar
-                        title={`会话 ${currentSessionId.slice(0, 8)}`}
-                        modelLabel={activeModelOption?.label ?? activeModelId}
-                        modeLabel={dialogueModeLabel}
-                        workspacePath={effectiveWorkingDirectory}
-                        reviewPanelOpened={reviewPanelOpened}
-                        terminalPanelOpened={terminalPanelOpened}
-                        onToggleReviewPanel={handleFusionReviewPanelToggle}
-                        onToggleTerminalPanel={handleTerminalPanelToggle}
-                        onMore={commandPalette.open}
-                      />
-                    ) : null}
-                    <ChatTopBar
-                      dialogueMode={dialogueMode}
-                      onChangeDialogueMode={handleDialogueModeChange}
-                      yoloMode={yoloMode}
-                      onToggleYolo={handleToggleYolo}
-                      density={isFusionLayout ? 'compact' : 'normal'}
-                      editorMode={editorMode}
-                      onToggleEditorMode={() =>
-                        startSessionSwitchTransition(() => {
-                          const next = !editorMode;
-                          setEditorMode(next);
-                          if (!next) setEditorFullScreen(false);
-                        })
-                      }
-                      rightOpen={rightOpen}
-                      onToggleRightOpen={() => setRightOpen((o) => !o)}
-                      hideRightPanelToggle={isFusionLayout}
-                      editorFullScreen={editorFullScreen}
-                      onToggleEditorFullScreen={() =>
-                        startSessionSwitchTransition(() => {
-                          if (editorFullScreen) {
-                            setEditorFullScreen(false);
-                            return;
+        </FusionChatMainShell>
+      ) : (
+        <>
+          <WorkspacePickerModal
+            isOpen={showWorkspaceSelector}
+            onClose={() => setShowWorkspaceSelector(false)}
+            onSelect={async (path) => {
+              if (currentSessionId) {
+                await workspace.setWorkspace(path);
+              }
+              addSavedWorkspacePath(path);
+              setSelectedWorkspacePath(path);
+              setFileTreeRootPath(path);
+              setShowWorkspaceSelector(false);
+            }}
+            fetchRootPath={workspace.fetchRootPath}
+            fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
+            fetchTree={workspace.fetchTree}
+            createDirectory={workspace.createDirectory}
+            initialPath={effectiveWorkingDirectory ?? undefined}
+            validatePath={workspace.validatePath}
+            loading={workspace.loading}
+          />
+          <LatestAssistantMessageContext value={latestAssistantMessageId}>
+            <ChatConversationView
+              sessionId={currentSessionId}
+              sessionSource="chat"
+              compact={isFusionLayout}
+              centerContent={fusionChatLayout.conversationLayoutState.centerContent}
+              contentMaxWidth={fusionChatLayout.conversationLayoutState.contentMaxWidth}
+              currentUserEmail={currentUserEmail}
+              currentUserDisplayName={currentUserDisplayName}
+              gatewayUrl={gatewayUrl}
+              token={token}
+              topBar={
+                <>
+                  {isFusionLayout && currentSessionId ? (
+                    <SessionHeaderBar
+                      title={`会话 ${currentSessionId.slice(0, 8)}`}
+                      modelLabel={activeModelOption?.label ?? activeModelId}
+                      modeLabel={dialogueModeLabel}
+                      workspacePath={effectiveWorkingDirectory}
+                      reviewPanelOpened={reviewPanelOpened}
+                      terminalPanelOpened={terminalPanelOpened}
+                      onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
+                      onToggleTerminalPanel={handleTerminalPanelToggle}
+                      onMore={commandPalette.open}
+                    />
+                  ) : null}
+                  <ChatTopBar
+                    dialogueMode={dialogueMode}
+                    onChangeDialogueMode={handleDialogueModeChange}
+                    yoloMode={yoloMode}
+                    onToggleYolo={handleToggleYolo}
+                    density={isFusionLayout ? 'compact' : 'normal'}
+                    editorMode={editorMode}
+                    onToggleEditorMode={() =>
+                      startSessionSwitchTransition(() => {
+                        const next = !editorMode;
+                        setEditorMode(next);
+                        if (!next) setEditorFullScreen(false);
+                      })
+                    }
+                    rightOpen={rightOpen}
+                    onToggleRightOpen={() => setRightOpen((o) => !o)}
+                    hideRightPanelToggle={isFusionLayout}
+                    editorFullScreen={editorFullScreen}
+                    onToggleEditorFullScreen={() =>
+                      startSessionSwitchTransition(() => {
+                        if (editorFullScreen) {
+                          setEditorFullScreen(false);
+                          return;
+                        }
+                        setEditorMode(true);
+                        setEditorFullScreen(true);
+                      })
+                    }
+                    terminalsChip={
+                      currentSessionId ? (
+                        <SessionTerminalsChip
+                          terminals={sessionTerminals.terminals}
+                          runningCount={sessionTerminals.runningCount}
+                          loading={sessionTerminals.loading}
+                          error={sessionTerminals.error}
+                          pendingKillIds={sessionTerminals.pendingKillIds}
+                          onKillTerminal={sessionTerminals.killTerminal}
+                          onReload={sessionTerminals.reload}
+                          gatewayUrl={gatewayUrl}
+                          token={token}
+                          sessionId={currentSessionId}
+                        />
+                      ) : null
+                    }
+                    quickTerminalToggle={
+                      currentSessionId ? (
+                        <QuickTerminalToggle
+                          open={quickTerminalOpen}
+                          onToggle={() =>
+                            setQuickTerminalOpenForWorkspace(
+                              effectiveWorkingDirectory,
+                              !quickTerminalOpen,
+                            )
                           }
-                          setEditorMode(true);
-                          setEditorFullScreen(true);
-                        })
+                        />
+                      ) : null
+                    }
+                    onOpenCommandPalette={commandPalette.open}
+                    bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
+                    multiSelectActive={multiSelect.multiSelect.enabled}
+                    onToggleMultiSelect={() => {
+                      if (multiSelect.multiSelect.enabled) {
+                        multiSelect.disableMultiSelect();
+                      } else {
+                        multiSelect.enableMultiSelect();
+                        requestAnimationFrame(() => multiSelect.selectAll(messages));
                       }
-                      terminalsChip={
-                        currentSessionId ? (
-                          <SessionTerminalsChip
-                            terminals={sessionTerminals.terminals}
-                            runningCount={sessionTerminals.runningCount}
-                            loading={sessionTerminals.loading}
-                            error={sessionTerminals.error}
-                            pendingKillIds={sessionTerminals.pendingKillIds}
-                            onKillTerminal={sessionTerminals.killTerminal}
-                            onReload={sessionTerminals.reload}
-                            gatewayUrl={gatewayUrl}
-                            token={token}
-                            sessionId={currentSessionId}
-                          />
-                        ) : null
-                      }
-                      quickTerminalToggle={
-                        currentSessionId ? (
-                          <ChatTerminalToggle
-                            isFusionLayout={isFusionLayout}
-                            terminalPanelOpened={terminalPanelOpened}
-                            quickTerminalOpen={quickTerminalOpen}
-                            onToggleTerminalPanelOpened={handleTerminalPanelToggle}
-                            onSetQuickTerminalOpen={(open) =>
-                              setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, open)
-                            }
-                          />
-                        ) : null
-                      }
-                      onOpenCommandPalette={commandPalette.open}
-                      bookmarkCount={
-                        bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length
-                      }
-                      multiSelectActive={multiSelect.multiSelect.enabled}
-                      onToggleMultiSelect={() => {
-                        if (multiSelect.multiSelect.enabled) {
-                          multiSelect.disableMultiSelect();
-                        } else {
-                          multiSelect.enableMultiSelect();
-                          requestAnimationFrame(() => multiSelect.selectAll(messages));
+                    }}
+                    onOpenBrowser={() => {
+                      startSessionSwitchTransition(() => {
+                        if (!browserPreviewUrl) {
+                          setBrowserPreviewUrl('http://localhost:3000');
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('browser');
+                      });
+                    }}
+                    browserActive={!!browserPreviewUrl}
+                    editorPaneTab={editorPaneTab}
+                    onActivateCodeTab={() => {
+                      // 用 transition 降级为非阻塞更新 — `editorMode` /
+                      // `editorPaneTab` 同时被多处 ChatPage 订阅,没有
+                      // transition 的话整树 rerender 会在 click handler
+                      // 内同步发生,触发 [Violation] 'click' handler
+                      // took ~190ms。视觉切换走 React concurrent 调度。
+                      startSessionSwitchTransition(() => {
+                        if (editorMode && editorPaneTab === 'code' && !editorFullScreen) {
+                          setEditorMode(false);
+                          return;
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('code');
+                      });
+                    }}
+                    onActivateBrowserTab={() => {
+                      startSessionSwitchTransition(() => {
+                        if (editorMode && editorPaneTab === 'browser' && !editorFullScreen) {
+                          setEditorMode(false);
+                          return;
+                        }
+                        if (!browserPreviewUrl) {
+                          setBrowserPreviewUrl('http://localhost:3000');
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('browser');
+                      });
+                    }}
+                    todoController={todoController}
+                    todoDetailsId={todoDetailsId}
+                  />
+                  {multiSelect.multiSelect.enabled && (
+                    <MultiSelectToolbar
+                      selectedCount={multiSelect.selectedCount}
+                      onCopy={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        if (selected.length > 0) {
+                          void copyExportToClipboard(selected, 'text').then((ok) => {
+                            if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
+                          });
                         }
                       }}
-                      onOpenBrowser={() => {
-                        startSessionSwitchTransition(() => {
-                          if (!browserPreviewUrl) {
-                            setBrowserPreviewUrl('http://localhost:3000');
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('browser');
-                        });
+                      onExport={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        if (selected.length > 0) {
+                          const content = exportMessages(selected, 'markdown');
+                          downloadExport(
+                            content,
+                            `chat-selected-${Date.now()}.md`,
+                            'text/markdown',
+                          );
+                          toast(`已导出 ${selected.length} 条消息`, 'success');
+                        }
                       }}
-                      browserActive={!!browserPreviewUrl}
-                      editorPaneTab={editorPaneTab}
-                      onActivateCodeTab={() => {
-                        // 用 transition 降级为非阻塞更新 — `editorMode` /
-                        // `editorPaneTab` 同时被多处 ChatPage 订阅,没有
-                        // transition 的话整树 rerender 会在 click handler
-                        // 内同步发生,触发 [Violation] 'click' handler
-                        // took ~190ms。视觉切换走 React concurrent 调度。
-                        startSessionSwitchTransition(() => {
-                          if (editorMode && editorPaneTab === 'code' && !editorFullScreen) {
-                            setEditorMode(false);
-                            return;
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('code');
-                        });
-                      }}
-                      onActivateBrowserTab={() => {
-                        startSessionSwitchTransition(() => {
-                          if (editorMode && editorPaneTab === 'browser' && !editorFullScreen) {
-                            setEditorMode(false);
-                            return;
-                          }
-                          if (!browserPreviewUrl) {
-                            setBrowserPreviewUrl('http://localhost:3000');
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('browser');
-                        });
-                      }}
-                      todoController={todoController}
-                      todoDetailsId={todoDetailsId}
-                    />
-                    {multiSelect.multiSelect.enabled && (
-                      <MultiSelectToolbar
-                        selectedCount={multiSelect.selectedCount}
-                        onCopy={() => {
-                          const selected = multiSelect.getSelectedMessages(messages);
-                          if (selected.length > 0) {
-                            void copyExportToClipboard(selected, 'text').then((ok) => {
-                              if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
+                      onBookmark={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        for (const msg of selected) {
+                          if (!bookmarkStore.isBookmarked(msg.id)) {
+                            bookmarkStore.addBookmark({
+                              messageId: msg.id,
+                              sessionId: currentSessionId ?? '',
+                              content: msg.content.slice(0, 200),
+                              role: msg.role,
                             });
                           }
-                        }}
-                        onExport={() => {
-                          const selected = multiSelect.getSelectedMessages(messages);
-                          if (selected.length > 0) {
-                            const content = exportMessages(selected, 'markdown');
-                            downloadExport(
-                              content,
-                              `chat-selected-${Date.now()}.md`,
-                              'text/markdown',
-                            );
-                            toast(`已导出 ${selected.length} 条消息`, 'success');
-                          }
-                        }}
-                        onBookmark={() => {
-                          const selected = multiSelect.getSelectedMessages(messages);
-                          for (const msg of selected) {
-                            if (!bookmarkStore.isBookmarked(msg.id)) {
-                              bookmarkStore.addBookmark({
-                                messageId: msg.id,
-                                sessionId: currentSessionId ?? '',
-                                content: msg.content.slice(0, 200),
-                                role: msg.role,
-                              });
-                            }
-                          }
-                          toast(`已收藏 ${selected.length} 条消息`, 'success');
-                          multiSelect.disableMultiSelect();
-                        }}
-                        onSelectAll={() => multiSelect.selectAll(messages)}
-                        onCancel={() => multiSelect.disableMultiSelect()}
-                      />
-                    )}
-                    <WorkflowRuntimeStatusStrip runtime={workflowRuntime} tasks={sessionTasks} />
-                    {/* ChatWorkbenchStatusStrip 在 fusion 模式下由 SessionHeaderBar 替代 */}
-                    {!isFusionLayout ? (
-                      <ChatWorkbenchStatusStrip
-                        activeTerminalCount={sessionTerminals.runningCount}
-                        dialogueModeLabel={dialogueModeLabel}
-                        editorMode={editorMode}
-                        editorPaneTab={editorPaneTab}
-                        isFusionLayout={isFusionLayout}
-                        messageCount={messages.length}
-                        modelLabel={activeModelOption?.label ?? activeModelId}
-                        onToggleReviewPanel={handleFusionReviewPanelToggle}
-                        onToggleTerminalPanel={handleTerminalPanelToggle}
-                        reviewPanelOpened={reviewPanelOpened}
-                        sessionId={currentSessionId}
-                        taskCount={sessionTasks.length}
-                        terminalPanelOpened={terminalPanelOpened}
-                        workspacePath={effectiveWorkingDirectory}
-                      />
-                    ) : null}
-                  </>
-                }
-                beforeMessages={
-                  <>
-                    <SubAgentRunList
-                      items={subAgentRunItems}
-                      selectedSessionId={selectedChildSessionId}
-                      onSelectSession={openChildSessionInspector}
+                        }
+                        toast(`已收藏 ${selected.length} 条消息`, 'success');
+                        multiSelect.disableMultiSelect();
+                      }}
+                      onSelectAll={() => multiSelect.selectAll(messages)}
+                      onCancel={() => multiSelect.disableMultiSelect()}
                     />
-                    <UserHistoryJumpList
-                      items={userHistoryJumpItems}
-                      scrollRegionRef={scrollRegionRef}
-                      ensureMessageVisible={ensureMessageVisible}
-                    />
-                  </>
-                }
-                afterMessages={
-                  <>
-                    {latestGeneratedImageResult && artifactsWorkspaceHref && (
-                      <ChatImageGenerationResultStrip
-                        artifactTitle={latestGeneratedImageResult.artifactTitle}
-                        modelLabel={latestGeneratedImageResult.modelLabel}
-                        onContinueEditing={continueEditingLatestGeneratedImage}
-                        onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
-                      />
-                    )}
-                  </>
-                }
-                composerRightSlot={
-                  <CompanionStage
-                    agentId={effectiveAgentId}
-                    attachedCount={companionComposerActivity.attachedCount}
-                    currentUserEmail={currentUserEmail}
-                    editorMode={editorMode}
-                    hasStreamError={streamError !== null}
-                    idleSeconds={idleSeconds}
-                    input={input}
-                    lastToolName={lastToolName}
-                    panelOpenSignal={companionPanelSignal}
-                    pendingPermissionCount={pendingPermissions.length}
-                    prefersReducedMotion={prefersReducedMotion}
-                    queuedCount={companionComposerActivity.queuedCount}
-                    rightOpen={rightOpen}
-                    sessionBusyState={remoteSessionBusyState}
-                    sessionId={currentSessionId}
-                    showVoice={companionComposerActivity.showVoice}
-                    streamErrorMessage={streamError}
-                    streaming={streaming}
-                    todoCount={sessionTodos.length}
-                    toolCallCount={toolCallCards.length}
+                  )}
+                  <WorkflowRuntimeStatusStrip runtime={workflowRuntime} tasks={sessionTasks} />
+                </>
+              }
+              beforeMessages={
+                <>
+                  <SubAgentRunList
+                    items={subAgentRunItems}
+                    selectedSessionId={selectedChildSessionId}
+                    onSelectSession={openChildSessionInspector}
                   />
-                }
-                composerExtras={{
-                  imageGeneration: true,
-                  skillRecommendation: true,
-                  multiSelect: true,
-                  bookmarks: true,
-                  promptTemplate: true,
-                  commandPalette: true,
-                  dialogueModeToggle: true,
-                  yoloMode: true,
-                  agentSwitch: true,
-                }}
-                messages={messages}
-                groupedMessageEntries={groupedMessageEntries}
-                visibleMessageCount={visibleMessageCount ?? sanitizedHistoricalMessages.length}
-                hiddenMessageCount={hiddenMessageCount}
-                visibleStreaming={visibleStreaming}
-                showSessionSwitchSkeleton={showSessionSwitchSkeleton}
-                remoteSessionBusyState={remoteSessionBusyState}
-                pendingPermissions={pendingPermissions}
-                resolveInlinePermissionActions={resolveInlinePermissionActions}
-                providerCatalog={providerCatalog}
-                activeProviderId={activeProviderId}
-                activeModelId={activeModelId}
-                activeModelLabel={activeModelOption?.label}
-                onLoadEarlier={() => {
-                  const localHidden =
-                    sanitizedHistoricalMessages.length -
-                    (visibleMessageCount ?? sanitizedHistoricalMessages.length);
-                  if (localHidden > 0) {
-                    setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-                  } else if (currentSessionId) {
-                    void loadCurrentSessionSnapshot(currentSessionId, {
-                      replaceMessages: true,
-                    })
-                      .then(() => {
-                        setServerTotalTurnCount(null);
-                        setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-                      })
-                      .catch(() => undefined);
-                  }
-                }}
-                welcomeScreen={{
-                  hasWorkspace: !!effectiveWorkingDirectory,
-                  dialogueMode,
-                  onNewSession: () => void ensureSession(),
-                  onOpenWorkspace: () => setShowWorkspaceSelector(true),
-                  onSelectMode: handleDialogueModeChange,
-                }}
-                streaming={streaming}
-                stoppingStream={stoppingStream}
-                streamError={streamError}
-                latestUpstreamSummary={visibleLatestUpstreamSummary}
-                onDismissStreamError={() => setStreamError(null)}
-                checkpointCount={compactions.length}
-                pendingQuestionsCount={pendingQuestions.length}
-                stopCapability={stopCapability}
-                onOpenRecovery={() => {
-                  setRightOpen(true);
-                  setRightTab('overview');
-                }}
-                scrollRegionRef={scrollRegionRef}
-                contentColumnRef={contentColumnRef}
-                bottomRef={bottomRef}
-                onScroll={handleScroll}
-                showScrollToBottom={showScrollToBottom}
-                hasPendingFollowContent={hasPendingFollowContent}
-                onScrollToBottom={(behavior, target) => scrollToBottom(behavior, target)}
-                editorMode={editorMode}
-                sessionTodos={sessionTodos}
-                rightOpen={rightOpen}
-                activePendingQuestion={activePendingQuestion}
-                inlineQuestionAnswers={inlineQuestionAnswers}
-                inlineQuestionCustomInputs={inlineQuestionCustomInputs}
-                inlineQuestionReplyStatus={inlineQuestionReplyStatus}
-                inlineQuestionReplyError={inlineQuestionReplyError}
-                onToggleInlineQuestionOption={toggleInlineQuestionOption}
-                onChangeInlineQuestionCustomInput={handleInlineQuestionCustomInput}
-                onReplyInlineQuestion={replyInlineQuestion}
-                historyEditPrompt={historyEditPrompt}
-                onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
-                onResendHistoryEdit={(text, editedInputParts) => {
-                  if (!historyEditPrompt) return;
-                  void handleEditResendInCurrentSession(
-                    text,
-                    historyEditPrompt.messageId,
-                    editedInputParts as never,
-                  );
-                  setHistoryEditPrompt(null);
-                }}
-                onContinueHistoryEdit={(text, editedInputParts) => {
-                  if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
-                    void sendMessage(text, {
-                      existingInputParts: editedInputParts as never,
-                    });
-                  } else {
-                    focusComposerWithText(text);
-                  }
-                  setHistoryEditPrompt(null);
-                }}
-                onCreateBranchFromHistoryEdit={(text, editedInputParts) => {
-                  if (!historyEditPrompt) return;
-                  void createBranchSessionFromMessage(
-                    text,
-                    historyEditPrompt.messageId,
-                    editedInputParts as never,
-                  );
-                  setHistoryEditPrompt(null);
-                }}
-                retryPrompt={retryPrompt}
-                onCloseRetry={() => setRetryPrompt(null)}
-                onRetryCurrent={() => {
-                  void handleRetryInCurrentSession();
-                }}
-                onRetryBranch={() => {
-                  void handleRetryInNewSession();
-                }}
-                chatSearch={chatSearch}
-                composerVariant={composerVariant}
-                providers={providers}
-                fastEnabled={fastEnabled}
-                onFastEnabledChange={setFastEnabled}
-                activeProvider={activeProvider}
-                activeModelOption={activeModelOption}
-                activeModelCanConfigureThinking={activeModelCanConfigureThinking}
-                activeModelTooltip={activeModelTooltip}
-                canStopCurrentSessionStream={canStopCurrentSessionStream}
-                dialogueMode={dialogueMode}
-                manualAgentId={manualAgentId}
-                yoloMode={yoloMode}
-                webSearchEnabled={webSearchEnabled}
-                thinkingEnabled={thinkingEnabled}
-                reasoningEffort={reasoningEffort}
-                imageReferenceArtifacts={availableImageEditReferenceArtifacts}
-                selectedImageEditReferenceArtifactId={selectedImageEditReferenceArtifactId}
-                latestGeneratedImageResult={latestGeneratedImageResult}
-                artifactsWorkspaceHref={artifactsWorkspaceHref}
-                imageGenerationMode={imageGenerationMode}
-                hasConfiguredImageModel={hasConfiguredImageModel}
-                imageGenerationBusy={imageGenerationBusy}
-                imageGenerationDefaults={imageGenerationDefaults}
-                imageModelLabel={imageModelLabel}
-                imagePluginEnabled={imagePluginEnabled}
-                toggleImageGenerationMode={toggleImageGenerationMode}
-                updateImageGenerationDefaults={updateImageGenerationDefaults}
-                composerWorkspaceCatalog={composerWorkspaceCatalog}
-                composerCommandDescriptors={composerCommandDescriptors}
-                agentOptions={agentOptions}
-                effectiveAgentId={effectiveAgentId}
-                defaultAgentLabel={defaultAgentLabel}
-                input={input}
-                setInput={setInput}
-                textareaRef={textareaRef}
-                onComposerSubmit={async (payload) => {
-                  return sendMessage(payload.text, {
-                    queuedFiles: payload.files,
-                    queuedAttachmentItems: payload.attachmentItems,
-                    queuedMessageId: payload.queuedMessageId,
-                  });
-                }}
-                onStopComposer={() => void stopActiveMessage()}
-                onComposerModelSelect={async (pid: string, mid: string) => {
-                  const nextProvider = providers.find((provider) => provider.id === pid);
-                  const nextModel = nextProvider?.defaultModels.find((model) => model.id === mid);
-                  const normalizedThinkingState = normalizeChatThinkingState({
-                    providerType: nextProvider?.type,
-                    modelId: nextModel?.id ?? mid,
-                    declaredSupportsThinking: nextModel?.supportsThinking === true,
-                    thinkingEnabled,
-                    reasoningEffort,
-                  });
-                  setActiveProviderId(pid);
-                  setActiveModelId(mid);
-                  setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
-                  setReasoningEffort(normalizedThinkingState.reasoningEffort);
-                  sessionModelSelectionSourceRef.current = 'manual';
-                  markSessionMetadataDirty();
-                }}
-                onToggleWebSearch={handleToggleWebSearch}
-                onThinkingEnabledChange={(enabled) => {
-                  setThinkingEnabled(enabled);
-                  markSessionMetadataDirty();
-                }}
-                onReasoningEffortChange={(effort) => {
-                  setReasoningEffort(effort);
-                  markSessionMetadataDirty();
-                }}
-                onManualAgentChange={handleManualAgentChange}
-                onClearManualAgentId={handleClearManualAgentId}
-                onEditPreviousUserMessage={handleEditPreviousUserMessage}
-                onContinueEditingImage={continueEditingLatestGeneratedImage}
-                onNavigateToArtifacts={
-                  artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined
-                }
-                onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
-                onCompanionActivityChange={setCompanionComposerActivity}
-                markSessionMetadataDirty={markSessionMetadataDirty}
-                statsData={composerStatsData}
-              />
-              {currentSessionId && !isFusionLayout ? (
-                <QuickTerminalPanel
-                  open={quickTerminalOpen}
-                  onRequestClose={() =>
-                    setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, false)
-                  }
-                  workspacePath={effectiveWorkingDirectory}
-                  gatewayUrl={gatewayUrl}
-                  token={token}
+                  <UserHistoryJumpList
+                    items={userHistoryJumpItems}
+                    scrollRegionRef={scrollRegionRef}
+                    ensureMessageVisible={ensureMessageVisible}
+                  />
+                </>
+              }
+              afterMessages={
+                <>
+                  {latestGeneratedImageResult && artifactsWorkspaceHref && (
+                    <ChatImageGenerationResultStrip
+                      artifactTitle={latestGeneratedImageResult.artifactTitle}
+                      modelLabel={latestGeneratedImageResult.modelLabel}
+                      onContinueEditing={continueEditingLatestGeneratedImage}
+                      onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
+                    />
+                  )}
+                </>
+              }
+              composerRightSlot={
+                <CompanionStage
+                  agentId={effectiveAgentId}
+                  attachedCount={companionComposerActivity.attachedCount}
+                  currentUserEmail={currentUserEmail}
+                  editorMode={editorMode}
+                  hasStreamError={streamError !== null}
+                  idleSeconds={idleSeconds}
+                  input={input}
+                  lastToolName={lastToolName}
+                  panelOpenSignal={companionPanelSignal}
+                  pendingPermissionCount={pendingPermissions.length}
+                  prefersReducedMotion={prefersReducedMotion}
+                  queuedCount={companionComposerActivity.queuedCount}
+                  rightOpen={rightOpen}
+                  sessionBusyState={remoteSessionBusyState}
                   sessionId={currentSessionId}
-                  terminals={sessionTerminals.terminals}
-                  loading={sessionTerminals.loading}
-                  onReload={sessionTerminals.reload}
-                  onRenameTerminal={sessionTerminals.renameTerminal}
-                  onDismissTerminal={sessionTerminals.dismissTerminal}
+                  showVoice={companionComposerActivity.showVoice}
+                  streamErrorMessage={streamError}
+                  streaming={streaming}
+                  todoCount={sessionTodos.length}
+                  toolCallCount={toolCallCards.length}
                 />
-              ) : null}
-            </LatestAssistantMessageContext>
-          </>
-        )}
-      </FusionChatMainShell>
+              }
+              composerExtras={{
+                imageGeneration: true,
+                skillRecommendation: true,
+                multiSelect: true,
+                bookmarks: true,
+                promptTemplate: true,
+                commandPalette: true,
+                dialogueModeToggle: true,
+                yoloMode: true,
+                agentSwitch: true,
+              }}
+              messages={messages}
+              groupedMessageEntries={groupedMessageEntries}
+              visibleMessageCount={visibleMessageCount ?? sanitizedHistoricalMessages.length}
+              hiddenMessageCount={hiddenMessageCount}
+              visibleStreaming={visibleStreaming}
+              showSessionSwitchSkeleton={showSessionSwitchSkeleton}
+              remoteSessionBusyState={remoteSessionBusyState}
+              pendingPermissions={pendingPermissions}
+              resolveInlinePermissionActions={resolveInlinePermissionActions}
+              providerCatalog={providerCatalog}
+              activeProviderId={activeProviderId}
+              activeModelId={activeModelId}
+              activeModelLabel={activeModelOption?.label}
+              onLoadEarlier={() => {
+                const localHidden =
+                  sanitizedHistoricalMessages.length -
+                  (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+                if (localHidden > 0) {
+                  setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+                } else if (currentSessionId) {
+                  void loadCurrentSessionSnapshot(currentSessionId, {
+                    replaceMessages: true,
+                  })
+                    .then(() => {
+                      setServerTotalTurnCount(null);
+                      setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+                    })
+                    .catch(() => undefined);
+                }
+              }}
+              welcomeScreen={{
+                hasWorkspace: !!effectiveWorkingDirectory,
+                dialogueMode,
+                onNewSession: () => void ensureSession(),
+                onOpenWorkspace: () => setShowWorkspaceSelector(true),
+                onSelectMode: handleDialogueModeChange,
+              }}
+              streaming={streaming}
+              stoppingStream={stoppingStream}
+              streamError={streamError}
+              latestUpstreamSummary={visibleLatestUpstreamSummary}
+              onDismissStreamError={() => setStreamError(null)}
+              checkpointCount={compactions.length}
+              pendingQuestionsCount={pendingQuestions.length}
+              stopCapability={stopCapability}
+              onOpenRecovery={() => {
+                setRightOpen(true);
+                setRightTab('overview');
+              }}
+              scrollRegionRef={scrollRegionRef}
+              contentColumnRef={contentColumnRef}
+              bottomRef={bottomRef}
+              onScroll={handleScroll}
+              showScrollToBottom={showScrollToBottom}
+              hasPendingFollowContent={hasPendingFollowContent}
+              onScrollToBottom={(behavior, target) => scrollToBottom(behavior, target)}
+              editorMode={editorMode}
+              sessionTodos={sessionTodos}
+              rightOpen={rightOpen}
+              activePendingQuestion={activePendingQuestion}
+              inlineQuestionAnswers={inlineQuestionAnswers}
+              inlineQuestionCustomInputs={inlineQuestionCustomInputs}
+              inlineQuestionReplyStatus={inlineQuestionReplyStatus}
+              inlineQuestionReplyError={inlineQuestionReplyError}
+              onToggleInlineQuestionOption={toggleInlineQuestionOption}
+              onChangeInlineQuestionCustomInput={handleInlineQuestionCustomInput}
+              onReplyInlineQuestion={replyInlineQuestion}
+              historyEditPrompt={historyEditPrompt}
+              onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
+              onResendHistoryEdit={(text, editedInputParts) => {
+                if (!historyEditPrompt) return;
+                void handleEditResendInCurrentSession(
+                  text,
+                  historyEditPrompt.messageId,
+                  editedInputParts as never,
+                );
+                setHistoryEditPrompt(null);
+              }}
+              onContinueHistoryEdit={(text, editedInputParts) => {
+                if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
+                  void sendMessage(text, {
+                    existingInputParts: editedInputParts as never,
+                  });
+                } else {
+                  focusComposerWithText(text);
+                }
+                setHistoryEditPrompt(null);
+              }}
+              onCreateBranchFromHistoryEdit={(text, editedInputParts) => {
+                if (!historyEditPrompt) return;
+                void createBranchSessionFromMessage(
+                  text,
+                  historyEditPrompt.messageId,
+                  editedInputParts as never,
+                );
+                setHistoryEditPrompt(null);
+              }}
+              retryPrompt={retryPrompt}
+              onCloseRetry={() => setRetryPrompt(null)}
+              onRetryCurrent={() => {
+                void handleRetryInCurrentSession();
+              }}
+              onRetryBranch={() => {
+                void handleRetryInNewSession();
+              }}
+              chatSearch={chatSearch}
+              composerVariant={composerVariant}
+              providers={providers}
+              fastEnabled={fastEnabled}
+              onFastEnabledChange={setFastEnabled}
+              activeProvider={activeProvider}
+              activeModelOption={activeModelOption}
+              activeModelCanConfigureThinking={activeModelCanConfigureThinking}
+              activeModelTooltip={activeModelTooltip}
+              canStopCurrentSessionStream={canStopCurrentSessionStream}
+              dialogueMode={dialogueMode}
+              manualAgentId={manualAgentId}
+              yoloMode={yoloMode}
+              webSearchEnabled={webSearchEnabled}
+              thinkingEnabled={thinkingEnabled}
+              reasoningEffort={reasoningEffort}
+              imageReferenceArtifacts={availableImageEditReferenceArtifacts}
+              selectedImageEditReferenceArtifactId={selectedImageEditReferenceArtifactId}
+              latestGeneratedImageResult={latestGeneratedImageResult}
+              artifactsWorkspaceHref={artifactsWorkspaceHref}
+              imageGenerationMode={imageGenerationMode}
+              hasConfiguredImageModel={hasConfiguredImageModel}
+              imageGenerationBusy={imageGenerationBusy}
+              imageGenerationDefaults={imageGenerationDefaults}
+              imageModelLabel={imageModelLabel}
+              imagePluginEnabled={imagePluginEnabled}
+              toggleImageGenerationMode={toggleImageGenerationMode}
+              updateImageGenerationDefaults={updateImageGenerationDefaults}
+              composerWorkspaceCatalog={composerWorkspaceCatalog}
+              composerCommandDescriptors={composerCommandDescriptors}
+              agentOptions={agentOptions}
+              effectiveAgentId={effectiveAgentId}
+              defaultAgentLabel={defaultAgentLabel}
+              input={input}
+              setInput={setInput}
+              textareaRef={textareaRef}
+              onComposerSubmit={async (payload) => {
+                return sendMessage(payload.text, {
+                  queuedFiles: payload.files,
+                  queuedAttachmentItems: payload.attachmentItems,
+                  queuedMessageId: payload.queuedMessageId,
+                });
+              }}
+              onStopComposer={() => void stopActiveMessage()}
+              onComposerModelSelect={async (pid: string, mid: string) => {
+                const nextProvider = providers.find((provider) => provider.id === pid);
+                const nextModel = nextProvider?.defaultModels.find((model) => model.id === mid);
+                const normalizedThinkingState = normalizeChatThinkingState({
+                  providerType: nextProvider?.type,
+                  modelId: nextModel?.id ?? mid,
+                  declaredSupportsThinking: nextModel?.supportsThinking === true,
+                  thinkingEnabled,
+                  reasoningEffort,
+                });
+                setActiveProviderId(pid);
+                setActiveModelId(mid);
+                setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
+                setReasoningEffort(normalizedThinkingState.reasoningEffort);
+                sessionModelSelectionSourceRef.current = 'manual';
+                markSessionMetadataDirty();
+              }}
+              onToggleWebSearch={handleToggleWebSearch}
+              onThinkingEnabledChange={(enabled) => {
+                setThinkingEnabled(enabled);
+                markSessionMetadataDirty();
+              }}
+              onReasoningEffortChange={(effort) => {
+                setReasoningEffort(effort);
+                markSessionMetadataDirty();
+              }}
+              onManualAgentChange={handleManualAgentChange}
+              onClearManualAgentId={handleClearManualAgentId}
+              onEditPreviousUserMessage={handleEditPreviousUserMessage}
+              onContinueEditingImage={continueEditingLatestGeneratedImage}
+              onNavigateToArtifacts={
+                artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined
+              }
+              onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
+              onCompanionActivityChange={setCompanionComposerActivity}
+              markSessionMetadataDirty={markSessionMetadataDirty}
+              statsData={composerStatsData}
+            />
+            {currentSessionId && !isFusionLayout ? (
+              <QuickTerminalPanel
+                open={quickTerminalOpen}
+                onRequestClose={() =>
+                  setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, false)
+                }
+                workspacePath={effectiveWorkingDirectory}
+                gatewayUrl={gatewayUrl}
+                token={token}
+                sessionId={currentSessionId}
+                terminals={sessionTerminals.terminals}
+                loading={sessionTerminals.loading}
+                onReload={sessionTerminals.reload}
+                onRenameTerminal={sessionTerminals.renameTerminal}
+                onDismissTerminal={sessionTerminals.dismissTerminal}
+              />
+            ) : null}
+          </LatestAssistantMessageContext>
+        </>
+      )}
 
       {/* Classic: ChatRightPanel 作为唯一右侧面板。
           Fusion: ChatRightPanel 不渲染，使用 ReviewPanel 作为独立侧面板。 */}

@@ -13,11 +13,11 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
-import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import type { CommandItem } from '@openAwork/shared-ui';
-import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
-import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
+import { useCommandRegistry } from '../../../hooks/command/useCommandRegistry.js';
+import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { createQuestionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { PendingQuestionRequest, SessionSearchResult } from '@openAwork/web-client';
 import {
@@ -26,13 +26,13 @@ import {
   subscribeCurrentSessionRefresh,
   subscribeSessionPendingPermission,
   subscribeSessionPendingQuestion,
-} from '../../utils/session/session-list-events.js';
+} from '../../../utils/session/session-list-events.js';
 import {
   toSessionPendingPermissionStateFromRequest,
   type SessionPendingPermissionState,
-} from '../../utils/permission/pending-permission-state.js';
-import { toast } from '../common/feedback/ToastNotification.js';
-import { getRecoveryPendingInteractions } from '../conversation-runtime/session/recovery-read-model.js';
+} from '../../../utils/permission/pending-permission-state.js';
+import { toast } from '../../common/feedback/ToastNotification.js';
+import { getRecoveryPendingInteractions } from '../../conversation-runtime/session/recovery-read-model.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 

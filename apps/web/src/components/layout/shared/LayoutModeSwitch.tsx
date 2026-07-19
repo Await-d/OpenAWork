@@ -1,4 +1,4 @@
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { LAYOUT_MODE_OPTIONS } from './layout-mode-options.js';
 import './LayoutModeSwitch.css';
 

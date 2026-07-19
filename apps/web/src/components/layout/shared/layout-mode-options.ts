@@ -1,4 +1,4 @@
-import type { WorkbenchLayoutMode } from '../../stores/ui/uiState.js';
+import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 
 export interface LayoutModeOption {
   readonly mode: WorkbenchLayoutMode;

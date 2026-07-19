@@ -2,12 +2,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { SidebarRailV2 } from './SidebarRailV2.js';
 
 const preloadRouteModuleByPath = vi.hoisted(() => vi.fn());
 
-vi.mock('../../routes/preloadable-route-modules.js', () => ({
+vi.mock('../../../routes/preloadable-route-modules.js', () => ({
   preloadRouteModuleByPath,
 }));
 

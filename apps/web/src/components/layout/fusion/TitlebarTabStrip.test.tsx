@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 const tauriWindowControls = vi.hoisted(() => ({
   close: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),

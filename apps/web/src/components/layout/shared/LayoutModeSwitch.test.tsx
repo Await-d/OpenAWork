@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LayoutModeSwitch } from './LayoutModeSwitch.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 function resetUiState(): void {
   useUIStateStore.setState({ workbenchLayoutMode: 'fusion' });

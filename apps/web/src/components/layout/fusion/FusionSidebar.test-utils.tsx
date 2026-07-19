@@ -1,17 +1,17 @@
 import { render } from '@testing-library/react';
 import { vi, type Mock } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
-import type { Session } from '../../hooks/workspace/useSessions.js';
+import type { Session } from '../../../hooks/workspace/useSessions.js';
 import type {
   TeamSidebarSession,
   TeamWorkspaceGroup,
   UseTeamSidebarSessionsResult,
-} from '../../hooks/workspace/useTeamSidebarSessions.js';
+} from '../../../hooks/workspace/useTeamSidebarSessions.js';
 import type {
   WorkspaceSessionGroup,
   WorkspaceSessionTreeGroup,
-} from '../../utils/session/session-grouping.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+} from '../../../utils/session/session-grouping.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionSidebar } from './FusionSidebar.js';
 
 export const OPENAWORK_PATH = '/home/await/project/OpenAWork';
@@ -62,15 +62,15 @@ vi.mock('@openAwork/web-client', () => ({
   createWorkspaceClient: fusionSidebarMocks.createWorkspaceClient,
 }));
 
-vi.mock('../../hooks/workspace/useSessions.js', () => ({
+vi.mock('../../../hooks/workspace/useSessions.js', () => ({
   useSessions: fusionSidebarMocks.useSessions,
 }));
 
-vi.mock('../../hooks/workspace/useTeamSidebarSessions.js', () => ({
+vi.mock('../../../hooks/workspace/useTeamSidebarSessions.js', () => ({
   useTeamSidebarSessions: fusionSidebarMocks.useTeamSidebarSessions,
 }));
 
-vi.mock('../../routes/preloadable-route-modules.js', () => ({
+vi.mock('../../../routes/preloadable-route-modules.js', () => ({
   preloadRouteModuleByPath: fusionSidebarMocks.preloadRouteModuleByPath,
 }));
 

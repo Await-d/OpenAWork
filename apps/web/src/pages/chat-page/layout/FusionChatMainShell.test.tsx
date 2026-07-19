@@ -12,7 +12,6 @@ function renderShell(overrides: Partial<FusionChatMainShellProps> = {}) {
     editorMode: false,
     editorPane: <div data-testid="editor-pane">editor</div>,
     hasSession: true,
-    isFusionLayout: true,
     showDockedSidePanel: true,
     sidePanel: <aside data-testid="docked-side-panel">side</aside>,
     splitContainerRef: createRef<HTMLDivElement>(),
@@ -57,8 +56,8 @@ describe('FusionChatMainShell', () => {
     expect(conversationPane.style.opacity).toBe('0');
   });
 
-  it('classic 模式只保留会话与编辑器，不渲染 fusion dock 和底部终端', () => {
-    renderShell({ isFusionLayout: false });
+  it('关闭 dock 或没有会话时收起 Fusion 侧栏和底部终端', () => {
+    renderShell({ hasSession: false, showDockedSidePanel: false });
 
     expect(screen.getByTestId('conversation-content')).toBeTruthy();
     expect(screen.getByTestId('editor-pane')).toBeTruthy();

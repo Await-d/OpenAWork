@@ -1,4 +1,4 @@
-import { TitlebarLayoutModeControl } from './TitlebarLayoutModeControl.js';
+import { TitlebarLayoutModeControl } from './shared/TitlebarLayoutModeControl.js';
 import { WorkbenchModeTabs } from './WorkbenchModeTabs.js';
 import './ClassicWorkbenchTitlebar.css';
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { LayoutModeMenuItems } from './TitlebarLayoutModeControl.js';
-import { SettingsIcon, ThemeIcon } from './TitlebarIcons.js';
+import { LayoutModeMenuItems } from '../shared/TitlebarLayoutModeControl.js';
+import { SettingsIcon, ThemeIcon } from '../shared/TitlebarIcons.js';
 import './TitlebarToolsMenu.css';
 
 export interface TitlebarToolsMenuProps {

@@ -24,7 +24,7 @@ vi.mock('react-router', () => ({
   useNavigate: () => mocks.navigate,
 }));
 
-vi.mock('../../stores/auth/auth.js', () => ({
+vi.mock('../../../stores/auth/auth.js', () => ({
   useAuthStore: (selector?: (state: { accessToken: string; gatewayUrl: string }) => unknown) => {
     const authState = {
       accessToken: 'token-test',
@@ -34,18 +34,18 @@ vi.mock('../../stores/auth/auth.js', () => ({
   },
 }));
 
-vi.mock('../../utils/session/session-list-events.js', () => ({
+vi.mock('../../../utils/session/session-list-events.js', () => ({
   getSessionPendingInteractionSnapshot: mocks.getSessionPendingInteractionSnapshot,
   requestCurrentSessionRefresh: mocks.requestCurrentSessionRefresh,
   requestSessionListRefresh: mocks.requestSessionListRefresh,
   subscribeSessionPendingPermission: mocks.subscribeSessionPendingPermission,
 }));
 
-vi.mock('../../utils/permission/permission-reply.js', () => ({
+vi.mock('../../../utils/permission/permission-reply.js', () => ({
   replyPermissionRequest: mocks.replyPermissionRequest,
 }));
 
-vi.mock('../common/feedback/ToastNotification.js', () => ({
+vi.mock('../../common/feedback/ToastNotification.js', () => ({
   toast: mocks.toast,
 }));
 

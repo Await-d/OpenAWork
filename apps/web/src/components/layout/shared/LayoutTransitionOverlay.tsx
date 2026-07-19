@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 const TRANSITION_STYLE = `
 @keyframes lto-backdrop-in {

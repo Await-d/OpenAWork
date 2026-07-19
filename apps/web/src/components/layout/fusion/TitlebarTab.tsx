@@ -9,7 +9,7 @@
  *  - draft 状态指示（未关联 session 的草稿标签）
  */
 
-import type { SessionTab } from '../../stores/ui/uiState.js';
+import type { SessionTab } from '../../../stores/ui/uiState.js';
 
 export interface TitlebarTabProps {
   tab: SessionTab;

@@ -1,4 +1,4 @@
-import { HomeIcon } from './TitlebarIcons.js';
+import { HomeIcon } from '../shared/TitlebarIcons.js';
 
 export interface TitlebarHomeButtonProps {
   readonly active: boolean;

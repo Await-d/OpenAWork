@@ -1,9 +1,9 @@
 import { CommandPalette, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import QuestionPromptCard from './common/display/QuestionPromptCard.js';
-import { FloatingPermissionPrompt } from './layout/FloatingPermissionPrompt.js';
-import { LayoutTransitionOverlay } from './layout/LayoutTransitionOverlay.js';
-import { useLayoutShared } from './layout/useLayoutShared.js';
-import { LayoutFusion } from './layout/LayoutFusion.js';
+import { FloatingPermissionPrompt } from './layout/shared/FloatingPermissionPrompt.js';
+import { LayoutTransitionOverlay } from './layout/shared/LayoutTransitionOverlay.js';
+import { useLayoutShared } from './layout/shared/useLayoutShared.js';
+import { LayoutFusion } from './layout/fusion/LayoutFusion.js';
 import { LayoutClassic } from './layout/LayoutClassic.js';
 
 export interface LayoutProps {

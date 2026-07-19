@@ -12,7 +12,6 @@ export interface FusionChatMainShellProps {
   readonly editorMode: boolean;
   readonly editorPane: ReactNode;
   readonly hasSession: boolean;
-  readonly isFusionLayout: boolean;
   readonly showDockedSidePanel: boolean;
   readonly sidePanel: ReactNode;
   readonly splitContainerRef: RefObject<HTMLDivElement | null>;
@@ -27,7 +26,6 @@ export function FusionChatMainShell({
   editorMode,
   editorPane,
   hasSession,
-  isFusionLayout,
   showDockedSidePanel,
   sidePanel,
   splitContainerRef,
@@ -48,35 +46,27 @@ export function FusionChatMainShell({
     width: conversationHidden ? 0 : editorMode ? 'calc(var(--split-pos) - 2.5px)' : undefined,
   };
 
-  const rootClassName = `fusion-chat-main-shell ${
-    isFusionLayout ? 'fusion-chat-main-shell--fusion' : 'fusion-chat-main-shell--classic'
-  }`;
+  const rootClassName = 'fusion-chat-main-shell fusion-chat-main-shell--fusion';
   const splitClassName = [
     'fusion-chat-main-shell__split',
-    isFusionLayout
-      ? 'fusion-chat-main-shell__split--fusion'
-      : 'fusion-chat-main-shell__split--classic',
+    'fusion-chat-main-shell__split--fusion',
     editorMode ? 'fusion-chat-main-shell__split--with-editor' : null,
   ]
     .filter(Boolean)
     .join(' ');
   const conversationPaneSizeClassName = editorMode
     ? 'fusion-chat-main-shell__conversation-pane--editor'
-    : isFusionLayout && showDockedSidePanel
+    : showDockedSidePanel
       ? 'fusion-chat-main-shell__conversation-pane--docked'
       : 'fusion-chat-main-shell__conversation-pane--fluid';
   const conversationPaneClassName = [
     'fusion-chat-main-shell__conversation-pane',
-    isFusionLayout
-      ? 'fusion-chat-main-shell__conversation-pane--fusion'
-      : 'fusion-chat-main-shell__conversation-pane--classic',
+    'fusion-chat-main-shell__conversation-pane--fusion',
     conversationPaneSizeClassName,
   ].join(' ');
   const conversationFrameClassName = [
     'fusion-chat-main-shell__conversation-frame',
-    isFusionLayout
-      ? 'fusion-chat-main-shell__conversation-frame--fusion'
-      : 'fusion-chat-main-shell__conversation-frame--classic',
+    'fusion-chat-main-shell__conversation-frame--fusion',
   ].join(' ');
 
   return (
@@ -103,12 +93,10 @@ export function FusionChatMainShell({
           </div>
           {editorPane}
         </div>
-        {isFusionLayout && showDockedSidePanel ? sidePanel : null}
+        {showDockedSidePanel ? sidePanel : null}
       </div>
 
-      {isFusionLayout && hasSession ? (
-        <div className="fusion-chat-main-shell__terminal">{terminal}</div>
-      ) : null}
+      {hasSession ? <div className="fusion-chat-main-shell__terminal">{terminal}</div> : null}
     </div>
   );
 }

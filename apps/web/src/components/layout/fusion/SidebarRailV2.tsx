@@ -15,11 +15,11 @@
 
 import { useCallback, type CSSProperties } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
-import NotificationCenter from './notification/NotificationCenter.js';
-import { railIcon, TOP_NAV_ITEMS, BOTTOM_NAV_ITEMS } from './nav/RailIcon.js';
-import type { NavItem } from './nav/RailIcon.js';
-import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import NotificationCenter from '../notification/NotificationCenter.js';
+import { railIcon, TOP_NAV_ITEMS, BOTTOM_NAV_ITEMS } from '../nav/RailIcon.js';
+import type { NavItem } from '../nav/RailIcon.js';
+import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 
 export interface SidebarRailV2Props {
   readonly accessToken: string | null;

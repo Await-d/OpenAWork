@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
-import type { Session } from '../../hooks/workspace/useSessions.js';
-import type { WorkspaceSessionTreeNode } from '../../utils/session/session-grouping.js';
-import { getPathBasename } from '../../utils/workspace-path.js';
+import type { Session } from '../../../hooks/workspace/useSessions.js';
+import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
+import { getPathBasename } from '../../../utils/workspace-path.js';
 
 export interface FusionSidebarPeekProps {
   readonly activeSessionId: string | null;

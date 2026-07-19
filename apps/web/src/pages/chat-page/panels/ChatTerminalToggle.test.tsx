@@ -21,14 +21,11 @@ afterEach(() => {
 });
 
 describe('ChatTerminalToggle', () => {
-  it('在 fusion 布局下切换全局终端面板状态', () => {
+  it('切换 Fusion 全局终端面板状态', () => {
     render(
       <ChatTerminalToggle
-        isFusionLayout={true}
         terminalPanelOpened={false}
-        quickTerminalOpen={false}
-        onToggleTerminalPanelOpened={useUIStateStore.getState().toggleTerminalPanelOpened}
-        onSetQuickTerminalOpen={vi.fn()}
+        onToggleTerminalPanel={useUIStateStore.getState().toggleTerminalPanelOpened}
       />,
     );
 
@@ -37,22 +34,18 @@ describe('ChatTerminalToggle', () => {
     expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
   });
 
-  it('在 classic 布局下继续切换 workspace 快捷终端状态', () => {
-    const onSetQuickTerminalOpen = vi.fn();
+  it('把当前终端展开态透传给按钮', () => {
+    const onToggleTerminalPanel = vi.fn();
 
     render(
       <ChatTerminalToggle
-        isFusionLayout={false}
-        terminalPanelOpened={false}
-        quickTerminalOpen={false}
-        onToggleTerminalPanelOpened={useUIStateStore.getState().toggleTerminalPanelOpened}
-        onSetQuickTerminalOpen={onSetQuickTerminalOpen}
+        terminalPanelOpened={true}
+        onToggleTerminalPanel={onToggleTerminalPanel}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开快捷终端面板' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起快捷终端面板' }));
 
-    expect(onSetQuickTerminalOpen).toHaveBeenCalledWith(true);
-    expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);
+    expect(onToggleTerminalPanel).toHaveBeenCalledTimes(1);
   });
 });

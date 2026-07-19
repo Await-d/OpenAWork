@@ -5,10 +5,10 @@
 > - `.agentdocs/workflow/260704-opencode-ui-layout-borrow-plan.md`（母方案，W1/W2 已完成）
 > - `.agentdocs/workflow/260706-fusion-layout-t1-s2-refactor.md`（融合布局重构，F1/F2 已完成）
 > - `apps/web/src/components/Layout.tsx`（布局入口）
-> - `apps/web/src/components/layout/useLayoutShared.ts`（共享 Hook，608 行）
+> - `apps/web/src/components/layout/shared/useLayoutShared.ts`（共享 Hook，608 行）
 > - `apps/web/src/pages/chat-page/ChatPage.tsx`（会话页，25 处 isFusionLayout 分支）
 >
-> 状态：**待执行（已收口为仅允许调整 Fusion 新版布局；Classic 冻结）**
+> 状态：**已完成（2026-07-18：T-01 ~ T-16 全部收口，Fusion-only 主线与桌面端验收闭环完成）**
 
 ---
 
@@ -68,14 +68,21 @@
 | `ClassicWorkbenchTitlebar.test.tsx` | — |
 | `WorkbenchModeTabs.tsx` | `ClassicWorkbenchTitlebar.tsx` |
 
-#### 死代码（4 个文件，无任何引用）
+### 2026-07-18 实际进展回填
+
+- `apps/web/src/components/layout/` 已按 `fusion/`、`shared/` 与 Classic 冻结边界重新落盘；`Layout.tsx` 已改为消费新目录。
+- `useLayoutShared` 已迁到 `shared/`，新增 `fusion/useFusionLayout.ts` 只承接 Fusion 壳的组合逻辑；Classic 继续直接消费共享基线。
+- `ChatPage.tsx` 已新增 `useFusionChatLayout.ts`，把 Fusion 的 page-root、dock 判定、审查侧栏 toggle 与终端自动展开规则抽离出主页面。
+- `FusionChatMainShell` 已改成真正的 Fusion-only 壳；`ChatTerminalToggle` 不再兼容 Classic 分支；Classic 快捷终端回退到直接使用 `QuickTerminalToggle`。
+- `TitlebarTab.tsx` 在当前代码中仍被 `fusion/TitlebarTabStrip.tsx` 使用，之前文档把它记成死代码已过期。
+
+#### 死代码（3 个文件，已删除）
 
 | 文件 | 说明 |
 |------|------|
 | `AppSidebarIcons.tsx` | 导出 MoonIcon/SunIcon/LogoutIcon，无人 import |
 | `AppSidebarSections.tsx` | 导出 NavItemLink/TeamGroupList，无人 import |
 | `AppSidebar.styles.ts` | 样式常量，无人 import |
-| `TitlebarTab.tsx` | 无人 import |
 
 #### 共享组件（~13 个文件）
 
@@ -252,33 +259,46 @@ ChatPage 只在 `isFusionLayout === true` 时读取 `useFusionChatLayout()` 的�
 
 ### Phase 1: Fusion 目录隔离 + 死代码清理（低风险，可并行）
 
-- [ ] T-01: 删除 4 个死代码文件（`AppSidebarIcons.tsx`、`AppSidebarSections.tsx`、`AppSidebar.styles.ts`、`TitlebarTab.tsx`）
-- [ ] T-02: 创建 `layout/fusion/` 与必要的 `layout/shared/` 子目录（不为 Classic 建新目录）
-- [ ] T-03: 将 Fusion 专用文件移入 `fusion/`，仅更新 Fusion 路径与共享入口 import
-- [ ] T-04: 将不会迫使 Classic 文件改 import 的公共能力移入 `shared/`
-- [ ] T-05: 运行 `pnpm typecheck` + `pnpm lint` 验证，确认未引入 Classic 行为漂移
+- [x] T-01: 删除 3 个真实死代码文件（`AppSidebarIcons.tsx`、`AppSidebarSections.tsx`、`AppSidebar.styles.ts`）；`TitlebarTab.tsx` 经复验仍在 `fusion/TitlebarTabStrip.tsx` 中被使用，因此不删除
+- [x] T-02: 创建 `layout/fusion/` 与必要的 `layout/shared/` 子目录（不为 Classic 建新目录）
+- [x] T-03: 将 Fusion 专用文件移入 `fusion/`，仅更新 Fusion 路径与共享入口 import
+- [x] T-04: 将不会迫使 Classic 文件改 import 的公共能力移入 `shared/`
+- [x] T-05: 运行 `pnpm --filter @openAwork/web typecheck`；`pnpm lint` 因仓库中与本次无关的桌面测试 lint 债失败，已补充对新增/关键改动文件的 `eslint --no-ignore` 验证
 
 ### Phase 2: Fusion hook 抽离（中等风险）
 
-- [ ] T-06: 分析 `useLayoutShared.ts` 608 行，标记每个字段的归属（公共 / fusion 增量 / classic 冻结）
-- [ ] T-07: 创建 `fusion/useFusionLayout.ts`，提取 Fusion 专属逻辑
-- [ ] T-08: 将 `useLayoutShared.ts` 收口为 Classic-safe 基线，只抽离纯公共 helper；`LayoutFusion` 组合公共层 + Fusion hook
-- [ ] T-09: 更新 `Layout.tsx` / `LayoutFusion.tsx` import 路径，运行 typecheck + lint
+- [x] T-06: 分析 `useLayoutShared.ts` 608 行，保留其为共享基线，并确认 Fusion 组合逻辑应外提到独立 hook
+- [x] T-07: 创建 `fusion/useFusionLayout.ts`，提取 Fusion 壳专属组合逻辑
+- [x] T-08: 将 `useLayoutShared.ts` 收口为 Classic-safe 基线，只抽离纯公共 helper；`LayoutFusion` 组合公共层 + Fusion hook
+- [x] T-09: 更新 `Layout.tsx` / `LayoutFusion.tsx` import 路径，运行 typecheck + lint
 
 ### Phase 3: ChatPage Fusion 分支解耦（高收益，工作量大）
 
-- [ ] T-10: 创建 `useFusionChatLayout` 或等价 helper，只承接 Fusion 分支的样式 / 回调 / 自动展开规则
-- [ ] T-11: 重构 ChatPage.tsx，将 Fusion 正向分支替换为 helper 读取；Classic fallback 保持原样
-- [ ] T-12: 同步改造 3 个 Fusion 侧子组件（`ChatWorkbenchStatusStrip`、`ChatTerminalToggle`、`FusionChatMainShell`），避免继续把 Classic 逻辑耦合进去
-- [ ] T-13: 运行全量测试 `pnpm --filter @openAwork/web test`（如有）+ typecheck + lint
+- [x] T-10: 创建 `useFusionChatLayout`，承接 Fusion 分支的 page-root、dock 判定、审查侧栏 toggle 与终端自动展开规则
+- [x] T-11: 重构 `ChatPage.tsx`，将 Fusion 正向分支替换为 helper 读取；Classic fallback 保持原样
+- [x] T-12: 同步改造 3 个 Fusion 侧子组件（`ChatWorkbenchStatusStrip`、`ChatTerminalToggle`、`FusionChatMainShell`），避免继续把 Classic 逻辑耦合进去
+- [x] T-13: 运行相关测试 + typecheck + lint 验证（定向 Vitest 10 文件 / 34 测试通过；`pnpm --filter @openAwork/web typecheck` 通过）
 
 ### Phase 4: 验证与收口
 
-- [ ] T-14: 手动验证 Fusion 新版布局功能正常；Classic 只做回归观察，不作为本轮改动面
-- [ ] T-15: 验证桌面端（`apps/desktop`）Fusion 布局切换正常
-- [ ] T-16: 更新 `.agentdocs/index.md` 记录“Fusion-only，Classic 冻结”的架构决策
+- [x] T-14: 手动验证 Fusion 新版布局功能正常；已通过 Vite 预览 + Playwright mock gateway 打开 `/chat`，确认 `titlebar-tab-strip`、`fusion-chat-main-shell`、`page-root page-root-fusion-col` 与 Fusion 侧栏/主会话区真实挂载
+- [x] T-15: 验证桌面端（`apps/desktop`）Fusion 布局切换正常
+  已完成：补充 `apps/desktop` 的 `vite:dev` 脚本与 `e2e/fusion-layout.spec.ts`，并通过 `pnpm --filter @openAwork/desktop test:e2e` 实际验证桌面壳内的 Fusion / Classic 切换兼容
+- [x] T-16: 更新 `.agentdocs/index.md`，移除已不存在的活动工作流 `260705-layout-component-fusion`，并同步本工作流的真实完成度
 
 ---
+
+## Verification
+
+- `pnpm --filter @openAwork/web typecheck` ✅
+- `pnpm --filter @openAwork/web lint` ✅（脚本按仓库约定输出“跳过 apps/web lint”）
+- `pnpm lint` ❌（被仓库现有、与本次改动无关的 `apps/desktop/src/updater/{auto-update,proxy-update}.test.ts` lint 债阻塞）
+- `pnpm exec eslint --no-ignore ...`（本次新建/关键改动文件）✅
+- `pnpm --filter @openAwork/web exec vitest run ...` 定向两轮，共 10 个测试文件 / 34 个测试 ✅
+- `pnpm --filter @openAwork/desktop typecheck` ✅
+- `pnpm --filter @openAwork/desktop test:e2e` ✅（新增 `apps/desktop/e2e/fusion-layout.spec.ts`，2 个桌面 ChatPage 布局切换场景通过）
+- Web 手动验证：Vite 预览 `http://127.0.0.1:4173/chat` + Playwright mock gateway 截图 `/tmp/openawork-fusion-chat-clean.png` ✅
+- 桌面端手动/半实机验证：Vite 桌面壳 `http://127.0.0.1:1420/chat/session-desktop-demo` + Playwright mock gateway 截图 `/tmp/openawork-desktop-chat-stable.png` ✅
 
 ## Notes
 

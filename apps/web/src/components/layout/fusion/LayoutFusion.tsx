@@ -9,8 +9,9 @@
 
 import { FusionSidebar } from './FusionSidebar.js';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
-import { CachedRouteOutlet } from '../common/routing/CachedRouteOutlet.js';
-import type { LayoutSharedState } from './useLayoutShared.js';
+import { useFusionLayout } from './useFusionLayout.js';
+import { CachedRouteOutlet } from '../../common/routing/CachedRouteOutlet.js';
+import type { LayoutSharedState } from '../shared/useLayoutShared.js';
 
 export interface LayoutFusionProps {
   readonly shared: LayoutSharedState;
@@ -19,14 +20,7 @@ export interface LayoutFusionProps {
 }
 
 export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps) {
-  const {
-    accessToken,
-    gatewayUrl,
-    clearAuth,
-    navigate,
-    hideGlobalSidebar,
-    pendingPermissionIndicator,
-  } = shared;
+  const fusionLayout = useFusionLayout({ shared, theme, onToggleTheme });
 
   return (
     <div
@@ -40,11 +34,11 @@ export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps
     >
       {/* 顶部标签页标题栏 */}
       <div key="fusion-titlebar" className="layout-titlebar-fusion">
-        <TitlebarTabStrip theme={theme} onToggleTheme={onToggleTheme} />
+        <TitlebarTabStrip {...fusionLayout.titlebarProps} />
       </div>
 
       <div
-        key={shared.layoutModeKey}
+        key={fusionLayout.layoutModeKey}
         className="layout-switch-wrapper"
         style={{
           display: 'flex',
@@ -53,19 +47,7 @@ export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps
           position: 'relative',
         }}
       >
-        {!hideGlobalSidebar ? (
-          <FusionSidebar
-            accessToken={accessToken}
-            gatewayUrl={gatewayUrl}
-            theme={theme}
-            onToggleTheme={onToggleTheme}
-            onLogout={() => {
-              clearAuth();
-              void navigate('/');
-            }}
-            pendingPermissionIndicator={pendingPermissionIndicator}
-          />
-        ) : null}
+        {!fusionLayout.hideGlobalSidebar ? <FusionSidebar {...fusionLayout.sidebarProps} /> : null}
 
         <div
           style={{

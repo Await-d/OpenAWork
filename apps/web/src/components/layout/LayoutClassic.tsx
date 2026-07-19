@@ -8,7 +8,7 @@
 
 import AppSidebar from './AppSidebar.js';
 import { CachedRouteOutlet } from '../common/routing/CachedRouteOutlet.js';
-import type { LayoutSharedState } from './useLayoutShared.js';
+import type { LayoutSharedState } from './shared/useLayoutShared.js';
 
 export interface LayoutClassicProps {
   readonly shared: LayoutSharedState;

@@ -7,7 +7,6 @@ interface ChatWorkbenchStatusStripProps {
   readonly dialogueModeLabel: string;
   readonly editorMode: boolean;
   readonly editorPaneTab: 'code' | 'browser';
-  readonly isFusionLayout: boolean;
   readonly messageCount: number;
   readonly modelLabel: string | null | undefined;
   readonly onToggleReviewPanel: () => void;
@@ -153,7 +152,6 @@ export function ChatWorkbenchStatusStrip({
   dialogueModeLabel,
   editorMode,
   editorPaneTab,
-  isFusionLayout,
   messageCount,
   modelLabel,
   onToggleReviewPanel,
@@ -164,10 +162,6 @@ export function ChatWorkbenchStatusStrip({
   terminalPanelOpened,
   workspacePath,
 }: ChatWorkbenchStatusStripProps) {
-  if (!isFusionLayout) {
-    return null;
-  }
-
   const resolvedModelLabel = modelLabel?.trim() || '未选择模型';
   const terminalLabel = terminalPanelOpened
     ? activeTerminalCount > 0

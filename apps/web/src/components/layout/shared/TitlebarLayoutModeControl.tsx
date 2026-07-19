@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import type { WorkbenchLayoutMode } from '../../stores/ui/uiState.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { CheckIcon, ChevronRightIcon } from './TitlebarIcons.js';
 import {
   getLayoutModeOption,

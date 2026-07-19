@@ -18,19 +18,19 @@ import {
   createPermissionsClient,
   createSessionsClient,
 } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import {
   getSessionPendingInteractionSnapshot,
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
   subscribeSessionPendingPermission,
-} from '../../utils/session/session-list-events.js';
-import type { SessionPendingPermissionState } from '../../utils/permission/pending-permission-state.js';
-import { toSessionPendingPermissionStateFromRequest } from '../../utils/permission/pending-permission-state.js';
-import { matchPendingPermissionForNotification } from '../../utils/permission/permission-notification.js';
-import { replyPermissionRequest } from '../../utils/permission/permission-reply.js';
-import { resolvePermissionAlwaysOverride } from '../../utils/permission/permission-scope.js';
-import { toast } from '../common/feedback/ToastNotification.js';
+} from '../../../utils/session/session-list-events.js';
+import type { SessionPendingPermissionState } from '../../../utils/permission/pending-permission-state.js';
+import { toSessionPendingPermissionStateFromRequest } from '../../../utils/permission/pending-permission-state.js';
+import { matchPendingPermissionForNotification } from '../../../utils/permission/permission-notification.js';
+import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
+import { resolvePermissionAlwaysOverride } from '../../../utils/permission/permission-scope.js';
+import { toast } from '../../common/feedback/ToastNotification.js';
 
 function resolvePermissionReplyError(error: unknown): {
   dismissPrompt: boolean;

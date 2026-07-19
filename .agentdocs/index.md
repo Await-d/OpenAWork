@@ -7,11 +7,10 @@
 - [260704-composer-optimization](workflow/260704-composer-optimization.md) — 输入框 ChatComposer 整体优化：13 项 / 3 Phase / Full orchestration；拆分超限文件 + 动画微交互(发送脉冲/拖拽淡入/按钮微弹/弹窗入场/队列pill) + 功能增强(字符计数/placeholder轮换/Esc清空/大文本折叠) + 视觉样式(流式呼吸光效/home glassmorphism/工具栏分组)
 - [260704-companion-linkage-enhancement](workflow/260704-companion-linkage-enhancement.md) — 伴侣系统联动场景强化：8 任务 / 5 Phase / Full orchestration；补齐工具调用联动、错误/重试反应、附件/队列真实计数、空闲检测提醒、后端上下文增强
 - [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：6 波次方案（W1 顶部标签页栏 / W2 双层侧边栏 Rail+Panel / W3 会话页面板化 Diff+终端 / W4 消息时间线智能滚动+预取 / W5 首页视图双栏+时间分组 / W6 拖拽排序+内联重命名+命令扩充）；2026-07-14 起剩余任务只允许落在 Fusion 新版布局，Classic 旧版布局冻结
-- [260705-layout-component-fusion](workflow/260705-layout-component-fusion.md) — 布局组件化融合方案：8 任务 / 4 Phase / Full orchestration；补齐母方案 W3/W4 缺失组件文件（TitlebarTabStrip / PanelResizeHandle / ReviewPanel / TerminalPanel），将 uiState store 已就绪状态接入真实 UI，清理纯 demo 产物
 - [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：5 波次 / Full orchestration；这是当前唯一允许继续演进的布局主线，继续推进 Titlebar 精简、Rail+Panel、SessionPanel 卡片化、侧面板 Tab 聚合与底部终端
-- [260708-layout-isolation-refactor](workflow/260708-layout-isolation-refactor.md) — 新旧布局文件夹与逻辑隔离重构（Fusion-only 收口）：4 Phase / 16 任务 / Full orchestration；只做 Fusion 目录隔离、Fusion hook 抽离与 ChatPage Fusion 分支解耦，Classic 旧版布局只保留冻结兼容边界
 
 ## Done Workflows
+- [260708-layout-isolation-refactor](workflow/done/260708-layout-isolation-refactor.md) — ✅ 已完成 2026-07-18：Fusion/Shared 目录隔离、`useFusionLayout`/`useFusionChatLayout` 抽离、ChatPage Fusion 壳解耦、相关定向测试与 Web/桌面端验收闭环已全部收口；Classic 旧布局保持冻结兼容
 - [260715-composer-input-history-recall](workflow/done/260715-composer-input-history-recall.md) — ✅ 已完成 2026-07-15：chat/team 共用 `UnifiedComposer` 已支持 `ArrowUp / ArrowDown` 输入历史回显；历史按 `gatewayUrl + currentUserEmail + sessionId` 隔离在前端运行期内存 store 中，默认只保留最新 50 条，并支持 pending→session 迁移；兼容 slash/@ 菜单、busy 队列、Esc 清空/恢复与 chat 双 Esc 编辑上一条消息
 - [260709-资源能力集成使用方案](workflow/done/260709-资源能力集成使用方案.md) — ✅ 已完成 2026-07-09：资源能力完整集成闭环；后台保留完整 catalog，前端按 `visibility / feature / usageKind` 分层展示；Channels persona、Team 模板、Commands/Prompts 材料边界、Skill/MCP 现有管理面合流、上传/删除实时识别与真实浏览器 QA 已完成；已有简单工具只登记/补说明，不新增第二套执行器
 - [260706-desktop-control-plugin-integration](workflow/done/260706-desktop-control-plugin-integration.md) — ✅ 已完成 2026-07-06：系统桌面控制插件集成闭环，包含前端插件开关、工作区状态/操作控制台、`plugin_settings.desktopControl`、后端按用户注入过滤、sandbox 二次门控、desktop-control route/web-client、Tauri loopback bridge 与多项验证

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../../hooks/workspace/useSessions.js';
-import type { WorkspaceSessionTreeNode } from '../../utils/session/session-grouping.js';
+import type { Session } from '../../../hooks/workspace/useSessions.js';
+import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
 import { FusionSidebarPeek } from './FusionSidebarPeek.js';
 
 function createSession(

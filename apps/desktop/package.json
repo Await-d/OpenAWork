@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm run tauri dev",
+    "vite:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "tauri": "node src-tauri/scripts/check-build-deps.mjs && node src-tauri/scripts/bundle-sidecar.mjs && tauri",
     "build": "pnpm run tauri build && node src-tauri/scripts/print-bundle-artifacts.mjs",
     "package": "pnpm run build",

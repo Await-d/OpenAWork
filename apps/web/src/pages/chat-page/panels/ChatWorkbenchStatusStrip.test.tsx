@@ -12,7 +12,6 @@ const DEFAULT_PROPS = {
   dialogueModeLabel: '程序员',
   editorMode: true,
   editorPaneTab: 'code',
-  isFusionLayout: true,
   messageCount: 18,
   modelLabel: 'gpt-5.5-codex',
   onToggleReviewPanel: () => undefined,
@@ -25,7 +24,7 @@ const DEFAULT_PROPS = {
 } as const;
 
 describe('ChatWorkbenchStatusStrip', () => {
-  it('fusion 布局下展示 Chat 工作台摘要和面板状态', () => {
+  it('展示 Chat 工作台摘要和面板状态', () => {
     render(<ChatWorkbenchStatusStrip {...DEFAULT_PROPS} />);
 
     expect(screen.getByLabelText('Chat 工作台摘要')).toBeTruthy();
@@ -40,7 +39,7 @@ describe('ChatWorkbenchStatusStrip', () => {
     expect(screen.getByText('代码面板')).toBeTruthy();
   });
 
-  it('fusion 状态条提供审查和终端面板的直接控制入口', () => {
+  it('状态条提供审查和终端面板的直接控制入口', () => {
     const onToggleReviewPanel = vi.fn();
     const onToggleTerminalPanel = vi.fn();
     render(
@@ -56,12 +55,6 @@ describe('ChatWorkbenchStatusStrip', () => {
 
     expect(onToggleReviewPanel).toHaveBeenCalledTimes(1);
     expect(onToggleTerminalPanel).toHaveBeenCalledTimes(1);
-  });
-
-  it('classic 布局下不渲染，保留旧版页面节奏', () => {
-    render(<ChatWorkbenchStatusStrip {...DEFAULT_PROPS} isFusionLayout={false} />);
-
-    expect(screen.queryByLabelText('Chat 工作台摘要')).toBeNull();
   });
 
   it('缺少会话、工作区和模型时展示明确占位', () => {

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
-import { TeamTitlebarSummary } from './TeamTitlebarSummary.js';
+import { TeamTitlebarSummary } from '../shared/TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
 import { TitlebarToolsMenu } from './TitlebarToolsMenu.js';
-import { isTauriRuntime } from '../../utils/gateway/desktop-gateway.js';
+import { isTauriRuntime } from '../../../utils/gateway/desktop-gateway.js';
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
 import './TitlebarTabStrip.css';
