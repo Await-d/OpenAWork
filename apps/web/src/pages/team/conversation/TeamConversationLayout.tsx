@@ -335,6 +335,7 @@ export interface TeamConversationLayoutProps {
 
 const SPLIT_INNER_STYLE: CSSProperties = {
   display: 'flex',
+  flexDirection: 'column',
   flex: 1,
   minHeight: 0,
   overflow: 'hidden',
@@ -344,7 +345,9 @@ const SPLIT_INNER_STYLE: CSSProperties = {
 const CONVERSATION_STREAM_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
+  flex: 1,
   width: '100%',
+  minHeight: 0,
   minWidth: 0,
   overflow: 'hidden',
   position: 'relative',
@@ -616,9 +619,9 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
       />
 
       <div style={SPLIT_INNER_STYLE}>
-        {beforeMessages}
         <div style={CONVERSATION_STREAM_STYLE}>
           <ChatSearchOverlay controller={chatSearch} />
+          {beforeMessages}
           <div
             ref={scrollRegionRef}
             onScroll={onScroll}

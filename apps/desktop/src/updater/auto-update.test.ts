@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Update } from '@tauri-apps/plugin-updater';
 
 // auto-update.ts imports `check` from the Tauri updater plugin at module load;
 // stub it so the module resolves under vitest (we only exercise the
@@ -153,7 +154,7 @@ describe('downloadUpdateViaProxy (§0.149 stall watchdog)', () => {
       install: vi.fn(async () => {
         calls.push('install');
       }),
-    } as unknown as import('@tauri-apps/plugin-updater').Update;
+    } as unknown as Update;
 
     await installUpdate(update, {
       beforeInstall: async () => {

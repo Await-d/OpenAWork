@@ -13,6 +13,7 @@ import {
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 import {
+  computeAutoRetryAvailableAtMs,
   completeRunningHandoffById,
   failRunningHandoffById,
   getHandoffById,
@@ -768,6 +769,7 @@ export async function reconcilePm2QualityReview(input: {
                 fromRoleLayer: 'reception',
                 toRoleLayer: 'pm1',
                 idempotencyKey: `quality-feedback:pm1-replan:${row.id}`,
+                notBeforeMs: computeAutoRetryAvailableAtMs((row.retry_count ?? 0) + 1),
                 payload: {
                   sourceIntent,
                   rewrittenIntent: `【质量评审退回重新规划】${sourceIntent}\n\n---\n\n${qualityFeedback}`,

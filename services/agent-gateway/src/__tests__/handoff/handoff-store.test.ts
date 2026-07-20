@@ -115,6 +115,35 @@ describe('createHandoff / getHandoff', () => {
     expect(second.id).not.toBe(first.id);
     expect(second.idempotencyKey).toBeNull();
   });
+
+  it('延后启动的 pending handoff 不会阻塞后续已到期任务被 watcher 拿到', () => {
+    const delayed = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      notBeforeMs: Date.now() + 60_000,
+    });
+    const ready = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET created_at = '2000-01-01 00:00:00' WHERE id = ?`,
+      [delayed.id],
+    );
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET created_at = '2000-01-01 00:00:01' WHERE id = ?`,
+      [ready.id],
+    );
+
+    const pending = store.listPendingHandoffs(10);
+    expect(pending.map((record) => record.id)).toContain(ready.id);
+    expect(pending.map((record) => record.id)).not.toContain(delayed.id);
+  });
 });
 
 describe('claimHandoff（并发互斥）', () => {
@@ -249,6 +278,7 @@ describe('startHandoff / completeHandoff / failHandoff', () => {
       failureReason: null,
       toSessionId: null,
     });
+    expect(store.listPendingHandoffs(10).map((record) => record.id)).not.toContain(retried.id);
   });
 });
 

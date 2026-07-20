@@ -14,7 +14,11 @@
 
 import { randomUUID } from 'node:crypto';
 import type { HandoffTaskRunner } from './watcher.js';
-import { createHandoff, type HandoffRecord } from '../store/handoff-store.js';
+import {
+  computeAutoRetryAvailableAtMs,
+  createHandoff,
+  type HandoffRecord,
+} from '../store/handoff-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
@@ -228,6 +232,7 @@ async function createReturnToPm1Handoff(input: {
       fromRoleLayer: 'reception',
       toRoleLayer: 'pm1',
       idempotencyKey: `pm2-return:${input.step}:${input.pm2HandoffId}`,
+      notBeforeMs: computeAutoRetryAvailableAtMs(effectiveRetryCount + 1),
       payload: {
         sourceIntent,
         rewrittenIntent: `【${input.step} 退回重新规划】${sourceIntent}\n\n---\n\n## 质量反馈\n${input.feedback}\n\n请根据以上反馈修正 spec/plan/tasks。`,

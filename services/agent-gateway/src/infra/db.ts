@@ -1279,6 +1279,7 @@ export async function migrate(): Promise<void> {
       to_role_layer TEXT NOT NULL,
       to_session_id TEXT,
       payload_json TEXT NOT NULL DEFAULT '{}',
+      available_at_ms INTEGER DEFAULT NULL,
       state TEXT NOT NULL DEFAULT 'pending',
       claim_token TEXT,
       claimed_at TEXT,
@@ -1298,8 +1299,12 @@ export async function migrate(): Promise<void> {
   ensureColumn('handoff_records', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('handoff_records', 'paused', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('handoff_records', 'crash_retry_count', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('handoff_records', 'available_at_ms', 'INTEGER DEFAULT NULL');
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_handoff_records_state ON handoff_records(state, created_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_pending_available ON handoff_records(state, paused, available_at_ms, created_at)',
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_handoff_records_from_session ON handoff_records(from_session_id, created_at DESC)',
@@ -1484,6 +1489,7 @@ function ensureTeamSchemaSafe(): void {
         to_role_layer TEXT NOT NULL,
         to_session_id TEXT,
         payload_json TEXT NOT NULL DEFAULT '{}',
+        available_at_ms INTEGER DEFAULT NULL,
         state TEXT NOT NULL DEFAULT 'pending',
         claim_token TEXT,
         claimed_at TEXT,
@@ -1516,6 +1522,9 @@ function ensureTeamSchemaSafe(): void {
   safe('handoff_records.crash_retry_count', () =>
     ensureColumn('handoff_records', 'crash_retry_count', 'INTEGER NOT NULL DEFAULT 0'),
   );
+  safe('handoff_records.available_at_ms', () =>
+    ensureColumn('handoff_records', 'available_at_ms', 'INTEGER DEFAULT NULL'),
+  );
   safe('handoff_records.idempotency_key', () =>
     ensureColumn('handoff_records', 'idempotency_key', 'TEXT DEFAULT NULL'),
   );
@@ -1527,6 +1536,11 @@ function ensureTeamSchemaSafe(): void {
   );
   safe('handoff_records.pause_reason', () =>
     ensureColumn('handoff_records', 'pause_reason', 'TEXT DEFAULT NULL'),
+  );
+  safe('handoff_records.pending-available-index', () =>
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_handoff_records_pending_available ON handoff_records(state, paused, available_at_ms, created_at)',
+    ),
   );
 
   // team_role_session_instances 表

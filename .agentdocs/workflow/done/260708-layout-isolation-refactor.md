@@ -292,9 +292,11 @@ ChatPage 只在 `isFusionLayout === true` 时读取 `useFusionChatLayout()` 的�
 
 - `pnpm --filter @openAwork/web typecheck` ✅
 - `pnpm --filter @openAwork/web lint` ✅（脚本按仓库约定输出“跳过 apps/web lint”）
-- `pnpm lint` ❌（被仓库现有、与本次改动无关的 `apps/desktop/src/updater/{auto-update,proxy-update}.test.ts` lint 债阻塞）
+- `pnpm lint` ✅（2026-07-19 补齐桌面 updater 测试中的 `consistent-type-imports` 历史 lint 债后通过）
 - `pnpm exec eslint --no-ignore ...`（本次新建/关键改动文件）✅
 - `pnpm --filter @openAwork/web exec vitest run ...` 定向两轮，共 10 个测试文件 / 34 个测试 ✅
+- 2026-07-19 隔离复查补强：`useFusionChatLayout` 不再回传 Classic root/layout；Classic/Fusion 对话布局 resolver 拆分；旧根路径、Fusion→Classic、shared→Fusion/Classic 反向搜索无残留 ✅
+- `pnpm --filter @openAwork/web exec vitest run src/pages/chat-page/layout/conversation-layout-state.test.ts src/pages/chat-page/layout/use-fusion-chat-layout.test.tsx src/pages/chat-page/layout/FusionChatMainShell.test.tsx src/pages/chat-page/panels/ChatTerminalToggle.test.tsx src/pages/chat-page/panels/ChatWorkbenchStatusStrip.test.tsx` ✅（5 个测试文件 / 15 个测试）
 - `pnpm --filter @openAwork/desktop typecheck` ✅
 - `pnpm --filter @openAwork/desktop test:e2e` ✅（新增 `apps/desktop/e2e/fusion-layout.spec.ts`，2 个桌面 ChatPage 布局切换场景通过）
 - Web 手动验证：Vite 预览 `http://127.0.0.1:4173/chat` + Playwright mock gateway 截图 `/tmp/openawork-fusion-chat-clean.png` ✅

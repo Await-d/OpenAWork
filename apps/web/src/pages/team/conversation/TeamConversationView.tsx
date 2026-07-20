@@ -1313,7 +1313,7 @@ export function TeamConversationView({
         <div
           style={
             soloMode
-              ? { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }
+              ? { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }
               : MAIN_PANEL_STYLE
           }
         >

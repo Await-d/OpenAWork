@@ -110,4 +110,35 @@ describe('useFusionChatLayout', () => {
     expect(setSidePanelActiveTab).not.toHaveBeenCalled();
     expect(setReviewPanelOpened).toHaveBeenCalledWith(false);
   });
+
+  it('禁用时仅关闭副作用，不回传 Classic 根布局', () => {
+    const setReviewPanelOpened = vi.fn();
+    const setSidePanelActiveTab = vi.fn();
+    const setTerminalPanelOpened = vi.fn();
+
+    const { result } = renderHook(() =>
+      useFusionChatLayout({
+        canDockSidePanel: true,
+        currentSessionId: 'session-1',
+        editorFullScreen: false,
+        editorMode: false,
+        enabled: false,
+        isNarrowViewport: false,
+        reviewPanelOpened: true,
+        setReviewPanelOpened,
+        setSidePanelActiveTab,
+        setTerminalPanelOpened,
+        sidePanelActiveTab: 'review',
+        terminalPanelOpened: false,
+        terminalRunningCount: 1,
+      }),
+    );
+
+    expect(result.current.pageRootClassName).toBe('page-root page-root-fusion-col');
+    expect(result.current.conversationLayoutState).toEqual({
+      centerContent: true,
+      contentMaxWidth: 720,
+    });
+    expect(setTerminalPanelOpened).not.toHaveBeenCalled();
+  });
 });

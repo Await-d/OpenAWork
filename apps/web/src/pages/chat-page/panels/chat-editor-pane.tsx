@@ -94,6 +94,7 @@ export function ChatEditorPane({
       <div
         ref={editorPaneRef}
         aria-hidden={!editorMode}
+        data-testid="chat-editor-pane"
         style={{
           flex: editorMode && fullScreen ? 1 : '0 0 auto',
           width: fullScreen

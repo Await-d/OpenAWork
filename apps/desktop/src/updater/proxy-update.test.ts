@@ -66,7 +66,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 vi.mock('./auto-update.js', async () => {
-  const actual = await vi.importActual<typeof import('./auto-update.js')>('./auto-update.js');
+  const actual = await vi.importActual('./auto-update.js');
   return actual;
 });
 

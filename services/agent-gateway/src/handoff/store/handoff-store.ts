@@ -48,6 +48,7 @@ interface HandoffRow {
   to_role_layer: string;
   to_session_id: string | null;
   payload_json: string;
+  available_at_ms: number | null;
   result_json: string | null;
   state: string;
   claim_token: string | null;
@@ -112,6 +113,28 @@ const UNRECOVERABLE_FAILED_HANDOFF_REASON_PREFIXES = [
 ] as const;
 
 const UNRECOVERABLE_FAILED_HANDOFF_REASON_SUBSTRINGS = ['需要用户介入'] as const;
+const AUTO_RETRY_BASE_DELAY_MS = 10_000;
+const AUTO_RETRY_MAX_DELAY_MS = 60_000;
+
+function normalizeAvailableAtMs(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Math.max(0, Math.floor(value));
+  return normalized > 0 ? normalized : null;
+}
+
+export function computeAutoRetryDelayMs(attempt: number): number {
+  const normalizedAttempt = Math.max(1, Math.floor(attempt));
+  return Math.min(
+    AUTO_RETRY_BASE_DELAY_MS * Math.pow(2, normalizedAttempt - 1),
+    AUTO_RETRY_MAX_DELAY_MS,
+  );
+}
+
+export function computeAutoRetryAvailableAtMs(attempt: number, nowMs = Date.now()): number {
+  return nowMs + computeAutoRetryDelayMs(attempt);
+}
 
 function parsePayload(json: string | null | undefined): unknown {
   if (!json) {
@@ -311,6 +334,7 @@ export interface CreateHandoffInput {
   toRoleLayer: HandoffRoleLayer;
   payload?: unknown;
   idempotencyKey?: string | null;
+  notBeforeMs?: number | null;
 }
 
 export function createHandoff(input: CreateHandoffInput): HandoffRecord {
@@ -337,11 +361,12 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
 
   const id = randomUUID();
   const payloadJson = JSON.stringify(input.payload ?? {});
+  const availableAtMs = normalizeAvailableAtMs(input.notBeforeMs);
   sqliteRun(
     `INSERT INTO handoff_records (
        id, user_id, from_session_id, from_role_layer, to_role_layer,
-       payload_json, state, retry_count, idempotency_key
-     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
+       payload_json, available_at_ms, state, retry_count, idempotency_key
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
     [
       id,
       input.userId,
@@ -349,6 +374,7 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
       input.fromRoleLayer,
       input.toRoleLayer,
       payloadJson,
+      availableAtMs,
       input.idempotencyKey ?? null,
     ],
   );
@@ -384,12 +410,15 @@ export function getHandoffById(handoffId: string): HandoffRecord | undefined {
 }
 
 export function listPendingHandoffs(limit = 50): HandoffRecord[] {
+  const nowMs = Date.now();
   const rows = sqliteAll<HandoffRow>(
     `SELECT * FROM handoff_records
-     WHERE state = 'pending' AND paused = 0
+     WHERE state = 'pending'
+       AND paused = 0
+       AND (available_at_ms IS NULL OR available_at_ms <= ?)
      ORDER BY created_at ASC
      LIMIT ?`,
-    [limit],
+    [nowMs, limit],
   );
   return rows.map(mapRow);
 }
@@ -460,6 +489,7 @@ export function claimHandoff(input: {
        SET state = 'claimed',
            claim_token = ?,
            claimed_at = datetime('now'),
+           available_at_ms = NULL,
            updated_at = datetime('now')
      WHERE id = ? AND state = 'pending' AND paused = 0`,
     [input.claimToken, input.handoffId],
@@ -593,6 +623,7 @@ export function retryRunningHandoffById(handoffId: string): boolean {
   const payloadJson = JSON.stringify(
     scrubHandledReviewDispositionPayload(parsePayload(row.payload_json)),
   );
+  const availableAtMs = computeAutoRetryAvailableAtMs(row.retry_count + 1);
   sqliteRun(
     `UPDATE handoff_records
        SET state = 'pending',
@@ -603,10 +634,11 @@ export function retryRunningHandoffById(handoffId: string): boolean {
            completed_at = NULL,
            to_session_id = NULL,
            payload_json = ?,
+           available_at_ms = ?,
            retry_count = retry_count + 1,
            updated_at = datetime('now')
      WHERE id = ? AND state = 'running'`,
-    [payloadJson, handoffId],
+    [payloadJson, availableAtMs, handoffId],
   );
   return true;
 }
@@ -719,6 +751,7 @@ export function retryFailedHandoff(input: { userId: string; handoffId: string })
            completed_at = NULL,
            to_session_id = NULL,
            payload_json = ?,
+           available_at_ms = NULL,
            updated_at = datetime('now')
      WHERE id = ? AND user_id = ? AND state = 'failed'`,
     [payloadJson, input.handoffId, input.userId],
@@ -833,16 +866,18 @@ export function reclaimAbandonedHandoffs(input: {
       );
       failedIds.push(row.id);
     } else {
+      const availableAtMs = computeAutoRetryAvailableAtMs(row.retry_count + 1);
       sqliteRun(
         `UPDATE handoff_records
            SET state = 'pending',
                claim_token = NULL,
                claimed_at = NULL,
                started_at = NULL,
+               available_at_ms = ?,
                retry_count = retry_count + 1,
                updated_at = datetime('now')
          WHERE id = ? AND state IN ('claimed','running')`,
-        [row.id],
+        [availableAtMs, row.id],
       );
       reclaimedIds.push(row.id);
     }

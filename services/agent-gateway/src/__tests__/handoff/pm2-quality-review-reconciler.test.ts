@@ -296,6 +296,8 @@ describe('reconcilePm2QualityReview', () => {
     const after = store.getHandoff({ userId: USER_ID, handoffId: pm2.id });
     expect(after?.state).toBe('pending');
     expect(after?.retryCount).toBe(1);
+    const pendingIds = store.listPendingHandoffs(10).map((record) => record.id);
+    expect(pendingIds).not.toContain(pm2.id);
   });
 
   it('quality review 只命中当前 dispatch scope 外的文件时，不自动 redispatch', async () => {

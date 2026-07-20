@@ -1,6 +1,8 @@
-export interface ConversationLayoutStateInput {
+export interface ClassicConversationLayoutStateInput {
   readonly editorMode: boolean;
-  readonly isFusionLayout: boolean;
+}
+
+export interface FusionConversationLayoutStateInput {
   readonly showDockedReviewPanel: boolean;
 }
 
@@ -9,20 +11,20 @@ export interface ConversationLayoutState {
   readonly contentMaxWidth: number | 'fluid';
 }
 
-export function resolveConversationLayoutState({
+export function resolveClassicConversationLayoutState({
   editorMode,
-  isFusionLayout,
-  showDockedReviewPanel,
-}: ConversationLayoutStateInput): ConversationLayoutState {
-  if (isFusionLayout) {
-    return {
-      centerContent: !showDockedReviewPanel,
-      contentMaxWidth: showDockedReviewPanel ? 'fluid' : 720,
-    };
-  }
-
+}: ClassicConversationLayoutStateInput): ConversationLayoutState {
   return {
     centerContent: true,
     contentMaxWidth: editorMode ? 720 : 1024,
+  };
+}
+
+export function resolveFusionConversationLayoutState({
+  showDockedReviewPanel,
+}: FusionConversationLayoutStateInput): ConversationLayoutState {
+  return {
+    centerContent: !showDockedReviewPanel,
+    contentMaxWidth: showDockedReviewPanel ? 'fluid' : 720,
   };
 }

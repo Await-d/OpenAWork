@@ -33,6 +33,7 @@ let store: typeof HandoffStoreModule;
 let pm2RunnerModule: typeof Pm2RunnerModule;
 
 const USER_ID = 'u-pm2-runner';
+const RECEPTION_SESSION_ID = 's-reception-runner';
 const PM1_SESSION_ID = 's-pm1-runner';
 const PM2_SESSION_ID = 's-pm2-runner';
 const TEAM_WORKSPACE_ID = 'tw-pm2-runner';
@@ -44,12 +45,32 @@ function seedUser(id: string, email: string): void {
   ]);
 }
 
-function seedSession(sessionId: string, userId: string): void {
+function seedSession(sessionId: string, userId: string, roleLayer = 'pm2'): void {
   dbModule.sqliteRun(
     `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, role_layer)
-     VALUES (?, ?, 'demo', '{}', 'pm2')`,
-    [sessionId, userId],
+     VALUES (?, ?, 'demo', '{}', ?)`,
+    [sessionId, userId, roleLayer],
   );
+}
+
+function seedReceptionToPm1Handoff(sourceIntent = '实现订单能力'): void {
+  const receptionToPm1 = store.createHandoff({
+    userId: USER_ID,
+    fromSessionId: RECEPTION_SESSION_ID,
+    fromRoleLayer: 'reception',
+    toRoleLayer: 'pm1',
+    payload: {
+      sourceIntent,
+      teamWorkspaceId: TEAM_WORKSPACE_ID,
+    },
+  });
+  store.claimHandoff({ handoffId: receptionToPm1.id, claimToken: 'tok-reception-to-pm1' });
+  store.startHandoff({
+    handoffId: receptionToPm1.id,
+    claimToken: 'tok-reception-to-pm1',
+    toSessionId: PM1_SESSION_ID,
+  });
+  store.completeHandoff({ handoffId: receptionToPm1.id, claimToken: 'tok-reception-to-pm1' });
 }
 
 function seedArtifact(input: {
@@ -198,8 +219,9 @@ beforeAll(async () => {
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser(USER_ID, 'pm2@example.com');
-  seedSession(PM1_SESSION_ID, USER_ID);
-  seedSession(PM2_SESSION_ID, USER_ID);
+  seedSession(RECEPTION_SESSION_ID, USER_ID, 'reception');
+  seedSession(PM1_SESSION_ID, USER_ID, 'pm1');
+  seedSession(PM2_SESSION_ID, USER_ID, 'pm2');
   mocks.resolveAuxiliaryLlmConfig.mockReset();
   mocks.requestWorkflowLlmCompletion.mockReset();
   mocks.requestWorkflowLlmCompletion.mockImplementation(async (input: { prompt: string }) => {
@@ -293,6 +315,7 @@ describe('createPm2Runner', () => {
   });
 
   it('architecture review 遇到阻断问题时写入 review artifact 并阻止派发', async () => {
+    seedReceptionToPm1Handoff('实现阻断案例');
     seedArtifact({
       artifactId: 'spec-blocking',
       sessionId: PM1_SESSION_ID,
@@ -374,6 +397,20 @@ describe('createPm2Runner', () => {
       [PM2_SESSION_ID],
     );
     expect(downstreamCount?.c).toBe(0);
+
+    const returnToPm1 = dbModule.sqliteGet<{ id: string; available_at_ms: number | null }>(
+      `SELECT id, available_at_ms
+         FROM handoff_records
+        WHERE from_session_id = ?
+          AND to_role_layer = 'pm1'
+          AND state = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [RECEPTION_SESSION_ID],
+    );
+    expect(returnToPm1?.available_at_ms).not.toBeNull();
+    expect((returnToPm1?.available_at_ms ?? 0) > Date.now()).toBe(true);
+    expect(store.listPendingHandoffs(10).map((record) => record.id)).not.toContain(returnToPm1?.id);
   });
 
   it('architecture review 通过时保留 review artifact 并继续派发', async () => {

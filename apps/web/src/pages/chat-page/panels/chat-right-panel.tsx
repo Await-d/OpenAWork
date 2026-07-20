@@ -291,6 +291,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
   return (
     <div
       aria-hidden={!rightOpen}
+      data-testid="chat-right-panel-shell"
       style={{
         width: rightPanelWidth,
         maxWidth: rightPanelMaxWidth,

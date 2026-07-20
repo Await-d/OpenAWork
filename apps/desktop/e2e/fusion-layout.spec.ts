@@ -173,7 +173,62 @@ test('desktop app preserves Classic chat fallback when layout mode switches back
 }) => {
   await openDesktopChat(page, 'classic');
 
-  await expect(page.locator('.page-root.page-root-row')).toBeVisible();
+  const pageRoot = page.locator('.page-root.page-root-row');
+  const classicWorkbench = page.getByTestId('classic-chat-workbench');
+  const classicMainColumn = page.getByTestId('classic-chat-main-column');
+  await expect(pageRoot).toBeVisible();
   await expect(page.getByTestId('fusion-chat-main-shell')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '打开快捷终端面板' })).toBeVisible();
+  await expect(classicWorkbench).toBeVisible();
+  await expect(classicMainColumn).toBeVisible();
+
+  const pageRootBeforeBox = await pageRoot.boundingBox();
+  if (!pageRootBeforeBox) {
+    throw new Error('Classic page root 未渲染');
+  }
+
+  await page.getByRole('button', { name: '展开面板' }).click();
+
+  const rightPanelShell = page.getByTestId('chat-right-panel-shell');
+  await expect(rightPanelShell).toBeVisible();
+  await expect(page.getByTestId('chat-right-panel-header-overview')).toBeVisible();
+
+  const [pageRootAfterBox, classicWorkbenchBox, classicMainColumnBox, rightPanelBox] =
+    await Promise.all([
+      pageRoot.boundingBox(),
+      classicWorkbench.boundingBox(),
+      classicMainColumn.boundingBox(),
+      rightPanelShell.boundingBox(),
+    ]);
+  if (!pageRootAfterBox || !classicWorkbenchBox || !classicMainColumnBox || !rightPanelBox) {
+    throw new Error('Classic 右栏布局测量失败');
+  }
+
+  expect(pageRootAfterBox.height).toBeLessThanOrEqual(pageRootBeforeBox.height + 48);
+  expect(rightPanelBox.x).toBeGreaterThanOrEqual(classicWorkbenchBox.x + classicWorkbenchBox.width);
+  expect(Math.abs(rightPanelBox.y - classicWorkbenchBox.y)).toBeLessThanOrEqual(4);
+});
+
+test('desktop app opens Classic editor workspace for code tree and browser preview', async ({
+  page,
+}) => {
+  await openDesktopChat(page, 'classic');
+
+  const classicWorkbench = page.getByTestId('classic-chat-workbench');
+  const editorPane = page.getByTestId('chat-editor-pane');
+  await expect(classicWorkbench).toBeVisible();
+
+  await page.getByRole('button', { name: '打开代码编辑器' }).click();
+  await expect(editorPane).toBeVisible();
+  await expect(editorPane.getByText('尚未选择工作区')).toBeVisible();
+
+  const editorPaneAfterCodeBox = await editorPane.boundingBox();
+  if (!editorPaneAfterCodeBox) {
+    throw new Error('Classic 编辑器面板未展开');
+  }
+  expect(editorPaneAfterCodeBox.width).toBeGreaterThan(240);
+
+  await page.getByRole('button', { name: /浏览器预览/ }).click();
+  await expect(editorPane.getByRole('button', { name: '预览' })).toBeVisible();
+  await expect(page.locator('iframe[title="内置浏览器"]')).toBeVisible();
 });

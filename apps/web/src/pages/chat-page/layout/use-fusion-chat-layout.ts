@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import {
-  resolveConversationLayoutState,
+  resolveFusionConversationLayoutState,
   type ConversationLayoutState,
 } from './conversation-layout-state.js';
 
@@ -100,32 +100,27 @@ export function useFusionChatLayout({
 
   const conversationLayoutState = useMemo(
     () =>
-      resolveConversationLayoutState({
-        editorMode,
-        isFusionLayout: enabled,
+      resolveFusionConversationLayoutState({
         showDockedReviewPanel: showDockedSidePanel,
       }),
-    [editorMode, enabled, showDockedSidePanel],
+    [showDockedSidePanel],
   );
 
-  const pageRootStyle = useMemo<CSSProperties | undefined>(
-    () =>
-      enabled
-        ? {
-            display: 'flex',
-            flex: 1,
-            flexDirection: 'column',
-            gap: 0,
-            minHeight: 0,
-            overflow: 'hidden',
-          }
-        : undefined,
-    [enabled],
+  const pageRootStyle = useMemo<CSSProperties>(
+    () => ({
+      display: 'flex',
+      flex: 1,
+      flexDirection: 'column',
+      gap: 0,
+      minHeight: 0,
+      overflow: 'hidden',
+    }),
+    [],
   );
 
   return {
     conversationLayoutState,
-    pageRootClassName: enabled ? 'page-root page-root-fusion-col' : 'page-root page-root-row',
+    pageRootClassName: 'page-root page-root-fusion-col',
     pageRootStyle,
     rightPanelCommandDescription: '切换审查/文件/Context 侧栏',
     rightPanelCommandLabel: reviewPanelOpened ? '收起审查侧栏' : '展开审查侧栏',

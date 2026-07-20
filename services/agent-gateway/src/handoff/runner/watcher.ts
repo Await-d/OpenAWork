@@ -25,6 +25,7 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqlite-batch.js';
 import {
   claimHandoff,
+  computeAutoRetryAvailableAtMs,
   failHandoff,
   listPendingHandoffs,
   reclaimAbandonedHandoffs,
@@ -1317,17 +1318,24 @@ export class HandoffWatcher {
                   typeof originalPayload?.['teamWorkspaceId'] === 'string'
                     ? originalPayload['teamWorkspaceId']
                     : null;
+                const escalationRound =
+                  typeof originalPayload?.['escalationRound'] === 'number' &&
+                  Number.isFinite(originalPayload['escalationRound'])
+                    ? Math.max(1, Math.floor(originalPayload['escalationRound']))
+                    : Math.max(1, input.handoff.retryCount + 1);
                 const nextHandoff = createHandoff({
                   userId: input.handoff.userId,
                   fromSessionId: input.toSessionId,
                   fromRoleLayer: 'pm1',
                   toRoleLayer: 'pm2',
                   idempotencyKey: `auto-chain-degraded:pm1-pm2:${input.handoff.id}`,
+                  notBeforeMs: computeAutoRetryAvailableAtMs(escalationRound),
                   payload: {
                     resultJson,
                     teamWorkspaceId,
                     sourceIntent: originalPayload?.['sourceIntent'] ?? null,
                     rewrittenIntent: originalPayload?.['rewrittenIntent'] ?? null,
+                    escalationRound,
                     degraded: true,
                     degradationReason: reason,
                   },
