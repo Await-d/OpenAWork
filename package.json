@@ -15,6 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:fastify-alignment": "node scripts/check-fastify-dependency-alignment.mjs",
+    "check:desktop-native": "node scripts/check-desktop-native.mjs",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:e2e": "pnpm -r run test:e2e",

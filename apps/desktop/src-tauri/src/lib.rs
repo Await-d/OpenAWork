@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, State, WindowEvent, Wry};
+use tauri::{Emitter, Manager, State, Url, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
@@ -77,6 +77,14 @@ fn shutdown_gateway_child_from_state(gateway_state: &Arc<Mutex<GatewayState>>) {
         }
         guard.port = None;
     }
+}
+
+fn build_proxy_update_endpoints(proxy_prefix: &str) -> Result<Vec<Url>, String> {
+    PROXY_UPDATE_ENDPOINTS
+        .iter()
+        .map(|url| Url::parse(&format!("{proxy_prefix}{url}")))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("构建代理更新端点失败：{error}"))
 }
 
 impl Drop for GatewayProcess {
@@ -741,6 +749,15 @@ fn updater_platform_key() -> Result<&'static str, String> {
         return Ok("linux-armv7");
     }
 
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "arm")
+    )))]
     Err(format!(
         "unsupported updater platform: {}-{}",
         std::env::consts::OS,
@@ -1119,11 +1136,7 @@ async fn download_and_install_proxy_update(
         return Err("代理前缀不能为空。".to_string());
     }
 
-    let endpoints = PROXY_UPDATE_ENDPOINTS
-        .iter()
-        .map(|url| format!("{proxy_prefix}{url}"))
-        .collect::<Vec<_>>();
-
+    let endpoints = build_proxy_update_endpoints(proxy_prefix)?;
     let updater = app
         .updater_builder()
         .endpoints(endpoints)
@@ -1863,6 +1876,18 @@ pub fn run() {
         generation: 0,
         desktop_auth_token: load_or_create_desktop_auth_token(),
     }));
+    #[cfg(target_os = "windows")]
+    let updater_plugin = tauri_plugin_updater::Builder::new()
+        .on_before_exit({
+            let gateway_process_for_updater = gateway_process_for_updater.clone();
+            move || {
+                shutdown_gateway_child_from_state(&gateway_process_for_updater);
+            }
+        })
+        .build();
+    #[cfg(not(target_os = "windows"))]
+    let updater_plugin = tauri_plugin_updater::Builder::new().build();
+
     let app = tauri::Builder::default()
         // single-instance 必须最先注册：第二个实例启动时直接回调 → 激活已有窗口然后退出。
         // 防止用户开多个 OpenAWork 桌面端，避免端口冲突 / sidecar 抢占等问题。
@@ -1877,16 +1902,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(
-            tauri_plugin_updater::Builder::new()
-                .on_before_exit({
-                    let gateway_process_for_updater = gateway_process_for_updater.clone();
-                    move || {
-                        shutdown_gateway_child_from_state(&gateway_process_for_updater);
-                    }
-                })
-                .build()
-        )
+        .plugin(updater_plugin)
         // C-8 窗口状态记忆：自动持久化窗口大小/位置，下次启动恢复。
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // C-7 全局快捷键：Alt+Shift+O 唤醒主窗口，Alt+Shift+P 显示配对 QR。
