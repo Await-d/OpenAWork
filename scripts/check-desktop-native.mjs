@@ -32,7 +32,7 @@ function hasCommand(command) {
       try {
         accessSync(candidate, constants.X_OK);
         return true;
-      } catch (_error) {
+      } catch {
         continue;
       }
     }
@@ -105,6 +105,13 @@ const childEnv = {
 };
 
 try {
+  const webDistDir = resolve(REPO_ROOT, 'apps/web/dist');
+  if (!existsSync(webDistDir)) {
+    run('pnpm', ['--filter', '@openAwork/web', 'build'], {
+      cwd: REPO_ROOT,
+      env: childEnv,
+    });
+  }
   run('node', ['apps/desktop/src-tauri/scripts/bundle-sidecar.mjs'], {
     cwd: REPO_ROOT,
     env: childEnv,
