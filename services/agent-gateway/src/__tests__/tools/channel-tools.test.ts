@@ -1,4 +1,6 @@
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dirname, resolve } from 'node:path';
 import {
   clearChannelMessageCache,
   listRecentChannelGroups,
@@ -22,6 +24,10 @@ type SqliteGetMockRow = {
 
 type SendImageMock = NonNullable<MessagingChannelService['sendImage']>;
 type ReplyImageMock = NonNullable<MessagingChannelService['replyImage']>;
+
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(TEST_DIR, '../../../../../');
+const WORKSPACE_PACKAGE_JSON = resolve(REPO_ROOT, 'package.json');
 
 const mocks = vi.hoisted(() => ({
   metadataJson: JSON.stringify({
@@ -83,8 +89,8 @@ function makeChannelMetadata(
 
 vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
-  WORKSPACE_ROOT: '/home/await/project/OpenAWork',
-  WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],
+  WORKSPACE_ROOT: REPO_ROOT,
+  WORKSPACE_ROOTS: [REPO_ROOT],
   sqliteAll: mocks.sqliteAllMock,
   sqliteGet: mocks.sqliteGetMock,
   sqliteRun: mocks.sqliteRunMock,
@@ -248,7 +254,7 @@ describe('channel tools', () => {
         toolCallId: 'call-channel-image',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           content: '图片说明',
         },
       },
@@ -279,7 +285,7 @@ describe('channel tools', () => {
         toolCallId: 'call-channel-image-explicit-reply',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           message_id: 'chat-1:message-42',
           content: '图片说明',
         },
@@ -307,7 +313,7 @@ describe('channel tools', () => {
         toolCallId: 'call-channel-image-cross-chat-reply',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           message_id: 'other-chat:message-42',
         },
       },
@@ -339,7 +345,7 @@ describe('channel tools', () => {
         toolCallId: 'call-qq-channel-image',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
         },
       },
       new AbortController().signal,
@@ -369,7 +375,7 @@ describe('channel tools', () => {
         toolCallId: 'call-qq-channel-image-explicit-reply',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           message_id: 'c2c:user-open-id|history-msg-id',
         },
       },
@@ -400,7 +406,7 @@ describe('channel tools', () => {
         toolCallId: 'call-qq-channel-image-cross-chat-reply',
         toolName: 'PluginSendImage',
         rawInput: {
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           message_id: 'c2c:other-user|history-msg-id',
         },
       },
@@ -426,7 +432,7 @@ describe('channel tools', () => {
         rawInput: {
           plugin_id: '',
           chat_id: '',
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
           content: '',
         },
       },
@@ -460,7 +466,7 @@ describe('channel tools', () => {
           rawInput: {
             plugin_id: rawIds.pluginId,
             chat_id: rawIds.chatId,
-            file_path: '/home/await/project/OpenAWork/package.json',
+            file_path: WORKSPACE_PACKAGE_JSON,
           },
         },
         new AbortController().signal,
@@ -489,7 +495,7 @@ describe('channel tools', () => {
         rawInput: {
           plugin_id: 'other-channel',
           chat_id: 'other-chat',
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
         },
       },
       new AbortController().signal,
@@ -513,7 +519,7 @@ describe('channel tools', () => {
         rawInput: {
           plugin_id: 'channel-1',
           chat_id: 'other-chat',
-          file_path: '/home/await/project/OpenAWork/package.json',
+          file_path: WORKSPACE_PACKAGE_JSON,
         },
       },
       new AbortController().signal,
