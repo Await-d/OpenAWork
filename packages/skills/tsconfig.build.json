@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@openAwork/mcp-client": ["../mcp-client/dist/index.d.ts"],
+      "@openAwork/resources": ["../resources/dist/index.d.ts"],
+      "@openAwork/resources/node": ["../resources/dist/node.d.ts"],
+      "@openAwork/skill-types": ["../skill-types/dist/index.d.ts"]
+    }
+  },
+  "references": [
+    { "path": "../mcp-client/tsconfig.build.json" },
+    { "path": "../resources/tsconfig.build.json" },
+    { "path": "../skill-types/tsconfig.build.json" }
+  ],
+  "exclude": ["node_modules", "dist", "src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**"]
+}

@@ -1,0 +1,39 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@openAwork/agent-core": ["../../packages/agent-core/dist/index.d.ts"],
+      "@openAwork/artifacts": ["../../packages/artifacts/dist/index.d.ts"],
+      "@openAwork/browser-automation": ["../../packages/browser-automation/dist/index.d.ts"],
+      "@openAwork/logger": ["../../packages/logger/dist/index.d.ts"],
+      "@openAwork/lsp-client": ["../../packages/lsp-client/dist/index.d.ts"],
+      "@openAwork/mcp-client": ["../../packages/mcp-client/dist/index.d.ts"],
+      "@openAwork/pairing": ["../../packages/pairing/dist/index.d.ts"],
+      "@openAwork/platform-adapter": ["../../packages/platform-adapter/dist/index.d.ts"],
+      "@openAwork/resources": ["../../packages/resources/dist/index.d.ts"],
+      "@openAwork/resources/node": ["../../packages/resources/dist/node.d.ts"],
+      "@openAwork/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@openAwork/skill-registry": ["../../packages/skill-registry/dist/index.d.ts"],
+      "@openAwork/skills": ["../../packages/skills/dist/index.d.ts"],
+      "@openAwork/skill-types": ["../../packages/skill-types/dist/index.d.ts"],
+      "@openAwork/telemetry": ["../../packages/telemetry/dist/index.d.ts"]
+    }
+  },
+  "references": [
+    { "path": "../../packages/agent-core/tsconfig.build.json" },
+    { "path": "../../packages/artifacts/tsconfig.build.json" },
+    { "path": "../../packages/browser-automation/tsconfig.build.json" },
+    { "path": "../../packages/logger/tsconfig.build.json" },
+    { "path": "../../packages/lsp-client/tsconfig.build.json" },
+    { "path": "../../packages/mcp-client/tsconfig.build.json" },
+    { "path": "../../packages/pairing/tsconfig.build.json" },
+    { "path": "../../packages/platform-adapter/tsconfig.build.json" },
+    { "path": "../../packages/resources/tsconfig.build.json" },
+    { "path": "../../packages/shared/tsconfig.build.json" },
+    { "path": "../../packages/skill-registry/tsconfig.build.json" },
+    { "path": "../../packages/skills/tsconfig.build.json" },
+    { "path": "../../packages/skill-types/tsconfig.build.json" },
+    { "path": "../../packages/telemetry/tsconfig.build.json" }
+  ],
+  "exclude": ["node_modules", "dist", "src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**"]
+}

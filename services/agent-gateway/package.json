@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -b --force",
+    "build": "tsc -b tsconfig.build.json --force",
     "build:binary": "bun build src/index.ts --compile --outfile dist/agent-gateway --external chromium-bidi --external electron",
     "sync-souls": "node scripts/sync-souls.mjs",
     "start": "node dist/index.js",

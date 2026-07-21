@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@openAwork/platform-adapter": ["../platform-adapter/dist/index.d.ts"],
+      "@openAwork/shared": ["../shared/dist/index.d.ts"]
+    }
+  },
+  "references": [
+    { "path": "../platform-adapter/tsconfig.build.json" },
+    { "path": "../shared/tsconfig.build.json" }
+  ],
+  "exclude": ["node_modules", "dist", "src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**"]
+}

@@ -17,7 +17,7 @@
   },
   "scripts": {
     "dev": "tsc --watch",
-    "build": "tsc -b --force",
+    "build": "tsc -b tsconfig.build.json --force",
     "typecheck": "tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force",
     "test": "vitest run --passWithNoTests src",
     "lint": "eslint .",

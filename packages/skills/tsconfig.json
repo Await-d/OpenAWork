@@ -19,5 +19,5 @@
     { "path": "../skill-types" }
   ],
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**"]
+  "exclude": ["node_modules", "dist"]
 }

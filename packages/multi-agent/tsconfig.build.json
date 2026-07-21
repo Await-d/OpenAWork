@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@openAwork/agent-core": ["../agent-core/dist/index.d.ts"],
+      "@openAwork/shared": ["../shared/dist/index.d.ts"]
+    }
+  },
+  "references": [
+    { "path": "../agent-core/tsconfig.build.json" },
+    { "path": "../shared/tsconfig.build.json" }
+  ],
+  "exclude": ["node_modules", "dist", "src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**"]
+}
