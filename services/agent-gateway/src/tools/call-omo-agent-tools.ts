@@ -17,12 +17,20 @@ export const CALL_OMO_ALLOWED_AGENTS = [
   'scout',
 ] as const;
 
+const optionalSessionIdSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, z.string().trim().min(1).optional());
+
 const callOmoAgentInputSchema = z.object({
   description: z.string().min(1).optional(),
   prompt: z.string().min(1),
   subagent_type: z.string().min(1),
   run_in_background: z.boolean().default(false),
-  session_id: z.string().min(1).optional(),
+  session_id: optionalSessionIdSchema,
 });
 
 // 把白名单 agent id 拼到工具描述里 —— LLM 第一次看到工具描述时就能

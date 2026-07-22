@@ -199,7 +199,13 @@ function ConversationAreaBody({
     return (
       <div
         className="team-conversation-area__body"
-        style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}
+        style={{
+          display: 'flex',
+          flex: 1,
+          flexDirection: 'column',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
       >
         {children}
       </div>

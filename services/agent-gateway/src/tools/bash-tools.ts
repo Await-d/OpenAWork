@@ -63,7 +63,10 @@ import {
   registerTerminal,
   setTerminalPid,
 } from '../session/session-terminal-registry.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import {
+  assertWorkspacePathSupportedByCurrentHost,
+  validateWorkspacePath,
+} from '../workspace/workspace-paths.js';
 import {
   captureWorkspaceReconcileSnapshot,
   collectWorkspaceReconcileDiffs,
@@ -308,6 +311,8 @@ async function resolveBashWorkdir(
     candidate = workdir ?? WORKSPACE_ROOT;
     validation = null;
   }
+
+  assertWorkspacePathSupportedByCurrentHost(candidate);
 
   const safe = validation?.ok
     ? validation.safePath

@@ -1137,8 +1137,14 @@ async fn download_and_install_proxy_update(
     }
 
     let endpoints = build_proxy_update_endpoints(proxy_prefix)?;
+    let gateway_process_for_updater = app.state::<GatewayProcess>().0.clone();
+    let app_handle = app.clone();
     let updater = app
         .updater_builder()
+        .on_before_exit(move || {
+            shutdown_gateway_child_from_state(&gateway_process_for_updater);
+            app_handle.cleanup_before_exit();
+        })
         .endpoints(endpoints)
         .map_err(|error| format!("构建代理更新端点失败：{error}"))?
         .timeout(Duration::from_secs(60))
@@ -1876,16 +1882,6 @@ pub fn run() {
         generation: 0,
         desktop_auth_token: load_or_create_desktop_auth_token(),
     }));
-    #[cfg(target_os = "windows")]
-    let updater_plugin = tauri_plugin_updater::Builder::new()
-        .on_before_exit({
-            let gateway_process_for_updater = gateway_process_for_updater.clone();
-            move || {
-                shutdown_gateway_child_from_state(&gateway_process_for_updater);
-            }
-        })
-        .build();
-    #[cfg(not(target_os = "windows"))]
     let updater_plugin = tauri_plugin_updater::Builder::new().build();
 
     let app = tauri::Builder::default()

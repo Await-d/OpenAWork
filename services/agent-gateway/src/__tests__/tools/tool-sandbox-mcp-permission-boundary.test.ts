@@ -227,4 +227,93 @@ describe('tool-sandbox flat MCP permission boundary', () => {
     );
     expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
   });
+
+  it('keeps rg bash queries behind approval because the command runs through a shell', async () => {
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-bash-rg-read',
+        toolName: 'bash',
+        rawInput: {
+          command: "rg -n -i --glob '!node_modules/**' '(openawork|package)' package.json",
+          description: '搜索工作区配置中的 OpenAWork',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-bash-rg-read'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()).toEqual(
+      expect.arrayContaining([
+        'bash',
+        "rg -n -i --glob '!node_modules/**' '(openawork|package)' package.json",
+      ]),
+    );
+  });
+
+  it('keeps rg commands with shell control operators behind approval', async () => {
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-bash-rg-shell',
+        toolName: 'bash',
+        rawInput: {
+          command: 'rg --version; printf unsafe',
+          description: '执行带控制符的搜索命令',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-bash-rg-shell'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()).toEqual(
+      expect.arrayContaining(['bash', 'rg --version; printf unsafe']),
+    );
+  });
+
+  it('keeps rg preprocessor commands behind approval', async () => {
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-bash-rg-preprocessor',
+        toolName: 'bash',
+        rawInput: {
+          command: 'rg --pre=cat openawork package.json',
+          description: '执行带预处理器的搜索命令',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-bash-rg-preprocessor'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()).toEqual(
+      expect.arrayContaining(['bash', 'rg --pre=cat openawork package.json']),
+    );
+  });
+
+  it.each([
+    'rg $RG_PRE openawork package.json',
+    'rg openawork *',
+    'rg --pre-glob=*.ts openawork .',
+  ])('keeps shell-expandable rg command behind approval: %s', async (command) => {
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: `call-bash-rg-expanded-${command.length}`,
+        toolName: 'bash',
+        rawInput: {
+          command,
+          description: '执行可能发生 Shell 展开的搜索命令',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext(`req-bash-rg-expanded-${command.length}`),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()).toEqual(expect.arrayContaining(['bash', command]));
+  });
 });

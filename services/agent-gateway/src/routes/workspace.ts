@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
+import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
@@ -15,6 +16,8 @@ import {
 } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
+  assertWorkspacePathSupportedByCurrentHost,
+  isWorkspaceAbsolutePath,
   validateWorkspacePath,
   validateWorkspaceRelativePath,
   isPathWithinRoot,
@@ -104,6 +107,25 @@ const MAX_FILE_BYTES = 100 * 1024;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
+function assertWorkspacePathSupportedByRequestHost(path: string): void {
+  if (!isWorkspaceAbsolutePath(path)) {
+    return;
+  }
+
+  try {
+    assertWorkspacePathSupportedByCurrentHost(path);
+  } catch (error) {
+    throw ApiError.badRequest(
+      error instanceof Error ? error.message : '当前设备无法访问该工作区路径。',
+    );
+  }
+}
+
+function validateWorkspacePathForRequest(path: string): string | null {
+  assertWorkspacePathSupportedByRequestHost(path);
+  return validateWorkspacePath(path);
+}
+
 async function readTree(
   dirPath: string,
   depth: number,
@@ -159,6 +181,8 @@ function resolveScopedWorkspacePath(input: {
     if (!scopeRoot) {
       return { safePath: null, scopeRoot: null, missingSessionWorkspace: true };
     }
+    assertWorkspacePathSupportedByRequestHost(scopeRoot);
+    assertWorkspacePathSupportedByRequestHost(input.path);
     return {
       safePath: resolveWorkspaceEntryPathForRequest({
         path: input.path,
@@ -170,7 +194,10 @@ function resolveScopedWorkspacePath(input: {
     };
   }
 
-  const scopeRoot = input.workspaceRoot ? validateWorkspacePath(input.workspaceRoot) : null;
+  assertWorkspacePathSupportedByRequestHost(input.path);
+  const scopeRoot = input.workspaceRoot
+    ? validateWorkspacePathForRequest(input.workspaceRoot)
+    : null;
   return {
     safePath: resolveWorkspaceEntryPathForRequest({
       path: input.path,
@@ -216,7 +243,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -281,7 +308,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed(undefined, { depth: parsed.depth });
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -361,7 +388,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -372,7 +399,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       // non-workspace root is rejected before being used for the
       // prefix check.
       if (parsed.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePath(parsed.workspaceRoot);
+        const safeRoot = validateWorkspacePathForRequest(parsed.workspaceRoot);
         if (!safeRoot) {
           pathStep.fail('forbidden workspace root');
           step.fail('forbidden workspace root');
@@ -448,13 +475,13 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       });
       const parsed = parseQuery(schema, request.query);
 
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
         return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
       if (parsed.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePath(parsed.workspaceRoot);
+        const safeRoot = validateWorkspacePathForRequest(parsed.workspaceRoot);
         if (!safeRoot || !isPathWithinRoot(safePath, safeRoot)) {
           step.fail('path outside workspace root');
           return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
@@ -528,7 +555,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -564,7 +591,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -637,7 +664,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -876,7 +903,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const parsed = parseQuery(schema, request.query);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -905,7 +932,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const parsed = parseQuery(schema, request.query);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -951,7 +978,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const parsed = parseBody(schema, request.body);
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
@@ -1009,7 +1036,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         maxResults: z.coerce.number().int().min(1).max(50).default(8),
       });
       const parsed = parseQuery(schema, request.query);
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         step.fail('forbidden path');
         return reply.status(403).send({
@@ -1068,7 +1095,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed(undefined, { maxResults: parsed.maxResults });
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePath(parsed.path);
+      const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
         pathStep.fail('forbidden path');
         step.fail('forbidden path');

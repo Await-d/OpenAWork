@@ -28,6 +28,15 @@ export interface ScrollManagerEffects {
   editorMode: boolean;
 }
 
+export interface ScrollManagerOptions {
+  /** 滚动到顶部附近时触发加载更早消息（距离顶部 <= 阈值 px）。 */
+  onNearTop?: () => void;
+  /** 触发加载的阈值（距顶部 px），默认 120。 */
+  nearTopThreshold?: number;
+  /** 防抖间隔 ms，避免连续触发，默认 800。 */
+  nearTopDebounceMs?: number;
+}
+
 export interface ScrollManagerReturn {
   isNearBottomRef: React.MutableRefObject<boolean>;
   ignoreScrollEventsUntilRef: React.MutableRefObject<number>;
@@ -39,6 +48,7 @@ export function useScrollManager(
   refs: ScrollManagerRefs,
   setters: ScrollManagerSetters,
   effects: ScrollManagerEffects,
+  options?: ScrollManagerOptions,
 ): ScrollManagerReturn {
   const {
     scrollRegionRef,
@@ -52,6 +62,8 @@ export function useScrollManager(
   const { messagesLength, visibleStreaming, visibleStreamBufferLength, editorMode } = effects;
   const isNearBottomRef = useRef(true);
   const ignoreScrollEventsUntilRef = useRef(0);
+  const lastNearTopTriggeredRef = useRef(0);
+  const isNearTopTriggeredRef = useRef(false);
 
   const getLatestAssistantAnchor = useCallback((): HTMLElement | null => {
     const sr = scrollRegionRef.current;
@@ -113,6 +125,24 @@ export function useScrollManager(
     }
     if (near && !wasNear) {
       setHasPendingFollowContent(false);
+    }
+
+    // ─── 滚动到顶部附近 → 自动加载更早消息 ───────────────────────
+    if (options?.onNearTop) {
+      const threshold = options.nearTopThreshold ?? 120;
+      const debounceMs = options.nearTopDebounceMs ?? 800;
+      const now = performance.now();
+      if (el.scrollTop <= threshold) {
+        if (!isNearTopTriggeredRef.current && now - lastNearTopTriggeredRef.current > debounceMs) {
+          isNearTopTriggeredRef.current = true;
+          lastNearTopTriggeredRef.current = now;
+          // 记录当前滚动位置，加载后恢复视口锚点
+          options.onNearTop();
+        }
+      } else if (el.scrollTop > threshold + 40) {
+        // 离开顶部区域后重置，允许下次再次触发
+        isNearTopTriggeredRef.current = false;
+      }
     }
   }
 

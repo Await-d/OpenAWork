@@ -1284,12 +1284,17 @@ export function TeamConversationView({
   };
 
   // 左侧：用户与接待的主对话区（dual 模式下占 55%）
+  // 注意：TeamConversationLayout 返回的是 fragment（topBar / 滚动区 / bar / composer
+  // 被拍平塞进本容器），本容器必须同时设 minHeight:0 + overflow:hidden —— 否则
+  // 消息流变长时，column flex 子项总高溢出会把 composer / 底部状态栏推出可视区，
+  // 表现为「输入框看不到 / 滚不到最底 / 底部被裁一截」三种同源症状。
   const MAIN_PANEL_STYLE: CSSProperties = {
     flex: viewMode === 'dual' ? '0 0 clamp(360px, 55%, 640px)' : '1 1 100%',
     minWidth: 0,
     minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
+    overflow: 'hidden',
     transition: 'flex 200ms ease',
   };
 
@@ -1313,7 +1318,15 @@ export function TeamConversationView({
         <div
           style={
             soloMode
-              ? { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }
+              ? {
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  // 同 MAIN_PANEL_STYLE：fragment 拍平后必须 overflow:hidden 兜底
+                  overflow: 'hidden',
+                }
               : MAIN_PANEL_STYLE
           }
         >
@@ -1408,6 +1421,7 @@ export function TeamConversationView({
               onLoadEarlier={() => {
                 void state.loadEarlierMessages();
               }}
+              isLoadingEarlier={state.isLoadingEarlier}
               emptyContent={
                 <TeamSessionEmptyState
                   roleLayer={state.roleLayer}

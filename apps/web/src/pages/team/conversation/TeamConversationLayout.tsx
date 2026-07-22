@@ -182,6 +182,8 @@ export interface TeamConversationLayoutProps {
   activeModelId: string;
   activeModelLabel?: string;
   onLoadEarlier: () => void;
+  /** 是否正在加载更早消息（滚动到顶部触发时禁用按钮）。 */
+  isLoadingEarlier?: boolean;
   /**
    * 初始无消息时显示的 WelcomeScreen 行为（chat 用，team 不传 = 不显示）。
    */
@@ -445,6 +447,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     activeModelId,
     activeModelLabel,
     onLoadEarlier,
+    isLoadingEarlier,
     welcomeScreen,
     emptyContent,
 
@@ -661,7 +664,11 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                       type="button"
                       data-testid="chat-load-earlier"
                       onClick={onLoadEarlier}
-                      style={LOAD_EARLIER_BTN_STYLE}
+                      style={{
+                        ...LOAD_EARLIER_BTN_STYLE,
+                        opacity: isLoadingEarlier ? 0.6 : 1,
+                        cursor: isLoadingEarlier ? 'wait' : 'pointer',
+                      }}
                     >
                       <svg
                         aria-hidden="true"
@@ -677,8 +684,9 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                         <path d="M12 19V5" />
                         <path d="m5 12 7-7 7 7" />
                       </svg>
-                      加载更早的 {Math.min(hiddenMessageCount, 20)} 条消息（共 {hiddenMessageCount}{' '}
-                      条隐藏）
+                      {isLoadingEarlier
+                        ? '加载中…'
+                        : `加载更早的消息（共 ${hiddenMessageCount} 条隐藏）`}
                     </button>
                   )}
                   <ChatMessageGroupList

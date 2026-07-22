@@ -1402,7 +1402,17 @@ export default function TeamPageV2() {
                       flexDirection: 'row',
                       overflow: 'hidden',
                     }
-                  : { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+                  : {
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      // 必须 overflow:hidden —— 下层 ConversationArea 内部的
+                      // TeamConversationLayout 返回 fragment，内容直接拍平进本容器。
+                      // 若不设 overflow，column flex 子项的最小高度会取内容高度，
+                      // 导致滚动区不收缩、composer 被推出视口且无法滚动。
+                      overflow: 'hidden',
+                    }
               }
             >
               <div
@@ -1415,7 +1425,13 @@ export default function TeamPageV2() {
                         flexDirection: 'column',
                         overflow: 'hidden',
                       }
-                    : { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }
+                    : {
+                        flex: 1,
+                        minWidth: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                      }
                 }
               >
                 <ConversationArea

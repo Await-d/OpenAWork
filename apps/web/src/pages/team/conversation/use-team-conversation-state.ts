@@ -228,6 +228,8 @@ export interface TeamConversationState {
   reload: () => Promise<void>;
   /** 拉取更早的团队对话回合。 */
   loadEarlierMessages: () => Promise<void>;
+  /** 是否正在加载更早消息（滚动到顶部触发时按钮显示加载中）。 */
+  isLoadingEarlier: boolean;
 
   /**
    * 提交 inbound message 到当前 session（L1.3 反向通道）。
@@ -311,8 +313,8 @@ const TEAM_CONVERSATION_RECOVERY_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_RECOVERY_RETRY_MAX_MS = 30_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS = 30_000;
-const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 10;
-const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 20;
+const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 25;
+const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 25;
 
 export function computeTeamConversationRecoveryRetryDelay(attempt: number): number {
   return computeExponentialRetryDelay({
@@ -603,27 +605,6 @@ export function useTeamConversationState(
     },
   );
 
-  const { handleScroll: scrollManagerHandleScroll, scrollToBottom } = useScrollManager(
-    {
-      scrollRegionRef,
-      bottomRef,
-      pendingScrollFrameRef,
-      contentColumnRef,
-      editorPaneRef,
-      textareaRef,
-    },
-    {
-      setShowScrollToBottom,
-      setHasPendingFollowContent,
-    },
-    {
-      messagesLength: messages.length,
-      visibleStreaming,
-      visibleStreamBufferLength: streamBuffer.length,
-      editorMode: false,
-    },
-  );
-
   // ─── 加载会话快照 ────────────────────────────────────────────────
   const reload = useCallback(async (): Promise<void> => {
     if (reloadPromiseRef.current?.sessionId === sessionId) {
@@ -827,6 +808,66 @@ export function useTeamConversationState(
   // without adding it to their dependency array (avoids re-registration churn).
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
+
+  // ─── 加载更早消息（滚动到顶部触发 + 手动按钮） ───────────────────
+  // 加载前记录滚动位置，加载后恢复 —— 防止新消息插入顶部后视口跳到底部
+  // ref 用于同步防抖，state 用于驱动 UI
+  const isLoadingEarlierRef = useRef(false);
+  const [isLoadingEarlier, setIsLoadingEarlier] = useState(false);
+
+  const loadEarlierMessagesWithAnchor = useCallback(async (): Promise<void> => {
+    if (isLoadingEarlierRef.current) return;
+    isLoadingEarlierRef.current = true;
+    setIsLoadingEarlier(true);
+
+    const sr = scrollRegionRef.current;
+    const prevScrollHeight = sr?.scrollHeight ?? 0;
+    const prevScrollTop = sr?.scrollTop ?? 0;
+
+    requestedTurnLimitRef.current += TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT;
+    await reload();
+
+    // 加载完成后恢复滚动位置：新插入的消息高度 = 新 scrollHeight - 旧 scrollHeight
+    requestAnimationFrame(() => {
+      if (sr) {
+        const newScrollHeight = sr.scrollHeight;
+        const heightDiff = newScrollHeight - prevScrollHeight;
+        sr.scrollTop = prevScrollTop + Math.max(0, heightDiff);
+      }
+      isLoadingEarlierRef.current = false;
+      setIsLoadingEarlier(false);
+    });
+  }, [reload, scrollRegionRef]);
+
+  const { handleScroll: scrollManagerHandleScroll, scrollToBottom } = useScrollManager(
+    {
+      scrollRegionRef,
+      bottomRef,
+      pendingScrollFrameRef,
+      contentColumnRef,
+      editorPaneRef,
+      textareaRef,
+    },
+    {
+      setShowScrollToBottom,
+      setHasPendingFollowContent,
+    },
+    {
+      messagesLength: messages.length,
+      visibleStreaming,
+      visibleStreamBufferLength: streamBuffer.length,
+      editorMode: false,
+    },
+    {
+      onNearTop: () => {
+        if (hiddenMessageCount > 0) {
+          void loadEarlierMessagesWithAnchor();
+        }
+      },
+      nearTopThreshold: 120,
+      nearTopDebounceMs: 800,
+    },
+  );
 
   // ─── 当 sessionId 变化时自动 reload ─────────────────────────────
   useEffect(() => {
@@ -1883,7 +1924,8 @@ export function useTeamConversationState(
     hiddenMessageCount,
 
     reload,
-    loadEarlierMessages,
+    loadEarlierMessages: loadEarlierMessagesWithAnchor,
+    isLoadingEarlier,
     submitInbound,
     startStream,
     stopStream,

@@ -9,6 +9,35 @@ function pathFlavorFor(...paths: string[]): PathFlavor {
   return paths.some((path) => WINDOWS_ABSOLUTE_PATH_PATTERN.test(path)) ? win32 : posix;
 }
 
+function isPathFlavorSupportedByCurrentHost(flavor: PathFlavor): boolean {
+  return process.platform === 'win32' ? flavor === win32 : flavor === posix;
+}
+
+function currentHostName(): string {
+  if (process.platform === 'win32') {
+    return 'Windows';
+  }
+  if (process.platform === 'darwin') {
+    return 'macOS';
+  }
+  return 'Linux';
+}
+
+function pathFlavorName(flavor: PathFlavor): string {
+  return flavor === win32 ? 'Windows' : 'POSIX';
+}
+
+export function assertWorkspacePathSupportedByCurrentHost(path: string): void {
+  const flavor = pathFlavorFor(path);
+  if (isPathFlavorSupportedByCurrentHost(flavor)) {
+    return;
+  }
+
+  throw new Error(
+    `当前网关运行在 ${currentHostName()}，无法访问 ${pathFlavorName(flavor)} 路径：${path}。请将会话工作区切换到当前设备可访问的目录。`,
+  );
+}
+
 function normalizeRelativeSeparators(path: string, flavor: PathFlavor): string {
   return flavor === win32 ? path.replaceAll('/', '\\') : path.replaceAll('\\', '/');
 }

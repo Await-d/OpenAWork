@@ -28,6 +28,7 @@ let workspaceRoutes: typeof WorkspaceRoutesModule.workspaceRoutes;
 
 const USER_ID = 'u-workspace-routes';
 const SESSION_ID = 's-workspace-routes';
+const testOnNonWindows = process.platform === 'win32' ? it.skip : it;
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
@@ -170,6 +171,43 @@ describe('workspace routes', () => {
       expect(response.json()).toMatchObject({
         error: '目标路径超出当前工作区范围。',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  testOnNonWindows('跨主机 Windows 路径返回明确的中文 400 错误', async () => {
+    const windowsPath =
+      'E:\\01Project\\appearance-automation\\appearance-automation-web-react\\src\\App.tsx';
+    const app = await buildApp();
+    try {
+      const requests = await Promise.all([
+        app.inject({
+          method: 'GET',
+          url: `/workspace/file?path=${encodeURIComponent(windowsPath)}`,
+          headers: { authorization: bearer(app) },
+        }),
+        app.inject({
+          method: 'GET',
+          url: `/workspace/file/binary?path=${encodeURIComponent(windowsPath)}`,
+          headers: { authorization: bearer(app) },
+        }),
+        app.inject({
+          method: 'GET',
+          url: `/workspace/validate?path=${encodeURIComponent(windowsPath)}`,
+          headers: { authorization: bearer(app) },
+        }),
+      ]);
+
+      for (const response of requests) {
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toMatchObject({
+          name: 'BadRequest',
+          data: {
+            message: expect.stringMatching(/当前网关运行在 .*，无法访问 Windows 路径/),
+          },
+        });
+      }
     } finally {
       await app.close();
     }

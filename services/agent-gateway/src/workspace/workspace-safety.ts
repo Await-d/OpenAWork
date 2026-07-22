@@ -10,6 +10,7 @@ import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import {
+  assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
   resolveWorkspaceEntryPath,
   validateWorkspacePath,
@@ -167,6 +168,7 @@ export function validateSessionWorkspacePath(input: {
 }
 
 export function assertSessionWorkspacePath(input: { path: string; sessionId: string }): string {
+  assertWorkspacePathSupportedByCurrentHost(input.path);
   const workingDirectory = getSessionWorkingDirectory(input.sessionId);
   if (!workingDirectory && requiresBoundSessionWorkspace(input.sessionId)) {
     throw new Error(`当前会话未绑定工作区，禁止访问路径：${input.path}`);

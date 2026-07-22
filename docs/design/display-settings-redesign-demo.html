@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAWork 显示设置 A/B 对照 Demo</title>
+    <meta
+      name="description"
+      content="OpenAWork 显示设置重设计 A/B 对照原型，直接比较当前实现和新方案在聊天场景中的具体效果。"
+    />
+    <link rel="stylesheet" href="./display-settings-redesign-demo.css" />
+  </head>
+  <body data-mode="dark" data-style="nebula">
+    <div class="shell">
+      <header class="panel hero">
+        <div class="hero-top">
+          <div>
+            <div class="eyebrow">显示设置重设计 · A/B 对照 Demo</div>
+            <h1>同一段聊天内容，直接看出“开关墙”和“策略面板”的差别</h1>
+            <p>
+              左边保留当前实现，中间展示新方案，底部用同一条消息在两种设置下渲染结果。你可以切场景、切设备、切主题，也可以直接点每一项，看实际效果怎么变。
+            </p>
+          </div>
+          <div class="hero-badge">交互原型 · 具体效果可见</div>
+        </div>
+
+        <div class="control-strip">
+          <div class="control-block">
+            <span class="label">查看场景</span>
+            <div class="tabs" id="scenario-tabs"></div>
+            <div class="hint" id="scenario-hint"></div>
+          </div>
+          <div class="control-block">
+            <span class="label">预览宽度</span>
+            <div class="tabs" id="device-tabs"></div>
+            <div class="hint">移动端会放大标签换行和卡片拥挤的问题。</div>
+          </div>
+          <div class="control-block">
+            <span class="label">界面模式</span>
+            <div class="tabs" id="mode-tabs"></div>
+            <div class="hint">只改变预览外观，不改变对照逻辑。</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="stats-grid">
+        <div class="stat">
+          <span>当前首屏内容</span>
+          <strong id="legacy-visible">--</strong>
+          <em id="legacy-em">当前实现</em>
+        </div>
+        <div class="stat">
+          <span>新版首屏内容</span>
+          <strong id="modern-visible">--</strong>
+          <em id="modern-em">重设计方案</em>
+        </div>
+        <div class="stat">
+          <span>需要主动展开</span>
+          <strong id="click-delta">--</strong>
+          <em>动作次数</em>
+        </div>
+        <div class="stat">
+          <span>信息噪声</span>
+          <strong id="noise-delta">--</strong>
+          <em>越低越干净</em>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel card">
+          <div class="section-head">
+            <div>
+              <h2>当前实现</h2>
+              <p>所有项都长得像普通开关，父子关系和优先级被打平。</p>
+            </div>
+            <span class="tag bad">开关墙</span>
+          </div>
+          <div class="legacy-list" id="legacy-settings"></div>
+          <div class="callout bad">
+            当前方案最明显的问题是: <strong>“显示推理过程”</strong> 和
+            <strong>“推理默认展开”</strong> 是父子关系，却被拆成了两行普通
+            toggle；工具调用也只有展开 / 不展开，没有日常更常用的 <strong>自动</strong> 状态。
+          </div>
+        </article>
+
+        <article class="panel card">
+          <div class="section-head">
+            <div>
+              <h2>重设计方案</h2>
+              <p>先选预设，再改局部策略；每个分组都能看到当前值和结果。</p>
+            </div>
+            <span class="tag good" id="modern-label">平衡</span>
+          </div>
+          <div id="modern-settings"></div>
+          <div class="callout good">
+            核心变化：把设置从“逐条开关”改成“消息层级、展开策略、工作台入口”三类决策。
+          </div>
+        </article>
+
+        <aside class="panel insight">
+          <div class="section-head">
+            <div>
+              <h2>你该看什么</h2>
+              <p>不是看卡片好不好看，而是看信息密度是否更像一个能工作、能排障的聊天界面。</p>
+            </div>
+            <span class="tag good">即时更新</span>
+          </div>
+          <div class="insight-stack" id="insights"></div>
+        </aside>
+      </section>
+
+      <section class="panel compare">
+        <div class="compare-head">
+          <div>
+            <div class="eyebrow">聊天结果对照</div>
+            <h2>同一段消息，在两套设置下会怎么显示</h2>
+            <p id="compare-description"></p>
+          </div>
+          <div class="delta" id="delta-banner"></div>
+        </div>
+        <div class="compare-grid" id="compare-grid"></div>
+        <div class="compare-footer">
+          <span>建议先点 <strong>批量工具调用</strong>，再看两边的工具卡片高度差。</span>
+          <span class="mono">OpenAWork / display-preferences</span>
+        </div>
+      </section>
+    </div>
+
+    <script defer src="./display-settings-redesign-demo.js"></script>
+  </body>
+</html>

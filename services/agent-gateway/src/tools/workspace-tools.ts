@@ -18,6 +18,7 @@ import {
   type WorkspaceReviewChange,
 } from '../workspace/workspace-review.js';
 import {
+  assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
   validateWorkspacePath,
   validateWorkspaceRelativePath,
@@ -55,6 +56,11 @@ const MAX_GLOB_MATCHES = 100;
 const _MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
+const optionalWorkspacePathSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim().length === 0 ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const workspaceTreeInputSchema = z.object({
   path: z.string().min(1),
   depth: z.number().int().min(1).max(MAX_TREE_DEPTH).default(2),
@@ -69,8 +75,8 @@ const workspaceTreeOutputSchema = z.object({
 
 const workspaceReadFileInputSchema = z
   .object({
-    path: z.string().min(1).optional(),
-    filePath: z.string().min(1).optional(),
+    path: optionalWorkspacePathSchema,
+    filePath: optionalWorkspacePathSchema,
     offset: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(MAX_READ_LINE_LIMIT).optional(),
   })
@@ -149,8 +155,8 @@ const workspaceReviewDiffOutputSchema = z.object({
 
 const workspaceWriteFileInputSchema = z
   .object({
-    path: z.string().min(1).optional(),
-    filePath: z.string().min(1).optional(),
+    path: optionalWorkspacePathSchema,
+    filePath: optionalWorkspacePathSchema,
     content: z.string(),
   })
   .superRefine((value, context) => {
@@ -220,6 +226,7 @@ function assertAccessibleWorkspacePath(
   target: 'directory' | 'file',
   sessionId?: string,
 ): string {
+  assertWorkspacePathSupportedByCurrentHost(path);
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
     : validateWorkspacePath(path);
@@ -239,6 +246,7 @@ function assertWritableWorkspacePath(
   target: 'directory' | 'file',
   sessionId?: string,
 ): string {
+  assertWorkspacePathSupportedByCurrentHost(path);
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
     : validateWorkspacePath(path);
@@ -254,6 +262,7 @@ function assertWritableWorkspacePath(
 }
 
 function assertSearchablePath(path: string, sessionId?: string): string {
+  assertWorkspacePathSupportedByCurrentHost(path);
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
     : validateWorkspacePath(path);
@@ -489,11 +498,18 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
   return matches.join('\n');
 }
 
+function createGrepMatcher(pattern: string): RegExp {
+  const caseInsensitivePrefix = '(?i)';
+  const ignoreCase = pattern.startsWith(caseInsensitivePrefix);
+  const source = ignoreCase ? pattern.slice(caseInsensitivePrefix.length) : pattern;
+  return new RegExp(source, ignoreCase ? 'i' : undefined);
+}
+
 async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
   const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
   await ensureIgnoreRulesLoadedForPath(safePath);
   await assertDirectory(safePath);
-  const matcher = new RegExp(input.pattern);
+  const matcher = createGrepMatcher(input.pattern);
   const includeRegex = input.include ? globPatternToRegex(input.include) : null;
   const matches: Array<{ path: string; line: number; text: string }> = [];
   const counts = new Map<string, number>();

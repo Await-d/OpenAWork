@@ -22,7 +22,7 @@ function createEntry(index: number, overrides?: Partial<TeamDynamicEntry>): Team
 }
 
 describe('TeamDynamicStrip', () => {
-  it('默认只显示前三条，并可展开剩余动态', () => {
+  it('默认只显示前两条，并可展开剩余动态', () => {
     render(
       <TeamDynamicStrip
         entries={[createEntry(0), createEntry(1), createEntry(2), createEntry(3)]}
@@ -31,12 +31,13 @@ describe('TeamDynamicStrip', () => {
 
     expect(screen.getByText('动态 1')).toBeTruthy();
     expect(screen.getByText('动态 2')).toBeTruthy();
-    expect(screen.getByText('动态 3')).toBeTruthy();
+    expect(screen.queryByText('动态 3')).toBeNull();
     expect(screen.queryByText('动态 4')).toBeNull();
-    expect(screen.getByRole('button', { name: '展开其余 1 条' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '展开其余 2 条' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '展开其余 1 条' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开其余 2 条' }));
 
+    expect(screen.getByText('动态 3')).toBeTruthy();
     expect(screen.getByText('动态 4')).toBeTruthy();
     expect(screen.getByRole('button', { name: '收起动态' })).toBeTruthy();
   });
