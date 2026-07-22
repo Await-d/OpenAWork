@@ -276,37 +276,60 @@ function mirrorSessionMessageForLegacySearch(input: {
   status?: string;
   userId: string;
 }): void {
-  const seq =
-    sqliteGet<{ max_seq: number | null }>(
-      'SELECT MAX(seq) AS max_seq FROM session_messages WHERE session_id = ? AND user_id = ?',
-      [input.sessionId, input.userId],
-    )?.max_seq ?? 0;
   const contentJson = JSON.stringify(input.content);
+  const writeMirrorRow = () => {
+    const seq =
+      sqliteGet<{ max_seq: number | null }>(
+        'SELECT MAX(seq) AS max_seq FROM session_messages WHERE session_id = ? AND user_id = ?',
+        [input.sessionId, input.userId],
+      )?.max_seq ?? 0;
 
-  sqliteRun(
-    `INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, agent_id, created_at_ms, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(id) DO UPDATE SET
-       role = excluded.role,
-       content_json = excluded.content_json,
-       status = excluded.status,
-       client_request_id = excluded.client_request_id,
-       agent_id = excluded.agent_id,
-       created_at_ms = excluded.created_at_ms,
-       updated_at = datetime('now')`,
-    [
-      input.messageId,
-      input.sessionId,
-      input.userId,
-      seq + 1,
-      input.role,
-      contentJson,
-      input.status ?? 'final',
-      input.clientRequestId ?? null,
-      input.agentId ?? null,
-      input.createdAt,
-    ],
-  );
+    sqliteRun(
+      `INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, agent_id, created_at_ms, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET
+         role = excluded.role,
+         content_json = excluded.content_json,
+         status = excluded.status,
+         client_request_id = excluded.client_request_id,
+         agent_id = excluded.agent_id,
+         created_at_ms = excluded.created_at_ms,
+         updated_at = datetime('now')`,
+      [
+        input.messageId,
+        input.sessionId,
+        input.userId,
+        seq + 1,
+        input.role,
+        contentJson,
+        input.status ?? 'final',
+        input.clientRequestId ?? null,
+        input.agentId ?? null,
+        input.createdAt,
+      ],
+    );
+  };
+
+  try {
+    writeMirrorRow();
+  } catch (error) {
+    const isRequestRoleConflict =
+      error instanceof Error &&
+      /UNIQUE constraint failed: session_messages\.session_id, session_messages\.client_request_id, session_messages\.role/.test(
+        error.message,
+      );
+    if (!isRequestRoleConflict || !input.clientRequestId) {
+      throw error;
+    }
+
+    deleteLegacySessionMessagesByRequestRole({
+      clientRequestId: input.clientRequestId,
+      role: input.role,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    writeMirrorRow();
+  }
 
   upsertSessionMessageSearchDocument({
     contentJson,

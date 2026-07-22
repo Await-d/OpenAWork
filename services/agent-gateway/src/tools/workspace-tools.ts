@@ -1,5 +1,5 @@
 import { promises as fsp, type Dirent, type Stats } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileBackupRef } from '@openAwork/shared';
@@ -413,6 +413,18 @@ function globPatternToRegex(pattern: string): RegExp {
   return new RegExp(regex);
 }
 
+function matchesGlobLikePath(pattern: string, patternRegex: RegExp, relativePath: string): boolean {
+  if (patternRegex.test(relativePath)) {
+    return true;
+  }
+
+  if (!pattern.includes('/') && !pattern.includes('\\')) {
+    return patternRegex.test(basename(relativePath));
+  }
+
+  return false;
+}
+
 export function resolveWorkspaceReviewFilePath(rootPath: string, filePath: string): string {
   const normalizedRootPath = resolve(rootPath);
   const normalizedFilePath = filePath.trim();
@@ -545,7 +557,7 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
         continue;
       }
       const relativePath = fullPath.slice(safePath.length).replace(/^\//u, '').replace(/\\/g, '/');
-      if (includeRegex && !includeRegex.test(relativePath)) {
+      if (includeRegex && !matchesGlobLikePath(input.include ?? '', includeRegex, relativePath)) {
         continue;
       }
       let stat: Stats;

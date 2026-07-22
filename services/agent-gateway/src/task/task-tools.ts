@@ -1,6 +1,14 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 
+const optionalNonBlankStringSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, z.string().trim().min(1).optional());
+
 /**
  * Schema for the `task` (a.k.a. `delegate_task`) tool.
  *
@@ -28,25 +36,19 @@ import { z } from 'zod';
  */
 const taskInputSchema = z
   .object({
-    description: z.string().min(1).optional(),
+    description: optionalNonBlankStringSchema,
     prompt: z.string().min(1),
-    subagent_type: z.string().min(1).optional(),
-    category: z.string().min(1).optional(),
+    subagent_type: optionalNonBlankStringSchema,
+    category: optionalNonBlankStringSchema,
     load_skills: z.array(z.string().min(1)).default([]),
     run_in_background: z.boolean().default(false),
-    session_id: z
-      .string()
-      .min(1)
-      .optional()
-      .describe('要继续的已有子会话 ID（取代旧的 `resume` 字段）。'),
-    task_id: z.string().min(1).optional(),
-    command: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        '保留字段，仅用于上游 schema 兼容的 slash command 标识。OpenAWork 目前忽略该字段——slash command 是服务端动作而非 prompt 模板，请直接在 `prompt` 中表达工作。',
-      ),
+    session_id: optionalNonBlankStringSchema.describe(
+      '要继续的已有子会话 ID（取代旧的 `resume` 字段）。',
+    ),
+    task_id: optionalNonBlankStringSchema,
+    command: optionalNonBlankStringSchema.describe(
+      '保留字段，仅用于上游 schema 兼容的 slash command 标识。OpenAWork 目前忽略该字段——slash command 是服务端动作而非 prompt 模板，请直接在 `prompt` 中表达工作。',
+    ),
   })
   .superRefine((value, context) => {
     if (value.subagent_type && value.category) {

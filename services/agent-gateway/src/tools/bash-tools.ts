@@ -268,6 +268,12 @@ interface ShellChoice {
   name: string;
 }
 
+interface ShellSelectionEnv {
+  ComSpec?: string;
+  OPENAWORK_WINDOWS_SHELL?: string;
+  SHELL?: string;
+}
+
 function pickShellName(): string {
   return path
     .basename(pickShell().shell)
@@ -275,23 +281,31 @@ function pickShellName(): string {
     .replace(/\.exe$/, '');
 }
 
-function pickShell(): ShellChoice {
-  if (process.platform === 'win32') {
-    const psCandidate = process.env.PSModulePath
-      ? process.env.SHELL || 'powershell.exe'
-      : process.env.ComSpec || 'cmd.exe';
+export function resolveShellChoiceForPlatform(
+  platform: NodeJS.Platform,
+  env: ShellSelectionEnv = process.env,
+): ShellChoice {
+  if (platform === 'win32') {
+    const configuredShell = env.OPENAWORK_WINDOWS_SHELL?.trim();
+    const shell =
+      configuredShell && configuredShell.length > 0 ? configuredShell : 'powershell.exe';
     return {
-      shell: psCandidate,
-      isPowerShell: /powershell|pwsh/i.test(psCandidate),
-      name: path.basename(psCandidate).toLowerCase(),
+      shell,
+      isPowerShell: /powershell|pwsh/i.test(shell),
+      name: path.basename(shell).toLowerCase(),
     };
   }
-  const shell = process.env.SHELL || '/bin/bash';
+
+  const shell = env.SHELL?.trim() || '/bin/bash';
   return {
     shell,
     isPowerShell: false,
     name: path.basename(shell).toLowerCase(),
   };
+}
+
+function pickShell(): ShellChoice {
+  return resolveShellChoiceForPlatform(process.platform, process.env);
 }
 
 // ---------- workdir resolution ----------

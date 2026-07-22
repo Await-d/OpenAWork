@@ -36,6 +36,7 @@ import {
 } from '../message/message-v2-adapter.js';
 import { executeSessionCompaction } from '../session/session-compaction.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import { recordUlwVerificationEvidence } from '../session/ulw-verification-evidence.js';
 import { withWorkflowRuntimeEvidenceArtifact } from '../session/workflow-runtime-state.js';
 import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
@@ -194,7 +195,10 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
           : body.messages
             ? normalizeMessageSnapshots(body.messages)
             : storedMessages;
-      const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      const graph = await taskManager.loadOrCreate(
+        resolveTaskGraphProjectRoot(sessionId),
+        sessionId,
+      );
 
       const cmdParams = {
         args: extractCommandArgs(body.rawInput, command.label),

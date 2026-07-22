@@ -329,6 +329,48 @@ describe('message-v2 compatibility regressions', () => {
     expect(insertLegacyCallIndex).toBeGreaterThan(deleteLegacyCallIndex);
   });
 
+  it('legacy request-role unique index冲突时会先清理旧镜像再重试写入', () => {
+    const clientRequestId = 'parent-req:assistant:retry-1';
+    let insertAttempts = 0;
+    mocks.sqliteAll.mockReturnValue([{ id: 'stale-legacy-message' }]);
+    mocks.sqliteGet.mockReturnValue({ max_seq: 0 });
+    mocks.sqliteRun.mockImplementation((sql: string) => {
+      if (!sql.includes('INSERT INTO session_messages')) {
+        return;
+      }
+
+      insertAttempts += 1;
+      if (insertAttempts === 1) {
+        throw new Error(
+          'UNIQUE constraint failed: session_messages.session_id, session_messages.client_request_id, session_messages.role',
+        );
+      }
+    });
+
+    expect(() =>
+      appendSessionMessageV2({
+        sessionId: 'session-1',
+        userId: 'user-1',
+        role: 'assistant',
+        messageId: 'assistant-retry-message',
+        createdAt: 123,
+        clientRequestId,
+        status: 'error',
+        content: [{ type: 'text', text: '[错误: STREAM_ERROR] boom' }],
+      }),
+    ).not.toThrow();
+
+    expect(insertAttempts).toBe(2);
+    expect(mocks.sqliteRun).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM session_messages_fts'),
+      ['stale-legacy-message'],
+    );
+    expect(mocks.sqliteRun).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM session_messages\n     WHERE session_id = ?'),
+      ['session-1', 'user-1', clientRequestId, 'assistant'],
+    );
+  });
+
   it('chunks large request-role deletes to stay under SQLite variable limits', () => {
     const clientRequestId = 'parent-req:tool:bulk-delete';
     const existingRows = Array.from({ length: 1200 }, (_, index) => ({
@@ -404,6 +446,17 @@ describe('message-v2 compatibility regressions', () => {
     );
     expect(streamModelRoundSource).toMatch(
       /buildErrorContent\('STREAM_ERROR', \w+\)[\s\S]*?replaceExisting: true/,
+    );
+  });
+
+  it('keeps final assistant writes idempotent for the same request scope', () => {
+    const streamModelRoundSource = readFileSync(
+      new URL('../../routes/stream-model-round.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(streamModelRoundSource).toMatch(
+      /appendSessionMessageV2\(\{[\s\S]*?role: 'assistant',[\s\S]*?clientRequestId:[\s\S]*?replaceExisting: true,[\s\S]*?modelID: input\.route\.model/ms,
     );
   });
 

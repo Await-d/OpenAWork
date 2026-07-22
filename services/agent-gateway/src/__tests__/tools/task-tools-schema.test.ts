@@ -92,16 +92,57 @@ describe('task tool — input schema basics', () => {
     }
   });
 
-  it('rejects empty description / prompt / category when provided', () => {
-    expect(
-      taskToolDefinition.inputSchema.safeParse({ ...baseValid, description: '' }).success,
-    ).toBe(false);
+  it('treats empty optional string fields as omitted', () => {
+    const parsed = taskToolDefinition.inputSchema.safeParse({
+      ...baseValid,
+      category: '',
+      command: '',
+      description: '',
+      session_id: '',
+      subagent_type: 'explore',
+      task_id: '',
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.category).toBeUndefined();
+      expect(parsed.data.command).toBeUndefined();
+      expect(parsed.data.description).toBeUndefined();
+      expect(parsed.data.session_id).toBeUndefined();
+      expect(parsed.data.task_id).toBeUndefined();
+    }
+  });
+
+  it('treats an empty subagent_type as omitted when category is present', () => {
+    const parsed = taskToolDefinition.inputSchema.safeParse({
+      ...baseValid,
+      subagent_type: '',
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.subagent_type).toBeUndefined();
+      expect(parsed.data.category).toBe('general');
+    }
+  });
+
+  it('rejects an empty required prompt', () => {
     expect(taskToolDefinition.inputSchema.safeParse({ ...baseValid, prompt: '' }).success).toBe(
       false,
     );
-    expect(taskToolDefinition.inputSchema.safeParse({ ...baseValid, category: '' }).success).toBe(
-      false,
-    );
+  });
+
+  it('rejects calls whose category and subagent_type are both blank after normalization', () => {
+    const parsed = taskToolDefinition.inputSchema.safeParse({
+      ...baseValid,
+      category: '',
+      subagent_type: '',
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) => /required/.test(issue.message))).toBe(true);
+    }
   });
 });
 
@@ -125,12 +166,15 @@ describe('task tool — session_id (replaces legacy `resume`)', () => {
     }
   });
 
-  it('rejects an empty session_id (must be a non-empty string when present)', () => {
+  it('treats an empty session_id as omitted', () => {
     const parsed = taskToolDefinition.inputSchema.safeParse({
       ...baseValid,
       session_id: '',
     });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.session_id).toBeUndefined();
+    }
   });
 
   it('does NOT define a `resume` field on the parsed shape', () => {
@@ -173,12 +217,15 @@ describe('task tool — command (reserved field, no-op)', () => {
     }
   });
 
-  it('rejects an empty command string when present', () => {
+  it('treats an empty command string as omitted', () => {
     const parsed = taskToolDefinition.inputSchema.safeParse({
       ...baseValid,
       command: '',
     });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.command).toBeUndefined();
+    }
   });
 
   it('documents the no-op intent in the description', () => {

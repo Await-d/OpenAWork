@@ -186,6 +186,7 @@ import {
   taskListToolDefinition,
   taskUpdateToolDefinition,
 } from '../task/task-crud-tools.js';
+import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
 import {
   clearTaskParentAutoResumeContext,
@@ -485,6 +486,10 @@ type PermissionState =
   | { kind: 'pending'; requestId: string; created: boolean }
   | { kind: 'not_needed' };
 
+async function loadTaskGraphForSession(taskManager: AgentTaskManagerImpl, graphSessionId: string) {
+  return taskManager.loadOrCreate(resolveTaskGraphProjectRoot(graphSessionId), graphSessionId);
+}
+
 export type BatchProgressCallback = (
   subTools: BatchSubToolProgress[],
   completedCount: number,
@@ -690,7 +695,7 @@ export async function terminateChildSession(input: {
   userId: string;
 }): Promise<{ stopped: boolean; terminated: boolean }> {
   const taskManager = new AgentTaskManagerImpl();
-  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.graphSessionId);
+  const graph = await loadTaskGraphForSession(taskManager, input.graphSessionId);
   const taskEntry = graph.tasks[input.taskId];
   if (!taskEntry) {
     return { stopped: false, terminated: false };
@@ -1321,7 +1326,7 @@ export async function reconcileResumedTaskChildSession(input: {
   }
 
   const taskManager = new AgentTaskManagerImpl();
-  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+  const graph = await loadTaskGraphForSession(taskManager, parentSessionId);
   const task = findTaskBySessionId(graph, input.childSessionId);
   if (!task) {
     return;
@@ -3673,7 +3678,7 @@ async function executeGatewayManagedToolImpl(
       const effectiveTaskDescription = parsed.data.description ?? parsed.data.prompt.slice(0, 40);
 
       const taskManager = new AgentTaskManagerImpl();
-      const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      const graph = await loadTaskGraphForSession(taskManager, sessionId);
       const parentEffective = getEffectiveSkillsForSession(sessionId) ?? undefined;
       const resolvedAgent = resolveDelegatedAgent(userId, parsed.data, {
         parentEffective,
@@ -4006,7 +4011,7 @@ async function executeGatewayManagedToolImpl(
             taskTitle: effectiveTaskDescription,
             userId,
           });
-          const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+          const refreshedGraph = await loadTaskGraphForSession(taskManager, sessionId);
           const refreshedTask = refreshedGraph.tasks[resumableTask.id] ?? resumableTask;
           return {
             toolCallId: request.toolCallId,
@@ -4150,7 +4155,7 @@ async function executeGatewayManagedToolImpl(
           taskTitle: effectiveTaskDescription,
           userId,
         });
-        const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+        const refreshedGraph = await loadTaskGraphForSession(taskManager, sessionId);
         const refreshedTask = refreshedGraph.tasks[childTask.id] ?? childTask;
         return {
           toolCallId: request.toolCallId,
@@ -4238,7 +4243,7 @@ async function executeGatewayManagedToolImpl(
       }
 
       const taskManager = new AgentTaskManagerImpl();
-      let graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      let graph = await loadTaskGraphForSession(taskManager, sessionId);
       let task = graph.tasks[parsed.data.task_id];
       if (!task) {
         return {
@@ -4260,7 +4265,7 @@ async function executeGatewayManagedToolImpl(
         });
         task = waitResult.task;
         waitTimedOut = waitResult.timedOut;
-        graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+        graph = await loadTaskGraphForSession(taskManager, sessionId);
       }
 
       if (!task) {
@@ -4295,7 +4300,7 @@ async function executeGatewayManagedToolImpl(
           statusCode: 500,
           userId,
         });
-        graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+        graph = await loadTaskGraphForSession(taskManager, sessionId);
         task = graph.tasks[parsed.data.task_id];
         if (!task) {
           return {
@@ -4400,7 +4405,7 @@ async function executeGatewayManagedToolImpl(
       }
 
       const taskManager = new AgentTaskManagerImpl();
-      const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      const graph = await loadTaskGraphForSession(taskManager, sessionId);
       const targetTaskIds = parsed.data.all
         ? Object.values(graph.tasks)
             .filter(
@@ -4846,7 +4851,7 @@ async function waitForTaskTerminalState(input: {
     if (input.signal.aborted) {
       throw new Error('Background task wait aborted');
     }
-    const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.sessionId);
+    const graph = await loadTaskGraphForSession(taskManager, input.sessionId);
     const task = graph.tasks[input.taskId];
     if (!task || (task.status !== 'running' && task.status !== 'pending')) {
       return { task, timedOut: false };
@@ -5225,7 +5230,7 @@ async function finalizeChildTaskRun(input: {
     return;
   }
 
-  const graph = await input.taskManager.loadOrCreate(WORKSPACE_ROOT, input.parentSessionId);
+  const graph = await loadTaskGraphForSession(input.taskManager, input.parentSessionId);
   const task = graph.tasks[input.childTaskId];
   if (!task) {
     return;

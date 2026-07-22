@@ -39,6 +39,7 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
+import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import {
   slimMessagesForRecovery,
   toPublicSessionResponse,
@@ -925,7 +926,7 @@ async function deleteSessionTree(input: {
       }
 
       backupStoragePaths.push(...candidatePaths);
-      await taskStore.deleteGraph(WORKSPACE_ROOT, session.id);
+      await taskStore.deleteGraph(resolveTaskGraphProjectRoot(session.id), session.id);
     }
   } finally {
     await garbageCollectBackupStoragePaths(backupStoragePaths);
@@ -990,7 +991,10 @@ export async function buildMergedSessionTaskProjection(input: {
 
   const graphs = await Promise.all(
     Array.from(graphSessionIds).map(async (graphSessionId) => ({
-      graph: await taskManager.loadOrCreate(WORKSPACE_ROOT, graphSessionId),
+      graph: await taskManager.loadOrCreate(
+        resolveTaskGraphProjectRoot(graphSessionId),
+        graphSessionId,
+      ),
       graphSessionId,
     })),
   );
@@ -1046,7 +1050,10 @@ async function findVisibleTaskEntry(input: {
   const graphSessionIds = collectAncestorSessionIds(sessionsById, input.sessionId);
 
   for (const graphSessionId of graphSessionIds) {
-    const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, graphSessionId);
+    const graph = await taskManager.loadOrCreate(
+      resolveTaskGraphProjectRoot(graphSessionId),
+      graphSessionId,
+    );
     const task = graph.tasks[input.taskId];
     if (!task) {
       continue;

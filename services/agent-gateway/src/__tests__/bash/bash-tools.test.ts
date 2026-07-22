@@ -30,8 +30,13 @@ vi.mock('../../infra/db.js', () => ({
   sqliteTransaction: vi.fn((fn: () => unknown) => fn()),
 }));
 
-const { bashToolDefinition, buildBashPermissionScope, deriveBashDescription, runBashCommand } =
-  await import('../../tools/bash-tools.js');
+const {
+  bashToolDefinition,
+  buildBashPermissionScope,
+  deriveBashDescription,
+  resolveShellChoiceForPlatform,
+  runBashCommand,
+} = await import('../../tools/bash-tools.js');
 const { buildBashApprovalPatterns } = await import('../../tools/bash-arity.js');
 const { TRUNCATION_DIR } = await import('../../tools/bash-output-truncator.js');
 
@@ -131,6 +136,29 @@ describe('bash-tools', () => {
     it('falls back to a generic phrase for an empty / whitespace-only command', () => {
       expect(deriveBashDescription('')).toBe('执行 bash 命令');
       expect(deriveBashDescription('   ')).toBe('执行 bash 命令');
+    });
+  });
+
+  describe('shell selection', () => {
+    it('Windows 默认使用 PowerShell，不跟随 Git Bash 风格的 SHELL 环境变量', () => {
+      const choice = resolveShellChoiceForPlatform('win32', {
+        SHELL: '/usr/bin/bash',
+      });
+
+      expect(choice.shell).toBe('powershell.exe');
+      expect(choice.isPowerShell).toBe(true);
+      expect(choice.name).toBe('powershell.exe');
+    });
+
+    it('Windows 允许通过 OPENAWORK_WINDOWS_SHELL 显式覆盖默认 shell', () => {
+      const choice = resolveShellChoiceForPlatform('win32', {
+        OPENAWORK_WINDOWS_SHELL: 'pwsh.exe',
+        SHELL: '/usr/bin/bash',
+      });
+
+      expect(choice.shell).toBe('pwsh.exe');
+      expect(choice.isPowerShell).toBe(true);
+      expect(choice.name).toBe('pwsh.exe');
     });
   });
 

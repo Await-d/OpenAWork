@@ -1282,6 +1282,7 @@ export async function runModelRound(input: {
       completedAt: Date.now(),
       firstContentAt: state.firstContentAt,
       modelID: input.route.model,
+      replaceExisting: true,
       ...(routeProviderId ? { providerID: routeProviderId } : {}),
       ...(input.agentId ? { agentId: input.agentId } : {}),
       ...(usage ? { usage } : {}),

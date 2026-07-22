@@ -1,7 +1,7 @@
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { WORKSPACE_ROOT } from '../infra/db.js';
+import { resolveTaskGraphProjectRoot } from './task-graph-root.js';
 
 const taskOwnershipSchema = z.object({
   principalKind: z.enum(['user', 'agent', 'system', 'service', 'session', 'tool']),
@@ -158,7 +158,7 @@ export const taskUpdateToolDefinition: ToolDefinition<typeof taskUpdateInputSche
 };
 
 async function loadGraph(sessionId: string) {
-  return new AgentTaskManagerImpl().loadOrCreate(WORKSPACE_ROOT, sessionId);
+  return new AgentTaskManagerImpl().loadOrCreate(resolveTaskGraphProjectRoot(sessionId), sessionId);
 }
 
 export async function runTaskCreateTool(
@@ -166,7 +166,7 @@ export async function runTaskCreateTool(
   input: z.infer<typeof taskCreateInputSchema>,
 ) {
   const taskManager = new AgentTaskManagerImpl();
-  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+  const graph = await loadGraph(sessionId);
   const normalizedSubject = input.title ?? input.subject;
   if (!normalizedSubject) {
     return JSON.stringify({ error: 'task_title_required' });
@@ -231,7 +231,7 @@ export async function runTaskUpdateTool(
   input: z.infer<typeof taskUpdateInputSchema>,
 ) {
   const taskManager = new AgentTaskManagerImpl();
-  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+  const graph = await loadGraph(sessionId);
   const task = graph.tasks[input.id];
   if (!task) {
     return JSON.stringify({ error: 'task_not_found' });

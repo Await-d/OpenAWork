@@ -34,6 +34,8 @@ vi.mock('../../message/message-store-v2.js', async () => {
   };
 });
 
+const testOnNonWindows = process.platform === 'win32' ? it.skip : it;
+
 describe('batch tool per-sub-call resilience', () => {
   beforeEach(() => {
     mocks.transitionToolToRunningMock.mockReset();
@@ -93,4 +95,51 @@ describe('batch tool per-sub-call resilience', () => {
     // The good sub-tool actually executed.
     expect(toolExecute).toHaveBeenCalledTimes(1);
   }, 15_000);
+
+  testOnNonWindows(
+    'batch 中的 grep 对 Windows 路径返回明确跨主机错误，而不是 No files found',
+    async () => {
+      const { ToolSandbox } = await import('../../tools/tool-sandbox.js');
+
+      const sandbox = new ToolSandbox({
+        allowedTools: ['grep', 'batch'],
+        defaultTimeoutMs: 1000,
+      });
+
+      const result = await sandbox.execute(
+        {
+          toolCallId: 'call-batch-grep',
+          toolName: 'batch',
+          rawInput: {
+            tool_calls: [
+              {
+                tool: 'grep',
+                parameters: {
+                  pattern: 'GetTreeMenuBatch\\(',
+                  include: '*.cs',
+                  output_mode: 'content',
+                  head_limit: 50,
+                  path: 'E:\\01Project\\appearance-automation\\Project\\appearance-automation',
+                },
+              },
+            ],
+          },
+        },
+        new AbortController().signal,
+        'session-1',
+      );
+
+      const output = result.output as {
+        results: Array<{ isError: boolean; output: string; tool: string }>;
+        total: number;
+      };
+
+      expect(result.isError).toBe(true);
+      expect(output.total).toBe(1);
+      expect(output.results[0]?.tool).toBe('grep');
+      expect(output.results[0]?.isError).toBe(true);
+      expect(output.results[0]?.output).toContain('当前网关运行在 Linux，无法访问 Windows 路径');
+      expect(output.results[0]?.output).not.toContain('No files found');
+    },
+  );
 });
