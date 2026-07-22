@@ -8,6 +8,8 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 export type { DialogueMode };
 
@@ -48,7 +50,7 @@ interface DialogueModeSelectorProps {
 }
 
 const MODE_COLOR: Record<DialogueMode, string> = {
-  clarify: '#6366f1',
+  clarify: colors.accent,
   coding: '#10b981',
   programmer: '#3b82f6',
 };
@@ -56,7 +58,7 @@ const MODE_COLOR: Record<DialogueMode, string> = {
 export function DialogueModeSelector({ mode, onChange }: DialogueModeSelectorProps) {
   const [visible, setVisible] = useState(false);
   const current = DIALOGUE_MODES.find((m) => m.value === mode) ?? DIALOGUE_MODE_DEFINITIONS[0];
-  const color = MODE_COLOR[mode] ?? '#6366f1';
+  const color = MODE_COLOR[mode] ?? colors.accent;
 
   return (
     <>
@@ -113,7 +115,7 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -135,15 +137,15 @@ const styles = StyleSheet.create({
     bottom: 80,
     left: 12,
     right: 12,
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
+    backgroundColor: colors.surface1,
+    borderRadius: radii.xl,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     padding: 12,
     gap: 8,
   },
   popoverTitle: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -157,17 +159,17 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
   },
   optionIcon: {
     width: 32,
     height: 32,
-    borderRadius: 8,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   optionIconText: { fontSize: 12, fontWeight: '700' },
-  optionLabel: { color: '#e2e8f0', fontSize: 13, fontWeight: '600' },
-  optionDesc: { color: '#64748b', fontSize: 11, marginTop: 1, lineHeight: 15 },
+  optionLabel: { color: colors.textDefault, fontSize: 13, fontWeight: '600' },
+  optionDesc: { color: colors.textMuted, fontSize: 11, marginTop: 1, lineHeight: 15 },
   check: { fontSize: 16, fontWeight: '700' },
 });

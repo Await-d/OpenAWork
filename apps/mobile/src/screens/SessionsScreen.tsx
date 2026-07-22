@@ -12,6 +12,9 @@ import {
 import { useAuthStore } from '../store/auth';
 import { listSessions, upsertSession } from '../db/session-store';
 import type { LocalSession } from '../db/session-store';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
+import { textPresets } from '../theme/typography';
 
 interface SessionsScreenProps {
   onSelectSession: (sessionId: string) => void;
@@ -95,7 +98,7 @@ export function SessionsScreen({
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#6366f1" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -112,7 +115,7 @@ export function SessionsScreen({
         data={sessions}
         keyExtractor={(s) => s.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
         ListEmptyComponent={<Text style={styles.empty}>暂无会话</Text>}
         renderItem={({ item }) => (
@@ -129,26 +132,33 @@ export function SessionsScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a' },
+  container: { flex: 1, backgroundColor: colors.bgBase },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgBase,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: colors.lineDefault,
   },
-  title: { fontSize: 18, fontWeight: '600', color: '#f8fafc' },
+  title: { ...textPresets.subheading, color: colors.textStrong },
   newBtn: {
-    backgroundColor: '#6366f1',
-    borderRadius: 6,
+    backgroundColor: colors.accentMuted,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
-  newBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  empty: { color: '#64748b', textAlign: 'center', marginTop: 40, fontSize: 14 },
-  item: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  itemTitle: { color: '#f8fafc', fontSize: 15, fontWeight: '500', marginBottom: 2 },
-  itemDate: { color: '#64748b', fontSize: 12 },
+  newBtnText: { ...textPresets.label, color: colors.accent },
+  empty: { ...textPresets.body, color: colors.textMuted, textAlign: 'center', marginTop: 40 },
+  item: { padding: 16, borderBottomWidth: 1, borderBottomColor: colors.lineDefault },
+  itemTitle: { ...textPresets.cardTitle, color: colors.textStrong, marginBottom: 2 },
+  itemDate: { ...textPresets.caption, color: colors.textMuted },
 });

@@ -110,6 +110,11 @@ interface ConnectionTabContentProps {
   upstreamRetryMaxRetries: number;
   saveUpstreamRetrySettings: () => void;
   savedUpstreamRetryMaxRetries: number;
+  /** 自定义域名 */
+  customBaseUrl: string;
+  setCustomBaseUrl: (url: string) => void;
+  customBaseUrlSaved: boolean;
+  saveCustomBaseUrl: () => void;
 }
 
 export function ConnectionTabContent({
@@ -149,6 +154,10 @@ export function ConnectionTabContent({
   upstreamRetryMaxRetries,
   saveUpstreamRetrySettings,
   savedUpstreamRetryMaxRetries,
+  customBaseUrl,
+  setCustomBaseUrl,
+  customBaseUrlSaved,
+  saveCustomBaseUrl,
 }: ConnectionTabContentProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -269,6 +278,45 @@ export function ConnectionTabContent({
               </label>
             </div>
           ) : null}
+        </section>
+      </div>
+
+      {/* ───── 区域：自定义域名 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>自定义域名</h3>
+          <p style={GROUP_DESC}>配置用于生成分享链接等对外 URL 的域名，不带尾部斜杠。</p>
+        </div>
+        <section style={SS_TIGHT}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                color: 'var(--fg-muted)',
+                fontSize: 11,
+                flex: 1,
+              }}
+            >
+              基础域名
+              <input
+                style={{ ...IS, padding: '6px 10px' }}
+                value={customBaseUrl}
+                onChange={(event) => setCustomBaseUrl(event.target.value)}
+                placeholder="https://openwork.app"
+              />
+            </label>
+            <button
+              style={{
+                ...BP,
+                opacity: customBaseUrlSaved ? 0.7 : 1,
+              }}
+              onClick={saveCustomBaseUrl}
+            >
+              {customBaseUrlSaved ? '✓ 已保存' : '保存'}
+            </button>
+          </div>
         </section>
       </div>
 

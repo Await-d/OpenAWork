@@ -30,6 +30,9 @@ import ExpoPersistenceAdapter, {
   type MobileImageGenerationDefaults,
   type MobileMcpServer,
 } from '../store/providerPersistence';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
+import { textPresets } from '../theme/typography';
 
 const PRESET_PROVIDERS = [
   { id: 'openai', name: 'OpenAI' },
@@ -51,9 +54,11 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ onLogout }: SettingsScreenProps) {
-  const { accessToken, gatewayUrl, setGatewayUrl, logout } = useAuthStore();
+  const { accessToken, gatewayUrl, setGatewayUrl, customBaseUrl, setCustomBaseUrl, logout } =
+    useAuthStore();
   const { state: otaState, checkAndApply, applyUpdate } = useOtaUpdate();
   const [gatewayInput, setGatewayInput] = useState(gatewayUrl);
+  const [customBaseUrlInput, setCustomBaseUrlInput] = useState(customBaseUrl);
   const [selectedProvider, setSelectedProvider] = useState<MobileProviderOption>(
     PRESET_PROVIDERS[0],
   );
@@ -71,6 +76,10 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
   useEffect(() => {
     setGatewayInput(gatewayUrl);
   }, [gatewayUrl]);
+
+  useEffect(() => {
+    setCustomBaseUrlInput(customBaseUrl);
+  }, [customBaseUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +135,11 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
   const saveGateway = async () => {
     await setGatewayUrl(gatewayInput.trim());
     Alert.alert('已保存', '网关地址已更新');
+  };
+
+  const saveCustomBaseUrlFn = async () => {
+    await setCustomBaseUrl(customBaseUrlInput.trim());
+    Alert.alert('已保存', '自定义域名已更新');
   };
 
   const persistMcpServers = (next: MobileMcpServer[]) => {
@@ -211,18 +225,35 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>设置</Text>
+
       <Text style={styles.section}>网关</Text>
       <TextInput
         style={styles.input}
         value={gatewayInput}
         onChangeText={setGatewayInput}
         placeholder={DEFAULT_MOBILE_GATEWAY_URL}
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.textSubtle}
         autoCapitalize="none"
         keyboardType="url"
       />
       <TouchableOpacity style={styles.btn} onPress={saveGateway}>
         <Text style={styles.btnText}>保存网关地址</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.section}>自定义域名</Text>
+      <Text style={styles.sectionDesc}>配置用于生成分享链接等对外 URL 的域名</Text>
+      <TextInput
+        style={styles.input}
+        value={customBaseUrlInput}
+        onChangeText={setCustomBaseUrlInput}
+        placeholder="https://openwork.app"
+        placeholderTextColor={colors.textSubtle}
+        autoCapitalize="none"
+        keyboardType="url"
+      />
+      <TouchableOpacity style={styles.btn} onPress={saveCustomBaseUrlFn}>
+        <Text style={styles.btnText}>保存域名</Text>
       </TouchableOpacity>
 
       <Text style={styles.section}>AI 提供商</Text>
@@ -249,7 +280,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
         value={apiKey}
         onChangeText={setApiKey}
         placeholder={`${selectedProvider.name} API 密钥`}
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.textSubtle}
         secureTextEntry
         autoCapitalize="none"
       />
@@ -353,7 +384,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
             value={imageDefaults.size}
             onChangeText={(size) => setImageDefaults((prev) => ({ ...prev, size }))}
             placeholder="例如 2560x1440"
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.textSubtle}
             autoCapitalize="none"
             autoCorrect={false}
           />
@@ -454,7 +485,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
           <Switch
             value={s.enabled}
             onValueChange={() => toggleMcp(s.id)}
-            trackColor={{ true: '#6366f1' }}
+            trackColor={{ true: colors.accent }}
           />
           <TouchableOpacity onPress={() => removeMcp(s.id)} style={styles.removeBtn}>
             <Text style={styles.removeBtnText}>✕</Text>
@@ -467,14 +498,14 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
           value={mcpName}
           onChangeText={setMcpName}
           placeholder="名称"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textSubtle}
         />
         <TextInput
           style={[styles.input, { flex: 2, marginBottom: 0, marginLeft: 6 }]}
           value={mcpUrl}
           onChangeText={setMcpUrl}
           placeholder="URL"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textSubtle}
           autoCapitalize="none"
         />
         <TouchableOpacity
@@ -524,91 +555,110 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  content: { padding: 16, paddingBottom: 40 },
+  container: { flex: 1, backgroundColor: colors.bgBase },
+  content: { padding: 16, paddingBottom: 80 },
+  pageTitle: {
+    ...textPresets.title,
+    color: colors.textStrong,
+    marginBottom: 8,
+  },
   section: {
-    color: '#6366f1',
-    fontWeight: '600',
-    fontSize: 12,
+    ...textPresets.label,
+    color: colors.accent,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginTop: 20,
     marginBottom: 8,
   },
+  sectionDesc: {
+    ...textPresets.caption,
+    color: colors.textSubtle,
+    marginBottom: 8,
+  },
   input: {
-    backgroundColor: '#1e293b',
-    color: '#f8fafc',
-    borderRadius: 8,
+    backgroundColor: colors.surface2,
+    color: colors.textStrong,
+    borderRadius: radii.md,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     marginBottom: 8,
   },
   btn: {
-    backgroundColor: '#6366f1',
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
     paddingVertical: 9,
     alignItems: 'center',
     marginBottom: 4,
   },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  btnText: { color: colors.white, fontSize: 14, fontWeight: '600' },
+  btnDisabled: { opacity: 0.5 },
   providerRow: { marginBottom: 8 },
   providerChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     marginRight: 6,
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surface2,
   },
-  providerChipActive: { borderColor: '#6366f1', backgroundColor: '#6366f122' },
-  providerChipText: { color: '#94a3b8', fontSize: 13 },
-  providerChipTextActive: { color: '#6366f1', fontWeight: '600' },
-  helperText: { color: '#94a3b8', fontSize: 12, lineHeight: 18, marginBottom: 8 },
-  helperTextDanger: { color: '#f87171' },
-  subtleLabel: { color: '#cbd5e1', fontSize: 12, marginBottom: 8, fontWeight: '600' },
+  providerChipActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentMuted },
+  providerChipText: { ...textPresets.body, color: colors.textMuted },
+  providerChipTextActive: { color: colors.accent, fontWeight: '600' },
+  helperText: {
+    ...textPresets.bodySmall,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  helperTextDanger: { color: colors.danger },
+  subtleLabel: { ...textPresets.label, color: colors.textDefault, marginBottom: 8 },
   imageDefaultsGrid: { gap: 10, marginBottom: 8 },
   imageField: { gap: 6 },
   imagePresetGroups: { gap: 10 },
   imagePresetGroup: { gap: 6 },
-  imagePresetGroupTitle: { color: '#e2e8f0', fontSize: 12, fontWeight: '700' },
-  imagePresetGroupHint: { color: '#94a3b8', fontSize: 11, lineHeight: 16 },
-  fieldLabel: { color: '#cbd5e1', fontSize: 12, fontWeight: '600' },
+  imagePresetGroupTitle: { ...textPresets.label, color: colors.textDefault },
+  imagePresetGroupHint: { ...textPresets.caption, color: colors.textMuted, lineHeight: 16 },
+  fieldLabel: { ...textPresets.label, color: colors.textDefault },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#1e293b',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
   },
-  optionChipActive: { borderColor: '#6366f1', backgroundColor: '#6366f122' },
-  optionChipText: { color: '#94a3b8', fontSize: 12 },
-  optionChipTextActive: { color: '#6366f1', fontWeight: '600' },
+  optionChipActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentMuted },
+  optionChipText: { ...textPresets.bodySmall, color: colors.textMuted },
+  optionChipTextActive: { color: colors.accent, fontWeight: '600' },
   mcpRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
+    backgroundColor: colors.surface1,
+    borderRadius: radii.md,
     padding: 10,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     gap: 8,
   },
   mcpInfo: { flex: 1, minWidth: 0 },
-  mcpName: { color: '#f8fafc', fontSize: 13, fontWeight: '500' },
-  mcpUrl: { color: '#64748b', fontSize: 11 },
+  mcpName: { ...textPresets.body, color: colors.textStrong, fontWeight: '500' },
+  mcpUrl: { ...textPresets.caption, color: colors.textMuted },
   mcpAddRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 0 },
   removeBtn: { padding: 4 },
-  removeBtnText: { color: '#f87171', fontSize: 14 },
-  logoutBtn: { backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#f87171', marginTop: 24 },
-  logoutBtnText: { color: '#f87171', fontSize: 14, fontWeight: '600' },
+  removeBtnText: { color: colors.danger, fontSize: 14 },
+  logoutBtn: {
+    backgroundColor: colors.surface1,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    marginTop: 24,
+  },
+  logoutBtnText: { color: colors.danger, fontSize: 14, fontWeight: '600' },
   updateRow: { marginBottom: 8 },
-  updateLabel: { color: '#94a3b8', fontSize: 13, marginBottom: 6 },
-  btnDisabled: { opacity: 0.5 },
+  updateLabel: { ...textPresets.body, color: colors.textMuted, marginBottom: 6 },
 });

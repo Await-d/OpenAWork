@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { View } from 'react-native';
 import { OnboardingWizard } from '../src/onboarding/OnboardingWizard';
+import { colors } from '../src/theme/colors';
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -13,7 +14,7 @@ export default function OnboardingScreen() {
   }, [router]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0f172a' }}>
+    <View style={{ flex: 1, backgroundColor: colors.bgBase }}>
       <OnboardingWizard
         onComplete={() => {
           void handleComplete();

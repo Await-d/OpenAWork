@@ -35,10 +35,16 @@ interface AuthState {
    * 持久化到 localStorage，下次启动 Rust 端会按此值重新 spawn sidecar。
    */
   webExposeLan: boolean;
+  /**
+   * 自定义域名，用于生成分享链接等对外 URL。
+   * 默认为 https://openwork.app
+   */
+  customBaseUrl: string;
   setAuth: (accessToken: string, email: string, refreshToken?: string, expiresIn?: string) => void;
   clearAuth: () => void;
   setGatewayUrl: (url: string) => void;
   setWebAccess: (enabled: boolean, port: number, exposeLan?: boolean) => void;
+  setCustomBaseUrl: (url: string) => void;
   refreshAccessToken: () => Promise<void>;
 }
 
@@ -63,6 +69,7 @@ export const useAuthStore = create<AuthState>()(
       webAccessEnabled: false,
       webPort: 3000,
       webExposeLan: false,
+      customBaseUrl: 'https://openwork.app',
       setAuth: (accessToken, email, refreshToken, expiresIn) => {
         const ms = expiresIn ? parseExpiresIn(expiresIn) : 15 * 60 * 1000;
         set({
@@ -83,6 +90,8 @@ export const useAuthStore = create<AuthState>()(
           // 在仅切换启停时把「桌面端」面板配置的 LAN 开关意外重置。
           webExposeLan: exposeLan ?? state.webExposeLan,
         })),
+      setCustomBaseUrl: (url) =>
+        set({ customBaseUrl: url.replace(/\/+$/, '') || 'https://openwork.app' }),
       refreshAccessToken: async () => {
         const { refreshToken, gatewayUrl } = get();
         if (!refreshToken) return;
@@ -110,6 +119,7 @@ export const useAuthStore = create<AuthState>()(
         webAccessEnabled: s.webAccessEnabled,
         webPort: s.webPort,
         webExposeLan: s.webExposeLan,
+        customBaseUrl: s.customBaseUrl,
       }),
       onRehydrateStorage: () => (_state, error) => {
         void error;

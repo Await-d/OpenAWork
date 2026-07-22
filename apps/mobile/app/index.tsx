@@ -1,6 +1,7 @@
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { useAuthStore } from '../src/store/auth';
+import { colors } from '../src/theme/colors';
 
 export default function Index() {
   const { accessToken, isLoading } = useAuthStore();
@@ -12,16 +13,16 @@ export default function Index() {
           flex: 1,
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: '#0f172a',
+          backgroundColor: colors.bgBase,
         }}
       >
-        <ActivityIndicator size="large" color="#6366f1" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
 
   if (!accessToken) {
-    return <Redirect href="/login" />;
+    return <Redirect href="/connection" />;
   }
 
   return <Redirect href="/sessions" />;

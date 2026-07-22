@@ -1,4 +1,6 @@
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 interface MobileChatSearchBarProps {
   activePosition: number;
@@ -32,7 +34,7 @@ export function MobileChatSearchBar({
         value={query}
         onChangeText={onChangeQuery}
         placeholder="搜索当前对话…"
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.textMuted}
         autoCapitalize="none"
         autoCorrect={false}
       />
@@ -68,33 +70,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    backgroundColor: '#0f172a',
+    borderBottomColor: colors.surface1,
+    backgroundColor: colors.bgBase,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   searchInput: {
     flex: 1,
     minHeight: 36,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     backgroundColor: '#020617',
-    color: '#f8fafc',
+    color: colors.textStrong,
     fontSize: 13,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  searchCount: { minWidth: 52, color: '#94a3b8', fontSize: 11, textAlign: 'center' },
+  searchCount: { minWidth: 52, color: colors.textMuted, fontSize: 11, textAlign: 'center' },
   searchNavButton: {
     width: 30,
     height: 30,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 10,
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surface1,
   },
   searchNavButtonDisabled: { opacity: 0.38 },
-  searchNavText: { color: '#e2e8f0', fontSize: 14, fontWeight: '800' },
-  closeText: { color: '#818cf8', fontSize: 12, fontWeight: '700' },
+  searchNavText: { color: colors.textDefault, fontSize: 14, fontWeight: '800' },
+  closeText: { color: colors.accent, fontSize: 12, fontWeight: '700' },
 });

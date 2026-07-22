@@ -11,7 +11,7 @@ import {
   parseMobileMessageSegments,
   summarizeMobileCodeBlock,
   toInputImageParts,
-} from '../screens/chat-message-actions.js';
+} from '../screens/chat-message-actions';
 
 describe('mobile chat message actions', () => {
   it('converts persisted input images to stream input parts', () => {

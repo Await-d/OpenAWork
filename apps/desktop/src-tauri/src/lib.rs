@@ -231,6 +231,9 @@ struct PersistedSettings {
     /// 前端负责监听键鼠活动与计时，超过时调 `lock_desktop_now` 。
     #[serde(default)]
     idle_lock_minutes: Option<u32>,
+    /// 更新渠道："preview" | "stable"。`None` = 默认 "preview"。
+    #[serde(default)]
+    update_channel: Option<String>,
 }
 
 /// 暴露给前端的设置视图——把 effective 路径与 autostart/pin 状态一起返回，
@@ -256,6 +259,8 @@ struct DesktopSettingsView {
     idle_lock_minutes: Option<u32>,
     /// PIN 长度（格子数），前后端统一，前端 PinInput 按此渲染。
     pin_digits: usize,
+    /// 当前生效的更新渠道。
+    update_channel: String,
 }
 
 /// 前端读解锁状态用的视图。
@@ -279,6 +284,7 @@ struct DesktopSettingsPatch {
     has_seen_tray_hint: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_opt_opt_u32")]
     idle_lock_minutes: Option<Option<u32>>,
+    update_channel: Option<String>,
 }
 
 /// 区分前端传 `null`（显式重置）与字段缺失（不修改）。serde 默认无法
@@ -1208,13 +1214,22 @@ fn current_updater_platform() -> Result<String, String> {
     Ok(updater_platform_key()?.to_string())
 }
 
-/// 返回当前构建的更新渠道（preview / stable）。
-/// 目前默认返回 "preview"；未来可通过编译时环境变量 UPDATE_CHANNEL 覆盖。
+/// 返回当前生效的更新渠道（preview / stable）。
+/// 优先读取用户在设置中保存的渠道，回退到构建时 feature，最终默认 "preview"。
 #[tauri::command]
-fn current_update_channel() -> Result<String, String> {
+fn current_update_channel(state: State<'_, SettingsState>) -> Result<String, String> {
+    // 1. 用户显式设置
+    if let Ok(guard) = state.0.lock() {
+        if let Some(ch) = &guard.update_channel {
+            if ch == "stable" || ch == "preview" {
+                return Ok(ch.clone());
+            }
+        }
+    }
+    // 2. 构建时 feature
     #[cfg(feature = "stable-channel")]
     {
-        Ok("stable".to_string())
+        return Ok("stable".to_string());
     }
     #[cfg(not(feature = "stable-channel"))]
     {
@@ -1332,6 +1347,7 @@ async fn get_desktop_settings(
         has_pin: snapshot.pin_hash.is_some(),
         idle_lock_minutes: snapshot.idle_lock_minutes,
         pin_digits: PIN_DIGITS,
+        update_channel: snapshot.update_channel.clone().unwrap_or_else(|| "preview".to_string()),
     })
 }
 
@@ -1505,6 +1521,16 @@ async fn update_desktop_settings(
                     _ => None,
                 };
                 save_settings(&app, &guard);
+            }
+        }
+    }
+    if let Some(channel) = patch.update_channel {
+        if channel == "preview" || channel == "stable" {
+            if let Some(state) = app.try_state::<SettingsState>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    guard.update_channel = Some(channel);
+                    save_settings(&app, &guard);
+                }
             }
         }
     }

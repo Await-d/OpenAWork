@@ -9,11 +9,13 @@ import {
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
 } from '@openAwork/shared';
-import type { MobileChatMessage } from '../chat/chat-message-content.js';
+import type { MobileChatMessage } from '../chat/chat-message-content';
 import {
   parseMobileMessageSegments,
   summarizeMobileCodeBlock,
-} from '../screens/chat-message-actions.js';
+} from '../screens/chat-message-actions';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 export function ChatMessageBubble({
   highlighted = false,
@@ -176,14 +178,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   userBubble: {
-    backgroundColor: '#6366f1',
+    backgroundColor: colors.accent,
     alignSelf: 'flex-end',
   },
   assistantBubble: {
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surface2,
     alignSelf: 'flex-start',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
   },
   streamingBubble: {
     opacity: 0.92,
@@ -193,19 +195,19 @@ const styles = StyleSheet.create({
     borderColor: '#fbbf24',
   },
   bubbleText: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 15,
     lineHeight: 22,
   },
   userBubbleText: {
-    color: '#fff',
+    color: colors.white,
   },
   codeBlock: {
     minWidth: 220,
     maxWidth: 300,
     marginTop: 8,
     marginBottom: 6,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: '#475569',
     backgroundColor: '#020617',
@@ -217,12 +219,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: colors.surface2,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.bgBase,
   },
-  codeLanguage: { color: '#94a3b8', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  codeLanguage: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
   codeHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   codeActionText: { color: '#93c5fd', fontSize: 10, fontWeight: '800' },
   codeText: {
@@ -234,8 +241,8 @@ const styles = StyleSheet.create({
   },
   codeCollapsedHint: {
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    color: '#64748b',
+    borderTopColor: colors.surface2,
+    color: colors.textMuted,
     fontSize: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -247,29 +254,29 @@ const styles = StyleSheet.create({
   imagePreview: {
     width: 180,
     height: 180,
-    borderRadius: 12,
-    backgroundColor: '#0f172a',
+    borderRadius: radii.lg,
+    backgroundColor: colors.bgBase,
   },
   imagePlaceholder: {
     width: 180,
     height: 120,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.bgBase,
   },
   imagePlaceholderText: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 11,
   },
   imageLabel: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 11,
   },
   cursor: {
-    color: '#6366f1',
+    color: colors.accent,
   },
   reasoningBlock: {
     marginBottom: REASONING_UI_TOKENS.blockMarginBottomPx,
@@ -303,7 +310,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: REASONING_UI_TOKENS.labelBadgePaddingXPx,
     paddingVertical: 3,
     borderRadius: REASONING_UI_TOKENS.labelBadgeRadiusPx,
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surface2,
     justifyContent: 'center',
   },
   reasoningLabel: {

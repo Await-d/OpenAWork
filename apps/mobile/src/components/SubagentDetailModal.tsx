@@ -14,6 +14,8 @@ import {
   Alert,
 } from 'react-native';
 import type { AgentActivity } from './AgentActivityPanel';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 export interface SubagentMessage {
   id: string;
@@ -45,7 +47,7 @@ interface SubagentDetailModalProps {
 }
 
 const ROLE_COLOR: Record<SubagentMessage['role'], string> = {
-  user: '#6366f1',
+  user: colors.accent,
   assistant: '#10b981',
   tool: '#f59e0b',
 };
@@ -105,7 +107,7 @@ const INTERVENTION_ACTIONS: {
   {
     key: 'inject',
     label: '注入消息',
-    color: '#6366f1',
+    color: colors.accent,
     icon: '↓',
     desc: '向子代理注入一条用户消息，不中断执行',
   },
@@ -119,7 +121,7 @@ const INTERVENTION_ACTIONS: {
   {
     key: 'interrupt',
     label: '中断执行',
-    color: '#ef4444',
+    color: colors.danger,
     icon: '■',
     desc: '立即停止该子代理的运行',
   },
@@ -277,7 +279,7 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
                 </View>
               ) : (
                 <View style={[ivStyles.section, { borderColor: '#ef444444' }]}>
-                  <Text style={[ivStyles.sectionTitle, { color: '#ef4444' }]}>⚠ 中断确认</Text>
+                  <Text style={[ivStyles.sectionTitle, { color: colors.danger }]}>⚠ 中断确认</Text>
                   <Text style={ivStyles.warningText}>
                     中断执行将立即停止该子代理，已产生的输出不会被回滚。此操作不可撤销。
                   </Text>
@@ -289,7 +291,7 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
                   {
                     backgroundColor:
                       INTERVENTION_ACTIONS.find((a) => a.key === selectedAction)?.color ??
-                      '#6366f1',
+                      colors.accent,
                   },
                   (sending || (selectedAction !== 'interrupt' && !interventionMsg.trim())) &&
                     ivStyles.submitBtnDisabled,
@@ -349,7 +351,10 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
                   </Text>
                 ) : null}
                 {detail.output ? (
-                  <Text style={[metaStyles.mono, { color: '#e2e8f0', marginTop: 8 }]} selectable>
+                  <Text
+                    style={[metaStyles.mono, { color: colors.textDefault, marginTop: 8 }]}
+                    selectable
+                  >
                     {detail.output}
                   </Text>
                 ) : null}
@@ -365,8 +370,8 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
 const SURFACE = '#0f1f3d';
 const CARD = '#1a2d4a';
 const BORDER = '#1e3a5f';
-const TEXT = '#e2e8f0';
-const MUTED = '#64748b';
+const TEXT = colors.textDefault;
+const MUTED = colors.textMuted;
 const ACCENT = '#3b82f6';
 
 const ivStyles = StyleSheet.create({
@@ -390,15 +395,15 @@ const ivStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     padding: 10,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: BORDER,
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.bgBase,
   },
   actionIcon: {
     width: 32,
     height: 32,
-    borderRadius: 8,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -407,9 +412,9 @@ const ivStyles = StyleSheet.create({
   actionDesc: { color: MUTED, fontSize: 11, marginTop: 1, lineHeight: 15 },
   checkmark: { fontSize: 16, fontWeight: '700' },
   input: {
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.bgBase,
     color: TEXT,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 10,
@@ -420,7 +425,7 @@ const ivStyles = StyleSheet.create({
   warningText: { color: '#fca5a5', fontSize: 13, lineHeight: 19 },
   submitBtn: { borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   submitBtnDisabled: { opacity: 0.4 },
-  submitText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  submitText: { color: colors.white, fontSize: 15, fontWeight: '700' },
 });
 
 const styles = StyleSheet.create({

@@ -1,4 +1,4 @@
-import { SettingsScreen as MobileSettingsScreen } from '../src/screens/SettingsScreen.js';
+import { SettingsScreen as MobileSettingsScreen } from '../src/screens/SettingsScreen';
 
 export default function SettingsRouteScreen() {
   return <MobileSettingsScreen />;

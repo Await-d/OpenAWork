@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { login as apiLogin } from '@openAwork/web-client';
 import {
   View,
@@ -12,14 +13,19 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import {
   DEFAULT_MOBILE_GATEWAY_URL,
   normalizeMobileGatewayUrl,
   useAuthStore,
 } from '../src/store/auth';
+import { colors } from '../src/theme/colors';
+import { radii } from '../src/theme/radii';
+import { textPresets } from '../src/theme/typography';
 
+/** S11: 账号登录 — 极简风格 */
 export default function LoginScreen() {
-  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_MOBILE_GATEWAY_URL);
+  const [gatewayUrl] = useState(DEFAULT_MOBILE_GATEWAY_URL);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +33,7 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter email and password');
+      Alert.alert('错误', '请输入邮箱和密码');
       return;
     }
     setLoading(true);
@@ -36,16 +42,17 @@ export default function LoginScreen() {
       const data = await apiLogin(url, email, password);
       await saveGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
+      await AsyncStorage.setItem('onboarded', 'true');
       router.replace('/sessions');
     } catch (e) {
       const isTimeout = e instanceof DOMException && e.name === 'TimeoutError';
       Alert.alert(
-        isTimeout ? 'Login Timeout' : 'Login Failed',
+        isTimeout ? '登录超时' : '登录失败',
         isTimeout
-          ? 'Gateway is not responding. Please check if the service is running.'
+          ? '网关未响应，请确认服务是否已启动。'
           : e instanceof Error
             ? e.message
-            : 'Unknown error',
+            : '未知错误',
       );
     } finally {
       setLoading(false);
@@ -57,48 +64,103 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.card}>
-        <Text style={styles.title}>✦ OpenAWork</Text>
-        <Text style={styles.subtitle}>AI Agent Platform</Text>
+      {/* 氛围光装饰 */}
+      <View style={styles.glowAccent} />
+      <View style={styles.glowAux} />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Gateway URL"
-          placeholderTextColor="#64748b"
-          value={gatewayUrl}
-          onChangeText={setGatewayUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor="#64748b"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#64748b"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+      {/* 标题栏 */}
+      <View style={styles.headerRow}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
+        </TouchableOpacity>
+        <View style={styles.brandRow}>
+          <View style={styles.brandIcon}>
+            <Ionicons name="sparkles" size={20} color={colors.white} />
+          </View>
+          <Text style={styles.brandName}>OPENAWORK</Text>
+        </View>
+        <View style={styles.secureBadge}>
+          <Ionicons name="lock-closed-outline" size={12} color={colors.accent} />
+          <Text style={styles.secureText}>安全连接</Text>
+        </View>
+      </View>
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={() => void handleLogin()}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Sign In</Text>
-          )}
+      <Text style={styles.welcomeTitle}>欢迎回来</Text>
+      <Text style={styles.welcomeSubtitle}>登录后继续你的会话、任务与工作区。</Text>
+
+      {/* 当前网关 */}
+      <View style={styles.gatewayCard}>
+        <View style={styles.gatewayIconWrap}>
+          <Ionicons name="globe-outline" size={16} color={colors.aux} />
+        </View>
+        <View style={styles.gatewayTextWrap}>
+          <Text style={styles.gatewayLabel}>当前网关</Text>
+          <Text style={styles.gatewayUrl} numberOfLines={1}>
+            {gatewayUrl}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={() => router.push('/connection')}>
+          <Text style={styles.gatewayChange}>更换</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 登录表单 */}
+      <Text style={styles.formLabel}>账号登录</Text>
+      <View style={styles.credentialCard}>
+        <View style={styles.inputRow}>
+          <Ionicons name="mail-outline" size={18} color={colors.textSubtle} />
+          <TextInput
+            style={styles.input}
+            placeholder="邮箱"
+            placeholderTextColor={colors.textSubtle}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.inputRow}>
+          <Ionicons name="lock-closed-outline" size={18} color={colors.textSubtle} />
+          <TextInput
+            style={styles.input}
+            placeholder="密码"
+            placeholderTextColor={colors.textSubtle}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+        </View>
+      </View>
+
+      {/* 辅助说明 */}
+      <View style={styles.assistRow}>
+        <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+        <Text style={styles.assistText}>网关状态已验证，可以安全登录。</Text>
+      </View>
+
+      {/* 登录按钮 */}
+      <TouchableOpacity
+        style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
+        onPress={() => void handleLogin()}
+        disabled={loading}
+        activeOpacity={0.8}
+      >
+        {loading ? (
+          <ActivityIndicator color={colors.white} />
+        ) : (
+          <>
+            <Ionicons name="log-in-outline" size={18} color={colors.white} />
+            <Text style={styles.loginBtnText}>登录并继续</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* 配对入口 */}
+      <View style={styles.pairRow}>
+        <Text style={styles.pairHint}>需要配对？</Text>
+        <TouchableOpacity onPress={() => router.push('/onboarding')}>
+          <Text style={styles.pairLink}>返回连接页扫码</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -108,53 +170,220 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 28,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  title: {
-    color: '#f8fafc',
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  subtitle: {
-    color: '#94a3b8',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 28,
-  },
-  input: {
-    backgroundColor: '#0f172a',
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 10,
-    padding: 14,
-    color: '#f8fafc',
-    fontSize: 15,
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: '#6366f1',
-    borderRadius: 10,
+    backgroundColor: colors.bgBase,
     padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
+    paddingTop: 60,
   },
-  buttonDisabled: {
+
+  /* glow decorations */
+  glowAccent: {
+    position: 'absolute',
+    top: -60,
+    right: -40,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: colors.accentMuted,
+    opacity: 0.6,
+  },
+  glowAux: {
+    position: 'absolute',
+    bottom: 100,
+    left: -60,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    backgroundColor: colors.auxMuted,
     opacity: 0.5,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
+
+  /* header */
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 36,
+    marginBottom: 24,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  brandIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.md,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandName: {
+    ...textPresets.caption,
+    color: colors.accent,
+    letterSpacing: 1.2,
+    fontWeight: '700',
+  },
+  secureBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.accentMuted,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  secureText: {
+    ...textPresets.caption,
+    color: colors.accent,
     fontWeight: '600',
+  },
+
+  /* welcome */
+  welcomeTitle: {
+    ...textPresets.title,
+    color: colors.textStrong,
+    fontSize: 28,
+    marginBottom: 6,
+  },
+  welcomeSubtitle: {
+    ...textPresets.body,
+    color: colors.textMuted,
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+
+  /* gateway card */
+  gatewayCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 52,
+    backgroundColor: colors.surfaceGlass,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.lineSubtle,
+    paddingHorizontal: 10,
+    marginBottom: 24,
+  },
+  gatewayIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: radii.sm,
+    backgroundColor: colors.auxMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gatewayTextWrap: {
+    flex: 1,
+    gap: 1,
+  },
+  gatewayLabel: {
+    ...textPresets.caption,
+    color: colors.textMuted,
+  },
+  gatewayUrl: {
+    ...textPresets.bodySmall,
+    color: colors.textStrong,
+    fontWeight: '600',
+  },
+  gatewayChange: {
+    ...textPresets.label,
+    color: colors.accent,
+  },
+
+  /* form */
+  formLabel: {
+    ...textPresets.label,
+    color: colors.textDefault,
+    marginBottom: 8,
+  },
+  credentialCard: {
+    backgroundColor: colors.surface1,
+    borderRadius: radii.lg + 2,
+    borderWidth: 1,
+    borderColor: colors.lineDefault,
+    paddingVertical: 2,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 52,
+  },
+  input: {
+    flex: 1,
+    ...textPresets.body,
+    color: colors.textStrong,
+    padding: 0,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.lineSubtle,
+  },
+
+  /* assist */
+  assistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 26,
+    marginBottom: 24,
+  },
+  assistText: {
+    ...textPresets.label,
+    color: colors.textMuted,
+  },
+
+  /* login button */
+  loginBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    backgroundColor: colors.accent,
+    borderRadius: radii.lg + 2,
+    marginBottom: 24,
+    shadowColor: colors.accent,
+    shadowOpacity: 0.3,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  loginBtnDisabled: {
+    opacity: 0.5,
+  },
+  loginBtnText: {
+    ...textPresets.body,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+
+  /* pair link */
+  pairRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  pairHint: {
+    ...textPresets.label,
+    color: colors.textMuted,
+  },
+  pairLink: {
+    ...textPresets.label,
+    color: colors.accent,
   },
 });

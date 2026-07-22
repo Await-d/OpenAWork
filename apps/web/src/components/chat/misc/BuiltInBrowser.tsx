@@ -700,7 +700,39 @@ export function BuiltInBrowser({
         if (!container) return;
 
         const appWindow = getCurrentWindow();
-        const rect = container.getBoundingClientRect();
+        let rect = container.getBoundingClientRect();
+
+        // 容器尚未完成布局(display:none 或零尺寸)时,用 ResizeObserver 等待
+        // 它变为可见且有尺寸后再创建 webview,避免 Tauri 原生 webview 初始化失败。
+        if (rect.width < 1 || rect.height < 1) {
+          await new Promise<void>((resolve) => {
+            const wait = new ResizeObserver(() => {
+              const r = container.getBoundingClientRect();
+              if (r.width >= 1 && r.height >= 1) {
+                wait.disconnect();
+                resolve();
+              }
+            });
+            wait.observe(container);
+            // 安全超时:5s 后即使容器仍零尺寸也继续(用 Math.max 兜底)。
+            const timer = setTimeout(() => {
+              wait.disconnect();
+              resolve();
+            }, 5000);
+            // 清理:组件卸载或 generation 变化时中止等待。
+            const check = setInterval(() => {
+              if (disposed || gen !== generationRef.current) {
+                clearInterval(check);
+                clearTimeout(timer);
+                wait.disconnect();
+                resolve();
+              }
+            }, 200);
+          });
+          if (disposed || gen !== generationRef.current) return;
+          rect = container.getBoundingClientRect();
+        }
+
         const label = `browser-${Date.now().toString(36)}`;
 
         webview = new Webview(appWindow, label, {
@@ -747,7 +779,12 @@ export function BuiltInBrowser({
 
         webview.once('tauri://error', (e: unknown) => {
           if (disposed || gen !== generationRef.current) return;
-          const msg = e instanceof Error ? e.message : String(e);
+          const msg =
+            e instanceof Error
+              ? e.message
+              : typeof e === 'object' && e !== null && 'message' in e
+                ? String((e as Record<string, unknown>).message)
+                : String(e);
           console.error('[BuiltInBrowser] webview error:', msg);
           webview = null;
           activeWebviewRef.current = null;
@@ -755,7 +792,12 @@ export function BuiltInBrowser({
         });
       } catch (err) {
         if (!disposed && gen === generationRef.current) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg =
+            err instanceof Error
+              ? err.message
+              : typeof err === 'object' && err !== null && 'message' in err
+                ? String((err as Record<string, unknown>).message)
+                : String(err);
           console.error('[BuiltInBrowser] init error:', msg);
           setWebviewError(msg);
         }
@@ -1134,6 +1176,7 @@ export function BuiltInBrowser({
                 width: '100%',
                 height: '100%',
                 border: 'none',
+                display: hidden ? 'none' : undefined,
               }}
               onLoad={() => {
                 try {

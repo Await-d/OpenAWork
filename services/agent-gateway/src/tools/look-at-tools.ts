@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { readFile, stat } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
@@ -29,6 +31,7 @@ import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
  * call pending forever.
  */
 const LOOK_AT_LLM_TIMEOUT_MS = 120_000;
+const LOOK_AT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
 
 /**
  * Upper bound on a `look_at` source file. Every file branch reads the WHOLE
@@ -83,6 +86,12 @@ interface PdfParser {
 
 type PdfParserConstructor = new (input: { data: Buffer }) => PdfParser;
 
+interface ResolvedLookAtImageSource {
+  readonly filename: string;
+  readonly imageDataUrl: string;
+  readonly mimeType: string;
+}
+
 const lookAtInputSchema = z
   .object({
     file_path: z.string().min(1).optional(),
@@ -120,8 +129,16 @@ export const lookAtToolDefinition: ToolDefinition<typeof lookAtInputSchema, z.Zo
 function inferMimeType(filePath: string | undefined, imageData: string | undefined): string {
   if (imageData) {
     const match = imageData.match(/^data:([^;]+);base64,/i);
-    return normalizeImageMimeType(match?.[1] ?? 'image/png');
+    if (match?.[1]) {
+      return normalizeImageMimeType(match[1]);
+    }
+    const remoteUrl = tryParseHttpUrl(imageData);
+    return inferPathMimeType(remoteUrl?.pathname);
   }
+  return inferPathMimeType(filePath);
+}
+
+function inferPathMimeType(filePath: string | undefined): string {
   const ext = extname(filePath ?? '').toLowerCase();
   switch (ext) {
     case '.png':
@@ -148,6 +165,94 @@ function inferMimeType(filePath: string | undefined, imageData: string | undefin
   }
 }
 
+function tryParseHttpUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/u, '')
+    .toLowerCase();
+}
+
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split('.').map((segment) => Number(segment));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [first, second] = parts;
+  if (first === undefined || second === undefined) return false;
+  return (
+    first === 10 ||
+    first === 127 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === '::1' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe8') ||
+    normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') ||
+    normalized.startsWith('feb')
+  );
+}
+
+function isLocalOrPrivateHost(hostname: string): boolean {
+  const normalizedHostname = normalizeHostname(hostname);
+  if (
+    normalizedHostname === 'localhost' ||
+    normalizedHostname.endsWith('.localhost') ||
+    normalizedHostname === '0.0.0.0' ||
+    normalizedHostname === '::' ||
+    normalizedHostname === '::1'
+  ) {
+    return true;
+  }
+
+  const ipVersion = isIP(normalizedHostname);
+  if (ipVersion === 4) return isPrivateIpv4(normalizedHostname);
+  if (ipVersion === 6) return isPrivateIpv6(normalizedHostname);
+  return false;
+}
+
+async function assertPublicRemoteImageUrl(imageUrl: string): Promise<URL> {
+  const url = tryParseHttpUrl(imageUrl);
+  if (!url) {
+    throw new Error('look_at remote image only supports public http(s) URLs');
+  }
+
+  const hostname = normalizeHostname(url.hostname);
+  if (!hostname || isLocalOrPrivateHost(hostname)) {
+    throw new Error('look_at remote image only supports public http(s) URLs');
+  }
+
+  if (isIP(hostname) !== 0) {
+    return url;
+  }
+
+  try {
+    const addresses = await lookup(hostname, { all: true, verbatim: true });
+    if (addresses.length === 0 || addresses.some((entry) => isLocalOrPrivateHost(entry.address))) {
+      throw new Error('look_at remote image only supports public http(s) URLs');
+    }
+  } catch {
+    throw new Error('look_at remote image only supports public http(s) URLs');
+  }
+
+  return url;
+}
+
 function normalizeImageMimeType(mimeType: string): string {
   return mimeType.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeType;
 }
@@ -163,6 +268,147 @@ function stripDataUrlPrefix(value: string): string {
 
 function buildImageDataUrl(value: string, mimeType: string): string {
   return `data:${mimeType};base64,${stripDataUrlPrefix(value)}`;
+}
+
+function extractMimeTypeFromContentType(contentType: string | null): string | undefined {
+  const mimeType = contentType?.split(';', 1)[0]?.trim();
+  return mimeType ? normalizeImageMimeType(mimeType) : undefined;
+}
+
+function buildClipboardFilename(mimeType: string): string {
+  const subtype = mimeType.split('/', 2)[1] ?? 'png';
+  return `clipboard.${subtype === 'svg+xml' ? 'svg' : subtype}`;
+}
+
+function buildRemoteImageFilename(url: URL, mimeType: string): string {
+  const candidate = basename(url.pathname);
+  if (candidate && candidate !== '.' && candidate !== '/') {
+    return candidate;
+  }
+  return buildClipboardFilename(mimeType);
+}
+
+async function readResponseBufferWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  if (maxBytes > 0) {
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(
+        `look_at remote image too large: content-length ${declared} exceeds limit ${maxBytes} bytes`,
+      );
+    }
+  }
+
+  if (!response.body) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (maxBytes > 0 && buffer.byteLength > maxBytes) {
+      throw new Error(`look_at remote image too large: exceeds limit ${maxBytes} bytes`);
+    }
+    return buffer;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (maxBytes > 0 && total > maxBytes) {
+        throw new Error(`look_at remote image too large: exceeds limit ${maxBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  return Buffer.concat(
+    chunks.map((chunk) => Buffer.from(chunk)),
+    total,
+  );
+}
+
+async function fetchLookAtRemoteImage(url: string): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, LOOK_AT_REMOTE_FETCH_TIMEOUT_MS);
+  timer.unref?.();
+
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(`look_at remote image timeout (${LOOK_AT_REMOTE_FETCH_TIMEOUT_MS}ms)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchRemoteImageAsDataUrl(imageUrl: string): Promise<ResolvedLookAtImageSource> {
+  const url = await assertPublicRemoteImageUrl(imageUrl);
+
+  const response = await fetchLookAtRemoteImage(url.toString());
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`look_at remote image request failed with status ${response.status}`);
+  }
+
+  const headerMimeType = extractMimeTypeFromContentType(response.headers.get('content-type'));
+  const mimeType = headerMimeType ?? inferPathMimeType(url.pathname);
+  if (!isImageMime(mimeType)) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(
+      `look_at remote image did not return an image content-type: ${response.headers.get('content-type') ?? 'unknown'}`,
+    );
+  }
+
+  const buffer = await readResponseBufferWithLimit(response, resolveLookAtMaxFileBytes());
+  return {
+    filename: buildRemoteImageFilename(url, mimeType),
+    imageDataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
+    mimeType,
+  };
+}
+
+async function resolveLookAtImageSource(input: {
+  filePath?: string;
+  imageData?: string;
+}): Promise<ResolvedLookAtImageSource | null> {
+  if (input.imageData) {
+    const remoteUrl = tryParseHttpUrl(input.imageData);
+    if (remoteUrl) {
+      return await fetchRemoteImageAsDataUrl(remoteUrl.toString());
+    }
+    const mimeType = inferMimeType(undefined, input.imageData);
+    return {
+      filename: buildClipboardFilename(mimeType),
+      imageDataUrl: buildImageDataUrl(input.imageData, mimeType),
+      mimeType,
+    };
+  }
+
+  if (!input.filePath) {
+    return null;
+  }
+
+  const mimeType = inferMimeType(input.filePath, undefined);
+  if (!isImageMime(mimeType)) {
+    return null;
+  }
+
+  return {
+    filename: basename(input.filePath),
+    imageDataUrl: `data:${mimeType};base64,${await readFile(input.filePath, 'base64')}`,
+    mimeType,
+  };
 }
 
 async function readFileAsText(filePath: string): Promise<string> {
@@ -341,8 +587,9 @@ export async function runLookAtTool(input: {
   parentSessionId: string;
   userId: string;
 }): Promise<string> {
-  const mimeType = inferMimeType(input.filePath, input.imageData);
-  const filePath = input.filePath ? validateWorkspacePath(input.filePath) : undefined;
+  const filePath = input.filePath
+    ? (validateWorkspacePath(input.filePath) ?? undefined)
+    : undefined;
   if (input.filePath && !filePath) {
     throw new Error('Forbidden file_path');
   }
@@ -351,13 +598,18 @@ export async function runLookAtTool(input: {
   if (filePath) {
     await assertLookAtFileWithinLimit(filePath);
   }
+  const resolvedImageSource = await resolveLookAtImageSource({
+    filePath,
+    imageData: input.imageData,
+  });
+  const mimeType = resolvedImageSource?.mimeType ?? inferMimeType(filePath, undefined);
   const agentPrompt = listManagedAgentsForUser(input.userId).find(
     (agent) => agent.id === 'multimodal-looker',
   )?.systemPrompt;
   const routeConfig = await resolveLookAtRoute(input.userId, agentPrompt);
-  const filename = input.filePath
-    ? basename(input.filePath)
-    : `clipboard.${mimeType.split('/')[1] ?? 'png'}`;
+  const filename =
+    resolvedImageSource?.filename ??
+    (input.filePath ? basename(input.filePath) : buildClipboardFilename(mimeType));
   const childSessionId = createLookAtChildSession(input.userId, input.parentSessionId, {
     parentSessionId: input.parentSessionId,
     createdByTool: 'look_at',
@@ -375,15 +627,12 @@ export async function runLookAtTool(input: {
   });
 
   let analysisText: string;
-  if (input.imageData || (filePath && isImageMime(mimeType))) {
-    const imageDataUrl = input.imageData
-      ? buildImageDataUrl(input.imageData, mimeType)
-      : `data:${mimeType};base64,${(await readFile(filePath!, 'base64')).toString()}`;
+  if (resolvedImageSource) {
     analysisText = await requestLookAtText({
       apiBaseUrl: routeConfig.route.apiBaseUrl,
       apiKey: routeConfig.route.apiKey,
-      imageDataUrl,
-      mimeType,
+      imageDataUrl: resolvedImageSource.imageDataUrl,
+      mimeType: resolvedImageSource.mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       ...(routeConfig.route.upstreamProtocol

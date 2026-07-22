@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MobileGatewayClient, type StreamHandlers } from '../hooks/useGatewayClient.js';
+import { MobileGatewayClient, type StreamHandlers } from '../hooks/useGatewayClient';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];

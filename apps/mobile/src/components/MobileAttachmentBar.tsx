@@ -1,4 +1,6 @@
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 export interface MobileAttachmentItem {
   id: string;
@@ -76,7 +78,7 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 20,
+    borderRadius: radii.pill,
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -85,13 +87,13 @@ const styles = StyleSheet.create({
   },
   chipIcon: { fontSize: 13 },
   chipName: {
-    color: '#e2e8f0',
+    color: colors.textDefault,
     fontSize: 11,
     fontWeight: '500',
     flex: 1,
     minWidth: 30,
     maxWidth: 90,
   },
-  chipSize: { color: '#64748b', fontSize: 10 },
-  chipRemove: { color: '#64748b', fontSize: 12, fontWeight: '700' },
+  chipSize: { color: colors.textMuted, fontSize: 10 },
+  chipRemove: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
 });

@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/auth';
 import { SessionsScreen } from '../screens/SessionsScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { colors } from '../theme/colors';
 
 const TOKEN_EXPIRES_AT_KEY = 'openwork_token_expires_at';
 const REFRESH_INTERVAL_MS = 60_000;
@@ -119,5 +120,10 @@ export function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a' },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgBase,
+  },
 });

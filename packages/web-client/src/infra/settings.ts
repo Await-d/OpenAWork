@@ -102,6 +102,9 @@ export interface SettingsClient {
   putUpstreamRetry(token: string, payload: unknown): Promise<unknown>;
   getWebsearch(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   putWebsearch(token: string, payload: unknown): Promise<unknown>;
+  // 自定义域名
+  getBaseUrl(token: string, options?: { signal?: AbortSignal }): Promise<{ baseUrl: string }>;
+  putBaseUrl(token: string, payload: { baseUrl: string }): Promise<void>;
   // 版本 / 校验
   getVersion(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   // 遥测同意 & 事件上报
@@ -620,6 +623,29 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         actionLabel: '保存 Websearch 策略',
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/websearch`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async getBaseUrl(token, options) {
+      return performSettingsRequest<{ baseUrl: string }>({
+        actionLabel: '读取自定义域名',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/base-url`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async putBaseUrl(token, payload) {
+      await performSettingsRequest<void>({
+        actionLabel: '保存自定义域名',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/base-url`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(payload),

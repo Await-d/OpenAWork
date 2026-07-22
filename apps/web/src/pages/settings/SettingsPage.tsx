@@ -263,10 +263,13 @@ export default function SettingsPage() {
     webPort,
     webExposeLan,
     setWebAccess,
+    customBaseUrl,
+    setCustomBaseUrl,
   } = useAuthStore();
   const token = useAuthStore((s) => s.accessToken);
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
+  const [customBaseUrlSaved, setCustomBaseUrlSaved] = useState(false);
   const {
     desktopGatewayBusy,
     desktopGatewayError,
@@ -297,6 +300,12 @@ export default function SettingsPage() {
     setUpstreamRetryMaxRetries,
     upstreamRetryMaxRetries,
   } = useSettingsUpstreamRetry({ gatewayUrl, token });
+
+  const saveCustomBaseUrl = React.useCallback(() => {
+    setCustomBaseUrlSaved(true);
+    setTimeout(() => setCustomBaseUrlSaved(false), 2000);
+  }, []);
+
   const memoryManagement = useMemoryManagement({
     gatewayUrl,
     token,
@@ -1788,6 +1797,10 @@ export default function SettingsPage() {
                       void saveUpstreamRetrySettings();
                     }}
                     savedUpstreamRetryMaxRetries={savedUpstreamRetryMaxRetries}
+                    customBaseUrl={customBaseUrl}
+                    setCustomBaseUrl={setCustomBaseUrl}
+                    customBaseUrlSaved={customBaseUrlSaved}
+                    saveCustomBaseUrl={saveCustomBaseUrl}
                   />
                 )}
                 {activeTab === 'display' && <DisplayTabContent />}

@@ -8,6 +8,8 @@ import {
   TouchableWithoutFeedback,
   ActivityIndicator,
 } from 'react-native';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 export interface ActionSheetButton {
   label: string;
@@ -58,7 +60,7 @@ export function ActionSheet({ visible, title, message, actions, onDismiss }: Act
               {action.loading ? (
                 <ActivityIndicator
                   size="small"
-                  color={action.variant === 'destructive' ? '#f87171' : '#6366f1'}
+                  color={action.variant === 'destructive' ? colors.danger : colors.accent}
                 />
               ) : (
                 <Text
@@ -126,7 +128,7 @@ export function ConfirmDialog({
               disabled={confirmLoading}
             >
               {confirmLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={colors.white} />
               ) : (
                 <Text style={styles.dialogConfirmText}>{confirmLabel}</Text>
               )}
@@ -138,14 +140,6 @@ export function ConfirmDialog({
   );
 }
 
-const BG = '#0f172a';
-const SURFACE = '#1e293b';
-const BORDER = '#334155';
-const ACCENT = '#6366f1';
-const TEXT = '#f8fafc';
-const MUTED = '#94a3b8';
-const DANGER = '#ef4444';
-
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -156,18 +150,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: SURFACE,
+    backgroundColor: colors.surface1,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 34,
     borderTopWidth: 1,
-    borderColor: BORDER,
+    borderColor: colors.lineDefault,
   },
   handle: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: BORDER,
+    backgroundColor: colors.lineDefault,
     alignSelf: 'center',
     marginTop: 10,
     marginBottom: 8,
@@ -176,28 +170,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    borderBottomColor: colors.lineDefault,
     gap: 4,
   },
-  title: { color: TEXT, fontSize: 16, fontWeight: '700' },
-  message: { color: MUTED, fontSize: 13, lineHeight: 18 },
+  title: { color: colors.textStrong, fontSize: 16, fontWeight: '700' },
+  message: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   actions: { paddingHorizontal: 16, paddingTop: 8 },
   actionBtn: {
     paddingVertical: 16,
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radii.lg,
   },
   actionBtnBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    borderBottomColor: colors.lineDefault,
     borderRadius: 0,
   },
   actionBtnDestructive: {},
-  actionBtnCancel: { marginTop: 6, backgroundColor: BG, borderRadius: 12 },
+  actionBtnCancel: { marginTop: 6, backgroundColor: colors.bgBase, borderRadius: radii.lg },
   actionBtnDisabled: { opacity: 0.4 },
-  actionText: { color: ACCENT, fontSize: 16, fontWeight: '600' },
-  actionTextDestructive: { color: DANGER },
-  actionTextCancel: { color: MUTED, fontWeight: '500' },
+  actionText: { color: colors.accent, fontSize: 16, fontWeight: '600' },
+  actionTextDestructive: { color: colors.danger },
+  actionTextCancel: { color: colors.textMuted, fontWeight: '500' },
   dialogOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -209,34 +203,34 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   dialogCard: {
-    backgroundColor: SURFACE,
+    backgroundColor: colors.surface1,
     borderRadius: 20,
     padding: 24,
     width: '100%',
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: colors.lineDefault,
     gap: 12,
   },
-  dialogTitle: { color: TEXT, fontSize: 17, fontWeight: '700' },
-  dialogMessage: { color: MUTED, fontSize: 14, lineHeight: 20 },
+  dialogTitle: { color: colors.textStrong, fontSize: 17, fontWeight: '700' },
+  dialogMessage: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
   dialogActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   dialogCancelBtn: {
     flex: 1,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: colors.lineDefault,
     alignItems: 'center',
-    backgroundColor: BG,
+    backgroundColor: colors.bgBase,
   },
-  dialogCancelText: { color: MUTED, fontSize: 14, fontWeight: '600' },
+  dialogCancelText: { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
   dialogConfirmBtn: {
     flex: 1,
     paddingVertical: 13,
-    borderRadius: 12,
-    backgroundColor: ACCENT,
+    borderRadius: radii.lg,
+    backgroundColor: colors.accent,
     alignItems: 'center',
   },
-  dialogConfirmBtnDestructive: { backgroundColor: DANGER },
-  dialogConfirmText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  dialogConfirmBtnDestructive: { backgroundColor: colors.danger },
+  dialogConfirmText: { color: colors.white, fontSize: 14, fontWeight: '700' },
 });

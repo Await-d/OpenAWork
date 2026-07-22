@@ -27,6 +27,11 @@ function generateId(): string {
 
 export class ArtifactManager implements ArtifactManagerInterface {
   private store = new Map<string, Artifact>();
+  private baseUrl: string;
+
+  constructor(baseUrl?: string) {
+    this.baseUrl = (baseUrl ?? 'https://openwork.app').replace(/\/+$/, '');
+  }
 
   register(artifact: Omit<Artifact, 'id' | 'createdAt'>): Artifact {
     const id = generateId();
@@ -52,13 +57,13 @@ export class ArtifactManager implements ArtifactManagerInterface {
   share(id: string): string {
     const artifact = this.store.get(id);
     if (!artifact) throw new Error(`Artifact not found: ${id}`);
-    return `https://openwork.app/share/${id}`;
+    return `${this.baseUrl}/share/${id}`;
   }
 
   download(id: string): string {
     const artifact = this.store.get(id);
     if (!artifact) throw new Error(`Artifact not found: ${id}`);
-    return `https://openwork.app/download/${id}/${encodeURIComponent(artifact.name)}`;
+    return `${this.baseUrl}/download/${id}/${encodeURIComponent(artifact.name)}`;
   }
 
   export(id: string): string {

@@ -292,7 +292,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           url: { type: 'string', description: '要请求的完整 URL' },
           format: {
             type: 'string',
-            enum: ['markdown', 'text', 'html'],
+            enum: ['markdown', 'text', 'html', 'image-preview'],
             description: '返回的响应格式',
           },
           timeout: {
@@ -1222,7 +1222,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           image_data: {
             type: 'string',
             description:
-              'Base64 图片字节（可使用 data:URL）。file_path 与 image_data 只允许传其一。',
+              'Base64 图片字节、data:URL，或 HTTP/HTTPS 远程图片 URL。file_path 与 image_data 只允许传其一。',
           },
           goal: {
             type: 'string',

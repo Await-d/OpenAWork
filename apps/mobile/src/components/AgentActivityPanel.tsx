@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated } from 'react-native';
 import { SubagentDetailModal } from './SubagentDetailModal';
 import type { SubagentDetail } from './SubagentDetailModal';
+import { colors } from '../theme/colors';
 
 export type ActivityKind = 'tool' | 'skill' | 'subagent';
 export type ActivityStatus = 'running' | 'done' | 'error';
@@ -188,7 +189,7 @@ function ActivityRow({
           </Text>
         ) : null}
         {!isSubagent && expanded && activity.output ? (
-          <Text style={[styles.activityDetail, { color: '#e2e8f0' }]} numberOfLines={6}>
+          <Text style={[styles.activityDetail, { color: colors.textDefault }]} numberOfLines={6}>
             {activity.output}
           </Text>
         ) : null}
@@ -262,11 +263,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: colors.surface2,
     gap: 6,
   },
   headerIcon: { color: '#3b82f6', fontSize: 13 },
-  headerTitle: { color: '#94a3b8', fontSize: 12, fontWeight: '600', flex: 1 },
+  headerTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '600', flex: 1 },
   headerCount: {
     color: '#3b82f6',
     fontSize: 11,
@@ -303,10 +304,10 @@ const styles = StyleSheet.create({
   kindIcon: { fontSize: 11 },
   kindLabel: { fontSize: 10, fontWeight: '700' },
   rowContent: { flex: 1, minWidth: 0 },
-  activityName: { color: '#e2e8f0', fontSize: 13, fontWeight: '500' },
+  activityName: { color: colors.textDefault, fontSize: 13, fontWeight: '500' },
   subagentHint: { color: '#3b82f6', fontSize: 11, marginTop: 2 },
   activityDetail: {
-    color: '#64748b',
+    color: colors.textMuted,
     fontSize: 11,
     fontFamily: 'monospace',
     marginTop: 4,

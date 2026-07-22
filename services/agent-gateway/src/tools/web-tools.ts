@@ -40,13 +40,13 @@ const webfetchUrlSchema = z
 
 const webfetchInputSchema = z.object({
   url: webfetchUrlSchema,
-  format: z.enum(['markdown', 'text', 'html']).default('markdown'),
+  format: z.enum(['markdown', 'text', 'html', 'image-preview']).default('markdown'),
   timeout: z.number().int().min(1).max(MAX_WEBFETCH_TIMEOUT_SECONDS).default(20),
 });
 
 const webfetchOutputSchema = z.object({
   url: webfetchUrlSchema,
-  format: z.enum(['markdown', 'text', 'html']),
+  format: z.enum(['markdown', 'text', 'html', 'image-preview']),
   status: z.number().int(),
   contentType: z.string(),
   content: z.string(),
@@ -122,6 +122,10 @@ function formatFetchedContent(input: {
     return isHtml ? htmlToText(input.body) : input.body;
   }
 
+  if (input.format === 'image-preview') {
+    return input.body;
+  }
+
   if (!isHtml) {
     return input.body;
   }
@@ -170,6 +174,11 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
             imageUrl: normalizedUrl,
             content: `![Fetched image](${normalizedUrl})`,
           };
+        }
+
+        if (input.format === 'image-preview') {
+          await response.body?.cancel().catch(() => undefined);
+          throw new Error('webfetch image-preview requires an image response');
         }
 
         // Size-capped read: never buffer an unbounded body into memory.

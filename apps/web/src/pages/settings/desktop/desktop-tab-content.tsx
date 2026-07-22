@@ -58,6 +58,7 @@ interface DesktopSettingsView {
   hasPin: boolean;
   idleLockMinutes: number | null;
   pinDigits: number;
+  updateChannel: 'preview' | 'stable';
 }
 
 /** 空闲自动锁预设分钟选项。`null` 表示禁用。 */
@@ -430,6 +431,17 @@ export function DesktopTabContent() {
     }
   }, []);
 
+  const updateChannel = useCallback(async (next: 'preview' | 'stable') => {
+    try {
+      const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+        patch: { updateChannel: next },
+      });
+      setView(updated);
+    } catch (err) {
+      logger.error('update_desktop_settings(update_channel) failed', err);
+    }
+  }, []);
+
   const submitRemovePin = useCallback(async () => {
     if (pinBusy) return;
     if (!pinCurrent) {
@@ -594,6 +606,55 @@ export function DesktopTabContent() {
             }}
           >
             已启用
+          </div>
+        </div>
+      </section>
+
+      <section style={SS}>
+        <h3 style={ST}>更新渠道</h3>
+        <div style={ROW_STYLE}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              选择更新渠道
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              预览版可抢先体验最新功能，发行版经过更充分的测试。切换后下次检查更新将使用新渠道。
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {[
+              { label: '预览版', value: 'preview' as const },
+              { label: '发行版', value: 'stable' as const },
+            ].map((opt) => {
+              const active = view.updateChannel === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => void updateChannel(opt.value)}
+                  style={{
+                    borderRadius: 6,
+                    border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
+                    background: active
+                      ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
+                      : 'var(--bg-overlay)',
+                    color: active ? 'var(--accent)' : 'var(--fg-default)',
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </section>

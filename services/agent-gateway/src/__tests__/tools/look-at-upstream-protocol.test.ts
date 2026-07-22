@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   runUpstreamGenerate: vi.fn(),
   sqliteGet: vi.fn(),
   sqliteRun: vi.fn(),
+  fetch: vi.fn(),
+  lookup: vi.fn(),
   listManagedAgentsForUser: vi.fn(() => [] as unknown[]),
   selectDelegatedModelForUser: vi.fn(() => null),
   getReferenceAgentModelEntries: vi.fn(() => [] as unknown[]),
@@ -70,6 +72,10 @@ vi.mock('../../workspace/workspace-paths.js', () => ({
   validateWorkspacePath: mocks.validateWorkspacePath,
 }));
 
+vi.mock('node:dns/promises', () => ({
+  lookup: mocks.lookup,
+}));
+
 vi.mock('../../v2-runtime/upstream/index.js', async (orig) => {
   type UpstreamModule = typeof UpstreamActual;
   const actual = await (orig() as Promise<UpstreamModule>);
@@ -114,10 +120,13 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
     mocks.getReferenceAgentModelEntries.mockReturnValue([]);
     mocks.getProviderConfigForSelection.mockResolvedValue(null);
     mocks.validateWorkspacePath.mockImplementation((p: string) => p);
+    mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    vi.stubGlobal('fetch', mocks.fetch);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('forwards anthropic_messages so vision calls hit the native API', async () => {
@@ -207,5 +216,113 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
       image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==',
       mediaType: 'image/jpeg',
     });
+  });
+
+  it('downloads remote image URLs passed via image_data before calling the upstream model', async () => {
+    mocks.resolveModelRoute.mockReturnValue(
+      createRoute({
+        upstreamProtocol: 'responses',
+        providerType: 'openai',
+        model: 'gpt-4o',
+        apiBaseUrl: 'https://api.openai.com/v1',
+      }),
+    );
+    mocks.fetch.mockResolvedValue(
+      new Response(new Uint8Array([255, 216, 255, 219]), {
+        status: 200,
+        headers: {
+          'content-type': 'image/jpeg',
+        },
+      }),
+    );
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: 'ok',
+      inputTokens: 0,
+      outputTokens: 0,
+      finishReason: 'stop',
+    });
+
+    await runLookAtTool({
+      imageData: 'https://ichef.bbci.co.uk/ace/standard/640/example.jpg',
+      goal: 'describe remote image',
+      parentSessionId: 'parent-session',
+      userId: 'user-1',
+    });
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'https://ichef.bbci.co.uk/ace/standard/640/example.jpg',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    );
+
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      { messages?: Array<{ content?: unknown }> } | undefined;
+    const content = callArgs?.messages?.[0]?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const imagePart = (content as Array<Record<string, unknown>>).find(
+      (part) => part['type'] === 'image',
+    );
+    expect(imagePart).toMatchObject({
+      mediaType: 'image/jpeg',
+    });
+    expect(String(imagePart?.['image'] ?? '')).toContain('data:image/jpeg;base64,');
+    expect(String(imagePart?.['image'] ?? '')).not.toContain('https://');
+  });
+
+  it('rejects remote image URLs that return non-image content', async () => {
+    mocks.resolveModelRoute.mockReturnValue(
+      createRoute({
+        upstreamProtocol: 'responses',
+        providerType: 'openai',
+        model: 'gpt-4o',
+        apiBaseUrl: 'https://api.openai.com/v1',
+      }),
+    );
+    mocks.fetch.mockResolvedValue(
+      new Response('<html>blocked</html>', {
+        status: 200,
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+        },
+      }),
+    );
+
+    await expect(
+      runLookAtTool({
+        imageData: 'https://ichef.bbci.co.uk/ace/standard/640/not-an-image.jpg',
+        goal: 'describe remote image',
+        parentSessionId: 'parent-session',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/did not return an image content-type/);
+
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
+  });
+
+  it('rejects localhost and private-network remote image URLs before fetch', async () => {
+    await expect(
+      runLookAtTool({
+        imageData: 'http://127.0.0.1:3000/internal.png',
+        goal: 'describe remote image',
+        parentSessionId: 'parent-session',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/only supports public http\(s\) URLs/);
+
+    mocks.lookup.mockResolvedValueOnce([{ address: '10.0.0.8', family: 4 }]);
+
+    await expect(
+      runLookAtTool({
+        imageData: 'https://cluster.internal/image.png',
+        goal: 'describe remote image',
+        parentSessionId: 'parent-session',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/only supports public http\(s\) URLs/);
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
   });
 });

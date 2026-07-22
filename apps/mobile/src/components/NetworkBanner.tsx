@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { useNetworkState } from '../hooks/useNetworkState';
+import { colors } from '../theme/colors';
 
 export function NetworkBanner() {
   const { isConnected } = useNetworkState();
@@ -8,20 +9,20 @@ export function NetworkBanner() {
 
   return (
     <View style={styles.banner}>
-      <Text style={styles.text}>No internet connection</Text>
+      <Text style={styles.text}>无网络连接</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   banner: {
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.danger,
     paddingVertical: 6,
     paddingHorizontal: 16,
     alignItems: 'center',
   },
   text: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 13,
     fontWeight: '600',
   },

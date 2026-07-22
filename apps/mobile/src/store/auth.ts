@@ -5,13 +5,14 @@ import {
   normalizeMobileGatewayUrl,
   resolveDefaultMobileGatewayUrl as resolveDefaultMobileGatewayUrlForPlatform,
   type MobileRuntimePlatform,
-} from './mobile-gateway-defaults.js';
+} from './mobile-gateway-defaults';
 
 export { normalizeMobileGatewayUrl };
 
 const ACCESS_TOKEN_KEY = 'openwork_access_token';
 const REFRESH_TOKEN_KEY = 'openwork_refresh_token';
 const GATEWAY_URL_KEY = 'openwork_gateway_url';
+const CUSTOM_BASE_URL_KEY = 'openwork_custom_base_url';
 
 function currentMobileRuntimePlatform(): MobileRuntimePlatform {
   return Platform.OS === 'android' ? 'android' : 'ios';
@@ -33,9 +34,11 @@ export interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   gatewayUrl: string;
+  customBaseUrl: string;
   isLoading: boolean;
   setTokens: (access: string, refresh: string) => Promise<void>;
   setGatewayUrl: (url: string) => Promise<void>;
+  setCustomBaseUrl: (url: string) => Promise<void>;
   loadFromStorage: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -44,6 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   refreshToken: null,
   gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
+  customBaseUrl: 'https://openwork.app',
   isLoading: true,
 
   setTokens: async (access, refresh) => {
@@ -58,21 +62,33 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ gatewayUrl: normalized });
   },
 
+  setCustomBaseUrl: async (url) => {
+    const normalized = url.replace(/\/+$/, '') || 'https://openwork.app';
+    await SecureStore.setItemAsync(CUSTOM_BASE_URL_KEY, normalized);
+    set({ customBaseUrl: normalized });
+  },
+
   loadFromStorage: async () => {
     try {
-      const [access, refresh, gateway] = await Promise.all([
+      const [access, refresh, gateway, baseUrl] = await Promise.all([
         SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
         SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
         SecureStore.getItemAsync(GATEWAY_URL_KEY),
+        SecureStore.getItemAsync(CUSTOM_BASE_URL_KEY),
       ]);
       set({
         accessToken: access,
         refreshToken: refresh,
         gatewayUrl: gateway ? normalizeMobileGatewayUrl(gateway) : DEFAULT_MOBILE_GATEWAY_URL,
+        customBaseUrl: baseUrl || 'https://openwork.app',
         isLoading: false,
       });
     } catch {
-      set({ gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL, isLoading: false });
+      set({
+        gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
+        customBaseUrl: 'https://openwork.app',
+        isLoading: false,
+      });
     }
   },
 

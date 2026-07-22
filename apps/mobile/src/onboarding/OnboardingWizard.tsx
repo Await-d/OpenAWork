@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import {
+  CameraView as CameraViewBase,
+  useCameraPermissions,
+  type BarcodeScanningResult,
+} from 'expo-camera';
+import type { ComponentType } from 'react';
+
+// Cast CameraView to fix React 19 JSX type compatibility
+const CameraView = CameraViewBase as unknown as ComponentType<Record<string, unknown>>;
 import { isGatewayHealthy, login, loginWithPairingToken } from '@openAwork/web-client';
 import { useAuthStore } from '../store/auth';
 import { DEFAULT_MOBILE_GATEWAY_URL, normalizeMobileGatewayUrl } from '../store/auth';
@@ -202,7 +210,7 @@ function HostProviderStep({ step, hostConfig, onNext, onBack }: StepProps) {
       <TextInput
         autoCapitalize="none"
         placeholder="sk-..."
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         secureTextEntry
         style={styles.input}
         value={apiKey}
@@ -234,7 +242,7 @@ function HostWorkspaceStep({ step, hostConfig, onNext, onBack }: StepProps) {
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="输入工作区目录路径"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={workspace}
         onChangeText={setWorkspace}
@@ -266,7 +274,7 @@ function HostGatewayStep({ step, onNext, onBack }: StepProps) {
         autoCorrect={false}
         keyboardType="url"
         placeholder="http://192.168.1.100:3000"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={gatewayUrl}
         onChangeText={setGatewayUrlInput}
@@ -325,7 +333,7 @@ function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
         autoCapitalize="none"
         keyboardType="email-address"
         placeholder="user@example.com"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={email}
         onChangeText={setEmail}
@@ -334,7 +342,7 @@ function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
       <Text style={styles.label}>密码</Text>
       <TextInput
         placeholder="••••••••"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         secureTextEntry
         style={styles.input}
         value={password}
@@ -397,7 +405,7 @@ function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
         <Text style={styles.heading}>健康检查</Text>
         {status === 'checking' ? (
           <>
-            <ActivityIndicator color={ACCENT} size="large" />
+            <ActivityIndicator color={colors.accent} size="large" />
             <Text style={styles.subheading}>正在连接 Gateway…</Text>
           </>
         ) : status === 'success' ? (
@@ -410,7 +418,7 @@ function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
           </>
         ) : (
           <>
-            <Text style={[styles.successMark, { color: '#f87171' }]}>✗</Text>
+            <Text style={[styles.successMark, { color: colors.danger }]}>✗</Text>
             <Text style={styles.errorText}>{errorMsg}</Text>
             <TouchableOpacity
               style={styles.primaryButton}
@@ -508,7 +516,9 @@ function ClientScanStep({ step, onNext, onBack, onComplete }: StepProps) {
           <CameraView
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={
-              scanned || loading ? undefined : (event) => void handleBarcodeScanned(event)
+              scanned || loading
+                ? undefined
+                : (event: BarcodeScanningResult) => void handleBarcodeScanned(event)
             }
             style={styles.cameraPreview}
           />
@@ -540,7 +550,7 @@ function ClientScanStep({ step, onNext, onBack, onComplete }: StepProps) {
         multiline
         numberOfLines={4}
         placeholder='{"hostUrl":"https://host.example.com","token":"abc123"}'
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={[styles.input, styles.multilineInput]}
         value={pairingCode}
         onChangeText={(v) => {
@@ -603,7 +613,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
         autoCapitalize="none"
         keyboardType="email-address"
         placeholder="user@example.com"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={email}
         onChangeText={setEmail}
@@ -612,7 +622,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
       <Text style={styles.label}>密码</Text>
       <TextInput
         placeholder="••••••••"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         secureTextEntry
         style={styles.input}
         value={password}
@@ -674,7 +684,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
         autoCorrect={false}
         keyboardType="url"
         placeholder="http://192.168.1.100:3000"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={gatewayUrl}
         onChangeText={setGatewayUrlInput}
@@ -685,7 +695,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
         autoCapitalize="none"
         keyboardType="email-address"
         placeholder="user@example.com"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         style={styles.input}
         value={email}
         onChangeText={setEmail}
@@ -694,7 +704,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
       <Text style={styles.label}>密码</Text>
       <TextInput
         placeholder="••••••••"
-        placeholderTextColor={MUTED}
+        placeholderTextColor={colors.textSubtle}
         secureTextEntry
         style={styles.input}
         value={password}
@@ -808,19 +818,14 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   );
 }
 
-const BG = '#0f172a';
-const SURFACE = '#1e293b';
-const SURFACE_ALT = '#172554';
-const ACCENT = '#6366f1';
-const TEXT = '#f8fafc';
-const MUTED = '#94a3b8';
-const BORDER = '#334155';
-const SUCCESS = '#22c55e';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
+import { textPresets } from '../theme/typography';
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: colors.bgBase,
   },
   stepContainer: {
     flexGrow: 1,
@@ -833,91 +838,86 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   progressText: {
-    color: MUTED,
-    fontSize: 12,
+    ...textPresets.label,
+    color: colors.textMuted,
     textAlign: 'right',
   },
   progressTrack: {
     height: 4,
-    borderRadius: 999,
-    backgroundColor: BORDER,
+    borderRadius: radii.pill,
+    backgroundColor: colors.lineDefault,
     overflow: 'hidden',
   },
   progressFill: {
     height: 4,
-    borderRadius: 999,
-    backgroundColor: ACCENT,
+    borderRadius: radii.pill,
+    backgroundColor: colors.accent,
   },
   backButton: {
     alignSelf: 'flex-start',
   },
   backButtonText: {
-    color: MUTED,
-    fontSize: 14,
-    fontWeight: '500',
+    ...textPresets.body,
+    color: colors.textMuted,
   },
   heading: {
-    color: TEXT,
-    fontSize: 24,
-    fontWeight: '700',
+    ...textPresets.title,
+    color: colors.textStrong,
   },
   subheading: {
-    color: MUTED,
-    fontSize: 14,
+    ...textPresets.body,
+    color: colors.textMuted,
     lineHeight: 20,
   },
   modeCard: {
-    backgroundColor: SURFACE,
-    borderColor: BORDER,
-    borderRadius: 16,
+    backgroundColor: colors.surface1,
+    borderColor: colors.lineDefault,
+    borderRadius: radii.xl,
     borderWidth: 1,
     padding: 18,
     gap: 6,
   },
   modeTitle: {
-    color: TEXT,
-    fontSize: 18,
-    fontWeight: '700',
+    ...textPresets.subheading,
+    color: colors.textStrong,
   },
   modeDescription: {
-    color: MUTED,
-    fontSize: 14,
+    ...textPresets.body,
+    color: colors.textMuted,
     lineHeight: 20,
   },
   optionList: {
     gap: 10,
   },
   optionCard: {
-    backgroundColor: SURFACE,
-    borderColor: BORDER,
-    borderRadius: 12,
+    backgroundColor: colors.surface1,
+    borderColor: colors.lineDefault,
+    borderRadius: radii.lg,
     borderWidth: 1,
     padding: 14,
   },
   optionCardSelected: {
-    backgroundColor: SURFACE_ALT,
-    borderColor: ACCENT,
+    backgroundColor: colors.accentMuted,
+    borderColor: colors.accent,
   },
   optionTitle: {
-    color: TEXT,
-    fontSize: 15,
-    fontWeight: '600',
+    ...textPresets.cardTitle,
+    color: colors.textStrong,
   },
   optionTitleSelected: {
-    color: '#c7d2fe',
+    color: colors.accent,
   },
   label: {
-    color: MUTED,
-    fontSize: 13,
-    fontWeight: '500',
+    ...textPresets.bodySmall,
+    color: colors.textMuted,
     marginTop: 6,
   },
   input: {
-    backgroundColor: SURFACE,
-    borderColor: BORDER,
-    borderRadius: 12,
+    backgroundColor: colors.surface2,
+    borderColor: colors.lineDefault,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    color: TEXT,
+    color: colors.textStrong,
     fontSize: 15,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -931,8 +931,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#020617',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface3,
   },
   cameraPreview: {
     flex: 1,
@@ -945,14 +945,14 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   cameraPermissionText: {
-    color: MUTED,
-    fontSize: 14,
+    ...textPresets.body,
+    color: colors.textMuted,
     textAlign: 'center',
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: ACCENT,
-    borderRadius: 12,
+    backgroundColor: colors.accent,
+    borderRadius: radii.lg,
     marginTop: 6,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -961,21 +961,21 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 15,
     fontWeight: '700',
   },
   secondaryButton: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: colors.lineDefault,
     marginTop: 6,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   secondaryButtonText: {
-    color: '#c7d2fe',
+    color: colors.accent,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -984,8 +984,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   linkButtonText: {
-    color: MUTED,
-    fontSize: 13,
+    ...textPresets.bodySmall,
+    color: colors.textMuted,
     textDecorationLine: 'underline',
   },
   centerContent: {
@@ -996,13 +996,13 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   successMark: {
-    color: SUCCESS,
+    color: colors.success,
     fontSize: 52,
     fontWeight: '800',
   },
   errorText: {
-    color: '#f87171',
-    fontSize: 13,
+    ...textPresets.bodySmall,
+    color: colors.danger,
     lineHeight: 18,
   },
 });

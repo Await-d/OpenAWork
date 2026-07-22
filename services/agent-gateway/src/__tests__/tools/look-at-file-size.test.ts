@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   runUpstreamGenerate: vi.fn(),
   sqliteGet: vi.fn(),
   sqliteRun: vi.fn(),
+  fetch: vi.fn(),
+  lookup: vi.fn(),
   listManagedAgentsForUser: vi.fn(() => [] as unknown[]),
   selectDelegatedModelForUser: vi.fn(() => null),
   getReferenceAgentModelEntries: vi.fn(() => [] as unknown[]),
@@ -28,6 +30,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('node:fs/promises', () => ({
   stat: mocks.stat,
   readFile: mocks.readFile,
+}));
+
+vi.mock('node:dns/promises', () => ({
+  lookup: mocks.lookup,
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -105,16 +111,19 @@ describe('runLookAtTool — file size guard', () => {
     mocks.getProviderConfigForSelection.mockResolvedValue(null);
     mocks.validateWorkspacePath.mockImplementation((p: string) => p);
     mocks.resolveModelRoute.mockReturnValue(createRoute());
+    mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     mocks.runUpstreamGenerate.mockResolvedValue({
       text: 'ok',
       inputTokens: 1,
       outputTokens: 1,
       finishReason: 'stop',
     });
+    vi.stubGlobal('fetch', mocks.fetch);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('超过大小上限的文件在读取前即被拒绝（不调用 readFile / 不打上游）', async () => {
@@ -149,5 +158,28 @@ describe('runLookAtTool — file size guard', () => {
 
     expect(result).toBe('ok');
     expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('远程图片超过大小上限时在打上游前被拒绝', async () => {
+    mocks.fetch.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {
+          'content-type': 'image/png',
+          'content-length': String(1024 * 1024 * 1024),
+        },
+      }),
+    );
+
+    await expect(
+      runLookAtTool({
+        imageData: 'https://cdn.example.com/huge.png',
+        goal: 'describe',
+        parentSessionId: 'parent',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/look_at remote image too large/);
+
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,28 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
+let ExpoSpeechRecognitionModule: {
+  isRecognitionAvailable: () => boolean;
+  requestPermissionsAsync: () => Promise<{ granted: boolean; canAskAgain?: boolean }>;
+  start: (opts: Record<string, unknown>) => void;
+  stop: () => void;
+  abort: () => void;
+} | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let useSpeechRecognitionEvent: (event: string, callback: (event: any) => void) => void = () => {
+  /* noop */
+};
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('expo-speech-recognition');
+  ExpoSpeechRecognitionModule = mod.ExpoSpeechRecognitionModule;
+  useSpeechRecognitionEvent = mod.useSpeechRecognitionEvent;
+} catch {
+  // expo-speech-recognition native module not available (e.g. Expo Go)
+}
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 interface MobileVoiceRecorderProps {
   onTranscript: (text: string) => void;
@@ -52,7 +73,10 @@ function WaveBar({ recording, maxH, delay }: { recording: boolean; maxH: number;
 
   return (
     <Animated.View
-      style={[waveStyle.bar, { height, backgroundColor: recording ? '#6366f1' : '#334155' }]}
+      style={[
+        waveStyle.bar,
+        { height, backgroundColor: recording ? colors.accent : colors.lineDefault },
+      ]}
     />
   );
 }
@@ -142,6 +166,10 @@ export function MobileVoiceRecorder({ onTranscript, onClose }: MobileVoiceRecord
     cancelledRef.current = false;
 
     try {
+      if (!ExpoSpeechRecognitionModule) {
+        setError('语音识别不可用（需要 dev-client 构建）');
+        return;
+      }
       const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
       if (!available) {
         setError('当前设备不可用语音识别服务');
@@ -173,7 +201,7 @@ export function MobileVoiceRecorder({ onTranscript, onClose }: MobileVoiceRecord
   }, [recording, starting]);
 
   const stopRecording = useCallback(() => {
-    ExpoSpeechRecognitionModule.stop();
+    ExpoSpeechRecognitionModule?.stop();
   }, []);
 
   const useTranscript = useCallback(() => {
@@ -192,14 +220,14 @@ export function MobileVoiceRecorder({ onTranscript, onClose }: MobileVoiceRecord
     setTranscript('');
     finalTranscriptRef.current = '';
     clearTimer();
-    ExpoSpeechRecognitionModule.abort();
+    ExpoSpeechRecognitionModule?.abort();
     onClose();
   }, [clearTimer, onClose]);
 
   useEffect(() => {
     return () => {
       clearTimer();
-      ExpoSpeechRecognitionModule.abort();
+      ExpoSpeechRecognitionModule?.abort();
     };
   }, [clearTimer]);
 
@@ -252,27 +280,27 @@ export function MobileVoiceRecorder({ onTranscript, onClose }: MobileVoiceRecord
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surface1,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: colors.lineDefault,
     padding: 16,
     alignItems: 'center',
     gap: 12,
   },
   waveRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 30 },
-  timer: { color: '#f8fafc', fontSize: 28, fontWeight: '200', letterSpacing: 2 },
-  hint: { color: '#64748b', fontSize: 12 },
+  timer: { color: colors.textStrong, fontSize: 28, fontWeight: '200', letterSpacing: 2 },
+  hint: { color: colors.textMuted, fontSize: 12 },
   transcriptBox: {
     width: '100%',
     minHeight: 72,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.bgBase,
     padding: 12,
   },
   transcriptText: {
-    color: '#f8fafc',
+    color: colors.textStrong,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -284,7 +312,7 @@ const styles = StyleSheet.create({
   },
   btnRow: { flexDirection: 'row', alignItems: 'center', gap: 24, marginTop: 4 },
   cancelBtn: { padding: 10 },
-  cancelText: { color: '#94a3b8', fontSize: 14 },
+  cancelText: { color: colors.textMuted, fontSize: 14 },
   settingsBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -295,7 +323,7 @@ const styles = StyleSheet.create({
   useBtn: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     backgroundColor: '#0f766e',
   },
   useBtnText: { color: '#ecfeff', fontSize: 13, fontWeight: '700' },
@@ -303,10 +331,10 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#6366f1',
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  recordBtnActive: { backgroundColor: '#ef4444' },
-  recordBtnText: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  recordBtnActive: { backgroundColor: colors.danger },
+  recordBtnText: { color: colors.white, fontSize: 20, fontWeight: '700' },
 });

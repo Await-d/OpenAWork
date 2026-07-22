@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
 
 interface MobileCompanionStageProps {
   input: string;
@@ -136,10 +138,10 @@ export function MobileCompanionStage(props: MobileCompanionStageProps) {
 const styles = StyleSheet.create({
   container: {
     padding: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    borderRadius: radii.lg,
+    backgroundColor: colors.auxMuted,
     borderWidth: 1,
-    borderColor: 'rgba(91, 140, 255, 0.16)',
+    borderColor: colors.auxBorder,
     marginHorizontal: 8,
     marginBottom: 4,
   },
@@ -153,30 +155,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.08,
-    color: '#5b8cff',
+    color: colors.aux,
   },
   closeButton: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: colors.textMuted,
     padding: 4,
   },
   outputBubble: {
     padding: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(91, 140, 255, 0.08)',
+    borderRadius: radii.md,
+    backgroundColor: colors.auxMuted,
     marginBottom: 6,
   },
   outputBadge: {
     fontSize: 9,
     fontWeight: '600',
-    color: '#5b8cff',
+    color: colors.aux,
     textTransform: 'uppercase',
     letterSpacing: 0.1,
     marginBottom: 2,
   },
   outputText: {
     fontSize: 12,
-    color: '#475569',
+    color: colors.textDefault,
     lineHeight: 18,
   },
   tagRow: {
@@ -187,14 +189,14 @@ const styles = StyleSheet.create({
   tag: {
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.3)',
-    backgroundColor: 'rgba(91, 140, 255, 0.04)',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
   },
   tagText: {
     fontSize: 9,
-    color: '#64748b',
+    color: colors.textMuted,
   },
   floatingButton: {
     position: 'absolute',
@@ -203,14 +205,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(91, 140, 255, 0.16)',
+    backgroundColor: colors.auxMuted,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(91, 140, 255, 0.24)',
+    borderColor: colors.auxBorder,
   },
   floatingButtonGlyph: {
     fontSize: 16,
-    color: '#5b8cff',
+    color: colors.aux,
   },
 });

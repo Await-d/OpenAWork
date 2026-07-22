@@ -13,6 +13,7 @@ import {
   Share,
 } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/auth';
 import { useGatewayClient } from '../hooks/useGatewayClient';
 import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
@@ -27,7 +28,7 @@ import {
   buildChatStreamToken,
   shouldApplyChatSessionMutation,
   shouldApplyChatStreamMutation,
-} from '../hooks/chat-stream-guard.js';
+} from '../hooks/chat-stream-guard';
 import type { AgentActivity } from '../components/AgentActivityPanel';
 import { AgentActivityPanel } from '../components/AgentActivityPanel';
 import { MobileVoiceRecorder } from '../components/MobileVoiceRecorder';
@@ -40,23 +41,21 @@ import { ActionSheet } from '../components/ActionSheet';
 import type { ActionSheetButton } from '../components/ActionSheet';
 import type { DialogueMode } from '@openAwork/shared';
 import { DialogueModeSelector } from '../components/DialogueModeSelector';
+import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { reconcileTaskActivities } from './chat-task-activities.js';
+import { reconcileTaskActivities } from './chat-task-activities';
 import {
   buildChatScreenSessionResetState,
   buildChatScreenStaleSendAbortState,
-} from './chat-screen-state.js';
-import { createChatScreenGuardedStreamHandlers } from './chat-screen-stream-handlers.js';
+} from './chat-screen-state';
+import { createChatScreenGuardedStreamHandlers } from './chat-screen-stream-handlers';
 import ExpoPersistenceAdapter, {
   DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS,
   loadImageGenerationDefaults,
   type MobileImageGenerationDefaults,
 } from '../store/providerPersistence';
-import {
-  normalizeMobileChatMessages,
-  type MobileChatMessage,
-} from '../chat/chat-message-content.js';
+import { normalizeMobileChatMessages, type MobileChatMessage } from '../chat/chat-message-content';
 import {
   buildChatDraftSummary,
   findChatMessageMatches,
@@ -67,7 +66,10 @@ import {
   MOBILE_PROMPT_TEMPLATES,
   moveChatSearchCursor,
   toInputImageParts,
-} from './chat-message-actions.js';
+} from './chat-message-actions';
+import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
+import { textPresets } from '../theme/typography';
 
 interface Message extends MobileChatMessage {
   streaming?: boolean;
@@ -141,6 +143,7 @@ function inferAttachmentType(input: {
 
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
+  const router = useRouter();
   const { stream, disconnect } = useGatewayClient(gatewayUrl, accessToken);
   const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
   const persistence = useMemo(() => new ExpoPersistenceAdapter(), []);
@@ -1023,31 +1026,45 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      <View style={styles.toolbar}>
+      {/* Chat Header */}
+      <View style={styles.chatHeader}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
+          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
+        </TouchableOpacity>
+        <Text style={styles.chatHeaderTitle} numberOfLines={1}>
+          聊天
+        </Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerActionBtn}
+            onPress={() => setSearchOpen((prev) => !prev)}
+          >
+            <Ionicons
+              name="search-outline"
+              size={18}
+              color={searchOpen ? colors.warning : colors.textMuted}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerActionBtn}>
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Context Bar — pills */}
+      <View style={styles.contextBar}>
         <DialogueModeSelector mode={dialogueMode} onChange={setDialogueMode} />
         <TouchableOpacity
-          style={[styles.imageModeToggle, searchOpen && styles.searchToggleActive]}
-          onPress={() => setSearchOpen((prev) => !prev)}
-        >
-          <Text style={[styles.imageModeToggleText, searchOpen && styles.searchToggleTextActive]}>
-            搜索
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.imageModeToggle,
-            imageGenerationMode && styles.imageModeToggleActive,
-            !hasConfiguredImageModel && styles.imageModeToggleDisabled,
-          ]}
+          style={[styles.contextPill, imageGenerationMode && styles.contextPillActive]}
           disabled={!hasConfiguredImageModel || sending || imageGenerationBusy}
           onPress={() => setImageGenerationMode((prev) => !prev)}
         >
-          <Text
-            style={[
-              styles.imageModeToggleText,
-              imageGenerationMode && styles.imageModeToggleTextActive,
-            ]}
-          >
+          <Ionicons
+            name="image-outline"
+            size={12}
+            color={imageGenerationMode ? colors.contrast : colors.textMuted}
+          />
+          <Text style={[styles.contextPillText, imageGenerationMode && { color: colors.contrast }]}>
             {imageGenerationMode ? '生图模式' : '图片模式'}
           </Text>
         </TouchableOpacity>
@@ -1090,7 +1107,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         scrollEventThrottle={80}
         ListEmptyComponent={
           historyLoading ? (
-            <ActivityIndicator color="#6366f1" style={{ marginTop: 40 }} />
+            <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
           ) : (
             <Text style={styles.empty}>开始对话…</Text>
           )
@@ -1163,11 +1180,6 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           onClose={() => setShowVoice(false)}
         />
       ) : null}
-
-      <MobileAttachmentBar
-        attachments={attachments}
-        onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
-      />
 
       {imageGenerationMode ? (
         <View style={styles.imagePanel}>
@@ -1245,7 +1257,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             value={imageDefaults.size}
             onChangeText={(size) => setImageDefaults((prev) => ({ ...prev, size }))}
             placeholder="例如 2560x1440"
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.textSubtle}
             autoCapitalize="none"
             autoCorrect={false}
             editable={!imageGenerationBusy}
@@ -1375,44 +1387,73 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         </View>
       ) : null}
 
-      <View style={styles.inputRow}>
-        <TouchableOpacity style={styles.iconBtn} onPress={handleAddAttachment}>
-          <Text style={styles.iconBtnText}>📎</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setShowVoice(true)}>
-          <Text style={styles.iconBtnText}>🎤</Text>
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder={imageGenerationMode ? '描述你想生成或编辑的图片…' : '发送消息…'}
-          placeholderTextColor="#64748b"
-          multiline
-          editable={!sending && !imageGenerationBusy}
-        />
-        {sending ? (
-          <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: '#ef4444' }]}
-            onPress={handleStop}
-          >
-            <Text style={styles.sendBtnText}>■</Text>
+      {/* Compact Composer */}
+      <View style={styles.composerCard}>
+        {attachments.length > 0 && (
+          <MobileAttachmentBar
+            attachments={attachments}
+            onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+          />
+        )}
+
+        <View style={styles.inputRow}>
+          <TouchableOpacity style={styles.iconBtn} onPress={handleAddAttachment}>
+            <Ionicons name="attach-outline" size={18} color={colors.textMuted} />
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={handleSend}
-            disabled={(!input.trim() && attachments.length === 0) || imageGenerationBusy}
-            style={[
-              styles.sendBtn,
-              (!input.trim() && attachments.length === 0) || imageGenerationBusy
-                ? styles.sendBtnDisabled
-                : undefined,
-            ]}
-          >
-            <Text style={styles.sendBtnText}>
-              {imageGenerationBusy ? '…' : imageGenerationMode ? '✦' : '↑'}
-            </Text>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setShowVoice(true)}>
+            <Ionicons name="mic-outline" size={18} color={colors.textMuted} />
           </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            value={input}
+            onChangeText={setInput}
+            placeholder={imageGenerationMode ? '描述你想生成或编辑的图片…' : '补充要求，或继续输入'}
+            placeholderTextColor={colors.textSubtle}
+            multiline
+            editable={!sending && !imageGenerationBusy}
+          />
+          {sending ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: colors.complement }]}
+              onPress={handleStop}
+            >
+              <Ionicons name="stop" size={16} color={colors.white} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={handleSend}
+              disabled={(!input.trim() && attachments.length === 0) || imageGenerationBusy}
+              style={[
+                styles.sendBtn,
+                (!input.trim() && attachments.length === 0) || imageGenerationBusy
+                  ? styles.sendBtnDisabled
+                  : undefined,
+              ]}
+            >
+              <Ionicons
+                name={imageGenerationMode ? 'sparkles' : 'arrow-up'}
+                size={18}
+                color={colors.white}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Quick templates */}
+        {!imageGenerationMode && (
+          <View style={styles.quickTemplateRow}>
+            <Text style={styles.quickLabel}>快捷</Text>
+            {MOBILE_PROMPT_TEMPLATES.map((template) => (
+              <TouchableOpacity
+                key={template.id}
+                disabled={sending || imageGenerationBusy}
+                onPress={() => applyPromptTemplate(template.prompt)}
+                style={[styles.quickChip, (sending || imageGenerationBusy) && { opacity: 0.45 }]}
+              >
+                <Text style={styles.quickChipText}>{template.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
       </View>
 
@@ -1442,39 +1483,139 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
+  container: { flex: 1, backgroundColor: colors.bgBase },
   list: { padding: 12, paddingBottom: 4 },
-  empty: { color: '#64748b', textAlign: 'center', marginTop: 60, fontSize: 14 },
+  empty: { ...textPresets.body, color: colors.textMuted, textAlign: 'center', marginTop: 60 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: 8,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    borderTopColor: colors.lineDefault,
     gap: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: '#1e293b',
-    color: '#f8fafc',
-    borderRadius: 10,
+    backgroundColor: colors.surface2,
+    color: colors.textStrong,
+    borderRadius: radii.lg,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
     maxHeight: 120,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.lineDefault,
   },
   sendBtn: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: '#6366f1',
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendBtnDisabled: { opacity: 0.4 },
-  sendBtnText: { color: '#fff', fontSize: 20, fontWeight: '700', lineHeight: 22 },
+  sendBtnText: { color: colors.white, fontSize: 20, fontWeight: '700', lineHeight: 22 },
+
+  /* Chat Header */
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 44,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lineDefault,
+  },
+  headerBackBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatHeaderTitle: {
+    ...textPresets.cardTitle,
+    color: colors.textStrong,
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  headerActionBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Context Bar */
+  contextBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lineDefault,
+  },
+  contextPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surface2,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.lineSubtle,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  contextPillActive: {
+    backgroundColor: colors.contrastMuted,
+    borderColor: colors.contrastBorder,
+  },
+  contextPillText: {
+    ...textPresets.caption,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+
+  /* Composer Card */
+  composerCard: {
+    backgroundColor: colors.surface1,
+    borderRadius: radii.xl + 8,
+    borderWidth: 1,
+    borderColor: colors.lineDefault,
+    margin: 16,
+    padding: 10,
+    gap: 6,
+  },
+
+  /* Quick templates */
+  quickTemplateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickLabel: {
+    ...textPresets.caption,
+    color: colors.textMuted,
+    fontWeight: '800',
+  },
+  quickChip: {
+    backgroundColor: colors.surface2,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.lineDefault,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  quickChipText: {
+    ...textPresets.caption,
+    color: colors.textDefault,
+    fontWeight: '700',
+  },
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1482,36 +1623,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: colors.lineDefault,
   },
   imageModeToggle: {
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#1e293b',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   imageModeToggleActive: {
-    borderColor: '#8b5cf6',
-    backgroundColor: '#8b5cf622',
+    borderColor: colors.contrastBorder,
+    backgroundColor: colors.contrastMuted,
   },
   searchToggleActive: {
-    borderColor: '#fbbf24',
-    backgroundColor: '#fbbf2422',
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningMuted,
   },
   imageModeToggleDisabled: { opacity: 0.45 },
-  imageModeToggleText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
-  imageModeToggleTextActive: { color: '#8b5cf6' },
-  searchToggleTextActive: { color: '#fbbf24' },
+  imageModeToggleText: { ...textPresets.label, color: colors.textMuted },
+  imageModeToggleTextActive: { color: colors.contrast },
+  searchToggleTextActive: { color: colors.warning },
   modeHintBar: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#111827',
-    backgroundColor: '#020617',
+    borderBottomColor: colors.lineSubtle,
+    backgroundColor: colors.surfaceSoft,
   },
-  modeHintText: { color: '#64748b', fontSize: 11, lineHeight: 15 },
+  modeHintText: { ...textPresets.caption, color: colors.textMuted, lineHeight: 15 },
   iconBtn: {
     width: 36,
     height: 36,
@@ -1521,13 +1662,12 @@ const styles = StyleSheet.create({
   iconBtnText: { fontSize: 18 },
   historySection: {
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    borderTopColor: colors.lineDefault,
     paddingTop: 6,
   },
   historyTitle: {
-    color: '#94a3b8',
-    fontSize: 12,
-    fontWeight: '600',
+    ...textPresets.label,
+    color: colors.textMuted,
     paddingHorizontal: 12,
     marginBottom: 2,
   },
@@ -1540,30 +1680,34 @@ const styles = StyleSheet.create({
     paddingTop: 7,
     paddingBottom: 4,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    backgroundColor: '#0f172a',
+    borderTopColor: colors.lineDefault,
+    backgroundColor: colors.bgBase,
   },
-  composerMetaText: { flex: 1, color: '#64748b', fontSize: 11, lineHeight: 15 },
-  composerMetaAction: { color: '#fca5a5', fontSize: 11, fontWeight: '800' },
+  composerMetaText: { flex: 1, ...textPresets.caption, color: colors.textMuted, lineHeight: 15 },
+  composerMetaAction: { ...textPresets.caption, color: colors.danger, fontWeight: '800' },
   promptTemplateBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.bgBase,
   },
-  promptTemplateLabel: { color: '#475569', fontSize: 11, fontWeight: '800' },
+  promptTemplateLabel: { ...textPresets.caption, color: colors.textSubtle, fontWeight: '800' },
   promptTemplateChip: {
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#111827',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   promptTemplateChipDisabled: { opacity: 0.45 },
-  promptTemplateChipText: { color: '#cbd5e1', fontSize: 11, fontWeight: '700' },
+  promptTemplateChipText: {
+    ...textPresets.bodySmall,
+    color: colors.textDefault,
+    fontWeight: '700',
+  },
   streamErrorBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1571,10 +1715,10 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 8,
     marginBottom: 4,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#ef444455',
-    backgroundColor: '#ef444414',
+    borderColor: colors.dangerBorder,
+    backgroundColor: colors.dangerMuted,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -1583,64 +1727,64 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     overflow: 'hidden',
-    backgroundColor: '#ef444422',
-    color: '#fca5a5',
+    backgroundColor: colors.dangerMuted,
+    color: colors.danger,
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 18,
     textAlign: 'center',
   },
-  streamErrorText: { flex: 1, color: '#fca5a5', fontSize: 12, lineHeight: 17 },
-  streamErrorDismiss: { color: '#fecaca', fontSize: 12, fontWeight: '700' },
-  streamErrorRetry: { color: '#fee2e2', fontSize: 12, fontWeight: '800' },
+  streamErrorText: { flex: 1, ...textPresets.bodySmall, color: colors.danger, lineHeight: 17 },
+  streamErrorDismiss: { ...textPresets.label, color: colors.danger, fontWeight: '700' },
+  streamErrorRetry: { ...textPresets.label, color: colors.danger, fontWeight: '800' },
   streamErrorRetryDisabled: { opacity: 0.45 },
   restoreFocusButton: {
     position: 'absolute',
     right: 14,
     bottom: 108,
     zIndex: 10,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#6366f166',
-    backgroundColor: '#111827ee',
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.surfaceGlass,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
+    shadowColor: colors.black,
+    shadowOpacity: 0.15,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 5,
   },
-  restoreFocusText: { color: '#c7d2fe', fontSize: 12, fontWeight: '800' },
+  restoreFocusText: { ...textPresets.label, color: colors.accent, fontWeight: '800' },
   imagePanel: {
     marginHorizontal: 12,
     marginTop: 10,
     marginBottom: 8,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#8b5cf655',
-    backgroundColor: '#8b5cf612',
+    borderColor: colors.contrastBorder,
+    backgroundColor: colors.contrastMuted,
     padding: 12,
     gap: 8,
   },
-  imagePanelTitle: { color: '#e2e8f0', fontSize: 13, fontWeight: '700' },
-  imagePanelText: { color: '#cbd5e1', fontSize: 12, lineHeight: 18 },
-  imagePanelHint: { color: '#94a3b8', fontSize: 11, lineHeight: 16 },
-  imagePanelHintDanger: { color: '#f87171' },
+  imagePanelTitle: { ...textPresets.body, color: colors.textDefault, fontWeight: '700' },
+  imagePanelText: { ...textPresets.bodySmall, color: colors.textDefault, lineHeight: 18 },
+  imagePanelHint: { ...textPresets.caption, color: colors.textMuted, lineHeight: 16 },
+  imagePanelHintDanger: { color: colors.danger },
   imagePresetGroups: { gap: 10 },
   imagePresetGroup: { gap: 6 },
-  imagePresetGroupTitle: { color: '#e2e8f0', fontSize: 12, fontWeight: '700' },
-  imagePresetGroupHint: { color: '#94a3b8', fontSize: 11, lineHeight: 16 },
+  imagePresetGroupTitle: { ...textPresets.label, color: colors.textDefault },
+  imagePresetGroupHint: { ...textPresets.caption, color: colors.textMuted, lineHeight: 16 },
   imageOptionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#1e293b',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
   },
-  optionChipActive: { borderColor: '#8b5cf6', backgroundColor: '#8b5cf622' },
-  optionChipText: { color: '#94a3b8', fontSize: 11 },
-  optionChipTextActive: { color: '#8b5cf6', fontWeight: '600' },
+  optionChipActive: { borderColor: colors.contrastBorder, backgroundColor: colors.contrastMuted },
+  optionChipText: { ...textPresets.caption, color: colors.textMuted },
+  optionChipTextActive: { color: colors.contrast, fontWeight: '600' },
 });

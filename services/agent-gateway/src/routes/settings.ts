@@ -1658,6 +1658,50 @@ ${contextBlock}
     },
   );
 
+  // ── Custom Base URL ──────────────────────────────────────────
+
+  const OPENAWORK_BASE_URL_KEY = 'openawork_base_url';
+
+  const baseUrlSettingsSchema = z.object({
+    baseUrl: z
+      .string()
+      .url()
+      .transform((url) => url.replace(/\/+$/, '')),
+  });
+
+  app.get(
+    '/settings/base-url',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.base-url.get');
+      const user = request.user as JwtPayload;
+      const row = sqliteGet<{ value: string }>(
+        'SELECT value FROM user_settings WHERE user_id = ? AND key = ?',
+        [user.sub, OPENAWORK_BASE_URL_KEY],
+      );
+      const baseUrl = row?.value ?? 'https://openwork.app';
+      step.succeed(undefined, { baseUrl });
+      return reply.send({ baseUrl });
+    },
+  );
+
+  app.put(
+    '/settings/base-url',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.base-url.put');
+      const user = request.user as JwtPayload;
+      const parsed = parseBody(baseUrlSettingsSchema, request.body);
+      sqliteRun('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', [
+        user.sub,
+        OPENAWORK_BASE_URL_KEY,
+        parsed.baseUrl,
+      ]);
+      step.succeed(undefined, { baseUrl: parsed.baseUrl });
+      return reply.send({ ok: true });
+    },
+  );
+
   // ── Telemetry consent & event reporting ────────────────────────
 
   const telemetryConsentSchema = z.object({

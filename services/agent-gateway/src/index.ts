@@ -125,6 +125,14 @@ installProcessSafetyHandlers({ logger: app.log });
 const port = Number(globalThis.process?.env['GATEWAY_PORT'] ?? 3000);
 const host = globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0';
 
+/**
+ * 自定义域名，用于生成分享链接等对外 URL。
+ * 默认为 https://openwork.app
+ */
+export const OPENAWORK_BASE_URL = (
+  globalThis.process?.env['OPENAWORK_BASE_URL'] ?? 'https://openwork.app'
+).replace(/\/+$/, '');
+
 await app.register(cors, { origin: true });
 await app.register(compress, {
   threshold: 1024,

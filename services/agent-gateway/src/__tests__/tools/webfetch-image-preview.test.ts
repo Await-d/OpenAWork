@@ -22,19 +22,35 @@ describe('webfetch image preview', () => {
     );
 
     const result = await webfetchTool.execute(
-      { url: imageUrl, format: 'markdown', timeout: 20 },
+      { url: imageUrl, format: 'image-preview', timeout: 20 },
       NO_SIGNAL,
     );
 
     expect(result).toEqual({
       url: imageUrl,
-      format: 'markdown',
+      format: 'image-preview',
       status: 200,
       contentType: 'image/png',
       mediaKind: 'image',
       imageUrl,
       content: `![Fetched image](${imageUrl})`,
     });
+  });
+
+  it('当 format=image-preview 但目标并非图片时返回明确错误', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('<html>not an image</html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+    );
+
+    await expect(
+      webfetchTool.execute(
+        { url: 'https://example.com/article', format: 'image-preview', timeout: 20 },
+        NO_SIGNAL,
+      ),
+    ).rejects.toThrow('webfetch image-preview requires an image response');
   });
 
   it('rejects non-http webfetch URLs at the schema boundary', () => {

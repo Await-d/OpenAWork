@@ -1,9 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import type { DialogueMode, InputImageContent, RunEvent } from '@openAwork/shared';
-import {
-  extractRuntimeTextDelta,
-  extractRuntimeThinkingDelta,
-} from '../chat/chat-message-content.js';
+import { extractRuntimeTextDelta, extractRuntimeThinkingDelta } from '../chat/chat-message-content';
 
 export type ActivityEvent =
   | { kind: 'tool_start'; id: string; name: string }

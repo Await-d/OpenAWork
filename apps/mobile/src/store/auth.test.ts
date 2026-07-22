@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeMobileGatewayUrl,
   resolveDefaultMobileGatewayUrl,
-} from './mobile-gateway-defaults.js';
+} from './mobile-gateway-defaults';
 
 describe('resolveDefaultMobileGatewayUrl', () => {
   it('优先使用 Expo 构建时注入的 HTTPS 网关地址', () => {
