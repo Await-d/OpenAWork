@@ -31,9 +31,15 @@ use tauri_plugin_updater::UpdaterExt;
 const DESKTOP_HOME_FOLDER: &str = ".openAwork";
 const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
 const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
-const PROXY_UPDATE_ENDPOINTS: [&str; 2] = [
-    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json",
+
+/// 预览版代理更新端点（ghp.ci 加速，国内优先）
+const PROXY_UPDATE_ENDPOINTS_PREVIEW: [&str; 1] = [
     "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest-cn.json",
+];
+
+/// 发行版代理更新端点（ghp.ci 加速，国内优先）
+const PROXY_UPDATE_ENDPOINTS_STABLE: [&str; 1] = [
+    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json",
 ];
 /// gateway 子目录名（在 effective data_root 下）。与 storage-paths.ts 中的
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。
@@ -79,8 +85,12 @@ fn shutdown_gateway_child_from_state(gateway_state: &Arc<Mutex<GatewayState>>) {
     }
 }
 
-fn build_proxy_update_endpoints(proxy_prefix: &str) -> Result<Vec<Url>, String> {
-    PROXY_UPDATE_ENDPOINTS
+fn build_proxy_update_endpoints(proxy_prefix: &str, channel: &str) -> Result<Vec<Url>, String> {
+    let endpoints = match channel {
+        "stable" => PROXY_UPDATE_ENDPOINTS_STABLE.as_slice(),
+        _ => PROXY_UPDATE_ENDPOINTS_PREVIEW.as_slice(),
+    };
+    endpoints
         .iter()
         .map(|url| Url::parse(&format!("{proxy_prefix}{url}")))
         .collect::<Result<Vec<_>, _>>()
@@ -1130,13 +1140,15 @@ async fn restart_app(app: tauri::AppHandle, state: State<'_, GatewayProcess>) ->
 async fn download_and_install_proxy_update(
     app: tauri::AppHandle,
     proxy_prefix: String,
+    channel: Option<String>,
 ) -> Result<(), String> {
     let proxy_prefix = proxy_prefix.trim();
     if proxy_prefix.is_empty() {
         return Err("代理前缀不能为空。".to_string());
     }
 
-    let endpoints = build_proxy_update_endpoints(proxy_prefix)?;
+    let channel = channel.unwrap_or_else(|| "preview".to_string());
+    let endpoints = build_proxy_update_endpoints(proxy_prefix, &channel)?;
     let gateway_process_for_updater = app.state::<GatewayProcess>().0.clone();
     let app_handle = app.clone();
     let updater = app
@@ -1194,6 +1206,20 @@ async fn download_and_install_proxy_update(
 #[tauri::command]
 fn current_updater_platform() -> Result<String, String> {
     Ok(updater_platform_key()?.to_string())
+}
+
+/// 返回当前构建的更新渠道（preview / stable）。
+/// 目前默认返回 "preview"；未来可通过编译时环境变量 UPDATE_CHANNEL 覆盖。
+#[tauri::command]
+fn current_update_channel() -> Result<String, String> {
+    #[cfg(feature = "stable-channel")]
+    {
+        Ok("stable".to_string())
+    }
+    #[cfg(not(feature = "stable-channel"))]
+    {
+        Ok("preview".to_string())
+    }
 }
 
 #[tauri::command]
@@ -1930,6 +1956,7 @@ pub fn run() {
             restart_app,
             download_and_install_proxy_update,
             current_updater_platform,
+            current_update_channel,
             list_lan_addresses,
             check_local_gateway_health,
             gateway_status,

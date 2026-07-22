@@ -23,16 +23,21 @@ export const GITHUB_PROXIES: GitHubProxy[] = [
   { name: 'GHProxy.net', prefix: 'https://ghproxy.net/' },
 ];
 
-const PROBE_URLS = [
-  'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json',
-  'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
-] as const;
+export type UpdateChannel = 'stable' | 'preview';
+
+const PROBE_URLS: Record<UpdateChannel, readonly string[]> = {
+  stable: ['https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json'],
+  preview: [
+    'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
+  ],
+};
 
 /** Timeout for probe requests (ms) */
 const PROBE_TIMEOUT_MS = 8000;
 
-/** Session-level cache: once a working proxy is found, reuse it */
+/** Session-level cache: once a working proxy is found, reuse it (per channel) */
 let cachedProxy: GitHubProxy | null = null;
+let cachedChannel: UpdateChannel | null = null;
 let cacheExpiry = 0;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -50,8 +55,12 @@ async function probeUrl(url: string, signal: AbortSignal): Promise<boolean> {
   }
 }
 
-async function probeProxy(proxy: GitHubProxy, signal: AbortSignal): Promise<GitHubProxy | null> {
-  const probes = PROBE_URLS.map((probeUrlCandidate) =>
+async function probeProxy(
+  proxy: GitHubProxy,
+  channel: UpdateChannel,
+  signal: AbortSignal,
+): Promise<GitHubProxy | null> {
+  const probes = PROBE_URLS[channel].map((probeUrlCandidate) =>
     probeUrl(`${proxy.prefix}${probeUrlCandidate}`, signal),
   );
   const results = await Promise.all(probes);
@@ -62,9 +71,11 @@ async function probeProxy(proxy: GitHubProxy, signal: AbortSignal): Promise<GitH
  * Probe all known proxies concurrently and return the first one that responds.
  * Returns null if none are reachable within the timeout.
  */
-export async function detectFastestProxy(): Promise<GitHubProxy | null> {
-  // Return cached result if still valid
-  if (cachedProxy && Date.now() < cacheExpiry) {
+export async function detectFastestProxy(
+  channel: UpdateChannel = 'preview',
+): Promise<GitHubProxy | null> {
+  // Return cached result if still valid and same channel
+  if (cachedProxy && cachedChannel === channel && Date.now() < cacheExpiry) {
     return cachedProxy;
   }
 
@@ -85,7 +96,7 @@ export async function detectFastestProxy(): Promise<GitHubProxy | null> {
     }, PROBE_TIMEOUT_MS);
 
     for (const proxy of GITHUB_PROXIES) {
-      void probeProxy(proxy, signal).then((result) => {
+      void probeProxy(proxy, channel, signal).then((result) => {
         pending -= 1;
         if (result && !settled) {
           settled = true;
@@ -103,6 +114,7 @@ export async function detectFastestProxy(): Promise<GitHubProxy | null> {
 
   if (result) {
     cachedProxy = result;
+    cachedChannel = channel;
     cacheExpiry = Date.now() + CACHE_TTL_MS;
   }
 
@@ -112,12 +124,14 @@ export async function detectFastestProxy(): Promise<GitHubProxy | null> {
 /**
  * Test if direct GitHub access works (without proxy).
  */
-export async function canReachGitHubDirectly(): Promise<boolean> {
+export async function canReachGitHubDirectly(channel: UpdateChannel = 'preview'): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     const results = await Promise.all(
-      PROBE_URLS.map((probeUrlCandidate) => probeUrl(probeUrlCandidate, controller.signal)),
+      PROBE_URLS[channel].map((probeUrlCandidate) =>
+        probeUrl(probeUrlCandidate, controller.signal),
+      ),
     );
     clearTimeout(timer);
     return results.some(Boolean);
@@ -136,6 +150,7 @@ export function proxyUrl(githubUrl: string, proxy: GitHubProxy): string {
 /** Clear the cached proxy (e.g. after a failure) */
 export function clearProxyCache(): void {
   cachedProxy = null;
+  cachedChannel = null;
   cacheExpiry = 0;
 }
 
@@ -143,6 +158,14 @@ export function clearProxyCache(): void {
 export function getCachedProxy(): GitHubProxy | null {
   if (cachedProxy && Date.now() < cacheExpiry) {
     return cachedProxy;
+  }
+  return null;
+}
+
+/** Get the currently cached channel (for UI display) */
+export function getCachedChannel(): UpdateChannel | null {
+  if (cachedProxy && cachedChannel && Date.now() < cacheExpiry) {
+    return cachedChannel;
   }
   return null;
 }

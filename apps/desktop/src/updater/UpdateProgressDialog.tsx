@@ -116,7 +116,7 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
           throw new UpdateError('unknown', `代理 ${result.proxyUsed.name} 当前不支持自动安装。`);
         }
         await stopGatewayBeforeInstall();
-        await downloadAndInstallProxyUpdate(result.proxyUsed, (p) => {
+        await downloadAndInstallProxyUpdate(result.proxyUsed, result.channel, (p) => {
           if (cancelledRef.current) return;
           setProgress(p.percent);
           setDownloaded(p.downloaded);
@@ -237,7 +237,26 @@ ${releaseNotes}`
           gap: '1rem',
         }}
       >
-        <div style={{ fontSize: 16, fontWeight: 600 }}>软件更新</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>软件更新</span>
+          {result?.channel && (
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background:
+                  result.channel === 'preview'
+                    ? 'hsl(var(--primary) / 0.15)'
+                    : 'hsl(142 71% 45% / 0.15)',
+                color: result.channel === 'preview' ? 'hsl(var(--primary))' : 'hsl(142 71% 45%)',
+                fontWeight: 600,
+              }}
+            >
+              {result.channel === 'preview' ? '预览版' : '发行版'}
+            </span>
+          )}
+        </div>
         <div
           style={{
             fontSize: 14,

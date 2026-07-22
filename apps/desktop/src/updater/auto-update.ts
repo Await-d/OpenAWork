@@ -1,8 +1,13 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { invoke } from '@tauri-apps/api/core';
-import { detectFastestProxy, proxyUrl, type GitHubProxy } from './github-proxy.js';
+import {
+  detectFastestProxy,
+  proxyUrl,
+  type GitHubProxy,
+  type UpdateChannel,
+} from './github-proxy.js';
 
-export type UpdateChannel = 'stable' | 'preview';
+export type { UpdateChannel } from './github-proxy.js';
 
 export interface DownloadProgress {
   downloaded: number;
@@ -16,6 +21,8 @@ export interface UpdateCheckResult {
   version: string | null;
   notes: string | null;
   installMode: 'native' | 'proxy-auto' | 'manual';
+  /** The update channel that was checked */
+  channel: UpdateChannel;
   /** Non-null when the result was obtained through a proxy */
   proxyUsed: GitHubProxy | null;
   /** Proxied download URL (available when proxyUsed is set and update is available) */
@@ -66,6 +73,34 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
+/**
+ * Detect the current build's update channel.
+ * Tries the Rust command first; falls back to 'preview' as the default
+ * (currently the only channel with published releases).
+ */
+export async function detectChannel(): Promise<UpdateChannel> {
+  try {
+    const channel = await invoke<string>('current_update_channel');
+    if (channel === 'stable' || channel === 'preview') {
+      return channel;
+    }
+  } catch {
+    // Command not available or returned unexpected value
+  }
+  // Default: preview — the only channel with releases as of 2026-07
+  return 'preview';
+}
+
+/** Return the upstream endpoints for the given channel. */
+function endpointsForChannel(channel: UpdateChannel): string[] {
+  if (channel === 'preview') {
+    return [
+      'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
+    ];
+  }
+  return ['https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json'];
+}
+
 // --- Tauri updater JSON format ---
 interface TauriUpdaterPlatform {
   signature: string;
@@ -78,12 +113,6 @@ interface TauriUpdaterJson {
   pub_date?: string;
   platforms: Record<string, TauriUpdaterPlatform>;
 }
-
-/** The direct GitHub endpoints configured in tauri.conf.json */
-const UPDATER_ENDPOINTS = [
-  'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json',
-  'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
-];
 
 /** Detect current platform key for Tauri updater JSON */
 async function getCurrentPlatformKey(): Promise<string> {
@@ -111,9 +140,10 @@ async function getCurrentPlatformKey(): Promise<string> {
  */
 async function fetchUpdaterJsonViaProxy(
   proxy: GitHubProxy,
+  channel: UpdateChannel,
 ): Promise<{ json: TauriUpdaterJson; platformEntry: TauriUpdaterPlatform } | null> {
   const platformKey = await getCurrentPlatformKey();
-  for (const endpoint of UPDATER_ENDPOINTS) {
+  for (const endpoint of endpointsForChannel(channel)) {
     const url = proxyUrl(endpoint, proxy);
     try {
       const controller = new AbortController();
@@ -138,6 +168,8 @@ async function fetchUpdaterJsonViaProxy(
  * all configured endpoints (including proxy ones).
  */
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  const channel = await detectChannel();
+
   // First, try Tauri's native check (endpoints include proxies in tauri.conf.json)
   try {
     const update = await check();
@@ -148,6 +180,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
         version: null,
         notes: null,
         installMode: 'native',
+        channel,
         proxyUsed: null,
       };
     }
@@ -157,6 +190,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
       version: update.version,
       notes: update.body ?? null,
       installMode: 'native',
+      channel,
       proxyUsed: null,
     };
   } catch (nativeErr) {
@@ -168,12 +202,12 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   }
 
   // Fallback: probe proxies and fetch latest.json manually
-  const proxy = await detectFastestProxy();
+  const proxy = await detectFastestProxy(channel);
   if (!proxy) {
     throw new UpdateError('network', '无法连接到 GitHub 或任何加速镜像，请检查网络连接。');
   }
 
-  const result = await fetchUpdaterJsonViaProxy(proxy);
+  const result = await fetchUpdaterJsonViaProxy(proxy, channel);
   if (!result) {
     throw new UpdateError('network', `通过代理 ${proxy.name} 获取更新信息失败。`);
   }
@@ -188,6 +222,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     version: json.version,
     notes: json.notes ?? null,
     installMode: supportsProxyAutoInstall(proxy) ? 'proxy-auto' : 'manual',
+    channel,
     proxyUsed: proxy,
     proxiedDownloadUrl: proxiedUrl,
   };
@@ -357,5 +392,10 @@ export async function silentUpdateCheck(): Promise<UpdateCheckResult | null> {
 }
 
 /** Re-export proxy utilities for UI consumption */
-export { detectFastestProxy, clearProxyCache, getCachedProxy } from './github-proxy.js';
+export {
+  detectFastestProxy,
+  clearProxyCache,
+  getCachedProxy,
+  getCachedChannel,
+} from './github-proxy.js';
 export type { GitHubProxy } from './github-proxy.js';

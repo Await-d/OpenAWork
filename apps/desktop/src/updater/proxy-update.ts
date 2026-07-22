@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { supportsProxyAutoInstall, toUpdateError } from './auto-update.js';
-import type { GitHubProxy } from './github-proxy.js';
+import type { GitHubProxy, UpdateChannel } from './github-proxy.js';
 
 const PROXY_UPDATE_EVENT = 'desktop:proxy-update-download';
 
@@ -33,6 +33,7 @@ function clampPercent(value: number): number {
 
 export async function downloadAndInstallProxyUpdate(
   proxy: GitHubProxy,
+  channel: UpdateChannel,
   onProgress: (progress: ProxyUpdateProgress) => void,
 ): Promise<void> {
   if (!supportsProxyAutoInstall(proxy)) {
@@ -61,6 +62,7 @@ export async function downloadAndInstallProxyUpdate(
   try {
     await invoke<void>('download_and_install_proxy_update', {
       proxyPrefix: proxy.prefix,
+      channel,
     });
     onProgress({ downloaded, total, percent: 100 });
   } catch (error) {

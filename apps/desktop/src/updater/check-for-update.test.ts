@@ -55,7 +55,9 @@ describe('checkForUpdate', () => {
 
   it('原生检查失败且稳定 latest.json 不存在时，仍可通过 preview 端点完成代理回退检查', async () => {
     vi.mocked(check).mockRejectedValueOnce(new Error('network unreachable'));
-    mocks.invoke.mockResolvedValueOnce('windows-x86_64');
+    mocks.invoke
+      .mockResolvedValueOnce('preview') // detectChannel()
+      .mockResolvedValueOnce('windows-x86_64'); // getCurrentPlatformKey()
     Object.defineProperty(window.navigator, 'platform', {
       value: 'Win32',
       configurable: true,
@@ -107,7 +109,9 @@ describe('checkForUpdate', () => {
 
   it('代理回退检查在 Intel macOS 上使用 darwin-x86_64 平台键', async () => {
     vi.mocked(check).mockRejectedValueOnce(new Error('network unreachable'));
-    mocks.invoke.mockResolvedValueOnce('darwin-x86_64');
+    mocks.invoke
+      .mockResolvedValueOnce('preview') // detectChannel()
+      .mockResolvedValueOnce('darwin-x86_64'); // getCurrentPlatformKey()
 
     const fetchMock: typeof fetch = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

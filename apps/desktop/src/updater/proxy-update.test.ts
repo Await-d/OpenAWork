@@ -99,6 +99,7 @@ describe('downloadAndInstallProxyUpdate', () => {
 
     await downloadAndInstallProxyUpdate(
       { name: 'GHProxy.cn', prefix: 'https://ghp.ci/' },
+      'preview',
       (snapshot) => {
         progress.push(snapshot);
       },
@@ -110,6 +111,7 @@ describe('downloadAndInstallProxyUpdate', () => {
     );
     expect(mocks.invoke).toHaveBeenCalledWith('download_and_install_proxy_update', {
       proxyPrefix: 'https://ghp.ci/',
+      channel: 'preview',
     });
     expect(progress).toEqual([
       { downloaded: 0, total: 100, percent: 0 },
