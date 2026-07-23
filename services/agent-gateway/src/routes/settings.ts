@@ -1,12 +1,19 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
-import { getProviderCatalogUi } from '@openAwork/agent-core';
+import {
+  getModelsDevData,
+  getProviderCatalogUi,
+  refreshModelsDevDataOrThrow,
+} from '@openAwork/agent-core';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { loadAppVersion } from '../app/app-version.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
+import {
+  buildCustomProviderFromModelsDev,
+  listDiscoverableProviders,
+} from '../provider/models-dev-discover.js';
 import { invalidateCatalog, invalidateAllCatalogs } from '../provider/provider-catalog.js';
-import { refreshModelsDevDataOrThrow } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   COMPACTION_SETTINGS_KEY,
@@ -1007,6 +1014,120 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, { providers: providerCount, models: modelCount });
       return reply.send({ ok: true, providerCount, modelCount });
+    },
+  );
+
+  app.get(
+    '/settings/providers/discover',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.providers.discover');
+      const loadStep = child('load-models-dev');
+      let data: Awaited<ReturnType<typeof getModelsDevData>>;
+      try {
+        data = await getModelsDevData();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        loadStep.fail(message);
+        step.fail('models.dev unavailable');
+        return reply.status(502).send({ providers: [], message: '无法加载 models.dev' });
+      }
+      loadStep.succeed();
+      const providers = listDiscoverableProviders(data);
+      step.succeed(undefined, { providers: providers.length });
+      return reply.send({ providers });
+    },
+  );
+
+  app.post(
+    '/settings/providers/import-from-models-dev',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { step, child } = startRequestWorkflow(
+        request,
+        'settings.providers.import-models-dev',
+      );
+
+      const body = request.body as {
+        modelsDevProviderId?: string;
+        name?: string;
+        enabled?: boolean;
+      };
+      if (!body?.modelsDevProviderId || typeof body.modelsDevProviderId !== 'string') {
+        step.fail('bad request');
+        return reply.status(400).send({ message: 'modelsDevProviderId is required' });
+      }
+
+      const loadStep = child('load-models-dev');
+      let data: Awaited<ReturnType<typeof getModelsDevData>>;
+      try {
+        data = await getModelsDevData();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        loadStep.fail(message);
+        step.fail('models.dev unavailable');
+        return reply.status(502).send({ message: `无法加载 models.dev：${message}` });
+      }
+      loadStep.succeed();
+
+      const buildStep = child('build-custom-provider');
+      let imported: AIProvider;
+      try {
+        imported = buildCustomProviderFromModelsDev(data, body.modelsDevProviderId, {
+          name: body.name,
+          enabled: body.enabled,
+        });
+      } catch (err) {
+        buildStep.fail(err instanceof Error ? err.message : String(err));
+        step.fail('not found');
+        return reply.status(404).send({
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      buildStep.succeed(undefined, { providerId: imported.id });
+
+      const loadExistingStep = child('load-existing-providers');
+      const providerRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      const selectionRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [user.sub],
+      );
+      loadExistingStep.succeed();
+
+      const existingRaw = parseStoredJson(providerRow?.value);
+      const existingList = Array.isArray(existingRaw) ? existingRaw : [];
+      const mergedRaw = [...existingList, imported];
+
+      const materializeStep = child('materialize');
+      const { providers, activeSelection } = await materializeProviderConfig(
+        mergedRaw,
+        parseStoredJson(selectionRow?.value),
+      );
+      materializeStep.succeed(undefined, { providers: providers.length });
+
+      const saveProvidersStep = child('save-providers');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(providers)],
+      );
+      saveProvidersStep.succeed();
+
+      const saveSelectionStep = child('save-active-selection');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'active_selection', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(activeSelection)],
+      );
+      saveSelectionStep.succeed();
+
+      invalidateCatalog(user.sub);
+      step.succeed(undefined, { providerId: imported.id });
+      return reply.send({ provider: imported, providers, activeSelection });
     },
   );
 
