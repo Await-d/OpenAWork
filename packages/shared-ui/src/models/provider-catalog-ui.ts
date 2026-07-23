@@ -112,14 +112,78 @@ const STATIC_FALLBACK: readonly ProviderCatalogUiEntry[] = [
     aliases: ['anthropic'],
     modelIdPrefixes: ['claude'],
   },
-  // Mistral 不在内置 catalog 中，但历史 UI 里出现过，保留兜底图标。
+  // mistral 已是一等公民，与后端 catalog 对齐。
   {
     type: 'mistral',
     displayName: 'Mistral',
     logoUrl: '/logo-mistralai.svg',
     fallbackGlyph: 'M',
     aliases: ['mistralai'],
-    modelIdPrefixes: ['mistral'],
+    modelIdPrefixes: ['mistral', 'mixtral', 'codestral', 'pixtral'],
+  },
+  {
+    type: 'zhipu',
+    displayName: '智谱 GLM',
+    fallbackGlyph: '智',
+    aliases: ['glm', 'bigmodel'],
+    modelIdPrefixes: ['glm'],
+  },
+  {
+    type: 'doubao',
+    displayName: '豆包 / 火山方舟',
+    fallbackGlyph: '豆',
+    aliases: ['volcengine', 'ark', 'volces'],
+    modelIdPrefixes: ['doubao', 'ep-'],
+  },
+  {
+    type: 'groq',
+    displayName: 'Groq',
+    fallbackGlyph: 'Gq',
+    modelIdPrefixes: ['llama', 'mixtral', 'gemma'],
+  },
+  {
+    type: 'siliconflow',
+    displayName: 'SiliconFlow',
+    fallbackGlyph: 'Si',
+    aliases: ['silicon'],
+  },
+  {
+    type: 'azure',
+    displayName: 'Azure OpenAI',
+    fallbackGlyph: 'Az',
+  },
+  {
+    type: 'xai',
+    displayName: 'xAI (Grok)',
+    fallbackGlyph: 'x',
+    aliases: ['grok'],
+    modelIdPrefixes: ['grok'],
+  },
+  {
+    type: 'minimax',
+    displayName: 'MiniMax',
+    fallbackGlyph: 'MM',
+    modelIdPrefixes: ['minimax', 'MiniMax', 'abab'],
+  },
+  {
+    type: 'baichuan',
+    displayName: '百川',
+    fallbackGlyph: '百',
+    modelIdPrefixes: ['Baichuan', 'baichuan'],
+  },
+  {
+    type: 'hunyuan',
+    displayName: '腾讯混元',
+    fallbackGlyph: '混',
+    aliases: ['tencent-hunyuan'],
+    modelIdPrefixes: ['hunyuan'],
+  },
+  {
+    type: 'qianfan',
+    displayName: '百度千帆 / 文心',
+    fallbackGlyph: '千',
+    aliases: ['wenxin', 'baidu'],
+    modelIdPrefixes: ['ernie'],
   },
 ];
 
@@ -163,7 +227,7 @@ rebuildIndex();
 
 /**
  * 用接口(/settings/providers/catalog)返回的数据覆盖前端注册表。
- * 静态兜底里有、但接口没返回的条目(如 'claude'/'mistral' 这类纯 UI 别名)会被保留。
+ * 静态兜底里有、但接口没返回的条目(如 'claude' 这类纯 UI 别名)会被保留。
  */
 export function hydrateProviderCatalogUi(entries: ProviderCatalogUiEntry[]): void {
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -184,8 +248,8 @@ export function hydrateProviderCatalogUi(entries: ProviderCatalogUiEntry[]): voi
 
 /** 列出全部 catalog 条目(用于设置页「新增供应商」平台下拉等)。 */
 export function getProviderUiList(): ProviderCatalogUiEntry[] {
-  // 过滤掉纯 UI 别名条目(claude/mistral)，只暴露可作为「平台类型」新增的项。
-  return catalogEntries.filter((entry) => entry.type !== 'claude' && entry.type !== 'mistral');
+  // 仅过滤纯 UI 别名；mistral 已是一等公民，不再排除。
+  return catalogEntries.filter((entry) => entry.type !== 'claude');
 }
 
 /** 按 type / 别名 / name 查 catalog 条目。 */
