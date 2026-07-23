@@ -190,4 +190,14 @@ describe('provider catalog expansion (2026-07-23)', () => {
     expect(inferProviderTypeFromHostname('open.bigmodel.cn')).toBe('zhipu');
     expect(inferProviderTypeFromHostname('api.siliconflow.cn')).toBe('siliconflow');
   });
+
+  it('siliconflow 按 modelId 前缀推断 thinking 风格', () => {
+    expect(resolveThinkingStyle('siliconflow', 'deepseek-ai/DeepSeek-V3')).toBe(
+      'deepseek_thinking',
+    );
+    expect(resolveThinkingStyle('siliconflow', 'Qwen/Qwen2.5-7B-Instruct')).toBe(
+      'qwen_enable_thinking',
+    );
+    expect(resolveThinkingStyle('siliconflow', 'totally-unknown-model')).toBe('none');
+  });
 });

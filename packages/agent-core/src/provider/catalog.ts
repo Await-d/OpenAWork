@@ -1125,10 +1125,10 @@ export const resolveThinkingStyle = (
     return 'anthropic_budget';
   }
 
-  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商——
-  // 用户可能通过 OpenAI 兼容代理使用 MiMo/Qwen/DeepSeek 等模型。
+  // 对 'openai' / 'custom' / 聚合平台，先尝试通过 modelId 前缀推断真实厂商——
+  // 用户可能通过 OpenAI 兼容代理或 SiliconFlow 使用 MiMo/Qwen/DeepSeek 等模型。
   // 只有推断失败时才 fallback 到 openai 的默认 'openai_effort'。
-  if (normalized === 'openai' || normalized === 'custom') {
+  if (normalized === 'openai' || normalized === 'custom' || normalized === 'siliconflow') {
     if (modelId) {
       const catalogEntry = findCatalogEntryByModelId(modelId, {
         includeOpenAI: true,
@@ -1137,7 +1137,7 @@ export const resolveThinkingStyle = (
         return catalogEntry.thinkingStyle;
       }
     }
-    // 推断失败：openai 用 openai_effort，custom 用 none
+    // 推断失败：openai 用 openai_effort，custom/siliconflow 用 none
     return normalized === 'openai' ? 'openai_effort' : 'none';
   }
 
@@ -1153,9 +1153,9 @@ export const resolveThinkingStyle = (
 export const catalogModelSupportsThinking = (providerType: string, modelId: string): boolean => {
   const normalized = providerType.toLowerCase();
 
-  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商
+  // 对 'openai' / 'custom' / siliconflow，先尝试通过 modelId 前缀推断真实厂商
   // （与 resolveThinkingStyle 对齐）。
-  if (normalized === 'openai' || normalized === 'custom') {
+  if (normalized === 'openai' || normalized === 'custom' || normalized === 'siliconflow') {
     if (modelId) {
       const catalogEntry = findCatalogEntryByModelId(modelId, {
         includeOpenAI: true,
