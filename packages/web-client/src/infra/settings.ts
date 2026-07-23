@@ -64,6 +64,14 @@ export interface SettingsClient {
     token: string,
     options?: { signal?: AbortSignal },
   ): Promise<{ ok: boolean; providerCount?: number; modelCount?: number; message?: string }>;
+  /** 从 models.dev 发现尚未内置的平台列表。 */
+  discoverProviders(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  /** 从 models.dev 导入指定平台为 custom provider。 */
+  importProviderFromModelsDev(
+    token: string,
+    payload: { modelsDevProviderId: string; name?: string; enabled?: boolean },
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>;
   putProviders(token: string, payload: unknown): Promise<unknown>;
   /** 单独更新 active-selection（chat / fast / image / compaction 的 provider+model 绑定）。 */
   putActiveSelection(token: string, payload: unknown): Promise<unknown>;
@@ -351,6 +359,30 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
             timeoutMs: 120_000,
             method: 'POST',
             headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async discoverProviders(token, options) {
+      const response = await fetchWithTimeout(`${baseUrl}/settings/providers/discover`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!response.ok) {
+        throw new HttpError(`发现 Provider 失败（HTTP ${response.status}）`, response.status);
+      }
+      return (await response.json()) as unknown;
+    },
+
+    async importProviderFromModelsDev(token, payload, options) {
+      return performSettingsRequest<unknown>({
+        actionLabel: '从 models.dev 导入 Provider',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/providers/import-from-models-dev`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
             signal: options?.signal,
           }),
       });
