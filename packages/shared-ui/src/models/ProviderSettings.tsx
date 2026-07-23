@@ -249,9 +249,48 @@ interface InlineFormProps {
 
 function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormProps) {
   const [form, setForm] = useState<ProviderEditData>(initial);
+  const [formError, setFormError] = useState<string | null>(null);
 
   function set(field: keyof ProviderEditData, value: string | boolean | undefined) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function requiresBaseUrl(type: string): boolean {
+    return type === 'custom' || type === 'azure';
+  }
+
+  function isValidHttpUrl(value: string): boolean {
+    try {
+      const u = new URL(value);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  function handleSubmit() {
+    const base = form.baseUrl.trim();
+    if (requiresBaseUrl(form.type)) {
+      if (!base) {
+        setFormError(
+          form.type === 'azure'
+            ? 'Azure OpenAI 必须填写资源 endpoint（例如 https://{resource}.openai.azure.com）'
+            : '自定义提供商必须填写 Base URL',
+        );
+        return;
+      }
+      if (!isValidHttpUrl(base)) {
+        setFormError('Base URL 必须是合法的 http(s) 地址');
+        return;
+      }
+    }
+    setFormError(null);
+    onSubmit({
+      ...form,
+      name: form.name.trim(),
+      baseUrl: base,
+      apiKey: form.apiKey.trim(),
+    });
   }
 
   // 当前所选平台类型在 catalog 里的条目(用于上游变体快捷填充与显示名)。
@@ -282,6 +321,13 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
   const row: CSSProperties = { display: 'flex', gap: 12, flexWrap: 'wrap' };
   const col: CSSProperties = { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 160 };
 
+  const guidance =
+    form.type === 'custom'
+      ? '适用于任意 OpenAI / Anthropic 兼容端点（中转、LM Studio、vLLM 等）。保存后请在模型列表添加 model id。'
+      : form.type === 'azure'
+        ? '填写 Azure 资源 endpoint；模型 id 使用部署名（deployment name）。'
+        : null;
+
   return (
     <div style={formWrap}>
       <div
@@ -294,6 +340,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
       >
         {isNew ? '新增提供商' : '编辑提供商'}
       </div>
+      {guidance ? (
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.45 }}>{guidance}</div>
+      ) : null}
       <div style={row}>
         <div style={col}>
           <label htmlFor="pf-name" style={labelStyle}>
@@ -304,7 +353,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             style={inputStyle}
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
-            placeholder="Provider name"
+            placeholder={
+              form.type === 'custom' ? '例如：公司中转 / LM Studio' : 'Provider name'
+            }
           />
         </div>
         <div style={col}>
@@ -322,6 +373,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
                 const entry = lookupProviderEntry(nextType);
                 const defaultUpstream =
                   entry?.upstreams?.find((u) => u.isDefault) ?? entry?.upstreams?.[0];
+                setFormError(null);
                 setForm((prev) => ({
                   ...prev,
                   type: nextType,
@@ -408,14 +460,21 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         </div>
         <div style={col}>
           <label htmlFor="pf-baseurl" style={labelStyle}>
-            Base URL
+            Base URL{requiresBaseUrl(form.type) ? ' *' : ''}
           </label>
           <input
             id="pf-baseurl"
             style={inputStyle}
             value={form.baseUrl}
-            onChange={(e) => set('baseUrl', e.target.value)}
-            placeholder="https://api.example.com/v1"
+            onChange={(e) => {
+              setFormError(null);
+              set('baseUrl', e.target.value);
+            }}
+            placeholder={
+              form.type === 'azure'
+                ? 'https://{resource}.openai.azure.com'
+                : 'https://api.example.com/v1'
+            }
           />
         </div>
         <div style={col}>
@@ -453,6 +512,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           启用
         </label>
       </div>
+      {formError ? (
+        <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{formError}</div>
+      ) : null}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
         <button
           type="button"
@@ -471,7 +533,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         </button>
         <button
           type="button"
-          onClick={() => onSubmit(form)}
+          onClick={handleSubmit}
           style={{
             background: 'var(--accent)',
             border: 'none',
