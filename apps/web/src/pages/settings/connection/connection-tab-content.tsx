@@ -93,6 +93,16 @@ interface ConnectionTabContentProps {
     modelCount?: number;
     message?: string;
   }>;
+  onDiscoverProviders?: () => Promise<{
+    providers: Array<{
+      id: string;
+      name: string;
+      api?: string;
+      modelCount: number;
+      sampleModels?: Array<{ id: string; name: string }>;
+    }>;
+  }>;
+  onImportDiscoveredProvider?: (modelsDevProviderId: string) => Promise<void>;
   urlInput: string;
   setUrlInput: React.Dispatch<React.SetStateAction<string>>;
   saveGatewayUrl: () => void;
@@ -137,6 +147,8 @@ export function ConnectionTabContent({
   handleAddProvider,
   onTestModel,
   onSyncCatalog,
+  onDiscoverProviders,
+  onImportDiscoveredProvider,
   urlInput,
   setUrlInput,
   saveGatewayUrl,
@@ -391,6 +403,8 @@ export function ConnectionTabContent({
             onUpdateModel={handleUpdateModel}
             {...(onTestModel ? { onTestModel } : {})}
             {...(onSyncCatalog ? { onSyncCatalog } : {})}
+            {...(onDiscoverProviders ? { onDiscoverProviders } : {})}
+            {...(onImportDiscoveredProvider ? { onImportDiscoveredProvider } : {})}
           />
         </div>
       </div>

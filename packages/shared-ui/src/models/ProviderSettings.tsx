@@ -166,6 +166,18 @@ export interface ProviderSettingsProps {
     modelCount?: number;
     message?: string;
   }>;
+  /** 从 models.dev 发现尚未内置的平台。 */
+  onDiscoverProviders?: () => Promise<{
+    providers: Array<{
+      id: string;
+      name: string;
+      api?: string;
+      modelCount: number;
+      sampleModels?: Array<{ id: string; name: string }>;
+    }>;
+  }>;
+  /** 导入发现到的平台为 custom provider。 */
+  onImportDiscoveredProvider?: (modelsDevProviderId: string) => Promise<void>;
   style?: CSSProperties;
 }
 
@@ -574,11 +586,51 @@ export function ProviderSettings({
   onUpdateModel,
   onTestModel,
   onSyncCatalog,
+  onDiscoverProviders,
+  onImportDiscoveredProvider,
   style,
 }: ProviderSettingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [discoverItems, setDiscoverItems] = useState<
+    Array<{ id: string; name: string; api?: string; modelCount: number }>
+  >([]);
+  const [discoverQuery, setDiscoverQuery] = useState('');
+  const [importingId, setImportingId] = useState<string | null>(null);
   const [forceCustomImageSize, setForceCustomImageSize] = useState(false);
+
+  async function openDiscover() {
+    if (!onDiscoverProviders) return;
+    setDiscoverOpen(true);
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    try {
+      const res = await onDiscoverProviders();
+      setDiscoverItems(res.providers ?? []);
+    } catch (e) {
+      setDiscoverError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }
+
+  async function importDiscovered(id: string) {
+    if (!onImportDiscoveredProvider) return;
+    setImportingId(id);
+    setDiscoverError(null);
+    try {
+      await onImportDiscoveredProvider(id);
+      setDiscoverOpen(false);
+      setDiscoverQuery('');
+    } catch (e) {
+      setDiscoverError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportingId(null);
+    }
+  }
   const [modelSearch, setModelSearch] = useState<{ chat: string; fast: string; image: string }>({
     chat: '',
     fast: '',
@@ -1479,26 +1531,186 @@ export function ProviderSettings({
           }}
         >
           <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>提供商</h2>
-          <button
-            type="button"
-            onClick={() => {
-              setAddingNew(true);
-              setEditingId(null);
-            }}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {onDiscoverProviders ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void openDiscover();
+                }}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--fg-default)',
+                  border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderRadius: 6,
+                  padding: '0.32rem 0.8rem',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                发现更多平台
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setAddingNew(true);
+                setEditingId(null);
+              }}
+              style={{
+                background: 'var(--accent)',
+                color: color.fgOnAccent,
+                border: 'none',
+                borderRadius: 6,
+                padding: '0.32rem 0.8rem',
+                fontSize: 12,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              + 添加提供商
+            </button>
+          </div>
+        </div>
+
+        {discoverOpen ? (
+          <div
             style={{
-              background: 'var(--accent)',
-              color: color.fgOnAccent,
-              border: 'none',
-              borderRadius: 6,
-              padding: '0.32rem 0.8rem',
-              fontSize: 12,
-              cursor: 'pointer',
-              fontWeight: 500,
+              margin: '0.75rem 1rem',
+              padding: '0.85rem 1rem',
+              borderRadius: 8,
+              border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+              background: 'var(--bg-raised)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
             }}
           >
-            + 添加提供商
-          </button>
-        </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+                从 models.dev 发现更多平台
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDiscoverOpen(false);
+                  setDiscoverError(null);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                }}
+              >
+                关闭
+              </button>
+            </div>
+            <input
+              style={inputStyle}
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="搜索平台名称或 id…"
+            />
+            {discoverLoading ? (
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>加载中…</div>
+            ) : null}
+            {discoverError ? (
+              <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{discoverError}</div>
+            ) : null}
+            {!discoverLoading ? (
+              <ul
+                style={{
+                  margin: 0,
+                  padding: 0,
+                  listStyle: 'none',
+                  maxHeight: 240,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                {discoverItems
+                  .filter((item) => {
+                    const q = discoverQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((item) => (
+                    <li
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        padding: '0.45rem 0.55rem',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{item.name}</div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: 'var(--fg-muted)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {item.id}
+                          {item.api ? ` · ${item.api}` : ''}
+                          {` · ${item.modelCount} 模型`}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!onImportDiscoveredProvider || importingId === item.id}
+                        onClick={() => {
+                          void importDiscovered(item.id);
+                        }}
+                        style={{
+                          background: 'var(--accent)',
+                          color: color.fgOnAccent,
+                          border: 'none',
+                          borderRadius: 6,
+                          padding: '0.28rem 0.7rem',
+                          fontSize: 11,
+                          cursor:
+                            !onImportDiscoveredProvider || importingId === item.id
+                              ? 'not-allowed'
+                              : 'pointer',
+                          fontWeight: 500,
+                          opacity:
+                            !onImportDiscoveredProvider || importingId === item.id ? 0.6 : 1,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {importingId === item.id ? '导入中…' : '导入'}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+              导入后类型为 custom，请填写 API Key 后再使用。
+            </div>
+          </div>
+        ) : null}
 
         {providers.length === 0 && !addingNew ? (
           <div
