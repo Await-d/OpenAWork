@@ -805,12 +805,20 @@ export function createPm2Runner(): HandoffTaskRunner {
     const specSummary = specRow?.content ? specRow.content.slice(0, 800) : '';
     const planSummary = planRow?.content ? planRow.content.slice(0, 1200) : '';
     // 如果是重试（payload 中有 reviewDisposition），把上轮质量反馈注入 context
+    // 优先使用结构化反馈（包含具体 ISSUE 列表和通过项），降级使用 reason 字符串
+    // reviewStructuredFeedback 由 reconciler 写入 payload 顶层（非 reviewDisposition 内部）
     const reviewDisposition = payload?.['reviewDisposition'] as Record<string, unknown> | undefined;
+    const structuredFeedback =
+      typeof payload?.['reviewStructuredFeedback'] === 'string'
+        ? payload['reviewStructuredFeedback']
+        : null;
     const lastReviewReason =
       typeof reviewDisposition?.['reason'] === 'string' ? reviewDisposition['reason'] : null;
-    const qualityFeedbackBlock = lastReviewReason
-      ? `\n\n⚠️ **上轮质量评审反馈（请在本轮执行中修正）**：\n${lastReviewReason}`
-      : '';
+    const qualityFeedbackBlock = structuredFeedback
+      ? `\n\n${structuredFeedback}`
+      : lastReviewReason
+        ? `\n\n⚠️ **上轮质量评审反馈（请在本轮执行中修正）**：\n${lastReviewReason}`
+        : '';
     const context = [
       `来自 PM1 的任务清单，共 ${tasks.length} 个任务。`,
       specSummary ? `\n**Spec 摘要**：\n${specSummary}` : '',

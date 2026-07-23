@@ -14,13 +14,18 @@ export interface GitHubProxy {
 
 /**
  * Known GitHub proxy services that support proxying release downloads.
- * Ordered by historical reliability (best first).
+ * Ordered by measured speed and reliability (best first, 2026-07).
+ *
+ * Selection criteria: must support both JSON metadata and large file
+ * downloads (HEAD 200 on release assets). Proxies that only serve JSON
+ * but fail on binary downloads are kept for probe/detection but listed
+ * after download-capable ones.
  */
 export const GITHUB_PROXIES: GitHubProxy[] = [
-  { name: 'GHProxy.cn', prefix: 'https://ghp.ci/' },
-  { name: 'GitHub Moeyy', prefix: 'https://github.moeyy.xyz/' },
-  { name: 'GH-Proxy', prefix: 'https://gh-proxy.com/' },
+  { name: 'GHProxy Fast', prefix: 'https://gh.llkk.cc/' },
+  { name: 'GH-DDLC', prefix: 'https://gh.ddlc.top/' },
   { name: 'GHProxy.net', prefix: 'https://ghproxy.net/' },
+  { name: 'GH-Proxy', prefix: 'https://gh-proxy.com/' },
 ];
 
 export type UpdateChannel = 'stable' | 'preview';

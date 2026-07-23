@@ -32,14 +32,16 @@ const DESKTOP_HOME_FOLDER: &str = ".openAwork";
 const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
 const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
 
-/// 预览版代理更新端点（ghp.ci 加速，国内优先）
+/// 预览版代理更新端点（由前端传入 proxy_prefix 拼接为完整代理 URL）
+/// 使用 latest.json（直接 GitHub URL），代理前缀由调用方添加。
+/// 不使用 latest-cn.json（其内部 URL 含固定代理前缀，会导致双重代理）。
 const PROXY_UPDATE_ENDPOINTS_PREVIEW: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest-cn.json",
+    "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json",
 ];
 
-/// 发行版代理更新端点（ghp.ci 加速，国内优先）
+/// 发行版代理更新端点（由前端传入 proxy_prefix 拼接为完整代理 URL）
 const PROXY_UPDATE_ENDPOINTS_STABLE: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json",
+    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json",
 ];
 /// gateway 子目录名（在 effective data_root 下）。与 storage-paths.ts 中的
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。

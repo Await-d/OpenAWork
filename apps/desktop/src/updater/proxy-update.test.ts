@@ -70,7 +70,6 @@ vi.mock('./auto-update.js', async () => {
   return actual;
 });
 
-import { supportsProxyAutoInstall } from './auto-update.js';
 import { downloadAndInstallProxyUpdate } from './proxy-update.js';
 
 describe('downloadAndInstallProxyUpdate', () => {
@@ -98,7 +97,7 @@ describe('downloadAndInstallProxyUpdate', () => {
     const progress: Array<{ downloaded: number; total: number | null; percent: number }> = [];
 
     await downloadAndInstallProxyUpdate(
-      { name: 'GHProxy.cn', prefix: 'https://ghp.ci/' },
+      { name: 'GHProxy Fast', prefix: 'https://gh.llkk.cc/' },
       'preview',
       (snapshot) => {
         progress.push(snapshot);
@@ -110,7 +109,7 @@ describe('downloadAndInstallProxyUpdate', () => {
       expect.any(Function),
     );
     expect(mocks.invoke).toHaveBeenCalledWith('download_and_install_proxy_update', {
-      proxyPrefix: 'https://ghp.ci/',
+      proxyPrefix: 'https://gh.llkk.cc/',
       channel: 'preview',
     });
     expect(progress).toEqual([
@@ -119,12 +118,5 @@ describe('downloadAndInstallProxyUpdate', () => {
       { downloaded: 100, total: 100, percent: 100 },
       { downloaded: 100, total: 100, percent: 100 },
     ]);
-  });
-
-  it('只有 ghp.ci 代理支持当前的自动安装链路', () => {
-    expect(supportsProxyAutoInstall({ name: 'GHProxy.cn', prefix: 'https://ghp.ci/' })).toBe(true);
-    expect(
-      supportsProxyAutoInstall({ name: 'GitHub Moeyy', prefix: 'https://github.moeyy.xyz/' }),
-    ).toBe(false);
   });
 });

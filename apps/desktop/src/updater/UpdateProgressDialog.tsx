@@ -3,7 +3,6 @@ import {
   checkForUpdate,
   downloadUpdate,
   installUpdate,
-  supportsProxyAutoInstall,
   toUpdateError,
   UpdateError,
   type UpdateCheckResult,
@@ -111,9 +110,6 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
           window.open(result.proxiedDownloadUrl, '_blank');
           setState('done');
           return;
-        }
-        if (!supportsProxyAutoInstall(result.proxyUsed)) {
-          throw new UpdateError('unknown', `代理 ${result.proxyUsed.name} 当前不支持自动安装。`);
         }
         await stopGatewayBeforeInstall();
         await downloadAndInstallProxyUpdate(result.proxyUsed, result.channel, (p) => {

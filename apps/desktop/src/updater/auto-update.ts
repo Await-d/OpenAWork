@@ -65,10 +65,6 @@ export function toUpdateError(err: unknown): UpdateError {
   return new UpdateError('unknown', msg);
 }
 
-export function supportsProxyAutoInstall(proxy: GitHubProxy): boolean {
-  return proxy.prefix === 'https://ghp.ci/';
-}
-
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
@@ -96,9 +92,13 @@ function endpointsForChannel(channel: UpdateChannel): string[] {
   if (channel === 'preview') {
     return [
       'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
+      'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest-cn.json',
     ];
   }
-  return ['https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json'];
+  return [
+    'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json',
+    'https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json',
+  ];
 }
 
 // --- Tauri updater JSON format ---
@@ -221,7 +221,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     update: null, // No native Update object — will use proxy download path
     version: json.version,
     notes: json.notes ?? null,
-    installMode: supportsProxyAutoInstall(proxy) ? 'proxy-auto' : 'manual',
+    installMode: 'proxy-auto',
     channel,
     proxyUsed: proxy,
     proxiedDownloadUrl: proxiedUrl,

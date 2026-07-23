@@ -1,6 +1,14 @@
 export interface QualityReviewDispositionInput {
   escalationRound: number;
   /**
+   * 跨 PM2 handoff 的全局升级轮次计数器。
+   * return-to-c 路径会创建全新的 PM2 handoff（retry_count=0），
+   * 导致 escalationRound 永远为 1、断路器 >=4 失效。
+   * 此字段从 PM2 payload 中的 globalEscalationRound 读取，
+   * 每次 return-to-c 时 +1，确保跨 handoff 也能正确计数。
+   */
+  globalEscalationRound?: number;
+  /**
    * 完整的评审判定结果，用于精确路由失败分流。
    * - `execution-protocol-failure`：交付协议未完成（completed 但缺 result_json）
    * - `implementation-failure`：执行层任务失败（failed/cancelled）或代码质量问题
@@ -38,13 +46,14 @@ export function deriveQualityReviewDisposition(
   input: QualityReviewDispositionInput,
 ): QualityReviewDisposition {
   // 1. 已重试 ≥ 4 轮 → 升级用户（无论失败类型）
-  // 前 3 轮可以 return-to-c / redispatch 自动修正，第 4 轮才真正升级用户。
-  // 给团队充分的自动修正机会，避免过早停止导致用户体验中断。
-  if (input.escalationRound >= 4) {
+  // 优先使用 globalEscalationRound（跨 PM2 handoff 的全局计数），
+  // 避免 return-to-c 路径因每次新建 PM2 handoff（retry_count=0）而永远触发不了断路器。
+  const effectiveEscalationRound = input.globalEscalationRound ?? input.escalationRound;
+  if (effectiveEscalationRound >= 4) {
     return {
       action: 'escalate-to-user',
       code: 'quality-review-escalate-to-user',
-      reason: `已自动修正 ${input.escalationRound} 轮仍未通过，需要用户介入`,
+      reason: `已自动修正 ${effectiveEscalationRound} 轮仍未通过，需要用户介入`,
       severity: 'error',
     };
   }

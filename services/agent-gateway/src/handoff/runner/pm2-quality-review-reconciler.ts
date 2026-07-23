@@ -34,6 +34,62 @@ import type { ReviewReport } from '../workflow/review-aggregator.js';
 const inFlightPm2QualityReviews = new Set<string>();
 export const QUALITY_REVIEW_RETRY_INTERVAL_MS = 30 * 1000;
 
+/**
+ * 计算两组 ISSUE 列表的重叠率。
+ * 使用简单的子串包含匹配：如果当前 ISSUE 的关键内容在上一轮中出现过，视为重叠。
+ * 返回 0-1 之间的比率。
+ */
+function computeIssueOverlap(current: string[], previous: string[]): number {
+  if (current.length === 0 || previous.length === 0) {
+    return 0;
+  }
+  let overlapCount = 0;
+  for (const cur of current) {
+    const curNormalized = cur.trim().toLowerCase().slice(0, 100);
+    if (!curNormalized) continue;
+    for (const prev of previous) {
+      const prevNormalized = prev.trim().toLowerCase().slice(0, 100);
+      if (!prevNormalized) continue;
+      // 双向子串匹配：当前包含上一轮，或上一轮包含当前
+      if (curNormalized.includes(prevNormalized) || prevNormalized.includes(curNormalized)) {
+        overlapCount++;
+        break;
+      }
+    }
+  }
+  return overlapCount / current.length;
+}
+
+/**
+ * 稳定性检查：对比当前审查结果与上一轮，判断是否为"稳定失败"。
+ * 连续两轮输出相同/相似的 ISSUE（重叠率 >= 70%）时返回 true，
+ * 表示 executor 无法自动修正，应直接升级给用户。
+ */
+function checkStabilityEscalation(
+  report: {
+    specIssues: string[];
+    qualityIssues: string[];
+    specReviewPassed: boolean;
+    qualityReviewPassed: boolean;
+  },
+  previousReviewIssuesJson: string | null | undefined,
+): boolean {
+  const previous = parseJsonObject(previousReviewIssuesJson);
+  if (!previous) return false;
+  const prevSpecIssues = Array.isArray(previous['specIssues'])
+    ? (previous['specIssues'] as string[])
+    : [];
+  const prevQualityIssues = Array.isArray(previous['qualityIssues'])
+    ? (previous['qualityIssues'] as string[])
+    : [];
+  const specSim = computeIssueOverlap(report.specIssues, prevSpecIssues);
+  const qualitySim = computeIssueOverlap(report.qualityIssues, prevQualityIssues);
+  return (
+    (!report.specReviewPassed && specSim >= 0.7) ||
+    (!report.qualityReviewPassed && qualitySim >= 0.7)
+  );
+}
+
 interface Pm2HandoffRow {
   id: string;
   payload_json: string;
@@ -549,25 +605,91 @@ export async function reconcilePm2QualityReview(input: {
         return { status: 'completed' };
       }
 
+      // 读取全局升级轮次计数器：return-to-c 路径会创建全新 PM2 handoff（retry_count=0），
+      // 导致 retry_count 无法反映实际循环次数。globalEscalationRound 从 PM2 payload 中读取，
+      // 由 watcher 在创建 PM1→PM2 handoff 时从 PM1 的 escalationRound 传入。
+      // 稳定性检查：对比上一轮审查结果，防止同一问题无限循环。
+      // 如果连续两轮审查输出相同/相似的 ISSUE，说明 executor 无法自动修正，
+      // 应直接升级给用户而非继续重试。
+      const stabilityEscalation = checkStabilityEscalation(
+        report,
+        typeof payload?.['previousReviewIssuesJson'] === 'string'
+          ? payload['previousReviewIssuesJson']
+          : null,
+      );
+
+      const globalEscalationRound =
+        typeof payload?.['globalEscalationRound'] === 'number'
+          ? payload['globalEscalationRound']
+          : undefined;
       const disposition = determineFailureDisposition({
         escalationRound: row.retry_count ?? 0,
+        ...(globalEscalationRound !== undefined ? { globalEscalationRound } : {}),
         report,
       });
       const ownershipGuard =
         disposition.action === 'redispatch' || disposition.action === 'return-to-c'
           ? assessAutoRemediationOwnershipScope({ children, report })
           : { eligible: true };
+      // 硬限制：redispatch 路径的 retry_count 也需要断路器保护。
+      // globalEscalationRound 只追踪 return-to-c 路径，redispatch 在同一 PM2 handoff
+      // 内 retry_count 递增但 globalEscalationRound 不变。如果 LLM 每轮输出不同 ISSUE
+      // （稳定性检查不触发），需要 retry_count 兜底防止无限循环。
+      const effectiveRetryCount = row.retry_count ?? 0;
       const effectiveDisposition = !ownershipGuard.eligible
         ? {
             action: 'escalate-to-user' as const,
             reason: ownershipGuard.reason ?? disposition.reason,
           }
-        : disposition;
+        : effectiveRetryCount >= 4
+          ? {
+              action: 'escalate-to-user' as const,
+              reason: `PM2 已重试 ${effectiveRetryCount} 轮仍未通过质量审查，需要用户介入：${disposition.reason}`,
+            }
+          : stabilityEscalation
+            ? {
+                action: 'escalate-to-user' as const,
+                reason: `连续两轮审查输出相同/相似的 ISSUE（稳定性检查触发），executor 无法自动修正：${disposition.reason}`,
+              }
+            : disposition;
+      // 构建结构化反馈：让 executor 看到具体的审查结果，而非模糊的 reason 字符串
+      // 轮次取 globalEscalationRound（return-to-c 路径）和 retry_count（redispatch 路径）的较大值，
+      // 确保显示的轮次反映实际总循环次数。
+      const currentRound = Math.max(globalEscalationRound ?? 0, effectiveRetryCount) + 1;
+      const structuredFeedback = [
+        `⚠️ 第 ${currentRound} 轮质量审查（超过 4 轮将升级给用户）`,
+        '',
+        `**Spec Review**：${report.specReviewPassed ? '✅ 通过' : '❌ 未通过'}`,
+        ...(report.specIssues.length > 0
+          ? report.specIssues.map((issue, idx) => `  ${idx + 1}. ${issue}`)
+          : report.specReviewPassed
+            ? ['  所有验收场景已覆盖']
+            : []),
+        '',
+        `**Quality Review**：${report.qualityReviewPassed ? '✅ 通过' : '❌ 未通过'}`,
+        ...(report.qualityIssues.length > 0
+          ? report.qualityIssues.map((issue, idx) => `  ${idx + 1}. ${issue}`)
+          : report.qualityReviewPassed
+            ? ['  代码质量和宪法合规']
+            : []),
+        '',
+        '**请重点修正以上标注的 ISSUE 项。已通过的检查项无需重复修改。**',
+      ].join('\n');
+
       const payloadWithDisposition = mergeReviewDispositionIntoPayload(payload, {
         action: effectiveDisposition.action,
         reason: effectiveDisposition.reason,
         status: 'pending',
         updatedAtMs: nowMs,
+      });
+      // 将结构化反馈写入 payload，PM2 runner 会优先使用此字段注入 executor context
+      payloadWithDisposition['reviewStructuredFeedback'] = structuredFeedback;
+      // 合并稳定性检查数据：将当前 issues 写入 payload，供下一轮对比
+      // （必须在这里合并，因为 writePm2PayloadJson 会覆盖之前的写入）
+      // 注意：此处 overallVerdict 已非 'pass'（L523 早返回），直接写入。
+      payloadWithDisposition['previousReviewIssuesJson'] = JSON.stringify({
+        specIssues: report.specIssues,
+        qualityIssues: report.qualityIssues,
       });
       writePm2PayloadJson(row.id, payloadWithDisposition);
 
@@ -675,8 +797,9 @@ export async function reconcilePm2QualityReview(input: {
         });
 
         // 构建质量反馈摘要：把评审报告中的具体问题整理成 PM1 能理解的反馈
+        const returnToCRound = Math.max(globalEscalationRound ?? 0, row.retry_count ?? 0) + 1;
         const qualityFeedback = [
-          `## 质量评审反馈（第 ${row.retry_count ?? 0} 轮）`,
+          `## 质量评审反馈（第 ${returnToCRound} 轮）`,
           '',
           `**退回原因**：${effectiveDisposition.reason}`,
           '',
@@ -780,7 +903,7 @@ export async function reconcilePm2QualityReview(input: {
                   isQualityFeedback: true,
                   qualityFeedback,
                   previousPm2HandoffId: row.id,
-                  escalationRound: (row.retry_count ?? 0) + 1,
+                  escalationRound: (globalEscalationRound ?? row.retry_count ?? 0) + 1,
                 },
               });
               publishHandoffEvent({ type: 'handoff.created', record: newPm1Handoff });
@@ -796,7 +919,7 @@ export async function reconcilePm2QualityReview(input: {
                     {
                       type: 'text',
                       text: [
-                        `🔄 质量评审发现规划问题，已自动退回 PM1 重新规划（第 ${(row.retry_count ?? 0) + 1} 轮）。`,
+                        `🔄 质量评审发现规划问题，已自动退回 PM1 重新规划（第 ${returnToCRound} 轮）。`,
                         '',
                         '**评审反馈**：',
                         qualityFeedback,

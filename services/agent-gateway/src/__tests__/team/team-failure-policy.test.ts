@@ -80,6 +80,56 @@ describe('deriveQualityReviewDisposition', () => {
     expect(result.action).toBe('redispatch');
     expect(result.reason).toContain('Quality Review 未通过');
   });
+
+  it('globalEscalationRound >= 4 时升级给用户（即使 escalationRound 为 0）', () => {
+    expect(
+      deriveQualityReviewDisposition({
+        escalationRound: 0,
+        globalEscalationRound: 4,
+        qualityIssues: ['代码质量不达标'],
+        qualityReviewPassed: false,
+        specIssues: [],
+        specReviewPassed: true,
+      }),
+    ).toMatchObject({
+      action: 'escalate-to-user',
+      code: 'quality-review-escalate-to-user',
+      severity: 'error',
+    });
+  });
+
+  it('globalEscalationRound < 4 且 spec 失败时正常退回 c 层', () => {
+    expect(
+      deriveQualityReviewDisposition({
+        escalationRound: 0,
+        globalEscalationRound: 2,
+        qualityIssues: [],
+        qualityReviewPassed: true,
+        specIssues: ['遗漏验收场景'],
+        specReviewPassed: false,
+      }),
+    ).toMatchObject({
+      action: 'return-to-c',
+      code: 'quality-review-return-to-c',
+      severity: 'warning',
+    });
+  });
+
+  it('无 globalEscalationRound 时回退到 escalationRound', () => {
+    expect(
+      deriveQualityReviewDisposition({
+        escalationRound: 4,
+        qualityIssues: ['测试失败'],
+        qualityReviewPassed: false,
+        specIssues: [],
+        specReviewPassed: true,
+      }),
+    ).toMatchObject({
+      action: 'escalate-to-user',
+      code: 'quality-review-escalate-to-user',
+      severity: 'error',
+    });
+  });
 });
 
 describe('deriveTeamRuntimeHealth', () => {

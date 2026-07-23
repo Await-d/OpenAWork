@@ -74,7 +74,9 @@ function chooseOnlyOrNamed(assets, pattern, archPattern = null, allowSingleFallb
 function selectPlatformAssets(assets) {
   return {
     'linux-x86_64': chooseOnlyOrNamed(assets, /\.AppImage$/i, /(amd64|x86_64)/i),
-    'windows-x86_64': chooseOnlyOrNamed(assets, /(?:setup.*\.exe|\.exe)$/i, /(x64|x86_64|amd64)/i),
+    'linux-aarch64': chooseOnlyOrNamed(assets, /\.AppImage$/i, /(aarch64|arm64)/i, false),
+    'windows-x86_64': chooseOnlyOrNamed(assets, /(?:setup.*\.exe|\.exe)$/i, /(?:^|[._-])x64(?:[._-]|$)|(?:^|[._-])x86_64(?:[._-]|$)|(?:^|[._-])amd64(?:[._-]|$)/i),
+    'windows-aarch64': chooseOnlyOrNamed(assets, /(?:setup.*\.exe|\.exe)$/i, /(?:^|[._-])(?:aarch64|arm64)(?:[._-]|$)/i, false),
     'darwin-aarch64': chooseOnlyOrNamed(assets, /\.app\.tar\.gz$/i, /(aarch64|arm64)/i),
     'darwin-x86_64': chooseOnlyOrNamed(assets, /\.app\.tar\.gz$/i, /(x64|x86_64|amd64)/i, false),
   };

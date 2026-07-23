@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { supportsProxyAutoInstall, toUpdateError } from './auto-update.js';
+import { toUpdateError } from './auto-update.js';
 import type { GitHubProxy, UpdateChannel } from './github-proxy.js';
 
 const PROXY_UPDATE_EVENT = 'desktop:proxy-update-download';
@@ -36,10 +36,6 @@ export async function downloadAndInstallProxyUpdate(
   channel: UpdateChannel,
   onProgress: (progress: ProxyUpdateProgress) => void,
 ): Promise<void> {
-  if (!supportsProxyAutoInstall(proxy)) {
-    throw toUpdateError(new Error(`代理 ${proxy.name} 当前不支持自动安装。`));
-  }
-
   let downloaded = 0;
   let total: number | null = null;
   const unlisten = await listen<ProxyUpdateEvent>(PROXY_UPDATE_EVENT, (event) => {

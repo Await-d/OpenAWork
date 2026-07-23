@@ -38,51 +38,48 @@ export default defineConfig({
       },
     }),
     tailwindcss(),
-    // 桌面端（Tauri）构建时禁用 PWA Service Worker：
-    // Tauri WebView 跨版本持久化 SW 缓存，导致新版本更新后旧 precache 仍被使用，
-    // 出现"强制刷新是新版、普通刷新回到旧版"的问题。桌面端有独立的 updater 机制，无需 PWA。
-    ...(process.env.TAURI_ENV_PLATFORM
-      ? []
-      : [
-          VitePWA({
-            registerType: 'autoUpdate',
-            devOptions: { enabled: false },
-            includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
-            manifest: {
-              name: 'OpenAWork',
-              short_name: 'OpenAWork',
-              description: 'AI Agent Workspace',
-              theme_color: '#0f172a',
-              background_color: '#0f172a',
-              display: 'standalone',
-              icons: [
-                { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
-                { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-                { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
-                {
-                  src: 'maskable-icon-512x512.png',
-                  sizes: '512x512',
-                  type: 'image/png',
-                  purpose: 'maskable',
-                },
-              ],
-            },
-            workbox: {
-              globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-              // Monaco editor + workers are large; exclude them from precache
-              // and let the browser cache them normally via HTTP caching.
-              globIgnores: ['**/*worker*.js'],
-              maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
-              runtimeCaching: [
-                {
-                  urlPattern: /^\/api\//,
-                  handler: 'NetworkFirst',
-                  options: { cacheName: 'api-cache' },
-                },
-              ],
-            },
-          }),
-        ]),
+    VitePWA({
+      // 桌面端（Tauri）构建时禁用 PWA Service Worker：
+      // Tauri WebView 跨版本持久化 SW 缓存，导致新版本更新后旧 precache 仍被使用，
+      // 出现"强制刷新是新版、普通刷新回到旧版"的问题。桌面端有独立的 updater 机制，无需 PWA。
+      disable: !!process.env.TAURI_ENV_PLATFORM,
+      registerType: 'autoUpdate',
+      devOptions: { enabled: false },
+      includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
+      manifest: {
+        name: 'OpenAWork',
+        short_name: 'OpenAWork',
+        description: 'AI Agent Workspace',
+        theme_color: '#0f172a',
+        background_color: '#0f172a',
+        display: 'standalone',
+        icons: [
+          { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: 'maskable-icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Monaco editor + workers are large; exclude them from precache
+        // and let the browser cache them normally via HTTP caching.
+        globIgnores: ['**/*worker*.js'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
+        runtimeCaching: [
+          {
+            urlPattern: /^\/api\//,
+            handler: 'NetworkFirst',
+            options: { cacheName: 'api-cache' },
+          },
+        ],
+      },
+    }),
   ],
   server: {
     port: 5173,

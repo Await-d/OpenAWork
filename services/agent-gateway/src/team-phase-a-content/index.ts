@@ -21,3 +21,5 @@ export {
 } from './soul-defaults.js';
 
 export { QUALITY_GATES_MD } from './quality-gates.js';
+
+export { getCompletionProtocolMd } from './completion-protocol.js';

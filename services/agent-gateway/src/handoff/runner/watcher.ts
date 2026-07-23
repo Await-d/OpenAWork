@@ -1083,6 +1083,12 @@ export class HandoffWatcher {
                   teamWorkspaceId,
                   sourceIntent: originalPayload?.['sourceIntent'] ?? null,
                   rewrittenIntent: originalPayload?.['rewrittenIntent'] ?? null,
+                  // 传递全局升级轮次：PM1 的 escalationRound 来自 return-to-c 路径
+                  // 的 globalEscalationRound，需要透传到 PM2 的 payload，
+                  // 否则每次新建 PM2 handoff 的 retry_count=0 会导致断路器失效。
+                  ...(typeof originalPayload?.['escalationRound'] === 'number'
+                    ? { globalEscalationRound: originalPayload['escalationRound'] }
+                    : {}),
                 },
               });
               publishHandoffEvent({ type: 'handoff.created', record: nextHandoff });
@@ -1336,6 +1342,8 @@ export class HandoffWatcher {
                     sourceIntent: originalPayload?.['sourceIntent'] ?? null,
                     rewrittenIntent: originalPayload?.['rewrittenIntent'] ?? null,
                     escalationRound,
+                    // 传递全局升级轮次到 PM2 payload，确保 return-to-c 路径的断路器生效
+                    globalEscalationRound: escalationRound,
                     degraded: true,
                     degradationReason: reason,
                   },

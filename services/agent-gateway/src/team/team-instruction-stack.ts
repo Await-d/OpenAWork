@@ -39,7 +39,7 @@ import { resolveEffectiveSoul } from './team-personas-store.js';
 import { getUserMemory } from './team-user-memory-store.js';
 import { listMemoriesForTeamWorkspaceKnowledge } from '../memory/memory-store.js';
 import { sqliteGet } from '../infra/db.js';
-import { QUALITY_GATES_MD } from '../team-phase-a-content/index.js';
+import { QUALITY_GATES_MD, getCompletionProtocolMd } from '../team-phase-a-content/index.js';
 import type { SoulRoleLayer } from '../team-phase-a-content/index.js';
 
 export interface TeamInstructionStackInput {
@@ -196,9 +196,14 @@ export async function buildTeamInstructionStack(
   }
 
   // 3.5. quality-gates（内联常量，所有角色共享的质量门禁附录）
+  // 3.6. completion-protocol（executor / reviewer 专用的完成协议，永不被上下文压缩）
   if (input.roleLayer) {
     segments.push(wrapLayer('quality-gates', QUALITY_GATES_MD));
     layers.qualityGates = true;
+    const protocolMd = getCompletionProtocolMd(input.roleLayer);
+    if (protocolMd) {
+      segments.push(wrapLayer('completion-protocol', protocolMd));
+    }
   }
 
   // 4. project-memory.md（D55：git 文件）
@@ -312,9 +317,14 @@ export function buildTeamInstructionStackSync(
   }
 
   // 3.5. quality-gates（内联常量，所有角色共享的质量门禁附录）
+  // 3.6. completion-protocol（executor / reviewer 专用的完成协议）
   if (input.roleLayer) {
     segments.push(wrapLayer('quality-gates', QUALITY_GATES_MD));
     layers.qualityGates = true;
+    const protocolMd = getCompletionProtocolMd(input.roleLayer);
+    if (protocolMd) {
+      segments.push(wrapLayer('completion-protocol', protocolMd));
+    }
   }
 
   const userMemory = getUserMemory(input.userId);

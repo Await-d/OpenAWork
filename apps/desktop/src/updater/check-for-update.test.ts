@@ -68,24 +68,21 @@ describe('checkForUpdate', () => {
         const url = input instanceof Request ? input.url : String(input);
         const method = init?.method ?? 'GET';
 
+        const proxyPrefix = 'https://gh.llkk.cc/';
+        const isProxyRequest = url.startsWith(proxyPrefix);
         const isProxyPreviewEndpoint =
-          url.startsWith('https://ghp.ci/') &&
-          url.includes('/releases/download/desktop-latest-preview/latest.json');
-        const isProxyStableEndpoint =
-          url.startsWith('https://ghp.ci/') &&
-          url.includes('/releases/latest/download/latest.json');
+          isProxyRequest && url.includes('/releases/download/desktop-latest-preview/latest');
+        const _isProxyStableEndpoint =
+          isProxyRequest && url.includes('/releases/latest/download/latest');
 
         if (method === 'HEAD') {
           if (isProxyPreviewEndpoint) {
             return new Response(null, { status: 200 });
           }
-          if (isProxyStableEndpoint) {
-            return new Response(null, { status: 404 });
-          }
           return new Response(null, { status: 404 });
         }
 
-        if (isProxyPreviewEndpoint) {
+        if (isProxyPreviewEndpoint && url.endsWith('latest.json')) {
           return previewJsonResponse(
             'windows-x86_64',
             'https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64-setup.exe',
@@ -101,9 +98,9 @@ describe('checkForUpdate', () => {
     expect(result.available).toBe(true);
     expect(result.version).toBe('0.7.0');
     expect(result.installMode).toBe('proxy-auto');
-    expect(result.proxyUsed?.name).toBe('GHProxy.cn');
+    expect(result.proxyUsed?.name).toBe('GHProxy Fast');
     expect(result.proxiedDownloadUrl).toBe(
-      'https://ghp.ci/https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64-setup.exe',
+      'https://gh.llkk.cc/https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64-setup.exe',
     );
   });
 
@@ -118,15 +115,16 @@ describe('checkForUpdate', () => {
         const url = input instanceof Request ? input.url : String(input);
         const method = init?.method ?? 'GET';
 
+        const proxyPrefix = 'https://gh.llkk.cc/';
         const isProxyPreviewEndpoint =
-          url.startsWith('https://ghp.ci/') &&
-          url.includes('/releases/download/desktop-latest-preview/latest.json');
+          url.startsWith(proxyPrefix) &&
+          url.includes('/releases/download/desktop-latest-preview/latest');
 
         if (method === 'HEAD') {
           return new Response(null, { status: isProxyPreviewEndpoint ? 200 : 404 });
         }
 
-        if (isProxyPreviewEndpoint) {
+        if (isProxyPreviewEndpoint && url.endsWith('latest.json')) {
           return previewJsonResponse(
             'darwin-x86_64',
             'https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64.dmg',
@@ -142,7 +140,7 @@ describe('checkForUpdate', () => {
     expect(result.available).toBe(true);
     expect(result.installMode).toBe('proxy-auto');
     expect(result.proxiedDownloadUrl).toBe(
-      'https://ghp.ci/https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64.dmg',
+      'https://gh.llkk.cc/https://github.com/Await-d/OpenAWork/releases/download/desktop-v0.7.0-preview/OpenAWork_0.7.0_x64.dmg',
     );
   });
 });

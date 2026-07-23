@@ -66,13 +66,25 @@ async function runSpecReview(input: {
   childResults: string;
   callLlm: ReviewInput['callLlm'];
 }): Promise<{ passed: boolean; issues: string[] }> {
-  const system = `你是 Spec Review 审查员。对照 spec 中的验收场景，检查实现结果是否覆盖。
+  const system = `你是 Spec Review 审查员。你的职责是逐项检查验收场景的覆盖情况。
 
-输出格式：
-PASS（全部覆盖）
-或
-ISSUE: [未覆盖的验收场景描述]
-ISSUE: [另一个]`;
+**判定规则（严格遵守）**：
+1. 先从 <spec> 中提取所有验收场景（Given/When/Then、验收条件、AC-xxx 编号等）
+2. 对每个验收场景，在 <implementation-results> 中查找对应的实现证据
+3. 只有在实现结果中完全找不到对应证据时，才输出 ISSUE
+4. 禁止因为以下原因输出 ISSUE：
+   - 代码风格、命名偏好、注释质量
+   - spec 中未声明的额外要求
+   - 推测性的潜在问题（没有实际证据证明未覆盖）
+   - 实现方式与预期不同但功能等价的情况
+
+**输出格式（严格遵守）**：
+每行一条，只输出以下两种格式之一：
+PASS
+ISSUE: [具体验收场景编号或描述] — [简述在实现结果中未找到的证据]
+
+如果所有验收场景都已覆盖，只输出一行 PASS。
+如果有未覆盖的场景，输出对应的 ISSUE 行，不要输出 PASS。`;
 
   const user = `<spec>\n${input.specContent}\n</spec>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
   const result = await input.callLlm(system, user);
@@ -95,13 +107,30 @@ async function runQualityReview(input: {
   childResults: string;
   callLlm: ReviewInput['callLlm'];
 }): Promise<{ passed: boolean; issues: string[] }> {
-  const system = `你是 Quality Review 审查员。检查实现结果的代码质量和宪法合规性。
+  const system = `你是 Quality Review 审查员。你的职责是按以下 checklist 逐项检查代码质量。
 
-输出格式：
+**检查维度（逐项评估）**：
+1. 功能正确性：实现结果是否完成了任务描述中的功能
+2. 错误处理：是否有明显的未处理异常或错误路径
+3. 安全性：是否有硬编码密钥、SQL 注入、未验证的用户输入等安全问题
+4. 宪法合规：实现是否违反 <constitution> 中的"禁止"条款
+
+**判定规则（严格遵守）**：
+1. 只有发现实际证据表明存在问题时，才输出 ISSUE
+2. 禁止因为以下原因输出 ISSUE：
+   - 代码风格、命名偏好、缩进格式
+   - "可以做得更好"的改进建议（不是问题）
+   - 推测性的潜在问题（没有实际证据）
+   - spec 中未要求的质量标准
+3. 如果 constitution 为空或没有明确的禁止条款，不要以"宪法合规"为由输出 ISSUE
+
+**输出格式（严格遵守）**：
+每行一条，只输出以下两种格式之一：
 PASS
-或
-ISSUE: [质量问题描述]
-ISSUE: [宪法违反描述]`;
+ISSUE: [检查维度] — [具体问题描述，包含文件位置]
+
+如果所有检查维度都通过，只输出一行 PASS。
+如果有实际问题，输出对应的 ISSUE 行，不要输出 PASS。`;
 
   const user = `<constitution>\n${input.constitutionBody}\n</constitution>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
   const result = await input.callLlm(system, user);
@@ -151,9 +180,13 @@ function generateReportMarkdown(report: Omit<ReviewReport, 'reportMarkdown'>): s
 export function determineFailureDisposition(input: {
   report: ReviewReport;
   escalationRound: number;
+  globalEscalationRound?: number;
 }): FailureDisposition {
   const disposition = deriveQualityReviewDisposition({
     escalationRound: input.escalationRound,
+    ...(input.globalEscalationRound !== undefined
+      ? { globalEscalationRound: input.globalEscalationRound }
+      : {}),
     overallVerdict: input.report.overallVerdict,
     qualityIssues: input.report.qualityIssues,
     qualityReviewPassed: input.report.qualityReviewPassed,
