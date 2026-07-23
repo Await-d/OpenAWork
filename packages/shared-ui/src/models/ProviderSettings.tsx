@@ -607,6 +607,7 @@ export function ProviderSettings({
     setDiscoverOpen(true);
     setDiscoverLoading(true);
     setDiscoverError(null);
+    setDiscoverQuery('');
     try {
       const res = await onDiscoverProviders();
       setDiscoverItems(res.providers ?? []);
@@ -1628,83 +1629,95 @@ export function ProviderSettings({
               <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{discoverError}</div>
             ) : null}
             {!discoverLoading ? (
-              <ul
-                style={{
-                  margin: 0,
-                  padding: 0,
-                  listStyle: 'none',
-                  maxHeight: 240,
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                }}
-              >
-                {discoverItems
-                  .filter((item) => {
-                    const q = discoverQuery.trim().toLowerCase();
-                    if (!q) return true;
-                    return (
-                      item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
-                    );
-                  })
-                  .map((item) => (
-                    <li
-                      key={item.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10,
-                        padding: '0.45rem 0.55rem',
-                        borderRadius: 6,
-                        border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{item.name}</div>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: 'var(--fg-muted)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {item.id}
-                          {item.api ? ` · ${item.api}` : ''}
-                          {` · ${item.modelCount} 模型`}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={!onImportDiscoveredProvider || importingId === item.id}
-                        onClick={() => {
-                          void importDiscovered(item.id);
-                        }}
+              (() => {
+                const q = discoverQuery.trim().toLowerCase();
+                const filtered = discoverItems.filter((item) => {
+                  if (!q) return true;
+                  return (
+                    item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+                  );
+                });
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                      {discoverItems.length === 0
+                        ? '暂无可导入平台（可能均已内置，或 models.dev 暂无数据）。'
+                        : '没有匹配的平台，请调整搜索关键词。'}
+                    </div>
+                  );
+                }
+                return (
+                  <ul
+                    style={{
+                      margin: 0,
+                      padding: 0,
+                      listStyle: 'none',
+                      maxHeight: 240,
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}
+                  >
+                    {filtered.map((item) => (
+                      <li
+                        key={item.id}
                         style={{
-                          background: 'var(--accent)',
-                          color: color.fgOnAccent,
-                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          padding: '0.45rem 0.55rem',
                           borderRadius: 6,
-                          padding: '0.28rem 0.7rem',
-                          fontSize: 11,
-                          cursor:
-                            !onImportDiscoveredProvider || importingId === item.id
-                              ? 'not-allowed'
-                              : 'pointer',
-                          fontWeight: 500,
-                          opacity:
-                            !onImportDiscoveredProvider || importingId === item.id ? 0.6 : 1,
-                          flexShrink: 0,
+                          border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                         }}
                       >
-                        {importingId === item.id ? '导入中…' : '导入'}
-                      </button>
-                    </li>
-                  ))}
-              </ul>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{item.name}</div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--fg-muted)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {item.id}
+                            {item.api ? ` · ${item.api}` : ''}
+                            {` · ${item.modelCount} 模型`}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!onImportDiscoveredProvider || importingId === item.id}
+                          onClick={() => {
+                            void importDiscovered(item.id);
+                          }}
+                          style={{
+                            background: 'var(--accent)',
+                            color: color.fgOnAccent,
+                            border: 'none',
+                            borderRadius: 6,
+                            padding: '0.28rem 0.7rem',
+                            fontSize: 11,
+                            cursor:
+                              !onImportDiscoveredProvider || importingId === item.id
+                                ? 'not-allowed'
+                                : 'pointer',
+                            fontWeight: 500,
+                            opacity:
+                              !onImportDiscoveredProvider || importingId === item.id ? 0.6 : 1,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {importingId === item.id ? '导入中…' : '导入'}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()
             ) : null}
             <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               导入后类型为 custom，请填写 API Key 后再使用。

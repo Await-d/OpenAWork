@@ -1049,15 +1049,15 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         'settings.providers.import-models-dev',
       );
 
-      const body = request.body as {
-        modelsDevProviderId?: string;
-        name?: string;
-        enabled?: boolean;
-      };
-      if (!body?.modelsDevProviderId || typeof body.modelsDevProviderId !== 'string') {
-        step.fail('bad request');
-        return reply.status(400).send({ message: 'modelsDevProviderId is required' });
-      }
+      const parseStep = child('parse-body');
+      const importBodySchema = z.object({
+        modelsDevProviderId: z.string().trim().min(1),
+        name: z.string().trim().min(1).optional(),
+        enabled: z.boolean().optional(),
+      });
+      // parseBody 失败会抛 ApiError.badRequest，由全局错误处理返回 400。
+      const body = parseBody(importBodySchema, request.body);
+      parseStep.succeed();
 
       const loadStep = child('load-models-dev');
       let data: Awaited<ReturnType<typeof getModelsDevData>>;
@@ -1100,6 +1100,37 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       const existingRaw = parseStoredJson(providerRow?.value);
       const existingList = Array.isArray(existingRaw) ? existingRaw : [];
+      // 防重复导入：同 baseUrl 的 custom 实例或同 models.dev id 前缀已存在则拒绝。
+      const safeModelsDevId = body.modelsDevProviderId
+        .replace(/[^a-zA-Z0-9_-]/g, '-')
+        .toLowerCase();
+      const idPrefix = `custom-md-${safeModelsDevId}-`;
+      const duplicate = existingList.find((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const provider = item as { id?: unknown; baseUrl?: unknown; type?: unknown };
+        if (provider.type !== 'custom') return false;
+        if (
+          typeof provider.id === 'string' &&
+          provider.id.toLowerCase().startsWith(idPrefix)
+        ) {
+          return true;
+        }
+        if (
+          imported.baseUrl &&
+          typeof provider.baseUrl === 'string' &&
+          provider.baseUrl === imported.baseUrl
+        ) {
+          return true;
+        }
+        return false;
+      });
+      if (duplicate) {
+        step.fail('duplicate');
+        return reply.status(409).send({
+          message: '该平台已导入，请勿重复添加。可在提供商列表中编辑已有实例。',
+        });
+      }
+
       const mergedRaw = [...existingList, imported];
 
       const materializeStep = child('materialize');
