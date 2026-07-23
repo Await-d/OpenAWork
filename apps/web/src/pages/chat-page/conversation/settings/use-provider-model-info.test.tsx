@@ -38,6 +38,8 @@ describe('useProviderModelInfo', () => {
         providers: PROVIDERS,
         activeProviderId: 'openai',
         activeModelId: 'snapshot-model',
+        defaultProviderId: 'openai',
+        defaultModelId: 'gpt-5.4',
         setActiveProviderId,
         setActiveModelId,
       }),
@@ -47,8 +49,13 @@ describe('useProviderModelInfo', () => {
       expect(result.current.activeProvider?.id).toBe('openai');
     });
 
-    expect(result.current.activeModelOption).toBeUndefined();
-    expect(result.current.activeModelTooltip).toBe('当前使用提供商：OpenAI');
+    expect(result.current.effectiveProviderId).toBe('openai');
+    expect(result.current.effectiveModelId).toBe('gpt-5.4');
+    expect(result.current.activeModelOption?.id).toBe('gpt-5.4');
+    expect(result.current.activeModelTooltip).toBe(
+      '当前使用模型：OpenAI / GPT-5.4（会话绑定模型不可用，已回退）',
+    );
+    expect(result.current.rawModelSelectionInvalid).toBe(true);
     expect(setActiveProviderId).not.toHaveBeenCalled();
     expect(setActiveModelId).not.toHaveBeenCalled();
   });
@@ -62,6 +69,8 @@ describe('useProviderModelInfo', () => {
         providers: PROVIDERS,
         activeProviderId: '',
         activeModelId: '',
+        defaultProviderId: 'openai',
+        defaultModelId: 'gpt-5.4',
         setActiveProviderId,
         setActiveModelId,
       }),

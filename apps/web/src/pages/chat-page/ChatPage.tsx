@@ -1098,6 +1098,28 @@ export default function ChatPage() {
     };
   }, [gatewayUrl, token]);
 
+  const syncFastSelectionWithModel = useCallback(
+    async (providerId: string, modelId: string): Promise<void> => {
+      if (!fastEnabled || !token) {
+        return;
+      }
+
+      try {
+        const { createSettingsClient } = await import('@openAwork/web-client');
+        await createSettingsClient(gatewayUrl).putActiveSelection(token, {
+          fast: { providerId, modelId },
+        });
+      } catch (error) {
+        logger.warn('failed to sync fast model selection', {
+          error: error instanceof Error ? error.message : String(error),
+          modelId,
+          providerId,
+        });
+      }
+    },
+    [fastEnabled, gatewayUrl, token],
+  );
+
   useEffect(() => {
     if (subAgentRunItems.length === 0) {
       if (selectedChildSessionId !== null) {
@@ -2597,8 +2619,8 @@ export default function ChatPage() {
     });
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
-    const requestProviderId = activeProviderId || undefined;
-    const requestModelLabel = (activeModelOption?.label ?? activeModelId) || undefined;
+    const requestProviderId = effectiveProviderId || undefined;
+    const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
     const shouldSendExplicitSelection = shouldSendExplicitStreamModelSelection(
       sessionModelSelectionSourceRef.current,
     );
@@ -2733,7 +2755,7 @@ export default function ChatPage() {
 
     const resolvedThinkingRequest = resolveChatThinkingRequest({
       providerType: activeProvider?.type,
-      modelId: activeModelOption?.id ?? activeModelId,
+      modelId: activeModelOption?.id ?? effectiveModelId,
       declaredSupportsThinking: activeModelOption?.supportsThinking === true,
       thinkingEnabled,
       reasoningEffort,
@@ -2743,8 +2765,10 @@ export default function ChatPage() {
       agentId: effectiveAgentId,
       dialogueMode,
       displayMessage: displayMessageForStream,
-      model: shouldSendExplicitSelection ? activeModelId || 'default' : 'default',
-      ...(shouldSendExplicitSelection && activeProviderId ? { providerId: activeProviderId } : {}),
+      model: shouldSendExplicitSelection ? effectiveModelId || 'default' : 'default',
+      ...(shouldSendExplicitSelection && effectiveProviderId
+        ? { providerId: effectiveProviderId }
+        : {}),
       thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
       reasoningEffort: resolvedThinkingRequest.reasoningEffort,
       webSearchEnabled,
@@ -3392,8 +3416,8 @@ export default function ChatPage() {
     const initialThinking = joinStreamingThinkingTexts(initialThinkingBlocks);
     const initialUsage = recoveredStreamSnapshot?.usage ?? null;
     const requestStartedAt = recoveredStreamSnapshot?.startedAt ?? Date.now();
-    const requestProviderId = activeProviderId || undefined;
-    const requestModelLabel = activeModelId || undefined;
+    const requestProviderId = effectiveProviderId || undefined;
+    const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
     const requestAgentId = effectiveAgentId || undefined;
     const recoveredModifiedFilesSummary = recoveredStreamSnapshot?.modifiedFilesSummary;
     const requestTextCodePoints = Array.from(initialText);
@@ -4305,10 +4329,14 @@ export default function ChatPage() {
     activeModelOption,
     activeModelCanConfigureThinking,
     activeModelTooltip,
+    effectiveProviderId,
+    effectiveModelId,
   } = useProviderModelInfo({
     providers,
     activeProviderId,
     activeModelId,
+    defaultProviderId: savedChatDefaultsRef.current?.providerId,
+    defaultModelId: savedChatDefaultsRef.current?.modelId,
     setActiveProviderId,
     setActiveModelId,
   });
@@ -4316,7 +4344,7 @@ export default function ChatPage() {
   useEffect(() => {
     const normalizedThinkingState = normalizeChatThinkingState({
       providerType: activeProvider?.type,
-      modelId: activeModelOption?.id ?? activeModelId,
+      modelId: activeModelOption?.id ?? effectiveModelId,
       declaredSupportsThinking: activeModelOption?.supportsThinking === true,
       thinkingEnabled,
       reasoningEffort,
@@ -4329,7 +4357,7 @@ export default function ChatPage() {
       setReasoningEffort(normalizedThinkingState.reasoningEffort);
     }
   }, [
-    activeModelId,
+    effectiveModelId,
     activeModelOption?.id,
     activeModelOption?.supportsThinking,
     activeProvider?.type,
@@ -4354,8 +4382,8 @@ export default function ChatPage() {
     messages,
     pendingPermissions,
     modelPrices,
-    activeProviderId,
-    activeModelId,
+    activeProviderId: effectiveProviderId,
+    activeModelId: effectiveModelId,
     activeModelOption,
     visibleStreaming,
     visibleStreamBuffer,
@@ -5031,7 +5059,7 @@ export default function ChatPage() {
                     {currentSessionId ? (
                       <SessionHeaderBar
                         title={`会话 ${currentSessionId.slice(0, 8)}`}
-                        modelLabel={activeModelOption?.label ?? activeModelId}
+                        modelLabel={activeModelOption?.label ?? effectiveModelId}
                         modeLabel={dialogueModeLabel}
                         workspacePath={effectiveWorkingDirectory}
                         reviewPanelOpened={reviewPanelOpened}
@@ -5259,8 +5287,8 @@ export default function ChatPage() {
                 pendingPermissions={pendingPermissions}
                 resolveInlinePermissionActions={resolveInlinePermissionActions}
                 providerCatalog={providerCatalog}
-                activeProviderId={activeProviderId}
-                activeModelId={activeModelId}
+                activeProviderId={effectiveProviderId}
+                activeModelId={effectiveModelId}
                 activeModelLabel={activeModelOption?.label}
                 onLoadEarlier={() => {
                   const localHidden =
@@ -5414,6 +5442,7 @@ export default function ChatPage() {
                   setReasoningEffort(normalizedThinkingState.reasoningEffort);
                   sessionModelSelectionSourceRef.current = 'manual';
                   markSessionMetadataDirty();
+                  await syncFastSelectionWithModel(pid, mid);
                 }}
                 onToggleWebSearch={handleToggleWebSearch}
                 onThinkingEnabledChange={(enabled) => {
@@ -5729,8 +5758,8 @@ export default function ChatPage() {
                   pendingPermissions={pendingPermissions}
                   resolveInlinePermissionActions={resolveInlinePermissionActions}
                   providerCatalog={providerCatalog}
-                  activeProviderId={activeProviderId}
-                  activeModelId={activeModelId}
+                  activeProviderId={effectiveProviderId}
+                  activeModelId={effectiveModelId}
                   activeModelLabel={activeModelOption?.label}
                   onLoadEarlier={() => {
                     const localHidden =
@@ -5884,6 +5913,7 @@ export default function ChatPage() {
                     setReasoningEffort(normalizedThinkingState.reasoningEffort);
                     sessionModelSelectionSourceRef.current = 'manual';
                     markSessionMetadataDirty();
+                    await syncFastSelectionWithModel(pid, mid);
                   }}
                   onToggleWebSearch={handleToggleWebSearch}
                   onThinkingEnabledChange={(enabled) => {

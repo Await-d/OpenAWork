@@ -1357,10 +1357,8 @@ export async function resolveStreamModelRoute(input: {
   const requestedModelId = normalizeRequestedModelId(input.requestData.model);
   const echoedSessionProviderId = normalizeRequestedProviderId(sessionSelection.providerId);
   const echoedSessionModelId = normalizeRequestedModelId(sessionSelection.modelId);
-  const hasExplicitProviderOverride =
-    requestedProviderId !== undefined && requestedProviderId !== echoedSessionProviderId;
-  const hasExplicitModelOverride =
-    requestedModelId !== undefined && requestedModelId !== echoedSessionModelId;
+  const hasExplicitProviderOverride = requestedProviderId !== undefined;
+  const hasExplicitModelOverride = requestedModelId !== undefined;
   const hasAuthoritativeTeamModel =
     (isTeamRoleLayer(input.roleLayer) || hasTeamDefinition(input.metadataJson)) &&
     Boolean(sessionSelection.providerId && sessionSelection.modelId);

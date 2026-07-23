@@ -1,11 +1,14 @@
 import { useEffect, useMemo } from 'react';
 import { canConfigureThinkingForModel } from '@openAwork/shared-ui';
 import type { ChatSettingsProvider } from '../../../../utils/chat/chat-session-defaults.js';
+import { resolveEffectiveChatModelSelection } from './resolve-effective-chat-model-selection.js';
 
 export interface ProviderModelInfoDeps {
   providers: ChatSettingsProvider[];
   activeProviderId: string;
   activeModelId: string;
+  defaultProviderId?: string | null;
+  defaultModelId?: string | null;
   setActiveProviderId: (value: string) => void;
   setActiveModelId: (value: string) => void;
 }
@@ -16,13 +19,34 @@ export interface ProviderModelInfoReturn {
   activeModelOption: ChatSettingsProvider['defaultModels'][number] | undefined;
   activeModelCanConfigureThinking: boolean;
   activeModelTooltip: string;
+  effectiveModelId: string;
+  effectiveProviderId: string;
+  rawModelSelectionInvalid: boolean;
 }
 
 export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModelInfoReturn {
-  const { providers, activeProviderId, activeModelId, setActiveProviderId, setActiveModelId } =
-    deps;
-
-  const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const {
+    activeModelId,
+    activeProviderId,
+    defaultModelId,
+    defaultProviderId,
+    providers,
+    setActiveModelId,
+    setActiveProviderId,
+  } = deps;
+  const effectiveSelection = useMemo(
+    () =>
+      resolveEffectiveChatModelSelection({
+        defaultModelId,
+        defaultProviderId,
+        providers,
+        selectedModelId: activeModelId,
+        selectedProviderId: activeProviderId,
+      }),
+    [activeModelId, activeProviderId, defaultModelId, defaultProviderId, providers],
+  );
+  const activeProvider = effectiveSelection.provider ?? undefined;
+  const activeModelOption = effectiveSelection.model ?? undefined;
   const providerCatalog = useMemo(
     () =>
       new Map(
@@ -33,15 +57,12 @@ export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModel
       ),
     [providers],
   );
-  const activeModelOption = activeProvider?.defaultModels.find(
-    (model) => model.id === activeModelId,
-  );
   const activeModelCanConfigureThinking = canConfigureThinkingForModel(
     activeProvider?.type,
-    activeModelOption?.id ?? activeModelId,
+    activeModelOption?.id ?? effectiveSelection.modelId,
   );
   const activeModelTooltip = activeModelOption?.label
-    ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}`
+    ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}${effectiveSelection.rawSelectionInvalid ? '（会话绑定模型不可用，已回退）' : ''}`
     : activeProvider?.name
       ? `当前使用提供商：${activeProvider.name}`
       : '当前使用模型';
@@ -51,25 +72,22 @@ export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModel
       return;
     }
 
-    const fallbackProvider = providers.find((provider) => provider.defaultModels.length > 0);
-    const hasActiveProvider = providers.some(
-      (provider) => provider.id === activeProviderId && provider.defaultModels.length > 0,
-    );
-    const nextProvider = hasActiveProvider
-      ? providers.find((provider) => provider.id === activeProviderId)
-      : fallbackProvider;
-    const nextProviderId = nextProvider?.id ?? '';
-
-    if (!activeProviderId && nextProviderId) {
-      setActiveProviderId(nextProviderId);
+    if (!activeProviderId && effectiveSelection.providerId) {
+      setActiveProviderId(effectiveSelection.providerId);
     }
 
-    const fallbackModelId = nextProvider?.defaultModels[0]?.id ?? '';
-    if (!activeModelId && fallbackModelId) {
-      setActiveProviderId(nextProviderId);
-      setActiveModelId(fallbackModelId);
+    if (!activeModelId && effectiveSelection.modelId) {
+      setActiveModelId(effectiveSelection.modelId);
     }
-  }, [providers, activeProviderId, activeModelId, setActiveProviderId, setActiveModelId]);
+  }, [
+    activeModelId,
+    activeProviderId,
+    effectiveSelection.modelId,
+    effectiveSelection.providerId,
+    providers,
+    setActiveModelId,
+    setActiveProviderId,
+  ]);
 
   return {
     activeProvider,
@@ -77,5 +95,8 @@ export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModel
     activeModelOption,
     activeModelCanConfigureThinking,
     activeModelTooltip,
+    effectiveModelId: effectiveSelection.modelId,
+    effectiveProviderId: effectiveSelection.providerId,
+    rawModelSelectionInvalid: effectiveSelection.rawSelectionInvalid,
   };
 }

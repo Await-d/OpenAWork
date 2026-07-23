@@ -244,7 +244,7 @@ describe('stream error contracts', () => {
     );
   });
 
-  it('请求仅回显 session chat 模型时仍允许 Fast 覆盖主对话流', async () => {
+  it('仅依赖 session metadata 选型时仍允许 Fast 覆盖主对话流', async () => {
     providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
       provider: fastProvider,
       modelId: 'gpt-5.4-nano',
@@ -263,8 +263,6 @@ describe('stream error contracts', () => {
         clientRequestId: 'req-fast-echo',
         maxTokens: 2048,
         message: 'hello',
-        model: 'gpt-4o',
-        providerId: 'openai-chat',
         temperature: 1,
       },
       userId: USER_ID,
@@ -275,6 +273,45 @@ describe('stream error contracts', () => {
     expect(route.upstreamProtocol).toBe('responses');
     expect(providerCatalogMocks.getFastProvider).toHaveBeenCalledWith(USER_ID);
     expect(providerCatalogMocks.getProviderForSelection).not.toHaveBeenCalled();
+  });
+
+  it('请求显式指定 provider/model 时不会再被 Fast 覆盖', async () => {
+    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
+      provider: fastProvider,
+      modelId: 'gpt-5.4-nano',
+    });
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+      }),
+      requestData: {
+        clientRequestId: 'req-explicit-chat-model',
+        maxTokens: 2048,
+        message: 'hello',
+        model: 'gpt-4o',
+        providerId: 'openai-chat',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.model).toBe('gpt-4o');
+    expect(route.providerId).toBe('openai-chat');
+    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
+    expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+      },
+      { fallbackToChat: true },
+    );
   });
 
   it('provider 缺失的 delegated model 绑定不会被 Fast 覆盖', async () => {
