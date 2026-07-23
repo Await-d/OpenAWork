@@ -31,6 +31,8 @@ jobs:
 
       - name: Lint commit messages
         run: |
+          set -euo pipefail
+
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             FROM_SHA="${{ github.event.pull_request.base.sha }}"
             TO_SHA="${{ github.event.pull_request.head.sha }}"
@@ -38,11 +40,21 @@ jobs:
             FROM_SHA="${{ github.event.before }}"
             TO_SHA="${{ github.sha }}"
 
-            if [ "$FROM_SHA" = "0000000000000000000000000000000000000000" ]; then
-              FROM_SHA=$(git rev-list --max-parents=0 "$TO_SHA" | tail -n 1)
+            # force-push / 历史重写后，github.event.before 可能已不在当前仓库，
+            # 直接 commitlint --from 会报 Invalid revision range。
+            if [ -z "$FROM_SHA" ] \
+              || [ "$FROM_SHA" = "0000000000000000000000000000000000000000" ] \
+              || ! git cat-file -e "${FROM_SHA}^{commit}" 2>/dev/null; then
+              echo "FROM_SHA=${FROM_SHA:-<empty>} 不可用，回退到近期提交范围"
+              if git rev-parse --verify "${TO_SHA}~30" >/dev/null 2>&1; then
+                FROM_SHA="$(git rev-parse "${TO_SHA}~30")"
+              else
+                FROM_SHA="$(git rev-list --max-parents=0 "$TO_SHA" | tail -n 1)"
+              fi
             fi
           fi
 
+          echo "Linting commits: ${FROM_SHA}..${TO_SHA}"
           pnpm commitlint --from "$FROM_SHA" --to "$TO_SHA" --verbose
 
   quality:
