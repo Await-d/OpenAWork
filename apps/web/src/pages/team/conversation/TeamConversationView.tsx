@@ -1115,6 +1115,7 @@ export function TeamConversationView({
   const activeModelCanConfigureThinking = canConfigureThinkingForModel(
     activeProvider?.type,
     activeModelOption?.id ?? state.activeModelId,
+    activeModelOption?.supportsThinking === true,
   );
   const activeModelTooltip = activeModelOption?.label
     ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}`

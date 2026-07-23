@@ -114,7 +114,10 @@ export interface SettingsClient {
   getBaseUrl(token: string, options?: { signal?: AbortSignal }): Promise<{ baseUrl: string }>;
   putBaseUrl(token: string, payload: { baseUrl: string }): Promise<void>;
   // 版本 / 校验
-  getVersion(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  getVersion(
+    token: string,
+    options?: { signal?: AbortSignal; channel?: 'preview' | 'stable' },
+  ): Promise<unknown>;
   // 遥测同意 & 事件上报
   getTelemetryConsent(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   updateTelemetryConsent(
@@ -686,10 +689,16 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
     },
 
     async getVersion(token, options) {
+      const params = new URLSearchParams();
+      if (options?.channel === 'preview' || options?.channel === 'stable') {
+        params.set('channel', options.channel);
+      }
+      const query = params.toString();
+      const url = query ? `${baseUrl}/settings/version?${query}` : `${baseUrl}/settings/version`;
       return performSettingsRequest<unknown>({
         actionLabel: '读取版本信息',
         request: () =>
-          fetchWithTimeout(`${baseUrl}/settings/version`, {
+          fetchWithTimeout(url, {
             headers: authHeader(token),
             signal: options?.signal,
           }),

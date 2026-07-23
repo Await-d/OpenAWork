@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface FileChange {
   id: string;
@@ -89,16 +90,15 @@ export default function ChangeReviewScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>变更审阅</Text>
-        <TouchableOpacity onPress={() => setSelected(new Set(MOCK_CHANGES.map((c) => c.id)))}>
-          <Text style={styles.selectAll}>全选</Text>
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      <ScreenHeader
+        title="变更审阅"
+        right={
+          <TouchableOpacity onPress={() => setSelected(new Set(MOCK_CHANGES.map((c) => c.id)))}>
+            <Text style={styles.selectAll}>全选</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {/* Summary bar */}
       <View style={styles.summaryBar}>
@@ -160,7 +160,7 @@ export default function ChangeReviewScreen() {
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </Screen>
   );
 }
 
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   },
   summaryText: { ...textPresets.label, color: colors.accent },
 
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   changeCard: {
     backgroundColor: colors.surface1,
     borderRadius: radii.md,

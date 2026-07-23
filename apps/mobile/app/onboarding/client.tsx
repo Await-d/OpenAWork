@@ -25,6 +25,7 @@ import {
   useAuthStore,
   DEFAULT_MOBILE_GATEWAY_URL,
 } from '../../src/store/auth';
+import { Screen } from '../../src/components/Screen';
 import { colors } from '../../src/theme/colors';
 import { radii } from '../../src/theme/radii';
 import { textPresets } from '../../src/theme/typography';
@@ -90,7 +91,7 @@ export default function ClientPairingScreen() {
           await AsyncStorage.setItem('onboarded', 'true');
           setConnected(true);
           setTimeout(() => {
-            router.replace('/sessions');
+            router.replace('/home');
           }, 800);
         } catch (apiErr) {
           const msg = apiErr instanceof Error ? apiErr.message : '配对登录失败';
@@ -117,116 +118,121 @@ export default function ClientPairingScreen() {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>连接桌面端</Text>
-        <View style={{ width: 36 }} />
-      </View>
-
-      {/* 连接状态 */}
-      <View style={styles.statusCard}>
-        <Ionicons
-          name={connected ? 'checkmark-circle' : 'radio-button-off-outline'}
-          size={16}
-          color={connected ? colors.success : colors.textSubtle}
-        />
-        <Text style={styles.statusText}>
-          {connected ? '配对成功，正在跳转…' : loading ? '正在配对…' : '等待扫描配对码'}
-        </Text>
-      </View>
-
-      {/* 网关地址 */}
-      <View style={styles.gatewayCard}>
-        <Ionicons name="globe-outline" size={14} color={colors.textMuted} />
-        <Text style={styles.gatewayLabel}>网关：</Text>
-        <Text style={styles.gatewayUrl} numberOfLines={1}>
-          {DEFAULT_MOBILE_GATEWAY_URL}
-        </Text>
-      </View>
-
-      {/* 扫码区域 */}
-      <View style={styles.cameraCard}>
-        {permission?.granted ? (
-          <CameraView
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={scanned || loading ? undefined : handleBarcodeScanned}
-            style={styles.cameraPreview}
-          />
-        ) : (
-          <View style={styles.cameraPermissionBox}>
-            <Ionicons name="camera-outline" size={36} color={colors.textSubtle} />
-            <Text style={styles.cameraPermissionText}>需要相机权限才能扫描二维码</Text>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => void requestPermission()}>
-              <Text style={styles.secondaryBtnText}>授权相机</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {scanned && !loading && !connected ? (
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => setScanned(false)}>
-          <Text style={styles.secondaryBtnText}>重新扫描</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {/* 手动输入配对码 */}
-      <Text style={styles.sectionLabel}>手动粘贴配对码</Text>
-      <TextInput
-        style={styles.codeInput}
-        placeholder="粘贴配对 JSON 或纯 token 字符串"
-        placeholderTextColor={colors.textSubtle}
-        value={pairingCode}
-        onChangeText={(v) => {
-          setPairingCode(v);
-          setError(null);
-          setScanned(false);
-        }}
-        multiline
-        numberOfLines={3}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-
-      <TouchableOpacity
-        style={[styles.primaryBtn, isDisabled && styles.disabledBtn]}
-        onPress={() => void completePairingLogin(pairingCode)}
-        disabled={isDisabled}
-      >
-        {loading ? (
-          <ActivityIndicator color={colors.white} size="small" />
-        ) : (
-          <>
-            <Ionicons name="git-merge-outline" size={16} color={colors.white} />
-            <Text style={styles.primaryBtnText}>使用配对码连接</Text>
-          </>
-        )}
-      </TouchableOpacity>
-
-      {/* 提示 */}
-      <View style={styles.tipCard}>
-        <Ionicons name="information-circle-outline" size={17} color={colors.aux} />
-        <Text style={styles.tipText}>
-          在桌面端开启局域网访问后，终端或 Web/Desktop 界面会显示配对二维码。
-        </Text>
-      </View>
-
-      {error ? (
-        <View style={styles.errorBar}>
-          <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
-          <Text style={styles.errorText}>{error}</Text>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>连接桌面端</Text>
+          <View style={{ width: 36 }} />
         </View>
-      ) : null}
-    </ScrollView>
+
+        {/* 连接状态 */}
+        <View style={styles.statusCard}>
+          <Ionicons
+            name={connected ? 'checkmark-circle' : 'radio-button-off-outline'}
+            size={16}
+            color={connected ? colors.success : colors.textSubtle}
+          />
+          <Text style={styles.statusText}>
+            {connected ? '配对成功，正在跳转…' : loading ? '正在配对…' : '等待扫描配对码'}
+          </Text>
+        </View>
+
+        {/* 网关地址 */}
+        <View style={styles.gatewayCard}>
+          <Ionicons name="globe-outline" size={14} color={colors.textMuted} />
+          <Text style={styles.gatewayLabel}>网关：</Text>
+          <Text style={styles.gatewayUrl} numberOfLines={1}>
+            {DEFAULT_MOBILE_GATEWAY_URL}
+          </Text>
+        </View>
+
+        {/* 扫码区域 */}
+        <View style={styles.cameraCard}>
+          {permission?.granted ? (
+            <CameraView
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={scanned || loading ? undefined : handleBarcodeScanned}
+              style={styles.cameraPreview}
+            />
+          ) : (
+            <View style={styles.cameraPermissionBox}>
+              <Ionicons name="camera-outline" size={36} color={colors.textSubtle} />
+              <Text style={styles.cameraPermissionText}>需要相机权限才能扫描二维码</Text>
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => void requestPermission()}
+              >
+                <Text style={styles.secondaryBtnText}>授权相机</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {scanned && !loading && !connected ? (
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => setScanned(false)}>
+            <Text style={styles.secondaryBtnText}>重新扫描</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* 手动输入配对码 */}
+        <Text style={styles.sectionLabel}>手动粘贴配对码</Text>
+        <TextInput
+          style={styles.codeInput}
+          placeholder="粘贴配对 JSON 或纯 token 字符串"
+          placeholderTextColor={colors.textSubtle}
+          value={pairingCode}
+          onChangeText={(v) => {
+            setPairingCode(v);
+            setError(null);
+            setScanned(false);
+          }}
+          multiline
+          numberOfLines={3}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+
+        <TouchableOpacity
+          style={[styles.primaryBtn, isDisabled && styles.disabledBtn]}
+          onPress={() => void completePairingLogin(pairingCode)}
+          disabled={isDisabled}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.white} size="small" />
+          ) : (
+            <>
+              <Ionicons name="git-merge-outline" size={16} color={colors.white} />
+              <Text style={styles.primaryBtnText}>使用配对码连接</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* 提示 */}
+        <View style={styles.tipCard}>
+          <Ionicons name="information-circle-outline" size={17} color={colors.aux} />
+          <Text style={styles.tipText}>
+            在桌面端开启局域网访问后，终端或 Web/Desktop 界面会显示配对二维码。
+          </Text>
+        </View>
+
+        {error ? (
+          <View style={styles.errorBar}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  content: { padding: 16, paddingBottom: 100 },
+  content: { padding: 16, paddingBottom: 32 },
 
   /* header */
   headerRow: {

@@ -12,6 +12,7 @@ const ERROR_TITLES: Record<UpdateErrorKind, string> = {
   signature: '校验失败',
   permission: '权限不足',
   no_update: '暂无更新',
+  cancelled: '已取消',
   unknown: '更新出错',
 };
 
@@ -20,6 +21,7 @@ const ERROR_HINTS: Record<UpdateErrorKind, string> = {
   signature: '更新包签名校验失败。请重试，或从 GitHub Releases 手动下载安装。',
   permission: '当前权限不足以安装更新。请尝试以管理员/具备写入权限的账户运行。',
   no_update: '当前已是最新版本。',
+  cancelled: '更新已取消，可随时重新检查并下载。',
   unknown: '更新过程中发生未知错误，请重试。',
 };
 

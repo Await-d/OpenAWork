@@ -92,7 +92,11 @@ export function normalizeChatThinkingState(
     };
   }
 
-  const canConfigureThinking = canConfigureThinkingForModel(input.providerType, input.modelId);
+  const canConfigureThinking = canConfigureThinkingForModel(
+    input.providerType,
+    input.modelId,
+    input.declaredSupportsThinking,
+  );
   if (!canConfigureThinking) {
     return {
       supportsThinking: true,

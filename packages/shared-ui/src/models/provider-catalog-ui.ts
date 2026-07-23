@@ -185,6 +185,12 @@ const STATIC_FALLBACK: readonly ProviderCatalogUiEntry[] = [
     aliases: ['wenxin', 'baidu'],
     modelIdPrefixes: ['ernie'],
   },
+  {
+    type: 'custom',
+    displayName: '自定义渠道',
+    fallbackGlyph: '✦',
+    aliases: ['custom-provider', 'self-hosted', 'openai-compatible'],
+  },
 ];
 
 const normalizeKey = (value: string): string => value.trim().toLowerCase();

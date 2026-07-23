@@ -1,10 +1,16 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { textPresets } from '../theme/typography';
+import {
+  BOTTOM_NAV_BAR_HEIGHT,
+  BOTTOM_NAV_OUTER_MARGIN,
+  MIN_HOME_INDICATOR_INSET,
+} from '../layout/metrics';
 
-export type BottomNavTab = 'sessions' | 'chat' | 'settings';
+export type BottomNavTab = 'home' | 'sessions' | 'settings';
 
 interface BottomNavProps {
   active: BottomNavTab;
@@ -17,14 +23,17 @@ const TABS: Array<{
   icon: keyof typeof Ionicons.glyphMap;
   iconActive: keyof typeof Ionicons.glyphMap;
 }> = [
+  { key: 'home', label: '首页', icon: 'home-outline', iconActive: 'home' },
   { key: 'sessions', label: '会话', icon: 'mail-outline', iconActive: 'mail' },
-  { key: 'chat', label: 'Chat', icon: 'chatbubble-outline', iconActive: 'chatbubble' },
   { key: 'settings', label: '设置', icon: 'settings-outline', iconActive: 'settings' },
 ];
 
 export function BottomNav({ active, onNavigate }: BottomNavProps) {
+  const insets = useSafeAreaInsets();
+  const bottomOffset = Math.max(insets.bottom, MIN_HOME_INDICATOR_INSET) + BOTTOM_NAV_OUTER_MARGIN;
+
   return (
-    <View style={styles.wrapper}>
+    <View pointerEvents="box-none" style={[styles.wrapper, { bottom: bottomOffset }]}>
       <View style={styles.container}>
         {TABS.map((tab) => {
           const isActive = tab.key === active;
@@ -34,6 +43,8 @@ export function BottomNav({ active, onNavigate }: BottomNavProps) {
               style={styles.tab}
               onPress={() => onNavigate(tab.key)}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
             >
               <Ionicons
                 name={isActive ? tab.iconActive : tab.icon}
@@ -52,17 +63,17 @@ export function BottomNav({ active, onNavigate }: BottomNavProps) {
 const styles = StyleSheet.create({
   wrapper: {
     position: 'absolute',
-    bottom: 16,
     left: 16,
     right: 16,
     alignItems: 'center',
+    zIndex: 20,
   },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
     width: '100%',
-    height: 60,
+    height: BOTTOM_NAV_BAR_HEIGHT,
     backgroundColor: colors.surface1,
     borderRadius: radii.pill,
     borderWidth: 1,

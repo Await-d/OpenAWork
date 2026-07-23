@@ -1,9 +1,10 @@
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, FlatList } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { radii } from '../../src/theme/radii';
 import { textPresets } from '../../src/theme/typography';
+import { Screen } from '../../src/components/Screen';
+import { ScreenHeader } from '../../src/components/ui';
 
 interface ChannelSession {
   id: string;
@@ -41,100 +42,96 @@ const BUILTIN_COMMANDS = [
 /** S33: 渠道会话与诊断 */
 export default function ChannelDiagnosticsScreen() {
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>渠道会话</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.container}>
+        <ScreenHeader title="渠道会话" />
 
-      {/* Running status */}
-      <View style={styles.runningBar}>
-        <View style={styles.runningDot} />
-        <Text style={styles.runningText}>渠道运行正常 · 响应 120ms · 今日 48 条消息</Text>
-      </View>
-
-      {/* Metrics */}
-      <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>48</Text>
-          <Text style={styles.metricLabel}>今日消息</Text>
+        {/* Running status */}
+        <View style={styles.runningBar}>
+          <View style={styles.runningDot} />
+          <Text style={styles.runningText}>渠道运行正常 · 响应 120ms · 今日 48 条消息</Text>
         </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>120ms</Text>
-          <Text style={styles.metricLabel}>响应延迟</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>99.2%</Text>
-          <Text style={styles.metricLabel}>成功率</Text>
-        </View>
-      </View>
 
-      {/* Session search */}
-      <Text style={styles.sectionTitle}>渠道会话</Text>
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={16} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="搜索会话…"
-          placeholderTextColor={colors.textSubtle}
-        />
-      </View>
-
-      {/* Sessions */}
-      <FlatList
-        data={MOCK_SESSIONS}
-        keyExtractor={(s) => s.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => {
-          const status = STATUS_MAP[item.status];
-          return (
-            <TouchableOpacity style={styles.sessionCard} activeOpacity={0.7}>
-              <View style={styles.sessionInfo}>
-                <Text style={styles.sessionTitle} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={styles.sessionMeta}>
-                  {item.user} · {item.time}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: status.color + '1A', borderColor: status.color + '52' },
-                ]}
-              >
-                <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
-            </TouchableOpacity>
-          );
-        }}
-      />
-
-      {/* Built-in commands */}
-      <Text style={styles.sectionTitle}>渠道内置命令</Text>
-      <View style={styles.cmdRow}>
-        {BUILTIN_COMMANDS.map((c) => (
-          <View key={c.cmd} style={styles.cmdChip}>
-            <Text style={styles.cmdText}>{c.cmd}</Text>
-            <Text style={styles.cmdDesc}>{c.desc}</Text>
+        {/* Metrics */}
+        <View style={styles.metricsRow}>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>48</Text>
+            <Text style={styles.metricLabel}>今日消息</Text>
           </View>
-        ))}
-      </View>
-
-      {/* Error entry */}
-      <TouchableOpacity style={styles.errorEntry} activeOpacity={0.7}>
-        <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
-        <View style={styles.errorInfo}>
-          <Text style={styles.errorTitle}>诊断错误日志</Text>
-          <Text style={styles.errorDesc}>查看最近的错误和警告</Text>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>120ms</Text>
+            <Text style={styles.metricLabel}>响应延迟</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <Text style={styles.metricValue}>99.2%</Text>
+            <Text style={styles.metricLabel}>成功率</Text>
+          </View>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.textSubtle} />
-      </TouchableOpacity>
-    </View>
+
+        {/* Session search */}
+        <Text style={styles.sectionTitle}>渠道会话</Text>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="搜索会话…"
+            placeholderTextColor={colors.textSubtle}
+          />
+        </View>
+
+        {/* Sessions */}
+        <FlatList
+          data={MOCK_SESSIONS}
+          keyExtractor={(s) => s.id}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => {
+            const status = STATUS_MAP[item.status];
+            return (
+              <TouchableOpacity style={styles.sessionCard} activeOpacity={0.7}>
+                <View style={styles.sessionInfo}>
+                  <Text style={styles.sessionTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.sessionMeta}>
+                    {item.user} · {item.time}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: status.color + '1A', borderColor: status.color + '52' },
+                  ]}
+                >
+                  <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
+              </TouchableOpacity>
+            );
+          }}
+        />
+
+        {/* Built-in commands */}
+        <Text style={styles.sectionTitle}>渠道内置命令</Text>
+        <View style={styles.cmdRow}>
+          {BUILTIN_COMMANDS.map((c) => (
+            <View key={c.cmd} style={styles.cmdChip}>
+              <Text style={styles.cmdText}>{c.cmd}</Text>
+              <Text style={styles.cmdDesc}>{c.desc}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Error entry */}
+        <TouchableOpacity style={styles.errorEntry} activeOpacity={0.7}>
+          <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+          <View style={styles.errorInfo}>
+            <Text style={styles.errorTitle}>诊断错误日志</Text>
+            <Text style={styles.errorDesc}>查看最近的错误和警告</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textSubtle} />
+        </TouchableOpacity>
+      </View>
+    </Screen>
   );
 }
 

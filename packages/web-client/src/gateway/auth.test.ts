@@ -80,9 +80,9 @@ describe('gateway auth helpers', () => {
   });
 
   it('logout 在请求挂起时经墙钟超时吞错（不永久 pending）', async () => {
-    // 半开连接：fetch 永不主动响应，只在 AbortSignal.timeout 注入的 signal 触发时
-    // reject。用一个很短的真实超时（AbortSignal.timeout 不受 vitest fake timers 驱动），
-    // 验证 logout 在墙钟到点后 settle（resolve，吞错），而不是永久 pending。
+    // 半开连接：fetch 永不主动响应，只在 fetchWithTimeout 注入的 signal 触发时
+    // reject。用一个很短的真实超时，验证 logout 在墙钟到点后 settle（resolve，吞错），
+    // 而不是永久 pending。超时走 AbortController + setTimeout，兼容 RN polyfill。
     globalThis.fetch = vi.fn((_input: string, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {

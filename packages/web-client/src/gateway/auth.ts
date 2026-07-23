@@ -39,11 +39,13 @@ export async function login(
   timeoutMs = LOGIN_TIMEOUT_MS,
 ): Promise<TokenPair> {
   try {
+    // 用 fetchWithTimeout 的 timeoutMs，不要 AbortSignal.timeout：
+    // RN AbortSignal polyfill 无 .timeout，会直接 TypeError。
     const res = await fetchWithTimeout(`${gatewayUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       const err = await readAuthError(res);
@@ -69,7 +71,7 @@ export async function refreshAccessToken(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       const err = await readAuthError(res);
@@ -101,7 +103,7 @@ export async function logout(
     await fetchWithTimeout(`${gatewayUrl}/auth/logout`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
   } catch {
     // Swallow — local sign-out proceeds regardless of server reachability.

@@ -68,6 +68,25 @@ describe('workspace file tools on non-Windows hosts', () => {
     }
   });
 
+  it('accepts a single file path as grep root', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'openawork-grep-file-'));
+    const filePath = join(directory, 'single.txt');
+    try {
+      await writeFile(filePath, 'alpha\nbeta\n', 'utf8');
+
+      const result = await executeGrepTool({
+        pattern: 'beta',
+        path: filePath,
+        output_mode: 'content',
+        head_limit: 10,
+      });
+
+      expect(result).toContain(`${filePath}:2: beta`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   testOnNonWindows('rejects a Windows path before attempting filesystem access', async () => {
     await expect(
       executeReadTool({

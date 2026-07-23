@@ -6,16 +6,16 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Alert,
   Share,
+  Platform,
 } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/auth';
 import { useGatewayClient } from '../hooks/useGatewayClient';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import {
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
@@ -67,9 +67,12 @@ import {
   moveChatSearchCursor,
   toInputImageParts,
 } from './chat-message-actions';
+import { Screen } from '../components/Screen';
+import { resolveComposerBottomInset } from '../layout/keyboard';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { textPresets } from '../theme/typography';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Message extends MobileChatMessage {
   streaming?: boolean;
@@ -144,6 +147,14 @@ function inferAttachmentType(input: {
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  const composerBottomInset = resolveComposerBottomInset({
+    keyboardHeight,
+    safeBottom: insets.bottom,
+    gap: 8,
+    platform: Platform.OS,
+  });
   const { stream, disconnect } = useGatewayClient(gatewayUrl, accessToken);
   const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
   const persistence = useMemo(() => new ExpoPersistenceAdapter(), []);
@@ -170,6 +181,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const [hasConfiguredImageModel, setHasConfiguredImageModel] = useState(false);
   const [imageModelLabel, setImageModelLabel] = useState('GPT Image 2 · OpenAI');
   const listRef = useRef<FlatList>(null);
+  const keyboardHeightRef = useRef(0);
   const isMountedRef = useRef(true);
   const isNearBottomRef = useRef(true);
   const lastContentHeightRef = useRef(0);
@@ -298,6 +310,17 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       viewPosition: 0.42,
     });
   }, [activeSearchMatch]);
+
+  // When the keyboard opens, keep the latest messages above the raised composer.
+  useEffect(() => {
+    const previous = keyboardHeightRef.current;
+    keyboardHeightRef.current = keyboardHeight;
+    if (keyboardHeight > 0 && previous === 0 && isNearBottomRef.current) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+      });
+    }
+  }, [keyboardHeight]);
 
   const canApplySessionMutation = useCallback(
     (requestSessionId: string | undefined) =>
@@ -1021,495 +1044,517 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   ]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      {/* Chat Header */}
-      <View style={styles.chatHeader}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.chatHeaderTitle} numberOfLines={1}>
-          聊天
-        </Text>
-        <View style={styles.headerActions}>
+    <Screen edges={['top', 'left', 'right']}>
+      <View style={styles.container}>
+        {/* Chat Header */}
+        <View style={styles.chatHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
+            <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
+          </TouchableOpacity>
+          <Text style={styles.chatHeaderTitle} numberOfLines={1}>
+            聊天
+          </Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => setSearchOpen((prev) => !prev)}
+            >
+              <Ionicons
+                name="search-outline"
+                size={18}
+                color={searchOpen ? colors.warning : colors.textMuted}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => router.push('/input-context')}
+            >
+              <Ionicons name="layers-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => router.push('/attachments')}
+            >
+              <Ionicons name="attach-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => router.push('/answer-retry')}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Context Bar — pills */}
+        <View style={styles.contextBar}>
+          <DialogueModeSelector mode={dialogueMode} onChange={setDialogueMode} />
           <TouchableOpacity
-            style={styles.headerActionBtn}
-            onPress={() => setSearchOpen((prev) => !prev)}
+            style={[styles.contextPill, imageGenerationMode && styles.contextPillActive]}
+            disabled={!hasConfiguredImageModel || sending || imageGenerationBusy}
+            onPress={() => setImageGenerationMode((prev) => !prev)}
           >
             <Ionicons
-              name="search-outline"
-              size={18}
-              color={searchOpen ? colors.warning : colors.textMuted}
+              name="image-outline"
+              size={12}
+              color={imageGenerationMode ? colors.contrast : colors.textMuted}
             />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionBtn}>
-            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Context Bar — pills */}
-      <View style={styles.contextBar}>
-        <DialogueModeSelector mode={dialogueMode} onChange={setDialogueMode} />
-        <TouchableOpacity
-          style={[styles.contextPill, imageGenerationMode && styles.contextPillActive]}
-          disabled={!hasConfiguredImageModel || sending || imageGenerationBusy}
-          onPress={() => setImageGenerationMode((prev) => !prev)}
-        >
-          <Ionicons
-            name="image-outline"
-            size={12}
-            color={imageGenerationMode ? colors.contrast : colors.textMuted}
-          />
-          <Text style={[styles.contextPillText, imageGenerationMode && { color: colors.contrast }]}>
-            {imageGenerationMode ? '生图模式' : '图片模式'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.modeHintBar}>
-        <Text style={styles.modeHintText}>
-          当前：{draftSummary.modeLabel}
-          {imageGenerationMode
-            ? ' · 发送会调用图片生成，附件仅支持参考图'
-            : ` · ${dialogueMode === 'clarify' ? '偏需求澄清' : dialogueMode === 'programmer' ? '偏工程协作' : '偏直接实现'}`}
-        </Text>
-      </View>
-
-      {searchOpen ? (
-        <MobileChatSearchBar
-          activePosition={activeSearchResultIndex}
-          matchCount={searchMatches.length}
-          query={searchQuery}
-          onChangeQuery={setSearchQuery}
-          onClose={() => {
-            setSearchOpen(false);
-            setSearchQuery('');
-          }}
-          onNext={() => moveSearchResult('next')}
-          onPrevious={() => moveSearchResult('previous')}
-        />
-      ) : null}
-
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={styles.list}
-        onContentSizeChange={handleChatContentSizeChange}
-        onScroll={handleChatScroll}
-        onScrollToIndexFailed={({ index }) => {
-          listRef.current?.scrollToOffset({ animated: true, offset: Math.max(0, index * 96) });
-        }}
-        scrollEventThrottle={80}
-        ListEmptyComponent={
-          historyLoading ? (
-            <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
-          ) : (
-            <Text style={styles.empty}>开始对话…</Text>
-          )
-        }
-        renderItem={({ item }) => (
-          <ChatMessageBubble
-            highlighted={activeSearchMatch?.messageId === item.id}
-            isStreaming={item.streaming}
-            message={item}
-            onLongPress={() => setSelectedMessage(item)}
-          />
-        )}
-      />
-
-      {showRestoreFocus ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="恢复到最新对话"
-          style={styles.restoreFocusButton}
-          onPress={() => scrollToLatestMessage(true)}
-        >
-          <Text style={styles.restoreFocusText}>{getChatRestoreFocusLabel(sending)}</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {activities.length > 0 ? <AgentActivityPanel activities={activities} /> : null}
-
-      {streamError ? (
-        <View style={styles.streamErrorBar}>
-          <Text style={styles.streamErrorIcon}>!</Text>
-          <Text style={styles.streamErrorText} numberOfLines={2}>
-            {streamError}
-          </Text>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="关闭流式错误提示"
-            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-            onPress={() => setStreamError(null)}
-          >
-            <Text style={styles.streamErrorDismiss}>知道了</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="重试上一次聊天请求"
-            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-            disabled={sending || imageGenerationBusy || !lastTextRequestRef.current}
-            onPress={() => {
-              void retryLastTextRequest();
-            }}
-          >
             <Text
-              style={[
-                styles.streamErrorRetry,
-                (sending || imageGenerationBusy || !lastTextRequestRef.current) &&
-                  styles.streamErrorRetryDisabled,
-              ]}
+              style={[styles.contextPillText, imageGenerationMode && { color: colors.contrast }]}
             >
-              重试
+              {imageGenerationMode ? '生图模式' : '图片模式'}
             </Text>
           </TouchableOpacity>
         </View>
-      ) : null}
 
-      {showVoice ? (
-        <MobileVoiceRecorder
-          onTranscript={(text) => {
-            setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
-            setShowVoice(false);
+        <View style={styles.modeHintBar}>
+          <Text style={styles.modeHintText}>
+            当前：{draftSummary.modeLabel}
+            {imageGenerationMode
+              ? ' · 发送会调用图片生成，附件仅支持参考图'
+              : ` · ${dialogueMode === 'clarify' ? '偏需求澄清' : dialogueMode === 'programmer' ? '偏工程协作' : '偏直接实现'}`}
+          </Text>
+        </View>
+
+        {searchOpen ? (
+          <MobileChatSearchBar
+            activePosition={activeSearchResultIndex}
+            matchCount={searchMatches.length}
+            query={searchQuery}
+            onChangeQuery={setSearchQuery}
+            onClose={() => {
+              setSearchOpen(false);
+              setSearchQuery('');
+            }}
+            onNext={() => moveSearchResult('next')}
+            onPrevious={() => moveSearchResult('previous')}
+          />
+        ) : null}
+
+        <FlatList
+          ref={listRef}
+          style={styles.messageList}
+          data={messages}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          onContentSizeChange={handleChatContentSizeChange}
+          onScroll={handleChatScroll}
+          onScrollToIndexFailed={({ index }) => {
+            listRef.current?.scrollToOffset({ animated: true, offset: Math.max(0, index * 96) });
           }}
-          onClose={() => setShowVoice(false)}
+          scrollEventThrottle={80}
+          ListEmptyComponent={
+            historyLoading ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
+            ) : (
+              <Text style={styles.empty}>开始对话…</Text>
+            )
+          }
+          renderItem={({ item }) => (
+            <ChatMessageBubble
+              highlighted={activeSearchMatch?.messageId === item.id}
+              isStreaming={item.streaming}
+              message={item}
+              onLongPress={() => setSelectedMessage(item)}
+            />
+          )}
         />
-      ) : null}
 
-      {imageGenerationMode ? (
-        <View style={styles.imagePanel}>
-          <Text style={styles.imagePanelTitle}>图片生成 / 编辑</Text>
-          <Text style={styles.imagePanelText}>
-            {hasConfiguredImageModel
-              ? `当前模型：${imageModelLabel}`
-              : '请先在设置中配置图片模型。'}
-          </Text>
-          <Text style={styles.imagePanelHint}>
-            支持 1K / 2K / 4K 档位下的横图 / 方图 / 竖图预设，也可输入合法自定义尺寸。可附加 1
-            张参考图。
-          </Text>
-          <View style={styles.imagePresetGroups}>
-            {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
-              <View key={group.tier} style={styles.imagePresetGroup}>
-                <Text style={styles.imagePresetGroupTitle}>{group.label}</Text>
-                <Text style={styles.imagePresetGroupHint}>{group.description}</Text>
-                <View style={styles.imageOptionRow}>
-                  {group.presets.map((preset) => (
-                    <TouchableOpacity
-                      key={preset.id}
-                      style={[
-                        styles.optionChip,
-                        resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
-                          styles.optionChipActive,
-                      ]}
-                      onPress={() => setImageDefaults((prev) => ({ ...prev, size: preset.size }))}
-                      disabled={imageGenerationBusy}
-                    >
-                      <Text
-                        style={[
-                          styles.optionChipText,
-                          resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
-                            styles.optionChipTextActive,
-                        ]}
-                      >
-                        {preset.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ))}
+        {showRestoreFocus ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="恢复到最新对话"
+            style={styles.restoreFocusButton}
+            onPress={() => scrollToLatestMessage(true)}
+          >
+            <Text style={styles.restoreFocusText}>{getChatRestoreFocusLabel(sending)}</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {activities.length > 0 ? <AgentActivityPanel activities={activities} /> : null}
+
+        {streamError ? (
+          <View style={styles.streamErrorBar}>
+            <Text style={styles.streamErrorIcon}>!</Text>
+            <Text style={styles.streamErrorText} numberOfLines={2}>
+              {streamError}
+            </Text>
             <TouchableOpacity
-              style={[
-                styles.optionChip,
-                resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
-                  styles.optionChipActive,
-              ]}
-              onPress={() =>
-                setImageDefaults((prev) => ({
-                  ...prev,
-                  size:
-                    resolveImageGenerationSizePresetId(prev.size) === 'custom'
-                      ? prev.size
-                      : sizeForPreset('1k'),
-                }))
-              }
-              disabled={imageGenerationBusy}
+              accessibilityRole="button"
+              accessibilityLabel="关闭流式错误提示"
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              onPress={() => setStreamError(null)}
+            >
+              <Text style={styles.streamErrorDismiss}>知道了</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="重试上一次聊天请求"
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              disabled={sending || imageGenerationBusy || !lastTextRequestRef.current}
+              onPress={() => {
+                void retryLastTextRequest();
+              }}
             >
               <Text
                 style={[
-                  styles.optionChipText,
-                  resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
-                    styles.optionChipTextActive,
+                  styles.streamErrorRetry,
+                  (sending || imageGenerationBusy || !lastTextRequestRef.current) &&
+                    styles.streamErrorRetryDisabled,
                 ]}
               >
-                自定义尺寸
+                重试
               </Text>
             </TouchableOpacity>
           </View>
-          <TextInput
-            style={styles.input}
-            value={imageDefaults.size}
-            onChangeText={(size) => setImageDefaults((prev) => ({ ...prev, size }))}
-            placeholder="例如 2560x1440"
-            placeholderTextColor={colors.textSubtle}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!imageGenerationBusy}
+        ) : null}
+
+        {showVoice ? (
+          <MobileVoiceRecorder
+            onTranscript={(text) => {
+              setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
+              setShowVoice(false);
+            }}
+            onClose={() => setShowVoice(false)}
           />
-          <Text
-            style={[
-              styles.imagePanelHint,
-              !validateImageGenerationSize(imageDefaults.size).valid && styles.imagePanelHintDanger,
-            ]}
-          >
-            {validateImageGenerationSize(imageDefaults.size).valid
-              ? '合法范围：最长边 ≤ 3840、宽高为 16 的倍数、比例不超过 3:1。'
-              : validateImageGenerationSize(imageDefaults.size).message}
-          </Text>
-          <View style={styles.imageOptionRow}>
-            {(['low', 'medium', 'high'] as const).map((quality) => (
+        ) : null}
+
+        {imageGenerationMode ? (
+          <View style={styles.imagePanel}>
+            <Text style={styles.imagePanelTitle}>图片生成 / 编辑</Text>
+            <Text style={styles.imagePanelText}>
+              {hasConfiguredImageModel
+                ? `当前模型：${imageModelLabel}`
+                : '请先在设置中配置图片模型。'}
+            </Text>
+            <Text style={styles.imagePanelHint}>
+              支持 1K / 2K / 4K 档位下的横图 / 方图 / 竖图预设，也可输入合法自定义尺寸。可附加 1
+              张参考图。
+            </Text>
+            <View style={styles.imagePresetGroups}>
+              {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
+                <View key={group.tier} style={styles.imagePresetGroup}>
+                  <Text style={styles.imagePresetGroupTitle}>{group.label}</Text>
+                  <Text style={styles.imagePresetGroupHint}>{group.description}</Text>
+                  <View style={styles.imageOptionRow}>
+                    {group.presets.map((preset) => (
+                      <TouchableOpacity
+                        key={preset.id}
+                        style={[
+                          styles.optionChip,
+                          resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
+                            styles.optionChipActive,
+                        ]}
+                        onPress={() => setImageDefaults((prev) => ({ ...prev, size: preset.size }))}
+                        disabled={imageGenerationBusy}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
+                              styles.optionChipTextActive,
+                          ]}
+                        >
+                          {preset.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
               <TouchableOpacity
-                key={quality}
                 style={[
                   styles.optionChip,
-                  imageDefaults.quality === quality && styles.optionChipActive,
+                  resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
+                    styles.optionChipActive,
                 ]}
-                onPress={() => setImageDefaults((prev) => ({ ...prev, quality }))}
+                onPress={() =>
+                  setImageDefaults((prev) => ({
+                    ...prev,
+                    size:
+                      resolveImageGenerationSizePresetId(prev.size) === 'custom'
+                        ? prev.size
+                        : sizeForPreset('1k'),
+                  }))
+                }
                 disabled={imageGenerationBusy}
               >
                 <Text
                   style={[
                     styles.optionChipText,
-                    imageDefaults.quality === quality && styles.optionChipTextActive,
+                    resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
+                      styles.optionChipTextActive,
                   ]}
                 >
-                  {quality}
+                  自定义尺寸
                 </Text>
               </TouchableOpacity>
-            ))}
-          </View>
-          <View style={styles.imageOptionRow}>
-            {(['png', 'jpeg', 'webp'] as const).map((outputFormat) => (
-              <TouchableOpacity
-                key={outputFormat}
-                style={[
-                  styles.optionChip,
-                  imageDefaults.outputFormat === outputFormat && styles.optionChipActive,
-                ]}
-                onPress={() => setImageDefaults((prev) => ({ ...prev, outputFormat }))}
-                disabled={imageGenerationBusy}
-              >
-                <Text
-                  style={[
-                    styles.optionChipText,
-                    imageDefaults.outputFormat === outputFormat && styles.optionChipTextActive,
-                  ]}
-                >
-                  {outputFormat.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            {(['auto', 'opaque'] as const).map((background) => (
-              <TouchableOpacity
-                key={background}
-                style={[
-                  styles.optionChip,
-                  imageDefaults.background === background && styles.optionChipActive,
-                ]}
-                onPress={() => setImageDefaults((prev) => ({ ...prev, background }))}
-                disabled={imageGenerationBusy}
-              >
-                <Text
-                  style={[
-                    styles.optionChipText,
-                    imageDefaults.background === background && styles.optionChipTextActive,
-                  ]}
-                >
-                  {background === 'auto' ? '自动背景' : '不透明背景'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      ) : null}
-
-      {artifactHistory.length > 0 ? (
-        <View style={styles.historySection}>
-          <Text style={styles.historyTitle}>已上传附件</Text>
-          <MobileAttachmentBar attachments={artifactHistory} />
-        </View>
-      ) : null}
-
-      {input.trim().length > 0 || attachments.length > 0 || imageGenerationMode ? (
-        <View style={styles.composerMetaBar}>
-          <Text style={styles.composerMetaText}>
-            {draftSummary.modeLabel} · {draftSummary.charCount} 字 · {draftSummary.lineCount} 行
-            {draftSummary.attachmentCount > 0 ? ` · ${draftSummary.attachmentCount} 个附件` : ''}
-          </Text>
-          {(input.trim().length > 0 || attachments.length > 0) &&
-          !sending &&
-          !imageGenerationBusy ? (
-            <TouchableOpacity
-              onPress={clearComposerDraft}
-              accessibilityRole="button"
-              accessibilityLabel="清空输入草稿"
-            >
-              <Text style={styles.composerMetaAction}>清空</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : null}
-
-      {!imageGenerationMode ? (
-        <View style={styles.promptTemplateBar}>
-          <Text style={styles.promptTemplateLabel}>快捷</Text>
-          {MOBILE_PROMPT_TEMPLATES.map((template) => (
-            <TouchableOpacity
-              key={template.id}
-              accessibilityRole="button"
-              accessibilityLabel={`插入${template.label}模板`}
-              disabled={sending || imageGenerationBusy}
-              onPress={() => applyPromptTemplate(template.prompt)}
+            </View>
+            <TextInput
+              style={styles.input}
+              value={imageDefaults.size}
+              onChangeText={(size) => setImageDefaults((prev) => ({ ...prev, size }))}
+              placeholder="例如 2560x1440"
+              placeholderTextColor={colors.textSubtle}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!imageGenerationBusy}
+            />
+            <Text
               style={[
-                styles.promptTemplateChip,
-                (sending || imageGenerationBusy) && styles.promptTemplateChipDisabled,
+                styles.imagePanelHint,
+                !validateImageGenerationSize(imageDefaults.size).valid &&
+                  styles.imagePanelHintDanger,
               ]}
             >
-              <Text style={styles.promptTemplateChipText}>{template.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      ) : null}
+              {validateImageGenerationSize(imageDefaults.size).valid
+                ? '合法范围：最长边 ≤ 3840、宽高为 16 的倍数、比例不超过 3:1。'
+                : validateImageGenerationSize(imageDefaults.size).message}
+            </Text>
+            <View style={styles.imageOptionRow}>
+              {(['low', 'medium', 'high'] as const).map((quality) => (
+                <TouchableOpacity
+                  key={quality}
+                  style={[
+                    styles.optionChip,
+                    imageDefaults.quality === quality && styles.optionChipActive,
+                  ]}
+                  onPress={() => setImageDefaults((prev) => ({ ...prev, quality }))}
+                  disabled={imageGenerationBusy}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      imageDefaults.quality === quality && styles.optionChipTextActive,
+                    ]}
+                  >
+                    {quality}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.imageOptionRow}>
+              {(['png', 'jpeg', 'webp'] as const).map((outputFormat) => (
+                <TouchableOpacity
+                  key={outputFormat}
+                  style={[
+                    styles.optionChip,
+                    imageDefaults.outputFormat === outputFormat && styles.optionChipActive,
+                  ]}
+                  onPress={() => setImageDefaults((prev) => ({ ...prev, outputFormat }))}
+                  disabled={imageGenerationBusy}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      imageDefaults.outputFormat === outputFormat && styles.optionChipTextActive,
+                    ]}
+                  >
+                    {outputFormat.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {(['auto', 'opaque'] as const).map((background) => (
+                <TouchableOpacity
+                  key={background}
+                  style={[
+                    styles.optionChip,
+                    imageDefaults.background === background && styles.optionChipActive,
+                  ]}
+                  onPress={() => setImageDefaults((prev) => ({ ...prev, background }))}
+                  disabled={imageGenerationBusy}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      imageDefaults.background === background && styles.optionChipTextActive,
+                    ]}
+                  >
+                    {background === 'auto' ? '自动背景' : '不透明背景'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
-      {/* Compact Composer */}
-      <View style={styles.composerCard}>
-        {attachments.length > 0 && (
-          <MobileAttachmentBar
-            attachments={attachments}
-            onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
-          />
-        )}
+        {artifactHistory.length > 0 ? (
+          <View style={styles.historySection}>
+            <Text style={styles.historyTitle}>已上传附件</Text>
+            <MobileAttachmentBar attachments={artifactHistory} />
+          </View>
+        ) : null}
 
-        <View style={styles.inputRow}>
-          <TouchableOpacity style={styles.iconBtn} onPress={handleAddAttachment}>
-            <Ionicons name="attach-outline" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => setShowVoice(true)}>
-            <Ionicons name="mic-outline" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-          <TextInput
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            placeholder={imageGenerationMode ? '描述你想生成或编辑的图片…' : '补充要求，或继续输入'}
-            placeholderTextColor={colors.textSubtle}
-            multiline
-            editable={!sending && !imageGenerationBusy}
-          />
-          {sending ? (
-            <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: colors.complement }]}
-              onPress={handleStop}
-            >
-              <Ionicons name="stop" size={16} color={colors.white} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={(!input.trim() && attachments.length === 0) || imageGenerationBusy}
-              style={[
-                styles.sendBtn,
-                (!input.trim() && attachments.length === 0) || imageGenerationBusy
-                  ? styles.sendBtnDisabled
-                  : undefined,
-              ]}
-            >
-              <Ionicons
-                name={imageGenerationMode ? 'sparkles' : 'arrow-up'}
-                size={18}
-                color={colors.white}
-              />
-            </TouchableOpacity>
-          )}
-        </View>
+        {input.trim().length > 0 || attachments.length > 0 || imageGenerationMode ? (
+          <View style={styles.composerMetaBar}>
+            <Text style={styles.composerMetaText}>
+              {draftSummary.modeLabel} · {draftSummary.charCount} 字 · {draftSummary.lineCount} 行
+              {draftSummary.attachmentCount > 0 ? ` · ${draftSummary.attachmentCount} 个附件` : ''}
+            </Text>
+            {(input.trim().length > 0 || attachments.length > 0) &&
+            !sending &&
+            !imageGenerationBusy ? (
+              <TouchableOpacity
+                onPress={clearComposerDraft}
+                accessibilityRole="button"
+                accessibilityLabel="清空输入草稿"
+              >
+                <Text style={styles.composerMetaAction}>清空</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
-        {/* Quick templates */}
-        {!imageGenerationMode && (
-          <View style={styles.quickTemplateRow}>
-            <Text style={styles.quickLabel}>快捷</Text>
+        {!imageGenerationMode ? (
+          <View style={styles.promptTemplateBar}>
+            <Text style={styles.promptTemplateLabel}>快捷</Text>
             {MOBILE_PROMPT_TEMPLATES.map((template) => (
               <TouchableOpacity
                 key={template.id}
+                accessibilityRole="button"
+                accessibilityLabel={`插入${template.label}模板`}
                 disabled={sending || imageGenerationBusy}
                 onPress={() => applyPromptTemplate(template.prompt)}
-                style={[styles.quickChip, (sending || imageGenerationBusy) && { opacity: 0.45 }]}
+                style={[
+                  styles.promptTemplateChip,
+                  (sending || imageGenerationBusy) && styles.promptTemplateChipDisabled,
+                ]}
               >
-                <Text style={styles.quickChipText}>{template.label}</Text>
+                <Text style={styles.promptTemplateChipText}>{template.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
-        )}
+        ) : null}
+
+        {/* Compact Composer — bottom inset tracks keyboard height */}
+        <View style={[styles.composerCard, { marginBottom: composerBottomInset }]}>
+          {attachments.length > 0 && (
+            <MobileAttachmentBar
+              attachments={attachments}
+              onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+            />
+          )}
+
+          <View style={styles.inputRow}>
+            <TouchableOpacity style={styles.iconBtn} onPress={handleAddAttachment}>
+              <Ionicons name="attach-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setShowVoice(true)}>
+              <Ionicons name="mic-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder={
+                imageGenerationMode ? '描述你想生成或编辑的图片…' : '补充要求，或继续输入'
+              }
+              placeholderTextColor={colors.textSubtle}
+              multiline
+              editable={!sending && !imageGenerationBusy}
+            />
+            {sending ? (
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: colors.complement }]}
+                onPress={handleStop}
+              >
+                <Ionicons name="stop" size={16} color={colors.white} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={handleSend}
+                disabled={(!input.trim() && attachments.length === 0) || imageGenerationBusy}
+                style={[
+                  styles.sendBtn,
+                  (!input.trim() && attachments.length === 0) || imageGenerationBusy
+                    ? styles.sendBtnDisabled
+                    : undefined,
+                ]}
+              >
+                <Ionicons
+                  name={imageGenerationMode ? 'sparkles' : 'arrow-up'}
+                  size={18}
+                  color={colors.white}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Quick templates */}
+          {!imageGenerationMode && (
+            <View style={styles.quickTemplateRow}>
+              <Text style={styles.quickLabel}>快捷</Text>
+              {MOBILE_PROMPT_TEMPLATES.map((template) => (
+                <TouchableOpacity
+                  key={template.id}
+                  disabled={sending || imageGenerationBusy}
+                  onPress={() => applyPromptTemplate(template.prompt)}
+                  style={[styles.quickChip, (sending || imageGenerationBusy) && { opacity: 0.45 }]}
+                >
+                  <Text style={styles.quickChipText}>{template.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <MobileCompanionStage
+          input={input}
+          sessionId={sessionId}
+          streaming={sending}
+          pendingPermissionCount={0}
+          attachedCount={attachments.length}
+          todoCount={0}
+          sessionBusyState={sending ? 'running' : null}
+          currentUserEmail={''}
+          showVoice={showVoice}
+          queuedCount={0}
+          rightOpen={false}
+        />
+
+        <ActionSheet
+          visible={Boolean(selectedMessage)}
+          title={selectedMessage?.role === 'user' ? '用户消息' : '助手回复'}
+          message={selectedMessage?.content.trim().slice(0, 120)}
+          actions={selectedMessageActions}
+          onDismiss={() => setSelectedMessage(null)}
+        />
       </View>
-
-      <MobileCompanionStage
-        input={input}
-        sessionId={sessionId}
-        streaming={sending}
-        pendingPermissionCount={0}
-        attachedCount={attachments.length}
-        todoCount={0}
-        sessionBusyState={sending ? 'running' : null}
-        currentUserEmail={''}
-        showVoice={showVoice}
-        queuedCount={0}
-        rightOpen={false}
-      />
-
-      <ActionSheet
-        visible={Boolean(selectedMessage)}
-        title={selectedMessage?.role === 'user' ? '用户消息' : '助手回复'}
-        message={selectedMessage?.content.trim().slice(0, 120)}
-        actions={selectedMessageActions}
-        onDismiss={() => setSelectedMessage(null)}
-      />
-    </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  list: { padding: 12, paddingBottom: 4 },
+  messageList: { flex: 1 },
+  list: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, gap: 8 },
   empty: { ...textPresets.body, color: colors.textMuted, textAlign: 'center', marginTop: 60 },
   inputRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.lineDefault,
+    alignItems: 'center',
     gap: 8,
+    minHeight: 40,
+    borderRadius: 14,
+    backgroundColor: colors.surface2,
+    paddingHorizontal: 10,
   },
   input: {
     flex: 1,
-    backgroundColor: colors.surface2,
+    backgroundColor: colors.transparent,
     color: colors.textStrong,
-    borderRadius: radii.lg,
-    paddingHorizontal: 12,
+    borderRadius: 14,
+    paddingHorizontal: 0,
     paddingVertical: 8,
     fontSize: 14,
     maxHeight: 120,
-    borderWidth: 1,
-    borderColor: colors.lineDefault,
+    borderWidth: 0,
   },
   sendBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1524,8 +1569,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     height: 44,
     paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.lineDefault,
   },
   headerBackBtn: {
     width: 36,
@@ -1555,10 +1598,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.lineDefault,
   },
   contextPill: {
     flexDirection: 'row',
@@ -1584,10 +1625,13 @@ const styles = StyleSheet.create({
   /* Composer Card */
   composerCard: {
     backgroundColor: colors.surface1,
-    borderRadius: radii.xl + 8,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: colors.lineDefault,
-    margin: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    // marginBottom is applied dynamically via composerBottomInset
+    // (tracks keyboard height / home indicator).
     padding: 10,
     gap: 6,
   },
@@ -1739,23 +1783,17 @@ const styles = StyleSheet.create({
   streamErrorRetry: { ...textPresets.label, color: colors.danger, fontWeight: '800' },
   streamErrorRetryDisabled: { opacity: 0.45 },
   restoreFocusButton: {
-    position: 'absolute',
-    right: 14,
-    bottom: 108,
+    alignSelf: 'center',
     zIndex: 10,
     borderRadius: radii.pill,
     borderWidth: 1,
     borderColor: colors.accentBorder,
-    backgroundColor: colors.surfaceGlass,
+    backgroundColor: colors.accentMuted,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    shadowColor: colors.black,
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
+    paddingVertical: 7,
+    marginBottom: 8,
   },
-  restoreFocusText: { ...textPresets.label, color: colors.accent, fontWeight: '800' },
+  restoreFocusText: { ...textPresets.label, color: colors.accent, fontWeight: '700' },
   imagePanel: {
     marginHorizontal: 12,
     marginTop: 10,

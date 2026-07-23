@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260723-mobile-pen-visual-alignment](workflow/260723-mobile-pen-visual-alignment.md) — 手机端主流程按 pen 视觉对齐：Full orchestration；方案 A 共享 UI 组件后逐屏套用（连接/登录/会话/聊天/设置 + 壳层）；逻辑不改
 - [260723-team-lifecycle-hard-contract-tools](workflow/260723-team-lifecycle-hard-contract-tools.md) — Team 生命周期硬契约工具化：Full orchestration；不推翻 5 层架构，将 executor/reviewer 完成输出升级为强制 Builtin Instruction（`submit_execution_result` + 结构化 `submit_review`），runner 门禁 + quality review 优先消费 checklist；本轮仅方案，待批准后实现
 - [260708-opencowork-tooling-integration-plan](workflow/260708-opencowork-tooling-integration-plan.md) — OpenCowork 工具生态集成方案：Full orchestration；坚持 OpenAWork 原生 MCP runtime、gateway tool registry、skill registry、channel manager 与 plugin settings 为主路径，已有简单工具只登记/补别名/补文档，不重复完整集成；P1 聚焦 `streamable-http`、文档数据 skills、Browser alias、通用 channel tools
 - [260707-omo-mcp-adapter-integration](workflow/260707-omo-mcp-adapter-integration.md) — OMO/LazyCodex MCP 适配器集成：9 任务 / Full orchestration；坚持 OpenAWork 原生 MCP runtime 为主路径，OMO/Hook 仅作为 typed manifest 输入源，落到 MCP catalog、flat tool 注入、sandbox 权限审计、Settings 管理与 team 最小授权链路
@@ -68,6 +69,7 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-23] 手机端主流程视觉对齐固定为「pen 为视觉真源 + 共享 ui 组件 + 逻辑不跟 pen 盲改」：token 已抽取；`components/ui` 提供 PageHeader/SearchField/Chip/SurfaceCard/ListRow/StatusBadge/HintCard/Buttons；主流程屏 sessions/connection/login/settings/chat 先视觉对齐，业务语义问题由产品后续点名。
 - [2026-07-23] Team 完成态固定为「Builtin Instruction 硬契约优先，prompt 仅兜底」：executor 必须 `submit_execution_result`，reviewer 必须结构化 `submit_review`；`result_json.protocol` 是完成真相源。`OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=soft|hard` 控制兼容期（默认 soft：缺 protocol 记 degraded；hard：execution-protocol-failure）。Quality Review 优先机器判定 checklist/items fail，LLM 仅做语义抽检；返工按 failedItems 精确反馈。不把 PM1/PM2 主编排改为 LLM 自由工具流。
 - [2026-07-15] Composer 输入历史固定为“`gatewayUrl + currentUserEmail + sessionId` scope 的内存 ring buffer”：`chat` 与 `team` 复用同一 `UnifiedComposer` 输入历史，最多保留最新 50 条；未建 session 时先记到 pending scope，首条发送创建 session 后再迁移；只在 direct send 成功或 queued send 成功入队时记录，不在每次编辑时落盘；多行输入仅在 caret 位于文本起点时允许 `ArrowUp` 进入历史浏览，避免抢占原生跨行导航。
 - [2026-07-14] 布局后续迭代固定为“Fusion-only，Classic 冻结”：只允许继续调整新版本 Fusion 布局；`LayoutClassic.tsx`、`AppSidebar.tsx`、`ClassicWorkbenchTitlebar.tsx`、`WorkbenchModeTabs.tsx` 等旧版路径只作为兼容边界保留。目录隔离、ChatPage 解耦、侧边栏/Titlebar/SessionPanel 后续演进都必须在 Fusion 路径内完成，不能以“对称重构”名义继续修改 Classic。

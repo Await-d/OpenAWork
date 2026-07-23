@@ -4,21 +4,28 @@ import { UpdateProgressDialog } from './UpdateProgressDialog.js';
 
 export interface UpdateActionPanelProps {
   onClose: () => void;
+  /**
+   * When true, skip the intermediate action list and start the Tauri update
+   * check immediately (used by About page "检查更新").
+   */
+  autoStartCheck?: boolean;
 }
 
 /**
  * 操作面板：点击托盘"检查更新"后先弹出此面板，
  * 用户可选择"检查更新"、"查看当前版本"等操作。
+ *
+ * About 页主按钮会带 autoStartCheck，直接进入进度检查，避免二次点击。
  */
-export function UpdateActionPanel({ onClose }: UpdateActionPanelProps) {
+export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateActionPanelProps) {
   const [appVersion, setAppVersion] = useState<string>('');
-  const [showUpdateProgress, setShowUpdateProgress] = useState(false);
+  const [showUpdateProgress, setShowUpdateProgress] = useState(autoStartCheck);
 
   useEffect(() => {
     void getVersion().then((v) => setAppVersion(v));
   }, []);
 
-  // 如果用户选择了"检查更新"，则展示 UpdateProgressDialog
+  // 如果用户选择了"检查更新"（或 About 页直接 autoStart），则展示 UpdateProgressDialog
   if (showUpdateProgress) {
     return <UpdateProgressDialog autoCheck onClose={onClose} />;
   }

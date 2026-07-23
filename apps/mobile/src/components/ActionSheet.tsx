@@ -143,7 +143,7 @@ export function ConfirmDialog({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(15,23,61,0.28)',
   },
   sheet: {
     position: 'absolute',
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
   actionTextCancel: { color: colors.textMuted, fontWeight: '500' },
   dialogOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(15,23,61,0.32)',
   },
   dialogWrapper: {
     flex: 1,

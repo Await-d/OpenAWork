@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 /** S14: 图片生成进度 — 独立进度指示组件/页面 */
 export default function ImageGenerationProgressScreen() {
@@ -22,63 +24,68 @@ export default function ImageGenerationProgressScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>图片生成中</Text>
-      <Text style={styles.subtitle}>请稍候，AI 正在创作你的图片。</Text>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <ScreenHeader title="生成进度" />
+      <View style={styles.container}>
+        <Text style={styles.title}>图片生成中</Text>
+        <Text style={styles.subtitle}>请稍候，AI 正在创作你的图片。</Text>
 
-      {/* Progress visualization */}
-      <View style={styles.progressArea}>
-        <View style={styles.spinnerWrap}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Ionicons name="sparkles" size={24} color={colors.accent} style={styles.sparkleIcon} />
+        {/* Progress visualization */}
+        <View style={styles.progressArea}>
+          <View style={styles.spinnerWrap}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Ionicons name="sparkles" size={24} color={colors.accent} style={styles.sparkleIcon} />
+          </View>
         </View>
-      </View>
 
-      {/* Stage indicators */}
-      <View style={styles.stageList}>
-        {stages.map((s, i) => {
-          const isDone = i < stage;
-          const isCurrent = i === stage;
-          const isPending = i > stage;
-          return (
-            <View key={i} style={styles.stageRow}>
-              <View style={styles.stageTimeline}>
-                <View
-                  style={[
-                    styles.stageDot,
-                    isDone && { backgroundColor: colors.success },
-                    isCurrent && { backgroundColor: colors.accent },
-                    isPending && { backgroundColor: colors.lineDefault },
-                  ]}
+        {/* Stage indicators */}
+        <View style={styles.stageList}>
+          {stages.map((s, i) => {
+            const isDone = i < stage;
+            const isCurrent = i === stage;
+            const isPending = i > stage;
+            return (
+              <View key={i} style={styles.stageRow}>
+                <View style={styles.stageTimeline}>
+                  <View
+                    style={[
+                      styles.stageDot,
+                      isDone && { backgroundColor: colors.success },
+                      isCurrent && { backgroundColor: colors.accent },
+                      isPending && { backgroundColor: colors.lineDefault },
+                    ]}
+                  />
+                  {i < stages.length - 1 && (
+                    <View
+                      style={[styles.stageLine, isDone && { backgroundColor: colors.success }]}
+                    />
+                  )}
+                </View>
+                <Ionicons
+                  name={isDone ? 'checkmark-circle' : s.icon}
+                  size={18}
+                  color={isDone ? colors.success : isCurrent ? colors.accent : colors.textSubtle}
                 />
-                {i < stages.length - 1 && (
-                  <View style={[styles.stageLine, isDone && { backgroundColor: colors.success }]} />
-                )}
+                <Text
+                  style={[
+                    styles.stageLabel,
+                    isDone && { color: colors.success },
+                    isCurrent && { color: colors.accent, fontWeight: '700' },
+                    isPending && { color: colors.textSubtle },
+                  ]}
+                >
+                  {s.label}
+                </Text>
+                {isCurrent && <ActivityIndicator size="small" color={colors.accent} />}
+                {isDone && <Ionicons name="checkmark" size={14} color={colors.success} />}
               </View>
-              <Ionicons
-                name={isDone ? 'checkmark-circle' : s.icon}
-                size={18}
-                color={isDone ? colors.success : isCurrent ? colors.accent : colors.textSubtle}
-              />
-              <Text
-                style={[
-                  styles.stageLabel,
-                  isDone && { color: colors.success },
-                  isCurrent && { color: colors.accent, fontWeight: '700' },
-                  isPending && { color: colors.textSubtle },
-                ]}
-              >
-                {s.label}
-              </Text>
-              {isCurrent && <ActivityIndicator size="small" color={colors.accent} />}
-              {isDone && <Ionicons name="checkmark" size={14} color={colors.success} />}
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
 
-      <Text style={styles.estimate}>预计剩余 3–5 秒</Text>
-    </View>
+        <Text style={styles.estimate}>预计剩余 3–5 秒</Text>
+      </View>
+    </Screen>
   );
 }
 

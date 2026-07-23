@@ -338,6 +338,10 @@ export function ModelManager({
 }: ModelManagerProps) {
   const [newLabel, setNewLabel] = useState('');
   const [newId, setNewId] = useState('');
+  // 自定义模型能力开关：自定义渠道/代理常需用户显式声明是否支持工具/视觉/思考。
+  const [newSupportsTools, setNewSupportsTools] = useState(true);
+  const [newSupportsVision, setNewSupportsVision] = useState(false);
+  const [newSupportsThinking, setNewSupportsThinking] = useState(false);
   // 每个模型独立的自检状态：testing(进行中) / 结果(成功或失败原因)。
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResults, setTestResults] = useState<Record<string, ProviderModelTestResult>>({});
@@ -408,9 +412,15 @@ export function ModelManager({
       id: trimmedId,
       label: trimmedLabel,
       enabled: true,
+      supportsTools: newSupportsTools,
+      supportsVision: newSupportsVision,
+      supportsThinking: newSupportsThinking,
     });
     setNewId('');
     setNewLabel('');
+    setNewSupportsTools(true);
+    setNewSupportsVision(false);
+    setNewSupportsThinking(false);
   }
 
   const inputBase: CSSProperties = {
@@ -673,9 +683,79 @@ export function ModelManager({
                             model.supportsImageGeneration4K === true ? (
                               <CapabilityDot label="4K" />
                             ) : null}
-                            {model.supportsTools ? <CapabilityDot label="工具" /> : null}
-                            {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
-                            {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
+                            {onUpdateModel ? (
+                              <>
+                                <label
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 10,
+                                    color: 'var(--fg-muted)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={model.supportsTools === true}
+                                    onChange={(event) =>
+                                      onUpdateModel(provider.id, model.id, {
+                                        supportsTools: event.target.checked,
+                                      })
+                                    }
+                                  />
+                                  工具
+                                </label>
+                                <label
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 10,
+                                    color: 'var(--fg-muted)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={model.supportsVision === true}
+                                    onChange={(event) =>
+                                      onUpdateModel(provider.id, model.id, {
+                                        supportsVision: event.target.checked,
+                                      })
+                                    }
+                                  />
+                                  视觉
+                                </label>
+                                <label
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 10,
+                                    color: 'var(--fg-muted)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={model.supportsThinking === true}
+                                    onChange={(event) =>
+                                      onUpdateModel(provider.id, model.id, {
+                                        supportsThinking: event.target.checked,
+                                      })
+                                    }
+                                  />
+                                  思考
+                                </label>
+                              </>
+                            ) : (
+                              <>
+                                {model.supportsTools ? <CapabilityDot label="工具" /> : null}
+                                {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
+                                {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
+                              </>
+                            )}
                           </div>
                         </td>
                         <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
@@ -903,47 +983,100 @@ export function ModelManager({
       <div
         style={{
           display: 'flex',
+          flexDirection: 'column',
           gap: 8,
           padding: '1rem 1.5rem',
           borderTop: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          alignItems: 'center',
-          flexWrap: 'wrap',
         }}
       >
-        <input
-          type="text"
-          placeholder="模型 ID"
-          value={newId}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setNewId(e.target.value)}
-          style={{ ...inputBase, width: 140 }}
-        />
-        <input
-          type="text"
-          placeholder="显示名称"
-          value={newLabel}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setNewLabel(e.target.value)}
-          style={{ ...inputBase, flex: 1, minWidth: 120 }}
-        />
-        <button
-          type="button"
-          onClick={handleAddModel}
-          disabled={!onAddModel || !newId.trim() || !newLabel.trim()}
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
+          添加模型：填写上游 model id
+          与显示名。自定义渠道/中转请按实际上游能力勾选工具、视觉、思考。
+        </div>
+        <div
           style={{
-            background:
-              onAddModel && newId.trim() && newLabel.trim()
-                ? 'var(--accent)'
-                : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
-            color: color.fgOnAccent,
-            border: 'none',
-            borderRadius: 6,
-            padding: '0.35rem 0.9rem',
-            fontSize: 12,
-            cursor: onAddModel && newId.trim() && newLabel.trim() ? 'pointer' : 'not-allowed',
-            fontWeight: 500,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            flexWrap: 'wrap',
           }}
         >
-          + 添加自定义模型
-        </button>
+          <input
+            type="text"
+            placeholder="模型 ID（如 gpt-4o / claude-sonnet-4-0）"
+            value={newId}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setNewId(e.target.value)}
+            style={{ ...inputBase, width: 220 }}
+          />
+          <input
+            type="text"
+            placeholder="显示名称"
+            value={newLabel}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setNewLabel(e.target.value)}
+            style={{ ...inputBase, flex: 1, minWidth: 120 }}
+          />
+          <button
+            type="button"
+            onClick={handleAddModel}
+            disabled={!onAddModel || !newId.trim() || !newLabel.trim()}
+            style={{
+              background:
+                onAddModel && newId.trim() && newLabel.trim()
+                  ? 'var(--accent)'
+                  : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+              color: color.fgOnAccent,
+              border: 'none',
+              borderRadius: 6,
+              padding: '0.35rem 0.9rem',
+              fontSize: 12,
+              cursor: onAddModel && newId.trim() && newLabel.trim() ? 'pointer' : 'not-allowed',
+              fontWeight: 500,
+            }}
+          >
+            + 添加模型
+          </button>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            fontSize: 11,
+            color: 'var(--fg-muted)',
+          }}
+        >
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          >
+            <input
+              type="checkbox"
+              checked={newSupportsTools}
+              onChange={(e) => setNewSupportsTools(e.target.checked)}
+            />
+            工具调用
+          </label>
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          >
+            <input
+              type="checkbox"
+              checked={newSupportsVision}
+              onChange={(e) => setNewSupportsVision(e.target.checked)}
+            />
+            视觉
+          </label>
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          >
+            <input
+              type="checkbox"
+              checked={newSupportsThinking}
+              onChange={(e) => setNewSupportsThinking(e.target.checked)}
+            />
+            思考
+          </label>
+        </div>
       </div>
     </div>
   );

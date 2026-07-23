@@ -172,32 +172,34 @@ function ReasoningBlock({
 
 const styles = StyleSheet.create({
   bubble: {
-    maxWidth: '80%',
+    maxWidth: '86%',
     borderRadius: 14,
-    padding: 12,
-    paddingHorizontal: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    gap: 3,
   },
   userBubble: {
     backgroundColor: colors.accent,
     alignSelf: 'flex-end',
   },
   assistantBubble: {
-    backgroundColor: colors.surface2,
+    backgroundColor: colors.surface1,
     alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: colors.lineDefault,
   },
   streamingBubble: {
-    opacity: 0.92,
+    opacity: 0.96,
   },
   highlightedBubble: {
-    borderWidth: 2,
-    borderColor: '#fbbf24',
+    borderWidth: 1.5,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningMuted,
   },
   bubbleText: {
-    color: colors.textMuted,
-    fontSize: 15,
-    lineHeight: 22,
+    color: colors.textDefault,
+    fontSize: 14,
+    lineHeight: 20,
   },
   userBubbleText: {
     color: colors.white,
@@ -205,12 +207,12 @@ const styles = StyleSheet.create({
   codeBlock: {
     minWidth: 220,
     maxWidth: 300,
-    marginTop: 8,
-    marginBottom: 6,
-    borderRadius: radii.lg,
+    marginTop: 6,
+    marginBottom: 4,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#475569',
-    backgroundColor: '#020617',
+    borderColor: colors.lineDefault,
+    backgroundColor: colors.surface2,
     overflow: 'hidden',
   },
   codeHeader: {
@@ -219,10 +221,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surface2,
+    borderBottomColor: colors.lineSubtle,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: colors.bgBase,
+    backgroundColor: colors.surfaceSoft,
   },
   codeLanguage: {
     color: colors.textMuted,
@@ -231,9 +233,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   codeHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  codeActionText: { color: '#93c5fd', fontSize: 10, fontWeight: '800' },
+  codeActionText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   codeText: {
-    color: '#dbeafe',
+    color: colors.textStrong,
     fontFamily: 'monospace',
     fontSize: 12,
     lineHeight: 18,
@@ -241,7 +243,7 @@ const styles = StyleSheet.create({
   },
   codeCollapsedHint: {
     borderTopWidth: 1,
-    borderTopColor: colors.surface2,
+    borderTopColor: colors.lineSubtle,
     color: colors.textMuted,
     fontSize: 10,
     paddingHorizontal: 10,

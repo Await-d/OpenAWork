@@ -16,6 +16,8 @@ import { upsertSession } from '../../src/db/session-store';
 import { colors } from '../../src/theme/colors';
 import { radii } from '../../src/theme/radii';
 import { textPresets } from '../../src/theme/typography';
+import { Screen } from '../../src/components/Screen';
+import { ScreenHeader } from '../../src/components/ui';
 
 const TEMPLATES = [
   {
@@ -84,96 +86,97 @@ export default function NewSessionScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>新会话</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <ScreenHeader title="新会话" style={styles.headerInScroll} />
 
-      <Text style={styles.title}>开始新对话</Text>
-      <Text style={styles.subtitle}>选择一个模板快速开始，或直接创建空白会话。</Text>
+        <Text style={styles.title}>开始新对话</Text>
+        <Text style={styles.subtitle}>选择一个模板快速开始，或直接创建空白会话。</Text>
 
-      {/* Title input */}
-      <Text style={styles.fieldLabel}>会话标题（可选）</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="给这次对话起个名字…"
-        placeholderTextColor={colors.textSubtle}
-        value={title}
-        onChangeText={setTitle}
-        autoCapitalize="none"
-      />
+        {/* Title input */}
+        <Text style={styles.fieldLabel}>会话标题（可选）</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="给这次对话起个名字…"
+          placeholderTextColor={colors.textSubtle}
+          value={title}
+          onChangeText={setTitle}
+          autoCapitalize="none"
+        />
 
-      {/* Templates */}
-      <Text style={styles.sectionTitle}>选择模板</Text>
-      <View style={styles.templateGrid}>
-        {TEMPLATES.map((t) => {
-          const isActive = selectedTemplate === t.id;
-          return (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.templateCard, isActive && styles.templateCardActive]}
-              onPress={() => setSelectedTemplate(t.id)}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.templateIconWrap,
-                  { backgroundColor: isActive ? t.color + '1A' : colors.surface2 },
-                ]}
+        {/* Templates */}
+        <Text style={styles.sectionTitle}>选择模板</Text>
+        <View style={styles.templateGrid}>
+          {TEMPLATES.map((t) => {
+            const isActive = selectedTemplate === t.id;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.templateCard, isActive && styles.templateCardActive]}
+                onPress={() => setSelectedTemplate(t.id)}
+                activeOpacity={0.7}
               >
-                <Ionicons name={t.icon} size={22} color={isActive ? t.color : colors.textMuted} />
-              </View>
-              <Text style={styles.templateTitle}>{t.title}</Text>
-              <Text style={styles.templateDesc}>{t.desc}</Text>
-              {isActive && (
-                <View style={styles.checkBadge}>
-                  <Ionicons name="checkmark" size={12} color={colors.white} />
+                <View
+                  style={[
+                    styles.templateIconWrap,
+                    { backgroundColor: isActive ? t.color + '1A' : colors.surface2 },
+                  ]}
+                >
+                  <Ionicons name={t.icon} size={22} color={isActive ? t.color : colors.textMuted} />
                 </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+                <Text style={styles.templateTitle}>{t.title}</Text>
+                <Text style={styles.templateDesc}>{t.desc}</Text>
+                {isActive && (
+                  <View style={styles.checkBadge}>
+                    <Ionicons name="checkmark" size={12} color={colors.white} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-      {/* Create button */}
-      <TouchableOpacity
-        style={[styles.createBtn, creating && { opacity: 0.5 }]}
-        onPress={() => void handleCreate()}
-        disabled={creating}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="add-circle-outline" size={18} color={colors.white} />
-        <Text style={styles.createBtnText}>{creating ? '创建中…' : '创建会话'}</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {/* Create button */}
+        <TouchableOpacity
+          style={[styles.createBtn, creating && { opacity: 0.5 }]}
+          onPress={() => void handleCreate()}
+          disabled={creating}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add-circle-outline" size={18} color={colors.white} />
+          <Text style={styles.createBtnText}>{creating ? '创建中…' : '创建会话'}</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  content: { padding: 16, paddingBottom: 100 },
+  content: { paddingBottom: 32 },
+  headerInScroll: { paddingHorizontal: 4, marginBottom: 8 },
 
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 38,
-    marginBottom: 16,
-    marginTop: 16,
+  title: {
+    ...textPresets.title,
+    color: colors.textStrong,
+    marginBottom: 6,
+    paddingHorizontal: 16,
   },
-  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { ...textPresets.cardTitle, color: colors.textStrong },
+  subtitle: {
+    ...textPresets.body,
+    color: colors.textMuted,
+    marginBottom: 24,
+    paddingHorizontal: 16,
+  },
 
-  title: { ...textPresets.title, color: colors.textStrong, marginBottom: 6 },
-  subtitle: { ...textPresets.body, color: colors.textMuted, marginBottom: 24 },
-
-  fieldLabel: { ...textPresets.label, color: colors.textMuted, marginBottom: 6 },
+  fieldLabel: {
+    ...textPresets.label,
+    color: colors.textMuted,
+    marginBottom: 6,
+    paddingHorizontal: 16,
+  },
   input: {
+    marginHorizontal: 16,
     backgroundColor: colors.surface1,
     borderRadius: radii.lg,
     borderWidth: 1,
@@ -184,9 +187,14 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
 
-  sectionTitle: { ...textPresets.subheading, color: colors.textStrong, marginBottom: 12 },
+  sectionTitle: {
+    ...textPresets.subheading,
+    color: colors.textStrong,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
 
-  templateGrid: { gap: 10, marginBottom: 24 },
+  templateGrid: { gap: 10, marginBottom: 24, paddingHorizontal: 16 },
   templateCard: {
     backgroundColor: colors.surface1,
     borderRadius: radii.lg,
@@ -222,6 +230,7 @@ const styles = StyleSheet.create({
   },
 
   createBtn: {
+    marginHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

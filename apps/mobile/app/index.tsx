@@ -25,5 +25,5 @@ export default function Index() {
     return <Redirect href="/connection" />;
   }
 
-  return <Redirect href="/sessions" />;
+  return <Redirect href="/home" />;
 }

@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface Channel {
   id: string;
@@ -66,68 +68,69 @@ export default function ChannelOverviewScreen() {
   const onlineCount = MOCK_CHANNELS.filter((c) => c.status === 'online').length;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>消息渠道</Text>
-        <TouchableOpacity style={styles.headerAction}>
-          <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Overview bar */}
-      <View style={styles.overviewBar}>
-        <Ionicons name="radio-outline" size={16} color={colors.aux} />
-        <Text style={styles.overviewText}>
-          {onlineCount} / {MOCK_CHANNELS.length} 渠道在线 ·{' '}
-          {MOCK_CHANNELS.reduce((s, c) => s + c.sessions, 0)} 个活跃会话
-        </Text>
-      </View>
-
-      {/* Connected channels */}
-      <Text style={styles.sectionTitle}>已接入</Text>
-      <FlatList
-        data={MOCK_CHANNELS}
-        keyExtractor={(c) => c.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => {
-          const platform = PLATFORM_CONFIG[item.platform];
-          const status = STATUS_CONFIG[item.status];
-          return (
-            <TouchableOpacity
-              style={styles.channelCard}
-              onPress={() => router.push(`/channel/${item.id}` as never)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.channelIconWrap, { backgroundColor: platform.color + '1A' }]}>
-                <Ionicons name={platform.icon} size={20} color={platform.color} />
-              </View>
-              <View style={styles.channelInfo}>
-                <Text style={styles.channelName}>{item.name}</Text>
-                <Text style={styles.channelMeta}>
-                  {platform.label} · {item.sessions} 会话 · {item.lastActive}
-                </Text>
-              </View>
-              <View style={[styles.statusDot, { backgroundColor: status.color }]} />
-              <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.container}>
+        <ScreenHeader
+          title="消息渠道"
+          right={
+            <TouchableOpacity style={styles.headerAction}>
+              <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
             </TouchableOpacity>
-          );
-        }}
-      />
+          }
+        />
 
-      {/* Add new */}
-      <Text style={styles.sectionTitle}>添加新渠道</Text>
-      <View style={styles.addGrid}>
-        {ADD_PLATFORMS.map((p) => (
-          <TouchableOpacity key={p.id} style={styles.addCard} activeOpacity={0.7}>
-            <Ionicons name={p.icon} size={24} color={p.color} />
-            <Text style={styles.addLabel}>{p.label}</Text>
-          </TouchableOpacity>
-        ))}
+        {/* Overview bar */}
+        <View style={styles.overviewBar}>
+          <Ionicons name="radio-outline" size={16} color={colors.aux} />
+          <Text style={styles.overviewText}>
+            {onlineCount} / {MOCK_CHANNELS.length} 渠道在线 ·{' '}
+            {MOCK_CHANNELS.reduce((s, c) => s + c.sessions, 0)} 个活跃会话
+          </Text>
+        </View>
+
+        {/* Connected channels */}
+        <Text style={styles.sectionTitle}>已接入</Text>
+        <FlatList
+          data={MOCK_CHANNELS}
+          keyExtractor={(c) => c.id}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => {
+            const platform = PLATFORM_CONFIG[item.platform];
+            const status = STATUS_CONFIG[item.status];
+            return (
+              <TouchableOpacity
+                style={styles.channelCard}
+                onPress={() => router.push(`/channel/${item.id}` as never)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.channelIconWrap, { backgroundColor: platform.color + '1A' }]}>
+                  <Ionicons name={platform.icon} size={20} color={platform.color} />
+                </View>
+                <View style={styles.channelInfo}>
+                  <Text style={styles.channelName}>{item.name}</Text>
+                  <Text style={styles.channelMeta}>
+                    {platform.label} · {item.sessions} 会话 · {item.lastActive}
+                  </Text>
+                </View>
+                <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+                <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
+              </TouchableOpacity>
+            );
+          }}
+        />
+
+        {/* Add new */}
+        <Text style={styles.sectionTitle}>添加新渠道</Text>
+        <View style={styles.addGrid}>
+          {ADD_PLATFORMS.map((p) => (
+            <TouchableOpacity key={p.id} style={styles.addCard} activeOpacity={0.7}>
+              <Ionicons name={p.icon} size={24} color={p.color} />
+              <Text style={styles.addLabel}>{p.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
-    </View>
+    </Screen>
   );
 }
 
@@ -195,7 +198,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     paddingHorizontal: 16,
-    paddingBottom: 100,
+    paddingBottom: 32,
   },
   addCard: {
     width: '47%',

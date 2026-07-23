@@ -5,6 +5,10 @@
  * probes them concurrently, and returns the fastest reachable one.
  */
 
+import { primaryLatestJsonForChannel, type UpdateChannel } from '@openAwork/shared';
+
+export type { UpdateChannel };
+
 export interface GitHubProxy {
   /** Display name */
   name: string;
@@ -30,13 +34,9 @@ export const GITHUB_PROXIES: GitHubProxy[] = [
 /** Historical prefixes that may still appear in published latest-cn.json. */
 export const LEGACY_PROXY_PREFIXES = ['https://ghp.ci/', 'https://github.moeyy.xyz/'] as const;
 
-export type UpdateChannel = 'stable' | 'preview';
-
 const PROBE_URLS: Record<UpdateChannel, readonly string[]> = {
-  stable: ['https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json'],
-  preview: [
-    'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
-  ],
+  stable: [primaryLatestJsonForChannel('stable')],
+  preview: [primaryLatestJsonForChannel('preview')],
 };
 
 /** Timeout for probe requests (ms) */

@@ -14,7 +14,12 @@ vi.mock('./github-proxy.js', () => ({
   proxyUrl: (url: string) => url,
 }));
 
-import { downloadUpdateViaProxy, installUpdate, UpdateError } from './auto-update.js';
+import {
+  downloadUpdate,
+  downloadUpdateViaProxy,
+  installUpdate,
+  UpdateError,
+} from './auto-update.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -163,5 +168,68 @@ describe('downloadUpdateViaProxy (§0.149 stall watchdog)', () => {
     });
 
     expect(calls).toEqual(['before', 'install']);
+  });
+});
+
+describe('downloadUpdateViaProxy user cancel', () => {
+  it('用户取消 signal 时抛 cancelled', async () => {
+    const controller = new AbortController();
+    globalThis.fetch = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        }),
+    ) as typeof fetch;
+
+    const pending = downloadUpdateViaProxy(
+      'https://proxy.test/app.tar.gz',
+      () => undefined,
+      60_000,
+      controller.signal,
+    );
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: 'cancelled', message: '更新已取消' });
+  });
+});
+
+describe('downloadUpdate native cancel', () => {
+  it('abort signal 时 close Update 并抛 cancelled', async () => {
+    let resolveDownload: (() => void) | undefined;
+    const close = vi.fn(async () => undefined);
+    const update = {
+      download: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveDownload = resolve;
+          }),
+      ),
+      close,
+    } as unknown as Update;
+
+    const controller = new AbortController();
+    const pending = downloadUpdate(update, () => undefined, { signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+    resolveDownload?.();
+
+    await expect(pending).rejects.toMatchObject({ kind: 'cancelled', message: '更新已取消' });
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('signal 已 aborted 时不启动 download', async () => {
+    const download = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const update = { download, close } as unknown as Update;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      downloadUpdate(update, () => undefined, { signal: controller.signal }),
+    ).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(download).not.toHaveBeenCalled();
   });
 });

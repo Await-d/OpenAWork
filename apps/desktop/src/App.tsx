@@ -250,6 +250,7 @@ export default function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapRetry, setBootstrapRetry] = useState(0);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [updateAutoStart, setUpdateAutoStart] = useState(false);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
 
@@ -304,7 +305,15 @@ export default function App() {
   }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
 
   useEffect(() => {
-    const unlisten = listen('tray:check-updates', () => {
+    const unlisten = listen<unknown>('tray:check-updates', (event) => {
+      const payload = event.payload;
+      const autoStart =
+        payload === true ||
+        (typeof payload === 'object' &&
+          payload !== null &&
+          'autoStart' in payload &&
+          (payload as { autoStart?: unknown }).autoStart === true);
+      setUpdateAutoStart(autoStart);
       setShowUpdateDialog(true);
     });
     return () => {
@@ -313,7 +322,13 @@ export default function App() {
   }, []);
 
   const updateDialog = showUpdateDialog ? (
-    <UpdateActionPanel onClose={() => setShowUpdateDialog(false)} />
+    <UpdateActionPanel
+      autoStartCheck={updateAutoStart}
+      onClose={() => {
+        setShowUpdateDialog(false);
+        setUpdateAutoStart(false);
+      }}
+    />
   ) : null;
 
   if (!onboarded) {

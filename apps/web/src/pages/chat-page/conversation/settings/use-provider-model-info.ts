@@ -60,6 +60,7 @@ export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModel
   const activeModelCanConfigureThinking = canConfigureThinkingForModel(
     activeProvider?.type,
     activeModelOption?.id ?? effectiveSelection.modelId,
+    activeModelOption?.supportsThinking === true,
   );
   const activeModelTooltip = activeModelOption?.label
     ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}${effectiveSelection.rawSelectionInvalid ? '（会话绑定模型不可用，已回退）' : ''}`

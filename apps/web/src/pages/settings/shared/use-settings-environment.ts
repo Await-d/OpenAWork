@@ -100,9 +100,18 @@ export function useSettingsEnvironment(
     }));
 
     try {
-      const data = (await createSettingsClient(input.gatewayUrl).getVersion(
-        input.token,
-      )) as SettingsVersionInfo;
+      let channel: 'preview' | 'stable' = 'preview';
+      if (isTauriRuntime()) {
+        try {
+          const resolved = await tauriInvoke<string>('current_update_channel');
+          channel = resolved === 'stable' ? 'stable' : 'preview';
+        } catch {
+          channel = 'preview';
+        }
+      }
+      const data = (await createSettingsClient(input.gatewayUrl).getVersion(input.token, {
+        channel,
+      })) as SettingsVersionInfo;
       setVersionInfo({
         currentVersion: data.currentVersion,
         latestVersion: data.latestVersion,

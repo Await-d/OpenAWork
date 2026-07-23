@@ -320,7 +320,19 @@ export function clampReasoningEffortForModel(
 }
 
 function supportsOpenRouterReasoning(model: string): boolean {
-  return model.includes('gpt') || model.includes('claude') || model.includes('gemini-3');
+  // 与 catalog / 前端 isOpenRouterReasoningModel 对齐：不要用裸 `gpt` 匹配。
+  const id = model.toLowerCase();
+  return (
+    /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/.test(id) ||
+    id.includes('claude-opus-4') ||
+    id.includes('claude-sonnet-4') ||
+    id.includes('claude-3-7-sonnet') ||
+    id.includes('gemini-2.5') ||
+    id.includes('gemini-3') ||
+    id.includes('deepseek-r') ||
+    id.includes('reasoner') ||
+    id.includes('thinking')
+  );
 }
 
 const SLUG_OVERRIDES: Record<string, string> = {

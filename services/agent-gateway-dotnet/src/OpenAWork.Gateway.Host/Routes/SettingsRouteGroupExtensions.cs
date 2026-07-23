@@ -182,9 +182,9 @@ public static class SettingsRouteGroupExtensions
             return TypedResults.Ok(response);
         });
 
-        group.MapGet("/version", async (ISender sender, CancellationToken cancellationToken) =>
+        group.MapGet("/version", async (ISender sender, string? channel, CancellationToken cancellationToken) =>
         {
-            var response = await sender.Send(new GetVersionQuery(), cancellationToken);
+            var response = await sender.Send(new GetVersionQuery(channel), cancellationToken);
             return TypedResults.Ok(response);
         });
 

@@ -1,6 +1,7 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
+import { updaterJsonEndpointsForChannel, type UpdateChannel } from '@openAwork/shared';
 import {
   clearProxyCache,
   detectFastestProxy,
@@ -8,7 +9,6 @@ import {
   LEGACY_PROXY_PREFIXES,
   proxyUrl,
   type GitHubProxy,
-  type UpdateChannel,
 } from './github-proxy.js';
 
 export type { UpdateChannel } from './github-proxy.js';
@@ -33,7 +33,8 @@ export interface UpdateCheckResult {
   proxiedDownloadUrl?: string;
 }
 
-export type UpdateErrorKind = 'network' | 'signature' | 'permission' | 'no_update' | 'unknown';
+export type UpdateErrorKind =
+  'network' | 'signature' | 'permission' | 'no_update' | 'cancelled' | 'unknown';
 
 export class UpdateError extends Error {
   constructor(
@@ -52,6 +53,10 @@ export function toUpdateError(err: unknown): UpdateError {
   const name = err instanceof Error ? err.name : '';
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
+  // Explicit user cancel (not AbortError stall timeouts from download watchdog).
+  if (lower.includes('更新已取消') || lower.includes('cancelled by user')) {
+    return new UpdateError('cancelled', msg);
+  }
   if (
     name === 'AbortError' ||
     lower.includes('network') ||
@@ -114,16 +119,8 @@ export async function detectChannel(): Promise<UpdateChannel> {
  * double-proxied download links that fail.
  */
 function endpointsForChannel(channel: UpdateChannel): string[] {
-  if (channel === 'preview') {
-    return [
-      'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json',
-      'https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest-cn.json',
-    ];
-  }
-  return [
-    'https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json',
-    'https://github.com/Await-d/OpenAWork/releases/latest/download/latest-cn.json',
-  ];
+  // includeCn for proxy fallback path only; native check uses tauri.conf endpoints.
+  return updaterJsonEndpointsForChannel(channel, { includeCn: true });
 }
 
 /** Parse a dotted version into numeric segments for comparison. */
@@ -344,19 +341,39 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   };
 }
 
+export interface DownloadUpdateOptions {
+  /** When aborted, closes the native Update resource and rejects with kind=cancelled. */
+  signal?: AbortSignal;
+}
+
 /**
  * Download using Tauri's native Update.download() — used when check()
  * succeeded via the native path.
+ *
+ * Pass `signal` so the UI can cancel: we call `update.close()` on abort, which
+ * releases the underlying download stream (unlike a UI-only cancelledRef).
  */
 export async function downloadUpdate(
   update: Update,
   onProgress: (progress: DownloadProgress) => void,
+  options: DownloadUpdateOptions = {},
 ): Promise<void> {
+  const signal = options.signal;
+  if (signal?.aborted) {
+    throw new UpdateError('cancelled', '更新已取消');
+  }
+
+  const abortNative = () => {
+    void update.close().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', abortNative, { once: true });
+
   try {
     let downloaded = 0;
     let total: number | null = null;
 
     await update.download((event) => {
+      if (signal?.aborted) return;
       if (event.event === 'Started') {
         total = event.data.contentLength ?? null;
       } else if (event.event === 'Progress') {
@@ -368,13 +385,21 @@ export async function downloadUpdate(
         });
       }
     });
+    if (signal?.aborted) {
+      throw new UpdateError('cancelled', '更新已取消');
+    }
   } catch (err) {
+    if (signal?.aborted) {
+      throw new UpdateError('cancelled', '更新已取消');
+    }
     const classified = toUpdateError(err);
     // On download network failure, try proxy fallback
     if (classified.kind === 'network') {
       throw new UpdateError('network', '下载失败，网络不可达。请尝试使用代理更新。');
     }
     throw classified;
+  } finally {
+    signal?.removeEventListener('abort', abortNative);
   }
 }
 
@@ -399,13 +424,13 @@ export async function downloadUpdateViaProxy(
   downloadUrl: string,
   onProgress: (progress: DownloadProgress) => void,
   stallTimeoutMs: number = DOWNLOAD_STALL_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  // Stall watchdog: aborting the controller both fails a hung initial fetch
-  // (connected, no headers) and rejects an in-flight `reader.read()` that has
-  // gone quiet mid-stream. Re-armed on every byte of progress so a slow but
-  // live download is never cut off.
+  // Stall watchdog + user cancel share one AbortController so in-flight
+  // fetch/read rejects promptly instead of leaving the progress bar frozen.
   const controller = new AbortController();
   let stalled = false;
+  let userCancelled = false;
   let stallTimer: ReturnType<typeof setTimeout> | undefined;
   const armStallTimer = () => {
     if (stallTimeoutMs <= 0) return;
@@ -415,6 +440,14 @@ export async function downloadUpdateViaProxy(
       controller.abort();
     }, stallTimeoutMs);
   };
+  const onUserAbort = () => {
+    userCancelled = true;
+    controller.abort();
+  };
+  if (signal?.aborted) {
+    throw new UpdateError('cancelled', '更新已取消');
+  }
+  signal?.addEventListener('abort', onUserAbort, { once: true });
 
   try {
     armStallTimer();
@@ -438,6 +471,9 @@ export async function downloadUpdateViaProxy(
       try {
         result = await reader.read();
       } catch (err) {
+        if (userCancelled || signal?.aborted) {
+          throw new UpdateError('cancelled', '更新已取消');
+        }
         if (stalled) {
           throw new UpdateError('network', `下载停滞超过 ${stallTimeoutMs}ms，网络可能已中断。`);
         }
@@ -466,11 +502,15 @@ export async function downloadUpdateViaProxy(
     }
     return merged.buffer;
   } catch (err) {
+    if (userCancelled || signal?.aborted) {
+      throw new UpdateError('cancelled', '更新已取消');
+    }
     if (stalled) {
       throw new UpdateError('network', `下载停滞超过 ${stallTimeoutMs}ms，网络可能已中断。`);
     }
     throw err;
   } finally {
+    signal?.removeEventListener('abort', onUserAbort);
     if (stallTimer) clearTimeout(stallTimer);
   }
 }

@@ -8,6 +8,7 @@ import {
 } from '@openAwork/agent-core';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { loadAppVersion } from '../app/app-version.js';
+import { checkLatestReleaseVersion } from '../app/release-version-check.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import {
   buildCustomProviderFromModelsDev,
@@ -1630,42 +1631,33 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/settings/version',
     { onRequest: [requireAuth] },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      const { step } = startRequestWorkflow(_request, 'settings.version.get');
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.version.get');
       const currentVersion = APP_VERSION;
+      const versionQuerySchema = z.object({
+        channel: z.enum(['preview', 'stable']).optional(),
+      });
+      const parsedQuery = parseQuery(versionQuerySchema, request.query);
+      const channel = parsedQuery.channel ?? 'preview';
 
-      let latestVersion: string | null = null;
-      let updateAvailable = false;
-      let checkError: string | null = null;
+      // Release channel is GitHub (desktop updater manifests), not npm.
+      // @openAwork/agent-gateway is private and is never published to the registry.
+      const releaseCheck = await checkLatestReleaseVersion({ currentVersion, channel });
 
-      try {
-        const response = await fetch('https://registry.npmjs.org/@openAwork/agent-gateway/latest', {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (response.ok) {
-          const data = (await response.json()) as { version?: string };
-          latestVersion = data.version ?? null;
-          if (latestVersion) {
-            const parts = (v: string) => v.split('.').map(Number) as [number, number, number];
-            const [curMajor, curMinor, curPatch] = parts(currentVersion);
-            const [latMajor, latMinor, latPatch] = parts(latestVersion);
-            updateAvailable =
-              latMajor > curMajor ||
-              (latMajor === curMajor && latMinor > curMinor) ||
-              (latMajor === curMajor && latMinor === curMinor && latPatch > curPatch);
-          }
-        }
-      } catch {
-        checkError = 'Unable to reach npm registry';
-      }
-
-      step.succeed(undefined, { currentVersion, updateAvailable });
+      step.succeed(undefined, {
+        currentVersion,
+        updateAvailable: releaseCheck.updateAvailable,
+        source: releaseCheck.source ?? 'none',
+        channel: releaseCheck.channel,
+      });
       return reply.send({
         currentVersion,
-        latestVersion,
-        updateAvailable,
-        checkError,
+        latestVersion: releaseCheck.latestVersion,
+        updateAvailable: releaseCheck.updateAvailable,
+        checkError: releaseCheck.checkError,
         checkedAt: new Date().toISOString(),
+        channel: releaseCheck.channel,
+        source: releaseCheck.source,
       });
     },
   );

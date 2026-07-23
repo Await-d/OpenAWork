@@ -63,6 +63,8 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
   const [proxyUsed, setProxyUsed] = useState<GitHubProxy | null>(null);
   const autoCheckStartedRef = useRef(false);
   const cancelledRef = useRef(false);
+  /** Aborts the active native/proxy download when the user cancels. */
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const stopGatewayBeforeInstall = useCallback(async () => {
     try {
@@ -108,6 +110,8 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
   const handleDownload = useCallback(async () => {
     if (!result) return;
     cancelledRef.current = false;
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     setState('downloading');
     setProgress(0);
     setDownloaded(0);
@@ -128,6 +132,8 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
         }
         try {
           await stopGatewayBeforeInstall();
+          // Proxy path currently runs download+install in one Rust command and
+          // cannot be hard-aborted mid-flight; cancelledRef still suppresses UI.
           await downloadAndInstallProxyUpdate(result.proxyUsed, result.channel, (p) => {
             if (cancelledRef.current) return;
             setProgress(p.percent);
@@ -151,13 +157,17 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
         return;
       }
 
-      await downloadUpdate(result.update, (p) => {
-        if (cancelledRef.current) return;
-        setProgress(p.percent);
-        setDownloaded(p.downloaded);
-        setTotal(p.total);
-      });
-      if (cancelledRef.current) return;
+      await downloadUpdate(
+        result.update,
+        (p) => {
+          if (cancelledRef.current) return;
+          setProgress(p.percent);
+          setDownloaded(p.downloaded);
+          setTotal(p.total);
+        },
+        { signal: abortController.signal },
+      );
+      if (cancelledRef.current || abortController.signal.aborted) return;
       setProgress(100);
       setState('installing');
       await installUpdate(result.update, {
@@ -166,15 +176,37 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       if (cancelledRef.current) return;
       setState('done');
     } catch (e) {
-      if (cancelledRef.current) return;
-      setError(toUpdateError(e));
+      if (cancelledRef.current || abortController.signal.aborted) return;
+      const classified = toUpdateError(e);
+      if (classified.kind === 'cancelled') return;
+      setError(classified);
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   }, [openManualDownload, result, stopGatewayBeforeInstall]);
 
-  const handleClose = useCallback(() => {
+  const handleCancelOrClose = useCallback(() => {
+    // Installing: only dismiss the dialog. Hard-closing the native Update after
+    // gateway stop can leave a half-installed state with no local gateway.
+    if (state === 'installing') {
+      onClose();
+      return;
+    }
+
     cancelledRef.current = true;
+
+    // Downloading (native): abort signal only — downloadUpdate's abort listener
+    // calls update.close(). Avoid double-close from the UI layer.
+    // Downloading (proxy-auto): soft cancel — Rust command cannot hard-abort;
+    // we only stop updating UI and close the dialog.
+    const controller = abortControllerRef.current;
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
     onClose();
-  }, [onClose]);
+  }, [onClose, state]);
 
   useEffect(() => {
     if (!autoCheck || autoCheckStartedRef.current) return;
@@ -185,6 +217,13 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
+      // Abort only — native update.close() is handled by downloadUpdate's
+      // signal listener. Do not close Update here or we risk tearing down
+      // resources during install if the dialog unmounts mid-install.
+      const controller = abortControllerRef.current;
+      if (controller && !controller.signal.aborted) {
+        controller.abort();
+      }
     };
   }, []);
 
@@ -214,7 +253,11 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
 ${releaseNotes}`
         : ''
     }`,
-    downloading: `下载中${proxyHint}… ${progress}%`,
+    downloading: result?.update
+      ? `下载中${proxyHint}… ${progress}%`
+      : result?.installMode === 'proxy-auto'
+        ? `下载安装中${proxyHint}… ${progress}%（代理安装无法中途停止，关闭仅隐藏进度）`
+        : `下载中${proxyHint}… ${progress}%`,
     installing: '下载完成，正在安装更新…',
     done: isManualProxyMode
       ? '已切换为手动安装：更新包已在浏览器中打开。请先完全退出 OpenAWork，再运行下载的安装包。'
@@ -242,10 +285,10 @@ ${releaseNotes}`
         height: '100vh',
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) handleClose();
+        if (e.target === e.currentTarget) handleCancelOrClose();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') handleClose();
+        if (e.key === 'Escape') handleCancelOrClose();
       }}
     >
       <div
@@ -332,7 +375,7 @@ ${releaseNotes}`
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button
             type="button"
-            onClick={handleClose}
+            onClick={handleCancelOrClose}
             style={{
               padding: '6px 14px',
               background: 'transparent',
@@ -343,7 +386,13 @@ ${releaseNotes}`
               fontSize: 13,
             }}
           >
-            {state === 'downloading' || state === 'installing' ? '取消显示' : '关闭'}
+            {state === 'downloading'
+              ? result?.update
+                ? '取消更新'
+                : result?.installMode === 'proxy-auto'
+                  ? '关闭进度'
+                  : '取消更新'
+              : '关闭'}
           </button>
           {(state === 'idle' || state === 'up-to-date') && (
             <button
@@ -402,7 +451,7 @@ ${releaseNotes}`
           {state === 'done' && isManualProxyMode && (
             <button
               type="button"
-              onClick={handleClose}
+              onClick={handleCancelOrClose}
               style={{
                 padding: '6px 14px',
                 background: 'hsl(142 71% 45%)',

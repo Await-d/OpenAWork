@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface PanelItem {
   id: string;
@@ -77,21 +79,39 @@ const PANELS: PanelItem[] = [
     title: 'OTA 更新',
     desc: '检查和应用应用更新',
     color: colors.aux,
-    route: '/settings',
+    route: '/settings/about',
+  },
+  {
+    id: '9',
+    icon: 'attach-outline',
+    title: '附件与素材',
+    desc: '选择图片、文件与录音素材',
+    color: colors.contrast,
+    route: '/attachments',
+  },
+  {
+    id: '10',
+    icon: 'refresh-outline',
+    title: '回答重试方式',
+    desc: '重试策略与恢复选项',
+    color: colors.warning,
+    route: '/answer-retry',
+  },
+  {
+    id: '11',
+    icon: 'layers-outline',
+    title: '输入上下文',
+    desc: '上下文片段与输入聚焦',
+    color: colors.accent,
+    route: '/input-context',
   },
 ];
 
 /** S27: 面板中心与设置入口 */
 export default function PanelCenterScreen() {
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>面板中心</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen>
+      <ScreenHeader title="面板中心" />
 
       <Text style={styles.title}>设置与工具</Text>
       <Text style={styles.subtitle}>集中管理所有配置面板和工作区工具。</Text>
@@ -117,7 +137,7 @@ export default function PanelCenterScreen() {
           </TouchableOpacity>
         )}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -144,7 +164,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   panelCard: {
     flexDirection: 'row',
     alignItems: 'center',

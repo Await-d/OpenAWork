@@ -145,12 +145,22 @@ export function inferSupportsThinking(
 export function canConfigureThinkingForModel(
   providerType: string | undefined,
   modelId: string | undefined,
+  declaredSupportsThinking = false,
 ): boolean {
   if (!providerType || !modelId) return false;
   const id = modelId.toLowerCase();
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
   const actualModelId = leafModelId(modelId);
-  if (effectiveType === 'openai') {
+  if (
+    declaredSupportsThinking &&
+    (providerType === 'custom' ||
+      providerType === 'azure' ||
+      providerType === 'openai' ||
+      providerType === 'siliconflow')
+  ) {
+    return !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId);
+  }
+  if (effectiveType === 'openai' || effectiveType === 'azure') {
     return (
       inferSupportsThinking(providerType, modelId, false) &&
       !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId)
@@ -158,8 +168,21 @@ export function canConfigureThinkingForModel(
   }
   if (effectiveType === 'deepseek') return !actualModelId.includes('reasoner');
   if (effectiveType === 'moonshot') return actualModelId.includes('kimi-k2');
-  if (['mimo', 'anthropic', 'claude', 'gemini', 'qwen'].includes(effectiveType)) return true;
-  if (effectiveType === 'openrouter') return id.includes('gpt') || id.includes('claude');
+  if (
+    ['mimo', 'anthropic', 'claude', 'gemini', 'qwen', 'xai', 'zhipu', 'doubao'].includes(
+      effectiveType,
+    )
+  ) {
+    return true;
+  }
+  if (effectiveType === 'openrouter') {
+    return (
+      id.includes('gpt-5') ||
+      id.includes('claude') ||
+      id.includes('gemini-3') ||
+      id.includes('thinking')
+    );
+  }
   return false;
 }
 

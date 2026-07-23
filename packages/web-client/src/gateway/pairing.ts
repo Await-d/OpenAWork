@@ -40,9 +40,11 @@ export async function getPairingQr(
   timeoutMs = PAIRING_TIMEOUT_MS,
 ): Promise<PairingQrResponse> {
   try {
+    // 用 fetchWithTimeout 的 timeoutMs，不要 AbortSignal.timeout：
+    // RN AbortSignal polyfill 无 .timeout，会直接 TypeError。
     const res = await fetchWithTimeout(`${gatewayUrl}/pairing/qr`, {
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       const data = await readPairingError(res);
@@ -68,7 +70,7 @@ export async function loginWithDesktopDefault(
         'X-OpenAWork-Desktop-Auth': desktopAuthToken,
       },
       body: JSON.stringify({ platform: 'desktop', ...input }),
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       const err = await readPairingError(res);
@@ -91,7 +93,7 @@ export async function loginWithPairingToken(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, ...input }),
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       const err = await readPairingError(res);

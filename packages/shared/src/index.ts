@@ -26,6 +26,15 @@ export type {
   AssistantTraceToolCall,
   AssistantTraceToolPart,
 } from './assistant-trace.js';
+export type { UpdateChannel } from './release-endpoints.js';
+export {
+  DESKTOP_PREVIEW_LATEST_TAG,
+  normalizeUpdateChannel,
+  OPENAWORK_GITHUB_REPO,
+  primaryLatestJsonForChannel,
+  RELEASE_ENDPOINTS,
+  updaterJsonEndpointsForChannel,
+} from './release-endpoints.js';
 export {
   contentFromAssistantTraceParts,
   createAssistantTraceContent,

@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated } from '
 import { SubagentDetailModal } from './SubagentDetailModal';
 import type { SubagentDetail } from './SubagentDetailModal';
 import { colors } from '../theme/colors';
+import { radii } from '../theme/radii';
+import { textPresets } from '../theme/typography';
 
 export type ActivityKind = 'tool' | 'skill' | 'subagent';
 export type ActivityStatus = 'running' | 'done' | 'error';
@@ -34,9 +36,9 @@ const KIND_LABEL: Record<ActivityKind, string> = {
 };
 
 const KIND_COLOR: Record<ActivityKind, string> = {
-  tool: '#10b981',
-  skill: '#8b5cf6',
-  subagent: '#3b82f6',
+  tool: colors.success,
+  skill: colors.contrast,
+  subagent: colors.aux,
 };
 
 const STATUS_ICON: Record<ActivityStatus, string> = {
@@ -46,9 +48,9 @@ const STATUS_ICON: Record<ActivityStatus, string> = {
 };
 
 const STATUS_COLOR: Record<ActivityStatus, string> = {
-  running: '#fbbf24',
-  done: '#34d399',
-  error: '#f87171',
+  running: colors.warning,
+  done: colors.success,
+  error: colors.danger,
 };
 
 function RunningDots() {
@@ -107,7 +109,7 @@ const dotStyle = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: '#fbbf24',
+    backgroundColor: colors.warning,
   },
 });
 
@@ -133,7 +135,7 @@ function PulsingBorder({ color }: { color: string }) {
     <Animated.View
       style={[
         { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-        { borderRadius: 10, borderWidth: 1.5, borderColor },
+        { borderRadius: 12, borderWidth: 1.5, borderColor },
       ]}
       pointerEvents="none"
     />
@@ -171,7 +173,7 @@ function ActivityRow({
       <View
         style={[
           styles.kindBadge,
-          { backgroundColor: `${kindColor}20`, borderColor: `${kindColor}40` },
+          { backgroundColor: `${kindColor}1A`, borderColor: `${kindColor}52` },
           isRunning && { borderColor: kindColor },
         ]}
       >
@@ -197,7 +199,7 @@ function ActivityRow({
       </View>
 
       <View style={styles.rightCol}>
-        <View style={[styles.statusBadge, { backgroundColor: `${statusColor}20` }]}>
+        <View style={[styles.statusBadge, { backgroundColor: `${statusColor}1A` }]}>
           {isRunning ? (
             <RunningDots />
           ) : (
@@ -234,9 +236,14 @@ export function AgentActivityPanel({ activities }: AgentActivityPanelProps) {
     <>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerIcon}>◈</Text>
+          <View style={styles.headerIconWrap}>
+            <Text style={styles.headerIcon}>◈</Text>
+          </View>
           <Text style={styles.headerTitle}>Agent 活动</Text>
-          <Text style={styles.headerCount}>{activities.length}</Text>
+          <View style={styles.headerCountWrap}>
+            <Text style={styles.headerCount}>{activities.length}</Text>
+          </View>
+          <Text style={styles.headerAction}>展开</Text>
         </View>
         <ScrollView style={styles.list} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {activities.map((a) => (
@@ -252,30 +259,56 @@ export function AgentActivityPanel({ activities }: AgentActivityPanelProps) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#0f1f3d',
-    borderTopWidth: 1,
-    borderTopColor: '#1e3a5f',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: colors.auxMuted,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.auxBorder,
     maxHeight: 200,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surface2,
-    gap: 6,
+    borderBottomColor: colors.lineSubtle,
+    gap: 9,
   },
-  headerIcon: { color: '#3b82f6', fontSize: 13 },
-  headerTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '600', flex: 1 },
+  headerIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: colors.surface1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIcon: { color: colors.aux, fontSize: 12, fontWeight: '700' },
+  headerTitle: {
+    ...textPresets.label,
+    color: colors.textStrong,
+    flex: 1,
+    fontWeight: '700',
+  },
+  headerCountWrap: {
+    backgroundColor: colors.surface1,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.auxBorder,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
   headerCount: {
-    color: '#3b82f6',
+    color: colors.aux,
     fontSize: 11,
     fontWeight: '700',
-    backgroundColor: '#1e3a5f',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
+  },
+  headerAction: {
+    ...textPresets.caption,
+    color: colors.accent,
+    fontWeight: '700',
   },
   list: { flex: 1 },
   rowRunning: {
@@ -284,16 +317,17 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#0f2040',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.lineSubtle,
     gap: 8,
+    backgroundColor: colors.surface1,
   },
   kindBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 6,
     paddingVertical: 3,
@@ -304,8 +338,8 @@ const styles = StyleSheet.create({
   kindIcon: { fontSize: 11 },
   kindLabel: { fontSize: 10, fontWeight: '700' },
   rowContent: { flex: 1, minWidth: 0 },
-  activityName: { color: colors.textDefault, fontSize: 13, fontWeight: '500' },
-  subagentHint: { color: '#3b82f6', fontSize: 11, marginTop: 2 },
+  activityName: { color: colors.textStrong, fontSize: 13, fontWeight: '600' },
+  subagentHint: { color: colors.aux, fontSize: 11, marginTop: 2, fontWeight: '600' },
   activityDetail: {
     color: colors.textMuted,
     fontSize: 11,
@@ -322,5 +356,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusIcon: { fontSize: 13, fontWeight: '700' },
-  chevron: { color: '#3b82f6', fontSize: 18, fontWeight: '600', lineHeight: 20 },
+  chevron: { color: colors.aux, fontSize: 18, fontWeight: '600', lineHeight: 20 },
 });

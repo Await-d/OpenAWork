@@ -24,9 +24,9 @@ const TYPE_ICON: Record<MobileAttachmentItem['type'], string> = {
 };
 
 const TYPE_COLOR: Record<MobileAttachmentItem['type'], string> = {
-  image: '#8b5cf6',
-  audio: '#f59e0b',
-  file: '#3b82f6',
+  image: colors.contrast,
+  audio: colors.warning,
+  file: colors.aux,
 };
 
 function fmtSize(b: number): string {
@@ -74,13 +74,13 @@ export function MobileAttachmentBar({ attachments, onRemove }: MobileAttachmentB
 
 const styles = StyleSheet.create({
   scroll: { maxHeight: 44 },
-  content: { paddingHorizontal: 12, gap: 8, alignItems: 'center', paddingVertical: 6 },
+  content: { paddingHorizontal: 0, gap: 8, alignItems: 'center', paddingVertical: 2 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: radii.pill,
     borderWidth: 1,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 4,
     gap: 5,
     maxWidth: 180,
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   chipName: {
     color: colors.textDefault,
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     flex: 1,
     minWidth: 30,
     maxWidth: 90,

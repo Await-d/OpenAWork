@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface Artifact {
   id: string;
@@ -40,17 +41,15 @@ export default function ArtifactPreviewScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>产物预览</Text>
-        <TouchableOpacity style={styles.headerAction}>
-          <Ionicons name="download-outline" size={18} color={colors.aux} />
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      <ScreenHeader
+        title="产物预览"
+        right={
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="download-outline" size={18} color={colors.aux} />
+          </TouchableOpacity>
+        }
+      />
 
       {/* Preview area */}
       <View style={styles.previewArea}>
@@ -93,7 +92,7 @@ export default function ArtifactPreviewScreen() {
           );
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -133,7 +132,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 10,
   },
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
 
   artifactCard: {
     flexDirection: 'row',

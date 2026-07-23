@@ -8,18 +8,18 @@ import { useAuthStore } from '../src/store/auth';
 import { NetworkBanner } from '../src/components/NetworkBanner';
 import { initSentry } from '../src/monitoring/sentry';
 import { BottomNav, type BottomNavTab } from '../src/components/BottomNav';
+import { shouldShowBottomNav } from '../src/layout/metrics';
 import { colors } from '../src/theme/colors';
 
 const SENTRY_DSN = process.env['EXPO_PUBLIC_SENTRY_DSN'] ?? '';
 if (SENTRY_DSN) initSentry(SENTRY_DSN);
 
-/** Screens that show the bottom navigation bar. */
-const NAV_SCREENS: ReadonlySet<string> = new Set(['/sessions', '/chat', '/settings']);
-
 function resolveActiveTab(pathname: string): BottomNavTab {
-  if (pathname.startsWith('/settings')) return 'settings';
-  if (pathname.startsWith('/chat')) return 'chat';
-  return 'sessions';
+  if (pathname === '/home' || pathname.startsWith('/home/')) return 'home';
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) return 'settings';
+  // Chat detail is not a bottom-tab root; keep sessions as the nearest list tab.
+  if (pathname.startsWith('/sessions') || pathname.startsWith('/chat')) return 'sessions';
+  return 'home';
 }
 
 export default function RootLayout() {
@@ -55,11 +55,11 @@ export default function RootLayout() {
     };
   }, [router]);
 
-  const showNav = NAV_SCREENS.has(pathname) || pathname.startsWith('/chat/');
+  const showNav = shouldShowBottomNav(pathname);
 
   const handleNav = (tab: BottomNavTab) => {
-    if (tab === 'sessions') router.replace('/sessions');
-    else if (tab === 'chat') router.replace('/sessions');
+    if (tab === 'home') router.replace('/home');
+    else if (tab === 'sessions') router.replace('/sessions');
     else if (tab === 'settings') router.replace('/settings');
   };
 
@@ -99,9 +99,11 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/client" />
         <Stack.Screen name="sessions" />
         <Stack.Screen name="sessions/new" />
+        <Stack.Screen name="home" />
         <Stack.Screen name="chat/[sessionId]" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="settings/mcp" />
+        <Stack.Screen name="settings/[section]" />
         <Stack.Screen name="image-workspace" />
         <Stack.Screen name="network" />
         <Stack.Screen name="quick-commands" />

@@ -1,14 +1,16 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNetworkState } from '../hooks/useNetworkState';
 import { colors } from '../theme/colors';
 
 export function NetworkBanner() {
   const { isConnected } = useNetworkState();
+  const insets = useSafeAreaInsets();
 
   if (isConnected) return null;
 
   return (
-    <View style={styles.banner}>
+    <View style={[styles.banner, { paddingTop: Math.max(insets.top, 6) }]}>
       <Text style={styles.text}>无网络连接</Text>
     </View>
   );
@@ -17,7 +19,7 @@ export function NetworkBanner() {
 const styles = StyleSheet.create({
   banner: {
     backgroundColor: colors.danger,
-    paddingVertical: 6,
+    paddingBottom: 6,
     paddingHorizontal: 16,
     alignItems: 'center',
   },

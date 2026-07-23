@@ -20,6 +20,7 @@ import {
   useAuthStore,
   DEFAULT_MOBILE_GATEWAY_URL,
 } from '../../src/store/auth';
+import { Screen } from '../../src/components/Screen';
 import { colors } from '../../src/theme/colors';
 import { radii } from '../../src/theme/radii';
 import { textPresets } from '../../src/theme/typography';
@@ -121,7 +122,7 @@ export default function GatewayConnectScreen() {
         const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
         await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
         await AsyncStorage.setItem('onboarded', 'true');
-        router.replace('/sessions');
+        router.replace('/home');
       } catch (apiErr) {
         const msg = apiErr instanceof Error ? apiErr.message : '配对登录失败';
         throw new Error(`${msg}（${url}）`);
@@ -155,7 +156,7 @@ export default function GatewayConnectScreen() {
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
       await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
       await AsyncStorage.setItem('onboarded', 'true');
-      router.replace('/sessions');
+      router.replace('/home');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '登录失败';
       setError(`${msg}（${url}）`);
@@ -165,218 +166,220 @@ export default function GatewayConnectScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>连接已有网关</Text>
-        <View style={{ width: 36 }} />
-      </View>
-
-      {/* 步骤条 */}
-      <View style={styles.stepRow}>
-        <StepBadge
-          index={1}
-          label="地址"
-          active={step === 'url'}
-          done={step === 'health' || step === 'login'}
-        />
-        <View style={styles.stepArrow} />
-        <StepBadge index={2} label="检查" active={step === 'health'} done={step === 'login'} />
-        <View style={styles.stepArrow} />
-        <StepBadge index={3} label="登录" active={step === 'login'} done={false} />
-      </View>
-
-      {/* Step 1: Gateway URL */}
-      {step === 'url' && (
-        <>
-          <Text style={styles.sectionTitle}>Gateway 地址</Text>
-          <Text style={styles.hint}>填写局域网或远程 Gateway 服务地址。</Text>
-
-          <Text style={styles.fieldLabel}>Gateway URL</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="http://192.168.1.100:3000"
-            placeholderTextColor={colors.textSubtle}
-            value={gatewayUrl}
-            onChangeText={setGatewayUrlInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-
-          <TouchableOpacity
-            style={[styles.primaryBtn, loading && styles.disabledBtn]}
-            onPress={() => void handleHealthCheck()}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.white} size="small" />
-            ) : (
-              <>
-                <Ionicons name="arrow-forward" size={16} color={colors.white} />
-                <Text style={styles.primaryBtnText}>测试连接</Text>
-              </>
-            )}
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
           </TouchableOpacity>
-        </>
-      )}
-
-      {/* Step 2: Health Check */}
-      {step === 'health' && (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.hint}>正在检查 Gateway 连接…</Text>
+          <Text style={styles.headerTitle}>连接已有网关</Text>
+          <View style={{ width: 36 }} />
         </View>
-      )}
 
-      {/* Step 3: Login */}
-      {step === 'login' && (
-        <>
-          {/* 健康检查结果 */}
-          <View style={[styles.healthCard, healthStatus === 'ok' ? styles.healthOk : {}]}>
-            <Ionicons name="shield-checkmark" size={18} color={colors.success} />
-            <View style={styles.healthTextWrap}>
-              <Text style={styles.healthTitle}>连接正常</Text>
-              <Text style={styles.healthMeta}>{verifiedUrl}</Text>
+        {/* 步骤条 */}
+        <View style={styles.stepRow}>
+          <StepBadge
+            index={1}
+            label="地址"
+            active={step === 'url'}
+            done={step === 'health' || step === 'login'}
+          />
+          <View style={styles.stepArrow} />
+          <StepBadge index={2} label="检查" active={step === 'health'} done={step === 'login'} />
+          <View style={styles.stepArrow} />
+          <StepBadge index={3} label="登录" active={step === 'login'} done={false} />
+        </View>
+
+        {/* Step 1: Gateway URL */}
+        {step === 'url' && (
+          <>
+            <Text style={styles.sectionTitle}>Gateway 地址</Text>
+            <Text style={styles.hint}>填写局域网或远程 Gateway 服务地址。</Text>
+
+            <Text style={styles.fieldLabel}>Gateway URL</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="http://192.168.1.100:3000"
+              placeholderTextColor={colors.textSubtle}
+              value={gatewayUrl}
+              onChangeText={setGatewayUrlInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, loading && styles.disabledBtn]}
+              onPress={() => void handleHealthCheck()}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="arrow-forward" size={16} color={colors.white} />
+                  <Text style={styles.primaryBtnText}>测试连接</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Step 2: Health Check */}
+        {step === 'health' && (
+          <View style={styles.centerBox}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={styles.hint}>正在检查 Gateway 连接…</Text>
+          </View>
+        )}
+
+        {/* Step 3: Login */}
+        {step === 'login' && (
+          <>
+            {/* 健康检查结果 */}
+            <View style={[styles.healthCard, healthStatus === 'ok' ? styles.healthOk : {}]}>
+              <Ionicons name="shield-checkmark" size={18} color={colors.success} />
+              <View style={styles.healthTextWrap}>
+                <Text style={styles.healthTitle}>连接正常</Text>
+                <Text style={styles.healthMeta}>{verifiedUrl}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setStep('url');
+                  setHealthStatus('idle');
+                  setVerifiedUrl('');
+                }}
+              >
+                <Text style={styles.healthAction}>更换</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              onPress={() => {
-                setStep('url');
-                setHealthStatus('idle');
-                setVerifiedUrl('');
-              }}
-            >
-              <Text style={styles.healthAction}>更换</Text>
-            </TouchableOpacity>
-          </View>
 
-          {/* 登录方式切换 */}
-          <View style={styles.methodRow}>
-            <TouchableOpacity
-              style={[styles.methodChip, loginMethod === 'pairing' && styles.methodChipActive]}
-              onPress={() => {
-                setLoginMethod('pairing');
-                setError(null);
-              }}
-            >
-              <Ionicons
-                name="keypad-outline"
-                size={14}
-                color={loginMethod === 'pairing' ? colors.accent : colors.textMuted}
-              />
-              <Text
-                style={[styles.methodText, loginMethod === 'pairing' && styles.methodTextActive]}
-              >
-                配对码
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.methodChip, loginMethod === 'password' && styles.methodChipActive]}
-              onPress={() => {
-                setLoginMethod('password');
-                setError(null);
-              }}
-            >
-              <Ionicons
-                name="lock-closed-outline"
-                size={14}
-                color={loginMethod === 'password' ? colors.accent : colors.textMuted}
-              />
-              <Text
-                style={[styles.methodText, loginMethod === 'password' && styles.methodTextActive]}
-              >
-                账号密码
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 配对码登录 */}
-          {loginMethod === 'pairing' && (
-            <>
-              <Text style={styles.fieldLabel}>配对码</Text>
-              <TextInput
-                style={[styles.input, styles.multilineInput]}
-                placeholder="粘贴配对 JSON 或纯 token 字符串"
-                placeholderTextColor={colors.textSubtle}
-                value={pairingCode}
-                onChangeText={(v) => {
-                  setPairingCode(v);
+            {/* 登录方式切换 */}
+            <View style={styles.methodRow}>
+              <TouchableOpacity
+                style={[styles.methodChip, loginMethod === 'pairing' && styles.methodChipActive]}
+                onPress={() => {
+                  setLoginMethod('pairing');
                   setError(null);
                 }}
-                multiline
-                numberOfLines={3}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && styles.disabledBtn]}
-                onPress={() => void handlePairingLogin()}
-                disabled={loading}
               >
-                {loading ? (
-                  <ActivityIndicator color={colors.white} size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="git-merge-outline" size={16} color={colors.white} />
-                    <Text style={styles.primaryBtnText}>使用配对码连接</Text>
-                  </>
-                )}
+                <Ionicons
+                  name="keypad-outline"
+                  size={14}
+                  color={loginMethod === 'pairing' ? colors.accent : colors.textMuted}
+                />
+                <Text
+                  style={[styles.methodText, loginMethod === 'pairing' && styles.methodTextActive]}
+                >
+                  配对码
+                </Text>
               </TouchableOpacity>
-            </>
-          )}
-
-          {/* 账号密码登录 */}
-          {loginMethod === 'password' && (
-            <>
-              <Text style={styles.fieldLabel}>邮箱</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="user@example.com"
-                placeholderTextColor={colors.textSubtle}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-              <Text style={styles.fieldLabel}>密码</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textSubtle}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
               <TouchableOpacity
-                style={[styles.primaryBtn, loading && styles.disabledBtn]}
-                onPress={() => void handlePasswordLogin()}
-                disabled={loading}
+                style={[styles.methodChip, loginMethod === 'password' && styles.methodChipActive]}
+                onPress={() => {
+                  setLoginMethod('password');
+                  setError(null);
+                }}
               >
-                {loading ? (
-                  <ActivityIndicator color={colors.white} size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="log-in-outline" size={16} color={colors.white} />
-                    <Text style={styles.primaryBtnText}>登录并继续</Text>
-                  </>
-                )}
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={14}
+                  color={loginMethod === 'password' ? colors.accent : colors.textMuted}
+                />
+                <Text
+                  style={[styles.methodText, loginMethod === 'password' && styles.methodTextActive]}
+                >
+                  账号密码
+                </Text>
               </TouchableOpacity>
-            </>
-          )}
-        </>
-      )}
+            </View>
 
-      {/* 错误提示 */}
-      {error ? (
-        <View style={styles.errorBar}>
-          <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-    </ScrollView>
+            {/* 配对码登录 */}
+            {loginMethod === 'pairing' && (
+              <>
+                <Text style={styles.fieldLabel}>配对码</Text>
+                <TextInput
+                  style={[styles.input, styles.multilineInput]}
+                  placeholder="粘贴配对 JSON 或纯 token 字符串"
+                  placeholderTextColor={colors.textSubtle}
+                  value={pairingCode}
+                  onChangeText={(v) => {
+                    setPairingCode(v);
+                    setError(null);
+                  }}
+                  multiline
+                  numberOfLines={3}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[styles.primaryBtn, loading && styles.disabledBtn]}
+                  onPress={() => void handlePairingLogin()}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="git-merge-outline" size={16} color={colors.white} />
+                      <Text style={styles.primaryBtnText}>使用配对码连接</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* 账号密码登录 */}
+            {loginMethod === 'password' && (
+              <>
+                <Text style={styles.fieldLabel}>邮箱</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="user@example.com"
+                  placeholderTextColor={colors.textSubtle}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Text style={styles.fieldLabel}>密码</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textSubtle}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                />
+                <TouchableOpacity
+                  style={[styles.primaryBtn, loading && styles.disabledBtn]}
+                  onPress={() => void handlePasswordLogin()}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="log-in-outline" size={16} color={colors.white} />
+                      <Text style={styles.primaryBtnText}>登录并继续</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </>
+        )}
+
+        {/* 错误提示 */}
+        {error ? (
+          <View style={styles.errorBar}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+    </Screen>
   );
 }
 
@@ -407,16 +410,14 @@ function StepBadge({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  content: { padding: 16, paddingBottom: 100 },
-
-  /* header */
+  content: { padding: 16, paddingBottom: 32 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     height: 38,
     marginBottom: 16,
-    marginTop: 16,
+    marginTop: 4,
   },
   backBtn: {
     width: 36,

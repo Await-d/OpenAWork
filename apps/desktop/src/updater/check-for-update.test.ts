@@ -229,4 +229,9 @@ describe('toUpdateError', () => {
     expect(toUpdateError(new Error('signature verify failed')).kind).toBe('signature');
     expect(toUpdateError(new Error('permission denied')).kind).toBe('permission');
   });
+
+  it('将用户取消消息归类为 cancelled', () => {
+    expect(toUpdateError(new Error('更新已取消')).kind).toBe('cancelled');
+    expect(toUpdateError(new Error('cancelled by user')).kind).toBe('cancelled');
+  });
 });

@@ -3,4 +3,4 @@ using OpenAWork.Gateway.Contracts.Settings;
 
 namespace OpenAWork.Gateway.Application.Features.Settings;
 
-public sealed record GetVersionQuery : IQuery<VersionResponse>;
+public sealed record GetVersionQuery(string? Channel = null) : IQuery<VersionResponse>;

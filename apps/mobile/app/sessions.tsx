@@ -9,89 +9,35 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
-  TextInput,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../src/store/auth';
 import { listSessions, upsertSession } from '../src/db/session-store';
 import type { LocalSession } from '../src/db/session-store';
+import { Screen } from '../src/components/Screen';
+import {
+  Chip,
+  HintCard,
+  PageHeader,
+  SearchField,
+  SectionLabel,
+  StatusBadge,
+  type ChipTone,
+} from '../src/components/ui';
+import { useBottomNavContentInset } from '../src/layout/use-bottom-nav-inset';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
 
 type FilterKey = 'active' | 'draft' | 'synced' | 'pinned';
 
-const FILTERS: Array<{ key: FilterKey; label: string; color: string; bg: string; border: string }> =
-  [
-    {
-      key: 'active',
-      label: '进行中',
-      color: colors.accent,
-      bg: colors.accentMuted,
-      border: colors.accentBorder,
-    },
-    {
-      key: 'draft',
-      label: '草稿',
-      color: colors.contrast,
-      bg: colors.contrastMuted,
-      border: colors.contrastBorder,
-    },
-    {
-      key: 'synced',
-      label: '已同步',
-      color: colors.aux,
-      bg: colors.auxMuted,
-      border: colors.auxBorder,
-    },
-    {
-      key: 'pinned',
-      label: '置顶',
-      color: colors.textMuted,
-      bg: colors.surface2,
-      border: colors.lineDefault,
-    },
-  ];
-
-/** Status badge for session cards. */
-function StatusBadge({ status }: { status: 'running' | 'draft' | 'done' }) {
-  if (status === 'running') {
-    return (
-      <View
-        style={[
-          badgeStyles.badge,
-          { backgroundColor: colors.successMuted, borderColor: colors.successBorder },
-        ]}
-      >
-        <Text style={[badgeStyles.text, { color: colors.success }]}>运行中</Text>
-      </View>
-    );
-  }
-  if (status === 'draft') {
-    return (
-      <View
-        style={[
-          badgeStyles.badge,
-          { backgroundColor: colors.surface2, borderColor: colors.lineDefault },
-        ]}
-      >
-        <Text style={[badgeStyles.text, { color: colors.textMuted }]}>草稿</Text>
-      </View>
-    );
-  }
-  return null;
-}
-
-const badgeStyles = StyleSheet.create({
-  badge: {
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  text: { ...textPresets.caption, fontWeight: '600' },
-});
+const FILTERS: Array<{ key: FilterKey; label: string; tone: ChipTone }> = [
+  { key: 'active', label: '进行中', tone: 'accent' },
+  { key: 'draft', label: '草稿', tone: 'contrast' },
+  { key: 'synced', label: '已同步', tone: 'aux' },
+  { key: 'pinned', label: '置顶', tone: 'default' },
+];
 
 /** S3: 会话列表 */
 export default function SessionsScreen() {
@@ -192,73 +138,62 @@ export default function SessionsScreen() {
     return true;
   });
 
+  const bottomInset = useBottomNavContentInset();
+
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </View>
+      <Screen>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
+      </Screen>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>会话</Text>
-        <TouchableOpacity onPress={() => void createSession()} style={styles.newBtn}>
-          <Ionicons name="add" size={16} color={colors.accent} />
-          <Text style={styles.newBtnText}>新建</Text>
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.headerSubtitle}>把进行中、草稿、已同步任务收进同一入口。</Text>
+    <Screen>
+      <PageHeader
+        title="会话"
+        subtitle="把进行中、草稿、已同步任务收进同一入口。"
+        action={
+          <TouchableOpacity onPress={() => void createSession()} style={styles.newBtn}>
+            <Ionicons name="add" size={16} color={colors.accent} />
+            <Text style={styles.newBtnText}>新建</Text>
+          </TouchableOpacity>
+        }
+      />
 
-      {/* Search bar */}
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={19} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="搜索会话、标题、消息或任务"
-          placeholderTextColor={colors.textSubtle}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-      </View>
+      <SearchField
+        placeholder="搜索会话、标题、消息或任务"
+        value={search}
+        onChangeText={setSearch}
+        containerStyle={styles.searchField}
+      />
 
-      {/* Filter chips */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const isActive = activeFilter === f.key;
           return (
-            <TouchableOpacity
+            <Chip
               key={f.key}
-              style={[
-                styles.filterChip,
-                isActive && { backgroundColor: f.bg, borderColor: f.border },
-              ]}
+              label={f.label}
+              tone={f.tone}
+              selected={isActive}
               onPress={() => setActiveFilter(isActive ? null : f.key)}
-            >
-              <Text style={[styles.filterText, isActive && { color: f.color }]}>{f.label}</Text>
-            </TouchableOpacity>
+            />
           );
         })}
       </View>
 
-      {/* Section header */}
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>最近会话</Text>
-        <TouchableOpacity>
-          <Text style={styles.sectionManage}>管理</Text>
-        </TouchableOpacity>
-      </View>
+      <SectionLabel title="最近会话" actionLabel="管理" />
 
-      {/* Session list */}
       <FlatList
         data={filteredSessions}
         keyExtractor={(item) => item.id}
         contentContainerStyle={
-          filteredSessions.length === 0 ? styles.emptyContainer : styles.listContent
+          filteredSessions.length === 0
+            ? styles.emptyContainer
+            : [styles.listContent, { paddingBottom: bottomInset }]
         }
         refreshControl={
           <RefreshControl
@@ -279,29 +214,25 @@ export default function SessionsScreen() {
         }
         ListFooterComponent={
           filteredSessions.length > 0 ? (
-            <View style={styles.hintCard}>
-              <Ionicons name="time-outline" size={17} color={colors.textMuted} />
-              <Text style={styles.hintText}>下拉可查看归档、失败与已删除会话。</Text>
-            </View>
+            <HintCard text="下拉可查看归档、失败与已删除会话。" style={styles.hint} />
           ) : null
         }
         renderItem={({ item, index }) => {
           const isFirst = index === 0;
           const initial = getInitial(item.title);
+          const statusTone = isFirst ? 'running' : item.draft ? 'draft' : null;
           return (
             <TouchableOpacity
               style={[styles.sessionCard, isFirst && styles.sessionCardActive]}
               onPress={() => router.push(`/chat/${item.id}`)}
               activeOpacity={0.7}
             >
-              {/* Icon */}
               <View style={[styles.sessionIcon, isFirst && styles.sessionIconActive]}>
                 <Text style={[styles.sessionIconText, isFirst && styles.sessionIconTextActive]}>
                   {initial}
                 </Text>
               </View>
 
-              {/* Text */}
               <View style={styles.sessionTextWrap}>
                 <Text style={styles.sessionTitle} numberOfLines={1}>
                   {item.title ?? '未命名会话'}
@@ -312,42 +243,22 @@ export default function SessionsScreen() {
                 </Text>
               </View>
 
-              {/* Status badge */}
-              <StatusBadge status={isFirst ? 'running' : item.draft ? 'draft' : 'done'} />
-
+              {statusTone ? <StatusBadge tone={statusTone} /> : null}
               <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
             </TouchableOpacity>
           );
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgBase },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.bgBase,
-  },
-
-  /* header */
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 4,
-  },
-  headerTitle: { ...textPresets.title, color: colors.textStrong },
-  headerSubtitle: {
-    ...textPresets.bodySmall,
-    color: colors.textMuted,
-    paddingHorizontal: 16,
-    marginBottom: 12,
   },
   newBtn: {
     flexDirection: 'row',
@@ -361,60 +272,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   newBtnText: { ...textPresets.label, color: colors.accent },
-
-  /* search */
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    height: 44,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: colors.surface1,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.lineDefault,
-    paddingHorizontal: 14,
-  },
-  searchInput: {
-    flex: 1,
-    ...textPresets.body,
-    color: colors.textStrong,
-    padding: 0,
-  },
-
-  /* filters */
+  searchField: { marginBottom: 12 },
   filterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     paddingHorizontal: 16,
     marginBottom: 16,
   },
-  filterChip: {
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.lineDefault,
-    backgroundColor: colors.surface2,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  filterText: { ...textPresets.caption, color: colors.textMuted, fontWeight: '600' },
-
-  /* section header */
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  sectionTitle: { ...textPresets.subheading, color: colors.textStrong },
-  sectionManage: { ...textPresets.label, color: colors.accent },
-
-  /* list */
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
-
-  /* session card */
+  listContent: { paddingHorizontal: 16, gap: 8 },
   sessionCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -463,25 +329,9 @@ const styles = StyleSheet.create({
     ...textPresets.cardDescription,
     color: colors.textMuted,
   },
-
-  /* empty */
   emptyContainer: { flex: 1 },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 120, gap: 8 },
   emptyText: { ...textPresets.subheading, color: colors.textStrong },
   emptySubtext: { ...textPresets.body, color: colors.textMuted },
-
-  /* hint */
-  hintCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    height: 48,
-    backgroundColor: colors.surfaceSoft,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.lineSubtle,
-    paddingHorizontal: 14,
-    marginTop: 8,
-  },
-  hintText: { ...textPresets.bodySmall, color: colors.textMuted },
+  hint: { marginTop: 8 },
 });

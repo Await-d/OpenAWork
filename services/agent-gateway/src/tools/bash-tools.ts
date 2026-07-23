@@ -41,7 +41,7 @@
  *     the model not to use newlines as separators).
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { promises as fsp, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -129,10 +129,32 @@ const DISALLOWED_PATTERNS: ReadonlyArray<{ pattern: RegExp; message: string }> =
   },
 ];
 
-function assertSafeBashCommand(command: string): void {
+interface ShellSafetyOptions {
+  isPowerShell: boolean;
+}
+
+export function assertSafeShellCommand(command: string, options: ShellSafetyOptions): void {
   for (const { pattern, message } of DISALLOWED_PATTERNS) {
+    if (
+      options.isPowerShell &&
+      pattern.source === '\\$\\(' &&
+      !looksLikeBashCommandSubstitution(command)
+    ) {
+      continue;
+    }
     if (pattern.test(command)) throw new Error(message);
   }
+}
+
+function looksLikeBashCommandSubstitution(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed.includes('$(')) {
+    return false;
+  }
+
+  const bashSubstitutionPrefix =
+    /(?:^|[;&|<>]\s*|\b(?:echo|printf|cat|ls|pwd|git|pnpm|npm|node|python|pytest|bun|sh|bash)\s+)\$\(/u;
+  return bashSubstitutionPrefix.test(trimmed);
 }
 
 const bashInputSchema = z.object({
@@ -274,6 +296,10 @@ interface ShellSelectionEnv {
   SHELL?: string;
 }
 
+interface ShellSelectionOptions {
+  commandExists?: (command: string) => boolean;
+}
+
 function pickShellName(): string {
   return path
     .basename(pickShell().shell)
@@ -284,11 +310,14 @@ function pickShellName(): string {
 export function resolveShellChoiceForPlatform(
   platform: NodeJS.Platform,
   env: ShellSelectionEnv = process.env,
+  options: ShellSelectionOptions = {},
 ): ShellChoice {
   if (platform === 'win32') {
     const configuredShell = env.OPENAWORK_WINDOWS_SHELL?.trim();
     const shell =
-      configuredShell && configuredShell.length > 0 ? configuredShell : 'powershell.exe';
+      configuredShell && configuredShell.length > 0
+        ? configuredShell
+        : pickDefaultWindowsShell(options.commandExists ?? commandExistsOnPath);
     return {
       shell,
       isPowerShell: /powershell|pwsh/i.test(shell),
@@ -306,6 +335,22 @@ export function resolveShellChoiceForPlatform(
 
 function pickShell(): ShellChoice {
   return resolveShellChoiceForPlatform(process.platform, process.env);
+}
+
+function pickDefaultWindowsShell(commandExists: (command: string) => boolean): string {
+  return commandExists('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
+}
+
+function commandExistsOnPath(command: string): boolean {
+  const result = spawnSync(
+    command,
+    ['-NoLogo', '-NoProfile', '-Command', '$PSVersionTable.PSVersion'],
+    {
+      stdio: 'ignore',
+      windowsHide: true,
+    },
+  );
+  return result.status === 0 && !result.error;
 }
 
 // ---------- workdir resolution ----------
@@ -662,7 +707,8 @@ export async function runBashCommand(
   input: BashInput,
   options: RunOptions = {},
 ): Promise<BashExecutionResult> {
-  assertSafeBashCommand(input.command);
+  const shellChoice = pickShell();
+  assertSafeShellCommand(input.command, { isPowerShell: shellChoice.isPowerShell });
   const cwd = await resolveBashWorkdir(input.workdir, options.sessionId);
   const timeoutMs = input.timeout ?? DEFAULT_BASH_TIMEOUT_MS;
   // Many models (especially smaller / non-Claude variants) skip the

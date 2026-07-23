@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../src/store/auth';
 import { createArtifactsClient } from '@openAwork/web-client';
@@ -24,6 +25,8 @@ import ExpoPersistenceAdapter, {
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 const persistence = new ExpoPersistenceAdapter();
 
@@ -88,148 +91,178 @@ export default function ImageWorkspaceScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>图片工作台</Text>
-      <Text style={styles.subtitle}>AI 生成图片、编辑、变体创作。</Text>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
+      <ScreenHeader title="图片工作台" />
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.subtitle}>AI 生成图片、编辑、变体创作。</Text>
 
-      {/* Model status */}
-      <View style={[styles.modelCard, hasModel ? styles.modelOk : styles.modelErr]}>
-        <Ionicons
-          name={hasModel ? 'checkmark-circle' : 'alert-circle-outline'}
-          size={18}
-          color={hasModel ? colors.success : colors.warning}
-        />
-        <Text style={styles.modelText}>
-          {hasModel ? `当前模型：${modelLabel}` : '请先在设置中配置图片模型'}
-        </Text>
-      </View>
-
-      {/* Prompt */}
-      <Text style={styles.fieldLabel}>图片描述</Text>
-      <TextInput
-        style={styles.promptInput}
-        placeholder="描述你想生成或编辑的图片…"
-        placeholderTextColor={colors.textSubtle}
-        value={prompt}
-        onChangeText={setPrompt}
-        multiline
-        numberOfLines={4}
-        textAlignVertical="top"
-      />
-
-      {/* Size presets */}
-      <Text style={styles.sectionTitle}>尺寸</Text>
-      {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
-        <View key={group.tier} style={styles.presetGroup}>
-          <Text style={styles.presetGroupLabel}>{group.label}</Text>
-          <View style={styles.chipRow}>
-            {group.presets.map((preset) => (
-              <TouchableOpacity
-                key={preset.id}
-                style={[
-                  styles.chip,
-                  resolveImageGenerationSizePresetId(defaults.size) === preset.id &&
-                    styles.chipActive,
-                ]}
-                onPress={() => setDefaults((d) => ({ ...d, size: preset.size }))}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    resolveImageGenerationSizePresetId(defaults.size) === preset.id &&
-                      styles.chipTextActive,
-                  ]}
-                >
-                  {preset.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {/* Model status */}
+        <View style={[styles.modelCard, hasModel ? styles.modelOk : styles.modelErr]}>
+          <Ionicons
+            name={hasModel ? 'checkmark-circle' : 'alert-circle-outline'}
+            size={18}
+            color={hasModel ? colors.success : colors.warning}
+          />
+          <Text style={styles.modelText}>
+            {hasModel ? `当前模型：${modelLabel}` : '请先在设置中配置图片模型'}
+          </Text>
         </View>
-      ))}
-      <TextInput
-        style={styles.input}
-        placeholder="自定义尺寸 如 2560x1440"
-        placeholderTextColor={colors.textSubtle}
-        value={defaults.size}
-        onChangeText={(size) => setDefaults((d) => ({ ...d, size }))}
-        autoCapitalize="none"
-      />
-      <Text
-        style={[
-          styles.hint,
-          !validateImageGenerationSize(defaults.size).valid && { color: colors.danger },
-        ]}
-      >
-        {validateImageGenerationSize(defaults.size).valid
-          ? '最长边 ≤ 3840、宽高为 16 的倍数、比例不超过 3:1'
-          : validateImageGenerationSize(defaults.size).message}
-      </Text>
 
-      {/* Quality / Format / Background */}
-      <Text style={styles.sectionTitle}>质量</Text>
-      <View style={styles.chipRow}>
-        {(['low', 'medium', 'high'] as const).map((q) => (
-          <TouchableOpacity
-            key={q}
-            style={[styles.chip, defaults.quality === q && styles.chipActive]}
-            onPress={() => setDefaults((d) => ({ ...d, quality: q }))}
-          >
-            <Text style={[styles.chipText, defaults.quality === q && styles.chipTextActive]}>
-              {q}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+        {/* Prompt */}
+        <Text style={styles.fieldLabel}>图片描述</Text>
+        <TextInput
+          style={styles.promptInput}
+          placeholder="描述你想生成或编辑的图片…"
+          placeholderTextColor={colors.textSubtle}
+          value={prompt}
+          onChangeText={setPrompt}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
 
-      <Text style={styles.sectionTitle}>格式</Text>
-      <View style={styles.chipRow}>
-        {(['png', 'jpeg', 'webp'] as const).map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[styles.chip, defaults.outputFormat === f && styles.chipActive]}
-            onPress={() => setDefaults((d) => ({ ...d, outputFormat: f }))}
-          >
-            <Text style={[styles.chipText, defaults.outputFormat === f && styles.chipTextActive]}>
-              {f.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
+        {/* Size presets */}
+        <Text style={styles.sectionTitle}>尺寸</Text>
+        {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
+          <View key={group.tier} style={styles.presetGroup}>
+            <Text style={styles.presetGroupLabel}>{group.label}</Text>
+            <View style={styles.chipRow}>
+              {group.presets.map((preset) => (
+                <TouchableOpacity
+                  key={preset.id}
+                  style={[
+                    styles.chip,
+                    resolveImageGenerationSizePresetId(defaults.size) === preset.id &&
+                      styles.chipActive,
+                  ]}
+                  onPress={() => setDefaults((d) => ({ ...d, size: preset.size }))}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      resolveImageGenerationSizePresetId(defaults.size) === preset.id &&
+                        styles.chipTextActive,
+                    ]}
+                  >
+                    {preset.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
         ))}
-        {(['auto', 'opaque'] as const).map((bg) => (
-          <TouchableOpacity
-            key={bg}
-            style={[styles.chip, defaults.background === bg && styles.chipActive]}
-            onPress={() => setDefaults((d) => ({ ...d, background: bg }))}
-          >
-            <Text style={[styles.chipText, defaults.background === bg && styles.chipTextActive]}>
-              {bg === 'auto' ? '自动背景' : '不透明'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+        <TextInput
+          style={styles.input}
+          placeholder="自定义尺寸 如 2560x1440"
+          placeholderTextColor={colors.textSubtle}
+          value={defaults.size}
+          onChangeText={(size) => setDefaults((d) => ({ ...d, size }))}
+          autoCapitalize="none"
+        />
+        <Text
+          style={[
+            styles.hint,
+            !validateImageGenerationSize(defaults.size).valid && { color: colors.danger },
+          ]}
+        >
+          {validateImageGenerationSize(defaults.size).valid
+            ? '最长边 ≤ 3840、宽高为 16 的倍数、比例不超过 3:1'
+            : validateImageGenerationSize(defaults.size).message}
+        </Text>
 
-      {/* Generate button */}
-      <TouchableOpacity
-        style={[styles.generateBtn, (generating || !hasModel) && { opacity: 0.5 }]}
-        onPress={() => void handleGenerate()}
-        disabled={generating || !hasModel}
-      >
-        {generating ? (
-          <ActivityIndicator color={colors.white} />
-        ) : (
-          <>
-            <Ionicons name="sparkles" size={18} color={colors.white} />
-            <Text style={styles.generateText}>生成图片</Text>
-          </>
-        )}
-      </TouchableOpacity>
-    </ScrollView>
+        {/* Quality / Format / Background */}
+        <Text style={styles.sectionTitle}>质量</Text>
+        <View style={styles.chipRow}>
+          {(['low', 'medium', 'high'] as const).map((q) => (
+            <TouchableOpacity
+              key={q}
+              style={[styles.chip, defaults.quality === q && styles.chipActive]}
+              onPress={() => setDefaults((d) => ({ ...d, quality: q }))}
+            >
+              <Text style={[styles.chipText, defaults.quality === q && styles.chipTextActive]}>
+                {q}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>格式</Text>
+        <View style={styles.chipRow}>
+          {(['png', 'jpeg', 'webp'] as const).map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.chip, defaults.outputFormat === f && styles.chipActive]}
+              onPress={() => setDefaults((d) => ({ ...d, outputFormat: f }))}
+            >
+              <Text style={[styles.chipText, defaults.outputFormat === f && styles.chipTextActive]}>
+                {f.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {(['auto', 'opaque'] as const).map((bg) => (
+            <TouchableOpacity
+              key={bg}
+              style={[styles.chip, defaults.background === bg && styles.chipActive]}
+              onPress={() => setDefaults((d) => ({ ...d, background: bg }))}
+            >
+              <Text style={[styles.chipText, defaults.background === bg && styles.chipTextActive]}>
+                {bg === 'auto' ? '自动背景' : '不透明'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Secondary entries */}
+        <View style={styles.linkRowWrap}>
+          <TouchableOpacity
+            style={styles.linkCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/image-params')}
+          >
+            <Ionicons name="options-outline" size={16} color={colors.accent} />
+            <View style={styles.linkTextWrap}>
+              <Text style={styles.linkTitle}>图片参数编辑</Text>
+              <Text style={styles.linkDesc}>尺寸、质量、格式与背景</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.linkCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/image-progress')}
+          >
+            <Ionicons name="hourglass-outline" size={16} color={colors.contrast} />
+            <View style={styles.linkTextWrap}>
+              <Text style={styles.linkTitle}>生成进度</Text>
+              <Text style={styles.linkDesc}>查看进行中的图片任务</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Generate button */}
+        <TouchableOpacity
+          style={[styles.generateBtn, (generating || !hasModel) && { opacity: 0.5 }]}
+          onPress={() => void handleGenerate()}
+          disabled={generating || !hasModel}
+        >
+          {generating ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <>
+              <Ionicons name="sparkles" size={18} color={colors.white} />
+              <Text style={styles.generateText}>生成图片</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  content: { padding: 16, paddingBottom: 100 },
+  content: { padding: 16, paddingBottom: 32 },
 
   title: { ...textPresets.title, color: colors.textStrong, marginTop: 16 },
   subtitle: { ...textPresets.body, color: colors.textMuted, marginTop: 6, marginBottom: 16 },
@@ -270,6 +303,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   hint: { ...textPresets.caption, color: colors.textMuted, marginBottom: 12 },
+
+  linkRowWrap: { gap: 10, marginBottom: 16 },
+  linkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.surface1,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.lineDefault,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  linkTextWrap: { flex: 1, gap: 2 },
+  linkTitle: { ...textPresets.body, color: colors.textStrong, fontWeight: '700' },
+  linkDesc: { ...textPresets.caption, color: colors.textMuted },
 
   sectionTitle: {
     ...textPresets.subheading,

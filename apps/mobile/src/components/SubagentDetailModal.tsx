@@ -48,8 +48,8 @@ interface SubagentDetailModalProps {
 
 const ROLE_COLOR: Record<SubagentMessage['role'], string> = {
   user: colors.accent,
-  assistant: '#10b981',
-  tool: '#f59e0b',
+  assistant: colors.success,
+  tool: colors.warning,
 };
 
 const ROLE_LABEL: Record<SubagentMessage['role'], string> = {
@@ -114,7 +114,7 @@ const INTERVENTION_ACTIONS: {
   {
     key: 'redirect',
     label: '重定向',
-    color: '#f59e0b',
+    color: colors.warning,
     icon: '⇄',
     desc: '修改子代理当前的执行目标',
   },
@@ -141,7 +141,11 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
       : null;
 
   const statusColor =
-    detail.status === 'done' ? '#34d399' : detail.status === 'error' ? '#f87171' : '#fbbf24';
+    detail.status === 'done'
+      ? colors.success
+      : detail.status === 'error'
+        ? colors.danger
+        : colors.warning;
   const statusLabel =
     detail.status === 'done' ? '已完成' : detail.status === 'error' ? '执行出错' : '执行中';
 
@@ -271,14 +275,14 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
                     placeholder={
                       selectedAction === 'inject' ? '输入要注入的消息…' : '输入新的执行目标…'
                     }
-                    placeholderTextColor="#475569"
+                    placeholderTextColor={colors.textSubtle}
                     multiline
                     numberOfLines={4}
                     textAlignVertical="top"
                   />
                 </View>
               ) : (
-                <View style={[ivStyles.section, { borderColor: '#ef444444' }]}>
+                <View style={[ivStyles.section, { borderColor: colors.dangerBorder }]}>
                   <Text style={[ivStyles.sectionTitle, { color: colors.danger }]}>⚠ 中断确认</Text>
                   <Text style={ivStyles.warningText}>
                     中断执行将立即停止该子代理，已产生的输出不会被回滚。此操作不可撤销。
@@ -367,12 +371,12 @@ export function SubagentDetailModal({ detail, onClose, onIntervene }: SubagentDe
   );
 }
 
-const SURFACE = '#0f1f3d';
-const CARD = '#1a2d4a';
-const BORDER = '#1e3a5f';
-const TEXT = colors.textDefault;
+const SURFACE = colors.surface1;
+const CARD = colors.surfaceSoft;
+const BORDER = colors.lineDefault;
+const TEXT = colors.textStrong;
 const MUTED = colors.textMuted;
-const ACCENT = '#3b82f6';
+const ACCENT = colors.accent;
 
 const ivStyles = StyleSheet.create({
   section: {
@@ -422,7 +426,7 @@ const ivStyles = StyleSheet.create({
     minHeight: 90,
     lineHeight: 20,
   },
-  warningText: { color: '#fca5a5', fontSize: 13, lineHeight: 19 },
+  warningText: { color: colors.danger, fontSize: 13, lineHeight: 19 },
   submitBtn: { borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   submitBtnDisabled: { opacity: 0.4 },
   submitText: { color: colors.white, fontSize: 15, fontWeight: '700' },
@@ -435,7 +439,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(15,23,61,0.32)',
   },
   sheet: {
     position: 'absolute',
@@ -494,7 +498,7 @@ const styles = StyleSheet.create({
   tabText: { color: MUTED, fontSize: 13, fontWeight: '600' },
   tabTextActive: { color: ACCENT },
   interveneTabLabel: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  interveneActiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fbbf24' },
+  interveneActiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
   emptyText: { color: MUTED, fontSize: 14 },
   msgList: { flex: 1 },
@@ -512,7 +516,7 @@ const msgStyles = StyleSheet.create({
     padding: 10,
     gap: 6,
   },
-  rowError: { borderColor: '#f8717144' },
+  rowError: { borderColor: colors.dangerBorder },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -527,7 +531,7 @@ const msgStyles = StyleSheet.create({
   roleLabel: { fontSize: 10, fontWeight: '700' },
   content: { color: MUTED, fontSize: 13, lineHeight: 19 },
   contentMono: { fontFamily: 'monospace', fontSize: 11 },
-  contentError: { color: '#fca5a5' },
+  contentError: { color: colors.danger },
 });
 
 const metaStyles = StyleSheet.create({

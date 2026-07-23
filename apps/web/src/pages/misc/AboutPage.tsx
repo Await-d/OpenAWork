@@ -3,10 +3,22 @@ import { createSettingsClient } from '@openAwork/web-client';
 import { BrandLogo } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
-import { isTauri } from '../settings/shared/settings-page-helpers.js';
+import { isTauri, tauriInvoke } from '../settings/shared/settings-page-helpers.js';
 import type { SettingsVersionInfo } from '../settings/state/settings-types.js';
 
 const RELEASES_URL = 'https://github.com/Await-d/OpenAWork/releases';
+
+type UpdateChannel = 'preview' | 'stable';
+
+async function resolveUpdateChannel(): Promise<UpdateChannel> {
+  if (!isTauri) return 'preview';
+  try {
+    const channel = await tauriInvoke<string>('current_update_channel');
+    return channel === 'stable' ? 'stable' : 'preview';
+  } catch {
+    return 'preview';
+  }
+}
 
 /* ── 工具函数 ──────────────────────────────────────────────────────────── */
 
@@ -117,22 +129,35 @@ interface UpdateSectionProps {
 }
 
 function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectionProps) {
+  const [desktopOpening, setDesktopOpening] = useState(false);
+
   const handleDesktopUpdate = useCallback(async () => {
     if (!isTauriEnv) return;
+    setDesktopOpening(true);
     try {
-      // 通过 emit tray:check-updates 事件触发桌面端更新面板
-      // 桌面端 App.tsx 监听了该事件并显示 UpdateActionPanel
+      // autoStart: true → UpdateActionPanel 直接进入 UpdateProgressDialog，避免二次点击
       const { emit } = await import('@tauri-apps/api/event');
-      await emit('tray:check-updates');
+      await emit('tray:check-updates', { autoStart: true });
     } catch {
-      // 如果 emit 失败，退回打开 releases 页面
       window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+    } finally {
+      setDesktopOpening(false);
     }
   }, [isTauriEnv]);
+
+  const handlePrimaryCheck = useCallback(() => {
+    if (isTauriEnv) {
+      void handleDesktopUpdate();
+      void onCheckVersion();
+      return;
+    }
+    void onCheckVersion();
+  }, [handleDesktopUpdate, isTauriEnv, onCheckVersion]);
 
   const hasUpdate = versionInfo.updateAvailable && versionInfo.latestVersion;
   const isLatest =
     versionInfo.latestVersion && !versionInfo.updateAvailable && !versionInfo.checkError;
+  const primaryBusy = isTauriEnv ? desktopOpening || versionInfo.checking : versionInfo.checking;
 
   return (
     <section
@@ -222,7 +247,9 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
               更新检查
             </h2>
             <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
-              检查网关版本是否有更新，或查看 GitHub 发布记录
+              {isTauriEnv
+                ? '打开桌面端更新面板并按当前更新渠道检查 GitHub Releases'
+                : '通过 GitHub Releases 检查是否有新版本发布（默认预览渠道）'}
             </span>
           </div>
         </div>
@@ -230,8 +257,8 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button
             type="button"
-            disabled={versionInfo.checking}
-            onClick={() => void onCheckVersion()}
+            disabled={primaryBusy}
+            onClick={() => void handlePrimaryCheck()}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -244,17 +271,18 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
               color: 'var(--fg-on-accent)',
               fontSize: 12,
               fontWeight: 600,
-              cursor: versionInfo.checking ? 'wait' : 'pointer',
-              opacity: versionInfo.checking ? 0.7 : 1,
+              cursor: primaryBusy ? 'wait' : 'pointer',
+              opacity: primaryBusy ? 0.7 : 1,
               transition: 'opacity 120ms ease',
             }}
           >
-            {versionInfo.checking ? '检查中…' : '检查更新'}
+            {primaryBusy ? '检查中…' : '检查更新'}
           </button>
           {isTauriEnv && (
             <button
               type="button"
-              onClick={() => void handleDesktopUpdate()}
+              disabled={versionInfo.checking}
+              onClick={() => void onCheckVersion()}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -267,10 +295,10 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
                 color: 'var(--fg-default)',
                 fontSize: 12,
                 fontWeight: 600,
-                cursor: 'pointer',
+                cursor: versionInfo.checking ? 'wait' : 'pointer',
               }}
             >
-              桌面端更新
+              {versionInfo.checking ? '刷新中…' : '刷新版本状态'}
             </button>
           )}
           <button
@@ -422,7 +450,10 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
             <path d="M12 9v4" />
             <path d="M12 17h.01" />
           </svg>
-          有新版本 v{versionInfo.latestVersion} 可用，建议尽快更新。
+          有新版本 v{versionInfo.latestVersion} 可用
+          {isTauriEnv
+            ? '。请点「检查更新」打开桌面端更新面板确认并安装。'
+            : '，请前往 GitHub 发布记录下载。'}
         </div>
       )}
       {isLatest && (
@@ -509,9 +540,10 @@ export default function AboutPage() {
     if (!token) return;
     setVersionInfo((prev) => ({ ...prev, checking: true, checkError: null }));
     try {
-      const data = (await createSettingsClient(gatewayUrl).getVersion(
-        token,
-      )) as SettingsVersionInfo;
+      const channel = await resolveUpdateChannel();
+      const data = (await createSettingsClient(gatewayUrl).getVersion(token, {
+        channel,
+      })) as SettingsVersionInfo;
       setVersionInfo({
         currentVersion: data.currentVersion,
         latestVersion: data.latestVersion,

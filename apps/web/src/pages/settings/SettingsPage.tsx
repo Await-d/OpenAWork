@@ -1152,7 +1152,7 @@ export default function SettingsPage() {
         : {
             id: makeStableId(baseId),
             type: isBuiltin ? data.type : 'custom',
-            name: data.name.trim() || data.type,
+            name: data.name.trim() || (isBuiltin ? data.type : '自定义渠道'),
             enabled: data.enabled,
             apiKey: data.apiKey.trim() || undefined,
             baseUrl: data.baseUrl.trim() || undefined,

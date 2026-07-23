@@ -98,16 +98,16 @@ export class ProviderManagerImpl implements ProviderManager {
     const now = nowIso();
     const baseProvider = isBuiltinType(type)
       ? getBuiltinProviderPreset(type)
-      : {
+      : ({
           id: `custom-${now}`,
-          type,
-          name: 'Custom Provider',
+          type: 'custom' as const,
+          name: '自定义渠道',
           enabled: true,
           baseUrl: '',
           defaultModels: [],
           createdAt: now,
           updatedAt: now,
-        };
+        } satisfies AIProvider);
 
     const provider: AIProvider = {
       ...baseProvider,

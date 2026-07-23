@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  CHAT_AUTO_FOLLOW_ALIGN,
   isScrollTopNearLatest,
   resolveLatestScrollTop,
 } from '../../../../components/conversation-runtime/scroll/scroll-alignment.js';
@@ -188,16 +189,19 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
         Math.max(CHAT_LATEST_FOCUS_THRESHOLD_PX * 2, scrollRegion.clientHeight * 0.18),
       );
 
+      // Auto-follow always uses latest-edge, so near-latest detection must
+      // match that target. Center-align detection would keep reporting "near"
+      // while the expanding tool body sits below the fold.
       return isScrollTopNearLatest({
         ...latestAnchorMetrics,
-        align: visibleStreaming ? 'center' : 'latest-edge',
+        align: CHAT_AUTO_FOLLOW_ALIGN,
         centerBias: CHAT_LATEST_CENTER_BIAS,
         centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
         scrollTop: scrollRegion.scrollTop,
         tolerancePx: followTolerance,
       });
     },
-    [getLatestAnchorMetrics, visibleStreaming],
+    [getLatestAnchorMetrics],
   );
 
   const handleScrollFrameRef = useRef<number | null>(null);
@@ -236,7 +240,9 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
   }
 
   const scrollToBottom = useCallback(
-    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'center') => {
+    // Default to latest-edge so accidental callers (and tool-card height
+    // growth) pin the growing bottom into view rather than the midpoint.
+    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'latest-edge') => {
       const scrollRegion = scrollRegionRef.current;
 
       isNearBottomRef.current = true;
@@ -311,13 +317,15 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
 
   useEffect(() => {
     if (visibleStreaming && isNearBottomRef.current) {
-      scrollToBottom('auto');
+      // Pin to latest-edge so tool-card expansion (which grows the assistant
+      // group downward) stays visible; center would leave the body off-screen.
+      scrollToBottom('auto', CHAT_AUTO_FOLLOW_ALIGN);
     }
   }, [scrollToBottom, visibleStreaming]);
 
   useEffect(() => {
     if (visibleStreaming && isNearBottomRef.current && visibleStreamBufferLength > 0) {
-      scrollToBottom('auto');
+      scrollToBottom('auto', CHAT_AUTO_FOLLOW_ALIGN);
     }
   }, [scrollToBottom, visibleStreamBufferLength, visibleStreaming]);
 
@@ -334,7 +342,7 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
 
   useEffect(() => {
     if (isNearBottomRef.current && messageCount > 0) {
-      scrollToBottom('auto', 'latest-edge');
+      scrollToBottom('auto', CHAT_AUTO_FOLLOW_ALIGN);
     }
   }, [messageCount, scrollToBottom]);
 
@@ -348,6 +356,9 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
       return;
     }
 
+    // ResizeObserver is the primary follow path for tool-call height growth
+    // (tool cards do not change visibleStreamBufferLength). Must use
+    // latest-edge, not center.
     const observer = new ResizeObserver(() => {
       if (!isNearBottomRef.current) {
         return;
@@ -357,7 +368,7 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
         return;
       }
 
-      scrollToBottom('auto', visibleStreaming ? 'center' : 'latest-edge');
+      scrollToBottom('auto', CHAT_AUTO_FOLLOW_ALIGN);
     });
 
     observer.observe(contentColumn);

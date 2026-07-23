@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface Snapshot {
   id: string;
@@ -51,16 +52,15 @@ export default function SnapshotRecoveryScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>快照恢复</Text>
-        <TouchableOpacity style={styles.headerAction}>
-          <Ionicons name="camera-outline" size={18} color={colors.aux} />
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      <ScreenHeader
+        title="快照恢复"
+        right={
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="camera-outline" size={18} color={colors.aux} />
+          </TouchableOpacity>
+        }
+      />
 
       <Text style={styles.title}>选择恢复点</Text>
       <Text style={styles.subtitle}>将工作区恢复到某个历史快照状态。</Text>
@@ -115,7 +115,7 @@ export default function SnapshotRecoveryScreen() {
           <Text style={styles.restoreText}>恢复快照</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </Screen>
   );
 }
 
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 32 },
   snapshotCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',

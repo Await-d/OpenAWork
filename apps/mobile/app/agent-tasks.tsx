@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
@@ -57,14 +59,8 @@ export default function AgentTasksScreen() {
   const doneCount = MOCK_TASKS.filter((t) => t.status === 'done').length;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Agent 任务</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen>
+      <ScreenHeader title="Agent 任务" />
 
       {/* Summary */}
       <View style={styles.summaryRow}>
@@ -126,7 +122,7 @@ export default function AgentTasksScreen() {
           );
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -159,7 +155,7 @@ const styles = StyleSheet.create({
   summaryValue: { ...textPresets.subheading, color: colors.textStrong },
   summaryLabel: { ...textPresets.caption, color: colors.textMuted },
 
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   taskCard: {
     backgroundColor: colors.surface1,
     borderRadius: radii.lg,

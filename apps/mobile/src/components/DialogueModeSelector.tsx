@@ -51,8 +51,8 @@ interface DialogueModeSelectorProps {
 
 const MODE_COLOR: Record<DialogueMode, string> = {
   clarify: colors.accent,
-  coding: '#10b981',
-  programmer: '#3b82f6',
+  coding: colors.success,
+  programmer: colors.aux,
 };
 
 export function DialogueModeSelector({ mode, onChange }: DialogueModeSelectorProps) {
@@ -115,9 +115,9 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radii.md,
+    borderRadius: radii.pill,
     borderWidth: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 5,
     gap: 4,
   },
@@ -130,13 +130,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(15,23,61,0.28)',
   },
   popover: {
     position: 'absolute',
     bottom: 80,
-    left: 12,
-    right: 12,
+    left: 16,
+    right: 16,
     backgroundColor: colors.surface1,
     borderRadius: radii.xl,
     borderWidth: 1,
@@ -157,9 +157,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     padding: 10,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.lineDefault,
+    backgroundColor: colors.surface1,
   },
   optionIcon: {
     width: 32,
@@ -169,7 +170,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   optionIconText: { fontSize: 12, fontWeight: '700' },
-  optionLabel: { color: colors.textDefault, fontSize: 13, fontWeight: '600' },
+  optionLabel: { color: colors.textStrong, fontSize: 13, fontWeight: '600' },
   optionDesc: { color: colors.textMuted, fontSize: 11, marginTop: 1, lineHeight: 15 },
   check: { fontSize: 16, fontWeight: '700' },
 });

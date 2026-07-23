@@ -334,7 +334,8 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   );
 
   const scrollToLatest = React.useCallback(
-    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'center') => {
+    // Default to latest-edge so tool-card growth stays pinned to the bottom.
+    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'latest-edge') => {
       const scrollRegion = scrollRegionRef.current;
       const latestAnchor = getLatestAssistantAnchor();
 
@@ -432,8 +433,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   useEffect(() => {
     void scrollAnchorKey;
     if (isNearLatestRef.current) {
-      const shouldCenterLatest = streaming || streamBuffer.length > 0 || liveToolCalls.length > 0;
-      scrollToLatest('auto', shouldCenterLatest ? 'center' : 'latest-edge');
+      // Always edge-pin while following. Center-align leaves expanding tool
+      // cards below the fold until a later commit-time edge scroll.
+      scrollToLatest('auto', 'latest-edge');
       return;
     }
 

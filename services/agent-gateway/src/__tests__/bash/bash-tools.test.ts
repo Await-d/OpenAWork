@@ -31,6 +31,7 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 const {
+  assertSafeShellCommand,
   bashToolDefinition,
   buildBashPermissionScope,
   deriveBashDescription,
@@ -140,10 +141,32 @@ describe('bash-tools', () => {
   });
 
   describe('shell selection', () => {
-    it('Windows 默认使用 PowerShell，不跟随 Git Bash 风格的 SHELL 环境变量', () => {
-      const choice = resolveShellChoiceForPlatform('win32', {
-        SHELL: '/usr/bin/bash',
-      });
+    it('Windows 默认优先使用 pwsh.exe，不跟随 Git Bash 风格的 SHELL 环境变量', () => {
+      const choice = resolveShellChoiceForPlatform(
+        'win32',
+        {
+          SHELL: '/usr/bin/bash',
+        },
+        {
+          commandExists: (command) => command === 'pwsh.exe',
+        },
+      );
+
+      expect(choice.shell).toBe('pwsh.exe');
+      expect(choice.isPowerShell).toBe(true);
+      expect(choice.name).toBe('pwsh.exe');
+    });
+
+    it('Windows 在找不到 pwsh.exe 时回退到 powershell.exe', () => {
+      const choice = resolveShellChoiceForPlatform(
+        'win32',
+        {
+          SHELL: '/usr/bin/bash',
+        },
+        {
+          commandExists: () => false,
+        },
+      );
 
       expect(choice.shell).toBe('powershell.exe');
       expect(choice.isPowerShell).toBe(true);
@@ -151,14 +174,40 @@ describe('bash-tools', () => {
     });
 
     it('Windows 允许通过 OPENAWORK_WINDOWS_SHELL 显式覆盖默认 shell', () => {
-      const choice = resolveShellChoiceForPlatform('win32', {
-        OPENAWORK_WINDOWS_SHELL: 'pwsh.exe',
-        SHELL: '/usr/bin/bash',
-      });
+      const choice = resolveShellChoiceForPlatform(
+        'win32',
+        {
+          OPENAWORK_WINDOWS_SHELL: 'pwsh.exe',
+          SHELL: '/usr/bin/bash',
+        },
+        {
+          commandExists: () => false,
+        },
+      );
 
       expect(choice.shell).toBe('pwsh.exe');
       expect(choice.isPowerShell).toBe(true);
       expect(choice.name).toBe('pwsh.exe');
+    });
+  });
+
+  describe('shell-aware safety pre-checks', () => {
+    it('允许 PowerShell 的变量子表达式', () => {
+      expect(() =>
+        assertSafeShellCommand('Write-Output "$($_.LineNumber)"', { isPowerShell: true }),
+      ).not.toThrow();
+    });
+
+    it('允许 PowerShell 的命令子表达式', () => {
+      expect(() =>
+        assertSafeShellCommand('Write-Output "$(Get-Location).Path"', { isPowerShell: true }),
+      ).not.toThrow();
+    });
+
+    it('仍然拒绝 bash 风格的命令替换', () => {
+      expect(() => assertSafeShellCommand('echo $(whoami)', { isPowerShell: false })).toThrow(
+        /Command substitution/,
+      );
     });
   });
 

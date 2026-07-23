@@ -1,9 +1,10 @@
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface ContextItem {
   id: string;
@@ -75,16 +76,15 @@ const TYPE_LABELS = {
 /** S30: 输入聚焦与上下文 */
 export default function InputContextScreen() {
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>上下文管理</Text>
-        <TouchableOpacity style={styles.headerAction}>
-          <Ionicons name="options-outline" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      <ScreenHeader
+        title="上下文管理"
+        right={
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="options-outline" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        }
+      />
 
       <Text style={styles.title}>当前上下文</Text>
       <Text style={styles.subtitle}>管理发送给 AI 的上下文信息，控制对话范围。</Text>
@@ -135,7 +135,7 @@ export default function InputContextScreen() {
         <Ionicons name="add-circle-outline" size={18} color={colors.accent} />
         <Text style={styles.addText}>添加上下文</Text>
       </TouchableOpacity>
-    </View>
+    </Screen>
   );
 }
 

@@ -305,6 +305,79 @@ describe('buildProviderOptions', () => {
     });
     expect(options).toBeUndefined();
   });
+
+  it('emits body.thinking for 智谱 GLM-4.5 thinking models', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'zhipu', enabled: true },
+      model: 'glm-4.5',
+    });
+    const oc = options?.['zhipu'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'enabled' } });
+  });
+
+  it('skips non-thinking 智谱 models', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'zhipu', enabled: true },
+      model: 'glm-4-flash',
+    });
+    expect(options).toBeUndefined();
+  });
+
+  it('emits body.thinking for 豆包 Seed thinking models', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'doubao', enabled: true },
+      model: 'doubao-seed-1.6',
+    });
+    const oc = options?.['doubao'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ thinking: { type: 'enabled' } });
+  });
+
+  it('emits openai reasoningEffort for xAI Grok', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'xai', enabled: true, effort: 'high' },
+      model: 'grok-3',
+    });
+    const oc = options?.['xai'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ reasoningEffort: 'high' });
+  });
+
+  it('emits openai reasoningEffort for Azure GPT-5 deployments', () => {
+    const options = buildProviderOptions({
+      thinking: { ...baseThinking, providerType: 'azure', enabled: true, effort: 'medium' },
+      model: 'gpt-5',
+    });
+    // Azure maps to both openai + azure keys.
+    expect(options?.['openai']).toMatchObject({ reasoningEffort: 'medium' });
+    expect(options?.['azure']).toMatchObject({ reasoningEffort: 'medium' });
+  });
+
+  it('emits openai reasoningEffort for custom channels with arbitrary model ids', () => {
+    const options = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'custom',
+        enabled: true,
+        supportsThinking: true,
+        effort: 'medium',
+      },
+      model: 'my-local-reasoner',
+    });
+    const oc = options?.['custom'] as Record<string, unknown> | undefined;
+    expect(oc).toEqual({ reasoningEffort: 'medium' });
+  });
+
+  it('does not invent thinking for Azure non-reasoning deployments when support is undeclared', () => {
+    const options = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'azure',
+        enabled: true,
+        supportsThinking: false,
+      },
+      model: 'gpt-4o',
+    });
+    expect(options).toBeUndefined();
+  });
 });
 
 describe('buildBaseProviderOptions', () => {

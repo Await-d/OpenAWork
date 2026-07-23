@@ -92,6 +92,39 @@ const isMoonshotThinkingModel = (modelId: string): boolean => {
   );
 };
 
+/** 智谱：GLM-4.5+ / GLM-Z1 等思考模型。 */
+const isZhipuThinkingModel = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('glm-4.5') ||
+    id.includes('glm-4-5') ||
+    id.includes('glm-z1') ||
+    id.includes('glm-4.6')
+  );
+};
+
+/** 豆包 / 方舟：Seed 1.6 与显式 thinking/reasoner 系列。 */
+const isDoubaoThinkingModel = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('doubao-seed-1.6') ||
+    id.includes('doubao-seed-1-6') ||
+    id.includes('doubao-1.5-thinking') ||
+    id.includes('doubao-thinking') ||
+    id.includes('seed-1.6') ||
+    ((id.includes('doubao') || id.includes('seed')) &&
+      (id.includes('thinking') || id.includes('reasoner')))
+  );
+};
+
+/** Qwen：仅 Qwen3 / QwQ / 显式 thinking 系列响应 enable_thinking。 */
+const isQwenThinkingModel = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('qwen3') || id.includes('qwq') || id.includes('thinking') || id.includes('reasoner')
+  );
+};
+
 const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
 
 function isOpenAIReasoningModel(modelId: string): boolean {
@@ -105,6 +138,25 @@ function isAnthropicThinkingModel(modelId: string): boolean {
     id.includes('claude-sonnet-4') ||
     id.includes('claude-3-7-sonnet')
   );
+}
+
+/** OpenRouter：仅对已知推理系列下发 reasoning，避免 gpt-4o 等误开。 */
+const isOpenRouterReasoningModel = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  return (
+    isOpenAIReasoningModel(id) ||
+    isAnthropicThinkingModel(id) ||
+    id.includes('gemini-2.5') ||
+    id.includes('gemini-3') ||
+    id.includes('deepseek-r') ||
+    id.includes('reasoner') ||
+    id.includes('thinking')
+  );
+};
+
+function isXaiThinkingModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return id.includes('grok-3') || id.includes('grok-4') || id.includes('grok-2');
 }
 
 export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
@@ -452,6 +504,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', isDefault: true }],
     thinkingStyle: 'openrouter_reasoning',
+    thinkingModelMatcher: isOpenRouterReasoningModel,
     defaultModels: [
       {
         id: 'anthropic/claude-sonnet-4-0',
@@ -459,6 +512,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         enabled: true,
         supportsTools: true,
         supportsVision: true,
+        supportsThinking: true,
         inputPricePerMillion: 3,
         outputPricePerMillion: 15,
       },
@@ -472,11 +526,22 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         outputPricePerMillion: 8,
       },
       {
+        id: 'openai/gpt-5',
+        label: 'GPT-5 (OpenRouter)',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+        inputPricePerMillion: 1.25,
+        outputPricePerMillion: 10,
+      },
+      {
         id: 'google/gemini-2.5-pro',
         label: 'Gemini 2.5 Pro (OpenRouter)',
         enabled: true,
         supportsTools: true,
         supportsVision: true,
+        supportsThinking: true,
         inputPricePerMillion: 1.25,
         outputPricePerMillion: 10,
       },
@@ -518,6 +583,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'qwen_enable_thinking',
+    thinkingModelMatcher: isQwenThinkingModel,
     defaultModels: [
       {
         id: 'qwen3-235b-a22b',
@@ -728,13 +794,15 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         isDefault: true,
       },
     ],
-    thinkingStyle: 'none',
+    thinkingStyle: 'body_thinking_type',
+    thinkingModelMatcher: isZhipuThinkingModel,
     defaultModels: [
       {
         id: 'glm-4.5',
         label: 'GLM-4.5',
         enabled: true,
         supportsTools: true,
+        supportsThinking: true,
       },
       {
         id: 'glm-4-flash',
@@ -762,7 +830,9 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         isDefault: true,
       },
     ],
-    thinkingStyle: 'none',
+    // 方舟 OpenAI 兼容：thinking 模型走 body.thinking.type 开关。
+    thinkingStyle: 'body_thinking_type',
+    thinkingModelMatcher: isDoubaoThinkingModel,
     defaultModels: [
       {
         id: 'ep-your-endpoint-id',
@@ -775,6 +845,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         label: 'Doubao Seed 1.6',
         enabled: true,
         supportsTools: true,
+        supportsThinking: true,
       },
     ],
   },
@@ -861,10 +932,19 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'openai_effort',
+    // Azure 部署名各异；仅对 GPT-5 / o 系列等 reasoning 模型下发 effort。
+    thinkingModelMatcher: isOpenAIReasoningModel,
     defaultModels: [
       {
         id: 'gpt-4o',
         label: '（部署名请改成你的 deployment）',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+      },
+      {
+        id: 'gpt-5',
+        label: 'GPT-5（部署名请改成你的 deployment）',
         enabled: true,
         supportsTools: true,
         supportsVision: true,
@@ -885,6 +965,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'xAI', baseUrl: 'https://api.x.ai/v1', isDefault: true }],
     thinkingStyle: 'openai_effort',
+    thinkingModelMatcher: isXaiThinkingModel,
     defaultModels: [
       {
         id: 'grok-3',
@@ -1100,8 +1181,20 @@ function inferModelThinkingSupport(entry: ProviderCatalogEntry, modelId: string)
   if (entry.type === 'anthropic') {
     return isAnthropicThinkingModel(modelId);
   }
-  if (entry.type === 'openai') {
+  if (entry.type === 'openai' || entry.type === 'azure') {
     return isOpenAIReasoningModel(modelId);
+  }
+  if (entry.type === 'xai') {
+    return isXaiThinkingModel(modelId);
+  }
+  // DeepSeek 全系（含 SiliconFlow 上的 DeepSeek-V3）可接受 thinking 开关。
+  if (entry.thinkingStyle === 'deepseek_thinking') {
+    return true;
+  }
+  // Gemini 2.5 / 3 系列支持 thinking_config。
+  if (entry.thinkingStyle === 'gemini_thinking') {
+    const id = modelId.toLowerCase();
+    return id.includes('gemini-2.5') || id.includes('gemini-3');
   }
   return false;
 }
@@ -1127,7 +1220,7 @@ export const resolveThinkingStyle = (
 
   // 对 'openai' / 'custom' / 聚合平台，先尝试通过 modelId 前缀推断真实厂商——
   // 用户可能通过 OpenAI 兼容代理或 SiliconFlow 使用 MiMo/Qwen/DeepSeek 等模型。
-  // 只有推断失败时才 fallback 到 openai 的默认 'openai_effort'。
+  // 只有推断失败时才 fallback。
   if (normalized === 'openai' || normalized === 'custom' || normalized === 'siliconflow') {
     if (modelId) {
       const catalogEntry = findCatalogEntryByModelId(modelId, {
@@ -1137,8 +1230,11 @@ export const resolveThinkingStyle = (
         return catalogEntry.thinkingStyle;
       }
     }
-    // 推断失败：openai 用 openai_effort，custom/siliconflow 用 none
-    return normalized === 'openai' ? 'openai_effort' : 'none';
+    // 推断失败：
+    // - openai / custom：默认按 OpenAI 兼容 reasoningEffort 下发
+    //   （自定义渠道用户勾选 supportsThinking 后必须有可执行风格，不能是 none）
+    // - siliconflow：无前缀时保持 none，避免对未知模型乱发参数
+    return normalized === 'siliconflow' ? 'none' : 'openai_effort';
   }
 
   const entry = getCatalogEntry(normalized);

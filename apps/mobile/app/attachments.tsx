@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface AssetItem {
   id: string;
@@ -78,14 +79,15 @@ export default function AttachmentPickerScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>选择附件</Text>
-        <Text style={styles.selectedCount}>{selected.size > 0 ? `已选 ${selected.size}` : ''}</Text>
-      </View>
+    <Screen>
+      <ScreenHeader
+        title="选择附件"
+        right={
+          <Text style={styles.selectedCount}>
+            {selected.size > 0 ? `已选 ${selected.size}` : ''}
+          </Text>
+        }
+      />
 
       {/* Search */}
       <View style={styles.searchBar}>
@@ -165,7 +167,7 @@ export default function AttachmentPickerScreen() {
           );
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -240,7 +242,7 @@ const styles = StyleSheet.create({
   },
   quickText: { ...textPresets.label, color: colors.textDefault },
 
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   assetCard: {
     flexDirection: 'row',
     alignItems: 'center',

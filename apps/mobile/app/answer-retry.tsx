@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 const RETRY_MODES = [
   {
@@ -42,14 +43,8 @@ export default function AnswerRetryScreen() {
   const [selected, setSelected] = useState<string>('same');
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>重试方式</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen>
+      <ScreenHeader title="重试方式" />
 
       <Text style={styles.title}>选择重试方式</Text>
       <Text style={styles.subtitle}>选择一种方式重新生成上一条回复。</Text>
@@ -104,7 +99,7 @@ export default function AnswerRetryScreen() {
         <Ionicons name="refresh" size={18} color={colors.white} />
         <Text style={styles.retryText}>重新生成</Text>
       </TouchableOpacity>
-    </View>
+    </Screen>
   );
 }
 

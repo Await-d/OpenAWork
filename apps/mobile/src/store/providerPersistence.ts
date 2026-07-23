@@ -50,7 +50,7 @@ const MOBILE_PROVIDER_PRESETS = [
     name: '智谱 AI',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
   },
-  { id: 'custom', type: 'custom', name: 'Custom', baseUrl: '' },
+  { id: 'custom', type: 'custom', name: '自定义渠道', baseUrl: '' },
 ] as const;
 
 export interface MobileMcpServer {

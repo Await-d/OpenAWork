@@ -8,6 +8,21 @@ export interface ChatLatestScrollMetrics {
   scrollTop: number;
 }
 
+/**
+ * Align mode for automatic follow-the-latest scrolling (stream tokens,
+ * content-column resize from tool-card expansion, message commit).
+ *
+ * Always `latest-edge`: center-align pins the midpoint of the latest
+ * assistant group, so when a tool card auto-expands and grows that group
+ * downward the new content falls below the fold until a later edge scroll
+ * (usually message commit when the tool finishes). Edge-align keeps the
+ * growing bottom visible for the whole run.
+ *
+ * Explicit user actions (e.g. "scroll to bottom" with a chosen align) may
+ * still request `center` via `scrollToBottom(..., 'center')`.
+ */
+export const CHAT_AUTO_FOLLOW_ALIGN: ChatLatestScrollAlign = 'latest-edge';
+
 interface ResolveLatestScrollTopOptions {
   align?: ChatLatestScrollAlign;
   anchorHeight: number;

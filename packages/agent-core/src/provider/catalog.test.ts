@@ -45,7 +45,14 @@ describe('provider catalog (single source of truth)', () => {
     expect(resolveThinkingStyle('qwen')).toBe('qwen_enable_thinking');
     expect(resolveThinkingStyle('moonshot')).toBe('body_thinking_type');
     expect(resolveThinkingStyle('mimo')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('zhipu')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('doubao')).toBe('body_thinking_type');
+    expect(resolveThinkingStyle('azure')).toBe('openai_effort');
+    expect(resolveThinkingStyle('xai')).toBe('openai_effort');
+    expect(resolveThinkingStyle('openrouter')).toBe('openrouter_reasoning');
+    expect(resolveThinkingStyle('custom', 'my-reasoner')).toBe('openai_effort');
     expect(resolveThinkingStyle('ollama')).toBe('none');
+    expect(resolveThinkingStyle('mistral')).toBe('none');
     expect(resolveThinkingStyle('unknown-vendor')).toBe('none');
   });
 
@@ -65,8 +72,8 @@ describe('provider catalog (single source of truth)', () => {
     expect(resolveThinkingStyle('custom', 'anthropic/claude-sonnet-4-0')).toBe('anthropic_budget');
     expect(resolveThinkingStyle('custom', 'google/gemini-2.5-pro')).toBe('gemini_thinking');
     expect(resolveThinkingStyle('custom', 'openai/gpt-5')).toBe('openai_effort');
-    // custom + 未知模型 → none
-    expect(resolveThinkingStyle('custom', 'totally-unknown')).toBe('none');
+    // custom + 未知模型 → openai_effort（自定义渠道默认可下发 reasoningEffort）
+    expect(resolveThinkingStyle('custom', 'totally-unknown')).toBe('openai_effort');
   });
 
   it('OpenAI 内置模型包含可直接用于 fast 的 GPT-5.x reasoning 候选', () => {
@@ -97,6 +104,26 @@ describe('provider catalog (single source of truth)', () => {
     expect(catalogModelSupportsThinking('custom', 'qwen-max')).toBe(false);
     expect(catalogModelSupportsThinking('custom', 'gemini-2.0-flash')).toBe(false);
     expect(catalogModelSupportsThinking('custom', 'moonshot-v1-32k')).toBe(false);
+  });
+
+  it('智谱 / 豆包 / Azure / xAI / OpenRouter 按模型放开 thinking', () => {
+    expect(catalogModelSupportsThinking('zhipu', 'glm-4.5')).toBe(true);
+    expect(catalogModelSupportsThinking('zhipu', 'glm-4-flash')).toBe(false);
+    expect(catalogModelSupportsThinking('doubao', 'doubao-seed-1.6')).toBe(true);
+    expect(catalogModelSupportsThinking('doubao', 'ep-your-endpoint-id')).toBe(false);
+    expect(catalogModelSupportsThinking('azure', 'gpt-5')).toBe(true);
+    expect(catalogModelSupportsThinking('azure', 'gpt-4o')).toBe(false);
+    expect(catalogModelSupportsThinking('xai', 'grok-3')).toBe(true);
+    expect(catalogModelSupportsThinking('openrouter', 'anthropic/claude-sonnet-4-0')).toBe(true);
+    expect(catalogModelSupportsThinking('openrouter', 'openai/gpt-5')).toBe(true);
+    // OpenRouter 网关 supportsOpenRouterReasoning 对所有 gpt/claude/gemini-3 放开。
+    expect(catalogModelSupportsThinking('openrouter', 'openai/gpt-4.1')).toBe(true);
+    expect(catalogModelSupportsThinking('openrouter', 'deepseek/deepseek-chat-v3-0324')).toBe(
+      false,
+    );
+    expect(catalogModelSupportsThinking('qwen', 'qwen3-235b-a22b')).toBe(true);
+    expect(catalogModelSupportsThinking('qwen', 'qwen-max')).toBe(false);
+    expect(catalogModelSupportsThinking('siliconflow', 'deepseek-ai/DeepSeek-V3')).toBe(true);
   });
 
   it('host → providerType 反推覆盖各内置平台', () => {

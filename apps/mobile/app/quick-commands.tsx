@@ -1,9 +1,10 @@
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
+import { Screen } from '../src/components/Screen';
+import { ScreenHeader } from '../src/components/ui';
 
 interface QuickCommand {
   id: string;
@@ -107,14 +108,8 @@ const CATEGORIES = [
 /** S28: 快捷命令与工作区能力 */
 export default function QuickCommandsScreen() {
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.textDefault} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>快捷命令</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    <Screen>
+      <ScreenHeader title="快捷命令" />
 
       <Text style={styles.title}>工作区能力</Text>
       <Text style={styles.subtitle}>一键触发常用操作，加速你的工作流。</Text>
@@ -146,7 +141,7 @@ export default function QuickCommandsScreen() {
           </TouchableOpacity>
         )}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -194,7 +189,7 @@ const styles = StyleSheet.create({
   categoryDot: { width: 6, height: 6, borderRadius: 3 },
   categoryText: { ...textPresets.caption, fontWeight: '600' },
 
-  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   commandCard: {
     flexDirection: 'row',
     alignItems: 'center',

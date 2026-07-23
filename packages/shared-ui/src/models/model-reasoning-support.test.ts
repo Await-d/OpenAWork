@@ -100,4 +100,52 @@ describe('model reasoning support', () => {
   it('keeps Moonshot as binary toggle (single medium effort)', () => {
     expect(getSupportedReasoningEffortsForModel('moonshot', 'kimi-k2.5')).toEqual(['medium']);
   });
+
+  it('enables thinking controls for Azure / xAI / 智谱 / 豆包 reasoning models', () => {
+    expect(inferSupportsThinking('azure', 'gpt-5', false)).toBe(true);
+    expect(canConfigureThinkingForModel('azure', 'gpt-5')).toBe(true);
+    expect(inferSupportsThinking('azure', 'gpt-4o', false)).toBe(false);
+    expect(canConfigureThinkingForModel('azure', 'gpt-4o')).toBe(false);
+
+    expect(inferSupportsThinking('xai', 'grok-3', false)).toBe(true);
+    expect(canConfigureThinkingForModel('xai', 'grok-3')).toBe(true);
+    expect(getSupportedReasoningEffortsForModel('xai', 'grok-3')).toEqual([
+      'low',
+      'medium',
+      'high',
+    ]);
+
+    expect(inferSupportsThinking('zhipu', 'glm-4.5', false)).toBe(true);
+    expect(canConfigureThinkingForModel('zhipu', 'glm-4.5')).toBe(true);
+    expect(canConfigureThinkingForModel('zhipu', 'glm-4-flash')).toBe(false);
+    expect(getSupportedReasoningEffortsForModel('zhipu', 'glm-4.5')).toEqual(['medium']);
+
+    expect(inferSupportsThinking('doubao', 'doubao-seed-1.6', false)).toBe(true);
+    expect(canConfigureThinkingForModel('doubao', 'doubao-seed-1.6')).toBe(true);
+    expect(getSupportedReasoningEffortsForModel('doubao', 'doubao-seed-1.6')).toEqual(['medium']);
+  });
+
+  it('infers siliconflow hosted DeepSeek / Qwen thinking models', () => {
+    expect(inferSupportsThinking('siliconflow', 'deepseek-ai/DeepSeek-V3', false)).toBe(true);
+    expect(canConfigureThinkingForModel('siliconflow', 'deepseek-ai/DeepSeek-V3')).toBe(true);
+    expect(inferSupportsThinking('siliconflow', 'Qwen/Qwen3-32B', false)).toBe(true);
+    expect(canConfigureThinkingForModel('siliconflow', 'Qwen/Qwen2.5-7B-Instruct')).toBe(false);
+  });
+
+  it('honors declared supportsThinking for custom arbitrary model ids', () => {
+    expect(inferSupportsThinking('custom', 'my-local-reasoner', true)).toBe(true);
+    expect(canConfigureThinkingForModel('custom', 'my-local-reasoner', true)).toBe(true);
+    expect(canConfigureThinkingForModel('custom', 'my-local-reasoner', false)).toBe(false);
+    expect(getSupportedReasoningEffortsForModel('custom', 'my-local-reasoner')).toEqual([
+      'low',
+      'medium',
+      'high',
+    ]);
+  });
+
+  it('does not treat non-reasoning OpenRouter gpt-4 models as thinking-capable', () => {
+    expect(inferSupportsThinking('openrouter', 'openai/gpt-4.1', false)).toBe(false);
+    expect(canConfigureThinkingForModel('openrouter', 'openai/gpt-4.1')).toBe(false);
+    expect(inferSupportsThinking('openrouter', 'openai/gpt-5', false)).toBe(true);
+  });
 });

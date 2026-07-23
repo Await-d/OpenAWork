@@ -199,9 +199,11 @@ const inputStyle: CSSProperties = {
 };
 
 function emptyForm(provider?: AIProviderRef): ProviderEditData {
+  // 新增默认落到「自定义渠道」：用户可自行填上游与模型；编辑时保留原 type。
+  const type = provider?.type ?? 'custom';
   return {
-    name: provider?.name ?? '',
-    type: provider?.type ?? '',
+    name: provider?.name ?? (type === 'custom' ? '自定义渠道' : ''),
+    type,
     enabled: provider?.enabled ?? true,
     apiKey: provider?.apiKey ?? '',
     baseUrl: provider?.baseUrl ?? '',
@@ -287,7 +289,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         setFormError(
           form.type === 'azure'
             ? 'Azure OpenAI 必须填写资源 endpoint（例如 https://{resource}.openai.azure.com）'
-            : '自定义提供商必须填写 Base URL',
+            : '自定义渠道必须填写上游 Base URL',
         );
         return;
       }
@@ -335,10 +337,23 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
 
   const guidance =
     form.type === 'custom'
-      ? '适用于任意 OpenAI / Anthropic 兼容端点（中转、LM Studio、vLLM 等）。保存后请在模型列表添加 model id。'
+      ? '自定义渠道：自行填写上游 Base URL、协议与 API Key，保存后在模型列表添加任意 model id（中转 / LM Studio / vLLM / OneAPI 等）。'
       : form.type === 'azure'
         ? '填写 Azure 资源 endpoint；模型 id 使用部署名（deployment name）。'
         : null;
+
+  // 类型下拉：自定义渠道置顶，其余按 catalog 顺序。
+  const typeOptions = useMemo(() => {
+    const customEntry = catalogOptions.find((entry) => entry.type === 'custom');
+    const rest = catalogOptions.filter((entry) => entry.type !== 'custom');
+    return [
+      customEntry ?? {
+        type: 'custom',
+        displayName: '自定义渠道',
+      },
+      ...rest,
+    ];
+  }, [catalogOptions]);
 
   return (
     <div style={formWrap}>
@@ -350,7 +365,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           marginBottom: 4,
         }}
       >
-        {isNew ? '新增提供商' : '编辑提供商'}
+        {isNew ? '新增渠道' : '编辑渠道'}
       </div>
       {guidance ? (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.45 }}>{guidance}</div>
@@ -365,7 +380,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             style={inputStyle}
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
-            placeholder={form.type === 'custom' ? '例如：公司中转 / LM Studio' : 'Provider name'}
+            placeholder={
+              form.type === 'custom' ? '例如：公司中转 / LM Studio / 自建网关' : 'Provider name'
+            }
           />
         </div>
         <div style={col}>
@@ -377,42 +394,62 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             <select
               id="pf-type"
               style={inputStyle}
-              value={form.type}
+              value={form.type || 'custom'}
               onChange={(e) => {
                 const nextType = e.target.value;
                 const entry = lookupProviderEntry(nextType);
                 const defaultUpstream =
                   entry?.upstreams?.find((u) => u.isDefault) ?? entry?.upstreams?.[0];
                 setFormError(null);
-                setForm((prev) => ({
-                  ...prev,
-                  type: nextType,
-                  // 名称未改过时带出平台默认显示名，便于多实例区分时再手动改。
-                  name:
-                    prev.name.trim().length === 0 || prev.name === prev.type
-                      ? (entry?.displayName ?? nextType)
+                setForm((prev) => {
+                  const prevWasDefaultName =
+                    prev.name.trim().length === 0 ||
+                    prev.name === prev.type ||
+                    prev.name === '自定义渠道' ||
+                    prev.name === (lookupProviderEntry(prev.type)?.displayName ?? '');
+                  return {
+                    ...prev,
+                    type: nextType,
+                    // 名称未改过时带出平台默认显示名，便于多实例区分时再手动改。
+                    name: prevWasDefaultName
+                      ? nextType === 'custom'
+                        ? '自定义渠道'
+                        : (entry?.displayName ?? nextType)
                       : prev.name,
-                  ...(defaultUpstream
-                    ? {
-                        baseUrl: defaultUpstream.baseUrl,
-                        upstreamProtocol: defaultUpstream.protocol,
-                      }
-                    : {}),
-                }));
+                    ...(nextType === 'custom'
+                      ? {
+                          // 切到自定义时清空内置默认上游，避免误用其它平台 endpoint。
+                          baseUrl: prev.type === 'custom' ? prev.baseUrl : '',
+                          upstreamProtocol:
+                            prev.type === 'custom' ? prev.upstreamProtocol : undefined,
+                        }
+                      : defaultUpstream
+                        ? {
+                            baseUrl: defaultUpstream.baseUrl,
+                            upstreamProtocol: defaultUpstream.protocol,
+                          }
+                        : {}),
+                  };
+                });
               }}
             >
-              {catalogOptions.map((entry) => (
+              {typeOptions.map((entry) => (
                 <option key={entry.type} value={entry.type}>
-                  {entry.displayName}
+                  {entry.type === 'custom'
+                    ? `${entry.displayName}（自填上游 / 模型）`
+                    : entry.displayName}
                 </option>
               ))}
-              <option value="custom">自定义 (custom)</option>
             </select>
           ) : (
             <input
               id="pf-type"
               style={{ ...inputStyle, opacity: 0.6 }}
-              value={form.type}
+              value={
+                form.type === 'custom'
+                  ? '自定义渠道'
+                  : (lookupProviderEntry(form.type)?.displayName ?? form.type)
+              }
               placeholder="openai / anthropic …"
               disabled
             />
@@ -470,7 +507,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         </div>
         <div style={col}>
           <label htmlFor="pf-baseurl" style={labelStyle}>
-            Base URL{requiresBaseUrl(form.type) ? ' *' : ''}
+            上游 Base URL{requiresBaseUrl(form.type) ? ' *' : ''}
           </label>
           <input
             id="pf-baseurl"
@@ -483,13 +520,15 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             placeholder={
               form.type === 'azure'
                 ? 'https://{resource}.openai.azure.com'
-                : 'https://api.example.com/v1'
+                : form.type === 'custom'
+                  ? 'https://your-gateway.example.com/v1'
+                  : 'https://api.example.com/v1'
             }
           />
         </div>
         <div style={col}>
           <label htmlFor="pf-protocol" style={labelStyle}>
-            Upstream Protocol
+            上游协议
           </label>
           <select
             id="pf-protocol"
@@ -500,7 +539,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
               set('upstreamProtocol', v === '' ? undefined : v);
             }}
           >
-            <option value="">Auto-detect</option>
+            <option value="">自动检测</option>
             <option value="chat_completions">Chat Completions (/v1/chat/completions)</option>
             <option value="responses">Responses (/v1/responses)</option>
             <option value="anthropic_messages">Anthropic Messages (/v1/messages)</option>
@@ -677,6 +716,7 @@ export function ProviderSettings({
     const canConfigureThinking = canConfigureThinkingForModel(
       selectedProviderType,
       selectedModel?.id,
+      selectedModel?.supportsThinking === true,
     );
     const controlEnabled = supportsThinking && canConfigureThinking;
     const supportedEfforts = getSupportedReasoningEffortsForModel(
