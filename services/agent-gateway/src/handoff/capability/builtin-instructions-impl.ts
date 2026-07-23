@@ -23,6 +23,14 @@ import {
   inferTaskProfile,
   TOOLSET_CATEGORIES,
 } from './dispatch-package.js';
+import {
+  findOutOfScopePaths,
+  normalizeReviewVerdict,
+  submitExecutionResultSchema,
+  submitReviewReportSchema,
+  SUBMIT_EXECUTION_RESULT_PROTOCOL,
+  SUBMIT_REVIEW_REPORT_PROTOCOL,
+} from './completion-protocol-contract.js';
 
 // ─── b: reception 层指令 ────────────────────────────────────────────────────
 
@@ -649,13 +657,14 @@ function makeMarkFailed(ownerLayer: 'pm1' | 'pm2' | 'executor' | 'reviewer'): vo
 }
 
 /**
- * submit_patch: executor 提交代码 patch artifact。
+ * submit_patch: executor 提交代码 patch artifact（过程产物，不单独构成完成证据）。
  */
 registerInstruction({
   name: 'submit_patch',
   ownerLayer: 'executor',
   description:
-    'executor 提交一份代码 patch（结构化输出）作为 artifact。phase=patch 或 implementation。',
+    'executor 提交一份代码 patch（结构化输出）作为 artifact。phase=patch 或 implementation。' +
+    '注意：这只是过程产物；任务完成必须再调用 submit_execution_result。',
   schema: z.object({
     phase: z.enum(['patch', 'implementation']).default('patch'),
     title: z.string().min(1).max(200),
@@ -681,41 +690,346 @@ registerInstruction({
     );
     return {
       ok: true,
-      message: `已提交 ${args.phase} artifact (id=${id.slice(0, 8)})`,
+      message: `已提交 ${args.phase} artifact (id=${id.slice(0, 8)})。完成任务请继续调用 submit_execution_result。`,
       data: { artifactId: id, phase: args.phase },
     };
   },
 });
 
 /**
- * submit_review: reviewer 提交评审报告。
+ * submit_execution_result: executor 完成硬契约。
+ * 写入 handoff result_json（protocol=submit_execution_result）+ implementation artifact。
+ */
+registerInstruction({
+  name: 'submit_execution_result',
+  ownerLayer: 'executor',
+  description:
+    '【必须】executor 提交结构化执行结果。没有调用本工具，runner 不会把任务视为合法完成。' +
+    '参数需包含 taskId、status、changedFiles、checklist（逐项 pass/fail/blocked + evidence）、summary、verification。',
+  schema: submitExecutionResultSchema,
+  handler: async (ctx, args): Promise<InstructionResult> => {
+    const handoff = resolveActiveHandoffForSession(ctx.sessionId, ctx.userId, ctx.handoffId);
+    if (!handoff) {
+      return {
+        ok: false,
+        errorCode: 'handoff-not-found',
+        message: '找不到当前 session 对应的运行中 handoff，无法写入执行结果。',
+      };
+    }
+
+    const payload = parseJsonObject(handoff.payload_json);
+    const expectedTaskId = readTaskIdFromPayload(payload);
+    if (expectedTaskId && expectedTaskId !== args.taskId) {
+      return {
+        ok: false,
+        errorCode: 'task-id-mismatch',
+        message: `taskId 不匹配：期望 ${expectedTaskId}，实际 ${args.taskId}`,
+      };
+    }
+
+    const ownedPaths = readOwnedPathsFromPayload(payload);
+    const outOfScope = findOutOfScopePaths({
+      changedFiles: args.changedFiles,
+      ownedPaths,
+    });
+    if (outOfScope.length > 0) {
+      return {
+        ok: false,
+        errorCode: 'owned-paths-violation',
+        message: `changedFiles 超出 ownedPaths：${outOfScope.slice(0, 5).join(', ')}`,
+        data: { outOfScope },
+      };
+    }
+
+    if (args.status === 'completed') {
+      const failed = args.checklist.filter((item) => item.status !== 'pass');
+      if (failed.length > 0) {
+        return {
+          ok: false,
+          errorCode: 'checklist-not-all-pass',
+          message: `status=completed 时 checklist 不得含 fail/blocked：${failed
+            .map((item) => item.id)
+            .join(', ')}`,
+        };
+      }
+    }
+
+    if (args.status === 'blocked' && !args.blockedReason) {
+      return {
+        ok: false,
+        errorCode: 'blocked-reason-required',
+        message: 'status=blocked 时必须提供 blockedReason。',
+      };
+    }
+
+    const failedItems = args.checklist
+      .filter((item) => item.status === 'fail' || item.status === 'blocked')
+      .map((item) => item.id);
+
+    const artifactId = randomUUID();
+    const artifactBody = [
+      `# Execution Result`,
+      '',
+      `**taskId**: ${args.taskId}`,
+      `**status**: ${args.status}`,
+      '',
+      '## Summary',
+      args.summary,
+      '',
+      '## Changed Files',
+      ...(args.changedFiles.length > 0
+        ? args.changedFiles.map((file) => `- ${file}`)
+        : ['- (none)']),
+      '',
+      '## Checklist',
+      ...args.checklist.map((item) => `- [${item.status}] ${item.id}: ${item.evidence}`),
+      '',
+      '## Verification',
+      ...(args.verification.length > 0
+        ? args.verification.map((step) => `- ${step}`)
+        : ['- (none)']),
+      ...(args.blockedReason ? ['', `## Blocked Reason`, args.blockedReason] : []),
+    ].join('\n');
+
+    sqliteRun(
+      `INSERT INTO artifacts (
+         id, session_id, user_id, type, title, content, version,
+         phase, team_workspace_id, parent_artifact_id
+       ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, 'implementation', ?, NULL)`,
+      [
+        artifactId,
+        ctx.sessionId,
+        ctx.userId,
+        `execution-result:${args.taskId}`,
+        artifactBody,
+        typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null,
+      ],
+    );
+
+    const resultJson = {
+      protocol: SUBMIT_EXECUTION_RESULT_PROTOCOL,
+      role: 'executor',
+      taskId: args.taskId,
+      status: args.status,
+      changedFiles: args.changedFiles,
+      checklist: args.checklist,
+      failedItems,
+      summary: args.summary,
+      verification: args.verification,
+      blockedReason: args.blockedReason ?? null,
+      artifactId,
+      submittedAt: new Date().toISOString(),
+    };
+    sqliteRun(
+      `UPDATE handoff_records
+          SET result_json = ?,
+              updated_at = datetime('now')
+        WHERE id = ?`,
+      [JSON.stringify(resultJson), handoff.id],
+    );
+
+    setSubstate({
+      sessionId: ctx.sessionId,
+      substate: args.status === 'failed' ? 'failed' : 'completed',
+      userId: ctx.userId,
+      roleLayer: 'executor',
+    });
+
+    return {
+      ok: true,
+      message: `已提交执行结果 protocol=${SUBMIT_EXECUTION_RESULT_PROTOCOL} status=${args.status} failedItems=${failedItems.length}`,
+      data: {
+        handoffId: handoff.id,
+        artifactId,
+        protocol: SUBMIT_EXECUTION_RESULT_PROTOCOL,
+        failedItems,
+      },
+    };
+  },
+});
+
+/**
+ * submit_review: reviewer 提交结构化评审报告（硬契约）。
+ * 兼容旧 decision/title/content；推荐提供 verdict + items。
  */
 registerInstruction({
   name: 'submit_review',
   ownerLayer: 'reviewer',
-  description: 'reviewer 提交评审报告 artifact（phase=review_report）。',
-  schema: z.object({
-    title: z.string().min(1).max(200),
-    content: z.string().min(1).max(64000),
-    decision: z.enum(['pass', 'fail', 'needs_revision']),
-    teamWorkspaceId: z.string().nullable().optional(),
-  }),
+  description:
+    '【必须】reviewer 提交结构化评审报告。优先提供 verdict + items（checklist 级 pass/fail）；' +
+    '也可兼容旧的 decision/title/content。没有结构化提交时，hard 模式下任务不算合法完成。',
+  schema: submitReviewReportSchema,
   handler: async (ctx, args): Promise<InstructionResult> => {
-    const id = randomUUID();
+    const handoff = resolveActiveHandoffForSession(ctx.sessionId, ctx.userId, ctx.handoffId);
+    if (!handoff) {
+      return {
+        ok: false,
+        errorCode: 'handoff-not-found',
+        message: '找不到当前 session 对应的运行中 handoff，无法写入评审结果。',
+      };
+    }
+
+    const payload = parseJsonObject(handoff.payload_json);
+    const expectedTaskId = readTaskIdFromPayload(payload);
+    const taskId = args.taskId ?? expectedTaskId ?? 'unknown';
+    if (args.taskId && expectedTaskId && args.taskId !== expectedTaskId) {
+      return {
+        ok: false,
+        errorCode: 'task-id-mismatch',
+        message: `taskId 不匹配：期望 ${expectedTaskId}，实际 ${args.taskId}`,
+      };
+    }
+
+    const verdict = normalizeReviewVerdict(args);
+    const items =
+      args.items && args.items.length > 0
+        ? args.items
+        : [
+            {
+              id: taskId,
+              status: verdict === 'pass' ? ('pass' as const) : ('fail' as const),
+              reason: args.overallReason ?? args.content?.slice(0, 500),
+            },
+          ];
+    const failedItems = items.filter((item) => item.status === 'fail').map((item) => item.id);
+
+    if (verdict === 'pass' && failedItems.length > 0) {
+      return {
+        ok: false,
+        errorCode: 'verdict-items-mismatch',
+        message: `verdict/decision=pass 时 items 不得含 fail：${failedItems.join(', ')}`,
+      };
+    }
+
+    const title = args.title ?? `review-report:${taskId}`;
+    const content =
+      args.content ??
+      [
+        `# Review Report`,
+        '',
+        `**taskId**: ${taskId}`,
+        `**verdict**: ${verdict}`,
+        '',
+        '## Items',
+        ...items.map(
+          (item) =>
+            `- [${item.status}] ${item.id}${item.reason ? `: ${item.reason}` : ''}${
+              item.fileRefs?.length ? ` (${item.fileRefs.join(', ')})` : ''
+            }`,
+        ),
+        ...(args.overallReason ? ['', '## Overall', args.overallReason] : []),
+      ].join('\n');
+
+    const artifactId = randomUUID();
     sqliteRun(
       `INSERT INTO artifacts (
          id, session_id, user_id, type, title, content, version,
          phase, team_workspace_id, parent_artifact_id
        ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, 'review_report', ?, NULL)`,
-      [id, ctx.sessionId, ctx.userId, args.title, args.content, args.teamWorkspaceId ?? null],
+      [artifactId, ctx.sessionId, ctx.userId, title, content, args.teamWorkspaceId ?? null],
     );
+
+    const resultJson = {
+      protocol: SUBMIT_REVIEW_REPORT_PROTOCOL,
+      role: 'reviewer',
+      taskId,
+      verdict,
+      decision: verdict,
+      items,
+      failedItems,
+      overallReason: args.overallReason ?? null,
+      summary: args.overallReason ?? content.slice(0, 500),
+      artifactId,
+      submittedAt: new Date().toISOString(),
+    };
+    sqliteRun(
+      `UPDATE handoff_records
+          SET result_json = ?,
+              updated_at = datetime('now')
+        WHERE id = ?`,
+      [JSON.stringify(resultJson), handoff.id],
+    );
+
+    setSubstate({
+      sessionId: ctx.sessionId,
+      substate: 'completed',
+      userId: ctx.userId,
+      roleLayer: 'reviewer',
+    });
+
     return {
       ok: true,
-      message: `已提交评审报告 (decision=${args.decision}, id=${id.slice(0, 8)})`,
-      data: { artifactId: id, decision: args.decision },
+      message: `已提交评审报告 protocol=${SUBMIT_REVIEW_REPORT_PROTOCOL} verdict=${verdict} failedItems=${failedItems.length}`,
+      data: {
+        handoffId: handoff.id,
+        artifactId,
+        protocol: SUBMIT_REVIEW_REPORT_PROTOCOL,
+        verdict,
+        failedItems,
+      },
     };
   },
 });
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function resolveActiveHandoffForSession(
+  sessionId: string,
+  userId: string,
+  handoffId?: string,
+): { id: string; payload_json: string | null } | null {
+  if (handoffId) {
+    const byId = sqliteGet<{ id: string; payload_json: string | null }>(
+      `SELECT id, payload_json FROM handoff_records
+        WHERE id = ? AND user_id = ?
+        LIMIT 1`,
+      [handoffId, userId],
+    );
+    if (byId) return byId;
+  }
+  return (
+    sqliteGet<{ id: string; payload_json: string | null }>(
+      `SELECT id, payload_json FROM handoff_records
+        WHERE to_session_id = ? AND user_id = ?
+          AND state IN ('running', 'claimed')
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [sessionId, userId],
+    ) ?? null
+  );
+}
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTaskIdFromPayload(payload: Record<string, unknown> | null): string | null {
+  if (!payload) return null;
+  const markers = payload['taskMarkers'];
+  if (typeof markers === 'object' && markers !== null && !Array.isArray(markers)) {
+    const taskId = (markers as Record<string, unknown>)['taskId'];
+    if (typeof taskId === 'string' && taskId.trim()) return taskId.trim();
+  }
+  if (typeof payload['taskId'] === 'string' && payload['taskId'].trim()) {
+    return payload['taskId'].trim();
+  }
+  return null;
+}
+
+function readOwnedPathsFromPayload(payload: Record<string, unknown> | null): string[] {
+  if (!payload) return [];
+  const raw = payload['ownedPaths'];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
 
 // ─── 注册多层共享指令 ───────────────────────────────────────────────────────
 

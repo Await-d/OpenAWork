@@ -21,6 +21,13 @@ import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqli
 import { type HandoffRecord } from '../store/handoff-store.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import { deriveQualityReviewDisposition } from '../../team/team-failure-policy.js';
+import {
+  extractFailedItemIds,
+  getResultProtocol,
+  resolveSubmitProtocolMode,
+  SUBMIT_EXECUTION_RESULT_PROTOCOL,
+  SUBMIT_REVIEW_REPORT_PROTOCOL,
+} from '../capability/completion-protocol-contract.js';
 
 export interface ReviewInput {
   userId: string;
@@ -52,6 +59,10 @@ interface ReviewReadinessResult {
    * `execution-protocol-failure`（交付协议未完成）。
    */
   hasFailedChildren: boolean;
+  /** checklist/items 中机器判定的失败项（跨子任务） */
+  structuredFailedItems: string[];
+  /** soft 兼容：子任务完成但未走 submit protocol */
+  protocolDegraded: boolean;
 }
 
 export type FailureDisposition =
@@ -234,9 +245,35 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
     return report;
   }
 
+  // 机器判定优先：结构化 checklist/items 已有 fail → 直接 implementation-failure，
+  // 不再依赖 LLM 重新“发现”同一批失败项。
+  if (readiness.structuredFailedItems.length > 0) {
+    const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
+      specReviewPassed: true,
+      qualityReviewPassed: false,
+      specIssues: [],
+      qualityIssues: [
+        `结构化 checklist 未通过：${readiness.structuredFailedItems.join('；')}`,
+        ...readiness.issues.filter(
+          (issue) => issue.includes('checklist') || issue.includes('failedItems'),
+        ),
+      ],
+      overallVerdict: 'implementation-failure',
+    };
+    const reportMarkdown = generateReportMarkdown(reportData);
+    const report: ReviewReport = { ...reportData, reportMarkdown };
+    persistReviewReport({
+      pm2HandoffId: input.pm2HandoffId,
+      pm2SessionId: input.pm2SessionId,
+      report,
+      userId: input.userId,
+    });
+    return report;
+  }
+
   const childResults = readiness.childResults;
 
-  // 并行跑 spec review + quality review
+  // 并行跑 spec review + quality review（仅结构化全部 pass 后做语义抽检）
   const [specResult, qualityResult] = await Promise.all([
     runSpecReview({
       specContent: input.specContent,
@@ -255,11 +292,19 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
   if (!specResult.passed) overallVerdict = 'planning-failure';
   else if (!qualityResult.passed) overallVerdict = 'implementation-failure';
 
+  const qualityIssues = [
+    ...qualityResult.issues,
+    ...(readiness.protocolDegraded
+      ? ['部分子任务未使用 submit_* 硬契约（soft 兼容 degraded）']
+      : []),
+  ];
+
   const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
     specReviewPassed: specResult.passed,
+    // protocolDegraded 不否决 pass（soft）；仅写入 qualityIssues 提示
     qualityReviewPassed: qualityResult.passed,
     specIssues: specResult.issues,
-    qualityIssues: qualityResult.issues,
+    qualityIssues,
     overallVerdict,
   };
 
@@ -319,6 +364,10 @@ function persistReviewReport(input: {
 function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessResult {
   const issues: string[] = [];
   let hasFailedChildren = false;
+  const structuredFailedItems: string[] = [];
+  let protocolDegraded = false;
+  const mode = resolveSubmitProtocolMode();
+
   const childResults = childHandoffs
     .map((h) => {
       const payload = isRecord(h.payload) ? h.payload : null;
@@ -326,11 +375,6 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
       const taskMarkers = isRecord(payload?.['taskMarkers']) ? payload['taskMarkers'] : null;
       const taskId = typeof taskMarkers?.['taskId'] === 'string' ? taskMarkers['taskId'] : '';
 
-      // 区分子 handoff 的终态：
-      //   - failed / cancelled：执行层任务本身失败，不应要求 result_json，
-      //     直接生成 implementation-failure issue 并标记 hasFailedChildren。
-      //   - completed：正常完成，必须检查 result_json 是否存在。
-      //   - 其他非终态：理论上 checkAllChildrenCompleted 已过滤，但防御性处理。
       if (h.state === 'failed' || h.state === 'cancelled') {
         hasFailedChildren = true;
         const failReason = h.failureReason
@@ -351,22 +395,36 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
         ].join('\n');
       }
 
-      // completed 或其他非终态：检查交付物。
-      // 优先使用 HandoffRecord 上已解析的 resultJson（由 checkAllChildrenCompleted 填充），
-      // 避免冗余 DB 查询；兜底再查 DB 以兼容直接构造的入参。
       const resultFromRecord = h.resultJson;
+      let resultObj: Record<string, unknown> | null = null;
       let resultJson = '';
       if (resultFromRecord !== null && resultFromRecord !== undefined) {
-        resultJson =
-          typeof resultFromRecord === 'string'
-            ? resultFromRecord
-            : JSON.stringify(resultFromRecord);
+        if (typeof resultFromRecord === 'string') {
+          resultJson = resultFromRecord;
+          try {
+            const parsed = JSON.parse(resultFromRecord) as unknown;
+            if (isRecord(parsed)) resultObj = parsed;
+          } catch {
+            resultObj = null;
+          }
+        } else if (isRecord(resultFromRecord)) {
+          resultObj = resultFromRecord;
+          resultJson = JSON.stringify(resultFromRecord);
+        }
       } else {
         const resultRow = sqliteGet<{ result_json: string | null }>(
           `SELECT result_json FROM handoff_records WHERE id = ?`,
           [h.id],
         );
         resultJson = resultRow?.result_json?.trim() ?? '';
+        if (resultJson) {
+          try {
+            const parsed = JSON.parse(resultJson) as unknown;
+            if (isRecord(parsed)) resultObj = parsed;
+          } catch {
+            resultObj = null;
+          }
+        }
       }
 
       if (!goal) {
@@ -381,11 +439,40 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
         );
       }
 
+      const protocol = getResultProtocol(resultObj);
+      const expectedProtocol =
+        h.toRoleLayer === 'reviewer'
+          ? SUBMIT_REVIEW_REPORT_PROTOCOL
+          : h.toRoleLayer === 'executor'
+            ? SUBMIT_EXECUTION_RESULT_PROTOCOL
+            : null;
+      if (expectedProtocol) {
+        if (protocol === expectedProtocol) {
+          const failed = extractFailedItemIds(resultObj);
+          structuredFailedItems.push(...failed);
+        } else if (mode === 'hard') {
+          issues.push(
+            `${h.id} 缺少 ${expectedProtocol} 硬契约（OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=hard）`,
+          );
+        } else {
+          protocolDegraded = true;
+        }
+      }
+
+      const childFailedItems = extractFailedItemIds(resultObj);
+      const failedItemsLine =
+        childFailedItems.length > 0
+          ? `失败项：${childFailedItems.join(', ')}`
+          : protocol
+            ? `protocol：${protocol}`
+            : 'protocol：缺失(degraded)';
+
       return [
         `[${h.toRoleLayer}:${h.id}]`,
         `任务：${goal || '未命名任务'}`,
         `任务ID：${taskId || '缺失'}`,
         `结果：${resultJson || '(无结果)'}`,
+        failedItemsLine,
       ].join('\n');
     })
     .join('\n\n');
@@ -395,6 +482,8 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
     issues,
     childResults,
     hasFailedChildren,
+    structuredFailedItems: Array.from(new Set(structuredFailedItems)),
+    protocolDegraded,
   };
 }
 

@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260723-team-lifecycle-hard-contract-tools](workflow/260723-team-lifecycle-hard-contract-tools.md) — Team 生命周期硬契约工具化：Full orchestration；不推翻 5 层架构，将 executor/reviewer 完成输出升级为强制 Builtin Instruction（`submit_execution_result` + 结构化 `submit_review`），runner 门禁 + quality review 优先消费 checklist；本轮仅方案，待批准后实现
 - [260708-opencowork-tooling-integration-plan](workflow/260708-opencowork-tooling-integration-plan.md) — OpenCowork 工具生态集成方案：Full orchestration；坚持 OpenAWork 原生 MCP runtime、gateway tool registry、skill registry、channel manager 与 plugin settings 为主路径，已有简单工具只登记/补别名/补文档，不重复完整集成；P1 聚焦 `streamable-http`、文档数据 skills、Browser alias、通用 channel tools
 - [260707-omo-mcp-adapter-integration](workflow/260707-omo-mcp-adapter-integration.md) — OMO/LazyCodex MCP 适配器集成：9 任务 / Full orchestration；坚持 OpenAWork 原生 MCP runtime 为主路径，OMO/Hook 仅作为 typed manifest 输入源，落到 MCP catalog、flat tool 注入、sandbox 权限审计、Settings 管理与 team 最小授权链路
 - [260706-lazycodex-native-workflow](workflow/260706-lazycodex-native-workflow.md) — LazyCodex/OmO 原生化接入：8 任务 / 6 Wave / Full orchestration；不直接依赖 `lazycodex-ai`，而是把 `ulw-plan` / `start-work` / `ulw-loop` / skills / reviewer gate / 证据包映射到 OpenAWork 原生 session、run events、artifacts、skill registry、Web 对话 UI 与 Team runtime

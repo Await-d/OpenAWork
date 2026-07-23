@@ -3,41 +3,36 @@
  *
  * 注入位置：team-instruction-stack.ts 的 quality-gates 之后，仅对 executor / reviewer 角色生效。
  * 目的：确保完成协议始终在 system prompt 中可见，即使上下文压缩清除了初始 user 消息。
- *
- * 这是 pm1-runner.ts 中完成协议的精简版——只保留格式要求和自验证规则，
- * 不包含工具使用建议（那些在对话过程中已经不再需要）。
  */
 
 const EXECUTOR_PROTOCOL = `## 完成协议（Executor）
 
-结束前必须满足以下全部条件：
+结束前必须满足：
 
 1. **至少调用过一次文件写入工具**（write / submit_patch / edit）
-2. **输出实施摘要**，必须包含：
-   - 修改了哪些文件
-   - 核心实现逻辑
-   - 如何验证
-3. **自验证**——输出摘要前，自查：
-   - 你的修改是否覆盖了任务描述中的每一条验收条件？
-   - 是否有任务要求但你未实现的部分？
-   - 如果有未覆盖项，在摘要中明确列出，不要声称已完成。
+2. **必须调用 submit_execution_result**（硬契约），提交：
+   - taskId
+   - status: completed | blocked | failed
+   - changedFiles
+   - checklist: [{ id, status: pass|fail|blocked, evidence }]
+   - summary / verification
+3. **自验证**：checklist 必须覆盖任务验收条件；未覆盖项标 fail/blocked，不要假 pass。
 
-⚠️ 禁止只回复文字描述就结束——必须有实际工具调用产出。`;
+⚠️ 只回复文字或只 mark_completed **不算完成**。没有 submit_execution_result，runner 在 hard 模式下会判定 execution-protocol-failure。`;
 
 const REVIEWER_PROTOCOL = `## 完成协议（Reviewer）
 
-结束前必须满足以下全部条件：
+结束前必须满足：
 
 1. **至少调用过一次文件读取工具**（read / list）
-2. **输出结构化评审摘要**，必须包含：
-   - 通过 / 不通过判定
-   - 具体问题列表（含文件位置和行号）
-   - 改进建议
-3. **自验证**——输出摘要前，自查：
-   - 你是否读取了所有相关代码文件？
-   - 你的判定是否有具体证据支撑？
+2. **必须调用 submit_review**（硬契约），提交：
+   - taskId（可选但推荐）
+   - verdict: pass | fail（或兼容 decision）
+   - items: [{ id, status: pass|fail, reason?, fileRefs? }]
+   - overallReason / title / content（可选展示）
+3. **自验证**：判定必须有证据；verdict=pass 时 items 不得含 fail。
 
-⚠️ 禁止只回复"已评审"或"看起来没问题"就结束——必须有具体的审查证据。`;
+⚠️ 只回复“已评审”或只 mark_completed **不算完成**。`;
 
 export function getCompletionProtocolMd(roleLayer: string): string | null {
   switch (roleLayer) {

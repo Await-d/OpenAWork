@@ -17,9 +17,8 @@ export interface GitHubProxy {
  * Ordered by measured speed and reliability (best first, 2026-07).
  *
  * Selection criteria: must support both JSON metadata and large file
- * downloads (HEAD 200 on release assets). Proxies that only serve JSON
- * but fail on binary downloads are kept for probe/detection but listed
- * after download-capable ones.
+ * downloads. Proxies that only serve JSON but fail on binary downloads
+ * are listed after download-capable ones.
  */
 export const GITHUB_PROXIES: GitHubProxy[] = [
   { name: 'GHProxy Fast', prefix: 'https://gh.llkk.cc/' },
@@ -27,6 +26,9 @@ export const GITHUB_PROXIES: GitHubProxy[] = [
   { name: 'GHProxy.net', prefix: 'https://ghproxy.net/' },
   { name: 'GH-Proxy', prefix: 'https://gh-proxy.com/' },
 ];
+
+/** Historical prefixes that may still appear in published latest-cn.json. */
+export const LEGACY_PROXY_PREFIXES = ['https://ghp.ci/', 'https://github.moeyy.xyz/'] as const;
 
 export type UpdateChannel = 'stable' | 'preview';
 
@@ -47,13 +49,28 @@ let cacheExpiry = 0;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Probe a URL for reachability.
+ *
+ * Prefer a small GET over HEAD: many GitHub proxies mishandle HEAD (return
+ * 404/405/empty) even when GET works for the same path. We only need a status
+ * code, so the body is discarded immediately.
+ */
 async function probeUrl(url: string, signal: AbortSignal): Promise<boolean> {
   try {
     const res = await fetch(url, {
-      method: 'HEAD',
+      method: 'GET',
       signal,
       redirect: 'follow',
+      // Avoid caching probe results across sessions in the WebView.
+      cache: 'no-store',
     });
+    // Drain/cancel the body so the connection can close promptly.
+    try {
+      await res.body?.cancel();
+    } catch {
+      // ignore cancel errors
+    }
     return res.ok || res.status === 302 || res.status === 301;
   } catch {
     return false;

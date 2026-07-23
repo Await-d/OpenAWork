@@ -30,6 +30,9 @@ use tauri_plugin_updater::UpdaterExt;
 /// 拿到自定义的 data_root；否则会出现先有蛋还是先有鸡的问题。
 const DESKTOP_HOME_FOLDER: &str = ".openAwork";
 const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
+/// 一次性标记：历史版本把 VitePWA Service Worker 打进了桌面端 WebView，
+/// 旧 SW 会拦截导航返回旧 precache。升级后在窗口可用时清理一次 WebView 浏览数据。
+const WEBVIEW_SW_CACHE_CLEARED_MARKER: &str = ".webview-sw-cache-cleared-v1";
 const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
 
 /// 预览版代理更新端点（由前端传入 proxy_prefix 拼接为完整代理 URL）
@@ -380,6 +383,50 @@ struct TrayMenuHandles {
 /// 当前的 settings.json 路径：`~/.openAwork/desktop-settings.json`。
 fn settings_file(app: &tauri::AppHandle) -> PathBuf {
     desktop_home_dir(app).join(DESKTOP_SETTINGS_FILE)
+}
+
+/// 清理历史 VitePWA Service Worker 在 Tauri WebView 中残留的浏览数据。
+///
+/// 仅执行一次（由 `~/.openAwork/.webview-sw-cache-cleared-v1` 标记）。
+/// 必须从原生侧触发：旧 SW 的 NavigationRoute 会拦截导航，前端新代码可能
+/// 根本加载不到，无法自行 unregister。
+///
+/// 副作用：会清掉该 WebView 的 localStorage / cookie / CacheStorage 等。
+/// 这是一次性迁移代价，避免用户永久卡在旧 UI。
+fn maybe_clear_stale_webview_service_worker_cache(app: &tauri::AppHandle) {
+    let home = desktop_home_dir(app);
+    let marker = home.join(WEBVIEW_SW_CACHE_CLEARED_MARKER);
+    if marker.exists() {
+        return;
+    }
+
+    let Some(window) = app.get_webview_window("main") else {
+        // 窗口尚未就绪时不写标记，下次启动再试。
+        return;
+    };
+
+    if let Err(err) = window.clear_all_browsing_data() {
+        // 清理失败不写标记，下次启动重试。
+        eprintln!("[desktop] clear_all_browsing_data failed: {err}");
+        return;
+    }
+
+    // 标记与 reload 解耦：清成功后即使写标记失败，也要 navigate，
+    // 否则用户仍停在已从旧 SW 加载的当前文档。
+    if let Err(err) = fs::create_dir_all(&home).and_then(|_| fs::write(&marker, b"1")) {
+        eprintln!("[desktop] failed to write SW cache cleared marker: {err}");
+    } else {
+        eprintln!(
+            "[desktop] cleared webview browsing data once to drop stale service worker cache"
+        );
+    }
+
+    // 当前文档可能已从旧 SW cache 加载；清完后强制 reload 一次。
+    if let Ok(url) = window.url() {
+        if let Err(err) = window.navigate(url) {
+            eprintln!("[desktop] reload after SW cache clear failed: {err}");
+        }
+    }
 }
 
 /// 读取桌面端持久化设置。
@@ -2018,6 +2065,10 @@ pub fn run() {
                 ..Default::default()
             }))));
             setup_tray(&handle)?;
+
+            // 一次性清掉历史 VitePWA 残留在 WebView 的 SW/缓存，避免升级后仍显示旧 UI。
+            // 必须在窗口已创建后调用；tauri.conf 默认 main 窗口在 setup 时已存在。
+            maybe_clear_stale_webview_service_worker_cache(&handle);
 
             // C-7 注册全局快捷键。
             let _ = handle

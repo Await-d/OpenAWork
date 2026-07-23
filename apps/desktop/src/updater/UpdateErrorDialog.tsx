@@ -8,19 +8,19 @@ export interface UpdateErrorDialogProps {
 }
 
 const ERROR_TITLES: Record<UpdateErrorKind, string> = {
-  network: 'Connection Failed',
-  signature: 'Verification Failed',
-  permission: 'Permission Denied',
-  no_update: 'No Update Found',
-  unknown: 'Update Error',
+  network: '连接失败',
+  signature: '校验失败',
+  permission: '权限不足',
+  no_update: '暂无更新',
+  unknown: '更新出错',
 };
 
 const ERROR_HINTS: Record<UpdateErrorKind, string> = {
-  network: 'Check your internet connection and try again.',
-  signature: 'The update package could not be verified. Please try again or download manually.',
-  permission: 'The app lacks permission to install updates. Try running as administrator.',
-  no_update: 'You are already on the latest version.',
-  unknown: 'An unexpected error occurred.',
+  network: '无法连接到更新服务器或加速镜像，请检查网络后重试。',
+  signature: '更新包签名校验失败。请重试，或从 GitHub Releases 手动下载安装。',
+  permission: '当前权限不足以安装更新。请尝试以管理员/具备写入权限的账户运行。',
+  no_update: '当前已是最新版本。',
+  unknown: '更新过程中发生未知错误，请重试。',
 };
 
 export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateErrorDialogProps) {
@@ -69,7 +69,7 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
           {ERROR_HINTS[kind]}
         </div>
         <details style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))' }}>
-          <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+          <summary style={{ cursor: 'pointer' }}>技术详情</summary>
           <pre
             style={{
               marginTop: 4,
@@ -99,7 +99,7 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
               fontSize: 13,
             }}
           >
-            Dismiss
+            关闭
           </button>
           {kind !== 'no_update' && (
             <button
@@ -116,7 +116,7 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
                 fontWeight: 600,
               }}
             >
-              Retry
+              重试
             </button>
           )}
         </div>

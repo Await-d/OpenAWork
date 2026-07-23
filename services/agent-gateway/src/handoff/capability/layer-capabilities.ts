@@ -210,6 +210,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedBuiltinInstructions: [
       'report_progress',
       'submit_patch',
+      // 完成硬契约：结构化提交 checklist + summary；runner/review 优先消费
+      'submit_execution_result',
       'mark_completed',
       'mark_failed',
     ],

@@ -25,6 +25,12 @@ import {
   inferTaskProfile,
   taskProfileSchema,
 } from '../capability/dispatch-package.js';
+import {
+  getResultProtocol,
+  resolveSubmitProtocolMode,
+  SUBMIT_EXECUTION_RESULT_PROTOCOL,
+  SUBMIT_REVIEW_REPORT_PROTOCOL,
+} from '../capability/completion-protocol-contract.js';
 import { listSessionMessagesV2 } from '../../message/message-v2-adapter.js';
 import { extractLatestChildSessionSummary } from '../../task/task-result-extraction.js';
 import { sqliteGet } from '../../infra/db.js';
@@ -106,27 +112,27 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           '',
           '**完成协议——必须遵守**：',
           '1. 先直接读代码/查证据，不要只口头计划。禁止在第一轮就回复 end_turn。',
-          '2. 必须先调用工具读取相关代码文件，不要只凭任务描述猜测。如果代码不存在，明确标记"无法评审"。',
-          '3. 结束前必须满足以下全部条件：',
-          '   a. 至少调用过一次文件读取工具（read/list）',
-          '   b. 输出结构化评审摘要：通过/不通过判定、具体问题列表（含文件位置和行号）、改进建议',
-          '4. 如果连续两轮没有新证据、工具调用或有效结论，必须明确失败原因，不要重复 thinking。',
+          '2. 必须先调用工具读取相关代码文件；如果代码不存在，明确标记"无法评审"。',
+          '3. 结束前必须调用 submit_review 提交结构化结果：',
+          '   - verdict: pass | fail',
+          '   - items: [{ id, status: pass|fail, reason?, fileRefs? }]',
+          '   - overallReason（可选）',
+          '4. 只 mark_completed 或只写文字不算完成；hard 模式下缺少 submit_review 会 protocol-failure。',
           '5. 使用工具时必须传入完整参数，不允许空参数调用。',
         ].join('\n')
       : [
           '你是实施工程师（Executor）。请根据以下任务描述完成具体的代码实现或文档编写。',
           '',
           '**完成协议——必须遵守**：',
-          '1. 第一轮必须调用工具——先读取相关文件了解现状，再写入/修改文件。禁止在第一轮就回复 end_turn。',
-          '2. 使用 write/submit_patch/edit 工具产出实际文件。新文件直接用 write 创建，修改文件先 read 再 edit。不要只回复文字描述。',
-          '3. 写文件时使用文件写入工具，不要用 bash 写大文件；内容过大时分段写入，不要放弃。',
-          '4. 结束前输出实施摘要：修改了哪些文件、核心实现逻辑、如何验证。',
-          '5.【自验证】输出摘要前，自查：',
-          '   a. 修改是否覆盖了任务描述中的每一条验收条件？',
-          '   b. 是否有任务要求但你未实现的部分？',
-          '   c. 如果有未覆盖项，在摘要中明确列出，不要声称已完成。',
-          '6. 如果连续两轮没有实际产出、工具调用或结论，必须明确失败原因，不要重复 thinking。',
-          '7. 使用工具时必须传入完整参数，不允许空参数调用。',
+          '1. 第一轮必须调用工具——先读取相关文件，再写入/修改文件。禁止在第一轮就回复 end_turn。',
+          '2. 使用 write/submit_patch/edit 产出实际文件；不要只回复文字描述。',
+          '3. 结束前必须调用 submit_execution_result 提交硬契约：',
+          '   - taskId / status / changedFiles',
+          '   - checklist: [{ id, status: pass|fail|blocked, evidence }]',
+          '   - summary / verification',
+          '4.【自验证】checklist 覆盖任务验收条件；未覆盖标 fail/blocked，不要假 pass。',
+          '5. 只 mark_completed 或只写文字不算完成；hard 模式下缺少 submit_execution_result 会 protocol-failure。',
+          '6. 使用工具时必须传入完整参数，不允许空参数调用。',
         ].join('\n');
 
   const userMessage = [
@@ -400,6 +406,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     role,
     sessionId: input.toSessionId,
     userId: input.handoff.userId,
+    handoffId: input.handoff.id,
   });
   if (!completionEvidence.ok) {
     throw new Error(`${role} 层执行未产出可评审结果：${completionEvidence.reason}`);
@@ -413,21 +420,26 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     roleLayer: role,
   });
 
-  // 写入 handoff result_json
+  // 写入 handoff result_json：
+  // - 若已有 submit_* protocol，合并 runner 元数据，不覆盖 checklist/items
+  // - soft 兼容路径写入 protocolDegraded
+  const existing = completionEvidence.resultJson ?? {};
+  const mergedResult = {
+    ...existing,
+    role,
+    taskTitle,
+    summary: completionEvidence.summary,
+    artifactCount: completionEvidence.artifactCount,
+    evidenceSource: completionEvidence.source,
+    completedAt: new Date().toISOString(),
+    protocol:
+      completionEvidence.protocol ??
+      (completionEvidence.protocolDegraded ? 'stream-degraded' : 'stream'),
+    protocolDegraded: completionEvidence.protocolDegraded,
+  };
   sqliteRun(
     `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
-    [
-      JSON.stringify({
-        role,
-        taskTitle,
-        summary: completionEvidence.summary,
-        artifactCount: completionEvidence.artifactCount,
-        evidenceSource: completionEvidence.source,
-        completedAt: new Date().toISOString(),
-        protocol: 'stream', // 标记使用了完整 stream 协议
-      }),
-      input.handoff.id,
-    ],
+    [JSON.stringify(mergedResult), input.handoff.id],
   );
 }
 
@@ -435,23 +447,59 @@ function collectExecutionCompletionEvidence(input: {
   role: 'executor' | 'reviewer';
   sessionId: string;
   userId: string;
+  handoffId?: string;
 }):
   | {
       ok: true;
       summary: string;
       artifactCount: number;
-      source: 'artifact+summary' | 'artifact' | 'summary';
+      source: 'artifact+summary' | 'artifact' | 'summary' | 'submit_protocol';
+      protocol: string | null;
+      protocolDegraded: boolean;
+      resultJson: Record<string, unknown> | null;
     }
   | { ok: false; reason: string } {
-  const summary = extractLatestChildSessionSummary(
+  const handoffRow = input.handoffId
+    ? sqliteGet<{ result_json: string | null }>(
+        `SELECT result_json FROM handoff_records WHERE id = ? LIMIT 1`,
+        [input.handoffId],
+      )
+    : sqliteGet<{ result_json: string | null }>(
+        `SELECT result_json FROM handoff_records
+          WHERE to_session_id = ? AND user_id = ?
+          ORDER BY updated_at DESC LIMIT 1`,
+        [input.sessionId, input.userId],
+      );
+
+  let resultJson: Record<string, unknown> | null = null;
+  if (handoffRow?.result_json) {
+    try {
+      const parsed = JSON.parse(handoffRow.result_json) as unknown;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        resultJson = parsed as Record<string, unknown>;
+      }
+    } catch {
+      resultJson = null;
+    }
+  }
+
+  const protocol = getResultProtocol(resultJson);
+  const requiredProtocol =
+    input.role === 'executor' ? SUBMIT_EXECUTION_RESULT_PROTOCOL : SUBMIT_REVIEW_REPORT_PROTOCOL;
+  const mode = resolveSubmitProtocolMode();
+  const hasSubmitProtocol = protocol === requiredProtocol;
+
+  const summaryFromProtocol =
+    resultJson && typeof resultJson['summary'] === 'string' ? resultJson['summary'] : '';
+
+  const summaryFromMessages = extractLatestChildSessionSummary(
     listSessionMessagesV2({
       sessionId: input.sessionId,
       userId: input.userId,
-      // 只读 final 状态的消息——error 状态的 assistant 消息是 LLM 报错时
-      // 写入的错误提示，不是真正的实施摘要，不应被当作"有效总结"。
       statuses: ['final'],
     }),
   );
+  const summary = summaryFromProtocol.trim() || summaryFromMessages;
   const artifactRows = sqliteGet<{ count: number }>(
     `SELECT COUNT(*) AS count
        FROM artifacts
@@ -464,8 +512,36 @@ function collectExecutionCompletionEvidence(input: {
   const hasSummary = summary.trim().length > 0;
   const hasArtifact = artifactCount > 0;
 
+  if (hasSubmitProtocol) {
+    return {
+      ok: true,
+      summary: hasSummary
+        ? summary
+        : input.role === 'reviewer'
+          ? '已提交结构化评审结果。'
+          : '已提交结构化执行结果。',
+      artifactCount,
+      source: 'submit_protocol',
+      protocol,
+      protocolDegraded: false,
+      resultJson,
+    };
+  }
+
+  // 缺硬契约
+  if (mode === 'hard') {
+    return {
+      ok: false,
+      reason: `缺少 ${requiredProtocol} 硬契约提交（OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=hard）`,
+    };
+  }
+
+  // soft：兼容旧 artifact/summary 路径
   if (!hasSummary && !hasArtifact) {
-    return { ok: false, reason: '缺少 artifact 且缺少有效 assistant 总结' };
+    return {
+      ok: false,
+      reason: `缺少 ${requiredProtocol}，且缺少 artifact/有效 assistant 总结`,
+    };
   }
 
   return {
@@ -477,6 +553,9 @@ function collectExecutionCompletionEvidence(input: {
         : '已提交实现 artifact。',
     artifactCount,
     source: hasSummary && hasArtifact ? 'artifact+summary' : hasArtifact ? 'artifact' : 'summary',
+    protocol: protocol,
+    protocolDegraded: true,
+    resultJson,
   };
 }
 

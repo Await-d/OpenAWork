@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   checkForUpdate,
+  clearProxyCache,
   downloadUpdate,
   installUpdate,
   toUpdateError,
@@ -89,6 +90,21 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     }
   }, []);
 
+  const openManualDownload = useCallback((downloadUrl: string) => {
+    window.open(downloadUrl, '_blank');
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            installMode: 'manual',
+            proxiedDownloadUrl: downloadUrl,
+          }
+        : prev,
+    );
+    setProgress(100);
+    setState('done');
+  }, []);
+
   const handleDownload = useCallback(async () => {
     if (!result) return;
     cancelledRef.current = false;
@@ -107,17 +123,28 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
           if (!result.proxiedDownloadUrl) {
             throw new UpdateError('unknown', '当前代理模式缺少可下载的更新地址。');
           }
-          window.open(result.proxiedDownloadUrl, '_blank');
-          setState('done');
+          openManualDownload(result.proxiedDownloadUrl);
           return;
         }
-        await stopGatewayBeforeInstall();
-        await downloadAndInstallProxyUpdate(result.proxyUsed, result.channel, (p) => {
-          if (cancelledRef.current) return;
-          setProgress(p.percent);
-          setDownloaded(p.downloaded);
-          setTotal(p.total);
-        });
+        try {
+          await stopGatewayBeforeInstall();
+          await downloadAndInstallProxyUpdate(result.proxyUsed, result.channel, (p) => {
+            if (cancelledRef.current) return;
+            setProgress(p.percent);
+            setDownloaded(p.downloaded);
+            setTotal(p.total);
+          });
+        } catch (proxyInstallError) {
+          // Auto-install via Rust updater can fail when the selected proxy
+          // only serves metadata well. Fall back to opening the download URL
+          // so the user can still finish the upgrade manually.
+          clearProxyCache();
+          if (result.proxiedDownloadUrl && !cancelledRef.current) {
+            openManualDownload(result.proxiedDownloadUrl);
+            return;
+          }
+          throw proxyInstallError;
+        }
         if (cancelledRef.current) return;
         setProgress(100);
         setState('done');
@@ -142,7 +169,7 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       if (cancelledRef.current) return;
       setError(toUpdateError(e));
     }
-  }, [result, stopGatewayBeforeInstall]);
+  }, [openManualDownload, result, stopGatewayBeforeInstall]);
 
   const handleClose = useCallback(() => {
     cancelledRef.current = true;
@@ -190,7 +217,7 @@ ${releaseNotes}`
     downloading: `下载中${proxyHint}… ${progress}%`,
     installing: '下载完成，正在安装更新…',
     done: isManualProxyMode
-      ? '更新包已在浏览器中打开。安装前请先完全退出 OpenAWork，再运行下载的安装包。'
+      ? '已切换为手动安装：更新包已在浏览器中打开。请先完全退出 OpenAWork，再运行下载的安装包。'
       : '更新已下载，重启应用以应用更新。',
     'up-to-date': '当前已是最新版本。',
   };

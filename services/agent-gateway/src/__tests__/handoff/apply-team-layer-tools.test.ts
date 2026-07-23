@@ -41,7 +41,7 @@ describe('applyTeamLayerToolGate', () => {
     expect(out).toBe(tools);
   });
 
-  it('executor 注入内置指令（submit_patch / mark_completed 等）', async () => {
+  it('executor 注入内置指令（submit_patch / submit_execution_result / mark_completed 等）', async () => {
     const tools = [tool('read'), tool('write'), tool('bash')];
     const out = await applyTeamLayerToolGate({
       roleLayer: 'executor',
@@ -50,6 +50,7 @@ describe('applyTeamLayerToolGate', () => {
     });
     const names = out.map((t) => t.function.name);
     expect(names).toContain('submit_patch');
+    expect(names).toContain('submit_execution_result');
     expect(names).toContain('report_progress');
     expect(names).toContain('mark_completed');
     expect(names).toContain('mark_failed');

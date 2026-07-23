@@ -76,6 +76,36 @@ function checkStabilityEscalation(
 ): boolean {
   const previous = parseJsonObject(previousReviewIssuesJson);
   if (!previous) return false;
+
+  // 优先：failedItems 集合 Jaccard 相似度（结构化路径）
+  const prevFailed = Array.isArray(previous['failedItems'])
+    ? (previous['failedItems'] as unknown[]).filter(
+        (item): item is string => typeof item === 'string',
+      )
+    : [];
+  const currentFailed = report.qualityIssues
+    .flatMap((issue) => {
+      const match = issue.match(/结构化 checklist 未通过：(.+)$/);
+      if (!match?.[1]) return [] as string[];
+      return match[1]
+        .split(/[；;]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    })
+    .filter((item, index, arr) => arr.indexOf(item) === index);
+  if (prevFailed.length > 0 && currentFailed.length > 0) {
+    const prevSet = new Set(prevFailed);
+    const curSet = new Set(currentFailed);
+    let inter = 0;
+    for (const id of curSet) {
+      if (prevSet.has(id)) inter += 1;
+    }
+    const union = new Set([...prevSet, ...curSet]).size;
+    if (union > 0 && inter / union >= 0.7) {
+      return true;
+    }
+  }
+
   const prevSpecIssues = Array.isArray(previous['specIssues'])
     ? (previous['specIssues'] as string[])
     : [];
@@ -656,6 +686,17 @@ export async function reconcilePm2QualityReview(input: {
       // 轮次取 globalEscalationRound（return-to-c 路径）和 retry_count（redispatch 路径）的较大值，
       // 确保显示的轮次反映实际总循环次数。
       const currentRound = Math.max(globalEscalationRound ?? 0, effectiveRetryCount) + 1;
+      // 从 qualityIssues 中尽量提取 failedItems 列表（结构化优先路径会写入“结构化 checklist 未通过：a；b”）
+      const failedItemsFromIssues = report.qualityIssues
+        .flatMap((issue) => {
+          const match = issue.match(/结构化 checklist 未通过：(.+)$/);
+          if (!match?.[1]) return [] as string[];
+          return match[1]
+            .split(/[；;]/)
+            .map((part) => part.trim())
+            .filter(Boolean);
+        })
+        .filter((item, index, arr) => arr.indexOf(item) === index);
       const structuredFeedback = [
         `⚠️ 第 ${currentRound} 轮质量审查（超过 4 轮将升级给用户）`,
         '',
@@ -672,8 +713,12 @@ export async function reconcilePm2QualityReview(input: {
           : report.qualityReviewPassed
             ? ['  代码质量和宪法合规']
             : []),
+        ...(failedItemsFromIssues.length > 0
+          ? ['', `**failedItems（请只修这些）**：${failedItemsFromIssues.join(', ')}`]
+          : []),
         '',
-        '**请重点修正以上标注的 ISSUE 项。已通过的检查项无需重复修改。**',
+        '**请重点修正以上标注的 ISSUE / failedItems。已通过的检查项无需重复修改。**',
+        '**返工完成后必须再次调用 submit_execution_result（或 submit_review）提交硬契约。**',
       ].join('\n');
 
       const payloadWithDisposition = mergeReviewDispositionIntoPayload(payload, {
@@ -684,12 +729,14 @@ export async function reconcilePm2QualityReview(input: {
       });
       // 将结构化反馈写入 payload，PM2 runner 会优先使用此字段注入 executor context
       payloadWithDisposition['reviewStructuredFeedback'] = structuredFeedback;
+      if (failedItemsFromIssues.length > 0) {
+        payloadWithDisposition['failedItems'] = failedItemsFromIssues;
+      }
       // 合并稳定性检查数据：将当前 issues 写入 payload，供下一轮对比
-      // （必须在这里合并，因为 writePm2PayloadJson 会覆盖之前的写入）
-      // 注意：此处 overallVerdict 已非 'pass'（L523 早返回），直接写入。
       payloadWithDisposition['previousReviewIssuesJson'] = JSON.stringify({
         specIssues: report.specIssues,
         qualityIssues: report.qualityIssues,
+        failedItems: failedItemsFromIssues,
       });
       writePm2PayloadJson(row.id, payloadWithDisposition);
 

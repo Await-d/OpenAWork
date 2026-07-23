@@ -71,6 +71,49 @@ function readTargetTriple() {
   return targetTriple;
 }
 
+/**
+ * Map a Rust/Tauri target triple to Bun's cross-compile --target value.
+ * Returns null when the host binary is already the intended target (no flag needed).
+ *
+ * Without this, `bun build --compile` always emits a host-arch binary, then we
+ * rename it with the target triple suffix — producing a mislabeled sidecar that
+ * crashes on windows-aarch64 / linux-aarch64 / cross-mac builds.
+ */
+function bunCompileTargetForTriple(targetTriple) {
+  const triple = String(targetTriple || '').trim();
+  if (!triple) return null;
+
+  /** @type {Record<string, string>} */
+  const mapping = {
+    'aarch64-apple-darwin': 'bun-darwin-arm64',
+    'x86_64-apple-darwin': 'bun-darwin-x64',
+    'aarch64-pc-windows-msvc': 'bun-windows-arm64',
+    'x86_64-pc-windows-msvc': 'bun-windows-x64',
+    'i686-pc-windows-msvc': 'bun-windows-x64',
+    'aarch64-unknown-linux-gnu': 'bun-linux-arm64',
+    'x86_64-unknown-linux-gnu': 'bun-linux-x64',
+    'aarch64-unknown-linux-musl': 'bun-linux-arm64-musl',
+    'x86_64-unknown-linux-musl': 'bun-linux-x64-musl',
+  };
+
+  const mapped = mapping[triple];
+  if (!mapped) {
+    throw new Error(
+      `Unsupported TAURI_TARGET_TRIPLE for Bun sidecar compile: ${triple}. ` +
+        `Add a mapping in bundle-sidecar.mjs or unset TAURI_TARGET_TRIPLE for host builds.`,
+    );
+  }
+  return mapped;
+}
+
+function isWindowsTriple(targetTriple) {
+  return String(targetTriple || '').includes('windows');
+}
+
+function isLinuxTriple(targetTriple) {
+  return String(targetTriple || '').includes('linux');
+}
+
 async function removeStaleGatewayBinaries() {
   await mkdir(binariesDir, { recursive: true });
   for (const entry of await readdir(binariesDir)) {
@@ -231,22 +274,36 @@ run(pnpmCommand, createPnpmArgs('build'), { cwd: gatewayDir });
 // playwright-core 内部有 chromium-bidi / electron 等可选模块，运行时按需懒加载；
 // Bun --compile 静态分析时无法找到这些包，需标记 external 跳过。桌面端 sidecar
 // 不使用 BiDi 协议或 Electron 自动化，标记后不影响实际运行时功能。
-run('bun', [
-  'build', 'src/index.ts',
+//
+// 当 CI 传入 TAURI_TARGET_TRIPLE（交叉编译）时，必须同步传给 bun --target，
+// 否则会把 host 架构二进制误标成目标架构（例如在 x64 runner 上打出 arm64 标签）。
+const targetTriple = readTargetTriple();
+const bunTarget = bunCompileTargetForTriple(targetTriple);
+const bunArgs = [
+  'build',
+  'src/index.ts',
   '--compile',
-  '--outfile', `dist/agent-gateway`,
-  '--external', 'chromium-bidi',
-  '--external', 'electron',
-], { cwd: gatewayDir });
+  '--outfile',
+  'dist/agent-gateway',
+  '--external',
+  'chromium-bidi',
+  '--external',
+  'electron',
+];
+if (bunTarget) {
+  bunArgs.push('--target', bunTarget);
+  console.log(`Cross-compiling gateway sidecar with bun --target=${bunTarget} (triple=${targetTriple})`);
+}
+run('bun', bunArgs, { cwd: gatewayDir });
 
 // Step 3: 把 gateway 可执行文件复制到 binaries/ 并加上 Tauri 要求的目标三元组后缀。
-const targetTriple = readTargetTriple();
-const executableExtension = process.platform === 'win32' ? '.exe' : '';
+// 扩展名按目标 triple 判断，而不是按当前 host OS（支持交叉编译）。
+const executableExtension = isWindowsTriple(targetTriple) ? '.exe' : '';
 const gatewaySrc = resolve(gatewayDir, `dist/agent-gateway${executableExtension}`);
 const gatewayDest = resolve(binariesDir, `agent-gateway-${targetTriple}${executableExtension}`);
 
 await removeStaleGatewayBinaries();
-if (process.platform === 'linux') {
+if (isLinuxTriple(targetTriple)) {
   const gatewayBytes = await readFile(gatewaySrc);
   const payloadHash = createHash('sha256').update(gatewayBytes).digest('hex').slice(0, 16);
   const payloadDest = `${gatewayDest}.gz`;
@@ -256,7 +313,7 @@ if (process.platform === 'linux') {
   console.log(`Gateway payload staged: ${payloadDest}`);
 } else {
   await cp(gatewaySrc, gatewayDest);
-  if (process.platform !== 'win32') {
+  if (!isWindowsTriple(targetTriple)) {
     await chmod(gatewayDest, 0o755);
   }
 }
