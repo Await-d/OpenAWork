@@ -99,6 +99,140 @@ function normalizeVersion(version) {
   return trimmed;
 }
 
+/**
+ * 将桌面安装包资产归类到「架构 × 平台格式」格子，用于生成类似 RustDesk 的下载表。
+ * 忽略 .sig / .json（updater 元数据）等非安装包文件。
+ *
+ * @returns {{
+ *   windows: { x64?: {label:string,url:string}, arm64?: {label:string,url:string} },
+ *   macos: { x64?: Array<{label:string,url:string}>, arm64?: Array<{label:string,url:string}> },
+ *   linuxDeb: { x64?: {label:string,url:string}, arm64?: {label:string,url:string} },
+ *   linuxAppImage: { x64?: {label:string,url:string}, arm64?: {label:string,url:string} },
+ *   other: Array<{name:string,url:string}>,
+ * }}
+ */
+function classifyDesktopAssets(assets) {
+  const grid = {
+    windows: {},
+    macos: { x64: [], arm64: [] },
+    linuxDeb: {},
+    linuxAppImage: {},
+    other: [],
+  };
+
+  for (const asset of assets) {
+    const name = String(asset?.name ?? '');
+    const url = String(asset?.browser_download_url ?? '');
+    if (!name || !url) continue;
+    if (name.endsWith('.sig') || name.endsWith('.json')) continue;
+
+    const lower = name.toLowerCase();
+
+    // Windows NSIS installer
+    if (lower.endsWith('-setup.exe') || lower.endsWith('.exe')) {
+      if (lower.includes('arm64') || lower.includes('aarch64')) {
+        grid.windows.arm64 = { label: 'EXE', url };
+        continue;
+      }
+      if (lower.includes('x64') || lower.includes('x86_64') || lower.includes('amd64')) {
+        grid.windows.x64 = { label: 'EXE', url };
+        continue;
+      }
+    }
+
+    // macOS DMG / app.tar.gz
+    if (lower.endsWith('.dmg') || lower.endsWith('.app.tar.gz')) {
+      const label = lower.endsWith('.dmg') ? 'DMG' : 'App';
+      const arch =
+        lower.includes('x64') || lower.includes('x86_64') || lower.includes('amd64')
+          ? 'x64'
+          : 'arm64'; // 当前默认产物是 aarch64
+      grid.macos[arch].push({ label, url });
+      continue;
+    }
+
+    // Linux deb
+    if (lower.endsWith('.deb')) {
+      if (lower.includes('arm64') || lower.includes('aarch64')) {
+        grid.linuxDeb.arm64 = { label: 'DEB', url };
+        continue;
+      }
+      if (lower.includes('amd64') || lower.includes('x86_64') || lower.includes('x64')) {
+        grid.linuxDeb.x64 = { label: 'DEB', url };
+        continue;
+      }
+    }
+
+    // Linux AppImage
+    if (lower.endsWith('.appimage')) {
+      if (lower.includes('aarch64') || lower.includes('arm64')) {
+        grid.linuxAppImage.arm64 = { label: 'AppImage', url };
+        continue;
+      }
+      if (lower.includes('amd64') || lower.includes('x86_64') || lower.includes('x64')) {
+        grid.linuxAppImage.x64 = { label: 'AppImage', url };
+        continue;
+      }
+    }
+
+    grid.other.push({ name, url });
+  }
+
+  return grid;
+}
+
+function formatCellLinks(links) {
+  if (!links || (Array.isArray(links) && links.length === 0)) {
+    return '';
+  }
+  const items = Array.isArray(links) ? links : [links];
+  return items.map((item) => `[${item.label}](${item.url})`).join(' &nbsp; ');
+}
+
+/**
+ * 生成类似 RustDesk 的安装包下载 Markdown 表格：
+ * 行 = 架构，列 = Windows / macOS / Ubuntu(deb) / AppImage
+ */
+function buildDesktopDownloadTable(grid) {
+  const rows = [
+    '| 架构 | Windows | macOS | Ubuntu | AppImage |',
+    '|------|---------|-------|--------|----------|',
+  ];
+
+  const archRows = [
+    {
+      title: 'x86-64 (64-bit)',
+      windows: grid.windows.x64,
+      macos: grid.macos.x64,
+      deb: grid.linuxDeb.x64,
+      appimage: grid.linuxAppImage.x64,
+    },
+    {
+      title: 'AArch64 (ARM64)',
+      windows: grid.windows.arm64,
+      macos: grid.macos.arm64,
+      deb: grid.linuxDeb.arm64,
+      appimage: grid.linuxAppImage.arm64,
+    },
+  ];
+
+  let hasAny = false;
+  for (const row of archRows) {
+    const cells = [
+      formatCellLinks(row.windows),
+      formatCellLinks(row.macos),
+      formatCellLinks(row.deb),
+      formatCellLinks(row.appimage),
+    ];
+    if (cells.some((cell) => cell.length > 0)) {
+      hasAny = true;
+      rows.push(`| ${row.title} | ${cells.join(' | ')} |`);
+    }
+  }
+
+  return hasAny ? rows : null;
+}
+
 function buildDesktopResultLines(release) {
   if (!release) {
     return ['- 当前未找到 GitHub Release 资产信息。'];
@@ -107,25 +241,27 @@ function buildDesktopResultLines(release) {
   const lines = [];
   if (typeof release.html_url === 'string' && release.html_url.length > 0) {
     lines.push(`- GitHub Release：${release.html_url}`);
+    lines.push('');
   }
 
-  const assets = Array.isArray(release.assets)
-    ? release.assets
-        .filter((asset) => {
-          const name = String(asset?.name ?? '');
-          const url = String(asset?.browser_download_url ?? '');
-          return Boolean(name) && Boolean(url) && !name.endsWith('.sig') && !name.endsWith('.json');
-        })
-        .sort((left, right) => String(left.name).localeCompare(String(right.name)))
-    : [];
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  const grid = classifyDesktopAssets(assets);
+  const table = buildDesktopDownloadTable(grid);
 
-  if (assets.length === 0) {
+  if (!table) {
     lines.push('- 当前未发现安装包附件。');
     return lines;
   }
 
-  for (const asset of assets) {
-    lines.push(`- [${String(asset.name)}](${String(asset.browser_download_url)})`);
+  lines.push(...table);
+
+  if (grid.other.length > 0) {
+    lines.push('');
+    lines.push('### 其他产物');
+    lines.push('');
+    for (const asset of grid.other.sort((a, b) => a.name.localeCompare(b.name))) {
+      lines.push(`- [${asset.name}](${asset.url})`);
+    }
   }
 
   return lines;
