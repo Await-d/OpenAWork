@@ -70,7 +70,7 @@ src/
 - **哈希锚定编辑**：`tools/hash-edit.ts` 使用 8 字符 SHA-256 行哈希（而非行号）防止跨版本编辑漂移。
 - **路由分级**：R0=只读/回答，R1=本地单文件，R2=多文件，R3=架构级/高风险。由 `routing.ts` 中 5 个维度计算得出。
 - **SessionStore 接口**：`sqlite-session-store.ts` 为生产实现；`InMemorySessionStore` 用于测试。
-- **Provider 类型**：`ProviderType` 联合类型——`anthropic | openai | deepseek | gemini | ollama | openrouter | qwen | moonshot | mimo | custom`。
+- **Provider 类型**：`ProviderType` 联合类型——`anthropic | openai | deepseek | gemini | ollama | openrouter | qwen | moonshot | mimo | mistral | zhipu | doubao | groq | siliconflow | azure | xai | minimax | baichuan | hunyuan | qianfan | custom`。
 - **Provider Catalog（平台单一事实来源）**：`src/provider/catalog.ts` 的 `PROVIDER_CATALOG` 是所有平台信息的唯一来源——内置预设(`presets.ts` 由它派生)、API Key 环境变量、上游 baseUrl/协议变体、thinking 下发风格、host→type 推断、别名归一、前端 UI 元数据(logo/显示名/字形)全部从这里产生。**新增一个平台只需三步**：① 在 `types.ts` 的 `ProviderType` 加一个成员；② 在 `catalog.ts` 的 `PROVIDER_CATALOG` 加一个条目；③(可选)在 `apps/web/public/` 放 `logo-<type>.svg`。网关枚举/thinking 分支、前端选择器/设置页/团队模板下拉都会自动生效，无需再改其它文件。thinking 复用已有「风格」(`ProviderThinkingStyle`)时，连网关 `provider-options.ts` 都不必改。
 - **权限主链**：统一位于 `src/permission/`；历史 `src/permissions/` 兼容层已退役，不再作为可用目录。
 

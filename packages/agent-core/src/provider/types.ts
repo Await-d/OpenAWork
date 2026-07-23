@@ -12,6 +12,17 @@ export type ProviderType =
   | 'qwen'
   | 'moonshot'
   | 'mimo'
+  | 'mistral'
+  | 'zhipu'
+  | 'doubao'
+  | 'groq'
+  | 'siliconflow'
+  | 'azure'
+  | 'xai'
+  | 'minimax'
+  | 'baichuan'
+  | 'hunyuan'
+  | 'qianfan'
   | 'custom';
 
 export interface ThinkingConfig {

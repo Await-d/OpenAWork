@@ -145,3 +145,49 @@ describe('provider catalog (single source of truth)', () => {
     expect(() => JSON.stringify(ui)).not.toThrow();
   });
 });
+
+describe('provider catalog expansion (2026-07-23)', () => {
+  const expectedNewTypes = [
+    'mistral',
+    'zhipu',
+    'doubao',
+    'groq',
+    'siliconflow',
+    'azure',
+    'xai',
+    'minimax',
+    'baichuan',
+    'hunyuan',
+    'qianfan',
+  ] as const;
+
+  it('包含全部新增一等公民 type 且默认不启用', () => {
+    for (const type of expectedNewTypes) {
+      const entry = getCatalogEntry(type);
+      expect(entry, type).toBeDefined();
+      expect(entry!.enabledByDefault).toBe(false);
+      expect(entry!.defaultModels.length).toBeGreaterThan(0);
+      expect(getDefaultUpstream(entry!)).toBeDefined();
+    }
+  });
+
+  it('别名归一到新 type', () => {
+    expect(normalizeProviderAlias('glm')).toBe('zhipu');
+    expect(normalizeProviderAlias('bigmodel')).toBe('zhipu');
+    expect(normalizeProviderAlias('grok')).toBe('xai');
+    expect(normalizeProviderAlias('volcengine')).toBe('doubao');
+    expect(normalizeProviderAlias('ark')).toBe('doubao');
+    expect(normalizeProviderAlias('silicon')).toBe('siliconflow');
+    expect(normalizeProviderAlias('mistralai')).toBe('mistral');
+    expect(normalizeProviderAlias('wenxin')).toBe('qianfan');
+    expect(normalizeProviderAlias('baidu')).toBe('qianfan');
+  });
+
+  it('host 反推覆盖新平台', () => {
+    expect(inferProviderTypeFromHostname('api.mistral.ai')).toBe('mistral');
+    expect(inferProviderTypeFromHostname('api.x.ai')).toBe('xai');
+    expect(inferProviderTypeFromHostname('api.groq.com')).toBe('groq');
+    expect(inferProviderTypeFromHostname('open.bigmodel.cn')).toBe('zhipu');
+    expect(inferProviderTypeFromHostname('api.siliconflow.cn')).toBe('siliconflow');
+  });
+});
