@@ -210,6 +210,74 @@ describe('submit_execution_result', () => {
     expect(result.ok).toBe(false);
     expect(result.errorCode).toBe('owned-paths-violation');
   });
+
+  it('ownedPaths 不应因后缀碰撞误放行', async () => {
+    seedRunningHandoff({
+      id: 'h-exec-3',
+      toSessionId: SESSION_ID,
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '实现登录',
+        taskMarkers: { taskId: 'T001' },
+        ownedPaths: ['src/auth/login.ts'],
+      },
+    });
+
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'executor', sessionId: SESSION_ID, userId: USER_ID },
+      instructionName: 'submit_execution_result',
+      rawArgs: {
+        taskId: 'T001',
+        status: 'completed',
+        changedFiles: ['login.ts'],
+        checklist: [{ id: 'AC-001', status: 'pass', evidence: 'x' }],
+        summary: '后缀碰撞不应通过',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe('owned-paths-violation');
+  });
+
+  it('status=blocked 时写入 failed 子状态并保留 blockedReason', async () => {
+    seedRunningHandoff({
+      id: 'h-exec-4',
+      toSessionId: SESSION_ID,
+      toRoleLayer: 'executor',
+      payload: {
+        goal: '实现登录',
+        taskMarkers: { taskId: 'T001' },
+        ownedPaths: ['src/auth'],
+      },
+    });
+
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'executor', sessionId: SESSION_ID, userId: USER_ID },
+      instructionName: 'submit_execution_result',
+      rawArgs: {
+        taskId: 'T001',
+        status: 'blocked',
+        changedFiles: ['src/auth/login.ts'],
+        checklist: [{ id: 'AC-001', status: 'blocked', evidence: '等待外部密钥' }],
+        summary: '因外部依赖阻塞',
+        blockedReason: '缺少第三方测试账号',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const handoffRow = dbModule.sqliteGet<{ result_json: string }>(
+      `SELECT result_json FROM handoff_records WHERE id = ?`,
+      ['h-exec-4'],
+    );
+    const handoffResult = JSON.parse(handoffRow?.result_json ?? '{}') as Record<string, unknown>;
+    expect(handoffResult['blockedReason']).toBe('缺少第三方测试账号');
+
+    const sessionRow = dbModule.sqliteGet<{ substate: string | null }>(
+      `SELECT substate FROM sessions WHERE id = ?`,
+      [SESSION_ID],
+    );
+    expect(sessionRow?.substate).toBe('failed');
+  });
 });
 
 describe('review aggregation + structured checklist', () => {
@@ -309,6 +377,18 @@ describe('toToolDefinition schema surface', () => {
     );
     expect(Object.keys(revDef.function.parameters.properties)).toEqual(
       expect.arrayContaining(['verdict', 'decision', 'items', 'title', 'content']),
+    );
+    const checklistSchema = execDef.function.parameters.properties['checklist'] as {
+      items?: { properties?: Record<string, unknown> };
+    };
+    const reviewItemsSchema = revDef.function.parameters.properties['items'] as {
+      items?: { properties?: Record<string, unknown> };
+    };
+    expect(Object.keys(checklistSchema.items?.properties ?? {})).toEqual(
+      expect.arrayContaining(['id', 'status', 'evidence']),
+    );
+    expect(Object.keys(reviewItemsSchema.items?.properties ?? {})).toEqual(
+      expect.arrayContaining(['id', 'status', 'reason', 'fileRefs']),
     );
     // default 字段不应被标为 required
     expect(execDef.function.parameters.required).not.toContain('changedFiles');

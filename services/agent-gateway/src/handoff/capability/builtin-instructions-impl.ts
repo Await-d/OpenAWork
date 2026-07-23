@@ -829,7 +829,7 @@ registerInstruction({
 
     setSubstate({
       sessionId: ctx.sessionId,
-      substate: args.status === 'failed' ? 'failed' : 'completed',
+      substate: args.status === 'completed' ? 'completed' : 'failed',
       userId: ctx.userId,
       roleLayer: 'executor',
     });

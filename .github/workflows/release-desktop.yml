@@ -112,30 +112,36 @@ jobs:
             args: '--target aarch64-apple-darwin --bundles app,dmg'
             rust_targets: 'aarch64-apple-darwin'
             tauri_target_triple: 'aarch64-apple-darwin'
+            optional: false
             bundle_path: apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
           - label: macos-x86_64
             runner: macos-13
             args: '--target x86_64-apple-darwin --bundles app,dmg'
             rust_targets: 'x86_64-apple-darwin'
             tauri_target_triple: 'x86_64-apple-darwin'
+            optional: false
             bundle_path: apps/desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/
           - label: windows-x86_64
             runner: windows-latest
             args: '--bundles nsis'
             rust_targets: ''
             tauri_target_triple: ''
+            optional: false
             bundle_path: apps/desktop/src-tauri/target/release/bundle/
           - label: windows-aarch64
             runner: windows-latest
             args: '--target aarch64-pc-windows-msvc --bundles nsis'
             rust_targets: 'aarch64-pc-windows-msvc'
             tauri_target_triple: 'aarch64-pc-windows-msvc'
+            # Bun Windows aarch64 交叉编译 runtime 提取仍不稳定；不阻断主发布
+            optional: true
             bundle_path: apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/
           - label: linux-x86_64
             runner: ubuntu-22.04
             args: '--verbose'
             rust_targets: ''
             tauri_target_triple: ''
+            optional: false
             bundle_path: |
               apps/desktop/src-tauri/target/release/bundle/deb/*.deb
               apps/desktop/src-tauri/target/release/bundle/deb/*.sig
@@ -149,6 +155,8 @@ jobs:
             rust_targets: 'aarch64-unknown-linux-gnu'
             tauri_target_triple: 'aarch64-unknown-linux-gnu'
             cross_compile: true
+            # Linux aarch64 交叉依赖链更脆，先作为可选矩阵，避免拖垮主渠道发布
+            optional: true
             bundle_path: |
               apps/desktop/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
               apps/desktop/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.sig
@@ -157,6 +165,7 @@ jobs:
               apps/desktop/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.tar.gz
               apps/desktop/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.json
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.optional == true }}
     steps:
       - uses: actions/checkout@v7
 
@@ -205,10 +214,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          CODENAME="$(lsb_release -cs)"
+
+          # 多架构交叉编译必须把 amd64/arm64 源严格拆开：
+          # - 现有 azure/archive/security 源只提供 amd64，不能在 add-architecture 后继续拉 arm64
+          # - arm64 包只能走 ports.ubuntu.com，且必须标 [arch=arm64]
+          # 之前用 add-apt-repository 会把 ports 源写成无 arch 限制，导致：
+          #   security.ubuntu.com 拉 arm64 → 404
+          #   ports.ubuntu.com 拉 amd64 → 404
+          #   apt-get install 最终 exit 100
           sudo dpkg --add-architecture arm64
-          # Add Ubuntu Ports for arm64 packages
-          sudo add-apt-repository -y "deb http://ports.ubuntu.com/ubuntu-ports/ $(lsb_release -cs) main restricted universe multiverse"
-          sudo add-apt-repository -y "deb http://ports.ubuntu.com/ubuntu-ports/ $(lsb_release -cs)-updates main restricted universe multiverse"
+
+          # 把现有 deb 源钉死为 amd64（兼容 sources.list 与 sources.list.d）
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -E -i \
+              -e 's/^deb (\[arch=[^]]+\] )?/deb [arch=amd64] /' \
+              /etc/apt/sources.list
+          fi
+          if compgen -G '/etc/apt/sources.list.d/*.list' > /dev/null; then
+            for f in /etc/apt/sources.list.d/*.list; do
+              sudo sed -E -i \
+                -e 's/^deb (\[arch=[^]]+\] )?/deb [arch=amd64] /' \
+                "$f"
+            done
+          fi
+          # DEB822 格式（Ubuntu 24+ 镜像）：补 Architectures: amd64
+          if compgen -G '/etc/apt/sources.list.d/*.sources' > /dev/null; then
+            for f in /etc/apt/sources.list.d/*.sources; do
+              if ! grep -q '^Architectures:' "$f"; then
+                sudo sed -i '/^Types:/a Architectures: amd64' "$f"
+              fi
+            done
+          fi
+
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME} main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-security main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-backports main restricted universe multiverse
+          EOF
+
           sudo apt-get update
           sudo apt-get install -y \
             crossbuild-essential-arm64 \
@@ -539,7 +584,7 @@ jobs:
         with:
           name: desktop-installers-${{ matrix.label }}
           path: ${{ matrix.bundle_path }}
-          if-no-files-found: error
+          if-no-files-found: ${{ matrix.optional == true && 'warn' || 'error' }}
           retention-days: 14
 
   publish-release-notes:

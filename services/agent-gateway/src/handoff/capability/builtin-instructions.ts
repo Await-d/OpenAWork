@@ -224,26 +224,37 @@ function isOptionalField(field: z.ZodType): boolean {
 
 function zodToJsonSchemaLite(schema: z.ZodType): Record<string, unknown> {
   const unwrapped = unwrapZodType(schema);
-  const def = (unwrapped as unknown as { _def?: { typeName?: string; shape?: () => unknown } })
-    ._def;
-  if (def?.typeName === 'ZodObject' && typeof def.shape === 'function') {
-    const shape = def.shape() as Record<string, z.ZodType>;
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [key, fieldSchema] of Object.entries(shape)) {
-      properties[key] = inferFieldType(fieldSchema);
-      if (!isOptionalField(fieldSchema)) {
-        required.push(key);
-      }
-    }
-    return {
-      type: 'object',
-      properties,
-      ...(required.length > 0 ? { required } : {}),
-    };
+  const objectSchema = buildObjectSchema(unwrapped);
+  if (objectSchema) {
+    return objectSchema;
   }
   // 默认空 object
   return { type: 'object', properties: {} };
+}
+
+function buildObjectSchema(schema: z.ZodType): {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+} | null {
+  const def = (schema as unknown as { _def?: { typeName?: string; shape?: () => unknown } })._def;
+  if (def?.typeName !== 'ZodObject' || typeof def.shape !== 'function') {
+    return null;
+  }
+  const shape = def.shape() as Record<string, z.ZodType>;
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    properties[key] = inferFieldType(fieldSchema);
+    if (!isOptionalField(fieldSchema)) {
+      required.push(key);
+    }
+  }
+  return {
+    type: 'object',
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+  };
 }
 
 function inferFieldType(field: z.ZodType): Record<string, unknown> {
@@ -266,7 +277,9 @@ function inferFieldType(field: z.ZodType): Record<string, unknown> {
           : {};
     return { type: 'array', items: item };
   }
-  if (tn === 'ZodObject') return { type: 'object' };
+  if (tn === 'ZodObject') {
+    return buildObjectSchema(unwrapped) ?? { type: 'object' };
+  }
   if (tn === 'ZodEnum') {
     const values = (def as unknown as { values?: readonly string[] }).values;
     return { type: 'string', enum: values ?? [] };

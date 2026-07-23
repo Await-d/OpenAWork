@@ -44,6 +44,119 @@ function run(command, args, options = {}) {
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status ?? 'unknown'}`);
   }
+  return result;
+}
+
+function runSoft(command, args, options = {}) {
+  return spawnSync(command, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: useShell,
+    ...options,
+  });
+}
+
+/**
+ * Bun 交叉编译会下载目标平台 runtime zip 并解压。
+ * Windows runner 上偶发 “Failed to extract executable … download may be incomplete”。
+ * 这里预热下载 + 有限重试，避免整次 release 因瞬时网络/解压失败挂掉。
+ */
+function resolveBunVersion() {
+  const result = runSoft('bun', ['--version']);
+  if (result.status !== 0) {
+    return null;
+  }
+  const version = String(result.stdout || '')
+    .trim()
+    .replace(/^v/, '');
+  return version || null;
+}
+
+function bunRuntimeAssetName(bunTarget) {
+  // bun --target 使用 arm64 命名；release asset 实际是 aarch64
+  // asset 文件名不带版本号，版本只在 download 路径里：
+  //   https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-aarch64.zip
+  return `${String(bunTarget).replace(/-arm64(-|$)/, '-aarch64$1')}.zip`;
+}
+
+function prefetchBunRuntime(bunTarget) {
+  const bunVersion = resolveBunVersion();
+  if (!bunVersion) {
+    console.warn('Unable to resolve bun version; skip runtime prefetch.');
+    return;
+  }
+
+  const assetName = bunRuntimeAssetName(bunTarget);
+  const url = `https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${assetName}`;
+  console.log(`Prefetching Bun runtime for cross-compile: ${url}`);
+
+  // 让 host bun 自己拉一次缓存；失败不阻断，后面仍会走正式 compile + 重试
+  const warm = runSoft('bun', ['pm', 'cache']);
+  if (warm.status !== 0) {
+    // older bun may not support `pm cache`; ignore
+  }
+
+  // 用 curl/powershell 预下载到临时目录，至少验证 asset 可访问且完整
+  const tmpDir = resolve(root, 'temp', 'bun-runtime-prefetch');
+  const zipPath = resolve(tmpDir, assetName);
+  try {
+    run(
+      process.platform === 'win32' ? 'powershell.exe' : 'bash',
+      process.platform === 'win32'
+        ? [
+            '-NoLogo',
+            '-NoProfile',
+            '-Command',
+            `New-Item -ItemType Directory -Force -Path '${tmpDir.replace(/'/g, "''")}' | Out-Null; ` +
+              `Invoke-WebRequest -Uri '${url}' -OutFile '${zipPath.replace(/'/g, "''")}'`,
+          ]
+        : ['-lc', `mkdir -p '${tmpDir}' && curl -fL --retry 3 --retry-delay 2 -o '${zipPath}' '${url}'`],
+    );
+    const sizeResult = runSoft(
+      process.platform === 'win32' ? 'powershell.exe' : 'bash',
+      process.platform === 'win32'
+        ? ['-NoLogo', '-NoProfile', '-Command', `(Get-Item '${zipPath.replace(/'/g, "''")}').Length`]
+        : ['-lc', `wc -c < '${zipPath}'`],
+    );
+    const size = Number(String(sizeResult.stdout || '').trim());
+    if (!Number.isFinite(size) || size < 1_000_000) {
+      console.warn(`Prefetched Bun runtime looks too small (${size} bytes): ${zipPath}`);
+    } else {
+      console.log(`Prefetched Bun runtime OK (${size} bytes): ${zipPath}`);
+    }
+  } catch (error) {
+    console.warn(
+      `Prefetch Bun runtime failed (will still try bun build): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function runBunCompileWithRetry(bunArgs, options = {}, attempts = 3) {
+  let lastError = null;
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      console.log(`bun compile attempt ${i}/${attempts}: bun ${bunArgs.join(' ')}`);
+      run('bun', bunArgs, options);
+      return;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`bun compile attempt ${i} failed: ${message}`);
+      if (i < attempts) {
+        // 给网络/解压一点恢复时间
+        spawnSync(process.platform === 'win32' ? 'powershell.exe' : 'sleep',
+          process.platform === 'win32'
+            ? ['-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 2']
+            : ['2'],
+        );
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`bun compile failed after ${attempts} attempts`);
 }
 
 function readTargetTriple() {
@@ -293,8 +406,9 @@ const bunArgs = [
 if (bunTarget) {
   bunArgs.push('--target', bunTarget);
   console.log(`Cross-compiling gateway sidecar with bun --target=${bunTarget} (triple=${targetTriple})`);
+  prefetchBunRuntime(bunTarget);
 }
-run('bun', bunArgs, { cwd: gatewayDir });
+runBunCompileWithRetry(bunArgs, { cwd: gatewayDir }, 3);
 
 // Step 3: 把 gateway 可执行文件复制到 binaries/ 并加上 Tauri 要求的目标三元组后缀。
 // 扩展名按目标 triple 判断，而不是按当前 host OS（支持交叉编译）。

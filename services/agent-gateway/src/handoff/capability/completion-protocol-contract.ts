@@ -116,12 +116,7 @@ export function findOutOfScopePaths(input: {
     if (!normalized) continue;
     let ok = false;
     for (const base of owned) {
-      if (
-        normalized === base ||
-        normalized.startsWith(`${base}/`) ||
-        base.endsWith(normalized) ||
-        normalized.endsWith(base)
-      ) {
+      if (normalized === base || normalized.startsWith(`${base}/`)) {
         ok = true;
         break;
       }
