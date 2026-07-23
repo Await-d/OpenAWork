@@ -29,8 +29,11 @@ export class ArtifactManager implements ArtifactManagerInterface {
   private store = new Map<string, Artifact>();
   private baseUrl: string;
 
+  /**
+   * @param baseUrl 用于生成分享链接的域名。为空时 share()/download() 返回空字符串。
+   */
   constructor(baseUrl?: string) {
-    this.baseUrl = (baseUrl ?? 'https://openwork.app').replace(/\/+$/, '');
+    this.baseUrl = (baseUrl ?? '').replace(/\/+$/, '');
   }
 
   register(artifact: Omit<Artifact, 'id' | 'createdAt'>): Artifact {
@@ -57,12 +60,14 @@ export class ArtifactManager implements ArtifactManagerInterface {
   share(id: string): string {
     const artifact = this.store.get(id);
     if (!artifact) throw new Error(`Artifact not found: ${id}`);
+    if (!this.baseUrl) return '';
     return `${this.baseUrl}/share/${id}`;
   }
 
   download(id: string): string {
     const artifact = this.store.get(id);
     if (!artifact) throw new Error(`Artifact not found: ${id}`);
+    if (!this.baseUrl) return '';
     return `${this.baseUrl}/download/${id}/${encodeURIComponent(artifact.name)}`;
   }
 

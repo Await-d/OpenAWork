@@ -127,11 +127,12 @@ const host = globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0';
 
 /**
  * 自定义域名，用于生成分享链接等对外 URL。
- * 默认为 https://openwork.app
+ * 为空时分享链接功能不可用，需用户在设置中配置。
  */
-export const OPENAWORK_BASE_URL = (
-  globalThis.process?.env['OPENAWORK_BASE_URL'] ?? 'https://openwork.app'
-).replace(/\/+$/, '');
+export const OPENAWORK_BASE_URL = (globalThis.process?.env['OPENAWORK_BASE_URL'] ?? '').replace(
+  /\/+$/,
+  '',
+);
 
 await app.register(cors, { origin: true });
 await app.register(compress, {

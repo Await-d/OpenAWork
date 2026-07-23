@@ -95,4 +95,62 @@ describe('resolveModelRoute env fallback', () => {
 
     expect(route.apiBaseUrl).toBe('https://relay.example.test/openai/v1');
   });
+
+  it('为 Anthropic 兼容的 MiMo 文档地址自动补上 /v1', () => {
+    const provider: AIProvider = {
+      id: 'mimo',
+      type: 'mimo',
+      name: 'Xiaomi MiMo',
+      enabled: true,
+      baseUrl: 'https://api.xiaomimimo.com/anthropic',
+      apiKey: 'test-key',
+      upstreamProtocol: 'anthropic_messages',
+      defaultModels: [
+        {
+          id: 'mimo-v2.5-pro',
+          label: 'MiMo V2.5 Pro',
+          enabled: true,
+          supportsThinking: true,
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const route = resolveModelRouteFromProvider(provider, 'mimo-v2.5-pro', {
+      maxTokens: 512,
+      temperature: 1,
+    });
+
+    expect(route.apiBaseUrl).toBe('https://api.xiaomimimo.com/anthropic/v1');
+  });
+
+  it('为裸 Anthropic 根地址自动补上 /v1', () => {
+    const provider: AIProvider = {
+      id: 'anthropic',
+      type: 'anthropic',
+      name: 'Anthropic',
+      enabled: true,
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'test-key',
+      upstreamProtocol: 'anthropic_messages',
+      defaultModels: [
+        {
+          id: 'claude-opus-4-0',
+          label: 'Claude Opus 4',
+          enabled: true,
+          supportsThinking: true,
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const route = resolveModelRouteFromProvider(provider, 'claude-opus-4-0', {
+      maxTokens: 512,
+      temperature: 1,
+    });
+
+    expect(route.apiBaseUrl).toBe('https://api.anthropic.com/v1');
+  });
 });

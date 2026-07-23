@@ -118,6 +118,10 @@ export interface BuiltAISdkProvider {
  */
 function composeAnthropicHeaders(config: AISdkProviderConfig): Record<string, string> {
   const headers = { ...(config.headers ?? {}) };
+  const providerKind = config.providerType.toLowerCase();
+  if (providerKind !== 'anthropic' && providerKind !== 'claude') {
+    return headers;
+  }
   // Drop any case-variant the caller may have set; we will rewrite.
   for (const key of Object.keys(headers)) {
     if (key.toLowerCase() === 'anthropic-beta') {

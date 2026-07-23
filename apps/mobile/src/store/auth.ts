@@ -47,7 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   refreshToken: null,
   gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
-  customBaseUrl: 'https://openwork.app',
+  customBaseUrl: '',
   isLoading: true,
 
   setTokens: async (access, refresh) => {
@@ -63,7 +63,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   setCustomBaseUrl: async (url) => {
-    const normalized = url.replace(/\/+$/, '') || 'https://openwork.app';
+    const normalized = url.replace(/\/+$/, '');
     await SecureStore.setItemAsync(CUSTOM_BASE_URL_KEY, normalized);
     set({ customBaseUrl: normalized });
   },
@@ -80,13 +80,13 @@ export const useAuthStore = create<AuthState>((set) => ({
         accessToken: access,
         refreshToken: refresh,
         gatewayUrl: gateway ? normalizeMobileGatewayUrl(gateway) : DEFAULT_MOBILE_GATEWAY_URL,
-        customBaseUrl: baseUrl || 'https://openwork.app',
+        customBaseUrl: baseUrl ?? '',
         isLoading: false,
       });
     } catch {
       set({
         gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
-        customBaseUrl: 'https://openwork.app',
+        customBaseUrl: '',
         isLoading: false,
       });
     }

@@ -37,7 +37,7 @@ interface AuthState {
   webExposeLan: boolean;
   /**
    * 自定义域名，用于生成分享链接等对外 URL。
-   * 默认为 https://openwork.app
+   * 为空时分享链接功能不可用，需用户在设置中配置。
    */
   customBaseUrl: string;
   setAuth: (accessToken: string, email: string, refreshToken?: string, expiresIn?: string) => void;
@@ -69,7 +69,7 @@ export const useAuthStore = create<AuthState>()(
       webAccessEnabled: false,
       webPort: 3000,
       webExposeLan: false,
-      customBaseUrl: 'https://openwork.app',
+      customBaseUrl: '',
       setAuth: (accessToken, email, refreshToken, expiresIn) => {
         const ms = expiresIn ? parseExpiresIn(expiresIn) : 15 * 60 * 1000;
         set({
@@ -90,8 +90,7 @@ export const useAuthStore = create<AuthState>()(
           // 在仅切换启停时把「桌面端」面板配置的 LAN 开关意外重置。
           webExposeLan: exposeLan ?? state.webExposeLan,
         })),
-      setCustomBaseUrl: (url) =>
-        set({ customBaseUrl: url.replace(/\/+$/, '') || 'https://openwork.app' }),
+      setCustomBaseUrl: (url) => set({ customBaseUrl: url.replace(/\/+$/, '') }),
       refreshAccessToken: async () => {
         const { refreshToken, gatewayUrl } = get();
         if (!refreshToken) return;

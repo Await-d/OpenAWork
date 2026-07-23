@@ -87,16 +87,29 @@ const normalizeBaseUrl = (value: string | undefined): string => {
 const normalizeRuntimeBaseUrl = (
   providerType: AIProvider['type'] | undefined,
   baseUrl: string,
+  upstreamProtocol?: UpstreamProtocol,
 ): string => {
-  if (providerType !== 'openai' || baseUrl.length === 0) {
+  if (baseUrl.length === 0) {
     return baseUrl;
   }
 
   try {
     const url = new URL(baseUrl);
-    if (url.pathname === '/' || url.pathname.length === 0) {
+    if (providerType === 'openai' && (url.pathname === '/' || url.pathname.length === 0)) {
       url.pathname = '/v1';
       return url.toString().replace(/\/+$/, '');
+    }
+
+    if (upstreamProtocol === 'anthropic_messages') {
+      const normalizedPath = url.pathname.replace(/\/+$/, '');
+      if (normalizedPath.length === 0) {
+        url.pathname = '/v1';
+        return url.toString().replace(/\/+$/, '');
+      }
+      if (normalizedPath === '/anthropic') {
+        url.pathname = '/anthropic/v1';
+        return url.toString().replace(/\/+$/, '');
+      }
     }
   } catch {
     return baseUrl;
@@ -167,14 +180,11 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const providerType =
     builtinProvider?.type ?? (model.startsWith('claude') ? 'anthropic' : undefined);
   const isAnthropic = providerType === 'anthropic';
-  const apiBaseUrl = normalizeRuntimeBaseUrl(
-    providerType,
-    normalizeBaseUrl(
-      (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
-        (isAnthropic
-          ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
-          : getOpenAiBaseUrl()),
-    ),
+  const rawApiBaseUrl = normalizeBaseUrl(
+    (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
+      (isAnthropic
+        ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
+        : getOpenAiBaseUrl()),
   );
 
   // 方案 5：插件优先解析协议，fallback 到原有逻辑
@@ -183,9 +193,10 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
       ? runHookFirst('resolve.protocol', providerType, {
           model,
           provider: builtinProvider,
-          baseUrl: apiBaseUrl,
+          baseUrl: rawApiBaseUrl,
         })
-      : undefined) ?? resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
+      : undefined) ?? resolveUpstreamProtocol({ model, providerType, baseUrl: rawApiBaseUrl });
+  const apiBaseUrl = normalizeRuntimeBaseUrl(providerType, rawApiBaseUrl, upstreamProtocol);
 
   // 方案 5：插件优先解析 API key，fallback 到原有逻辑
   const apiKey =
@@ -233,10 +244,8 @@ export function resolveModelRouteFromProvider(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const resolvedProviderBaseUrl = normalizeRuntimeBaseUrl(
-    provider.type,
-    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
-  );
+  const rawProviderBaseUrl =
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
 
   // 方案 5：插件优先解析协议（显式 override 仍然最优先）
   const upstreamProtocol =
@@ -244,14 +253,19 @@ export function resolveModelRouteFromProvider(
     runHookFirst('resolve.protocol', provider.type, {
       model: modelId,
       provider,
-      baseUrl: resolvedProviderBaseUrl,
+      baseUrl: rawProviderBaseUrl,
     }) ??
     resolveUpstreamProtocol({
       model: modelId,
       providerType: provider.type,
-      baseUrl: resolvedProviderBaseUrl,
+      baseUrl: rawProviderBaseUrl,
       explicitOverride: provider.upstreamProtocol,
     });
+  const resolvedProviderBaseUrl = normalizeRuntimeBaseUrl(
+    provider.type,
+    rawProviderBaseUrl,
+    upstreamProtocol,
+  );
 
   // 方案 5：插件优先解析 API key
   const apiKey =
@@ -303,10 +317,8 @@ export function resolveCompactionRoute(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const resolvedCompactionBaseUrl = normalizeRuntimeBaseUrl(
-    provider.type,
-    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
-  );
+  const rawCompactionBaseUrl =
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
 
   // 方案 5：插件优先解析协议
   const upstreamProtocol =
@@ -314,14 +326,19 @@ export function resolveCompactionRoute(
     runHookFirst('resolve.protocol', provider.type, {
       model: modelId,
       provider,
-      baseUrl: resolvedCompactionBaseUrl,
+      baseUrl: rawCompactionBaseUrl,
     }) ??
     resolveUpstreamProtocol({
       model: modelId,
       providerType: provider.type,
-      baseUrl: resolvedCompactionBaseUrl,
+      baseUrl: rawCompactionBaseUrl,
       explicitOverride: provider.upstreamProtocol,
     });
+  const resolvedCompactionBaseUrl = normalizeRuntimeBaseUrl(
+    provider.type,
+    rawCompactionBaseUrl,
+    upstreamProtocol,
+  );
 
   // 方案 5：插件优先解析 API key
   const apiKey =

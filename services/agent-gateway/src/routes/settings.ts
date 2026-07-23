@@ -1679,7 +1679,7 @@ ${contextBlock}
         'SELECT value FROM user_settings WHERE user_id = ? AND key = ?',
         [user.sub, OPENAWORK_BASE_URL_KEY],
       );
-      const baseUrl = row?.value ?? 'https://openwork.app';
+      const baseUrl = row?.value ?? '';
       step.succeed(undefined, { baseUrl });
       return reply.send({ baseUrl });
     },

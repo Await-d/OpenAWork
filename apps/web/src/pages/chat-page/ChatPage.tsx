@@ -249,6 +249,7 @@ import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
 import { useChatUiState } from './hooks/use-chat-ui-state.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
+import { CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX } from '../../components/conversation-runtime/scroll/scroll-constants.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './conversation/snapshot/use-session-content-artifact-count.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
@@ -1692,13 +1693,16 @@ export default function ChatPage() {
         setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
         setIsSessionLoading(false);
       });
-      // Restore scroll position after React renders the cached messages
+      // Restore scroll position after React renders the cached messages.
+      // Use double rAF to ensure at least one paint cycle has completed.
       ignoreScrollEventsUntilRef.current = performance.now() + 600;
       requestAnimationFrame(() => {
-        const sr = scrollRegionRef.current;
-        if (sr && !cancelled) {
-          sr.scrollTo({ top: cachedScrollTop, behavior: 'auto' });
-        }
+        requestAnimationFrame(() => {
+          const sr = scrollRegionRef.current;
+          if (sr && !cancelled) {
+            sr.scrollTo({ top: cachedScrollTop, behavior: 'auto' });
+          }
+        });
       });
     } else {
       sessionRestoredFromCacheRef.current = false;
@@ -2059,16 +2063,48 @@ export default function ChatPage() {
       }
       isNearBottomRef.current = true;
       ignoreScrollEventsUntilRef.current = performance.now() + 600;
-      const timer = window.setTimeout(() => {
-        const sr = scrollRegionRef.current;
-        if (sr) {
-          sr.scrollTo({ top: sr.scrollHeight, behavior: 'auto' });
-        } else {
-          bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-        }
-      }, 200);
+      // Use double rAF to ensure the browser has completed at least one paint
+      // cycle after React commits the new messages to the DOM.
+      let frameId: number;
+      let fallbackTimer = 0;
+      let settleObserver: ResizeObserver | null = null;
+      frameId = requestAnimationFrame(() => {
+        frameId = requestAnimationFrame(() => {
+          const sr = scrollRegionRef.current;
+          if (sr) {
+            sr.scrollTo({ top: sr.scrollHeight, behavior: 'auto' });
+          } else {
+            bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+          }
+          // Observe content height changes (images, code blocks loading) and
+          // re-scroll once if the user is still at the bottom.
+          const contentCol = contentColumnRef.current;
+          if (typeof ResizeObserver !== 'undefined' && contentCol) {
+            let settled = false;
+            settleObserver = new ResizeObserver(() => {
+              if (settled) return;
+              const s = scrollRegionRef.current;
+              if (!s) return;
+              const nearBottom =
+                s.scrollHeight - s.scrollTop - s.clientHeight <=
+                CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX;
+              if (nearBottom) {
+                s.scrollTo({ top: s.scrollHeight, behavior: 'auto' });
+              }
+              settled = true;
+              settleObserver?.disconnect();
+            });
+            settleObserver.observe(contentCol);
+            fallbackTimer = window.setTimeout(() => {
+              settleObserver?.disconnect();
+            }, 2000);
+          }
+        });
+      });
       return () => {
-        window.clearTimeout(timer);
+        cancelAnimationFrame(frameId);
+        if (fallbackTimer) window.clearTimeout(fallbackTimer);
+        settleObserver?.disconnect();
       };
     }
     prevSnapshotReadyRef.current = isSessionSnapshotReady;
@@ -2079,6 +2115,7 @@ export default function ChatPage() {
     ignoreScrollEventsUntilRef,
     scrollRegionRef,
     bottomRef,
+    contentColumnRef,
   ]);
 
   useEffect(() => {
