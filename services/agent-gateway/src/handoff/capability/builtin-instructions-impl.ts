@@ -920,12 +920,15 @@ registerInstruction({
       ].join('\n');
 
     const artifactId = randomUUID();
+    const teamWorkspaceId =
+      args.teamWorkspaceId ??
+      (typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null);
     sqliteRun(
       `INSERT INTO artifacts (
          id, session_id, user_id, type, title, content, version,
          phase, team_workspace_id, parent_artifact_id
        ) VALUES (?, ?, ?, 'markdown', ?, ?, 1, 'review_report', ?, NULL)`,
-      [artifactId, ctx.sessionId, ctx.userId, title, content, args.teamWorkspaceId ?? null],
+      [artifactId, ctx.sessionId, ctx.userId, title, content, teamWorkspaceId],
     );
 
     const resultJson = {

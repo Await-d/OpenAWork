@@ -19,6 +19,7 @@ import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/noti
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { requestSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
 import { subscribeSessionListRefresh } from '../../../utils/session/session-list-events.js';
+import { isPermissionReplyAlreadyHandled } from '../../../utils/permission/permission-reply.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { BellIcon } from './notification-icons.js';
 import { NotificationPanel } from './NotificationPanel.js';
@@ -97,6 +98,13 @@ export default function NotificationCenter({
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const permissionDetailsFetchedRef = useRef<Set<string>>(new Set());
+  /**
+   * 本地已判定为 stale 并正在 / 已 markRead 的 permission 通知 id。
+   * 用于挡住「乐观移除 → markRead 未落库 → loadNotifications 又把未读项拉回」
+   * 的竞态；markRead 失败时会从集合中剔除，允许后续重试。
+   */
+  const dismissedPermissionNotificationIdsRef = useRef<Set<string>>(new Set());
   const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
 
   useEffect(() => {
@@ -215,16 +223,21 @@ export default function NotificationCenter({
           status: 'unread',
         });
         if (controller.signal.aborted) return;
-        setNotifications(next);
+        // 过滤掉本地已判定 stale / 刚处理完但仍可能短暂未读的 permission 通知，
+        // 避免 markRead 与 list 之间的竞态把它们重新弹回列表。
+        const visible = next.filter(
+          (item) => !dismissedPermissionNotificationIdsRef.current.has(item.id),
+        );
+        setNotifications(visible);
 
-        // Browser notification when page hidden
+        // Browser notification when page hidden — only for items still shown.
         if (
           typeof window !== 'undefined' &&
           document.visibilityState === 'hidden' &&
           'Notification' in window &&
           Notification.permission === 'granted'
         ) {
-          next.forEach((item) => {
+          visible.forEach((item) => {
             if (seenIdsRef.has(item.id)) return;
             seenIdsRef.add(item.id);
             if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
@@ -241,7 +254,7 @@ export default function NotificationCenter({
             });
           });
         } else {
-          next.forEach((item) => seenIdsRef.add(item.id));
+          visible.forEach((item) => seenIdsRef.add(item.id));
         }
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
@@ -256,24 +269,42 @@ export default function NotificationCenter({
   const handleOpenNotification = useCallback(
     async (notification: NotificationRecord) => {
       if (!accessToken) return;
-      await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
+      if (notification.eventType === 'permission_asked') {
+        dismissedPermissionNotificationIdsRef.current.add(notification.id);
+      }
       setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
       setOpen(false);
+      try {
+        await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
+      } catch {
+        if (notification.eventType === 'permission_asked') {
+          dismissedPermissionNotificationIdsRef.current.delete(notification.id);
+          permissionDetailsFetchedRef.current.delete(notification.id);
+        }
+        void loadNotifications().catch(() => undefined);
+      }
       if (notification.sessionId) {
         preloadRoute('/chat');
         void navigate(`/chat/${notification.sessionId}`);
       }
     },
-    [accessToken, gatewayUrl, navigate, preloadRoute],
+    [accessToken, gatewayUrl, loadNotifications, navigate, preloadRoute],
   );
 
   const handleDismissNotification = useCallback(
     async (notification: NotificationRecord) => {
       if (!accessToken) return;
+      if (notification.eventType === 'permission_asked') {
+        dismissedPermissionNotificationIdsRef.current.add(notification.id);
+      }
       setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
       try {
         await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
       } catch {
+        if (notification.eventType === 'permission_asked') {
+          dismissedPermissionNotificationIdsRef.current.delete(notification.id);
+          permissionDetailsFetchedRef.current.delete(notification.id);
+        }
         void loadNotifications().catch(() => undefined);
       }
     },
@@ -323,7 +354,6 @@ export default function NotificationCenter({
   const [permissionDetails, setPermissionDetails] = useState<
     Record<string, PendingPermissionRequest>
   >({});
-  const permissionDetailsFetchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!accessToken) return;
@@ -331,11 +361,13 @@ export default function NotificationCenter({
       (n) =>
         n.eventType === 'permission_asked' &&
         n.sessionId &&
-        !permissionDetailsFetchedRef.current.has(n.id),
+        !permissionDetailsFetchedRef.current.has(n.id) &&
+        !dismissedPermissionNotificationIdsRef.current.has(n.id),
     );
     if (permNotifications.length === 0) return;
     permNotifications.forEach((n) => permissionDetailsFetchedRef.current.add(n.id));
     const permClient = createPermissionsClient(gatewayUrl);
+    const notificationsClient = createNotificationsClient(gatewayUrl);
     const bySession = new Map<string, NotificationRecord[]>();
     permNotifications.forEach((n) => {
       const list = bySession.get(n.sessionId as string) ?? [];
@@ -346,18 +378,53 @@ export default function NotificationCenter({
       void permClient
         .listPending(accessToken, sessionId)
         .then((pending) => {
+          const pendingOnly = pending.filter((request) => request.status === 'pending');
           const updates: Record<string, PendingPermissionRequest> = {};
+          const staleIds: string[] = [];
           notifs.forEach((notification) => {
-            const matched = matchPendingPermissionForNotification(notification, pending);
+            const matched = matchPendingPermissionForNotification(notification, pendingOnly);
             if (matched) {
               updates[notification.id] = matched;
+              return;
+            }
+
+            // 只在「确定已不存在」时自动 markRead：
+            // - 该会话已无任何 pending；或
+            // - 通知正文带 requestId，且该 id 不在 pending 列表中。
+            // 模糊匹配失败但会话仍有其它 pending 时，保留通知（不展示审批按钮），
+            // 避免误把仍有效的权限请求清掉。
+            const parsed = parsePermissionNotificationBody(notification.body);
+            const requestId = parsed?.requestId?.trim();
+            const isDefinitelyGone =
+              pendingOnly.length === 0 ||
+              (typeof requestId === 'string' &&
+                requestId.length > 0 &&
+                !pendingOnly.some((request) => request.requestId === requestId));
+            if (isDefinitelyGone) {
+              staleIds.push(notification.id);
             }
           });
           if (Object.keys(updates).length > 0) {
             setPermissionDetails((prev) => ({ ...prev, ...updates }));
           }
+          if (staleIds.length > 0) {
+            staleIds.forEach((id) => dismissedPermissionNotificationIdsRef.current.add(id));
+            setNotifications((prev) => prev.filter((item) => !staleIds.includes(item.id)));
+            staleIds.forEach((id) => {
+              void notificationsClient.markRead(accessToken, id).catch(() => {
+                // markRead 失败：允许后续轮询 / refresh 重新评估。
+                dismissedPermissionNotificationIdsRef.current.delete(id);
+                permissionDetailsFetchedRef.current.delete(id);
+              });
+            });
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          // 拉取 pending 失败时回滚 fetched 标记，避免永久跳过。
+          notifs.forEach((notification) => {
+            permissionDetailsFetchedRef.current.delete(notification.id);
+          });
+        });
     });
   }, [accessToken, gatewayUrl, notifications]);
 
@@ -419,8 +486,13 @@ export default function NotificationCenter({
         };
         toast(`已提交：${labels[decision]}`, 'success');
         void handleDismissNotification(notification);
-      } catch {
-        toast('审批操作失败，请稍后重试', 'error');
+      } catch (error) {
+        if (isPermissionReplyAlreadyHandled(error)) {
+          toast('该权限请求已被处理或已过期', 'info');
+          void handleDismissNotification(notification);
+        } else {
+          toast('审批操作失败，请稍后重试', 'error');
+        }
       } finally {
         setReplyingIds((prev) => {
           const next = new Set(prev);
@@ -442,6 +514,8 @@ export default function NotificationCenter({
     if (!accessToken) {
       setNotifications([]);
       setPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
+      dismissedPermissionNotificationIdsRef.current.clear();
+      permissionDetailsFetchedRef.current.clear();
       return;
     }
 
@@ -476,6 +550,10 @@ export default function NotificationCenter({
 
   useEffect(() => {
     return subscribeSessionListRefresh(() => {
+      // Floating / inline replies mark notifications read server-side and
+      // broadcast a session-list refresh. Clear the per-item fetch cache so we
+      // re-list pending permissions and drop any already-resolved entries.
+      permissionDetailsFetchedRef.current.clear();
       void loadNotifications().catch(() => undefined);
     });
   }, [loadNotifications]);

@@ -37,6 +37,14 @@ function seedBase(): void {
   );
 }
 
+function seedSession(sessionId: string, roleLayer: string): void {
+  dbModule.sqliteRun(
+    `INSERT OR IGNORE INTO sessions (id, user_id, title, metadata_json, role_layer)
+     VALUES (?, ?, 'demo', '{}', ?)`,
+    [sessionId, USER_ID, roleLayer],
+  );
+}
+
 function seedRunningHandoff(input: {
   id: string;
   toSessionId: string;
@@ -361,6 +369,41 @@ describe('review aggregation + structured checklist', () => {
 
     expect(report.overallVerdict).toBe('execution-protocol-failure');
     expect(report.qualityIssues.join('；')).toContain('submit_execution_result');
+  });
+});
+
+describe('submit_review', () => {
+  it('未显式传 teamWorkspaceId 时，artifact 继承 handoff payload 的 teamWorkspaceId', async () => {
+    const reviewerSessionId = 's-protocol-reviewer';
+    seedSession(reviewerSessionId, 'reviewer');
+    seedRunningHandoff({
+      id: 'h-review-1',
+      toSessionId: reviewerSessionId,
+      toRoleLayer: 'reviewer',
+      payload: {
+        goal: '评审登录实现',
+        taskMarkers: { taskId: 'T001' },
+        teamWorkspaceId: 'tw-review',
+      },
+    });
+
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'reviewer', sessionId: reviewerSessionId, userId: USER_ID },
+      instructionName: 'submit_review',
+      rawArgs: {
+        taskId: 'T001',
+        verdict: 'pass',
+        items: [{ id: 'AC-001', status: 'pass', reason: '实现符合预期' }],
+        overallReason: '通过',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const artifactRow = dbModule.sqliteGet<{ team_workspace_id: string | null }>(
+      `SELECT team_workspace_id FROM artifacts WHERE session_id = ? AND phase = 'review_report'`,
+      [reviewerSessionId],
+    );
+    expect(artifactRow?.team_workspace_id).toBe('tw-review');
   });
 });
 

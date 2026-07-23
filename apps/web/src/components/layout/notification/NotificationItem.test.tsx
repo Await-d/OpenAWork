@@ -113,6 +113,30 @@ describe('NotificationItem', () => {
     );
   });
 
+  it('没有 pending 详情时不展示审批操作按钮', () => {
+    const notification = makeNotification();
+    const html = renderToStaticMarkup(
+      <NotificationItem
+        notification={notification}
+        permDetail={undefined}
+        sessionTitle="测试会话"
+        replying={false}
+        selectedScope={undefined}
+        index={0}
+        onOpen={vi.fn()}
+        onDismiss={vi.fn()}
+        onReply={vi.fn()}
+        onScopeChange={vi.fn()}
+      />,
+    );
+
+    expect(html).not.toContain('允许一次');
+    expect(html).not.toContain('本会话');
+    expect(html).not.toContain('永久允许');
+    expect(html).not.toContain('拒绝');
+    expect(html).not.toContain('授权范围');
+  });
+
   it('bash 权限通知也会按第一档、第二档、第三档固定展示指令范围', () => {
     const notification = makeNotification({
       title: '等待权限 · bash',

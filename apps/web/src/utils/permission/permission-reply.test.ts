@@ -11,8 +11,48 @@ vi.mock('@openAwork/web-client', () => ({
   }),
 }));
 
-import { replyPermissionRequest } from './permission-reply.js';
+import {
+  isPermissionReplyAlreadyHandled,
+  replyPermissionRequest,
+  resolvePermissionReplyError,
+} from './permission-reply.js';
 import { subscribeSessionStreamResumeAttach } from '../session/session-stream-resume-events.js';
+
+describe('resolvePermissionReplyError', () => {
+  it('中文 409「权限请求已处理」应关闭弹层', () => {
+    const error = Object.assign(new Error('权限请求已处理，无法重复提交。'), {
+      status: 409,
+      data: { error: '权限请求已处理，无法重复提交。' },
+    });
+
+    expect(isPermissionReplyAlreadyHandled(error)).toBe(true);
+    expect(resolvePermissionReplyError(error)).toEqual({
+      dismissPrompt: true,
+      inlineMessage: '该权限请求已被处理，正在重新同步。',
+      toastMessage: '权限请求已被处理，已重新同步状态。',
+    });
+  });
+
+  it('404 应关闭弹层', () => {
+    const error = Object.assign(new Error('目标权限请求不存在。'), {
+      status: 404,
+      data: { error: '目标权限请求不存在。' },
+    });
+
+    expect(resolvePermissionReplyError(error).dismissPrompt).toBe(true);
+  });
+
+  it('其它错误保留弹层并展示文案', () => {
+    const error = Object.assign(new Error('网络异常，回复权限请求失败。'), {
+      status: 500,
+    });
+
+    expect(resolvePermissionReplyError(error)).toEqual({
+      dismissPrompt: false,
+      inlineMessage: '网络异常，回复权限请求失败。',
+    });
+  });
+});
 
 describe('replyPermissionRequest', () => {
   beforeEach(() => {

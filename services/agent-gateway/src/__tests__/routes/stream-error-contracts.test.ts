@@ -25,6 +25,7 @@ let streamRequestSchema: typeof StreamRoutesModule.streamRequestSchema;
 let streamRoutes: typeof StreamRoutesPluginModule.streamRoutes;
 let STREAM_ERROR_MESSAGES: typeof StreamRoutesModule.STREAM_ERROR_MESSAGES;
 let STREAM_PLUGIN_ERROR_MESSAGES: typeof StreamRoutesPluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
+let buildSseClientDisconnectedAuditLog: typeof StreamRoutesPluginModule.buildSseClientDisconnectedAuditLog;
 let createStreamErrorChunk: typeof StreamRoutesModule.createStreamErrorChunk;
 let createStreamUpstreamRouteChunk: typeof StreamRoutesModule.createStreamUpstreamRouteChunk;
 let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
@@ -109,6 +110,7 @@ beforeAll(async () => {
   const pluginModule = await import('../../routes/stream-routes-plugin.js');
   streamRoutes = pluginModule.streamRoutes;
   STREAM_PLUGIN_ERROR_MESSAGES = pluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
+  buildSseClientDisconnectedAuditLog = pluginModule.buildSseClientDisconnectedAuditLog;
 }, STREAM_ERROR_CONTRACTS_COLD_IMPORT_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
@@ -191,6 +193,25 @@ describe('stream error contracts', () => {
       'WebSocket 流式响应处理中断，请稍后重试。',
     );
     expect(STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError).toBe('SSE 流式响应处理中断，请稍后重试。');
+  });
+
+  it('SSE 客户端主动断开仅记录非错误审计事件', () => {
+    expect(
+      buildSseClientDisconnectedAuditLog({
+        clientRequestId: 'req-disconnect',
+        sessionId: SESSION_ID,
+      }),
+    ).toEqual({
+      sessionId: SESSION_ID,
+      category: 'route',
+      sourceName: 'SSE_CLIENT_DISCONNECTED',
+      requestId: 'req-disconnect',
+      output: {
+        code: 'SSE_CLIENT_DISCONNECTED',
+        message: STREAM_PLUGIN_ERROR_MESSAGES.sseClientDisconnected,
+      },
+      isError: false,
+    });
   });
 
   it('Team metadata 固定模型不可用时不 fallback 到 Chat 默认模型', async () => {

@@ -60,6 +60,23 @@ const streamMultiAttachQuerySchema = z.object({
   token: z.string().trim().min(1),
 });
 
+export function buildSseClientDisconnectedAuditLog(input: {
+  clientRequestId: string;
+  sessionId: string;
+}) {
+  return {
+    sessionId: input.sessionId,
+    category: 'route' as const,
+    sourceName: 'SSE_CLIENT_DISCONNECTED',
+    requestId: input.clientRequestId,
+    output: {
+      code: 'SSE_CLIENT_DISCONNECTED',
+      message: STREAM_PLUGIN_ERROR_MESSAGES.sseClientDisconnected,
+    },
+    isError: false,
+  };
+}
+
 function parseSseCursorFromLastEventId(
   lastEventId: string | undefined,
   clientRequestId: string,
@@ -547,16 +564,12 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       if (clientClosed) return;
       clientClosed = true;
       if (streamingStarted) {
-        writeAuditLog({
-          sessionId,
-          category: 'route',
-          sourceName: 'SSE_CLIENT_DISCONNECTED',
-          requestId: query.data.clientRequestId,
-          output: {
-            code: 'SSE_CLIENT_DISCONNECTED',
-            message: STREAM_PLUGIN_ERROR_MESSAGES.sseClientDisconnected,
-          },
-        });
+        writeAuditLog(
+          buildSseClientDisconnectedAuditLog({
+            clientRequestId: query.data.clientRequestId,
+            sessionId,
+          }),
+        );
       }
     };
     request.raw.on('close', onClientClose);

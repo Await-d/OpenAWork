@@ -122,6 +122,34 @@ export function PermissionPrompt(props: PermissionPromptProps): ReactElement {
         )
       ) : null}
       {props.errorMessage ? <div>{props.errorMessage}</div> : null}
+      <button
+        type="button"
+        disabled={props.pendingDecision !== null && props.pendingDecision !== undefined}
+        onClick={() => props.onDecide(props.requestId, 'once')}
+      >
+        允许一次
+      </button>
+      <button
+        type="button"
+        disabled={props.pendingDecision !== null && props.pendingDecision !== undefined}
+        onClick={() => props.onDecide(props.requestId, 'session')}
+      >
+        本会话允许
+      </button>
+      <button
+        type="button"
+        disabled={props.pendingDecision !== null && props.pendingDecision !== undefined}
+        onClick={() => props.onDecide(props.requestId, 'permanent')}
+      >
+        永久允许
+      </button>
+      <button
+        type="button"
+        disabled={props.pendingDecision !== null && props.pendingDecision !== undefined}
+        onClick={() => props.onDecide(props.requestId, 'reject')}
+      >
+        拒绝
+      </button>
     </div>
   );
 }

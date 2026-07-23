@@ -74,6 +74,42 @@ describe('buildUpstreamStreamSummaryLog', () => {
       isError: false,
     });
   });
+
+  it('仅 stopReason=error 时把流摘要记为错误', () => {
+    expect(
+      buildUpstreamStreamSummaryLog({
+        model: 'gpt-test',
+        round: 1,
+        upstreamProtocol: 'responses',
+        stopReason: 'cancelled',
+        diagnostics: {
+          textDeltaCount: 0,
+          reasoningDeltaCount: 0,
+          toolCallDeltaCount: 0,
+          sawDone: false,
+          sawError: false,
+          stalled: false,
+        },
+      }).isError,
+    ).toBe(false);
+
+    expect(
+      buildUpstreamStreamSummaryLog({
+        model: 'gpt-test',
+        round: 1,
+        upstreamProtocol: 'responses',
+        stopReason: 'error',
+        diagnostics: {
+          textDeltaCount: 0,
+          reasoningDeltaCount: 0,
+          toolCallDeltaCount: 0,
+          sawDone: false,
+          sawError: true,
+          stalled: false,
+        },
+      }).isError,
+    ).toBe(true);
+  });
 });
 
 describe('toUpstreamStreamSummary', () => {

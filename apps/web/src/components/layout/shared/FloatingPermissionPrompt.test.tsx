@@ -41,9 +41,14 @@ vi.mock('../../../utils/session/session-list-events.js', () => ({
   subscribeSessionPendingPermission: mocks.subscribeSessionPendingPermission,
 }));
 
-vi.mock('../../../utils/permission/permission-reply.js', () => ({
-  replyPermissionRequest: mocks.replyPermissionRequest,
-}));
+vi.mock('../../../utils/permission/permission-reply.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../utils/permission/permission-reply.js')>();
+  return {
+    ...actual,
+    replyPermissionRequest: mocks.replyPermissionRequest,
+  };
+});
 
 vi.mock('../../common/feedback/ToastNotification.js', () => ({
   toast: mocks.toast,
@@ -117,6 +122,32 @@ describe('FloatingPermissionPrompt', () => {
     await waitFor(() => {
       expect(mocks.navigate).toHaveBeenCalledWith('/team/workspace-1?sessionId=target-session-1');
     });
+  });
+
+  it('回复返回中文 409 时会关闭弹层并 toast 提示', async () => {
+    mocks.replyPermissionRequest.mockRejectedValueOnce(
+      Object.assign(new Error('权限请求已处理，无法重复提交。'), {
+        status: 409,
+        data: { error: '权限请求已处理，无法重复提交。' },
+      }),
+    );
+
+    render(<FloatingPermissionPrompt />);
+
+    const allowOnce = await screen.findByRole('button', { name: '允许一次' });
+    fireEvent.click(allowOnce);
+
+    await waitFor(() => {
+      expect(mocks.toast).toHaveBeenCalledWith(
+        '权限请求已被处理，已重新同步状态。',
+        'warning',
+        4200,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '允许一次' })).toBeNull();
+    });
+    expect(mocks.requestSessionListRefresh).toHaveBeenCalled();
   });
 
   it('错过实时事件时会从未读通知恢复待审批弹层', async () => {

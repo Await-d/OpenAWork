@@ -6140,12 +6140,13 @@ export class ToolSandbox {
     }
 
     if (permissionState.kind === 'pending') {
+      const pendingMessage = permissionState.created
+        ? `Tool "${request.toolName}" requires approval before it can run. Permission request ${permissionState.requestId} has been created. Ask the user to approve it, then retry.`
+        : `Tool "${request.toolName}" is waiting for approval. Permission request ${permissionState.requestId} is still pending. Ask the user to approve it, then retry.`;
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: permissionState.created
-          ? `Tool "${request.toolName}" requires approval before it can modify the workspace. Permission request ${permissionState.requestId} has been created. Ask the user to approve it, then retry.`
-          : `Tool "${request.toolName}" is waiting for approval. Permission request ${permissionState.requestId} is still pending. Ask the user to approve it, then retry.`,
+        output: pendingMessage,
         isError: true,
         durationMs: 0,
         pendingPermissionRequestId: permissionState.requestId,

@@ -38,5 +38,5 @@ export function shouldAdoptSessionModelSelectionDefaults(input: {
 export function shouldSendExplicitStreamModelSelection(
   source: ModelSelectionSource | null,
 ): boolean {
-  return source === 'manual';
+  return source !== null;
 }

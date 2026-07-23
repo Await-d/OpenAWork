@@ -242,6 +242,13 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         throw ApiError.notFound('目标权限请求不存在。');
       }
       if (permissionRequest.status !== 'pending') {
+        // 幂等收口：重复提交时仍把对应通知标为已读，避免前端通知中心残留
+        // 可点击的已处理权限项。
+        markPermissionNotificationsReadByRequestIds({
+          requestIds: [body.requestId],
+          sessionId,
+          userId: user.sub,
+        });
         step.fail('permission request already resolved');
         return reply.status(409).send({ error: '权限请求已处理，无法重复提交。' });
       }

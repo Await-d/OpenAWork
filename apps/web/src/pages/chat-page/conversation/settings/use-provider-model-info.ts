@@ -52,21 +52,22 @@ export function useProviderModelInfo(deps: ProviderModelInfoDeps): ProviderModel
     }
 
     const fallbackProvider = providers.find((provider) => provider.defaultModels.length > 0);
-    const nextProvider =
-      providers.find(
-        (provider) => provider.id === activeProviderId && provider.defaultModels.length > 0,
-      ) ?? fallbackProvider;
-    const nextModel = nextProvider?.defaultModels.find((model) => model.id === activeModelId);
-    const fallbackModel = nextProvider?.defaultModels[0];
+    const hasActiveProvider = providers.some(
+      (provider) => provider.id === activeProviderId && provider.defaultModels.length > 0,
+    );
+    const nextProvider = hasActiveProvider
+      ? providers.find((provider) => provider.id === activeProviderId)
+      : fallbackProvider;
     const nextProviderId = nextProvider?.id ?? '';
-    const nextModelId = nextModel?.id ?? fallbackModel?.id ?? '';
 
-    if (activeProviderId !== nextProviderId) {
+    if (!activeProviderId && nextProviderId) {
       setActiveProviderId(nextProviderId);
     }
 
-    if (activeModelId !== nextModelId) {
-      setActiveModelId(nextModelId);
+    const fallbackModelId = nextProvider?.defaultModels[0]?.id ?? '';
+    if (!activeModelId && fallbackModelId) {
+      setActiveProviderId(nextProviderId);
+      setActiveModelId(fallbackModelId);
     }
   }, [providers, activeProviderId, activeModelId, setActiveProviderId, setActiveModelId]);
 

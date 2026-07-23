@@ -615,8 +615,10 @@ function NotificationItemImpl({
           </div>
         )}
 
-        {/* Permission quick actions */}
-        {isPermission && notification.sessionId && (
+        {/* Permission quick actions — only when we still have a live pending request.
+            Resolved/expired permissions stay in the list until marked read, but
+            must not re-offer decide buttons that will 409. */}
+        {isPermission && notification.sessionId && permDetail?.status === 'pending' && (
           <PermissionActions
             notificationId={notification.id}
             replying={replying}

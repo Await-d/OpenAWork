@@ -166,6 +166,42 @@ describe('permissions reply notification sync', () => {
     }
   });
 
+  it('重复提交已处理权限时返回 409，并把对应通知标记为已读', async () => {
+    seedPendingPermissionRequest('perm-already');
+    seedPermissionNotification('notif-perm-already', 'perm-already');
+    dbModule.sqliteRun(
+      `UPDATE permission_requests SET status = 'approved', decision = 'session' WHERE id = ?`,
+      ['perm-already'],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          requestId: 'perm-already',
+          decision: 'session',
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: '权限请求已处理，无法重复提交。' });
+
+      const notification = dbModule.sqliteGet<{ status: string }>(
+        'SELECT status FROM notifications WHERE id = ? LIMIT 1',
+        ['notif-perm-already'],
+      );
+      expect(notification?.status).toBe('read');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('拒绝触发级联时，会把主请求和级联请求的通知一起标记为已读', async () => {
     seedPendingPermissionRequest('perm-primary');
     seedPendingPermissionRequest('perm-secondary');

@@ -208,7 +208,11 @@ jobs:
             patchelf \
             squashfs-tools \
             appstream \
-            wget
+            wget \
+            xdg-utils
+          # linuxdeploy AppImage 在部分 runner 上会调用 xdg-open；
+          # ARM 镜像默认不带 xdg-utils，缺了会在 bundling 阶段直接失败：
+          #   xdg-open binary not found /usr/bin/xdg-open
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
 
       # 已改为原生 ARM runner，不再做 x64→arm64 交叉编译依赖安装。

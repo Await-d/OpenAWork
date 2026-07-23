@@ -244,6 +244,7 @@ describe('tool-sandbox flat MCP permission boundary', () => {
     );
 
     expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval before it can run');
     expect(permissionInsertParams()).toEqual(
       expect.arrayContaining([
         'bash',

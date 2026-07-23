@@ -28,55 +28,12 @@ import {
 import type { SessionPendingPermissionState } from '../../../utils/permission/pending-permission-state.js';
 import { toSessionPendingPermissionStateFromRequest } from '../../../utils/permission/pending-permission-state.js';
 import { matchPendingPermissionForNotification } from '../../../utils/permission/permission-notification.js';
-import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
+import {
+  replyPermissionRequest,
+  resolvePermissionReplyError,
+} from '../../../utils/permission/permission-reply.js';
 import { resolvePermissionAlwaysOverride } from '../../../utils/permission/permission-scope.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
-
-function resolvePermissionReplyError(error: unknown): {
-  dismissPrompt: boolean;
-  inlineMessage: string;
-  toastMessage?: string;
-} {
-  const httpError =
-    typeof error === 'object' && error !== null && typeof Reflect.get(error, 'status') === 'number'
-      ? {
-          status: Reflect.get(error, 'status') as number,
-          data: Reflect.get(error, 'data') as { error?: string } | undefined,
-        }
-      : null;
-
-  if (httpError) {
-    if (httpError.status === 409 && httpError.data?.error === 'Permission request expired') {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '该权限请求已过期，正在重新同步。',
-        toastMessage: '权限请求已过期，已重新同步状态。',
-      };
-    }
-    if (
-      httpError.status === 409 &&
-      httpError.data?.error === 'Permission request already resolved'
-    ) {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '该权限请求已被处理，正在重新同步。',
-        toastMessage: '权限请求已被处理，已重新同步状态。',
-      };
-    }
-    if (httpError.status === 404) {
-      return {
-        dismissPrompt: true,
-        inlineMessage: '权限请求已不存在，正在重新同步。',
-        toastMessage: '权限请求已不存在，已重新同步状态。',
-      };
-    }
-  }
-
-  return {
-    dismissPrompt: false,
-    inlineMessage: error instanceof Error ? error.message : '权限处理失败，请重试。',
-  };
-}
 
 /**
  * Callback to notify the parent Layout about pending permission state

@@ -43,3 +43,46 @@ export function getPermissionReplyStatusCode(error: unknown): number | null {
   const status = Reflect.get(error, 'status');
   return typeof status === 'number' ? status : null;
 }
+
+/**
+ * 404 / 409 表示服务端上该权限请求已不存在或已处理完毕。
+ * 前端应视为幂等成功：关闭弹层 / 从通知列表移除，而不是保留可重复提交的 UI。
+ */
+export function isPermissionReplyAlreadyHandled(error: unknown): boolean {
+  const status = getPermissionReplyStatusCode(error);
+  return status === 404 || status === 409;
+}
+
+export function getPermissionReplyErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return '权限处理失败，请重试。';
+}
+
+export function resolvePermissionReplyError(error: unknown): {
+  dismissPrompt: boolean;
+  inlineMessage: string;
+  toastMessage?: string;
+} {
+  if (isPermissionReplyAlreadyHandled(error)) {
+    const status = getPermissionReplyStatusCode(error);
+    if (status === 404) {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '权限请求已不存在，正在重新同步。',
+        toastMessage: '权限请求已不存在，已重新同步状态。',
+      };
+    }
+    return {
+      dismissPrompt: true,
+      inlineMessage: '该权限请求已被处理，正在重新同步。',
+      toastMessage: '权限请求已被处理，已重新同步状态。',
+    };
+  }
+
+  return {
+    dismissPrompt: false,
+    inlineMessage: getPermissionReplyErrorMessage(error),
+  };
+}

@@ -54,10 +54,10 @@ describe('model-selection-source', () => {
     ).toBe(false);
   });
 
-  it('只有手动选型才显式透传 provider/model', () => {
+  it('只要会话已有明确模型绑定，就显式透传 provider/model', () => {
     expect(shouldSendExplicitStreamModelSelection('manual')).toBe(true);
-    expect(shouldSendExplicitStreamModelSelection('metadata')).toBe(false);
-    expect(shouldSendExplicitStreamModelSelection('defaults')).toBe(false);
+    expect(shouldSendExplicitStreamModelSelection('metadata')).toBe(true);
+    expect(shouldSendExplicitStreamModelSelection('defaults')).toBe(true);
     expect(shouldSendExplicitStreamModelSelection(null)).toBe(false);
   });
 });
