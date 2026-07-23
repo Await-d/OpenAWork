@@ -159,29 +159,31 @@ function runBunCompileWithRetry(bunArgs, options = {}, attempts = 3) {
     : new Error(`bun compile failed after ${attempts} attempts`);
 }
 
-function readTargetTriple() {
-  if (process.env.TAURI_TARGET_TRIPLE) {
-    return process.env.TAURI_TARGET_TRIPLE;
-  }
-
+function readHostTriple() {
   const result = spawnSync('rustc', ['-Vv'], { encoding: 'utf8' });
   if (result.error) {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error('rustc -Vv failed while resolving Tauri target triple');
+    throw new Error('rustc -Vv failed while resolving host triple');
   }
 
   const hostLine = result.stdout
     .split('\n')
     .map((line) => line.trim())
     .find((line) => line.startsWith('host:'));
-  const targetTriple = hostLine?.slice('host:'.length).trim();
-  if (!targetTriple) {
-    throw new Error('Cannot resolve Tauri target triple from rustc -Vv output');
+  const hostTriple = hostLine?.slice('host:'.length).trim();
+  if (!hostTriple) {
+    throw new Error('Cannot resolve host triple from rustc -Vv output');
   }
+  return hostTriple;
+}
 
-  return targetTriple;
+function readTargetTriple() {
+  if (process.env.TAURI_TARGET_TRIPLE) {
+    return process.env.TAURI_TARGET_TRIPLE;
+  }
+  return readHostTriple();
 }
 
 /**
@@ -191,10 +193,25 @@ function readTargetTriple() {
  * Without this, `bun build --compile` always emits a host-arch binary, then we
  * rename it with the target triple suffix — producing a mislabeled sidecar that
  * crashes on windows-aarch64 / linux-aarch64 / cross-mac builds.
+ *
+ * 注意：仅在“目标 ≠ 主机”时才返回 bun --target。主机匹配时强制 --target 会让
+ * Bun 去下载/解压目标 runtime；Windows x64→arm64 场景下该步骤会稳定失败：
+ *   Failed to extract executable for 'bun-windows-aarch64-v…'
  */
 function bunCompileTargetForTriple(targetTriple) {
   const triple = String(targetTriple || '').trim();
   if (!triple) return null;
+
+  let hostTriple = '';
+  try {
+    hostTriple = readHostTriple();
+  } catch {
+    hostTriple = '';
+  }
+  if (hostTriple && hostTriple === triple) {
+    // 原生构建：直接用 host bun，不触发交叉 runtime 下载/解压
+    return null;
+  }
 
   /** @type {Record<string, string>} */
   const mapping = {
