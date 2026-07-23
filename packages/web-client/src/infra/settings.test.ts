@@ -223,6 +223,43 @@ describe('createSettingsClient mutation error handling', () => {
     ).rejects.toThrow('provider config conflict');
   });
 
+  it('discoverProviders 请求正确路径并返回 JSON', async () => {
+    globalThis.fetch = vi.fn(async (input) => {
+      expect(String(input)).toContain('/settings/providers/discover');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ providers: [{ id: 'together', name: 'Together' }] }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const data = (await client.discoverProviders('token-1')) as {
+      providers: Array<{ id: string }>;
+    };
+    expect(data.providers[0]?.id).toBe('together');
+  });
+
+  it('importProviderFromModelsDev 以 POST 发送 modelsDevProviderId', async () => {
+    globalThis.fetch = vi.fn(async (input, init) => {
+      expect(String(input)).toContain('/settings/providers/import-from-models-dev');
+      expect(init?.method).toBe('POST');
+      const body = JSON.parse(String(init?.body)) as { modelsDevProviderId: string };
+      expect(body.modelsDevProviderId).toBe('together');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: { id: 'custom-md-together-1', type: 'custom' } }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const data = (await client.importProviderFromModelsDev('token-1', {
+      modelsDevProviderId: 'together',
+    })) as { provider: { type: string } };
+    expect(data.provider.type).toBe('custom');
+  });
+
   it('retryMcpServer 网络异常时会转换成中文网络错误', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('Failed to fetch');

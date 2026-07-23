@@ -1308,6 +1308,59 @@ export default function SettingsPage() {
     }
   }, [token, gatewayUrl]);
 
+  const handleDiscoverProviders = React.useCallback(async (): Promise<{
+    providers: Array<{
+      id: string;
+      name: string;
+      api?: string;
+      modelCount: number;
+      sampleModels?: Array<{ id: string; name: string }>;
+    }>;
+  }> => {
+    if (!token) {
+      throw new Error('未登录，无法发现平台。');
+    }
+    const data = (await createSettingsClient(gatewayUrl).discoverProviders(token)) as {
+      providers?: Array<{
+        id: string;
+        name: string;
+        api?: string;
+        modelCount: number;
+        sampleModels?: Array<{ id: string; name: string }>;
+      }>;
+    };
+    return { providers: data.providers ?? [] };
+  }, [token, gatewayUrl]);
+
+  const handleImportDiscoveredProvider = React.useCallback(
+    async (modelsDevProviderId: string): Promise<void> => {
+      if (!token) {
+        throw new Error('未登录，无法导入平台。');
+      }
+      const data = (await createSettingsClient(gatewayUrl).importProviderFromModelsDev(token, {
+        modelsDevProviderId,
+      })) as {
+        providers?: AIProviderRef[];
+        activeSelection?: ActiveSelectionRef;
+      };
+      if (data.providers) {
+        providersRef.current = data.providers;
+        setProviders(data.providers);
+        const { draftSelection, savedSelection } = syncSelectionForProviders(data.providers);
+        if (data.activeSelection) {
+          activeSelectionRef.current = data.activeSelection;
+          setActiveSelection(data.activeSelection);
+          setSavedActiveSelection(data.activeSelection);
+        } else {
+          activeSelectionRef.current = draftSelection;
+          setActiveSelection(draftSelection);
+          setSavedActiveSelection(savedSelection);
+        }
+      }
+    },
+    [token, gatewayUrl, syncSelectionForProviders],
+  );
+
   function handleToggleProvider(id: string) {
     setProviders((prev) => {
       const next = prev.map((provider) =>
@@ -1778,6 +1831,8 @@ export default function SettingsPage() {
                     handleAddProvider={handleAddProvider}
                     onTestModel={handleTestModel}
                     onSyncCatalog={handleSyncCatalog}
+                    onDiscoverProviders={handleDiscoverProviders}
+                    onImportDiscoveredProvider={handleImportDiscoveredProvider}
                     urlInput={urlInput}
                     setUrlInput={setUrlInput}
                     saveGatewayUrl={saveGatewayUrl}

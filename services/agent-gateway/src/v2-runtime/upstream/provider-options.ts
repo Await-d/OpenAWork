@@ -504,22 +504,24 @@ export function buildProviderOptions(input: {
   }
 
   // 当 supportsThinking 为 false 时，检查是否是因为用户通过 OpenAI 兼容代理
-  // 使用非 OpenAI 模型（如 MiMo/Qwen/DeepSeek），此时 providerType 是 'openai'
-  // 或 'custom'，modelConfig 找不到导致 supportsThinking=false。通过 modelId
+  // 或聚合平台（如 SiliconFlow）使用非 OpenAI 模型（如 MiMo/Qwen/DeepSeek），
+  // 此时 modelConfig 找不到导致 supportsThinking=false。通过 modelId
   // 推断出真实厂商后，应视为支持思考。
   let effectiveSupportsThinking = thinking.supportsThinking;
   const normalizedProviderType = thinking.providerType.toLowerCase();
   if (
     !effectiveSupportsThinking &&
-    (normalizedProviderType === 'openai' || normalizedProviderType === 'custom')
+    (normalizedProviderType === 'openai' ||
+      normalizedProviderType === 'custom' ||
+      normalizedProviderType === 'siliconflow')
   ) {
     const inferredStyle = resolveThinkingStyle(thinking.providerType, input.model);
     if (
       inferredStyle !== 'none' &&
       catalogModelSupportsThinking(thinking.providerType, input.model)
     ) {
-      // 仅在 openai/custom 代理场景下，且根据 modelId 能推断出真实支持 thinking
-      // 的厂商模型时，才恢复 supportsThinking。
+      // 仅在 openai/custom/siliconflow 代理场景下，且根据 modelId 能推断出真实
+      // 支持 thinking 的厂商模型时，才恢复 supportsThinking。
       effectiveSupportsThinking = true;
     }
   }

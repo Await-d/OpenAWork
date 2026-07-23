@@ -675,6 +675,367 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
   },
+  {
+    type: 'mistral',
+    displayName: 'Mistral',
+    enabledByDefault: false,
+    apiKeyEnv: 'MISTRAL_API_KEY',
+    hostnames: ['api.mistral.ai'],
+    ui: {
+      logoUrl: '/logo-mistralai.svg',
+      fallbackGlyph: 'M',
+      aliases: ['mistralai'],
+      modelIdPrefixes: ['mistral', 'mixtral', 'codestral', 'pixtral'],
+    },
+    upstreams: [{ label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', isDefault: true }],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'mistral-large-latest',
+        label: 'Mistral Large',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'mistral-small-latest',
+        label: 'Mistral Small',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'codestral-latest',
+        label: 'Codestral',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'zhipu',
+    displayName: '智谱 GLM',
+    enabledByDefault: false,
+    apiKeyEnv: 'ZHIPU_API_KEY',
+    hostnames: ['open.bigmodel.cn'],
+    ui: {
+      fallbackGlyph: '智',
+      aliases: ['glm', 'bigmodel'],
+      modelIdPrefixes: ['glm'],
+    },
+    upstreams: [
+      {
+        label: '智谱 OpenAI 兼容',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'glm-4.5',
+        label: 'GLM-4.5',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'glm-4-flash',
+        label: 'GLM-4 Flash',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'doubao',
+    displayName: '豆包 / 火山方舟',
+    enabledByDefault: false,
+    apiKeyEnv: 'ARK_API_KEY',
+    hostnames: ['ark.cn-beijing.volces.com'],
+    ui: {
+      fallbackGlyph: '豆',
+      aliases: ['volcengine', 'ark', 'volces'],
+      modelIdPrefixes: ['doubao', 'ep-'],
+    },
+    upstreams: [
+      {
+        label: '火山方舟',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'ep-your-endpoint-id',
+        label: '（请替换为方舟接入点 ID）',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'doubao-seed-1.6',
+        label: 'Doubao Seed 1.6',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'groq',
+    displayName: 'Groq',
+    enabledByDefault: false,
+    apiKeyEnv: 'GROQ_API_KEY',
+    hostnames: ['api.groq.com'],
+    ui: {
+      fallbackGlyph: 'Gq',
+      modelIdPrefixes: ['llama', 'mixtral', 'gemma'],
+    },
+    upstreams: [
+      {
+        label: 'Groq OpenAI 兼容',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'llama-3.3-70b-versatile',
+        label: 'Llama 3.3 70B Versatile',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'llama-3.1-8b-instant',
+        label: 'Llama 3.1 8B Instant',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'siliconflow',
+    displayName: 'SiliconFlow',
+    enabledByDefault: false,
+    apiKeyEnv: 'SILICONFLOW_API_KEY',
+    hostnames: ['api.siliconflow.cn'],
+    ui: {
+      fallbackGlyph: 'Si',
+      aliases: ['silicon'],
+    },
+    upstreams: [
+      {
+        label: 'SiliconFlow',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'deepseek-ai/DeepSeek-V3',
+        label: 'DeepSeek V3',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'Qwen/Qwen2.5-7B-Instruct',
+        label: 'Qwen2.5 7B Instruct',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'azure',
+    displayName: 'Azure OpenAI',
+    enabledByDefault: false,
+    apiKeyEnv: 'AZURE_OPENAI_API_KEY',
+    ui: {
+      fallbackGlyph: 'Az',
+    },
+    upstreams: [
+      {
+        label: 'Azure OpenAI（请填写资源 endpoint）',
+        baseUrl: '',
+        protocol: 'chat_completions',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'openai_effort',
+    defaultModels: [
+      {
+        id: 'gpt-4o',
+        label: '（部署名请改成你的 deployment）',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+      },
+    ],
+  },
+  {
+    type: 'xai',
+    displayName: 'xAI (Grok)',
+    enabledByDefault: false,
+    apiKeyEnv: 'XAI_API_KEY',
+    hostnames: ['api.x.ai'],
+    ui: {
+      fallbackGlyph: 'x',
+      aliases: ['grok'],
+      modelIdPrefixes: ['grok'],
+    },
+    upstreams: [{ label: 'xAI', baseUrl: 'https://api.x.ai/v1', isDefault: true }],
+    thinkingStyle: 'openai_effort',
+    defaultModels: [
+      {
+        id: 'grok-3',
+        label: 'Grok 3',
+        enabled: true,
+        supportsTools: true,
+        supportsThinking: true,
+      },
+      {
+        id: 'grok-3-mini',
+        label: 'Grok 3 Mini',
+        enabled: true,
+        supportsTools: true,
+        supportsThinking: true,
+      },
+    ],
+  },
+  {
+    type: 'minimax',
+    displayName: 'MiniMax',
+    enabledByDefault: false,
+    apiKeyEnv: 'MINIMAX_API_KEY',
+    hostnames: ['api.minimax.chat'],
+    ui: {
+      fallbackGlyph: 'MM',
+      modelIdPrefixes: ['minimax', 'MiniMax', 'abab'],
+    },
+    upstreams: [
+      {
+        label: 'MiniMax',
+        baseUrl: 'https://api.minimax.chat/v1',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'MiniMax-Text-01',
+        label: 'MiniMax Text 01',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'abab6.5s-chat',
+        label: 'ABAB 6.5s Chat',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'baichuan',
+    displayName: '百川',
+    enabledByDefault: false,
+    apiKeyEnv: 'BAICHUAN_API_KEY',
+    hostnames: ['api.baichuan-ai.com'],
+    ui: {
+      fallbackGlyph: '百',
+      modelIdPrefixes: ['Baichuan', 'baichuan'],
+    },
+    upstreams: [
+      {
+        label: '百川',
+        baseUrl: 'https://api.baichuan-ai.com/v1',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'Baichuan4',
+        label: 'Baichuan 4',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'Baichuan3-Turbo',
+        label: 'Baichuan 3 Turbo',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'hunyuan',
+    displayName: '腾讯混元',
+    enabledByDefault: false,
+    apiKeyEnv: 'HUNYUAN_API_KEY',
+    hostnames: ['api.hunyuan.cloud.tencent.com'],
+    ui: {
+      fallbackGlyph: '混',
+      aliases: ['tencent-hunyuan'],
+      modelIdPrefixes: ['hunyuan'],
+    },
+    upstreams: [
+      {
+        label: '混元 OpenAI 兼容',
+        baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'hunyuan-turbos-latest',
+        label: 'Hunyuan TurboS',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'hunyuan-lite',
+        label: 'Hunyuan Lite',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
+  {
+    type: 'qianfan',
+    displayName: '百度千帆 / 文心',
+    enabledByDefault: false,
+    apiKeyEnv: 'QIANFAN_API_KEY',
+    hostnames: ['qianfan.baidubce.com'],
+    ui: {
+      fallbackGlyph: '千',
+      aliases: ['wenxin', 'baidu'],
+      modelIdPrefixes: ['ernie'],
+    },
+    upstreams: [
+      {
+        label: '千帆 OpenAI 兼容',
+        baseUrl: 'https://qianfan.baidubce.com/v2',
+        isDefault: true,
+      },
+    ],
+    thinkingStyle: 'none',
+    defaultModels: [
+      {
+        id: 'ernie-4.0-8k',
+        label: 'ERNIE 4.0 8K',
+        enabled: true,
+        supportsTools: true,
+      },
+      {
+        id: 'ernie-speed-8k',
+        label: 'ERNIE Speed 8K',
+        enabled: true,
+        supportsTools: true,
+      },
+    ],
+  },
 ];
 
 const CATALOG_BY_TYPE = new Map<string, ProviderCatalogEntry>(
@@ -764,10 +1125,10 @@ export const resolveThinkingStyle = (
     return 'anthropic_budget';
   }
 
-  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商——
-  // 用户可能通过 OpenAI 兼容代理使用 MiMo/Qwen/DeepSeek 等模型。
+  // 对 'openai' / 'custom' / 聚合平台，先尝试通过 modelId 前缀推断真实厂商——
+  // 用户可能通过 OpenAI 兼容代理或 SiliconFlow 使用 MiMo/Qwen/DeepSeek 等模型。
   // 只有推断失败时才 fallback 到 openai 的默认 'openai_effort'。
-  if (normalized === 'openai' || normalized === 'custom') {
+  if (normalized === 'openai' || normalized === 'custom' || normalized === 'siliconflow') {
     if (modelId) {
       const catalogEntry = findCatalogEntryByModelId(modelId, {
         includeOpenAI: true,
@@ -776,7 +1137,7 @@ export const resolveThinkingStyle = (
         return catalogEntry.thinkingStyle;
       }
     }
-    // 推断失败：openai 用 openai_effort，custom 用 none
+    // 推断失败：openai 用 openai_effort，custom/siliconflow 用 none
     return normalized === 'openai' ? 'openai_effort' : 'none';
   }
 
@@ -792,9 +1153,9 @@ export const resolveThinkingStyle = (
 export const catalogModelSupportsThinking = (providerType: string, modelId: string): boolean => {
   const normalized = providerType.toLowerCase();
 
-  // 对 'openai' 和 'custom'，先尝试通过 modelId 前缀推断真实厂商
+  // 对 'openai' / 'custom' / siliconflow，先尝试通过 modelId 前缀推断真实厂商
   // （与 resolveThinkingStyle 对齐）。
-  if (normalized === 'openai' || normalized === 'custom') {
+  if (normalized === 'openai' || normalized === 'custom' || normalized === 'siliconflow') {
     if (modelId) {
       const catalogEntry = findCatalogEntryByModelId(modelId, {
         includeOpenAI: true,

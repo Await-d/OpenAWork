@@ -166,6 +166,18 @@ export interface ProviderSettingsProps {
     modelCount?: number;
     message?: string;
   }>;
+  /** 从 models.dev 发现尚未内置的平台。 */
+  onDiscoverProviders?: () => Promise<{
+    providers: Array<{
+      id: string;
+      name: string;
+      api?: string;
+      modelCount: number;
+      sampleModels?: Array<{ id: string; name: string }>;
+    }>;
+  }>;
+  /** 导入发现到的平台为 custom provider。 */
+  onImportDiscoveredProvider?: (modelsDevProviderId: string) => Promise<void>;
   style?: CSSProperties;
 }
 
@@ -249,9 +261,48 @@ interface InlineFormProps {
 
 function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormProps) {
   const [form, setForm] = useState<ProviderEditData>(initial);
+  const [formError, setFormError] = useState<string | null>(null);
 
   function set(field: keyof ProviderEditData, value: string | boolean | undefined) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function requiresBaseUrl(type: string): boolean {
+    return type === 'custom' || type === 'azure';
+  }
+
+  function isValidHttpUrl(value: string): boolean {
+    try {
+      const u = new URL(value);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  function handleSubmit() {
+    const base = form.baseUrl.trim();
+    if (requiresBaseUrl(form.type)) {
+      if (!base) {
+        setFormError(
+          form.type === 'azure'
+            ? 'Azure OpenAI 必须填写资源 endpoint（例如 https://{resource}.openai.azure.com）'
+            : '自定义提供商必须填写 Base URL',
+        );
+        return;
+      }
+      if (!isValidHttpUrl(base)) {
+        setFormError('Base URL 必须是合法的 http(s) 地址');
+        return;
+      }
+    }
+    setFormError(null);
+    onSubmit({
+      ...form,
+      name: form.name.trim(),
+      baseUrl: base,
+      apiKey: form.apiKey.trim(),
+    });
   }
 
   // 当前所选平台类型在 catalog 里的条目(用于上游变体快捷填充与显示名)。
@@ -282,6 +333,13 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
   const row: CSSProperties = { display: 'flex', gap: 12, flexWrap: 'wrap' };
   const col: CSSProperties = { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 160 };
 
+  const guidance =
+    form.type === 'custom'
+      ? '适用于任意 OpenAI / Anthropic 兼容端点（中转、LM Studio、vLLM 等）。保存后请在模型列表添加 model id。'
+      : form.type === 'azure'
+        ? '填写 Azure 资源 endpoint；模型 id 使用部署名（deployment name）。'
+        : null;
+
   return (
     <div style={formWrap}>
       <div
@@ -294,6 +352,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
       >
         {isNew ? '新增提供商' : '编辑提供商'}
       </div>
+      {guidance ? (
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.45 }}>{guidance}</div>
+      ) : null}
       <div style={row}>
         <div style={col}>
           <label htmlFor="pf-name" style={labelStyle}>
@@ -304,7 +365,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             style={inputStyle}
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
-            placeholder="Provider name"
+            placeholder={form.type === 'custom' ? '例如：公司中转 / LM Studio' : 'Provider name'}
           />
         </div>
         <div style={col}>
@@ -322,6 +383,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
                 const entry = lookupProviderEntry(nextType);
                 const defaultUpstream =
                   entry?.upstreams?.find((u) => u.isDefault) ?? entry?.upstreams?.[0];
+                setFormError(null);
                 setForm((prev) => ({
                   ...prev,
                   type: nextType,
@@ -408,14 +470,21 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         </div>
         <div style={col}>
           <label htmlFor="pf-baseurl" style={labelStyle}>
-            Base URL
+            Base URL{requiresBaseUrl(form.type) ? ' *' : ''}
           </label>
           <input
             id="pf-baseurl"
             style={inputStyle}
             value={form.baseUrl}
-            onChange={(e) => set('baseUrl', e.target.value)}
-            placeholder="https://api.example.com/v1"
+            onChange={(e) => {
+              setFormError(null);
+              set('baseUrl', e.target.value);
+            }}
+            placeholder={
+              form.type === 'azure'
+                ? 'https://{resource}.openai.azure.com'
+                : 'https://api.example.com/v1'
+            }
           />
         </div>
         <div style={col}>
@@ -453,6 +522,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           启用
         </label>
       </div>
+      {formError ? (
+        <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{formError}</div>
+      ) : null}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
         <button
           type="button"
@@ -471,7 +543,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         </button>
         <button
           type="button"
-          onClick={() => onSubmit(form)}
+          onClick={handleSubmit}
           style={{
             background: 'var(--accent)',
             border: 'none',
@@ -512,11 +584,52 @@ export function ProviderSettings({
   onUpdateModel,
   onTestModel,
   onSyncCatalog,
+  onDiscoverProviders,
+  onImportDiscoveredProvider,
   style,
 }: ProviderSettingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [discoverItems, setDiscoverItems] = useState<
+    Array<{ id: string; name: string; api?: string; modelCount: number }>
+  >([]);
+  const [discoverQuery, setDiscoverQuery] = useState('');
+  const [importingId, setImportingId] = useState<string | null>(null);
   const [forceCustomImageSize, setForceCustomImageSize] = useState(false);
+
+  async function openDiscover() {
+    if (!onDiscoverProviders) return;
+    setDiscoverOpen(true);
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    setDiscoverQuery('');
+    try {
+      const res = await onDiscoverProviders();
+      setDiscoverItems(res.providers ?? []);
+    } catch (e) {
+      setDiscoverError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }
+
+  async function importDiscovered(id: string) {
+    if (!onImportDiscoveredProvider) return;
+    setImportingId(id);
+    setDiscoverError(null);
+    try {
+      await onImportDiscoveredProvider(id);
+      setDiscoverOpen(false);
+      setDiscoverQuery('');
+    } catch (e) {
+      setDiscoverError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportingId(null);
+    }
+  }
   const [modelSearch, setModelSearch] = useState<{ chat: string; fast: string; image: string }>({
     chat: '',
     fast: '',
@@ -1417,26 +1530,196 @@ export function ProviderSettings({
           }}
         >
           <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>提供商</h2>
-          <button
-            type="button"
-            onClick={() => {
-              setAddingNew(true);
-              setEditingId(null);
-            }}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {onDiscoverProviders ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void openDiscover();
+                }}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--fg-default)',
+                  border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderRadius: 6,
+                  padding: '0.32rem 0.8rem',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                发现更多平台
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setAddingNew(true);
+                setEditingId(null);
+              }}
+              style={{
+                background: 'var(--accent)',
+                color: color.fgOnAccent,
+                border: 'none',
+                borderRadius: 6,
+                padding: '0.32rem 0.8rem',
+                fontSize: 12,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              + 添加提供商
+            </button>
+          </div>
+        </div>
+
+        {discoverOpen ? (
+          <div
             style={{
-              background: 'var(--accent)',
-              color: color.fgOnAccent,
-              border: 'none',
-              borderRadius: 6,
-              padding: '0.32rem 0.8rem',
-              fontSize: 12,
-              cursor: 'pointer',
-              fontWeight: 500,
+              margin: '0.75rem 1rem',
+              padding: '0.85rem 1rem',
+              borderRadius: 8,
+              border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+              background: 'var(--bg-raised)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
             }}
           >
-            + 添加提供商
-          </button>
-        </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+                从 models.dev 发现更多平台
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDiscoverOpen(false);
+                  setDiscoverError(null);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                }}
+              >
+                关闭
+              </button>
+            </div>
+            <input
+              style={inputStyle}
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="搜索平台名称或 id…"
+            />
+            {discoverLoading ? (
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>加载中…</div>
+            ) : null}
+            {discoverError ? (
+              <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{discoverError}</div>
+            ) : null}
+            {!discoverLoading
+              ? (() => {
+                  const q = discoverQuery.trim().toLowerCase();
+                  const filtered = discoverItems.filter((item) => {
+                    if (!q) return true;
+                    return item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
+                  });
+                  if (filtered.length === 0) {
+                    return (
+                      <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                        {discoverItems.length === 0
+                          ? '暂无可导入平台（可能均已内置，或 models.dev 暂无数据）。'
+                          : '没有匹配的平台，请调整搜索关键词。'}
+                      </div>
+                    );
+                  }
+                  return (
+                    <ul
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        listStyle: 'none',
+                        maxHeight: 240,
+                        overflowY: 'auto',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}
+                    >
+                      {filtered.map((item) => (
+                        <li
+                          key={item.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 10,
+                            padding: '0.45rem 0.55rem',
+                            borderRadius: 6,
+                            border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{item.name}</div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: 'var(--fg-muted)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {item.id}
+                              {item.api ? ` · ${item.api}` : ''}
+                              {` · ${item.modelCount} 模型`}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!onImportDiscoveredProvider || importingId === item.id}
+                            onClick={() => {
+                              void importDiscovered(item.id);
+                            }}
+                            style={{
+                              background: 'var(--accent)',
+                              color: color.fgOnAccent,
+                              border: 'none',
+                              borderRadius: 6,
+                              padding: '0.28rem 0.7rem',
+                              fontSize: 11,
+                              cursor:
+                                !onImportDiscoveredProvider || importingId === item.id
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                              fontWeight: 500,
+                              opacity:
+                                !onImportDiscoveredProvider || importingId === item.id ? 0.6 : 1,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {importingId === item.id ? '导入中…' : '导入'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()
+              : null}
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+              导入后类型为 custom，请填写 API Key 后再使用。
+            </div>
+          </div>
+        ) : null}
 
         {providers.length === 0 && !addingNew ? (
           <div
