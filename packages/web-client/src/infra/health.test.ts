@@ -3,17 +3,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHealthClient, isGatewayHealthy } from './health.js';
 
 const originalFetch = globalThis.fetch;
-const originalAbortSignalTimeout = (
-  AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }
-).timeout;
+const abortSignalRecord = AbortSignal as typeof AbortSignal & {
+  timeout?: typeof AbortSignal.timeout;
+};
+const originalAbortSignalTimeout = abortSignalRecord.timeout;
+
+function removeAbortSignalTimeout(): void {
+  // TS2790: delete 只能用于 optional 属性；这里用 Reflect 规避 DOM 类型把 timeout 标成必选。
+  Reflect.deleteProperty(AbortSignal, 'timeout');
+}
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalAbortSignalTimeout) {
-    (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout =
-      originalAbortSignalTimeout;
+    abortSignalRecord.timeout = originalAbortSignalTimeout;
   } else {
-    delete (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout;
+    removeAbortSignalTimeout();
   }
   vi.restoreAllMocks();
 });
@@ -54,7 +59,7 @@ describe('createHealthClient', () => {
   it('在无 AbortSignal.timeout 的 RN polyfill 环境下仍可探活成功', async () => {
     // React Native 的 AbortSignal 来自 abort-controller@3，没有 static timeout。
     // 旧实现一调用 AbortSignal.timeout 就 TypeError，被 catch 后恒返回 false。
-    delete (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout;
+    removeAbortSignalTimeout();
 
     globalThis.fetch = vi.fn(async () => {
       return {
@@ -67,7 +72,7 @@ describe('createHealthClient', () => {
   });
 
   it('挂起请求在 timeoutMs 后返回 false（不永久 pending）', async () => {
-    delete (AbortSignal as typeof AbortSignal & { timeout?: typeof AbortSignal.timeout }).timeout;
+    removeAbortSignalTimeout();
 
     globalThis.fetch = vi.fn((_input: string, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
