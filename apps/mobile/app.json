@@ -3,7 +3,7 @@
     "name": "OpenAWork",
     "slug": "openAwork",
     "scheme": "openawork",
-    "version": "0.8.0",
+    "version": "0.8.1",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "updates": {
