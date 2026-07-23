@@ -115,7 +115,9 @@ jobs:
             optional: false
             bundle_path: apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
           - label: macos-x86_64
-            runner: macos-13
+            # 不用 macos-13：Intel runner 容量极稀缺，常排队数小时无机器。
+            # 在 macos-latest (Apple Silicon) 上交叉编译 x86_64-apple-darwin。
+            runner: macos-latest
             args: '--target x86_64-apple-darwin --bundles app,dmg'
             rust_targets: 'x86_64-apple-darwin'
             tauri_target_triple: 'x86_64-apple-darwin'
