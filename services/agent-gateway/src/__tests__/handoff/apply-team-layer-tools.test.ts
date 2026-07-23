@@ -5,6 +5,9 @@
  * 能拿到内置指令 + 必备工具 + MCP 直通，不再因「指令未注入」无法工作。
  */
 
+process.env['DATABASE_URL'] = ':memory:';
+process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+
 import { describe, expect, it } from 'vitest';
 import {
   applyTeamLayerToolGate,

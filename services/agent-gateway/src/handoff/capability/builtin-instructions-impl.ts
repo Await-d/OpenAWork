@@ -728,8 +728,11 @@ registerInstruction({
     }
 
     const ownedPaths = readOwnedPathsFromPayload(payload);
+    // zod .default([]) 在部分 infer 路径下仍可能是 optional，运行时兜底
+    const changedFiles = args.changedFiles ?? [];
+    const verification = args.verification ?? [];
     const outOfScope = findOutOfScopePaths({
-      changedFiles: args.changedFiles,
+      changedFiles,
       ownedPaths,
     });
     if (outOfScope.length > 0) {
@@ -777,17 +780,13 @@ registerInstruction({
       args.summary,
       '',
       '## Changed Files',
-      ...(args.changedFiles.length > 0
-        ? args.changedFiles.map((file) => `- ${file}`)
-        : ['- (none)']),
+      ...(changedFiles.length > 0 ? changedFiles.map((file) => `- ${file}`) : ['- (none)']),
       '',
       '## Checklist',
       ...args.checklist.map((item) => `- [${item.status}] ${item.id}: ${item.evidence}`),
       '',
       '## Verification',
-      ...(args.verification.length > 0
-        ? args.verification.map((step) => `- ${step}`)
-        : ['- (none)']),
+      ...(verification.length > 0 ? verification.map((step) => `- ${step}`) : ['- (none)']),
       ...(args.blockedReason ? ['', `## Blocked Reason`, args.blockedReason] : []),
     ].join('\n');
 
@@ -811,11 +810,11 @@ registerInstruction({
       role: 'executor',
       taskId: args.taskId,
       status: args.status,
-      changedFiles: args.changedFiles,
+      changedFiles,
       checklist: args.checklist,
       failedItems,
       summary: args.summary,
-      verification: args.verification,
+      verification,
       blockedReason: args.blockedReason ?? null,
       artifactId,
       submittedAt: new Date().toISOString(),

@@ -68,6 +68,7 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-23] Team 完成态固定为「Builtin Instruction 硬契约优先，prompt 仅兜底」：executor 必须 `submit_execution_result`，reviewer 必须结构化 `submit_review`；`result_json.protocol` 是完成真相源。`OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=soft|hard` 控制兼容期（默认 soft：缺 protocol 记 degraded；hard：execution-protocol-failure）。Quality Review 优先机器判定 checklist/items fail，LLM 仅做语义抽检；返工按 failedItems 精确反馈。不把 PM1/PM2 主编排改为 LLM 自由工具流。
 - [2026-07-15] Composer 输入历史固定为“`gatewayUrl + currentUserEmail + sessionId` scope 的内存 ring buffer”：`chat` 与 `team` 复用同一 `UnifiedComposer` 输入历史，最多保留最新 50 条；未建 session 时先记到 pending scope，首条发送创建 session 后再迁移；只在 direct send 成功或 queued send 成功入队时记录，不在每次编辑时落盘；多行输入仅在 caret 位于文本起点时允许 `ArrowUp` 进入历史浏览，避免抢占原生跨行导航。
 - [2026-07-14] 布局后续迭代固定为“Fusion-only，Classic 冻结”：只允许继续调整新版本 Fusion 布局；`LayoutClassic.tsx`、`AppSidebar.tsx`、`ClassicWorkbenchTitlebar.tsx`、`WorkbenchModeTabs.tsx` 等旧版路径只作为兼容边界保留。目录隔离、ChatPage 解耦、侧边栏/Titlebar/SessionPanel 后续演进都必须在 Fusion 路径内完成，不能以“对称重构”名义继续修改 Classic。
 - [2026-07-09] 资源能力集成固定为“后台完整 catalog + 前端/功能按用途分层读取”：`GET /resources` 必须保留 `souls`、`agentTemplates`、`commands`、`prompts` 等 feature 资源供 Channels/Team/Commands/Prompts 读取；资源中心 UI 只在前端按 `visibility / feature / usageKind` 分主目录与功能专用区；`souls` 是 channel persona，`agentTemplates` 是 team/workspace template，不能作为普通 Skill/Agent 混入主目录。

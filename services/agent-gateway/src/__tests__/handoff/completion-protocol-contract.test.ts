@@ -295,3 +295,23 @@ describe('review aggregation + structured checklist', () => {
     expect(report.qualityIssues.join('；')).toContain('submit_execution_result');
   });
 });
+
+describe('toToolDefinition schema surface', () => {
+  it('submit_execution_result / submit_review 对 LLM 暴露完整 properties', async () => {
+    const exec = builtin.getInstruction('submit_execution_result', 'executor');
+    const rev = builtin.getInstruction('submit_review', 'reviewer');
+    expect(exec).toBeDefined();
+    expect(rev).toBeDefined();
+    const execDef = builtin.toToolDefinition(exec!);
+    const revDef = builtin.toToolDefinition(rev!);
+    expect(Object.keys(execDef.function.parameters.properties)).toEqual(
+      expect.arrayContaining(['taskId', 'status', 'checklist', 'summary']),
+    );
+    expect(Object.keys(revDef.function.parameters.properties)).toEqual(
+      expect.arrayContaining(['verdict', 'decision', 'items', 'title', 'content']),
+    );
+    // default 字段不应被标为 required
+    expect(execDef.function.parameters.required).not.toContain('changedFiles');
+    expect(execDef.function.parameters.required).not.toContain('verification');
+  });
+});

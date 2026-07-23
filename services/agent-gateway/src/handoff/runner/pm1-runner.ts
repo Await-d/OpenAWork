@@ -412,6 +412,45 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     throw new Error(`${role} 层执行未产出可评审结果：${completionEvidence.reason}`);
   }
 
+  // submit_execution_result 的 status=failed/blocked 视为执行层失败，
+  // 不能把 substate 标成 completed，否则上层会把失败当成功收口。
+  const submittedStatus =
+    completionEvidence.resultJson && typeof completionEvidence.resultJson['status'] === 'string'
+      ? completionEvidence.resultJson['status']
+      : null;
+  if (
+    completionEvidence.protocol === SUBMIT_EXECUTION_RESULT_PROTOCOL &&
+    (submittedStatus === 'failed' || submittedStatus === 'blocked')
+  ) {
+    setSubstate({
+      sessionId: input.toSessionId,
+      substate: 'failed',
+      userId: input.handoff.userId,
+      roleLayer: role,
+    });
+    const existing = completionEvidence.resultJson ?? {};
+    sqliteRun(
+      `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
+      [
+        JSON.stringify({
+          ...existing,
+          role,
+          taskTitle,
+          summary: completionEvidence.summary,
+          artifactCount: completionEvidence.artifactCount,
+          evidenceSource: completionEvidence.source,
+          completedAt: new Date().toISOString(),
+          protocol: completionEvidence.protocol,
+          protocolDegraded: false,
+        }),
+        input.handoff.id,
+      ],
+    );
+    throw new Error(
+      `${role} 层通过 submit_execution_result 报告 ${submittedStatus}：${completionEvidence.summary}`,
+    );
+  }
+
   // 设置完成 substate
   setSubstate({
     sessionId: input.toSessionId,

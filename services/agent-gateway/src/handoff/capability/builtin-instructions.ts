@@ -170,19 +170,71 @@ export function toToolDefinition(instruction: BuiltinInstruction): {
 /**
  * 轻量 zod → JSON schema 转换（仅支持 z.object 顶层 + 简单字段类型）。
  * 完整能力需引入 zod-to-json-schema，但项目还没装；先做最小版。
+ *
+ * 兼容：
+ *   - ZodEffects（.superRefine / .refine / .transform）
+ *   - ZodDefault / ZodOptional / ZodNullable 包装
  */
+function unwrapZodType(schema: z.ZodType): z.ZodType {
+  let current: z.ZodType = schema;
+  for (let i = 0; i < 8; i += 1) {
+    const def = (
+      current as unknown as {
+        _def?: {
+          typeName?: string;
+          schema?: z.ZodType;
+          innerType?: z.ZodType;
+        };
+      }
+    )._def;
+    const tn = def?.typeName;
+    if (tn === 'ZodEffects' && def?.schema) {
+      current = def.schema;
+      continue;
+    }
+    if ((tn === 'ZodDefault' || tn === 'ZodOptional' || tn === 'ZodNullable') && def?.innerType) {
+      current = def.innerType;
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
+function isOptionalField(field: z.ZodType): boolean {
+  let current: z.ZodType = field;
+  for (let i = 0; i < 6; i += 1) {
+    const def = (
+      current as unknown as {
+        _def?: { typeName?: string; innerType?: z.ZodType };
+      }
+    )._def;
+    const tn = def?.typeName;
+    if (tn === 'ZodOptional' || tn === 'ZodDefault') {
+      return true;
+    }
+    if (tn === 'ZodNullable' && def?.innerType) {
+      current = def.innerType;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
 function zodToJsonSchemaLite(schema: z.ZodType): Record<string, unknown> {
-  // 兜底：如果 schema 是 z.object，直接拿 shape
-  const def = (schema as unknown as { _def?: { typeName?: string; shape?: () => unknown } })._def;
+  const unwrapped = unwrapZodType(schema);
+  const def = (unwrapped as unknown as { _def?: { typeName?: string; shape?: () => unknown } })
+    ._def;
   if (def?.typeName === 'ZodObject' && typeof def.shape === 'function') {
     const shape = def.shape() as Record<string, z.ZodType>;
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
     for (const [key, fieldSchema] of Object.entries(shape)) {
-      const fieldDef = (fieldSchema as unknown as { _def?: { typeName?: string } })._def;
-      const isOptional = fieldDef?.typeName === 'ZodOptional';
       properties[key] = inferFieldType(fieldSchema);
-      if (!isOptional) required.push(key);
+      if (!isOptionalField(fieldSchema)) {
+        required.push(key);
+      }
     }
     return {
       type: 'object',
@@ -195,15 +247,25 @@ function zodToJsonSchemaLite(schema: z.ZodType): Record<string, unknown> {
 }
 
 function inferFieldType(field: z.ZodType): Record<string, unknown> {
-  const def = (field as unknown as { _def?: { typeName?: string; innerType?: z.ZodType } })._def;
+  const unwrapped = unwrapZodType(field);
+  const def = (
+    unwrapped as unknown as {
+      _def?: { typeName?: string; innerType?: z.ZodType; type?: z.ZodType };
+    }
+  )._def;
   const tn = def?.typeName;
-  if (tn === 'ZodOptional' && def?.innerType) {
-    return inferFieldType(def.innerType);
-  }
   if (tn === 'ZodString') return { type: 'string' };
   if (tn === 'ZodNumber') return { type: 'number' };
   if (tn === 'ZodBoolean') return { type: 'boolean' };
-  if (tn === 'ZodArray') return { type: 'array' };
+  if (tn === 'ZodArray') {
+    const item =
+      def && 'type' in def && def.type
+        ? inferFieldType(def.type)
+        : def?.innerType
+          ? inferFieldType(def.innerType)
+          : {};
+    return { type: 'array', items: item };
+  }
   if (tn === 'ZodObject') return { type: 'object' };
   if (tn === 'ZodEnum') {
     const values = (def as unknown as { values?: readonly string[] }).values;

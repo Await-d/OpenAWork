@@ -32,8 +32,10 @@ installExtensionNoiseFilter();
 // render-time half of the story.
 installMonacoAsyncErrorFilter();
 
-const root = document.getElementById('root');
-if (!root) throw new Error('Root element not found');
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Root element not found');
+// 收窄后赋给局部 const，避免闭包内控制流收窄失效导致 createRoot 仍见 null。
+const root: HTMLElement = rootElement;
 
 const DESKTOP_SW_CLEANUP_KEY = 'openawork.desktop.sw-cleanup-version';
 

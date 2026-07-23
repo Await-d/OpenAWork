@@ -237,33 +237,33 @@ Executor prompt/context 注入：只修 failedItems，已 pass 的不要动。
 ## Implementation Plan
 
 ### Phase 0: 方案确认（当前）
-- [ ] T-00: 用户批准本实施方案（含兼容策略与 schema）
+- [x] T-00 ✅: 用户批准本实施方案（soft→hard + 升级 submit_review + Phase A）
 
 ### Phase 1: 契约与能力矩阵
-- [ ] T-01: 定义 `submit_execution_result` / 升级 `submit_review` Zod schema 与 result_json 类型
-- [ ] T-02: 更新 `layer-capabilities.ts` allowedBuiltinInstructions
-- [ ] T-03: 在 `builtin-instructions-impl.ts` 注册/升级 handler（含 ownedPaths/taskId 校验）
+- [x] T-01 ✅: 定义 `submit_execution_result` / 升级 `submit_review` Zod schema 与 result_json 类型
+- [x] T-02 ✅: 更新 `layer-capabilities.ts` allowedBuiltinInstructions
+- [x] T-03 ✅: 在 `builtin-instructions-impl.ts` 注册/升级 handler（含 ownedPaths/taskId 校验）
 
 ### Phase 2: Runner 完成门禁
-- [ ] T-04: 升级 `collectExecutionCompletionEvidence` / `runExecutionLayer` 要求 protocol submit
-- [ ] T-05: 兼容策略实现（degraded vs hard fail 开关，默认 soft→下一版 hard）
+- [x] T-04 ✅: 升级 `collectExecutionCompletionEvidence` / `runExecutionLayer` 要求 protocol submit
+- [x] T-05 ✅: 兼容策略实现（OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=soft|hard）
 
 ### Phase 3: Review 聚合与返工
-- [ ] T-06: `review-aggregator` 优先解析 checklist/items，机器判定 + LLM 兜底
-- [ ] T-07: reconciler/pm2-runner 注入 failedItems 精确反馈；稳定性检查优先 item 集合
+- [x] T-06 ✅: `review-aggregator` 优先解析 checklist/items，机器判定 + LLM 兜底
+- [x] T-07 ✅: reconciler/pm2-runner 注入 failedItems 精确反馈；稳定性检查优先 item 集合
 
 ### Phase 4: Prompt 与工具可见性
-- [ ] T-08: executor/reviewer 完成协议改为“必须调用 submit_* 工具”，弱化纯文本完成
-- [ ] T-09: apply-team-layer-tools / tool-sandbox 确认新指令放行
+- [x] T-08 ✅: executor/reviewer 完成协议改为“必须调用 submit_* 工具”
+- [x] T-09 ✅: apply-team-layer-tools 确认新指令放行（测试补 DATABASE_URL）
 
 ### Phase 5: 测试与验证
-- [ ] T-10: 单元测试：schema 校验、handler 写 result_json、ownedPaths 拒绝
-- [ ] T-11: 集成测试：无 submit → protocol-failure；checklist fail → redispatch 带 failedItems
-- [ ] T-12: 回归：team-failure-policy / review-readiness / quality-review reconciler
+- [x] T-10 ✅: 单元测试：schema 校验、handler 写 result_json、ownedPaths 拒绝
+- [x] T-11 ✅: 集成测试：无 submit hard → protocol-failure；checklist fail → implementation-failure
+- [x] T-12 ✅: 回归：team-failure-policy / review-readiness / builtin-instructions / apply-team-layer-tools
 
 ### Phase 6: 文档与收口
-- [ ] T-13: 更新 agentdocs memory / 相关注释；明确 Phase B 边界
-- [ ] T-14: 全量相关 vitest + typecheck
+- [x] T-13 ✅: 更新 workflow 进度与 memory
+- [x] T-14 ✅: typecheck + 相关 vitest 通过
 
 ## Notes
 
