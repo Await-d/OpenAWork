@@ -49,6 +49,10 @@ import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
 import { generateImageToolDefinition } from './image-generation-tool.js';
+import { convertMediaToolDefinition } from './convert-media-tool.js';
+import { extractMediaInfoToolDefinition } from './extract-media-info-tool.js';
+import { extractVideoFrameToolDefinition } from './extract-video-frame-tool.js';
+import { generateAudioToolDefinition } from './generate-audio-tool.js';
 import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import { desktopControlToolDefinition } from './desktop-control.js';
 import {
@@ -198,6 +202,10 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   MCP_LIST_TOOLS_DEFINITION,
   MCP_CALL_DEFINITION,
   generateImageToolDefinition,
+  convertMediaToolDefinition,
+  extractMediaInfoToolDefinition,
+  extractVideoFrameToolDefinition,
+  generateAudioToolDefinition,
   repoCloneToolDefinition,
   repoOverviewToolDefinition,
   ...CHANNEL_TOOL_DEFINITIONS,
@@ -1265,6 +1273,75 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['prompt'],
+        additionalProperties: false,
+      };
+    case 'convert_media':
+      return {
+        type: 'object',
+        properties: {
+          source: { type: 'string', description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
+          targetFormat: {
+            type: 'string',
+            enum: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'mp4', 'webm', 'mkv', 'mov', 'avi', 'gif', 'png', 'jpg', 'webp', 'weba'],
+            description: '目标格式',
+          },
+          videoQuality: { type: 'integer', minimum: 0, maximum: 51, description: '视频编码质量 CRF 值（0-51，越低质量越高，默认 23）' },
+          audioBitrate: { type: 'string', description: '音频比特率，如 "128k"' },
+          videoScale: { type: 'string', description: '视频分辨率缩放，如 "1280:-1"' },
+          videoFps: { type: 'integer', minimum: 1, maximum: 60, description: '视频帧率' },
+          startTime: { type: 'number', minimum: 0, description: '截取起始时间（秒）' },
+          duration: { type: 'number', minimum: 0, description: '截取持续时间（秒）' },
+        },
+        required: ['source', 'targetFormat'],
+        additionalProperties: false,
+      };
+    case 'extract_media_info':
+      return {
+        type: 'object',
+        properties: {
+          source: { type: 'string', description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
+        },
+        required: ['source'],
+        additionalProperties: false,
+      };
+    case 'extract_video_frame':
+      return {
+        type: 'object',
+        properties: {
+          source: { type: 'string', description: '视频来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
+          timestamp: { type: 'number', minimum: 0, description: '提取帧的时间戳（秒），默认取第 1 秒' },
+          count: { type: 'integer', minimum: 1, maximum: 10, description: '提取多帧的数量（1-10），均匀分布' },
+          width: { type: 'integer', minimum: 16, maximum: 3840, description: '输出帧的宽度（像素），高度自动等比缩放' },
+          format: { type: 'string', enum: ['png', 'jpg'], description: '输出图片格式：png（默认）或 jpg' },
+        },
+        required: ['source'],
+        additionalProperties: false,
+      };
+    case 'generate_audio':
+      return {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要转为语音的文本内容，支持中英文混合，最长 5000 字符' },
+          voice: {
+            type: 'string',
+            enum: [
+              'zh-CN-XiaoxiaoNeural',
+              'zh-CN-YunxiNeural',
+              'zh-CN-YunyangNeural',
+              'zh-CN-XiaoyiNeural',
+              'zh-CN-YunjianNeural',
+              'en-US-AriaNeural',
+              'en-US-GuyNeural',
+              'en-US-JennyNeural',
+            ],
+            description: '语音角色，默认 zh-CN-XiaoxiaoNeural',
+          },
+          rate: { type: 'number', minimum: 0.5, maximum: 2, description: '语速倍率，1.0=正常速度' },
+          volume: { type: 'number', minimum: 0, maximum: 1, description: '音量 0-1，默认 1.0' },
+          pitch: { type: 'string', description: '音调调整，如 "+10Hz" 或 "-5Hz"' },
+          outputFormat: { type: 'string', enum: ['mp3', 'wav'], description: '输出格式：mp3（默认）或 wav' },
+        },
+        required: ['text'],
         additionalProperties: false,
       };
     case 'grep':

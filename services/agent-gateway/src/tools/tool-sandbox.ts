@@ -80,6 +80,22 @@ import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
 import { createEditTool } from './edit-tools.js';
 import { executeGenerateImageTool, generateImageToolDefinition } from './image-generation-tool.js';
 import {
+  convertMediaToolDefinition,
+  executeConvertMediaTool,
+} from './convert-media-tool.js';
+import {
+  executeExtractMediaInfoTool,
+  extractMediaInfoToolDefinition,
+} from './extract-media-info-tool.js';
+import {
+  executeExtractVideoFrameTool,
+  extractVideoFrameToolDefinition,
+} from './extract-video-frame-tool.js';
+import {
+  executeGenerateAudioTool,
+  generateAudioToolDefinition,
+} from './generate-audio-tool.js';
+import {
   interactiveBashToolDefinition,
   runInteractiveBashCommand,
 } from './interactive-bash-tools.js';
@@ -442,6 +458,10 @@ const TOOL_WHITELIST = new Set<string>([
   desktopAutomationToolDefinition.name,
   desktopControlToolDefinition.name,
   'generate_image',
+  convertMediaToolDefinition.name,
+  extractMediaInfoToolDefinition.name,
+  extractVideoFrameToolDefinition.name,
+  generateAudioToolDefinition.name,
   repoCloneToolDefinition.name,
   repoOverviewToolDefinition.name,
   ...CHANNEL_TOOL_DEFINITIONS.map((tool) => tool.name),
@@ -2612,6 +2632,156 @@ async function executeGatewayManagedToolImpl(
         output: result.output,
         isError: result.isError,
         durationMs: Date.now() - startAt,
+      };
+    }
+
+    if (request.toolName === convertMediaToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = convertMediaToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const convertStartAt = Date.now();
+      const convertResult = await executeConvertMediaTool({
+        signal,
+        sessionId,
+        userId,
+        toolCallId: request.toolCallId,
+        toolInput: parsed.data,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: convertResult.output,
+        isError: convertResult.isError,
+        durationMs: Date.now() - convertStartAt,
+      };
+    }
+
+    if (request.toolName === extractMediaInfoToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = extractMediaInfoToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const probeStartAt = Date.now();
+      const probeResult = await executeExtractMediaInfoTool({
+        signal,
+        userId,
+        toolInput: parsed.data,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: probeResult.output,
+        isError: probeResult.isError,
+        durationMs: Date.now() - probeStartAt,
+      };
+    }
+
+    if (request.toolName === extractVideoFrameToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = extractVideoFrameToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const frameStartAt = Date.now();
+      const frameResult = await executeExtractVideoFrameTool({
+        signal,
+        sessionId,
+        userId,
+        toolCallId: request.toolCallId,
+        toolInput: parsed.data,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: frameResult.output,
+        isError: frameResult.isError,
+        durationMs: Date.now() - frameStartAt,
+      };
+    }
+
+    if (request.toolName === generateAudioToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = generateAudioToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const audioStartAt = Date.now();
+      const audioResult = await executeGenerateAudioTool({
+        signal,
+        sessionId,
+        userId,
+        toolCallId: request.toolCallId,
+        toolInput: parsed.data,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: audioResult.output,
+        isError: audioResult.isError,
+        durationMs: Date.now() - audioStartAt,
       };
     }
 
