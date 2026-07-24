@@ -1569,7 +1569,7 @@ export function flattenWorkspaceFiles(
 
 export function parseSessionModeMetadata(metadataJson: string | undefined): {
   agentId?: string;
-  dialogueMode: DialogueMode;
+  dialogueMode?: DialogueMode;
   yoloMode: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
@@ -1580,7 +1580,6 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
 } {
   if (!metadataJson) {
     return {
-      dialogueMode: 'clarify',
       yoloMode: false,
       webSearchEnabled: true,
       thinkingEnabled: false,
@@ -1607,7 +1606,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
         parsed.dialogueMode === 'coding' ||
         parsed.dialogueMode === 'programmer'
           ? parsed.dialogueMode
-          : 'clarify',
+          : undefined,
       yoloMode: parsed.yoloMode === true,
       webSearchEnabled: parsed.webSearchEnabled !== false,
       thinkingEnabled: parsed.thinkingEnabled === true,
@@ -1848,6 +1847,14 @@ export function replaceOrAppendStreamedAssistantMessage(
   onDoneMessage: ChatMessage,
   streamToolCallIds: ReadonlySet<string>,
 ): ChatMessage[] {
+  // Scan the most recent assistant messages (not just the very last one)
+  // to handle cases where interleaved event cards (permission events,
+  // compaction cards, etc.) sit between the streaming placeholder and
+  // the final committed message. Only count trace-bearing messages
+  // toward the limit so a burst of event cards doesn't exhaust the budget.
+  let traceMessagesChecked = 0;
+  const maxTraceMessagesToCheck = 5;
+
   for (let i = previousMessages.length - 1; i >= 0; i--) {
     const msg = previousMessages[i]!;
     if (msg.role !== 'assistant') continue;
@@ -1859,9 +1866,11 @@ export function replaceOrAppendStreamedAssistantMessage(
 
     // Fallback: heuristic checks for messages without parts.
     const existingTrace = readAssistantTracePayload(msg);
-    if (!existingTrace) continue;
+    if (!existingTrace) {
+      continue;
+    }
 
-    // Tool call ID overlap.
+    traceMessagesChecked++;
     if (streamToolCallIds.size > 0) {
       const existingIds = new Set(
         existingTrace.toolCalls.map((tc) => tc.toolCallId).filter(Boolean),
@@ -1896,8 +1905,14 @@ export function replaceOrAppendStreamedAssistantMessage(
       }
     }
 
-    // Only check the last assistant message with trace content.
-    break;
+    // Also check snapshot equivalence as a last-resort fallback — handles
+    // the race between finalizeStreamMessage (local ID) and a subsequent
+    // reload that already replaced the message with the server version.
+    if (areSnapshotMessagesEquivalent(msg, onDoneMessage)) {
+      return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
+    }
+
+    if (traceMessagesChecked >= maxTraceMessagesToCheck) break;
   }
 
   return [...previousMessages, onDoneMessage];
@@ -2556,6 +2571,7 @@ function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): b
     if (leftTrace && rightTrace) {
       const leftText = leftTrace.text.trim();
       const rightText = rightTrace.text.trim();
+      // Exact text match with time tolerance.
       if (leftText === rightText && leftText.length > 0) {
         const leftCreatedAt = getComparableCreatedAt(left.createdAt);
         const rightCreatedAt = getComparableCreatedAt(right.createdAt);
@@ -2563,6 +2579,29 @@ function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): b
           return true;
         }
         return Math.abs(leftCreatedAt - rightCreatedAt) <= SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS;
+      }
+      // Prefix match — the local finalized version (from onDone) and the
+      // server snapshot may share a text prefix when the server truncated
+      // or reformatted the tail. Only apply this when the shorter text is
+      // at least 50% of the longer text to avoid false positives between
+      // different rounds with coincidentally similar prefixes.
+      // Use a longer time tolerance because long tool-call sequences can
+      // span well beyond 15s.
+      const shorterLen = Math.min(leftText.length, rightText.length);
+      const longerLen = Math.max(leftText.length, rightText.length);
+      if (
+        leftText.length > 0 &&
+        rightText.length > 0 &&
+        longerLen > 0 &&
+        shorterLen / longerLen >= 0.5 &&
+        (leftText.startsWith(rightText) || rightText.startsWith(leftText))
+      ) {
+        const leftCreatedAt = getComparableCreatedAt(left.createdAt);
+        const rightCreatedAt = getComparableCreatedAt(right.createdAt);
+        if (leftCreatedAt === null || rightCreatedAt === null) {
+          return true;
+        }
+        return Math.abs(leftCreatedAt - rightCreatedAt) <= SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS * 4;
       }
 
       // If text is empty on both sides, compare by tool call IDs as a proxy.

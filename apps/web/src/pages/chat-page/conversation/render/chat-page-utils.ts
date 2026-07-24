@@ -98,7 +98,7 @@ export function createSessionMetadataSnapshot(metadata: {
   yoloMode?: boolean;
 }): string {
   const snapshot: Record<string, unknown> = {
-    dialogueMode: metadata.dialogueMode ?? 'clarify',
+    dialogueMode: metadata.dialogueMode ?? null,
     yoloMode: metadata.yoloMode === true,
     webSearchEnabled: metadata.webSearchEnabled !== false,
     thinkingEnabled: metadata.thinkingEnabled === true,
