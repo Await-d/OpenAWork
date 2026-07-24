@@ -1,10 +1,17 @@
 import React from 'react';
+import type { DialogueMode } from '@openAwork/shared';
 import { SS, ST } from '../shared/settings-section-styles.js';
 import {
   useDisplayPreferencesStore,
   type ThemeMode,
   type ThemeStyle,
+  type ToolExpandCategory,
+  type MessageLayoutMode,
+  TOOL_EXPAND_CATEGORY_LABELS,
 } from '../../../stores/settings/display-preferences.js';
+import {
+  DIALOGUE_MODE_OPTIONS,
+} from '../../../pages/chat-page/mode/dialogue-mode.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 import { CurrentUserProfileSection } from './current-user-profile-section.js';
@@ -311,7 +318,7 @@ export function DisplayTabContent() {
     },
     {
       title: '工具调用默认展开',
-      description: '块状、分组、批量和内联工具卡默认展开；关闭后优先显示摘要，按需再展开',
+      description: '总开关。开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。可在下方按工具类别单独调整',
       checked: store.toolCallsExpandedByDefault,
       onChange: store.setToolCallsExpandedByDefault,
     },
@@ -358,6 +365,8 @@ export function DisplayTabContent() {
 
       <CurrentUserProfileSection />
 
+      <MessageLayoutSection />
+
       <section style={SS}>
         <h3 style={ST}>消息元信息</h3>
         <div style={SECTION_LIST}>{renderRows(messageMetaRows)}</div>
@@ -367,6 +376,10 @@ export function DisplayTabContent() {
         <h3 style={ST}>推理与工具调用</h3>
         <div style={SECTION_LIST}>{renderRows(reasoningToolRows)}</div>
       </section>
+
+      <ToolExpandSection />
+
+      <DialogueModeSection />
 
       <section style={SS}>
         <h3 style={ST}>输入区</h3>
@@ -513,5 +526,315 @@ function ThemeStyleRow() {
         })}
       </div>
     </div>
+  );
+}
+
+// ── 工具类别折叠控制 ────────────────────────────────────────
+
+const TOOL_EXPAND_CATEGORIES: ToolExpandCategory[] = [
+  'bash',
+  'fileEdit',
+  'fileRead',
+  'mcp',
+  'skill',
+  'web',
+  'batch',
+  'other',
+];
+
+const TOOL_EXPAND_DESCRIPTIONS: Record<ToolExpandCategory, string> = {
+  bash: 'bash / interactive_bash — Shell 命令执行',
+  fileEdit: 'write / edit / multi_edit / apply_patch — 文件写入与编辑',
+  fileRead: 'read / grep / glob / list / codesearch — 文件读取与搜索',
+  mcp: 'mcp_call / mcp_list_tools / skill_mcp — MCP 服务器工具调用',
+  skill: 'skill — 技能调用',
+  web: 'webfetch / websearch / google_search — 网络抓取与搜索',
+  batch: 'batch — 批量并行工具调用',
+  other: '其他未分类工具',
+};
+
+/**
+ * 工具类别折叠行——与通用 SettingRow 不同，右侧除了 Toggle 还附带
+ * 明确的文字标签（"默认展开" / "默认折叠"），消除开/关语义歧义。
+ */
+function ToolExpandRow({
+  title,
+  description,
+  expanded,
+  onChange,
+  disabled,
+  isLast,
+}: {
+  title: string;
+  description: string;
+  expanded: boolean;
+  onChange: (expanded: boolean) => void;
+  disabled: boolean;
+  isLast: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        padding: '10px 0',
+        ...(isLast ? {} : { borderBottom: '1px solid var(--border-subtle)' }),
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>{title}</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{description}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: expanded ? 'var(--accent)' : 'var(--fg-muted)',
+            minWidth: 48,
+            textAlign: 'right',
+          }}
+        >
+          {expanded ? '默认展开' : '默认折叠'}
+        </span>
+        <Toggle
+          checked={expanded}
+          onChange={disabled ? () => {} : onChange}
+          label={`${title} ${expanded ? '默认展开' : '默认折叠'}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ToolExpandSection() {
+  const globalExpand = useDisplayPreferencesStore((s) => s.toolCallsExpandedByDefault);
+  const overrides = useDisplayPreferencesStore((s) => s.toolExpandedOverrides);
+  const setOverride = useDisplayPreferencesStore((s) => s.setToolExpandedOverride);
+
+  return (
+    <section style={SS}>
+      <h3 style={ST}>工具调用折叠</h3>
+      <p
+        style={{
+          fontSize: 12,
+          color: 'var(--fg-muted)',
+          lineHeight: 1.6,
+          marginBottom: 4,
+        }}
+      >
+        控制聊天页面中各类工具调用的默认展示方式。开启 = 默认展开详情，关闭 = 默认折叠为摘要行。
+        运行中和失败的工具始终自动展开，不受此设置影响。
+        {!globalExpand && (
+          <span style={{ color: 'var(--warning-fg, var(--fg-muted))', marginLeft: 4 }}>
+            需先开启上方"工具调用默认展开"总开关才能按类别调整。
+          </span>
+        )}
+      </p>
+      <div style={SECTION_LIST}>
+        {TOOL_EXPAND_CATEGORIES.map((cat, i) => (
+          <ToolExpandRow
+            key={cat}
+            title={TOOL_EXPAND_CATEGORY_LABELS[cat]}
+            description={TOOL_EXPAND_DESCRIPTIONS[cat]}
+            expanded={globalExpand && (overrides[cat] ?? false)}
+            onChange={(checked) => setOverride(cat, checked)}
+            disabled={!globalExpand}
+            isLast={i === TOOL_EXPAND_CATEGORIES.length - 1}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── 默认对话模式选择 ────────────────────────────────────────
+
+function DialogueModeSection() {
+  const defaultDialogueMode = useDisplayPreferencesStore((s) => s.defaultDialogueMode);
+  const setDefaultDialogueMode = useDisplayPreferencesStore((s) => s.setDefaultDialogueMode);
+
+  return (
+    <section style={SS}>
+      <h3 style={ST}>默认对话模式</h3>
+      <p
+        style={{
+          fontSize: 12,
+          color: 'var(--fg-muted)',
+          lineHeight: 1.6,
+          marginBottom: 4,
+        }}
+      >
+        新建会话时使用的默认对话模式。已有会话从其元数据恢复，不受此项影响。
+      </p>
+      <div style={SECTION_LIST}>
+        {DIALOGUE_MODE_OPTIONS.map((option, i) => {
+          const active = defaultDialogueMode === option.value;
+          const isLast = i === DIALOGUE_MODE_OPTIONS.length - 1;
+          return (
+            <div
+              key={option.value}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                padding: '10px 0',
+                borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: active ? 'var(--accent)' : 'var(--fg-strong)',
+                  }}
+                >
+                  {option.label} — {option.description}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                  {option.details.join(' · ')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDefaultDialogueMode(option.value as DialogueMode)}
+                aria-pressed={active}
+                aria-label={option.label}
+                style={{
+                  position: 'relative',
+                  width: 18,
+                  height: 18,
+                  borderRadius: '50%',
+                  border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'border-color 180ms ease',
+                  padding: 0,
+                }}
+              >
+                {active && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: 'var(--accent)',
+                      transition: 'opacity 180ms ease',
+                    }}
+                  />
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ── 消息布局模式选择 ────────────────────────────────────────
+
+const MESSAGE_LAYOUT_OPTIONS: {
+  value: MessageLayoutMode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'unified',
+    label: '统一左对齐',
+    description: '所有消息头像在左、内容在右，占满宽度',
+  },
+  {
+    value: 'split',
+    label: '左右分列',
+    description: '用户消息靠右、助手消息靠左，类似即时通讯风格',
+  },
+];
+
+function MessageLayoutSection() {
+  const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
+  const setMessageLayout = useDisplayPreferencesStore((s) => s.setMessageLayout);
+
+  return (
+    <section style={SS}>
+      <h3 style={ST}>消息布局</h3>
+      <div style={SECTION_LIST}>
+        {MESSAGE_LAYOUT_OPTIONS.map((opt, i) => {
+          const active = messageLayout === opt.value;
+          const isLast = i === MESSAGE_LAYOUT_OPTIONS.length - 1;
+          return (
+            <div
+              key={opt.value}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                padding: '10px 0',
+                borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: active ? 'var(--accent)' : 'var(--fg-strong)',
+                  }}
+                >
+                  {opt.label}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                  {opt.description}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMessageLayout(opt.value)}
+                aria-pressed={active}
+                aria-label={opt.label}
+                style={{
+                  position: 'relative',
+                  width: 18,
+                  height: 18,
+                  borderRadius: '50%',
+                  border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'border-color 180ms ease',
+                  padding: 0,
+                }}
+              >
+                {active && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: 'var(--accent)',
+                    }}
+                  />
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

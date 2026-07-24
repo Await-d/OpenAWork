@@ -59,7 +59,19 @@ describe('InlineToolCall', () => {
   });
 
   it('开启默认展开后自动展示内联工具详情', () => {
-    useDisplayPreferencesStore.setState({ toolCallsExpandedByDefault: true });
+    useDisplayPreferencesStore.setState({
+      toolCallsExpandedByDefault: true,
+      toolExpandedOverrides: {
+        bash: false,
+        fileEdit: false,
+        fileRead: false,
+        mcp: false,
+        skill: true,
+        web: false,
+        batch: false,
+        other: false,
+      },
+    });
 
     render(
       <InlineToolCall

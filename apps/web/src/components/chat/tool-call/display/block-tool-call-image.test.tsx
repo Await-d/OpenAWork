@@ -16,8 +16,8 @@ vi.mock('@openAwork/shared-ui', () => ({
   UnifiedCodeDiff: () => null,
 }));
 
-vi.mock('../../../../stores/settings/display-preferences.js', () => ({
-  useDisplayPreferencesStore: () => true,
+vi.mock('../../../../stores/settings/use-tool-expand-default.js', () => ({
+  useToolExpandDefault: () => () => true,
 }));
 
 import { BlockToolCall } from './block-tool-call.js';

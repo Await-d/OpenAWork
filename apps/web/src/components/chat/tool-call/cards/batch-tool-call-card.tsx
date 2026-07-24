@@ -1,6 +1,6 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
 import { useEffect, useMemo, useState } from 'react';
-import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
+import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { ToolIcon } from '../display/tool-icon';
 import { formatElapsed } from '../shared/format.js';
 import { extractFilePath } from '../shared/input-paths.js';
@@ -151,12 +151,10 @@ function BatchSubCallRow({
   parentTerminalState?: 'completed' | 'failed';
   renderToolCallDisplay: RenderToolCallDisplay;
 }) {
-  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
-    (s) => s.toolCallsExpandedByDefault,
-  );
+  const shouldExpandByDefault = useToolExpandDefault()(tool);
   const visualState = batchSubVisualState(result, parentTerminalState);
   const shouldAutoExpand =
-    toolCallsExpandedByDefault || visualState === 'running' || visualState === 'failed';
+    shouldExpandByDefault || visualState === 'running' || visualState === 'failed';
   const [open, setOpen] = useState(shouldAutoExpand);
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
   const childStatus: ToolCallCardProps['status'] =

@@ -28,7 +28,7 @@ import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { extractWebSummary } from '../shared/web-helpers.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
-import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
+import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 
 /* ── BlockToolCall (write / edit / bash / web / apply_patch / multi_edit) ── */
 
@@ -94,16 +94,14 @@ export function BlockToolCall({
     return 'found';
   }, [isWebTool, webSummary, visualState]);
 
-  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
-    (s) => s.toolCallsExpandedByDefault,
-  );
+  const shouldExpandByDefault = useToolExpandDefault()(toolName);
 
   const isWebEmptyResult = isWebTool && searchVisualState === 'empty';
 
   const shouldAutoExpand =
     visualState !== 'pending' &&
     !isWebEmptyResult &&
-    (toolCallsExpandedByDefault || !(visualState === 'completed' && hasLargeOutput));
+    (shouldExpandByDefault || !(visualState === 'completed' && hasLargeOutput));
 
   const [open, setOpen] = useState(shouldAutoExpand);
   const [webResultsExpanded, setWebResultsExpanded] = useState(false);

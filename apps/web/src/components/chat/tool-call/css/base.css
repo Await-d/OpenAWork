@@ -126,10 +126,14 @@
 .tool-call-inline-wrap {
   display: flex;
   flex-direction: column;
+  margin: 2px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 
 .tool-call-inline-output {
-  margin-left: 20px;
+  margin-left: 18px;
   margin-top: 2px;
   margin-bottom: 2px;
   display: flex;
@@ -176,6 +180,9 @@
   display: flex;
   flex-direction: column;
   margin: 2px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 
 .tool-call-grouped-header {
@@ -193,11 +200,11 @@
   line-height: 1.5;
   appearance: none;
   flex-wrap: nowrap;
+  border-radius: 3px;
 }
 
 .tool-call-grouped-header:hover {
   background: var(--bg-surface);
-  border-radius: 3px;
 }
 
 .tool-call-grouped-name {
@@ -264,7 +271,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  border-left: 1px solid color-mix(in oklch, var(--border-default) 50%, transparent);
+  border-left: 1px solid var(--border-subtle);
   margin-left: 6px;
 }
 
@@ -274,6 +281,9 @@
   display: flex;
   flex-direction: column;
   margin: 2px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
 
 .tool-call-block-header {
@@ -281,7 +291,7 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 2px 0;
+  padding: 3px 0;
   background: transparent;
   border: none;
   color: inherit;
@@ -291,11 +301,11 @@
   line-height: 1.4;
   appearance: none;
   flex-wrap: nowrap;
+  border-radius: 3px;
 }
 
 .tool-call-block-header:hover {
   background: var(--bg-surface);
-  border-radius: 3px;
 }
 
 /* tool-call-block-icon removed — replaced by ToolStatusDot */
@@ -369,8 +379,8 @@
 }
 
 .tool-call-block-body {
-  margin-top: 2px;
-  padding-left: 4px;
+  margin-top: 4px;
+  padding-left: 2px;
   min-width: 0;
   overflow: hidden;
 }

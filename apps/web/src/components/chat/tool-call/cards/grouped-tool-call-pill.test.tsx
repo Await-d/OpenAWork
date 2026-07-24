@@ -49,7 +49,19 @@ describe('GroupedToolCallPill', () => {
   });
 
   it('开启默认展开后自动展开分组工具详情', () => {
-    useDisplayPreferencesStore.setState({ toolCallsExpandedByDefault: true });
+    useDisplayPreferencesStore.setState({
+      toolCallsExpandedByDefault: true,
+      toolExpandedOverrides: {
+        bash: false,
+        fileEdit: false,
+        fileRead: true,
+        mcp: false,
+        skill: false,
+        web: false,
+        batch: false,
+        other: false,
+      },
+    });
 
     render(
       <GroupedToolCallPill

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { DialogueMode } from '@openAwork/shared';
 import {
   writeThemeStyle as storageWriteThemeStyle,
   writeThemeMode as storageWriteThemeMode,
@@ -28,7 +29,86 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * - `ocean`：深海青蓝 + 珊瑚
  */
 export type ThemeStyle =
-  'nebula' | 'aurora' | 'linear' | 'forest' | 'sakura' | 'carbon' | 'sunset' | 'ocean';
+  | 'nebula' | 'aurora' | 'linear' | 'forest' | 'sakura' | 'carbon' | 'sunset' | 'ocean';
+
+/**
+ * 工具折叠类别——按用户可感知的工具类型分组，控制聊天页面中各类型工具调用的默认展开/折叠行为。
+ * - `bash`：Shell 命令（bash / interactive_bash）
+ * - `fileEdit`：文件写入/编辑（write / edit / multi_edit / apply_patch / hash_edit）
+ * - `fileRead`：文件读取/搜索（read / grep / glob / list / codesearch / ast_grep_*）
+ * - `mcp`：MCP 工具调用（mcp_call / mcp_list_tools / mcp_* 前缀 / skill_mcp）
+ * - `skill`：Skill 工具调用（skill）
+ * - `web`：网络工具（webfetch / websearch / google_search）
+ * - `batch`：批量工具调用
+ * - `other`：其他未分类工具
+ */
+export type ToolExpandCategory =
+  | 'bash'
+  | 'fileEdit'
+  | 'fileRead'
+  | 'mcp'
+  | 'skill'
+  | 'web'
+  | 'batch'
+  | 'other';
+
+export type ToolExpandOverrides = Record<ToolExpandCategory, boolean>;
+
+/**
+ * 消息布局模式。
+ * - `unified`：统一左对齐——所有消息（user / assistant）头像在左、内容在右，占满宽度（默认）。
+ * - `split`：左右分列——user 消息靠右对齐，assistant 消息靠左对齐，各自有最大宽度限制。
+ */
+export type MessageLayoutMode = 'unified' | 'split';
+
+/**
+ * 将工具名映射到折叠类别，用于按类别控制工具调用的默认展开/折叠行为。
+ */
+export function classifyToolName(toolName: string): ToolExpandCategory {
+  const n = toolName.trim().toLowerCase();
+  if (n === 'bash' || n === 'interactive_bash') return 'bash';
+  if (
+    n === 'write' ||
+    n === 'edit' ||
+    n === 'multi_edit' ||
+    n === 'apply_patch' ||
+    n === 'hash_edit' ||
+    n === 'workspace_create_directory' ||
+    n === 'workspace_review_revert'
+  )
+    return 'fileEdit';
+  if (
+    n === 'read' ||
+    n === 'grep' ||
+    n === 'glob' ||
+    n === 'list' ||
+    n === 'codesearch' ||
+    n === 'ast_grep_search' ||
+    n === 'ast_grep_replace' ||
+    n === 'workspace_review_status' ||
+    n === 'session_list' ||
+    n === 'session_read' ||
+    n === 'session_search'
+  )
+    return 'fileRead';
+  if (n === 'mcp_call' || n === 'mcp_list_tools' || n === 'skill_mcp' || n.startsWith('mcp_'))
+    return 'mcp';
+  if (n === 'skill') return 'skill';
+  if (n === 'webfetch' || n === 'websearch' || n === 'google_search') return 'web';
+  if (n === 'batch') return 'batch';
+  return 'other';
+}
+
+export const TOOL_EXPAND_CATEGORY_LABELS: Record<ToolExpandCategory, string> = {
+  bash: 'Bash 命令',
+  fileEdit: '文件编辑',
+  fileRead: '文件读取 / 搜索',
+  mcp: 'MCP 工具',
+  skill: 'Skill 技能',
+  web: '网络工具',
+  batch: '批量调用',
+  other: '其他工具',
+};
 
 /**
  * 显示偏好设置——控制界面中各 UI 元素的显隐与行为。
@@ -67,6 +147,11 @@ export interface DisplayPreferencesStore {
   showEstimatedTokens: boolean;
   setShowEstimatedTokens: (v: boolean) => void;
 
+  // ── 消息布局 ──────────────────────────────────────────────
+
+  messageLayout: MessageLayoutMode;
+  setMessageLayout: (v: MessageLayoutMode) => void;
+
   // ── 推理与工具调用 ────────────────────────────────────────
 
   showReasoningBlock: boolean;
@@ -77,6 +162,24 @@ export interface DisplayPreferencesStore {
 
   toolCallsExpandedByDefault: boolean;
   setToolCallsExpandedByDefault: (v: boolean) => void;
+
+  /**
+   * 按工具类别控制默认展开行为。
+   * - 当 `toolCallsExpandedByDefault` 为 `false`（默认）：所有工具默认折叠，此字段无效果。
+   * - 当 `toolCallsExpandedByDefault` 为 `true`：某类工具在此处设为 `false` 后仍默认折叠，
+   *   其余类别跟随全局开关展开。
+   */
+  toolExpandedOverrides: ToolExpandOverrides;
+  setToolExpandedOverride: (category: ToolExpandCategory, expanded: boolean) => void;
+
+  // ── 对话模式 ──────────────────────────────────────────────
+
+  /**
+   * 新会话的默认对话模式（clarify / coding / programmer）。
+   * 仅在创建新会话或重置会话时使用；已有会话从元数据恢复。
+   */
+  defaultDialogueMode: DialogueMode;
+  setDefaultDialogueMode: (v: DialogueMode) => void;
 
   // ── 输入区 ────────────────────────────────────────────────
 
@@ -115,9 +218,12 @@ type DisplayPreferenceValues = Omit<
   | 'setShowStopReason'
   | 'setShowTokenBreakdown'
   | 'setShowEstimatedTokens'
+  | 'setMessageLayout'
   | 'setShowReasoningBlock'
   | 'setReasoningExpandedByDefault'
   | 'setToolCallsExpandedByDefault'
+  | 'setToolExpandedOverride'
+  | 'setDefaultDialogueMode'
   | 'setShowComposerStatsBar'
   | 'setShowCommandPaletteButton'
   | 'setShowGatewayStatusIndicator'
@@ -129,6 +235,21 @@ type DisplayPreferenceValues = Omit<
 
 const DISPLAY_PREFERENCES_STORAGE_KEY = 'openAwork-display-preferences';
 
+/**
+ * 工具类别折叠默认值——所有类别默认折叠（false）。
+ * 用户可在设置中按类别开启默认展开。
+ */
+const DEFAULT_TOOL_EXPAND_OVERRIDES: ToolExpandOverrides = {
+  bash: false,
+  fileEdit: false,
+  fileRead: false,
+  mcp: false,
+  skill: false,
+  web: false,
+  batch: false,
+  other: false,
+};
+
 const DEFAULTS: DisplayPreferenceValues = {
   showMessageTimestamps: true,
   showProviderLabel: true,
@@ -137,9 +258,12 @@ const DEFAULTS: DisplayPreferenceValues = {
   showStopReason: true,
   showTokenBreakdown: true,
   showEstimatedTokens: true,
+  messageLayout: 'unified',
   showReasoningBlock: true,
   reasoningExpandedByDefault: false,
   toolCallsExpandedByDefault: false,
+  toolExpandedOverrides: { ...DEFAULT_TOOL_EXPAND_OVERRIDES },
+  defaultDialogueMode: 'coding',
   showComposerStatsBar: true,
   showCommandPaletteButton: true,
   showGatewayStatusIndicator: true,
@@ -181,6 +305,10 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         set({ showEstimatedTokens: v });
         void persistToLocalStorage();
       },
+      setMessageLayout: (v) => {
+        set({ messageLayout: v });
+        void persistToLocalStorage();
+      },
       setShowReasoningBlock: (v) => {
         set({ showReasoningBlock: v });
         void persistToLocalStorage();
@@ -191,6 +319,16 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
       },
       setToolCallsExpandedByDefault: (v) => {
         set({ toolCallsExpandedByDefault: v });
+        void persistToLocalStorage();
+      },
+      setToolExpandedOverride: (category, expanded) => {
+        set((s) => ({
+          toolExpandedOverrides: { ...s.toolExpandedOverrides, [category]: expanded },
+        }));
+        void persistToLocalStorage();
+      },
+      setDefaultDialogueMode: (v) => {
+        set({ defaultDialogueMode: v });
         void persistToLocalStorage();
       },
       setShowComposerStatsBar: (v) => {
@@ -228,7 +366,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
     }),
     {
       name: DISPLAY_PREFERENCES_STORAGE_KEY,
-      version: 3,
+      version: 6,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         showMessageTimestamps: s.showMessageTimestamps,
@@ -238,9 +376,12 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         showStopReason: s.showStopReason,
         showTokenBreakdown: s.showTokenBreakdown,
         showEstimatedTokens: s.showEstimatedTokens,
+        messageLayout: s.messageLayout,
         showReasoningBlock: s.showReasoningBlock,
         reasoningExpandedByDefault: s.reasoningExpandedByDefault,
         toolCallsExpandedByDefault: s.toolCallsExpandedByDefault,
+        toolExpandedOverrides: s.toolExpandedOverrides,
+        defaultDialogueMode: s.defaultDialogueMode,
         showComposerStatsBar: s.showComposerStatsBar,
         showCommandPaletteButton: s.showCommandPaletteButton,
         showGatewayStatusIndicator: s.showGatewayStatusIndicator,
@@ -278,9 +419,12 @@ function persistToLocalStorage() {
       showStopReason: state.showStopReason,
       showTokenBreakdown: state.showTokenBreakdown,
       showEstimatedTokens: state.showEstimatedTokens,
+      messageLayout: state.messageLayout,
       showReasoningBlock: state.showReasoningBlock,
       reasoningExpandedByDefault: state.reasoningExpandedByDefault,
       toolCallsExpandedByDefault: state.toolCallsExpandedByDefault,
+      toolExpandedOverrides: state.toolExpandedOverrides,
+      defaultDialogueMode: state.defaultDialogueMode,
       showComposerStatsBar: state.showComposerStatsBar,
       showCommandPaletteButton: state.showCommandPaletteButton,
       showGatewayStatusIndicator: state.showGatewayStatusIndicator,
@@ -288,7 +432,7 @@ function persistToLocalStorage() {
       themeMode: state.themeMode,
       themeStyle: state.themeStyle,
     };
-    const serialized = JSON.stringify({ state: data, version: 3 });
+    const serialized = JSON.stringify({ state: data, version: 6 });
     localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, serialized);
     console.log('[theme-store] manual persist done:', data.themeStyle, data.themeMode);
   } catch (e) {

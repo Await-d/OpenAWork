@@ -1,6 +1,6 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
 import { useEffect, useMemo, useState } from 'react';
-import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
+import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
@@ -157,11 +157,9 @@ export function InlineToolCall({
   const hasInput = Object.keys(input).length > 0;
   const hasOutput = output !== undefined;
   const canExpand = !isLsp && (hasInput || hasOutput);
-  const toolCallsExpandedByDefault = useDisplayPreferencesStore(
-    (s) => s.toolCallsExpandedByDefault,
-  );
+  const shouldExpandByDefault = useToolExpandDefault()(toolName);
   const shouldAutoExpand =
-    toolCallsExpandedByDefault || visualState === 'running' || visualState === 'failed';
+    shouldExpandByDefault || visualState === 'running' || visualState === 'failed';
   const [expanded, setExpanded] = useState(shouldAutoExpand);
 
   useEffect(() => {
