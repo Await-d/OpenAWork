@@ -173,6 +173,14 @@ export function useScrollManager(
       ignoreScrollEventsUntilRef.current = Math.max(ignoreScrollEventsUntilRef.current, nextIgnore);
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
         if (sr) {
+          // Skip when the scroll region has zero clientHeight — the container
+          // hasn't been laid out yet (common during CSS containment / route
+          // transitions in classic layout).  A scrollTo(0) here would pin the
+          // viewport at the top and defeat the progressive retry in ChatPage.
+          if (sr.clientHeight === 0) {
+            pendingScrollFrameRef.current = null;
+            return;
+          }
           const maxST = Math.max(0, sr.scrollHeight - sr.clientHeight);
           const m =
             la && la !== bottomRef.current && sr.contains(la) ? getLatestAnchorMetrics(sr) : null;
@@ -188,8 +196,7 @@ export function useScrollManager(
             align === 'latest-edge'
               ? scrollDelta > 0.5
               : scrollDelta > CHAT_LATEST_FOCUS_THRESHOLD_PX;
-          if (sr.clientHeight === 0 || shouldScrollForAlign)
-            sr.scrollTo({ top: nextTop, behavior });
+          if (shouldScrollForAlign) sr.scrollTo({ top: nextTop, behavior });
         } else {
           bottomRef.current?.scrollIntoView({
             behavior,

@@ -696,6 +696,7 @@ export function SessionSidebar({
             active={sidebarTab === 'files'}
             sessionId={sessionId ?? null}
             onCreateSession={(directoryPath) => void newSession(directoryPath)}
+            onSwitchWorkspace={onOpenWorkspacePicker}
           />
         )}
         {sidebarTab === 'sessions' &&

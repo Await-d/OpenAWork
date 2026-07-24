@@ -1189,6 +1189,7 @@ export function InlinePermissionQuickBar({
               <div
                 style={{
                   marginLeft: 11,
+                  maxWidth: '100%',
                   color: 'var(--fg-muted)',
                   fontFamily: 'var(--font-mono, monospace)',
                   fontSize: 10,

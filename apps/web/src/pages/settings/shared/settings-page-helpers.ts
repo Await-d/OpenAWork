@@ -38,10 +38,9 @@ export const TABS = [
 export type TabId = (typeof TABS)[number]['id'];
 
 /**
- * 仅在 Tauri 桌面端运行时可见的 tab 列表。Web/移动端不渲染。
- * 由 SettingsPage 在 nav 与路由切换处共同过滤。
+ * 所有 tab 在所有平台均可见（桌面端设置页不再限制为 Tauri 专属）。
  */
-export const TAURI_ONLY_TAB_IDS: ReadonlySet<TabId> = new Set(['desktop']);
+export const TAURI_ONLY_TAB_IDS: ReadonlySet<TabId> = new Set();
 
 export const TAB_CATEGORIES: ReadonlyArray<{
   id: string;

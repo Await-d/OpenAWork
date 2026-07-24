@@ -198,4 +198,47 @@ describe('WorkspaceFileTreePanel', () => {
 
     expect(screen.getByText('当前目录为空，可在此浏览目录并从工作区中打开文件')).not.toBeNull();
   });
+
+  it('路径不兼容错误时展示切换工作区按钮', () => {
+    sidebarState.fileTreeError =
+      '当前网关运行在 Windows，无法访问 POSIX 路径：/home/await/project/00001.demo。请将会话工作区切换到当前设备可访问的目录。';
+
+    const onSwitchWorkspace = vi.fn();
+    render(
+      <WorkspaceFileTreePanel
+        allowMutations={false}
+        fetchTree={vi.fn(async () => [])}
+        onOpenFile={vi.fn()}
+        onSwitchWorkspace={onSwitchWorkspace}
+      />,
+    );
+
+    const btn = screen.getByRole('button', { name: '切换工作区' });
+    fireEvent.click(btn);
+    expect(onSwitchWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('路径不兼容但未提供 onSwitchWorkspace 时不展示切换按钮', () => {
+    sidebarState.fileTreeError =
+      '当前网关运行在 Windows，无法访问 POSIX 路径：/home/await/project/00001.demo。请将会话工作区切换到当前设备可访问的目录。';
+
+    renderPanel();
+
+    expect(screen.queryByRole('button', { name: '切换工作区' })).toBeNull();
+  });
+
+  it('普通错误不展示切换工作区按钮', () => {
+    sidebarState.fileTreeError = '读取文件树失败';
+
+    render(
+      <WorkspaceFileTreePanel
+        allowMutations={false}
+        fetchTree={vi.fn(async () => [])}
+        onOpenFile={vi.fn()}
+        onSwitchWorkspace={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '切换工作区' })).toBeNull();
+  });
 });

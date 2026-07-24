@@ -2075,31 +2075,51 @@ export default function ChatPage() {
     );
 
   const prevSnapshotReadyRef = useRef(false);
-  useEffect(() => {
-    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messages.length > 0) {
-      // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
-      if (sessionRestoredFromCacheRef.current) {
-        sessionRestoredFromCacheRef.current = false;
-        prevSnapshotReadyRef.current = isSessionSnapshotReady;
-        return;
-      }
+  const prevPageActiveRef = useRef(isPageActive);
+  // When true, the next scroll-to-latest trigger (Effect A or B) should be
+  // suppressed because the cache-restore path already set scrollTop.
+  const suppressNextScrollRef = useRef(false);
+
+  // ── Shared scroll-to-latest helper ───────────────────────────────────
+  // Used by both the snapshot-ready effect and the page-reactivation effect
+  // to force the scroll region to the bottom after messages are committed.
+  //
+  // `behavior`:
+  //   - 'auto'   — instant jump (used for first snapshot load with long history)
+  //   - 'smooth' — animated scroll (used for page reactivation)
+  const forceScrollToLatest = useCallback(
+    (behavior: ScrollBehavior = 'auto') => {
       isNearBottomRef.current = true;
       ignoreScrollEventsUntilRef.current = performance.now() + 600;
-      // Use double rAF to ensure the browser has completed at least one paint
-      // cycle after React commits the new messages to the DOM.
       let frameId: number;
       let fallbackTimer = 0;
+      let retryTimer = 0;
       let settleObserver: ResizeObserver | null = null;
+
+      const doScroll = () => {
+        const sr = scrollRegionRef.current;
+        if (sr && sr.clientHeight > 0) {
+          sr.scrollTo({ top: sr.scrollHeight, behavior });
+          return true;
+        }
+        if (!sr) {
+          bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+          return true;
+        }
+        return false;
+      };
+
       frameId = requestAnimationFrame(() => {
         frameId = requestAnimationFrame(() => {
-          const sr = scrollRegionRef.current;
-          if (sr) {
-            sr.scrollTo({ top: sr.scrollHeight, behavior: 'auto' });
-          } else {
-            bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+          const scrolled = doScroll();
+          // If the scroll region wasn't ready (clientHeight === 0, common when
+          // the page just switched from display:none to display:flex), retry
+          // once after a short delay.
+          if (!scrolled) {
+            retryTimer = window.setTimeout(() => {
+              doScroll();
+            }, 150);
           }
-          // Observe content height changes (images, code blocks loading) and
-          // re-scroll once if the user is still at the bottom.
           const contentCol = contentColumnRef.current;
           if (typeof ResizeObserver !== 'undefined' && contentCol) {
             let settled = false;
@@ -2126,18 +2146,45 @@ export default function ChatPage() {
       return () => {
         cancelAnimationFrame(frameId);
         if (fallbackTimer) window.clearTimeout(fallbackTimer);
+        if (retryTimer) window.clearTimeout(retryTimer);
         settleObserver?.disconnect();
       };
+    },
+    [
+      isNearBottomRef,
+      ignoreScrollEventsUntilRef,
+      scrollRegionRef,
+      bottomRef,
+      contentColumnRef,
+    ],
+  );
+
+  // ── Effect A: First snapshot ready → scroll to bottom ────────────────
+  // Triggers when `isSessionSnapshotReady` transitions to `true` for the
+  // first time after a session switch (prevSnapshotReadyRef guards against
+  // re-triggering on every messages.length change).
+  useEffect(() => {
+    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messages.length > 0) {
+      // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
+      if (sessionRestoredFromCacheRef.current) {
+        sessionRestoredFromCacheRef.current = false;
+        suppressNextScrollRef.current = true;
+        prevSnapshotReadyRef.current = isSessionSnapshotReady;
+        return;
+      }
+      suppressNextScrollRef.current = false;
+      const cleanup = forceScrollToLatest('auto');
+      prevSnapshotReadyRef.current = isSessionSnapshotReady;
+      return cleanup;
     }
     prevSnapshotReadyRef.current = isSessionSnapshotReady;
   }, [
     isSessionSnapshotReady,
     messages.length,
+    forceScrollToLatest,
     isNearBottomRef,
     ignoreScrollEventsUntilRef,
-    scrollRegionRef,
-    bottomRef,
-    contentColumnRef,
+    sessionRestoredFromCacheRef,
   ]);
 
   useEffect(() => {
@@ -2145,6 +2192,33 @@ export default function ChatPage() {
       prevSnapshotReadyRef.current = false;
     }
   }, [isSessionSnapshotReady]);
+
+  // ── Effect B: Page reactivation → scroll to bottom ───────────────────
+  // In classic layout, CachedRouteOutlet keeps ChatPage mounted but toggles
+  // `display: none / flex` on the wrapper.  When the user navigates away
+  // (e.g. to Settings) and back, `isPageActive` goes false → true.  Since
+  // `isSessionSnapshotReady` never changed, Effect A won't re-fire.  This
+  // effect bridges the gap: when the page becomes active again and there
+  // are messages, force a scroll to the latest message.
+  useEffect(() => {
+    const wasActive = prevPageActiveRef.current;
+    prevPageActiveRef.current = isPageActive;
+    if (!wasActive && isPageActive && isSessionSnapshotReady && messages.length > 0) {
+      // If Effect A just ran a cache-restore skip, don't override the
+      // restored scrollTop with a forced scroll-to-bottom.
+      if (suppressNextScrollRef.current) {
+        suppressNextScrollRef.current = false;
+        return;
+      }
+      const cleanup = forceScrollToLatest('smooth');
+      return cleanup;
+    }
+  }, [
+    isPageActive,
+    isSessionSnapshotReady,
+    messages.length,
+    forceScrollToLatest,
+  ]);
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
@@ -4960,23 +5034,24 @@ export default function ChatPage() {
                   setEditorFullScreen(true);
                 })
               }
-              fileTree={
-                <WorkspaceFileTreePanel
-                  workspacePath={effectiveWorkingDirectory}
-                  sessionId={currentSessionId}
-                  onOpenFile={(path) => void fileEditor.openFile(path)}
-                  fetchTree={workspace.fetchTree}
-                  active={editorMode}
-                  variant="embedded"
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    background: 'var(--bg-surface)',
-                    overflow: 'hidden',
-                  }}
-                />
-              }
-            />
+                fileTree={
+                  <WorkspaceFileTreePanel
+                    workspacePath={effectiveWorkingDirectory}
+                    sessionId={currentSessionId}
+                    onOpenFile={(path) => void fileEditor.openFile(path)}
+                    fetchTree={workspace.fetchTree}
+                    active={editorMode}
+                    variant="embedded"
+                    onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      background: 'var(--bg-surface)',
+                      overflow: 'hidden',
+                    }}
+                  />
+                }
+              />
           }
           hasSession={currentSessionId !== null}
           showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
@@ -5986,6 +6061,7 @@ export default function ChatPage() {
                     fetchTree={workspace.fetchTree}
                     active={editorMode}
                     variant="embedded"
+                    onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
                     style={{
                       flex: 1,
                       minHeight: 0,

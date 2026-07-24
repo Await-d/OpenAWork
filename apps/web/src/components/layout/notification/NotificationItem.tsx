@@ -569,6 +569,8 @@ function NotificationItemImpl({
             {parsedDetail.previewAction && (
               <code
                 style={{
+                  display: 'block',
+                  maxWidth: '100%',
                   color: 'var(--fg-muted)',
                   fontFamily: 'var(--font-mono, monospace)',
                   fontSize: 9,

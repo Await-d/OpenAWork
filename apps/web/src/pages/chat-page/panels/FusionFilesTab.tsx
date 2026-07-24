@@ -154,6 +154,7 @@ export function FusionFilesTab({
                 active={true}
                 allowMutations={false}
                 variant="embedded"
+                onSwitchWorkspace={onOpenWorkspace}
                 style={{
                   flex: 1,
                   minHeight: 0,

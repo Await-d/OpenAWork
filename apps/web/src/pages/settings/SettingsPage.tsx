@@ -1958,7 +1958,7 @@ export default function SettingsPage() {
                     activeImageModelId={activeSelection.image?.modelId}
                   />
                 )}
-                {activeTab === 'desktop' && isTauri && <DesktopTabContent />}
+                {activeTab === 'desktop' && <DesktopTabContent />}
                 {activeTab === 'devtools' && (
                   <DevtoolsTabContent
                     devLogs={devLogs}

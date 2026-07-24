@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Team 右侧 · Todo + 层级详情（简约版）</title>
+    <style>
+      :root {
+        --accent: #5cd4c0;
+        --complement: #f06b7e;
+        --contrast: #f0b429;
+        --aux: #8b9cf5;
+        --success: #3dd49a;
+        --bg-base: #080b12;
+        --bg-raised: #0d1119;
+        --bg-overlay: #121721;
+        --bg-surface: #171d29;
+        --bg-hover: #1c2433;
+        --fg-strong: #eef2ff;
+        --fg-default: #c8d0e0;
+        --fg-muted: #8b95a8;
+        --fg-faint: #5c667a;
+        --border: #1e2636;
+        --border-strong: #2a3344;
+        --font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+        --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+        --l-reception: #5cd4c0;
+        --l-pm1: #67e8f9;
+        --l-pm2: #c4b5fd;
+        --l-executor: #86efac;
+        --l-tester: #8b9cf5;
+        --l-reviewer: #f0b429;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        font-family: var(--font);
+        color: var(--fg-default);
+        background: var(--bg-base);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page {
+        display: grid;
+        gap: 10px;
+        min-height: 100vh;
+        padding: 10px;
+        grid-template-rows: auto auto minmax(0, 1fr);
+      }
+
+      .hero,
+      .controls {
+        border: 1px solid var(--border);
+        background: var(--bg-raised);
+        padding: 10px 12px;
+      }
+
+      .hero h1 {
+        margin: 0 0 2px;
+        color: var(--fg-strong);
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--fg-muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        align-items: center;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+      }
+
+      .seg button {
+        appearance: none;
+        border: 0;
+        border-right: 1px solid var(--border);
+        min-height: 26px;
+        padding: 0 10px;
+        background: transparent;
+        color: var(--fg-muted);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .seg button:last-child {
+        border-right: 0;
+      }
+
+      .seg button[aria-pressed='true'] {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        color: var(--fg-strong);
+      }
+
+      .stage {
+        min-height: 0;
+        height: min(86vh, 980px);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(400px, 480px);
+        border: 1px solid var(--border-strong);
+        background: var(--bg-base);
+        overflow: hidden;
+      }
+
+      /* 左：主对话占位，极简 */
+      .left {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--border);
+      }
+
+      .left-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+
+      .left-bar strong {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
+
+      .left-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px 14px;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .bubble {
+        max-width: 480px;
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: var(--fg-default);
+      }
+
+      .bubble .m {
+        margin-bottom: 2px;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+
+      .bubble.user {
+        margin-left: auto;
+        color: var(--fg-strong);
+      }
+
+      .left-input {
+        border-top: 1px solid var(--border);
+        padding: 8px 10px;
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+
+      /* 右：主面板 */
+      .right {
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        background: var(--bg-raised);
+      }
+
+      .r-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .r-head h2 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .r-head .meta {
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+
+      .r-actions {
+        display: inline-flex;
+        gap: 0;
+        border: 1px solid var(--border);
+      }
+
+      .r-actions button {
+        appearance: none;
+        border: 0;
+        border-right: 1px solid var(--border);
+        min-height: 24px;
+        padding: 0 8px;
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .r-actions button:last-child {
+        border-right: 0;
+      }
+
+      .r-actions button.primary {
+        color: var(--accent);
+      }
+
+      .r-actions button.danger {
+        color: var(--complement);
+      }
+
+      /* 层级条：扁平行，不要卡片 */
+      .layer-bar {
+        display: flex;
+        gap: 0;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-base);
+      }
+
+      .layer-bar button {
+        appearance: none;
+        position: relative;
+        flex: 1 0 auto;
+        min-width: 56px;
+        border: 0;
+        border-right: 1px solid var(--border);
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--fg-muted);
+        padding: 7px 8px 6px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .layer-bar button:last-child {
+        border-right: 0;
+      }
+
+      .layer-bar button[data-active='true'] {
+        color: var(--fg-strong);
+        border-bottom-color: var(--c);
+        background: color-mix(in srgb, var(--c) 7%, transparent);
+      }
+
+      .layer-bar .code {
+        display: block;
+        color: var(--c);
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.1;
+      }
+
+      .layer-bar .name {
+        display: block;
+        margin-top: 1px;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .layer-bar .state {
+        display: block;
+        margin-top: 1px;
+        color: var(--fg-faint);
+        font-size: 9px;
+      }
+
+      .layer-bar .dot-fail {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--complement);
+      }
+
+      /* 主体上下 */
+      .body {
+        min-height: 0;
+        display: grid;
+        overflow: hidden;
+      }
+
+      .body[data-split='todo-heavy'] {
+        grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .body[data-split='balanced'] {
+        grid-template-rows: minmax(0, 0.72fr) minmax(0, 1.28fr);
+      }
+
+      .body[data-split='detail-heavy'] {
+        grid-template-rows: minmax(0, 0.48fr) minmax(0, 1.52fr);
+      }
+
+      .block {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .block + .block {
+        border-top: 1px solid var(--border);
+      }
+
+      .block-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 28px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-base) 55%, transparent);
+        flex-shrink: 0;
+      }
+
+      .block-head h3 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .block-head h3 span {
+        color: var(--fg-faint);
+        font-weight: 600;
+      }
+
+      .filters {
+        display: inline-flex;
+        gap: 0;
+      }
+
+      .filters button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--fg-faint);
+        min-height: 24px;
+        padding: 0 7px;
+        font-size: 10px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .filters button[aria-pressed='true'] {
+        color: var(--accent);
+      }
+
+      .scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      /* Todo：行列表，无卡片包裹 */
+      .todo-row {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: start;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+      }
+
+      .todo-row:hover {
+        background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+      }
+
+      .todo-row[data-active='true'] {
+        background: color-mix(in srgb, var(--c) 8%, transparent);
+        box-shadow: inset 2px 0 0 var(--c);
+      }
+
+      .todo-row[data-done='true'] {
+        opacity: 0.55;
+      }
+
+      .check {
+        width: 12px;
+        height: 12px;
+        margin-top: 3px;
+        border: 1px solid color-mix(in srgb, var(--c) 55%, var(--border-strong));
+        background: transparent;
+        color: var(--c);
+        font-size: 9px;
+        line-height: 10px;
+        text-align: center;
+      }
+
+      .todo-row[data-done='true'] .check {
+        background: color-mix(in srgb, var(--c) 18%, transparent);
+      }
+
+      .todo-main {
+        min-width: 0;
+      }
+
+      .todo-title {
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1.35;
+      }
+
+      .todo-row[data-done='true'] .todo-title {
+        text-decoration: line-through;
+        color: var(--fg-muted);
+      }
+
+      .todo-sub {
+        margin-top: 1px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .todo-tags {
+        margin-top: 3px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+
+      .todo-tags b {
+        color: var(--c);
+        font-weight: 700;
+      }
+
+      .todo-tags .s-run {
+        color: var(--success);
+      }
+
+      .todo-tags .s-fail {
+        color: var(--complement);
+      }
+
+      .todo-tags .s-wait {
+        color: var(--contrast);
+      }
+
+      .todo-time {
+        color: var(--fg-faint);
+        font-size: 10px;
+        white-space: nowrap;
+        padding-top: 2px;
+      }
+
+      .group-label {
+        padding: 6px 10px 3px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-base) 40%, transparent);
+      }
+
+      /* 详情：上下文一行 + 消息流，无厚卡片 */
+      .detail-context {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--c) 5%, transparent);
+      }
+
+      .detail-context .line1 {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        align-items: baseline;
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+
+      .detail-context .line1 strong {
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .detail-context .line1 .live {
+        color: var(--c);
+        font-weight: 700;
+      }
+
+      .detail-context .line2 {
+        margin-top: 3px;
+        color: var(--fg-default);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+
+      .detail-context .line3 {
+        margin-top: 3px;
+        color: var(--fg-faint);
+        font-size: 10.5px;
+      }
+
+      .detail-context .line3 b {
+        color: var(--fg-muted);
+        font-weight: 650;
+      }
+
+      .msg {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .msg:hover {
+        background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
+      }
+
+      .msg-top {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        margin-bottom: 2px;
+        font-size: 10.5px;
+      }
+
+      .msg-top .who {
+        color: var(--fg-strong);
+        font-weight: 700;
+      }
+
+      .msg-top .role {
+        color: var(--c);
+        font-weight: 650;
+      }
+
+      .msg-top .when {
+        margin-left: auto;
+        color: var(--fg-faint);
+      }
+
+      .msg-body {
+        color: var(--fg-default);
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .msg[data-role='user'] .msg-body {
+        color: var(--fg-strong);
+      }
+
+      .msg[data-role='tool'] .msg-body {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .msg[data-role='error'] {
+        background: color-mix(in srgb, var(--complement) 6%, transparent);
+      }
+
+      .msg[data-role='error'] .msg-body {
+        color: color-mix(in srgb, var(--complement) 80%, var(--fg-default));
+      }
+
+      .msg[data-role='system'] .msg-body {
+        color: var(--fg-muted);
+        font-size: 11.5px;
+      }
+
+      .msg-tags {
+        margin-top: 3px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+
+      .empty {
+        padding: 16px 10px;
+        color: var(--fg-faint);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      @media (max-width: 960px) {
+        .stage {
+          grid-template-columns: 1fr;
+          height: auto;
+          min-height: 1000px;
+        }
+
+        .left {
+          min-height: 220px;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <h1>右侧 · Todo + 层级详情（简约版）</h1>
+        <p>去掉厚卡片与大 padding，改成扁平行列表：上层 Todo，下层层级对话详情，顶部层级条切换。</p>
+      </header>
+
+      <section class="controls">
+        <span>比例</span>
+        <div class="seg">
+          <button type="button" data-split="todo-heavy" aria-pressed="false">Todo 重</button>
+          <button type="button" data-split="balanced" aria-pressed="true">均衡</button>
+          <button type="button" data-split="detail-heavy" aria-pressed="false">详情重</button>
+        </div>
+        <span>过滤</span>
+        <div class="seg">
+          <button type="button" data-filter="all" aria-pressed="true">全部</button>
+          <button type="button" data-filter="active" aria-pressed="false">进行中</button>
+          <button type="button" data-filter="blocked" aria-pressed="false">阻塞</button>
+          <button type="button" data-filter="done" aria-pressed="false">完成</button>
+        </div>
+        <span style="color: var(--fg-faint)">1/2/3 比例 · 点 Todo 联动详情</span>
+      </section>
+
+      <div class="stage">
+        <section class="left">
+          <div class="left-bar">
+            <span>主对话 · <strong>OAuth 登录实现</strong></span>
+            <span>占位</span>
+          </div>
+          <div class="left-body">
+            <div class="bubble user">
+              <div class="m">你 · 14:32</div>
+              帮我实现 OAuth 登录，优先 GitHub，附带基础测试。
+            </div>
+            <div class="bubble">
+              <div class="m">接待 · b · 14:32</div>
+              已接收。右侧可看任务与各层对话详情。
+            </div>
+            <div class="bubble">
+              <div class="m">系统 · 14:39</div>
+              #12 callback 校验超时失败。
+            </div>
+          </div>
+          <div class="left-input">composer 占位</div>
+        </section>
+
+        <aside class="right" id="right"></aside>
+      </div>
+    </div>
+
+    <script>
+      const LAYERS = [
+        {
+          id: 'reception',
+          code: 'b',
+          name: '接待',
+          color: 'var(--l-reception)',
+          state: 'completed',
+          stateLabel: '完成',
+          title: '接收诉求并启动编排',
+          desc: '优先 GitHub OAuth + 本地 callback + 登录回归。',
+          from: null,
+          to: '规划',
+          messages: [
+            { role: 'user', who: '你', when: '14:32', text: '帮我实现 OAuth 登录，优先 GitHub，附带基础测试。' },
+            {
+              role: 'assistant',
+              who: '接待 · b',
+              when: '14:32',
+              text: '已接收。启动规划 → 派发 → 执行 → 测试。\n预计首轮 3–5 分钟。',
+              tags: ['启动'],
+            },
+            { role: 'system', who: '系统', when: '14:32', text: 'handoff → 规划（PM1）', tags: ['交接'] },
+          ],
+        },
+        {
+          id: 'pm1',
+          code: 'c',
+          name: '规划',
+          color: 'var(--l-pm1)',
+          state: 'completed',
+          stateLabel: '完成',
+          title: '拆解实现计划',
+          desc: 'provider / callback / session / tests 四段。',
+          from: '接待',
+          to: '管控',
+          messages: [
+            {
+              role: 'assistant',
+              who: '规划 · PM1',
+              when: '14:33',
+              text: '范围：\n1) GitHub OAuth App\n2) localhost:3000 callback\n3) session 落库\n4) 登录回归',
+              tags: ['plan'],
+            },
+            {
+              role: 'tool',
+              who: '规划 · PM1',
+              when: '14:33',
+              text: 'write · docs/plan-oauth.md (+48)',
+              tags: ['write'],
+            },
+            { role: 'system', who: '系统', when: '14:33', text: 'handoff → 管控（PM2）', tags: ['交接'] },
+          ],
+        },
+        {
+          id: 'pm2',
+          code: 'd',
+          name: '管控',
+          color: 'var(--l-pm2)',
+          state: 'completed',
+          stateLabel: '已派发',
+          title: '任务派发与约束',
+          desc: '开发 #12/#13，测试 #14；本地 callback 已确认。',
+          from: '规划',
+          to: '执行 / 测试',
+          messages: [
+            {
+              role: 'assistant',
+              who: '管控 · PM2',
+              when: '14:34',
+              text: '#12 callback 校验 → e1\n#13 session 落库 → e2\n#14 登录回归 → t1',
+              tags: ['派发'],
+            },
+            {
+              role: 'assistant',
+              who: '管控 · PM2',
+              when: '14:35',
+              text: '确认 callback：\nhttp://localhost:3000/api/auth/callback/github',
+              tags: ['澄清'],
+            },
+            {
+              role: 'user',
+              who: '你',
+              when: '14:36',
+              text: '对，本地先用这个。',
+              tags: ['确认'],
+            },
+          ],
+        },
+        {
+          id: 'executor',
+          code: 'e',
+          name: '执行',
+          color: 'var(--l-executor)',
+          state: 'failed',
+          stateLabel: '部分失败',
+          title: '实现 provider / callback / session',
+          desc: 'provider 完成；callback 超时失败；session 仍在推进。',
+          from: '管控',
+          to: '测试',
+          messages: [
+            {
+              role: 'assistant',
+              who: '执行 · e1',
+              when: '14:36',
+              text: 'GitHub provider 与登录按钮已完成，下一步补 callback 校验。',
+              tags: ['#12'],
+            },
+            {
+              role: 'tool',
+              who: '执行 · e1',
+              when: '14:37',
+              text: 'edit · src/auth/github.ts\n+ provider config\n+ login button',
+              tags: ['edit'],
+            },
+            {
+              role: 'tool',
+              who: '执行 · e1',
+              when: '14:38',
+              text: 'shell · pnpm test auth.oauth --runInBand\nexit 1 · token exchange timeout',
+              tags: ['shell'],
+            },
+            {
+              role: 'error',
+              who: '执行 · e1',
+              when: '14:39',
+              text: 'callback 校验超时：token exchange > 8s。\n可能：client secret 未注入 / 端口不通 / 代理干扰',
+              tags: ['#12', '可重试'],
+            },
+            {
+              role: 'assistant',
+              who: '执行 · e2',
+              when: '14:38',
+              text: 'session 落库接口草稿完成，等待 callback 联调。',
+              tags: ['#13'],
+            },
+          ],
+        },
+        {
+          id: 'tester',
+          code: 't',
+          name: '测试',
+          color: 'var(--l-tester)',
+          state: 'pending',
+          stateLabel: '排队',
+          title: '登录回归',
+          desc: '用例就绪，等待可测构建。',
+          from: '执行',
+          to: '评审',
+          messages: [
+            {
+              role: 'assistant',
+              who: '测试 · t1',
+              when: '14:38',
+              text: '用例：未登录拦截 / 授权回跳 / session cookie。\n当前阻塞：依赖 #12。',
+              tags: ['#14'],
+            },
+            {
+              role: 'system',
+              who: '系统',
+              when: '14:39',
+              text: '#12 失败，测试保持排队。',
+              tags: ['阻塞'],
+            },
+          ],
+        },
+        {
+          id: 'reviewer',
+          code: 'r',
+          name: '评审',
+          color: 'var(--l-reviewer)',
+          state: 'idle',
+          stateLabel: '待命',
+          title: '实现评审',
+          desc: '等待测试通过。',
+          from: '测试',
+          to: null,
+          messages: [],
+        },
+      ];
+
+      const TODOS = [
+        {
+          id: 't2',
+          title: '#12 callback 校验',
+          sub: 'token exchange 超时，需重试或补 secret',
+          layer: 'executor',
+          status: 'failed',
+          priority: 'P0',
+          time: '14:39',
+        },
+        {
+          id: 't3',
+          title: '#13 session 落库',
+          sub: '接口草稿完成，待与 callback 联调',
+          layer: 'executor',
+          status: 'running',
+          priority: 'P1',
+          time: '14:38',
+        },
+        {
+          id: 't4',
+          title: '#14 登录回归测试',
+          sub: '依赖 #12 成功产物',
+          layer: 'tester',
+          status: 'blocked',
+          priority: 'P1',
+          time: '14:39',
+        },
+        {
+          id: 't1',
+          title: '确认 callback URL',
+          sub: '本地使用 localhost:3000',
+          layer: 'pm2',
+          status: 'done',
+          priority: 'P1',
+          time: '14:36',
+        },
+        {
+          id: 't5',
+          title: '产出 plan 并派发',
+          sub: '四段计划已交给管控',
+          layer: 'pm1',
+          status: 'done',
+          priority: 'P2',
+          time: '14:33',
+        },
+        {
+          id: 't6',
+          title: '接待启动编排',
+          sub: '用户诉求已入库',
+          layer: 'reception',
+          status: 'done',
+          priority: 'P2',
+          time: '14:32',
+        },
+        {
+          id: 't7',
+          title: '实现评审',
+          sub: '等待测试通过',
+          layer: 'reviewer',
+          status: 'pending',
+          priority: 'P2',
+          time: '—',
+        },
+      ];
+
+      const STATUS = {
+        done: { label: '完成', cls: '' },
+        running: { label: '进行中', cls: 's-run' },
+        failed: { label: '失败', cls: 's-fail' },
+        blocked: { label: '阻塞', cls: 's-fail' },
+        pending: { label: '排队', cls: 's-wait' },
+      };
+
+      const state = {
+        split: 'balanced',
+        filter: 'all',
+        layerId: 'executor',
+        todoId: 't2',
+      };
+
+      const layerOf = (id) => LAYERS.find((l) => l.id === id);
+
+      function filteredTodos() {
+        return TODOS.filter((t) => {
+          if (state.filter === 'all') return true;
+          if (state.filter === 'active') return t.status === 'running' || t.status === 'pending';
+          if (state.filter === 'blocked') return t.status === 'failed' || t.status === 'blocked';
+          if (state.filter === 'done') return t.status === 'done';
+          return true;
+        });
+      }
+
+      function render() {
+        document.querySelectorAll('[data-split]').forEach((b) => {
+          b.setAttribute('aria-pressed', String(b.dataset.split === state.split));
+        });
+        document.querySelectorAll('[data-filter]').forEach((b) => {
+          b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter));
+        });
+
+        const layer = layerOf(state.layerId) || LAYERS[0];
+        const todos = filteredTodos();
+        const linked = TODOS.filter((t) => t.layer === layer.id);
+        const groups = [
+          {
+            title: '当前',
+            items: todos.filter((t) => ['failed', 'blocked', 'running'].includes(t.status)),
+          },
+          {
+            title: '排队',
+            items: todos.filter((t) => t.status === 'pending'),
+          },
+          {
+            title: '完成',
+            items: todos.filter((t) => t.status === 'done'),
+          },
+        ].filter((g) => g.items.length);
+
+        document.getElementById('right').innerHTML = `
+          <div class="r-head">
+            <div>
+              <h2>任务 / 层级详情</h2>
+            </div>
+            <span class="meta">${TODOS.length} todo · ${layer.name}</span>
+            <div class="r-actions">
+              <button type="button" class="danger">重试失败</button>
+              <button type="button" class="primary">打开此层</button>
+            </div>
+          </div>
+
+          <div class="layer-bar">
+            ${LAYERS.map((l) => {
+              const fail = TODOS.some((t) => t.layer === l.id && (t.status === 'failed' || t.status === 'blocked'));
+              return `
+                <button type="button" data-layer="${l.id}" data-active="${state.layerId === l.id}" style="--c:${l.color}">
+                  ${fail ? '<span class="dot-fail"></span>' : ''}
+                  <span class="code">${l.code}</span>
+                  <span class="name">${l.name}</span>
+                  <span class="state">${l.stateLabel}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          <div class="body" data-split="${state.split}">
+            <section class="block">
+              <div class="block-head">
+                <h3>Todo <span>${todos.length}</span></h3>
+                <div class="filters">
+                  <button type="button" data-filter="all" aria-pressed="${state.filter === 'all'}">全部</button>
+                  <button type="button" data-filter="active" aria-pressed="${state.filter === 'active'}">进行中</button>
+                  <button type="button" data-filter="blocked" aria-pressed="${state.filter === 'blocked'}">阻塞</button>
+                  <button type="button" data-filter="done" aria-pressed="${state.filter === 'done'}">完成</button>
+                </div>
+              </div>
+              <div class="scroll">
+                ${
+                  groups.length
+                    ? groups
+                        .map(
+                          (g) => `
+                      <div class="group-label">${g.title} · ${g.items.length}</div>
+                      ${g.items
+                        .map((t) => {
+                          const l = layerOf(t.layer);
+                          const st = STATUS[t.status];
+                          return `
+                            <div class="todo-row" data-todo="${t.id}" data-active="${state.todoId === t.id}" data-done="${t.status === 'done'}" style="--c:${l.color}">
+                              <div class="check">${t.status === 'done' ? '✓' : ''}</div>
+                              <div class="todo-main">
+                                <div class="todo-title">${t.title}</div>
+                                <div class="todo-sub">${t.sub}</div>
+                                <div class="todo-tags">
+                                  <b>${l.name}</b>
+                                  <span class="${st.cls}">${st.label}</span>
+                                  <span>${t.priority}</span>
+                                </div>
+                              </div>
+                              <div class="todo-time">${t.time}</div>
+                            </div>
+                          `;
+                        })
+                        .join('')}
+                    `,
+                        )
+                        .join('')
+                    : '<div class="empty">当前过滤下没有任务</div>'
+                }
+              </div>
+            </section>
+
+            <section class="block" style="--c:${layer.color}">
+              <div class="block-head">
+                <h3>层级对话 <span>${layer.messages.length}</span></h3>
+                <span style="color:var(--fg-faint);font-size:10px">${layer.stateLabel}</span>
+              </div>
+              <div class="detail-context">
+                <div class="line1">
+                  <span class="live">${layer.name}</span>
+                  <strong>${layer.title}</strong>
+                </div>
+                <div class="line2">${layer.desc}</div>
+                <div class="line3">
+                  ${layer.from ? `来自 <b>${layer.from}</b>` : '<b>入口层</b>'}
+                  ${layer.to ? ` → <b>${layer.to}</b>` : ''}
+                  ${linked.length ? ` · 关联 ${linked.map((t) => t.title).join(' / ')}` : ''}
+                </div>
+              </div>
+              <div class="scroll">
+                ${
+                  layer.messages.length
+                    ? layer.messages
+                        .map(
+                          (m) => `
+                      <article class="msg" data-role="${m.role}">
+                        <div class="msg-top">
+                          <span class="who">${m.who}</span>
+                          <span class="role">${roleLabel(m.role)}</span>
+                          <span class="when">${m.when}</span>
+                        </div>
+                        <div class="msg-body">${esc(m.text)}</div>
+                        ${
+                          m.tags?.length
+                            ? `<div class="msg-tags">${m.tags.map((t) => `<span>${t}</span>`).join('')}</div>`
+                            : ''
+                        }
+                      </article>
+                    `,
+                        )
+                        .join('')
+                    : '<div class="empty">该层暂无对话</div>'
+                }
+              </div>
+            </section>
+          </div>
+        `;
+
+        bind();
+      }
+
+      function roleLabel(role) {
+        return { user: '用户', assistant: '回复', system: '系统', tool: '工具', error: '错误' }[role] || role;
+      }
+
+      function esc(s) {
+        return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      }
+
+      function bind() {
+        document.querySelectorAll('[data-layer]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.layerId = btn.getAttribute('data-layer');
+            state.todoId = TODOS.find((t) => t.layer === state.layerId)?.id || null;
+            render();
+          });
+        });
+        document.querySelectorAll('[data-todo]').forEach((el) => {
+          el.addEventListener('click', () => {
+            const todo = TODOS.find((t) => t.id === el.getAttribute('data-todo'));
+            if (!todo) return;
+            state.todoId = todo.id;
+            state.layerId = todo.layer;
+            render();
+          });
+        });
+        document.querySelectorAll('.block-head [data-filter]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.filter = btn.getAttribute('data-filter');
+            render();
+          });
+        });
+      }
+
+      document.querySelectorAll('.controls [data-split]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.split = btn.dataset.split;
+          render();
+        });
+      });
+      document.querySelectorAll('.controls [data-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.filter = btn.dataset.filter;
+          render();
+        });
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.target.matches('input, textarea')) return;
+        if (e.key === '1') state.split = 'todo-heavy';
+        if (e.key === '2') state.split = 'balanced';
+        if (e.key === '3') state.split = 'detail-heavy';
+        if (['1', '2', '3'].includes(e.key)) render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>

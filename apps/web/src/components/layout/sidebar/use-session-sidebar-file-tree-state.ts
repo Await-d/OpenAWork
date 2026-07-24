@@ -5,6 +5,16 @@ import { isPathWithinRoot, rebasePath } from '../../../utils/workspace-path.js';
 const SESSION_SIDEBAR_FILE_TREE_RETRY_BASE_MS = 2_000;
 const SESSION_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
 
+/**
+ * 检测错误是否为跨平台路径不兼容——网关返回的 400 BadRequest 中包含
+ * "无法访问 … 路径" 提示。这类错误是永久性的（Windows 网关无法访问
+ * POSIX 路径，反之亦然），重试只会无限循环，应当跳过 scheduleRetry。
+ */
+function isPathIncompatibleError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('无法访问') && message.includes('路径');
+}
+
 function computeRetryDelay(attempt: number): number {
   const safeAttempt = Math.max(0, attempt);
   return Math.min(
@@ -329,7 +339,9 @@ export function useSessionSidebarFileTreeState(
           setFileTree((current) => current);
         }
         setFileTreeError(error instanceof Error ? error.message : '读取文件树失败');
-        scheduleRetry({ kind: 'root', preserveExpandedDirectories });
+        if (!isPathIncompatibleError(error)) {
+          scheduleRetry({ kind: 'root', preserveExpandedDirectories });
+        }
         return false;
       } finally {
         if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
@@ -403,7 +415,9 @@ export function useSessionSidebarFileTreeState(
         return true;
       } catch (error) {
         setFileTreeError(error instanceof Error ? error.message : '刷新目录失败');
-        scheduleRetry({ kind: 'refresh-directory', path: directoryPath });
+        if (!isPathIncompatibleError(error)) {
+          scheduleRetry({ kind: 'refresh-directory', path: directoryPath });
+        }
         return false;
       } finally {
         if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
@@ -463,7 +477,9 @@ export function useSessionSidebarFileTreeState(
           }
 
           setFileTreeError(error instanceof Error ? error.message : '读取目录失败');
-          scheduleRetry({ kind: 'toggle-directory', path });
+          if (!isPathIncompatibleError(error)) {
+            scheduleRetry({ kind: 'toggle-directory', path });
+          }
           optionsRef.current.setExpandedDirs((prev) => {
             const next = new Set(prev);
             next.delete(path);

@@ -61,6 +61,13 @@ interface DesktopSettingsView {
   updateChannel: 'preview' | 'stable';
 }
 
+/** 关闭行为选项预设列表。 */
+const CLOSE_BEHAVIOR_OPTIONS: ReadonlyArray<{ label: string; value: CloseBehaviorValue }> = [
+  { label: '每次询问', value: 'ask' },
+  { label: '最小化到托盘', value: 'minimize' },
+  { label: '直接退出', value: 'exit' },
+];
+
 /** 空闲自动锁预设分钟选项。`null` 表示禁用。 */
 const IDLE_LOCK_PRESETS: ReadonlyArray<{ label: string; value: number | null }> = [
   { label: '禁用', value: null },
@@ -183,6 +190,21 @@ export function DesktopTabContent() {
 
   const refresh = useCallback(async () => {
     if (!isTauri) {
+      // 非 Tauri 环境（Web 浏览器）使用默认值，允许用户在 Web 端预览和修改设置
+      setView({
+        closeBehavior: 'ask',
+        hasSeenTrayHint: false,
+        effectiveDataRoot: '',
+        customDataRoot: null,
+        defaultDataRoot: '',
+        settingsFilePath: '',
+        autostartEnabled: false,
+        hasPin: false,
+        idleLockMinutes: null,
+        pinDigits: 4,
+        updateChannel: 'stable',
+      });
+      setError(null);
       setLoading(false);
       return;
     }
@@ -205,6 +227,10 @@ export function DesktopTabContent() {
 
   const toggleAutostart = useCallback(async () => {
     if (!view) return;
+    if (!isTauri) {
+      setAutostartMsg({ type: 'error', text: '桌面端设置仅支持在 Tauri 桌面端应用内修改。' });
+      return;
+    }
     const target = !view.autostartEnabled;
     setBusy('autostart');
     setAutostartMsg(null);
@@ -291,6 +317,10 @@ export function DesktopTabContent() {
 
   const pickAndMigrate = useCallback(async () => {
     if (!view) return;
+    if (!isTauri) {
+      setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
+      return;
+    }
     try {
       const picked = await tauriInvoke<string | null>('pick_folder');
       if (!picked) {
@@ -308,6 +338,10 @@ export function DesktopTabContent() {
 
   const resetToDefault = useCallback(async () => {
     if (!view || !view.customDataRoot) return;
+    if (!isTauri) {
+      setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
+      return;
+    }
     try {
       await runMigration(view.defaultDataRoot, 'reset', '重置');
       setError(null);
@@ -321,6 +355,9 @@ export function DesktopTabContent() {
 
   const openSettingsFile = useCallback(async () => {
     if (!view) return;
+    if (!isTauri) {
+      return;
+    }
     try {
       await tauriInvoke('open_artifact_path', { path: view.effectiveDataRoot });
     } catch (err) {
@@ -393,6 +430,10 @@ export function DesktopTabContent() {
 
   const submitSetPin = useCallback(async () => {
     if (pinBusy) return;
+    if (!isTauri) {
+      setPinError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
+      return;
+    }
     if (!view || pinNew.length < view.pinDigits) {
       setPinError(`新 PIN 须为 ${view?.pinDigits ?? 6} 位数字`);
       return;
@@ -421,6 +462,7 @@ export function DesktopTabContent() {
   }, [pinBusy, pinConfirm, pinCurrent, pinMode, pinNew, resetPinForm]);
 
   const updateIdleLockMinutes = useCallback(async (next: number | null) => {
+    if (!isTauri) return;
     try {
       const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
         patch: { idleLockMinutes: next },
@@ -432,6 +474,7 @@ export function DesktopTabContent() {
   }, []);
 
   const updateChannel = useCallback(async (next: 'preview' | 'stable') => {
+    if (!isTauri) return;
     try {
       const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
         patch: { updateChannel: next },
@@ -442,8 +485,34 @@ export function DesktopTabContent() {
     }
   }, []);
 
+  const handleSetCloseBehavior = useCallback(
+    async (next: CloseBehaviorValue) => {
+      if (!view) return;
+      if (!isTauri) {
+        setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
+        return;
+      }
+      try {
+        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+          patch: { closeBehavior: next },
+        });
+        setView(updated);
+        setError(null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`设置关闭行为失败：${msg}`);
+        logger.error('update_desktop_settings(close_behavior) failed', err);
+      }
+    },
+    [view],
+  );
+
   const submitRemovePin = useCallback(async () => {
     if (pinBusy) return;
+    if (!isTauri) {
+      setPinError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
+      return;
+    }
     if (!pinCurrent) {
       setPinError('请输入当前 PIN');
       return;
@@ -477,17 +546,6 @@ export function DesktopTabContent() {
     next.delete('show');
     setSearchParams(next, { replace: true });
   }, [refreshPairingQr, searchParams, setSearchParams]);
-
-  if (!isTauri) {
-    return (
-      <section style={SS}>
-        <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-          这些设置仅在 OpenAWork 桌面端（Tauri）应用中生效。请在桌面端启动后再访问此面板。
-        </div>
-      </section>
-    );
-  }
 
   if (loading) {
     return (
@@ -568,46 +626,61 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>关闭行为</h3>
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-          点击主窗口右上角 X 会直接退出 OpenAWork，并同时停止本地网关。
-          当前版本不再提供“每次询问”或“最小化到托盘”的关闭模式。
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5, marginBottom: 8 }}>
+          设置点击主窗口右上角 X 时的行为。修改即时生效。
         </div>
-        <div
-          style={{
-            ...ROW_STYLE,
-            borderColor: 'var(--accent)',
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-              固定为：直接退出
-            </div>
+        {CLOSE_BEHAVIOR_OPTIONS.map((opt) => {
+          const selected = view.closeBehavior === opt.value;
+          return (
             <div
+              key={opt.value}
+              onClick={() => handleSetCloseBehavior(opt.value)}
               style={{
-                marginTop: 3,
-                fontSize: 11,
-                lineHeight: 1.5,
-                color: 'var(--fg-muted)',
+                ...ROW_STYLE,
+                cursor: 'pointer',
+                borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
+                background: selected
+                  ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
+                  : 'var(--bg-overlay)',
               }}
             >
-              关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+                  {opt.label}
+                </div>
+                <div
+                  style={{
+                    marginTop: 3,
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {opt.value === 'ask'
+                    ? '每次关闭时弹出确认对话框，可选择退出或最小化。'
+                    : opt.value === 'minimize'
+                      ? '关闭窗口时最小化到系统托盘，后台继续运行。'
+                      : '关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。'}
+                </div>
+              </div>
+              {selected && (
+                <div
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 999,
+                    border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+                    color: 'var(--accent)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    flexShrink: 0,
+                  }}
+                >
+                  已选中
+                </div>
+              )}
             </div>
-          </div>
-          <div
-            style={{
-              padding: '4px 8px',
-              borderRadius: 999,
-              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-              color: 'var(--accent)',
-              fontSize: 11,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            已启用
-          </div>
-        </div>
+          );
+        })}
       </section>
 
       <section style={SS}>

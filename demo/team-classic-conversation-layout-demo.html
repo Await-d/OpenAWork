@@ -1,0 +1,1460 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Team 经典页 · 对话布局优化 Demo</title>
+    <style>
+      :root {
+        --accent: #5cd4c0;
+        --accent-muted: color-mix(in srgb, var(--accent) 14%, transparent);
+        --accent-subtle: color-mix(in srgb, var(--accent) 7%, transparent);
+        --accent-border: color-mix(in srgb, var(--accent) 30%, transparent);
+        --contrast: #f0b429;
+        --complement: #f06b7e;
+        --aux: #8b9cf5;
+        --success: #3dd49a;
+        --bg-base: #080b12;
+        --bg-raised: #0d1119;
+        --bg-overlay: #121721;
+        --bg-surface: #171d29;
+        --bg-elevated: #1d2535;
+        --bg-hover: #232d40;
+        --bg-active: #2a3650;
+        --fg-strong: #eef2ff;
+        --fg-default: #c8d0e0;
+        --fg-muted: #8b95a8;
+        --fg-faint: #5c667a;
+        --border-default: #2a3344;
+        --border-subtle: #1e2636;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+        --radius-pill: 999px;
+        --shadow-sm: 0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset,
+          0 8px 24px color-mix(in srgb, #000 28%, transparent);
+        --font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+        --mono: ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
+          radial-gradient(900px 500px at 90% 0%, color-mix(in srgb, var(--aux) 8%, transparent), transparent 50%),
+          var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--font);
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .page {
+        display: grid;
+        gap: 16px;
+        min-height: 100vh;
+        padding: 16px;
+        grid-template-rows: auto auto minmax(0, 1fr);
+      }
+
+      .hero {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px 20px;
+        padding: 14px 16px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, var(--bg-overlay) 88%, transparent);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .hero h1 {
+        margin: 0 0 4px;
+        color: var(--fg-strong);
+        font-size: 18px;
+        font-weight: 750;
+        letter-spacing: 0.01em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 720px;
+        color: var(--fg-muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-pill);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .pill strong {
+        color: var(--fg-strong);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .pill[data-tone='accent'] {
+        border-color: var(--accent-border);
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+
+      .pill[data-tone='danger'] {
+        border-color: color-mix(in srgb, var(--complement) 35%, transparent);
+        background: color-mix(in srgb, var(--complement) 10%, transparent);
+        color: var(--complement);
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+      }
+
+      .controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: center;
+      }
+
+      .control-group {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .control-label {
+        color: var(--fg-faint);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .seg {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        background: var(--bg-base);
+      }
+
+      .seg button {
+        appearance: none;
+        border: 0;
+        border-radius: 8px;
+        min-height: 30px;
+        padding: 0 12px;
+        background: transparent;
+        color: var(--fg-muted);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .seg button[aria-pressed='true'] {
+        background: color-mix(in srgb, var(--accent) 16%, var(--bg-surface));
+        color: var(--fg-strong);
+        box-shadow: inset 0 0 0 1px var(--accent-border);
+      }
+
+      .seg button:hover {
+        color: var(--fg-default);
+        background: var(--bg-hover);
+      }
+
+      .notes {
+        display: grid;
+        gap: 6px;
+        color: var(--fg-muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .notes code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--bg-surface);
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      /* ─── 工作台外壳 ─── */
+      .stage-shell {
+        min-height: 0;
+        border: 1px solid var(--border-default);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--bg-base);
+        box-shadow: var(--shadow-sm);
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+      }
+
+      .rail {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 8px;
+        border-right: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+      }
+
+      .rail-dot {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .rail-dot.active {
+        border-color: var(--accent-border);
+        background: var(--accent-muted);
+        color: var(--accent);
+      }
+
+      .workbench {
+        min-width: 0;
+        min-height: 620px;
+        height: min(78vh, 860px);
+        display: flex;
+        flex-direction: column;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 70%, transparent), transparent 80px),
+          var(--bg-base);
+      }
+
+      /* ─── 现状 Superbar：信息过载 ─── */
+      .superbar {
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
+      }
+
+      .superbar-current {
+        display: grid;
+        gap: 8px;
+        padding: 8px 10px;
+      }
+
+      .superbar-current .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+      }
+
+      .superbar-current .row.secondary {
+        padding-top: 2px;
+        border-top: 1px dashed color-mix(in srgb, var(--border-default) 55%, transparent);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        max-width: 100%;
+        padding: 0 10px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-pill);
+        background: var(--bg-surface);
+        color: var(--fg-default);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .chip .muted {
+        color: var(--fg-muted);
+      }
+
+      .chip .title {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: 700;
+        color: var(--fg-strong);
+      }
+
+      .status-flow {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        padding: 4px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
+        color: var(--fg-muted);
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .status-flow b {
+        color: var(--accent);
+      }
+
+      .tabs {
+        display: inline-flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .tab {
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .tab[aria-selected='true'] {
+        border-color: var(--accent-border);
+        background: var(--accent-subtle);
+        color: var(--fg-strong);
+      }
+
+      /* ─── 优化 Superbar：矮单行 ─── */
+      .superbar-opt {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 40px;
+        padding: 6px 12px;
+      }
+
+      .context {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+      }
+
+      .context-path {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+
+      .context-path strong {
+        color: var(--fg-strong);
+        font-weight: 720;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 220px;
+      }
+
+      .runtime-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .runtime-inline .stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .runtime-inline .stat em {
+        font-style: normal;
+        color: var(--fg-strong);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .runtime-inline .stat[data-tone='run'] em {
+        color: var(--accent);
+      }
+
+      .runtime-inline .stat[data-tone='fail'] em {
+        color: var(--complement);
+      }
+
+      .icon-btn {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .icon-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+
+      .icon-btn.primary {
+        border-color: var(--accent-border);
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+
+      /* ─── 主体：现状 vs 优化 ─── */
+      .main {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        overflow: hidden;
+      }
+
+      /* 现状：对话被挤窄 */
+      .main[data-layout='current'] {
+        grid-template-columns: minmax(280px, min(420px, 38%)) minmax(0, 1fr);
+      }
+
+      /* 优化：对话主宽 */
+      .main[data-layout='optimized'] {
+        grid-template-columns: minmax(0, 1fr) var(--side-w, 360px);
+      }
+
+      .main[data-side='collapsed'] {
+        grid-template-columns: minmax(0, 1fr) 0px;
+      }
+
+      .main[data-side='collapsed'] .side {
+        display: none;
+      }
+
+      .session,
+      .side {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .session {
+        background: var(--bg-base);
+        border-right: 1px solid var(--border-subtle);
+      }
+
+      .side {
+        background: var(--bg-raised);
+      }
+
+      /* 现状侧栏头很重 */
+      .side-head-current {
+        display: grid;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-overlay) 90%, transparent);
+      }
+
+      .side-eyebrow {
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: 760;
+      }
+
+      .side-title {
+        color: var(--fg-strong);
+        font-size: 13px;
+        font-weight: 780;
+      }
+
+      .side-tabs {
+        display: flex;
+        gap: 4px;
+        overflow-x: auto;
+        padding: 3px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        background: var(--bg-surface);
+      }
+
+      .side-summary-current {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-overlay) 70%, transparent);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .summary-stat {
+        display: grid;
+        gap: 2px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-surface);
+      }
+
+      .summary-stat span {
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .summary-stat strong {
+        color: var(--fg-strong);
+        font-size: 13px;
+      }
+
+      .summary-stat[data-tone='run'] strong {
+        color: var(--accent);
+      }
+
+      .summary-stat[data-tone='fail'] strong {
+        color: var(--complement);
+      }
+
+      /* 优化侧栏：单行工具条 */
+      .side-head-opt {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-overlay) 80%, transparent);
+      }
+
+      .side-head-opt .tabs {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .side-head-opt .badge {
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: var(--radius-pill);
+        background: color-mix(in srgb, var(--complement) 18%, transparent);
+        color: var(--complement);
+        font-size: 10px;
+        font-weight: 750;
+        display: inline-grid;
+        place-items: center;
+      }
+
+      .side-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .card {
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--bg-overlay) 88%, transparent);
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .card h3 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 13px;
+        font-weight: 720;
+      }
+
+      .card p,
+      .card li {
+        margin: 0;
+        color: var(--fg-muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .progress {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--bg-surface);
+        overflow: hidden;
+      }
+
+      .progress > i {
+        display: block;
+        height: 100%;
+        width: 62%;
+        background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--aux) 70%, var(--accent)));
+      }
+
+      .task-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 0;
+        border-top: 1px solid var(--border-subtle);
+        font-size: 12px;
+      }
+
+      .task-row:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      .task-row b {
+        color: var(--fg-default);
+        font-weight: 650;
+      }
+
+      .task-row span {
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+
+      /* 对话流 */
+      .messages {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 16px 18px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .msg {
+        display: grid;
+        gap: 6px;
+        max-width: min(720px, 100%);
+      }
+
+      .msg.user {
+        margin-left: auto;
+        justify-items: end;
+      }
+
+      .msg-meta {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+
+      .msg-meta b {
+        color: var(--fg-muted);
+        font-weight: 700;
+      }
+
+      .bubble {
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-overlay);
+        color: var(--fg-default);
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+
+      .msg.user .bubble {
+        background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
+        border-color: var(--accent-border);
+        color: var(--fg-strong);
+      }
+
+      .msg.system .bubble {
+        background: color-mix(in srgb, var(--contrast) 8%, var(--bg-overlay));
+        border-color: color-mix(in srgb, var(--contrast) 28%, transparent);
+        color: var(--fg-default);
+        font-size: 12px;
+      }
+
+      .typing {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+
+      .typing i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.35;
+        animation: blink 1.2s infinite ease-in-out;
+      }
+
+      .typing i:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+
+      .typing i:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 0.25;
+          transform: translateY(0);
+        }
+        50% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
+      }
+
+      /* 现状：失败诊断条常驻占高 */
+      .error-banner {
+        flex-shrink: 0;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-bottom: 1px solid color-mix(in srgb, var(--complement) 30%, transparent);
+        background: color-mix(in srgb, var(--complement) 10%, var(--bg-overlay));
+        color: var(--fg-default);
+        font-size: 12px;
+      }
+
+      .error-banner strong {
+        color: var(--complement);
+      }
+
+      .ghost-btn {
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, var(--complement) 35%, transparent);
+        background: transparent;
+        color: var(--complement);
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      /* composer */
+      .composer-wrap {
+        flex-shrink: 0;
+        border-top: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
+        padding: 10px 12px 12px;
+      }
+
+      .composer {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 14px;
+        background: var(--bg-surface);
+      }
+
+      .composer textarea {
+        width: 100%;
+        min-height: 52px;
+        max-height: 140px;
+        resize: vertical;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--fg-strong);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .composer-tools {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .tool-left {
+        display: inline-flex;
+        gap: 6px;
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+
+      .send {
+        min-height: 30px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--accent) 88%, #000);
+        color: #04120f;
+        font-size: 12px;
+        font-weight: 760;
+        cursor: pointer;
+      }
+
+      .send:hover {
+        filter: brightness(1.05);
+      }
+
+      /* 分隔拖拽 */
+      .splitter {
+        width: 5px;
+        margin-left: -2px;
+        cursor: col-resize;
+        position: relative;
+        z-index: 2;
+        background: transparent;
+      }
+
+      .main[data-layout='optimized']:not([data-side='collapsed']) {
+        grid-template-columns: minmax(0, 1fr) 5px var(--side-w, 360px);
+      }
+
+      .splitter::after {
+        content: '';
+        position: absolute;
+        inset: 0 -2px;
+        background: transparent;
+      }
+
+      .splitter:hover::after,
+      .splitter.active::after {
+        background: color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+
+      .diff-callout {
+        position: absolute;
+        right: 18px;
+        bottom: 86px;
+        z-index: 5;
+        max-width: 280px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--accent-border);
+        background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+        box-shadow: var(--shadow-sm);
+        color: var(--fg-muted);
+        font-size: 12px;
+        line-height: 1.45;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(6px);
+        transition: 180ms ease;
+      }
+
+      .diff-callout.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .diff-callout b {
+        color: var(--accent);
+      }
+
+      .stage-relative {
+        position: relative;
+        min-width: 0;
+      }
+
+      .kbd {
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0 6px;
+        border-radius: 5px;
+        border: 1px solid var(--border-default);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+
+      @media (max-width: 980px) {
+        .stage-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .rail {
+          display: none;
+        }
+
+        .main[data-layout='current'],
+        .main[data-layout='optimized'],
+        .main[data-layout='optimized']:not([data-side='collapsed']) {
+          grid-template-columns: 1fr;
+          grid-template-rows: minmax(280px, 55%) auto minmax(220px, 45%);
+        }
+
+        .splitter {
+          width: 100%;
+          height: 5px;
+          margin: 0;
+          cursor: row-resize;
+        }
+
+        .session {
+          border-right: 0;
+          border-bottom: 1px solid var(--border-subtle);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <h1>Team 经典页 · 对话界面布局 Demo</h1>
+          <p>
+            只对比「对话工作台」本身：顶栏密度、对话/侧栏主次比例、状态重复、侧栏 chrome。
+            用下方开关在 <b>现状</b> 与 <b>优化</b> 之间切换，看你更喜欢哪套骨架。
+          </p>
+        </div>
+        <div class="hero-meta">
+          <span class="pill" data-tone="accent">对话常驻</span>
+          <span class="pill">侧栏可调宽</span>
+          <span class="pill" data-tone="danger">失败 · 1</span>
+        </div>
+      </header>
+
+      <section class="controls" aria-label="布局控制">
+        <div class="controls-row">
+          <div class="control-group">
+            <span class="control-label">布局版本</span>
+            <div class="seg" role="group" aria-label="布局版本">
+              <button type="button" id="btn-current" aria-pressed="false">现状（挤对话）</button>
+              <button type="button" id="btn-optimized" aria-pressed="true">优化（对话主宽）</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <span class="control-label">侧栏</span>
+            <div class="seg" role="group" aria-label="侧栏开关">
+              <button type="button" id="btn-side-open" aria-pressed="true">展开</button>
+              <button type="button" id="btn-side-collapsed" aria-pressed="false">专注收起</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <span class="control-label">侧栏宽度</span>
+            <div class="seg" role="group" aria-label="侧栏宽度预设">
+              <button type="button" data-side-w="300" aria-pressed="false">窄 300</button>
+              <button type="button" data-side-w="360" aria-pressed="true">默认 360</button>
+              <button type="button" data-side-w="440" aria-pressed="false">宽 440</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="notes" id="layout-notes">
+          <div>
+            <b style="color: var(--fg-strong)">优化版要点：</b>
+            ① Superbar 压成单行上下文 + 运行态；
+            ② 对话占主宽（约 1fr），侧栏固定/可拖；
+            ③ 状态只在顶栏出现一次，侧栏不再重复大 summary；
+            ④ 失败从常驻横幅改为顶栏数字，不抢消息区高度；
+            ⑤ 侧栏 head 仅保留 tab 工具条。
+          </div>
+        </div>
+      </section>
+
+      <div class="stage-shell">
+        <aside class="rail" aria-hidden="true">
+          <div class="rail-dot">O</div>
+          <div class="rail-dot">聊</div>
+          <div class="rail-dot active">团</div>
+          <div class="rail-dot">设</div>
+        </aside>
+
+        <div class="stage-relative">
+          <div class="workbench" id="workbench">
+            <!-- Superbar -->
+            <header class="superbar" id="superbar"></header>
+
+            <!-- 主体 -->
+            <div class="main" id="main" data-layout="optimized" style="--side-w: 360px">
+              <section class="session" aria-label="对话区">
+                <div class="error-banner" id="error-banner">
+                  <div><strong>1 个失败任务</strong> · executor 在 OAuth callback 校验超时</div>
+                  <button class="ghost-btn" type="button">重试失败</button>
+                </div>
+
+                <div class="messages" id="messages">
+                  <article class="msg user">
+                    <div class="msg-meta"><b>你</b><span>14:32</span></div>
+                    <div class="bubble">帮我实现 OAuth 登录，优先 GitHub，附带基础测试。</div>
+                  </article>
+
+                  <article class="msg">
+                    <div class="msg-meta"><b>接待 · b</b><span>14:32</span></div>
+                    <div class="bubble">已接收。我会先澄清范围，再交给规划与执行链路。
+预计 3–5 分钟完成首轮实现。</div>
+                  </article>
+
+                  <article class="msg system">
+                    <div class="msg-meta"><b>系统</b><span>14:33</span></div>
+                    <div class="bubble">🟡 进度：PM1 规划完成 → 已派发给开发 ×2 / 测试</div>
+                  </article>
+
+                  <article class="msg">
+                    <div class="msg-meta"><b>PM2 · 管控</b><span>14:35</span></div>
+                    <div class="bubble">开发分支已创建。当前阻塞：GitHub OAuth App 的 callback URL 是否固定为
+<code style="color:var(--aux)">http://localhost:3000/api/auth/callback/github</code>？</div>
+                  </article>
+
+                  <article class="msg user">
+                    <div class="msg-meta"><b>你</b><span>14:36</span></div>
+                    <div class="bubble">对，本地先用这个；生产域名后面再补。</div>
+                  </article>
+
+                  <article class="msg">
+                    <div class="msg-meta"><b>执行 · e1</b><span>14:38</span></div>
+                    <div class="bubble">已完成 provider 配置与登录按钮。正在补 callback 校验与 session 落库…</div>
+                  </article>
+
+                  <div class="typing" aria-live="polite">
+                    <i></i><i></i><i></i>
+                    <span>测试 · t1 正在跑登录回归</span>
+                  </div>
+                </div>
+
+                <div class="composer-wrap">
+                  <div class="composer">
+                    <textarea placeholder="给团队补充约束、澄清或追加任务…（演示输入）"></textarea>
+                    <div class="composer-tools">
+                      <div class="tool-left">
+                        <span class="kbd">↵</span> 发送
+                        <span class="kbd">⇧↵</span> 换行
+                      </div>
+                      <button class="send" type="button">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div class="splitter" id="splitter" title="拖拽调整侧栏宽度"></div>
+
+              <aside class="side" id="side" aria-label="工作台侧栏"></aside>
+            </div>
+          </div>
+
+          <div class="diff-callout" id="callout"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        layout: 'optimized', // current | optimized
+        side: 'open', // open | collapsed
+        sideW: 360,
+        tab: 'tasks',
+      };
+
+      const notes = {
+        current: `
+          <div>
+            <b style="color: var(--complement)">现状问题：</b>
+            ① Superbar 两行（上下文 + tabs/摘要）占高；
+            ② 对话列被压到约 38% 宽，侧栏反而更宽；
+            ③ 运行态在顶栏、摘要 pills、侧栏 summary 重复 3 次；
+            ④ 失败横幅常驻，压缩消息可视高度；
+            ⑤ 侧栏 head + 大 summary 先吃掉一截，内容区偏矮。
+          </div>
+        `,
+        optimized: `
+          <div>
+            <b style="color: var(--fg-strong)">优化版要点：</b>
+            ① Superbar 压成单行上下文 + 运行态；
+            ② 对话占主宽（约 1fr），侧栏固定/可拖；
+            ③ 状态只在顶栏出现一次，侧栏不再重复大 summary；
+            ④ 失败从常驻横幅改为顶栏数字，不抢消息区高度；
+            ⑤ 侧栏 head 仅保留 tab 工具条。
+          </div>
+        `,
+      };
+
+      const callouts = {
+        current: '对话被挤在左侧窄列，侧栏 summary 又重复了一遍状态。',
+        optimized: '对话回到主列；状态只留顶栏一处；侧栏变工具区。',
+      };
+
+      function el(html) {
+        const t = document.createElement('template');
+        t.innerHTML = html.trim();
+        return t.content.firstElementChild;
+      }
+
+      function renderSuperbar() {
+        const root = document.getElementById('superbar');
+        if (state.layout === 'current') {
+          root.innerHTML = `
+            <div class="superbar-current">
+              <div class="row">
+                <span class="chip"><span class="muted">工作区</span><span class="title">OpenAWork Core</span></span>
+                <span class="chip"><span class="muted">会话</span><span class="title">OAuth 登录实现</span></span>
+                <span class="status-flow">💬接待 → 📋规划 → <b>🎯派发</b> → ⚡开发×2 → 🧪测试 → 🔍审查</span>
+                <span class="pill">运行中</span>
+                <span class="pill">Handoff 3</span>
+                <span class="pill" data-tone="danger">失败 1</span>
+                <span class="pill">澄清 0</span>
+              </div>
+              <div class="row secondary">
+                <div class="tabs">
+                  <button class="tab" aria-selected="false">概览</button>
+                  <button class="tab" aria-selected="true">对话</button>
+                  <button class="tab" aria-selected="false">任务</button>
+                  <button class="tab" aria-selected="false">度量</button>
+                  <button class="tab" aria-selected="false">治理</button>
+                </div>
+                <span class="chip"><span class="muted">成员</span><strong>6</strong></span>
+                <span class="chip"><span class="muted">在线</span><strong>4</strong></span>
+                <span class="chip"><span class="muted">描述</span><span class="title">GitHub OAuth + 测试闭环</span></span>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        root.innerHTML = `
+          <div class="superbar-opt">
+            <div class="context">
+              <div class="context-path">
+                <span>OpenAWork Core</span>
+                <span>/</span>
+                <strong title="OAuth 登录实现">OAuth 登录实现</strong>
+              </div>
+            </div>
+            <div class="runtime-inline" title="点击可展开层级抽屉（示意）">
+              <span class="stat" data-tone="run">状态 <em>运行中</em></span>
+              <span class="stat">Handoff <em>3</em></span>
+              <span class="stat" data-tone="fail">失败 <em>1</em></span>
+              <span class="stat">澄清 <em>0</em></span>
+            </div>
+            <button class="icon-btn" type="button" title="层级流程">层级</button>
+            <button class="icon-btn primary" type="button" title="暂停全部">暂停</button>
+            <button class="icon-btn" type="button" title="专注模式" id="focus-from-bar">专注</button>
+          </div>
+        `;
+
+        root.querySelector('#focus-from-bar')?.addEventListener('click', () => {
+          state.side = state.side === 'open' ? 'collapsed' : 'open';
+          syncControls();
+          render();
+        });
+      }
+
+      function renderSide() {
+        const side = document.getElementById('side');
+        const tabs = ['overview', 'tasks', 'metrics', 'governance'];
+        const labels = { overview: '概览', tasks: '任务', metrics: '度量', governance: '治理' };
+
+        if (state.layout === 'current') {
+          side.innerHTML = `
+            <div class="side-head-current">
+              <div>
+                <div class="side-eyebrow">工作台视图</div>
+                <div class="side-title">${labels[state.tab]}</div>
+              </div>
+              <div class="side-tabs">
+                ${tabs
+                  .map(
+                    (t) => `
+                  <button class="tab" data-tab="${t}" aria-selected="${state.tab === t}">${labels[t]}</button>
+                `,
+                  )
+                  .join('')}
+              </div>
+            </div>
+            <section class="side-summary-current">
+              <div>
+                <div class="side-eyebrow">OpenAWork Core</div>
+                <div class="side-title">OAuth 登录实现</div>
+                <div style="color:var(--fg-muted);font-size:12px;margin-top:4px">等待团队会话上下文 / GitHub OAuth + 测试闭环</div>
+              </div>
+              <div class="summary-grid">
+                <div class="summary-stat" data-tone="run"><span>状态</span><strong>运行中</strong></div>
+                <div class="summary-stat"><span>Handoff</span><strong>3</strong></div>
+                <div class="summary-stat" data-tone="fail"><span>失败</span><strong>1</strong></div>
+                <div class="summary-stat"><span>澄清</span><strong>0</strong></div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span class="pill">1 未读</span>
+                <span class="pill">当前 ${labels[state.tab]}</span>
+              </div>
+            </section>
+            <div class="side-body">${sideContent()}</div>
+          `;
+        } else {
+          side.innerHTML = `
+            <div class="side-head-opt">
+              <div class="tabs">
+                ${tabs
+                  .map(
+                    (t) => `
+                  <button class="tab" data-tab="${t}" aria-selected="${state.tab === t}">
+                    ${labels[t]}${t === 'tasks' ? ' <span class="badge">1</span>' : ''}
+                  </button>
+                `,
+                  )
+                  .join('')}
+              </div>
+            </div>
+            <div class="side-body">${sideContent()}</div>
+          `;
+        }
+
+        side.querySelectorAll('[data-tab]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.tab = btn.getAttribute('data-tab');
+            renderSide();
+            flashCallout(`侧栏切到「${labels[state.tab]}」，对话区保持不动。`);
+          });
+        });
+      }
+
+      function sideContent() {
+        if (state.tab === 'overview') {
+          return `
+            <div class="card">
+              <h3>运行拓扑</h3>
+              <p>接待 → 规划 → 派发 → 执行×2 → 测试 → 审查</p>
+              <div class="progress"><i></i></div>
+              <p>整体进度约 62%，预计剩余 ~2 min。</p>
+            </div>
+            <div class="card">
+              <h3>当前焦点</h3>
+              <p>executor 在补 callback 校验；tester 等待可测构建。</p>
+            </div>
+          `;
+        }
+        if (state.tab === 'metrics') {
+          return `
+            <div class="card">
+              <h3>本轮耗时</h3>
+              <div class="task-row"><b>规划</b><span>48s</span></div>
+              <div class="task-row"><b>执行</b><span>2m 12s</span></div>
+              <div class="task-row"><b>测试</b><span>进行中</span></div>
+            </div>
+            <div class="card">
+              <h3>工具调用</h3>
+              <p>shell 14 · edit 9 · read 22 · browser 1</p>
+            </div>
+          `;
+        }
+        if (state.tab === 'governance') {
+          return `
+            <div class="card">
+              <h3>澄清 / 审批</h3>
+              <p>当前无待澄清项。失败任务可从任务 tab 重试。</p>
+            </div>
+            <div class="card">
+              <h3>共享</h3>
+              <p>此会话未开启外部共享。</p>
+            </div>
+          `;
+        }
+        return `
+          <div class="card">
+            <h3>活跃任务</h3>
+            <div class="task-row"><b>#12 callback 校验</b><span style="color:var(--complement)">失败</span></div>
+            <div class="task-row"><b>#13 session 落库</b><span style="color:var(--accent)">运行中</span></div>
+            <div class="task-row"><b>#14 登录回归</b><span>排队</span></div>
+          </div>
+          <div class="card">
+            <h3>建议操作</h3>
+            <p>先重试 #12；若仍失败，补充 GitHub App client secret 是否已注入环境。</p>
+          </div>
+        `;
+      }
+
+      function render() {
+        const main = document.getElementById('main');
+        const errorBanner = document.getElementById('error-banner');
+        const notesEl = document.getElementById('layout-notes');
+        const splitter = document.getElementById('splitter');
+
+        main.dataset.layout = state.layout;
+        main.dataset.side = state.side;
+        main.style.setProperty('--side-w', state.sideW + 'px');
+
+        // 现状：失败横幅常驻；优化：收进顶栏数字
+        errorBanner.style.display = state.layout === 'current' ? 'flex' : 'none';
+        splitter.style.display = state.layout === 'optimized' && state.side === 'open' ? 'block' : 'none';
+
+        notesEl.innerHTML = notes[state.layout];
+        renderSuperbar();
+        renderSide();
+      }
+
+      function syncControls() {
+        document.getElementById('btn-current').setAttribute('aria-pressed', String(state.layout === 'current'));
+        document.getElementById('btn-optimized').setAttribute('aria-pressed', String(state.layout === 'optimized'));
+        document.getElementById('btn-side-open').setAttribute('aria-pressed', String(state.side === 'open'));
+        document
+          .getElementById('btn-side-collapsed')
+          .setAttribute('aria-pressed', String(state.side === 'collapsed'));
+        document.querySelectorAll('[data-side-w]').forEach((btn) => {
+          btn.setAttribute('aria-pressed', String(Number(btn.dataset.sideW) === state.sideW));
+        });
+      }
+
+      let calloutTimer;
+      function flashCallout(text) {
+        const node = document.getElementById('callout');
+        node.textContent = text;
+        node.classList.add('show');
+        clearTimeout(calloutTimer);
+        calloutTimer = setTimeout(() => node.classList.remove('show'), 2200);
+      }
+
+      // controls
+      document.getElementById('btn-current').addEventListener('click', () => {
+        state.layout = 'current';
+        syncControls();
+        render();
+        flashCallout(callouts.current);
+      });
+      document.getElementById('btn-optimized').addEventListener('click', () => {
+        state.layout = 'optimized';
+        syncControls();
+        render();
+        flashCallout(callouts.optimized);
+      });
+      document.getElementById('btn-side-open').addEventListener('click', () => {
+        state.side = 'open';
+        syncControls();
+        render();
+      });
+      document.getElementById('btn-side-collapsed').addEventListener('click', () => {
+        state.side = 'collapsed';
+        syncControls();
+        render();
+        flashCallout('专注模式：侧栏收起，对话全宽。');
+      });
+      document.querySelectorAll('[data-side-w]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.sideW = Number(btn.dataset.sideW);
+          state.side = 'open';
+          state.layout = 'optimized';
+          syncControls();
+          render();
+        });
+      });
+
+      // drag splitter
+      (() => {
+        const splitter = document.getElementById('splitter');
+        const main = document.getElementById('main');
+        let dragging = false;
+        splitter.addEventListener('pointerdown', (e) => {
+          if (state.layout !== 'optimized' || state.side !== 'open') return;
+          dragging = true;
+          splitter.classList.add('active');
+          splitter.setPointerCapture(e.pointerId);
+        });
+        splitter.addEventListener('pointermove', (e) => {
+          if (!dragging) return;
+          const rect = main.getBoundingClientRect();
+          const next = Math.round(rect.right - e.clientX);
+          state.sideW = Math.max(280, Math.min(520, next));
+          main.style.setProperty('--side-w', state.sideW + 'px');
+        });
+        const end = () => {
+          if (!dragging) return;
+          dragging = false;
+          splitter.classList.remove('active');
+          syncControls();
+        };
+        splitter.addEventListener('pointerup', end);
+        splitter.addEventListener('pointercancel', end);
+      })();
+
+      // keyboard: 1/2 switch layout
+      window.addEventListener('keydown', (e) => {
+        if (e.target.matches('textarea, input')) return;
+        if (e.key === '1') {
+          state.layout = 'current';
+          syncControls();
+          render();
+          flashCallout(callouts.current);
+        }
+        if (e.key === '2') {
+          state.layout = 'optimized';
+          syncControls();
+          render();
+          flashCallout(callouts.optimized);
+        }
+        if (e.key.toLowerCase() === 'f') {
+          state.side = state.side === 'open' ? 'collapsed' : 'open';
+          syncControls();
+          render();
+        }
+      });
+
+      syncControls();
+      render();
+      flashCallout('默认展示优化版。按 1/2 切换现状与优化，F 切换专注。');
+    </script>
+  </body>
+</html>

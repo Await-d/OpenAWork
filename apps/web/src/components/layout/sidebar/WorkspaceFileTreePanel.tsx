@@ -70,6 +70,11 @@ export interface WorkspaceFileTreePanelProps {
   /** Optional className / style overrides for the root container. */
   className?: string;
   style?: React.CSSProperties;
+  /**
+   * Called when the user clicks "切换工作区" in the path-incompatible
+   * error state. When omitted the button is hidden.
+   */
+  onSwitchWorkspace?: () => void;
 }
 
 /**
@@ -92,6 +97,7 @@ export function WorkspaceFileTreePanel({
   sessionId = null,
   className,
   style,
+  onSwitchWorkspace,
 }: WorkspaceFileTreePanelProps) {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -149,6 +155,11 @@ export function WorkspaceFileTreePanel({
     fileTreeRootPath,
     setExpandedDirs,
   });
+
+  const isPathIncompatibleError =
+    fileTreeError !== null &&
+    fileTreeError.includes('无法访问') &&
+    fileTreeError.includes('路径');
 
   useEffect(() => {
     setFileTreeContextMenu(null);
@@ -564,9 +575,32 @@ export function WorkspaceFileTreePanel({
               fontSize: 11,
               lineHeight: 1.5,
               flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
             }}
           >
-            {fileTreeError}
+            <span>{fileTreeError}</span>
+            {isPathIncompatibleError && onSwitchWorkspace && (
+              <button
+                type="button"
+                onClick={onSwitchWorkspace}
+                style={{
+                  alignSelf: 'flex-start',
+                  padding: '4px 10px',
+                  borderRadius: 5,
+                  border: '1px solid color-mix(in oklab, var(--accent) 40%, var(--border-default) 60%)',
+                  background: 'color-mix(in oklab, var(--accent) 12%, var(--bg-overlay) 88%)',
+                  color: 'var(--accent)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                切换工作区
+              </button>
+            )}
           </div>
         )}
 

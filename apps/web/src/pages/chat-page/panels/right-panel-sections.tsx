@@ -1073,7 +1073,22 @@ export function ChatHistoryTabContent(props: {
                   >
                     {permission.reason}
                   </div>
-                  <div style={{ color: 'var(--fg-muted)', fontSize: 10, marginTop: 2 }}>
+                  <div
+                    style={{
+                      color: 'var(--fg-muted)',
+                      fontSize: 10,
+                      marginTop: 2,
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={
+                      permission.previewAction
+                        ? `${permission.scope} · ${permission.riskLevel} · ${permission.previewAction}`
+                        : `${permission.scope} · ${permission.riskLevel}`
+                    }
+                  >
                     {permission.scope} · {permission.riskLevel}
                     {permission.previewAction ? ` · ${permission.previewAction}` : ''}
                   </div>
@@ -1097,6 +1112,8 @@ export function ChatHistoryTabContent(props: {
                                 key={pattern}
                                 title="批准会话/永久后将自动覆盖该模式"
                                 style={{
+                                  display: 'inline-block',
+                                  maxWidth: '100%',
                                   fontFamily: 'var(--font-mono, monospace)',
                                   fontSize: 9,
                                   padding: '1px 6px',
@@ -1105,6 +1122,9 @@ export function ChatHistoryTabContent(props: {
                                   border:
                                     '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
                                   color: 'var(--accent)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
                                 }}
                               >
                                 {pattern}
