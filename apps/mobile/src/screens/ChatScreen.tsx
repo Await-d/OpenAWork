@@ -15,6 +15,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/auth';
 import { useGatewayClient } from '../hooks/useGatewayClient';
+import { useAuthErrorHandler } from '../hooks/use-auth-error-handler';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import {
@@ -145,7 +146,8 @@ function inferAttachmentType(input: {
 }
 
 export function ChatScreen({ sessionId }: ChatScreenProps) {
-  const { accessToken, gatewayUrl } = useAuthStore();
+  const { accessToken, gatewayUrl, userEmail } = useAuthStore();
+  const handleAuthError = useAuthErrorHandler();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
@@ -180,6 +182,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   );
   const [hasConfiguredImageModel, setHasConfiguredImageModel] = useState(false);
   const [imageModelLabel, setImageModelLabel] = useState('GPT Image 2 · OpenAI');
+  const [todoCount, setTodoCount] = useState(0);
+  const [pendingPermissionCount, setPendingPermissionCount] = useState(0);
   const listRef = useRef<FlatList>(null);
   const keyboardHeightRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -345,6 +349,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         }
         setActivities((prev) => reconcileTaskActivities(prev, tasks));
       } catch (error) {
+        if (handleAuthError(error)) return;
         console.warn('Failed to sync mobile task activities', error);
       }
     },
@@ -379,6 +384,36 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     };
   }, [accessToken, sessionId, syncTaskActivities, taskSyncIntervalMs]);
 
+  // 同步 session status（todo + pending permission 计数）
+  useEffect(() => {
+    if (!accessToken) {
+      setTodoCount(0);
+      setPendingPermissionCount(0);
+      return;
+    }
+    let cancelled = false;
+    const syncStatus = async () => {
+      if (cancelled) return;
+      try {
+        const status = await sessionsClient.getStatus(accessToken, sessionId);
+        if (cancelled) return;
+        const pendingTodos = (status.todoLanes?.main ?? []).filter(
+          (t) => t.status === 'pending' || t.status === 'in_progress',
+        ).length;
+        setTodoCount(pendingTodos);
+        setPendingPermissionCount(status.pendingPermissions?.length ?? 0);
+      } catch {
+        // 静默处理——状态同步失败不应阻塞聊天
+      }
+    };
+    void syncStatus();
+    const timer = setInterval(() => void syncStatus(), taskSyncIntervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [accessToken, sessionId, sessionsClient, taskSyncIntervalMs]);
+
   const loadArtifactHistory = useCallback(
     async (requestSessionId = sessionId) => {
       if (!accessToken) return;
@@ -409,6 +444,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             }),
         );
       } catch (error) {
+        if (handleAuthError(error)) return;
         console.warn('Failed to load mobile artifact history', error);
       }
     },
@@ -425,7 +461,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
 
         try {
           const contentBase64 = await FileSystem.readAsStringAsync(attachment.uri, {
-            encoding: FileSystem.EncodingType.Base64,
+            encoding: 'base64' as const,
           });
           const mimeType = resolveAttachmentMimeType({
             mimeType: attachment.mimeType,
@@ -459,6 +495,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             }),
           });
         } catch (error) {
+          if (handleAuthError(error)) return uploaded;
           console.warn('Failed to upload mobile attachment', error);
         }
       }
@@ -519,6 +556,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         const msgs: Message[] = normalizeMobileChatMessages(session.messages ?? []);
         setMessages(msgs);
       } catch (error) {
+        if (handleAuthError(error)) return;
         console.warn('Failed to load mobile chat history', error);
       } finally {
         if (canApplySessionMutation(requestSessionId)) {
@@ -1504,13 +1542,13 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           input={input}
           sessionId={sessionId}
           streaming={sending}
-          pendingPermissionCount={0}
+          pendingPermissionCount={pendingPermissionCount}
           attachedCount={attachments.length}
-          todoCount={0}
+          todoCount={todoCount}
           sessionBusyState={sending ? 'running' : null}
-          currentUserEmail={''}
+          currentUserEmail={userEmail}
           showVoice={showVoice}
-          queuedCount={0}
+          queuedCount={sending ? 1 : 0}
           rightOpen={false}
         />
 
