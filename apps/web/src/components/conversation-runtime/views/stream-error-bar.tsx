@@ -28,7 +28,7 @@ export function ChatStreamErrorBar({
     >
       <div
         style={{
-          maxWidth: 1024,
+          maxWidth: 860,
           margin: '0 auto',
           display: 'flex',
           alignItems: 'center',

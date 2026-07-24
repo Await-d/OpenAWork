@@ -556,6 +556,13 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     contentMaxWidth === 'fluid'
       ? '100%'
       : (contentMaxWidth ?? (compact ? '100%' : editorMode ? 720 : 1024));
+
+  // split 布局下内容区域增宽 15%，为左右分列留出更多空间
+  const effectiveContentMaxWidth =
+    messageLayout === 'split' && resolvedContentMaxWidth !== '100%'
+      ? `calc(${resolvedContentMaxWidth}px * 1.15)`
+      : resolvedContentMaxWidth;
+
   const shouldCenterContent = centerContent ?? !compact;
   const scrollRegionClassName = showWelcome
     ? 'chat-conversation-view__scroll chat-conversation-view__scroll--welcome'
@@ -563,7 +570,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    maxWidth: resolvedContentMaxWidth,
+    maxWidth: effectiveContentMaxWidth,
     margin: shouldCenterContent ? '0 auto' : 0,
     display: 'flex',
     flexDirection: 'column',

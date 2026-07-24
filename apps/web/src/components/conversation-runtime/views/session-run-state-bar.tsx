@@ -156,7 +156,7 @@ export function SessionRunStateBar({
     >
       <div
         style={{
-          maxWidth: 1024,
+          maxWidth: 860,
           margin: '0 auto',
           width: '100%',
           display: 'flex',

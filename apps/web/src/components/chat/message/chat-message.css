@@ -2567,9 +2567,9 @@
 
 /* ── 消息布局模式：左右分列 (split) ──────────────────────────────
  * 当容器设置 data-message-layout="split" 时：
- * - user 消息：头像在右、内容靠右对齐，最大宽度 75%
- * - assistant 消息：头像在左、内容靠左对齐，最大宽度 88%
- * - header 随行对齐
+ * - user 消息：头像在右、内容靠右对齐，最大宽度 65%
+ * - assistant 消息：头像在左、内容靠左对齐，最大宽度 65%
+ * - 双方互不侵入对方头像侧，至少留出 30% 空白
  * 默认模式 (unified) 不触发任何下列规则，保持全宽左对齐。
  */
 
@@ -2578,7 +2578,7 @@
 }
 
 [data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-main {
-  flex: 0 1 75%;
+  flex: 0 1 65%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -2597,6 +2597,13 @@
   max-width: 100%;
 }
 
+/* split 模式下 user 消息的头像在右侧（row-reverse），
+ * 复制按钮默认 right:0 会与头像重叠，改为定位到左侧。 */
+[data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-hover-actions {
+  right: auto;
+  left: 0;
+}
+
 [data-message-layout='split'] .chat-message-row[data-role='assistant'] .chat-message-main {
-  flex: 0 1 88%;
+  flex: 0 1 65%;
 }
