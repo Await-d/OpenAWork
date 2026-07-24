@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { refreshAccessToken as apiRefreshToken } from '@openAwork/web-client';
+import { acquireRefresh } from '@openAwork/web-client';
 
 /**
  * 根据当前浏览器地址动态计算默认 Gateway 地址。
@@ -94,17 +94,22 @@ export const useAuthStore = create<AuthState>()(
       refreshAccessToken: async () => {
         const { refreshToken, gatewayUrl } = get();
         if (!refreshToken) return;
-        try {
-          const data = await apiRefreshToken(gatewayUrl, refreshToken);
-          const ms = parseExpiresIn(data.expiresIn ?? '15m');
-          set({
-            accessToken: data.accessToken,
-            refreshToken: data.refreshToken,
-            tokenExpiresAt: Date.now() + ms,
-          });
-        } catch {
-          get().clearAuth();
-        }
+        // 通过 acquireRefresh 全局单飞入口刷新，与 withTokenRefresh 的被动刷新共享
+        // 同一个 in-flight promise，避免并发使用同一个 refresh token 导致轮换竞态。
+        const tokenStore = {
+          getAccessToken: () => get().accessToken,
+          getRefreshToken: () => get().refreshToken,
+          setTokens: (accessToken: string, newRefreshToken: string, expiresIn: string) => {
+            const ms = parseExpiresIn(expiresIn);
+            set({
+              accessToken,
+              refreshToken: newRefreshToken,
+              tokenExpiresAt: Date.now() + ms,
+            });
+          },
+          clearAuth: () => get().clearAuth(),
+        };
+        await acquireRefresh(gatewayUrl, tokenStore);
       },
     }),
     {

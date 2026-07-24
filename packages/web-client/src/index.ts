@@ -233,7 +233,7 @@ export type {
   SessionsClient,
   SessionsListOptions,
 } from './session/sessions.js';
-export { withTokenRefresh } from './gateway/token-refresh.js';
+export { acquireRefresh, withTokenRefresh } from './gateway/token-refresh.js';
 export type { TokenStore } from './gateway/token-refresh.js';
 export { authHeader, jsonAuthHeaders, HttpError } from './gateway/http.js';
 export type { JsonErrorData } from './gateway/http.js';
@@ -322,6 +322,7 @@ export type {
   ChannelConversationSummary,
   ChannelConversationsResponse,
   ChannelDescriptorListResponse,
+  ChannelDiagnostics,
   ChannelListResponse,
   ChannelMutationResponse,
   ChannelTargetsResponse,
