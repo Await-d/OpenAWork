@@ -2,6 +2,7 @@ import { createSettingsClient, type SettingsProvidersLoadResult } from '@openAwo
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../../components/conversation-runtime/messages/support.js';
 import type { ModelSelectionSource } from '../../pages/chat-page/conversation/settings/model-selection-source.js';
+import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 
 export interface ChatSettingsModel {
   id: string;
@@ -170,6 +171,7 @@ export function buildSavedChatSessionMetadata(
   const metadata: Record<string, unknown> = {
     thinkingEnabled: defaults.thinkingEnabled,
     reasoningEffort: defaults.reasoningEffort,
+    dialogueMode: useDisplayPreferencesStore.getState().defaultDialogueMode,
   };
 
   if (defaults.providerId) {

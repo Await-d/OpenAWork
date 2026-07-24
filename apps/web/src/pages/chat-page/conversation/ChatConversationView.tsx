@@ -27,6 +27,7 @@ import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import './ChatConversationView.css';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
 import type {
@@ -262,6 +263,7 @@ export interface ChatConversationViewProps {
   yoloMode: boolean;
   fastEnabled?: boolean;
   webSearchEnabled: boolean;
+  webSearchAvailable?: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   imageReferenceArtifacts?: ChatImageGenerationReferenceArtifact[];
@@ -370,6 +372,7 @@ const LOAD_EARLIER_BTN_STYLE: CSSProperties = {
 
 function buildComposerFeatures(
   extras: ConversationComposerExtras | undefined,
+  webSearchAvailable: boolean,
 ): UnifiedComposerFeatures {
   const ex = extras ?? {};
   return {
@@ -377,7 +380,7 @@ function buildComposerFeatures(
     voice: false,
     modelPicker: true,
     modelSettings: true,
-    webSearch: true,
+    webSearch: webSearchAvailable,
     imageGen: ex.imageGeneration ?? false,
     promptOptimize: true,
     slashCommands: true,
@@ -478,6 +481,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     yoloMode,
     fastEnabled,
     webSearchEnabled,
+    webSearchAvailable = true,
     thinkingEnabled,
     reasoningEffort,
     imageReferenceArtifacts,
@@ -520,9 +524,11 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     composerRightSlot,
   } = props;
 
-  const composerFeatures = buildComposerFeatures(composerExtras);
+  const composerFeatures = buildComposerFeatures(composerExtras, webSearchAvailable);
 
   const snapshotAwareAction = useSnapshotAwareAction({ sessionId, gatewayUrl, messages });
+
+  const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
 
   const showWelcome =
     welcomeScreen !== undefined &&
@@ -626,6 +632,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
             <div
               ref={contentColumnRef}
               data-testid="chat-content-column"
+              data-message-layout={messageLayout}
               style={contentColumnStyle}
             >
               {showSessionSwitchSkeleton ? <ChatSessionSkeleton /> : null}

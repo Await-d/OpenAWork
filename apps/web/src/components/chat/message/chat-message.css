@@ -2564,3 +2564,39 @@
     max-width: 100%;
   }
 }
+
+/* ── 消息布局模式：左右分列 (split) ──────────────────────────────
+ * 当容器设置 data-message-layout="split" 时：
+ * - user 消息：头像在右、内容靠右对齐，最大宽度 75%
+ * - assistant 消息：头像在左、内容靠左对齐，最大宽度 88%
+ * - header 随行对齐
+ * 默认模式 (unified) 不触发任何下列规则，保持全宽左对齐。
+ */
+
+[data-message-layout='split'] .chat-message-row[data-role='user'] {
+  flex-direction: row-reverse;
+}
+
+[data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-main {
+  flex: 0 1 75%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+[data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-header {
+  flex-direction: row-reverse;
+}
+
+[data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-content-shell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+[data-message-layout='split'] .chat-message-row[data-role='user'] .chat-message-content {
+  max-width: 100%;
+}
+
+[data-message-layout='split'] .chat-message-row[data-role='assistant'] .chat-message-main {
+  flex: 0 1 88%;
+}

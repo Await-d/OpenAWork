@@ -233,6 +233,7 @@ import { useAssistantMessageProcessing } from './conversation/snapshot/use-assis
 import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js';
 import type { SessionImageGenerationResponse } from './hooks/use-chat-image-generation.js';
 import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
+import { useWebSearchAvailable } from './hooks/use-web-search-available.js';
 import {
   type HistoryEditPrompt,
   type RetryPrompt,
@@ -285,6 +286,7 @@ import {
   type DialogueMode,
   getDefaultAgentForDialogueMode,
 } from './mode/dialogue-mode.js';
+import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
 import { buildStreamAssistantTrace } from './conversation/render/build-stream-assistant-trace.js';
 import { commitStreamingRound } from './conversation/render/commit-streaming-round.js';
@@ -416,7 +418,9 @@ export default function ChatPage() {
     thinkingEnabled: boolean;
   } | null>(null);
 
-  const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
+  const [dialogueMode, setDialogueMode] = useState<DialogueMode>(
+    () => useDisplayPreferencesStore.getState().defaultDialogueMode,
+  );
   const [manualAgentId, setManualAgentId] = useState('');
   const [yoloMode, setYoloMode] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
@@ -680,6 +684,7 @@ export default function ChatPage() {
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
     setStreamError(null);
+    setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
     currentLoadedSessionIdRef.current = null;
     consumeResetToWelcomeSignal();
   }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -859,13 +864,22 @@ export default function ChatPage() {
     token,
   });
 
+  const { webSearchAvailable } = useWebSearchAvailable({ gatewayUrl, token });
+
+  // 当全局 Web 搜索不可用时，强制关闭会话级开关
+  useEffect(() => {
+    if (!webSearchAvailable && webSearchEnabled) {
+      setWebSearchEnabled(false);
+    }
+  }, [webSearchAvailable, webSearchEnabled]);
+
   const {
     buildSessionMetadata,
     markSessionMetadataDirty,
     clearSessionMetadataDirty,
     handleDialogueModeChange,
     handleToggleYolo,
-    handleToggleWebSearch,
+    handleToggleWebSearch: rawHandleToggleWebSearch,
     handleThinkingEnabledChange,
     handleReasoningEffortChange,
     handleManualAgentChange,
@@ -897,6 +911,12 @@ export default function ChatPage() {
     gatewayUrl,
     token,
   );
+
+  // 包装 toggle：全局不可用时禁止开启
+  const handleToggleWebSearch = useCallback(() => {
+    if (!webSearchAvailable) return;
+    rawHandleToggleWebSearch();
+  }, [webSearchAvailable, rawHandleToggleWebSearch]);
 
   useEffect(() => {
     if (
@@ -1569,6 +1589,7 @@ export default function ChatPage() {
         lastPersistedSessionMetadataSnapshotRef.current = null;
         resetStreamState();
         setStreamError(null);
+        setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
         currentLoadedSessionIdRef.current = null;
       }
       return;
@@ -1750,10 +1771,10 @@ export default function ChatPage() {
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
     setStreamError(null);
-    setDialogueMode('coding');
+    setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
     setManualAgentId('');
     setYoloMode(false);
-    setWebSearchEnabled(true);
+    setWebSearchEnabled(webSearchAvailable);
     setThinkingEnabled(false);
     setReasoningEffort('medium');
     setActiveProviderId('');
@@ -1840,10 +1861,10 @@ export default function ChatPage() {
             setIsSessionSnapshotReady(true);
             setServerTotalTurnCount(recovery.totalTurnCount ?? null);
             if (!sessionMetadataDirtyRef.current) {
-              setDialogueMode(metadata.dialogueMode);
+              setDialogueMode(metadata.dialogueMode ?? useDisplayPreferencesStore.getState().defaultDialogueMode);
               setManualAgentId(metadata.agentId ?? '');
               setYoloMode(metadata.yoloMode);
-              setWebSearchEnabled(metadata.webSearchEnabled);
+              setWebSearchEnabled(metadata.webSearchEnabled && webSearchAvailable);
               setThinkingEnabled(metadata.thinkingEnabled);
               setReasoningEffort(metadata.reasoningEffort);
               setActiveProviderId(metadata.providerId ?? '');
@@ -2080,6 +2101,14 @@ export default function ChatPage() {
   // suppressed because the cache-restore path already set scrollTop.
   const suppressNextScrollRef = useRef(false);
 
+  // Refs mirroring reactive state for use inside effects that must NOT
+  // re-run when these values change (to avoid canceling an in-progress
+  // settleObserver via cleanup).
+  const isSessionSnapshotReadyRef = useRef(isSessionSnapshotReady);
+  isSessionSnapshotReadyRef.current = isSessionSnapshotReady;
+  const messagesLengthRef = useRef(messages.length);
+  messagesLengthRef.current = messages.length;
+
   // ── Shared scroll-to-latest helper ───────────────────────────────────
   // Used by both the snapshot-ready effect and the page-reactivation effect
   // to force the scroll region to the bottom after messages are committed.
@@ -2093,60 +2122,80 @@ export default function ChatPage() {
       ignoreScrollEventsUntilRef.current = performance.now() + 600;
       let frameId: number;
       let fallbackTimer = 0;
-      let retryTimer = 0;
+      let retryTimer1 = 0;
+      let retryTimer2 = 0;
+      let retryTimer3 = 0;
       let settleObserver: ResizeObserver | null = null;
 
-      const doScroll = () => {
+      const doScroll = (): void => {
         const sr = scrollRegionRef.current;
         if (sr && sr.clientHeight > 0) {
-          sr.scrollTo({ top: sr.scrollHeight, behavior });
-          return true;
+          const maxST = Math.max(0, sr.scrollHeight - sr.clientHeight);
+          if (sr.scrollTop < maxST - 1) {
+            sr.scrollTo({ top: maxST, behavior });
+          }
+          return;
         }
         if (!sr) {
           bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
-          return true;
         }
-        return false;
+      };
+
+      // The settled flag flips to true once content stops resizing.
+      // Until then, every ResizeObserver callback re-scrolls to bottom.
+      let settled = false;
+      let settleTimeout = 0;
+
+      const scheduleSettle = () => {
+        if (settleTimeout) window.clearTimeout(settleTimeout);
+        settleTimeout = window.setTimeout(() => {
+          settled = true;
+        }, 400);
       };
 
       frameId = requestAnimationFrame(() => {
         frameId = requestAnimationFrame(() => {
-          const scrolled = doScroll();
-          // If the scroll region wasn't ready (clientHeight === 0, common when
-          // the page just switched from display:none to display:flex), retry
-          // once after a short delay.
-          if (!scrolled) {
-            retryTimer = window.setTimeout(() => {
-              doScroll();
-            }, 150);
-          }
+          doScroll();
+          scheduleSettle();
+
+          // Progressive setTimeout retries — cover layout stabilisation
+          // from display:none → flex, CSS animations, lazy content.
+          retryTimer1 = window.setTimeout(() => {
+            if (!settled) doScroll();
+          }, 100);
+          retryTimer2 = window.setTimeout(() => {
+            if (!settled) doScroll();
+          }, 300);
+          retryTimer3 = window.setTimeout(() => {
+            if (!settled) doScroll();
+          }, 600);
+
+          // ResizeObserver: keep re-scrolling to bottom until content
+          // stops resizing (400ms of no resize = settled).
           const contentCol = contentColumnRef.current;
           if (typeof ResizeObserver !== 'undefined' && contentCol) {
-            let settled = false;
             settleObserver = new ResizeObserver(() => {
               if (settled) return;
               const s = scrollRegionRef.current;
-              if (!s) return;
-              const nearBottom =
-                s.scrollHeight - s.scrollTop - s.clientHeight <=
-                CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX;
-              if (nearBottom) {
-                s.scrollTo({ top: s.scrollHeight, behavior: 'auto' });
-              }
-              settled = true;
-              settleObserver?.disconnect();
+              if (!s || s.clientHeight === 0) return;
+              s.scrollTo({ top: s.scrollHeight, behavior: 'auto' });
+              scheduleSettle();
             });
             settleObserver.observe(contentCol);
             fallbackTimer = window.setTimeout(() => {
               settleObserver?.disconnect();
-            }, 2000);
+            }, 3000);
           }
         });
       });
+
       return () => {
         cancelAnimationFrame(frameId);
         if (fallbackTimer) window.clearTimeout(fallbackTimer);
-        if (retryTimer) window.clearTimeout(retryTimer);
+        if (retryTimer1) window.clearTimeout(retryTimer1);
+        if (retryTimer2) window.clearTimeout(retryTimer2);
+        if (retryTimer3) window.clearTimeout(retryTimer3);
+        if (settleTimeout) window.clearTimeout(settleTimeout);
         settleObserver?.disconnect();
       };
     },
@@ -2163,8 +2212,12 @@ export default function ChatPage() {
   // Triggers when `isSessionSnapshotReady` transitions to `true` for the
   // first time after a session switch (prevSnapshotReadyRef guards against
   // re-triggering on every messages.length change).
+  //
+  // IMPORTANT: Only depends on `isSessionSnapshotReady` and the stable
+  // `forceScrollToLatest` callback.  `messages.length` is read via ref so
+  // streaming updates don't cause cleanup to cancel the settleObserver.
   useEffect(() => {
-    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messages.length > 0) {
+    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messagesLengthRef.current > 0) {
       // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
       if (sessionRestoredFromCacheRef.current) {
         sessionRestoredFromCacheRef.current = false;
@@ -2180,7 +2233,6 @@ export default function ChatPage() {
     prevSnapshotReadyRef.current = isSessionSnapshotReady;
   }, [
     isSessionSnapshotReady,
-    messages.length,
     forceScrollToLatest,
     isNearBottomRef,
     ignoreScrollEventsUntilRef,
@@ -2200,10 +2252,22 @@ export default function ChatPage() {
   // `isSessionSnapshotReady` never changed, Effect A won't re-fire.  This
   // effect bridges the gap: when the page becomes active again and there
   // are messages, force a scroll to the latest message.
+  //
+  // IMPORTANT: This effect only depends on `isPageActive` (and the stable
+  // `forceScrollToLatest` callback).  We deliberately exclude
+  // `isSessionSnapshotReady` and `messages.length` from the dep array so
+  // that streaming updates (which change messages.length) don't cause the
+  // cleanup to cancel an in-progress smooth scroll.  Those values are read
+  // via refs instead.
   useEffect(() => {
     const wasActive = prevPageActiveRef.current;
     prevPageActiveRef.current = isPageActive;
-    if (!wasActive && isPageActive && isSessionSnapshotReady && messages.length > 0) {
+    if (
+      !wasActive &&
+      isPageActive &&
+      isSessionSnapshotReadyRef.current &&
+      messagesLengthRef.current > 0
+    ) {
       // If Effect A just ran a cache-restore skip, don't override the
       // restored scrollTop with a forced scroll-to-bottom.
       if (suppressNextScrollRef.current) {
@@ -2213,12 +2277,7 @@ export default function ChatPage() {
       const cleanup = forceScrollToLatest('smooth');
       return cleanup;
     }
-  }, [
-    isPageActive,
-    isSessionSnapshotReady,
-    messages.length,
-    forceScrollToLatest,
-  ]);
+  }, [isPageActive, forceScrollToLatest]);
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
@@ -4876,7 +4935,8 @@ export default function ChatPage() {
       onCommandPalette: commandPalette.toggle,
       onSearch: () => chatSearch.open(),
       onToggleDialogueMode: () => {
-        const nextMode: DialogueMode = dialogueMode === 'coding' ? 'clarify' : 'coding';
+        const preferred = useDisplayPreferencesStore.getState().defaultDialogueMode;
+        const nextMode: DialogueMode = dialogueMode === preferred ? 'clarify' : preferred;
         handleDialogueModeChange(nextMode);
       },
       onCopyLastAssistant: () => {
@@ -4930,6 +4990,7 @@ export default function ChatPage() {
         setRightOpen((v) => !v);
       },
       onNewSession: () => {
+        setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
         navigate('/chat');
         navigateToHome();
       },
@@ -5471,6 +5532,7 @@ export default function ChatPage() {
                 manualAgentId={manualAgentId}
                 yoloMode={yoloMode}
                 webSearchEnabled={webSearchEnabled}
+                webSearchAvailable={webSearchAvailable}
                 thinkingEnabled={thinkingEnabled}
                 reasoningEffort={reasoningEffort}
                 imageReferenceArtifacts={availableImageEditReferenceArtifacts}
@@ -5942,6 +6004,7 @@ export default function ChatPage() {
                   manualAgentId={manualAgentId}
                   yoloMode={yoloMode}
                   webSearchEnabled={webSearchEnabled}
+                  webSearchAvailable={webSearchAvailable}
                   thinkingEnabled={thinkingEnabled}
                   reasoningEffort={reasoningEffort}
                   imageReferenceArtifacts={availableImageEditReferenceArtifacts}
