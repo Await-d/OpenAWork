@@ -77,6 +77,7 @@
       "@sentry/cli",
       "better-sqlite3",
       "esbuild",
+      "ffmpeg-static",
       "koffi",
       "msw"
     ],
@@ -107,5 +108,8 @@
     "apps/*",
     "packages/*",
     "services/*"
-  ]
+  ],
+  "dependencies": {
+    "@rollup/rollup-win32-x64-msvc": "4.62.2"
+  }
 }
