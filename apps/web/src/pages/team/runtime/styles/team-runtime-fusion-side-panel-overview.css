@@ -1,8 +1,8 @@
-.team-v2-root[data-workbench-layout='fusion'] .team-v2-fusion-side-panel {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel {
   --team-fusion-overview-card-min: calc(var(--spacing-12) * 2 + var(--spacing-8));
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-session-context-strip {
   gap: var(--spacing-2) !important;
@@ -10,13 +10,13 @@
   border-radius: var(--radius-md) !important;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-session-context-status {
   padding: var(--spacing-1) var(--spacing-2) !important;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-session-context-subtitle {
   display: -webkit-box;
@@ -25,7 +25,7 @@
   -webkit-line-clamp: 1;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-map {
   gap: var(--spacing-2);
@@ -34,14 +34,14 @@
   box-shadow: none;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-header {
   align-items: center;
   gap: var(--spacing-2);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-heading {
   display: flex;
@@ -49,21 +49,21 @@
   gap: var(--spacing-2);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-kicker {
   font-size: 9px;
   letter-spacing: 0.06em;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-heading
   h3 {
   font-size: 12px;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-count {
   overflow: hidden;
@@ -72,14 +72,14 @@
   white-space: nowrap;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-grid {
   grid-template-columns: repeat(auto-fit, minmax(var(--team-fusion-overview-card-min), 1fr));
   gap: var(--spacing-2);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-card {
   min-height: 0;
@@ -88,13 +88,13 @@
   border-radius: var(--radius-md);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-card-head {
   gap: var(--spacing-2);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-icon {
   width: var(--spacing-6);
@@ -102,21 +102,21 @@
   border-radius: var(--radius-sm);
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-summary {
   min-height: 0;
   -webkit-line-clamp: 1;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-children {
   max-height: calc(var(--spacing-6) + var(--spacing-1));
   overflow: hidden;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-workbench-chip {
   padding: var(--spacing-1) var(--spacing-2);
@@ -124,7 +124,7 @@
   font-size: 9px;
 }
 
-.team-v2-root[data-workbench-layout='fusion'] .team-v2-fusion-side-panel .team-v2-overview-metrics {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel .team-v2-overview-metrics {
   grid-template-columns: repeat(
     auto-fit,
     minmax(var(--team-fusion-overview-card-min), 1fr)
@@ -132,7 +132,7 @@
   gap: var(--spacing-2) !important;
 }
 
-.team-v2-root[data-workbench-layout='fusion'] .team-v2-fusion-side-panel .team-v2-overview-card {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel .team-v2-overview-card {
   min-height: 0;
   gap: var(--spacing-1) !important;
   padding: var(--spacing-2) !important;
@@ -140,7 +140,7 @@
   border-radius: var(--radius-md) !important;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-card-label {
   min-width: 0;
@@ -151,13 +151,13 @@
   overflow-wrap: normal;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-card-value {
   font-size: 20px !important;
 }
 
-.team-v2-root[data-workbench-layout='fusion']
+.team-v2-root[data-workbench-layout]
   .team-v2-fusion-side-panel
   .team-v2-overview-card-note {
   display: -webkit-box;
@@ -168,35 +168,35 @@
 }
 
 @container (max-width: 620px) {
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-session-context-strip {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-session-context-status {
     justify-self: start;
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-overview-workbench-header {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-overview-workbench-count {
     max-width: 100%;
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-overview-workbench-summary,
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-v2-fusion-side-panel
     .team-v2-overview-workbench-children {
     display: none;

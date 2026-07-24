@@ -998,6 +998,7 @@ export default function TeamPageV2() {
   const setTeamEditorMode = useUIStateStore((s) => s.setTeamEditorMode);
   const workbenchLayoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const isFusionWorkbench = workbenchLayoutMode === 'fusion';
+  const isClassicWorkbench = workbenchLayoutMode === 'classic';
   // 全局侧栏（classic 的 AppSidebar / fusion 的 FusionSidebar）已承载「团队会话」段，
   // 团队页自己的左侧栏现仅渲染文件树（会话列表已从该栏彻底移除，而非隐藏）。
   const shellCollapsed = effectiveSidebarCollapsed;
@@ -1088,7 +1089,8 @@ export default function TeamPageV2() {
     gridTemplateColumns,
     columnGap: 0,
     rowGap: 0,
-    padding: isMobile || isFusionWorkbench ? 0 : '6px 8px 10px',
+    // classic / fusion 均走并排工作台，贴边以最大化对话与侧栏可视区域
+    padding: isMobile || isFusionWorkbench || isClassicWorkbench ? 0 : '6px 8px 10px',
   };
 
   if (isMobile || effectiveFocusMode) {
@@ -1262,8 +1264,9 @@ export default function TeamPageV2() {
     />
   ) : undefined;
   const sidePanelMiddleTab: MiddleTabKey = middleTab === 'conversation' ? 'dashboard' : middleTab;
-  const fusionSidePanel =
-    isFusionWorkbench && !isMobile ? (
+  // classic / fusion 桌面端均挂载工作台侧栏：对话常驻，概览/任务/度量/治理进侧栏
+  const workbenchSidePanel =
+    (isFusionWorkbench || isClassicWorkbench) && !isMobile ? (
       <TeamFusionSidePanel
         activePrimary={activePrimary}
         activeHandoffCount={activeHandoffCount}
@@ -1281,7 +1284,7 @@ export default function TeamPageV2() {
       </TeamFusionSidePanel>
     ) : undefined;
   const conversationAreaMessagesOverride =
-    isFusionWorkbench || middleTab === 'conversation'
+    isFusionWorkbench || isClassicWorkbench || middleTab === 'conversation'
       ? conversationMessagesOverride
       : renderTeamMiddleTabPanel(middleTab);
 
@@ -1481,7 +1484,11 @@ export default function TeamPageV2() {
                               <TeamPageSuperbarLeading
                                 activeWorkspaceId={resolvedTeamWorkspaceId}
                                 activeWorkspaceName={teamWorkspaceDisplayName}
-                                compact={isFusionWorkbench || breakpoint !== 'desktop'}
+                                compact={
+                                  isFusionWorkbench ||
+                                  isClassicWorkbench ||
+                                  breakpoint !== 'desktop'
+                                }
                                 memberCount={data.topSummary.memberCount}
                                 onlineCount={data.topSummary.onlineCount}
                                 selectedTeam={selectedTeam}
@@ -1523,10 +1530,11 @@ export default function TeamPageV2() {
                               </div>
                             ) : null
                           }
-                          stackCenterSlot={isTablet || isFusionWorkbench}
+                          stackCenterSlot={isTablet || isFusionWorkbench || isClassicWorkbench}
                           trailingSlot={
                             !isMobile ? (
-                              isFusionWorkbench ? (
+                              // 并排工作台下统一用更紧凑的 fusion 摘要，避免 classic 多 pill 挤爆超级栏
+                              isFusionWorkbench || isClassicWorkbench ? (
                                 <TeamFusionSuperbarSummary
                                   description={data.topSummary.description}
                                   footerLead={data.footerLead}
@@ -1555,7 +1563,7 @@ export default function TeamPageV2() {
                     ) : null
                   }
                   messagesOverride={conversationAreaMessagesOverride}
-                  sidePanel={fusionSidePanel}
+                  sidePanel={workbenchSidePanel}
                   fallbackContent={
                     // 对话主 tab：依赖 chat 流自身的视觉，不再额外注入 IdleHint
                     // 与 EmptyState（避免在已经有 composer / 接待对话流的页面下方

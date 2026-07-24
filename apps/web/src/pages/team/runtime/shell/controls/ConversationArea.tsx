@@ -188,7 +188,7 @@ export function ConversationArea({
 
 function ConversationAreaBody({
   children,
-  presentation = 'session-first',
+  presentation = 'workspace-first',
   sidePanel,
 }: {
   readonly children: ReactNode;

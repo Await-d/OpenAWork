@@ -1,10 +1,10 @@
 @container (max-width: 640px) {
-  .team-v2-root[data-workbench-layout='fusion'] .team-conversation-area__workbench {
+  .team-v2-root[data-workbench-layout] .team-conversation-area__workbench {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(240px, 44%) minmax(0, 1fr);
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench:has(
       .team-v2-fusion-side-panel[data-active-primary='conversation'][data-active-tab='dashboard']
     ) {
@@ -19,7 +19,7 @@
     overflow: auto;
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench:has(
       .team-v2-fusion-side-panel[data-active-primary='conversation'][data-active-tab='dashboard']
     )
@@ -27,7 +27,7 @@
     block-size: var(--team-fusion-workbench-conversation-block);
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench:has(
       .team-v2-fusion-side-panel[data-active-primary='conversation'][data-active-tab='dashboard']
     )
@@ -35,8 +35,8 @@
     block-size: auto;
   }
 
-  .team-v2-root[data-workbench-layout='fusion'] .team-conversation-area__workbench--workspace-first,
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout] .team-conversation-area__workbench--workspace-first,
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench:has(
       .team-v2-fusion-side-panel:not(
         [data-active-primary='conversation'][data-active-tab='dashboard']
@@ -47,15 +47,15 @@
       minmax(var(--team-fusion-workbench-session-min), auto);
   }
 
-  .team-v2-root[data-workbench-layout='fusion'] .team-conversation-area__session {
+  .team-v2-root[data-workbench-layout] .team-conversation-area__session {
     border-bottom: 1px solid var(--border-subtle);
     border-right: 0;
   }
 
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench--workspace-first
     .team-conversation-area__session,
-  .team-v2-root[data-workbench-layout='fusion']
+  .team-v2-root[data-workbench-layout]
     .team-conversation-area__workbench:has(
       .team-v2-fusion-side-panel:not(
         [data-active-primary='conversation'][data-active-tab='dashboard']
@@ -66,7 +66,7 @@
     border-top: 1px solid var(--border-subtle);
   }
 
-  .team-v2-root[data-workbench-layout='fusion'] .team-conversation-area__side-panel {
+  .team-v2-root[data-workbench-layout] .team-conversation-area__side-panel {
     border-top: 0;
   }
 }
