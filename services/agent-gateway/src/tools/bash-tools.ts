@@ -41,7 +41,7 @@
  *     the model not to use newlines as separators).
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { promises as fsp, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +50,12 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileDiffContent, SessionTerminalKind } from '@openAwork/shared';
 import { z } from 'zod';
 import { bashCommandScope } from './bash-arity.js';
+import {
+  resolveShellChoiceForPlatform as resolveShellChoiceForPlatformBase,
+  type ShellChoice,
+  type ShellSelectionEnv,
+  type ShellSelectionOptions,
+} from './shell-choice.js';
 import {
   MAX_OUTPUT_BYTES,
   MAX_OUTPUT_LINES,
@@ -272,7 +278,7 @@ const RAW_DESCRIPTION_TEMPLATE = loadDescriptionTemplate();
 function renderDescription(): string {
   const shellName = pickShellName();
   const chaining =
-    shellName === 'powershell' || shellName === 'pwsh'
+    shellName === 'powershell'
       ? "命令之间有依赖、必须串行时，该 shell 下请避免使用 '&&'（Windows PowerShell 5.1 不支持）。后一条命令需要前一条成功后才跑时，使用 PowerShell 条件如 `cmd1; if ($?) { cmd2 }`。"
       : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
   return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', process.platform)
@@ -283,22 +289,6 @@ function renderDescription(): string {
 }
 
 // ---------- Shell selection ----------
-
-interface ShellChoice {
-  shell: string;
-  isPowerShell: boolean;
-  name: string;
-}
-
-interface ShellSelectionEnv {
-  ComSpec?: string;
-  OPENAWORK_WINDOWS_SHELL?: string;
-  SHELL?: string;
-}
-
-interface ShellSelectionOptions {
-  commandExists?: (command: string) => boolean;
-}
 
 function pickShellName(): string {
   return path
@@ -312,45 +302,11 @@ export function resolveShellChoiceForPlatform(
   env: ShellSelectionEnv = process.env,
   options: ShellSelectionOptions = {},
 ): ShellChoice {
-  if (platform === 'win32') {
-    const configuredShell = env.OPENAWORK_WINDOWS_SHELL?.trim();
-    const shell =
-      configuredShell && configuredShell.length > 0
-        ? configuredShell
-        : pickDefaultWindowsShell(options.commandExists ?? commandExistsOnPath);
-    return {
-      shell,
-      isPowerShell: /powershell|pwsh/i.test(shell),
-      name: path.basename(shell).toLowerCase(),
-    };
-  }
-
-  const shell = env.SHELL?.trim() || '/bin/bash';
-  return {
-    shell,
-    isPowerShell: false,
-    name: path.basename(shell).toLowerCase(),
-  };
+  return resolveShellChoiceForPlatformBase(platform, env, options);
 }
 
 function pickShell(): ShellChoice {
   return resolveShellChoiceForPlatform(process.platform, process.env);
-}
-
-function pickDefaultWindowsShell(commandExists: (command: string) => boolean): string {
-  return commandExists('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
-}
-
-function commandExistsOnPath(command: string): boolean {
-  const result = spawnSync(
-    command,
-    ['-NoLogo', '-NoProfile', '-Command', '$PSVersionTable.PSVersion'],
-    {
-      stdio: 'ignore',
-      windowsHide: true,
-    },
-  );
-  return result.status === 0 && !result.error;
 }
 
 // ---------- workdir resolution ----------
@@ -492,9 +448,10 @@ function spawnAndCollect(
   externalSignal: AbortSignal | undefined,
   onPartialOutput: ((text: string) => void) | undefined,
   onPidAssigned?: (pid: number | undefined) => void,
+  shellChoice?: ShellChoice,
 ): Promise<SpawnOutcome> {
   return new Promise((resolve) => {
-    const choice = pickShell();
+    const choice = shellChoice ?? pickShell();
     const args = choice.isPowerShell
       ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command]
       : [];
@@ -782,6 +739,7 @@ export async function runBashCommand(
     options.signal,
     wrappedPartialOutput,
     onPidAssigned,
+    shellChoice,
   );
 
   let diffs: FileDiffContent[] | undefined;
@@ -821,6 +779,21 @@ export async function runBashCommand(
   if (outcome.kind === 'spawn_error') {
     const reason = outcome.spawnError?.message ?? 'unknown spawn error';
     metadataLines.push(`bash tool failed to spawn the command: ${reason}`);
+  }
+  const shellCompatibilityHint = buildShellCompatibilityHint({
+    cwd,
+    output: outcome.rawOutput,
+    shellChoice,
+  });
+  if (shellCompatibilityHint) {
+    metadataLines.push(shellCompatibilityHint);
+  }
+  const packageManagerHint = buildPackageManagerHint({
+    cwd,
+    output: outcome.rawOutput,
+  });
+  if (packageManagerHint) {
+    metadataLines.push(packageManagerHint);
   }
 
   let finalOutput = truncated.content || '(no output)';
@@ -865,6 +838,27 @@ export async function runBashCommand(
     ...(diffs && diffs.length > 0 ? { diffs } : {}),
   };
   return result;
+}
+
+function buildShellCompatibilityHint(input: {
+  cwd: string;
+  output: string;
+  shellChoice: ShellChoice;
+}): string | null {
+  if (
+    input.shellChoice.name.startsWith('powershell') &&
+    input.output.includes("The token '&&' is not a valid statement separator in this version.")
+  ) {
+    return `当前 shell 为 Windows PowerShell 5.1（cwd: ${input.cwd}），不支持 '&&'。请拆成多次 bash 调用、改用 \`; if ($?) { ... }\`，或通过 OPENAWORK_WINDOWS_SHELL 切到 pwsh.exe。`;
+  }
+  return null;
+}
+
+function buildPackageManagerHint(input: { cwd: string; output: string }): string | null {
+  if (input.output.includes('ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND')) {
+    return `当前目录 ${input.cwd} 下没有 pnpm importer manifest。请把 workdir 指到包含 package.json / package.json5 / package.yaml / pnpm-workspace.yaml 的目录后重试。`;
+  }
+  return null;
 }
 
 // ---------- Tool registration ----------

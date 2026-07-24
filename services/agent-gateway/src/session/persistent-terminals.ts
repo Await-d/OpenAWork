@@ -28,6 +28,7 @@ import {
   setTerminalPid,
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
+import { resolveShellChoiceForPlatform } from '../tools/shell-choice.js';
 
 interface PersistentEntry {
   terminalId: string;
@@ -98,12 +99,13 @@ function countLivePersistentTerminals(sessionId: string): number {
 }
 
 function getShell(): { shell: string; args: string[] } {
-  if (process.platform === 'win32') {
-    return { shell: 'powershell.exe', args: ['-NoLogo', '-NoProfile'] };
+  const choice = resolveShellChoiceForPlatform(process.platform, process.env);
+  if (choice.isPowerShell) {
+    return { shell: choice.shell, args: ['-NoLogo', '-NoProfile'] };
   }
   // Use a non-login interactive shell. We lose .bashrc aliases for
   // login-only setup but that's a fair trade for predictable behaviour.
-  return { shell: process.env['SHELL'] || '/bin/bash', args: ['-i'] };
+  return { shell: choice.shell, args: ['-i'] };
 }
 
 function appendToBuffer(entry: PersistentEntry, chunk: Buffer): void {

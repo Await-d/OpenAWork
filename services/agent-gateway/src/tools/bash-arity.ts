@@ -222,6 +222,10 @@ export function tokenizeCommand(command: string): string[] {
 const SHELL_CONTROL_TOKENS = new Set(['|', '||', '&&', ';', '&', '>', '>>', '<', '<<']);
 const PARTIAL_SCOPE_SKIP_TOKENS = new Set(['--']);
 
+function containsDynamicShellEvaluation(command: string): boolean {
+  return command.includes('$(') || command.includes('`');
+}
+
 export function readPrimaryCommandTokens(tokens: string[]): string[] {
   const primary: string[] = [];
 
@@ -236,6 +240,9 @@ export function readPrimaryCommandTokens(tokens: string[]): string[] {
 }
 
 export function buildBashApprovalPatterns(command: string): string[] {
+  if (containsDynamicShellEvaluation(command)) {
+    return [];
+  }
   const primaryTokens = readPrimaryCommandTokens(tokenizeCommand(command.trim()));
   const patterns = new Set<string>();
 

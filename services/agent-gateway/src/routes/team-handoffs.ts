@@ -59,6 +59,7 @@ import { buildTeamResumeBackgroundRequestData } from '../team/team-resume-contex
 import { assessTeamResumeMode, resolveBackgroundRerunTarget } from '../team/team-resume-context.js';
 import { preResumeConsistencyCheck } from '../team/team-resume-consistency-check.js';
 import { runSessionInBackground } from './stream-runtime.js';
+import { getBackgroundTaskScheduler } from '../handoff/runner/scheduler.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -178,6 +179,30 @@ function triggerTeamResumeBackgroundRun(input: {
 
 type HandoffControlAction = 'cancel' | 'pause' | 'resume';
 type HandoffControlSignal = 'cancel_signal' | 'pause_signal' | 'resume_signal';
+
+function toScheduledHandoffTaskId(handoffId: string): string {
+  return `handoff:${handoffId}`;
+}
+
+function pauseScheduledHandoffTask(handoffId: string): void {
+  try {
+    getBackgroundTaskScheduler().pause(toScheduledHandoffTaskId(handoffId));
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] scheduler.pause 失败（${handoffId}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function resumeScheduledHandoffTask(handoffId: string): void {
+  try {
+    getBackgroundTaskScheduler().resume(toScheduledHandoffTaskId(handoffId));
+  } catch (err) {
+    console.warn(
+      `[team-handoffs] scheduler.resume 失败（${handoffId}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 function logHandoffControl(input: {
   action: HandoffControlAction;
@@ -800,6 +825,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
 
       const after = getHandoff({ userId: user.sub, handoffId });
       if (after) {
+        pauseScheduledHandoffTask(handoffId);
         injectControlSignal({
           action: 'pause',
           messageType: 'pause_signal',
@@ -852,6 +878,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
 
       const after = getHandoff({ userId: user.sub, handoffId });
       if (after) {
+        resumeScheduledHandoffTask(handoffId);
         injectControlSignal({
           action: 'resume',
           messageType: 'resume_signal',
@@ -905,6 +932,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         // would 500 a pause that already took effect and leave the UI without
         // the terminal notification. Isolate per handoff + warn.
         try {
+          pauseScheduledHandoffTask(handoffId);
           const after = getHandoff({ userId: user.sub, handoffId });
           if (!after) {
             continue;
@@ -1024,6 +1052,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
         // one handoff's control-signal fan-out throwing must not abort the
         // aggregate all-resumed event + audit + reply.
         try {
+          resumeScheduledHandoffTask(handoffId);
           const after = getHandoff({ userId: user.sub, handoffId });
           if (!after) {
             continue;

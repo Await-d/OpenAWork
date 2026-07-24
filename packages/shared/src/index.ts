@@ -26,9 +26,11 @@ export type {
   AssistantTraceToolCall,
   AssistantTraceToolPart,
 } from './assistant-trace.js';
-export type { UpdateChannel } from './release-endpoints.js';
+export type { UpdateChannel, GitHubProxy } from './release-endpoints.js';
 export {
   DESKTOP_PREVIEW_LATEST_TAG,
+  GITHUB_PROXIES,
+  LEGACY_PROXY_PREFIXES,
   normalizeUpdateChannel,
   OPENAWORK_GITHUB_REPO,
   primaryLatestJsonForChannel,

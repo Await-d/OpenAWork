@@ -17,9 +17,25 @@ process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 const runSessionInBackgroundMock = vi.hoisted(() => vi.fn());
+const schedulerPauseMock = vi.hoisted(() => vi.fn(() => true));
+const schedulerResumeMock = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock('../../routes/stream-runtime.js', () => ({
   runSessionInBackground: runSessionInBackgroundMock,
+}));
+
+vi.mock('../../handoff/runner/scheduler.js', () => ({
+  getBackgroundTaskScheduler: () => ({
+    cancel: vi.fn(() => false),
+    getStatus: vi.fn(() => null),
+    listActive: vi.fn(() => []),
+    pause: schedulerPauseMock,
+    pauseAll: vi.fn(() => 0),
+    resume: schedulerResumeMock,
+    resumeAll: vi.fn(() => 0),
+    schedule: vi.fn(),
+    subscribe: vi.fn(() => () => undefined),
+  }),
 }));
 
 let dbModule: typeof DbModule;
@@ -101,6 +117,10 @@ beforeAll(async () => {
 beforeEach(() => {
   runSessionInBackgroundMock.mockReset();
   runSessionInBackgroundMock.mockResolvedValue({ statusCode: 200 });
+  schedulerPauseMock.mockReset();
+  schedulerPauseMock.mockReturnValue(true);
+  schedulerResumeMock.mockReset();
+  schedulerResumeMock.mockReturnValue(true);
   teamEventsBus.__clearTeamEventsBusForTesting();
   dbModule.sqliteRun('DELETE FROM team_audit_logs', []);
   dbModule.sqliteRun('DELETE FROM session_inbound_messages', []);
@@ -444,6 +464,7 @@ describe('POST /team/handoffs/:handoffId/pause', () => {
           userId: USER_ID,
         }),
       );
+      expect(schedulerPauseMock).toHaveBeenCalledWith(`handoff:${created.id}`);
 
       const audit = dbModule.sqliteGet<{
         action: string;
@@ -555,6 +576,7 @@ describe('POST /team/handoffs/:handoffId/resume', () => {
           userId: USER_ID,
         }),
       );
+      expect(schedulerResumeMock).toHaveBeenCalledWith(`handoff:${created.id}`);
 
       const audit = dbModule.sqliteGet<{
         action: string;
@@ -964,6 +986,8 @@ describe('POST /team/sessions/:sessionId/pause-all', () => {
           { id: handoffRunning.id, paused: 1 },
         ]),
       );
+      expect(schedulerPauseMock).toHaveBeenCalledWith(`handoff:${handoffRunning.id}`);
+      expect(schedulerPauseMock).toHaveBeenCalledWith(`handoff:${handoffPending.id}`);
 
       const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
         `SELECT message_type, payload_json
@@ -1166,6 +1190,8 @@ describe('POST /team/sessions/:sessionId/resume-all', () => {
           { id: handoffRunning.id, paused: 0 },
         ]),
       );
+      expect(schedulerResumeMock).toHaveBeenCalledWith(`handoff:${handoffRunning.id}`);
+      expect(schedulerResumeMock).toHaveBeenCalledWith(`handoff:${handoffPending.id}`);
 
       const inbound = dbModule.sqliteGet<{ message_type: string; payload_json: string }>(
         `SELECT message_type, payload_json

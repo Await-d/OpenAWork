@@ -1,5 +1,5 @@
 import { promises as fsp, type Dirent, type Stats } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileBackupRef } from '@openAwork/shared';
@@ -520,11 +520,50 @@ function createGrepMatcher(pattern: string): RegExp {
 async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
   const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
   await ensureIgnoreRulesLoadedForPath(safePath);
-  await assertDirectory(safePath);
+  const targetStat = await fsp.stat(safePath);
   const matcher = createGrepMatcher(input.pattern);
   const includeRegex = input.include ? globPatternToRegex(input.include) : null;
   const matches: Array<{ path: string; line: number; text: string }> = [];
   const counts = new Map<string, number>();
+
+  const searchRoot = targetStat.isDirectory() ? safePath : dirname(safePath);
+
+  async function searchFile(fullPath: string): Promise<void> {
+    const relativePath = fullPath.slice(searchRoot.length).replace(/^\//u, '').replace(/\\/g, '/');
+    if (includeRegex && !matchesGlobLikePath(input.include ?? '', includeRegex, relativePath)) {
+      return;
+    }
+    let stat: Stats;
+    try {
+      stat = await fsp.stat(fullPath);
+    } catch {
+      return;
+    }
+    if (!stat.isFile() || stat.size > MAX_SEARCH_FILE_BYTES) {
+      return;
+    }
+    let content: string;
+    try {
+      content = await fsp.readFile(fullPath, 'utf8');
+    } catch {
+      return;
+    }
+    const lines = content.split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const text = lines[index] ?? '';
+      if (!matcher.test(text)) {
+        continue;
+      }
+      counts.set(fullPath, (counts.get(fullPath) ?? 0) + 1);
+      if (input.output_mode === 'count') {
+        continue;
+      }
+      matches.push({ path: fullPath, line: index + 1, text: text.trim() });
+      if (input.head_limit > 0 && matches.length >= input.head_limit) {
+        return;
+      }
+    }
+  }
 
   async function searchDirectory(dirPath: string): Promise<void> {
     let entries: Dirent[];
@@ -556,44 +595,24 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
       if (!entry.isFile()) {
         continue;
       }
-      const relativePath = fullPath.slice(safePath.length).replace(/^\//u, '').replace(/\\/g, '/');
-      if (includeRegex && !matchesGlobLikePath(input.include ?? '', includeRegex, relativePath)) {
-        continue;
-      }
-      let stat: Stats;
-      try {
-        stat = await fsp.stat(fullPath);
-      } catch {
-        continue;
-      }
-      if (stat.size > MAX_SEARCH_FILE_BYTES) {
-        continue;
-      }
-      let content: string;
-      try {
-        content = await fsp.readFile(fullPath, 'utf8');
-      } catch {
-        continue;
-      }
-      const lines = content.split('\n');
-      for (let index = 0; index < lines.length; index += 1) {
-        const text = lines[index] ?? '';
-        if (!matcher.test(text)) {
-          continue;
-        }
-        counts.set(fullPath, (counts.get(fullPath) ?? 0) + 1);
-        if (input.output_mode === 'count') {
-          continue;
-        }
-        matches.push({ path: fullPath, line: index + 1, text: text.trim() });
-        if (input.head_limit > 0 && matches.length >= input.head_limit) {
-          return;
-        }
+      await searchFile(fullPath);
+      if (
+        input.head_limit > 0 &&
+        input.output_mode !== 'count' &&
+        matches.length >= input.head_limit
+      ) {
+        return;
       }
     }
   }
 
-  await searchDirectory(safePath);
+  if (targetStat.isDirectory()) {
+    await searchDirectory(safePath);
+  } else if (targetStat.isFile()) {
+    await searchFile(safePath);
+  } else {
+    throw new Error(`Path is neither a file nor a directory: ${safePath}`);
+  }
   if (input.output_mode === 'count') {
     if (counts.size === 0) {
       return 'No files found';

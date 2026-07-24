@@ -246,6 +246,14 @@ describe('bash-tools', () => {
         ),
       ).toEqual(['curl -s *', 'curl *']);
     });
+
+    it('PowerShell 子表达式命令只允许精确 scope，不生成 wildcard 审批模式', () => {
+      expect(
+        buildBashApprovalPatterns(
+          "Write-Output \"$($_.Path.Replace((Get-Location).Path + '\\\\', '')):$($_.LineNumber)\"",
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe('safety pre-checks', () => {
@@ -374,6 +382,20 @@ describe('bash-tools', () => {
         workdir,
       });
       expect(result.cwd).toBe(workdir);
+    });
+
+    it('adds a workdir hint for pnpm importer-manifest failures', async () => {
+      const result = await runBashCommand({
+        command:
+          'node -e "process.stderr.write(\'ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND No package.json was found in current directory.\\\\n\'); process.exit(1)"',
+        description: 'pnpm manifest hint',
+        workdir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain('ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND');
+      expect(result.output).toContain('workdir');
+      expect(result.output).toContain('package.json');
     });
   });
 

@@ -125,9 +125,83 @@ describe('checkLatestReleaseVersion', () => {
     expect(result).toEqual({
       latestVersion: null,
       updateAvailable: false,
-      checkError: 'Unable to reach GitHub releases',
+      checkError: 'Unable to reach GitHub releases or mirrors',
       source: null,
       channel: 'preview',
     });
+  });
+
+  it('falls back to proxy latest.json when direct GitHub fails', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      const href = String(url);
+      // Direct GitHub endpoints fail
+      const isDirectGitHub =
+        (href.includes('github.com') || href.includes('api.github.com')) &&
+        !href.includes('gh.llkk.cc') &&
+        !href.includes('gh.ddlc.top') &&
+        !href.includes('ghproxy.net') &&
+        !href.includes('gh-proxy.com');
+      if (isDirectGitHub) {
+        throw new Error('ETIMEDOUT');
+      }
+      // Proxy latest.json via gh.llkk.cc succeeds
+      if (href.includes('gh.llkk.cc') && href.includes('latest.json')) {
+        return {
+          ok: true,
+          json: async () => ({ version: '0.8.4', platforms: {} }),
+        };
+      }
+      throw new Error(`unexpected url ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await checkLatestReleaseVersion({
+      currentVersion: '0.8.0',
+      channel: 'preview',
+      fetchImpl,
+    });
+
+    expect(result.latestVersion).toBe('0.8.4');
+    expect(result.updateAvailable).toBe(true);
+    expect(result.source).toBe('preview-proxy');
+    expect(result.checkError).toBeNull();
+  });
+
+  it('falls back to proxy GitHub API when both direct and proxy latest.json fail', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      const href = String(url);
+      // Direct GitHub endpoints fail (only match github.com / api.github.com, not proxy hosts)
+      const isDirectGitHub =
+        (href.includes('github.com') || href.includes('api.github.com')) &&
+        !href.includes('gh.llkk.cc') &&
+        !href.includes('gh.ddlc.top') &&
+        !href.includes('ghproxy.net') &&
+        !href.includes('gh-proxy.com');
+      if (isDirectGitHub) {
+        throw new Error('ETIMEDOUT');
+      }
+      // All proxy latest.json endpoints fail
+      if (href.includes('latest.json')) {
+        return { ok: false, json: async () => ({}) };
+      }
+      // Proxy GitHub API via ghproxy.net succeeds
+      if (href.includes('ghproxy.net') && href.includes('api.github.com')) {
+        return {
+          ok: true,
+          json: async () => ({ tag_name: 'v0.8.3' }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const result = await checkLatestReleaseVersion({
+      currentVersion: '0.8.0',
+      channel: 'preview',
+      fetchImpl,
+    });
+
+    expect(result.latestVersion).toBe('0.8.3');
+    expect(result.updateAvailable).toBe(true);
+    expect(result.source).toBe('github-api-proxy');
+    expect(result.checkError).toBeNull();
   });
 });

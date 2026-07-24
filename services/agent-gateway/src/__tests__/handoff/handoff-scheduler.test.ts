@@ -111,10 +111,32 @@ describe('pause / resume', () => {
     expect(events.find((e) => e.type === 'paused')).toBeDefined();
   });
 
-  it('resume 一个 paused 任务把它放回 pending', () => {
-    scheduler.schedule({ id: 'r', run: async () => {} });
+  it('resume 一个被 pause 的运行中任务会重新启动', async () => {
+    let runCount = 0;
+    const secondRun = { resolve: null as null | (() => void) };
+    scheduler.schedule({
+      id: 'r',
+      run: (signal) =>
+        new Promise<void>((resolve) => {
+          runCount += 1;
+          if (runCount === 1) {
+            signal.addEventListener('abort', () => resolve(), { once: true });
+            return;
+          }
+          secondRun.resolve = resolve;
+        }),
+    });
     scheduler.pause('r');
+    await flushMicrotasks();
     expect(scheduler.resume('r')).toBe(true);
+    await flushMicrotasks();
+    expect(runCount).toBe(2);
+    if (typeof secondRun.resolve !== 'function') {
+      throw new Error('第二次运行的 resolver 未建立');
+    }
+    secondRun.resolve();
+    await flushMicrotasks();
+    expect(scheduler.getStatus('r')?.status).toBe('completed');
     expect(events.find((e) => e.type === 'resumed')).toBeDefined();
   });
 

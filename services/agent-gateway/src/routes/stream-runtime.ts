@@ -768,6 +768,7 @@ export async function runSessionInBackground(input: {
   onStarted?: () => void;
   requestData: Record<string, unknown>;
   sessionId: string;
+  signal?: AbortSignal;
   teamResumeRootSessionId?: string;
   userId: string;
   writeChunk?: (chunk: RunEvent) => void;
@@ -799,6 +800,7 @@ export async function runSessionInBackground(input: {
       method: 'INTERNAL',
       path: `/sessions/${input.sessionId}/stream/background`,
       requestData,
+      signal: input.signal,
       sessionContext,
       sessionId: input.sessionId,
       teamResumeRootSessionId: input.teamResumeRootSessionId,

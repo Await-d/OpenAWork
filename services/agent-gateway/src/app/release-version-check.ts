@@ -10,7 +10,12 @@
  * helper reads the same channel endpoints from `@openAwork/shared`.
  */
 
-import { normalizeUpdateChannel, RELEASE_ENDPOINTS, type UpdateChannel } from '@openAwork/shared';
+import {
+  normalizeUpdateChannel,
+  RELEASE_ENDPOINTS,
+  GITHUB_PROXIES,
+  type UpdateChannel,
+} from '@openAwork/shared';
 
 export type { UpdateChannel };
 
@@ -157,6 +162,24 @@ export async function checkLatestReleaseVersion(
     },
   ];
 
+  // When direct GitHub access fails (China mainland / firewall), fall back to
+  // proxy/mirror services that cache GitHub release assets.
+  for (const proxy of GITHUB_PROXIES) {
+    candidates.push(
+      {
+        source: `${channel}-proxy` as ReleaseVersionCheckResult['source'],
+        url: `${proxy.prefix}${channelLatestJson}`,
+        parse: versionFromUpdaterJson,
+      },
+      {
+        source: 'github-api-proxy' as ReleaseVersionCheckResult['source'],
+        url: `${proxy.prefix}${endpoints.githubLatestApi}`,
+        parse: versionFromGithubReleaseApi,
+        accept: 'application/vnd.github+json',
+      },
+    );
+  }
+
   let sawNetworkAttempt = false;
   for (const candidate of candidates) {
     sawNetworkAttempt = true;
@@ -182,7 +205,7 @@ export async function checkLatestReleaseVersion(
     latestVersion: null,
     updateAvailable: false,
     checkError: sawNetworkAttempt
-      ? 'Unable to reach GitHub releases'
+      ? 'Unable to reach GitHub releases or mirrors'
       : 'Unable to check for updates',
     source: null,
     channel,

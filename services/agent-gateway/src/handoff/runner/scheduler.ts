@@ -171,12 +171,15 @@ export class InProcessScheduler implements BackgroundTaskScheduler {
     const task = this.tasks.get(taskId);
     if (!task) return false;
     if (task.snapshot.status !== 'paused') return false;
+    const wasRunningBeforePause = task.preParseStatus === 'running';
     // 重新生成 abort controller，因为 paused 时已 abort 过一次
     task.abort = new AbortController();
-    task.snapshot.status = task.preParseStatus ?? 'pending';
+    task.snapshot.status = 'pending';
+    task.snapshot.completedAt = null;
+    task.snapshot.failureReason = null;
     task.preParseStatus = null;
     this.emit({ type: 'resumed', task: cloneSnapshot(task.snapshot) });
-    if (!this.globalPaused && task.snapshot.status === 'pending') {
+    if (!this.globalPaused && (task.snapshot.status === 'pending' || wasRunningBeforePause)) {
       this.runTask(task);
     }
     return true;

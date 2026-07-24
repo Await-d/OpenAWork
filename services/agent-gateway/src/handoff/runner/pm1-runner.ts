@@ -202,6 +202,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   try {
     streamResult = await runSessionInBackground({
       sessionId: input.toSessionId,
+      signal: input.signal,
       userId: input.handoff.userId,
       ...(teamResumeRootSessionId ? { teamResumeRootSessionId } : {}),
       requestData: {

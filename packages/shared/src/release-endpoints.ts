@@ -51,6 +51,32 @@ export function primaryLatestJsonForChannel(channel: UpdateChannel): string {
     : RELEASE_ENDPOINTS.stableLatestJson;
 }
 
+/**
+ * GitHub proxy/mirror services for China mainland users.
+ *
+ * Used by both the gateway version check and the desktop updater as fallback
+ * endpoints when direct GitHub access is unavailable (timeout / DNS block).
+ * Ordered by measured speed and reliability (best first, 2026-07).
+ */
+export interface GitHubProxy {
+  name: string;
+  /** Full URL prefix — append the original GitHub URL after it. */
+  prefix: string;
+}
+
+export const GITHUB_PROXIES: GitHubProxy[] = [
+  { name: 'GHProxy Fast', prefix: 'https://gh.llkk.cc/' },
+  { name: 'GH-DDLC', prefix: 'https://gh.ddlc.top/' },
+  { name: 'GHProxy.net', prefix: 'https://ghproxy.net/' },
+  { name: 'GH-Proxy', prefix: 'https://gh-proxy.com/' },
+];
+
+/** Historical prefixes that may still appear in published latest-cn.json. */
+export const LEGACY_PROXY_PREFIXES: readonly string[] = [
+  'https://ghp.ci/',
+  'https://github.moeyy.xyz/',
+];
+
 export function normalizeUpdateChannel(
   value: string | null | undefined,
   fallback: UpdateChannel = 'preview',
