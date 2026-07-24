@@ -451,6 +451,10 @@ export function PermissionPrompt({
         gap: 10,
         maxWidth: 440,
         minWidth: 340,
+        maxHeight: 'calc(100vh - 80px)',
+        overflowY: 'auto',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(148,163,184,0.25) transparent',
         boxShadow: '0 22px 56px rgba(15, 23, 42, 0.45)',
         willChange: 'transform, opacity',
         ...style,
@@ -576,6 +580,10 @@ export function PermissionPrompt({
             color: 'var(--fg-strong)',
             wordBreak: 'break-all',
             whiteSpace: 'pre-wrap',
+            maxHeight: 120,
+            overflowY: 'auto',
+            scrollbarWidth: 'thin',
+            scrollbarColor: 'rgba(148,163,184,0.25) transparent',
           }}
         >
           {previewAction ?? scope}
@@ -642,12 +650,17 @@ export function PermissionPrompt({
                   </span>
                   <code
                     style={{
+                      display: 'block',
                       fontFamily: 'var(--font-mono, monospace)',
                       fontSize: 11,
                       color: isSelected ? 'var(--accent)' : 'var(--fg-muted)',
                       wordBreak: 'break-all',
                       whiteSpace: 'pre-wrap',
                       lineHeight: 1.4,
+                      maxHeight: 60,
+                      overflowY: 'auto',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'rgba(148,163,184,0.25) transparent',
                     }}
                   >
                     {level.pattern}

@@ -1565,6 +1565,51 @@ function isAutoAllowedGitBashRead(input: {
   return validateSessionWorkspacePath({ path: filePath, sessionId: input.sessionId }).ok;
 }
 
+/**
+ * Threshold (in characters) beyond which a bash command is considered "long"
+ * and should be summarised in the permission prompt instead of shown verbatim.
+ */
+const BASH_COMMAND_SUMMARY_THRESHOLD = 120;
+
+/**
+ * Produce a human-friendly summary of a bash command for use in the permission
+ * prompt's `previewAction` field.
+ *
+ * The `scope` field is kept as the full original command (needed for correct
+ * permission matching on the gateway side), but `previewAction` only shows a
+ * summary so the permission popup stays compact.
+ *
+ * When the command is short (≤ threshold chars, single line), it is returned
+ * as-is. When it is long or multi-line, only the first meaningful line is kept
+ * and a `…(共 N 行)` suffix is appended so the user can immediately tell that
+ * the full command is larger than what is shown.
+ *
+ * Examples:
+ *   "ls -la"                              → "ls -la"
+ *   "python script.py\nimport os\n..."    → "python script.py …(共 15 行)"
+ *   "@'...big script...'@ | python x.py"  → "@'...big script...'@ | python x.py …(共 3 行)"
+ */
+function summarizeBashCommand(command: string): string {
+  const trimmed = command.trim();
+  const lines = trimmed.split('\n');
+
+  if (lines.length <= 1 && trimmed.length <= BASH_COMMAND_SUMMARY_THRESHOLD) {
+    return trimmed;
+  }
+
+  const firstLine = (lines[0] ?? '').trim();
+  const firstLineClipped =
+    firstLine.length > BASH_COMMAND_SUMMARY_THRESHOLD
+      ? `${firstLine.slice(0, BASH_COMMAND_SUMMARY_THRESHOLD)}…`
+      : firstLine;
+
+  if (lines.length > 1) {
+    return `${firstLineClipped} …(共 ${lines.length} 行)`;
+  }
+
+  return `${firstLineClipped}…`;
+}
+
 function buildPermissionRequestContext(
   sessionId: string,
   request: ToolCallRequest,
@@ -1779,11 +1824,12 @@ function buildPermissionRequestContext(
       const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
       const safeWorkdir = validation.ok ? validation.safePath : null;
       if (!command || !safeWorkdir) return null;
+      const previewSummary = summarizeBashCommand(command);
       return {
         scope: command,
         reason: '需要执行工作区命令',
         riskLevel: 'high',
-        previewAction: `执行命令: ${command}`,
+        previewAction: `执行命令: ${previewSummary}`,
         always: buildBashApprovalPatterns(command),
       };
     }
@@ -1791,11 +1837,12 @@ function buildPermissionRequestContext(
       const tmuxCommand =
         typeof rawInput.tmux_command === 'string' ? rawInput.tmux_command.trim() : '';
       if (!tmuxCommand) return null;
+      const previewSummary = summarizeBashCommand(tmuxCommand);
       return {
         scope: tmuxCommand,
         reason: '需要执行 tmux 交互式命令',
         riskLevel: 'high',
-        previewAction: `执行 tmux 命令: ${tmuxCommand}`,
+        previewAction: `执行 tmux 命令: ${previewSummary}`,
         always: buildBashApprovalPatterns(tmuxCommand),
       };
     }
