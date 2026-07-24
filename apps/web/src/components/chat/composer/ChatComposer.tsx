@@ -285,7 +285,10 @@ export function ChatComposer({
   const effectiveStopCapability =
     stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
   const showStopAction =
-    streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
+    streaming ||
+    effectiveStopCapability === 'precise' ||
+    effectiveStopCapability === 'best_effort' ||
+    effectiveStopCapability === 'observe_only';
   const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
   const showQueueAction =
     !imageGenerationMode &&
@@ -451,7 +454,7 @@ export function ChatComposer({
       <div
         className="chat-composer__inner"
         style={{
-          maxWidth: editorMode ? 720 : 1024,
+          maxWidth: editorMode ? 680 : 860,
           margin: '0 auto',
           width: '100%',
           position: 'relative',

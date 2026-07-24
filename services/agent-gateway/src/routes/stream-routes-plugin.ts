@@ -31,6 +31,7 @@ import {
   stopAnyInFlightStreamRequestForSession,
   stopInFlightStreamRequest,
 } from './stream-cancellation.js';
+import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { installWsHeartbeat } from './ws-heartbeat.js';
 
 export const STREAM_PLUGIN_ERROR_MESSAGES = {
@@ -242,6 +243,11 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (stopped) {
         clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
+      } else {
+        // No in-flight request found — the stream may have ended without
+        // cleaning up state_status. Run the reconciler to reset stale
+        // running/paused state back to idle so the frontend can recover.
+        await reconcileSessionRuntime({ sessionId, userId: user.sub });
       }
 
       return reply.status(200).send({ stopped });

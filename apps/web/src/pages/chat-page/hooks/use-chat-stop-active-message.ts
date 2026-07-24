@@ -55,7 +55,7 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
   } = options;
 
   const stopActiveMessage = useCallback(async () => {
-    if (stopCapability === 'none' || stopCapability === 'observe_only' || stoppingStream) {
+    if (stopCapability === 'none' || stoppingStream) {
       return;
     }
 
@@ -73,14 +73,14 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
     setStreamError(null);
     try {
       const sessionsClient = createSessionsClient(gatewayUrl) as SessionsClientWithActiveStop;
-      const stopped =
-        stopCapability === 'best_effort'
-          ? Boolean(
-              currentSessionId &&
-              token &&
-              (await sessionsClient.stopActiveStream(token, currentSessionId)),
-            )
-          : await client.stopStream();
+      const useRemoteStop = stopCapability === 'best_effort' || stopCapability === 'observe_only';
+      const stopped = useRemoteStop
+        ? Boolean(
+            currentSessionId &&
+            token &&
+            (await sessionsClient.stopActiveStream(token, currentSessionId)),
+          )
+        : await client.stopStream();
       if (!stopped) {
         stoppingStreamRef.current = false;
         setStoppingStream(false);
@@ -90,7 +90,7 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
               messageLimit: initialTurnLimit,
             }).catch(() => undefined)
           : Promise.resolve());
-        if (stopCapability === 'best_effort') {
+        if (useRemoteStop) {
           setStreamError('当前会话没有可停止的活动运行，正在刷新状态。');
         } else {
           setStreamError('当前运行控制句柄已失效，正在刷新会话状态。');
@@ -98,7 +98,7 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
         return;
       }
 
-      if (stopCapability === 'best_effort' || !streaming) {
+      if (useRemoteStop || !streaming) {
         stoppingStreamRef.current = false;
         setStoppingStream(false);
         void (currentSessionId

@@ -116,6 +116,7 @@ function getPrimaryButtonDisabled(props: ChatComposerPrimaryActionsProps): boole
 
 function getPrimaryButtonTone(props: ChatComposerPrimaryActionsProps): string {
   if (props.showStopAction) {
+    if (props.effectiveStopCapability === 'observe_only') return 'warning';
     return props.effectiveStopCapability === 'best_effort' ? 'warning' : 'danger';
   }
   if (props.sessionBusyState === 'running') return 'running';
@@ -126,6 +127,7 @@ function getPrimaryButtonTone(props: ChatComposerPrimaryActionsProps): string {
 function getPrimaryButtonLabel(props: ChatComposerPrimaryActionsProps): string {
   if (props.showStopAction) {
     if (props.stoppingStream) return '停止中';
+    if (props.effectiveStopCapability === 'observe_only') return '尝试停止';
     return props.effectiveStopCapability === 'best_effort' ? '尝试停止' : '停止';
   }
   if (props.sessionBusyState === 'running') return '运行中';
@@ -137,6 +139,9 @@ function getComposerStatusLabel(props: ChatComposerPrimaryActionsProps): string 
   if (props.showStopAction) {
     if (props.stoppingStream) return '正在停止…';
     if (props.streaming) return '正在生成… · Esc 停止';
+    if (props.effectiveStopCapability === 'observe_only') {
+      return '远端运行中 · 将尝试发送停止请求';
+    }
     return props.effectiveStopCapability === 'best_effort'
       ? '当前页未接管原始请求 · 将尝试停止本会话的当前运行'
       : '当前运行流仍受此页控制 · 可直接停止';
