@@ -21,6 +21,32 @@ import {
 const INITIAL_PAGE_SIZE = 8;
 const LOAD_MORE_STEP = 10;
 
+/** 反馈条样式 — 用 CSS 类替代内联样式 */
+const FEEDBACK_STYLE_BASE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '10px 14px',
+  borderRadius: 'var(--radius-md, 8px)',
+  fontSize: 12,
+  fontWeight: 600,
+  lineHeight: 1.5,
+} as const;
+
+const FEEDBACK_STYLE_DANGER = {
+  ...FEEDBACK_STYLE_BASE,
+  border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)',
+  background: 'color-mix(in oklch, var(--danger) 8%, var(--bg-overlay))',
+  color: 'var(--danger)',
+} as const;
+
+const FEEDBACK_STYLE_SUCCESS = {
+  ...FEEDBACK_STYLE_BASE,
+  border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
+  background: 'color-mix(in oklch, var(--success) 8%, var(--bg-overlay))',
+  color: 'var(--success)',
+} as const;
+
 export function MessagesTab({
   selectedTeam = null,
 }: {
@@ -171,79 +197,25 @@ export function MessagesTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* ─── 操作反馈 / 错误提示 ─── */}
       {showFeedback ? (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)',
-            background: 'color-mix(in oklch, var(--danger) 8%, var(--bg-overlay))',
-            color: 'var(--danger)',
-            fontSize: 12,
-            fontWeight: 600,
-            lineHeight: 1.5,
-          }}
-        >
+        <div style={FEEDBACK_STYLE_DANGER}>
           <Icon name="error" size={14} color="var(--danger)" />
           <span>{feedback.message}</span>
         </div>
       ) : null}
       {showSuccess ? (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
-            background: 'color-mix(in oklch, var(--success) 8%, var(--bg-overlay))',
-            color: 'var(--success)',
-            fontSize: 12,
-            fontWeight: 600,
-            lineHeight: 1.5,
-          }}
-        >
+        <div style={FEEDBACK_STYLE_SUCCESS}>
           <Icon name="check" size={14} color="var(--success)" />
           <span>{feedback.message}</span>
         </div>
       ) : null}
       {showError ? (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)',
-            background: 'color-mix(in oklch, var(--danger) 8%, var(--bg-overlay))',
-            color: 'var(--danger)',
-            fontSize: 12,
-            fontWeight: 600,
-            lineHeight: 1.5,
-          }}
-        >
+        <div style={FEEDBACK_STYLE_DANGER}>
           <Icon name="error" size={14} color="var(--danger)" />
           <span>{error}</span>
         </div>
       ) : null}
       {/* ─── 顶部标题栏 + 筛选器 ─── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          flexWrap: 'wrap',
-          padding: '12px 16px',
-          borderRadius: 12,
-          border: '1px solid var(--border-subtle)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
+      <div className="team-conv-panel-header" style={{ gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span
             style={{
@@ -252,7 +224,7 @@ export function MessagesTab({
               justifyContent: 'center',
               width: 28,
               height: 28,
-              borderRadius: 8,
+              borderRadius: 'var(--radius-sm, 6px)',
               background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
               color: 'var(--accent)',
             }}
@@ -270,7 +242,7 @@ export function MessagesTab({
         </div>
         <span style={{ flex: 1 }} />
         {/* 类型筛选 */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="team-conv-filter-bar">
           {(
             Object.entries(MSG_TYPE_META) as [
               AgentTeamsMessageCard['type'],
@@ -283,26 +255,10 @@ export function MessagesTab({
                 key={type}
                 type="button"
                 onClick={() => toggleTypeFilter(type)}
-                className="team-btn-focusable"
+                className="team-conv-filter-btn"
+                data-active={isActive}
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '5px 10px',
-                  borderRadius: 999,
-                  border: `1px solid ${
-                    isActive
-                      ? 'color-mix(in oklch, var(--accent) 40%, transparent)'
-                      : 'var(--border-subtle)'
-                  }`,
-                  background: isActive
-                    ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
-                    : 'transparent',
                   color: isActive ? 'var(--fg-strong)' : meta.color,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 150ms cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
               >
                 <Icon name={meta.icon} size={12} color={isActive ? 'var(--accent)' : meta.color} />
@@ -317,17 +273,7 @@ export function MessagesTab({
                 setTypeFilter(new Set());
                 setVisibleCount(INITIAL_PAGE_SIZE);
               }}
-              className="team-btn-focusable"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--fg-muted)',
-                fontSize: 11,
-                cursor: 'pointer',
-                padding: '4px 8px',
-                borderRadius: 6,
-                transition: 'color 150ms ease',
-              }}
+              className="team-conv-filter-btn"
             >
               清除筛选
             </button>

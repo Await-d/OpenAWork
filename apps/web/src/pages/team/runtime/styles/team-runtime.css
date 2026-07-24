@@ -17,6 +17,7 @@
 @import './team-runtime-knowledge-graph.css';
 @import './team-runtime-fusion.css';
 @import './team-runtime-flow-animations.css';
+@import './team-runtime-conversation-tabs.css';
 
 /* ───── 页面壳层：背景、面板和移动抽屉 ───── */
 .team-v2-root {

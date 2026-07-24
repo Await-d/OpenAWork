@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import type { EdgeView } from './LayerFlowPipeline.js';
 import { STATE_COLOR, STATE_LABELS } from './layer-flow-state.js';
 
@@ -13,24 +12,6 @@ export function LayerFlowEdge({ edge, onSelect }: LayerFlowEdgeProps) {
       ? 'var(--border-default)'
       : (STATE_COLOR[edge.state] ?? 'var(--fg-muted)');
   const clickable = Boolean(onSelect);
-  const trackStyle: CSSProperties = edge.active
-    ? {
-        height: 3,
-        width: '100%',
-        borderRadius: 'var(--radius-pill, 9999px)',
-        backgroundImage: `linear-gradient(90deg, color-mix(in srgb, ${color} 20%, transparent) 0%, ${color} 50%, color-mix(in srgb, ${color} 20%, transparent) 100%)`,
-        backgroundSize: '200% 100%',
-        animation: 'team-flow-dash 1.1s linear infinite',
-      }
-    : {
-        height: 2,
-        width: '100%',
-        borderRadius: 'var(--radius-pill, 9999px)',
-        background:
-          edge.latest && edge.state !== 'idle'
-            ? `color-mix(in srgb, ${color} 50%, transparent)`
-            : 'color-mix(in srgb, var(--border-default) 45%, transparent)',
-      };
 
   return (
     <button
@@ -39,41 +20,19 @@ export function LayerFlowEdge({ edge, onSelect }: LayerFlowEdgeProps) {
       disabled={!clickable}
       aria-label={edge.latest ? '查看该层间消息详情' : '该相邻层暂无消息传递'}
       title={edge.latest ? '查看层间消息详情' : '暂无传递'}
+      className="team-conv-flow-edge"
+      data-active={edge.active ? 'true' : 'false'}
+      data-clickable={clickable ? 'true' : 'false'}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        padding: '8px 1px',
-        background: 'transparent',
-        border: 'none',
-        cursor: clickable ? 'pointer' : 'default',
-        transition: 'opacity 160ms ease',
-        opacity: edge.state === 'idle' && !edge.latest ? 0.5 : 1,
+        '--edge-color': color,
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          fontSize: 12,
-          color,
-          lineHeight: 1,
-          fontWeight: 700,
-        }}
-      >
+      <span aria-hidden className="team-conv-flow-edge__arrow">
         ▸
       </span>
-      <span style={trackStyle} aria-hidden />
+      <span className="team-conv-flow-edge__track" aria-hidden />
       {edge.latest ? (
-        <span
-          style={{
-            fontSize: 8.5,
-            fontWeight: 600,
-            color: 'var(--fg-muted)',
-            whiteSpace: 'nowrap',
-          }}
-        >
+        <span style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
           {STATE_LABELS[edge.state] ?? edge.state}
         </span>
       ) : (

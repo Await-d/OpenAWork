@@ -28,15 +28,6 @@ import {
 } from './layer-flow-view-model.js';
 import { resolveFlowHandoffSessionId } from './layer-flow-state.js';
 import { buildLayerTimeline, buildLayerTimelineSections } from './layer-flow-timeline-model.js';
-import {
-  CONTAINER_STYLE,
-  FLOW_DENSITY_TOGGLE_STYLE,
-  FLOW_ROW_STYLE,
-  NARROW_FLOW_DENSITY_TOGGLE_STYLE,
-  PIPELINE_SCROLL_STYLE,
-  SPLIT_STYLE,
-  TIMELINE_PANEL_STYLE,
-} from './layer-flow-view-styles.js';
 
 export interface LayerFlowViewProps {
   selectedTeam?: AgentTeamsSidebarTeam | null;
@@ -165,21 +156,20 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
       subtitle="把消息在 接待 → 规划 → 管控 → 执行 → 评审 各层之间的传递实时画成流水线。点左侧记录切换，右侧面板只显示对话。"
       scroll={false}
     >
-      <div ref={containerRef} style={CONTAINER_STYLE}>
+      <div ref={containerRef} className="team-conv-root" style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1, overflow: 'hidden' }}>
+        {/* 流水线 + 密度切换 */}
         <div
-          style={
-            isNarrowLayout
-              ? {
-                  ...FLOW_ROW_STYLE,
-                  gridTemplateColumns: 'minmax(0, 1fr)',
-                  rowGap: 8,
-                }
-              : FLOW_ROW_STYLE
-          }
-          role="group"
-          aria-label="层级流水线"
+          className="team-conv-panel"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isNarrowLayout ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) auto',
+            alignItems: 'flex-start',
+            gap: 12,
+            padding: '12px 16px',
+            flexShrink: 0,
+          }}
         >
-          <div style={PIPELINE_SCROLL_STYLE}>
+          <div style={{ minWidth: 0, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 2 }}>
             <LayerFlowPipeline
               edges={edges}
               layerViews={layerViews}
@@ -191,7 +181,10 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
           <SegmentedToggle<LayerFlowDensityMode>
             ariaLabel="层级流动密度模式"
             size="sm"
-            style={isNarrowLayout ? NARROW_FLOW_DENSITY_TOGGLE_STYLE : FLOW_DENSITY_TOGGLE_STYLE}
+            style={{
+              alignSelf: 'start',
+              justifySelf: isNarrowLayout ? 'end' : 'start',
+            }}
             value={flowDensityMode}
             onChange={setFlowDensityMode}
             options={[
@@ -201,27 +194,18 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
           />
         </div>
 
+        {/* 时间线 + 详情面板 */}
         <div
+          className={isNarrowLayout ? '' : 'team-conv-split'}
           style={
             isNarrowLayout
-              ? {
-                  ...SPLIT_STYLE,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                }
-              : SPLIT_STYLE
+              ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden' }
+              : undefined
           }
         >
           <div
-            style={
-              isNarrowLayout
-                ? {
-                    ...TIMELINE_PANEL_STYLE,
-                    maxHeight: 280,
-                  }
-                : TIMELINE_PANEL_STYLE
-            }
+            className={isNarrowLayout ? 'team-conv-panel' : 'team-conv-split__sidebar'}
+            style={isNarrowLayout ? { maxHeight: 280, minHeight: 0, flex: '0 0 auto' } : undefined}
           >
             <LayerFlowTimelinePanel
               sections={timelineSections}
@@ -231,18 +215,20 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
             />
           </div>
 
-          <LayerFlowDetailPane
-            detailMode={detailMode}
-            detailSelectedTeam={detailSelectedTeam}
-            effectiveSelectedTeam={selectedDetailTeam}
-            layerViews={layerViews}
-            selectedHandoff={selectedHandoff}
-            selectedHandoffReuseBadge={selectedHandoffReuseBadge}
-            selectedSessionId={selectedSessionId}
-            sessionTitleById={sessionTitleById}
-            onDetailModeChange={setDetailMode}
-            onSelectSessionId={setSelectedSessionId}
-          />
+          <div className={isNarrowLayout ? 'team-conv-panel' : 'team-conv-split__main'}>
+            <LayerFlowDetailPane
+              detailMode={detailMode}
+              detailSelectedTeam={detailSelectedTeam}
+              effectiveSelectedTeam={selectedDetailTeam}
+              layerViews={layerViews}
+              selectedHandoff={selectedHandoff}
+              selectedHandoffReuseBadge={selectedHandoffReuseBadge}
+              selectedSessionId={selectedSessionId}
+              sessionTitleById={sessionTitleById}
+              onDetailModeChange={setDetailMode}
+              onSelectSessionId={setSelectedSessionId}
+            />
+          </div>
         </div>
       </div>
     </TabContainer>

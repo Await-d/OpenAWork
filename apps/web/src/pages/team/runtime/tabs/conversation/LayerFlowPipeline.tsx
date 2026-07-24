@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import type {
   HandoffEntry,
   HandoffState,
@@ -30,29 +29,6 @@ export interface EdgeView {
   toIndex: number;
 }
 
-const FLOW_NODE_COLUMN =
-  'minmax(clamp(calc(var(--spacing-6) * 2), 12vw, calc(var(--spacing-8) * 2 + var(--spacing-1))), 1fr)';
-const FLOW_EDGE_COLUMN = 'clamp(var(--spacing-2), 3vw, var(--spacing-6))';
-
-const PIPELINE_GRID_STYLE: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: [
-    FLOW_NODE_COLUMN,
-    FLOW_EDGE_COLUMN,
-    FLOW_NODE_COLUMN,
-    FLOW_EDGE_COLUMN,
-    FLOW_NODE_COLUMN,
-    FLOW_EDGE_COLUMN,
-    FLOW_NODE_COLUMN,
-    FLOW_EDGE_COLUMN,
-    FLOW_NODE_COLUMN,
-  ].join(' '),
-  alignItems: 'stretch',
-  gap: '0',
-  flex: '1 1 calc(var(--spacing-8) * 14)',
-  minWidth: 'calc(var(--spacing-8) * 10)',
-};
-
 export interface LayerFlowPipelineProps {
   edges: EdgeView[];
   layerViews: LayerNodeView[];
@@ -75,7 +51,7 @@ export function LayerFlowPipeline({
   const items = buildPipelineItems(layerViews, edges);
 
   return (
-    <div style={PIPELINE_GRID_STYLE}>
+    <div className="team-conv-pipeline">
       {items.map((item) => {
         if (item.kind === 'node') {
           return (

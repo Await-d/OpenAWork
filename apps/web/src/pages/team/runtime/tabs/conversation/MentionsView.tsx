@@ -1,15 +1,15 @@
 /**
- * 260516-team-page-v2 · T-13 · MentionsView
+ * 260516-team-page-v2 · T-13 · MentionsView（对话 Tab 重写版）
  *
  * 「待回复 / @ 我的」tab 内容：
  *   - 阻塞确认（waiting_confirmation）置顶
  *   - 其他通知按时间倒序
  *   - 已读 / 未读切换
  *
- * 数据来源：useTeamNotificationStore.events
+ * 重写要点：使用 team-conv-* CSS 类名系统替代大量内联样式，统一卡片和过滤栏视觉。
  */
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useState } from 'react';
 import {
   getTeamNotificationEventKey,
   useClarificationStore,
@@ -27,105 +27,7 @@ import {
   teamEventTypeLabel,
 } from '../../data/team-event-labels.js';
 
-const CONTAINER_STYLE: CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
-};
-
-const FILTER_BAR_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  flexWrap: 'wrap',
-};
-
-const FILTER_BTN_STYLE: CSSProperties = {
-  padding: '4px 10px',
-  borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'transparent',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-  color: 'var(--fg-muted)',
-};
-
-const FILTER_BTN_ACTIVE_STYLE: CSSProperties = {
-  ...FILTER_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
-  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-  color: 'var(--fg-strong)',
-};
-
-const CARD_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 6,
-  padding: '12px 14px',
-  borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
-};
-
-const BLOCKING_CARD_STYLE: CSSProperties = {
-  ...CARD_STYLE,
-  borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
-};
-
-const EMPTY_STYLE: CSSProperties = {
-  display: 'grid',
-  placeItems: 'center',
-  padding: 32,
-  borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
-  color: 'var(--fg-muted)',
-  fontSize: 13,
-  gap: 6,
-};
-
-const SUMMARY_GRID_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-};
-
-const SUMMARY_CARD_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  padding: '10px 12px',
-  borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
-};
-
-const SUMMARY_CARD_BLOCKING_STYLE: CSSProperties = {
-  ...SUMMARY_CARD_STYLE,
-  borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
-};
-
-const SUMMARY_CARD_WARNING_STYLE: CSSProperties = {
-  ...SUMMARY_CARD_STYLE,
-  borderColor: 'color-mix(in srgb, var(--warning) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 7%, var(--bg-overlay))',
-};
-
 type MentionFilter = 'all' | 'unread' | 'blocking';
-
-const SUMMARY_ACTION_STYLE: CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'var(--bg-base)',
-  color: 'var(--fg-strong)',
-  fontSize: 11,
-  fontWeight: 700,
-  cursor: 'pointer',
-  justifySelf: 'start',
-};
 
 function isBlocking(event: HandoffEvent): boolean {
   return (
@@ -142,7 +44,6 @@ function summarize(event: HandoffEvent): string {
 export interface MentionsViewProps {
   onOpenBlockingTarget?: (event: HandoffEvent) => void;
   onOpenClarifications?: () => void;
-  /** 当前选中会话 ID，用于按 session scope 过滤通知事件。 */
   selectedTeamId?: string | null;
 }
 
@@ -156,12 +57,8 @@ function getBlockingActionLabel(event: HandoffEvent): string | null {
 }
 
 function describeBlockingActionLabel(targetTab: TeamRuntimeHandoffContextTab): string | null {
-  if (targetTab === 'review') {
-    return '前往评审';
-  }
-  if (targetTab === 'artifacts') {
-    return '前往任务与产物';
-  }
+  if (targetTab === 'review') return '前往评审';
+  if (targetTab === 'artifacts') return '前往任务与产物';
   return '前往健康度';
 }
 
@@ -180,18 +77,11 @@ export function MentionsView({
 
   const [filter, setFilter] = useState<MentionFilter>('all');
 
-  // 按选中会话过滤事件——只显示属于当前会话 scope 的通知
   const scopedEvents = useMemo(() => {
-    if (!selectedTeamId) {
-      return events;
-    }
+    if (!selectedTeamId) return events;
     return events.filter((event) => {
       const eventSessionId = event.sessionId;
-      if (!eventSessionId) {
-        // 没有关联 sessionId 的事件保留（如全局通知）
-        return true;
-      }
-      // 精确匹配或属于会话子树（通过 fromSessionId 判断）
+      if (!eventSessionId) return true;
       return (
         eventSessionId === selectedTeamId ||
         (typeof event.payload['fromSessionId'] === 'string' &&
@@ -217,12 +107,12 @@ export function MentionsView({
     } else if (filter === 'blocking') {
       list = list.filter((item) => item.blocking);
     }
-    // 阻塞置顶 + 时间倒序
     return list.slice().sort((a, b) => {
       if (a.blocking !== b.blocking) return a.blocking ? -1 : 1;
       return b.event.timestamp - a.event.timestamp;
     });
   }, [enriched, filter, readEventKeys]);
+
   const blockingCount = useMemo(() => enriched.filter((item) => item.blocking).length, [enriched]);
   const primaryBlockingTarget = useMemo(
     () =>
@@ -233,51 +123,61 @@ export function MentionsView({
 
   if (scopedEvents.length === 0) {
     return (
-      <div style={CONTAINER_STYLE}>
-        <div style={EMPTY_STYLE}>
-          <span style={{ fontSize: 26 }} aria-hidden>
-            🔔
-          </span>
-          <strong style={{ color: 'var(--fg-default)' }}>暂无待回复消息</strong>
-          <span>团队产生阻塞确认或推送通知时，会出现在这里。</span>
-        </div>
+      <div className="team-conv-empty">
+        <span className="team-conv-empty__icon" aria-hidden>🔔</span>
+        <strong className="team-conv-empty__title">暂无待回复消息</strong>
+        <span className="team-conv-empty__description">
+          团队产生阻塞确认或推送通知时，会出现在这里。
+        </span>
       </div>
     );
   }
 
   return (
-    <div style={CONTAINER_STYLE}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 摘要卡片 */}
       {blockingCount > 0 || clarificationPending > 0 ? (
-        <div style={SUMMARY_GRID_STYLE}>
+        <div
+          style={{
+            display: 'grid',
+            gap: 8,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          }}
+        >
           {blockingCount > 0 ? (
-            <div style={SUMMARY_CARD_BLOCKING_STYLE}>
-              <strong style={{ color: 'var(--danger)', fontSize: 13 }}>需要优先处理的阻塞</strong>
+            <div className="team-conv-panel" style={{ padding: '10px 12px', display: 'grid', gap: 4, borderColor: 'color-mix(in srgb, var(--danger, var(--complement)) 40%, transparent)' }}>
+              <strong style={{ color: 'var(--danger, var(--complement))', fontSize: 13 }}>
+                需要优先处理的阻塞
+              </strong>
               <span style={{ color: 'var(--fg-strong)', fontSize: 13, fontWeight: 700 }}>
                 当前有 {blockingCount} 条升级/阻塞通知
               </span>
               <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
                 优先查看本页阻塞卡片，确认是否需要你修改需求、补约束，或直接介入当前流程。
               </span>
-              <button
-                type="button"
-                onClick={() => setFilter('blocking')}
-                style={SUMMARY_ACTION_STYLE}
-              >
-                仅看阻塞
-              </button>
-              {primaryBlockingTarget && onOpenBlockingTarget ? (
+              <div style={{ display: 'flex', gap: 6 }}>
                 <button
                   type="button"
-                  onClick={() => onOpenBlockingTarget(primaryBlockingTarget)}
-                  style={SUMMARY_ACTION_STYLE}
+                  onClick={() => setFilter('blocking')}
+                  className="team-conv-filter-btn"
+                  data-active={filter === 'blocking'}
                 >
-                  {getBlockingActionLabel(primaryBlockingTarget) ?? '前往处理'}
+                  仅看阻塞
                 </button>
-              ) : null}
+                {primaryBlockingTarget && onOpenBlockingTarget ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenBlockingTarget(primaryBlockingTarget)}
+                    className="team-conv-filter-btn"
+                  >
+                    {getBlockingActionLabel(primaryBlockingTarget) ?? '前往处理'}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
           {clarificationPending > 0 ? (
-            <div style={SUMMARY_CARD_WARNING_STYLE}>
+            <div className="team-conv-panel" style={{ padding: '10px 12px', display: 'grid', gap: 4, borderColor: 'color-mix(in srgb, var(--warning) 40%, transparent)' }}>
               <strong style={{ color: 'var(--warning)', fontSize: 13 }}>待回答的澄清问题</strong>
               <span style={{ color: 'var(--fg-strong)', fontSize: 13, fontWeight: 700 }}>
                 当前有 {clarificationPending} 条 NEEDS CLARIFICATION
@@ -290,7 +190,7 @@ export function MentionsView({
                 onClick={() => {
                   onOpenClarifications?.();
                 }}
-                style={SUMMARY_ACTION_STYLE}
+                className="team-conv-filter-btn"
               >
                 前往任务流
               </button>
@@ -298,58 +198,66 @@ export function MentionsView({
           ) : null}
         </div>
       ) : null}
-      <div style={FILTER_BAR_STYLE}>
-        <FilterBtn
-          label={`全部 · ${enriched.length}`}
-          active={filter === 'all'}
+
+      {/* 过滤栏 */}
+      <div className="team-conv-filter-bar">
+        <button
+          type="button"
+          className="team-conv-filter-btn"
+          data-active={filter === 'all'}
           onClick={() => setFilter('all')}
-        />
-        <FilterBtn
-          label={`未读 · ${unreadCount}`}
-          active={filter === 'unread'}
+        >
+          全部 · {enriched.length}
+        </button>
+        <button
+          type="button"
+          className="team-conv-filter-btn"
+          data-active={filter === 'unread'}
           onClick={() => setFilter('unread')}
-        />
-        <FilterBtn
-          label={`阻塞 · ${blockingCount}`}
-          active={filter === 'blocking'}
+        >
+          未读 · {unreadCount}
+        </button>
+        <button
+          type="button"
+          className="team-conv-filter-btn"
+          data-active={filter === 'blocking'}
           onClick={() => setFilter('blocking')}
-        />
+        >
+          阻塞 · {blockingCount}
+        </button>
         <span style={{ flex: 1 }} />
         <button
           type="button"
           onClick={() => {
             markAllRead();
           }}
-          style={FILTER_BTN_STYLE}
+          className="team-conv-filter-btn"
         >
           全部标为已读
         </button>
       </div>
 
+      {/* 消息卡片列表 */}
       <div style={{ display: 'grid', gap: 8 }}>
         {visible.length === 0 ? (
-          <div style={EMPTY_STYLE}>
-            <span>当前过滤条件下无消息。</span>
+          <div className="team-conv-empty" style={{ padding: '24px 16px' }}>
+            <span className="team-conv-empty__description">当前过滤条件下无消息。</span>
           </div>
         ) : (
           visible.map((item) => (
-            <div key={item.id} style={item.blocking ? BLOCKING_CARD_STYLE : CARD_STYLE}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 11,
-                  color: 'var(--fg-muted)',
-                }}
-              >
+            <div
+              key={item.id}
+              className="team-conv-message-card"
+              data-blocking={item.blocking ? 'true' : undefined}
+            >
+              <div className="team-conv-message-card__header">
                 {item.blocking ? (
                   <span
+                    className="team-conv-badge"
                     style={{
-                      padding: '1px 8px',
-                      borderRadius: 999,
                       background: 'color-mix(in srgb, var(--warning) 22%, transparent)',
                       color: 'var(--warning)',
+                      borderColor: 'color-mix(in srgb, var(--warning) 40%, transparent)',
                       fontSize: 10,
                       fontWeight: 800,
                       textTransform: 'uppercase',
@@ -358,24 +266,34 @@ export function MentionsView({
                     阻塞
                   </span>
                 ) : null}
-                <span style={{ fontWeight: 700, color: 'var(--fg-default)' }}>
+                <span style={{ fontWeight: 700, color: 'var(--fg-default)', fontSize: 11 }}>
                   {teamEventTypeLabel(item.event.type)}
                 </span>
-                {item.event.layer ? <span>· {teamEventLayerLabel(item.event.layer)}</span> : null}
+                {item.event.layer ? (
+                  <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                    · {teamEventLayerLabel(item.event.layer)}
+                  </span>
+                ) : null}
                 <span style={{ flex: 1 }} />
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <span
+                  style={{
+                    color: 'var(--fg-muted)',
+                    fontSize: 10,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
                   {new Date(item.event.timestamp).toLocaleTimeString()}
                 </span>
               </div>
-              <div style={{ fontSize: 13, color: 'var(--fg-strong)', lineHeight: 1.55 }}>
+              <div className="team-conv-message-card__body" style={{ fontSize: 13 }}>
                 <MarkdownMessageContent content={summarize(item.event)} />
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div className="team-conv-message-card__footer">
                 {item.blocking && onOpenBlockingTarget && getBlockingActionLabel(item.event) ? (
                   <button
                     type="button"
                     onClick={() => onOpenBlockingTarget(item.event)}
-                    style={FILTER_BTN_STYLE}
+                    className="team-conv-filter-btn"
                   >
                     {getBlockingActionLabel(item.event)}
                   </button>
@@ -389,7 +307,7 @@ export function MentionsView({
                       markEventRead(item.id);
                     }
                   }}
-                  style={FILTER_BTN_STYLE}
+                  className="team-conv-filter-btn"
                 >
                   {readEventKeys.has(item.id) ? '标为未读' : '标为已读'}
                 </button>
@@ -399,25 +317,5 @@ export function MentionsView({
         )}
       </div>
     </div>
-  );
-}
-
-function FilterBtn({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={active ? FILTER_BTN_ACTIVE_STYLE : FILTER_BTN_STYLE}
-    >
-      {label}
-    </button>
   );
 }

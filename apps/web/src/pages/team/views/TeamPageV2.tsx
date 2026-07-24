@@ -132,7 +132,7 @@ import {
 import { resolveMatchedSharedSessionDetail } from '../runtime/data/team-runtime-shared-context.js';
 import { TeamPageV2RuntimeNotices } from './TeamPageV2RuntimeNotices.js';
 import { TeamFusionSuperbarSummary } from './TeamFusionSuperbarSummary.js';
-import { TeamFusionSidePanel } from './TeamFusionSidePanel.js';
+
 
 // ───── 尺寸常量 ─────
 
@@ -1210,6 +1210,7 @@ export default function TeamPageV2() {
       style={{
         display: 'flex',
         flexDirection: 'column',
+        alignItems: 'center',
         flex: 1,
         minHeight: 0,
         overflow: 'hidden',
@@ -1247,44 +1248,31 @@ export default function TeamPageV2() {
   );
 
   const conversationMessagesOverride = isSelectedSharedSession ? (
-    <TeamSharedConversationPanel
-      key={selectedTeamId}
-      selectedTeamTitle={selectedTeam?.title ?? null}
-      selectedTeamSubtitle={selectedTeam?.subtitle ?? null}
-      sharedSession={data.activeSharedSession}
-      sharedSessionLoading={data.sharedSessionLoading}
-      onOpenReview={() => handleMiddleTabChange('review')}
-      onOpenShares={() => handleMiddleTabChange('shares')}
-    />
-  ) : selectedTeamId && selectedTeamId !== conversationReceptionSessionId ? (
-    <TeamConversationView
-      key={selectedTeamId}
-      sessionId={selectedTeamId}
-      composerEnabled={inboundComposerEnabled}
-    />
-  ) : undefined;
-  const sidePanelMiddleTab: MiddleTabKey = middleTab === 'conversation' ? 'dashboard' : middleTab;
-  // classic / fusion 桌面端均挂载工作台侧栏：对话常驻，概览/任务/度量/治理进侧栏
-  const workbenchSidePanel =
-    (isFusionWorkbench || isClassicWorkbench) && !isMobile ? (
-      <TeamFusionSidePanel
-        activePrimary={activePrimary}
-        activeHandoffCount={activeHandoffCount}
-        clarificationPending={clarificationPending}
-        effectiveMode={effectiveMode}
-        failedTaskCount={failedTaskCount}
-        middleTab={sidePanelMiddleTab}
-        onPrimaryChange={handlePrimaryTabChange}
-        selectedTeamSubtitle={selectedTeam?.subtitle ?? null}
+    <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto' }}>
+      <TeamSharedConversationPanel
+        key={selectedTeamId}
         selectedTeamTitle={selectedTeam?.title ?? null}
-        unreadCount={scopedUnreadCount}
-        workspaceLabel={teamWorkspaceDisplayName}
-      >
-        {renderTeamMiddleTabPanel(sidePanelMiddleTab)}
-      </TeamFusionSidePanel>
-    ) : undefined;
+        selectedTeamSubtitle={selectedTeam?.subtitle ?? null}
+        sharedSession={data.activeSharedSession}
+        sharedSessionLoading={data.sharedSessionLoading}
+        onOpenReview={() => handleMiddleTabChange('review')}
+        onOpenShares={() => handleMiddleTabChange('shares')}
+      />
+    </div>
+  ) : selectedTeamId && selectedTeamId !== conversationReceptionSessionId ? (
+    <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto' }}>
+      <TeamConversationView
+        key={selectedTeamId}
+        sessionId={selectedTeamId}
+        composerEnabled={inboundComposerEnabled}
+      />
+    </div>
+  ) : undefined;
+  // 已移除右侧工作台侧栏（概览/任务/度量/治理），对话区占满全宽
+  const workbenchSidePanel = undefined;
+  // 侧栏已移除，概览/任务/度量/治理 tab 内容直接在主区域渲染
   const conversationAreaMessagesOverride =
-    isFusionWorkbench || isClassicWorkbench || middleTab === 'conversation'
+    middleTab === 'conversation' || middleTab === 'office'
       ? conversationMessagesOverride
       : renderTeamMiddleTabPanel(middleTab);
 

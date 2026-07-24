@@ -18,6 +18,7 @@ import { type CSSProperties, type ReactNode } from 'react';
 
 const CONTAINER_BASE: CSSProperties = {
   flex: 1,
+  width: '100%',
   minHeight: 0,
   display: 'flex',
   flexDirection: 'column',
