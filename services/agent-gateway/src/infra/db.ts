@@ -5,11 +5,16 @@ import { mkdirSync } from 'node:fs';
 import {
   dedupeWorkspaceRoots,
   discoverWorkspaceRoot,
+  isUnsafeWorkspaceRootFallback,
   parseConfiguredWorkspaceRoots,
   parseWorkspaceAccessMode,
 } from '../workspace/workspace-config.js';
 import { loadAppVersion } from '../app/app-version.js';
-import { assertSafeGatewayDatabasePath, resolveGatewayDatabasePath } from './storage-paths.js';
+import {
+  assertSafeGatewayDatabasePath,
+  resolveGatewayDataDir,
+  resolveGatewayDatabasePath,
+} from './storage-paths.js';
 import {
   normalizeToolArgumentsForStorage,
   normalizeToolResultOutputForStorage,
@@ -56,7 +61,16 @@ function resolveDbPath(): string {
 
 const configuredWorkspaceRoots = parseConfiguredWorkspaceRoots(process.env['WORKSPACE_ROOTS']);
 const explicitWorkspaceRoot = process.env['WORKSPACE_ROOT'];
-const fallbackWorkspaceRoot = explicitWorkspaceRoot ?? discoverWorkspaceRoot(process.cwd());
+const discoveredWorkspaceRoot = explicitWorkspaceRoot ?? discoverWorkspaceRoot(process.cwd());
+// When the process inherits a Windows system directory as cwd (common for
+// GUI / service launches) and no WORKSPACE_ROOT(S) is configured, prefer the
+// gateway data dir over system32 so tool-output writes stay writable.
+const fallbackWorkspaceRoot =
+  !explicitWorkspaceRoot &&
+  configuredWorkspaceRoots.length === 0 &&
+  isUnsafeWorkspaceRootFallback(discoveredWorkspaceRoot)
+    ? resolveGatewayDataDir()
+    : discoveredWorkspaceRoot;
 const hasExplicitWorkspaceRoots =
   configuredWorkspaceRoots.length > 0 || Boolean(explicitWorkspaceRoot);
 
@@ -64,7 +78,7 @@ export const WORKSPACE_ROOTS = dedupeWorkspaceRoots(
   configuredWorkspaceRoots.length > 0 ? configuredWorkspaceRoots : [fallbackWorkspaceRoot],
 );
 
-export const WORKSPACE_ROOT = WORKSPACE_ROOTS[0] ?? resolve(process.cwd());
+export const WORKSPACE_ROOT = WORKSPACE_ROOTS[0] ?? resolveGatewayDataDir();
 export const WORKSPACE_ACCESS_MODE = parseWorkspaceAccessMode(
   process.env['WORKSPACE_ACCESS_MODE'],
   hasExplicitWorkspaceRoots,

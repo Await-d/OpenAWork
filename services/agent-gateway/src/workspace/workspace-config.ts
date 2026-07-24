@@ -57,6 +57,37 @@ export function parseWorkspaceAccessMode(
   return hasExplicitWorkspaceRoots ? 'restricted' : 'unrestricted';
 }
 
+/**
+ * Paths that must never become the gateway's default WORKSPACE_ROOT.
+ * On Windows, GUI-launched processes often inherit `C:\WINDOWS\system32` as
+ * cwd; treating that as the workspace makes bash truncation try to write
+ * under a protected system directory and surface ENOENT / EPERM.
+ */
+export function isUnsafeWorkspaceRootFallback(rootPath: string): boolean {
+  const resolved = resolve(rootPath);
+  const normalized = resolved.replace(/\\/g, '/').toLowerCase();
+  const base = normalized.split('/').filter(Boolean).pop() ?? '';
+
+  if (base === 'system32' || base === 'syswow64' || base === 'sysnative') {
+    return true;
+  }
+
+  // Drive root (C:\ / /) is never a useful project workspace.
+  if (dirname(resolved) === resolved) {
+    return true;
+  }
+
+  // Windows / Windows\System* trees.
+  if (
+    /(^|\/)windows(\/|$)/.test(normalized) &&
+    /\/(system32|syswow64|sysnative)(\/|$)/.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function discoverWorkspaceRoot(startPath: string): string {
   let currentPath = resolve(startPath);
 
@@ -70,6 +101,9 @@ export function discoverWorkspaceRoot(startPath: string): string {
 
     const parentPath = dirname(currentPath);
     if (parentPath === currentPath) {
+      // No repo markers found. Callers that refuse system-directory fallbacks
+      // (e.g. db.ts WORKSPACE_ROOT bootstrap) should check
+      // isUnsafeWorkspaceRootFallback on this result.
       return resolve(startPath);
     }
 

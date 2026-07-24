@@ -39,7 +39,7 @@ const {
   runBashCommand,
 } = await import('../../tools/bash-tools.js');
 const { buildBashApprovalPatterns } = await import('../../tools/bash-arity.js');
-const { TRUNCATION_DIR } = await import('../../tools/bash-output-truncator.js');
+const { listTruncationDirCandidates } = await import('../../tools/bash-output-truncator.js');
 
 /**
  * Real-process integration tests for the bash tool. We don't mock spawn
@@ -449,7 +449,10 @@ describe('bash-tools', () => {
       expect(result.kind).toBe('exit');
       expect(result.truncated).toBe(true);
       expect(typeof result.outputPath).toBe('string');
-      expect(result.outputPath?.startsWith(TRUNCATION_DIR)).toBe(true);
+      // Prefer workspace tool-output; may fall back to data/tmp when unwritable.
+      expect(listTruncationDirCandidates().some((dir) => result.outputPath?.startsWith(dir))).toBe(
+        true,
+      );
       // Hint is in the output so the model knows where to look.
       expect(result.output).toContain('Output truncated');
       expect(result.output).toContain('Full output saved to:');

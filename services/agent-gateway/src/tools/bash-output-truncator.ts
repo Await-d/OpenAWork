@@ -2,11 +2,10 @@
  * Bash Output Truncator — port of opencode's `tool/truncate.ts`.
  *
  * When bash command output exceeds line/byte limits, truncates the output and
- * writes the full content to a tool-output directory inside the workspace
- * so that follow-up `read` / `grep` calls (which are restricted to the
- * workspace by `validateWorkspacePath`) can still inspect it. This mirrors
- * opencode's `Truncate.write()` + `Truncate.output()` contract while
- * matching opencode's UTF-8 boundary-safe `tail` algorithm in `bash.ts`.
+ * writes the full content to a tool-output directory so that follow-up `read` /
+ * `grep` calls can still inspect it. This mirrors opencode's `Truncate.write()`
+ * + `Truncate.output()` contract while matching opencode's UTF-8 boundary-safe
+ * `tail` algorithm in `bash.ts`.
  *
  * Behaviour highlights kept aligned with opencode:
  *   - `MAX_OUTPUT_LINES = 2000`, `MAX_OUTPUT_BYTES = 50 * 1024`
@@ -15,44 +14,115 @@
  *   - `direction: 'head' | 'tail'` selects which end of the output to keep.
  *   - The single-line-too-long edge case is handled by walking back to the
  *     nearest UTF-8 codepoint boundary.
+ *
+ * Directory selection:
+ *   In restricted mode we only write under configured workspace roots so the
+ *   returned `outputPath` remains reachable by `Read` / `Grep`. In
+ *   unrestricted mode we still prefer workspace storage first, then fall back
+ *   to `{OPENAWORK_DATA_DIR}/tool-output`, then
+ *   `os.tmpdir()/openAwork/tool-output`.
  */
 
 import { promises as fsp } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { WORKSPACE_ROOT } from '../infra/db.js';
+import { WORKSPACE_ACCESS_RESTRICTED, WORKSPACE_ROOT, WORKSPACE_ROOTS } from '../infra/db.js';
+import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 
 export const MAX_OUTPUT_LINES = 2000;
 export const MAX_OUTPUT_BYTES = 50 * 1024; // 50 KB
 
 /**
- * Tool output is persisted under a hidden folder *inside the workspace* so
- * that the model's follow-up `read` / `grep` calls — which go through
- * `validateWorkspacePath` and refuse anything outside the workspace when
- * `WORKSPACE_ACCESS_RESTRICTED=true` — can still reach the saved file.
- * Mirrors opencode's `TRUNCATION_DIR = Global.Path.data/tool-output`,
- * adapted to OpenAWork's per-workspace layout.
+ * Preferred tool-output directory inside the workspace (opencode-compatible
+ * layout adapted to OpenAWork's per-workspace root). Callers that only need a
+ * stable "primary" path (tests, docs) can keep using this; actual writes go
+ * through {@link resolveWritableTruncationDir} which may fall back.
  */
 export const TRUNCATION_DIR = path.join(WORKSPACE_ROOT, '.openAwork', 'tool-output');
 
-let dirEnsured = false;
+function workspaceTruncationDirs(): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
 
-async function ensureTruncationDir(): Promise<void> {
-  if (dirEnsured) return;
-  try {
-    await fsp.mkdir(TRUNCATION_DIR, { recursive: true });
-    dirEnsured = true;
-  } catch {
-    // may already exist or be unwritable; the next writeFile call will surface
-    // the real error to the caller. Set the flag anyway to avoid re-mkdir storms.
-    dirEnsured = true;
+  for (const workspaceRoot of WORKSPACE_ROOTS) {
+    const dir = path.resolve(workspaceRoot, '.openAwork', 'tool-output');
+    if (seen.has(dir)) {
+      continue;
+    }
+    seen.add(dir);
+    result.push(dir);
   }
+
+  return result;
+}
+
+/** Candidate dirs in preference order (deduped, absolute). */
+export function listTruncationDirCandidates(): string[] {
+  const workspaceCandidates = workspaceTruncationDirs();
+  const candidates = WORKSPACE_ACCESS_RESTRICTED
+    ? workspaceCandidates
+    : [
+        ...workspaceCandidates,
+        path.join(resolveGatewayDataDir(), 'tool-output'),
+        path.join(tmpdir(), 'openAwork', 'tool-output'),
+      ];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    result.push(resolved);
+  }
+  return result;
+}
+
+let cachedWritableDir: string | undefined;
+
+/**
+ * Ensure a writable truncation directory exists. Tries each candidate until
+ * mkdir + a probe write succeed. Caches the first success for the process
+ * lifetime; cache is cleared only when every candidate fails so a later retry
+ * can recover after permissions change.
+ */
+export async function resolveWritableTruncationDir(): Promise<string> {
+  if (cachedWritableDir) {
+    return cachedWritableDir;
+  }
+
+  const errors: string[] = [];
+  for (const dir of listTruncationDirCandidates()) {
+    try {
+      await fsp.mkdir(dir, { recursive: true });
+      const probe = path.join(
+        dir,
+        `.write-probe-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
+      await fsp.writeFile(probe, '', 'utf-8');
+      await fsp.rm(probe).catch(() => undefined);
+      cachedWritableDir = dir;
+      return dir;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${dir}: ${message}`);
+    }
+  }
+
+  throw new Error(
+    `Unable to create a writable bash tool-output directory. Tried:\n${errors.join('\n')}`,
+  );
+}
+
+/** @internal test helper — reset the cached writable dir between cases. */
+export function resetTruncationDirCacheForTests(): void {
+  cachedWritableDir = undefined;
 }
 
 async function writeFullOutput(text: string): Promise<string> {
-  await ensureTruncationDir();
+  const dir = await resolveWritableTruncationDir();
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
-  const file = path.join(TRUNCATION_DIR, `bash_${ts}_${rand}.txt`);
+  const file = path.join(dir, `bash_${ts}_${rand}.txt`);
   await fsp.writeFile(file, text, 'utf-8');
   return file;
 }
@@ -82,8 +152,8 @@ function trimLineToBytes(line: string, maxBytes: number): string {
  * Truncate bash output if it exceeds line/byte limits.
  *
  * Returns the (possibly truncated) content and, when truncated, saves the
- * full output to `TRUNCATION_DIR` and returns the path. The returned hint
- * tells the model how to inspect the saved file with workspace-safe tools.
+ * full output to a writable truncation dir and returns the path. The returned
+ * hint tells the model how to inspect the saved file with workspace-safe tools.
  */
 export async function truncateBashOutput(
   text: string,

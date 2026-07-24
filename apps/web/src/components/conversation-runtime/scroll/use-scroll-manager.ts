@@ -183,10 +183,12 @@ export function useScrollManager(
                 centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
               })
             : maxST;
-          if (
-            sr.clientHeight === 0 ||
-            Math.abs(sr.scrollTop - nextTop) > CHAT_LATEST_FOCUS_THRESHOLD_PX
-          )
+          const scrollDelta = Math.abs(sr.scrollTop - nextTop);
+          const shouldScrollForAlign =
+            align === 'latest-edge'
+              ? scrollDelta > 0.5
+              : scrollDelta > CHAT_LATEST_FOCUS_THRESHOLD_PX;
+          if (sr.clientHeight === 0 || shouldScrollForAlign)
             sr.scrollTo({ top: nextTop, behavior });
         } else {
           bottomRef.current?.scrollIntoView({

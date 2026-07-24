@@ -56,12 +56,7 @@ import {
   type ShellSelectionEnv,
   type ShellSelectionOptions,
 } from './shell-choice.js';
-import {
-  MAX_OUTPUT_BYTES,
-  MAX_OUTPUT_LINES,
-  TRUNCATION_DIR,
-  truncateBashOutput,
-} from './bash-output-truncator.js';
+import { MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES, truncateBashOutput } from './bash-output-truncator.js';
 import { WORKSPACE_ROOT } from '../infra/db.js';
 import {
   appendTerminalOutput,
@@ -876,38 +871,41 @@ export const bashToolDefinition: ToolDefinition<typeof bashInputSchema, typeof b
 
 // Re-export so callers (e.g. the truncation cleanup task or tests) have a
 // single import surface.
-export { TRUNCATION_DIR };
+export { TRUNCATION_DIR, listTruncationDirCandidates } from './bash-output-truncator.js';
 
-// Best-effort directory cleanup on module load. Keeps the truncation
-// directory from ballooning across long-running gateway processes.
-// Mirrors opencode's `Truncate.cleanup()` retention loop, simplified: we
-// drop files older than 7 days. Runs in the background; failures are
-// swallowed because the next `writeFile` recreates the directory anyway.
+// Best-effort directory cleanup on module load. Keeps truncation directories
+// from ballooning across long-running gateway processes. Mirrors opencode's
+// `Truncate.cleanup()` retention loop, simplified: drop files older than 7
+// days across every candidate dir (workspace / data / tmp). Runs in the
+// background; failures are swallowed because the next write recreates dirs.
 const TRUNCATION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 void (async () => {
-  try {
-    const entries = await fsp.readdir(TRUNCATION_DIR);
-    const cutoff = Date.now() - TRUNCATION_RETENTION_MS;
-    await Promise.all(
-      entries
-        .filter((name) => name.startsWith('bash_'))
-        .map(async (name) => {
-          const file = path.join(TRUNCATION_DIR, name);
-          try {
-            const info = await stat(file);
-            if (info.mtimeMs < cutoff) {
-              await fsp.rm(file).catch((error: unknown) => {
-                if (process.env['OPENAWORK_DEBUG_TRUNCATION_CLEANUP'] === '1') {
-                  console.warn('Failed to remove stale bash truncation file', { error, file });
-                }
-              });
+  const { listTruncationDirCandidates: listDirs } = await import('./bash-output-truncator.js');
+  const cutoff = Date.now() - TRUNCATION_RETENTION_MS;
+  for (const dir of listDirs()) {
+    try {
+      const entries = await fsp.readdir(dir);
+      await Promise.all(
+        entries
+          .filter((name) => name.startsWith('bash_'))
+          .map(async (name) => {
+            const file = path.join(dir, name);
+            try {
+              const info = await stat(file);
+              if (info.mtimeMs < cutoff) {
+                await fsp.rm(file).catch((error: unknown) => {
+                  if (process.env['OPENAWORK_DEBUG_TRUNCATION_CLEANUP'] === '1') {
+                    console.warn('Failed to remove stale bash truncation file', { error, file });
+                  }
+                });
+              }
+            } catch {
+              // ignore
             }
-          } catch {
-            // ignore
-          }
-        }),
-    );
-  } catch {
-    // directory missing or unreadable — nothing to clean up
+          }),
+      );
+    } catch {
+      // directory missing or unreadable — nothing to clean up
+    }
   }
 })();

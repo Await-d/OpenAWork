@@ -950,10 +950,18 @@ async fn spawn_gateway_sidecar(
             bridge.ensure_started(desktop_auth_token.clone()).await?
         }
     };
+    // Windows GUI launches often inherit `C:\WINDOWS\system32` as cwd. The
+    // gateway falls back to process.cwd() for WORKSPACE_ROOT when no env is
+    // set; pin sidecar cwd to the data dir so bash tool-output truncation
+    // never tries to mkdir under System32.
+    let sidecar_cwd = data_dir.clone();
+    let _ = fs::create_dir_all(&sidecar_cwd);
+
     let mut command = app
         .shell()
         .sidecar("agent-gateway")
         .map_err(|e| e.to_string())?
+        .current_dir(sidecar_cwd)
         .env("GATEWAY_PORT", port.to_string())
         .env("GATEWAY_HOST", host)
         .env("DESKTOP_AUTOMATION", "1")
