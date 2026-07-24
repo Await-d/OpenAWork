@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 export interface AttachmentItem {
   id: string;
   name: string;
-  type: 'image' | 'audio' | 'file';
+  type: 'image' | 'audio' | 'video' | 'file';
   sizeBytes: number;
 }
 
@@ -17,6 +17,7 @@ export interface AttachmentBarProps {
 const TYPE_ICON: Record<AttachmentItem['type'], string> = {
   image: '🖼',
   audio: '🎵',
+  video: '🎬',
   file: '📎',
 };
 

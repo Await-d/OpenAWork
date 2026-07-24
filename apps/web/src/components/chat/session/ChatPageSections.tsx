@@ -4,6 +4,7 @@ import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import { renderMediaContent } from '../media/media-renderer.js';
 import {
   type AssistantTracePayload,
   type ChatMessage,
@@ -244,14 +245,17 @@ export function renderChatMessageContentWithOptions(
 ) {
   if (m.role !== 'assistant') {
     const inputImages = m.rawContent ? extractInputImages(m.rawContent) : [];
-    if (inputImages.length === 0) {
+    const mediaNodes = m.rawContent ? renderMediaContent(m.rawContent as unknown as import('@openAwork/shared').MessageContent[]) : [];
+
+    if (inputImages.length === 0 && mediaNodes.length === 0) {
       return m.content;
     }
 
     return (
       <div style={{ display: 'grid', gap: 10 }}>
         {m.content ? <span>{m.content}</span> : null}
-        <UserAttachedImagesGallery images={inputImages} />
+        {inputImages.length > 0 && <UserAttachedImagesGallery images={inputImages} />}
+        {mediaNodes.length > 0 && <div style={{ display: 'grid', gap: 10 }}>{mediaNodes}</div>}
       </div>
     );
   }

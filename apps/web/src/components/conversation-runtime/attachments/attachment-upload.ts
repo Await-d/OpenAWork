@@ -45,6 +45,39 @@ export function inferMimeTypeFromFileName(fileName: string): string | undefined 
   if (lowerName.endsWith('.gif')) {
     return 'image/gif';
   }
+  if (lowerName.endsWith('.mp3')) {
+    return 'audio/mpeg';
+  }
+  if (lowerName.endsWith('.wav')) {
+    return 'audio/wav';
+  }
+  if (lowerName.endsWith('.ogg')) {
+    return 'audio/ogg';
+  }
+  if (lowerName.endsWith('.m4a')) {
+    return 'audio/mp4';
+  }
+  if (lowerName.endsWith('.flac')) {
+    return 'audio/flac';
+  }
+  if (lowerName.endsWith('.aac')) {
+    return 'audio/aac';
+  }
+  if (lowerName.endsWith('.mp4')) {
+    return 'video/mp4';
+  }
+  if (lowerName.endsWith('.webm')) {
+    return 'video/webm';
+  }
+  if (lowerName.endsWith('.mkv')) {
+    return 'video/x-matroska';
+  }
+  if (lowerName.endsWith('.mov')) {
+    return 'video/quicktime';
+  }
+  if (lowerName.endsWith('.avi')) {
+    return 'video/x-msvideo';
+  }
   return undefined;
 }
 
@@ -64,6 +97,9 @@ function inferAttachmentType(file: File): AttachmentItem['type'] {
   }
   if (mimeType?.startsWith('audio/')) {
     return 'audio';
+  }
+  if (mimeType?.startsWith('video/')) {
+    return 'video';
   }
   return 'file';
 }
@@ -100,7 +136,7 @@ function toUploadedChatAttachment(
 
   return {
     artifactId: artifact.id,
-    ...(mimeType?.startsWith('image/')
+    ...(mimeType?.startsWith('image/') || mimeType?.startsWith('audio/') || mimeType?.startsWith('video/')
       ? {
           dataUrl: `data:${mimeType};base64,${contentBase64}`,
         }

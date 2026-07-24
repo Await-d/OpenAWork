@@ -17,6 +17,9 @@ export {
 } from './cards/batch-tool-call-card.js';
 export { BlockToolCall } from './display/block-tool-call.js';
 export { GenerateImageToolCard } from './cards/generate-image-tool-card.js';
+export { ConvertMediaToolCard } from './cards/convert-media-tool-card.js';
+export { GenerateAudioToolCard } from './cards/generate-audio-tool-card.js';
+export { ExtractVideoFrameToolCard } from './cards/extract-video-frame-tool-card.js';
 export { GroupedToolCallPill } from './cards/grouped-tool-call-pill.js';
 export { InlineToolCall } from './display/inline-tool-call.js';
 export {
