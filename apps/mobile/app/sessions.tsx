@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createSessionsClient } from '@openAwork/web-client';
+import { createSessionsClient, HttpError } from '@openAwork/web-client';
 import {
   View,
   Text,
@@ -72,7 +72,7 @@ export default function SessionsScreen() {
           accessToken ?? '',
         )) as unknown as typeof remote;
       } catch (e: unknown) {
-        if (e instanceof Error && e.message.includes('401')) {
+        if (e instanceof HttpError && e.status === 401) {
           await logout();
           router.replace('/login');
           return;

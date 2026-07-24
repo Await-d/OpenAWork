@@ -39,7 +39,7 @@ type LoginMethod = 'pairing' | 'password';
 
 /** 连接已有网关 — 输入 URL → 健康检查 → 配对码或账号密码登录 */
 export default function GatewayConnectScreen() {
-  const { setGatewayUrl, setTokens } = useAuthStore();
+  const { setGatewayUrl, setTokens, setUserEmail } = useAuthStore();
 
   const [step, setStep] = useState<'url' | 'health' | 'login'>('url');
   const [gatewayUrl, setGatewayUrlInput] = useState(DEFAULT_MOBILE_GATEWAY_URL);
@@ -153,6 +153,7 @@ export default function GatewayConnectScreen() {
       const data = await login(url, email.trim(), password, 8000);
       await setGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
+      await setUserEmail(email.trim());
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
       await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
       await AsyncStorage.setItem('onboarded', 'true');

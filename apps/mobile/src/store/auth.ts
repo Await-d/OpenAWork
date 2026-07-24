@@ -13,6 +13,7 @@ const ACCESS_TOKEN_KEY = 'openwork_access_token';
 const REFRESH_TOKEN_KEY = 'openwork_refresh_token';
 const GATEWAY_URL_KEY = 'openwork_gateway_url';
 const CUSTOM_BASE_URL_KEY = 'openwork_custom_base_url';
+const USER_EMAIL_KEY = 'openwork_user_email';
 
 function currentMobileRuntimePlatform(): MobileRuntimePlatform {
   return Platform.OS === 'android' ? 'android' : 'ios';
@@ -35,8 +36,10 @@ export interface AuthState {
   refreshToken: string | null;
   gatewayUrl: string;
   customBaseUrl: string;
+  userEmail: string;
   isLoading: boolean;
   setTokens: (access: string, refresh: string) => Promise<void>;
+  setUserEmail: (email: string) => Promise<void>;
   setGatewayUrl: (url: string) => Promise<void>;
   setCustomBaseUrl: (url: string) => Promise<void>;
   loadFromStorage: () => Promise<void>;
@@ -48,12 +51,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
   customBaseUrl: '',
+  userEmail: '',
   isLoading: true,
 
   setTokens: async (access, refresh) => {
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access);
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh);
     set({ accessToken: access, refreshToken: refresh });
+  },
+
+  setUserEmail: async (email) => {
+    await SecureStore.setItemAsync(USER_EMAIL_KEY, email);
+    set({ userEmail: email });
   },
 
   setGatewayUrl: async (url) => {
@@ -70,23 +79,26 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loadFromStorage: async () => {
     try {
-      const [access, refresh, gateway, baseUrl] = await Promise.all([
+      const [access, refresh, gateway, baseUrl, email] = await Promise.all([
         SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
         SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
         SecureStore.getItemAsync(GATEWAY_URL_KEY),
         SecureStore.getItemAsync(CUSTOM_BASE_URL_KEY),
+        SecureStore.getItemAsync(USER_EMAIL_KEY),
       ]);
       set({
         accessToken: access,
         refreshToken: refresh,
         gatewayUrl: gateway ? normalizeMobileGatewayUrl(gateway) : DEFAULT_MOBILE_GATEWAY_URL,
         customBaseUrl: baseUrl ?? '',
+        userEmail: email ?? '',
         isLoading: false,
       });
     } catch {
       set({
         gatewayUrl: DEFAULT_MOBILE_GATEWAY_URL,
         customBaseUrl: '',
+        userEmail: '',
         isLoading: false,
       });
     }
@@ -96,7 +108,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     await Promise.all([
       SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
       SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+      SecureStore.deleteItemAsync(USER_EMAIL_KEY),
     ]);
-    set({ accessToken: null, refreshToken: null });
+    set({ accessToken: null, refreshToken: null, userEmail: '' });
   },
 }));

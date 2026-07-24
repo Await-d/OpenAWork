@@ -298,7 +298,7 @@ function HostGatewayStep({ step, onNext, onBack }: StepProps) {
 }
 
 function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
-  const { setTokens, setGatewayUrl } = useAuthStore();
+  const { setTokens, setGatewayUrl, setUserEmail } = useAuthStore();
   const gUrl = hostConfig.gatewayUrl;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -313,6 +313,7 @@ function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
       const data = await login(gUrl, email.trim(), password, 8000);
       await setGatewayUrl(gUrl);
       await setTokens(data.accessToken, data.refreshToken);
+      await setUserEmail(email.trim());
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
       await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
       onNext();
@@ -578,7 +579,7 @@ function ClientScanStep({ step, onNext, onBack, onComplete }: StepProps) {
 }
 
 function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
-  const { setTokens, setGatewayUrl } = useAuthStore();
+  const { setTokens, setGatewayUrl, setUserEmail } = useAuthStore();
   const gatewayUrl = hostConfig.workspace;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -593,6 +594,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
       const data = await login(gatewayUrl, email.trim(), password, 8000);
       await setGatewayUrl(gatewayUrl);
       await setTokens(data.accessToken, data.refreshToken);
+      await setUserEmail(email.trim());
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
       await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
       onNext();
@@ -643,7 +645,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
 }
 
 function CloudLoginStep({ step, onNext, onBack }: StepProps) {
-  const { setGatewayUrl, setTokens } = useAuthStore();
+  const { setGatewayUrl, setTokens, setUserEmail } = useAuthStore();
   const [gatewayUrl, setGatewayUrlInput] = useState(DEFAULT_MOBILE_GATEWAY_URL);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -663,6 +665,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
       const data = await login(url, email.trim(), password);
       await setGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
+      await setUserEmail(email.trim());
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
       await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
       onNext();

@@ -32,7 +32,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { setTokens, setGatewayUrl: saveGatewayUrl } = useAuthStore();
+  const { setTokens, setGatewayUrl: saveGatewayUrl, setUserEmail } = useAuthStore();
   const keyboardHeight = useKeyboardHeight();
   const formBottomInset = resolveComposerBottomInset({
     keyboardHeight,
@@ -52,6 +52,7 @@ export default function LoginScreen() {
       const data = await apiLogin(url, email, password);
       await saveGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
+      await setUserEmail(email.trim());
       await AsyncStorage.setItem('onboarded', 'true');
       router.replace('/home');
     } catch (e) {

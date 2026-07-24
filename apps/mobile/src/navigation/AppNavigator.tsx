@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { refreshAccessToken } from '@openAwork/web-client';
+import { refreshAccessToken, createSessionsClient, HttpError } from '@openAwork/web-client';
 import { useAuthStore } from '../store/auth';
+import { emitAuthError } from '../hooks/use-auth-error-handler';
 import { SessionsScreen } from '../screens/SessionsScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -72,7 +73,13 @@ export function AppNavigator() {
         const expiresInMs = data.expiresIn ? parseExpiresIn(data.expiresIn) : 15 * 60 * 1000;
         await SecureStore.setItemAsync(TOKEN_EXPIRES_AT_KEY, String(Date.now() + expiresInMs));
       } catch (error) {
-        console.warn('Failed to refresh mobile auth token', error);
+        if (error instanceof HttpError && error.status === 401) {
+          console.warn('Mobile token refresh failed with 401, logging out');
+          emitAuthError(error);
+          await logout();
+        } else {
+          console.warn('Failed to refresh mobile auth token', error);
+        }
       }
     }
 
@@ -82,7 +89,7 @@ export function AppNavigator() {
     return () => {
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
     };
-  }, [accessToken, gatewayUrl, setTokens]);
+  }, [accessToken, gatewayUrl, setTokens, logout]);
 
   if (screen.name === 'loading') {
     return (
@@ -114,7 +121,19 @@ export function AppNavigator() {
   return (
     <SessionsScreen
       onSelectSession={(sessionId) => setScreen({ name: 'chat', sessionId })}
-      onNewSession={() => undefined}
+      onNewSession={async () => {
+        if (!accessToken) return;
+        try {
+          const newSession = await createSessionsClient(gatewayUrl).create(accessToken, {
+            title: '新对话',
+          });
+          if (newSession.id) {
+            setScreen({ name: 'chat', sessionId: newSession.id });
+          }
+        } catch {
+          // 创建失败时保持在会话列表
+        }
+      }}
     />
   );
 }

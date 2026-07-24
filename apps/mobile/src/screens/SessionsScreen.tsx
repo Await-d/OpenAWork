@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useAuthStore } from '../store/auth';
+import { useAuthErrorHandler } from '../hooks/use-auth-error-handler';
 import { listSessions, upsertSession } from '../db/session-store';
 import type { LocalSession } from '../db/session-store';
 import { colors } from '../theme/colors';
@@ -26,6 +27,7 @@ export function SessionsScreen({
   onNewSession: _onNewSession,
 }: SessionsScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
+  const handleAuthError = useAuthErrorHandler();
   const [sessions, setSessions] = useState<LocalSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,6 +58,7 @@ export function SessionsScreen({
       }
       setSessions(await listSessions());
     } catch (error) {
+      if (handleAuthError(error)) return;
       console.warn('Failed to sync mobile sessions from gateway', error);
     }
   }, [accessToken, gatewayUrl]);
@@ -91,6 +94,7 @@ export function SessionsScreen({
       setSessions(await listSessions());
       onSelectSession(data.sessionId);
     } catch (error) {
+      if (handleAuthError(error)) return;
       console.warn('Failed to create mobile session', error);
     }
   };

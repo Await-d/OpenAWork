@@ -5,6 +5,7 @@ import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/store/auth';
+import { subscribeAuthError } from '../src/hooks/use-auth-error-handler';
 import { NetworkBanner } from '../src/components/NetworkBanner';
 import { initSentry } from '../src/monitoring/sentry';
 import { BottomNav, type BottomNavTab } from '../src/components/BottomNav';
@@ -24,6 +25,7 @@ function resolveActiveTab(pathname: string): BottomNavTab {
 
 export default function RootLayout() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const router = useRouter();
   const pathname = usePathname();
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
@@ -54,6 +56,39 @@ export default function RootLayout() {
       isMounted = false;
     };
   }, [router]);
+
+  // 全局认证守卫：当 accessToken 被清除（如 API 返回 401 后 logout）时，
+  // 自动重定向到登录页。排除已在公共路由（登录/连接/onboarding）上的情况。
+  useEffect(() => {
+    if (!hasCheckedOnboarding) return;
+    if (accessToken) return;
+
+    const publicRoutes = ['/login', '/connection', '/onboarding'];
+    const isOnPublicRoute = publicRoutes.some(
+      (route) => pathname === route || pathname.startsWith(route + '/'),
+    );
+    if (isOnPublicRoute) return;
+
+    router.replace('/login');
+  }, [accessToken, hasCheckedOnboarding, pathname, router]);
+
+  // 全局 401 事件监听：当任意 API 调用返回 401 时（即使 catch 块没有
+  // 显式调用 handleAuthError，只要 emitAuthError 被触发），
+  // 立即重定向到登录页。这是 accessToken 守卫的补充——
+  // emitAuthError 会同时触发 logout()（清除 token）和此事件，
+  // 二者都能独立触发跳转，确保不会遗漏。
+  useEffect(() => {
+    if (!hasCheckedOnboarding) return;
+    return subscribeAuthError(() => {
+      const publicRoutes = ['/login', '/connection', '/onboarding'];
+      const isOnPublicRoute = publicRoutes.some(
+        (route) => pathname === route || pathname.startsWith(route + '/'),
+      );
+      if (!isOnPublicRoute) {
+        router.replace('/login');
+      }
+    });
+  }, [hasCheckedOnboarding, pathname, router]);
 
   const showNav = shouldShowBottomNav(pathname);
 
