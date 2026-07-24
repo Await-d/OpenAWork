@@ -137,9 +137,35 @@ export interface ReasoningContent {
   signature?: string;
 }
 
+export interface InputAudioContent {
+  type: 'input_audio';
+  artifactId?: string;
+  fileId?: string;
+  fileName?: string;
+  audioUrl?: string;
+  mimeType?: string;
+  duration?: number;
+  transcript?: string;
+}
+
+export interface InputVideoContent {
+  type: 'input_video';
+  artifactId?: string;
+  fileId?: string;
+  fileName?: string;
+  videoUrl?: string;
+  mimeType?: string;
+  duration?: number;
+  thumbnailUrl?: string;
+  width?: number;
+  height?: number;
+}
+
 export type MessageContent =
   | TextContent
   | InputImageContent
+  | InputAudioContent
+  | InputVideoContent
   | ReasoningContent
   | ToolCallContent
   | ToolResultContent

@@ -1,4 +1,4 @@
-export type AttachmentType = 'image' | 'audio' | 'file';
+export type AttachmentType = 'image' | 'audio' | 'video' | 'file';
 
 export interface Attachment {
   id: string;

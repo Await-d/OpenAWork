@@ -74,6 +74,10 @@ export interface AIModelConfig {
    * "best-effort" path (request is forwarded; relay decides).
    */
   supportsImageGeneration4K?: boolean;
+  supportsAudioInput?: boolean;
+  supportsVideoInput?: boolean;
+  supportsAudioOutput?: boolean;
+  supportsVideoGeneration?: boolean;
   supportsThinking?: boolean;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
