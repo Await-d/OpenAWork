@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Team 右侧 · Todo + 层级详情（简约版）</title>
+    <title>Team 经典页 · 右侧工作台（层级/角色/任务/消息）</title>
     <style>
       :root {
         --accent: #5cd4c0;
@@ -24,7 +24,6 @@
         --border-strong: #2a3344;
         --font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
         --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
-
         --l-reception: #5cd4c0;
         --l-pm1: #67e8f9;
         --l-pm2: #c4b5fd;
@@ -33,345 +32,898 @@
         --l-reviewer: #f0b429;
       }
 
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
-      body {
+      * { box-sizing: border-box; }
+      html, body {
         margin: 0;
-        min-height: 100%;
+        height: 100%;
         font-family: var(--font);
         color: var(--fg-default);
         background: var(--bg-base);
       }
+      button, textarea { font: inherit; }
 
-      button {
-        font: inherit;
-      }
-
-      .page {
+      .app {
+        height: 100vh;
         display: grid;
-        gap: 10px;
-        min-height: 100vh;
-        padding: 10px;
-        grid-template-rows: auto auto minmax(0, 1fr);
-      }
-
-      .hero,
-      .controls {
-        border: 1px solid var(--border);
-        background: var(--bg-raised);
-        padding: 10px 12px;
-      }
-
-      .hero h1 {
-        margin: 0 0 2px;
-        color: var(--fg-strong);
-        font-size: 15px;
-        font-weight: 700;
-      }
-
-      .hero p {
-        margin: 0;
-        color: var(--fg-muted);
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px 14px;
-        align-items: center;
-        color: var(--fg-muted);
-        font-size: 12px;
-      }
-
-      .seg {
-        display: inline-flex;
-        border: 1px solid var(--border);
-        background: var(--bg-base);
-      }
-
-      .seg button {
-        appearance: none;
-        border: 0;
-        border-right: 1px solid var(--border);
-        min-height: 26px;
-        padding: 0 10px;
-        background: transparent;
-        color: var(--fg-muted);
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: 600;
-      }
-
-      .seg button:last-child {
-        border-right: 0;
-      }
-
-      .seg button[aria-pressed='true'] {
-        background: color-mix(in srgb, var(--accent) 12%, transparent);
-        color: var(--fg-strong);
-      }
-
-      .stage {
-        min-height: 0;
-        height: min(86vh, 980px);
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(400px, 480px);
-        border: 1px solid var(--border-strong);
-        background: var(--bg-base);
+        grid-template-columns: minmax(0, 1fr) minmax(500px, 44vw);
         overflow: hidden;
       }
 
-      /* 左：主对话占位，极简 */
-      .left {
+      /* ─── 左：主对话 ─── */
+      .chat {
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        border-right: 1px solid var(--border);
+        background: var(--bg-base);
+      }
+      .chat-top {
+        display: grid;
+        grid-template-rows: auto auto;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-raised);
+      }
+      .chat-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 30px;
+        padding: 0 10px;
+      }
+      .chat-bar .path {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+      .chat-bar .path strong { color: var(--fg-strong); font-weight: 650; }
+      .chat-bar .chip {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 22px;
+        padding: 0 7px;
+        border: 1px solid var(--border);
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+      .chat-bar .chip b {
+        color: var(--fg-muted);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .chat-bar .chip.live { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); }
+      .chat-bar .chip.live[data-paused='true'] { color: var(--contrast); border-color: color-mix(in srgb, var(--contrast) 30%, var(--border)); }
+      .chat-bar .chip.fail { color: var(--complement); border-color: color-mix(in srgb, var(--complement) 30%, var(--border)); }
+      .chat-quick {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        min-height: 26px;
+        padding: 0 6px 3px;
+        overflow-x: auto;
+        scrollbar-width: thin;
+      }
+      .chat-quick .qbtn {
+        appearance: none;
+        border: 1px solid var(--border);
+        border-right-width: 0;
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        min-height: 22px;
+        padding: 0 8px;
+        font-size: 10.5px;
+        font-weight: 650;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .chat-quick .qbtn:first-child { border-radius: 0; }
+      .chat-quick .qbtn:last-child { border-right-width: 1px; }
+      .chat-quick .qbtn:hover { background: var(--bg-hover); color: var(--fg-default); }
+      .chat-quick .qbtn.primary { color: var(--accent); }
+      .chat-quick .qbtn.danger { color: var(--complement); }
+      .chat-quick .qbtn[data-on='true'] {
+        background: color-mix(in srgb, var(--accent) 10%, var(--bg-base));
+        color: var(--fg-strong);
+      }
+      .chat-quick .sep {
+        width: 8px;
+        flex-shrink: 0;
+      }
+      .chat-quick .hint {
+        margin-left: 8px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        white-space: nowrap;
+      }
+      .chat-main {
+        position: relative;
+        min-height: 0;
         display: flex;
         flex-direction: column;
-        min-width: 0;
-        border-right: 1px solid var(--border);
+        overflow: hidden;
       }
-
-      .left-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        min-height: 34px;
-        padding: 0 10px;
-        border-bottom: 1px solid var(--border);
-        color: var(--fg-muted);
-        font-size: 11px;
-      }
-
-      .left-bar strong {
-        color: var(--fg-strong);
-        font-weight: 650;
-      }
-
-      .left-body {
+      .chat-stream {
         flex: 1;
         min-height: 0;
         overflow: auto;
-        padding: 12px 14px;
-        display: grid;
+        padding: 10px 36px 12px 14px;
+        display: flex;
+        flex-direction: column;
         gap: 10px;
-        align-content: start;
+        scroll-behavior: smooth;
       }
-
-      .bubble {
-        max-width: 480px;
-        font-size: 12.5px;
-        line-height: 1.5;
-        color: var(--fg-default);
+      /* 对话列：限制阅读宽度，减少左右空旷感 */
+      .chat-stream > * {
+        width: min(680px, 100%);
       }
-
-      .bubble .m {
-        margin-bottom: 2px;
+      .chat-stream > .chat-msg.user {
+        align-self: flex-end;
+        width: min(520px, 100%);
+      }
+      .chat-day {
+        display: none; /* 单日会话不必占位 */
+      }
+      .chat-msg {
+        flex-shrink: 0;
+      }
+      .chat-msg.user { margin-left: auto; }
+      .chat-msg .meta {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        margin-bottom: 3px;
         color: var(--fg-faint);
-        font-size: 10px;
+        font-size: 10.5px;
       }
-
-      .bubble.user {
-        margin-left: auto;
+      .chat-msg .meta b { color: var(--fg-muted); font-weight: 650; }
+      .chat-msg .bubble {
+        padding: 8px 11px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+        color: var(--fg-default);
+        font-size: 12.5px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+      .chat-msg.user .bubble {
+        border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+        background: color-mix(in srgb, var(--accent) 9%, var(--bg-surface));
         color: var(--fg-strong);
       }
+      .chat-msg .text {
+        color: inherit;
+        font-size: inherit;
+        line-height: inherit;
+        white-space: pre-wrap;
+      }
+      .chat-msg.user .text { color: inherit; }
 
-      .left-input {
-        border-top: 1px solid var(--border);
-        padding: 8px 10px;
+      /* 待你处理：仅对话区需要人拍板时出现 */
+      .attention-bar {
+        flex-shrink: 0;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+        padding: 0 10px;
+        border-bottom: 1px solid color-mix(in srgb, var(--contrast) 35%, var(--border));
+        background: color-mix(in srgb, var(--contrast) 8%, var(--bg-raised));
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+      .attention-bar[data-show='true'] { display: flex; }
+      .attention-bar .attn {
+        color: var(--contrast);
+        font-weight: 750;
+        font-size: 10px;
+      }
+      .attention-bar strong { color: var(--fg-strong); font-weight: 650; }
+      .attention-bar .grow { flex: 1; }
+      .attention-bar button {
+        appearance: none;
+        border: 1px solid color-mix(in srgb, var(--contrast) 35%, var(--border));
+        background: transparent;
+        color: var(--contrast);
+        min-height: 20px;
+        padding: 0 8px;
+        font-size: 10.5px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      /* 对话内嵌：决策 / 阻塞 / 推送 / 产物 — 不重复右侧切换 */
+      .decision-bar {
+        flex-shrink: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        align-items: center;
+        padding: 4px 10px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-raised) 80%, transparent);
+        font-size: 10.5px;
+        color: var(--fg-muted);
+      }
+      .decision-bar .label {
+        color: var(--fg-faint);
+        font-weight: 700;
+        font-size: 10px;
+      }
+      .decision-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 20px;
+        padding: 0 7px;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        font-size: 10.5px;
+      }
+      .decision-chip b { color: var(--fg-strong); font-weight: 650; }
+      .decision-chip button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--fg-faint);
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+        padding: 0 0 0 2px;
+      }
+      .decision-chip button:hover { color: var(--complement); }
+
+      .inline-card {
+        position: relative;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+        padding: 9px 11px 9px 13px;
+        flex-shrink: 0;
+      }
+      .inline-card::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--border-strong);
+      }
+      .inline-card[data-tone='block'] {
+        border-color: color-mix(in srgb, var(--contrast) 40%, var(--border));
+        background: color-mix(in srgb, var(--contrast) 7%, var(--bg-overlay));
+      }
+      .inline-card[data-tone='block']::before { background: var(--contrast); }
+      .inline-card[data-tone='progress'] {
+        border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+        background: color-mix(in srgb, var(--accent) 5%, var(--bg-overlay));
+      }
+      .inline-card[data-tone='progress']::before { background: var(--accent); }
+      .inline-card[data-tone='fail'] {
+        border-color: color-mix(in srgb, var(--complement) 40%, var(--border));
+        background: color-mix(in srgb, var(--complement) 7%, var(--bg-overlay));
+      }
+      .inline-card[data-tone='fail']::before { background: var(--complement); }
+      .inline-card[data-tone='done'] {
+        border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+        background: color-mix(in srgb, var(--success) 5%, var(--bg-overlay));
+        opacity: 0.92;
+      }
+      .inline-card[data-tone='done']::before { background: var(--success); }
+      .inline-card .ic-top {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        align-items: baseline;
+        margin-bottom: 4px;
+        font-size: 11px;
+        color: var(--fg-faint);
+      }
+      .inline-card .ic-top strong {
+        color: var(--fg-strong);
+        font-size: 12.5px;
+        font-weight: 700;
+      }
+      .inline-card .ic-top .tone {
+        font-weight: 750;
+        font-size: 10px;
+      }
+      .inline-card[data-tone='block'] .ic-top .tone { color: var(--contrast); }
+      .inline-card[data-tone='progress'] .ic-top .tone { color: var(--accent); }
+      .inline-card[data-tone='fail'] .ic-top .tone { color: var(--complement); }
+      .inline-card[data-tone='done'] .ic-top .tone { color: var(--success); }
+      .inline-card .ic-body {
+        color: var(--fg-default);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+      .inline-card .ic-code {
+        margin-top: 6px;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.45;
+        word-break: break-all;
+      }
+      .inline-card .ic-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .inline-card .ic-actions button {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        min-height: 26px;
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .inline-card .ic-actions button:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+      .inline-card .ic-actions button.primary {
+        border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+        color: var(--accent);
+      }
+      .inline-card .ic-actions button.danger {
+        border-color: color-mix(in srgb, var(--complement) 35%, var(--border));
+        color: var(--complement);
+      }
+      .inline-card .ic-done-note {
+        margin-top: 6px;
         color: var(--fg-faint);
         font-size: 11px;
       }
 
-      /* 右：主面板 */
-      .right {
+      .suggest-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .suggest-row button {
+        appearance: none;
+        border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border));
+        background: color-mix(in srgb, var(--accent) 6%, transparent);
+        color: var(--accent);
+        min-height: 26px;
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .suggest-row button:hover {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+      }
+
+      .artifact-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .artifact-row button {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        min-height: 24px;
+        padding: 0 8px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+        font-family: var(--mono);
+      }
+      .artifact-row button:hover { color: var(--aux); border-color: color-mix(in srgb, var(--aux) 35%, var(--border)); }
+
+      .typing-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--fg-muted);
+        font-size: 12px;
+        flex-shrink: 0;
+        padding: 2px 0;
+      }
+      .typing-row i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.35;
+        animation: blink 1.2s infinite ease-in-out;
+      }
+      .typing-row i:nth-child(2) { animation-delay: 0.15s; }
+      .typing-row i:nth-child(3) { animation-delay: 0.3s; }
+
+      .scroll-bottom {
+        position: absolute;
+        right: 34px;
+        bottom: 10px;
+        appearance: none;
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+        color: var(--fg-muted);
+        min-height: 26px;
+        padding: 0 9px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+        display: none;
+        z-index: 3;
+      }
+      .scroll-bottom[data-show='true'] { display: inline-flex; align-items: center; gap: 4px; }
+      .scroll-bottom:hover { color: var(--fg-strong); background: var(--bg-hover); }
+      @keyframes blink {
+        0%, 100% { opacity: 0.25; transform: translateY(0); }
+        50% { opacity: 1; transform: translateY(-2px); }
+      }
+
+      /* 跳转轨：贴右、更轻 */
+      .jump-rail {
+        position: absolute;
+        top: 10px;
+        right: 6px;
+        width: 22px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        pointer-events: none;
+      }
+      .jump-rail .jr-label {
+        color: var(--fg-faint);
+        font-size: 9px;
+        font-weight: 700;
+        writing-mode: vertical-rl;
+        letter-spacing: 0.06em;
+        margin-bottom: 2px;
+        opacity: 0.7;
+      }
+      .jump-rail button {
+        pointer-events: auto;
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
+        color: var(--fg-faint);
+        font-size: 9px;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 0;
+      }
+      .jump-rail button:hover,
+      .jump-rail button[data-on='true'] {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+      }
+
+      .composer-wrap {
+        border-top: 1px solid var(--border);
+        background: var(--bg-raised);
+      }
+      .composer-context {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        padding: 5px 10px 0;
+        font-size: 11px;
+        color: var(--fg-faint);
+      }
+      .composer-context .cx {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 22px;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+        color: var(--fg-muted);
+        cursor: pointer;
+      }
+      .composer-context .cx[data-on='true'] {
+        border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
+      }
+      .composer-context .cx b { color: inherit; font-weight: 700; }
+      .composer-context #cx-hint { min-width: 0; }
+      .composer {
+        padding: 6px 10px 8px;
+      }
+      .composer-box {
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        padding: 6px 8px;
+        transition: border-color 120ms ease;
+      }
+      .composer-box:focus-within {
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+      }
+      .composer-box textarea {
+        width: 100%;
+        min-height: 38px;
+        max-height: 140px;
+        resize: none;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--fg-strong);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .composer-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 4px;
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+      .composer-foot .foot-left {
+        display: inline-flex;
+        gap: 10px;
+        align-items: center;
+        min-width: 0;
+      }
+      .composer-foot .foot-left button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--fg-faint);
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+        padding: 0;
+      }
+      .composer-foot .foot-left button:hover { color: var(--fg-muted); }
+      .composer-foot .char {
+        color: var(--fg-faint);
+        font-variant-numeric: tabular-nums;
+        font-size: 10px;
+      }
+      .composer-foot .send {
+        appearance: none;
+        border: 0;
+        min-height: 26px;
+        padding: 0 12px;
+        background: color-mix(in srgb, var(--accent) 85%, #000);
+        color: #04120f;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .composer-foot .send:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .toast {
+        position: absolute;
+        left: 50%;
+        bottom: 84px;
+        transform: translateX(-50%) translateY(8px);
+        max-width: min(420px, 86%);
+        padding: 7px 12px;
+        border: 1px solid var(--accent-border, color-mix(in srgb, var(--accent) 30%, transparent));
+        background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        opacity: 0;
+        pointer-events: none;
+        transition: 160ms ease;
+        z-index: 5;
+      }
+      .toast[data-show='true'] {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      /* ─── 右：工作台 ─── */
+      .side {
         min-width: 0;
         min-height: 0;
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto minmax(0, 1fr);
         background: var(--bg-raised);
       }
 
-      .r-head {
+      /* 顶部主 tab */
+      .side-tabs {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        min-height: 34px;
-        padding: 0 10px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .r-head h2 {
-        margin: 0;
-        color: var(--fg-strong);
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      .r-head .meta {
-        color: var(--fg-faint);
-        font-size: 11px;
-      }
-
-      .r-actions {
-        display: inline-flex;
-        gap: 0;
-        border: 1px solid var(--border);
-      }
-
-      .r-actions button {
-        appearance: none;
-        border: 0;
-        border-right: 1px solid var(--border);
-        min-height: 24px;
-        padding: 0 8px;
-        background: transparent;
-        color: var(--fg-muted);
-        font-size: 11px;
-        font-weight: 650;
-        cursor: pointer;
-      }
-
-      .r-actions button:last-child {
-        border-right: 0;
-      }
-
-      .r-actions button.primary {
-        color: var(--accent);
-      }
-
-      .r-actions button.danger {
-        color: var(--complement);
-      }
-
-      /* 层级条：扁平行，不要卡片 */
-      .layer-bar {
-        display: flex;
-        gap: 0;
-        overflow-x: auto;
+        align-items: stretch;
+        min-height: 28px;
         border-bottom: 1px solid var(--border);
         background: var(--bg-base);
       }
+      .side-tabs button {
+        appearance: none;
+        position: relative;
+        border: 0;
+        border-right: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg-muted);
+        padding: 0 11px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .side-tabs button[aria-selected='true'] {
+        color: var(--fg-strong);
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+      }
+      .side-tabs button[aria-selected='true']::after {
+        content: '';
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 2px;
+        background: var(--accent);
+      }
+      .side-tabs .grow { flex: 1; }
+      .side-tabs .count {
+        margin-left: 4px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 600;
+      }
 
-      .layer-bar button {
+      /* 运行控制条：耗时 / 暂停 / 状态 */
+      .control-bar {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 26px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-base) 55%, transparent);
+        font-size: 10px;
+        color: var(--fg-muted);
+      }
+      .control-bar .live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--success);
+        font-weight: 700;
+      }
+      .control-bar .live[data-paused='true'] { color: var(--contrast); }
+      .control-bar .live i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .control-bar .live:not([data-paused='true']) i {
+        animation: pulse 1.4s infinite;
+      }
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+        70% { box-shadow: 0 0 0 6px transparent; }
+        100% { box-shadow: 0 0 0 0 transparent; }
+      }
+      .control-bar .stat {
+        color: var(--fg-faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .control-bar .stat b {
+        color: var(--fg-muted);
+        font-weight: 650;
+      }
+      .control-bar .stat[data-tone='fail'] b { color: var(--complement); }
+      .control-bar .grow { flex: 1; }
+      .control-bar .btn {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg-muted);
+        min-height: 22px;
+        padding: 0 7px;
+        font-size: 10.5px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .control-bar .btn:hover { background: var(--bg-hover); color: var(--fg-default); }
+      .control-bar .btn.danger { color: var(--complement); border-color: color-mix(in srgb, var(--complement) 30%, var(--border)); }
+      .control-bar .btn.primary { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+
+      /* 层级/角色总览条 */
+      .layer-overview {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 6px;
+        align-items: center;
+        min-height: 28px;
+        padding: 3px 8px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-base);
+      }
+      .layer-overview .summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 6px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        white-space: nowrap;
+      }
+      .layer-overview .summary b {
+        color: var(--fg-muted);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .layer-rail {
+        display: flex;
+        gap: 0;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        background: var(--bg-raised);
+        scrollbar-width: thin;
+      }
+      .layer-rail button {
         appearance: none;
         position: relative;
         flex: 1 0 auto;
-        min-width: 56px;
+        min-width: 58px;
         border: 0;
         border-right: 1px solid var(--border);
-        border-bottom: 2px solid transparent;
         background: transparent;
         color: var(--fg-muted);
-        padding: 7px 8px 6px;
+        padding: 3px 6px;
         cursor: pointer;
         text-align: left;
       }
-
-      .layer-bar button:last-child {
-        border-right: 0;
-      }
-
-      .layer-bar button[data-active='true'] {
+      .layer-rail button:last-child { border-right: 0; }
+      .layer-rail button[data-active='true'] {
         color: var(--fg-strong);
-        border-bottom-color: var(--c);
-        background: color-mix(in srgb, var(--c) 7%, transparent);
+        background: color-mix(in srgb, var(--c) 8%, transparent);
+        box-shadow: inset 0 -2px 0 var(--c);
       }
-
-      .layer-bar .code {
-        display: block;
+      .layer-rail .code {
         color: var(--c);
         font-size: 10px;
         font-weight: 800;
-        line-height: 1.1;
+        margin-right: 3px;
       }
-
-      .layer-bar .name {
+      .layer-rail .name { font-size: 11px; font-weight: 650; }
+      .layer-rail .meta {
         display: block;
-        margin-top: 1px;
-        font-size: 11px;
-        font-weight: 650;
-      }
-
-      .layer-bar .state {
-        display: block;
-        margin-top: 1px;
+        margin-top: 0;
         color: var(--fg-faint);
         font-size: 9px;
+        line-height: 1.2;
       }
-
-      .layer-bar .dot-fail {
+      .layer-rail .dot {
         position: absolute;
         top: 5px;
         right: 5px;
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--complement);
+      }
+      .layer-rail .dot.fail { background: var(--complement); }
+      .layer-rail .dot.live {
+        background: var(--success);
+        animation: pulse 1.4s infinite;
       }
 
-      /* 主体上下 */
-      .body {
+      /* 主体内容 */
+      .side-body {
         min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── 任务页：Todo + 角色 + 消息 ── */
+      .tasks-layout {
+        min-height: 0;
+        height: 100%;
         display: grid;
+        /* 卡片行 + 列表更克制，消息区更大 */
+        grid-template-rows: auto minmax(108px, 0.30fr) minmax(0, 1.70fr);
         overflow: hidden;
       }
 
-      .body[data-split='todo-heavy'] {
-        grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      /* 当前层角色条 */
+      .role-strip {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--c) 4%, var(--bg-base));
+        scrollbar-width: thin;
       }
-
-      .body[data-split='balanced'] {
-        grid-template-rows: minmax(0, 0.72fr) minmax(0, 1.28fr);
+      .role-strip .label {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 700;
+        border-right: 1px solid var(--border);
+        white-space: nowrap;
       }
-
-      .body[data-split='detail-heavy'] {
-        grid-template-rows: minmax(0, 0.48fr) minmax(0, 1.52fr);
+      .role-chip {
+        appearance: none;
+        border: 0;
+        border-right: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg-muted);
+        min-height: 26px;
+        padding: 2px 8px;
+        cursor: pointer;
+        text-align: left;
       }
+      .role-chip[data-active='true'] {
+        color: var(--fg-strong);
+        background: color-mix(in srgb, var(--c) 10%, transparent);
+      }
+      .role-chip .rn {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .role-chip .rm {
+        display: block;
+        margin-top: 0;
+        color: var(--fg-faint);
+        font-size: 9px;
+        line-height: 1.2;
+      }
+      .role-chip .rm .run { color: var(--success); }
+      .role-chip .rm .fail { color: var(--complement); }
+      .role-chip .rm .idle { color: var(--fg-faint); }
 
-      .block {
+      .panel {
         min-height: 0;
         display: flex;
         flex-direction: column;
         overflow: hidden;
       }
-
-      .block + .block {
-        border-top: 1px solid var(--border);
-      }
-
-      .block-head {
+      .panel + .panel { border-top: 1px solid var(--border); }
+      .panel-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        min-height: 28px;
-        padding: 0 10px;
+        min-height: 24px;
+        padding: 0 8px;
         border-bottom: 1px solid var(--border);
-        background: color-mix(in srgb, var(--bg-base) 55%, transparent);
+        background: color-mix(in srgb, var(--bg-base) 45%, transparent);
         flex-shrink: 0;
       }
-
-      .block-head h3 {
+      .panel-head h3 {
         margin: 0;
         color: var(--fg-strong);
         font-size: 11px;
         font-weight: 700;
       }
-
-      .block-head h3 span {
+      .panel-head h3 em {
+        margin-left: 6px;
         color: var(--fg-faint);
+        font-style: normal;
         font-weight: 600;
       }
-
-      .filters {
-        display: inline-flex;
-        gap: 0;
-      }
-
+      .filters { display: inline-flex; }
       .filters button {
         appearance: none;
         border: 0;
@@ -383,314 +935,835 @@
         font-weight: 650;
         cursor: pointer;
       }
+      .filters button[aria-pressed='true'] { color: var(--accent); }
+      .scroll { flex: 1; min-height: 0; overflow: auto; }
 
-      .filters button[aria-pressed='true'] {
-        color: var(--accent);
-      }
-
-      .scroll {
-        flex: 1;
-        min-height: 0;
-        overflow: auto;
-      }
-
-      /* Todo：行列表，无卡片包裹 */
-      .todo-row {
-        display: grid;
-        grid-template-columns: 14px minmax(0, 1fr) auto;
-        gap: 8px;
-        align-items: start;
-        padding: 7px 10px;
+      /* 小型任务卡片横滑 */
+      .task-cards {
+        display: flex;
+        gap: 6px;
+        padding: 5px 8px;
+        overflow-x: auto;
         border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-base) 30%, transparent);
+        scrollbar-width: thin;
+      }
+      .task-card {
+        flex: 0 0 auto;
+        width: 148px;
+        padding: 5px 7px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
         cursor: pointer;
+        text-align: left;
       }
-
-      .todo-row:hover {
-        background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
-      }
-
-      .todo-row[data-active='true'] {
-        background: color-mix(in srgb, var(--c) 8%, transparent);
+      .task-card:hover { background: var(--bg-hover); }
+      .task-card[data-active='true'] {
+        border-color: color-mix(in srgb, var(--c) 45%, var(--border));
         box-shadow: inset 2px 0 0 var(--c);
+        background: color-mix(in srgb, var(--c) 7%, var(--bg-overlay));
       }
-
-      .todo-row[data-done='true'] {
-        opacity: 0.55;
+      .task-card .tc-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 3px;
+        font-size: 10px;
       }
-
-      .check {
-        width: 12px;
-        height: 12px;
-        margin-top: 3px;
-        border: 1px solid color-mix(in srgb, var(--c) 55%, var(--border-strong));
-        background: transparent;
-        color: var(--c);
-        font-size: 9px;
-        line-height: 10px;
-        text-align: center;
+      .task-card .tc-id {
+        color: var(--fg-faint);
+        font-family: var(--mono);
+        font-weight: 700;
       }
-
-      .todo-row[data-done='true'] .check {
-        background: color-mix(in srgb, var(--c) 18%, transparent);
-      }
-
-      .todo-main {
-        min-width: 0;
-      }
-
-      .todo-title {
+      .task-card .tc-st { font-weight: 700; }
+      .task-card .tc-st.run { color: var(--success); }
+      .task-card .tc-st.fail { color: var(--complement); }
+      .task-card .tc-st.wait { color: var(--contrast); }
+      .task-card .tc-st.done { color: var(--fg-faint); }
+      .task-card .tc-title {
         color: var(--fg-strong);
-        font-size: 12px;
+        font-size: 11.5px;
         font-weight: 650;
-        line-height: 1.35;
-      }
-
-      .todo-row[data-done='true'] .todo-title {
-        text-decoration: line-through;
-        color: var(--fg-muted);
-      }
-
-      .todo-sub {
-        margin-top: 1px;
-        color: var(--fg-muted);
-        font-size: 11px;
-        line-height: 1.35;
+        line-height: 1.25;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-
-      .todo-tags {
+      .task-card .tc-sub {
+        margin-top: 1px;
+        color: var(--fg-muted);
+        font-size: 10px;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .task-card .tc-meta {
         margin-top: 3px;
         display: flex;
-        flex-wrap: wrap;
         gap: 6px;
         color: var(--fg-faint);
-        font-size: 10px;
+        font-size: 9.5px;
       }
+      .task-card .tc-meta b { color: var(--c); font-weight: 700; }
 
-      .todo-tags b {
-        color: var(--c);
-        font-weight: 700;
-      }
-
-      .todo-tags .s-run {
-        color: var(--success);
-      }
-
-      .todo-tags .s-fail {
-        color: var(--complement);
-      }
-
-      .todo-tags .s-wait {
-        color: var(--contrast);
-      }
-
-      .todo-time {
-        color: var(--fg-faint);
-        font-size: 10px;
-        white-space: nowrap;
-        padding-top: 2px;
-      }
-
-      .group-label {
-        padding: 6px 10px 3px;
+      /* Todo 行 */
+      .group {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 5px 12px 3px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-raised) 94%, var(--bg-base));
         color: var(--fg-faint);
         font-size: 10px;
         font-weight: 700;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        border-bottom: 1px solid var(--border);
-        background: color-mix(in srgb, var(--bg-base) 40%, transparent);
       }
-
-      /* 详情：上下文一行 + 消息流，无厚卡片 */
-      .detail-context {
-        padding: 8px 10px;
+      .todo {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: start;
+        padding: 5px 8px;
         border-bottom: 1px solid var(--border);
-        background: color-mix(in srgb, var(--c) 5%, transparent);
+        cursor: pointer;
       }
+      .todo:hover { background: color-mix(in srgb, var(--bg-hover) 60%, transparent); }
+      .todo[data-active='true'] {
+        background: color-mix(in srgb, var(--c) 8%, transparent);
+        box-shadow: inset 2px 0 0 var(--c);
+      }
+      .todo[data-done='true'] { opacity: 0.55; }
+      .todo .box {
+        width: 12px;
+        height: 12px;
+        margin-top: 3px;
+        border: 1px solid color-mix(in srgb, var(--c) 55%, var(--border-strong));
+        color: var(--c);
+        font-size: 9px;
+        line-height: 10px;
+        text-align: center;
+      }
+      .todo[data-done='true'] .box { background: color-mix(in srgb, var(--c) 18%, transparent); }
+      .todo .body { min-width: 0; }
+      .todo .title-line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+      .todo .id {
+        flex-shrink: 0;
+        color: var(--fg-faint);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 650;
+      }
+      .todo .title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .todo[data-done='true'] .title {
+        text-decoration: line-through;
+        color: var(--fg-muted);
+      }
+      .todo .sub {
+        margin-top: 2px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .todo .meta {
+        margin-top: 3px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+      .todo .meta b { color: var(--c); font-weight: 700; }
+      .todo .meta .run { color: var(--success); }
+      .todo .meta .fail { color: var(--complement); }
+      .todo .meta .wait { color: var(--contrast); }
+      .todo .side-meta {
+        display: grid;
+        justify-items: end;
+        gap: 2px;
+        padding-top: 1px;
+      }
+      .todo .time { color: var(--fg-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+      .todo .pri {
+        color: var(--fg-faint);
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 700;
+      }
+      .todo .pri[data-p='P0'] { color: var(--complement); }
 
-      .detail-context .line1 {
+      /* 消息区 */
+      .live-bar {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 22px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--c) 6%, var(--bg-base));
+        color: var(--fg-muted);
+        font-size: 10.5px;
+      }
+      .live-bar .pulse {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--c);
+        font-weight: 700;
+      }
+      .live-bar .pulse i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: pulse 1.4s infinite;
+      }
+      .live-bar .grow { flex: 1; }
+      .live-bar .muted { color: var(--fg-faint); }
+
+      .ctx {
+        flex-shrink: 0;
+        padding: 5px 8px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--c) 4%, transparent);
+      }
+      .ctx .l1 {
         display: flex;
         flex-wrap: wrap;
         gap: 6px 10px;
         align-items: baseline;
-        color: var(--fg-muted);
-        font-size: 11px;
-      }
-
-      .detail-context .line1 strong {
-        color: var(--fg-strong);
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      .detail-context .line1 .live {
-        color: var(--c);
-        font-weight: 700;
-      }
-
-      .detail-context .line2 {
-        margin-top: 3px;
-        color: var(--fg-default);
-        font-size: 11.5px;
-        line-height: 1.4;
-      }
-
-      .detail-context .line3 {
-        margin-top: 3px;
-        color: var(--fg-faint);
-        font-size: 10.5px;
-      }
-
-      .detail-context .line3 b {
-        color: var(--fg-muted);
-        font-weight: 650;
-      }
-
-      .msg {
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .msg:hover {
-        background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
-      }
-
-      .msg-top {
-        display: flex;
-        gap: 8px;
-        align-items: baseline;
-        margin-bottom: 2px;
-        font-size: 10.5px;
-      }
-
-      .msg-top .who {
-        color: var(--fg-strong);
-        font-weight: 700;
-      }
-
-      .msg-top .role {
-        color: var(--c);
-        font-weight: 650;
-      }
-
-      .msg-top .when {
-        margin-left: auto;
-        color: var(--fg-faint);
-      }
-
-      .msg-body {
-        color: var(--fg-default);
-        font-size: 12px;
-        line-height: 1.55;
-        white-space: pre-wrap;
-      }
-
-      .msg[data-role='user'] .msg-body {
-        color: var(--fg-strong);
-      }
-
-      .msg[data-role='tool'] .msg-body {
-        font-family: var(--mono);
         font-size: 11px;
         color: var(--fg-muted);
       }
-
-      .msg[data-role='error'] {
-        background: color-mix(in srgb, var(--complement) 6%, transparent);
-      }
-
-      .msg[data-role='error'] .msg-body {
-        color: color-mix(in srgb, var(--complement) 80%, var(--fg-default));
-      }
-
-      .msg[data-role='system'] .msg-body {
-        color: var(--fg-muted);
+      .ctx .l1 .layer { color: var(--c); font-weight: 700; }
+      .ctx .l1 strong { color: var(--fg-strong); font-size: 12px; font-weight: 700; }
+      .ctx .l1 .state { margin-left: auto; color: var(--fg-faint); font-size: 10px; }
+      .ctx .l2 {
+        margin-top: 2px;
+        color: var(--fg-default);
         font-size: 11.5px;
+        line-height: 1.35;
       }
-
-      .msg-tags {
+      .ctx .l3 {
         margin-top: 3px;
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: 3px 10px;
+        color: var(--fg-faint);
+        font-size: 10.5px;
+      }
+      .ctx .l3 b { color: var(--fg-muted); font-weight: 650; }
+
+      .stream { padding: 4px 0 12px; }
+      .time-mark {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 5px 12px;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .handoff {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        padding: 4px 8px;
+      }
+      .handoff .rail, .msg .rail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .handoff .dot {
+        width: 8px;
+        height: 8px;
+        margin-top: 5px;
+        border-radius: 50%;
+        background: var(--c);
+        opacity: 0.75;
+      }
+      .handoff .line, .msg .line {
+        flex: 1;
+        width: 1px;
+        margin-top: 4px;
+        background: color-mix(in srgb, var(--border-strong) 80%, transparent);
+      }
+      .handoff .card {
+        padding: 5px 0 8px 4px;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+      }
+      .handoff .card b { color: var(--fg-strong); font-weight: 650; }
+      .handoff .card .when {
+        margin-left: 8px;
         color: var(--fg-faint);
         font-size: 10px;
       }
 
+      .msg {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        padding: 0 8px;
+      }
+      .msg .dot {
+        width: 7px;
+        height: 7px;
+        margin-top: 8px;
+        border-radius: 50%;
+        border: 1.5px solid var(--c);
+        background: var(--bg-raised);
+      }
+      .msg[data-role='error'] .dot {
+        border-color: var(--complement);
+        background: var(--complement);
+      }
+      .msg[data-role='tool'] .dot {
+        border-color: var(--aux);
+        background: transparent;
+      }
+      .msg[data-role='user'] .dot {
+        border-color: var(--accent);
+        background: var(--accent);
+      }
+      .msg:last-child .line { opacity: 0; }
+      .msg .content {
+        min-width: 0;
+        padding: 5px 0 8px 4px;
+      }
+      .msg[data-active='true'] .content {
+        background: color-mix(in srgb, var(--c) 5%, transparent);
+        margin-left: -4px;
+        padding-left: 8px;
+        box-shadow: inset 2px 0 0 var(--c);
+      }
+      .msg .top {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        align-items: baseline;
+        margin-bottom: 3px;
+        font-size: 11px;
+      }
+      .msg .who { color: var(--fg-strong); font-weight: 700; }
+      .msg .role { color: var(--c); font-weight: 650; font-size: 10px; }
+      .msg[data-role='error'] .role { color: var(--complement); }
+      .msg[data-role='tool'] .role { color: var(--aux); }
+      .msg .when {
+        margin-left: auto;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      .msg .text {
+        color: var(--fg-default);
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+      .msg[data-role='user'] .text { color: var(--fg-strong); }
+      .msg[data-role='system'] .text { color: var(--fg-muted); font-size: 12px; }
+      .msg[data-role='error'] .text {
+        color: color-mix(in srgb, var(--complement) 82%, var(--fg-default));
+      }
+      .tool {
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-base) 55%, transparent);
+      }
+      .tool summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        cursor: pointer;
+        list-style: none;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        font-family: var(--mono);
+      }
+      .tool summary::-webkit-details-marker { display: none; }
+      .tool summary::before { content: '▸'; color: var(--fg-faint); font-size: 10px; width: 10px; }
+      .tool[open] summary::before { content: '▾'; }
+      .tool summary .cmd {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-default);
+      }
+      .tool summary .badge {
+        margin-left: auto;
+        flex-shrink: 0;
+        color: var(--fg-faint);
+        font-family: var(--font);
+        font-size: 10px;
+        font-weight: 650;
+      }
+      .tool summary .badge.fail { color: var(--complement); }
+      .tool summary .badge.ok { color: var(--success); }
+      .tool pre {
+        margin: 0;
+        padding: 6px 8px 8px 26px;
+        border-top: 1px solid var(--border);
+        color: var(--fg-muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+      .msg .tags {
+        margin-top: 4px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+      .msg .tags .task {
+        color: var(--c);
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .msg[data-streaming='true'] .content {
+        background: color-mix(in srgb, var(--c) 4%, transparent);
+      }
+      .msg .stream-text::after {
+        content: '▍';
+        margin-left: 1px;
+        color: var(--c);
+        animation: caret 1s steps(1) infinite;
+      }
+      @keyframes caret { 50% { opacity: 0; } }
+      .stream-status {
+        margin-top: 4px;
+        color: var(--c);
+        font-size: 10.5px;
+        font-weight: 650;
+      }
+
+      /* ── 概览页 ── */
+      .overview {
+        height: 100%;
+        overflow: auto;
+        padding: 12px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+      .ov-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .ov-stat {
+        padding: 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+      }
+      .ov-stat .k {
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 650;
+      }
+      .ov-stat .v {
+        margin-top: 4px;
+        color: var(--fg-strong);
+        font-size: 18px;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+      }
+      .ov-stat .v.fail { color: var(--complement); }
+      .ov-stat .v.run { color: var(--success); }
+      .ov-stat .s {
+        margin-top: 2px;
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+      .ov-section-title {
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      .ov-layers {
+        display: grid;
+        gap: 6px;
+      }
+      .ov-layer {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+        cursor: pointer;
+      }
+      .ov-layer:hover { background: var(--bg-hover); }
+      .ov-layer .ln {
+        color: var(--c);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .ov-layer .ld {
+        min-width: 0;
+        color: var(--fg-muted);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ov-layer .lm {
+        color: var(--fg-faint);
+        font-size: 10px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .ov-roles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .ov-role {
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+      .ov-role b { color: var(--fg-strong); font-weight: 650; }
+      .ov-role .st { margin-left: 6px; font-size: 10px; }
+      .ov-role .st.run { color: var(--success); }
+      .ov-role .st.fail { color: var(--complement); }
+      .ov-role .st.idle { color: var(--fg-faint); }
+
+      /* ── 度量页 ── */
+      .metrics {
+        height: 100%;
+        overflow: auto;
+        padding: 12px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+      .metric-row {
+        display: grid;
+        grid-template-columns: 100px minmax(0, 1fr) 48px;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .metric-row .name { color: var(--fg-muted); }
+      .metric-row .bar {
+        height: 6px;
+        background: var(--bg-surface);
+        overflow: hidden;
+      }
+      .metric-row .bar > i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+      }
+      .metric-row .val {
+        color: var(--fg-strong);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .metric-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .metric-table th {
+        text-align: left;
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-weight: 700;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .metric-table td {
+        padding: 7px 8px;
+        border-bottom: 1px solid var(--border);
+        color: var(--fg-default);
+      }
+      .metric-table td.num {
+        font-variant-numeric: tabular-nums;
+        color: var(--fg-muted);
+      }
+
+      /* ── 治理页 ── */
+      .gov {
+        height: 100%;
+        overflow: auto;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .gov-item {
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: start;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+      }
+      .gov-item .tag {
+        color: var(--contrast);
+        font-size: 10px;
+        font-weight: 750;
+        padding-top: 2px;
+      }
+      .gov-item .tag.fail { color: var(--complement); }
+      .gov-item .tag.info { color: var(--aux); }
+      .gov-item .body { min-width: 0; }
+      .gov-item .title {
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .gov-item .desc {
+        margin-top: 2px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      .gov-item .act {
+        display: flex;
+        gap: 4px;
+      }
+      .gov-item .act button {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg-muted);
+        min-height: 24px;
+        padding: 0 8px;
+        font-size: 11px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .gov-item .act button.primary {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+      }
+
       .empty {
-        padding: 16px 10px;
+        padding: 20px 12px;
         color: var(--fg-faint);
         font-size: 12px;
         text-align: center;
+        line-height: 1.5;
       }
 
-      @media (max-width: 960px) {
-        .stage {
-          grid-template-columns: 1fr;
-          height: auto;
-          min-height: 1000px;
-        }
+      .paused-mask {
+        opacity: 0.55;
+        pointer-events: none;
+      }
 
-        .left {
-          min-height: 220px;
+      @media (max-width: 1000px) {
+        .app {
+          grid-template-columns: 1fr;
+          grid-template-rows: minmax(220px, 32vh) minmax(0, 1fr);
+        }
+        .chat {
           border-right: 0;
           border-bottom: 1px solid var(--border);
         }
+        .ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
     </style>
   </head>
   <body>
-    <div class="page">
-      <header class="hero">
-        <h1>右侧 · Todo + 层级详情（简约版）</h1>
-        <p>去掉厚卡片与大 padding，改成扁平行列表：上层 Todo，下层层级对话详情，顶部层级条切换。</p>
-      </header>
+    <div class="app">
+      <section class="chat" aria-label="主对话">
+        <header class="chat-top">
+          <div class="chat-bar">
+            <div class="path">OpenAWork Core / <strong>OAuth 登录实现</strong></div>
+            <span class="chip live" id="chat-status" data-paused="false">运行中</span>
+            <span class="chip" id="chat-elapsed">耗时 <b>2m 14s</b></span>
+            <span class="chip fail" id="chat-fail">失败 <b>2</b></span>
+          </div>
+          <div class="chat-quick" id="chat-quick">
+            <button type="button" class="qbtn primary" data-quick="pause" id="quick-pause">暂停全部</button>
+            <button type="button" class="qbtn danger" data-quick="retry">重试失败</button>
+            <button type="button" class="qbtn" data-quick="focus-fail">定位失败</button>
+            <span class="sep"></span>
+            <button type="button" class="qbtn" data-quick="copy-summary">复制摘要</button>
+            <button type="button" class="qbtn" data-quick="focus-mode" id="quick-focus">专注对话</button>
+            <span class="hint" id="quick-hint">对话区快捷</span>
+          </div>
+        </header>
 
-      <section class="controls">
-        <span>比例</span>
-        <div class="seg">
-          <button type="button" data-split="todo-heavy" aria-pressed="false">Todo 重</button>
-          <button type="button" data-split="balanced" aria-pressed="true">均衡</button>
-          <button type="button" data-split="detail-heavy" aria-pressed="false">详情重</button>
+        <div class="decision-bar" id="decision-bar">
+          <span class="label">已确认</span>
+          <span class="decision-chip" data-decision="github"><b>GitHub OAuth</b><button type="button" title="移除" data-rm-decision>×</button></span>
+          <span class="decision-chip" data-decision="callback"><b>callback=localhost:3000</b><button type="button" title="移除" data-rm-decision>×</button></span>
+          <span class="decision-chip" data-decision="tests"><b>含基础测试</b><button type="button" title="移除" data-rm-decision>×</button></span>
         </div>
-        <span>过滤</span>
-        <div class="seg">
-          <button type="button" data-filter="all" aria-pressed="true">全部</button>
-          <button type="button" data-filter="active" aria-pressed="false">进行中</button>
-          <button type="button" data-filter="blocked" aria-pressed="false">阻塞</button>
-          <button type="button" data-filter="done" aria-pressed="false">完成</button>
+
+        <div class="attention-bar" id="attention-bar" data-show="true">
+          <span class="attn">待你处理</span>
+          <strong>#12 校验失败</strong>
+          <span>可重试 / 补 secret / 调整范围</span>
+          <span class="grow"></span>
+          <button type="button" id="attn-jump">查看</button>
         </div>
-        <span style="color: var(--fg-faint)">1/2/3 比例 · 点 Todo 联动详情</span>
+
+        <div class="chat-main">
+          <div class="chat-stream" id="chat-stream">
+            <div class="chat-day">今天</div>
+
+            <article class="chat-msg user" id="jump-u1" data-jump="1">
+              <div class="meta"><b>你</b><span>14:32</span></div>
+              <div class="bubble"><div class="text">帮我实现 OAuth 登录，优先 GitHub，附带基础测试。</div></div>
+            </article>
+
+            <article class="chat-msg">
+              <div class="meta"><b>接待 · b</b><span>14:32</span></div>
+              <div class="bubble">
+                <div class="text">已接收。我会启动规划 → 派发 → 执行 → 测试链路。
+预计首轮 3–5 分钟。过程中需要你确认的点会直接推到这里。</div>
+                <div class="suggest-row">
+                  <button type="button" data-fill="同时补 README 接入说明">同时补 README</button>
+                  <button type="button" data-fill="先只做 GitHub，Google 以后再说">只要 GitHub</button>
+                  <button type="button" data-fill="登录成功后跳到 /dashboard">指定成功跳转</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="inline-card" data-tone="progress">
+              <div class="ic-top">
+                <span class="tone">进度</span>
+                <strong>规划完成，已派发执行</strong>
+                <span>14:34</span>
+              </div>
+              <div class="ic-body">#12 callback 校验 · #13 session 落库 · #14 登录回归 已创建。本地 callback 需你确认后继续。</div>
+              <div class="artifact-row">
+                <button type="button" data-artifact="plan">plan-oauth.md</button>
+                <button type="button" data-artifact="tasks">任务清单</button>
+              </div>
+            </article>
+
+            <article class="inline-card" data-tone="block" id="block-card">
+              <div class="ic-top">
+                <span class="tone">需要你确认</span>
+                <strong>callback URL</strong>
+                <span>14:35</span>
+              </div>
+              <div class="ic-body">PM2 需要确认本地 callback 是否固定为：</div>
+              <div class="ic-code">http://localhost:3000/api/auth/callback/github</div>
+              <div class="ic-actions" id="block-actions">
+                <button type="button" class="primary" data-decide="localhost">确认 localhost</button>
+                <button type="button" data-decide="both">本地 + 预留生产</button>
+                <button type="button" data-decide="later">稍后决定</button>
+              </div>
+            </article>
+
+            <article class="chat-msg user" id="jump-u2" data-jump="2">
+              <div class="meta"><b>你</b><span>14:36</span></div>
+              <div class="bubble"><div class="text">对，本地先用这个；生产域名后面再补。</div></div>
+            </article>
+
+            <article class="inline-card" data-tone="fail" id="fail-card">
+              <div class="ic-top">
+                <span class="tone">失败</span>
+                <strong>#12 callback 校验超时</strong>
+                <span>14:39</span>
+              </div>
+              <div class="ic-body">token exchange &gt; 8s。可能：client secret 未注入 / 端口不通 / 代理干扰。
+#14 测试因此排队；#13 session 落库仍在推进。</div>
+              <div class="ic-actions">
+                <button type="button" class="danger" data-quick="retry">重试 #12</button>
+                <button type="button" data-fill="client secret 已放进 .env.local，请重试">告知已补 secret</button>
+                <button type="button" data-fill="先跳过测试，继续把 session 落库做完">先做 session</button>
+              </div>
+              <div class="artifact-row">
+                <button type="button" data-artifact="log">auth.oauth.log</button>
+                <button type="button" data-artifact="github-ts">src/auth/github.ts</button>
+              </div>
+            </article>
+
+            <div class="typing-row" id="typing-row">
+              <i></i><i></i><i></i>
+              <span>执行 · e2 正在补充 session 联调说明…</span>
+            </div>
+          </div>
+
+          <button type="button" class="scroll-bottom" id="scroll-bottom" data-show="false">↓ 最新</button>
+
+          <div class="jump-rail" aria-label="用户消息跳转">
+            <span class="jr-label">跳转</span>
+            <button type="button" data-jump-to="jump-u1" title="第 1 条用户输入">1</button>
+            <button type="button" data-jump-to="jump-u2" title="第 2 条用户输入">2</button>
+          </div>
+
+          <div class="toast" id="chat-toast"></div>
+        </div>
+
+        <footer class="composer-wrap">
+          <div class="composer-context">
+            <button type="button" class="cx" data-cx="constraint" data-on="false">+ 约束</button>
+            <button type="button" class="cx" data-cx="clarify" data-on="false">+ 澄清回复</button>
+            <button type="button" class="cx" data-cx="followup" data-on="true"><b>追加任务</b></button>
+            <span id="cx-hint">输入将作为追加任务发给团队</span>
+          </div>
+          <div class="composer">
+            <div class="composer-box">
+              <textarea id="composer-input" placeholder="补充约束、回答澄清，或追加任务…" rows="2"></textarea>
+              <div class="composer-foot">
+                <div class="foot-left">
+                  <button type="button" data-fill="请在失败重试前先检查 .env 里的 GITHUB_CLIENT_SECRET">填入排查建议</button>
+                  <span>↵ 发送 · ⇧↵ 换行</span>
+                  <span class="char" id="char-count">0</span>
+                </div>
+                <button type="button" class="send" id="composer-send" disabled>发送</button>
+              </div>
+            </div>
+          </div>
+        </footer>
       </section>
 
-      <div class="stage">
-        <section class="left">
-          <div class="left-bar">
-            <span>主对话 · <strong>OAuth 登录实现</strong></span>
-            <span>占位</span>
-          </div>
-          <div class="left-body">
-            <div class="bubble user">
-              <div class="m">你 · 14:32</div>
-              帮我实现 OAuth 登录，优先 GitHub，附带基础测试。
-            </div>
-            <div class="bubble">
-              <div class="m">接待 · b · 14:32</div>
-              已接收。右侧可看任务与各层对话详情。
-            </div>
-            <div class="bubble">
-              <div class="m">系统 · 14:39</div>
-              #12 callback 校验超时失败。
-            </div>
-          </div>
-          <div class="left-input">composer 占位</div>
-        </section>
+      <aside class="side" aria-label="团队工作台">
+        <div class="side-tabs" role="tablist" aria-label="工作台">
+          <button type="button" role="tab" data-tab="tasks" aria-selected="true">
+            任务<span class="count" id="tab-task-count">7</span>
+          </button>
+          <button type="button" role="tab" data-tab="overview" aria-selected="false">概览</button>
+          <button type="button" role="tab" data-tab="metrics" aria-selected="false">度量</button>
+          <button type="button" role="tab" data-tab="governance" aria-selected="false">
+            治理<span class="count" id="tab-gov-count">2</span>
+          </button>
+          <div class="grow"></div>
+        </div>
 
-        <aside class="right" id="right"></aside>
-      </div>
+        <div class="control-bar" id="control-bar"></div>
+        <div class="layer-overview" id="layer-overview"></div>
+        <div class="side-body" id="side-body"></div>
+      </aside>
     </div>
 
     <script>
@@ -702,20 +1775,18 @@
           color: 'var(--l-reception)',
           state: 'completed',
           stateLabel: '完成',
+          live: false,
           title: '接收诉求并启动编排',
           desc: '优先 GitHub OAuth + 本地 callback + 登录回归。',
           from: null,
           to: '规划',
+          roles: [
+            { id: 'b', name: '接待 · b', status: 'done', statusLabel: '完成', taskCount: 1 },
+          ],
           messages: [
-            { role: 'user', who: '你', when: '14:32', text: '帮我实现 OAuth 登录，优先 GitHub，附带基础测试。' },
-            {
-              role: 'assistant',
-              who: '接待 · b',
-              when: '14:32',
-              text: '已接收。启动规划 → 派发 → 执行 → 测试。\n预计首轮 3–5 分钟。',
-              tags: ['启动'],
-            },
-            { role: 'system', who: '系统', when: '14:32', text: 'handoff → 规划（PM1）', tags: ['交接'] },
+            { id: 'm1', role: 'user', who: '你', when: '14:32', text: '帮我实现 OAuth 登录，优先 GitHub，附带基础测试。', taskIds: ['t6'] },
+            { id: 'm2', role: 'assistant', who: '接待 · b', when: '14:32', text: '已接收。启动规划 → 派发 → 执行 → 测试。\n预计首轮 3–5 分钟。', tags: ['启动'], taskIds: ['t6'] },
+            { id: 'm3', role: 'system', kind: 'handoff', who: '系统', when: '14:32', text: '交接至 规划（PM1）', tags: ['交接'] },
           ],
         },
         {
@@ -725,26 +1796,18 @@
           color: 'var(--l-pm1)',
           state: 'completed',
           stateLabel: '完成',
+          live: false,
           title: '拆解实现计划',
           desc: 'provider / callback / session / tests 四段。',
           from: '接待',
           to: '管控',
+          roles: [
+            { id: 'pm1', name: '规划 · PM1', status: 'done', statusLabel: '完成', taskCount: 1 },
+          ],
           messages: [
-            {
-              role: 'assistant',
-              who: '规划 · PM1',
-              when: '14:33',
-              text: '范围：\n1) GitHub OAuth App\n2) localhost:3000 callback\n3) session 落库\n4) 登录回归',
-              tags: ['plan'],
-            },
-            {
-              role: 'tool',
-              who: '规划 · PM1',
-              when: '14:33',
-              text: 'write · docs/plan-oauth.md (+48)',
-              tags: ['write'],
-            },
-            { role: 'system', who: '系统', when: '14:33', text: 'handoff → 管控（PM2）', tags: ['交接'] },
+            { id: 'm4', role: 'assistant', who: '规划 · PM1', when: '14:33', text: '范围：\n1) GitHub OAuth App\n2) localhost:3000 callback\n3) session 落库\n4) 登录回归', tags: ['plan'], taskIds: ['t5'] },
+            { id: 'm5', role: 'tool', who: '规划 · PM1', when: '14:33', tool: { name: 'write', summary: 'docs/plan-oauth.md (+48)', detail: 'path: docs/plan-oauth.md\n+48 lines\nstatus: ok', status: 'ok' }, taskIds: ['t5'] },
+            { id: 'm6', role: 'system', kind: 'handoff', who: '系统', when: '14:33', text: '交接至 管控（PM2）· 携带 plan.md', tags: ['交接'] },
           ],
         },
         {
@@ -754,32 +1817,19 @@
           color: 'var(--l-pm2)',
           state: 'completed',
           stateLabel: '已派发',
+          live: false,
           title: '任务派发与约束',
           desc: '开发 #12/#13，测试 #14；本地 callback 已确认。',
           from: '规划',
           to: '执行 / 测试',
+          roles: [
+            { id: 'pm2', name: '管控 · PM2', status: 'done', statusLabel: '已派发', taskCount: 1 },
+          ],
           messages: [
-            {
-              role: 'assistant',
-              who: '管控 · PM2',
-              when: '14:34',
-              text: '#12 callback 校验 → e1\n#13 session 落库 → e2\n#14 登录回归 → t1',
-              tags: ['派发'],
-            },
-            {
-              role: 'assistant',
-              who: '管控 · PM2',
-              when: '14:35',
-              text: '确认 callback：\nhttp://localhost:3000/api/auth/callback/github',
-              tags: ['澄清'],
-            },
-            {
-              role: 'user',
-              who: '你',
-              when: '14:36',
-              text: '对，本地先用这个。',
-              tags: ['确认'],
-            },
+            { id: 'm7', role: 'assistant', who: '管控 · PM2', when: '14:34', text: '#12 callback 校验 → e1\n#13 session 落库 → e2\n#14 登录回归 → t1', tags: ['派发'], taskIds: ['t2', 't3', 't4'] },
+            { id: 'm8', role: 'assistant', who: '管控 · PM2', when: '14:35', text: '确认 callback：\nhttp://localhost:3000/api/auth/callback/github', tags: ['澄清'], taskIds: ['t1'] },
+            { id: 'm9', role: 'user', who: '你', when: '14:36', text: '对，本地先用这个。', tags: ['确认'], taskIds: ['t1'] },
+            { id: 'm10', role: 'system', kind: 'handoff', who: '系统', when: '14:36', text: '交接至 执行 e1/e2 · 测试 t1', tags: ['交接'] },
           ],
         },
         {
@@ -787,48 +1837,26 @@
           code: 'e',
           name: '执行',
           color: 'var(--l-executor)',
-          state: 'failed',
-          stateLabel: '部分失败',
+          state: 'running',
+          stateLabel: '运行中',
+          live: true,
+          liveLabel: 'e2 正在写 session 联调说明',
           title: '实现 provider / callback / session',
-          desc: 'provider 完成；callback 超时失败；session 仍在推进。',
+          desc: 'provider 完成；#12 失败待重试；#13 仍在推进。',
           from: '管控',
           to: '测试',
+          roles: [
+            { id: 'e1', name: '执行 · e1', status: 'fail', statusLabel: '失败', taskCount: 1 },
+            { id: 'e2', name: '执行 · e2', status: 'run', statusLabel: '运行中', taskCount: 1 },
+          ],
           messages: [
-            {
-              role: 'assistant',
-              who: '执行 · e1',
-              when: '14:36',
-              text: 'GitHub provider 与登录按钮已完成，下一步补 callback 校验。',
-              tags: ['#12'],
-            },
-            {
-              role: 'tool',
-              who: '执行 · e1',
-              when: '14:37',
-              text: 'edit · src/auth/github.ts\n+ provider config\n+ login button',
-              tags: ['edit'],
-            },
-            {
-              role: 'tool',
-              who: '执行 · e1',
-              when: '14:38',
-              text: 'shell · pnpm test auth.oauth --runInBand\nexit 1 · token exchange timeout',
-              tags: ['shell'],
-            },
-            {
-              role: 'error',
-              who: '执行 · e1',
-              when: '14:39',
-              text: 'callback 校验超时：token exchange > 8s。\n可能：client secret 未注入 / 端口不通 / 代理干扰',
-              tags: ['#12', '可重试'],
-            },
-            {
-              role: 'assistant',
-              who: '执行 · e2',
-              when: '14:38',
-              text: 'session 落库接口草稿完成，等待 callback 联调。',
-              tags: ['#13'],
-            },
+            { id: 'm11', role: 'assistant', who: '执行 · e1', when: '14:36', text: 'GitHub provider 与登录按钮已完成，下一步补 callback 校验。', tags: ['进度'], taskIds: ['t2'], roleId: 'e1' },
+            { id: 'm12', role: 'tool', who: '执行 · e1', when: '14:37', tool: { name: 'edit', summary: 'src/auth/github.ts', detail: '+ provider config\n+ login button wiring\nstatus: ok', status: 'ok' }, taskIds: ['t2'], roleId: 'e1' },
+            { id: 'm13', role: 'tool', who: '执行 · e1', when: '14:38', tool: { name: 'shell', summary: 'pnpm test auth.oauth --runInBand', detail: 'exit 1\ntoken exchange timeout after 8000ms\nlast log: waiting for https://github.com/login/oauth/access_token', status: 'fail' }, taskIds: ['t2'], roleId: 'e1' },
+            { id: 'm14', role: 'error', who: '执行 · e1', when: '14:39', text: 'callback 校验超时：token exchange > 8s。\n可能：client secret 未注入 / 端口不通 / 代理干扰', tags: ['可重试'], taskIds: ['t2'], roleId: 'e1' },
+            { id: 'm15', role: 'assistant', who: '执行 · e2', when: '14:38', text: 'session 落库接口草稿完成，等待 callback 联调。', tags: ['进度'], taskIds: ['t3'], roleId: 'e2' },
+            { id: 'm16', role: 'tool', who: '执行 · e2', when: '14:38', tool: { name: 'edit', summary: 'src/auth/session.ts', detail: '+ createSession()\n+ setCookie()\nstatus: ok', status: 'ok' }, taskIds: ['t3'], roleId: 'e2' },
+            { id: 'm17', role: 'assistant', who: '执行 · e2', when: '14:40', text: '正在补充 session 与 callback 的联调步骤，方便 #12 恢复后直接接上。', streaming: true, taskIds: ['t3'], roleId: 'e2' },
           ],
         },
         {
@@ -838,25 +1866,17 @@
           color: 'var(--l-tester)',
           state: 'pending',
           stateLabel: '排队',
+          live: false,
           title: '登录回归',
           desc: '用例就绪，等待可测构建。',
           from: '执行',
           to: '评审',
+          roles: [
+            { id: 't1', name: '测试 · t1', status: 'idle', statusLabel: '排队', taskCount: 1 },
+          ],
           messages: [
-            {
-              role: 'assistant',
-              who: '测试 · t1',
-              when: '14:38',
-              text: '用例：未登录拦截 / 授权回跳 / session cookie。\n当前阻塞：依赖 #12。',
-              tags: ['#14'],
-            },
-            {
-              role: 'system',
-              who: '系统',
-              when: '14:39',
-              text: '#12 失败，测试保持排队。',
-              tags: ['阻塞'],
-            },
+            { id: 'm18', role: 'assistant', who: '测试 · t1', when: '14:38', text: '用例：未登录拦截 / 授权回跳 / session cookie。\n当前阻塞：依赖 #12。', tags: ['准备就绪'], taskIds: ['t4'], roleId: 't1' },
+            { id: 'm19', role: 'system', who: '系统', when: '14:39', text: '#12 失败，测试保持排队。', tags: ['阻塞'], taskIds: ['t4'] },
           ],
         },
         {
@@ -866,96 +1886,75 @@
           color: 'var(--l-reviewer)',
           state: 'idle',
           stateLabel: '待命',
+          live: false,
           title: '实现评审',
           desc: '等待测试通过。',
           from: '测试',
           to: null,
+          roles: [
+            { id: 'r1', name: '评审 · r1', status: 'idle', statusLabel: '待命', taskCount: 1 },
+          ],
           messages: [],
         },
       ];
 
       const TODOS = [
-        {
-          id: 't2',
-          title: '#12 callback 校验',
-          sub: 'token exchange 超时，需重试或补 secret',
-          layer: 'executor',
-          status: 'failed',
-          priority: 'P0',
-          time: '14:39',
-        },
-        {
-          id: 't3',
-          title: '#13 session 落库',
-          sub: '接口草稿完成，待与 callback 联调',
-          layer: 'executor',
-          status: 'running',
-          priority: 'P1',
-          time: '14:38',
-        },
-        {
-          id: 't4',
-          title: '#14 登录回归测试',
-          sub: '依赖 #12 成功产物',
-          layer: 'tester',
-          status: 'blocked',
-          priority: 'P1',
-          time: '14:39',
-        },
-        {
-          id: 't1',
-          title: '确认 callback URL',
-          sub: '本地使用 localhost:3000',
-          layer: 'pm2',
-          status: 'done',
-          priority: 'P1',
-          time: '14:36',
-        },
-        {
-          id: 't5',
-          title: '产出 plan 并派发',
-          sub: '四段计划已交给管控',
-          layer: 'pm1',
-          status: 'done',
-          priority: 'P2',
-          time: '14:33',
-        },
-        {
-          id: 't6',
-          title: '接待启动编排',
-          sub: '用户诉求已入库',
-          layer: 'reception',
-          status: 'done',
-          priority: 'P2',
-          time: '14:32',
-        },
-        {
-          id: 't7',
-          title: '实现评审',
-          sub: '等待测试通过',
-          layer: 'reviewer',
-          status: 'pending',
-          priority: 'P2',
-          time: '—',
-        },
+        { id: 't2', key: '#12', title: 'callback 校验', sub: 'token exchange 超时，需重试或补 secret', layer: 'executor', roleId: 'e1', status: 'failed', priority: 'P0', time: '14:39', owner: 'e1', elapsed: '1m 12s' },
+        { id: 't3', key: '#13', title: 'session 落库', sub: '接口草稿完成，联调说明生成中', layer: 'executor', roleId: 'e2', status: 'running', priority: 'P1', time: '14:40', owner: 'e2', elapsed: '2m 04s' },
+        { id: 't4', key: '#14', title: '登录回归测试', sub: '依赖 #12 成功产物', layer: 'tester', roleId: 't1', status: 'blocked', priority: 'P1', time: '14:39', owner: 't1', elapsed: '—' },
+        { id: 't1', key: '#11', title: '确认 callback URL', sub: '本地使用 localhost:3000', layer: 'pm2', roleId: 'pm2', status: 'done', priority: 'P1', time: '14:36', owner: 'pm2', elapsed: '18s' },
+        { id: 't5', key: '#10', title: '产出 plan 并派发', sub: '四段计划已交给管控', layer: 'pm1', roleId: 'pm1', status: 'done', priority: 'P2', time: '14:33', owner: 'pm1', elapsed: '42s' },
+        { id: 't6', key: '#09', title: '接待启动编排', sub: '用户诉求已入库', layer: 'reception', roleId: 'b', status: 'done', priority: 'P2', time: '14:32', owner: 'b', elapsed: '9s' },
+        { id: 't7', key: '#15', title: '实现评审', sub: '等待测试通过', layer: 'reviewer', roleId: 'r1', status: 'pending', priority: 'P2', time: '—', owner: 'r1', elapsed: '—' },
+      ];
+
+      const GOV_ITEMS = [
+        { id: 'g1', tag: '失败', tone: 'fail', title: '#12 callback 校验失败', desc: 'token exchange 超时。可重试，或先检查 client secret / 本地端口。', actions: ['重试', '查看日志'] },
+        { id: 'g2', tag: '阻塞', tone: 'fail', title: '#14 测试被阻塞', desc: '依赖 #12 产物，当前排队等待。', actions: ['查看依赖'] },
+        { id: 'g3', tag: '澄清', tone: '', title: 'callback URL 已确认', desc: '用户确认本地使用 localhost:3000。', actions: ['归档'] },
+        { id: 'g4', tag: '审计', tone: 'info', title: '派发记录已写入', desc: 'PM2 将 #12/#13/#14 派发至 e1/e2/t1。', actions: ['查看'] },
       ];
 
       const STATUS = {
-        done: { label: '完成', cls: '' },
-        running: { label: '进行中', cls: 's-run' },
-        failed: { label: '失败', cls: 's-fail' },
-        blocked: { label: '阻塞', cls: 's-fail' },
-        pending: { label: '排队', cls: 's-wait' },
+        done: { label: '完成', cls: 'done' },
+        running: { label: '进行中', cls: 'run' },
+        failed: { label: '失败', cls: 'fail' },
+        blocked: { label: '阻塞', cls: 'fail' },
+        pending: { label: '排队', cls: 'wait' },
       };
 
       const state = {
-        split: 'balanced',
+        tab: 'tasks',
         filter: 'all',
+        msgFilter: 'all',
         layerId: 'executor',
+        roleId: 'all', // all | specific role id in current layer
         todoId: 't2',
+        paused: false,
+        focusChat: false,
+        elapsedSec: 134,
       };
 
       const layerOf = (id) => LAYERS.find((l) => l.id === id);
+      const todoOf = (id) => TODOS.find((t) => t.id === id);
+
+      function allRoles() {
+        return LAYERS.flatMap((l) => l.roles.map((r) => ({ ...r, layerId: l.id, layerName: l.name, color: l.color })));
+      }
+
+      function counts() {
+        const roles = allRoles();
+        return {
+          layers: LAYERS.length,
+          roles: roles.length,
+          activeRoles: roles.filter((r) => r.status === 'run').length,
+          failRoles: roles.filter((r) => r.status === 'fail').length,
+          tasks: TODOS.length,
+          failTasks: TODOS.filter((t) => t.status === 'failed' || t.status === 'blocked').length,
+          runningTasks: TODOS.filter((t) => t.status === 'running').length,
+          doneTasks: TODOS.filter((t) => t.status === 'done').length,
+        };
+      }
 
       function filteredTodos() {
         return TODOS.filter((t) => {
@@ -967,62 +1966,539 @@
         });
       }
 
-      function render() {
-        document.querySelectorAll('[data-split]').forEach((b) => {
-          b.setAttribute('aria-pressed', String(b.dataset.split === state.split));
+      function layerTodos(layerId) {
+        return TODOS.filter((t) => t.layer === layerId);
+      }
+
+      function filterMessages(messages) {
+        return messages.filter((m) => {
+          if (state.roleId !== 'all' && m.roleId && m.roleId !== state.roleId) return false;
+          if (state.msgFilter === 'all') return true;
+          if (state.msgFilter === 'dialog') return m.role === 'user' || m.role === 'assistant';
+          if (state.msgFilter === 'tool') return m.role === 'tool';
+          if (state.msgFilter === 'error') return m.role === 'error';
+          if (state.msgFilter === 'handoff') return m.kind === 'handoff' || (m.tags || []).includes('交接');
+          return true;
         });
-        document.querySelectorAll('[data-filter]').forEach((b) => {
-          b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter));
+      }
+
+      function esc(s) {
+        return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      }
+
+      function roleLabel(m) {
+        if (m.kind === 'handoff') return '交接';
+        if (m.streaming) return '输出中';
+        return { user: '用户', assistant: '回复', system: '系统', tool: '工具', error: '错误' }[m.role] || m.role;
+      }
+
+      function formatElapsed(sec) {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}m ${String(s).padStart(2, '0')}s`;
+      }
+
+      function preferredTodoForLayer(layerId) {
+        return (
+          TODOS.find((t) => t.layer === layerId && (t.status === 'failed' || t.status === 'blocked' || t.status === 'running')) ||
+          TODOS.find((t) => t.layer === layerId)
+        );
+      }
+
+      function selectLayer(layerId, roleId = 'all') {
+        state.layerId = layerId;
+        state.roleId = roleId;
+        const todo = preferredTodoForLayer(layerId);
+        if (todo) {
+          if (roleId !== 'all') {
+            const byRole = TODOS.find((t) => t.layer === layerId && t.roleId === roleId);
+            state.todoId = byRole?.id || todo.id;
+          } else {
+            state.todoId = todo.id;
+          }
+        }
+        state.tab = 'tasks';
+        render();
+      }
+
+      function selectTodo(id) {
+        const todo = todoOf(id);
+        if (!todo) return;
+        state.todoId = todo.id;
+        state.layerId = todo.layer;
+        state.roleId = todo.roleId || 'all';
+        state.tab = 'tasks';
+        render();
+      }
+
+      function setHint(text) {
+        const el = document.getElementById('quick-hint');
+        if (el) el.textContent = text;
+        const toast = document.getElementById('chat-toast');
+        if (toast) {
+          toast.textContent = text;
+          toast.dataset.show = 'true';
+          clearTimeout(setHint._t);
+          setHint._t = setTimeout(() => {
+            toast.dataset.show = 'false';
+          }, 1800);
+        }
+      }
+
+      function updateAttentionBar() {
+        const bar = document.getElementById('attention-bar');
+        const failCard = document.getElementById('fail-card');
+        const blockCard = document.getElementById('block-card');
+        const blockPending = blockCard && blockCard.dataset.tone === 'block';
+        const failPending = failCard && failCard.dataset.tone === 'fail';
+        if (!bar) return;
+        if (failPending) {
+          bar.dataset.show = 'true';
+          bar.querySelector('strong').textContent = '#12 校验失败';
+          bar.querySelector('span:nth-of-type(2)').textContent = '可重试 / 补 secret / 调整范围';
+          bar.dataset.target = 'fail-card';
+        } else if (blockPending) {
+          bar.dataset.show = 'true';
+          bar.querySelector('strong').textContent = 'callback 待确认';
+          bar.querySelector('span:nth-of-type(2)').textContent = '需要你拍板后继续';
+          bar.dataset.target = 'block-card';
+        } else {
+          bar.dataset.show = 'false';
+        }
+      }
+
+      function autoGrowComposer() {
+        const input = document.getElementById('composer-input');
+        if (!input) return;
+        input.style.height = 'auto';
+        input.style.height = Math.min(140, Math.max(38, input.scrollHeight)) + 'px';
+        const count = document.getElementById('char-count');
+        const send = document.getElementById('composer-send');
+        const len = input.value.trim().length;
+        if (count) count.textContent = String(input.value.length);
+        if (send) send.disabled = len === 0;
+      }
+
+      function appendUserBubble(text) {
+        const stream = document.getElementById('chat-stream');
+        if (!stream) return;
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const id = 'jump-u' + (stream.querySelectorAll('.chat-msg.user').length + 1);
+        const art = document.createElement('article');
+        art.className = 'chat-msg user';
+        art.id = id;
+        art.innerHTML = `<div class="meta"><b>你</b><span>${hh}:${mm}</span></div><div class="bubble"><div class="text"></div></div>`;
+        art.querySelector('.text').textContent = text;
+        const typing = document.getElementById('typing-row');
+        stream.insertBefore(art, typing || null);
+
+        // 更新跳转轨
+        const rail = document.querySelector('.jump-rail');
+        if (rail) {
+          const n = stream.querySelectorAll('.chat-msg.user').length;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.setAttribute('data-jump-to', id);
+          btn.title = `第 ${n} 条用户输入`;
+          btn.textContent = String(n);
+          btn.onclick = () => {
+            document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.querySelectorAll('[data-jump-to]').forEach((b) => (b.dataset.on = 'false'));
+            btn.dataset.on = 'true';
+          };
+          rail.appendChild(btn);
+        }
+        art.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+
+      function bindChatBody() {
+        const stream = document.getElementById('chat-stream');
+        const scrollBtn = document.getElementById('scroll-bottom');
+
+        const updateScrollBtn = () => {
+          if (!stream || !scrollBtn) return;
+          const dist = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+          scrollBtn.dataset.show = dist > 80 ? 'true' : 'false';
+        };
+        stream?.addEventListener('scroll', updateScrollBtn);
+        scrollBtn?.addEventListener('click', () => {
+          stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' });
         });
 
-        const layer = layerOf(state.layerId) || LAYERS[0];
-        const todos = filteredTodos();
-        const linked = TODOS.filter((t) => t.layer === layer.id);
-        const groups = [
-          {
-            title: '当前',
-            items: todos.filter((t) => ['failed', 'blocked', 'running'].includes(t.status)),
-          },
-          {
-            title: '排队',
-            items: todos.filter((t) => t.status === 'pending'),
-          },
-          {
-            title: '完成',
-            items: todos.filter((t) => t.status === 'done'),
-          },
-        ].filter((g) => g.items.length);
+        document.getElementById('attn-jump')?.addEventListener('click', () => {
+          const bar = document.getElementById('attention-bar');
+          const target = bar?.dataset.target;
+          if (target) document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
 
-        document.getElementById('right').innerHTML = `
-          <div class="r-head">
-            <div>
-              <h2>任务 / 层级详情</h2>
-            </div>
-            <span class="meta">${TODOS.length} todo · ${layer.name}</span>
-            <div class="r-actions">
-              <button type="button" class="danger">重试失败</button>
-              <button type="button" class="primary">打开此层</button>
-            </div>
+        // 建议 chips → 填入输入框
+        document.querySelectorAll('[data-fill]').forEach((btn) => {
+          btn.onclick = () => {
+            const input = document.getElementById('composer-input');
+            input.value = btn.getAttribute('data-fill');
+            autoGrowComposer();
+            input.focus();
+            setHint('已填入建议，可直接发送');
+          };
+        });
+
+        // 决策卡
+        document.querySelectorAll('[data-decide]').forEach((btn) => {
+          btn.onclick = () => {
+            const v = btn.getAttribute('data-decide');
+            const card = document.getElementById('block-card');
+            if (!card) return;
+            const map = {
+              localhost: '已确认：本地 callback = localhost:3000',
+              both: '已确认：本地 + 预留生产域名',
+              later: '已推迟确认 callback URL',
+            };
+            card.dataset.tone = 'done';
+            card.querySelector('.tone').textContent = '已处理';
+            card.querySelector('strong').textContent = 'callback URL';
+            card.querySelector('.ic-body').textContent = map[v] || '已处理';
+            const code = card.querySelector('.ic-code');
+            if (code) code.remove();
+            const actions = card.querySelector('.ic-actions');
+            if (actions) {
+              actions.outerHTML = '<div class="ic-done-note">已回传团队 · 执行将继续</div>';
+            }
+            // 写入决策条
+            if (v === 'localhost' || v === 'both') {
+              const bar = document.getElementById('decision-bar');
+              if (bar && !bar.querySelector('[data-decision="callback"]')) {
+                const chip = document.createElement('span');
+                chip.className = 'decision-chip';
+                chip.dataset.decision = 'callback';
+                chip.innerHTML = `<b>${v === 'both' ? '本地+生产 callback' : 'callback=localhost:3000'}</b><button type="button" title="移除" data-rm-decision>×</button>`;
+                chip.querySelector('button').onclick = () => {
+                  chip.remove();
+                  setHint('已从确认集移除');
+                };
+                bar.appendChild(chip);
+              }
+            }
+            updateAttentionBar();
+            setHint('决策已回传团队');
+          };
+        });
+
+        // 产物点击（演示）
+        document.querySelectorAll('[data-artifact]').forEach((btn) => {
+          btn.onclick = () => setHint(`打开产物：${btn.textContent.trim()}（演示）`);
+        });
+
+        // 决策 chip 删除
+        document.querySelectorAll('[data-rm-decision]').forEach((btn) => {
+          btn.onclick = () => {
+            btn.closest('.decision-chip')?.remove();
+            setHint('已从确认集移除');
+          };
+        });
+
+        // 用户消息跳转轨
+        document.querySelectorAll('[data-jump-to]').forEach((btn) => {
+          btn.onclick = () => {
+            const id = btn.getAttribute('data-jump-to');
+            document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.querySelectorAll('[data-jump-to]').forEach((b) => (b.dataset.on = 'false'));
+            btn.dataset.on = 'true';
+          };
+        });
+
+        // 输入上下文模式
+        document.querySelectorAll('[data-cx]').forEach((btn) => {
+          btn.onclick = () => {
+            document.querySelectorAll('[data-cx]').forEach((b) => (b.dataset.on = 'false'));
+            btn.dataset.on = 'true';
+            const mode = btn.getAttribute('data-cx');
+            const hint = document.getElementById('cx-hint');
+            const input = document.getElementById('composer-input');
+            if (mode === 'constraint') {
+              hint.textContent = '输入将作为硬约束写入团队上下文';
+              input.placeholder = '例如：必须使用现有 auth 中间件，不要新建一套…';
+            } else if (mode === 'clarify') {
+              hint.textContent = '输入将作为澄清回复回传当前阻塞项';
+              input.placeholder = '直接回答当前需要确认的问题…';
+            } else {
+              hint.textContent = '输入将作为追加任务发给团队';
+              input.placeholder = '补充约束、回答澄清，或追加任务…';
+            }
+            input.focus();
+          };
+        });
+
+        const input = document.getElementById('composer-input');
+        input?.addEventListener('input', autoGrowComposer);
+        input?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById('composer-send')?.click();
+          }
+        });
+
+        document.getElementById('composer-send')?.addEventListener('click', () => {
+          const el = document.getElementById('composer-input');
+          const text = el?.value.trim();
+          if (!text) return;
+          appendUserBubble(text);
+          el.value = '';
+          autoGrowComposer();
+          setHint('已发送到团队（演示）');
+          // 轻量回执
+          const streamEl = document.getElementById('chat-stream');
+          const note = document.createElement('article');
+          note.className = 'inline-card';
+          note.dataset.tone = 'progress';
+          note.innerHTML = `
+            <div class="ic-top"><span class="tone">已接收</span><strong>团队已收到你的补充</strong><span>刚刚</span></div>
+            <div class="ic-body">会按当前模式处理，并在需要时再次向你确认。</div>
+          `;
+          const typing = document.getElementById('typing-row');
+          streamEl?.insertBefore(note, typing || null);
+          note.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        });
+
+        updateAttentionBar();
+        autoGrowComposer();
+        updateScrollBtn();
+      }
+
+      function renderChatTop(c) {
+        const status = document.getElementById('chat-status');
+        if (status) {
+          status.textContent = state.paused ? '已暂停' : '运行中';
+          status.dataset.paused = String(state.paused);
+        }
+
+        const elapsed = document.getElementById('chat-elapsed');
+        if (elapsed) elapsed.innerHTML = `耗时 <b>${formatElapsed(state.elapsedSec)}</b>`;
+
+        const failChip = document.getElementById('chat-fail');
+        if (failChip) {
+          failChip.innerHTML = `失败 <b>${c.failTasks}</b>`;
+          failChip.style.display = c.failTasks ? '' : 'none';
+        }
+
+        const pauseBtn = document.getElementById('quick-pause');
+        if (pauseBtn) {
+          pauseBtn.textContent = state.paused ? '恢复全部' : '暂停全部';
+          pauseBtn.dataset.on = String(state.paused);
+        }
+
+        const focusBtn = document.getElementById('quick-focus');
+        if (focusBtn) focusBtn.dataset.on = String(Boolean(state.focusChat));
+
+        const app = document.querySelector('.app');
+        const side = document.querySelector('.side');
+        if (app) {
+          app.style.gridTemplateColumns = state.focusChat
+            ? 'minmax(0, 1fr) 0px'
+            : 'minmax(0, 1fr) minmax(520px, 46vw)';
+        }
+        if (side) side.style.display = state.focusChat ? 'none' : '';
+
+        const typing = document.getElementById('typing-row');
+        if (typing) typing.style.opacity = state.paused ? '0.4' : '1';
+      }
+
+      function bindChatQuick() {
+        document.querySelectorAll('[data-quick]').forEach((btn) => {
+          btn.onclick = () => {
+            const action = btn.getAttribute('data-quick');
+            if (action === 'pause') {
+              state.paused = !state.paused;
+              setHint(state.paused ? '已全局暂停' : '已恢复运行');
+              render();
+              return;
+            }
+            if (action === 'retry') {
+              setHint('已提交 #12 重试');
+              alert('演示：已提交失败任务重试');
+              return;
+            }
+            if (action === 'focus-fail') {
+              const fail = TODOS.find((t) => t.status === 'failed' || t.status === 'blocked');
+              if (fail) {
+                state.focusChat = false;
+                selectTodo(fail.id);
+                setHint(`右侧已定位 ${fail.key}`);
+              }
+              return;
+            }
+            if (action === 'copy-summary') {
+              const c = counts();
+              const text = `OAuth 登录实现 · ${state.paused ? '已暂停' : '运行中'} · 耗时 ${formatElapsed(state.elapsedSec)} · 层级 ${c.layers} · 角色 ${c.roles} · 失败 ${c.failTasks}`;
+              navigator.clipboard?.writeText(text);
+              setHint('摘要已复制');
+              return;
+            }
+            if (action === 'focus-mode') {
+              state.focusChat = !state.focusChat;
+              setHint(state.focusChat ? '专注对话：右侧已收起' : '已退出专注对话');
+              render();
+            }
+          };
+        });
+      }
+
+      function renderControlBar() {
+        const c = counts();
+        document.getElementById('control-bar').innerHTML = `
+          <span class="live" data-paused="${state.paused}">
+            <i></i>${state.paused ? '已暂停' : '运行中'}
+          </span>
+          <span class="stat">耗时 <b>${formatElapsed(state.elapsedSec)}</b></span>
+          <span class="stat">层级 <b>${c.layers}</b></span>
+          <span class="stat">角色 <b>${c.roles}</b><span style="color:var(--fg-faint)"> · 活 ${c.activeRoles}</span></span>
+          <span class="stat" data-tone="${c.failTasks ? 'fail' : ''}">失败 <b>${c.failTasks}</b></span>
+          <span class="grow"></span>
+          <button type="button" class="btn" id="btn-focus-fail" ${c.failTasks ? '' : 'disabled'} style="${c.failTasks ? '' : 'opacity:.4'}">定位失败</button>
+          <button type="button" class="btn danger" id="btn-retry" ${c.failTasks ? '' : 'disabled'} style="${c.failTasks ? '' : 'opacity:.4'}">重试失败</button>
+          <button type="button" class="btn primary" id="btn-pause">${state.paused ? '恢复全部' : '暂停全部'}</button>
+        `;
+
+        document.getElementById('btn-pause').onclick = () => {
+          state.paused = !state.paused;
+          render();
+        };
+        document.getElementById('btn-focus-fail').onclick = () => {
+          const fail = TODOS.find((t) => t.status === 'failed' || t.status === 'blocked');
+          if (fail) selectTodo(fail.id);
+        };
+        document.getElementById('btn-retry').onclick = () => {
+          alert('演示：已提交失败任务重试');
+        };
+
+        renderChatTop(c);
+        bindChatQuick();
+      }
+
+      function renderLayerOverview() {
+        const c = counts();
+        document.getElementById('layer-overview').innerHTML = `
+          <div class="summary">
+            <span>共 <b>${c.layers}</b> 层</span>
+            <span><b>${c.roles}</b> 角色</span>
+            <span>任务 <b>${c.tasks}</b></span>
           </div>
-
-          <div class="layer-bar">
+          <div class="layer-rail">
             ${LAYERS.map((l) => {
-              const fail = TODOS.some((t) => t.layer === l.id && (t.status === 'failed' || t.status === 'blocked'));
+              const nRoles = l.roles.length;
+              const nTasks = layerTodos(l.id).length;
+              const fail = layerTodos(l.id).some((t) => t.status === 'failed' || t.status === 'blocked');
               return `
                 <button type="button" data-layer="${l.id}" data-active="${state.layerId === l.id}" style="--c:${l.color}">
-                  ${fail ? '<span class="dot-fail"></span>' : ''}
-                  <span class="code">${l.code}</span>
-                  <span class="name">${l.name}</span>
-                  <span class="state">${l.stateLabel}</span>
+                  ${l.live && !state.paused ? '<span class="dot live"></span>' : fail ? '<span class="dot fail"></span>' : ''}
+                  <span class="code">${l.code}</span><span class="name">${l.name}</span>
+                  <span class="meta">${nRoles} 角色 · ${nTasks} 任务</span>
                 </button>
               `;
             }).join('')}
           </div>
+        `;
+        document.querySelectorAll('#layer-overview [data-layer]').forEach((btn) => {
+          btn.onclick = () => selectLayer(btn.getAttribute('data-layer'));
+        });
+      }
 
-          <div class="body" data-split="${state.split}">
-            <section class="block">
-              <div class="block-head">
-                <h3>Todo <span>${todos.length}</span></h3>
+      function renderTool(m) {
+        const t = m.tool;
+        const badgeCls = t.status === 'fail' ? 'fail' : t.status === 'ok' ? 'ok' : '';
+        const badgeText = t.status === 'fail' ? '失败' : t.status === 'ok' ? '成功' : t.status || '';
+        return `
+          <details class="tool" ${t.status === 'fail' ? 'open' : ''}>
+            <summary>
+              <span class="cmd">${esc(t.name)} · ${esc(t.summary)}</span>
+              <span class="badge ${badgeCls}">${badgeText}</span>
+            </summary>
+            <pre>${esc(t.detail || '')}</pre>
+          </details>
+        `;
+      }
+
+      function renderMessage(m) {
+        const active = Boolean(state.todoId && m.taskIds?.includes(state.todoId));
+        if (m.kind === 'handoff') {
+          return `
+            <div class="handoff">
+              <div class="rail"><span class="dot"></span><span class="line"></span></div>
+              <div class="card"><b>${esc(m.text)}</b><span class="when">${m.when}</span></div>
+            </div>
+          `;
+        }
+        return `
+          <article class="msg" data-role="${m.role}" data-active="${active}" data-streaming="${Boolean(m.streaming)}">
+            <div class="rail"><span class="dot"></span><span class="line"></span></div>
+            <div class="content">
+              <div class="top">
+                <span class="who">${esc(m.who)}</span>
+                <span class="role">${roleLabel(m)}</span>
+                <span class="when">${m.when}</span>
+              </div>
+              ${
+                m.role === 'tool' && m.tool
+                  ? renderTool(m)
+                  : `<div class="text ${m.streaming ? 'stream-text' : ''}">${esc(m.text || '')}</div>`
+              }
+              ${m.streaming ? `<div class="stream-status">实时输出中…</div>` : ''}
+              ${
+                m.tags?.length || m.taskIds?.length
+                  ? `<div class="tags">
+                      ${(m.taskIds || [])
+                        .map((tid) => {
+                          const t = todoOf(tid);
+                          return t ? `<span class="task" data-todo="${t.id}">${t.key}</span>` : '';
+                        })
+                        .join('')}
+                      ${(m.tags || []).map((t) => `<span>${esc(t)}</span>`).join('')}
+                    </div>`
+                  : ''
+              }
+            </div>
+          </article>
+        `;
+      }
+
+      function renderTasks() {
+        const layer = layerOf(state.layerId) || LAYERS[0];
+        const todos = filteredTodos();
+        const layerTaskList = layerTodos(layer.id);
+        const messages = filterMessages(layer.messages);
+        const activeTodo = todoOf(state.todoId);
+
+        const groups = [
+          { title: '当前', items: todos.filter((t) => ['failed', 'blocked', 'running'].includes(t.status)) },
+          { title: '排队', items: todos.filter((t) => t.status === 'pending') },
+          { title: '完成', items: todos.filter((t) => t.status === 'done') },
+        ].filter((g) => g.items.length);
+
+        return `
+          <div class="tasks-layout ${state.paused ? 'paused-mask' : ''}" style="--c:${layer.color}">
+            <div class="role-strip">
+              <div class="label">角色 · ${layer.roles.length}</div>
+              <button type="button" class="role-chip" data-role="all" data-active="${state.roleId === 'all'}">
+                <span class="rn">全部角色</span>
+                <span class="rm">${layer.roles.length} 人 · ${layerTaskList.length} 任务</span>
+              </button>
+              ${layer.roles
+                .map((r) => {
+                  const stCls = r.status === 'run' ? 'run' : r.status === 'fail' ? 'fail' : 'idle';
+                  return `
+                    <button type="button" class="role-chip" data-role="${r.id}" data-active="${state.roleId === r.id}">
+                      <span class="rn">${r.name}</span>
+                      <span class="rm"><span class="${stCls}">${r.statusLabel}</span> · ${r.taskCount} 任务</span>
+                    </button>
+                  `;
+                })
+                .join('')}
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h3>任务<em>${todos.length}</em></h3>
                 <div class="filters">
                   <button type="button" data-filter="all" aria-pressed="${state.filter === 'all'}">全部</button>
                   <button type="button" data-filter="active" aria-pressed="${state.filter === 'active'}">进行中</button>
@@ -1030,30 +2506,59 @@
                   <button type="button" data-filter="done" aria-pressed="${state.filter === 'done'}">完成</button>
                 </div>
               </div>
-              <div class="scroll">
+              <div class="task-cards">
+                ${
+                  layerTaskList.length
+                    ? layerTaskList
+                        .map((t) => {
+                          const st = STATUS[t.status];
+                          return `
+                            <button type="button" class="task-card" data-todo="${t.id}" data-active="${state.todoId === t.id}" style="--c:${layer.color}">
+                              <div class="tc-top">
+                                <span class="tc-id">${t.key}</span>
+                                <span class="tc-st ${st.cls}">${st.label}</span>
+                              </div>
+                              <div class="tc-title">${t.title}</div>
+                              <div class="tc-sub">${t.sub}</div>
+                              <div class="tc-meta"><b>${t.owner}</b><span>${t.elapsed}</span><span>${t.priority}</span></div>
+                            </button>
+                          `;
+                        })
+                        .join('')
+                    : '<div class="empty" style="padding:8px 0">当前层暂无任务卡片</div>'
+                }
+              </div>
+              <div class="scroll" id="todo-scroll">
                 ${
                   groups.length
                     ? groups
                         .map(
                           (g) => `
-                      <div class="group-label">${g.title} · ${g.items.length}</div>
+                      <div class="group">${g.title} · ${g.items.length}</div>
                       ${g.items
                         .map((t) => {
                           const l = layerOf(t.layer);
                           const st = STATUS[t.status];
                           return `
-                            <div class="todo-row" data-todo="${t.id}" data-active="${state.todoId === t.id}" data-done="${t.status === 'done'}" style="--c:${l.color}">
-                              <div class="check">${t.status === 'done' ? '✓' : ''}</div>
-                              <div class="todo-main">
-                                <div class="todo-title">${t.title}</div>
-                                <div class="todo-sub">${t.sub}</div>
-                                <div class="todo-tags">
+                            <div class="todo" data-todo="${t.id}" data-active="${state.todoId === t.id}" data-done="${t.status === 'done'}" style="--c:${l.color}">
+                              <div class="box">${t.status === 'done' ? '✓' : ''}</div>
+                              <div class="body">
+                                <div class="title-line">
+                                  <span class="id">${t.key}</span>
+                                  <span class="title">${t.title}</span>
+                                </div>
+                                <div class="sub">${t.sub}</div>
+                                <div class="meta">
                                   <b>${l.name}</b>
                                   <span class="${st.cls}">${st.label}</span>
-                                  <span>${t.priority}</span>
+                                  <span>${t.owner}</span>
+                                  <span>${t.elapsed}</span>
                                 </div>
                               </div>
-                              <div class="todo-time">${t.time}</div>
+                              <div class="side-meta">
+                                <span class="time">${t.time}</span>
+                                <span class="pri" data-p="${t.priority}">${t.priority}</span>
+                              </div>
                             </div>
                           `;
                         })
@@ -1066,110 +2571,321 @@
               </div>
             </section>
 
-            <section class="block" style="--c:${layer.color}">
-              <div class="block-head">
-                <h3>层级对话 <span>${layer.messages.length}</span></h3>
-                <span style="color:var(--fg-faint);font-size:10px">${layer.stateLabel}</span>
+            <section class="panel">
+              <div class="panel-head">
+                <h3>层级消息<em>${messages.length}</em></h3>
+                <div class="filters">
+                  <button type="button" data-msg-filter="all" aria-pressed="${state.msgFilter === 'all'}">全部</button>
+                  <button type="button" data-msg-filter="dialog" aria-pressed="${state.msgFilter === 'dialog'}">对话</button>
+                  <button type="button" data-msg-filter="tool" aria-pressed="${state.msgFilter === 'tool'}">工具</button>
+                  <button type="button" data-msg-filter="error" aria-pressed="${state.msgFilter === 'error'}">错误</button>
+                  <button type="button" data-msg-filter="handoff" aria-pressed="${state.msgFilter === 'handoff'}">交接</button>
+                </div>
               </div>
-              <div class="detail-context">
-                <div class="line1">
-                  <span class="live">${layer.name}</span>
+
+              ${
+                (layer.live || messages.some((m) => m.streaming)) && !state.paused
+                  ? `<div class="live-bar">
+                      <span class="pulse"><i></i>LIVE</span>
+                      <span>${esc(layer.liveLabel || '正在输出…')}</span>
+                      <span class="grow"></span>
+                      <span class="muted">${layer.name} · ${layer.roles.length} 角色</span>
+                    </div>`
+                  : state.paused
+                    ? `<div class="live-bar"><span class="muted">全局已暂停 · 消息流冻结展示</span></div>`
+                    : ''
+              }
+
+              <div class="ctx">
+                <div class="l1">
+                  <span class="layer">${layer.code} · ${layer.name}</span>
                   <strong>${layer.title}</strong>
+                  <span class="state">${layer.stateLabel}</span>
                 </div>
-                <div class="line2">${layer.desc}</div>
-                <div class="line3">
-                  ${layer.from ? `来自 <b>${layer.from}</b>` : '<b>入口层</b>'}
-                  ${layer.to ? ` → <b>${layer.to}</b>` : ''}
-                  ${linked.length ? ` · 关联 ${linked.map((t) => t.title).join(' / ')}` : ''}
+                <div class="l2">${layer.desc}</div>
+                <div class="l3">
+                  <span>角色 <b>${layer.roles.length}</b></span>
+                  <span>任务 <b>${layerTaskList.length}</b></span>
+                  <span>${layer.from ? `来自 <b>${layer.from}</b>` : '<b>入口层</b>'}</span>
+                  <span>${layer.to ? `下一跳 <b>${layer.to}</b>` : '无下一跳'}</span>
+                  ${
+                    activeTodo && activeTodo.layer === layer.id
+                      ? `<span>聚焦 <b>${activeTodo.key}</b></span>`
+                      : ''
+                  }
                 </div>
               </div>
-              <div class="scroll">
+
+              <div class="scroll" id="msg-scroll">
                 ${
-                  layer.messages.length
-                    ? layer.messages
-                        .map(
-                          (m) => `
-                      <article class="msg" data-role="${m.role}">
-                        <div class="msg-top">
-                          <span class="who">${m.who}</span>
-                          <span class="role">${roleLabel(m.role)}</span>
-                          <span class="when">${m.when}</span>
-                        </div>
-                        <div class="msg-body">${esc(m.text)}</div>
-                        ${
-                          m.tags?.length
-                            ? `<div class="msg-tags">${m.tags.map((t) => `<span>${t}</span>`).join('')}</div>`
-                            : ''
-                        }
-                      </article>
-                    `,
-                        )
-                        .join('')
-                    : '<div class="empty">该层暂无对话</div>'
+                  messages.length
+                    ? `<div class="stream">
+                        <div class="time-mark">今天</div>
+                        ${messages.map((m) => renderMessage(m)).join('')}
+                      </div>`
+                    : `<div class="empty">${layer.messages.length ? '当前筛选下没有消息' : '该层暂无消息'}</div>`
                 }
               </div>
             </section>
           </div>
         `;
-
-        bind();
       }
 
-      function roleLabel(role) {
-        return { user: '用户', assistant: '回复', system: '系统', tool: '工具', error: '错误' }[role] || role;
+      function renderOverview() {
+        const c = counts();
+        const roles = allRoles();
+        return `
+          <div class="overview">
+            <div class="ov-stats">
+              <div class="ov-stat"><div class="k">层级</div><div class="v">${c.layers}</div><div class="s">流水线节点</div></div>
+              <div class="ov-stat"><div class="k">角色</div><div class="v">${c.roles}</div><div class="s">活跃 ${c.activeRoles} · 失败 ${c.failRoles}</div></div>
+              <div class="ov-stat"><div class="k">任务</div><div class="v run">${c.runningTasks}</div><div class="s">进行中 / 共 ${c.tasks}</div></div>
+              <div class="ov-stat"><div class="k">失败/阻塞</div><div class="v fail">${c.failTasks}</div><div class="s">需处理</div></div>
+            </div>
+
+            <div>
+              <div class="ov-section-title">层级一览 · 点击切换</div>
+              <div class="ov-layers">
+                ${LAYERS.map((l) => {
+                  const nRoles = l.roles.length;
+                  const nTasks = layerTodos(l.id).length;
+                  return `
+                    <div class="ov-layer" data-goto-layer="${l.id}" style="--c:${l.color}">
+                      <div class="ln">${l.code} · ${l.name}</div>
+                      <div class="ld">${l.desc}</div>
+                      <div class="lm">${l.stateLabel}<br/>${nRoles} 角色 · ${nTasks} 任务</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <div>
+              <div class="ov-section-title">全部角色 · ${roles.length}</div>
+              <div class="ov-roles">
+                ${roles
+                  .map((r) => {
+                    const stCls = r.status === 'run' ? 'run' : r.status === 'fail' ? 'fail' : 'idle';
+                    return `
+                      <div class="ov-role" data-goto-role="${r.layerId}:${r.id}" style="border-left:2px solid ${r.color}">
+                        <b>${r.name}</b>
+                        <span class="st ${stCls}">${r.statusLabel}</span>
+                        <div style="margin-top:2px;color:var(--fg-faint);font-size:10px">${r.layerName} · ${r.taskCount} 任务</div>
+                      </div>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            </div>
+          </div>
+        `;
       }
 
-      function esc(s) {
-        return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      function renderMetrics() {
+        const timing = [
+          { name: '接待', pct: 12, val: '9s' },
+          { name: '规划', pct: 28, val: '42s' },
+          { name: '管控', pct: 18, val: '24s' },
+          { name: '执行', pct: 78, val: '2m 12s' },
+          { name: '测试', pct: 5, val: '等待' },
+          { name: '评审', pct: 0, val: '—' },
+        ];
+        return `
+          <div class="metrics">
+            <div>
+              <div class="ov-section-title">各层耗时占比</div>
+              ${timing
+                .map(
+                  (t) => `
+                <div class="metric-row">
+                  <div class="name">${t.name}</div>
+                  <div class="bar"><i style="width:${t.pct}%"></i></div>
+                  <div class="val">${t.val}</div>
+                </div>
+              `,
+                )
+                .join('')}
+            </div>
+            <div>
+              <div class="ov-section-title">角色工作量</div>
+              <table class="metric-table">
+                <thead>
+                  <tr><th>角色</th><th>层级</th><th>任务</th><th>消息</th><th>状态</th></tr>
+                </thead>
+                <tbody>
+                  ${allRoles()
+                    .map((r) => {
+                      const layer = layerOf(r.layerId);
+                      const msgCount = (layer?.messages || []).filter((m) => m.roleId === r.id || (!m.roleId && layer.roles.length === 1)).length;
+                      return `
+                        <tr data-goto-role="${r.layerId}:${r.id}" style="cursor:pointer">
+                          <td>${r.name}</td>
+                          <td class="num">${r.layerName}</td>
+                          <td class="num">${r.taskCount}</td>
+                          <td class="num">${msgCount}</td>
+                          <td class="num">${r.statusLabel}</td>
+                        </tr>
+                      `;
+                    })
+                    .join('')}
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <div class="ov-section-title">工具调用摘要</div>
+              <table class="metric-table">
+                <thead>
+                  <tr><th>工具</th><th>次数</th><th>成功</th><th>失败</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>edit</td><td class="num">3</td><td class="num">3</td><td class="num">0</td></tr>
+                  <tr><td>shell</td><td class="num">1</td><td class="num">0</td><td class="num">1</td></tr>
+                  <tr><td>write</td><td class="num">1</td><td class="num">1</td><td class="num">0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
       }
 
-      function bind() {
-        document.querySelectorAll('[data-layer]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            state.layerId = btn.getAttribute('data-layer');
-            state.todoId = TODOS.find((t) => t.layer === state.layerId)?.id || null;
-            render();
-          });
+      function renderGovernance() {
+        return `
+          <div class="gov">
+            <div class="ov-section-title">待处理 · ${GOV_ITEMS.filter((g) => g.tone === 'fail').length}</div>
+            ${GOV_ITEMS.map(
+              (g) => `
+              <div class="gov-item">
+                <div class="tag ${g.tone}">${g.tag}</div>
+                <div class="body">
+                  <div class="title">${g.title}</div>
+                  <div class="desc">${g.desc}</div>
+                </div>
+                <div class="act">
+                  ${g.actions
+                    .map(
+                      (a, i) =>
+                        `<button type="button" class="${i === 0 ? 'primary' : ''}" data-gov-action="${g.id}:${a}">${a}</button>`,
+                    )
+                    .join('')}
+                </div>
+              </div>
+            `,
+            ).join('')}
+          </div>
+        `;
+      }
+
+      function render() {
+        const c = counts();
+        document.getElementById('tab-task-count').textContent = String(c.tasks);
+        document.getElementById('tab-gov-count').textContent = String(
+          GOV_ITEMS.filter((g) => g.tone === 'fail').length,
+        );
+
+        document.querySelectorAll('.side-tabs [data-tab]').forEach((btn) => {
+          btn.setAttribute('aria-selected', String(btn.dataset.tab === state.tab));
         });
+
+        renderControlBar();
+        renderLayerOverview();
+
+        const host = document.getElementById('side-body');
+        if (state.tab === 'tasks') host.innerHTML = renderTasks();
+        if (state.tab === 'overview') host.innerHTML = renderOverview();
+        if (state.tab === 'metrics') host.innerHTML = renderMetrics();
+        if (state.tab === 'governance') host.innerHTML = renderGovernance();
+
+        bindBody();
+        scrollActive();
+      }
+
+      function scrollActive() {
+        requestAnimationFrame(() => {
+          document.querySelector('.todo[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+          const streamMsg = document.querySelector('.msg[data-streaming="true"]');
+          const activeMsg = document.querySelector('.msg[data-active="true"]');
+          (streamMsg || activeMsg)?.scrollIntoView({ block: 'nearest' });
+        });
+      }
+
+      function bindBody() {
+        document.querySelectorAll('[data-role]').forEach((btn) => {
+          btn.onclick = () => {
+            state.roleId = btn.getAttribute('data-role');
+            if (state.roleId !== 'all') {
+              const todo = TODOS.find((t) => t.layer === state.layerId && t.roleId === state.roleId);
+              if (todo) state.todoId = todo.id;
+            }
+            render();
+          };
+        });
+
         document.querySelectorAll('[data-todo]').forEach((el) => {
-          el.addEventListener('click', () => {
-            const todo = TODOS.find((t) => t.id === el.getAttribute('data-todo'));
-            if (!todo) return;
-            state.todoId = todo.id;
-            state.layerId = todo.layer;
-            render();
-          });
+          el.onclick = (e) => {
+            e.stopPropagation();
+            selectTodo(el.getAttribute('data-todo'));
+          };
         });
-        document.querySelectorAll('.block-head [data-filter]').forEach((btn) => {
-          btn.addEventListener('click', () => {
+
+        document.querySelectorAll('[data-filter]').forEach((btn) => {
+          btn.onclick = () => {
             state.filter = btn.getAttribute('data-filter');
             render();
-          });
+          };
+        });
+
+        document.querySelectorAll('[data-msg-filter]').forEach((btn) => {
+          btn.onclick = () => {
+            state.msgFilter = btn.getAttribute('data-msg-filter');
+            render();
+          };
+        });
+
+        document.querySelectorAll('[data-goto-layer]').forEach((el) => {
+          el.onclick = () => selectLayer(el.getAttribute('data-goto-layer'));
+        });
+
+        document.querySelectorAll('[data-goto-role]').forEach((el) => {
+          el.onclick = () => {
+            const [layerId, roleId] = el.getAttribute('data-goto-role').split(':');
+            selectLayer(layerId, roleId);
+          };
+        });
+
+        document.querySelectorAll('[data-gov-action]').forEach((btn) => {
+          btn.onclick = () => {
+            const [id, action] = btn.getAttribute('data-gov-action').split(':');
+            if (action === '重试' || action === '查看依赖' || action === '查看日志') {
+              const fail = TODOS.find((t) => t.status === 'failed' || t.status === 'blocked');
+              if (fail) selectTodo(fail.id);
+            } else {
+              alert(`演示：${action}（${id}）`);
+            }
+          };
         });
       }
 
-      document.querySelectorAll('.controls [data-split]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          state.split = btn.dataset.split;
+      document.querySelectorAll('.side-tabs [data-tab]').forEach((btn) => {
+        btn.onclick = () => {
+          state.tab = btn.dataset.tab;
           render();
-        });
-      });
-      document.querySelectorAll('.controls [data-filter]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          state.filter = btn.dataset.filter;
-          render();
-        });
+        };
       });
 
-      window.addEventListener('keydown', (e) => {
-        if (e.target.matches('input, textarea')) return;
-        if (e.key === '1') state.split = 'todo-heavy';
-        if (e.key === '2') state.split = 'balanced';
-        if (e.key === '3') state.split = 'detail-heavy';
-        if (['1', '2', '3'].includes(e.key)) render();
-      });
+      // 耗时 tick（只更新数字，不整页重绘）
+      setInterval(() => {
+        if (!state.paused) {
+          state.elapsedSec += 1;
+          const elapsedText = formatElapsed(state.elapsedSec);
+          const controlElapsed = document.querySelector('#control-bar .stat b');
+          if (controlElapsed) controlElapsed.textContent = elapsedText;
+          const chatElapsed = document.querySelector('#chat-elapsed b');
+          if (chatElapsed) chatElapsed.textContent = elapsedText;
+        }
+      }, 1000);
 
       render();
+      bindChatBody();
     </script>
   </body>
 </html>
