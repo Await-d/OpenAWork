@@ -1,11 +1,14 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { createSessionsClient } from '@openAwork/web-client';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
 import { Screen } from '../src/components/Screen';
 import { ScreenHeader } from '../src/components/ui';
+import { useAuthStore } from '../src/store/auth';
 
 const RETRY_MODES = [
   {
@@ -40,7 +43,30 @@ const RETRY_MODES = [
 
 /** S26: 回答重试方式选择 */
 export default function AnswerRetryScreen() {
+  const { sessionId, messageId } = useLocalSearchParams<{
+    sessionId: string;
+    messageId?: string;
+  }>();
+  const { accessToken, gatewayUrl } = useAuthStore();
   const [selected, setSelected] = useState<string>('same');
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = useCallback(async () => {
+    if (!sessionId || !accessToken || !messageId) {
+      Alert.alert('提示', '缺少会话或消息信息，无法重试');
+      return;
+    }
+    setRetrying(true);
+    try {
+      const client = createSessionsClient(gatewayUrl);
+      await client.truncateMessages(accessToken, sessionId, messageId, { inclusive: true });
+      router.replace(`/chat/${sessionId}`);
+    } catch (err) {
+      Alert.alert('重试失败', err instanceof Error ? err.message : '请稍后重试');
+    } finally {
+      setRetrying(false);
+    }
+  }, [sessionId, messageId, accessToken, gatewayUrl]);
 
   return (
     <Screen>
@@ -56,8 +82,13 @@ export default function AnswerRetryScreen() {
           <Text style={styles.originalLabel}>原始回复</Text>
         </View>
         <Text style={styles.originalText} numberOfLines={3}>
-          已定位重试分支，正在补齐边界测试。建议先检查 auth.ts 中的 token
-          刷新逻辑，然后补充对应的单元测试用例…
+          {selected === 'edit'
+            ? '编辑后重试：将截断到上一条用户消息，你可以修改后重新发送。'
+            : selected === 'model'
+              ? '切换模型重试：将在聊天页面中切换模型后重新生成。'
+              : selected === 'temperature'
+                ? '调整参数重试：将在聊天页面中调整参数后重新生成。'
+                : '相同提示词重试：将截断到上一条用户消息并重新发送。'}
         </Text>
       </View>
 
@@ -95,9 +126,19 @@ export default function AnswerRetryScreen() {
       </View>
 
       {/* Action */}
-      <TouchableOpacity style={styles.retryBtn}>
-        <Ionicons name="refresh" size={18} color={colors.white} />
-        <Text style={styles.retryText}>重新生成</Text>
+      <TouchableOpacity
+        style={[styles.retryBtn, retrying && { opacity: 0.6 }]}
+        disabled={retrying}
+        onPress={() => void handleRetry()}
+      >
+        {retrying ? (
+          <ActivityIndicator color={colors.white} />
+        ) : (
+          <>
+            <Ionicons name="refresh" size={18} color={colors.white} />
+            <Text style={styles.retryText}>重新生成</Text>
+          </>
+        )}
       </TouchableOpacity>
     </Screen>
   );

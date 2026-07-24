@@ -1,19 +1,35 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, TextInput } from 'react-native';
+import { useState, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import { router, useLocalSearchParams } from 'expo-router';
+import {
+  createArtifactsClient,
+  createSessionsClient,
+} from '@openAwork/web-client';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
 import { Screen } from '../src/components/Screen';
 import { ScreenHeader } from '../src/components/ui';
+import { useAuthStore } from '../src/store/auth';
 
 interface AssetItem {
   id: string;
   name: string;
   type: 'image' | 'file' | 'code';
   size: string;
-  uri?: string;
+  sessionId?: string;
 }
 
 const SOURCE_TABS = [
@@ -21,14 +37,6 @@ const SOURCE_TABS = [
   { id: 'gallery', label: '相册', icon: 'images-outline' as const },
   { id: 'files', label: '文件', icon: 'folder-outline' as const },
   { id: 'code', label: '代码', icon: 'code-slash-outline' as const },
-];
-
-const MOCK_ASSETS: AssetItem[] = [
-  { id: '1', name: 'auth.ts', type: 'code', size: '2.4 KB' },
-  { id: '2', name: 'screenshot.png', type: 'image', size: '340 KB' },
-  { id: '3', name: 'README.md', type: 'file', size: '1.8 KB' },
-  { id: '4', name: 'config.json', type: 'file', size: '512 B' },
-  { id: '5', name: 'banner.jpg', type: 'image', size: '128 KB' },
 ];
 
 const TYPE_ICONS: Record<AssetItem['type'], keyof typeof Ionicons.glyphMap> = {
@@ -43,11 +51,87 @@ const TYPE_COLORS: Record<AssetItem['type'], string> = {
   code: colors.accent,
 };
 
+function inferAssetType(name: string): AssetItem['type'] {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp' || ext === 'gif') {
+    return 'image';
+  }
+  if (
+    ext === 'ts' ||
+    ext === 'tsx' ||
+    ext === 'js' ||
+    ext === 'jsx' ||
+    ext === 'py' ||
+    ext === 'go' ||
+    ext === 'rs'
+  ) {
+    return 'code';
+  }
+  return 'file';
+}
+
+function formatSize(bytes: unknown): string {
+  if (typeof bytes === 'number' && bytes > 0) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return '—';
+}
+
 /** S12: 附件与素材选择 */
 export default function AttachmentPickerScreen() {
+  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+  const { accessToken, gatewayUrl } = useAuthStore();
   const [activeTab, setActiveTab] = useState('recent');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [assets, setAssets] = useState<AssetItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
+  const loadAssets = useCallback(async () => {
+    if (!accessToken || !gatewayUrl) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const sessionsClient = createSessionsClient(gatewayUrl);
+      const sessions = await sessionsClient.list(accessToken, { excludeTeam: true });
+      const artifactsClient = createArtifactsClient(gatewayUrl);
+      const recentSessions = sessions.slice(0, 10);
+      const results = await Promise.all(
+        recentSessions.map(async (s) => {
+          try {
+            const resp = await artifactsClient.listForSession(accessToken, s.id);
+            const rawArtifacts = resp.contentArtifacts ?? [];
+            return rawArtifacts.map((raw): AssetItem => {
+              const rec = raw as Record<string, unknown>;
+              const name = (rec['title'] as string) ?? (rec['name'] as string) ?? '未命名';
+              return {
+                id: (rec['id'] as string) ?? `${s.id}-${name}`,
+                name,
+                type: inferAssetType(name),
+                size: formatSize(rec['sizeBytes'] ?? rec['size']),
+                sessionId: s.id,
+              };
+            });
+          } catch {
+            return [];
+          }
+        }),
+      );
+      setAssets(results.flat().slice(0, 50));
+    } catch {
+      // 静默处理——空列表即可
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken, gatewayUrl]);
+
+  useEffect(() => {
+    void loadAssets();
+  }, [loadAssets]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -58,25 +142,93 @@ export default function AttachmentPickerScreen() {
     });
   }
 
+  async function readFileAsBase64(uri: string): Promise<string> {
+    const result = await FileSystem.readAsStringAsync(uri, {
+      encoding: 'base64' as const,
+    });
+    return result;
+  }
+
   async function handlePickDocument() {
+    if (!accessToken || !gatewayUrl || !sessionId) {
+      // 没有关联会话时，仅打开文件选择器并导航回聊天
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        router.back();
+      }
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       multiple: true,
       copyToCacheDirectory: true,
     });
-    if (!result.canceled) {
-      // handle picked files
+    if (result.canceled || !result.assets) return;
+
+    setUploading(true);
+    try {
+      const artifactsClient = createArtifactsClient(gatewayUrl);
+      for (const asset of result.assets) {
+        const base64 = await readFileAsBase64(asset.uri);
+        await artifactsClient.uploadToSession(accessToken, sessionId, {
+          name: asset.name,
+          mimeType: asset.mimeType,
+          sizeBytes: asset.size,
+          contentBase64: base64,
+        });
+      }
+      Alert.alert('成功', `已上传 ${result.assets.length} 个文件`);
+      await loadAssets();
+    } catch (err) {
+      Alert.alert('上传失败', err instanceof Error ? err.message : '请稍后重试');
+    } finally {
+      setUploading(false);
     }
   }
 
   async function handlePickImage() {
+    if (!accessToken || !gatewayUrl || !sessionId) {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'image/*',
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        router.back();
+      }
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       type: 'image/*',
       copyToCacheDirectory: true,
     });
-    if (!result.canceled) {
-      // handle picked image
+    if (result.canceled || !result.assets) return;
+
+    setUploading(true);
+    try {
+      const artifactsClient = createArtifactsClient(gatewayUrl);
+      for (const asset of result.assets) {
+        const base64 = await readFileAsBase64(asset.uri);
+        await artifactsClient.uploadToSession(accessToken, sessionId, {
+          name: asset.name,
+          mimeType: asset.mimeType,
+          sizeBytes: asset.size,
+          contentBase64: base64,
+        });
+      }
+      Alert.alert('成功', `已上传 ${result.assets.length} 张图片`);
+      await loadAssets();
+    } catch (err) {
+      Alert.alert('上传失败', err instanceof Error ? err.message : '请稍后重试');
+    } finally {
+      setUploading(false);
     }
   }
+
+  const filteredAssets = assets.filter(
+    (a) => !search.trim() || a.name.toLowerCase().includes(search.toLowerCase()),
+  );
 
   return (
     <Screen>
@@ -124,66 +276,89 @@ export default function AttachmentPickerScreen() {
 
       {/* Quick actions */}
       <View style={styles.quickRow}>
-        <TouchableOpacity style={styles.quickBtn} onPress={() => void handlePickImage()}>
-          <Ionicons name="camera-outline" size={18} color={colors.accent} />
-          <Text style={styles.quickText}>拍照</Text>
+        <TouchableOpacity
+          style={styles.quickBtn}
+          onPress={() => void handlePickImage()}
+          disabled={uploading}
+        >
+          {uploading ? (
+            <ActivityIndicator color={colors.accent} size="small" />
+          ) : (
+            <>
+              <Ionicons name="camera-outline" size={18} color={colors.accent} />
+              <Text style={styles.quickText}>拍照</Text>
+            </>
+          )}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.quickBtn} onPress={() => void handlePickDocument()}>
-          <Ionicons name="document-attach-outline" size={18} color={colors.aux} />
-          <Text style={styles.quickText}>浏览文件</Text>
+        <TouchableOpacity
+          style={styles.quickBtn}
+          onPress={() => void handlePickDocument()}
+          disabled={uploading}
+        >
+          {uploading ? (
+            <ActivityIndicator color={colors.aux} size="small" />
+          ) : (
+            <>
+              <Ionicons name="document-attach-outline" size={18} color={colors.aux} />
+              <Text style={styles.quickText}>浏览文件</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
       {/* Asset list */}
-      <FlatList
-        data={MOCK_ASSETS.filter(
-          (a) => !search.trim() || a.name.toLowerCase().includes(search.toLowerCase()),
-        )}
-        keyExtractor={(a) => a.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => {
-          const isSelected = selected.has(item.id);
-          return (
-            <TouchableOpacity
-              style={[styles.assetCard, isSelected && styles.assetCardActive]}
-              onPress={() => toggleSelect(item.id)}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[styles.assetIconWrap, { backgroundColor: TYPE_COLORS[item.type] + '1A' }]}
+      {loading ? (
+        <View style={styles.loadingBox}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.loadingText}>加载中…</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredAssets}
+          keyExtractor={(a) => a.id}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.emptyBox}>
+              <Ionicons name="attach-outline" size={40} color={colors.textSubtle} />
+              <Text style={styles.emptyTitle}>暂无附件</Text>
+              <Text style={styles.emptyDesc}>通过拍照或浏览文件上传附件</Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const isSelected = selected.has(item.id);
+            return (
+              <TouchableOpacity
+                style={[styles.assetCard, isSelected && styles.assetCardActive]}
+                onPress={() => toggleSelect(item.id)}
+                activeOpacity={0.7}
               >
-                <Ionicons name={TYPE_ICONS[item.type]} size={18} color={TYPE_COLORS[item.type]} />
-              </View>
-              <View style={styles.assetInfo}>
-                <Text style={styles.assetName}>{item.name}</Text>
-                <Text style={styles.assetSize}>{item.size}</Text>
-              </View>
-              <Ionicons
-                name={isSelected ? 'checkbox' : 'square-outline'}
-                size={20}
-                color={isSelected ? colors.accent : colors.textSubtle}
-              />
-            </TouchableOpacity>
-          );
-        }}
-      />
+                <View
+                  style={[styles.assetIconWrap, { backgroundColor: TYPE_COLORS[item.type] + '1A' }]}
+                >
+                  <Ionicons name={TYPE_ICONS[item.type]} size={18} color={TYPE_COLORS[item.type]} />
+                </View>
+                <View style={styles.assetInfo}>
+                  <Text style={styles.assetName}>{item.name}</Text>
+                  <Text style={styles.assetSize}>{item.size}</Text>
+                </View>
+                <Ionicons
+                  name={isSelected ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={isSelected ? colors.accent : colors.textSubtle}
+                />
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
     </Screen>
   );
 }
 
+// 需要导入 useLocalSearchParams 和 Alert — 已在文件顶部导入
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 44,
-    paddingHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { ...textPresets.cardTitle, color: colors.textStrong },
   selectedCount: { ...textPresets.label, color: colors.accent },
 
   searchBar: {
@@ -241,6 +416,13 @@ const styles = StyleSheet.create({
     borderColor: colors.lineDefault,
   },
   quickText: { ...textPresets.label, color: colors.textDefault },
+
+  loadingBox: { alignItems: 'center', paddingVertical: 24, gap: 8 },
+  loadingText: { ...textPresets.caption, color: colors.textMuted },
+
+  emptyBox: { alignItems: 'center', gap: 8, paddingTop: 40 },
+  emptyTitle: { ...textPresets.subheading, color: colors.textStrong },
+  emptyDesc: { ...textPresets.body, color: colors.textMuted, textAlign: 'center' },
 
   listContent: { paddingHorizontal: 16, gap: 8, paddingBottom: 32 },
   assetCard: {

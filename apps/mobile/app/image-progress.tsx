@@ -1,89 +1,155 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
+import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
 import { Screen } from '../src/components/Screen';
 import { ScreenHeader } from '../src/components/ui';
 
+const STAGES = [
+  { label: '解析提示词', icon: 'document-text-outline' as const },
+  { label: '生成图片', icon: 'sparkles-outline' as const },
+  { label: '后处理', icon: 'color-wand-outline' as const },
+  { label: '保存结果', icon: 'save-outline' as const },
+];
+
 /** S14: 图片生成进度 — 独立进度指示组件/页面 */
 export default function ImageGenerationProgressScreen() {
+  const { sessionId, status } = useLocalSearchParams<{
+    sessionId?: string;
+    status?: 'generating' | 'done' | 'error';
+    error?: string;
+  }>();
   const [stage, setStage] = useState(0);
-  const stages = [
-    { label: '解析提示词', icon: 'document-text-outline' as const },
-    { label: '生成图片', icon: 'sparkles-outline' as const },
-    { label: '后处理', icon: 'color-wand-outline' as const },
-    { label: '保存结果', icon: 'save-outline' as const },
-  ];
+  const isDone = status === 'done';
+  const isError = status === 'error';
 
   useEffect(() => {
+    if (isDone || isError) {
+      setStage(STAGES.length);
+      return;
+    }
+    // 模拟进度推进（实际图片生成 API 是同步的，没有独立进度端点）
     const timer = setInterval(() => {
-      setStage((s) => Math.min(s + 1, stages.length - 1));
+      setStage((s) => Math.min(s + 1, STAGES.length - 1));
     }, 2000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isDone, isError]);
 
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']}>
       <ScreenHeader title="生成进度" />
       <View style={styles.container}>
-        <Text style={styles.title}>图片生成中</Text>
-        <Text style={styles.subtitle}>请稍候，AI 正在创作你的图片。</Text>
+        <Text style={styles.title}>
+          {isDone ? '生成完成' : isError ? '生成失败' : '图片生成中'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {isDone
+            ? '图片已保存，可在产物预览中查看。'
+            : isError
+              ? '生成过程中出现错误，请重试。'
+              : '请稍候，AI 正在创作你的图片。'}
+        </Text>
 
         {/* Progress visualization */}
         <View style={styles.progressArea}>
-          <View style={styles.spinnerWrap}>
-            <ActivityIndicator size="large" color={colors.accent} />
-            <Ionicons name="sparkles" size={24} color={colors.accent} style={styles.sparkleIcon} />
-          </View>
+          {isDone ? (
+            <Ionicons name="checkmark-circle" size={48} color={colors.success} />
+          ) : isError ? (
+            <Ionicons name="alert-circle-outline" size={48} color={colors.danger} />
+          ) : (
+            <View style={styles.spinnerWrap}>
+              <ActivityIndicator size="large" color={colors.accent} />
+              <Ionicons name="sparkles" size={24} color={colors.accent} style={styles.sparkleIcon} />
+            </View>
+          )}
         </View>
 
         {/* Stage indicators */}
         <View style={styles.stageList}>
-          {stages.map((s, i) => {
-            const isDone = i < stage;
-            const isCurrent = i === stage;
-            const isPending = i > stage;
+          {STAGES.map((s, i) => {
+            const stageDone = isDone || i < stage;
+            const stageCurrent = !isDone && !isError && i === stage;
+            const stagePending = !isDone && i > stage;
             return (
               <View key={i} style={styles.stageRow}>
                 <View style={styles.stageTimeline}>
                   <View
                     style={[
                       styles.stageDot,
-                      isDone && { backgroundColor: colors.success },
-                      isCurrent && { backgroundColor: colors.accent },
-                      isPending && { backgroundColor: colors.lineDefault },
+                      stageDone && { backgroundColor: colors.success },
+                      stageCurrent && { backgroundColor: colors.accent },
+                      stagePending && { backgroundColor: colors.lineDefault },
                     ]}
                   />
-                  {i < stages.length - 1 && (
+                  {i < STAGES.length - 1 ? (
                     <View
-                      style={[styles.stageLine, isDone && { backgroundColor: colors.success }]}
+                      style={[styles.stageLine, stageDone && { backgroundColor: colors.success }]}
                     />
-                  )}
+                  ) : null}
                 </View>
                 <Ionicons
-                  name={isDone ? 'checkmark-circle' : s.icon}
+                  name={stageDone ? 'checkmark-circle' : s.icon}
                   size={18}
-                  color={isDone ? colors.success : isCurrent ? colors.accent : colors.textSubtle}
+                  color={
+                    stageDone
+                      ? colors.success
+                      : stageCurrent
+                        ? colors.accent
+                        : colors.textSubtle
+                  }
                 />
                 <Text
                   style={[
                     styles.stageLabel,
-                    isDone && { color: colors.success },
-                    isCurrent && { color: colors.accent, fontWeight: '700' },
-                    isPending && { color: colors.textSubtle },
+                    stageDone && { color: colors.success },
+                    stageCurrent && { color: colors.accent, fontWeight: '700' },
+                    stagePending && { color: colors.textSubtle },
                   ]}
                 >
                   {s.label}
                 </Text>
-                {isCurrent && <ActivityIndicator size="small" color={colors.accent} />}
-                {isDone && <Ionicons name="checkmark" size={14} color={colors.success} />}
+                {stageCurrent ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+                {stageDone ? <Ionicons name="checkmark" size={14} color={colors.success} /> : null}
               </View>
             );
           })}
         </View>
 
-        <Text style={styles.estimate}>预计剩余 3–5 秒</Text>
+        {/* Action buttons */}
+        {isDone ? (
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => router.push('/artifacts')}
+            >
+              <Ionicons name="cube-outline" size={16} color={colors.accent} />
+              <Text style={styles.secondaryBtnText}>查看产物</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() =>
+                sessionId ? router.replace(`/chat/${sessionId}`) : router.replace('/home')
+              }
+            >
+              <Text style={styles.primaryBtnText}>返回聊天</Text>
+            </TouchableOpacity>
+          </View>
+        ) : isError ? (
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() =>
+              sessionId ? router.replace(`/chat/${sessionId}`) : router.replace('/image-workspace')
+            }
+          >
+            <Ionicons name="arrow-back" size={16} color={colors.white} />
+            <Text style={styles.primaryBtnText}>返回重试</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.estimate}>预计剩余 3–5 秒</Text>
+        )}
       </View>
     </Screen>
   );
@@ -118,4 +184,30 @@ const styles = StyleSheet.create({
   stageLabel: { ...textPresets.body, flex: 1 },
 
   estimate: { ...textPresets.caption, color: colors.textSubtle, textAlign: 'center' },
+
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  secondaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 48,
+    backgroundColor: colors.surface2,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.lineDefault,
+  },
+  secondaryBtnText: { ...textPresets.body, color: colors.accent, fontWeight: '600' },
+  primaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 48,
+    backgroundColor: colors.accent,
+    borderRadius: radii.lg,
+  },
+  primaryBtnText: { ...textPresets.body, color: colors.white, fontWeight: '700' },
 });
