@@ -46,7 +46,7 @@ describe('buildProviderOptions', () => {
   it('returns undefined when thinking is unsupported', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, supportsThinking: false },
-      model: 'claude-sonnet-4-5',
+      model: 'claude-haiku-4-5',
     });
     expect(options).toBeUndefined();
   });
@@ -55,12 +55,28 @@ describe('buildProviderOptions', () => {
     const options = buildProviderOptions({
       thinking: {
         ...baseThinking,
-        providerType: 'anthropic',
+        providerType: 'gemini',
         supportsThinking: false,
       },
-      model: 'claude-haiku-4-5',
+      model: 'gemini-2.0-flash',
     });
     expect(options).toBeUndefined();
+  });
+
+  it('uses catalog inference when a direct Qwen model has a stale thinking capability flag', () => {
+    const options = buildProviderOptions({
+      thinking: {
+        ...baseThinking,
+        providerType: 'qwen',
+        supportsThinking: false,
+      },
+      model: 'qwen3-235b-a22b',
+    });
+
+    expect(options?.['qwen']).toMatchObject({
+      enable_thinking: true,
+      thinking_budget: 8192,
+    });
   });
 
   it('infers vendor-qualified proxy model ids before choosing option shape', () => {
@@ -245,13 +261,13 @@ describe('buildProviderOptions', () => {
     expect(options).toBeUndefined();
   });
 
-  it('emits mimo.thinking + reasoning_effort for mimo models', () => {
+  it('emits mimo.thinking + reasoningEffort for mimo models', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'mimo', enabled: true },
       model: 'mimo-v2.5-pro',
     });
     const oc = options?.['mimo'] as Record<string, unknown> | undefined;
-    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoning_effort: 'medium' });
+    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoningEffort: 'medium' });
   });
 
   it('emits mimo.thinking disabled when thinking is turned off', () => {
@@ -263,13 +279,13 @@ describe('buildProviderOptions', () => {
     expect(oc).toEqual({ thinking: { type: 'disabled' } });
   });
 
-  it('emits deepseek.thinking + reasoning_effort for high effort', () => {
+  it('emits deepseek.thinking + reasoningEffort for high effort', () => {
     const options = buildProviderOptions({
       thinking: { ...baseThinking, providerType: 'deepseek', enabled: true, effort: 'high' },
       model: 'deepseek-chat',
     });
     const oc = options?.['deepseek'] as Record<string, unknown> | undefined;
-    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoning_effort: 'max' });
+    expect(oc).toEqual({ thinking: { type: 'enabled' }, reasoningEffort: 'max' });
   });
 
   it('emits deepseek.thinking without reasoning_effort for low effort', () => {

@@ -1,15 +1,25 @@
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { z } from 'zod';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { OpenWebSearchRuntime } from 'open-websearch/build/runtime/createRuntime.js';
+import { fetchOpenWebSearchPage } from './open-websearch-fetch-web.js';
+import {
+  loadOpenWebSearchGithubReadmeService,
+  loadOpenWebSearchSearchService,
+  type OpenWebSearchGithubReadmeService,
+  type OpenWebSearchSearchService,
+} from './open-websearch-services.js';
+import {
+  GITHUB_REPOSITORY_URL_MESSAGE,
+  PUBLIC_HTTP_URL_MESSAGE,
+  githubRepositoryUrlSchema,
+  publicHttpUrlSchema,
+  readPublicUrlError,
+} from './open-websearch-url.js';
 import type { MCPCallInput } from './mcp-runtime.js';
 
 const OPEN_WEBSEARCH_ENGINES = ['bing', 'duckduckgo', 'baidu', 'sogou', 'startpage'] as const;
 
 const DEFAULT_OPEN_WEBSEARCH_ENGINES = ['bing', 'duckduckgo'] as const;
-const PUBLIC_HTTP_URL_MESSAGE = '只支持公开 HTTP(S) 网页 URL。';
-const GITHUB_REPOSITORY_URL_MESSAGE = '只支持公开 GitHub 仓库 URL。';
 
 const searchInputSchema = z.object({
   query: z.string().trim().min(1).max(500),
@@ -20,20 +30,6 @@ const searchInputSchema = z.object({
     .max(4)
     .default([...DEFAULT_OPEN_WEBSEARCH_ENGINES]),
 });
-
-const publicHttpUrlSchema = z
-  .string()
-  .trim()
-  .url()
-  .max(2_000)
-  .refine(isPublicHttpUrl, PUBLIC_HTTP_URL_MESSAGE);
-
-const githubRepositoryUrlSchema = z
-  .string()
-  .trim()
-  .url()
-  .max(2_000)
-  .refine(isPublicGithubRepositoryUrl, GITHUB_REPOSITORY_URL_MESSAGE);
 
 const fetchWebInputSchema = z.object({
   url: publicHttpUrlSchema,
@@ -96,37 +92,20 @@ export const OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS = [
   },
 ] satisfies readonly MCPToolDef[];
 
-let cachedRuntimePromise: Promise<OpenWebSearchRuntime> | undefined;
-
-async function getRuntime(): Promise<OpenWebSearchRuntime> {
-  if (!cachedRuntimePromise) {
-    cachedRuntimePromise = loadRuntime();
-  }
-  try {
-    return await cachedRuntimePromise;
-  } catch (error) {
-    cachedRuntimePromise = undefined;
-    throw error;
-  }
-}
-
-async function loadRuntime(): Promise<OpenWebSearchRuntime> {
-  const { createOpenWebSearchRuntime } =
-    await import('open-websearch/build/runtime/createRuntime.js');
-  return createOpenWebSearchRuntime();
-}
-
 export async function callOpenWebSearchVirtualMcp(
   _sessionId: string,
   input: MCPCallInput,
 ): Promise<MCPToolResult> {
   switch (input.toolName) {
     case 'search':
-      return executeSearch(await getRuntime(), input.arguments ?? {});
+      return executeSearch(await loadOpenWebSearchSearchService(), input.arguments ?? {});
     case 'fetch_web':
-      return executeFetchWeb(await getRuntime(), input.arguments ?? {});
+      return executeFetchWeb(input.arguments ?? {});
     case 'fetch_github_readme':
-      return executeFetchGithubReadme(await getRuntime(), input.arguments ?? {});
+      return executeFetchGithubReadme(
+        await loadOpenWebSearchGithubReadmeService(),
+        input.arguments ?? {},
+      );
     default:
       return errorResult(`未知的 Open WebSearch 工具：${input.toolName}`);
   }
@@ -138,25 +117,25 @@ export async function executeOpenWebSearchTool(
 ): Promise<MCPToolResult> {
   switch (input.toolName) {
     case 'search':
-      return executeSearch(runtime, input.arguments ?? {});
+      return executeSearch(runtime.services.search, input.arguments ?? {});
     case 'fetch_web':
-      return executeFetchWeb(runtime, input.arguments ?? {});
+      return executeFetchWeb(input.arguments ?? {});
     case 'fetch_github_readme':
-      return executeFetchGithubReadme(runtime, input.arguments ?? {});
+      return executeFetchGithubReadme(runtime.services.fetchGithubReadme, input.arguments ?? {});
     default:
       return errorResult(`未知的 Open WebSearch 工具：${input.toolName}`);
   }
 }
 
 async function executeSearch(
-  runtime: OpenWebSearchRuntime,
+  searchService: OpenWebSearchSearchService,
   rawInput: Record<string, unknown>,
 ): Promise<MCPToolResult> {
   const parsed = searchInputSchema.safeParse(rawInput);
   if (!parsed.success) return errorResult(parsed.error.issues[0]?.message ?? '搜索参数无效。');
 
   try {
-    const result = await runtime.services.search.execute({
+    const result = await searchService.execute({
       ...parsed.data,
       engines: parsed.data.engines,
       searchMode: 'request',
@@ -167,10 +146,7 @@ async function executeSearch(
   }
 }
 
-async function executeFetchWeb(
-  runtime: OpenWebSearchRuntime,
-  rawInput: Record<string, unknown>,
-): Promise<MCPToolResult> {
+async function executeFetchWeb(rawInput: Record<string, unknown>): Promise<MCPToolResult> {
   const parsed = fetchWebInputSchema.safeParse(rawInput);
   if (!parsed.success) return errorResult(parsed.error.issues[0]?.message ?? '网页提取参数无效。');
 
@@ -179,14 +155,14 @@ async function executeFetchWeb(
     if (urlError) {
       return errorResult(urlError);
     }
-    return jsonResult(await runtime.services.fetchWeb.execute(parsed.data));
+    return jsonResult(await fetchOpenWebSearchPage(parsed.data));
   } catch (error) {
     return errorResult(`网页提取失败：${readErrorMessage(error)}`);
   }
 }
 
 async function executeFetchGithubReadme(
-  runtime: OpenWebSearchRuntime,
+  githubReadmeService: OpenWebSearchGithubReadmeService,
   rawInput: Record<string, unknown>,
 ): Promise<MCPToolResult> {
   const parsed = fetchGithubReadmeInputSchema.safeParse(rawInput);
@@ -197,7 +173,7 @@ async function executeFetchGithubReadme(
     if (urlError) {
       return errorResult(urlError);
     }
-    const content = await runtime.services.fetchGithubReadme.execute(parsed.data);
+    const content = await githubReadmeService.execute(parsed.data);
     return content === null ? errorResult('未找到该 GitHub 仓库的 README。') : textResult(content);
   } catch (error) {
     return errorResult(`README 提取失败：${readErrorMessage(error)}`);
@@ -221,103 +197,4 @@ function errorResult(message: string): MCPToolResult {
 
 function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isPublicHttpUrl(value: string): boolean {
-  const url = parseUrl(value);
-  if (!url) return false;
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  return !isLocalOrPrivateHost(url.hostname);
-}
-
-function isPublicGithubRepositoryUrl(value: string): boolean {
-  const url = parseUrl(value);
-  if (!url || !isPublicHttpUrl(value)) return false;
-  const hostname = normalizeHostname(url.hostname);
-  if (hostname !== 'github.com' && hostname !== 'www.github.com') return false;
-  const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
-  return segments.length === 2;
-}
-
-async function readPublicUrlError(value: string, message: string): Promise<string | null> {
-  const url = parseUrl(value);
-  if (!url || !isPublicHttpUrl(value)) {
-    return message;
-  }
-
-  const hostname = normalizeHostname(url.hostname);
-  if (!hostname || isIP(hostname) !== 0) {
-    return null;
-  }
-
-  try {
-    const addresses = await lookup(hostname, { all: true, verbatim: true });
-    if (addresses.length === 0) {
-      return message;
-    }
-    return addresses.some((entry) => isLocalOrPrivateHost(entry.address)) ? message : null;
-  } catch {
-    return message;
-  }
-}
-
-function parseUrl(value: string): URL | null {
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHostname(hostname: string): string {
-  return hostname
-    .replace(/^\[|\]$/g, '')
-    .replace(/\.+$/u, '')
-    .toLowerCase();
-}
-
-function isLocalOrPrivateHost(hostname: string): boolean {
-  const normalizedHostname = normalizeHostname(hostname);
-  if (
-    normalizedHostname === 'localhost' ||
-    normalizedHostname.endsWith('.localhost') ||
-    normalizedHostname === '0.0.0.0' ||
-    normalizedHostname === '::' ||
-    normalizedHostname === '::1'
-  ) {
-    return true;
-  }
-
-  const ipVersion = isIP(normalizedHostname);
-  if (ipVersion === 4) return isPrivateIpv4(normalizedHostname);
-  if (ipVersion === 6) return isPrivateIpv6(normalizedHostname);
-  return false;
-}
-
-function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map((segment) => Number(segment));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
-  const [first, second] = parts;
-  if (first === undefined || second === undefined) return false;
-
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function isPrivateIpv6(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return (
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
-  );
 }

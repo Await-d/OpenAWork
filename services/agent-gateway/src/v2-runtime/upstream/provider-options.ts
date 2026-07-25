@@ -515,25 +515,13 @@ export function buildProviderOptions(input: {
     return undefined;
   }
 
-  // 当 supportsThinking 为 false 时，检查是否是因为用户通过 OpenAI 兼容代理
-  // 或聚合平台（如 SiliconFlow）使用非 OpenAI 模型（如 MiMo/Qwen/DeepSeek），
-  // 此时 modelConfig 找不到导致 supportsThinking=false。通过 modelId
-  // 推断出真实厂商后，应视为支持思考。
   let effectiveSupportsThinking = thinking.supportsThinking;
-  const normalizedProviderType = thinking.providerType.toLowerCase();
-  if (
-    !effectiveSupportsThinking &&
-    (normalizedProviderType === 'openai' ||
-      normalizedProviderType === 'custom' ||
-      normalizedProviderType === 'siliconflow')
-  ) {
+  if (!effectiveSupportsThinking) {
     const inferredStyle = resolveThinkingStyle(thinking.providerType, input.model);
     if (
       inferredStyle !== 'none' &&
       catalogModelSupportsThinking(thinking.providerType, input.model)
     ) {
-      // 仅在 openai/custom/siliconflow 代理场景下，且根据 modelId 能推断出真实
-      // 支持 thinking 的厂商模型时，才恢复 supportsThinking。
       effectiveSupportsThinking = true;
     }
   }
@@ -544,6 +532,7 @@ export function buildProviderOptions(input: {
   const model = input.model.toLowerCase();
   const effort = normalizeProviderReasoningEffort(thinking.effort);
   const style = resolveThinkingStyle(thinking.providerType, input.model);
+  const normalizedProviderType = thinking.providerType.toLowerCase();
   const modelInfo = buildProviderOptionsModelInfo({
     providerType: thinking.providerType,
     model: input.model,
@@ -619,7 +608,7 @@ export function buildProviderOptions(input: {
       return providerOptions(modelInfo, {
         body: {
           thinking: { type: 'enabled' },
-          ...(effortParam ? { reasoning_effort: effortParam } : {}),
+          ...(effortParam ? { reasoningEffort: effortParam } : {}),
         },
       });
     }
@@ -708,7 +697,7 @@ export function buildProviderOptions(input: {
         return providerOptions(modelInfo, {
           body: {
             thinking: { type: 'enabled' },
-            reasoning_effort: mimoEffort,
+            reasoningEffort: mimoEffort,
           },
         });
       }
