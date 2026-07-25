@@ -12,6 +12,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import ffprobePath from 'ffprobe-static';
 import { getMediaCategory } from './media-codec.js';
+import { resolveMediaBinaryPath } from './media-binary-path.js';
+
+const FFPROBE_PATH = resolveMediaBinaryPath(process.env.FFPROBE_BIN, ffprobePath.path);
 
 export interface MediaInfo {
   type: 'audio' | 'video' | 'image' | 'unknown';
@@ -95,6 +98,10 @@ export async function probeMediaFile(
   mimeType: string,
   signal?: AbortSignal,
 ): Promise<MediaInfo> {
+  if (!FFPROBE_PATH) {
+    return Promise.reject(new Error('ffprobe 不可用。请配置 FFPROBE_BIN 或安装 ffprobe-static。'));
+  }
+
   return new Promise<MediaInfo>((resolve, reject) => {
     const args = [
       '-v',
@@ -106,7 +113,7 @@ export async function probeMediaFile(
       filePath,
     ];
 
-    const child = spawn(ffprobePath.path, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -215,7 +222,11 @@ function parseFFprobeOutput(output: FFprobeOutput, mimeType: string): MediaInfo 
  */
 export async function isFFprobeAvailable(): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    const child = spawn(ffprobePath.path, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (!FFPROBE_PATH) {
+      resolve(false);
+      return;
+    }
+    const child = spawn(FFPROBE_PATH, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'] });
     child.on('error', () => resolve(false));
     child.on('close', (code) => resolve(code === 0));
   });

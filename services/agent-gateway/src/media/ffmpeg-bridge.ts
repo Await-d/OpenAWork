@@ -10,10 +10,11 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import ffmpegStatic from 'ffmpeg-static';
+import * as ffmpegStaticModule from 'ffmpeg-static';
 import { MIME_TO_CODEC, FORMAT_TO_MIME } from './media-codec.js';
+import { resolveMediaBinaryPath } from './media-binary-path.js';
 
-const FFMPEG_PATH = ffmpegStatic as unknown as string;
+const FFMPEG_PATH = resolveMediaBinaryPath(process.env.FFMPEG_BIN, ffmpegStaticModule.default);
 
 export interface ConvertMediaOptions {
   targetFormat: string;
@@ -500,6 +501,10 @@ async function extractMultipleFrames(
 }
 
 function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
+  if (!FFMPEG_PATH) {
+    return Promise.reject(new Error('ffmpeg 不可用。请配置 FFMPEG_BIN 或安装 ffmpeg-static。'));
+  }
+
   return new Promise<void>((resolve, reject) => {
     const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
