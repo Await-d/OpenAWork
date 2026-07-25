@@ -7,34 +7,18 @@ import {
   generateThumbnail,
   isFFmpegAvailable,
 } from '../media/ffmpeg-bridge.js';
-import {
-  createMediaArtifact,
-  extractBufferFromDataUrl,
-  fetchMediaFromUrl,
-} from '../media/media-artifact.js';
+import { createMediaArtifact, extractBufferFromDataUrl } from '../media/media-artifact.js';
 
 const extractVideoFrameInputSchema = z.object({
-  source: z
-    .string()
-    .min(1)
-    .describe('视频来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
-  timestamp: z
-    .number()
-    .min(0)
-    .optional()
-    .describe('提取帧的时间戳（秒）。不传时默认取第 1 秒'),
+  source: z.string().min(1).describe('视频来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
+  timestamp: z.number().min(0).optional().describe('提取帧的时间戳（秒）。不传时默认取第 1 秒'),
   count: z
     .number()
     .min(1)
     .max(10)
     .optional()
     .describe('提取多帧时的数量（1-10），帧会在视频中均匀分布。不传时只提取一帧'),
-  width: z
-    .number()
-    .min(16)
-    .max(3840)
-    .optional()
-    .describe('输出帧的宽度（像素），高度自动等比缩放'),
+  width: z.number().min(16).max(3840).optional().describe('输出帧的宽度（像素），高度自动等比缩放'),
   format: z
     .enum(['png', 'jpg'])
     .optional()
@@ -108,9 +92,10 @@ export async function executeExtractVideoFrameTool(input: {
       ...(toolInput.format ? { format: toolInput.format } : {}),
     };
 
-    const frames = isUrlInput && urlSource
-      ? await extractVideoFramesFromUrl(urlSource, frameOptions, signal)
-      : await extractVideoFrames(buffer, frameOptions, signal);
+    const frames =
+      isUrlInput && urlSource
+        ? await extractVideoFramesFromUrl(urlSource, frameOptions, signal)
+        : await extractVideoFrames(buffer, frameOptions, signal);
 
     if (frames.length === 0) {
       return { output: '未能从视频中提取到任何帧', isError: true };

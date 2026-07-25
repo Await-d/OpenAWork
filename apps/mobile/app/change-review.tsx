@@ -9,10 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  createWorkspaceClient,
-  type WorkspaceReviewChange,
-} from '@openAwork/web-client';
+import { createWorkspaceClient, type WorkspaceReviewChange } from '@openAwork/web-client';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
@@ -128,29 +125,29 @@ export default function ChangeReviewScreen() {
       {
         text: '还原',
         style: 'destructive',
-        onPress: async () => {
-          setReverting(true);
-          try {
-            const workspaceClient = createWorkspaceClient(gatewayUrl);
-            const roots = await workspaceClient.listRoots(accessToken);
-            const rootPath = roots[0] ?? '';
-            const selectedPaths = changes
-              .filter((c) => selected.has(c.id))
-              .map((c) => c.path);
-            await Promise.all(
-              selectedPaths.map((filePath) =>
-                workspaceClient.reviewRevert(accessToken, rootPath, filePath),
-              ),
-            );
-            setSelected(new Set());
-            setRefreshing(true);
-            await loadChanges();
-            Alert.alert('成功', `已还原 ${selectedPaths.length} 个文件`);
-          } catch (e) {
-            Alert.alert('还原失败', e instanceof Error ? e.message : '请稍后重试');
-          } finally {
-            setReverting(false);
-          }
+        onPress: () => {
+          void (async () => {
+            setReverting(true);
+            try {
+              const workspaceClient = createWorkspaceClient(gatewayUrl);
+              const roots = await workspaceClient.listRoots(accessToken);
+              const rootPath = roots[0] ?? '';
+              const selectedPaths = changes.filter((c) => selected.has(c.id)).map((c) => c.path);
+              await Promise.all(
+                selectedPaths.map((filePath) =>
+                  workspaceClient.reviewRevert(accessToken, rootPath, filePath),
+                ),
+              );
+              setSelected(new Set());
+              setRefreshing(true);
+              await loadChanges();
+              Alert.alert('成功', `已还原 ${selectedPaths.length} 个文件`);
+            } catch (e) {
+              Alert.alert('还原失败', e instanceof Error ? e.message : '请稍后重试');
+            } finally {
+              setReverting(false);
+            }
+          })();
         },
       },
     ]);

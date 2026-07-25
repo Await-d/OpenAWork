@@ -1,5 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import { colors } from '../src/theme/colors';
@@ -31,10 +38,7 @@ const TYPE_COLORS: Record<ArtifactItem['type'], string> = {
   file: colors.textMuted,
 };
 
-function inferArtifactType(
-  name: string,
-  rawType: unknown,
-): ArtifactItem['type'] {
+function inferArtifactType(name: string, rawType: unknown): ArtifactItem['type'] {
   if (typeof rawType === 'string') {
     if (rawType.includes('image') || rawType.includes('png') || rawType.includes('jpeg')) {
       return 'image';
@@ -111,7 +115,7 @@ export default function ArtifactPreviewScreen() {
             const resp = await artifactsClient.listForSession(accessToken, s.id);
             const rawArtifacts = resp.contentArtifacts ?? [];
             return rawArtifacts.map((raw): ArtifactItem => {
-              const rec = raw as Record<string, unknown>;
+              const rec = raw;
               const name = (rec['title'] as string) ?? (rec['name'] as string) ?? '未命名';
               return {
                 id: (rec['id'] as string) ?? `${s.id}-${name}`,
@@ -164,11 +168,7 @@ export default function ArtifactPreviewScreen() {
             const item = artifacts.find((a) => a.id === selectedId);
             return item ? (
               <>
-                <Ionicons
-                  name={TYPE_ICONS[item.type]}
-                  size={48}
-                  color={TYPE_COLORS[item.type]}
-                />
+                <Ionicons name={TYPE_ICONS[item.type]} size={48} color={TYPE_COLORS[item.type]} />
                 <Text style={styles.previewName}>{item.name}</Text>
                 <Text style={styles.previewMeta}>
                   {item.size} · {item.time}
@@ -209,9 +209,7 @@ export default function ArtifactPreviewScreen() {
       {/* Artifact list */}
       {!loading && !error ? (
         <>
-          <Text style={styles.sectionTitle}>
-            已生成产物 · {artifacts.length} 个
-          </Text>
+          <Text style={styles.sectionTitle}>已生成产物 · {artifacts.length} 个</Text>
           <FlatList
             data={artifacts}
             keyExtractor={(a) => a.id}

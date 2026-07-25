@@ -13,10 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { router, useLocalSearchParams } from 'expo-router';
-import {
-  createArtifactsClient,
-  createSessionsClient,
-} from '@openAwork/web-client';
+import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
@@ -106,7 +103,7 @@ export default function AttachmentPickerScreen() {
             const resp = await artifactsClient.listForSession(accessToken, s.id);
             const rawArtifacts = resp.contentArtifacts ?? [];
             return rawArtifacts.map((raw): AssetItem => {
-              const rec = raw as Record<string, unknown>;
+              const rec = raw;
               const name = (rec['title'] as string) ?? (rec['name'] as string) ?? '未命名';
               return {
                 id: (rec['id'] as string) ?? `${s.id}-${name}`,

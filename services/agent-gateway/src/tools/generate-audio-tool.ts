@@ -1,6 +1,5 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { spawn } from 'node:child_process';
 import { createMediaArtifact } from '../media/media-artifact.js';
 import { probeMediaBuffer } from '../media/ffprobe-bridge.js';
 
@@ -23,26 +22,10 @@ const generateAudioInputSchema = z.object({
     ])
     .optional()
     .describe('语音角色。默认 zh-CN-XiaoxiaoNeural（女声）。可选中文角色和英文角色'),
-  rate: z
-    .number()
-    .min(0.5)
-    .max(2)
-    .optional()
-    .describe('语速倍率，1.0=正常速度。默认 1.0'),
-  volume: z
-    .number()
-    .min(0)
-    .max(1)
-    .optional()
-    .describe('音量 0-1，默认 1.0'),
-  pitch: z
-    .string()
-    .optional()
-    .describe('音调调整，如 "+10Hz" 或 "-5Hz"。默认不调整'),
-  outputFormat: z
-    .enum(['mp3', 'wav'])
-    .optional()
-    .describe('输出格式：mp3（默认）或 wav'),
+  rate: z.number().min(0.5).max(2).optional().describe('语速倍率，1.0=正常速度。默认 1.0'),
+  volume: z.number().min(0).max(1).optional().describe('音量 0-1，默认 1.0'),
+  pitch: z.string().optional().describe('音调调整，如 "+10Hz" 或 "-5Hz"。默认不调整'),
+  outputFormat: z.enum(['mp3', 'wav']).optional().describe('输出格式：mp3（默认）或 wav'),
 });
 
 const generateAudioOutputSchema = z.string();
@@ -161,7 +144,9 @@ async function synthesizeWithEdgeTTS(
   const WebSocket = (await import('ws')).default;
 
   // Edge TTS WebSocket URL
-  const wsUrl = new URL('wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1');
+  const wsUrl = new URL(
+    'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1',
+  );
   wsUrl.searchParams.set('TrustedClientToken', '6A5AA1D4EAFF4E9FB37E23D68491D6F4');
 
   // 构造 SSML
@@ -169,7 +154,8 @@ async function synthesizeWithEdgeTTS(
   const volumePercent = `${volume < 1 ? '-' : '+'}${Math.round(Math.abs(volume - 1) * 100)}%`;
   const pitchValue = pitch ?? '+0Hz';
 
-  const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>` +
+  const ssml =
+    `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>` +
     `<voice name='${voice}'>` +
     `<prosody rate='${ratePercent}' volume='${volumePercent}' pitch='${pitchValue}'>` +
     escapeXml(text) +
@@ -182,7 +168,7 @@ async function synthesizeWithEdgeTTS(
     const ws = new WebSocket(wsUrl.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0',
-        'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+        Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
       },
     });
 
@@ -207,7 +193,10 @@ async function synthesizeWithEdgeTTS(
         context: {
           synthesis: {
             metadata: {
-              outputFormat: outputFormat === 'wav' ? 'audio-24khz-48kbitrate-mono-mp3' : 'audio-24khz-48kbitrate-mono-mp3',
+              outputFormat:
+                outputFormat === 'wav'
+                  ? 'audio-24khz-48kbitrate-mono-mp3'
+                  : 'audio-24khz-48kbitrate-mono-mp3',
               token: 'd4bea4e4a7e94e9fb37e23d68491d6f4',
             },
           },
@@ -220,7 +209,7 @@ async function synthesizeWithEdgeTTS(
         'X-RequestId': 'edge-tts-' + Date.now(),
         'Content-Type': 'application/ssml+xml',
         'X-Timestamp': new Date().toISOString(),
-        'Path': 'ssml',
+        Path: 'ssml',
         body: ssml,
       });
       ws.send(ssmlMessage);

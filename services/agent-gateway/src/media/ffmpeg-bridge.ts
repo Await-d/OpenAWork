@@ -60,6 +60,14 @@ export interface ExtractedFrame {
   extension: string;
 }
 
+async function removeTempPath(path: string): Promise<void> {
+  try {
+    await rm(path, { force: true });
+  } catch (error) {
+    console.warn(`[ffmpeg-bridge] 清理临时文件失败: ${path}`, error);
+  }
+}
+
 /**
  * 转换媒体格式。
  *
@@ -109,8 +117,8 @@ export async function convertMedia(
       sizeBytes: outputBuffer.byteLength,
     };
   } finally {
-    await rm(inputFile, { force: true }).catch(() => {});
-    await rm(outputFile, { force: true }).catch(() => {});
+    await removeTempPath(inputFile);
+    await removeTempPath(outputFile);
   }
 }
 
@@ -142,7 +150,7 @@ export async function extractVideoFrames(
       const frames = await extractMultipleFrames(inputFile, tempDir, hash, options, format, signal);
       return frames.map((f, i) => ({
         buffer: f,
-        timestamp: options.timestamp ?? 0 + (i * (options.count ?? 1)),
+        timestamp: options.timestamp ?? 0 + i * (options.count ?? 1),
         mimeType,
         extension,
       }));
@@ -153,22 +161,27 @@ export async function extractVideoFrames(
     const outputFile = join(tempDir, `frame-${hash}-0.${format}`);
     const args = [
       '-y',
-      '-ss', String(timestamp),
-      '-i', inputFile,
-      '-frames:v', '1',
+      '-ss',
+      String(timestamp),
+      '-i',
+      inputFile,
+      '-frames:v',
+      '1',
       ...(options.width ? ['-vf', `scale=${options.width}:-1`] : []),
-      '-f', format === 'jpg' ? 'image2' : 'image2',
-      '-vcodec', format === 'jpg' ? 'mjpeg' : 'png',
+      '-f',
+      format === 'jpg' ? 'image2' : 'image2',
+      '-vcodec',
+      format === 'jpg' ? 'mjpeg' : 'png',
       outputFile,
     ];
 
     await runFFmpeg(args, signal);
     const buffer = await readFile(outputFile);
-    await rm(outputFile, { force: true }).catch(() => {});
+    await removeTempPath(outputFile);
 
     return [{ buffer, timestamp, mimeType, extension }];
   } finally {
-    await rm(inputFile, { force: true }).catch(() => {});
+    await removeTempPath(inputFile);
   }
 }
 
@@ -179,7 +192,11 @@ export async function generateThumbnail(
   inputBuffer: Buffer,
   signal?: AbortSignal,
 ): Promise<ExtractedFrame> {
-  const frames = await extractVideoFrames(inputBuffer, { timestamp: 1, width: 480, format: 'jpg' }, signal);
+  const frames = await extractVideoFrames(
+    inputBuffer,
+    { timestamp: 1, width: 480, format: 'jpg' },
+    signal,
+  );
   return frames[0]!;
 }
 
@@ -227,7 +244,7 @@ export async function convertMediaFromUrl(
       sizeBytes: outputBuffer.byteLength,
     };
   } finally {
-    await rm(outputFile, { force: true }).catch(() => {});
+    await removeTempPath(outputFile);
   }
 }
 
@@ -252,12 +269,18 @@ export async function extractVideoFramesFromUrl(
       const outputPattern = join(tempDir, `frame-${hash}-%d.${format}`);
       const args = [
         '-y',
-        '-user_agent', 'Mozilla/5.0',
-        '-i', inputUrl,
-        '-vf', `select='not(mod(n\\,max(1\\,floor(tb*duration/${options.count}))))',setpts=N/FRAME_RATE/TB${options.width ? `,scale=${options.width}:-1` : ''}`,
-        '-vsync', 'vfr',
-        '-frames:v', String(options.count),
-        '-f', 'image2',
+        '-user_agent',
+        'Mozilla/5.0',
+        '-i',
+        inputUrl,
+        '-vf',
+        `select='not(mod(n\\,max(1\\,floor(tb*duration/${options.count}))))',setpts=N/FRAME_RATE/TB${options.width ? `,scale=${options.width}:-1` : ''}`,
+        '-vsync',
+        'vfr',
+        '-frames:v',
+        String(options.count),
+        '-f',
+        'image2',
         outputPattern,
       ];
       await runFFmpeg(args, signal);
@@ -268,7 +291,7 @@ export async function extractVideoFramesFromUrl(
         try {
           const buf = await readFile(framePath);
           frames.push({ buffer: buf, timestamp: 0, mimeType, extension });
-          await rm(framePath, { force: true }).catch(() => {});
+          await removeTempPath(framePath);
         } catch {
           break;
         }
@@ -281,19 +304,25 @@ export async function extractVideoFramesFromUrl(
     const outputFile = join(tempDir, `frame-${hash}-0.${format}`);
     const args = [
       '-y',
-      '-user_agent', 'Mozilla/5.0',
-      '-ss', String(timestamp),
-      '-i', inputUrl,
-      '-frames:v', '1',
+      '-user_agent',
+      'Mozilla/5.0',
+      '-ss',
+      String(timestamp),
+      '-i',
+      inputUrl,
+      '-frames:v',
+      '1',
       ...(options.width ? ['-vf', `scale=${options.width}:-1`] : []),
-      '-f', 'image2',
-      '-vcodec', format === 'jpg' ? 'mjpeg' : 'png',
+      '-f',
+      'image2',
+      '-vcodec',
+      format === 'jpg' ? 'mjpeg' : 'png',
       outputFile,
     ];
 
     await runFFmpeg(args, signal);
     const buffer = await readFile(outputFile);
-    await rm(outputFile, { force: true }).catch(() => {});
+    await removeTempPath(outputFile);
 
     return [{ buffer, timestamp, mimeType, extension }];
   } finally {
@@ -302,7 +331,7 @@ export async function extractVideoFramesFromUrl(
     await Promise.all(
       files
         .filter((f) => f.startsWith(`frame-${hash}`))
-        .map((f) => rm(join(tempDir, f), { force: true }).catch(() => {})),
+        .map((f) => removeTempPath(join(tempDir, f))),
     );
   }
 }
@@ -441,11 +470,16 @@ async function extractMultipleFrames(
   const outputPattern = join(tempDir, `frame-${hash}-%d.${format}`);
   const args = [
     '-y',
-    '-i', inputFile,
-    '-vf', `select='not(mod(n\\,max(1\\,floor(tb*duration/${count}))))',setpts=N/FRAME_RATE/TB${options.width ? `,scale=${options.width}:-1` : ''}`,
-    '-vsync', 'vfr',
-    '-frames:v', String(count),
-    '-f', 'image2',
+    '-i',
+    inputFile,
+    '-vf',
+    `select='not(mod(n\\,max(1\\,floor(tb*duration/${count}))))',setpts=N/FRAME_RATE/TB${options.width ? `,scale=${options.width}:-1` : ''}`,
+    '-vsync',
+    'vfr',
+    '-frames:v',
+    String(count),
+    '-f',
+    'image2',
     outputPattern,
   ];
 
@@ -456,7 +490,7 @@ async function extractMultipleFrames(
     try {
       const buf = await readFile(framePath);
       frames.push(buf);
-      await rm(framePath, { force: true }).catch(() => {});
+      await removeTempPath(framePath);
     } catch {
       break;
     }

@@ -1,5 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+} from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { createChannelsClient } from '@openAwork/web-client';
@@ -19,7 +26,10 @@ interface ChannelItem {
   lastActive: string;
 }
 
-const PLATFORM_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; label: string; color: string }> = {
+const PLATFORM_CONFIG: Record<
+  string,
+  { icon: keyof typeof Ionicons.glyphMap; label: string; color: string }
+> = {
   feishu: { icon: 'chatbubbles-outline', label: '飞书', color: colors.aux },
   telegram: { icon: 'paper-plane-outline', label: 'Telegram', color: colors.accent },
   dingtalk: { icon: 'mail-outline', label: '钉钉', color: colors.contrast },
@@ -74,7 +84,7 @@ export default function ChannelOverviewScreen() {
       const client = createChannelsClient(gatewayUrl);
       const rawChannels = await client.list(accessToken);
       const mapped: ChannelItem[] = rawChannels.map((raw) => {
-        const rec = raw as Record<string, unknown>;
+        const rec = raw;
         const platform = resolvePlatform(rec['platform'] ?? rec['type'] ?? rec['kind']);
         return {
           id: (rec['id'] as string) ?? '',

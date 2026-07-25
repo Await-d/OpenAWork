@@ -7,7 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import ffprobePath from 'ffprobe-static';
@@ -56,6 +56,14 @@ interface FFprobeOutput {
   };
 }
 
+async function removeTempFile(path: string): Promise<void> {
+  try {
+    await rm(path, { force: true });
+  } catch (error) {
+    console.warn(`[ffprobe-bridge] 清理临时文件失败: ${path}`, error);
+  }
+}
+
 /**
  * 从 Buffer 提取媒体元信息。
  * 将 buffer 写入临时文件后调用 ffprobe。
@@ -75,7 +83,7 @@ export async function probeMediaBuffer(
   try {
     return await probeMediaFile(tempFile, mimeType, signal);
   } finally {
-    await rm(tempFile, { force: true }).catch(() => {});
+    await removeTempFile(tempFile);
   }
 }
 
@@ -89,8 +97,10 @@ export async function probeMediaFile(
 ): Promise<MediaInfo> {
   return new Promise<MediaInfo>((resolve, reject) => {
     const args = [
-      '-v', 'quiet',
-      '-print_format', 'json',
+      '-v',
+      'quiet',
+      '-print_format',
+      'json',
       '-show_format',
       '-show_streams',
       filePath,
@@ -133,7 +143,9 @@ export async function probeMediaFile(
         const output: FFprobeOutput = JSON.parse(Buffer.concat(stdoutChunks).toString('utf-8'));
         resolve(parseFFprobeOutput(output, mimeType));
       } catch (err) {
-        reject(new Error(`ffprobe 输出解析失败: ${err instanceof Error ? err.message : String(err)}`));
+        reject(
+          new Error(`ffprobe 输出解析失败: ${err instanceof Error ? err.message : String(err)}`),
+        );
       }
     });
   });
@@ -185,7 +197,9 @@ function parseFFprobeOutput(output: FFprobeOutput, mimeType: string): MediaInfo 
     duration,
     ...(videoStream?.width ? { width: videoStream.width } : {}),
     ...(videoStream?.height ? { height: videoStream.height } : {}),
-    ...(videoStream?.codec_name ? { videoCodec: videoStream.codec_name, codec: videoStream.codec_name } : {}),
+    ...(videoStream?.codec_name
+      ? { videoCodec: videoStream.codec_name, codec: videoStream.codec_name }
+      : {}),
     ...(audioStream?.codec_name ? { audioCodec: audioStream.codec_name } : {}),
     ...(audioStream?.sample_rate ? { sampleRate: parseInt(audioStream.sample_rate, 10) } : {}),
     ...(audioStream?.channels ? { channels: audioStream.channels } : {}),

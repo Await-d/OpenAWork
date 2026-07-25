@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type Hls from 'hls.js';
+
+type HlsHandle = {
+  destroy(): void;
+};
 
 export interface VideoPlayerProps {
   src: string;
@@ -14,11 +17,7 @@ export interface VideoPlayerProps {
 
 function isHlsSource(src: string): boolean {
   // .m3u8 或 application/vnd.apple.mpegurl
-  return (
-    src.toLowerCase().endsWith('.m3u8') ||
-    src.includes('.m3u8?') ||
-    src.includes('m3u8#')
-  );
+  return src.toLowerCase().endsWith('.m3u8') || src.includes('.m3u8?') || src.includes('m3u8#');
 }
 
 /**
@@ -41,7 +40,7 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  const hlsRef = useRef<HlsHandle | null>(null);
   const [playing, setPlaying] = useState(false);
   const [hover, setHover] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);

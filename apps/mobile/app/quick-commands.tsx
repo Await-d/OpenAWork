@@ -27,25 +27,90 @@ const CATEGORY_COLORS: Record<string, string> = {
   default: colors.textMuted,
 };
 
-const FALLBACK_COMMANDS: Array<{ id: string; label: string; description: string; icon: keyof typeof Ionicons.glyphMap; category: string }> = [
-  { id: 'fix', label: '修复这段代码', description: '分析错误并提供修复方案', icon: 'bug-outline', category: 'coding' },
-  { id: 'explain', label: '解释这段代码', description: '逐行解析代码逻辑', icon: 'book-outline', category: 'coding' },
-  { id: 'test', label: '编写单元测试', description: '为当前代码生成测试用例', icon: 'flask-outline', category: 'coding' },
-  { id: 'refactor', label: '重构优化', description: '改善代码结构和可读性', icon: 'git-branch-outline', category: 'coding' },
-  { id: 'summarize', label: '总结文档', description: '提取文档的关键信息', icon: 'document-text-outline', category: 'research' },
-  { id: 'translate', label: '翻译内容', description: '多语言翻译与本地化', icon: 'language-outline', category: 'research' },
-  { id: 'git-status', label: '查看 Git 状态', description: '检查工作区变更', icon: 'git-commit-outline', category: 'workspace' },
-  { id: 'run-tests', label: '运行测试', description: '执行项目测试套件', icon: 'play-circle-outline', category: 'workspace' },
+const FALLBACK_COMMANDS: Array<{
+  id: string;
+  label: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  category: string;
+}> = [
+  {
+    id: 'fix',
+    label: '修复这段代码',
+    description: '分析错误并提供修复方案',
+    icon: 'bug-outline',
+    category: 'coding',
+  },
+  {
+    id: 'explain',
+    label: '解释这段代码',
+    description: '逐行解析代码逻辑',
+    icon: 'book-outline',
+    category: 'coding',
+  },
+  {
+    id: 'test',
+    label: '编写单元测试',
+    description: '为当前代码生成测试用例',
+    icon: 'flask-outline',
+    category: 'coding',
+  },
+  {
+    id: 'refactor',
+    label: '重构优化',
+    description: '改善代码结构和可读性',
+    icon: 'git-branch-outline',
+    category: 'coding',
+  },
+  {
+    id: 'summarize',
+    label: '总结文档',
+    description: '提取文档的关键信息',
+    icon: 'document-text-outline',
+    category: 'research',
+  },
+  {
+    id: 'translate',
+    label: '翻译内容',
+    description: '多语言翻译与本地化',
+    icon: 'language-outline',
+    category: 'research',
+  },
+  {
+    id: 'git-status',
+    label: '查看 Git 状态',
+    description: '检查工作区变更',
+    icon: 'git-commit-outline',
+    category: 'workspace',
+  },
+  {
+    id: 'run-tests',
+    label: '运行测试',
+    description: '执行项目测试套件',
+    icon: 'play-circle-outline',
+    category: 'workspace',
+  },
 ];
 
 function inferCategory(cmd: CommandDescriptor): string {
   const id = cmd.id.toLowerCase();
   const label = cmd.label.toLowerCase();
   if (id.includes('image') || label.includes('图片')) return 'image';
-  if (id.includes('git') || id.includes('test') || id.includes('workspace') || label.includes('git') || label.includes('测试')) {
+  if (
+    id.includes('git') ||
+    id.includes('test') ||
+    id.includes('workspace') ||
+    label.includes('git') ||
+    label.includes('测试')
+  ) {
     return 'workspace';
   }
-  if (id.includes('translate') || id.includes('summarize') || label.includes('翻译') || label.includes('总结')) {
+  if (
+    id.includes('translate') ||
+    id.includes('summarize') ||
+    label.includes('翻译') ||
+    label.includes('总结')
+  ) {
     return 'research';
   }
   return 'coding';
@@ -65,19 +130,18 @@ export default function QuickCommandsScreen() {
   const [commands, setCommands] = useState<CommandDescriptor[]>([]);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const loadCommands = useCallback(async () => {
     if (!accessToken || !gatewayUrl) {
-      setError('请先登录并连接网关');
       setLoading(false);
       return;
     }
-    setError(null);
     try {
       const client = createCommandsClient(gatewayUrl);
       const list = await client.list(accessToken);
-      const filtered = list.filter((c) => c.contexts.includes('palette') || c.contexts.includes('composer'));
+      const filtered = list.filter(
+        (c) => c.contexts.includes('palette') || c.contexts.includes('composer'),
+      );
       setCommands(filtered.length > 0 ? filtered : []);
     } catch {
       // 命令列表加载失败时使用 fallback
@@ -187,9 +251,7 @@ export default function QuickCommandsScreen() {
             </View>
             <View style={styles.commandTextWrap}>
               <Text style={styles.commandTitle}>{item.label}</Text>
-              {item.description ? (
-                <Text style={styles.commandDesc}>{item.description}</Text>
-              ) : null}
+              {item.description ? <Text style={styles.commandDesc}>{item.description}</Text> : null}
             </View>
             <Ionicons name="chevron-forward" size={16} color={colors.textSubtle} />
           </TouchableOpacity>

@@ -37,9 +37,7 @@ const TYPE_MAP = {
   checkpoint: { icon: 'flag-outline' as const, color: colors.accent },
 };
 
-function mapScopeKind(
-  scopeKind: string,
-): SnapshotItem['type'] {
+function mapScopeKind(scopeKind: string): SnapshotItem['type'] {
   if (scopeKind === 'manual') return 'manual';
   if (scopeKind === 'baseline' || scopeKind === 'restore') return 'checkpoint';
   return 'auto';
@@ -102,7 +100,7 @@ export default function SnapshotRecoveryScreen() {
         treeHash: t.treeHash,
       }));
       setSnapshots(mapped);
-    } catch (e) {
+    } catch {
       // 回退到 sessions API 的 listSnapshots
       try {
         const sessionsClient = createSessionsClient(gatewayUrl);
@@ -122,9 +120,7 @@ export default function SnapshotRecoveryScreen() {
         }));
         setSnapshots(mapped);
       } catch (e2) {
-        setError(
-          e2 instanceof Error ? e2.message : '加载快照列表失败',
-        );
+        setError(e2 instanceof Error ? e2.message : '加载快照列表失败');
       }
     } finally {
       setLoading(false);
@@ -156,9 +152,7 @@ export default function SnapshotRecoveryScreen() {
         const changed = result.summary.changed;
         const additions = result.summary.additions;
         const deletions = result.summary.deletions;
-        setPreviewResult(
-          `预览：${changed} 个文件将变更 · +${additions} 行 · -${deletions} 行`,
-        );
+        setPreviewResult(`预览：${changed} 个文件将变更 · +${additions} 行 · -${deletions} 行`);
       }
     } catch (e) {
       Alert.alert('预览失败', e instanceof Error ? e.message : '请稍后重试');
@@ -180,27 +174,29 @@ export default function SnapshotRecoveryScreen() {
       {
         text: '恢复',
         style: 'destructive',
-        onPress: async () => {
-          setRestoring(true);
-          try {
-            const snapshotClient = createSnapshotTreesClient(gatewayUrl);
-            const result = await snapshotClient.restoreToTree(accessToken, sessionId, {
-              treeHash: snapshot.treeHash,
-              mode: 'apply',
-            });
-            if (result.mode === 'apply') {
-              Alert.alert('恢复成功', `已恢复 ${result.changed} 个文件`, [
-                {
-                  text: '返回聊天',
-                  onPress: () => router.replace(`/chat/${sessionId}`),
-                },
-              ]);
+        onPress: () => {
+          void (async () => {
+            setRestoring(true);
+            try {
+              const snapshotClient = createSnapshotTreesClient(gatewayUrl);
+              const result = await snapshotClient.restoreToTree(accessToken, sessionId, {
+                treeHash: snapshot.treeHash,
+                mode: 'apply',
+              });
+              if (result.mode === 'apply') {
+                Alert.alert('恢复成功', `已恢复 ${result.changed} 个文件`, [
+                  {
+                    text: '返回聊天',
+                    onPress: () => router.replace(`/chat/${sessionId}`),
+                  },
+                ]);
+              }
+            } catch (e) {
+              Alert.alert('恢复失败', e instanceof Error ? e.message : '请稍后重试');
+            } finally {
+              setRestoring(false);
             }
-          } catch (e) {
-            Alert.alert('恢复失败', e instanceof Error ? e.message : '请稍后重试');
-          } finally {
-            setRestoring(false);
-          }
+          })();
         },
       },
     ]);
