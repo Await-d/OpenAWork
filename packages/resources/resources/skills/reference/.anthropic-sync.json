@@ -1,0 +1,23 @@
+{
+  "upstream": "https://github.com/anthropics/skills.git",
+  "branch": "main",
+  "commit": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+  "syncedAt": "2026-07-25T11:39:14Z",
+  "skills": [
+    "docx",
+    "pdf",
+    "pptx",
+    "xlsx",
+    "frontend-design",
+    "canvas-design",
+    "theme-factory",
+    "brand-guidelines",
+    "algorithmic-art",
+    "slack-gif-creator",
+    "webapp-testing",
+    "web-artifacts-builder",
+    "skill-creator",
+    "doc-coauthoring"
+  ],
+  "skipped": []
+}

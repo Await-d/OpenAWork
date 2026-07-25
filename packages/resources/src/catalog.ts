@@ -13,14 +13,25 @@ export const RESOURCE_AREAS = [
 export type ResourceArea = (typeof RESOURCE_AREAS)[number];
 
 export const INTEGRATED_RESOURCE_SKILL_NAMES = [
+  'algorithmic-art',
+  'brand-guidelines',
+  'canvas-design',
   'csv-pipeline',
+  'doc-coauthoring',
   'docx',
   'email-drafter',
   'excel-processor',
+  'frontend-design',
   'image-ocr',
   'pdf',
+  'pptx',
   'product-design',
+  'skill-creator',
+  'slack-gif-creator',
+  'theme-factory',
+  'web-artifacts-builder',
   'web-scraper',
+  'webapp-testing',
   'xlsx',
 ] as const;
 
@@ -189,8 +200,24 @@ const filesystemAndNetworkOptional = [
 ] satisfies readonly SkillPermission[];
 
 export const RESOURCE_SKILL_PROFILES = {
+  'algorithmic-art': {
+    capabilities: ['creative.algorithmic-art', 'creative.p5js', 'creative.generative'],
+    permissions: filesystemOptional,
+  },
+  'brand-guidelines': {
+    capabilities: ['design.brand', 'design.typography', 'design.colors'],
+    permissions: filesystemOptional,
+  },
+  'canvas-design': {
+    capabilities: ['design.canvas', 'design.philosophy', 'creative.visual'],
+    permissions: filesystemOptional,
+  },
   'csv-pipeline': {
     capabilities: ['data.csv', 'data.json', 'data.transform', 'data.reporting'],
+    permissions: filesystemOptional,
+  },
+  'doc-coauthoring': {
+    capabilities: ['writing.coauthoring', 'writing.documentation', 'writing.specs'],
     permissions: filesystemOptional,
   },
   docx: {
@@ -205,6 +232,10 @@ export const RESOURCE_SKILL_PROFILES = {
     capabilities: ['spreadsheet.xlsx', 'spreadsheet.analysis', 'spreadsheet.formatting'],
     permissions: filesystemOptional,
   },
+  'frontend-design': {
+    capabilities: ['design.frontend', 'design.ui', 'design.typography'],
+    permissions: filesystemOptional,
+  },
   'image-ocr': {
     capabilities: ['image.ocr', 'document.extract', 'vision.text'],
     permissions: filesystemOptional,
@@ -213,13 +244,37 @@ export const RESOURCE_SKILL_PROFILES = {
     capabilities: ['document.pdf', 'document.extract', 'document.forms', 'document.generate'],
     permissions: filesystemOptional,
   },
+  pptx: {
+    capabilities: ['document.pptx', 'document.presentation', 'document.edit'],
+    permissions: filesystemOptional,
+  },
   'product-design': {
     capabilities: ['product.design', 'design.audit', 'prototype.workflow', 'research.synthesis'],
     permissions: filesystemAndNetworkOptional,
   },
+  'skill-creator': {
+    capabilities: ['meta.skill-creator', 'meta.evaluation', 'meta.benchmarking'],
+    permissions: filesystemOptional,
+  },
+  'slack-gif-creator': {
+    capabilities: ['creative.gif', 'creative.animation', 'creative.slack'],
+    permissions: filesystemOptional,
+  },
+  'theme-factory': {
+    capabilities: ['design.theme', 'design.styling', 'design.color-palette'],
+    permissions: filesystemOptional,
+  },
+  'web-artifacts-builder': {
+    capabilities: ['frontend.artifacts', 'frontend.react', 'frontend.bundling'],
+    permissions: filesystemOptional,
+  },
   'web-scraper': {
     capabilities: ['web.fetch', 'web.search', 'web.scrape', 'web.extract'],
     permissions: filesystemAndNetworkOptional,
+  },
+  'webapp-testing': {
+    capabilities: ['qa.webapp', 'qa.playwright', 'qa.automation'],
+    permissions: filesystemOptional,
   },
   xlsx: {
     capabilities: ['spreadsheet.xlsx', 'spreadsheet.formulas', 'spreadsheet.visualization'],
