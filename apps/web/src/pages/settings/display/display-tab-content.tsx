@@ -9,9 +9,7 @@ import {
   type MessageLayoutMode,
   TOOL_EXPAND_CATEGORY_LABELS,
 } from '../../../stores/settings/display-preferences.js';
-import {
-  DIALOGUE_MODE_OPTIONS,
-} from '../../../pages/chat-page/mode/dialogue-mode.js';
+import { DIALOGUE_MODE_OPTIONS } from '../../../pages/chat-page/mode/dialogue-mode.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 import { CurrentUserProfileSection } from './current-user-profile-section.js';
@@ -318,7 +316,8 @@ export function DisplayTabContent() {
     },
     {
       title: '工具调用默认展开',
-      description: '总开关。开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。可在下方按工具类别单独调整',
+      description:
+        '总开关。开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。可在下方按工具类别单独调整',
       checked: store.toolCallsExpandedByDefault,
       onChange: store.setToolCallsExpandedByDefault,
     },
@@ -586,7 +585,9 @@ function ToolExpandRow({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
         <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>{title}</span>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{description}</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+          {description}
+        </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <span
@@ -686,7 +687,9 @@ function DialogueModeSection() {
                 borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}
+              >
                 <span
                   style={{
                     fontSize: 13,
@@ -784,7 +787,9 @@ function MessageLayoutSection() {
                 borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}
+              >
                 <span
                   style={{
                     fontSize: 13,

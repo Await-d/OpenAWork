@@ -313,8 +313,10 @@ const TEAM_CONVERSATION_RECOVERY_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_RECOVERY_RETRY_MAX_MS = 30_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_BASE_MS = 2_000;
 const TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS = 30_000;
-const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 25;
-const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 25;
+/** 默认加载最近 50 轮（与 MultiLayerFeed / LayerChat 窗口一致）。 */
+const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 50;
+/** 上滑无感加载：每次再扩 50 轮。 */
+const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 50;
 
 export function computeTeamConversationRecoveryRetryDelay(attempt: number): number {
   return computeExponentialRetryDelay({

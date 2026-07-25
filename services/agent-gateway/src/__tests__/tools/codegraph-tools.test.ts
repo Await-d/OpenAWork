@@ -70,6 +70,10 @@ describe('codegraph tool definitions and sandbox boundary', () => {
     expect(byName.get('codegraph_node')?.properties.limit).toMatchObject({
       maximum: 2000,
     });
+    expect(byName.get('codegraph_node')?.anyOf).toEqual([
+      { type: 'object', required: ['symbol'] },
+      { type: 'object', required: ['file'] },
+    ]);
     expect(byName.get('codegraph_impact')?.properties.maxDepth).toMatchObject({
       maximum: 5,
     });

@@ -75,7 +75,7 @@ describe('buildUpstreamStreamSummaryLog', () => {
     });
   });
 
-  it('仅 stopReason=error 时把流摘要记为错误', () => {
+  it('流摘要即使 stopReason=error 也不应单独生成诊断错误', () => {
     expect(
       buildUpstreamStreamSummaryLog({
         model: 'gpt-test',
@@ -108,7 +108,7 @@ describe('buildUpstreamStreamSummaryLog', () => {
           stalled: false,
         },
       }).isError,
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

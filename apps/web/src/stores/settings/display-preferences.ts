@@ -29,7 +29,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * - `ocean`：深海青蓝 + 珊瑚
  */
 export type ThemeStyle =
-  | 'nebula' | 'aurora' | 'linear' | 'forest' | 'sakura' | 'carbon' | 'sunset' | 'ocean';
+  'nebula' | 'aurora' | 'linear' | 'forest' | 'sakura' | 'carbon' | 'sunset' | 'ocean';
 
 /**
  * 工具折叠类别——按用户可感知的工具类型分组，控制聊天页面中各类型工具调用的默认展开/折叠行为。
@@ -43,14 +43,7 @@ export type ThemeStyle =
  * - `other`：其他未分类工具
  */
 export type ToolExpandCategory =
-  | 'bash'
-  | 'fileEdit'
-  | 'fileRead'
-  | 'mcp'
-  | 'skill'
-  | 'web'
-  | 'batch'
-  | 'other';
+  'bash' | 'fileEdit' | 'fileRead' | 'mcp' | 'skill' | 'web' | 'batch' | 'other';
 
 export type ToolExpandOverrides = Record<ToolExpandCategory, boolean>;
 

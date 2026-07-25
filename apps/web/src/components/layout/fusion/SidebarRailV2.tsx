@@ -444,10 +444,10 @@ export function SidebarRailV2({
             onFocus={() => preloadRoute(item.to)}
             onPointerDown={() => preloadRoute(item.to)}
             title={item.label}
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               isActive ? 'nav-rail-btn nav-rail-link-active' : 'nav-rail-btn'
             }
-            style={({ isActive }) => ({
+            style={({ isActive }: { isActive: boolean }) => ({
               ...NAV_ICON_BUTTON_STYLE,
               color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
             })}

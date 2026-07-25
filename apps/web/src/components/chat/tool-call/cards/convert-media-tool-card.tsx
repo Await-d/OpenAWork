@@ -78,7 +78,15 @@ export function ConvertMediaToolCard({
               : `转换为 ${targetFormat.toUpperCase()}`}
         </span>
         {result && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              marginLeft: 'auto',
+              flexShrink: 0,
+            }}
+          >
             {result.mimeType && (
               <span style={paramPillStyle}>{result.mimeType.split('/')[1]?.toUpperCase()}</span>
             )}

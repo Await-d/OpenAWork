@@ -157,9 +157,7 @@ export function WorkspaceFileTreePanel({
   });
 
   const isPathIncompatibleError =
-    fileTreeError !== null &&
-    fileTreeError.includes('无法访问') &&
-    fileTreeError.includes('路径');
+    fileTreeError !== null && fileTreeError.includes('无法访问') && fileTreeError.includes('路径');
 
   useEffect(() => {
     setFileTreeContextMenu(null);
@@ -589,7 +587,8 @@ export function WorkspaceFileTreePanel({
                   alignSelf: 'flex-start',
                   padding: '4px 10px',
                   borderRadius: 5,
-                  border: '1px solid color-mix(in oklab, var(--accent) 40%, var(--border-default) 60%)',
+                  border:
+                    '1px solid color-mix(in oklab, var(--accent) 40%, var(--border-default) 60%)',
                   background: 'color-mix(in oklab, var(--accent) 12%, var(--bg-overlay) 88%)',
                   color: 'var(--accent)',
                   fontSize: 11,

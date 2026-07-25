@@ -151,7 +151,13 @@ export default function ChannelDiagnosticsScreen() {
               <View
                 style={[
                   styles.runningDot,
-                  { backgroundColor: isRunning ? colors.success : lastError ? colors.danger : colors.textMuted },
+                  {
+                    backgroundColor: isRunning
+                      ? colors.success
+                      : lastError
+                        ? colors.danger
+                        : colors.textMuted,
+                  },
                 ]}
               />
               <Text
@@ -189,9 +195,7 @@ export default function ChannelDiagnosticsScreen() {
                 <Text style={styles.metricLabel}>心跳</Text>
               </View>
               <View style={styles.metricCard}>
-                <Text style={styles.metricValue}>
-                  {isRunning ? '✓' : '✗'}
-                </Text>
+                <Text style={styles.metricValue}>{isRunning ? '✓' : '✗'}</Text>
                 <Text style={styles.metricLabel}>状态</Text>
               </View>
             </View>
@@ -235,7 +239,8 @@ export default function ChannelDiagnosticsScreen() {
                         {item.title || item.chatName || '未命名会话'}
                       </Text>
                       <Text style={styles.sessionMeta}>
-                        {item.chatName ?? '—'} · {formatTime(item.updatedAt)} · {item.messageCount} 条消息
+                        {item.chatName ?? '—'} · {formatTime(item.updatedAt)} · {item.messageCount}{' '}
+                        条消息
                       </Text>
                       {item.lastMessagePreview ? (
                         <Text style={styles.sessionPreview} numberOfLines={1}>

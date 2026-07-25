@@ -156,6 +156,43 @@ async function main(): Promise<void> {
               'tool_handoff should require a fresh upstream call because its bookend is not replayable',
             );
 
+            const handoffReplayResponse = await streamScenario({
+              accessToken,
+              app,
+              clientRequestId: 'req-tool-handoff',
+              message: 'tool handoff 不应直接 replay 完整结果',
+              sessionId,
+            });
+            assert(
+              handoffReplayResponse.statusCode === 200,
+              'tool handoff replay after fresh upstream should succeed',
+            );
+            const handoffReplayEvents = parseSseChunks(handoffReplayResponse.body);
+            assert(
+              handoffReplayEvents.some(
+                (event) =>
+                  event['type'] === 'text_delta' &&
+                  event['delta'] === 'bookend fallback reached upstream',
+              ),
+              'tool_handoff replay after fresh upstream should emit the successful text',
+            );
+            assert(
+              handoffReplayEvents.some(
+                (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+              ),
+              'tool_handoff replay after fresh upstream should end_turn',
+            );
+            assert(
+              !handoffReplayEvents.some(
+                (event) => event['type'] === 'done' && event['stopReason'] === 'tool_use',
+              ),
+              'tool_handoff replay after fresh upstream should not include stale tool_use',
+            );
+            assert(
+              Number(upstreamCallCount) === 1,
+              'tool_handoff replay after fresh upstream should not issue another upstream call',
+            );
+
             appendSessionMessage({
               sessionId,
               userId,

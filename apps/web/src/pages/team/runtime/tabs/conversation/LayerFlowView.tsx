@@ -156,7 +156,18 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
       subtitle="把消息在 接待 → 规划 → 管控 → 执行 → 评审 各层之间的传递实时画成流水线。点左侧记录切换，右侧面板只显示对话。"
       scroll={false}
     >
-      <div ref={containerRef} className="team-conv-root" style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1, overflow: 'hidden' }}>
+      <div
+        ref={containerRef}
+        className="team-conv-root"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          minHeight: 0,
+          flex: 1,
+          overflow: 'hidden',
+        }}
+      >
         {/* 流水线 + 密度切换 */}
         <div
           className="team-conv-panel"
@@ -199,7 +210,14 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
           className={isNarrowLayout ? '' : 'team-conv-split'}
           style={
             isNarrowLayout
-              ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden' }
+              ? {
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  overflow: 'hidden',
+                }
               : undefined
           }
         >

@@ -136,7 +136,9 @@ function toUploadedChatAttachment(
 
   return {
     artifactId: artifact.id,
-    ...(mimeType?.startsWith('image/') || mimeType?.startsWith('audio/') || mimeType?.startsWith('video/')
+    ...(mimeType?.startsWith('image/') ||
+    mimeType?.startsWith('audio/') ||
+    mimeType?.startsWith('video/')
       ? {
           dataUrl: `data:${mimeType};base64,${contentBase64}`,
         }

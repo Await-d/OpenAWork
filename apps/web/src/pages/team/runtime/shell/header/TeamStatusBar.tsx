@@ -1,119 +1,130 @@
 /**
- * 260515-team-phase-b · T-12 + 260516-team-page-v2 · T-04 / T-05
+ * TeamStatusBar：最顶部运行状态 + 操作按钮（demo 式紧凑条）
  *
- * TeamStatusBar：顶部固定运行状态栏。
- *
- * V2 升级（T-04 / T-05）：
- *   - 始终渲染（无 handoff 时最小化为单行提示）
- *   - 集成 LayerStatusIndicator（活跃层级 chip 列表）
- *   - 集成 TaskProgressBar（已完成 / 总数 进度条）
- *   - 集成 EstimatedTimeLabel（基于运行中任务的最早 startedAt 估算）
+ * 只展示：
+ *   - 状态 chip（运行中 / 已暂停 / 待命）
+ *   - 失败 chip
+ *   - 操作按钮（暂停/恢复、重试、定位、专注）
  */
 
 import { useMemo, type CSSProperties } from 'react';
-import {
-  useHandoffStore,
-  useLayerStore,
-  type TeamRoleLayer,
-} from '../../../../../stores/team/team-events.js';
+import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
 import {
   computeTeamStatusBarStats,
   filterHandoffsForStatusBar,
 } from './team-status-bar-helpers.js';
 
 const BAR_STYLE: CSSProperties = {
-  display: 'flex',
+  display: 'inline-flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '2px 0',
+  gap: 5,
+  minHeight: 26,
+  padding: 0,
   fontSize: 11,
-  fontWeight: 600,
+  fontWeight: 650,
   flexWrap: 'nowrap',
   minWidth: 0,
   overflow: 'hidden',
+  maxWidth: '100%',
 };
 
-const MINIMIZED_BAR_STYLE: CSSProperties = {
-  ...BAR_STYLE,
-  opacity: 0.6,
-};
-
-const LAYER_BADGE_STYLE: CSSProperties = {
+const CHIP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 3,
-  padding: '1px 5px',
-  borderRadius: 4,
+  gap: 4,
+  minHeight: 22,
+  padding: '0 7px',
+  borderRadius: 0,
+  border: '1px solid var(--border-default)',
+  color: 'var(--fg-faint)',
   fontSize: 10,
-  fontWeight: 700,
-  textTransform: 'uppercase',
+  fontWeight: 650,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+  background: 'transparent',
 };
 
-const PROGRESS_TRACK_STYLE: CSSProperties = {
-  position: 'relative',
-  width: 60,
-  height: 3,
-  borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
-  overflow: 'hidden',
-};
-
-const PROGRESS_FILL_STYLE: CSSProperties = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  height: '100%',
-  borderRadius: 999,
-  background: 'var(--accent)',
-  transition: 'width 200ms ease',
-};
-
-const ESTIMATE_LABEL_STYLE: CSSProperties = {
-  fontSize: 10,
-  color: 'var(--fg-subtle)',
-  fontWeight: 400,
+const BTN_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  minHeight: 22,
+  padding: '0 8px',
+  borderRadius: 0,
+  fontSize: 10.5,
+  fontWeight: 650,
   flexShrink: 0,
   whiteSpace: 'nowrap',
+  border: '1px solid var(--border-default)',
+  borderRightWidth: 0,
+  background: 'var(--bg-base)',
+  color: 'var(--fg-muted)',
+  cursor: 'pointer',
 };
 
-const LAYER_COLORS: Record<TeamRoleLayer, string> = {
-  user: 'var(--fg-muted)',
-  reception: 'var(--accent)',
-  pm1: 'var(--chart-5)',
-  pm2: 'var(--chart-5)',
-  executor: 'var(--success)',
-  tester: 'var(--aux)',
-  reviewer: 'var(--warning)',
+const BTN_LAST_STYLE: CSSProperties = {
+  ...BTN_STYLE,
+  borderRightWidth: 1,
+};
+
+const ACTIONS_WRAP: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 0,
+  marginLeft: 4,
+  flexShrink: 0,
+  minWidth: 0,
 };
 
 export interface TeamStatusBarProps {
   onPauseAll?: () => void;
   onResumeAll?: () => void;
+  onRetryFailed?: () => void;
+  onFocusFail?: () => void;
+  onToggleFocus?: () => void;
   paused?: boolean;
+  focusMode?: boolean;
+  failCount?: number;
+  busy?: boolean;
   selectedSessionId?: string | null;
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return '<1s';
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
-}
-
-function formatEstimatedMinutes(ms: number | null): string {
-  if (ms === null) return '计算中...';
-  if (ms === 0) return '~0min';
-  const minutes = Math.max(1, Math.ceil(ms / 60000));
-  return `~${minutes}min`;
+function statusChip(paused?: boolean, running = 0): { label: string; style: CSSProperties } {
+  if (paused) {
+    return {
+      label: '已暂停',
+      style: {
+        ...CHIP_STYLE,
+        color: 'var(--warning)',
+        borderColor: 'color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+      },
+    };
+  }
+  if (running > 0) {
+    return {
+      label: `运行中 ${running}`,
+      style: {
+        ...CHIP_STYLE,
+        color: 'var(--success)',
+        borderColor: 'color-mix(in srgb, var(--success) 30%, var(--border-default))',
+      },
+    };
+  }
+  return {
+    label: '待命',
+    style: CHIP_STYLE,
+  };
 }
 
 export function TeamStatusBar({
   onPauseAll,
   onResumeAll,
+  onRetryFailed,
+  onFocusFail,
+  onToggleFocus,
   paused,
+  focusMode,
+  failCount,
+  busy = false,
   selectedSessionId = null,
 }: TeamStatusBarProps) {
   const handoffs = useHandoffStore((s) => s.handoffs);
@@ -122,128 +133,118 @@ export function TeamStatusBar({
     () => filterHandoffsForStatusBar(handoffs.values(), nodes.values(), selectedSessionId),
     [handoffs, nodes, selectedSessionId],
   );
-
   const stats = useMemo(() => computeTeamStatusBarStats(scopedHandoffs), [scopedHandoffs]);
+  const failed = failCount ?? stats.failed;
+  const chip = statusChip(paused, stats.running);
 
-  // 无 handoff 时最小化展示
-  if (scopedHandoffs.length === 0) {
+  const hasActions = Boolean(
+    (onPauseAll && !paused) ||
+    (onResumeAll && paused) ||
+    onRetryFailed ||
+    onFocusFail ||
+    onToggleFocus,
+  );
+
+  if (scopedHandoffs.length === 0 && !paused && !hasActions) {
     return (
-      <div style={MINIMIZED_BAR_STYLE} role="status" aria-label="团队运行状态（待命中）">
-        <span style={{ color: 'var(--fg-muted)', fontWeight: 400 }}>● AI 团队待命中</span>
+      <div style={BAR_STYLE} role="status" aria-label="团队运行状态（待命中）">
+        <span style={CHIP_STYLE}>待命</span>
       </div>
     );
   }
 
   return (
-    <div style={BAR_STYLE} role="status" aria-label="团队运行状态">
-      {/* TaskProgressBar */}
-      {stats.total > 0 ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <div style={PROGRESS_TRACK_STYLE} aria-label="任务进度">
-            <div
-              style={{
-                ...PROGRESS_FILL_STYLE,
-                width: `${stats.progress * 100}%`,
-              }}
-            />
-          </div>
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-            {stats.completed}/{stats.total}
-          </span>
+    <div
+      style={BAR_STYLE}
+      role="status"
+      aria-label={paused ? '团队运行状态（已暂停）' : '团队运行状态'}
+    >
+      <span style={chip.style}>{chip.label}</span>
+      {failed > 0 ? (
+        <span
+          style={{
+            ...CHIP_STYLE,
+            color: 'var(--danger)',
+            borderColor: 'color-mix(in srgb, var(--danger) 30%, var(--border-default))',
+          }}
+        >
+          失败 <b style={{ color: 'inherit', fontWeight: 700 }}>{failed}</b>
+        </span>
+      ) : null}
+
+      {hasActions ? (
+        <div style={ACTIONS_WRAP} data-team-status-actions="true">
+          {(() => {
+            type ActionBtn = {
+              key: string;
+              label: string;
+              onClick?: () => void;
+              color?: string;
+              active?: boolean;
+            };
+            const actions: ActionBtn[] = [];
+            if (onPauseAll && !paused) {
+              actions.push({
+                key: 'pause',
+                label: busy ? '暂停中…' : '暂停全部',
+                onClick: onPauseAll,
+                color: 'var(--accent)',
+              });
+            }
+            if (onResumeAll && paused) {
+              actions.push({
+                key: 'resume',
+                label: busy ? '恢复中…' : '恢复全部',
+                onClick: onResumeAll,
+                color: 'var(--success)',
+              });
+            }
+            if (onRetryFailed) {
+              actions.push({
+                key: 'retry',
+                label: '重试失败',
+                onClick: onRetryFailed,
+                color: 'var(--danger)',
+              });
+            }
+            if (onFocusFail) {
+              actions.push({ key: 'focus-fail', label: '定位失败', onClick: onFocusFail });
+            }
+            if (onToggleFocus) {
+              actions.push({
+                key: 'focus',
+                label: focusMode ? '退出专注' : '专注对话',
+                onClick: onToggleFocus,
+                active: Boolean(focusMode),
+              });
+            }
+            return actions.map((action, index) => {
+              const isLast = index === actions.length - 1;
+              return (
+                <button
+                  key={action.key}
+                  type="button"
+                  onClick={action.onClick}
+                  disabled={busy}
+                  style={{
+                    ...(isLast ? BTN_LAST_STYLE : BTN_STYLE),
+                    color: action.color ?? 'var(--fg-muted)',
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy ? 0.6 : 1,
+                    ...(action.active
+                      ? {
+                          background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-base))',
+                          color: 'var(--fg-strong)',
+                        }
+                      : null),
+                  }}
+                >
+                  {action.label}
+                </button>
+              );
+            });
+          })()}
         </div>
-      ) : null}
-
-      {/* 任务计数 */}
-      {stats.running > 0 ? (
-        <span style={{ color: 'var(--success)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          ● {stats.running} 运行中
-        </span>
-      ) : null}
-      {stats.pending > 0 ? (
-        <span style={{ color: 'var(--fg-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          ◌ {stats.pending} 等待
-        </span>
-      ) : null}
-      {stats.failed > 0 ? (
-        <span style={{ color: 'var(--danger)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          ✗ {stats.failed}
-        </span>
-      ) : null}
-
-      {/* LayerStatusIndicator —— 可被压缩 */}
-      {stats.activeLayers.length > 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            gap: 4,
-            minWidth: 0,
-            overflow: 'hidden',
-          }}
-        >
-          {stats.activeLayers.map((layer) => (
-            <span
-              key={layer}
-              style={{
-                ...LAYER_BADGE_STYLE,
-                color: LAYER_COLORS[layer],
-                border: `1px solid ${LAYER_COLORS[layer]}40`,
-                background: `${LAYER_COLORS[layer]}10`,
-              }}
-            >
-              {layer}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      {/* EstimatedTimeLabel */}
-      <span style={ESTIMATE_LABEL_STYLE}>
-        预计 {formatEstimatedMinutes(stats.estimatedRemainingMs)}
-      </span>
-      {stats.elapsedMs !== null ? (
-        <span style={ESTIMATE_LABEL_STYLE}>已运行 {formatDuration(stats.elapsedMs)}</span>
-      ) : null}
-
-      {/* 暂停/恢复按钮 */}
-      {onPauseAll && !paused ? (
-        <button
-          className="team-v2-control team-v2-control--transparent"
-          type="button"
-          onClick={onPauseAll}
-          style={{
-            marginLeft: 'auto',
-            padding: '2px 10px',
-            borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-            color: 'var(--fg-default)',
-            fontSize: 11,
-            cursor: 'pointer',
-            flexShrink: 0,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          全部暂停
-        </button>
-      ) : null}
-      {onResumeAll && paused ? (
-        <button
-          className="team-v2-control team-v2-control--transparent"
-          type="button"
-          onClick={onResumeAll}
-          style={{
-            marginLeft: 'auto',
-            padding: '2px 10px',
-            borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
-            color: 'var(--success)',
-            fontSize: 11,
-            cursor: 'pointer',
-            flexShrink: 0,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          全部恢复
-        </button>
       ) : null}
     </div>
   );

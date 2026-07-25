@@ -318,6 +318,17 @@ export function replaySessionEntries(sessionId: string): SessionEntry[] {
   return aggregateSessionEntries(listSessionEvents({ sessionId }));
 }
 
+export function deleteSessionEventsByRequestScope(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): void {
+  sqliteRun(
+    'DELETE FROM session_entry WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
+    [input.sessionId, input.userId, input.clientRequestId],
+  );
+}
+
 // ─── RunEvent → SessionEvent translator ───
 
 /**

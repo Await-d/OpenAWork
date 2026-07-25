@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260725-team-layer-todo-workbench](workflow/260725-team-layer-todo-workbench.md) — Team classic 对话工作台 MVP 已落地：左运营壳(ChatOps/Attention/InlineOps) + 右 layer/role/todo 工作台；仅 `workbenchLayoutMode==='classic'`；Fusion 不变；composer 三模式/服务端决策持久化后置
 - [260723-mobile-pen-visual-alignment](workflow/260723-mobile-pen-visual-alignment.md) — 手机端主流程按 pen 视觉对齐：Full orchestration；方案 A 共享 UI 组件后逐屏套用（连接/登录/会话/聊天/设置 + 壳层）；逻辑不改
 - [260723-team-lifecycle-hard-contract-tools](workflow/260723-team-lifecycle-hard-contract-tools.md) — Team 生命周期硬契约工具化：Full orchestration；不推翻 5 层架构，将 executor/reviewer 完成输出升级为强制 Builtin Instruction（`submit_execution_result` + 结构化 `submit_review`），runner 门禁 + quality review 优先消费 checklist；本轮仅方案，待批准后实现
 - [260708-opencowork-tooling-integration-plan](workflow/260708-opencowork-tooling-integration-plan.md) — OpenCowork 工具生态集成方案：Full orchestration；坚持 OpenAWork 原生 MCP runtime、gateway tool registry、skill registry、channel manager 与 plugin settings 为主路径，已有简单工具只登记/补别名/补文档，不重复完整集成；P1 聚焦 `streamable-http`、文档数据 skills、Browser alias、通用 channel tools
@@ -69,6 +70,7 @@
 - [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
 
 ## Architecture Decisions
+- [2026-07-25] Team「经典对话页」原型（`demo/team-layer-todo-detail-demo.html`）落点固定为 **Team 并排工作台（`TeamPageV2` sidePanel + `TeamLayerTodoWorkbench`）**，不是复活 Classic 全局布局：左侧永驻对话，右侧默认任务台（layer rail → role strip → todo list → detail messages），概览/度量/治理嵌入既有 tab 内容；数据用前端派生 view-model，不新建第二套消息/任务真相源。MVP 不含 composer 三模式真协议与决策集服务端持久化。
 - [2026-07-23] 手机端主流程视觉对齐固定为「pen 为视觉真源 + 共享 ui 组件 + 逻辑不跟 pen 盲改」：token 已抽取；`components/ui` 提供 PageHeader/SearchField/Chip/SurfaceCard/ListRow/StatusBadge/HintCard/Buttons；主流程屏 sessions/connection/login/settings/chat 先视觉对齐，业务语义问题由产品后续点名。
 - [2026-07-23] Team 完成态固定为「Builtin Instruction 硬契约优先，prompt 仅兜底」：executor 必须 `submit_execution_result`，reviewer 必须结构化 `submit_review`；`result_json.protocol` 是完成真相源。`OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=soft|hard` 控制兼容期（默认 soft：缺 protocol 记 degraded；hard：execution-protocol-failure）。Quality Review 优先机器判定 checklist/items fail，LLM 仅做语义抽检；返工按 failedItems 精确反馈。不把 PM1/PM2 主编排改为 LLM 自由工具流。
 - [2026-07-15] Composer 输入历史固定为“`gatewayUrl + currentUserEmail + sessionId` scope 的内存 ring buffer”：`chat` 与 `team` 复用同一 `UnifiedComposer` 输入历史，最多保留最新 50 条；未建 session 时先记到 pending scope，首条发送创建 session 后再迁移；只在 direct send 成功或 queued send 成功入队时记录，不在每次编辑时落盘；多行输入仅在 caret 位于文本起点时允许 `ArrowUp` 进入历史浏览，避免抢占原生跨行导航。
@@ -108,6 +110,7 @@
 - 若 gateway 需要同时支持 `chat_completions` 与 `responses`，优先先产出协议无关 IR，再由末端 renderer 负责最终 body；不要在 `stream-model-round.ts` 或任意 provider-specific helper 里重新拼一套语义。
 
 ## Known Pitfalls
+- Team 并排工作台改造时不要误改 Classic 冻结路径（`LayoutClassic` / `AppSidebar` 等）；`TeamPageV2` 当前 `workbenchSidePanel = undefined`，恢复 sidePanel 时应挂新 `TeamLayerTodoWorkbench`，并避免继续膨胀 `TeamPageV2` / `TeamConversationView` 超大文件——必须拆 view-model 与子组件。
 - `ChatPage` 的流式状态如果同时存在于页面本体和 `useChatStreaming`，会立刻引发重复声明与状态分叉；迁移时必须先统一单一真相源，再改调用点。
 - 移动端若继续同时保留 Expo Router `app/*` 与 `src/screens/*` 两套实现，后续功能很容易再次只改到未接入路径；改动前先确认真实入口。
 - WebSocket 鉴权若继续把 bearer token 放进 query string，会泄露给代理日志和调试链路；移动端现已改为 Authorization header，其他客户端也应避免回退。

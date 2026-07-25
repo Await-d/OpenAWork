@@ -85,8 +85,7 @@
   white-space: nowrap;
 }
 
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__summary-stat[data-tone='running'] {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__summary-stat[data-tone='running'] {
   background: var(--accent-subtle);
   border-color: var(--accent-border);
 }
@@ -97,10 +96,8 @@
   color: var(--accent);
 }
 
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__summary-stat[data-tone='paused'],
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__summary-stat[data-tone='idle'] {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__summary-stat[data-tone='paused'],
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__summary-stat[data-tone='idle'] {
   background: var(--contrast-subtle);
   border-color: var(--contrast-border);
 }
@@ -114,8 +111,7 @@
   color: var(--contrast);
 }
 
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__summary-stat[data-tone='failure'] {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__summary-stat[data-tone='failure'] {
   background: var(--complement-subtle);
   border-color: var(--complement-border);
 }

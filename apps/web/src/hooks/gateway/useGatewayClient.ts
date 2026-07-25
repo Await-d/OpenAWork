@@ -949,10 +949,6 @@ export function useGatewayClient(token: string | null): GatewayClient {
           // `{type:'ping'}` with `pong` and emits chunks during a live turn;
           // if NOTHING arrives within the tolerance window the socket is
           // presumed half-open (server vanished without a FIN) and we close it
-          // — which triggers the existing onclose → startSse() fallback. The
-          // SSE re-send is idempotent: handleStreamRequest dedupes by
-          // clientRequestId (awaits the in-flight run + replays), so a healthy
-          // backgrounded run is re-attached rather than duplicated.
           lastServerActivityAt = Date.now();
           stopLivenessProbe();
           livenessTimer = setInterval(() => {

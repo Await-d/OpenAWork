@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  ActivityIndicator,
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { createChannelsClient, type ChannelDiagnostics } from '@openAwork/web-client';
@@ -67,7 +75,13 @@ export default function ChannelConfigScreen() {
         {error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryLink} onPress={() => { setLoading(true); void loadDiagnostics(); }}>
+            <TouchableOpacity
+              style={styles.retryLink}
+              onPress={() => {
+                setLoading(true);
+                void loadDiagnostics();
+              }}
+            >
               <Text style={styles.retryLinkText}>重试</Text>
             </TouchableOpacity>
           </View>
@@ -94,7 +108,13 @@ export default function ChannelConfigScreen() {
               ]}
             >
               <Ionicons
-                name={isRunning ? 'checkmark-circle' : lastError ? 'alert-circle-outline' : 'pause-circle-outline'}
+                name={
+                  isRunning
+                    ? 'checkmark-circle'
+                    : lastError
+                      ? 'alert-circle-outline'
+                      : 'pause-circle-outline'
+                }
                 size={16}
                 color={isRunning ? colors.success : lastError ? colors.danger : colors.textMuted}
               />
@@ -137,9 +157,7 @@ export default function ChannelConfigScreen() {
               <View style={styles.groupRow}>
                 <Ionicons name="people-outline" size={16} color={colors.accent} />
                 <Text style={styles.groupName}>{channelId ?? '未知渠道'}</Text>
-                <Text style={styles.groupCount}>
-                  {diagnostics?.lastDispatchType ?? '—'}
-                </Text>
+                <Text style={styles.groupCount}>{diagnostics?.lastDispatchType ?? '—'}</Text>
               </View>
             </View>
 

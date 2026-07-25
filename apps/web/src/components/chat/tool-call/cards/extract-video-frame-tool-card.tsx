@@ -69,7 +69,15 @@ export function ExtractVideoFrameToolCard({
               : `提取 ${result?.count ?? frames.length} 帧画面`}
         </span>
         {result && frames.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              marginLeft: 'auto',
+              flexShrink: 0,
+            }}
+          >
             <span style={paramPillStyle}>{frames.length} 帧</span>
           </div>
         )}
@@ -142,30 +150,55 @@ function FrameThumbnail({
       }}
     >
       {loading && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: '100%', height: '100%', color: 'var(--fg-muted)', fontSize: 10,
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%',
+            color: 'var(--fg-muted)',
+            fontSize: 10,
+          }}
+        >
           加载…
         </div>
       )}
       {!loading && !error && mediaSrc && (
-        <img src={mediaSrc} alt={`帧 ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <img
+          src={mediaSrc}
+          alt={`帧 ${index + 1}`}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
       )}
       {error && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: '100%', height: '100%', color: 'var(--fg-complement)', fontSize: 10,
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%',
+            color: 'var(--fg-complement)',
+            fontSize: 10,
+          }}
+        >
           失败
         </div>
       )}
       {frame.timestamp !== undefined && (
-        <div style={{
-          position: 'absolute', bottom: 2, right: 4,
-          padding: '1px 4px', borderRadius: 3,
-          background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 9,
-        }}>
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 2,
+            right: 4,
+            padding: '1px 4px',
+            borderRadius: 3,
+            background: 'rgba(0,0,0,0.6)',
+            color: 'white',
+            fontSize: 9,
+          }}
+        >
           {Math.round(frame.timestamp)}s
         </div>
       )}

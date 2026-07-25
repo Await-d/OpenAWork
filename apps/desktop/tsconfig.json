@@ -17,5 +17,11 @@
       "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"]
     }
   },
-  "include": ["src", "../web/src/tauri-event.d.ts", "../../packages/shared/src/version.d.ts"]
+  "include": [
+    "src",
+    "../web/src/tauri-event.d.ts",
+    "../../packages/shared/src/version.d.ts",
+    "../../packages/shared/src/react-css-vars.d.ts",
+    "../../packages/shared-ui/src/types/hls-js.d.ts"
+  ]
 }

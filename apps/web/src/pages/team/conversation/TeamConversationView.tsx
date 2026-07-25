@@ -142,6 +142,12 @@ export interface TeamConversationViewProps {
    * 某个具体角色实例后只看该角色的对话，而非混合所有子角色。
    */
   soloMode?: boolean;
+  /**
+   * classic 工作台模式：隐藏旧版 topBar（RunStateBanner / SubstateProgress /
+   * ViewModeToggle / dual 多层侧栏等弃用布局），只保留对话流 + 外层注入的
+   * ops chrome / inline cards。
+   */
+  classicWorkbench?: boolean;
 }
 
 const TEAM_CONVERSATION_LAYER_ORDER = [
@@ -198,6 +204,7 @@ export function TeamConversationView({
   focusedLayer = null,
   readOnly = false,
   soloMode = false,
+  classicWorkbench = false,
 }: TeamConversationViewProps) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -378,13 +385,11 @@ export function TeamConversationView({
     [state.pendingQuestions],
   );
 
-  // 默认 topBar：
-  //   - reception 层：显示「团队整体运行状态」横幅（TeamRunStateBanner，自聚合
-  //     handoff/连接/活动信号；无任何 handoff 时自渲染为 null）。它解决了
-  //     「提交需求后看不出团队是在跑/卡住/异常停」的可观测性缺口。reception 会话
-  //     自身常回 idle，原来的 substate 进度条对 reception 没意义，故不再用它。
-  //   - 其它层（pm1/pm2/executor/reviewer）：保留 substate 进度条（对单层有意义）。
-  const effectiveTopBar = (
+  // classic 工作台：弃用旧 topBar（RunStateBanner / SubstateProgress / ViewModeToggle）。
+  // 非 classic：保持原 reception 运行横幅 / 其它层 substate 进度条。
+  const effectiveTopBar = classicWorkbench ? (
+    (topBar ?? null)
+  ) : (
     <>
       {topBar ??
         (state.roleLayer === 'reception' ? (
@@ -1241,14 +1246,31 @@ export function TeamConversationView({
   );
 
   useEffect(() => {
-    if (readOnly || hasAutoOpenedMultiLayerRef.current || compact || viewMode !== 'single') return;
+    // classic 工作台弃用 dual 多层侧栏，禁止自动切 dual
+    if (
+      classicWorkbench ||
+      readOnly ||
+      hasAutoOpenedMultiLayerRef.current ||
+      compact ||
+      viewMode !== 'single'
+    ) {
+      return;
+    }
     // 有任何层级消息就自动展开左侧群聊汇总面板（不再要求必须有其它层级消息）
     if (!hasAnyMessages) return;
     if (isNarrowLayout) return;
     hasAutoOpenedMultiLayerRef.current = true;
     setSelectedLayer((previous) => previous ?? defaultDetailLayer);
     setViewMode('dual');
-  }, [compact, defaultDetailLayer, hasAnyMessages, isNarrowLayout, readOnly, viewMode]);
+  }, [
+    classicWorkbench,
+    compact,
+    defaultDetailLayer,
+    hasAnyMessages,
+    isNarrowLayout,
+    readOnly,
+    viewMode,
+  ]);
 
   useEffect(() => {
     const updateNarrowLayout = () => setIsNarrowLayout(window.innerWidth < 900);
@@ -1289,8 +1311,9 @@ export function TeamConversationView({
   // 被拍平塞进本容器），本容器必须同时设 minHeight:0 + overflow:hidden —— 否则
   // 消息流变长时，column flex 子项总高溢出会把 composer / 底部状态栏推出可视区，
   // 表现为「输入框看不到 / 滚不到最底 / 底部被裁一截」三种同源症状。
+  const effectiveViewMode: ViewMode = classicWorkbench || soloMode ? 'single' : viewMode;
   const MAIN_PANEL_STYLE: CSSProperties = {
-    flex: viewMode === 'dual' ? '0 0 clamp(360px, 55%, 640px)' : '1 1 100%',
+    flex: effectiveViewMode === 'dual' ? '0 0 clamp(360px, 55%, 640px)' : '1 1 100%',
     minWidth: 0,
     minHeight: 0,
     display: 'flex',
@@ -1314,11 +1337,17 @@ export function TeamConversationView({
           }}
         />
       )}
-      <div style={soloMode ? { display: 'flex', flex: 1, minHeight: 0 } : DUAL_LAYOUT_STYLE}>
+      <div
+        style={
+          soloMode || classicWorkbench
+            ? { display: 'flex', flex: 1, minHeight: 0 }
+            : DUAL_LAYOUT_STYLE
+        }
+      >
         {/* 左侧：用户与接待的对话 */}
         <div
           style={
-            soloMode
+            soloMode || classicWorkbench
               ? {
                   flex: 1,
                   minWidth: 0,
@@ -1342,11 +1371,12 @@ export function TeamConversationView({
               topBar={effectiveTopBar}
               beforeMessages={
                 <>
-                  {/* 优化：reception 层的主对话不显示 TeamSessionHeader（用户已经在看
-                  对话了，不需要再看"接待层 / idle"这种元数据）。非 reception
-                  层（pm1/pm2/executor/reviewer）保留 header 以便用户知道当前看
-                  的是哪个子 session。readOnly 模式下全部禁用。 */}
-                  {state.roleLayer && state.roleLayer !== 'reception' && !readOnly ? (
+                  {/* classic 工作台弃用 SessionHeader / RunEventsPreview 等旧 chrome，
+                      运营信息改由外层 ops chrome / inline cards 承载。 */}
+                  {!classicWorkbench &&
+                  state.roleLayer &&
+                  state.roleLayer !== 'reception' &&
+                  !readOnly ? (
                     <TeamSessionHeader
                       roleLayer={state.roleLayer}
                       substate={state.substate}
@@ -1354,7 +1384,7 @@ export function TeamConversationView({
                       sessionMetadata={state.sessionMetadata}
                     />
                   ) : null}
-                  {state.runEvents.length > 0 && !readOnly ? (
+                  {!classicWorkbench && state.runEvents.length > 0 && !readOnly ? (
                     <TeamRunEventsPreview runEvents={state.runEvents} />
                   ) : null}
                   {beforeMessages}
@@ -1499,14 +1529,14 @@ export function TeamConversationView({
             />
           </LatestAssistantMessageContext>
         </div>
-        {soloMode ? null : (
+        {soloMode || classicWorkbench ? null : (
           <TeamConversationLayerSidePanel
             activeLayer={state.roleLayer}
             currentSessionId={sessionId}
             layers={multiLayerMessages}
             mode={multiLayerMode}
             selectedLayer={selectedLayer}
-            isOpen={viewMode === 'dual'}
+            isOpen={effectiveViewMode === 'dual'}
             activeModelId={state.activeModelId}
             activeModelLabel={activeModelOption?.label}
             activeProviderId={state.activeProviderId}

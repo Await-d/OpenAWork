@@ -176,7 +176,8 @@
   align-items: flex-start;
   gap: var(--spacing-3, 12px);
   padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, var(--border-default)) 40%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border-subtle, var(--border-default)) 40%, transparent);
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--bg-overlay) 60%, transparent) 0%,
@@ -237,7 +238,9 @@
   border: 1px solid var(--state-border, color-mix(in srgb, var(--border-default) 40%, transparent));
   background: var(--state-bg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)));
   color: var(--state-color, var(--fg-default));
-  transition: background 160ms ease, border-color 160ms ease;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
 }
 
 .team-conv-badge--layer {
@@ -261,8 +264,15 @@
 }
 
 @keyframes team-conv-pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -363,7 +373,10 @@
 }
 
 .team-conv-filter-btn[data-layer-filter] {
-  border-color: var(--layer-color-border, color-mix(in srgb, var(--border-default) 30%, transparent));
+  border-color: var(
+    --layer-color-border,
+    color-mix(in srgb, var(--border-default) 30%, transparent)
+  );
 }
 
 .team-conv-filter-btn[data-layer-filter][data-active='true'] {
@@ -440,7 +453,8 @@
 }
 
 @keyframes team-conv-node-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--node-color) 40%, transparent);
   }
   50% {
@@ -539,8 +553,12 @@
 }
 
 @keyframes team-conv-flow-dash {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -569,7 +587,8 @@
   padding: 6px 4px;
   border-radius: var(--radius-sm, 6px);
   background: color-mix(in srgb, var(--bg-overlay) 45%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, var(--border-default)) 35%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border-subtle, var(--border-default)) 35%, transparent);
 }
 
 .team-conv-timeline__section-title {
@@ -673,7 +692,9 @@
   border-radius: var(--radius-md, 8px);
   border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
   background: color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base));
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .team-conv-message-card:hover {

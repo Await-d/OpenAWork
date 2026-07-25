@@ -4,18 +4,22 @@ import {
   wrapGatewayToolsForAiSdkDeclarationsOnly,
 } from '../../v2-runtime/upstream/index.js';
 
-function buildGatewayTool(name: string, description: string): GatewayToolFunctionShape {
+function buildGatewayTool(
+  name: string,
+  description: string,
+  parameters: GatewayToolFunctionShape['function']['parameters'] = {
+    type: 'object',
+    properties: { query: { type: 'string' }, numResults: { type: 'integer' } },
+    required: ['query'],
+    additionalProperties: false,
+  },
+): GatewayToolFunctionShape {
   return {
     type: 'function',
     function: {
       name,
       description,
-      parameters: {
-        type: 'object',
-        properties: { query: { type: 'string' }, numResults: { type: 'integer' } },
-        required: ['query'],
-        additionalProperties: false,
-      },
+      parameters,
       strict: false,
     },
   };
@@ -39,5 +43,38 @@ describe('wrapGatewayToolsForAiSdkDeclarationsOnly', () => {
       (symbol) => symbol.description,
     );
     expect(schemaSymbolDescriptions).toContain('vercel.ai.schema');
+  });
+
+  it('preserves object types for root anyOf branches used by gateway tools', async () => {
+    const set = wrapGatewayToolsForAiSdkDeclarationsOnly([
+      buildGatewayTool('codegraph_node', 'inspect codegraph nodes', {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string' },
+          file: { type: 'string' },
+        },
+        required: [],
+        anyOf: [
+          { type: 'object', required: ['symbol'] },
+          { type: 'object', required: ['file'] },
+        ],
+        additionalProperties: false,
+      }),
+    ]);
+    const node = set['codegraph_node'];
+    expect(node).toBeDefined();
+    if (!node || typeof node.inputSchema !== 'object' || node.inputSchema === null) {
+      throw new Error('expected codegraph_node schema to be wrapped');
+    }
+    if (!('jsonSchema' in node.inputSchema)) {
+      throw new Error('expected wrapped schema to expose jsonSchema');
+    }
+
+    const schema = await Promise.resolve(node.inputSchema.jsonSchema);
+    expect(schema.type).toBe('object');
+    expect(schema.anyOf).toEqual([
+      { type: 'object', required: ['symbol'] },
+      { type: 'object', required: ['file'] },
+    ]);
   });
 });

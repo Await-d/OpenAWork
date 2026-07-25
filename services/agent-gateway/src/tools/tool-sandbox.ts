@@ -79,10 +79,7 @@ import type { DynamicToolEntry } from './dynamic-tool-loader.js';
 import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
 import { createEditTool } from './edit-tools.js';
 import { executeGenerateImageTool, generateImageToolDefinition } from './image-generation-tool.js';
-import {
-  convertMediaToolDefinition,
-  executeConvertMediaTool,
-} from './convert-media-tool.js';
+import { convertMediaToolDefinition, executeConvertMediaTool } from './convert-media-tool.js';
 import {
   executeExtractMediaInfoTool,
   extractMediaInfoToolDefinition,
@@ -91,10 +88,7 @@ import {
   executeExtractVideoFrameTool,
   extractVideoFrameToolDefinition,
 } from './extract-video-frame-tool.js';
-import {
-  executeGenerateAudioTool,
-  generateAudioToolDefinition,
-} from './generate-audio-tool.js';
+import { executeGenerateAudioTool, generateAudioToolDefinition } from './generate-audio-tool.js';
 import {
   interactiveBashToolDefinition,
   runInteractiveBashCommand,

@@ -40,6 +40,7 @@ import {
   triggerOverflowCompaction,
 } from '../compaction/auto-compaction-trigger.js';
 import { persistStreamUserMessage } from '../session/stream-session-title.js';
+import { deleteSessionEventsByRequestScope } from '../session/session-entry-store.js';
 import { buildCapabilityContext } from './capabilities.js';
 import {
   CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
@@ -62,7 +63,11 @@ import {
   mergeFileDiffs,
   traceFileDiffs,
 } from '../tools/modified-files-summary.js';
-import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
+import {
+  deleteRequestFileDiffs,
+  persistSessionFileDiffs,
+} from '../session/session-file-diff-store.js';
+import { deleteRequestSnapshots } from '../session/session-snapshot-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tools/tool-sandbox.js';
@@ -1079,11 +1084,11 @@ export function replayPersistedAssistantResponse(input: {
   return true;
 }
 
-function clearRetryableFailedRequestArtifacts(input: {
+function clearStaleReplayRequestArtifacts(input: {
   clientRequestId: string;
   sessionId: string;
   userId: string;
-}): void {
+}): boolean {
   const durableEvents = listSessionRunEventsByRequest({
     sessionId: input.sessionId,
     clientRequestId: input.clientRequestId,
@@ -1097,18 +1102,20 @@ function clearRetryableFailedRequestArtifacts(input: {
     role: 'assistant',
   });
 
-  const shouldClearRunEvents = latestBookend?.kind === 'run_failed';
-  const shouldAllowRetry = shouldClearRunEvents || stored?.status === 'error';
-  if (!shouldAllowRetry) {
-    return;
+  const shouldClearRequestScope =
+    latestBookend?.kind === 'run_failed' ||
+    latestBookend?.replayable === false ||
+    stored?.status === 'error' ||
+    (durableEvents.length > 0 && latestBookend === undefined && !stored);
+
+  if (!shouldClearRequestScope) {
+    return false;
   }
 
-  if (shouldClearRunEvents) {
-    deleteSessionRunEventsByRequest({
-      sessionId: input.sessionId,
-      clientRequestId: input.clientRequestId,
-    });
-  }
+  deleteSessionRunEventsByRequest({
+    sessionId: input.sessionId,
+    clientRequestId: input.clientRequestId,
+  });
 
   deleteSessionMessagesByRequestScope({
     sessionId: input.sessionId,
@@ -1116,6 +1123,22 @@ function clearRetryableFailedRequestArtifacts(input: {
     clientRequestId: input.clientRequestId,
     roles: ['assistant', 'tool'],
   });
+  deleteRequestFileDiffs({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  deleteRequestSnapshots({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  deleteSessionEventsByRequestScope({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  return true;
 }
 
 function parseToolInput(raw: string): Record<string, unknown> {
@@ -2104,7 +2127,7 @@ export async function handleStreamRequest(input: {
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
 
-  clearRetryableFailedRequestArtifacts({
+  clearStaleReplayRequestArtifacts({
     clientRequestId: requestData.clientRequestId,
     sessionId: input.sessionId,
     userId: input.user.sub,
@@ -2129,6 +2152,11 @@ export async function handleStreamRequest(input: {
   const inFlight = getInFlightStreamRequest(input.sessionId, requestData.clientRequestId);
   if (inFlight) {
     await inFlight.execution.catch(() => undefined);
+    clearStaleReplayRequestArtifacts({
+      clientRequestId: requestData.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+    });
     if (
       replayPersistedAssistantResponse({
         clientRequestId: requestData.clientRequestId,
@@ -2141,23 +2169,6 @@ export async function handleStreamRequest(input: {
       wl.flush(ctx, 200);
       return { statusCode: 200, errorSummary: '请求被 in-flight replay 拦截，未执行新 LLM 调用' };
     }
-
-    wl.flush(ctx, 409);
-    writeAuditLog({
-      sessionId: input.sessionId,
-      category: 'route',
-      sourceName: 'REPLAY_FAILED',
-      requestId: requestData.clientRequestId,
-      output: { message: STREAM_ERROR_MESSAGES.requestReplayFailed, code: 'REQUEST_REPLAY_FAILED' },
-    });
-    input.writeChunk(
-      createStreamErrorChunk(
-        'REQUEST_REPLAY_FAILED',
-        STREAM_ERROR_MESSAGES.requestReplayFailed,
-        runId,
-      ),
-    );
-    return { statusCode: 409, errorSummary: '请求重放失败（REQUEST_REPLAY_FAILED）' };
   }
 
   if (

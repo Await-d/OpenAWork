@@ -62,7 +62,12 @@ export default function ImageGenerationProgressScreen() {
           ) : (
             <View style={styles.spinnerWrap}>
               <ActivityIndicator size="large" color={colors.accent} />
-              <Ionicons name="sparkles" size={24} color={colors.accent} style={styles.sparkleIcon} />
+              <Ionicons
+                name="sparkles"
+                size={24}
+                color={colors.accent}
+                style={styles.sparkleIcon}
+              />
             </View>
           )}
         </View>
@@ -94,11 +99,7 @@ export default function ImageGenerationProgressScreen() {
                   name={stageDone ? 'checkmark-circle' : s.icon}
                   size={18}
                   color={
-                    stageDone
-                      ? colors.success
-                      : stageCurrent
-                        ? colors.accent
-                        : colors.textSubtle
+                    stageDone ? colors.success : stageCurrent ? colors.accent : colors.textSubtle
                   }
                 />
                 <Text
@@ -121,10 +122,7 @@ export default function ImageGenerationProgressScreen() {
         {/* Action buttons */}
         {isDone ? (
           <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={() => router.push('/artifacts')}
-            >
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.push('/artifacts')}>
               <Ionicons name="cube-outline" size={16} color={colors.accent} />
               <Text style={styles.secondaryBtnText}>查看产物</Text>
             </TouchableOpacity>

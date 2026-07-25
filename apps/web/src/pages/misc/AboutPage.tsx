@@ -5,8 +5,7 @@ import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { isTauri, tauriInvoke } from '../settings/shared/settings-page-helpers.js';
 import type { SettingsVersionInfo } from '../settings/state/settings-types.js';
-
-const RELEASES_URL = 'https://github.com/Await-d/OpenAWork/releases';
+import { openDesktopUpdatePanel } from './about-page-desktop-update.js';
 
 type UpdateChannel = 'preview' | 'stable';
 
@@ -135,11 +134,9 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
     if (!isTauriEnv) return;
     setDesktopOpening(true);
     try {
-      // autoStart: true → UpdateActionPanel 直接进入 UpdateProgressDialog，避免二次点击
-      const { emit } = await import('@tauri-apps/api/event');
-      await emit('tray:check-updates', { autoStart: true });
+      await openDesktopUpdatePanel();
     } catch {
-      window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+      window.open('https://github.com/Await-d/OpenAWork/releases', '_blank', 'noopener,noreferrer');
     } finally {
       setDesktopOpening(false);
     }
@@ -303,7 +300,13 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
           )}
           <button
             type="button"
-            onClick={() => window.open(RELEASES_URL, '_blank', 'noopener,noreferrer')}
+            onClick={() =>
+              window.open(
+                'https://github.com/Await-d/OpenAWork/releases',
+                '_blank',
+                'noopener,noreferrer',
+              )
+            }
             style={{
               display: 'inline-flex',
               alignItems: 'center',

@@ -145,11 +145,15 @@ export default function InputContextScreen() {
           <Text style={styles.statLabel}>上下文项</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>{contextItems.filter((c) => c.type === 'todo').length}</Text>
+          <Text style={styles.statValue}>
+            {contextItems.filter((c) => c.type === 'todo').length}
+          </Text>
           <Text style={styles.statLabel}>待办</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>{contextItems.filter((c) => c.type === 'message').length}</Text>
+          <Text style={styles.statValue}>
+            {contextItems.filter((c) => c.type === 'message').length}
+          </Text>
           <Text style={styles.statLabel}>消息</Text>
         </View>
       </View>
@@ -193,12 +197,21 @@ export default function InputContextScreen() {
             }
             renderItem={({ item }) => (
               <View style={styles.contextCard}>
-                <View style={[styles.contextIconWrap, { backgroundColor: TYPE_COLORS[item.type] + '1A' }]}>
+                <View
+                  style={[
+                    styles.contextIconWrap,
+                    { backgroundColor: TYPE_COLORS[item.type] + '1A' },
+                  ]}
+                >
                   <Ionicons name={TYPE_ICONS[item.type]} size={16} color={TYPE_COLORS[item.type]} />
                 </View>
                 <View style={styles.contextInfo}>
-                  <Text style={styles.contextLabel} numberOfLines={1}>{item.label}</Text>
-                  <Text style={styles.contextDesc} numberOfLines={2}>{item.description}</Text>
+                  <Text style={styles.contextLabel} numberOfLines={1}>
+                    {item.label}
+                  </Text>
+                  <Text style={styles.contextDesc} numberOfLines={2}>
+                    {item.description}
+                  </Text>
                 </View>
                 <View style={[styles.typeBadge, { borderColor: TYPE_COLORS[item.type] + '52' }]}>
                   <Text style={[styles.typeText, { color: TYPE_COLORS[item.type] }]}>
@@ -217,11 +230,7 @@ export default function InputContextScreen() {
           />
 
           {/* Add context */}
-          <TouchableOpacity
-            style={styles.addBtn}
-            activeOpacity={0.7}
-            onPress={handleAdd}
-          >
+          <TouchableOpacity style={styles.addBtn} activeOpacity={0.7} onPress={handleAdd}>
             <Ionicons name="add-circle-outline" size={18} color={colors.accent} />
             <Text style={styles.addText}>添加上下文</Text>
           </TouchableOpacity>

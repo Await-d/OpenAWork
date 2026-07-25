@@ -1861,7 +1861,9 @@ export default function ChatPage() {
             setIsSessionSnapshotReady(true);
             setServerTotalTurnCount(recovery.totalTurnCount ?? null);
             if (!sessionMetadataDirtyRef.current) {
-              setDialogueMode(metadata.dialogueMode ?? useDisplayPreferencesStore.getState().defaultDialogueMode);
+              setDialogueMode(
+                metadata.dialogueMode ?? useDisplayPreferencesStore.getState().defaultDialogueMode,
+              );
               setManualAgentId(metadata.agentId ?? '');
               setYoloMode(metadata.yoloMode);
               setWebSearchEnabled(metadata.webSearchEnabled && webSearchAvailable);
@@ -2199,13 +2201,7 @@ export default function ChatPage() {
         settleObserver?.disconnect();
       };
     },
-    [
-      isNearBottomRef,
-      ignoreScrollEventsUntilRef,
-      scrollRegionRef,
-      bottomRef,
-      contentColumnRef,
-    ],
+    [isNearBottomRef, ignoreScrollEventsUntilRef, scrollRegionRef, bottomRef, contentColumnRef],
   );
 
   // ── Effect A: First snapshot ready → scroll to bottom ────────────────
@@ -5095,24 +5091,24 @@ export default function ChatPage() {
                   setEditorFullScreen(true);
                 })
               }
-                fileTree={
-                  <WorkspaceFileTreePanel
-                    workspacePath={effectiveWorkingDirectory}
-                    sessionId={currentSessionId}
-                    onOpenFile={(path) => void fileEditor.openFile(path)}
-                    fetchTree={workspace.fetchTree}
-                    active={editorMode}
-                    variant="embedded"
-                    onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
-                    style={{
-                      flex: 1,
-                      minHeight: 0,
-                      background: 'var(--bg-surface)',
-                      overflow: 'hidden',
-                    }}
-                  />
-                }
-              />
+              fileTree={
+                <WorkspaceFileTreePanel
+                  workspacePath={effectiveWorkingDirectory}
+                  sessionId={currentSessionId}
+                  onOpenFile={(path) => void fileEditor.openFile(path)}
+                  fetchTree={workspace.fetchTree}
+                  active={editorMode}
+                  variant="embedded"
+                  onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    background: 'var(--bg-surface)',
+                    overflow: 'hidden',
+                  }}
+                />
+              }
+            />
           }
           hasSession={currentSessionId !== null}
           showDockedSidePanel={fusionChatLayout.showDockedSidePanel}

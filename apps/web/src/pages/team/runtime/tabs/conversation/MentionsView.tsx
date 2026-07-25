@@ -124,7 +124,9 @@ export function MentionsView({
   if (scopedEvents.length === 0) {
     return (
       <div className="team-conv-empty">
-        <span className="team-conv-empty__icon" aria-hidden>🔔</span>
+        <span className="team-conv-empty__icon" aria-hidden>
+          🔔
+        </span>
         <strong className="team-conv-empty__title">暂无待回复消息</strong>
         <span className="team-conv-empty__description">
           团队产生阻塞确认或推送通知时，会出现在这里。
@@ -145,7 +147,16 @@ export function MentionsView({
           }}
         >
           {blockingCount > 0 ? (
-            <div className="team-conv-panel" style={{ padding: '10px 12px', display: 'grid', gap: 4, borderColor: 'color-mix(in srgb, var(--danger, var(--complement)) 40%, transparent)' }}>
+            <div
+              className="team-conv-panel"
+              style={{
+                padding: '10px 12px',
+                display: 'grid',
+                gap: 4,
+                borderColor:
+                  'color-mix(in srgb, var(--danger, var(--complement)) 40%, transparent)',
+              }}
+            >
               <strong style={{ color: 'var(--danger, var(--complement))', fontSize: 13 }}>
                 需要优先处理的阻塞
               </strong>
@@ -177,7 +188,15 @@ export function MentionsView({
             </div>
           ) : null}
           {clarificationPending > 0 ? (
-            <div className="team-conv-panel" style={{ padding: '10px 12px', display: 'grid', gap: 4, borderColor: 'color-mix(in srgb, var(--warning) 40%, transparent)' }}>
+            <div
+              className="team-conv-panel"
+              style={{
+                padding: '10px 12px',
+                display: 'grid',
+                gap: 4,
+                borderColor: 'color-mix(in srgb, var(--warning) 40%, transparent)',
+              }}
+            >
               <strong style={{ color: 'var(--warning)', fontSize: 13 }}>待回答的澄清问题</strong>
               <span style={{ color: 'var(--fg-strong)', fontSize: 13, fontWeight: 700 }}>
                 当前有 {clarificationPending} 条 NEEDS CLARIFICATION

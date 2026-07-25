@@ -686,7 +686,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                       </svg>
                       {isLoadingEarlier
                         ? '加载中…'
-                        : `加载更早的消息（共 ${hiddenMessageCount} 条隐藏）`}
+                        : `上滑继续加载更早消息（还有 ${hiddenMessageCount} 条）`}
                     </button>
                   )}
                   <ChatMessageGroupList

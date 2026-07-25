@@ -41,8 +41,14 @@ export function createMediaArtifact(input: MediaArtifactInput): MediaArtifactRes
   const dataUrl = `data:${input.mimeType};base64,${base64}`;
   const extension = getExtensionForMime(input.mimeType);
 
-  const fileName = input.fileName
-    ?? `${input.title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-').replace(/^-+|-+$/g, '') || 'media'}.${extension}`;
+  const fileName =
+    input.fileName ??
+    `${
+      input.title
+        .toLowerCase()
+        .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-')
+        .replace(/^-+|-+$/g, '') || 'media'
+    }.${extension}`;
 
   const metadata: Record<string, unknown> = {
     mimeType: input.mimeType,

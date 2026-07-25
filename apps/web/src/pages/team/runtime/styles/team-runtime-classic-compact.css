@@ -1,0 +1,119 @@
+/**
+ * classic Team 布局密度（对齐 demo/team-layer-todo-detail-demo.html）
+ * 目标：顶栏一行状态操作、对话/工作台贴边、直角细边框、小字号低 padding。
+ */
+
+.team-v2-root[data-workbench-layout='classic'] {
+  --team-classic-bar-height: 30px;
+}
+
+/* 主面板去卡片感，贴边 */
+.team-v2-root[data-workbench-layout='classic'] .team-v2-pane--main {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-v2-pane--main::before {
+  display: none;
+}
+
+/* 对话 + 右侧工作台：demo 比例约 56% / 44% */
+.team-v2-root[data-workbench-layout='classic'] .team-conversation-area__workbench,
+.team-v2-root[data-workbench-layout='classic'] .team-conversation-area__workbench--workspace-first {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 44vw) !important;
+  gap: 0 !important;
+  background: var(--bg-base);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-conversation-area__session {
+  background: var(--bg-base);
+  border-right: 1px solid var(--border-default);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-conversation-area__side-panel {
+  border-left: none;
+  background: var(--bg-raised, var(--bg-overlay));
+  min-width: 0;
+}
+
+/* 最顶上下文行：路径左 + 状态/操作右 */
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar--single {
+  background: var(--bg-raised, var(--bg-overlay));
+  border-bottom: 1px solid var(--border-default);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar__context {
+  min-height: var(--team-classic-bar-height);
+  padding: 0 10px !important;
+  gap: 8px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 70%, transparent);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar__leading {
+  flex: 1 1 auto !important;
+  min-height: 26px !important;
+  gap: 6px !important;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar__trailing {
+  flex: 0 1 auto !important;
+  max-width: min(640px, 60vw);
+}
+
+.team-v2-root[data-workbench-layout='classic'] [data-testid='team-classic-top-actions'] {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* 导航行更扁 */
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar__nav {
+  min-height: 28px;
+  padding: 2px 6px 2px !important;
+  gap: 4px !important;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-tab-bar__status {
+  display: none;
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-tab-bar--single
+  [role='tablist'][aria-label='子视图切换'] {
+  min-height: 26px;
+  padding: 2px 6px 2px !important;
+}
+
+/* 顶栏会话标题更像 path */
+.team-v2-root[data-workbench-layout='classic'] [data-testid='team-current-session-pill'] {
+  max-width: min(280px, 36vw);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 对话区 ops / attention 贴边 */
+.team-v2-root[data-workbench-layout='classic'] [data-team-classic-ops-chrome='true'] {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 70%, transparent);
+  background: var(--bg-raised, var(--bg-overlay));
+}
+
+.team-v2-root[data-workbench-layout='classic'] [data-team-classic-inline-cards='true'] {
+  gap: 6px;
+  padding: 6px 10px 8px;
+  width: min(680px, 100%);
+}
+
+/* 工作台内部密度 */
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench {
+  background: var(--bg-raised, var(--bg-overlay));
+}
+
+/* 对话消息列限制阅读宽度，减少空旷感 */
+.team-v2-root[data-workbench-layout='classic'] .team-conversation-area__session {
+  /* keep full height; content width handled by message stream itself if present */
+}

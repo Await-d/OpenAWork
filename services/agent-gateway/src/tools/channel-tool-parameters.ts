@@ -2,7 +2,7 @@ type ToolParameters = {
   type: 'object';
   properties: Record<string, unknown>;
   required: string[];
-  anyOf?: { required: string[] }[];
+  anyOf?: { type: 'object'; required: string[] }[];
   additionalProperties: boolean;
 };
 

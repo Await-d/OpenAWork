@@ -162,8 +162,8 @@ const CURRENT_SESSION_META_PILL_STYLE: CSSProperties = {
 const SUPERBAR_LEADING_CLUSTER_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 10,
-  flexWrap: 'wrap',
+  gap: 8,
+  flexWrap: 'nowrap',
   minWidth: 0,
 };
 
@@ -172,10 +172,10 @@ const SUPERBAR_WORKSPACE_GROUP_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   minWidth: 0,
-  padding: '4px 8px 4px 2px',
-  borderRadius: 8,
-  background: 'color-mix(in srgb, var(--bg-base) 42%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border-default) 24%, transparent)',
+  padding: 0,
+  borderRadius: 0,
+  background: 'transparent',
+  border: 'none',
 };
 
 const SUPERBAR_SESSION_GROUP_STYLE: CSSProperties = {
@@ -284,18 +284,42 @@ export function TeamPageSuperbarLeading({
         <span style={SUPERBAR_SESSION_GROUP_STYLE}>
           <span
             data-testid="team-current-session-pill"
-            style={CURRENT_SESSION_PILL_STYLE}
+            style={
+              compact
+                ? {
+                    ...CURRENT_SESSION_PILL_STYLE,
+                    padding: '0 2px',
+                    border: 'none',
+                    background: 'transparent',
+                    gap: 4,
+                  }
+                : CURRENT_SESSION_PILL_STYLE
+            }
             title={[selectedTeam.title, sessionStatus, sessionSubtitle, summaryDescription]
               .filter(Boolean)
               .join(' · ')}
           >
-            <span style={CURRENT_SESSION_LABEL_STYLE}>当前会话</span>
-            <span style={CURRENT_SESSION_TITLE_STYLE}>{selectedTeam.title}</span>
+            {!compact ? <span style={CURRENT_SESSION_LABEL_STYLE}>当前会话</span> : null}
+            <span
+              style={{
+                ...CURRENT_SESSION_TITLE_STYLE,
+                maxWidth: compact ? 220 : CURRENT_SESSION_TITLE_STYLE.maxWidth,
+              }}
+            >
+              {selectedTeam.title}
+            </span>
           </span>
-          <span data-testid="team-current-session-status" style={CURRENT_SESSION_META_PILL_STYLE}>
-            {sessionStatus}
-          </span>
-          {sessionSubtitle ? (
+          {/* compact/classic：状态改由最顶 TeamStatusBar 统一展示，避免重复 pill */}
+          {!compact ? (
+            <span data-testid="team-current-session-status" style={CURRENT_SESSION_META_PILL_STYLE}>
+              {sessionStatus}
+            </span>
+          ) : (
+            <span data-testid="team-current-session-status" style={{ display: 'none' }}>
+              {sessionStatus}
+            </span>
+          )}
+          {!compact && sessionSubtitle ? (
             <span style={CURRENT_SESSION_META_PILL_STYLE}>{sessionSubtitle}</span>
           ) : null}
           {!compact ? (

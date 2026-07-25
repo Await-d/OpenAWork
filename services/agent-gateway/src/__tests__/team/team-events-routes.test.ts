@@ -45,6 +45,21 @@ interface CapturedTeamEventsSocket {
   ws: TestWebSocket;
 }
 
+function assertIsTestWebSocket(value: unknown): asserts value is TestWebSocket {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('on' in value) ||
+    typeof value.on !== 'function' ||
+    !('send' in value) ||
+    typeof value.send !== 'function' ||
+    !('terminate' in value) ||
+    typeof value.terminate !== 'function'
+  ) {
+    throw new Error('expected websocket test handle with on/send/terminate');
+  }
+}
+
 async function openTeamEventsSocket(
   app: FastifyInstance,
   path: string,
@@ -53,12 +68,13 @@ async function openTeamEventsSocket(
   const pendingResolvers: Array<(value: unknown) => void> = [];
   let capturedWs: TestWebSocket | null = null;
 
-  const ws = (await app.injectWS(
+  const ws = await app.injectWS(
     path,
     {},
     {
       onInit: (clientWs) => {
-        capturedWs = clientWs as TestWebSocket;
+        assertIsTestWebSocket(clientWs);
+        capturedWs = clientWs;
         capturedWs.on('message', (data) => {
           const parsed = JSON.parse(data.toString()) as unknown;
           const resolve = pendingResolvers.shift();
@@ -70,7 +86,8 @@ async function openTeamEventsSocket(
         });
       },
     },
-  )) as TestWebSocket;
+  );
+  assertIsTestWebSocket(ws);
 
   return {
     ws: capturedWs ?? ws,

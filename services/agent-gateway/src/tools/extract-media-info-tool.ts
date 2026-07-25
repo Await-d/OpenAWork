@@ -9,10 +9,7 @@ function isHlsUrl(url: string): boolean {
 }
 
 const extractMediaInfoInputSchema = z.object({
-  source: z
-    .string()
-    .min(1)
-    .describe('媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
+  source: z.string().min(1).describe('媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
 });
 
 const extractMediaInfoOutputSchema = z.string();
@@ -57,7 +54,11 @@ export async function executeExtractMediaInfoTool(input: {
     if (toolInput.source.startsWith('http://') || toolInput.source.startsWith('https://')) {
       // HLS 流直接用 ffprobe 探测 URL（无法先下载为 Buffer）
       if (isHlsUrl(toolInput.source)) {
-        const hlsInfo = await probeMediaUrl(toolInput.source, 'application/vnd.apple.mpegurl', signal);
+        const hlsInfo = await probeMediaUrl(
+          toolInput.source,
+          'application/vnd.apple.mpegurl',
+          signal,
+        );
         const summary = {
           success: true,
           type: hlsInfo.type,

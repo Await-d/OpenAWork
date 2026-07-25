@@ -121,7 +121,7 @@ export interface GatewayToolDefinition {
       type: 'object';
       properties: Record<string, unknown>;
       required: string[];
-      anyOf?: { required: string[] }[];
+      anyOf?: { type: 'object'; required: string[] }[];
       additionalProperties: boolean;
     };
     strict: boolean;
@@ -577,7 +577,10 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           symbolsOnly: { type: 'boolean' },
         },
         required: [],
-        anyOf: [{ required: ['symbol'] }, { required: ['file'] }],
+        anyOf: [
+          { type: 'object', required: ['symbol'] },
+          { type: 'object', required: ['file'] },
+        ],
         additionalProperties: false,
       };
     case 'codegraph_callers':
@@ -1279,13 +1282,38 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          source: { type: 'string', description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
+          source: {
+            type: 'string',
+            description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL',
+          },
           targetFormat: {
             type: 'string',
-            enum: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'mp4', 'webm', 'mkv', 'mov', 'avi', 'gif', 'png', 'jpg', 'webp', 'weba'],
+            enum: [
+              'mp3',
+              'wav',
+              'ogg',
+              'aac',
+              'flac',
+              'm4a',
+              'mp4',
+              'webm',
+              'mkv',
+              'mov',
+              'avi',
+              'gif',
+              'png',
+              'jpg',
+              'webp',
+              'weba',
+            ],
             description: '目标格式',
           },
-          videoQuality: { type: 'integer', minimum: 0, maximum: 51, description: '视频编码质量 CRF 值（0-51，越低质量越高，默认 23）' },
+          videoQuality: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 51,
+            description: '视频编码质量 CRF 值（0-51，越低质量越高，默认 23）',
+          },
           audioBitrate: { type: 'string', description: '音频比特率，如 "128k"' },
           videoScale: { type: 'string', description: '视频分辨率缩放，如 "1280:-1"' },
           videoFps: { type: 'integer', minimum: 1, maximum: 60, description: '视频帧率' },
@@ -1299,7 +1327,10 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          source: { type: 'string', description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
+          source: {
+            type: 'string',
+            description: '媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL',
+          },
         },
         required: ['source'],
         additionalProperties: false,
@@ -1308,11 +1339,32 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          source: { type: 'string', description: '视频来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL' },
-          timestamp: { type: 'number', minimum: 0, description: '提取帧的时间戳（秒），默认取第 1 秒' },
-          count: { type: 'integer', minimum: 1, maximum: 10, description: '提取多帧的数量（1-10），均匀分布' },
-          width: { type: 'integer', minimum: 16, maximum: 3840, description: '输出帧的宽度（像素），高度自动等比缩放' },
-          format: { type: 'string', enum: ['png', 'jpg'], description: '输出图片格式：png（默认）或 jpg' },
+          source: {
+            type: 'string',
+            description: '视频来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL',
+          },
+          timestamp: {
+            type: 'number',
+            minimum: 0,
+            description: '提取帧的时间戳（秒），默认取第 1 秒',
+          },
+          count: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 10,
+            description: '提取多帧的数量（1-10），均匀分布',
+          },
+          width: {
+            type: 'integer',
+            minimum: 16,
+            maximum: 3840,
+            description: '输出帧的宽度（像素），高度自动等比缩放',
+          },
+          format: {
+            type: 'string',
+            enum: ['png', 'jpg'],
+            description: '输出图片格式：png（默认）或 jpg',
+          },
         },
         required: ['source'],
         additionalProperties: false,
@@ -1321,7 +1373,10 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          text: { type: 'string', description: '要转为语音的文本内容，支持中英文混合，最长 5000 字符' },
+          text: {
+            type: 'string',
+            description: '要转为语音的文本内容，支持中英文混合，最长 5000 字符',
+          },
           voice: {
             type: 'string',
             enum: [
@@ -1339,7 +1394,11 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           rate: { type: 'number', minimum: 0.5, maximum: 2, description: '语速倍率，1.0=正常速度' },
           volume: { type: 'number', minimum: 0, maximum: 1, description: '音量 0-1，默认 1.0' },
           pitch: { type: 'string', description: '音调调整，如 "+10Hz" 或 "-5Hz"' },
-          outputFormat: { type: 'string', enum: ['mp3', 'wav'], description: '输出格式：mp3（默认）或 wav' },
+          outputFormat: {
+            type: 'string',
+            enum: ['mp3', 'wav'],
+            description: '输出格式：mp3（默认）或 wav',
+          },
         },
         required: ['text'],
         additionalProperties: false,
@@ -1414,7 +1473,10 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['content'],
-        anyOf: [{ required: ['path'] }, { required: ['filePath'] }],
+        anyOf: [
+          { type: 'object', required: ['path'] },
+          { type: 'object', required: ['filePath'] },
+        ],
         additionalProperties: false,
       };
     case 'workspace_create_directory':

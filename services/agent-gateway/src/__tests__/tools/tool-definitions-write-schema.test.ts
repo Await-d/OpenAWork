@@ -10,8 +10,8 @@ describe('buildGatewayToolDefinitions write schema', () => {
     expect(writeTool?.function.parameters.type).toBe('object');
     expect(writeTool?.function.parameters.required).toEqual(['content']);
     expect(writeTool?.function.parameters.anyOf).toEqual([
-      { required: ['path'] },
-      { required: ['filePath'] },
+      { type: 'object', required: ['path'] },
+      { type: 'object', required: ['filePath'] },
     ]);
     expect(writeTool?.function.parameters.properties).toMatchObject({
       path: { type: 'string' },

@@ -178,7 +178,7 @@ export function buildUpstreamStreamSummaryLog(input: {
       sawError: input.diagnostics.sawError,
       stalled: input.diagnostics.stalled,
     },
-    isError: input.stopReason === 'error',
+    isError: false,
   };
 }
 

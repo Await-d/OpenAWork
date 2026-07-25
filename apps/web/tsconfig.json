@@ -18,6 +18,11 @@
     "composite": false,
     "noEmit": true
   },
-  "include": ["src", "../../packages/shared/src/version.d.ts"],
+  "include": [
+    "src",
+    "../../packages/shared/src/version.d.ts",
+    "../../packages/shared/src/react-css-vars.d.ts",
+    "../../packages/shared-ui/src/types/hls-js.d.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

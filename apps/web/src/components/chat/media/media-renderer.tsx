@@ -61,14 +61,16 @@ export function extractInputAudio(content: unknown[]): InputAudioItem[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const obj = item as Record<string, unknown>;
     if (obj['type'] !== 'input_audio') return [];
-    return [{
-      ...(typeof obj['artifactId'] === 'string' ? { artifactId: obj['artifactId'] } : {}),
-      ...(typeof obj['audioUrl'] === 'string' ? { audioUrl: obj['audioUrl'] } : {}),
-      ...(typeof obj['fileName'] === 'string' ? { fileName: obj['fileName'] } : {}),
-      ...(typeof obj['mimeType'] === 'string' ? { mimeType: obj['mimeType'] } : {}),
-      ...(typeof obj['duration'] === 'number' ? { duration: obj['duration'] } : {}),
-      ...(typeof obj['transcript'] === 'string' ? { transcript: obj['transcript'] } : {}),
-    }];
+    return [
+      {
+        ...(typeof obj['artifactId'] === 'string' ? { artifactId: obj['artifactId'] } : {}),
+        ...(typeof obj['audioUrl'] === 'string' ? { audioUrl: obj['audioUrl'] } : {}),
+        ...(typeof obj['fileName'] === 'string' ? { fileName: obj['fileName'] } : {}),
+        ...(typeof obj['mimeType'] === 'string' ? { mimeType: obj['mimeType'] } : {}),
+        ...(typeof obj['duration'] === 'number' ? { duration: obj['duration'] } : {}),
+        ...(typeof obj['transcript'] === 'string' ? { transcript: obj['transcript'] } : {}),
+      },
+    ];
   });
 }
 
@@ -80,16 +82,18 @@ export function extractInputVideo(content: unknown[]): InputVideoItem[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const obj = item as Record<string, unknown>;
     if (obj['type'] !== 'input_video') return [];
-    return [{
-      ...(typeof obj['artifactId'] === 'string' ? { artifactId: obj['artifactId'] } : {}),
-      ...(typeof obj['videoUrl'] === 'string' ? { videoUrl: obj['videoUrl'] } : {}),
-      ...(typeof obj['fileName'] === 'string' ? { fileName: obj['fileName'] } : {}),
-      ...(typeof obj['mimeType'] === 'string' ? { mimeType: obj['mimeType'] } : {}),
-      ...(typeof obj['duration'] === 'number' ? { duration: obj['duration'] } : {}),
-      ...(typeof obj['thumbnailUrl'] === 'string' ? { thumbnailUrl: obj['thumbnailUrl'] } : {}),
-      ...(typeof obj['width'] === 'number' ? { width: obj['width'] } : {}),
-      ...(typeof obj['height'] === 'number' ? { height: obj['height'] } : {}),
-    }];
+    return [
+      {
+        ...(typeof obj['artifactId'] === 'string' ? { artifactId: obj['artifactId'] } : {}),
+        ...(typeof obj['videoUrl'] === 'string' ? { videoUrl: obj['videoUrl'] } : {}),
+        ...(typeof obj['fileName'] === 'string' ? { fileName: obj['fileName'] } : {}),
+        ...(typeof obj['mimeType'] === 'string' ? { mimeType: obj['mimeType'] } : {}),
+        ...(typeof obj['duration'] === 'number' ? { duration: obj['duration'] } : {}),
+        ...(typeof obj['thumbnailUrl'] === 'string' ? { thumbnailUrl: obj['thumbnailUrl'] } : {}),
+        ...(typeof obj['width'] === 'number' ? { width: obj['width'] } : {}),
+        ...(typeof obj['height'] === 'number' ? { height: obj['height'] } : {}),
+      },
+    ];
   });
 }
 

@@ -60,7 +60,11 @@ export function GenerateAudioToolCard({
     >
       <div className="tool-call-block-header" style={{ cursor: 'default', minHeight: 32 }}>
         <ToolIcon toolName="generate_audio" status={visualState} size={14} />
-        <span className="tool-call-block-title" style={{ flex: '0 1 auto', maxWidth: '55%' }} title={text}>
+        <span
+          className="tool-call-block-title"
+          style={{ flex: '0 1 auto', maxWidth: '55%' }}
+          title={text}
+        >
           {visualState === 'running'
             ? '正在生成语音…'
             : visualState === 'failed'
@@ -68,7 +72,15 @@ export function GenerateAudioToolCard({
               : `语音合成: ${textPreview}`}
         </span>
         {result && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              marginLeft: 'auto',
+              flexShrink: 0,
+            }}
+          >
             <span style={paramPillStyle}>{voice}</span>
             {result.duration !== undefined && result.duration > 0 && (
               <span style={paramPillStyle}>{Math.round(result.duration)}s</span>

@@ -18,8 +18,9 @@ import {
   IncidentReadableCard,
 } from '../../../conversation/extras/incident-readable-card.js';
 
-const INITIAL_PAGE_SIZE = 8;
-const LOAD_MORE_STEP = 10;
+/** 与 team 对话流默认窗口一致：首屏 50，每次再扩 50。 */
+const INITIAL_PAGE_SIZE = 50;
+const LOAD_MORE_STEP = 50;
 
 /** 反馈条样式 — 用 CSS 类替代内联样式 */
 const FEEDBACK_STYLE_BASE = {

@@ -1,7 +1,7 @@
 #[test]
 fn proxy_update_path_rebinds_before_exit_hook_to_stop_gateway_child() {
-    let lib_rs = include_str!("../src/lib.rs");
-    let proxy_update_section = lib_rs
+    let updater_commands_rs = include_str!("../src/updater_commands.rs");
+    let proxy_update_section = updater_commands_rs
         .split("async fn download_and_install_proxy_update")
         .nth(1)
         .expect("proxy update command should exist");

@@ -1062,8 +1062,11 @@ export default function AppSidebar({
               </span>
               <button
                 type="button"
-                onClick={() => setShowWorkspacePicker(true)}
-                title="新建工作区"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void newSession();
+                }}
+                title="新建会话"
                 style={{
                   flexShrink: 0,
                   display: 'flex',
@@ -1078,6 +1081,44 @@ export default function AppSidebar({
                   cursor: 'pointer',
                   padding: 0,
                   marginLeft: 'auto',
+                  marginRight: 2,
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowWorkspacePicker(true);
+                }}
+                title="新建工作区"
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  padding: 0,
                   marginRight: 2,
                 }}
               >
@@ -1642,10 +1683,10 @@ export default function AppSidebar({
             onFocus={() => preloadRoute(item.to)}
             onPointerDown={() => preloadRoute(item.to)}
             title={item.label}
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               isActive ? 'nav-rail-btn nav-rail-link-active' : 'nav-rail-btn'
             }
-            style={({ isActive }) => ({
+            style={({ isActive }: { isActive: boolean }) => ({
               ...navItemStyle,
               color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
               fontWeight: isActive ? 600 : 500,

@@ -56,13 +56,8 @@ export function useWebSearchAvailable(
 
       try {
         const mcpData = (await client.listMcpServers(token)) as McpServersPayload;
-        const allServers = [
-          ...(mcpData.servers ?? []),
-          ...(mcpData.builtinServers ?? []),
-        ];
-        const searchServers = allServers.filter((server) =>
-          SEARCH_MANAGED_MCP_IDS.has(server.id),
-        );
+        const allServers = [...(mcpData.servers ?? []), ...(mcpData.builtinServers ?? [])];
+        const searchServers = allServers.filter((server) => SEARCH_MANAGED_MCP_IDS.has(server.id));
         hasEnabledMcp = searchServers.some((server) => server.enabled !== false);
       } catch {
         // 如果 MCP 列表加载失败，保守地认为可用（不影响默认行为）

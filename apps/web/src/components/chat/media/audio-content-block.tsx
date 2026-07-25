@@ -22,7 +22,13 @@ export function AudioContentBlock({
   duration?: number;
   transcript?: string;
 }) {
-  const { mediaSrc, loading, error, fileName: loadedFileName, retry } = useMediaArtifact(artifactId);
+  const {
+    mediaSrc,
+    loading,
+    error,
+    fileName: loadedFileName,
+    retry,
+  } = useMediaArtifact(artifactId);
 
   const src = audioUrl ?? mediaSrc;
   const displayName = fileName ?? loadedFileName;
@@ -38,9 +44,7 @@ export function AudioContentBlock({
   if (error) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <span style={{ color: 'var(--fg-complement)', fontSize: 12 }}>
-          音频加载失败: {error}
-        </span>
+        <span style={{ color: 'var(--fg-complement)', fontSize: 12 }}>音频加载失败: {error}</span>
         <button
           type="button"
           onClick={retry}

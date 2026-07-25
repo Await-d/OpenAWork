@@ -62,61 +62,30 @@ export async function waitFor(
   throw new Error(message);
 }
 
-function createAnthropicSseFrames(text: string): string[] {
+function createChatCompletionsSseFrames(text: string): string[] {
   return [
-    'event: message_start',
     `data: ${JSON.stringify({
-      type: 'message_start',
-      message: {
-        id: 'msg_mock',
-        type: 'message',
-        role: 'assistant',
-        model: 'claude-opus-4-0',
-        content: [],
-        stop_reason: null,
-        stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 0 },
-      },
+      choices: [
+        {
+          delta: { content: text },
+          finish_reason: 'stop',
+        },
+      ],
     })}`,
     '',
-    'event: content_block_start',
-    `data: ${JSON.stringify({
-      type: 'content_block_start',
-      index: 0,
-      content_block: { type: 'text', text: '' },
-    })}`,
-    '',
-    'event: content_block_delta',
-    `data: ${JSON.stringify({
-      type: 'content_block_delta',
-      index: 0,
-      delta: { type: 'text_delta', text },
-    })}`,
-    '',
-    'event: content_block_stop',
-    `data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}`,
-    '',
-    'event: message_delta',
-    `data: ${JSON.stringify({
-      type: 'message_delta',
-      delta: { stop_reason: 'end_turn', stop_sequence: null },
-      usage: { output_tokens: 1 },
-    })}`,
-    '',
-    'event: message_stop',
-    `data: ${JSON.stringify({ type: 'message_stop' })}`,
+    'data: [DONE]',
     '',
   ];
 }
 
 export function createChatCompletionsStream(text: string): Response {
   const encoder = new TextEncoder();
-  const anthropicFrames = createAnthropicSseFrames(text);
+  const chatCompletionFrames = createChatCompletionsSseFrames(text);
 
   return new Response(
     new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode(anthropicFrames.join('\n')));
+        controller.enqueue(encoder.encode(chatCompletionFrames.join('\n')));
         controller.close();
       },
     }),
@@ -158,7 +127,7 @@ export function createDelayedChatCompletionsStream(input: {
     new ReadableStream({
       start(controller) {
         const timer = setTimeout(() => {
-          controller.enqueue(encoder.encode(createAnthropicSseFrames(input.text).join('\n')));
+          controller.enqueue(encoder.encode(createChatCompletionsSseFrames(input.text).join('\n')));
           controller.close();
         }, input.delayMs);
 

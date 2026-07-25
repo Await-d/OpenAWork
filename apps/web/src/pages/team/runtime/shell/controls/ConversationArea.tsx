@@ -98,6 +98,20 @@ export interface ConversationAreaProps {
    */
   receptionComposerEnabled?: boolean;
   /**
+   * 注入到内嵌 / 覆盖路径 TeamConversationView 的 beforeMessages 槽位。
+   * classic 布局用它挂运营条（ChatOps / Attention / Decision），不影响 fusion。
+   */
+  conversationBeforeMessages?: ReactNode;
+  /**
+   * 注入到内嵌 TeamConversationView 的 afterMessages 槽位（与团队动态条并存）。
+   * classic 用它挂 InlineOpsCard（失败/澄清/进度）。
+   */
+  conversationAfterMessages?: ReactNode;
+  /**
+   * classic 工作台模式：内嵌 TeamConversationView 隐藏旧 topBar / dual 多层侧栏。
+   */
+  classicWorkbench?: boolean;
+  /**
    * 隐藏 ConversationArea 自带的 textarea + 发送按钮（已废弃）。
    *
    * 原 V1 路径下 ConversationArea 内置一个简易 textarea；现在统一由内部的
@@ -121,6 +135,9 @@ export function ConversationArea({
   sidePanel,
   receptionSessionId,
   receptionComposerEnabled = false,
+  conversationBeforeMessages,
+  conversationAfterMessages,
+  classicWorkbench = false,
   workspaceLabel,
 }: ConversationAreaProps) {
   const { error, loading } = useTeamRuntimeReferenceViewData();
@@ -132,7 +149,9 @@ export function ConversationArea({
     return (
       <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
         {topBar}
-        <ConversationAreaBody sidePanel={sidePanel}>{messagesOverride}</ConversationAreaBody>
+        <ConversationAreaBody sidePanel={sidePanel} presentation="session-first">
+          {messagesOverride}
+        </ConversationAreaBody>
       </section>
     );
   }
@@ -142,13 +161,16 @@ export function ConversationArea({
     return (
       <section className="team-conversation-area" style={CONTAINER_STYLE} aria-label="对话区">
         {topBar}
-        <ConversationAreaBody sidePanel={sidePanel}>
+        <ConversationAreaBody sidePanel={sidePanel} presentation="session-first">
           <TeamConversationView
             key={receptionSessionId}
             sessionId={receptionSessionId}
             composerEnabled={receptionComposerEnabled}
+            classicWorkbench={classicWorkbench}
+            beforeMessages={conversationBeforeMessages}
             afterMessages={
               <>
+                {conversationAfterMessages}
                 {fallbackContent}
                 <TeamDynamicStrip entries={dynamicEntries} />
               </>

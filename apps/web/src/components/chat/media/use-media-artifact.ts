@@ -79,7 +79,9 @@ export function useMediaArtifact(artifactId: string | undefined): {
         }
 
         setMediaSrc(
-          content.startsWith('data:') ? content : `data:${mimeTypeRef.current ?? 'application/octet-stream'};base64,${content}`,
+          content.startsWith('data:')
+            ? content
+            : `data:${mimeTypeRef.current ?? 'application/octet-stream'};base64,${content}`,
         );
       } catch (err) {
         if (cancelled) return;
@@ -90,7 +92,9 @@ export function useMediaArtifact(artifactId: string | undefined): {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [gatewayUrl, token, artifactId, retryNonce]);
 
   return {

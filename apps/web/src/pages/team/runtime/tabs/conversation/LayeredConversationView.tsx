@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import {
   useHandoffStore,
   useLayerStore,
@@ -41,6 +42,34 @@ import {
   type LayerConversationRow,
   type LayerConversationState,
 } from './layered-conversation-model.js';
+
+type StateBadgeStyle = CSSProperties & {
+  '--state-color': string;
+  '--state-bg': string;
+  '--state-border': string;
+};
+
+type LayerColorStyle = CSSProperties & {
+  '--layer-color': string;
+  '--layer-color-soft': string;
+  '--layer-color-border': string;
+};
+
+function buildStateBadgeStyle(color: string): StateBadgeStyle {
+  return {
+    '--state-color': color,
+    '--state-bg': `color-mix(in srgb, ${color} 10%, transparent)`,
+    '--state-border': `color-mix(in srgb, ${color} 28%, transparent)`,
+  };
+}
+
+function buildLayerColorStyle(color: string): LayerColorStyle {
+  return {
+    '--layer-color': color,
+    '--layer-color-soft': `color-mix(in srgb, ${color} 10%, transparent)`,
+    '--layer-color-border': `color-mix(in srgb, ${color} 28%, transparent)`,
+  };
+}
 
 const STATE_COLORS: Record<string, string> = {
   idle: 'var(--fg-muted)',
@@ -184,7 +213,17 @@ export function LayeredConversationView({
       subtitle="按接待、规划、管控、执行、测试、评审等层级查看当前会话树中的历史对话。"
       scroll={false}
     >
-      <div className="team-conv-root" style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div
+        className="team-conv-root"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         {/* 头部面板 */}
         <div className="team-conv-panel" style={{ flexShrink: 0 }}>
           <div className="team-conv-panel-header">
@@ -201,7 +240,15 @@ export function LayeredConversationView({
               </span>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 16px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              padding: '8px 16px',
+            }}
+          >
             <SegmentedToggle<'split' | 'thread'>
               ariaLabel="布局模式"
               size="sm"
@@ -412,7 +459,8 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
         gap: 10,
         padding: '10px 14px',
         borderBottom: '1px solid color-mix(in srgb, var(--border-default) 32%, transparent)',
-        background: 'linear-gradient(180deg, color-mix(in srgb, var(--layer-color-soft) 60%, var(--bg-overlay)) 0%, transparent 100%)',
+        background:
+          'linear-gradient(180deg, color-mix(in srgb, var(--layer-color-soft) 60%, var(--bg-overlay)) 0%, transparent 100%)',
         flexShrink: 0,
       }}
     >
@@ -459,11 +507,7 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
       <span
         className="team-conv-badge team-conv-state"
         data-state={row.state}
-        style={{
-          '--state-color': stateColor,
-          '--state-bg': `color-mix(in srgb, ${stateColor} 10%, transparent)`,
-          '--state-border': `color-mix(in srgb, ${stateColor} 28%, transparent)`,
-        }}
+        style={buildStateBadgeStyle(stateColor)}
       >
         {STATE_LABELS[row.state]}
       </span>
@@ -471,13 +515,7 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
   );
 }
 
-function LayerRowAvatar({
-  layer,
-  state,
-}: {
-  layer: TeamRoleLayer;
-  state: LayerConversationState;
-}) {
+function LayerRowAvatar({ layer, state }: { layer: TeamRoleLayer; state: LayerConversationState }) {
   const identity = getRoleLayerIdentity(layer);
   const isRunning = state === 'running';
   return (
@@ -548,9 +586,7 @@ function LayerSessionRow({
       data-layer={row.roleLayer}
       data-selected={selected}
       style={{
-        '--layer-color': identity.color,
-        '--layer-color-soft': `color-mix(in srgb, ${identity.color} 10%, transparent)`,
-        '--layer-color-border': `color-mix(in srgb, ${identity.color} 28%, transparent)`,
+        ...buildLayerColorStyle(identity.color),
         display: 'grid',
         gridTemplateColumns: 'auto auto 1fr',
         gap: 8,
@@ -623,11 +659,7 @@ function LayerSessionRow({
             <span
               className="team-conv-badge team-conv-state"
               data-state={row.state}
-              style={{
-                '--state-color': stateColor,
-                '--state-bg': `color-mix(in srgb, ${stateColor} 10%, transparent)`,
-                '--state-border': `color-mix(in srgb, ${stateColor} 28%, transparent)`,
-              }}
+              style={buildStateBadgeStyle(stateColor)}
             >
               {STATE_LABELS[row.state]}
             </span>
@@ -647,11 +679,7 @@ function LayerSessionRow({
         >
           <span
             className="team-conv-badge team-conv-badge--layer"
-            style={{
-              '--layer-color': identity.color,
-              '--layer-color-soft': `color-mix(in srgb, ${identity.color} 10%, transparent)`,
-              '--layer-color-border': `color-mix(in srgb, ${identity.color} 28%, transparent)`,
-            }}
+            style={buildLayerColorStyle(identity.color)}
           >
             {routeLabel}
           </span>

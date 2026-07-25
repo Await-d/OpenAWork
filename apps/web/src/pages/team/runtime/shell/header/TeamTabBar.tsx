@@ -203,8 +203,9 @@ const CONTEXT_TRAILING_STYLE: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'flex-end',
   gap: 6,
-  flex: '1 1 320px',
+  flex: '0 1 auto',
   minWidth: 0,
+  maxWidth: '100%',
 };
 
 const SINGLE_PRIMARY_GROUP_STYLE: CSSProperties = {
@@ -350,6 +351,11 @@ export interface TeamTabBarProps {
   /** 单行模式下，主 tab 组与右侧操作之间的内容（如运行状态栏）。 */
   centerSlot?: ReactNode;
   stackCenterSlot?: boolean;
+  /**
+   * 隐藏导航行尾部 TeamRunStatePill。
+   * classic 顶栏已用 TeamStatusBar 展示状态时避免双份状态胶囊。
+   */
+  hideRunStatePill?: boolean;
   /** 单行模式下，最右侧操作区（如暂停按钮、治理齿轮）；显示在运行胶囊与 3D 之后。 */
   trailingSlot?: ReactNode;
 }
@@ -386,6 +392,7 @@ export function TeamTabBar({
   leadingSlot,
   centerSlot,
   stackCenterSlot = false,
+  hideRunStatePill = false,
   trailingSlot,
 }: TeamTabBarProps) {
   const subTabs: ReadonlyArray<SubTabDef> =
@@ -409,6 +416,7 @@ export function TeamTabBar({
         leadingSlot={leadingSlot}
         centerSlot={centerSlot}
         stackCenterSlot={stackCenterSlot}
+        hideRunStatePill={hideRunStatePill}
         trailingSlot={trailingSlot}
       />
     );
@@ -521,6 +529,7 @@ type SingleRowProps = Pick<
   | 'leadingSlot'
   | 'centerSlot'
   | 'stackCenterSlot'
+  | 'hideRunStatePill'
   | 'trailingSlot'
 >;
 
@@ -547,6 +556,7 @@ function SingleRowTabBar({
   leadingSlot,
   centerSlot,
   stackCenterSlot = false,
+  hideRunStatePill = false,
   trailingSlot,
 }: SingleRowProps) {
   // 主 tab「更多」溢出菜单的展开态与锚点。
@@ -689,23 +699,37 @@ function SingleRowTabBar({
   };
 
   return (
-    <div ref={rootRef} style={BAR_ROOT_STYLE}>
-      {/* 第 ① 行：上下文信息。工作区 / 当前会话与统计分开，避免导航行被挤压。 */}
+    <div
+      ref={rootRef}
+      className="team-tab-bar team-tab-bar--single"
+      data-hide-run-state-pill={hideRunStatePill ? 'true' : undefined}
+      data-stack-center={stackCenterSlot ? 'true' : undefined}
+      style={BAR_ROOT_STYLE}
+    >
+      {/* 第 ① 行：上下文信息。classic 把状态操作放 trailing，作为最顶一行。 */}
       {hasContextRow ? (
-        <div style={SINGLE_CONTEXT_ROW_STYLE}>
-          {leadingSlot ? <span style={LEADING_STYLE}>{leadingSlot}</span> : null}
-          {trailingSlot ? <span style={CONTEXT_TRAILING_STYLE}>{trailingSlot}</span> : null}
+        <div className="team-tab-bar__context" style={SINGLE_CONTEXT_ROW_STYLE}>
+          {leadingSlot ? (
+            <span className="team-tab-bar__leading" style={LEADING_STYLE}>
+              {leadingSlot}
+            </span>
+          ) : null}
+          {trailingSlot ? (
+            <span className="team-tab-bar__trailing" style={CONTEXT_TRAILING_STYLE}>
+              {trailingSlot}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
       {centerSlot && stackCenterSlot ? (
-        <div style={SINGLE_STATUS_ROW_STYLE}>
+        <div className="team-tab-bar__status" style={SINGLE_STATUS_ROW_STYLE}>
           <span style={CENTER_SLOT_STYLE}>{centerSlot}</span>
         </div>
       ) : null}
 
       {/* 第 ② 行：主 tab（窄屏溢出「更多」）+ 运行状态 + 3D。 */}
-      <div style={SINGLE_NAV_ROW_STYLE}>
+      <div className="team-tab-bar__nav" style={SINGLE_NAV_ROW_STYLE}>
         <div
           ref={groupRef}
           style={SINGLE_PRIMARY_GROUP_STYLE}
@@ -795,7 +819,7 @@ function SingleRowTabBar({
         ) : null}
 
         <span style={SINGLE_ACTIONS_STYLE}>
-          <TeamRunStatePill />
+          {hideRunStatePill ? null : <TeamRunStatePill />}
           {showOffice ? (
             <button
               type="button"

@@ -124,6 +124,16 @@ const CATEGORY_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   default: 'terminal-outline',
 };
 
+type CommandCardItem = {
+  id: string;
+  label: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  category: string;
+  color: string;
+  descriptor: CommandDescriptor | null;
+};
+
 /** S28: 快捷命令与工作区能力 */
 export default function QuickCommandsScreen() {
   const { accessToken, gatewayUrl } = useAuthStore();
@@ -156,7 +166,7 @@ export default function QuickCommandsScreen() {
   }, [loadCommands]);
 
   const hasRealCommands = commands.length > 0;
-  const displayItems = hasRealCommands
+  const displayItems: CommandCardItem[] = hasRealCommands
     ? commands.map((c) => ({
         id: c.id,
         label: c.label,
@@ -174,7 +184,7 @@ export default function QuickCommandsScreen() {
 
   const categories = Array.from(new Set(displayItems.map((c) => c.category)));
 
-  async function handleExecute(item: (typeof displayItems)[number]) {
+  async function handleExecute(item: CommandCardItem) {
     if (!item.descriptor) {
       // fallback 命令——导航到新会话
       router.push('/sessions/new');

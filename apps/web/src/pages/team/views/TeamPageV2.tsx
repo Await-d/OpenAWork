@@ -84,10 +84,14 @@ import {
   disconnectTeamEvents,
   getTeamNotificationEventKey,
   useHandoffStore,
+  useLayerStore,
   useTeamNotificationStore,
   useClarificationStore,
 } from '../../../stores/team/team-events.js';
 import type { HandoffEvent } from '../../../stores/team/team-events.js';
+import { ClassicTeamLayerTodoSidePanel } from './workbench/ClassicTeamLayerTodoSidePanel.js';
+import { ClassicTeamConversationOpsChrome } from '../conversation/ops/ClassicTeamConversationOpsChrome.js';
+import { ClassicTeamConversationInlineCards } from '../conversation/ops/ClassicTeamConversationInlineCards.js';
 import { OfficeThreeCanvas } from '../runtime/tabs/office/OfficeThreeCanvas.js';
 import { useOfficeSceneState } from '../runtime/tabs/office/OfficeScene.js';
 import type { TeamSessionCreationDraft } from '../runtime/data/team-session-creation.types.js';
@@ -132,7 +136,6 @@ import {
 import { resolveMatchedSharedSessionDetail } from '../runtime/data/team-runtime-shared-context.js';
 import { TeamPageV2RuntimeNotices } from './TeamPageV2RuntimeNotices.js';
 import { TeamFusionSuperbarSummary } from './TeamFusionSuperbarSummary.js';
-
 
 // ───── 尺寸常量 ─────
 
@@ -310,10 +313,12 @@ export default function TeamPageV2() {
   const mode = useTeamPageMode();
   const breakpoint = useBreakpoint();
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const layerNodesMap = useLayerStore((s) => s.nodes);
   const notificationEvents = useTeamNotificationStore((s) => s.events);
   const readEventKeys = useTeamNotificationStore((s) => s.readEventKeys);
   const globalUnreadCount = useTeamNotificationStore((s) => s.unreadCount);
   const clarificationPending = useClarificationStore((s) => s.pendingCount);
+  const clarificationItems = useClarificationStore((s) => s.items);
   const officeSceneState = useOfficeSceneState();
   const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const [pauseResumeBusy, setPauseResumeBusy] = useState(false);
@@ -743,6 +748,8 @@ export default function TeamPageV2() {
   }, [handleResumeAll, staleHandoffCount]);
 
   const handleSelectLayerSession = useCallback(() => {
+    // classic 弃用底部「层级对话」抽屉
+    if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
     setDrawerVisible(true);
   }, []);
 
@@ -750,6 +757,8 @@ export default function TeamPageV2() {
     if (event.target instanceof HTMLElement && event.target.closest('button')) {
       return;
     }
+    // classic 工作台弃用底部「层级对话」抽屉，状态栏点击不再打开
+    if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
     setDrawerVisible(true);
   }, []);
 
@@ -1247,8 +1256,95 @@ export default function TeamPageV2() {
     </div>
   );
 
+  const classicFailedHandoffs = useMemo(
+    () => scopedHandoffs.filter((h) => h.state === 'failed'),
+    [scopedHandoffs],
+  );
+  const classicRunningHandoffs = useMemo(
+    () => scopedHandoffs.filter((h) => h.state === 'running' || h.state === 'claimed'),
+    [scopedHandoffs],
+  );
+  const classicPendingClarifications = useMemo(() => {
+    const pending = (clarificationItems ?? []).filter((item) => item.status === 'pending');
+    if (!selectedRuntimeSessionScope) {
+      // 未选中本地运行树会话时，不跨会话展示澄清，避免脏状态
+      return selectedTeamId
+        ? pending.filter(
+            (item) => item.sessionId === selectedTeamId || item.fromSessionId === selectedTeamId,
+          )
+        : [];
+    }
+    return pending.filter(
+      (item) =>
+        selectedRuntimeSessionScope.has(item.sessionId) ||
+        selectedRuntimeSessionScope.has(item.fromSessionId),
+    );
+  }, [clarificationItems, selectedRuntimeSessionScope, selectedTeamId]);
+
+  const handleClassicFocusFail = useCallback(() => {
+    // 优先滚到对话内联失败/澄清卡，否则滚到运营条 attention 锚点
+    const inline = document.querySelector(
+      '[data-team-classic-inline-cards] [data-team-attention-anchor="true"]',
+    );
+    const target =
+      inline ??
+      document.querySelector('[data-team-classic-ops-chrome] [data-team-attention-anchor="true"]');
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
+
+  const handleClassicFocusWorkbench = useCallback(() => {
+    if (effectiveFocusMode) {
+      setFocusMode(false);
+    }
+    // 右侧任务台默认在 tasks tab；若中间主 tab 不在对话，classic 仍保持对话在左
+  }, [effectiveFocusMode]);
+
+  const handleClassicFillComposer = useCallback((text: string) => {
+    // 与 TeamConversationView 监听的 composer-reference 事件对齐，填入输入框不直接发送
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(
+      new CustomEvent('openawork:composer-reference', {
+        detail: { text },
+      }),
+    );
+  }, []);
+
+  // 对话区只保留待处理/决策提示；状态与操作按钮统一在顶部 TeamStatusBar
+  const classicOpsChrome =
+    isClassicWorkbench && selectedTeamId && !isSelectedSharedSession ? (
+      <ClassicTeamConversationOpsChrome
+        failedHandoffs={classicFailedHandoffs}
+        pendingClarifications={classicPendingClarifications}
+        onFocusFail={handleClassicFocusFail}
+      />
+    ) : null;
+
+  const classicInlineCards =
+    isClassicWorkbench && selectedTeamId && !isSelectedSharedSession ? (
+      <ClassicTeamConversationInlineCards
+        failedHandoffs={classicFailedHandoffs}
+        pendingClarifications={classicPendingClarifications}
+        runningHandoffs={classicRunningHandoffs}
+        onRetryFailed={canManageSelectedRuntimeTree ? handleRetryFailed : undefined}
+        onFocusWorkbench={handleClassicFocusWorkbench}
+        onFillComposer={handleClassicFillComposer}
+      />
+    ) : null;
+
   const conversationMessagesOverride = isSelectedSharedSession ? (
-    <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto' }}>
+    <div
+      style={{
+        width: '100%',
+        maxWidth: isClassicWorkbench ? undefined : 1080,
+        margin: '0 auto',
+        minHeight: 0,
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <TeamSharedConversationPanel
         key={selectedTeamId}
         selectedTeamTitle={selectedTeam?.title ?? null}
@@ -1260,17 +1356,43 @@ export default function TeamPageV2() {
       />
     </div>
   ) : selectedTeamId && selectedTeamId !== conversationReceptionSessionId ? (
-    <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto' }}>
+    <div
+      style={{
+        width: '100%',
+        maxWidth: isClassicWorkbench ? undefined : 1080,
+        margin: '0 auto',
+        minHeight: 0,
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <TeamConversationView
         key={selectedTeamId}
         sessionId={selectedTeamId}
         composerEnabled={inboundComposerEnabled}
+        classicWorkbench={isClassicWorkbench}
+        beforeMessages={classicOpsChrome}
+        afterMessages={classicInlineCards}
       />
     </div>
   ) : undefined;
-  // 已移除右侧工作台侧栏（概览/任务/度量/治理），对话区占满全宽
-  const workbenchSidePanel = undefined;
-  // 侧栏已移除，概览/任务/度量/治理 tab 内容直接在主区域渲染
+  // classic-only：右侧 layer/todo 工作台；fusion 保持无侧栏（内容仍走中间主 tab）
+  const classicLayerNodes = useMemo(() => Array.from(layerNodesMap.values()), [layerNodesMap]);
+  // 右侧 layer/todo 工作台只挂在「对话」相关中间区；其它主 tab 必须回到中间内容切换
+  const classicConversationSurface = middleTab === 'conversation' || middleTab === 'office';
+  const workbenchSidePanel =
+    isClassicWorkbench && classicConversationSurface && !effectiveFocusMode && !isMobile ? (
+      <ClassicTeamLayerTodoSidePanel
+        handoffs={scopedHandoffs}
+        layerNodes={classicLayerNodes}
+        taskLanes={data.taskLanes}
+        overviewSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('overview'))}
+        metricsSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('metrics'))}
+        governanceSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('governance'))}
+      />
+    ) : undefined;
+  // 注意：不得因 classic 布局锁死对话区，否则顶部主 tab / 子 tab 会失效
   const conversationAreaMessagesOverride =
     middleTab === 'conversation' || middleTab === 'office'
       ? conversationMessagesOverride
@@ -1302,8 +1424,8 @@ export default function TeamPageV2() {
             className="team-v2-pane team-v2-pane--main"
             style={{ ...LEFT_AREA_STYLE, position: 'relative' }}
           >
-            {/* 错误诊断折叠面板 + 专注模式切换 */}
-            {failedTaskCount > 0 && !isSelectedSharedSession ? (
+            {/* classic 工作台：失败诊断/专注按钮改由左侧 ops chrome 承载，去掉旧浮动控件 */}
+            {!isClassicWorkbench && failedTaskCount > 0 && !isSelectedSharedSession ? (
               <ErrorDiagnosticsPanel
                 failedHandoffs={scopedHandoffs}
                 selectedTeam={selectedTeam}
@@ -1312,8 +1434,8 @@ export default function TeamPageV2() {
               />
             ) : null}
 
-            {/* 专注模式切换按钮 */}
-            {!isMobile ? (
+            {/* 专注模式切换按钮（classic 用 ChatOpsBar「专注对话」） */}
+            {!isClassicWorkbench && !isMobile ? (
               <button
                 type="button"
                 onClick={handleToggleFocusMode}
@@ -1370,8 +1492,9 @@ export default function TeamPageV2() {
               </button>
             ) : null}
 
-            {/* 智能输入引导气泡 */}
-            {selectedTeamId &&
+            {/* 智能输入引导气泡（classic 由 ops/inline cards 替代，避免双套引导） */}
+            {!isClassicWorkbench &&
+            selectedTeamId &&
             (suggestionContext === 'failure' || suggestionContext === 'idle') &&
             !suggestionDismissed &&
             !isMobile ? (
@@ -1446,6 +1569,22 @@ export default function TeamPageV2() {
                   onRetryConnection={handleRetryConnection}
                   receptionSessionId={selectedTeamId ? conversationReceptionSessionId : null}
                   receptionComposerEnabled={true}
+                  classicWorkbench={isClassicWorkbench}
+                  conversationBeforeMessages={
+                    // reception 内嵌路径也挂 classic 运营条；子 session 覆盖路径在 messagesOverride 内已注入
+                    classicOpsChrome &&
+                    selectedTeamId &&
+                    selectedTeamId === conversationReceptionSessionId
+                      ? classicOpsChrome
+                      : undefined
+                  }
+                  conversationAfterMessages={
+                    classicInlineCards &&
+                    selectedTeamId &&
+                    selectedTeamId === conversationReceptionSessionId
+                      ? classicInlineCards
+                      : undefined
+                  }
                   topBar={
                     selectedTeamId ? (
                       <>
@@ -1485,8 +1624,10 @@ export default function TeamPageV2() {
                               />
                             ) : null
                           }
+                          // classic：状态/操作按钮放最顶上下文行 trailing，避免第二行堆叠
+                          // fusion/其它：保持 centerSlot 状态栏 + trailing 摘要
                           centerSlot={
-                            !isMobile ? (
+                            !isMobile && !isClassicWorkbench ? (
                               <div
                                 className="team-v2-control team-v2-control--transparent"
                                 style={SUPERBAR_STATUS_TRIGGER_STYLE}
@@ -1503,26 +1644,54 @@ export default function TeamPageV2() {
                               >
                                 <TeamStatusBar
                                   paused={effectiveMode === 'paused'}
+                                  busy={pauseResumeBusy}
                                   selectedSessionId={selectedTeamId || null}
                                   onPauseAll={
                                     canManageSelectedRuntimeTree ? handlePauseAll : undefined
                                   }
                                   onResumeAll={
-                                    effectiveMode === 'paused'
-                                      ? undefined
-                                      : canManageSelectedRuntimeTree
-                                        ? handleRequestResumeAll
-                                        : undefined
+                                    canManageSelectedRuntimeTree
+                                      ? handleRequestResumeAll
+                                      : undefined
                                   }
                                 />
                               </div>
                             ) : null
                           }
-                          stackCenterSlot={isTablet || isFusionWorkbench || isClassicWorkbench}
+                          stackCenterSlot={
+                            // classic 不把状态挤到第二行；tablet/fusion 仍可 stack
+                            isClassicWorkbench ? false : isTablet || isFusionWorkbench
+                          }
+                          hideRunStatePill={isClassicWorkbench}
                           trailingSlot={
                             !isMobile ? (
-                              // 并排工作台下统一用更紧凑的 fusion 摘要，避免 classic 多 pill 挤爆超级栏
-                              isFusionWorkbench || isClassicWorkbench ? (
+                              isClassicWorkbench ? (
+                                <div
+                                  className="team-v2-classic-top-actions"
+                                  data-testid="team-classic-top-actions"
+                                >
+                                  <TeamStatusBar
+                                    paused={effectiveMode === 'paused'}
+                                    busy={pauseResumeBusy || retryingFailed}
+                                    selectedSessionId={selectedTeamId || null}
+                                    failCount={failedTaskCount}
+                                    focusMode={effectiveFocusMode}
+                                    onPauseAll={
+                                      canManageSelectedRuntimeTree ? handlePauseAll : undefined
+                                    }
+                                    onResumeAll={
+                                      canManageSelectedRuntimeTree
+                                        ? handleRequestResumeAll
+                                        : undefined
+                                    }
+                                    onRetryFailed={
+                                      canManageSelectedRuntimeTree ? handleRetryFailed : undefined
+                                    }
+                                    onFocusFail={handleClassicFocusFail}
+                                    onToggleFocus={handleToggleFocusMode}
+                                  />
+                                </div>
+                              ) : isFusionWorkbench ? (
                                 <TeamFusionSuperbarSummary
                                   description={data.topSummary.description}
                                   footerLead={data.footerLead}
@@ -1593,7 +1762,13 @@ export default function TeamPageV2() {
           </section>
         </main>
 
-        <LayerConversationDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+        {/* classic 弃用底部「层级对话」面板；fusion 保留 */}
+        {!isClassicWorkbench ? (
+          <LayerConversationDrawer
+            visible={drawerVisible}
+            onClose={() => setDrawerVisible(false)}
+          />
+        ) : null}
         <PauseConfirmDialog
           open={showPauseConfirm}
           activeCount={activeHandoffCount}

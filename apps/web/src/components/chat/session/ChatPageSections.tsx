@@ -245,7 +245,9 @@ export function renderChatMessageContentWithOptions(
 ) {
   if (m.role !== 'assistant') {
     const inputImages = m.rawContent ? extractInputImages(m.rawContent) : [];
-    const mediaNodes = m.rawContent ? renderMediaContent(m.rawContent as unknown as import('@openAwork/shared').MessageContent[]) : [];
+    const mediaNodes = m.rawContent
+      ? renderMediaContent(m.rawContent as unknown as import('@openAwork/shared').MessageContent[])
+      : [];
 
     if (inputImages.length === 0 && mediaNodes.length === 0) {
       return m.content;

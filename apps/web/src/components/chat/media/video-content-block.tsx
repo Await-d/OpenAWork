@@ -26,7 +26,13 @@ export function VideoContentBlock({
   width?: number;
   height?: number;
 }) {
-  const { mediaSrc, loading, error, fileName: loadedFileName, retry } = useMediaArtifact(artifactId);
+  const {
+    mediaSrc,
+    loading,
+    error,
+    fileName: loadedFileName,
+    retry,
+  } = useMediaArtifact(artifactId);
 
   const src = videoUrl ?? mediaSrc;
   const displayName = fileName ?? loadedFileName;
@@ -57,9 +63,7 @@ export function VideoContentBlock({
   if (error) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <span style={{ color: 'var(--fg-complement)', fontSize: 12 }}>
-          视频加载失败: {error}
-        </span>
+        <span style={{ color: 'var(--fg-complement)', fontSize: 12 }}>视频加载失败: {error}</span>
         <button
           type="button"
           onClick={retry}

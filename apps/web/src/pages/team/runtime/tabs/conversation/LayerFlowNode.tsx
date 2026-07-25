@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
 import type { LayerNodeView } from './LayerFlowPipeline.js';
 import { STATE_COLOR, STATE_LABELS } from './layer-flow-state.js';
+
+type NodeStyle = CSSProperties & {
+  '--node-color': string;
+};
+
+type StateStyle = CSSProperties & {
+  '--state-color': string;
+  '--state-bg': string;
+  '--state-border': string;
+};
 
 interface LayerFlowNodeProps {
   onSelect: () => void;
@@ -16,8 +27,15 @@ export function LayerFlowNode({ onSelect, selected, view }: LayerFlowNodeProps) 
   const arriveKey = view.active ? 'on' : 'off';
   const prevActiveRef = useRef(arriveKey);
   const [arrive, setArrive] = useState(false);
-  const onlyRoleInstance =
-    view.roleInstances.length === 1 ? (view.roleInstances[0] ?? null) : null;
+  const nodeStyle: NodeStyle = {
+    '--node-color': color,
+  };
+  const stateStyle: StateStyle = {
+    '--state-color': color,
+    '--state-bg': `color-mix(in srgb, ${color} 10%, transparent)`,
+    '--state-border': `color-mix(in srgb, ${color} 28%, transparent)`,
+  };
+  const onlyRoleInstance = view.roleInstances.length === 1 ? (view.roleInstances[0] ?? null) : null;
 
   useEffect(() => {
     if (prevActiveRef.current !== arriveKey && arriveKey === 'on') {
@@ -51,9 +69,7 @@ export function LayerFlowNode({ onSelect, selected, view }: LayerFlowNodeProps) 
       data-active={view.active ? 'true' : 'false'}
       data-selected={selected ? 'true' : 'false'}
       data-clickable={clickable ? 'true' : 'false'}
-      style={{
-        '--node-color': color,
-      }}
+      style={nodeStyle}
     >
       <span aria-hidden className="team-conv-flow-node__circle">
         {id.icon}
@@ -61,15 +77,7 @@ export function LayerFlowNode({ onSelect, selected, view }: LayerFlowNodeProps) 
 
       <span className="team-conv-flow-node__label">{id.short}</span>
 
-      <span
-        className="team-conv-badge team-conv-state"
-        data-state={view.state}
-        style={{
-          '--state-color': color,
-          '--state-bg': `color-mix(in srgb, ${color} 10%, transparent)`,
-          '--state-border': `color-mix(in srgb, ${color} 28%, transparent)`,
-        }}
-      >
+      <span className="team-conv-badge team-conv-state" data-state={view.state} style={stateStyle}>
         {view.active && <span className="team-conv-badge--dot team-conv-badge--pulse" />}
         {stateLabel}
       </span>

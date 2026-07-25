@@ -83,8 +83,7 @@
   scrollbar-width: none;
 }
 
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__head-tabs::-webkit-scrollbar {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__head-tabs::-webkit-scrollbar {
   display: none;
 }
 
@@ -123,8 +122,7 @@
   color: var(--fg-default);
 }
 
-.team-v2-root[data-workbench-layout]
-  .team-v2-fusion-side-panel__tab[data-active='true']:hover {
+.team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__tab[data-active='true']:hover {
   background: var(--accent-subtle);
   color: var(--accent);
 }

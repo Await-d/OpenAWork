@@ -1,5 +1,6 @@
 mod desktop_control_bridge;
 mod desktop_control_native;
+mod updater_commands;
 
 use argon2::password_hash::{rand_core::OsRng as ArgonRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -13,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, State, Url, WindowEvent, Wry};
+use tauri::{Emitter, Manager, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
@@ -21,7 +22,10 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutS
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_updater::UpdaterExt;
+use updater_commands::{
+    current_update_channel, current_updater_platform, download_and_install_proxy_update,
+    open_update_panel,
+};
 
 /// 桌面端统一根目录（存放 desktop-settings.json 与默认 agent-gateway 数据）。
 ///
@@ -33,19 +37,6 @@ const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
 /// 一次性标记：历史版本把 VitePWA Service Worker 打进了桌面端 WebView，
 /// 旧 SW 会拦截导航返回旧 precache。升级后在窗口可用时清理一次 WebView 浏览数据。
 const WEBVIEW_SW_CACHE_CLEARED_MARKER: &str = ".webview-sw-cache-cleared-v1";
-const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
-
-/// 预览版代理更新端点（由前端传入 proxy_prefix 拼接为完整代理 URL）
-/// 使用 latest.json（直接 GitHub URL），代理前缀由调用方添加。
-/// 不使用 latest-cn.json（其内部 URL 含固定代理前缀，会导致双重代理）。
-const PROXY_UPDATE_ENDPOINTS_PREVIEW: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json",
-];
-
-/// 发行版代理更新端点（由前端传入 proxy_prefix 拼接为完整代理 URL）
-const PROXY_UPDATE_ENDPOINTS_STABLE: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json",
-];
 /// gateway 子目录名（在 effective data_root 下）。与 storage-paths.ts 中的
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。
 const GATEWAY_SUBDIR: &str = "agent-gateway";
@@ -55,19 +46,6 @@ struct GatewayState {
     port: Option<u16>,
     generation: u64,
     desktop_auth_token: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "event", content = "data")]
-enum ProxyUpdateDownloadEvent {
-    #[serde(rename_all = "camelCase")]
-    Started { content_length: Option<u64> },
-    #[serde(rename_all = "camelCase")]
-    Progress {
-        chunk_length: usize,
-        downloaded: usize,
-        content_length: Option<u64>,
-    },
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -88,18 +66,6 @@ fn shutdown_gateway_child_from_state(gateway_state: &Arc<Mutex<GatewayState>>) {
         }
         guard.port = None;
     }
-}
-
-fn build_proxy_update_endpoints(proxy_prefix: &str, channel: &str) -> Result<Vec<Url>, String> {
-    let endpoints = match channel {
-        "stable" => PROXY_UPDATE_ENDPOINTS_STABLE.as_slice(),
-        _ => PROXY_UPDATE_ENDPOINTS_PREVIEW.as_slice(),
-    };
-    endpoints
-        .iter()
-        .map(|url| Url::parse(&format!("{proxy_prefix}{url}")))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("构建代理更新端点失败：{error}"))
 }
 
 impl Drop for GatewayProcess {
@@ -784,52 +750,6 @@ fn normalize_gateway_host(input: Option<&str>) -> &'static str {
     }
 }
 
-fn updater_platform_key() -> Result<&'static str, String> {
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        return Ok("windows-x86_64");
-    }
-    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-    {
-        return Ok("windows-aarch64");
-    }
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        return Ok("darwin-x86_64");
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        return Ok("darwin-aarch64");
-    }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        return Ok("linux-x86_64");
-    }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        return Ok("linux-aarch64");
-    }
-    #[cfg(all(target_os = "linux", target_arch = "arm"))]
-    {
-        return Ok("linux-armv7");
-    }
-
-    #[cfg(not(any(
-        all(target_os = "windows", target_arch = "x86_64"),
-        all(target_os = "windows", target_arch = "aarch64"),
-        all(target_os = "macos", target_arch = "x86_64"),
-        all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "aarch64"),
-        all(target_os = "linux", target_arch = "arm")
-    )))]
-    Err(format!(
-        "unsupported updater platform: {}-{}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    ))
-}
-
 /// 解析 sidecar 启动时 `OPENAWORK_WEB_DIST` 应该指向的目录。
 ///
 /// 生产构建中，前端 `apps/web/dist` 通过 `tauri.conf.json` 的
@@ -1197,101 +1117,6 @@ async fn restart_app(app: tauri::AppHandle, state: State<'_, GatewayProcess>) ->
         .map_err(|error| error.to_string())?;
     app.exit(0);
     Ok(())
-}
-
-#[tauri::command]
-async fn download_and_install_proxy_update(
-    app: tauri::AppHandle,
-    proxy_prefix: String,
-    channel: Option<String>,
-) -> Result<(), String> {
-    let proxy_prefix = proxy_prefix.trim();
-    if proxy_prefix.is_empty() {
-        return Err("代理前缀不能为空。".to_string());
-    }
-
-    let channel = channel.unwrap_or_else(|| "preview".to_string());
-    let endpoints = build_proxy_update_endpoints(proxy_prefix, &channel)?;
-    let gateway_process_for_updater = app.state::<GatewayProcess>().0.clone();
-    let app_handle = app.clone();
-    let updater = app
-        .updater_builder()
-        .on_before_exit(move || {
-            shutdown_gateway_child_from_state(&gateway_process_for_updater);
-            app_handle.cleanup_before_exit();
-        })
-        .endpoints(endpoints)
-        .map_err(|error| format!("构建代理更新端点失败：{error}"))?
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|error| format!("初始化代理更新器失败：{error}"))?;
-
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|error| format!("通过代理检查更新失败：{error}"))?
-    else {
-        return Err("当前没有可安装的更新。".to_string());
-    };
-
-    let progress_app = app.clone();
-    let mut first_chunk = true;
-    let mut downloaded = 0_usize;
-
-    update
-        .download_and_install(
-            |chunk_length, content_length| {
-                if first_chunk {
-                    first_chunk = false;
-                    let _ = progress_app.emit(
-                        EVT_PROXY_UPDATE_DOWNLOAD,
-                        ProxyUpdateDownloadEvent::Started { content_length },
-                    );
-                }
-                downloaded += chunk_length;
-                let _ = progress_app.emit(
-                    EVT_PROXY_UPDATE_DOWNLOAD,
-                    ProxyUpdateDownloadEvent::Progress {
-                        chunk_length,
-                        downloaded,
-                        content_length,
-                    },
-                );
-            },
-            || {},
-        )
-        .await
-        .map_err(|error| format!("通过代理下载或安装更新失败：{error}"))?;
-
-    Ok(())
-}
-
-#[tauri::command]
-fn current_updater_platform() -> Result<String, String> {
-    Ok(updater_platform_key()?.to_string())
-}
-
-/// 返回当前生效的更新渠道（preview / stable）。
-/// 优先读取用户在设置中保存的渠道，回退到构建时 feature，最终默认 "preview"。
-#[tauri::command]
-fn current_update_channel(state: State<'_, SettingsState>) -> Result<String, String> {
-    // 1. 用户显式设置
-    if let Ok(guard) = state.0.lock() {
-        if let Some(ch) = &guard.update_channel {
-            if ch == "stable" || ch == "preview" {
-                return Ok(ch.clone());
-            }
-        }
-    }
-    // 2. 构建时 feature
-    #[cfg(feature = "stable-channel")]
-    {
-        return Ok("stable".to_string());
-    }
-    #[cfg(not(feature = "stable-channel"))]
-    {
-        Ok("preview".to_string())
-    }
 }
 
 #[tauri::command]
@@ -2037,6 +1862,7 @@ pub fn run() {
             start_gateway,
             stop_gateway,
             restart_app,
+            open_update_panel,
             download_and_install_proxy_update,
             current_updater_platform,
             current_update_channel,

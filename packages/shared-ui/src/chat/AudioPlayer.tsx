@@ -71,14 +71,17 @@ export function AudioPlayer({
     }
   }, [playing]);
 
-  const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const audio = audioRef.current;
-    if (!audio || !total) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = ratio * total;
-    setCurrent(audio.currentTime);
-  }, [total]);
+  const seek = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const audio = audioRef.current;
+      if (!audio || !total) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      audio.currentTime = ratio * total;
+      setCurrent(audio.currentTime);
+    },
+    [total],
+  );
 
   const changeRate = useCallback(() => {
     const rates = [1, 1.5, 2, 0.75];
@@ -138,8 +141,12 @@ export function AudioPlayer({
             flexShrink: 0,
             transition: 'transform 100ms ease',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.05)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
         >
           {playing ? '\u23F8' : '\u25B6'}
         </button>

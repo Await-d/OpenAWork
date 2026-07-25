@@ -32,15 +32,21 @@
         --l-reviewer: #f0b429;
       }
 
-      * { box-sizing: border-box; }
-      html, body {
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
         margin: 0;
         height: 100%;
         font-family: var(--font);
         color: var(--fg-default);
         background: var(--bg-base);
       }
-      button, textarea { font: inherit; }
+      button,
+      textarea {
+        font: inherit;
+      }
 
       .app {
         height: 100vh;
@@ -80,7 +86,10 @@
         color: var(--fg-muted);
         font-size: 12px;
       }
-      .chat-bar .path strong { color: var(--fg-strong); font-weight: 650; }
+      .chat-bar .path strong {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
       .chat-bar .chip {
         flex-shrink: 0;
         display: inline-flex;
@@ -99,9 +108,18 @@
         font-weight: 700;
         font-variant-numeric: tabular-nums;
       }
-      .chat-bar .chip.live { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); }
-      .chat-bar .chip.live[data-paused='true'] { color: var(--contrast); border-color: color-mix(in srgb, var(--contrast) 30%, var(--border)); }
-      .chat-bar .chip.fail { color: var(--complement); border-color: color-mix(in srgb, var(--complement) 30%, var(--border)); }
+      .chat-bar .chip.live {
+        color: var(--success);
+        border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+      }
+      .chat-bar .chip.live[data-paused='true'] {
+        color: var(--contrast);
+        border-color: color-mix(in srgb, var(--contrast) 30%, var(--border));
+      }
+      .chat-bar .chip.fail {
+        color: var(--complement);
+        border-color: color-mix(in srgb, var(--complement) 30%, var(--border));
+      }
       .chat-quick {
         display: flex;
         align-items: center;
@@ -124,11 +142,22 @@
         cursor: pointer;
         white-space: nowrap;
       }
-      .chat-quick .qbtn:first-child { border-radius: 0; }
-      .chat-quick .qbtn:last-child { border-right-width: 1px; }
-      .chat-quick .qbtn:hover { background: var(--bg-hover); color: var(--fg-default); }
-      .chat-quick .qbtn.primary { color: var(--accent); }
-      .chat-quick .qbtn.danger { color: var(--complement); }
+      .chat-quick .qbtn:first-child {
+        border-radius: 0;
+      }
+      .chat-quick .qbtn:last-child {
+        border-right-width: 1px;
+      }
+      .chat-quick .qbtn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+      .chat-quick .qbtn.primary {
+        color: var(--accent);
+      }
+      .chat-quick .qbtn.danger {
+        color: var(--complement);
+      }
       .chat-quick .qbtn[data-on='true'] {
         background: color-mix(in srgb, var(--accent) 10%, var(--bg-base));
         color: var(--fg-strong);
@@ -174,7 +203,9 @@
       .chat-msg {
         flex-shrink: 0;
       }
-      .chat-msg.user { margin-left: auto; }
+      .chat-msg.user {
+        margin-left: auto;
+      }
       .chat-msg .meta {
         display: flex;
         gap: 8px;
@@ -183,7 +214,10 @@
         color: var(--fg-faint);
         font-size: 10.5px;
       }
-      .chat-msg .meta b { color: var(--fg-muted); font-weight: 650; }
+      .chat-msg .meta b {
+        color: var(--fg-muted);
+        font-weight: 650;
+      }
       .chat-msg .bubble {
         padding: 8px 11px;
         border: 1px solid var(--border);
@@ -204,7 +238,9 @@
         line-height: inherit;
         white-space: pre-wrap;
       }
-      .chat-msg.user .text { color: inherit; }
+      .chat-msg.user .text {
+        color: inherit;
+      }
 
       /* 待你处理：仅对话区需要人拍板时出现 */
       .attention-bar {
@@ -219,14 +255,21 @@
         color: var(--fg-muted);
         font-size: 11px;
       }
-      .attention-bar[data-show='true'] { display: flex; }
+      .attention-bar[data-show='true'] {
+        display: flex;
+      }
       .attention-bar .attn {
         color: var(--contrast);
         font-weight: 750;
         font-size: 10px;
       }
-      .attention-bar strong { color: var(--fg-strong); font-weight: 650; }
-      .attention-bar .grow { flex: 1; }
+      .attention-bar strong {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
+      .attention-bar .grow {
+        flex: 1;
+      }
       .attention-bar button {
         appearance: none;
         border: 1px solid color-mix(in srgb, var(--contrast) 35%, var(--border));
@@ -268,7 +311,10 @@
         color: var(--fg-muted);
         font-size: 10.5px;
       }
-      .decision-chip b { color: var(--fg-strong); font-weight: 650; }
+      .decision-chip b {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
       .decision-chip button {
         appearance: none;
         border: 0;
@@ -279,7 +325,9 @@
         line-height: 1;
         padding: 0 0 0 2px;
       }
-      .decision-chip button:hover { color: var(--complement); }
+      .decision-chip button:hover {
+        color: var(--complement);
+      }
 
       .inline-card {
         position: relative;
@@ -301,23 +349,31 @@
         border-color: color-mix(in srgb, var(--contrast) 40%, var(--border));
         background: color-mix(in srgb, var(--contrast) 7%, var(--bg-overlay));
       }
-      .inline-card[data-tone='block']::before { background: var(--contrast); }
+      .inline-card[data-tone='block']::before {
+        background: var(--contrast);
+      }
       .inline-card[data-tone='progress'] {
         border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
         background: color-mix(in srgb, var(--accent) 5%, var(--bg-overlay));
       }
-      .inline-card[data-tone='progress']::before { background: var(--accent); }
+      .inline-card[data-tone='progress']::before {
+        background: var(--accent);
+      }
       .inline-card[data-tone='fail'] {
         border-color: color-mix(in srgb, var(--complement) 40%, var(--border));
         background: color-mix(in srgb, var(--complement) 7%, var(--bg-overlay));
       }
-      .inline-card[data-tone='fail']::before { background: var(--complement); }
+      .inline-card[data-tone='fail']::before {
+        background: var(--complement);
+      }
       .inline-card[data-tone='done'] {
         border-color: color-mix(in srgb, var(--success) 28%, var(--border));
         background: color-mix(in srgb, var(--success) 5%, var(--bg-overlay));
         opacity: 0.92;
       }
-      .inline-card[data-tone='done']::before { background: var(--success); }
+      .inline-card[data-tone='done']::before {
+        background: var(--success);
+      }
       .inline-card .ic-top {
         display: flex;
         flex-wrap: wrap;
@@ -336,10 +392,18 @@
         font-weight: 750;
         font-size: 10px;
       }
-      .inline-card[data-tone='block'] .ic-top .tone { color: var(--contrast); }
-      .inline-card[data-tone='progress'] .ic-top .tone { color: var(--accent); }
-      .inline-card[data-tone='fail'] .ic-top .tone { color: var(--complement); }
-      .inline-card[data-tone='done'] .ic-top .tone { color: var(--success); }
+      .inline-card[data-tone='block'] .ic-top .tone {
+        color: var(--contrast);
+      }
+      .inline-card[data-tone='progress'] .ic-top .tone {
+        color: var(--accent);
+      }
+      .inline-card[data-tone='fail'] .ic-top .tone {
+        color: var(--complement);
+      }
+      .inline-card[data-tone='done'] .ic-top .tone {
+        color: var(--success);
+      }
       .inline-card .ic-body {
         color: var(--fg-default);
         font-size: 12.5px;
@@ -430,7 +494,10 @@
         cursor: pointer;
         font-family: var(--mono);
       }
-      .artifact-row button:hover { color: var(--aux); border-color: color-mix(in srgb, var(--aux) 35%, var(--border)); }
+      .artifact-row button:hover {
+        color: var(--aux);
+        border-color: color-mix(in srgb, var(--aux) 35%, var(--border));
+      }
 
       .typing-row {
         display: inline-flex;
@@ -449,8 +516,12 @@
         opacity: 0.35;
         animation: blink 1.2s infinite ease-in-out;
       }
-      .typing-row i:nth-child(2) { animation-delay: 0.15s; }
-      .typing-row i:nth-child(3) { animation-delay: 0.3s; }
+      .typing-row i:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .typing-row i:nth-child(3) {
+        animation-delay: 0.3s;
+      }
 
       .scroll-bottom {
         position: absolute;
@@ -468,11 +539,25 @@
         display: none;
         z-index: 3;
       }
-      .scroll-bottom[data-show='true'] { display: inline-flex; align-items: center; gap: 4px; }
-      .scroll-bottom:hover { color: var(--fg-strong); background: var(--bg-hover); }
+      .scroll-bottom[data-show='true'] {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .scroll-bottom:hover {
+        color: var(--fg-strong);
+        background: var(--bg-hover);
+      }
       @keyframes blink {
-        0%, 100% { opacity: 0.25; transform: translateY(0); }
-        50% { opacity: 1; transform: translateY(-2px); }
+        0%,
+        100% {
+          opacity: 0.25;
+          transform: translateY(0);
+        }
+        50% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
       }
 
       /* 跳转轨：贴右、更轻 */
@@ -544,8 +629,13 @@
         color: var(--accent);
         background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
       }
-      .composer-context .cx b { color: inherit; font-weight: 700; }
-      .composer-context #cx-hint { min-width: 0; }
+      .composer-context .cx b {
+        color: inherit;
+        font-weight: 700;
+      }
+      .composer-context #cx-hint {
+        min-width: 0;
+      }
       .composer {
         padding: 6px 10px 8px;
       }
@@ -594,7 +684,9 @@
         cursor: pointer;
         padding: 0;
       }
-      .composer-foot .foot-left button:hover { color: var(--fg-muted); }
+      .composer-foot .foot-left button:hover {
+        color: var(--fg-muted);
+      }
       .composer-foot .char {
         color: var(--fg-faint);
         font-variant-numeric: tabular-nums;
@@ -672,11 +764,15 @@
       .side-tabs button[aria-selected='true']::after {
         content: '';
         position: absolute;
-        left: 0; right: 0; bottom: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
         height: 2px;
         background: var(--accent);
       }
-      .side-tabs .grow { flex: 1; }
+      .side-tabs .grow {
+        flex: 1;
+      }
       .side-tabs .count {
         margin-left: 4px;
         color: var(--fg-faint);
@@ -703,7 +799,9 @@
         color: var(--success);
         font-weight: 700;
       }
-      .control-bar .live[data-paused='true'] { color: var(--contrast); }
+      .control-bar .live[data-paused='true'] {
+        color: var(--contrast);
+      }
       .control-bar .live i {
         width: 6px;
         height: 6px;
@@ -714,9 +812,15 @@
         animation: pulse 1.4s infinite;
       }
       @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
-        70% { box-shadow: 0 0 0 6px transparent; }
-        100% { box-shadow: 0 0 0 0 transparent; }
+        0% {
+          box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent);
+        }
+        70% {
+          box-shadow: 0 0 0 6px transparent;
+        }
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+        }
       }
       .control-bar .stat {
         color: var(--fg-faint);
@@ -726,8 +830,12 @@
         color: var(--fg-muted);
         font-weight: 650;
       }
-      .control-bar .stat[data-tone='fail'] b { color: var(--complement); }
-      .control-bar .grow { flex: 1; }
+      .control-bar .stat[data-tone='fail'] b {
+        color: var(--complement);
+      }
+      .control-bar .grow {
+        flex: 1;
+      }
       .control-bar .btn {
         appearance: none;
         border: 1px solid var(--border);
@@ -739,9 +847,18 @@
         font-weight: 650;
         cursor: pointer;
       }
-      .control-bar .btn:hover { background: var(--bg-hover); color: var(--fg-default); }
-      .control-bar .btn.danger { color: var(--complement); border-color: color-mix(in srgb, var(--complement) 30%, var(--border)); }
-      .control-bar .btn.primary { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+      .control-bar .btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+      .control-bar .btn.danger {
+        color: var(--complement);
+        border-color: color-mix(in srgb, var(--complement) 30%, var(--border));
+      }
+      .control-bar .btn.primary {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+      }
 
       /* 层级/角色总览条 */
       .layer-overview {
@@ -788,7 +905,9 @@
         cursor: pointer;
         text-align: left;
       }
-      .layer-rail button:last-child { border-right: 0; }
+      .layer-rail button:last-child {
+        border-right: 0;
+      }
       .layer-rail button[data-active='true'] {
         color: var(--fg-strong);
         background: color-mix(in srgb, var(--c) 8%, transparent);
@@ -800,7 +919,10 @@
         font-weight: 800;
         margin-right: 3px;
       }
-      .layer-rail .name { font-size: 11px; font-weight: 650; }
+      .layer-rail .name {
+        font-size: 11px;
+        font-weight: 650;
+      }
       .layer-rail .meta {
         display: block;
         margin-top: 0;
@@ -816,7 +938,9 @@
         height: 6px;
         border-radius: 50%;
       }
-      .layer-rail .dot.fail { background: var(--complement); }
+      .layer-rail .dot.fail {
+        background: var(--complement);
+      }
       .layer-rail .dot.live {
         background: var(--success);
         animation: pulse 1.4s infinite;
@@ -836,7 +960,7 @@
         height: 100%;
         display: grid;
         /* 卡片行 + 列表更克制，消息区更大 */
-        grid-template-rows: auto minmax(108px, 0.30fr) minmax(0, 1.70fr);
+        grid-template-rows: auto minmax(108px, 0.3fr) minmax(0, 1.7fr);
         overflow: hidden;
       }
 
@@ -889,9 +1013,15 @@
         font-size: 9px;
         line-height: 1.2;
       }
-      .role-chip .rm .run { color: var(--success); }
-      .role-chip .rm .fail { color: var(--complement); }
-      .role-chip .rm .idle { color: var(--fg-faint); }
+      .role-chip .rm .run {
+        color: var(--success);
+      }
+      .role-chip .rm .fail {
+        color: var(--complement);
+      }
+      .role-chip .rm .idle {
+        color: var(--fg-faint);
+      }
 
       .panel {
         min-height: 0;
@@ -899,7 +1029,9 @@
         flex-direction: column;
         overflow: hidden;
       }
-      .panel + .panel { border-top: 1px solid var(--border); }
+      .panel + .panel {
+        border-top: 1px solid var(--border);
+      }
       .panel-head {
         display: flex;
         align-items: center;
@@ -923,7 +1055,9 @@
         font-style: normal;
         font-weight: 600;
       }
-      .filters { display: inline-flex; }
+      .filters {
+        display: inline-flex;
+      }
       .filters button {
         appearance: none;
         border: 0;
@@ -935,8 +1069,14 @@
         font-weight: 650;
         cursor: pointer;
       }
-      .filters button[aria-pressed='true'] { color: var(--accent); }
-      .scroll { flex: 1; min-height: 0; overflow: auto; }
+      .filters button[aria-pressed='true'] {
+        color: var(--accent);
+      }
+      .scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
 
       /* 小型任务卡片横滑 */
       .task-cards {
@@ -957,7 +1097,9 @@
         cursor: pointer;
         text-align: left;
       }
-      .task-card:hover { background: var(--bg-hover); }
+      .task-card:hover {
+        background: var(--bg-hover);
+      }
       .task-card[data-active='true'] {
         border-color: color-mix(in srgb, var(--c) 45%, var(--border));
         box-shadow: inset 2px 0 0 var(--c);
@@ -975,11 +1117,21 @@
         font-family: var(--mono);
         font-weight: 700;
       }
-      .task-card .tc-st { font-weight: 700; }
-      .task-card .tc-st.run { color: var(--success); }
-      .task-card .tc-st.fail { color: var(--complement); }
-      .task-card .tc-st.wait { color: var(--contrast); }
-      .task-card .tc-st.done { color: var(--fg-faint); }
+      .task-card .tc-st {
+        font-weight: 700;
+      }
+      .task-card .tc-st.run {
+        color: var(--success);
+      }
+      .task-card .tc-st.fail {
+        color: var(--complement);
+      }
+      .task-card .tc-st.wait {
+        color: var(--contrast);
+      }
+      .task-card .tc-st.done {
+        color: var(--fg-faint);
+      }
       .task-card .tc-title {
         color: var(--fg-strong);
         font-size: 11.5px;
@@ -1005,7 +1157,10 @@
         color: var(--fg-faint);
         font-size: 9.5px;
       }
-      .task-card .tc-meta b { color: var(--c); font-weight: 700; }
+      .task-card .tc-meta b {
+        color: var(--c);
+        font-weight: 700;
+      }
 
       /* Todo 行 */
       .group {
@@ -1030,12 +1185,16 @@
         border-bottom: 1px solid var(--border);
         cursor: pointer;
       }
-      .todo:hover { background: color-mix(in srgb, var(--bg-hover) 60%, transparent); }
+      .todo:hover {
+        background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
+      }
       .todo[data-active='true'] {
         background: color-mix(in srgb, var(--c) 8%, transparent);
         box-shadow: inset 2px 0 0 var(--c);
       }
-      .todo[data-done='true'] { opacity: 0.55; }
+      .todo[data-done='true'] {
+        opacity: 0.55;
+      }
       .todo .box {
         width: 12px;
         height: 12px;
@@ -1046,9 +1205,18 @@
         line-height: 10px;
         text-align: center;
       }
-      .todo[data-done='true'] .box { background: color-mix(in srgb, var(--c) 18%, transparent); }
-      .todo .body { min-width: 0; }
-      .todo .title-line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+      .todo[data-done='true'] .box {
+        background: color-mix(in srgb, var(--c) 18%, transparent);
+      }
+      .todo .body {
+        min-width: 0;
+      }
+      .todo .title-line {
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+        min-width: 0;
+      }
       .todo .id {
         flex-shrink: 0;
         color: var(--fg-faint);
@@ -1085,24 +1253,39 @@
         color: var(--fg-faint);
         font-size: 10px;
       }
-      .todo .meta b { color: var(--c); font-weight: 700; }
-      .todo .meta .run { color: var(--success); }
-      .todo .meta .fail { color: var(--complement); }
-      .todo .meta .wait { color: var(--contrast); }
+      .todo .meta b {
+        color: var(--c);
+        font-weight: 700;
+      }
+      .todo .meta .run {
+        color: var(--success);
+      }
+      .todo .meta .fail {
+        color: var(--complement);
+      }
+      .todo .meta .wait {
+        color: var(--contrast);
+      }
       .todo .side-meta {
         display: grid;
         justify-items: end;
         gap: 2px;
         padding-top: 1px;
       }
-      .todo .time { color: var(--fg-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+      .todo .time {
+        color: var(--fg-faint);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+      }
       .todo .pri {
         color: var(--fg-faint);
         font-family: var(--mono);
         font-size: 9px;
         font-weight: 700;
       }
-      .todo .pri[data-p='P0'] { color: var(--complement); }
+      .todo .pri[data-p='P0'] {
+        color: var(--complement);
+      }
 
       /* 消息区 */
       .live-bar {
@@ -1131,8 +1314,12 @@
         background: currentColor;
         animation: pulse 1.4s infinite;
       }
-      .live-bar .grow { flex: 1; }
-      .live-bar .muted { color: var(--fg-faint); }
+      .live-bar .grow {
+        flex: 1;
+      }
+      .live-bar .muted {
+        color: var(--fg-faint);
+      }
 
       .ctx {
         flex-shrink: 0;
@@ -1148,9 +1335,20 @@
         font-size: 11px;
         color: var(--fg-muted);
       }
-      .ctx .l1 .layer { color: var(--c); font-weight: 700; }
-      .ctx .l1 strong { color: var(--fg-strong); font-size: 12px; font-weight: 700; }
-      .ctx .l1 .state { margin-left: auto; color: var(--fg-faint); font-size: 10px; }
+      .ctx .l1 .layer {
+        color: var(--c);
+        font-weight: 700;
+      }
+      .ctx .l1 strong {
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .ctx .l1 .state {
+        margin-left: auto;
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
       .ctx .l2 {
         margin-top: 2px;
         color: var(--fg-default);
@@ -1165,9 +1363,14 @@
         color: var(--fg-faint);
         font-size: 10.5px;
       }
-      .ctx .l3 b { color: var(--fg-muted); font-weight: 650; }
+      .ctx .l3 b {
+        color: var(--fg-muted);
+        font-weight: 650;
+      }
 
-      .stream { padding: 4px 0 12px; }
+      .stream {
+        padding: 4px 0 12px;
+      }
       .time-mark {
         position: sticky;
         top: 0;
@@ -1186,7 +1389,8 @@
         grid-template-columns: 22px minmax(0, 1fr);
         padding: 4px 8px;
       }
-      .handoff .rail, .msg .rail {
+      .handoff .rail,
+      .msg .rail {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1199,7 +1403,8 @@
         background: var(--c);
         opacity: 0.75;
       }
-      .handoff .line, .msg .line {
+      .handoff .line,
+      .msg .line {
         flex: 1;
         width: 1px;
         margin-top: 4px;
@@ -1210,7 +1415,10 @@
         color: var(--fg-muted);
         font-size: 11.5px;
       }
-      .handoff .card b { color: var(--fg-strong); font-weight: 650; }
+      .handoff .card b {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
       .handoff .card .when {
         margin-left: 8px;
         color: var(--fg-faint);
@@ -1242,7 +1450,9 @@
         border-color: var(--accent);
         background: var(--accent);
       }
-      .msg:last-child .line { opacity: 0; }
+      .msg:last-child .line {
+        opacity: 0;
+      }
       .msg .content {
         min-width: 0;
         padding: 5px 0 8px 4px;
@@ -1261,10 +1471,21 @@
         margin-bottom: 3px;
         font-size: 11px;
       }
-      .msg .who { color: var(--fg-strong); font-weight: 700; }
-      .msg .role { color: var(--c); font-weight: 650; font-size: 10px; }
-      .msg[data-role='error'] .role { color: var(--complement); }
-      .msg[data-role='tool'] .role { color: var(--aux); }
+      .msg .who {
+        color: var(--fg-strong);
+        font-weight: 700;
+      }
+      .msg .role {
+        color: var(--c);
+        font-weight: 650;
+        font-size: 10px;
+      }
+      .msg[data-role='error'] .role {
+        color: var(--complement);
+      }
+      .msg[data-role='tool'] .role {
+        color: var(--aux);
+      }
       .msg .when {
         margin-left: auto;
         color: var(--fg-faint);
@@ -1277,8 +1498,13 @@
         line-height: 1.6;
         white-space: pre-wrap;
       }
-      .msg[data-role='user'] .text { color: var(--fg-strong); }
-      .msg[data-role='system'] .text { color: var(--fg-muted); font-size: 12px; }
+      .msg[data-role='user'] .text {
+        color: var(--fg-strong);
+      }
+      .msg[data-role='system'] .text {
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
       .msg[data-role='error'] .text {
         color: color-mix(in srgb, var(--complement) 82%, var(--fg-default));
       }
@@ -1297,9 +1523,18 @@
         font-size: 11.5px;
         font-family: var(--mono);
       }
-      .tool summary::-webkit-details-marker { display: none; }
-      .tool summary::before { content: '▸'; color: var(--fg-faint); font-size: 10px; width: 10px; }
-      .tool[open] summary::before { content: '▾'; }
+      .tool summary::-webkit-details-marker {
+        display: none;
+      }
+      .tool summary::before {
+        content: '▸';
+        color: var(--fg-faint);
+        font-size: 10px;
+        width: 10px;
+      }
+      .tool[open] summary::before {
+        content: '▾';
+      }
       .tool summary .cmd {
         min-width: 0;
         overflow: hidden;
@@ -1315,8 +1550,12 @@
         font-size: 10px;
         font-weight: 650;
       }
-      .tool summary .badge.fail { color: var(--complement); }
-      .tool summary .badge.ok { color: var(--success); }
+      .tool summary .badge.fail {
+        color: var(--complement);
+      }
+      .tool summary .badge.ok {
+        color: var(--success);
+      }
       .tool pre {
         margin: 0;
         padding: 6px 8px 8px 26px;
@@ -1349,7 +1588,11 @@
         color: var(--c);
         animation: caret 1s steps(1) infinite;
       }
-      @keyframes caret { 50% { opacity: 0; } }
+      @keyframes caret {
+        50% {
+          opacity: 0;
+        }
+      }
       .stream-status {
         margin-top: 4px;
         color: var(--c);
@@ -1388,8 +1631,12 @@
         font-weight: 750;
         font-variant-numeric: tabular-nums;
       }
-      .ov-stat .v.fail { color: var(--complement); }
-      .ov-stat .v.run { color: var(--success); }
+      .ov-stat .v.fail {
+        color: var(--complement);
+      }
+      .ov-stat .v.run {
+        color: var(--success);
+      }
       .ov-stat .s {
         margin-top: 2px;
         color: var(--fg-muted);
@@ -1417,7 +1664,9 @@
         background: var(--bg-overlay);
         cursor: pointer;
       }
-      .ov-layer:hover { background: var(--bg-hover); }
+      .ov-layer:hover {
+        background: var(--bg-hover);
+      }
       .ov-layer .ln {
         color: var(--c);
         font-size: 12px;
@@ -1449,11 +1698,23 @@
         font-size: 11px;
         color: var(--fg-muted);
       }
-      .ov-role b { color: var(--fg-strong); font-weight: 650; }
-      .ov-role .st { margin-left: 6px; font-size: 10px; }
-      .ov-role .st.run { color: var(--success); }
-      .ov-role .st.fail { color: var(--complement); }
-      .ov-role .st.idle { color: var(--fg-faint); }
+      .ov-role b {
+        color: var(--fg-strong);
+        font-weight: 650;
+      }
+      .ov-role .st {
+        margin-left: 6px;
+        font-size: 10px;
+      }
+      .ov-role .st.run {
+        color: var(--success);
+      }
+      .ov-role .st.fail {
+        color: var(--complement);
+      }
+      .ov-role .st.idle {
+        color: var(--fg-faint);
+      }
 
       /* ── 度量页 ── */
       .metrics {
@@ -1473,7 +1734,9 @@
         border-bottom: 1px solid var(--border);
         font-size: 12px;
       }
-      .metric-row .name { color: var(--fg-muted); }
+      .metric-row .name {
+        color: var(--fg-muted);
+      }
       .metric-row .bar {
         height: 6px;
         background: var(--bg-surface);
@@ -1537,9 +1800,15 @@
         font-weight: 750;
         padding-top: 2px;
       }
-      .gov-item .tag.fail { color: var(--complement); }
-      .gov-item .tag.info { color: var(--aux); }
-      .gov-item .body { min-width: 0; }
+      .gov-item .tag.fail {
+        color: var(--complement);
+      }
+      .gov-item .tag.info {
+        color: var(--aux);
+      }
+      .gov-item .body {
+        min-width: 0;
+      }
       .gov-item .title {
         color: var(--fg-strong);
         font-size: 12px;
@@ -1593,7 +1862,9 @@
           border-right: 0;
           border-bottom: 1px solid var(--border);
         }
-        .ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .ov-stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
     </style>
   </head>
@@ -1608,21 +1879,32 @@
             <span class="chip fail" id="chat-fail">失败 <b>2</b></span>
           </div>
           <div class="chat-quick" id="chat-quick">
-            <button type="button" class="qbtn primary" data-quick="pause" id="quick-pause">暂停全部</button>
+            <button type="button" class="qbtn primary" data-quick="pause" id="quick-pause">
+              暂停全部
+            </button>
             <button type="button" class="qbtn danger" data-quick="retry">重试失败</button>
             <button type="button" class="qbtn" data-quick="focus-fail">定位失败</button>
             <span class="sep"></span>
             <button type="button" class="qbtn" data-quick="copy-summary">复制摘要</button>
-            <button type="button" class="qbtn" data-quick="focus-mode" id="quick-focus">专注对话</button>
+            <button type="button" class="qbtn" data-quick="focus-mode" id="quick-focus">
+              专注对话
+            </button>
             <span class="hint" id="quick-hint">对话区快捷</span>
           </div>
         </header>
 
         <div class="decision-bar" id="decision-bar">
           <span class="label">已确认</span>
-          <span class="decision-chip" data-decision="github"><b>GitHub OAuth</b><button type="button" title="移除" data-rm-decision>×</button></span>
-          <span class="decision-chip" data-decision="callback"><b>callback=localhost:3000</b><button type="button" title="移除" data-rm-decision>×</button></span>
-          <span class="decision-chip" data-decision="tests"><b>含基础测试</b><button type="button" title="移除" data-rm-decision>×</button></span>
+          <span class="decision-chip" data-decision="github"
+            ><b>GitHub OAuth</b><button type="button" title="移除" data-rm-decision>×</button></span
+          >
+          <span class="decision-chip" data-decision="callback"
+            ><b>callback=localhost:3000</b
+            ><button type="button" title="移除" data-rm-decision>×</button></span
+          >
+          <span class="decision-chip" data-decision="tests"
+            ><b>含基础测试</b><button type="button" title="移除" data-rm-decision>×</button></span
+          >
         </div>
 
         <div class="attention-bar" id="attention-bar" data-show="true">
@@ -1639,17 +1921,23 @@
 
             <article class="chat-msg user" id="jump-u1" data-jump="1">
               <div class="meta"><b>你</b><span>14:32</span></div>
-              <div class="bubble"><div class="text">帮我实现 OAuth 登录，优先 GitHub，附带基础测试。</div></div>
+              <div class="bubble">
+                <div class="text">帮我实现 OAuth 登录，优先 GitHub，附带基础测试。</div>
+              </div>
             </article>
 
             <article class="chat-msg">
               <div class="meta"><b>接待 · b</b><span>14:32</span></div>
               <div class="bubble">
-                <div class="text">已接收。我会启动规划 → 派发 → 执行 → 测试链路。
-预计首轮 3–5 分钟。过程中需要你确认的点会直接推到这里。</div>
+                <div class="text">
+                  已接收。我会启动规划 → 派发 → 执行 → 测试链路。 预计首轮 3–5
+                  分钟。过程中需要你确认的点会直接推到这里。
+                </div>
                 <div class="suggest-row">
                   <button type="button" data-fill="同时补 README 接入说明">同时补 README</button>
-                  <button type="button" data-fill="先只做 GitHub，Google 以后再说">只要 GitHub</button>
+                  <button type="button" data-fill="先只做 GitHub，Google 以后再说">
+                    只要 GitHub
+                  </button>
                   <button type="button" data-fill="登录成功后跳到 /dashboard">指定成功跳转</button>
                 </div>
               </div>
@@ -1661,7 +1949,10 @@
                 <strong>规划完成，已派发执行</strong>
                 <span>14:34</span>
               </div>
-              <div class="ic-body">#12 callback 校验 · #13 session 落库 · #14 登录回归 已创建。本地 callback 需你确认后继续。</div>
+              <div class="ic-body">
+                #12 callback 校验 · #13 session 落库 · #14 登录回归 已创建。本地 callback
+                需你确认后继续。
+              </div>
               <div class="artifact-row">
                 <button type="button" data-artifact="plan">plan-oauth.md</button>
                 <button type="button" data-artifact="tasks">任务清单</button>
@@ -1677,7 +1968,9 @@
               <div class="ic-body">PM2 需要确认本地 callback 是否固定为：</div>
               <div class="ic-code">http://localhost:3000/api/auth/callback/github</div>
               <div class="ic-actions" id="block-actions">
-                <button type="button" class="primary" data-decide="localhost">确认 localhost</button>
+                <button type="button" class="primary" data-decide="localhost">
+                  确认 localhost
+                </button>
                 <button type="button" data-decide="both">本地 + 预留生产</button>
                 <button type="button" data-decide="later">稍后决定</button>
               </div>
@@ -1694,12 +1987,18 @@
                 <strong>#12 callback 校验超时</strong>
                 <span>14:39</span>
               </div>
-              <div class="ic-body">token exchange &gt; 8s。可能：client secret 未注入 / 端口不通 / 代理干扰。
-#14 测试因此排队；#13 session 落库仍在推进。</div>
+              <div class="ic-body">
+                token exchange &gt; 8s。可能：client secret 未注入 / 端口不通 / 代理干扰。 #14
+                测试因此排队；#13 session 落库仍在推进。
+              </div>
               <div class="ic-actions">
                 <button type="button" class="danger" data-quick="retry">重试 #12</button>
-                <button type="button" data-fill="client secret 已放进 .env.local，请重试">告知已补 secret</button>
-                <button type="button" data-fill="先跳过测试，继续把 session 落库做完">先做 session</button>
+                <button type="button" data-fill="client secret 已放进 .env.local，请重试">
+                  告知已补 secret
+                </button>
+                <button type="button" data-fill="先跳过测试，继续把 session 落库做完">
+                  先做 session
+                </button>
               </div>
               <div class="artifact-row">
                 <button type="button" data-artifact="log">auth.oauth.log</button>
@@ -1713,7 +2012,9 @@
             </div>
           </div>
 
-          <button type="button" class="scroll-bottom" id="scroll-bottom" data-show="false">↓ 最新</button>
+          <button type="button" class="scroll-bottom" id="scroll-bottom" data-show="false">
+            ↓ 最新
+          </button>
 
           <div class="jump-rail" aria-label="用户消息跳转">
             <span class="jr-label">跳转</span>
@@ -1728,15 +2029,26 @@
           <div class="composer-context">
             <button type="button" class="cx" data-cx="constraint" data-on="false">+ 约束</button>
             <button type="button" class="cx" data-cx="clarify" data-on="false">+ 澄清回复</button>
-            <button type="button" class="cx" data-cx="followup" data-on="true"><b>追加任务</b></button>
+            <button type="button" class="cx" data-cx="followup" data-on="true">
+              <b>追加任务</b>
+            </button>
             <span id="cx-hint">输入将作为追加任务发给团队</span>
           </div>
           <div class="composer">
             <div class="composer-box">
-              <textarea id="composer-input" placeholder="补充约束、回答澄清，或追加任务…" rows="2"></textarea>
+              <textarea
+                id="composer-input"
+                placeholder="补充约束、回答澄清，或追加任务…"
+                rows="2"
+              ></textarea>
               <div class="composer-foot">
                 <div class="foot-left">
-                  <button type="button" data-fill="请在失败重试前先检查 .env 里的 GITHUB_CLIENT_SECRET">填入排查建议</button>
+                  <button
+                    type="button"
+                    data-fill="请在失败重试前先检查 .env 里的 GITHUB_CLIENT_SECRET"
+                  >
+                    填入排查建议
+                  </button>
                   <span>↵ 发送 · ⇧↵ 换行</span>
                   <span class="char" id="char-count">0</span>
                 </div>
@@ -1780,13 +2092,34 @@
           desc: '优先 GitHub OAuth + 本地 callback + 登录回归。',
           from: null,
           to: '规划',
-          roles: [
-            { id: 'b', name: '接待 · b', status: 'done', statusLabel: '完成', taskCount: 1 },
-          ],
+          roles: [{ id: 'b', name: '接待 · b', status: 'done', statusLabel: '完成', taskCount: 1 }],
           messages: [
-            { id: 'm1', role: 'user', who: '你', when: '14:32', text: '帮我实现 OAuth 登录，优先 GitHub，附带基础测试。', taskIds: ['t6'] },
-            { id: 'm2', role: 'assistant', who: '接待 · b', when: '14:32', text: '已接收。启动规划 → 派发 → 执行 → 测试。\n预计首轮 3–5 分钟。', tags: ['启动'], taskIds: ['t6'] },
-            { id: 'm3', role: 'system', kind: 'handoff', who: '系统', when: '14:32', text: '交接至 规划（PM1）', tags: ['交接'] },
+            {
+              id: 'm1',
+              role: 'user',
+              who: '你',
+              when: '14:32',
+              text: '帮我实现 OAuth 登录，优先 GitHub，附带基础测试。',
+              taskIds: ['t6'],
+            },
+            {
+              id: 'm2',
+              role: 'assistant',
+              who: '接待 · b',
+              when: '14:32',
+              text: '已接收。启动规划 → 派发 → 执行 → 测试。\n预计首轮 3–5 分钟。',
+              tags: ['启动'],
+              taskIds: ['t6'],
+            },
+            {
+              id: 'm3',
+              role: 'system',
+              kind: 'handoff',
+              who: '系统',
+              when: '14:32',
+              text: '交接至 规划（PM1）',
+              tags: ['交接'],
+            },
           ],
         },
         {
@@ -1805,9 +2138,37 @@
             { id: 'pm1', name: '规划 · PM1', status: 'done', statusLabel: '完成', taskCount: 1 },
           ],
           messages: [
-            { id: 'm4', role: 'assistant', who: '规划 · PM1', when: '14:33', text: '范围：\n1) GitHub OAuth App\n2) localhost:3000 callback\n3) session 落库\n4) 登录回归', tags: ['plan'], taskIds: ['t5'] },
-            { id: 'm5', role: 'tool', who: '规划 · PM1', when: '14:33', tool: { name: 'write', summary: 'docs/plan-oauth.md (+48)', detail: 'path: docs/plan-oauth.md\n+48 lines\nstatus: ok', status: 'ok' }, taskIds: ['t5'] },
-            { id: 'm6', role: 'system', kind: 'handoff', who: '系统', when: '14:33', text: '交接至 管控（PM2）· 携带 plan.md', tags: ['交接'] },
+            {
+              id: 'm4',
+              role: 'assistant',
+              who: '规划 · PM1',
+              when: '14:33',
+              text: '范围：\n1) GitHub OAuth App\n2) localhost:3000 callback\n3) session 落库\n4) 登录回归',
+              tags: ['plan'],
+              taskIds: ['t5'],
+            },
+            {
+              id: 'm5',
+              role: 'tool',
+              who: '规划 · PM1',
+              when: '14:33',
+              tool: {
+                name: 'write',
+                summary: 'docs/plan-oauth.md (+48)',
+                detail: 'path: docs/plan-oauth.md\n+48 lines\nstatus: ok',
+                status: 'ok',
+              },
+              taskIds: ['t5'],
+            },
+            {
+              id: 'm6',
+              role: 'system',
+              kind: 'handoff',
+              who: '系统',
+              when: '14:33',
+              text: '交接至 管控（PM2）· 携带 plan.md',
+              tags: ['交接'],
+            },
           ],
         },
         {
@@ -1826,10 +2187,42 @@
             { id: 'pm2', name: '管控 · PM2', status: 'done', statusLabel: '已派发', taskCount: 1 },
           ],
           messages: [
-            { id: 'm7', role: 'assistant', who: '管控 · PM2', when: '14:34', text: '#12 callback 校验 → e1\n#13 session 落库 → e2\n#14 登录回归 → t1', tags: ['派发'], taskIds: ['t2', 't3', 't4'] },
-            { id: 'm8', role: 'assistant', who: '管控 · PM2', when: '14:35', text: '确认 callback：\nhttp://localhost:3000/api/auth/callback/github', tags: ['澄清'], taskIds: ['t1'] },
-            { id: 'm9', role: 'user', who: '你', when: '14:36', text: '对，本地先用这个。', tags: ['确认'], taskIds: ['t1'] },
-            { id: 'm10', role: 'system', kind: 'handoff', who: '系统', when: '14:36', text: '交接至 执行 e1/e2 · 测试 t1', tags: ['交接'] },
+            {
+              id: 'm7',
+              role: 'assistant',
+              who: '管控 · PM2',
+              when: '14:34',
+              text: '#12 callback 校验 → e1\n#13 session 落库 → e2\n#14 登录回归 → t1',
+              tags: ['派发'],
+              taskIds: ['t2', 't3', 't4'],
+            },
+            {
+              id: 'm8',
+              role: 'assistant',
+              who: '管控 · PM2',
+              when: '14:35',
+              text: '确认 callback：\nhttp://localhost:3000/api/auth/callback/github',
+              tags: ['澄清'],
+              taskIds: ['t1'],
+            },
+            {
+              id: 'm9',
+              role: 'user',
+              who: '你',
+              when: '14:36',
+              text: '对，本地先用这个。',
+              tags: ['确认'],
+              taskIds: ['t1'],
+            },
+            {
+              id: 'm10',
+              role: 'system',
+              kind: 'handoff',
+              who: '系统',
+              when: '14:36',
+              text: '交接至 执行 e1/e2 · 测试 t1',
+              tags: ['交接'],
+            },
           ],
         },
         {
@@ -1850,13 +2243,89 @@
             { id: 'e2', name: '执行 · e2', status: 'run', statusLabel: '运行中', taskCount: 1 },
           ],
           messages: [
-            { id: 'm11', role: 'assistant', who: '执行 · e1', when: '14:36', text: 'GitHub provider 与登录按钮已完成，下一步补 callback 校验。', tags: ['进度'], taskIds: ['t2'], roleId: 'e1' },
-            { id: 'm12', role: 'tool', who: '执行 · e1', when: '14:37', tool: { name: 'edit', summary: 'src/auth/github.ts', detail: '+ provider config\n+ login button wiring\nstatus: ok', status: 'ok' }, taskIds: ['t2'], roleId: 'e1' },
-            { id: 'm13', role: 'tool', who: '执行 · e1', when: '14:38', tool: { name: 'shell', summary: 'pnpm test auth.oauth --runInBand', detail: 'exit 1\ntoken exchange timeout after 8000ms\nlast log: waiting for https://github.com/login/oauth/access_token', status: 'fail' }, taskIds: ['t2'], roleId: 'e1' },
-            { id: 'm14', role: 'error', who: '执行 · e1', when: '14:39', text: 'callback 校验超时：token exchange > 8s。\n可能：client secret 未注入 / 端口不通 / 代理干扰', tags: ['可重试'], taskIds: ['t2'], roleId: 'e1' },
-            { id: 'm15', role: 'assistant', who: '执行 · e2', when: '14:38', text: 'session 落库接口草稿完成，等待 callback 联调。', tags: ['进度'], taskIds: ['t3'], roleId: 'e2' },
-            { id: 'm16', role: 'tool', who: '执行 · e2', when: '14:38', tool: { name: 'edit', summary: 'src/auth/session.ts', detail: '+ createSession()\n+ setCookie()\nstatus: ok', status: 'ok' }, taskIds: ['t3'], roleId: 'e2' },
-            { id: 'm17', role: 'assistant', who: '执行 · e2', when: '14:40', text: '正在补充 session 与 callback 的联调步骤，方便 #12 恢复后直接接上。', streaming: true, taskIds: ['t3'], roleId: 'e2' },
+            {
+              id: 'm11',
+              role: 'assistant',
+              who: '执行 · e1',
+              when: '14:36',
+              text: 'GitHub provider 与登录按钮已完成，下一步补 callback 校验。',
+              tags: ['进度'],
+              taskIds: ['t2'],
+              roleId: 'e1',
+            },
+            {
+              id: 'm12',
+              role: 'tool',
+              who: '执行 · e1',
+              when: '14:37',
+              tool: {
+                name: 'edit',
+                summary: 'src/auth/github.ts',
+                detail: '+ provider config\n+ login button wiring\nstatus: ok',
+                status: 'ok',
+              },
+              taskIds: ['t2'],
+              roleId: 'e1',
+            },
+            {
+              id: 'm13',
+              role: 'tool',
+              who: '执行 · e1',
+              when: '14:38',
+              tool: {
+                name: 'shell',
+                summary: 'pnpm test auth.oauth --runInBand',
+                detail:
+                  'exit 1\ntoken exchange timeout after 8000ms\nlast log: waiting for https://github.com/login/oauth/access_token',
+                status: 'fail',
+              },
+              taskIds: ['t2'],
+              roleId: 'e1',
+            },
+            {
+              id: 'm14',
+              role: 'error',
+              who: '执行 · e1',
+              when: '14:39',
+              text: 'callback 校验超时：token exchange > 8s。\n可能：client secret 未注入 / 端口不通 / 代理干扰',
+              tags: ['可重试'],
+              taskIds: ['t2'],
+              roleId: 'e1',
+            },
+            {
+              id: 'm15',
+              role: 'assistant',
+              who: '执行 · e2',
+              when: '14:38',
+              text: 'session 落库接口草稿完成，等待 callback 联调。',
+              tags: ['进度'],
+              taskIds: ['t3'],
+              roleId: 'e2',
+            },
+            {
+              id: 'm16',
+              role: 'tool',
+              who: '执行 · e2',
+              when: '14:38',
+              tool: {
+                name: 'edit',
+                summary: 'src/auth/session.ts',
+                detail: '+ createSession()\n+ setCookie()\nstatus: ok',
+                status: 'ok',
+              },
+              taskIds: ['t3'],
+              roleId: 'e2',
+            },
+            {
+              id: 'm17',
+              role: 'assistant',
+              who: '执行 · e2',
+              when: '14:40',
+              text: '正在补充 session 与 callback 的联调步骤，方便 #12 恢复后直接接上。',
+              streaming: true,
+              taskIds: ['t3'],
+              roleId: 'e2',
+            },
           ],
         },
         {
@@ -1875,8 +2344,25 @@
             { id: 't1', name: '测试 · t1', status: 'idle', statusLabel: '排队', taskCount: 1 },
           ],
           messages: [
-            { id: 'm18', role: 'assistant', who: '测试 · t1', when: '14:38', text: '用例：未登录拦截 / 授权回跳 / session cookie。\n当前阻塞：依赖 #12。', tags: ['准备就绪'], taskIds: ['t4'], roleId: 't1' },
-            { id: 'm19', role: 'system', who: '系统', when: '14:39', text: '#12 失败，测试保持排队。', tags: ['阻塞'], taskIds: ['t4'] },
+            {
+              id: 'm18',
+              role: 'assistant',
+              who: '测试 · t1',
+              when: '14:38',
+              text: '用例：未登录拦截 / 授权回跳 / session cookie。\n当前阻塞：依赖 #12。',
+              tags: ['准备就绪'],
+              taskIds: ['t4'],
+              roleId: 't1',
+            },
+            {
+              id: 'm19',
+              role: 'system',
+              who: '系统',
+              when: '14:39',
+              text: '#12 失败，测试保持排队。',
+              tags: ['阻塞'],
+              taskIds: ['t4'],
+            },
           ],
         },
         {
@@ -1899,20 +2385,132 @@
       ];
 
       const TODOS = [
-        { id: 't2', key: '#12', title: 'callback 校验', sub: 'token exchange 超时，需重试或补 secret', layer: 'executor', roleId: 'e1', status: 'failed', priority: 'P0', time: '14:39', owner: 'e1', elapsed: '1m 12s' },
-        { id: 't3', key: '#13', title: 'session 落库', sub: '接口草稿完成，联调说明生成中', layer: 'executor', roleId: 'e2', status: 'running', priority: 'P1', time: '14:40', owner: 'e2', elapsed: '2m 04s' },
-        { id: 't4', key: '#14', title: '登录回归测试', sub: '依赖 #12 成功产物', layer: 'tester', roleId: 't1', status: 'blocked', priority: 'P1', time: '14:39', owner: 't1', elapsed: '—' },
-        { id: 't1', key: '#11', title: '确认 callback URL', sub: '本地使用 localhost:3000', layer: 'pm2', roleId: 'pm2', status: 'done', priority: 'P1', time: '14:36', owner: 'pm2', elapsed: '18s' },
-        { id: 't5', key: '#10', title: '产出 plan 并派发', sub: '四段计划已交给管控', layer: 'pm1', roleId: 'pm1', status: 'done', priority: 'P2', time: '14:33', owner: 'pm1', elapsed: '42s' },
-        { id: 't6', key: '#09', title: '接待启动编排', sub: '用户诉求已入库', layer: 'reception', roleId: 'b', status: 'done', priority: 'P2', time: '14:32', owner: 'b', elapsed: '9s' },
-        { id: 't7', key: '#15', title: '实现评审', sub: '等待测试通过', layer: 'reviewer', roleId: 'r1', status: 'pending', priority: 'P2', time: '—', owner: 'r1', elapsed: '—' },
+        {
+          id: 't2',
+          key: '#12',
+          title: 'callback 校验',
+          sub: 'token exchange 超时，需重试或补 secret',
+          layer: 'executor',
+          roleId: 'e1',
+          status: 'failed',
+          priority: 'P0',
+          time: '14:39',
+          owner: 'e1',
+          elapsed: '1m 12s',
+        },
+        {
+          id: 't3',
+          key: '#13',
+          title: 'session 落库',
+          sub: '接口草稿完成，联调说明生成中',
+          layer: 'executor',
+          roleId: 'e2',
+          status: 'running',
+          priority: 'P1',
+          time: '14:40',
+          owner: 'e2',
+          elapsed: '2m 04s',
+        },
+        {
+          id: 't4',
+          key: '#14',
+          title: '登录回归测试',
+          sub: '依赖 #12 成功产物',
+          layer: 'tester',
+          roleId: 't1',
+          status: 'blocked',
+          priority: 'P1',
+          time: '14:39',
+          owner: 't1',
+          elapsed: '—',
+        },
+        {
+          id: 't1',
+          key: '#11',
+          title: '确认 callback URL',
+          sub: '本地使用 localhost:3000',
+          layer: 'pm2',
+          roleId: 'pm2',
+          status: 'done',
+          priority: 'P1',
+          time: '14:36',
+          owner: 'pm2',
+          elapsed: '18s',
+        },
+        {
+          id: 't5',
+          key: '#10',
+          title: '产出 plan 并派发',
+          sub: '四段计划已交给管控',
+          layer: 'pm1',
+          roleId: 'pm1',
+          status: 'done',
+          priority: 'P2',
+          time: '14:33',
+          owner: 'pm1',
+          elapsed: '42s',
+        },
+        {
+          id: 't6',
+          key: '#09',
+          title: '接待启动编排',
+          sub: '用户诉求已入库',
+          layer: 'reception',
+          roleId: 'b',
+          status: 'done',
+          priority: 'P2',
+          time: '14:32',
+          owner: 'b',
+          elapsed: '9s',
+        },
+        {
+          id: 't7',
+          key: '#15',
+          title: '实现评审',
+          sub: '等待测试通过',
+          layer: 'reviewer',
+          roleId: 'r1',
+          status: 'pending',
+          priority: 'P2',
+          time: '—',
+          owner: 'r1',
+          elapsed: '—',
+        },
       ];
 
       const GOV_ITEMS = [
-        { id: 'g1', tag: '失败', tone: 'fail', title: '#12 callback 校验失败', desc: 'token exchange 超时。可重试，或先检查 client secret / 本地端口。', actions: ['重试', '查看日志'] },
-        { id: 'g2', tag: '阻塞', tone: 'fail', title: '#14 测试被阻塞', desc: '依赖 #12 产物，当前排队等待。', actions: ['查看依赖'] },
-        { id: 'g3', tag: '澄清', tone: '', title: 'callback URL 已确认', desc: '用户确认本地使用 localhost:3000。', actions: ['归档'] },
-        { id: 'g4', tag: '审计', tone: 'info', title: '派发记录已写入', desc: 'PM2 将 #12/#13/#14 派发至 e1/e2/t1。', actions: ['查看'] },
+        {
+          id: 'g1',
+          tag: '失败',
+          tone: 'fail',
+          title: '#12 callback 校验失败',
+          desc: 'token exchange 超时。可重试，或先检查 client secret / 本地端口。',
+          actions: ['重试', '查看日志'],
+        },
+        {
+          id: 'g2',
+          tag: '阻塞',
+          tone: 'fail',
+          title: '#14 测试被阻塞',
+          desc: '依赖 #12 产物，当前排队等待。',
+          actions: ['查看依赖'],
+        },
+        {
+          id: 'g3',
+          tag: '澄清',
+          tone: '',
+          title: 'callback URL 已确认',
+          desc: '用户确认本地使用 localhost:3000。',
+          actions: ['归档'],
+        },
+        {
+          id: 'g4',
+          tag: '审计',
+          tone: 'info',
+          title: '派发记录已写入',
+          desc: 'PM2 将 #12/#13/#14 派发至 e1/e2/t1。',
+          actions: ['查看'],
+        },
       ];
 
       const STATUS = {
@@ -1939,7 +2537,9 @@
       const todoOf = (id) => TODOS.find((t) => t.id === id);
 
       function allRoles() {
-        return LAYERS.flatMap((l) => l.roles.map((r) => ({ ...r, layerId: l.id, layerName: l.name, color: l.color })));
+        return LAYERS.flatMap((l) =>
+          l.roles.map((r) => ({ ...r, layerId: l.id, layerName: l.name, color: l.color })),
+        );
       }
 
       function counts() {
@@ -1977,7 +2577,8 @@
           if (state.msgFilter === 'dialog') return m.role === 'user' || m.role === 'assistant';
           if (state.msgFilter === 'tool') return m.role === 'tool';
           if (state.msgFilter === 'error') return m.role === 'error';
-          if (state.msgFilter === 'handoff') return m.kind === 'handoff' || (m.tags || []).includes('交接');
+          if (state.msgFilter === 'handoff')
+            return m.kind === 'handoff' || (m.tags || []).includes('交接');
           return true;
         });
       }
@@ -1989,7 +2590,11 @@
       function roleLabel(m) {
         if (m.kind === 'handoff') return '交接';
         if (m.streaming) return '输出中';
-        return { user: '用户', assistant: '回复', system: '系统', tool: '工具', error: '错误' }[m.role] || m.role;
+        return (
+          { user: '用户', assistant: '回复', system: '系统', tool: '工具', error: '错误' }[
+            m.role
+          ] || m.role
+        );
       }
 
       function formatElapsed(sec) {
@@ -2000,8 +2605,11 @@
 
       function preferredTodoForLayer(layerId) {
         return (
-          TODOS.find((t) => t.layer === layerId && (t.status === 'failed' || t.status === 'blocked' || t.status === 'running')) ||
-          TODOS.find((t) => t.layer === layerId)
+          TODOS.find(
+            (t) =>
+              t.layer === layerId &&
+              (t.status === 'failed' || t.status === 'blocked' || t.status === 'running'),
+          ) || TODOS.find((t) => t.layer === layerId)
         );
       }
 
@@ -2130,7 +2738,10 @@
         document.getElementById('attn-jump')?.addEventListener('click', () => {
           const bar = document.getElementById('attention-bar');
           const target = bar?.dataset.target;
-          if (target) document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (target)
+            document
+              .getElementById(target)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
 
         // 建议 chips → 填入输入框
@@ -2388,7 +2999,9 @@
             ${LAYERS.map((l) => {
               const nRoles = l.roles.length;
               const nTasks = layerTodos(l.id).length;
-              const fail = layerTodos(l.id).some((t) => t.status === 'failed' || t.status === 'blocked');
+              const fail = layerTodos(l.id).some(
+                (t) => t.status === 'failed' || t.status === 'blocked',
+              );
               return `
                 <button type="button" data-layer="${l.id}" data-active="${state.layerId === l.id}" style="--c:${l.color}">
                   ${l.live && !state.paused ? '<span class="dot live"></span>' : fail ? '<span class="dot fail"></span>' : ''}
@@ -2407,7 +3020,8 @@
       function renderTool(m) {
         const t = m.tool;
         const badgeCls = t.status === 'fail' ? 'fail' : t.status === 'ok' ? 'ok' : '';
-        const badgeText = t.status === 'fail' ? '失败' : t.status === 'ok' ? '成功' : t.status || '';
+        const badgeText =
+          t.status === 'fail' ? '失败' : t.status === 'ok' ? '成功' : t.status || '';
         return `
           <details class="tool" ${t.status === 'fail' ? 'open' : ''}>
             <summary>
@@ -2470,7 +3084,10 @@
         const activeTodo = todoOf(state.todoId);
 
         const groups = [
-          { title: '当前', items: todos.filter((t) => ['failed', 'blocked', 'running'].includes(t.status)) },
+          {
+            title: '当前',
+            items: todos.filter((t) => ['failed', 'blocked', 'running'].includes(t.status)),
+          },
           { title: '排队', items: todos.filter((t) => t.status === 'pending') },
           { title: '完成', items: todos.filter((t) => t.status === 'done') },
         ].filter((g) => g.items.length);
@@ -2665,7 +3282,8 @@
               <div class="ov-roles">
                 ${roles
                   .map((r) => {
-                    const stCls = r.status === 'run' ? 'run' : r.status === 'fail' ? 'fail' : 'idle';
+                    const stCls =
+                      r.status === 'run' ? 'run' : r.status === 'fail' ? 'fail' : 'idle';
                     return `
                       <div class="ov-role" data-goto-role="${r.layerId}:${r.id}" style="border-left:2px solid ${r.color}">
                         <b>${r.name}</b>
@@ -2716,7 +3334,9 @@
                   ${allRoles()
                     .map((r) => {
                       const layer = layerOf(r.layerId);
-                      const msgCount = (layer?.messages || []).filter((m) => m.roleId === r.id || (!m.roleId && layer.roles.length === 1)).length;
+                      const msgCount = (layer?.messages || []).filter(
+                        (m) => m.roleId === r.id || (!m.roleId && layer.roles.length === 1),
+                      ).length;
                       return `
                         <tr data-goto-role="${r.layerId}:${r.id}" style="cursor:pointer">
                           <td>${r.name}</td>
@@ -2813,7 +3433,9 @@
           btn.onclick = () => {
             state.roleId = btn.getAttribute('data-role');
             if (state.roleId !== 'all') {
-              const todo = TODOS.find((t) => t.layer === state.layerId && t.roleId === state.roleId);
+              const todo = TODOS.find(
+                (t) => t.layer === state.layerId && t.roleId === state.roleId,
+              );
               if (todo) state.todoId = todo.id;
             }
             render();

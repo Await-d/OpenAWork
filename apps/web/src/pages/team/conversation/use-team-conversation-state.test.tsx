@@ -784,7 +784,8 @@ describe('useTeamConversationState — 加载快照', () => {
       const url = typeof input === 'string' ? input : input.toString();
       const parsed = new URL(url);
       const messageLimit = Number(parsed.searchParams.get('messageLimit') ?? '0');
-      const userTurnCount = messageLimit >= 30 ? 4 : 1;
+      // 初始 50 轮只返回 20 条 user turn；扩到 100 后返回 40 条
+      const userTurnCount = messageLimit >= 100 ? 40 : 20;
       const messages = Array.from({ length: userTurnCount }).flatMap((_, index) => [
         {
           id: `u-${index + 1}`,
@@ -814,7 +815,7 @@ describe('useTeamConversationState — 加载快照', () => {
             children: [],
             ratings: [],
             activeStream: null,
-            totalTurnCount: 12,
+            totalTurnCount: 60,
           },
         }),
         {
@@ -838,15 +839,15 @@ describe('useTeamConversationState — 加载快照', () => {
       expect(result.current.isSessionSnapshotReady).toBe(true);
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toContain('messageLimit=10');
-    expect(result.current.hiddenMessageCount).toBe(11);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('messageLimit=50');
+    expect(result.current.hiddenMessageCount).toBe(40);
 
     await act(async () => {
       await result.current.loadEarlierMessages();
     });
 
-    expect(fetchMock.mock.calls[1]?.[0]).toContain('messageLimit=30');
-    expect(result.current.hiddenMessageCount).toBe(8);
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('messageLimit=100');
+    expect(result.current.hiddenMessageCount).toBe(20);
   });
 });
 

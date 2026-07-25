@@ -168,21 +168,23 @@ vi.mock('../runtime/shell/header/TeamStatusBar.js', () => ({
     onPauseAll,
     onResumeAll,
     paused,
+    busy,
   }: {
     onPauseAll?: () => void;
     onResumeAll?: () => void;
     paused?: boolean;
+    busy?: boolean;
   }) => (
     <div>
       <span data-testid="team-status-bar-mode">{paused ? 'paused' : 'running'}</span>
       {onPauseAll && !paused ? (
-        <button type="button" onClick={onPauseAll}>
-          全部暂停
+        <button type="button" onClick={onPauseAll} disabled={busy}>
+          {busy ? '暂停中…' : '全部暂停'}
         </button>
       ) : null}
       {onResumeAll && paused ? (
-        <button type="button" onClick={onResumeAll}>
-          全部恢复
+        <button type="button" onClick={onResumeAll} disabled={busy}>
+          {busy ? '恢复中…' : '全部恢复'}
         </button>
       ) : null}
     </div>
@@ -907,9 +909,15 @@ describe('TeamPageV2', () => {
     };
 
     renderPage();
+    // 顶部状态栏随选中会话出现；产品不再自动选中会话，测试需主动选中
+    useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-root');
 
-    expect(screen.queryByText('LLM 调用已停止')).toBeNull();
-    expect(screen.getByTestId('team-status-bar-mode').textContent).toBe('running');
+    await waitFor(() => {
+      expect(screen.getByTestId('team-status-bar-mode').textContent).toBe('running');
+    });
+    // 已移除顶部「团队已暂停」大横幅；运行态不应出现暂停提示文案
+    expect(screen.queryByText('团队已暂停')).toBeNull();
+    expect(screen.queryByText('所有运行中的 LLM 调用已停止')).toBeNull();
     expect(await screen.findByRole('button', { name: '全部暂停' })).toBeTruthy();
   });
 
@@ -1191,6 +1199,7 @@ describe('TeamPageV2', () => {
 
   it('点击顶部暂停后会经确认弹层调用真实 pause-all 接口', async () => {
     renderPage();
+    useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-root');
 
     const pauseButton = await screen.findByRole('button', { name: '全部暂停' });
     fireEvent.click(pauseButton);
@@ -1211,6 +1220,7 @@ describe('TeamPageV2', () => {
 
   it('工作区切换后旧会话失效时会回退到新的默认会话', async () => {
     const view = renderPage();
+    useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-root');
 
     await screen.findByRole('button', { name: '全部暂停' });
 
@@ -1317,12 +1327,9 @@ describe('TeamPageV2', () => {
     ]);
 
     renderPage();
+    useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-root');
 
-    const resumeButtons = await screen.findAllByRole('button', { name: '全部恢复' });
-    const resumeButton = resumeButtons[0];
-    if (!resumeButton) {
-      throw new Error('未找到恢复按钮');
-    }
+    const resumeButton = await screen.findByRole('button', { name: '全部恢复' });
     fireEvent.click(resumeButton);
 
     expect(screen.getByRole('dialog', { name: '恢复过期任务' })).toBeTruthy();
@@ -1362,12 +1369,9 @@ describe('TeamPageV2', () => {
     mocks.resumeAllRuntimeSessions.mockReturnValueOnce(resumePromise);
 
     renderPage();
+    useUIStateStore.getState().triggerTeamSelectSession('workspace-1', 'session-root');
 
-    const resumeButtons = await screen.findAllByRole('button', { name: '全部恢复' });
-    const resumeButton = resumeButtons[0];
-    if (!resumeButton) {
-      throw new Error('未找到恢复按钮');
-    }
+    const resumeButton = await screen.findByRole('button', { name: '全部恢复' });
     fireEvent.click(resumeButton);
 
     await waitFor(() => {

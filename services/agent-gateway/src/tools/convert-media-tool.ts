@@ -7,19 +7,30 @@ import {
   type ConvertMediaOptions,
 } from '../media/ffmpeg-bridge.js';
 import { probeMediaBuffer } from '../media/ffprobe-bridge.js';
-import {
-  createMediaArtifact,
-  extractBufferFromDataUrl,
-} from '../media/media-artifact.js';
+import { createMediaArtifact, extractBufferFromDataUrl } from '../media/media-artifact.js';
 import { isFFmpegAvailable } from '../media/ffmpeg-bridge.js';
 
 const convertMediaInputSchema = z.object({
-  source: z
-    .string()
-    .min(1)
-    .describe('媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
+  source: z.string().min(1).describe('媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
   targetFormat: z
-    .enum(['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'mp4', 'webm', 'mkv', 'mov', 'avi', 'gif', 'png', 'jpg', 'webp', 'weba'])
+    .enum([
+      'mp3',
+      'wav',
+      'ogg',
+      'aac',
+      'flac',
+      'm4a',
+      'mp4',
+      'webm',
+      'mkv',
+      'mov',
+      'avi',
+      'gif',
+      'png',
+      'jpg',
+      'webp',
+      'weba',
+    ])
     .describe('目标格式'),
   videoQuality: z
     .number()
@@ -27,30 +38,14 @@ const convertMediaInputSchema = z.object({
     .max(51)
     .optional()
     .describe('视频编码质量 CRF 值（0-51，越低质量越高，默认 23）。仅对 H.264 视频有效'),
-  audioBitrate: z
-    .string()
-    .optional()
-    .describe('音频比特率，如 "128k"、"192k"'),
+  audioBitrate: z.string().optional().describe('音频比特率，如 "128k"、"192k"'),
   videoScale: z
     .string()
     .optional()
     .describe('视频分辨率缩放，如 "1280:-1"（宽度 1280，高度等比缩放）'),
-  videoFps: z
-    .number()
-    .min(1)
-    .max(60)
-    .optional()
-    .describe('视频帧率'),
-  startTime: z
-    .number()
-    .min(0)
-    .optional()
-    .describe('截取起始时间（秒）'),
-  duration: z
-    .number()
-    .min(0)
-    .optional()
-    .describe('截取持续时间（秒）'),
+  videoFps: z.number().min(1).max(60).optional().describe('视频帧率'),
+  startTime: z.number().min(0).optional().describe('截取起始时间（秒）'),
+  duration: z.number().min(0).optional().describe('截取持续时间（秒）'),
 });
 
 const convertMediaOutputSchema = z.string();
@@ -141,9 +136,10 @@ export async function executeConvertMediaTool(input: {
     };
 
     // URL 输入直接走 FFmpeg 流式转换（支持 HLS .m3u8）
-    const result = isUrlInput && urlSource
-      ? await convertMediaFromUrl(urlSource, inputMimeType, options, signal)
-      : await convertMedia(buffer, inputMimeType, options, signal);
+    const result =
+      isUrlInput && urlSource
+        ? await convertMediaFromUrl(urlSource, inputMimeType, options, signal)
+        : await convertMedia(buffer, inputMimeType, options, signal);
 
     // 提取输出媒体信息
     let mediaInfo;

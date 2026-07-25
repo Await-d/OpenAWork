@@ -195,6 +195,7 @@ function parseFFprobeOutput(output: FFprobeOutput, mimeType: string): MediaInfo 
     type,
     mimeType,
     duration,
+    sizeBytes,
     ...(videoStream?.width ? { width: videoStream.width } : {}),
     ...(videoStream?.height ? { height: videoStream.height } : {}),
     ...(videoStream?.codec_name
@@ -205,7 +206,6 @@ function parseFFprobeOutput(output: FFprobeOutput, mimeType: string): MediaInfo 
     ...(audioStream?.channels ? { channels: audioStream.channels } : {}),
     ...(bitrate ? { bitrate } : {}),
     ...(fps ? { fps } : {}),
-    ...(sizeBytes ? { sizeBytes } : {}),
     ...(formatName ? { format: formatName } : {}),
   };
 }

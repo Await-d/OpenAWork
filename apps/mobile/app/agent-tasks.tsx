@@ -1,5 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+} from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { createSessionsClient, type SessionTask } from '@openAwork/web-client';
@@ -68,17 +75,15 @@ export default function AgentTasksScreen() {
         recentSessions.map(async (s) => {
           try {
             const sessionTasks = await sessionsClient.getTasks(accessToken, s.id);
-            return sessionTasks.map(
-              (t: SessionTask): TaskItem => ({
-                id: t.id,
-                name: t.title,
-                agent: t.assignedAgent ?? 'agent',
-                status: mapTaskStatus(t.status),
-                output: t.result ?? t.errorMessage,
-                artifacts: 0,
-                sessionId: s.id,
-              }),
-            );
+            return sessionTasks.map((t: SessionTask): TaskItem => ({
+              id: t.id,
+              name: t.title,
+              agent: t.assignedAgent ?? 'agent',
+              status: mapTaskStatus(t.status),
+              output: t.result ?? t.errorMessage,
+              artifacts: 0,
+              sessionId: s.id,
+            }));
           } catch {
             return [];
           }
