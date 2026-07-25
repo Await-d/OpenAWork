@@ -1,2 +1,14 @@
+# 仓库生成物与本地工具目录。
+dist
+node_modules
+.expo
+src-tauri
+pnpm-lock.yaml
+.sisyphus
+.serena
+.agentdocs
+apps/*/playwright-report
+apps/*/test-results
+
 # 外部同步的技能快照保留上游格式，不在仓库内重写。
 packages/resources/resources/skills/reference/
