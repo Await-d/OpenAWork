@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpError } from '../session/sessions.js';
-import { acquireRefresh, withTokenRefresh } from './token-refresh.js';
+import { withTokenRefresh } from './token-refresh.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
