@@ -234,7 +234,17 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
+      - name: Prepare Windows ARM64 dependencies
+        if: matrix.label == 'windows-aarch64'
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm rebuild @sentry/cli better-sqlite3 esbuild koffi msw
+          npm_config_arch=x64 pnpm rebuild ffmpeg-static
+          node apps/desktop/src-tauri/scripts/stage-windows-arm64-media.mjs
+
       - name: Install dependencies
+        if: matrix.label != 'windows-aarch64'
         run: pnpm install --frozen-lockfile
 
       - uses: oven-sh/setup-bun@v2
