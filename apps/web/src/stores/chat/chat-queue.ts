@@ -48,7 +48,9 @@ export const useChatQueueStore = create<ChatQueueStore>()(
               if (migratedQueues && typeof migratedQueues === 'object') {
                 // 清理旧 sessionStorage 数据，避免后续混淆
                 window.sessionStorage.removeItem('openAwork-chat-queue');
-                return { queuesByScope: migratedQueues } as { queuesByScope: Record<string, PersistedQueuedComposerMessage[]> };
+                return { queuesByScope: migratedQueues } as {
+                  queuesByScope: Record<string, PersistedQueuedComposerMessage[]>;
+                };
               }
             }
           } catch {

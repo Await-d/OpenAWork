@@ -158,8 +158,7 @@ export function InlineToolCall({
   const hasOutput = output !== undefined;
   const canExpand = !isLsp && (hasInput || hasOutput);
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
-  const shouldAutoExpand =
-    shouldExpandByDefault || visualState === 'running';
+  const shouldAutoExpand = shouldExpandByDefault || visualState === 'running';
   const [expanded, setExpanded] = useState(shouldAutoExpand);
 
   useEffect(() => {

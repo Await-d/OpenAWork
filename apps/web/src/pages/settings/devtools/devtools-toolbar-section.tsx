@@ -107,9 +107,19 @@ export function DevtoolsToolbarSection({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const navItems: Array<{ id: DevtoolsSectionId; label: string; count?: number; isError?: boolean }> = [
+  const navItems: Array<{
+    id: DevtoolsSectionId;
+    label: string;
+    count?: number;
+    isError?: boolean;
+  }> = [
     { id: 'overview', label: '总览', count: counts.errorSources, isError: counts.errorSources > 0 },
-    { id: 'diagnostics', label: '诊断', count: counts.diagnostics, isError: counts.diagnostics > 0 },
+    {
+      id: 'diagnostics',
+      label: '诊断',
+      count: counts.diagnostics,
+      isError: counts.diagnostics > 0,
+    },
     { id: 'logs', label: '日志', count: counts.logs },
     { id: 'ssh', label: 'SSH', count: counts.sshConnections },
     { id: 'workers', label: 'Worker', count: workerErrors, isError: workerErrors > 0 },
@@ -129,9 +139,7 @@ export function DevtoolsToolbarSection({
             >
               {item.label}
               {item.isError && item.count ? (
-                <span style={{ ...BADGE, color: 'var(--danger)', fontSize: 9 }}>
-                  {item.count}
-                </span>
+                <span style={{ ...BADGE, color: 'var(--danger)', fontSize: 9 }}>{item.count}</span>
               ) : null}
             </button>
           ))}
@@ -170,11 +178,7 @@ export function DevtoolsToolbarSection({
 
         {/* 导出按钮组 */}
         <div style={EXPORT_DROPDOWN} ref={exportMenuRef}>
-          <button
-            type="button"
-            onClick={() => setShowExportMenu(!showExportMenu)}
-            style={BP}
-          >
+          <button type="button" onClick={() => setShowExportMenu(!showExportMenu)} style={BP}>
             导出 ▾
           </button>
 

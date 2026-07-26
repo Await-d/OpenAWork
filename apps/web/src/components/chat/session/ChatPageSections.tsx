@@ -360,11 +360,11 @@ function renderAssistantMessageContentValue(
     typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
   if (earlyContent && looksLikeStructuredJsonContent(earlyContent)) {
     try {
-      const earlyParsed = JSON.parse(earlyContent) as { type?: string; payload?: Record<string, unknown> };
-      if (
-        earlyParsed?.type === 'assistant_event' &&
-        earlyParsed.payload?.kind === 'compaction'
-      ) {
+      const earlyParsed = JSON.parse(earlyContent) as {
+        type?: string;
+        payload?: Record<string, unknown>;
+      };
+      if (earlyParsed?.type === 'assistant_event' && earlyParsed.payload?.kind === 'compaction') {
         const card = createCompactionCardContent({
           title: (earlyParsed.payload['title'] as string)?.trim() || 'compact',
           summary: (earlyParsed.payload['message'] as string) || '',
@@ -521,7 +521,9 @@ function renderAssistantMessageContentValue(
   const nestedCompactionCard = extractNestedCompactionCardContent(content);
   if (nestedCompactionCard) {
     try {
-      return <GenerativeUIRenderer message={JSON.parse(nestedCompactionCard) as GenerativeUIMessage} />;
+      return (
+        <GenerativeUIRenderer message={JSON.parse(nestedCompactionCard) as GenerativeUIMessage} />
+      );
     } catch {
       // Fall through to assistant-trace rendering if the nested payload is malformed.
     }

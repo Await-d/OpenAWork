@@ -719,14 +719,28 @@ export function DevtoolsTabContent({
         <h3 style={ST}>数据源概览</h3>
 
         {/* 简洁统计行 */}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-muted)' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            fontSize: 11,
+            color: 'var(--fg-muted)',
+          }}
+        >
           <span style={{ color: 'var(--accent)' }}>正常 {healthyCount}</span>
           {loadingCount > 0 && <span>加载 {loadingCount}</span>}
           {emptyCount > 0 && <span>空 {emptyCount}</span>}
-          {unavailableCount > 0 && <span style={{ color: 'var(--warning)' }}>未接入 {unavailableCount}</span>}
-          {errorSources.length > 0 && <span style={{ color: 'var(--danger)' }}>失败 {errorSources.length}</span>}
+          {unavailableCount > 0 && (
+            <span style={{ color: 'var(--warning)' }}>未接入 {unavailableCount}</span>
+          )}
+          {errorSources.length > 0 && (
+            <span style={{ color: 'var(--danger)' }}>失败 {errorSources.length}</span>
+          )}
           {logErrors > 0 && <span style={{ color: 'var(--danger)' }}>日志错误 {logErrors}</span>}
-          {workerErrors > 0 && <span style={{ color: 'var(--danger)' }}>Worker 异常 {workerErrors}</span>}
+          {workerErrors > 0 && (
+            <span style={{ color: 'var(--danger)' }}>Worker 异常 {workerErrors}</span>
+          )}
         </div>
 
         {/* 错误提示 - 仅在有错误时显示 */}
@@ -747,7 +761,15 @@ export function DevtoolsTabContent({
                 }}
               >
                 <span style={{ color: 'var(--danger)', fontWeight: 500 }}>✗ {source.label}</span>
-                <span style={{ color: 'var(--fg-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    color: 'var(--fg-muted)',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {source.detail}：{source.error}
                 </span>
               </div>
@@ -911,7 +933,10 @@ export function DevtoolsTabContent({
       <section ref={sshSectionRef} style={SS}>
         <h3 style={ST}>SSH 远程连接</h3>
         {sourceStates.sshConnections.status === 'error' && sourceStates.sshConnections.error && (
-          <InlineFailureNotice title="SSH 连接加载失败" message={sourceStates.sshConnections.error} />
+          <InlineFailureNotice
+            title="SSH 连接加载失败"
+            message={sourceStates.sshConnections.error}
+          />
         )}
         <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
           管理远程 SSH 连接

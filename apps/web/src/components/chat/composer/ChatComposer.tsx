@@ -720,9 +720,7 @@ export function ChatComposer({
                     expanded={pastePreviewExpanded}
                     onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
                     onUpdateText={(updatedText) => {
-                      setPasteCollapsed((prev) =>
-                        prev ? { ...prev, text: updatedText } : prev,
-                      );
+                      setPasteCollapsed((prev) => (prev ? { ...prev, text: updatedText } : prev));
                     }}
                     onDiscard={() => {
                       setPasteCollapsed(null);

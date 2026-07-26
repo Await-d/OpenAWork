@@ -665,12 +665,28 @@ function ReasoningToolSection() {
           checked={store.showReasoningBlock}
           onChange={store.setShowReasoningBlock}
         />
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 0' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            padding: '10px 0',
+          }}
+        >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>推理过程默认展开</span>
-            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>AI 思考过程超过 3 行时默认展开，而非折叠</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>
+              推理过程默认展开
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              AI 思考过程超过 3 行时默认展开，而非折叠
+            </span>
           </div>
-          <Toggle checked={store.reasoningExpandedByDefault} onChange={store.setReasoningExpandedByDefault} label="推理过程默认展开" />
+          <Toggle
+            checked={store.reasoningExpandedByDefault}
+            onChange={store.setReasoningExpandedByDefault}
+            label="推理过程默认展开"
+          />
         </div>
       </div>
 
@@ -701,11 +717,7 @@ function ReasoningToolSection() {
               开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。运行中和失败的工具始终自动展开。
             </span>
           </div>
-          <Toggle
-            checked={globalExpand}
-            onChange={setGlobalExpand}
-            label="工具调用默认展开"
-          />
+          <Toggle checked={globalExpand} onChange={setGlobalExpand} label="工具调用默认展开" />
         </div>
         {globalExpand && (
           <div

@@ -89,16 +89,42 @@ export function ErrorCommandCenter({
       {/* 统计信息 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-muted)' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              fontSize: 11,
+              color: 'var(--fg-muted)',
+            }}
+          >
             <span>全部：{allDiagnostics.length}</span>
             <span>可见：{filteredDiagnostics.length}</span>
-            {errorLogCount > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误：{errorLogCount}</span>}
-            {workerErrorCount > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>Worker 异常：{workerErrorCount}</span>}
-            {selectedDiagnostic?.requestId && <span style={{ color: 'var(--accent)' }}>当前：{selectedDiagnostic.requestId}</span>}
-            <span style={{ color: 'var(--accent)' }} aria-live="polite">{copiedFeedback ?? ''}</span>
+            {errorLogCount > 0 && (
+              <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
+                日志错误：{errorLogCount}
+              </span>
+            )}
+            {workerErrorCount > 0 && (
+              <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
+                Worker 异常：{workerErrorCount}
+              </span>
+            )}
+            {selectedDiagnostic?.requestId && (
+              <span style={{ color: 'var(--accent)' }}>当前：{selectedDiagnostic.requestId}</span>
+            )}
+            <span style={{ color: 'var(--accent)' }} aria-live="polite">
+              {copiedFeedback ?? ''}
+            </span>
           </div>
         </div>
-        <span style={{ fontSize: 11, fontWeight: 600, color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)' }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
+          }}
+        >
           {hasErrors ? `${filteredDiagnostics.length} 条错误` : '无错误'}
         </span>
       </div>
@@ -108,7 +134,8 @@ export function ErrorCommandCenter({
         <div style={{ display: 'flex', gap: 3, overflowX: 'auto', paddingBottom: 2 }}>
           {filteredDiagnostics.map((diagnostic) => {
             const key = buildDiagnosticKey(diagnostic);
-            const isActive = selectedDiagnostic !== null && buildDiagnosticKey(selectedDiagnostic) === key;
+            const isActive =
+              selectedDiagnostic !== null && buildDiagnosticKey(selectedDiagnostic) === key;
             return (
               <button
                 key={key}
@@ -120,7 +147,9 @@ export function ErrorCommandCenter({
                   borderRadius: 2,
                   border: 'none',
                   borderBottom: `1px solid ${isActive ? 'var(--danger)' : 'var(--border-subtle)'}`,
-                  background: isActive ? 'color-mix(in srgb, var(--danger) 8%, transparent)' : 'transparent',
+                  background: isActive
+                    ? 'color-mix(in srgb, var(--danger) 8%, transparent)'
+                    : 'transparent',
                   color: isActive ? 'var(--danger)' : 'var(--fg-muted)',
                   padding: '2px 5px',
                   fontSize: 10,
@@ -143,16 +172,31 @@ export function ErrorCommandCenter({
 
       {/* 操作按钮 */}
       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" onClick={onCopySelected} disabled={!hasSelected} style={btn(hasSelected)}>
+        <button
+          type="button"
+          onClick={onCopySelected}
+          disabled={!hasSelected}
+          style={btn(hasSelected)}
+        >
           复制当前
         </button>
         <button type="button" onClick={onCopyVisible} disabled={!hasErrors} style={btn(hasErrors)}>
           复制可见 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
         </button>
-        <button type="button" onClick={onCopyRelatedContext} disabled={!hasSelected} style={btn(hasSelected)}>
+        <button
+          type="button"
+          onClick={onCopyRelatedContext}
+          disabled={!hasSelected}
+          style={btn(hasSelected)}
+        >
           复制关联
         </button>
-        <button type="button" onClick={onScrollToLogs} disabled={!hasRelated} style={btn(hasRelated)}>
+        <button
+          type="button"
+          onClick={onScrollToLogs}
+          disabled={!hasRelated}
+          style={btn(hasRelated)}
+        >
           查看日志 {hasRelated ? `(${relatedLogs.length})` : ''}
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -169,10 +213,20 @@ export function ErrorCommandCenter({
           >
             导出报告
           </button>
-          <button type="button" onClick={onExportJson} disabled={!hasExportableContext} style={btn(hasExportableContext)}>
+          <button
+            type="button"
+            onClick={onExportJson}
+            disabled={!hasExportableContext}
+            style={btn(hasExportableContext)}
+          >
             JSON
           </button>
-          <button type="button" onClick={onExportMarkdown} disabled={!hasExportableContext} style={btn(hasExportableContext)}>
+          <button
+            type="button"
+            onClick={onExportMarkdown}
+            disabled={!hasExportableContext}
+            style={btn(hasExportableContext)}
+          >
             MD
           </button>
         </div>
@@ -181,10 +235,14 @@ export function ErrorCommandCenter({
       {/* 选中的错误详情 */}
       {hasSelected && (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-          <span style={{ color: 'var(--fg-strong)', fontWeight: 500 }}>{selectedDiagnostic.message}</span>
+          <span style={{ color: 'var(--fg-strong)', fontWeight: 500 }}>
+            {selectedDiagnostic.message}
+          </span>
           {selectedDiagnostic.toolName && <span> · {selectedDiagnostic.toolName}</span>}
           {selectedDiagnostic.requestId && <span> · {selectedDiagnostic.requestId}</span>}
-          {typeof selectedDiagnostic.durationMs === 'number' && <span> · {selectedDiagnostic.durationMs}ms</span>}
+          {typeof selectedDiagnostic.durationMs === 'number' && (
+            <span> · {selectedDiagnostic.durationMs}ms</span>
+          )}
         </div>
       )}
     </div>

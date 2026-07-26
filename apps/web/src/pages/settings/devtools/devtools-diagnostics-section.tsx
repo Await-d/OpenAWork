@@ -10,7 +10,17 @@ import {
   InlineFailureNotice,
 } from './devtools-workbench-primitives.js';
 import { ErrorCommandCenter } from './devtools-error-command.js';
-import { SS, ST, BADGE, BS, BG, TWO_COLUMN, LEFT_PANEL, RIGHT_PANEL, LIST_CONTAINER } from '../shared/settings-section-styles.js';
+import {
+  SS,
+  ST,
+  BADGE,
+  BS,
+  BG,
+  TWO_COLUMN,
+  LEFT_PANEL,
+  RIGHT_PANEL,
+  LIST_CONTAINER,
+} from '../shared/settings-section-styles.js';
 
 interface DevtoolsDiagnosticsSectionProps {
   sectionRef: React.RefObject<HTMLDivElement | null>;
@@ -77,7 +87,15 @@ export function DevtoolsDiagnosticsSection({
   return (
     <section ref={sectionRef} style={SS}>
       {/* 标题和操作栏 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 4,
+          alignItems: 'center',
+        }}
+      >
         <h3 style={ST}>诊断信息</h3>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           {availableDates.length > 0 && (
@@ -97,7 +115,9 @@ export function DevtoolsDiagnosticsSection({
             >
               <option value="">全部日期</option>
               {availableDates.map((date) => (
-                <option key={date} value={date}>{date}</option>
+                <option key={date} value={date}>
+                  {date}
+                </option>
               ))}
             </select>
           )}
@@ -202,7 +222,8 @@ export function DevtoolsDiagnosticsSection({
             <div style={LIST_CONTAINER}>
               {filteredDiagnostics.map((diagnostic, index) => {
                 const key = buildDiagnosticKey(diagnostic);
-                const isActive = selectedDiagnosticKey === key || (!selectedDiagnosticKey && index === 0);
+                const isActive =
+                  selectedDiagnosticKey === key || (!selectedDiagnosticKey && index === 0);
 
                 return (
                   <button
@@ -213,7 +234,9 @@ export function DevtoolsDiagnosticsSection({
                       borderRadius: 2,
                       border: 'none',
                       borderBottom: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
-                      background: isActive ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : 'transparent',
+                      background: isActive
+                        ? 'color-mix(in srgb, var(--accent) 5%, transparent)'
+                        : 'transparent',
                       color: 'var(--fg-strong)',
                       padding: '4px 6px',
                       display: 'flex',
@@ -224,7 +247,14 @@ export function DevtoolsDiagnosticsSection({
                       minWidth: 0,
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 4, alignItems: 'flex-start' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 4,
+                        alignItems: 'flex-start',
+                      }}
+                    >
                       <span
                         style={{
                           fontSize: 11,
@@ -241,12 +271,28 @@ export function DevtoolsDiagnosticsSection({
                       >
                         {diagnostic.message}
                       </span>
-                      <span style={{ ...BADGE, color: 'var(--danger)', flexShrink: 0, fontSize: 9 }}>
+                      <span
+                        style={{ ...BADGE, color: 'var(--danger)', flexShrink: 0, fontSize: 9 }}
+                      >
                         {diagnostic.severity}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', gap: 4, fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 4,
+                        fontSize: 10,
+                        color: 'var(--fg-muted)',
+                        fontFamily: 'monospace',
+                      }}
+                    >
+                      <span
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {formatDiagnosticLocation(diagnostic)}
                       </span>
                       {typeof diagnostic.durationMs === 'number' && (
@@ -270,7 +316,12 @@ export function DevtoolsDiagnosticsSection({
                     key={`${log.timestamp}-${log.requestId ?? index}`}
                     type="button"
                     onClick={onScrollToLogs}
-                    style={{ ...BG, padding: '1px 4px', fontSize: 10, color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-default)' }}
+                    style={{
+                      ...BG,
+                      padding: '1px 4px',
+                      fontSize: 10,
+                      color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-default)',
+                    }}
                   >
                     {log.requestId ?? log.source ?? `日志 ${index + 1}`}
                   </button>
@@ -284,7 +335,11 @@ export function DevtoolsDiagnosticsSection({
                 type="button"
                 onClick={() => onCopyDiagnosticField('输入', selectedDiagnostic?.input)}
                 disabled={!selectedDiagnostic}
-                style={{ ...BS, opacity: selectedDiagnostic ? 1 : 0.4, cursor: selectedDiagnostic ? 'pointer' : 'not-allowed' }}
+                style={{
+                  ...BS,
+                  opacity: selectedDiagnostic ? 1 : 0.4,
+                  cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
+                }}
               >
                 复制输入
               </button>
@@ -292,7 +347,11 @@ export function DevtoolsDiagnosticsSection({
                 type="button"
                 onClick={() => onCopyDiagnosticField('输出', selectedDiagnostic?.output)}
                 disabled={!selectedDiagnostic}
-                style={{ ...BS, opacity: selectedDiagnostic ? 1 : 0.4, cursor: selectedDiagnostic ? 'pointer' : 'not-allowed' }}
+                style={{
+                  ...BS,
+                  opacity: selectedDiagnostic ? 1 : 0.4,
+                  cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
+                }}
               >
                 复制输出
               </button>
@@ -305,7 +364,11 @@ export function DevtoolsDiagnosticsSection({
       ) : diagnostics.length > 0 ? (
         <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           当前筛选条件无匹配结果。共有 {diagnostics.length} 条诊断记录。
-          <button type="button" onClick={() => onSetDiagnosticQuery('')} style={{ ...BG, fontSize: 11, marginLeft: 4 }}>
+          <button
+            type="button"
+            onClick={() => onSetDiagnosticQuery('')}
+            style={{ ...BG, fontSize: 11, marginLeft: 4 }}
+          >
             清空筛选
           </button>
         </div>

@@ -109,7 +109,12 @@ export function TreeNodesPreview({
   return (
     <div className="tool-call-tree">
       {data.nodes.map((node, idx) => (
-        <TreeNodeRow key={`${node.name}-${idx}`} node={node} depth={0} defaultExpanded={defaultExpanded} />
+        <TreeNodeRow
+          key={`${node.name}-${idx}`}
+          node={node}
+          depth={0}
+          defaultExpanded={defaultExpanded}
+        />
       ))}
       {data.visited !== undefined && (
         <div className="tool-call-search-meta">共 {data.visited} 个条目 · 点击目录展开</div>

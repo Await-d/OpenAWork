@@ -85,7 +85,15 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       console.log('[updater] 开始检查更新…');
       const r = await checkForUpdate();
       if (cancelledRef.current) return;
-      console.log('[updater] 检查结果:', JSON.stringify({ available: r.available, version: r.version, installMode: r.installMode, proxyUsed: r.proxyUsed?.name }));
+      console.log(
+        '[updater] 检查结果:',
+        JSON.stringify({
+          available: r.available,
+          version: r.version,
+          installMode: r.installMode,
+          proxyUsed: r.proxyUsed?.name,
+        }),
+      );
       setResult(r);
       setReleaseNotes(r.notes);
       setProxyUsed(r.proxyUsed);
@@ -121,7 +129,14 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     setDownloaded(0);
     setTotal(null);
     setError(null);
-    console.log('[updater] 开始下载:', JSON.stringify({ hasUpdate: !!result.update, installMode: result.installMode, proxyUsed: result.proxyUsed?.name }));
+    console.log(
+      '[updater] 开始下载:',
+      JSON.stringify({
+        hasUpdate: !!result.update,
+        installMode: result.installMode,
+        proxyUsed: result.proxyUsed?.name,
+      }),
+    );
 
     try {
       if (!result.update) {

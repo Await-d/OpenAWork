@@ -604,13 +604,15 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
             icon={LayersIcon}
             label="压缩"
             value={
-              data.latestCompactionRepresentedMessages && data.latestCompactionRepresentedMessages > 0
+              data.latestCompactionRepresentedMessages &&
+              data.latestCompactionRepresentedMessages > 0
                 ? `${data.latestCompactionRepresentedMessages} 条`
                 : `${data.compactionCount} 次`
             }
             valueColor={COLOR_COMPACTION}
             title={
-              data.latestCompactionRepresentedMessages && data.latestCompactionRepresentedMessages > 0
+              data.latestCompactionRepresentedMessages &&
+              data.latestCompactionRepresentedMessages > 0
                 ? `最近一次压缩后，摘要覆盖 ${data.latestCompactionRepresentedMessages} 条历史消息`
                 : `当前会话已发生 ${data.compactionCount} 次上下文压缩`
             }

@@ -22,7 +22,12 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
   const [appVersion, setAppVersion] = useState<string>('');
   const [showUpdateProgress, setShowUpdateProgress] = useState(autoStartCheck);
 
-  console.log('[UpdateActionPanel] 渲染, autoStartCheck:', autoStartCheck, 'showUpdateProgress:', showUpdateProgress);
+  console.log(
+    '[UpdateActionPanel] 渲染, autoStartCheck:',
+    autoStartCheck,
+    'showUpdateProgress:',
+    showUpdateProgress,
+  );
 
   useEffect(() => {
     void getVersion().then((v) => setAppVersion(v));

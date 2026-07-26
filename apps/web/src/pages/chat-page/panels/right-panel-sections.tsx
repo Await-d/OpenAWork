@@ -1625,10 +1625,7 @@ export function ChatOverviewTabContent(props: {
                   />
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
-                  {formatContextCompactionHint(
-                    latestCompaction,
-                    contextUsageSnapshot.estimated,
-                  )}
+                  {formatContextCompactionHint(latestCompaction, contextUsageSnapshot.estimated)}
                 </div>
               </>
             );

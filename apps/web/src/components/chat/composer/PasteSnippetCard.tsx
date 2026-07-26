@@ -40,7 +40,9 @@ export function PasteSnippetCard({
   const charCount = text.length > 999 ? `${Math.round(text.length / 100) / 10}k` : `${text.length}`;
 
   return (
-    <div style={{ marginBottom: 4, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div
+      style={{ marginBottom: 4, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}
+    >
       {/* 紧凑胶囊标签 */}
       <div
         style={{

@@ -135,7 +135,12 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     const isShortOutput = textPayload.text.length < 200 && textPayload.text.split('\n').length <= 5;
     return (
       <>
-        <ExpandableOutput text={textPayload.text} maxChars={500} compact={isShortOutput} defaultExpanded={shouldExpandByDefault} />
+        <ExpandableOutput
+          text={textPayload.text}
+          maxChars={500}
+          compact={isShortOutput}
+          defaultExpanded={shouldExpandByDefault}
+        />
         {diagnostics && diagnostics.length > 0 && <DiagnosticsPreview items={diagnostics} />}
       </>
     );
@@ -146,5 +151,12 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   const fallbackText =
     typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
-  return <ExpandableOutput text={fallbackText} maxChars={500} compact={isShortFallback} defaultExpanded={shouldExpandByDefault} />;
+  return (
+    <ExpandableOutput
+      text={fallbackText}
+      maxChars={500}
+      compact={isShortFallback}
+      defaultExpanded={shouldExpandByDefault}
+    />
+  );
 }

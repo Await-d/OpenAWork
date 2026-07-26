@@ -4,7 +4,9 @@ import { buildCommandDescriptors } from '../../routes/command-descriptors.js';
 describe('compact command descriptors', () => {
   it('只暴露 /compact 作为压缩命令入口', () => {
     const descriptors = buildCommandDescriptors();
-    const compactCommands = descriptors.filter((command) => command.action.kind === 'compact_session');
+    const compactCommands = descriptors.filter(
+      (command) => command.action.kind === 'compact_session',
+    );
 
     expect(compactCommands).toHaveLength(1);
     expect(compactCommands[0]).toMatchObject({

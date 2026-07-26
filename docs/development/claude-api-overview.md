@@ -6,12 +6,12 @@
 
 ## 1. Anthropic Python SDK
 
-| 项目 | 说明 |
-|------|------|
-| **PyPI 包名** | `anthropic` |
-| **GitHub** | [anthropics/anthropic-sdk-python](https://github.com/anthropics/anthropic-sdk-python) |
-| **License** | MIT |
-| **是否开源** | ✅ 是 |
+| 项目          | 说明                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------- |
+| **PyPI 包名** | `anthropic`                                                                           |
+| **GitHub**    | [anthropics/anthropic-sdk-python](https://github.com/anthropics/anthropic-sdk-python) |
+| **License**   | MIT                                                                                   |
+| **是否开源**  | ✅ 是                                                                                 |
 
 ### 快速上手
 
@@ -44,12 +44,12 @@ print(message.content[0].text)
 
 ## 2. Anthropic TypeScript / Node.js SDK
 
-| 项目 | 说明 |
-|------|------|
-| **npm 包名** | `@anthropic-ai/sdk` |
-| **GitHub** | [anthropics/anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript) |
-| **License** | MIT |
-| **是否开源** | ✅ 是 |
+| 项目         | 说明                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------- |
+| **npm 包名** | `@anthropic-ai/sdk`                                                                           |
+| **GitHub**   | [anthropics/anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript) |
+| **License**  | MIT                                                                                           |
+| **是否开源** | ✅ 是                                                                                         |
 
 ### 快速上手
 
@@ -81,12 +81,12 @@ console.log(message.content[0].text);
 
 ## 3. Claude Code（CLI & SDK）
 
-| 项目 | 说明 |
-|------|------|
-| **npm 包名** | `@anthropic-ai/claude-code` |
-| **GitHub** | [anthropics/claude-code](https://github.com/anthropics/claude-code) |
-| **License** | Apache 2.0 |
-| **是否开源** | ✅ 是 |
+| 项目         | 说明                                                                |
+| ------------ | ------------------------------------------------------------------- |
+| **npm 包名** | `@anthropic-ai/claude-code`                                         |
+| **GitHub**   | [anthropics/claude-code](https://github.com/anthropics/claude-code) |
+| **License**  | Apache 2.0                                                          |
+| **是否开源** | ✅ 是                                                               |
 
 ### 安装
 
@@ -105,10 +105,10 @@ claude   # 启动交互式会话
 #### SDK 模式（编程调用）
 
 ```typescript
-import { query, type SDKMessage } from "@anthropic-ai/claude-code";
+import { query, type SDKMessage } from '@anthropic-ai/claude-code';
 
 const response = await query({
-  prompt: "Write a hello world program in Python",
+  prompt: 'Write a hello world program in Python',
   options: {
     maxTurns: 3,
   },
@@ -127,11 +127,11 @@ console.log(response);
 
 ## 4. 开源状态总结
 
-| SDK | 是否开源 | License | 模型是否开源 |
-|-----|---------|---------|-------------|
-| Python SDK (`anthropic`) | ✅ 开源 | MIT | ❌ 闭源（仅 API 访问） |
-| TypeScript SDK (`@anthropic-ai/sdk`) | ✅ 开源 | MIT | ❌ 闭源（仅 API 访问） |
-| Claude Code (`@anthropic-ai/claude-code`) | ✅ 开源 | Apache 2.0 | ❌ 闭源（仅 API 访问） |
+| SDK                                       | 是否开源 | License    | 模型是否开源           |
+| ----------------------------------------- | -------- | ---------- | ---------------------- |
+| Python SDK (`anthropic`)                  | ✅ 开源  | MIT        | ❌ 闭源（仅 API 访问） |
+| TypeScript SDK (`@anthropic-ai/sdk`)      | ✅ 开源  | MIT        | ❌ 闭源（仅 API 访问） |
+| Claude Code (`@anthropic-ai/claude-code`) | ✅ 开源  | Apache 2.0 | ❌ 闭源（仅 API 访问） |
 
 > **关键区分**：SDK / 客户端工具是开源的，Claude 模型本身是闭源的，只能通过 Anthropic API 或 claude.ai 使用。
 
@@ -139,12 +139,12 @@ console.log(response);
 
 ## 5. 相关资源
 
-| 资源 | 链接 |
-|------|------|
-| Anthropic 官方文档 | [docs.anthropic.com](https://docs.anthropic.com) |
-| API Key 管理 | [console.anthropic.com](https://console.anthropic.com) |
-| Claude Code 文档 | [docs.anthropic.com/en/docs/claude-code](https://docs.anthropic.com/en/docs/claude-code) |
-| MCP 协议规范 | [modelcontextprotocol.io](https://modelcontextprotocol.io) |
+| 资源               | 链接                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| Anthropic 官方文档 | [docs.anthropic.com](https://docs.anthropic.com)                                         |
+| API Key 管理       | [console.anthropic.com](https://console.anthropic.com)                                   |
+| Claude Code 文档   | [docs.anthropic.com/en/docs/claude-code](https://docs.anthropic.com/en/docs/claude-code) |
+| MCP 协议规范       | [modelcontextprotocol.io](https://modelcontextprotocol.io)                               |
 
 ---
 
@@ -158,4 +158,4 @@ console.log(response);
 
 ---
 
-*最后更新：2026-07-26*
+_最后更新：2026-07-26_

@@ -308,7 +308,9 @@ function UIStatus({ payload }: { payload: Record<string, unknown> }) {
 
 function UICompaction({ payload }: { payload: Record<string, unknown> }) {
   const phase =
-    payload['phase'] === 'started' || payload['phase'] === 'completed' || payload['phase'] === 'failed'
+    payload['phase'] === 'started' ||
+    payload['phase'] === 'completed' ||
+    payload['phase'] === 'failed'
       ? payload['phase']
       : 'completed';
   const trigger =
@@ -355,7 +357,15 @@ function UICompaction({ payload }: { payload: Record<string, unknown> }) {
     >
       <span
         aria-hidden="true"
-        style={{ color: phase === 'failed' ? 'var(--danger)' : phase === 'started' ? 'var(--warning)' : 'var(--aux)', fontSize: 10 }}
+        style={{
+          color:
+            phase === 'failed'
+              ? 'var(--danger)'
+              : phase === 'started'
+                ? 'var(--warning)'
+                : 'var(--aux)',
+          fontSize: 10,
+        }}
       >
         •
       </span>
