@@ -41,6 +41,10 @@ vi.mock('../utils/tauri-gateway.js', () => ({
   stopDesktopGateway: mocks.stopDesktopGateway,
 }));
 
+vi.mock('./proxy-update.js', () => ({
+  downloadAndInstallProxyUpdate: vi.fn(),
+}));
+
 import { UpdateProgressDialog } from './UpdateProgressDialog.js';
 
 function createNativeUpdateStub(): object {

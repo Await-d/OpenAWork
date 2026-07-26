@@ -70,6 +70,10 @@ vi.mock('./auto-update.js', async () => {
   return actual;
 });
 
+vi.mock('@openAwork/shared', () => ({
+  updaterJsonEndpointsForChannel: vi.fn(() => ({ endpoints: [] })),
+}));
+
 import { downloadAndInstallProxyUpdate } from './proxy-update.js';
 
 describe('downloadAndInstallProxyUpdate', () => {
