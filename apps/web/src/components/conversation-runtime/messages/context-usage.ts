@@ -7,11 +7,13 @@ export interface ChatContextUsageSnapshot {
 export function buildChatContextUsageSnapshot({
   contextWindow,
   historicalTokens,
+  preferHistoricalEstimate = false,
   reportedTotalTokens,
   streamingTotalTokens,
 }: {
   contextWindow?: number;
   historicalTokens: number;
+  preferHistoricalEstimate?: boolean;
   reportedTotalTokens?: number;
   streamingTotalTokens?: number;
 }): ChatContextUsageSnapshot | null {
@@ -27,6 +29,7 @@ export function buildChatContextUsageSnapshot({
   const estimatedUsedTokens = Math.max(safeHistoricalTokens, safeStreamingTotalTokens ?? 0);
 
   if (
+    !preferHistoricalEstimate &&
     safeReportedTotalTokens !== undefined &&
     (safeReportedTotalTokens > 0 || estimatedUsedTokens === 0)
   ) {

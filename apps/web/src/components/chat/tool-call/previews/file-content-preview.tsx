@@ -42,8 +42,14 @@ const FILE_CONTENT_PREVIEW_LINES = 30;
  * code block. Replaces what would otherwise be a flat ExpandableOutput of
  * `output.content` (which loses the path/range/truncation context).
  */
-export function FileContentPreview({ data }: { data: FileContentLike }) {
-  const [expanded, setExpanded] = useState(false);
+export function FileContentPreview({
+  data,
+  defaultExpanded = false,
+}: {
+  data: FileContentLike;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const fileEditorRef = useFileEditorContext();
   const lines = useMemo(() => data.content.split('\n'), [data.content]);
   const start = data.lineStart ?? 1;

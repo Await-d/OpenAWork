@@ -131,7 +131,7 @@ const executorAdapter: TeamRoleAdapter = {
     agentImplKey: 'executor',
     provider: null,
     promptSuffix: '你是执行层，负责按任务要求产出可工作的代码/文档。',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
   }),
 };
 

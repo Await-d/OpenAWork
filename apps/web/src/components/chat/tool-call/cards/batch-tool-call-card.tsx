@@ -154,7 +154,7 @@ function BatchSubCallRow({
   const shouldExpandByDefault = useToolExpandDefault()(tool);
   const visualState = batchSubVisualState(result, parentTerminalState);
   const shouldAutoExpand =
-    shouldExpandByDefault || visualState === 'running' || visualState === 'failed';
+    shouldExpandByDefault || visualState === 'running';
   const [open, setOpen] = useState(shouldAutoExpand);
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
   const childStatus: ToolCallCardProps['status'] =

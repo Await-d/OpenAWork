@@ -84,7 +84,7 @@ export function GroupedToolCallPill({
   // Visual: a single error inside a group surfaces as red dot. The
   // detailed per-call status is still visible after expansion.
   const visualState: 'completed' | 'failed' = errorCount > 0 ? 'failed' : 'completed';
-  const shouldAutoExpand = shouldExpandByDefault || hasActiveCalls || errorCount > 0;
+  const shouldAutoExpand = shouldExpandByDefault || hasActiveCalls;
   const [expanded, setExpanded] = useState(shouldAutoExpand);
 
   useEffect(() => {

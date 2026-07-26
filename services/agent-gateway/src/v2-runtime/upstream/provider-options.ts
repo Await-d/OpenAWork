@@ -614,6 +614,9 @@ export function buildProviderOptions(input: {
     }
 
     case 'gemini_thinking': {
+      // Gemini 通过 OpenAI 兼容端点接入时，thinking_config 直接作为请求体
+      // 顶层字段 google.thinking_config 传递。注意：extra_body 是 OpenAI SDK
+      // 客户端库的概念，原生 HTTP 请求不应包含 extra_body 包裹层。
       if (!thinking.enabled) {
         if (model.includes('gemini-3')) {
           // gemini-3 only accepts thinking_level (string), not numeric

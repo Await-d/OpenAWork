@@ -483,6 +483,31 @@
   word-break: break-word;
 }
 
+.chat-message-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.chat-message-error-retry {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default));
+  background: color-mix(in oklch, var(--danger) 12%, var(--bg-overlay));
+  color: color-mix(in oklch, var(--danger) 80%, var(--fg-strong) 20%);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.chat-message-error-retry:hover {
+  background: color-mix(in oklch, var(--danger) 18%, var(--bg-overlay));
+  border-color: color-mix(in oklch, var(--danger) 55%, var(--border-default));
+}
+
 .chat-message-error-banner .chat-message-content[data-role='assistant'] {
   color: color-mix(in oklch, var(--danger) 32%, var(--fg-strong) 68%);
 }

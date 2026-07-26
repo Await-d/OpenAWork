@@ -10,6 +10,8 @@ import {
   type ChatMessage,
   type ChatReasoningPart,
   type ChatToolPart,
+  createCompactionCardContent,
+  extractNestedCompactionCardContent,
   extractInputImages,
   parseAssistantEventContent,
   parseAssistantTraceContent,
@@ -352,6 +354,35 @@ function renderAssistantMessageContentValue(
   contentOrMessage: ChatMessage | string,
   options?: ChatToolRenderOptions,
 ) {
+  // 统一拦截：将 assistant_event + kind:'compaction' 消息转为格式化的 compaction 卡片
+  // 此拦截在 parts/content 路径分流之前，确保所有压缩事件都使用 UICompaction 渲染
+  const earlyContent =
+    typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
+  if (earlyContent && looksLikeStructuredJsonContent(earlyContent)) {
+    try {
+      const earlyParsed = JSON.parse(earlyContent) as { type?: string; payload?: Record<string, unknown> };
+      if (
+        earlyParsed?.type === 'assistant_event' &&
+        earlyParsed.payload?.kind === 'compaction'
+      ) {
+        const card = createCompactionCardContent({
+          title: (earlyParsed.payload['title'] as string)?.trim() || 'compact',
+          summary: (earlyParsed.payload['message'] as string) || '',
+          trigger: 'automatic',
+          phase:
+            earlyParsed.payload['status'] === 'running'
+              ? 'started'
+              : earlyParsed.payload['status'] === 'error'
+                ? 'failed'
+                : 'completed',
+        });
+        return <GenerativeUIRenderer message={JSON.parse(card) as GenerativeUIMessage} />;
+      }
+    } catch {
+      // Fall through to normal rendering
+    }
+  }
+
   // Parts-first path: when the message carries structured parts that
   // include any reasoning / tool / event segment, render them in their
   // original order. This is the only way to faithfully show the wire
@@ -419,38 +450,6 @@ function renderAssistantMessageContentValue(
     );
   }
 
-  const assistantTrace =
-    typeof contentOrMessage === 'string'
-      ? parseAssistantTraceContent(content)
-      : readAssistantTracePayload(contentOrMessage);
-  if (assistantTrace) {
-    const reasoningBlocksEndedFlags =
-      typeof contentOrMessage === 'string' ? undefined : contentOrMessage.reasoningBlocksEndedFlags;
-    const reasoningBlocksDurationsMs =
-      typeof contentOrMessage === 'string'
-        ? undefined
-        : contentOrMessage.reasoningBlocksDurationsMs;
-    return (
-      <AssistantTraceContent
-        messageId={options?.messageId}
-        payload={assistantTrace}
-        presentationMode={options?.presentationMode}
-        reasoningBlocksEndedFlags={reasoningBlocksEndedFlags}
-        reasoningBlocksDurationsMs={reasoningBlocksDurationsMs}
-        resolveInlinePermissionActions={options?.resolveInlinePermissionActions}
-        streaming={options?.streaming}
-        onOpenChildSession={options?.onOpenChildSession}
-        selectedChildSessionId={options?.selectedChildSessionId}
-        taskRuntimeLookup={options?.taskRuntimeLookup}
-      />
-    );
-  }
-
-  const assistantEvent = parseAssistantEventContent(content);
-  if (assistantEvent) {
-    return <AssistantEventRow payload={assistantEvent} />;
-  }
-
   try {
     const parsed = JSON.parse(content) as GenerativeUIMessage & {
       payload?: Record<string, unknown>;
@@ -516,13 +515,48 @@ function renderAssistantMessageContentValue(
       return <GenerativeUIRenderer message={parsed} />;
     }
   } catch {
+    // Fall through to assistant-trace / assistant-event parsing.
+  }
+
+  const nestedCompactionCard = extractNestedCompactionCardContent(content);
+  if (nestedCompactionCard) {
+    try {
+      return <GenerativeUIRenderer message={JSON.parse(nestedCompactionCard) as GenerativeUIMessage} />;
+    } catch {
+      // Fall through to assistant-trace rendering if the nested payload is malformed.
+    }
+  }
+
+  const assistantTrace =
+    typeof contentOrMessage === 'string'
+      ? parseAssistantTraceContent(content)
+      : readAssistantTracePayload(contentOrMessage);
+  if (assistantTrace) {
+    const reasoningBlocksEndedFlags =
+      typeof contentOrMessage === 'string' ? undefined : contentOrMessage.reasoningBlocksEndedFlags;
+    const reasoningBlocksDurationsMs =
+      typeof contentOrMessage === 'string'
+        ? undefined
+        : contentOrMessage.reasoningBlocksDurationsMs;
     return (
-      <AssistantRichContent
-        content={content}
-        streaming={options?.streaming}
+      <AssistantTraceContent
         messageId={options?.messageId}
+        payload={assistantTrace}
+        presentationMode={options?.presentationMode}
+        reasoningBlocksEndedFlags={reasoningBlocksEndedFlags}
+        reasoningBlocksDurationsMs={reasoningBlocksDurationsMs}
+        resolveInlinePermissionActions={options?.resolveInlinePermissionActions}
+        streaming={options?.streaming}
+        onOpenChildSession={options?.onOpenChildSession}
+        selectedChildSessionId={options?.selectedChildSessionId}
+        taskRuntimeLookup={options?.taskRuntimeLookup}
       />
     );
+  }
+
+  const assistantEvent = parseAssistantEventContent(content);
+  if (assistantEvent) {
+    return <AssistantEventRow payload={assistantEvent} />;
   }
 
   return (
@@ -653,6 +687,30 @@ function AssistantPartsContent({
           });
         }
         if (part.type === 'event') {
+          // 压缩事件使用专门的 UICompaction 卡片渲染，而非通用事件行
+          if (part.payload.kind === 'compaction') {
+            const compactionCard = createCompactionCardContent({
+              title: part.payload.title?.trim() || 'compact',
+              summary: part.payload.message || '',
+              trigger: 'automatic',
+              phase:
+                part.payload.status === 'running'
+                  ? 'started'
+                  : part.payload.status === 'error'
+                    ? 'failed'
+                    : 'completed',
+            });
+            try {
+              return (
+                <GenerativeUIRenderer
+                  key={part.id}
+                  message={JSON.parse(compactionCard) as GenerativeUIMessage}
+                />
+              );
+            } catch {
+              // Fall through to AssistantEventRow if parsing fails
+            }
+          }
           return <AssistantEventRow key={part.id} payload={part.payload} />;
         }
         return null;
@@ -891,6 +949,27 @@ function AssistantRichContentBody({
 
   // JSON 内容：先尝试解析为 incident 卡片，否则格式化为代码块
   if (!streaming && looksLikeJson(content)) {
+    // 0. assistant_event + kind:'compaction' → 格式化的 compaction 卡片
+    try {
+      const parsed = JSON.parse(content) as { type?: string; payload?: Record<string, unknown> };
+      if (parsed?.type === 'assistant_event' && parsed.payload?.kind === 'compaction') {
+        const card = createCompactionCardContent({
+          title: (parsed.payload['title'] as string)?.trim() || 'compact',
+          summary: (parsed.payload['message'] as string) || '',
+          trigger: 'automatic',
+          phase:
+            parsed.payload['status'] === 'running'
+              ? 'started'
+              : parsed.payload['status'] === 'error'
+                ? 'failed'
+                : 'completed',
+        });
+        return <GenerativeUIRenderer message={JSON.parse(card) as GenerativeUIMessage} />;
+      }
+    } catch {
+      // Fall through
+    }
+
     // 1. 尝试解析为 incident JSON → 人类可读卡片
     const incident = tryParseIncidentJson(content);
     if (incident) {

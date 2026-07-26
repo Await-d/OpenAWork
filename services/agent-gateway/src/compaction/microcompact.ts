@@ -55,6 +55,8 @@ export const DEFAULT_COMPACTABLE_TOOLS: ReadonlySet<string> = new Set([
   'web_fetch',
   'list_directory',
   'read_code',
+  'desktop_automation',
+  'desktop_control',
 ]);
 
 export const DEFAULT_PROTECTED_TOOLS: ReadonlySet<string> = new Set(['skill']);

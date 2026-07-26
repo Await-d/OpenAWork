@@ -72,8 +72,20 @@ import {
   collectDelegatedSessionText,
   extractLatestDelegatedSessionMessage,
 } from '../task/delegated-task-display.js';
-import { desktopAutomationToolDefinition, runDesktopAutomationTool } from './desktop-automation.js';
-import { desktopControlToolDefinition, runDesktopControlTool } from './desktop-control.js';
+import {
+  desktopAutomationManager,
+  desktopAutomationToolDefinition,
+  runDesktopAutomationTool,
+} from './desktop-automation.js';
+import {
+  desktopControlManager,
+  desktopControlToolDefinition,
+  runDesktopControlTool,
+} from './desktop-control.js';
+import {
+  createDesktopScreenshotArtifactToolResult,
+  readDesktopControlScreenshotPayload,
+} from './desktop-screenshot-artifact.js';
 import { isDesktopControlPluginEnabledForUser } from './plugin-tool-settings.js';
 import type { DynamicToolEntry } from './dynamic-tool-loader.js';
 import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
@@ -2271,6 +2283,38 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
+      if (parsed.data.action === 'screenshot') {
+        const userId = getSessionOwnerUserId(sessionId);
+        if (!userId) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `Session owner not found for session ${sessionId}`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        const screenshotResult = createDesktopScreenshotArtifactToolResult({
+          userId,
+          sessionId,
+          toolCallId: request.toolCallId,
+          screenshotPayload: await desktopAutomationManager.screenshot(),
+          title: 'Desktop automation screenshot',
+          summary: '已保存桌面自动化截图，完整图像已作为图片附件提供。',
+          sourceKind: 'tool_desktop_automation_screenshot',
+          createdByNote: 'desktop_automation screenshot',
+        });
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: screenshotResult.output,
+          attachments: screenshotResult.attachments,
+          isError: false,
+          durationMs: 0,
+        };
+      }
+
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2288,6 +2332,51 @@ async function executeGatewayManagedToolImpl(
           toolName: request.toolName,
           output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
           isError: true,
+          durationMs: 0,
+        };
+      }
+
+      if (parsed.data.action === 'screenshot') {
+        const userId = getSessionOwnerUserId(sessionId);
+        if (!userId) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `Session owner not found for session ${sessionId}`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        const screenshotPayload = readDesktopControlScreenshotPayload(
+          await desktopControlManager.screenshot(parsed.data),
+        );
+        if (!screenshotPayload) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: '系统桌面截图结果缺少可用的图像数据。',
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        const screenshotResult = createDesktopScreenshotArtifactToolResult({
+          userId,
+          sessionId,
+          toolCallId: request.toolCallId,
+          screenshotPayload,
+          title: 'Desktop control screenshot',
+          summary: '已保存系统桌面截图，完整图像已作为图片附件提供。',
+          sourceKind: 'tool_desktop_control_screenshot',
+          createdByNote: 'desktop_control screenshot',
+        });
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: screenshotResult.output,
+          attachments: screenshotResult.attachments,
+          isError: false,
           durationMs: 0,
         };
       }

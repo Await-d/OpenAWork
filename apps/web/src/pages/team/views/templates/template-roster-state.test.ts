@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { WorkflowTemplateRecord } from '@openAwork/web-client';
 import {
   EMPTY_TEMPLATE_STATE,
   addCustomSlot,
@@ -12,6 +13,7 @@ import {
   exportTemplateState,
   importTemplateState,
   moveCustomSlotToLayer,
+  templateToEditorState,
   type TemplateEditorState,
 } from './template-roster-state.js';
 
@@ -228,6 +230,28 @@ describe('moveCustomSlotToLayer', () => {
     const preset = roster.find((s) => s.specialty !== 'custom')!;
     const moved = moveCustomSlotToLayer(roster, preset.id, 'pm1');
     expect(moved.find((s) => s.id === preset.id)?.layer).toBe(preset.layer);
+  });
+});
+
+describe('legacy executor toolset migration', () => {
+  it('模板编辑态会升级旧版内置 executor 工具集', () => {
+    const legacyRoster = [
+      {
+        ...cloneDefaultRoster().find((slot) => slot.id === 'executor-frontend')!,
+        toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+      },
+    ];
+    const template: WorkflowTemplateRecord = {
+      id: 'legacy',
+      name: 'legacy',
+      description: '',
+      category: 'team-playbook',
+      nodes: [],
+      edges: [],
+      metadata: { teamTemplate: { memberSlots: legacyRoster } },
+    };
+    const state = templateToEditorState(template);
+    expect(state.memberSlots[0]?.toolsets).toContain('desktop');
   });
 });
 

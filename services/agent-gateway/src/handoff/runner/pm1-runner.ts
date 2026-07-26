@@ -920,6 +920,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
       if (workingDir) {
         const { readFileSync, existsSync } = await import('node:fs');
+        // eslint-disable-next-line @typescript-eslint/unbound-method -- node:path 方法安全解构
         const { join } = await import('node:path');
         const agentsPath = join(workingDir, 'AGENTS.md');
         if (existsSync(agentsPath)) {

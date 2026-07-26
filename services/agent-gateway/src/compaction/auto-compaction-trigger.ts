@@ -33,6 +33,9 @@ import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { reactiveCompactByTokenGap } from './reactive-compact.js';
 import { trySessionMemoryCompaction } from './session-memory-compact.js';
 
+const RUNTIME_REPLACE_STRATEGY = 'runtime_replace' as const;
+const SUMMARY_ONLY_STRATEGY = 'summary_only' as const;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface AutoCompactionContext {
@@ -167,7 +170,7 @@ export async function triggerProactiveCompaction(
         trigger: 'automatic',
         phase: 'started',
         cause: 'proactive_near_overflow',
-        strategy: 'summary_only',
+        strategy: RUNTIME_REPLACE_STRATEGY,
         eventId: `${input.clientRequestId}:proactive-compact:${input.round}:started`,
         runId: input.runId,
         occurredAt: Date.now(),
@@ -201,7 +204,7 @@ export async function triggerProactiveCompaction(
         trigger: 'automatic',
         phase: 'completed',
         cause: 'proactive_near_overflow',
-        strategy: 'summary_only',
+        strategy: RUNTIME_REPLACE_STRATEGY,
         compactedMessages: compactedCount,
         representedMessages: representedCount,
         eventId: `${input.clientRequestId}:proactive-compact:${input.round}:${signature}:completed`,
@@ -221,7 +224,7 @@ export async function triggerProactiveCompaction(
         trigger: 'automatic',
         phase: 'failed',
         cause: 'proactive_near_overflow',
-        strategy: 'summary_only',
+        strategy: SUMMARY_ONLY_STRATEGY,
         eventId: `${input.clientRequestId}:proactive-compact:${input.round}:failed`,
         runId: input.runId,
         occurredAt: Date.now(),
@@ -314,7 +317,6 @@ export async function triggerOverflowCompaction(
             trigger: 'automatic',
             phase: 'completed',
             cause: 'usage_overflow',
-            strategy: 'summary_only',
             compactedMessages: reactiveResult.droppedMessages,
             eventId: `${input.clientRequestId}:reactive-compact:${input.round}:completed`,
             runId: input.runId,
@@ -355,7 +357,7 @@ export async function triggerOverflowCompaction(
           trigger: 'automatic',
           phase: 'completed',
           cause: roundResult.usage ? 'usage_overflow' : 'provider_overflow',
-          strategy: 'summary_only',
+          strategy: RUNTIME_REPLACE_STRATEGY,
           compactedMessages: allMessagesForSM.length - smResult.messagesToKeep.length,
           eventId: `${input.clientRequestId}:session-memory-compact:${input.round}:completed`,
           runId: input.runId,
@@ -395,7 +397,6 @@ export async function triggerOverflowCompaction(
           trigger: 'automatic',
           phase: 'completed',
           cause: 'usage_overflow',
-          strategy: 'summary_only',
           compactedMessages: truncationResult.truncatedCount,
           eventId: `${input.clientRequestId}:aggressive-truncate:${input.round}:completed`,
           runId: input.runId,
@@ -430,7 +431,7 @@ export async function triggerOverflowCompaction(
       ? ('replay' as const)
       : !roundResult.usage && roundResult.stopReason === 'error'
         ? ('synthetic_continue' as const)
-        : ('summary_only' as const);
+        : RUNTIME_REPLACE_STRATEGY;
     const messagesForCompaction = replayMessage ? allMessages.slice(0, -1) : allMessages;
 
     if (messagesForCompaction.length === 0) {
@@ -480,7 +481,7 @@ export async function triggerOverflowCompaction(
           trigger: 'automatic',
           phase: 'failed',
           cause,
-          strategy: 'summary_only',
+          strategy: SUMMARY_ONLY_STRATEGY,
           eventId: `${input.clientRequestId}:auto-compact:${input.round}:${signature}:llm-failed`,
           runId: input.runId,
           occurredAt: Date.now(),
@@ -529,7 +530,7 @@ export async function triggerOverflowCompaction(
         trigger: 'automatic',
         phase: 'failed',
         cause: roundResult.usage ? 'usage_overflow' : 'provider_overflow',
-        strategy: 'summary_only',
+        strategy: SUMMARY_ONLY_STRATEGY,
         eventId: `${input.clientRequestId}:auto-compact:${input.round}:failed`,
         runId: input.runId,
         occurredAt: Date.now(),

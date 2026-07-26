@@ -190,8 +190,25 @@ export interface ChatConversationViewProps {
   streamError: string | null;
   latestUpstreamSummary: UpstreamStreamSummary | null;
   onDismissStreamError: () => void;
+  /**
+   * Optional retry for the last failed stream turn. When provided the
+   * stream-error bar shows a primary "重试" button.
+   */
+  onRetryStreamError?: () => void;
+  /**
+   * Optional progress text while automatic reconnect / exponential
+   * backoff is in flight (e.g. "自动重连中 · 约 1.5s 后重试…").
+   */
+  streamRetryProgress?: string | null;
   /** SessionRunStateBar 字段。 */
   checkpointCount: number;
+  latestCompaction?: {
+    trigger: 'manual' | 'automatic';
+    phase?: 'started' | 'completed' | 'failed';
+    compactedMessages?: number;
+    representedMessages?: number;
+    cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
+  } | null;
   pendingQuestionsCount: number;
   stopCapability: 'none' | 'precise' | 'best_effort' | 'observe_only';
   onOpenRecovery: () => void;
@@ -430,7 +447,10 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     streamError,
     latestUpstreamSummary,
     onDismissStreamError,
+    onRetryStreamError,
+    streamRetryProgress,
     checkpointCount,
+    latestCompaction,
     pendingQuestionsCount,
     stopCapability,
     onOpenRecovery,
@@ -721,11 +741,14 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
         streamError={streamError}
         latestUpstreamSummary={latestUpstreamSummary}
         onDismiss={onDismissStreamError}
+        onRetry={onRetryStreamError}
+        retryProgress={streamRetryProgress}
       />
 
       {remoteSessionBusyState && (
         <SessionRunStateBar
           checkpointCount={checkpointCount}
+          latestCompaction={latestCompaction ?? null}
           latestUpstreamSummary={latestUpstreamSummary}
           onOpenRecovery={onOpenRecovery}
           pendingPermissionsCount={pendingPermissions.length}

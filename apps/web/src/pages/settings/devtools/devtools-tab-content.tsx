@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  RootCausePanel,
   SSHConnectionPanel,
   type DevEvent,
   type SSHConnectionEntry,
@@ -718,93 +717,51 @@ export function DevtoolsTabContent({
 
       <section ref={overviewSectionRef} style={SS}>
         <h3 style={ST}>数据源概览</h3>
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 760, lineHeight: 1.6 }}>
-          以下展示各数据源的实时健康状态。点击数据源卡片中的刷新按钮可单独刷新，也可使用工具栏的「刷新」按钮批量刷新。
-          {errorSources.length > 0 ? (
-            <span style={{ color: 'var(--danger)', fontWeight: 600, marginLeft: 4 }}>
-              当前有 {errorSources.length} 个数据源失败，请优先排查。
-            </span>
-          ) : null}
+
+        {/* 简洁统计行 */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-muted)' }}>
+          <span style={{ color: 'var(--accent)' }}>正常 {healthyCount}</span>
+          {loadingCount > 0 && <span>加载 {loadingCount}</span>}
+          {emptyCount > 0 && <span>空 {emptyCount}</span>}
+          {unavailableCount > 0 && <span style={{ color: 'var(--warning)' }}>未接入 {unavailableCount}</span>}
+          {errorSources.length > 0 && <span style={{ color: 'var(--danger)' }}>失败 {errorSources.length}</span>}
+          {logErrors > 0 && <span style={{ color: 'var(--danger)' }}>日志错误 {logErrors}</span>}
+          {workerErrors > 0 && <span style={{ color: 'var(--danger)' }}>Worker 异常 {workerErrors}</span>}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {[
-            { label: '正常', value: healthyCount, color: 'var(--accent)' },
-            { label: '载入中', value: loadingCount, color: 'var(--fg-default)' },
-            { label: '空数据', value: emptyCount, color: 'var(--fg-default)' },
-            { label: '未接入', value: unavailableCount, color: 'var(--warning)' },
-            { label: '失败', value: errorSources.length, color: 'var(--danger)' },
-          ].map((item) => (
-            <div
-              key={item.label}
-              style={{
-                borderRadius: 999,
-                padding: '3px 8px',
-                background:
-                  item.value > 0 &&
-                  (item.color === 'var(--danger)' || item.color === 'var(--warning)')
-                    ? `color-mix(in srgb, ${item.color} 10%, var(--bg-overlay))`
-                    : 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
-                border:
-                  item.value > 0 &&
-                  (item.color === 'var(--danger)' || item.color === 'var(--warning)')
-                    ? `1px solid color-mix(in srgb, ${item.color} 30%, var(--border-default))`
-                    : '1px solid var(--border-default)',
-                fontSize: 11,
-                color: item.value > 0 ? item.color : 'var(--fg-subtle)',
-                fontWeight: 600,
-                fontVariantNumeric: 'tabular-nums',
-                opacity: item.value > 0 ? 1 : 0.6,
-              }}
-            >
-              {item.label} {item.value}
-            </div>
-          ))}
-          <div
-            style={{
-              borderRadius: 999,
-              padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
-              border: '1px solid var(--border-default)',
-              fontSize: 11,
-              color: 'var(--fg-default)',
-              fontWeight: 600,
-            }}
-          >
-            错误日志 {logErrors}
-          </div>
-          <div
-            style={{
-              borderRadius: 999,
-              padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
-              border: '1px solid var(--border-default)',
-              fontSize: 11,
-              color: workerErrors > 0 ? 'var(--danger)' : 'var(--fg-default)',
-              fontWeight: 600,
-            }}
-          >
-            Worker 异常 {workerErrors}
-          </div>
-        </div>
-        {errorSources.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+        {/* 错误提示 - 仅在有错误时显示 */}
+        {errorSources.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {errorSources.map((source) => (
-              <RootCausePanel
+              <div
                 key={source.label}
-                nodeLabel={source.label}
-                attempts={1}
-                error={`${source.detail}：${source.error}`}
-                style={{ maxWidth: '100%' }}
-              />
+                style={{
+                  border: '1px solid color-mix(in srgb, var(--danger) 20%, var(--border-subtle))',
+                  borderRadius: 3,
+                  padding: '3px 6px',
+                  background: 'color-mix(in srgb, var(--danger) 3%, transparent)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 10,
+                }}
+              >
+                <span style={{ color: 'var(--danger)', fontWeight: 500 }}>✗ {source.label}</span>
+                <span style={{ color: 'var(--fg-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {source.detail}：{source.error}
+                </span>
+              </div>
             ))}
           </div>
-        ) : null}
+        )}
+
+        {/* 数据源卡片 - 紧凑网格 */}
         <div
           style={{
             ...UV,
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: 8,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: 3,
           }}
         >
           {(Object.entries(sourceStates) as Array<[DevtoolsSourceKey, DevtoolsSourceState]>).map(
@@ -953,26 +910,16 @@ export function DevtoolsTabContent({
 
       <section ref={sshSectionRef} style={SS}>
         <h3 style={ST}>SSH 远程连接</h3>
-        {sourceStates.sshConnections.status === 'error' && sourceStates.sshConnections.error ? (
-          <InlineFailureNotice
-            title="SSH 连接加载失败"
-            message={sourceStates.sshConnections.error}
-          />
-        ) : null}
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--fg-muted)',
-            maxWidth: 760,
-            lineHeight: 1.6,
-          }}
-        >
-          管理远程 SSH 连接，连接成功后可浏览远程文件树并与远程会话绑定。
-          {sshConnections.length > 0 ? (
-            <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 600 }}>
+        {sourceStates.sshConnections.status === 'error' && sourceStates.sshConnections.error && (
+          <InlineFailureNotice title="SSH 连接加载失败" message={sourceStates.sshConnections.error} />
+        )}
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+          管理远程 SSH 连接
+          {sshConnections.length > 0 && (
+            <span style={{ marginLeft: 4, color: 'var(--accent)' }}>
               当前 {sshConnections.length} 个连接
             </span>
-          ) : null}
+          )}
         </div>
         <div style={UV}>
           <SSHConnectionPanel

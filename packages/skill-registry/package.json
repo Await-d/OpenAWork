@@ -23,5 +23,8 @@
     "@openAwork/skill-types": "workspace:*",
     "fflate": "^0.8.2",
     "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37"
   }
 }

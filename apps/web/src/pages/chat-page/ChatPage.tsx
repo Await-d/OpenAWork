@@ -689,7 +689,8 @@ export default function ChatPage() {
     consumeResetToWelcomeSignal();
   }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
+  const { attachRetryNonce, attachRetryProgress, cancelAttachRetry, scheduleAttachRetry } =
+    useStreamAttachRetry();
   useEffect(() => {
     return subscribeSessionStreamResumeAttach((sessionId) => {
       if (sessionId !== currentSessionId || !isPageActive) {
@@ -1766,7 +1767,11 @@ export default function ChatPage() {
     setRecoveryActiveStream(null);
     setIsSessionSnapshotReady(false);
     setSessionModesHydrated(false);
-    setSessionMetadataDirty(false);
+    // 必须同时重置 ref 和 state —— 如果只 setSessionMetadataDirty(false)，
+    // sessionMetadataDirtyRef.current 会保留上一个会话的 dirty 标记，
+    // 导致 recovery 回调中 if (!sessionMetadataDirtyRef.current) 判断为 false，
+    // 会话 metadata 中的 providerId/modelId 不被应用，输入框显示的是旧模型。
+    clearSessionMetadataDirty();
     sessionModelSelectionSourceRef.current = null;
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
@@ -1860,6 +1865,12 @@ export default function ChatPage() {
             );
             setIsSessionSnapshotReady(true);
             setServerTotalTurnCount(recovery.totalTurnCount ?? null);
+            // 会话切换时的初始恢复 —— 无条件应用 metadata。
+            // 之前用 if (!sessionMetadataDirtyRef.current) 守卫，但由于会话切换
+            // useEffect 中已通过 clearSessionMetadataDirty() 重置了 ref，
+            // 如果 ref 为 true 则说明用户在 recovery 异步窗口内手动改了模型，
+            // 此时应当尊重用户选择。但对于 dialogueMode/yoloMode 等非模型设置，
+            // 仍然应该在 ref 为 false 时才恢复（它们有自己的 dirty 语义）。
             if (!sessionMetadataDirtyRef.current) {
               setDialogueMode(
                 metadata.dialogueMode ?? useDisplayPreferencesStore.getState().defaultDialogueMode,
@@ -1869,14 +1880,17 @@ export default function ChatPage() {
               setWebSearchEnabled(metadata.webSearchEnabled && webSearchAvailable);
               setThinkingEnabled(metadata.thinkingEnabled);
               setReasoningEffort(metadata.reasoningEffort);
-              setActiveProviderId(metadata.providerId ?? '');
-              setActiveModelId(metadata.modelId ?? '');
-              sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
-                modelSelectionSource: metadata.modelSelectionSource,
-                providerId: metadata.providerId,
-                modelId: metadata.modelId,
-              });
             }
+            // 模型选择必须无条件从 metadata 恢复 —— 这是会话绑定的核心数据。
+            // 即使 sessionMetadataDirtyRef 在异步窗口中被设为 true（极端竞态），
+            // 也应优先采用服务端 metadata 中的值，因为它代表了会话最后一次持久化的状态。
+            setActiveProviderId(metadata.providerId ?? '');
+            setActiveModelId(metadata.modelId ?? '');
+            sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
+              modelSelectionSource: metadata.modelSelectionSource,
+              providerId: metadata.providerId,
+              modelId: metadata.modelId,
+            });
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
               agentId: metadata.agentId,
@@ -2339,6 +2353,29 @@ export default function ChatPage() {
     handleEditRetryMessage(previousUserMessage);
   }, [handleEditRetryMessage, messages]);
 
+  const handleRetryLastFailedTurn = useCallback(() => {
+    // Prefer the most recent assistant error / cancelled message as the
+    // retry target; fall back to the latest user turn.
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message) continue;
+      if (
+        message.role === 'assistant' &&
+        (message.status === 'error' ||
+          message.status === 'cancelled' ||
+          message.stopReason === 'error' ||
+          message.stopReason === 'cancelled')
+      ) {
+        handleRetryMessage(message.id);
+        return;
+      }
+    }
+    const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+    if (lastUser) {
+      handleRetryMessage(lastUser.id);
+    }
+  }, [handleRetryMessage, messages]);
+
   const { createBranchSessionFromMessage } = useChatBranchSession({
     token,
     gatewayUrl,
@@ -2521,17 +2558,25 @@ export default function ChatPage() {
   ): Promise<boolean> {
     const sourceInput = sanitizeComposerPlainText(overrideText ?? '');
     const effectiveFiles = options?.queuedFiles ?? [];
+    const trimmedSourceInput = sourceInput.trim();
+    const matchedClientCommand =
+      effectiveFiles.length === 0
+        ? matchClientSlashCommand(trimmedSourceInput, composerCommandDescriptors)
+        : null;
+    const matchedServerCommand =
+      effectiveFiles.length === 0
+        ? matchServerSlashCommand(trimmedSourceInput, composerCommandDescriptors)
+        : null;
     if (
-      (!sourceInput.trim() && (imageGenerationMode || effectiveFiles.length === 0)) ||
-      streaming ||
-      remoteSessionBusyState ||
+      (!trimmedSourceInput && (imageGenerationMode || effectiveFiles.length === 0)) ||
+      ((streaming || remoteSessionBusyState) && !matchedServerCommand && !matchedClientCommand) ||
       imageGenerationBusy
     ) {
       return false;
     }
     const requestOriginSessionId = activeSessionRef.current;
     setStreamError(null);
-    let text = sourceInput.trim();
+    let text = trimmedSourceInput;
 
     // ── 内置 client 命令:/open <url> ─────────────────────────────────
     // 直接打开内置浏览器到指定 URL,不发送给 LLM。
@@ -2644,22 +2689,18 @@ export default function ChatPage() {
       });
     }
 
-    const matchedClientCommand =
-      effectiveFiles.length === 0
-        ? matchClientSlashCommand(text, composerCommandDescriptors)
-        : null;
-    const matchedServerCommand =
-      effectiveFiles.length === 0
-        ? matchServerSlashCommand(text, composerCommandDescriptors)
-        : null;
-
     if (matchedClientCommand?.action.kind === 'open_companion_panel') {
       bumpCompanionPanelSignal();
       return true;
     }
 
     if (matchedServerCommand) {
-      await executeServerCommand({
+      // Server commands are actions, not chat messages. Clear the composer
+      // immediately so the command is not left in the input while it runs.
+      if (overrideText === undefined) {
+        setInput('');
+      }
+      void executeServerCommand({
         command: matchedServerCommand,
         currentSessionId,
         gatewayUrl,
@@ -2677,9 +2718,14 @@ export default function ChatPage() {
           setRightPanelState((prev) =>
             events.reduce((next, event) => applyChatRightPanelEvent(next, event), prev),
           );
-          appendAssistantEventMessages(events, { excludeCompaction: true });
+          appendAssistantEventMessages(events);
         },
-        onOpenRightPanel: () => {},
+        onOpenRightPanel: () => {
+          setRightOpen(true);
+          setRightTab(
+            matchedServerCommand.action.kind === 'compact_session' ? 'history' : 'overview',
+          );
+        },
       });
       requestSessionListRefresh();
       return true;
@@ -3271,38 +3317,40 @@ export default function ChatPage() {
         const finishedAt = Date.now();
         const resolvedStopReason = stopReason ?? 'end_turn';
         const wasCancelled = String(resolvedStopReason) === 'cancelled';
-        // P1-CANCEL / T-CANCEL-08: render a precise toast based on
-        // the cascade reason. Three branches:
-        //   - `parent_aborted` / `ancestor_aborted` → this session is
-        //     a descendant; the user did NOT click stop here, the
-        //     parent did. We tell them so they understand why their
-        //     stream just terminated.
-        //   - `user_aborted` with a non-empty cascade → the user
-        //     stopped this session and the gateway also took N
-        //     children down with it; show that count.
-        //   - everything else (`user_aborted` + no cascade) → bare
-        //     "已停止" remains the default and we do not toast.
-        if (wasCancelled && cancellation) {
-          const suffix = cancellation.timedOut ? '（超时）' : '';
-          if (
-            cancellation.reason === 'parent_aborted' ||
-            cancellation.reason === 'ancestor_aborted'
-          ) {
-            toast(
-              `本会话由${cancellation.reason === 'parent_aborted' ? '父' : '上游'}会话中断${suffix}`,
-              'info',
-              3200,
-            );
-          } else if (cancellation.descendantSessions > 0) {
-            const desc = cancellation.descendantSessions;
-            const streams = cancellation.cancelledStreams;
-            toast(
-              `已停止当前会话 + ${desc} 个子会话${
-                streams > 0 ? `（共 ${streams} 个运行中请求）` : ''
-              }${suffix}`,
-              'success',
-              3200,
-            );
+        // P1-CANCEL / T-CANCEL-08: always surface a stop reason toast.
+        //   - `parent_aborted` / `ancestor_aborted` → descendant was
+        //     stopped because a parent session aborted.
+        //   - `user_aborted` with cascade → stopped self + N children.
+        //   - bare stop / missing cancellation → short "已停止生成".
+        if (wasCancelled) {
+          if (cancellation) {
+            const suffix = cancellation.timedOut ? '（超时）' : '';
+            if (
+              cancellation.reason === 'parent_aborted' ||
+              cancellation.reason === 'ancestor_aborted'
+            ) {
+              toast(
+                `本会话由${cancellation.reason === 'parent_aborted' ? '父' : '上游'}会话中断${suffix}`,
+                'info',
+                3200,
+              );
+            } else if (cancellation.descendantSessions > 0) {
+              const desc = cancellation.descendantSessions;
+              const streams = cancellation.cancelledStreams;
+              toast(
+                `已停止当前会话 + ${desc} 个子会话${
+                  streams > 0 ? `（共 ${streams} 个运行中请求）` : ''
+                }${suffix}`,
+                'success',
+                3200,
+              );
+            } else {
+              // Bare user stop — still surface a short toast so the
+              // stop reason is never silent.
+              toast(`已停止生成${suffix}`, 'info', 2200);
+            }
+          } else {
+            toast('已停止生成', 'info', 2200);
           }
         }
         const isPausedForPermission = resolvedStopReason === 'tool_permission';
@@ -3320,6 +3368,14 @@ export default function ChatPage() {
           finalAccumulatedText.trim().length > 0 ||
           accumulatedThinking.trim().length > 0 ||
           toolCallIds.size > 0;
+        // Preserve cancelled / error as first-class message statuses so the
+        // message meta row can show "已停止" / "错误" without depending on a
+        // display preference the user may have turned off.
+        const messageStatus: 'completed' | 'error' | 'cancelled' = wasCancelled
+          ? 'cancelled'
+          : resolvedStopReason === 'error'
+            ? 'error'
+            : 'completed';
         if (hasRenderableAssistantReply || !wasCancelled) {
           const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
           const finalized = finalizeStreamMessage({
@@ -3338,7 +3394,7 @@ export default function ChatPage() {
             providerId: resolvedMessageProviderId,
             requestStartedAt,
             setMessages,
-            status: 'completed',
+            status: messageStatus,
             stopReason: resolvedStopReason,
             toolCallIds: new Set(liveToolCalls.keys()),
             traceFinalStatus,
@@ -3362,7 +3418,7 @@ export default function ChatPage() {
             providerId: resolvedMessageProviderId,
             requestStartedAt,
             setMessages,
-            status: 'completed',
+            status: 'cancelled',
             stopReason: resolvedStopReason,
             toolCallIds: new Set(liveToolCalls.keys()),
             traceFinalStatus,
@@ -4306,6 +4362,11 @@ export default function ChatPage() {
             finalAccumulatedText.trim().length > 0 ||
             accumulatedThinking.trim().length > 0 ||
             toolCallIds.size > 0;
+          const messageStatus: 'completed' | 'error' | 'cancelled' = wasCancelled
+            ? 'cancelled'
+            : resolvedStopReason === 'error'
+              ? 'error'
+              : 'completed';
           if (hasRenderableAssistantReply || !wasCancelled) {
             const attachMsgId =
               currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
@@ -4325,7 +4386,32 @@ export default function ChatPage() {
               providerId: resolvedMessageProviderId,
               requestStartedAt,
               setMessages,
-              status: 'completed',
+              status: messageStatus,
+              stopReason: resolvedStopReason,
+              toolCallIds: new Set(liveToolCalls.keys()),
+              traceFinalStatus,
+            });
+            firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
+          } else if (wasCancelled) {
+            const attachMsgId =
+              currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+            const finalized = finalizeStreamMessage({
+              accumulatedSegments,
+              accumulatedThinking,
+              agentId: streamAgentId || requestAgentId,
+              buildTraceMessage: (messageId, textContent) =>
+                buildAttachTraceMessage(messageId, textContent, traceFinalStatus),
+              contentText: '已停止',
+              createdAt: finishedAt,
+              currentRoundStartedAt,
+              firstTokenLatencyAttached,
+              firstTokenObservedAt,
+              messageId: attachMsgId,
+              model: resolvedMessageModel,
+              providerId: resolvedMessageProviderId,
+              requestStartedAt,
+              setMessages,
+              status: 'cancelled',
               stopReason: resolvedStopReason,
               toolCallIds: new Set(liveToolCalls.keys()),
               traceFinalStatus,
@@ -4501,6 +4587,7 @@ export default function ChatPage() {
     effectiveReportedStreamUsage,
     streamingUsageDetails,
     contextUsageSnapshot,
+    effectiveContextMessageCount,
     sanitizedHistoricalMessages,
     hiddenMessageCount,
     historicalRenderedMessageEntries,
@@ -4529,6 +4616,13 @@ export default function ChatPage() {
     buildMessageActions: (message) => {
       const baseActions = buildMessageActions(message);
       const isBookmarked = bookmarkStore.isBookmarked(message.id);
+
+      // 对于压缩消息，只返回基础操作（复制），不添加收藏和选择按钮
+      const isCompaction = baseActions.length === 1 && baseActions[0]?.id === 'copy';
+      if (isCompaction) {
+        return baseActions;
+      }
+
       return [
         ...baseActions,
         {
@@ -4609,6 +4703,7 @@ export default function ChatPage() {
     const contextUsedTokens = contextUsageSnapshot?.usedTokens ?? 0;
     const contextMaxTokens = contextUsageSnapshot?.maxTokens ?? 0;
     const contextIsEstimated = contextUsageSnapshot?.estimated ?? false;
+    const latestCompaction = compactions[0];
 
     return {
       totalCostUsd,
@@ -4624,6 +4719,10 @@ export default function ChatPage() {
       messageTurns: usageDetails.size,
       hiddenMessageCount: hiddenMessageCount ?? 0,
       serverTotalTurnCount: serverTotalTurnCount ?? null,
+      compactionCount: compactions.length,
+      latestCompactionTrigger: latestCompaction?.trigger,
+      latestCompactionRepresentedMessages: latestCompaction?.representedMessages,
+      latestCompactionCompactedMessages: latestCompaction?.compactedMessages,
       childSessionCount: childSessions.length,
       sessionTaskCount: sessionTasks.length,
       tokensPerSecond: streamingUsageDetails?.tokensPerSecond,
@@ -4640,6 +4739,7 @@ export default function ChatPage() {
     visibleStreaming,
     hiddenMessageCount,
     serverTotalTurnCount,
+    compactions,
     childSessions.length,
     sessionTasks.length,
   ]);
@@ -4665,6 +4765,7 @@ export default function ChatPage() {
       dialogueMode,
       effectiveWorkingDirectory,
       messages,
+      effectiveContextMessageCount,
       onCompactSession: handleFusionContextCompactSession,
       onOpenRecoveryStrategy: handleFusionContextOpenRecoveryStrategy,
       pendingPermissions,
@@ -5450,7 +5551,10 @@ export default function ChatPage() {
                 stoppingStream={stoppingStream}
                 streamError={streamError}
                 latestUpstreamSummary={visibleLatestUpstreamSummary}
+                latestCompaction={compactions[0] ?? null}
                 onDismissStreamError={() => setStreamError(null)}
+                onRetryStreamError={handleRetryLastFailedTurn}
+                streamRetryProgress={attachRetryProgress}
                 checkpointCount={compactions.length}
                 pendingQuestionsCount={pendingQuestions.length}
                 stopCapability={stopCapability}
@@ -5922,7 +6026,10 @@ export default function ChatPage() {
                   stoppingStream={stoppingStream}
                   streamError={streamError}
                   latestUpstreamSummary={visibleLatestUpstreamSummary}
+                  latestCompaction={compactions[0] ?? null}
                   onDismissStreamError={() => setStreamError(null)}
+                  onRetryStreamError={handleRetryLastFailedTurn}
+                  streamRetryProgress={attachRetryProgress}
                   checkpointCount={compactions.length}
                   pendingQuestionsCount={pendingQuestions.length}
                   stopCapability={stopCapability}
@@ -6183,6 +6290,7 @@ export default function ChatPage() {
           currentSessionId={currentSessionId}
           dialogueMode={dialogueMode}
           effectiveWorkingDirectory={effectiveWorkingDirectory}
+          effectiveContextMessageCount={effectiveContextMessageCount}
           messages={messages}
           sessionStateStatus={sessionStateStatus}
           workspaceFileItems={workspaceFileItems}

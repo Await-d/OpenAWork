@@ -64,6 +64,19 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
     exitInputHistoryBrowsing,
   } = opts;
 
+  function isExactSlashCommandInput(): boolean {
+    if (!composerMenu || composerMenu.type !== 'slash') {
+      return false;
+    }
+
+    const trimmedInput = input.trim().toLowerCase();
+    if (trimmedInput.length === 0) {
+      return false;
+    }
+
+    return slashCommandItems.some((item) => item.label.toLowerCase() === trimmedInput);
+  }
+
   function replaceComposerToken(start: number, end: number, replacement: string) {
     const before = input.slice(0, start);
     const after = input.slice(end);
@@ -136,6 +149,12 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
               }
             : prev,
         );
+        return;
+      }
+      if (e.key === 'Enter' && currentItems.length > 0 && isExactSlashCommandInput()) {
+        e.preventDefault();
+        setComposerMenu(null);
+        void sendMessage();
         return;
       }
       if ((e.key === 'Enter' || e.key === 'Tab') && currentItems.length > 0) {

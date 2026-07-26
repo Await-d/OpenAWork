@@ -30,13 +30,15 @@ export const SYSTEM_BUILTIN_SKILL_NAMES = [
   'lsp',
   'ast-grep',
   'rules',
+  'superpowers',
+  'create-pr',
+  'cloudflare',
 ] as const;
 
 export type SystemBuiltinSkillName = (typeof SYSTEM_BUILTIN_SKILL_NAMES)[number];
 
 export const SYSTEM_BUILTIN_COMMAND_IDS = [
   'slash-compact',
-  'slash-summarize',
   'slash-handoff',
   'slash-buddy',
   'nav-chat',
@@ -83,6 +85,11 @@ const filesystemOptional = [
   { type: 'filesystem', scope: '**', required: false },
 ] satisfies readonly SkillPermission[];
 
+const filesystemAndNetworkOptional = [
+  ...filesystemOptional,
+  { type: 'network', scope: '*', required: false },
+] satisfies readonly SkillPermission[];
+
 export const SYSTEM_BUILTIN_SKILL_PROFILES = {
   'git-master': {
     capabilities: ['git.commit', 'git.rebase', 'git.history', 'git.bisect', 'git.blame'],
@@ -115,6 +122,24 @@ export const SYSTEM_BUILTIN_SKILL_PROFILES = {
   rules: {
     capabilities: ['rules.discovery', 'rules.compliance'],
     permissions: filesystemOptional,
+  },
+  superpowers: {
+    capabilities: ['code.tdd', 'code.debugging', 'review.code-quality', 'verification.completion'],
+    permissions: filesystemOptional,
+  },
+  'create-pr': {
+    capabilities: ['git.pull-request', 'git.conventional-commits', 'git.ci-verification'],
+    permissions: filesystemRequired,
+  },
+  cloudflare: {
+    capabilities: [
+      'cloudflare.workers',
+      'cloudflare.pages',
+      'cloudflare.storage',
+      'cloudflare.ai',
+      'cloudflare.deployment',
+    ],
+    permissions: filesystemAndNetworkOptional,
   },
 } satisfies Record<SystemBuiltinSkillName, SystemBuiltinSkillProfile>;
 

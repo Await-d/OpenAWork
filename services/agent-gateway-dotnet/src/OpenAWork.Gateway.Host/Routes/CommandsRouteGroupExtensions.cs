@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using OpenAWork.Gateway.Application.Abstractions.Auth;
 using OpenAWork.Gateway.Application.Abstractions.Persistence;
+using OpenAWork.Gateway.Application.Abstractions.Settings;
 using OpenAWork.Gateway.Persistence.EFCore;
 using OpenAWork.Gateway.Persistence.EFCore.Entities;
 
@@ -67,6 +68,7 @@ public static class CommandsRouteGroupExtensions
             GatewayDbContext dbContext,
             IConfiguration configuration,
             IMessageV2Store messageV2Store,
+            IWorkflowLlmClient workflowLlmClient,
             CancellationToken cancellationToken) =>
         {
             if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId))
@@ -97,7 +99,7 @@ public static class CommandsRouteGroupExtensions
             CommandExecutionResultView result;
             if (string.Equals(command.Action.Kind, "compact_session", StringComparison.Ordinal))
             {
-                result = await ExecuteCompactAsync(id, session, messages, dbContext, cancellationToken);
+                result = await ExecuteCompactAsync(id, session, messages, requestBody.ExecutionId, dbContext, configuration, workflowLlmClient, cancellationToken);
             }
             else if (string.Equals(command.Action.Kind, "generate_handoff", StringComparison.Ordinal))
             {
@@ -142,17 +144,36 @@ public static class CommandsRouteGroupExtensions
         string sessionId,
         SessionRecord session,
         IReadOnlyList<CommandMessageSnapshot> messages,
+        string? requestExecutionId,
+        IConfiguration configuration,
+        IWorkflowLlmClient workflowLlmClient,
         GatewayDbContext dbContext,
         CancellationToken cancellationToken)
     {
-        var summary = BuildSummary(messages);
+        var apiBaseUrl = configuration["AI_API_BASE_URL"] ?? "https://api.openai.com/v1";
+        var apiKey = configuration["AI_API_KEY"] ?? string.Empty;
+        var model = configuration["AI_DEFAULT_MODEL"] ?? "gpt-4o-mini";
+        var summary = await workflowLlmClient.CompleteAsync(
+            apiBaseUrl,
+            apiKey,
+            model,
+            BuildManualCompactionPrompt(messages),
+            0.2,
+            cancellationToken);
+        summary = string.IsNullOrWhiteSpace(summary)
+            ? BuildFallbackSummary(messages)
+            : summary.Trim();
+
         var metadata = ParseMetadata(session.MetadataJson);
         metadata["lastCompactionSummary"] = summary;
         metadata["lastCompactionTrigger"] = "manual";
         metadata["compactionMemory"] = new JsonObject
         {
-            ["schemaVersion"] = 1,
+            ["schemaVersion"] = 2,
+            ["strategy"] = "runtime_replace",
             ["coveredUntilMessageId"] = messages.LastOrDefault()?.Id,
+            ["compactedMessages"] = messages.Count,
+            ["representedMessages"] = messages.Count,
         };
 
         var storedMessages = JsonNode.Parse(session.MessagesJson) as JsonArray ?? [];
@@ -170,7 +191,10 @@ public static class CommandsRouteGroupExtensions
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var runId = $"command:{sessionId}:slash-compact";
+        var executionId = string.IsNullOrWhiteSpace(requestExecutionId)
+            ? Guid.NewGuid().ToString("N")
+            : requestExecutionId.Trim();
+        var runId = $"command:{sessionId}:slash-compact:{executionId}";
         return new CommandExecutionResultView(
             [
                 new Dictionary<string, object?>
@@ -180,9 +204,9 @@ public static class CommandsRouteGroupExtensions
                     ["trigger"] = "manual",
                     ["phase"] = "started",
                     ["cause"] = "manual",
-                    ["strategy"] = "summary_only",
+                    ["strategy"] = "runtime_replace",
                     ["runId"] = runId,
-                    ["eventId"] = $"{sessionId}:slash-compact:started",
+                    ["eventId"] = $"{sessionId}:slash-compact:{executionId}:started",
                     ["occurredAt"] = now,
                 },
                 new Dictionary<string, object?>
@@ -192,11 +216,11 @@ public static class CommandsRouteGroupExtensions
                     ["trigger"] = "manual",
                     ["phase"] = "completed",
                     ["cause"] = "manual",
-                    ["strategy"] = "summary_only",
+                    ["strategy"] = "runtime_replace",
                     ["compactedMessages"] = messages.Count,
                     ["representedMessages"] = messages.Count,
                     ["runId"] = runId,
-                    ["eventId"] = $"{sessionId}:slash-compact:completed",
+                    ["eventId"] = $"{sessionId}:slash-compact:{executionId}:completed",
                     ["occurredAt"] = now,
                 },
             ],
@@ -563,6 +587,9 @@ public static class CommandsRouteGroupExtensions
                 && ImplementedServerCommandActions.Contains(descriptor.Action.Kind));
 
     private static string BuildSummary(IReadOnlyList<CommandMessageSnapshot> messages)
+        => BuildFallbackSummary(messages);
+
+    private static string BuildFallbackSummary(IReadOnlyList<CommandMessageSnapshot> messages)
     {
         var snippets = messages
             .SelectMany((message) => message.Content)
@@ -575,6 +602,40 @@ public static class CommandsRouteGroupExtensions
             ? "Durable session compaction memory: 当前没有足够文本可处理。"
             : $"Durable session compaction memory: {string.Join(" | ", snippets)}";
     }
+
+    private static string BuildManualCompactionPrompt(IReadOnlyList<CommandMessageSnapshot> messages)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("请把以下 OpenAWork 会话压缩成可继续执行的运行时记忆。输出用于替换较早历史上下文，因此必须保留任务目标、关键约束、已完成工作、失败尝试、重要工具结果和下一步。不要寒暄，不要虚构。 ");
+        builder.AppendLine();
+        builder.AppendLine($"待压缩消息数：{messages.Count}");
+        builder.AppendLine("历史消息：");
+
+        foreach (var message in messages)
+        {
+            var content = string.Join("\n\n", message.Content
+                .Select((item) => item.Text?.Trim())
+                .Where((text) => !string.IsNullOrWhiteSpace(text)));
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                continue;
+            }
+
+            builder.AppendLine($"[{FormatCommandRole(message.Role)}] {content}");
+            builder.AppendLine();
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static string FormatCommandRole(string role)
+        => role switch
+        {
+            "user" => "用户",
+            "assistant" => "助手",
+            "tool" => "工具",
+            _ => role,
+        };
 
     private static JsonObject ParseMetadata(string metadataJson)
     {
@@ -626,6 +687,7 @@ public static class CommandsRouteGroupExtensions
 
         var commandId = ReadRequiredString(body, "commandId", 1, 120, issues, "commandId");
         var rawInput = ReadOptionalString(body, "rawInput", 4000, issues, "rawInput");
+        var executionId = ReadOptionalString(body, "executionId", 128, issues, "executionId");
         var messages = ReadMessages(body, issues);
         if (commandId is null || issues.Count > 0)
         {
@@ -633,7 +695,7 @@ public static class CommandsRouteGroupExtensions
             return false;
         }
 
-        request = new ExecuteCommandBody(commandId, rawInput, messages);
+        request = new ExecuteCommandBody(commandId, rawInput, executionId, messages);
         return true;
     }
 
@@ -826,7 +888,11 @@ public static class CommandsRouteGroupExtensions
         }
     }
 
-    private sealed record ExecuteCommandBody(string CommandId, string? RawInput, IReadOnlyList<CommandMessageSnapshot>? Messages);
+    private sealed record ExecuteCommandBody(
+        string CommandId,
+        string? RawInput,
+        string? ExecutionId,
+        IReadOnlyList<CommandMessageSnapshot>? Messages);
 
     private sealed record CommandMessageSnapshot(string Id, string Role, IReadOnlyList<CommandContentSnapshot> Content, long CreatedAt);
 

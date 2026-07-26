@@ -34,6 +34,13 @@ describe('truncateToolOutput', () => {
     expect(truncated).toContain(NOTICE_FRAGMENT);
   });
 
+  it('caps desktop_control output at the tool-specific 8k limit', () => {
+    const output = 's'.repeat(20_000);
+    const truncated = truncateToolOutput('desktop_control', output);
+    expect(truncated.startsWith('s'.repeat(8_000))).toBe(true);
+    expect(truncated).toContain(NOTICE_FRAGMENT);
+  });
+
   it('uses default 200k cap for known truncatable tools without specific override', () => {
     const output = 'g'.repeat(250_000);
     const truncated = truncateToolOutput('grep', output);

@@ -1,9 +1,10 @@
 use crate::desktop_control_native::{
     command_exists, coordinate_arg, read_png_response, run_command, temp_png_path, ClickAction,
     ClickRequest, ClickResponse, DesktopControlAction, DesktopControlActionResponse,
-    DesktopControlCapabilities, DesktopControlCapability, DesktopControlError, DesktopControlStatus,
-    HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse, ScreenshotRequest, ScrollRequest,
-    ScrollResponse, TypeTextRequest, TypeTextResponse, WaitRequest, WaitResponse,
+    DesktopControlCapabilities, DesktopControlCapability, DesktopControlError,
+    DesktopControlStatus, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse,
+    ScreenshotRequest, ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse,
+    WaitRequest, WaitResponse,
 };
 use std::thread;
 use std::time::Duration;
@@ -31,7 +32,9 @@ pub fn status() -> DesktopControlStatus {
             type_text: input.clone(),
             key: input.clone(),
             hotkey: input,
-            scroll: DesktopControlCapability::unavailable("generic macOS scroll is not implemented"),
+            scroll: DesktopControlCapability::unavailable(
+                "generic macOS scroll is not implemented",
+            ),
             wait: DesktopControlCapability::available("std-thread-sleep"),
         },
     }
@@ -41,9 +44,12 @@ pub fn execute_action(
     action: DesktopControlAction,
 ) -> Result<DesktopControlActionResponse, DesktopControlError> {
     match action {
-        DesktopControlAction::Screenshot(request) => capture_screenshot(request)
-            .map(DesktopControlActionResponse::Screenshot),
-        DesktopControlAction::Click(request) => click(request).map(DesktopControlActionResponse::Click),
+        DesktopControlAction::Screenshot(request) => {
+            capture_screenshot(request).map(DesktopControlActionResponse::Screenshot)
+        }
+        DesktopControlAction::Click(request) => {
+            click(request).map(DesktopControlActionResponse::Click)
+        }
         DesktopControlAction::TypeText(request) => {
             type_text(request).map(DesktopControlActionResponse::TypeText)
         }
@@ -54,7 +60,9 @@ pub fn execute_action(
         DesktopControlAction::Scroll(request) => {
             scroll(request).map(DesktopControlActionResponse::Scroll)
         }
-        DesktopControlAction::Wait(request) => Ok(DesktopControlActionResponse::Wait(wait(request))),
+        DesktopControlAction::Wait(request) => {
+            Ok(DesktopControlActionResponse::Wait(wait(request)))
+        }
     }
 }
 
@@ -175,7 +183,10 @@ fn run_osascript(script: String) -> Result<(), DesktopControlError> {
 
 fn click_script(x: f64, y: f64, count: u8) -> String {
     let line = format!("click at {{{}, {}}}", coordinate_arg(x), coordinate_arg(y));
-    let body = (0..count).map(|_| line.clone()).collect::<Vec<_>>().join("\n");
+    let body = (0..count)
+        .map(|_| line.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
     format!("tell application \"System Events\"\n{body}\nend tell")
 }
 

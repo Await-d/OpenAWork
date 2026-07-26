@@ -57,6 +57,26 @@ describe('reference resource skills', () => {
   });
 });
 
+describe('additional builtin skills', () => {
+  it('exposes superpowers, create-pr, and cloudflare as validated builtin skills', () => {
+    const catalog = listResourceCatalog();
+    const skills = new Map(catalog.skills.map((skill) => [skill.name, skill]));
+
+    for (const skillName of ['superpowers', 'create-pr', 'cloudflare']) {
+      const skill = skills.get(skillName);
+
+      expect(skill).toMatchObject({
+        name: skillName,
+        integration: 'builtin',
+        feature: 'skills',
+        usageKind: 'skill',
+      });
+      expect(skill?.content.length ?? 0).toBeGreaterThan(300);
+      expect(skill?.path.endsWith(`${skillName}.md`)).toBe(true);
+    }
+  });
+});
+
 describe('resource catalog', () => {
   it('indexes non-skill resource areas with explicit integration modes', () => {
     const catalog = listResourceCatalog();

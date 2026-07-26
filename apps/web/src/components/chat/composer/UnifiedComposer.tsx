@@ -293,6 +293,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
       messageTurns: 0,
       hiddenMessageCount: 0,
       serverTotalTurnCount: null,
+      compactionCount: 0,
       childSessionCount: 0,
       sessionTaskCount: 0,
       totalDurationMs: 0,

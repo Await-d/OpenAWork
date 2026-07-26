@@ -26,12 +26,17 @@ import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@openAwork/shared';
 import {
   applyToolResultToLocalAssistantMessages,
+  deduplicateCompactionMessages,
   normalizeChatMessages,
   partsFromOrderedAssistantContent,
+  parseAssistantTraceContent,
   reconcileSnapshotChatMessages,
   type ChatMessage,
   type ChatMessagePart,
   type ChatToolPart,
+  extractNestedCompactionCardContent,
+  estimateContextMessageTokens,
+  filterChatMessagesForContext,
 } from './support.js';
 
 const MSG_ID = 'msg-1';
@@ -457,5 +462,195 @@ describe('applyToolResultToLocalAssistantMessages', () => {
       makeToolResultEvent({ toolCallId: 'unknown' }),
     );
     expect(next).toBe(messages);
+  });
+});
+
+describe('extractNestedCompactionCardContent', () => {
+  it('直接识别 compaction JSON', () => {
+    const content = JSON.stringify({
+      type: 'compaction',
+      payload: {
+        title: 'compact',
+        summary: '已保留关键上下文。',
+        trigger: 'manual',
+      },
+    });
+
+    const extracted = extractNestedCompactionCardContent(content);
+    expect(extracted).not.toBeNull();
+    expect(JSON.parse(extracted as string)).toEqual(JSON.parse(content));
+  });
+
+  it('把旧版 assistant_event 压缩消息转换成同手动压缩一致的小卡片', () => {
+    const content = JSON.stringify({
+      source: 'openawork_internal',
+      type: 'assistant_event',
+      payload: {
+        kind: 'compaction',
+        title: 'compact',
+        message: '已预防性压缩 2 条较早消息，保留 6 条近期消息。',
+        status: 'success',
+      },
+    });
+
+    const extracted = extractNestedCompactionCardContent(content);
+    expect(extracted).not.toBeNull();
+    expect(JSON.parse(extracted as string)).toEqual({
+      type: 'compaction',
+      payload: {
+        title: 'compact',
+        summary: '已预防性压缩 2 条较早消息，保留 6 条近期消息。',
+        trigger: 'automatic',
+        phase: 'completed',
+      },
+    });
+  });
+
+  it('识别 assistant_trace 中内嵌的 compaction_marker', () => {
+    const content = JSON.stringify({
+      type: 'assistant_trace',
+      payload: {
+        text: JSON.stringify({
+          source: 'openAwork',
+          type: 'compaction_marker',
+          payload: {
+            summary: '已压缩较早轮次，保留当前任务上下文。',
+          },
+        }),
+        toolCalls: [],
+      },
+    });
+
+    const extracted = extractNestedCompactionCardContent(content);
+    expect(extracted).not.toBeNull();
+    expect(JSON.parse(extracted as string)).toEqual({
+      type: 'compaction',
+      payload: {
+        title: 'compact',
+        summary: '已压缩较早轮次，保留当前任务上下文。',
+        trigger: 'manual',
+      },
+    });
+  });
+
+  it('识别 assistant_trace 中内嵌的 compaction 卡片', () => {
+    const content = JSON.stringify({
+      type: 'assistant_trace',
+      payload: {
+        text: JSON.stringify({
+          type: 'compaction',
+          payload: {
+            title: 'compact',
+            summary: '已整理长上下文，继续保留关键指令。',
+            trigger: 'automatic',
+          },
+        }),
+        toolCalls: [],
+      },
+    });
+
+    const extracted = extractNestedCompactionCardContent(content);
+    expect(extracted).not.toBeNull();
+    expect(JSON.parse(extracted as string)).toEqual({
+      type: 'compaction',
+      payload: {
+        title: 'compact',
+        summary: '已整理长上下文，继续保留关键指令。',
+        trigger: 'automatic',
+      },
+    });
+  });
+
+  it('不会误判普通 assistant_trace 文本', () => {
+    const content = JSON.stringify({
+      type: 'assistant_trace',
+      payload: {
+        text: '这是普通回复内容。',
+        toolCalls: [],
+      },
+    });
+
+    expect(parseAssistantTraceContent(content)?.text).toBe('这是普通回复内容。');
+    expect(extractNestedCompactionCardContent(content)).toBeNull();
+  });
+});
+
+describe('filterChatMessagesForContext', () => {
+  it('有持久化 marker 时不重复计算后续 assistant-event 压缩卡片', () => {
+    const marker = {
+      id: 'marker-1',
+      role: 'assistant' as const,
+      content: JSON.stringify({
+        source: 'openAwork',
+        type: 'compaction_marker',
+        payload: {
+          summary: '压缩摘要',
+          trigger: 'manual',
+        },
+      }),
+      status: 'completed' as const,
+    };
+    const displayCard = {
+      id: 'event-1',
+      role: 'assistant' as const,
+      content: JSON.stringify({
+        type: 'compaction',
+        payload: {
+          title: 'compact',
+          summary: '压缩摘要',
+          trigger: 'manual',
+          phase: 'completed',
+        },
+      }),
+      status: 'completed' as const,
+    };
+
+    const effective = filterChatMessagesForContext([
+      { id: 'old', role: 'user', content: '旧历史', status: 'completed' },
+      marker,
+      displayCard,
+      { id: 'new', role: 'user', content: '新问题', status: 'completed' },
+    ]);
+
+    expect(effective.map((message) => message.id)).toEqual(['marker-1', 'new']);
+    expect(estimateContextMessageTokens(effective[0]!)).toBeGreaterThan(0);
+  });
+
+  it('兼容旧 phase-specific assistant-event ID，只保留完成态卡片', () => {
+    const deduplicated = deduplicateCompactionMessages([
+      {
+        id: 'server-started',
+        clientRequestId: 'assistant_event:session-1:slash-compact:run-1:compaction:started',
+        role: 'assistant',
+        content: JSON.stringify({
+          type: 'compaction',
+          payload: {
+            title: 'compact',
+            summary: '正在压缩会话上下文。',
+            trigger: 'manual',
+            phase: 'started',
+          },
+        }),
+        status: 'completed',
+      },
+      {
+        id: 'server-completed',
+        clientRequestId: 'assistant_event:session-1:slash-compact:run-1:compaction:completed',
+        role: 'assistant',
+        content: JSON.stringify({
+          type: 'compaction',
+          payload: {
+            title: 'compact',
+            summary: '已压缩较早消息。',
+            trigger: 'manual',
+            phase: 'completed',
+          },
+        }),
+        status: 'completed',
+      },
+    ]);
+
+    expect(deduplicated).toHaveLength(1);
+    expect(deduplicated[0]?.id).toBe('server-completed');
   });
 });

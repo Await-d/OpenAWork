@@ -90,6 +90,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  clientRequestId?: string;
   /** Structured parts — source of truth for reconciliation. */
   parts?: ChatMessagePart[];
   rawContent?: Message['content'];
@@ -105,7 +106,7 @@ export interface ChatMessage {
   providerUsage?: Message['providerUsage'];
   toolCallCount?: number;
   modifiedFilesSummary?: ModifiedFilesSummaryContent;
-  status?: 'streaming' | 'completed' | 'error';
+  status?: 'streaming' | 'completed' | 'error' | 'cancelled';
   /**
    * Transient flag (live-streaming only): one boolean per `reasoningBlocks`
    * entry — true once the corresponding `thinking_end` event has been seen.
@@ -505,6 +506,7 @@ export function createStatusCardContent(payload: {
 }
 
 export function createCompactionCardContent(payload: {
+  phase?: 'started' | 'completed' | 'failed';
   summary: string;
   title: string;
   trigger: 'manual' | 'automatic';
@@ -515,16 +517,352 @@ export function createCompactionCardContent(payload: {
   });
 }
 
+function parseCompactionCardContent(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as {
+      payload?: Record<string, unknown>;
+      type?: unknown;
+    };
+
+    if (parsed?.type === 'compaction') {
+      const payload = parsed.payload ?? {};
+      if (
+        typeof payload['title'] !== 'string' ||
+        typeof payload['summary'] !== 'string' ||
+        (payload['trigger'] !== 'manual' && payload['trigger'] !== 'automatic')
+      ) {
+        return null;
+      }
+
+      return createCompactionCardContent({
+        title: payload['title'],
+        summary: payload['summary'],
+        trigger: payload['trigger'],
+        ...(payload['phase'] === 'started' ||
+        payload['phase'] === 'completed' ||
+        payload['phase'] === 'failed'
+          ? { phase: payload['phase'] }
+          : {}),
+      });
+    }
+
+    if (parsed?.type !== 'compaction_marker') {
+      return null;
+    }
+
+    const payload = parsed.payload ?? {};
+    if (typeof payload['summary'] !== 'string') {
+      return null;
+    }
+
+    return createCompactionCardContent({
+      title:
+        typeof payload['title'] === 'string' && payload['title'].trim().length > 0
+          ? payload['title']
+          : 'compact',
+      summary: payload['summary'],
+      trigger: payload['trigger'] === 'automatic' ? 'automatic' : 'manual',
+      ...(payload['phase'] === 'started' ||
+      payload['phase'] === 'completed' ||
+      payload['phase'] === 'failed'
+        ? { phase: payload['phase'] }
+        : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+export type CompactionTranscriptSource = 'assistant_event' | 'card' | 'marker';
+export type CompactionTranscriptPhase = 'completed' | 'failed' | 'started';
+
+export interface CompactionTranscriptState {
+  phase: CompactionTranscriptPhase;
+  source: CompactionTranscriptSource;
+  summary: string;
+  tailStartMessageId?: string;
+}
+
+function compactionPhaseRank(phase: CompactionTranscriptPhase): number {
+  if (phase === 'completed') return 3;
+  if (phase === 'failed') return 2;
+  return 1;
+}
+
+function parseCompactionTranscriptContent(content: string): CompactionTranscriptState | null {
+  try {
+    const parsed = JSON.parse(content) as {
+      payload?: Record<string, unknown>;
+      source?: unknown;
+      type?: unknown;
+    };
+    const payload = parsed.payload ?? {};
+
+    if (
+      (parsed.source === 'openAwork' || parsed.source === 'openawork_internal') &&
+      parsed.type === 'compaction_marker' &&
+      typeof payload['summary'] === 'string'
+    ) {
+      return {
+        phase: 'completed',
+        source: 'marker',
+        summary: payload['summary'],
+        ...(typeof payload['tailStartMessageId'] === 'string'
+          ? { tailStartMessageId: payload['tailStartMessageId'] }
+          : {}),
+      };
+    }
+
+    if (parsed.type === 'compaction' && typeof payload['summary'] === 'string') {
+      return {
+        phase:
+          payload['phase'] === 'started' ||
+          payload['phase'] === 'failed' ||
+          payload['phase'] === 'completed'
+            ? payload['phase']
+            : 'completed',
+        source: 'card',
+        summary: payload['summary'],
+      };
+    }
+
+    const assistantEvent = parseAssistantEventContent(content);
+    if (assistantEvent?.kind === 'compaction') {
+      return {
+        phase:
+          assistantEvent.status === 'running'
+            ? 'started'
+            : assistantEvent.status === 'error'
+              ? 'failed'
+              : 'completed',
+        source: 'assistant_event',
+        summary: assistantEvent.message,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+export function readCompactionTranscriptState(
+  message: Pick<ChatMessage, 'content' | 'role'>,
+): CompactionTranscriptState | null {
+  if (message.role !== 'assistant') {
+    return null;
+  }
+
+  const direct = parseCompactionTranscriptContent(message.content);
+  if (direct) {
+    return direct;
+  }
+
+  const trace = parseAssistantTraceContent(message.content);
+  if (trace && trace.text.trim().length > 0 && trace.text.trim() !== message.content.trim()) {
+    return parseCompactionTranscriptContent(trace.text);
+  }
+
+  return null;
+}
+
+/**
+ * 判断消息内容是否是压缩消息（compaction）。
+ * 用于在压缩消息上隐藏重试、收藏、点赞等操作按钮。
+ */
+export function isCompactionMessage(message: Pick<ChatMessage, 'content' | 'role'>): boolean {
+  return readCompactionTranscriptState(message) !== null;
+}
+
+function resolveCompactionTranscriptIdentity(message: ChatMessage): string | null {
+  const state = readCompactionTranscriptState(message);
+  if (!state || state.source === 'marker') {
+    return null;
+  }
+
+  const clientRequestId = message.clientRequestId?.trim() ?? '';
+  if (clientRequestId.startsWith('assistant_event:compaction:')) {
+    return clientRequestId.slice('assistant_event:'.length);
+  }
+
+  const legacyEventMatch = clientRequestId.match(
+    /^assistant_event:(.+):compaction:(?:started|completed|failed|request-failed)$/,
+  );
+  if (legacyEventMatch?.[1]) {
+    return `compaction:${legacyEventMatch[1]}`;
+  }
+
+  if (message.id.startsWith('assistant_event:compaction:')) {
+    return message.id.slice('assistant_event:'.length);
+  }
+
+  return null;
+}
+
+export function deduplicateCompactionMessages(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length < 2) {
+    return messages;
+  }
+
+  const result: ChatMessage[] = [];
+  const indexByIdentity = new Map<string, number>();
+  for (const message of messages) {
+    const identity = resolveCompactionTranscriptIdentity(message);
+    if (!identity) {
+      result.push(message);
+      continue;
+    }
+
+    const existingIndex = indexByIdentity.get(identity);
+    if (existingIndex === undefined) {
+      indexByIdentity.set(identity, result.length);
+      result.push(message);
+      continue;
+    }
+
+    const existing = result[existingIndex];
+    const nextState = readCompactionTranscriptState(message);
+    const existingState = existing ? readCompactionTranscriptState(existing) : null;
+    if (
+      existing &&
+      nextState &&
+      (!existingState ||
+        compactionPhaseRank(nextState.phase) >= compactionPhaseRank(existingState.phase))
+    ) {
+      result[existingIndex] = message;
+    }
+  }
+
+  return result;
+}
+
+export function filterChatMessagesForContext(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  const deduplicatedMessages = deduplicateCompactionMessages(messages);
+  let markerIndex = -1;
+  let markerState: CompactionTranscriptState | null = null;
+  for (let index = deduplicatedMessages.length - 1; index >= 0; index -= 1) {
+    const state = readCompactionTranscriptState(deduplicatedMessages[index]!);
+    if (state?.source === 'marker' && state.phase === 'completed') {
+      markerIndex = index;
+      markerState = state;
+      break;
+    }
+  }
+
+  if (markerIndex >= 0) {
+    const tailIndex = markerState?.tailStartMessageId
+      ? deduplicatedMessages.findIndex((message) => message.id === markerState?.tailStartMessageId)
+      : -1;
+    const messagesAfterMarker = deduplicatedMessages.slice(markerIndex + 1).filter((message) => {
+      const state = readCompactionTranscriptState(message);
+      // The persisted marker is the model-facing compaction summary. Any
+      // assistant-event/card copy after it is display-only and must not be
+      // counted or sent a second time.
+      return state?.source !== 'assistant_event' && state?.source !== 'card';
+    });
+    if (tailIndex >= 0 && tailIndex <= markerIndex) {
+      return [
+        deduplicatedMessages[markerIndex]!,
+        ...deduplicatedMessages.slice(tailIndex, markerIndex),
+        ...messagesAfterMarker,
+      ];
+    }
+    return [deduplicatedMessages[markerIndex]!, ...messagesAfterMarker];
+  }
+
+  for (let index = deduplicatedMessages.length - 1; index >= 0; index -= 1) {
+    const state = readCompactionTranscriptState(deduplicatedMessages[index]!);
+    if (state?.phase === 'completed') {
+      return deduplicatedMessages.slice(index);
+    }
+  }
+
+  return deduplicatedMessages;
+}
+
+export function estimateContextMessageTokens(message: ChatMessage): number {
+  const compaction = readCompactionTranscriptState(message);
+  if (compaction) {
+    if (compaction.phase !== 'completed') {
+      return 0;
+    }
+    return estimateTokenCount(`What did we do so far?\n\n${compaction.summary}`);
+  }
+
+  if (message.role === 'assistant') {
+    if (parseAssistantEventContent(message.content)) {
+      return 0;
+    }
+
+    try {
+      const parsed = JSON.parse(message.content) as { type?: unknown };
+      if (
+        parsed.type === 'status' ||
+        parsed.type === 'tool_call' ||
+        parsed.type === 'form' ||
+        parsed.type === 'table' ||
+        parsed.type === 'chart' ||
+        parsed.type === 'approval' ||
+        parsed.type === 'code_diff'
+      ) {
+        return 0;
+      }
+    } catch {
+      // Plain assistant text and assistant traces continue below.
+    }
+  }
+
+  return message.tokenEstimate ?? estimateTokenCount(message.content);
+}
+
+export function extractNestedCompactionCardContent(content: string): string | null {
+  const directCard = parseCompactionCardContent(content);
+  if (directCard) {
+    return directCard;
+  }
+
+  const assistantEvent = parseAssistantEventContent(content);
+  if (assistantEvent?.kind === 'compaction') {
+    return createCompactionCardContent({
+      title: assistantEvent.title.trim() || 'compact',
+      summary: assistantEvent.message,
+      trigger: 'automatic',
+      phase:
+        assistantEvent.status === 'running'
+          ? 'started'
+          : assistantEvent.status === 'error'
+            ? 'failed'
+            : 'completed',
+    });
+  }
+
+  const trace = parseAssistantTraceContent(content);
+  if (!trace) {
+    return null;
+  }
+
+  const nested = trace.text.trim();
+  if (nested.length === 0 || nested === content.trim()) {
+    return null;
+  }
+
+  return parseCompactionCardContent(nested);
+}
+
 export function createCommandCardContent(
   card: CommandResultCard,
   options?: { kindOverride?: AssistantEventKind },
 ): string {
   return card.type === 'compaction'
-    ? createAssistantEventCardContent({
-        kind: options?.kindOverride ?? 'compaction',
+    ? createCompactionCardContent({
         title: card.title,
-        message: card.summary,
-        status: 'success',
+        summary: card.summary,
+        trigger: card.trigger,
+        phase: 'completed',
       })
     : createAssistantEventCardContent({
         kind: options?.kindOverride ?? classifyAssistantEventKind(`${card.title}\n${card.message}`),
@@ -534,16 +872,60 @@ export function createCommandCardContent(
       });
 }
 
+function buildCompactionCardTitle(event: Extract<RunEvent, { type: 'compaction' }>): string {
+  return 'compact';
+}
+
+function buildCompactionCardSummary(event: Extract<RunEvent, { type: 'compaction' }>): string {
+  const lines: string[] = [];
+  const summary = event.summary?.trim();
+  if (summary) {
+    lines.push(summary);
+  }
+
+  const metaParts: string[] = [];
+  if (typeof event.compactedMessages === 'number' && event.compactedMessages > 0) {
+    metaParts.push(`压缩 ${event.compactedMessages} 条`);
+  }
+  if (typeof event.representedMessages === 'number' && event.representedMessages > 0) {
+    metaParts.push(`摘要覆盖 ${event.representedMessages} 条`);
+  }
+  if (event.cause === 'usage_overflow') {
+    metaParts.push('触发：上下文用量溢出');
+  } else if (event.cause === 'provider_overflow') {
+    metaParts.push('触发：上游上下文溢出');
+  } else if (event.cause === 'proactive_near_overflow') {
+    metaParts.push('触发：接近上限主动压缩');
+  } else if (event.cause === 'manual') {
+    metaParts.push('触发：手动压缩');
+  }
+
+  if (metaParts.length > 0) {
+    lines.push(metaParts.join(' · '));
+  }
+
+  if (lines.length === 0) {
+    return event.trigger === 'automatic'
+      ? '系统已压缩较早的对话内容，以腾出上下文空间。'
+      : '会话上下文已压缩。';
+  }
+  return lines.join('\n');
+}
+
 export function createAssistantEventContent(
   event: RunEvent,
   options?: { kindOverride?: AssistantEventKind },
 ): string | null {
   if (event.type === 'compaction') {
-    return createAssistantEventCardContent({
-      kind: options?.kindOverride ?? 'compaction',
-      title: '会话已压缩',
-      message: event.summary,
-      status: 'success',
+    // Prefer the dedicated GenerativeUI compaction card so the main
+    // transcript shows a purpose-built compact marker (title / trigger /
+    // summary) instead of a generic operational status row.
+    void options;
+    return createCompactionCardContent({
+      title: buildCompactionCardTitle(event),
+      summary: buildCompactionCardSummary(event),
+      trigger: event.trigger,
+      phase: event.phase,
     });
   }
 
@@ -1700,9 +2082,14 @@ export function reconcileSnapshotChatMessages(
 
       if (previousMessage.status === 'streaming' && snapshotMessage.status !== 'streaming') {
         // Snapshot has a finalized version (e.g. completed/error), prefer it.
+        // Still keep a locally known cancelled/error terminal if the snapshot
+        // only brought a generic completed payload.
         reconciledSnapshotEntries.push({
           matchedPreviousIndex: previousEntry.index,
-          message: snapshotMessage,
+          message: {
+            ...snapshotMessage,
+            ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
+          },
         });
       } else if (previousMessage.parts && snapshotMessage.parts) {
         // Both have parts — merge by part ID (find → replace or push).
@@ -1718,14 +2105,19 @@ export function reconcileSnapshotChatMessages(
             ),
             modifiedFilesSummary:
               snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
+            ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
           },
         });
       } else {
         // Fallback: prefer previous to preserve local annotations, but merge
         // if the snapshot has more complete text content.
+        const merged = mergePreferringCompleteContent(previousMessage, snapshotMessage);
         reconciledSnapshotEntries.push({
           matchedPreviousIndex: previousEntry.index,
-          message: mergePreferringCompleteContent(previousMessage, snapshotMessage),
+          message: {
+            ...merged,
+            ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
+          },
         });
       }
     } else {
@@ -1918,6 +2310,63 @@ export function replaceOrAppendStreamedAssistantMessage(
   return [...previousMessages, onDoneMessage];
 }
 
+function resolveNormalizedChatMessageStatus(
+  record: Record<string, unknown>,
+  stopReason: string | undefined,
+): ChatMessage['status'] | undefined {
+  if (
+    record['status'] === 'streaming' ||
+    record['status'] === 'completed' ||
+    record['status'] === 'error' ||
+    record['status'] === 'cancelled'
+  ) {
+    return record['status'];
+  }
+
+  // Backend message rows often only carry stopReason (or legacy "final")
+  // without a UI-facing status. Infer abnormal terminals so a recovery
+  // reload does not silently rewrite cancelled/error turns as completed.
+  if (stopReason === 'error') return 'error';
+  if (stopReason === 'cancelled') return 'cancelled';
+  if (record['status'] === 'final' || record['status'] === undefined) return 'completed';
+  return undefined;
+}
+
+function preferLocalTerminalStatus(
+  previous: ChatMessage,
+  snapshot: ChatMessage,
+): Pick<ChatMessage, 'status' | 'stopReason'> {
+  const previousIsTerminal =
+    previous.status === 'error' ||
+    previous.status === 'cancelled' ||
+    previous.stopReason === 'error' ||
+    previous.stopReason === 'cancelled';
+  const snapshotIsGenericCompleted =
+    snapshot.status === undefined ||
+    snapshot.status === 'completed' ||
+    snapshot.status === 'streaming';
+
+  if (previousIsTerminal && snapshotIsGenericCompleted) {
+    return {
+      ...(previous.status ? { status: previous.status } : {}),
+      ...(previous.stopReason ? { stopReason: previous.stopReason } : {}),
+    };
+  }
+
+  return {
+    ...(snapshot.status
+      ? { status: snapshot.status }
+      : previous.status
+        ? { status: previous.status }
+        : {}),
+    ...(snapshot.stopReason
+      ? { stopReason: snapshot.stopReason }
+      : previous.stopReason
+        ? { stopReason: previous.stopReason }
+        : {}),
+  };
+}
+
 export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
   if (!Array.isArray(rawMessages)) return [];
 
@@ -1960,6 +2409,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           id,
           role,
           content: record['content'],
+          clientRequestId: normalizeOptionalString(record['clientRequestId']),
           createdAt: normalizeCreatedAt(createdAt),
           model,
           providerId,
@@ -1969,12 +2419,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           stopReason,
           tokenEstimate,
           providerUsage,
-          status:
-            record['status'] === 'streaming' ||
-            record['status'] === 'completed' ||
-            record['status'] === 'error'
-              ? record['status']
-              : undefined,
+          status: resolveNormalizedChatMessageStatus(record, stopReason),
         };
 
         if (role === 'assistant') {
@@ -2043,6 +2488,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           id,
           role: 'user',
           content: text,
+          clientRequestId: normalizeOptionalString(record['clientRequestId']),
           rawContent: content as Message['content'],
           createdAt: createdAtValue,
           model,
@@ -2186,6 +2632,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           id,
           role: 'assistant',
           content: traceContent,
+          clientRequestId: normalizeOptionalString(record['clientRequestId']),
           parts: partsForMessage,
           rawContent: content as Message['content'],
           createdAt: createdAtValue,
@@ -2200,7 +2647,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           providerUsage,
           toolCallCount: assistantToolCalls.length > 0 ? assistantToolCalls.length : undefined,
           modifiedFilesSummary: modifiedFilesSummary ?? undefined,
-          status: 'completed',
+          status: resolveNormalizedChatMessageStatus(record, stopReason) ?? 'completed',
         });
 
         toolCalls.forEach((toolCall) => {
@@ -2544,6 +2991,7 @@ function mergePreferringCompleteContent(previous: ChatMessage, snapshot: ChatMes
         : {}),
     }),
     modifiedFilesSummary: snapTrace.modifiedFilesSummary ?? previous.modifiedFilesSummary,
+    ...preferLocalTerminalStatus(previous, snapshot),
   };
 }
 

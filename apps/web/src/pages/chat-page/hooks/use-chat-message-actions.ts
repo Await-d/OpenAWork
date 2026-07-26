@@ -198,42 +198,72 @@ export function useChatMessageActions(
   );
 
   const buildMessageActions = useCallback(
-    (message: ChatMessage): MessageActionItem[] => [
-      {
-        id: 'copy',
-        label: '复制',
-        onClick: () => handleCopyMessage(message),
-      },
-      ...(message.role === 'assistant' && message.rawContent
-        ? [
+    (message: ChatMessage): MessageActionItem[] => {
+      // Compaction markers are system notices, not retriable assistant turns.
+      if (message.role === 'assistant') {
+        try {
+          const parsed = JSON.parse(message.content) as { type?: unknown };
+          if (parsed?.type === 'compaction') {
+            return [
+              {
+                id: 'copy',
+                label: '复制',
+                onClick: () => handleCopyMessage(message),
+              },
+            ];
+          }
+        } catch {
+          // fall through to normal actions
+        }
+        const assistantEvent = parseAssistantEventContent(message.content);
+        if (assistantEvent?.kind === 'compaction') {
+          return [
             {
-              id: 'rate-up',
-              label: messageRatings[message.id]?.rating === 'up' ? '👍 已赞' : '👍',
-              onClick: () => void onToggleMessageRating(message, 'up'),
+              id: 'copy',
+              label: '复制',
+              onClick: () => handleCopyMessage(message),
             },
-            {
-              id: 'rate-down',
-              label: messageRatings[message.id]?.rating === 'down' ? '👎 已踩' : '👎',
-              onClick: () => void onToggleMessageRating(message, 'down'),
-            },
-          ]
-        : []),
-      ...(message.role === 'user'
-        ? [
-            {
-              id: 'edit-retry',
-              label: '编辑重试',
-              onClick: () => handleEditRetryMessage(message),
-            },
-          ]
-        : [
-            {
-              id: 'retry',
-              label: '重试',
-              onClick: () => handleRetryMessage(message.id),
-            },
-          ]),
-    ],
+          ];
+        }
+      }
+
+      return [
+        {
+          id: 'copy',
+          label: '复制',
+          onClick: () => handleCopyMessage(message),
+        },
+        ...(message.role === 'assistant' && message.rawContent
+          ? [
+              {
+                id: 'rate-up',
+                label: messageRatings[message.id]?.rating === 'up' ? '👍 已赞' : '👍',
+                onClick: () => void onToggleMessageRating(message, 'up'),
+              },
+              {
+                id: 'rate-down',
+                label: messageRatings[message.id]?.rating === 'down' ? '👎 已踩' : '👎',
+                onClick: () => void onToggleMessageRating(message, 'down'),
+              },
+            ]
+          : []),
+        ...(message.role === 'user'
+          ? [
+              {
+                id: 'edit-retry',
+                label: '编辑重试',
+                onClick: () => handleEditRetryMessage(message),
+              },
+            ]
+          : [
+              {
+                id: 'retry',
+                label: '重试',
+                onClick: () => handleRetryMessage(message.id),
+              },
+            ]),
+      ];
+    },
     [
       handleCopyMessage,
       handleEditRetryMessage,

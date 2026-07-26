@@ -120,6 +120,7 @@ function StatusBadge({
 
 export function SessionRunStateBar({
   checkpointCount = 0,
+  latestCompaction = null,
   latestUpstreamSummary = null,
   onOpenRecovery,
   pendingPermissionsCount = 0,
@@ -128,6 +129,13 @@ export function SessionRunStateBar({
   stopCapability = 'observe_only',
 }: {
   checkpointCount?: number;
+  latestCompaction?: {
+    trigger: 'manual' | 'automatic';
+    phase?: 'started' | 'completed' | 'failed';
+    compactedMessages?: number;
+    representedMessages?: number;
+    cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
+  } | null;
   latestUpstreamSummary?: UpstreamStreamSummary | null;
   onOpenRecovery?: () => void;
   pendingPermissionsCount?: number;
@@ -141,6 +149,25 @@ export function SessionRunStateBar({
 
   const counterParts: string[] = [];
   if (checkpointCount > 0) counterParts.push(`检查点 ${checkpointCount}`);
+  if (latestCompaction) {
+    if (latestCompaction.phase === 'failed') {
+      counterParts.push('压缩失败');
+    } else if (latestCompaction.phase === 'started') {
+      counterParts.push(latestCompaction.trigger === 'manual' ? '压缩中' : '自动压缩中');
+    } else if (
+      typeof latestCompaction.representedMessages === 'number' &&
+      latestCompaction.representedMessages > 0
+    ) {
+      counterParts.push(`摘要 ${latestCompaction.representedMessages} 条`);
+    } else if (
+      typeof latestCompaction.compactedMessages === 'number' &&
+      latestCompaction.compactedMessages > 0
+    ) {
+      counterParts.push(`压缩 ${latestCompaction.compactedMessages} 条`);
+    } else {
+      counterParts.push(latestCompaction.trigger === 'manual' ? '已手动压缩' : '已自动压缩');
+    }
+  }
   if (pendingPermissionsCount > 0) counterParts.push(`审批 ${pendingPermissionsCount}`);
   if (pendingQuestionsCount > 0) counterParts.push(`问题 ${pendingQuestionsCount}`);
   const upstreamSummaryLabel = formatChatUpstreamSummaryLabel(latestUpstreamSummary);

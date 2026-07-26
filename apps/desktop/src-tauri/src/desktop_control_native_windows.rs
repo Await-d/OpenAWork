@@ -1,8 +1,9 @@
 use crate::desktop_control_native::{
     command_exists, coordinate_arg, read_png_response, run_command, temp_png_path, ClickAction,
     ClickRequest, ClickResponse, DesktopControlAction, DesktopControlActionResponse,
-    DesktopControlCapabilities, DesktopControlCapability, DesktopControlError, DesktopControlStatus,
-    MouseButton, ScreenshotRequest, ScrollRequest, ScrollResponse, WaitRequest, WaitResponse,
+    DesktopControlCapabilities, DesktopControlCapability, DesktopControlError,
+    DesktopControlStatus, MouseButton, ScreenshotRequest, ScrollRequest, ScrollResponse,
+    WaitRequest, WaitResponse,
 };
 use std::thread;
 use std::time::Duration;
@@ -37,20 +38,27 @@ pub fn execute_action(
     action: DesktopControlAction,
 ) -> Result<DesktopControlActionResponse, DesktopControlError> {
     match action {
-        DesktopControlAction::Screenshot(request) => capture_screenshot(request)
-            .map(DesktopControlActionResponse::Screenshot),
-        DesktopControlAction::Click(request) => click(request).map(DesktopControlActionResponse::Click),
+        DesktopControlAction::Screenshot(request) => {
+            capture_screenshot(request).map(DesktopControlActionResponse::Screenshot)
+        }
+        DesktopControlAction::Click(request) => {
+            click(request).map(DesktopControlActionResponse::Click)
+        }
         DesktopControlAction::TypeText(request) => {
             input::type_text(request).map(DesktopControlActionResponse::TypeText)
         }
-        DesktopControlAction::Key(request) => input::key(request).map(DesktopControlActionResponse::Key),
+        DesktopControlAction::Key(request) => {
+            input::key(request).map(DesktopControlActionResponse::Key)
+        }
         DesktopControlAction::Hotkey(request) => {
             input::hotkey(request).map(DesktopControlActionResponse::Hotkey)
         }
         DesktopControlAction::Scroll(request) => {
             scroll(request).map(DesktopControlActionResponse::Scroll)
         }
-        DesktopControlAction::Wait(request) => Ok(DesktopControlActionResponse::Wait(wait(request))),
+        DesktopControlAction::Wait(request) => {
+            Ok(DesktopControlActionResponse::Wait(wait(request)))
+        }
     }
 }
 
@@ -169,17 +177,13 @@ fn mouse_bridge_type() -> String {
         .to_owned()
 }
 
-fn mouse_event_flags(
-    action: ClickAction,
-    button: MouseButton,
-) -> String {
+fn mouse_event_flags(action: ClickAction, button: MouseButton) -> String {
     let (down, up) = match button {
         MouseButton::Left => ("0x0002", "0x0004"),
         MouseButton::Right => ("0x0008", "0x0010"),
         MouseButton::Middle => ("0x0020", "0x0040"),
     };
-    let call =
-        |flag: &str| format!("[MouseBridge]::mouse_event({flag},0,0,0,[UIntPtr]::Zero);");
+    let call = |flag: &str| format!("[MouseBridge]::mouse_event({flag},0,0,0,[UIntPtr]::Zero);");
     match action {
         ClickAction::Click => format!("{} {}", call(down), call(up)),
         ClickAction::DoubleClick => {

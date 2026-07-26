@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import type { UpdateErrorKind } from './auto-update.js';
 
 export interface UpdateErrorDialogProps {
@@ -26,9 +27,11 @@ const ERROR_HINTS: Record<UpdateErrorKind, string> = {
 };
 
 export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateErrorDialogProps) {
-  return (
-    <dialog
-      open
+  return createPortal(
+    <div
+      data-openawork-update-dialog="true"
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed',
         inset: 0,
@@ -37,11 +40,8 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9001,
-        border: 'none',
         padding: 0,
         margin: 0,
-        maxWidth: '100vw',
-        maxHeight: '100vh',
         width: '100vw',
         height: '100vh',
       }}
@@ -59,9 +59,11 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
           borderRadius: 12,
           padding: '1.5rem',
           width: 380,
+          maxWidth: 'calc(100vw - 24px)',
           display: 'flex',
           flexDirection: 'column',
           gap: '0.875rem',
+          boxShadow: '0 24px 80px hsl(220 40% 2% / 0.42)',
         }}
       >
         <div style={{ fontSize: 16, fontWeight: 600, color: 'hsl(var(--destructive))' }}>
@@ -123,6 +125,7 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
           )}
         </div>
       </div>
-    </dialog>
+    </div>,
+    document.body,
   );
 }

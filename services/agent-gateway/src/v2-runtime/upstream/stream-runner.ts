@@ -778,7 +778,7 @@ export async function* runUpstreamStream(
       case 'tool-input-start': {
         const callId = typeof part.id === 'string' ? part.id : undefined;
         const toolName = typeof part.toolName === 'string' ? part.toolName : '';
-        if (!callId) break;
+        if (!callId || !toolName) break;
         state.toolNamesById.set(callId, toolName);
         // Emit a zero-length delta so downstream accumulators register
         // the (toolCallId, toolName) pair before any input streams in.
@@ -805,6 +805,10 @@ export async function* runUpstreamStream(
         const toolName =
           state.toolNamesById.get(callId) ??
           ('toolName' in part && typeof part.toolName === 'string' ? part.toolName : '');
+        // Skip deltas for tool calls that had no resolvable name — the
+        // opener (tool-input-start) was already dropped for this callId,
+        // so yielding here would emit a delta with an empty toolName.
+        if (!toolName) break;
         yield {
           type: 'tool_call_delta',
           toolCallId: callId,
@@ -832,7 +836,7 @@ export async function* runUpstreamStream(
           ('toolName' in part && typeof part.toolName === 'string' ? part.toolName : undefined) ??
           (callId ? state.toolNamesById.get(callId) : undefined) ??
           '';
-        if (!callId) break;
+        if (!callId || !toolName) break;
         const inputValue = (part as { input?: unknown }).input;
         const inputDelta =
           typeof inputValue === 'string'

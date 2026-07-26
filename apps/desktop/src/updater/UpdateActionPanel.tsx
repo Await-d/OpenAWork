@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getVersion } from '@tauri-apps/api/app';
 import { UpdateProgressDialog } from './UpdateProgressDialog.js';
 
@@ -21,6 +22,8 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
   const [appVersion, setAppVersion] = useState<string>('');
   const [showUpdateProgress, setShowUpdateProgress] = useState(autoStartCheck);
 
+  console.log('[UpdateActionPanel] 渲染, autoStartCheck:', autoStartCheck, 'showUpdateProgress:', showUpdateProgress);
+
   useEffect(() => {
     void getVersion().then((v) => setAppVersion(v));
   }, []);
@@ -30,9 +33,11 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
     return <UpdateProgressDialog autoCheck onClose={onClose} />;
   }
 
-  return (
-    <dialog
-      open
+  return createPortal(
+    <div
+      data-openawork-update-dialog="true"
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed',
         inset: 0,
@@ -41,11 +46,8 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9000,
-        border: 'none',
         padding: 0,
         margin: 0,
-        maxWidth: '100vw',
-        maxHeight: '100vh',
         width: '100vw',
         height: '100vh',
       }}
@@ -63,12 +65,13 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
           borderRadius: 12,
           padding: '1.5rem',
           width: 380,
+          maxWidth: 'calc(100vw - 24px)',
           display: 'flex',
           flexDirection: 'column',
           gap: '1rem',
+          boxShadow: '0 24px 80px hsl(220 40% 2% / 0.42)',
         }}
       >
-        {/* 标题 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
             style={{
@@ -92,7 +95,6 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
           </div>
         </div>
 
-        {/* 分隔线 */}
         <div
           style={{
             borderTop: '1px solid hsl(var(--border-default))',
@@ -100,7 +102,6 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
           }}
         />
 
-        {/* 操作按钮列表 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <ActionButton
             icon="🔍"
@@ -118,7 +119,6 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
           />
         </div>
 
-        {/* 底部关闭按钮 */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
           <button
             type="button"
@@ -137,7 +137,8 @@ export function UpdateActionPanel({ onClose, autoStartCheck = false }: UpdateAct
           </button>
         </div>
       </div>
-    </dialog>
+    </div>,
+    document.body,
   );
 }
 

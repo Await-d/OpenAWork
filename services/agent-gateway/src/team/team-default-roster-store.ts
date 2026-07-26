@@ -8,7 +8,11 @@
  *   - 允许为空数组，代表仍未配置固定 roster
  */
 
-import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS, TEAM_RUNTIME_LAYER_ORDER } from '@openAwork/shared';
+import {
+  DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
+  TEAM_RUNTIME_LAYER_ORDER,
+  upgradeLegacyExecutorToolsets,
+} from '@openAwork/shared';
 import type {
   FixedTeamMemberSlot,
   TeamMemberSpecialty,
@@ -107,6 +111,7 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   const displayName = rec['displayName'];
   const personaKey = rec['personaKey'];
   const toolsets = normalizeToolsets(rec['toolsets']);
+  const toolsetsCustomized = rec['toolsetsCustomized'];
   const required = rec['required'];
 
   if (
@@ -136,6 +141,13 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   const mcpServerIds = normalizeIdList(rec['mcpServerIds']);
   // 路由关键词：让上游派发动态识别该成员（尤其自定义角色）的专长。
   const routingKeywords = normalizeIdList(rec['routingKeywords']);
+  const normalizedToolsets = upgradeLegacyExecutorToolsets({
+    layer,
+    specialty,
+    personaKey,
+    toolsets,
+    toolsetsCustomized,
+  });
   // 派发优先级：同分排序权重。
   const dispatchPriorityRaw = rec['dispatchPriority'];
   const dispatchPriority =
@@ -151,7 +163,8 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
     specialty,
     displayName: displayName.trim(),
     personaKey: personaKey.trim(),
-    toolsets,
+    toolsets: normalizedToolsets,
+    ...(typeof toolsetsCustomized === 'boolean' ? { toolsetsCustomized } : {}),
     required,
     ...(isBoundedString(modelId, 200) ? { modelId: modelId.trim() } : {}),
     ...(isBoundedString(providerId, 200) ? { providerId: providerId.trim() } : {}),

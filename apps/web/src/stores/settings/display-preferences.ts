@@ -140,6 +140,15 @@ export interface DisplayPreferencesStore {
   showEstimatedTokens: boolean;
   setShowEstimatedTokens: (v: boolean) => void;
 
+  showRequestIndex: boolean;
+  setShowRequestIndex: (v: boolean) => void;
+
+  showToolCount: boolean;
+  setShowToolCount: (v: boolean) => void;
+
+  showMetaLine: boolean;
+  setShowMetaLine: (v: boolean) => void;
+
   // ── 消息布局 ──────────────────────────────────────────────
 
   messageLayout: MessageLayoutMode;
@@ -211,6 +220,9 @@ type DisplayPreferenceValues = Omit<
   | 'setShowStopReason'
   | 'setShowTokenBreakdown'
   | 'setShowEstimatedTokens'
+  | 'setShowRequestIndex'
+  | 'setShowToolCount'
+  | 'setShowMetaLine'
   | 'setMessageLayout'
   | 'setShowReasoningBlock'
   | 'setReasoningExpandedByDefault'
@@ -251,6 +263,9 @@ const DEFAULTS: DisplayPreferenceValues = {
   showStopReason: true,
   showTokenBreakdown: true,
   showEstimatedTokens: true,
+  showRequestIndex: true,
+  showToolCount: true,
+  showMetaLine: true,
   messageLayout: 'unified',
   showReasoningBlock: true,
   reasoningExpandedByDefault: false,
@@ -296,6 +311,18 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
       },
       setShowEstimatedTokens: (v) => {
         set({ showEstimatedTokens: v });
+        void persistToLocalStorage();
+      },
+      setShowRequestIndex: (v) => {
+        set({ showRequestIndex: v });
+        void persistToLocalStorage();
+      },
+      setShowToolCount: (v) => {
+        set({ showToolCount: v });
+        void persistToLocalStorage();
+      },
+      setShowMetaLine: (v) => {
+        set({ showMetaLine: v });
         void persistToLocalStorage();
       },
       setMessageLayout: (v) => {
@@ -359,7 +386,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
     }),
     {
       name: DISPLAY_PREFERENCES_STORAGE_KEY,
-      version: 6,
+      version: 7,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         showMessageTimestamps: s.showMessageTimestamps,
@@ -369,6 +396,9 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         showStopReason: s.showStopReason,
         showTokenBreakdown: s.showTokenBreakdown,
         showEstimatedTokens: s.showEstimatedTokens,
+        showRequestIndex: s.showRequestIndex,
+        showToolCount: s.showToolCount,
+        showMetaLine: s.showMetaLine,
         messageLayout: s.messageLayout,
         showReasoningBlock: s.showReasoningBlock,
         reasoningExpandedByDefault: s.reasoningExpandedByDefault,
@@ -412,6 +442,9 @@ function persistToLocalStorage() {
       showStopReason: state.showStopReason,
       showTokenBreakdown: state.showTokenBreakdown,
       showEstimatedTokens: state.showEstimatedTokens,
+      showRequestIndex: state.showRequestIndex,
+      showToolCount: state.showToolCount,
+      showMetaLine: state.showMetaLine,
       messageLayout: state.messageLayout,
       showReasoningBlock: state.showReasoningBlock,
       reasoningExpandedByDefault: state.reasoningExpandedByDefault,
@@ -425,7 +458,7 @@ function persistToLocalStorage() {
       themeMode: state.themeMode,
       themeStyle: state.themeStyle,
     };
-    const serialized = JSON.stringify({ state: data, version: 6 });
+    const serialized = JSON.stringify({ state: data, version: 7 });
     localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, serialized);
     console.log('[theme-store] manual persist done:', data.themeStyle, data.themeMode);
   } catch (e) {

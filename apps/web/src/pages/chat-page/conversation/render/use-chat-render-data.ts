@@ -31,12 +31,19 @@ import type {
 import {
   clearResolvedPendingPermissionFromMessage,
   createAssistantTraceContent,
+  deduplicateCompactionMessages,
+  estimateContextMessageTokens,
   estimateTokenCount,
+  filterChatMessagesForContext,
   partsFromAssistantTrace,
+  readCompactionTranscriptState,
   readAssistantTracePayload,
 } from '../../../../components/conversation-runtime/messages/support.js';
 import type { TaskToolRuntimeLookup } from './task-tool-runtime.js';
-import { shouldShowMessageInTranscript } from '../../../../components/conversation-runtime/messages/transcript-visibility.js';
+import {
+  isTranscriptCompactionMessage,
+  shouldShowMessageInTranscript,
+} from '../../../../components/conversation-runtime/messages/transcript-visibility.js';
 
 export interface ChatRenderDataInput {
   messages: ChatMessage[];
@@ -104,6 +111,7 @@ export interface ChatRenderDataReturn {
   effectiveReportedStreamUsage: ChatBackendUsageSnapshot | undefined;
   streamingUsageDetails: ChatUsageDetails | undefined;
   contextUsageSnapshot: ChatContextUsageSnapshot | null;
+  effectiveContextMessageCount: number;
   sanitizedHistoricalMessages: ChatMessage[];
   hiddenMessageCount: number;
   historicalRenderedMessageEntries: ChatRenderEntry[];
@@ -143,6 +151,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleMessageCount,
     serverTotalTurnCount,
   } = input;
+
+  const effectiveContextMessages = useMemo(
+    () => filterChatMessagesForContext(messages),
+    [messages],
+  );
 
   const assistantUsageDetails = useMemo(() => {
     const usageByMessageId = new Map<string, ChatUsageDetails>();
@@ -191,21 +204,10 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   }, [activeModelId, activeModelOption?.label, messages, modelPrices]);
 
   const messageInputTokens = useMemo(() => {
-    return messages.reduce((sum, message) => {
-      return sum + (message.tokenEstimate ?? estimateTokenCount(message.content));
+    return effectiveContextMessages.reduce((sum, message) => {
+      return sum + estimateContextMessageTokens(message);
     }, 0);
-  }, [messages]);
-
-  const latestHistoricalProviderTokens = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.role === 'assistant' && message.providerUsage) {
-        return message.providerUsage.totalTokens;
-      }
-    }
-
-    return undefined;
-  }, [messages]);
+  }, [effectiveContextMessages]);
 
   const streamingOutputTokens = useMemo(() => {
     return visibleStreamBuffer.length > 0 ? estimateTokenCount(visibleStreamBuffer) : 0;
@@ -218,6 +220,40 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         : undefined,
     [visibleReportedStreamUsage],
   );
+
+  const shouldPreferHistoricalContextEstimate = useMemo(() => {
+    if (visibleStreaming) {
+      return false;
+    }
+
+    let latestCompactionAt = -1;
+    let latestUsageAssistantAt = -1;
+    for (const message of messages) {
+      const createdAt =
+        typeof message.createdAt === 'number'
+          ? message.createdAt
+          : typeof message.createdAt === 'string'
+            ? Date.parse(message.createdAt)
+            : NaN;
+      if (!Number.isFinite(createdAt)) {
+        continue;
+      }
+
+      const compaction = readCompactionTranscriptState(message);
+      if (compaction?.phase === 'completed') {
+        latestCompactionAt = Math.max(latestCompactionAt, createdAt);
+      }
+      if (
+        message.role === 'assistant' &&
+        message.providerUsage &&
+        message.providerUsage.totalTokens > 0
+      ) {
+        latestUsageAssistantAt = Math.max(latestUsageAssistantAt, createdAt);
+      }
+    }
+
+    return latestCompactionAt >= 0 && latestCompactionAt >= latestUsageAssistantAt;
+  }, [messages, visibleStreaming]);
 
   const streamingUsageDetails = useMemo<ChatUsageDetails | undefined>(() => {
     if (!visibleStreaming || (visibleStreamBuffer.length === 0 && !effectiveReportedStreamUsage)) {
@@ -270,15 +306,16 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     () =>
       buildChatContextUsageSnapshot({
         contextWindow: activeModelOption?.contextWindow,
-        historicalTokens: latestHistoricalProviderTokens ?? messageInputTokens,
+        historicalTokens: messageInputTokens,
+        preferHistoricalEstimate: shouldPreferHistoricalContextEstimate,
         reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
         streamingTotalTokens: streamingUsageDetails?.totalTokens,
       }),
     [
       activeModelOption?.contextWindow,
       effectiveReportedStreamUsage?.totalTokens,
-      latestHistoricalProviderTokens,
       messageInputTokens,
+      shouldPreferHistoricalContextEstimate,
       streamingUsageDetails?.totalTokens,
     ],
   );
@@ -290,7 +327,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         .map((permission) => permission.requestId),
     );
 
-    return messages.flatMap((message) => {
+    const visible = messages.flatMap((message) => {
       if (message.role !== 'assistant') {
         return [message];
       }
@@ -321,6 +358,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
 
       return [nextMessage];
     });
+    return deduplicateCompactionMessages(visible);
   }, [messages, pendingPermissions]);
 
   const visibleMessages = useMemo(() => {
@@ -348,6 +386,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     return visibleMessages.map((message) => ({
       message,
       actions: buildMessageActions(message),
+      // Keep compaction markers as their own visual group so they don't
+      // collapse into the surrounding assistant turn bubbles.
+      ...(isTranscriptCompactionMessage(message)
+        ? { groupIdentityKey: `compaction:${message.id}` }
+        : {}),
       renderContent: (currentMessage: ChatMessage) =>
         renderChatMessageContentWithOptions(currentMessage, {
           onOpenChildSession: openChildSessionInspector,
@@ -527,6 +570,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     effectiveReportedStreamUsage,
     streamingUsageDetails,
     contextUsageSnapshot,
+    effectiveContextMessageCount: effectiveContextMessages.length,
     sanitizedHistoricalMessages,
     hiddenMessageCount,
     historicalRenderedMessageEntries,

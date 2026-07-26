@@ -1,19 +1,20 @@
 use serde::Serialize;
+use serde_json::json;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State, Url};
 use tauri_plugin_updater::UpdaterExt;
 
-use crate::{restore_main_window, shutdown_gateway_child_from_state, GatewayProcess, SettingsState};
+use crate::{
+    restore_main_window, shutdown_gateway_child_from_state, GatewayProcess, SettingsState,
+};
 
 const EVT_PROXY_UPDATE_DOWNLOAD: &str = "desktop:proxy-update-download";
 
-const PROXY_UPDATE_ENDPOINTS_PREVIEW: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json",
-];
+const PROXY_UPDATE_ENDPOINTS_PREVIEW: [&str; 1] =
+    ["https://github.com/Await-d/OpenAWork/releases/download/desktop-latest-preview/latest.json"];
 
-const PROXY_UPDATE_ENDPOINTS_STABLE: [&str; 1] = [
-    "https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json",
-];
+const PROXY_UPDATE_ENDPOINTS_STABLE: [&str; 1] =
+    ["https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json"];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data")]
@@ -88,14 +89,13 @@ fn updater_platform_key() -> Result<&'static str, String> {
 
 #[tauri::command]
 pub fn open_update_panel(app: AppHandle, auto_start: Option<bool>) -> Result<(), String> {
+    let auto_start = auto_start.unwrap_or(true);
+
+    // 先恢复主窗口，再通知前端打开更新弹窗。
     restore_main_window(&app);
-    app.emit(
-        "tray:check-updates",
-        serde_json::json!({
-            "autoStart": auto_start.unwrap_or(false),
-        }),
-    )
-    .map_err(|error| format!("打开更新面板失败：{error}"))
+    app.emit("tray:check-updates", json!({ "autoStart": auto_start }))
+        .map_err(|error| format!("发送更新弹窗事件失败：{error}"))?;
+    Ok(())
 }
 
 #[tauri::command]

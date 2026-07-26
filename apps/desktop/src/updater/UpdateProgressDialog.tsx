@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   checkForUpdate,
   clearProxyCache,
@@ -81,13 +82,16 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     setError(null);
     setProxyUsed(null);
     try {
+      console.log('[updater] 开始检查更新…');
       const r = await checkForUpdate();
       if (cancelledRef.current) return;
+      console.log('[updater] 检查结果:', JSON.stringify({ available: r.available, version: r.version, installMode: r.installMode, proxyUsed: r.proxyUsed?.name }));
       setResult(r);
       setReleaseNotes(r.notes);
       setProxyUsed(r.proxyUsed);
       setState(r.available ? 'available' : 'up-to-date');
     } catch (e) {
+      console.error('[updater] 检查更新失败:', e);
       setError(toUpdateError(e));
     }
   }, []);
@@ -117,6 +121,7 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
     setDownloaded(0);
     setTotal(null);
     setError(null);
+    console.log('[updater] 开始下载:', JSON.stringify({ hasUpdate: !!result.update, installMode: result.installMode, proxyUsed: result.proxyUsed?.name }));
 
     try {
       if (!result.update) {
@@ -176,6 +181,7 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
       if (cancelledRef.current) return;
       setState('done');
     } catch (e) {
+      console.error('[updater] 下载/安装失败:', e);
       if (cancelledRef.current || abortController.signal.aborted) return;
       const classified = toUpdateError(e);
       if (classified.kind === 'cancelled') return;
@@ -211,6 +217,7 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
   useEffect(() => {
     if (!autoCheck || autoCheckStartedRef.current) return;
     autoCheckStartedRef.current = true;
+    console.log('[updater] UpdateProgressDialog 已挂载，autoCheck=true，开始自动检查');
     void handleCheck();
   }, [autoCheck, handleCheck]);
 
@@ -243,16 +250,31 @@ export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgr
 
   const proxyHint = proxyUsed ? `（通过 ${proxyUsed.name} 加速）` : '';
   const isManualProxyMode = result?.installMode === 'manual';
+  const statusMessage =
+    state === 'available'
+      ? `发现新版本 ${result?.version ?? ''}${proxyHint}。`
+      : state === 'downloading'
+        ? result?.update
+          ? `下载中${proxyHint}… ${progress}%`
+          : result?.installMode === 'proxy-auto'
+            ? `下载安装中${proxyHint}… ${progress}%（代理安装无法中途停止，关闭仅隐藏进度）`
+            : `下载中${proxyHint}… ${progress}%`
+        : state === 'done'
+          ? isManualProxyMode
+            ? '已切换为手动安装：更新包已在浏览器中打开。请先完全退出 OpenAWork，再运行下载的安装包。'
+            : '更新已下载，重启应用以应用更新。'
+          : state === 'checking'
+            ? '正在检查更新…'
+            : state === 'installing'
+              ? '下载完成，正在安装更新…'
+              : state === 'up-to-date'
+                ? '当前已是最新版本。'
+                : '检查更新以获取最新功能和修复。';
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- 保留备用
   const STATUS_MSG: Record<UpdateState, string> = {
     idle: '检查更新以获取最新功能和修复。',
     checking: '正在检查更新…',
-    available: `发现新版本 ${result?.version ?? ''}${proxyHint}。${
-      releaseNotes
-        ? `\
-\
-${releaseNotes}`
-        : ''
-    }`,
+    available: `发现新版本 ${result?.version ?? ''}${proxyHint}。`,
     downloading: result?.update
       ? `下载中${proxyHint}… ${progress}%`
       : result?.installMode === 'proxy-auto'
@@ -265,9 +287,11 @@ ${releaseNotes}`
     'up-to-date': '当前已是最新版本。',
   };
 
-  return (
-    <dialog
-      open
+  return createPortal(
+    <div
+      data-openawork-update-dialog="true"
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed',
         inset: 0,
@@ -276,11 +300,8 @@ ${releaseNotes}`
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9000,
-        border: 'none',
         padding: 0,
         margin: 0,
-        maxWidth: '100vw',
-        maxHeight: '100vh',
         width: '100vw',
         height: '100vh',
       }}
@@ -296,11 +317,14 @@ ${releaseNotes}`
           background: 'hsl(var(--background))',
           border: '1px solid hsl(var(--border-default))',
           borderRadius: 12,
-          padding: '1.5rem',
-          width: 380,
+          padding: '1.25rem',
+          width: 'min(640px, calc(100vw - 24px))',
+          maxHeight: 'min(78vh, 760px)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '1rem',
+          gap: '0.875rem',
+          boxShadow: '0 24px 80px hsl(220 40% 2% / 0.42)',
+          overflow: 'hidden',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -323,15 +347,57 @@ ${releaseNotes}`
             </span>
           )}
         </div>
-        <div
-          style={{
-            fontSize: 14,
-            color: 'hsl(var(--muted-foreground))',
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {STATUS_MSG[state]}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+          <div
+            style={{
+              fontSize: 14,
+              color: 'hsl(var(--muted-foreground))',
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {statusMessage}
+          </div>
+
+          {state === 'available' && releaseNotes ? (
+            <section
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                minHeight: 0,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: 'hsl(var(--foreground))',
+                  letterSpacing: '0.02em',
+                }}
+              >
+                发布日志
+              </div>
+              <div
+                style={{
+                  maxHeight: 'min(42vh, 360px)',
+                  overflowY: 'auto',
+                  padding: '0.875rem 1rem',
+                  borderRadius: 10,
+                  background: 'hsl(var(--muted) / 0.35)',
+                  border: '1px solid hsl(var(--border-default))',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  color: 'hsl(var(--foreground))',
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {releaseNotes}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         {state === 'checking' && <Spinner />}
@@ -372,7 +438,16 @@ ${releaseNotes}`
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            justifyContent: 'flex-end',
+            flexWrap: 'wrap',
+            marginTop: 'auto',
+            paddingTop: 4,
+          }}
+        >
           <button
             type="button"
             onClick={handleCancelOrClose}
@@ -384,6 +459,7 @@ ${releaseNotes}`
               color: 'hsl(var(--muted-foreground))',
               cursor: 'pointer',
               fontSize: 13,
+              flex: '0 0 auto',
             }}
           >
             {state === 'downloading'
@@ -407,6 +483,7 @@ ${releaseNotes}`
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
+                flex: '0 0 auto',
               }}
             >
               立即检查
@@ -425,6 +502,7 @@ ${releaseNotes}`
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
+                flex: '0 0 auto',
               }}
             >
               更新
@@ -443,6 +521,7 @@ ${releaseNotes}`
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
+                flex: '0 0 auto',
               }}
             >
               重启
@@ -461,6 +540,7 @@ ${releaseNotes}`
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
+                flex: '0 0 auto',
               }}
             >
               完成
@@ -468,6 +548,7 @@ ${releaseNotes}`
           )}
         </div>
       </div>
-    </dialog>
+    </div>,
+    document.body,
   );
 }

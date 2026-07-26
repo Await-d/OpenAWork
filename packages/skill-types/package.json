@@ -18,5 +18,8 @@
     "test": "vitest run --passWithNoTests",
     "lint": "eslint .",
     "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37"
   }
 }

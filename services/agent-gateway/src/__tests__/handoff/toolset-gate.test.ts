@@ -31,6 +31,8 @@ const ALL_TOOLS: Tool[] = [
   tool('websearch'),
   tool('webfetch'),
   tool('lsp_find_references'),
+  tool('desktop_automation'),
+  tool('desktop_control'),
   tool('grep'),
   tool('AskUserQuestion'),
   tool('todoread'),
@@ -102,6 +104,15 @@ describe('filterToolsByAllowedSets', () => {
     expect(allowed).toContain('web');
     const filtered = filterToolsByAllowedSets(ALL_TOOLS, allowed);
     expect(names(filtered)).toContain('websearch');
+  });
+
+  it('executor 放宽后含 desktop → desktop automation/control 可见', () => {
+    const allowed = LAYER_CAPABILITIES.executor.allowedToolsetCategories as ToolsetCategory[];
+    expect(allowed).toContain('desktop');
+    const filtered = filterToolsByAllowedSets(ALL_TOOLS, allowed);
+    const n = names(filtered);
+    expect(n).toContain('desktop_automation');
+    expect(n).toContain('desktop_control');
   });
 
   it('reviewer 放宽后含 shell/test → bash 可见', () => {
@@ -194,6 +205,7 @@ describe('层级白名单 ∩ 成员 toolsets 交集语义（模拟 stream.ts �
     expect(result).toContain('read');
     expect(result).toContain('write');
     expect(result).toContain('shell');
+    expect(result).not.toContain('desktop');
   });
 
   it('必备工具不可被成员配置砍掉：pm1 成员只勾 read 时仍含 write', () => {
@@ -252,10 +264,11 @@ describe('LAYER_CAPABILITIES 必备/允许 工具集不变量', () => {
     expect(LAYER_CAPABILITIES.reviewer.requiredToolsetCategories.length).toBeGreaterThan(0);
   });
 
-  it('executor 必备含 read/write/shell（交付代码三大件）', () => {
+  it('executor 必备含 read/write/shell，但 desktop 不是强制权限', () => {
     expect(LAYER_CAPABILITIES.executor.requiredToolsetCategories).toEqual(
       expect.arrayContaining(['read', 'write', 'shell']),
     );
+    expect(LAYER_CAPABILITIES.executor.requiredToolsetCategories).not.toContain('desktop');
   });
 
   it('pm1 必备含 read/write（写 spec/plan/tasks 必需）', () => {

@@ -10,7 +10,7 @@ import {
   InlineFailureNotice,
 } from './devtools-workbench-primitives.js';
 import { ErrorCommandCenter } from './devtools-error-command.js';
-import { SS, ST } from '../shared/settings-section-styles.js';
+import { SS, ST, BADGE, BS, BG, TWO_COLUMN, LEFT_PANEL, RIGHT_PANEL, LIST_CONTAINER } from '../shared/settings-section-styles.js';
 
 interface DevtoolsDiagnosticsSectionProps {
   sectionRef: React.RefObject<HTMLDivElement | null>;
@@ -38,57 +38,6 @@ interface DevtoolsDiagnosticsSectionProps {
   onExportErrorReport: () => void;
   onScrollToLogs: () => void;
   onCopyDiagnosticField: (label: string, value: unknown) => void;
-}
-
-interface DiagnosticFileSummary {
-  filePath: string;
-  count: number;
-  toolName: string;
-  lastMessage: string;
-}
-
-const PANEL_SURFACE_STYLE: React.CSSProperties = {
-  borderRadius: 10,
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-  padding: '10px 12px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  minWidth: 0,
-};
-
-const META_BADGE_STYLE: React.CSSProperties = {
-  borderRadius: 999,
-  padding: '5px 10px',
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
-  fontSize: 11,
-  color: 'var(--fg-default)',
-  fontWeight: 700,
-  fontVariantNumeric: 'tabular-nums',
-};
-
-function buildFileSummaries(diagnostics: SettingsDiagnosticRecord[]): DiagnosticFileSummary[] {
-  const grouped = new Map<string, DiagnosticFileSummary>();
-
-  for (const diagnostic of diagnostics) {
-    const existing = grouped.get(diagnostic.filePath);
-    if (existing) {
-      existing.count += 1;
-      existing.lastMessage = diagnostic.message;
-      continue;
-    }
-
-    grouped.set(diagnostic.filePath, {
-      filePath: diagnostic.filePath,
-      count: 1,
-      toolName: diagnostic.toolName ?? diagnostic.filePath,
-      lastMessage: diagnostic.message,
-    });
-  }
-
-  return Array.from(grouped.values());
 }
 
 function formatDiagnosticLocation(diagnostic: SettingsDiagnosticRecord): string {
@@ -122,68 +71,42 @@ export function DevtoolsDiagnosticsSection({
   onScrollToLogs,
   onCopyDiagnosticField,
 }: DevtoolsDiagnosticsSectionProps) {
-  const fileSummaries = React.useMemo(
-    () => buildFileSummaries(filteredDiagnostics),
-    [filteredDiagnostics],
-  );
-
-  const selectedFilePath = selectedDiagnostic?.filePath ?? null;
-
   const appVersion = filteredDiagnostics[0]?.appVersion ?? null;
   const [isClearing, setIsClearing] = React.useState(false);
 
   return (
     <section ref={sectionRef} style={SS}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-          alignItems: 'flex-start',
-        }}
-      >
+      {/* 标题和操作栏 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
         <h3 style={ST}>诊断信息</h3>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {availableDates.length > 0 ? (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          {availableDates.length > 0 && (
             <select
               value={dateFilter ?? ''}
               onChange={(event) => onSetDateFilter(event.target.value || null)}
               style={{
-                borderRadius: 8,
-                border: dateFilter ? '1px solid var(--danger)' : '1px solid var(--border-default)',
-                padding: '6px 10px',
+                borderRadius: 3,
+                border: '1px solid var(--border-default)',
+                padding: '3px 6px',
                 background: 'var(--bg-overlay)',
                 color: 'var(--fg-strong)',
-                fontSize: 12,
+                fontSize: 11,
                 cursor: 'pointer',
               }}
               aria-label="按日期过滤诊断"
             >
               <option value="">全部日期</option>
               {availableDates.map((date) => (
-                <option key={date} value={date}>
-                  {date}
-                </option>
+                <option key={date} value={date}>{date}</option>
               ))}
             </select>
-          ) : null}
-          {appVersion ? (
-            <span
-              style={{
-                borderRadius: 999,
-                padding: '5px 10px',
-                border: '1px solid var(--border-default)',
-                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
-                fontSize: 11,
-                color: 'var(--fg-muted)',
-                fontFamily: 'monospace',
-              }}
-            >
+          )}
+          {appVersion && (
+            <span style={{ ...BADGE, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
               v{appVersion}
             </span>
-          ) : null}
-          {diagnostics.length > 0 ? (
+          )}
+          {diagnostics.length > 0 && (
             <button
               type="button"
               disabled={isClearing}
@@ -191,23 +114,15 @@ export function DevtoolsDiagnosticsSection({
                 setIsClearing(true);
                 void onClearDiagnostics().finally(() => setIsClearing(false));
               }}
-              style={{
-                borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
-                padding: '6px 12px',
-                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
-                color: 'var(--danger)',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: isClearing ? 'not-allowed' : 'pointer',
-                opacity: isClearing ? 0.6 : 1,
-              }}
+              style={{ ...BG, color: isClearing ? 'var(--fg-muted)' : 'var(--danger)' }}
             >
-              {isClearing ? '清除中…' : '清除全部错误'}
+              {isClearing ? '清除中…' : '清除'}
             </button>
-          ) : null}
+          )}
         </div>
       </div>
+
+      {/* 错误命令中心 */}
       <ErrorCommandCenter
         allDiagnostics={diagnostics}
         filteredDiagnostics={filteredDiagnostics}
@@ -225,528 +140,177 @@ export function DevtoolsDiagnosticsSection({
         onSelectDiagnostic={onSelectDiagnostic}
         onScrollToLogs={onScrollToLogs}
       />
+
+      {/* 内容区域 */}
       {sourceState.status === 'error' && sourceState.error ? (
         <InlineFailureNotice title="诊断信息加载失败" message={sourceState.error} />
       ) : filteredDiagnostics.length > 0 ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start' }}>
-          <div
-            style={{
-              flex: '0 1 340px',
-              minWidth: 280,
-              maxWidth: 360,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={PANEL_SURFACE_STYLE}>
-              <div
+        <div style={TWO_COLUMN}>
+          {/* 左侧：错误列表 */}
+          <div style={LEFT_PANEL}>
+            {/* 搜索框 */}
+            <div style={{ position: 'relative' }}>
+              <input
+                type="search"
+                value={diagnosticQuery}
+                onChange={(event) => onSetDiagnosticQuery(event.target.value)}
+                aria-label="搜索诊断错误"
+                name="diagnostic-query"
+                autoComplete="off"
+                placeholder="搜索错误..."
                 style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  flexWrap: 'wrap',
+                  width: '100%',
+                  background: 'transparent',
+                  border: `1px solid ${diagnosticQuery ? 'var(--danger)' : 'var(--border-subtle)'}`,
+                  borderRadius: 2,
+                  padding: '3px 6px',
+                  color: 'var(--fg-strong)',
+                  fontSize: 11,
+                  outline: 'none',
                 }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                    {diagnosticQuery ? '搜索条件（筛选中）' : '错误浏览器'}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-                    先缩小范围，再从左侧列表锁定具体错误，右侧详情会保持稳定宽度，不会被不同长度的卡片撑乱。
-                  </div>
-                </div>
-                {diagnosticQuery ? (
-                  <button
-                    type="button"
-                    onClick={() => onSetDiagnosticQuery('')}
-                    style={{
-                      alignSelf: 'flex-start',
-                      borderRadius: 999,
-                      border: '1px solid var(--border-default)',
-                      padding: '6px 10px',
-                      background: 'var(--bg-overlay)',
-                      color: 'var(--fg-strong)',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    清空筛选
-                  </button>
-                ) : null}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'relative' }}>
-                <input
-                  type="search"
-                  value={diagnosticQuery}
-                  onChange={(event) => onSetDiagnosticQuery(event.target.value)}
-                  aria-label="搜索诊断错误"
-                  name="diagnostic-query"
-                  autoComplete="off"
-                  placeholder="搜索 message / requestId / tool…"
+              />
+              {diagnosticQuery && (
+                <button
+                  type="button"
+                  onClick={() => onSetDiagnosticQuery('')}
+                  aria-label="清空搜索"
                   style={{
-                    flex: 1,
-                    background: 'var(--bg-overlay)',
-                    border: diagnosticQuery
-                      ? '1px solid var(--danger)'
-                      : '1px solid var(--border-default)',
-                    borderRadius: 6,
-                    padding: '7px 32px 7px 10px',
-                    color: 'var(--fg-strong)',
-                    fontSize: 12,
-                    outline: 'none',
-                  }}
-                />
-                {diagnosticQuery ? (
-                  <button
-                    type="button"
-                    onClick={() => onSetDiagnosticQuery('')}
-                    aria-label="清空搜索"
-                    style={{
-                      position: 'absolute',
-                      right: 8,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: 'var(--fg-muted)',
-                      fontSize: 14,
-                      lineHeight: 1,
-                      padding: '2px 4px',
-                      borderRadius: 3,
-                    }}
-                  >
-                    ✕
-                  </button>
-                ) : null}
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={META_BADGE_STYLE}>文件 {fileSummaries.length}</span>
-                <span
-                  style={{
-                    ...META_BADGE_STYLE,
-                    color: filteredDiagnostics.length > 0 ? 'var(--danger)' : 'var(--fg-default)',
-                    borderColor:
-                      filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))'
-                        : 'var(--border-default)',
-                    background:
-                      filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))'
-                        : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                    position: 'absolute',
+                    right: 3,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--fg-muted)',
+                    fontSize: 10,
+                    padding: '1px 2px',
                   }}
                 >
-                  可见错误 {filteredDiagnostics.length}
-                </span>
-                <span style={META_BADGE_STYLE}>关联日志 {relatedLogs.length}</span>
-              </div>
+                  ✕
+                </button>
+              )}
             </div>
 
-            <div style={PANEL_SURFACE_STYLE}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  alignItems: 'center',
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                  按文件聚合
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--fg-muted)',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {fileSummaries.length} 个文件
-                </div>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  maxHeight: 220,
-                  overflowY: 'auto',
-                }}
-              >
-                {fileSummaries.map((summary) => {
-                  const firstIndex = filteredDiagnostics.findIndex(
-                    (diagnostic) => diagnostic.filePath === summary.filePath,
-                  );
-                  const firstDiagnostic = firstIndex >= 0 ? filteredDiagnostics[firstIndex] : null;
-                  const isActive = selectedFilePath === summary.filePath;
+            {/* 统计信息 */}
+            <div style={{ display: 'flex', gap: 6, fontSize: 10, color: 'var(--fg-muted)' }}>
+              <span>{filteredDiagnostics.length} 条错误</span>
+              {relatedLogs.length > 0 && <span>{relatedLogs.length} 关联日志</span>}
+            </div>
 
-                  return (
-                    <button
-                      key={summary.filePath}
-                      type="button"
-                      onClick={() => {
-                        if (!firstDiagnostic) {
-                          return;
-                        }
-                        onSelectDiagnostic(buildDiagnosticKey(firstDiagnostic));
-                      }}
-                      style={{
-                        borderRadius: 6,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 20%, var(--border-default))'}`,
-                        background: isActive
-                          ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
-                          : 'var(--bg-overlay)',
-                        color: 'var(--fg-strong)',
-                        padding: '8px 10px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 4,
-                        cursor: firstDiagnostic ? 'pointer' : 'default',
-                        textAlign: 'left',
-                        minWidth: 0,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 8,
-                          alignItems: 'center',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: isActive ? 'var(--danger)' : 'var(--fg-strong)',
-                            minWidth: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            flex: 1,
-                          }}
-                        >
-                          {summary.filePath}
-                        </span>
-                        <span
-                          style={{
-                            borderRadius: 4,
-                            padding: '2px 6px',
-                            background: isActive
-                              ? 'color-mix(in srgb, var(--danger) 20%, transparent)'
-                              : 'color-mix(in srgb, var(--danger) 12%, transparent)',
-                            color: 'var(--danger)',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            flexShrink: 0,
-                            fontVariantNumeric: 'tabular-nums',
-                          }}
-                        >
-                          {summary.count}
-                        </span>
-                      </div>
+            {/* 错误列表 */}
+            <div style={LIST_CONTAINER}>
+              {filteredDiagnostics.map((diagnostic, index) => {
+                const key = buildDiagnosticKey(diagnostic);
+                const isActive = selectedDiagnosticKey === key || (!selectedDiagnosticKey && index === 0);
+
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onSelectDiagnostic(key)}
+                    style={{
+                      borderRadius: 2,
+                      border: 'none',
+                      borderBottom: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
+                      background: isActive ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : 'transparent',
+                      color: 'var(--fg-strong)',
+                      padding: '4px 6px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 4, alignItems: 'flex-start' }}>
                       <span
                         style={{
-                          fontSize: 10,
-                          color: 'var(--fg-muted)',
-                          fontFamily: 'monospace',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {summary.toolName}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={PANEL_SURFACE_STYLE}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  alignItems: 'center',
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                  错误列表
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--fg-muted)',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {filteredDiagnostics.length} 条
-                </div>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  maxHeight: 420,
-                  overflowY: 'auto',
-                }}
-              >
-                {filteredDiagnostics.map((diagnostic, index) => {
-                  const key = buildDiagnosticKey(diagnostic);
-                  const isActive =
-                    selectedDiagnosticKey === key || (!selectedDiagnosticKey && index === 0);
-
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => onSelectDiagnostic(key)}
-                      style={{
-                        borderRadius: 14,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default))' : 'var(--border-default)'}`,
-                        background: isActive
-                          ? 'linear-gradient(135deg, color-mix(in srgb, var(--danger) 11%, var(--bg-overlay)), color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)))'
-                          : 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
-                        color: 'var(--fg-strong)',
-                        padding: '12px 14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        minWidth: 0,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 10,
-                          alignItems: 'flex-start',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: isActive ? 'var(--danger)' : 'var(--fg-strong)',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            minWidth: 0,
-                            flex: 1,
-                          }}
-                        >
-                          {diagnostic.message}
-                        </span>
-                        <span
-                          style={{
-                            borderRadius: 999,
-                            padding: '4px 8px',
-                            background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-                            color: 'var(--danger)',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            flexShrink: 0,
-                          }}
-                        >
-                          {diagnostic.severity}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: 'flex',
-                          gap: 8,
-                          flexWrap: 'wrap',
                           fontSize: 11,
-                          color: 'var(--fg-muted)',
+                          fontWeight: isActive ? 500 : 400,
+                          color: isActive ? 'var(--accent)' : 'var(--fg-strong)',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          minWidth: 0,
+                          flex: 1,
+                          lineHeight: 1.3,
                         }}
                       >
-                        <span>{formatDiagnosticLocation(diagnostic)}</span>
-                        {typeof diagnostic.durationMs === 'number' ? (
-                          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {diagnostic.durationMs}ms
-                          </span>
-                        ) : null}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                        {diagnostic.message}
+                      </span>
+                      <span style={{ ...BADGE, color: 'var(--danger)', flexShrink: 0, fontSize: 9 }}>
+                        {diagnostic.severity}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {formatDiagnosticLocation(diagnostic)}
+                      </span>
+                      {typeof diagnostic.durationMs === 'number' && (
+                        <span style={{ flexShrink: 0 }}>{diagnostic.durationMs}ms</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div
-            style={{
-              flex: '1 1 460px',
-              minWidth: 320,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={PANEL_SURFACE_STYLE}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  flexWrap: 'wrap',
-                }}
+          {/* 右侧：详情面板 */}
+          <div style={RIGHT_PANEL}>
+            {/* 关联日志 */}
+            {relatedLogs.length > 0 && (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', fontSize: 10 }}>
+                <span style={{ color: 'var(--fg-muted)' }}>关联:</span>
+                {relatedLogs.map((log, index) => (
+                  <button
+                    key={`${log.timestamp}-${log.requestId ?? index}`}
+                    type="button"
+                    onClick={onScrollToLogs}
+                    style={{ ...BG, padding: '1px 4px', fontSize: 10, color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-default)' }}
+                  >
+                    {log.requestId ?? log.source ?? `日志 ${index + 1}`}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 操作按钮 */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => onCopyDiagnosticField('输入', selectedDiagnostic?.input)}
+                disabled={!selectedDiagnostic}
+                style={{ ...BS, opacity: selectedDiagnostic ? 1 : 0.4, cursor: selectedDiagnostic ? 'pointer' : 'not-allowed' }}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
-                    错误详情
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-                    详情区固定在右侧，输入、输出和关联日志都围绕当前错误展开，避免在不同大小的卡片之间来回跳转。
-                  </div>
-                </div>
-                {selectedDiagnostic ? (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={META_BADGE_STYLE}>
-                      {selectedDiagnostic.toolName ?? selectedDiagnostic.filePath}
-                    </span>
-                    {selectedDiagnostic.requestId ? (
-                      <span style={META_BADGE_STYLE}>{selectedDiagnostic.requestId}</span>
-                    ) : null}
-                    {typeof selectedDiagnostic.durationMs === 'number' ? (
-                      <span style={META_BADGE_STYLE}>{selectedDiagnostic.durationMs}ms</span>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              {relatedLogs.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-muted)' }}>
-                    关联日志
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {relatedLogs.map((log, index) => (
-                      <button
-                        key={`${log.timestamp}-${log.requestId ?? index}`}
-                        type="button"
-                        onClick={onScrollToLogs}
-                        style={{
-                          borderRadius: 999,
-                          border: '1px solid var(--border-default)',
-                          padding: '6px 10px',
-                          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
-                          color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {log.requestId ?? log.source ?? `日志 ${index + 1}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    borderRadius: 12,
-                    border: '1px dashed var(--border-default)',
-                    padding: '12px 14px',
-                    fontSize: 12,
-                    color: 'var(--fg-muted)',
-                    background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
-                  }}
-                >
-                  这条错误暂时没有匹配到关联日志，可以直接复制输入和输出 payload 继续排查。
-                </div>
-              )}
-
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => onCopyDiagnosticField('输入 payload', selectedDiagnostic?.input)}
-                  disabled={!selectedDiagnostic}
-                  style={{
-                    borderRadius: 10,
-                    border: '1px solid var(--border-default)',
-                    padding: '8px 12px',
-                    background: 'var(--bg-overlay)',
-                    color: 'var(--fg-strong)',
-                    fontSize: 12,
-                    cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
-                    opacity: selectedDiagnostic ? 1 : 0.45,
-                  }}
-                >
-                  复制输入 payload
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onCopyDiagnosticField('输出 payload', selectedDiagnostic?.output)}
-                  disabled={!selectedDiagnostic}
-                  style={{
-                    borderRadius: 10,
-                    border: '1px solid var(--border-default)',
-                    padding: '8px 12px',
-                    background: 'var(--bg-overlay)',
-                    color: 'var(--fg-strong)',
-                    fontSize: 12,
-                    cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
-                    opacity: selectedDiagnostic ? 1 : 0.45,
-                  }}
-                >
-                  复制输出 payload
-                </button>
-              </div>
+                复制输入
+              </button>
+              <button
+                type="button"
+                onClick={() => onCopyDiagnosticField('输出', selectedDiagnostic?.output)}
+                disabled={!selectedDiagnostic}
+                style={{ ...BS, opacity: selectedDiagnostic ? 1 : 0.4, cursor: selectedDiagnostic ? 'pointer' : 'not-allowed' }}
+              >
+                复制输出
+              </button>
             </div>
 
+            {/* 详情面板 */}
             <DiagnosticDetailsPanel diagnostic={selectedDiagnostic} />
           </div>
         </div>
       ) : diagnostics.length > 0 ? (
-        <div
-          style={{
-            borderRadius: 12,
-            border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
-            background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
-            padding: '16px 18px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 4 }}
-            >
-              当前筛选条件无匹配结果
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--fg-default)' }}>
-              共有 {diagnostics.length} 条诊断记录，但当前搜索词未命中任何条目。
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onSetDiagnosticQuery('')}
-            style={{
-              borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--warning) 40%, var(--border-default))',
-              padding: '8px 14px',
-              background: 'var(--bg-overlay)',
-              color: 'var(--fg-strong)',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          当前筛选条件无匹配结果。共有 {diagnostics.length} 条诊断记录。
+          <button type="button" onClick={() => onSetDiagnosticQuery('')} style={{ ...BG, fontSize: 11, marginLeft: 4 }}>
             清空筛选
           </button>
         </div>
       ) : (
-        <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>最近没有采集到新的异常。</p>
+        <p style={{ fontSize: 11, color: 'var(--fg-muted)' }}>最近没有采集到新的异常。</p>
       )}
     </section>
   );

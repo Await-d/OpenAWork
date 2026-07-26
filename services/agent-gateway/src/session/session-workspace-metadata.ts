@@ -17,6 +17,7 @@ const teamMemberSlotSchema = z.object({
   required: z.boolean(),
   specialty: z.enum(specialtyValues),
   toolsets: z.array(z.string().min(1).max(80)).max(20),
+  toolsetsCustomized: z.boolean().optional(),
   // 可选的 per-member 模型绑定（智能分配模型功能写入；老数据无此字段）。
   providerId: z.string().min(1).max(200).optional(),
   modelId: z.string().min(1).max(200).optional(),

@@ -35,6 +35,7 @@ import {
   listSessionMessagesV2,
 } from '../message/message-v2-adapter.js';
 import { executeSessionCompaction } from '../session/session-compaction.js';
+import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import { recordUlwVerificationEvidence } from '../session/ulw-verification-evidence.js';
@@ -96,6 +97,7 @@ const messageSnapshotSchema = z.object({
 
 const executeCommandSchema = z.object({
   commandId: z.string().min(1),
+  executionId: z.string().trim().min(1).max(128).optional(),
   messages: z.array(messageSnapshotSchema).optional(),
   rawInput: z.string().trim().min(1).optional(),
 });
@@ -203,6 +205,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       const cmdParams = {
         args: extractCommandArgs(body.rawInput, command.label),
         commandId: command.id,
+        executionId: body.executionId,
         graph,
         messages,
         metadataJson: session.metadata_json,
@@ -265,6 +268,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
 async function executeCompactCommand(params: {
   args: string[];
   commandId: string;
+  executionId?: string;
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
@@ -272,6 +276,10 @@ async function executeCompactCommand(params: {
   sessionId: string;
   userId: string;
 }): Promise<CommandExecutionResult> {
+  const strategy = 'runtime_replace' as const;
+  const fallbackStrategy = 'summary_only' as const;
+  const executionId = params.executionId?.trim() || randomUUID();
+  const commandRunId = `command:${params.sessionId}:${params.commandId}:${executionId}`;
   const task = taskManager.addTask(params.graph, {
     title: '压缩会话',
     description: '执行 /compact 命令并生成摘要卡片',
@@ -289,28 +297,58 @@ async function executeCompactCommand(params: {
   );
   const compactionSettings = readCompactionSettings(parseStoredJson(compactionSettingsRow?.value));
   const startedAt = Date.now();
-  const compaction = await executeSessionCompaction({
-    metadataJson: params.metadataJson,
-    messages: params.messages,
-    prune: compactionSettings.prune,
-    recentMessagesKept: compactionSettings.recentMessagesKept,
-    route: compactionRoute,
-    sessionId: params.sessionId,
-    trigger: 'manual',
-    userId: params.userId,
+  const startedEvent = {
+    type: 'compaction' as const,
+    summary: '正在压缩会话上下文。',
+    trigger: 'manual' as const,
+    phase: 'started' as const,
+    cause: 'manual' as const,
+    strategy,
+    runId: commandRunId,
+    eventId: `${params.sessionId}:${params.commandId}:${executionId}:compaction:started`,
+    occurredAt: startedAt,
+  };
+  publishSessionRunEvent(params.sessionId, startedEvent, {
+    clientRequestId: `${params.sessionId}:${params.commandId}:${executionId}`,
   });
+
+  let compaction: Awaited<ReturnType<typeof executeSessionCompaction>>;
+  try {
+    compaction = await executeSessionCompaction({
+      metadataJson: params.metadataJson,
+      messages: params.messages,
+      prune: compactionSettings.prune,
+      recentMessagesKept: compactionSettings.recentMessagesKept,
+      route: compactionRoute,
+      sessionId: params.sessionId,
+      trigger: 'manual',
+      userId: params.userId,
+    });
+  } catch (error: unknown) {
+    publishSessionRunEvent(
+      params.sessionId,
+      {
+        type: 'compaction',
+        summary: error instanceof Error ? error.message : '压缩失败。',
+        trigger: 'manual',
+        phase: 'failed',
+        cause: 'manual',
+        strategy: fallbackStrategy,
+        runId: commandRunId,
+        eventId: `${params.sessionId}:${params.commandId}:${executionId}:compaction:failed`,
+        occurredAt: Date.now(),
+      },
+      { clientRequestId: `${params.sessionId}:${params.commandId}:${executionId}` },
+    );
+    throw error;
+  }
   const completedAt = Date.now();
   const card = {
     type: 'compaction' as const,
-    title: '会话已压缩',
+    title: 'compact',
     summary: compaction.summary,
     trigger: 'manual' as const,
   };
-  appendCommandCardArtifacts({
-    sessionId: params.sessionId,
-    userId: params.userId,
-    card,
-  });
 
   sqliteRun("UPDATE sessions SET updated_at = datetime('now') WHERE id = ? AND user_id = ?", [
     params.sessionId,
@@ -318,6 +356,42 @@ async function executeCompactCommand(params: {
   ]);
   taskManager.completeTask(params.graph, task.id, compaction.summary);
   await taskManager.save(params.graph);
+
+  const failedEvent = compaction.llmErrorMessage
+    ? ({
+        type: 'compaction' as const,
+        summary: `压缩 LLM 失败，已回退到结构化摘要：${compaction.llmErrorMessage}`,
+        trigger: 'manual' as const,
+        phase: 'failed' as const,
+        cause: 'manual' as const,
+        strategy: fallbackStrategy,
+        runId: commandRunId,
+        eventId: `${params.sessionId}:${params.commandId}:${executionId}:compaction:failed`,
+        occurredAt: completedAt,
+      } as const)
+    : null;
+  const completedEvent = {
+    type: 'compaction' as const,
+    summary: compaction.summary,
+    trigger: 'manual' as const,
+    phase: 'completed' as const,
+    cause: 'manual' as const,
+    strategy,
+    compactedMessages: compaction.durableSummary?.newlySummarizedMessages ?? params.messages.length,
+    representedMessages:
+      compaction.durableSummary?.totalRepresentedMessages ?? params.messages.length,
+    runId: commandRunId,
+    eventId: `${params.sessionId}:${params.commandId}:${executionId}:compaction:completed`,
+    occurredAt: completedAt,
+  };
+  if (failedEvent) {
+    publishSessionRunEvent(params.sessionId, failedEvent, {
+      clientRequestId: `${params.sessionId}:${params.commandId}:${executionId}`,
+    });
+  }
+  publishSessionRunEvent(params.sessionId, completedEvent, {
+    clientRequestId: `${params.sessionId}:${params.commandId}:${executionId}`,
+  });
 
   return {
     sessionId: params.sessionId,
@@ -329,51 +403,13 @@ async function executeCompactCommand(params: {
         status: 'done',
         sessionId: params.sessionId,
         parentTaskId: task.parentTaskId,
-        eventId: `${params.sessionId}:${task.id}:task`,
-        runId: `command:${params.sessionId}:${params.commandId}`,
+        runId: commandRunId,
+        eventId: `${params.sessionId}:${params.commandId}:${executionId}:task`,
         occurredAt: Date.now(),
       },
-      {
-        type: 'compaction',
-        summary: '正在压缩会话上下文。',
-        trigger: 'manual',
-        phase: 'started',
-        cause: 'manual',
-        strategy: 'summary_only',
-        runId: `command:${params.sessionId}:${params.commandId}`,
-        eventId: `${params.sessionId}:${params.commandId}:compaction:started`,
-        occurredAt: startedAt,
-      },
-      ...(compaction.llmErrorMessage
-        ? [
-            {
-              type: 'compaction' as const,
-              summary: `压缩 LLM 失败，已回退到结构化摘要：${compaction.llmErrorMessage}`,
-              trigger: 'manual' as const,
-              phase: 'failed' as const,
-              cause: 'manual' as const,
-              strategy: 'summary_only' as const,
-              runId: `command:${params.sessionId}:${params.commandId}`,
-              eventId: `${params.sessionId}:${params.commandId}:compaction:failed`,
-              occurredAt: completedAt,
-            },
-          ]
-        : []),
-      {
-        type: 'compaction',
-        summary: compaction.summary,
-        trigger: 'manual',
-        phase: 'completed',
-        cause: 'manual',
-        strategy: 'summary_only',
-        compactedMessages:
-          compaction.durableSummary?.newlySummarizedMessages ?? params.messages.length,
-        representedMessages:
-          compaction.durableSummary?.totalRepresentedMessages ?? params.messages.length,
-        runId: `command:${params.sessionId}:${params.commandId}`,
-        eventId: `${params.sessionId}:${params.commandId}:compaction:completed`,
-        occurredAt: completedAt,
-      },
+      startedEvent,
+      ...(failedEvent ? [failedEvent] : []),
+      completedEvent,
     ],
     card,
   };
@@ -1721,7 +1757,7 @@ function appendCommandCardArtifacts(input: {
   userId: string;
   card: CommandExecutionResult['card'];
 }): void {
-  if (!input.card) return;
+  if (!input.card || input.card.type === 'compaction') return;
 
   // V2 single-write path: emit MessageEvents.Created → projector writes
   // `message_v2` and the search index helper upserts FTS. The legacy

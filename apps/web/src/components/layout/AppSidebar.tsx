@@ -571,6 +571,77 @@ export default function AppSidebar({
   const activeTeamSessionId = isTeamRoute ? storedActiveTeamSessionId : null;
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
 
+  // ─── 底部更多菜单状态 ───
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [moreMenuPos, setMoreMenuPos] = useState<{ bottom: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!showMoreMenu) {
+      setMoreMenuPos(null);
+      return;
+    }
+    const btn = moreBtnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const MENU_WIDTH = 180;
+    const MARGIN = 8;
+    // 水平居中于按钮，但不超出视口
+    let left = rect.left + rect.width / 2;
+    if (left - MENU_WIDTH / 2 < MARGIN) {
+      left = MARGIN + MENU_WIDTH / 2;
+    } else if (left + MENU_WIDTH / 2 > window.innerWidth - MARGIN) {
+      left = window.innerWidth - MARGIN - MENU_WIDTH / 2;
+    }
+    setMoreMenuPos({
+      bottom: window.innerHeight - rect.top + 4,
+      left,
+    });
+    const handleResize = () => {
+      const r = btn.getBoundingClientRect();
+      let l = r.left + r.width / 2;
+      if (l - MENU_WIDTH / 2 < MARGIN) {
+        l = MARGIN + MENU_WIDTH / 2;
+      } else if (l + MENU_WIDTH / 2 > window.innerWidth - MARGIN) {
+        l = window.innerWidth - MARGIN - MENU_WIDTH / 2;
+      }
+      setMoreMenuPos({
+        bottom: window.innerHeight - r.top + 4,
+        left: l,
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleResize, true);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleResize, true);
+    };
+  }, [showMoreMenu]);
+
+  useEffect(() => {
+    if (!showMoreMenu) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      const menu = moreMenuRef.current;
+      const btn = moreBtnRef.current;
+      if (
+        menu && e.target instanceof Node && !menu.contains(e.target) &&
+        btn && !btn.contains(e.target)
+      ) {
+        setShowMoreMenu(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowMoreMenu(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showMoreMenu]);
+
   const [contextMenu, setContextMenu] = useState<{
     sessionId: string;
     x: number;
@@ -1596,162 +1667,254 @@ export default function AppSidebar({
           padding: '2px 6px 6px',
         }}
       >
-        {accessToken && (
-          <NotificationCenter
-            accessToken={accessToken}
-            gatewayUrl={gatewayUrl}
-            pendingPermissionIndicator={pendingPermissionIndicator}
-            labelStyleOverride={
-              expanded ? { display: 'block', opacity: 1 } : { display: 'none', opacity: 0 }
-            }
-            expanded={expanded}
-          />
-        )}
-
-        {onToggleTheme && (
-          <button
-            type="button"
-            title={theme === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
-            onClick={onToggleTheme}
-            className="nav-rail-btn"
-            style={{
-              ...navItemStyle,
-              border: 'none',
-              cursor: 'pointer',
-              justifyContent: expanded ? 'flex-start' : 'center',
-              padding: expanded ? '0 12px' : '0',
-            }}
-          >
-            <span className="nav-rail-icon">
-              {theme === 'dark' ? (
-                <svg
-                  aria-hidden="true"
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="4" />
-                  <line x1="12" y1="2" x2="12" y2="4" />
-                  <line x1="12" y1="20" x2="12" y2="22" />
-                  <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
-                  <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
-                  <line x1="2" y1="12" x2="4" y2="12" />
-                  <line x1="20" y1="12" x2="22" y2="12" />
-                  <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
-                  <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
-                </svg>
-              ) : (
-                <svg
-                  aria-hidden="true"
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
+        <button
+          ref={moreBtnRef}
+          type="button"
+          title="更多选项"
+          aria-label="更多选项"
+          aria-pressed={showMoreMenu}
+          onClick={() => setShowMoreMenu((v) => !v)}
+          className="nav-rail-btn"
+          style={{
+            ...navItemStyle,
+            border: 'none',
+            cursor: 'pointer',
+            justifyContent: expanded ? 'flex-start' : 'center',
+            padding: expanded ? '0 12px' : '0',
+            color: showMoreMenu ? 'var(--accent)' : 'var(--fg-muted)',
+            background: showMoreMenu ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+          }}
+        >
+          <span className="nav-rail-icon">
+            <svg
+              aria-hidden="true"
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="5" r="1" fill="currentColor" />
+              <circle cx="12" cy="12" r="1" fill="currentColor" />
+              <circle cx="12" cy="19" r="1" fill="currentColor" />
+            </svg>
+          </span>
+          {expanded && (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              更多
             </span>
-            {expanded && (
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {theme === 'dark' ? '日间' : '夜间'}
-              </span>
-            )}
-          </button>
-        )}
+          )}
+        </button>
 
-        {BOTTOM_NAV_ITEMS.map((item: NavItem) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onPointerEnter={() => preloadRoute(item.to)}
-            onFocus={() => preloadRoute(item.to)}
-            onPointerDown={() => preloadRoute(item.to)}
-            title={item.label}
-            className={({ isActive }: { isActive: boolean }) =>
-              isActive ? 'nav-rail-btn nav-rail-link-active' : 'nav-rail-btn'
-            }
-            style={({ isActive }: { isActive: boolean }) => ({
-              ...navItemStyle,
-              color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
-              fontWeight: isActive ? 600 : 500,
-              justifyContent: expanded ? 'flex-start' : 'center',
-              padding: expanded ? '0 12px' : '0',
-            })}
-          >
-            <span className="nav-rail-icon">{railIcon(item.iconKey)}</span>
-            {expanded && (
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {item.label}
+        {/* ── 弹出菜单 ── */}
+        {showMoreMenu &&
+          moreMenuPos &&
+          createPortal(
+            <div
+              ref={moreMenuRef}
+              style={{
+                position: 'fixed',
+                bottom: moreMenuPos.bottom,
+                left: moreMenuPos.left,
+                transform: 'translateX(-50%)',
+                zIndex: 9999,
+                minWidth: 180,
+                background: 'var(--bg-raised, var(--bg-base))',
+                border: '1px solid var(--border-default)',
+                borderRadius: 10,
+                boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+                padding: '4px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1,
+              }}
+            >
+            {/* 通知 */}
+            <NavLink
+              to="/settings/notification"
+              onClick={() => setShowMoreMenu(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--fg-default)',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'left',
+                textDecoration: 'none',
+                boxSizing: 'border-box',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--bg-overlay)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              <span style={{ display: 'flex', width: 18, height: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
               </span>
-            )}
-          </NavLink>
-        ))}
+              <span>通知</span>
+            </NavLink>
 
-        {onLogout && (
-          <button
-            type="button"
-            title="退出登录"
-            className="nav-rail-logout"
-            onClick={onLogout}
-            style={{
-              ...navItemStyle,
-              border: 'none',
-              cursor: 'pointer',
-              justifyContent: expanded ? 'flex-start' : 'center',
-              padding: expanded ? '0 12px' : '0',
-            }}
-          >
-            <span className="nav-rail-icon">
-              <svg
-                aria-hidden="true"
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </span>
-            {expanded && (
-              <span
+            {/* 主题切换 */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleTheme();
+                  setShowMoreMenu(false);
+                }}
                 style={{
-                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--fg-default)',
+                  fontSize: 13,
                   fontWeight: 500,
-                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  boxSizing: 'border-box',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-overlay)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
                 }}
               >
-                退出
-              </span>
+                <span style={{ display: 'flex', width: 18, height: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {theme === 'dark' ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="4" />
+                      <line x1="12" y1="2" x2="12" y2="4" />
+                      <line x1="12" y1="20" x2="12" y2="22" />
+                      <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
+                      <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
+                      <line x1="2" y1="12" x2="4" y2="12" />
+                      <line x1="20" y1="12" x2="22" y2="12" />
+                      <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
+                      <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  )}
+                </span>
+                <span>{theme === 'dark' ? '切换日间模式' : '切换夜间模式'}</span>
+              </button>
             )}
-          </button>
+
+            {/* 设置 */}
+            {BOTTOM_NAV_ITEMS.map((item: NavItem) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                onClick={() => setShowMoreMenu(false)}
+                onPointerEnter={() => preloadRoute(item.to)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--fg-default)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  textDecoration: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-overlay)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span style={{ display: 'flex', width: 18, height: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {railIcon(item.iconKey)}
+                </span>
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+
+            {/* 分割线 */}
+            {onLogout && (
+              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '2px 8px' }} />
+            )}
+
+            {/* 退出 */}
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  onLogout();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--danger, #ef4444)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  boxSizing: 'border-box',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-overlay)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span style={{ display: 'flex', width: 18, height: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                </span>
+                <span>退出登录</span>
+              </button>
+            )}
+          </div>,
+          document.body,
         )}
       </div>
 

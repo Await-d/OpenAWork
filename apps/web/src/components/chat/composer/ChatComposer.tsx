@@ -12,7 +12,7 @@ import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-de
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import { ChatComposerMenu } from './ChatComposerMenu.js';
 import { ChatComposerOptimize } from './ChatComposerOptimize.js';
-import { ChatComposerPasteCollapse } from './ChatComposerPasteCollapse.js';
+import { PasteSnippetCard } from './PasteSnippetCard.js';
 import { ChatComposerImagePanel } from './ChatComposerFeatureToggles.js';
 import { ChatComposerQueue } from './ChatComposerQueue.js';
 import { ChatComposerToolbar } from './ChatComposerToolbar.js';
@@ -225,10 +225,6 @@ export function ChatComposer({
     null,
   );
   const [pastePreviewExpanded, setPastePreviewExpanded] = useState(false);
-  const [pasteInsertionRange, setPasteInsertionRange] = useState<{
-    readonly start: number;
-    readonly end: number;
-  } | null>(null);
   const composerPlaceholder = useComposerPlaceholder(input, placeholder);
   const characterCount = useMemo(
     () => getComposerCharacterCount(input, statsData?.contextMaxTokens),
@@ -280,8 +276,8 @@ export function ChatComposer({
 
   const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
   const canSubmit = imageGenerationMode
-    ? input.trim().length > 0
-    : input.trim().length > 0 || attachedFiles.length > 0;
+    ? input.trim().length > 0 || pasteCollapsed !== null
+    : input.trim().length > 0 || attachedFiles.length > 0 || pasteCollapsed !== null;
   const effectiveStopCapability =
     stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
   const showStopAction =
@@ -319,14 +315,87 @@ export function ChatComposer({
     [agentCycleList, effectiveAgentId, onChangeManualAgentId, onClearManualAgentId],
   );
 
+  // 粘贴大文本时自动折叠成内联卡片，文本不进入 textarea，用户可直接继续输入
+  const wrappedOnPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const pastedText = e.clipboardData.getData('text/plain');
+      if (pastedText.length > 500) {
+        e.preventDefault();
+        const lineCount = pastedText.split('\n').length;
+        setPasteCollapsed({ text: pastedText, lineCount });
+        setPastePreviewExpanded(false);
+        // 同时处理可能存在的图片
+        const imageFiles = Array.from(e.clipboardData.items)
+          .filter((item) => item.type.startsWith('image/'))
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => Boolean(file));
+        if (imageFiles.length > 0) onDropFiles?.(imageFiles);
+        // 保持焦点在 textarea，用户可继续输入
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return;
+      }
+      onInputPaste(e);
+    },
+    [onInputPaste, onDropFiles, textareaRef],
+  );
+
+  // 发送/排队前将粘贴的完整文本拼接到用户输入前面
+  const pendingActionRef = useRef<'send' | 'queue' | null>(null);
+
+  const wrappedOnSend = useCallback(() => {
+    if (pasteCollapsed) {
+      pendingActionRef.current = 'send';
+      const combined = `${pasteCollapsed.text}\n\n${input}`;
+      onReplaceInput?.(combined);
+      setPasteCollapsed(null);
+      setPastePreviewExpanded(false);
+      return;
+    }
+    void onSend();
+  }, [input, onSend, onReplaceInput, pasteCollapsed]);
+
+  // 队列消息也需要合并粘贴文本
+  const wrappedOnQueueMessage = useCallback(() => {
+    if (pasteCollapsed) {
+      pendingActionRef.current = 'queue';
+      const combined = `${pasteCollapsed.text}\n\n${input}`;
+      onReplaceInput?.(combined);
+      setPasteCollapsed(null);
+      setPastePreviewExpanded(false);
+      return;
+    }
+    void onQueueMessage?.();
+  }, [input, onQueueMessage, onReplaceInput, pasteCollapsed]);
+
+  // 当 input 更新后检测到 pending action，触发实际发送/排队
+  useEffect(() => {
+    if (pendingActionRef.current === 'send') {
+      pendingActionRef.current = null;
+      void onSend();
+    } else if (pendingActionRef.current === 'queue') {
+      pendingActionRef.current = null;
+      void onQueueMessage?.();
+    }
+  }, [input, onSend, onQueueMessage]);
+
   const wrappedOnKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key !== 'Escape') {
         lastEmptyEscapeAtRef.current = 0;
       }
+      // 粘贴卡片存在时，Enter 发送或排队前先合并文本
+      if (pasteCollapsed && e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (showStopAction || hasRemoteSessionBusyState) {
+          void wrappedOnQueueMessage();
+        } else {
+          void wrappedOnSend();
+        }
+        return;
+      }
       if (e.key === 'Tab' && !composerMenu && showQueueAction && !e.shiftKey) {
         e.preventDefault();
-        void onQueueMessage?.();
+        void wrappedOnQueueMessage();
         return;
       }
       if (e.key === 'Escape' && isBrowsingInputHistory && onRestoreInputFromHistory) {
@@ -365,41 +434,37 @@ export function ChatComposer({
         onReplaceInput?.('');
         return;
       }
+      // Escape 清空粘贴卡片（无输入文本时）
+      if (
+        e.key === 'Escape' &&
+        !showStopAction &&
+        !composerMenu &&
+        pasteCollapsed &&
+        input.trim().length === 0
+      ) {
+        e.preventDefault();
+        setPasteCollapsed(null);
+        setPastePreviewExpanded(false);
+        return;
+      }
       onKeyDown(e);
     },
     [
       composerMenu,
+      hasRemoteSessionBusyState,
       input,
       onEditPreviousUserMessage,
       onKeyDown,
-      onQueueMessage,
       onReplaceInput,
       onRestoreInputFromHistory,
+      pasteCollapsed,
       showQueueAction,
       showStopAction,
       streaming,
       isBrowsingInputHistory,
+      wrappedOnQueueMessage,
+      wrappedOnSend,
     ],
-  );
-
-  // T-09: 粘贴大文本折叠
-  const wrappedOnPaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const pastedText = e.clipboardData.getData('text/plain');
-      if (pastedText.length > 500) {
-        e.preventDefault();
-        const lineCount = pastedText.split('\n').length;
-        setPasteCollapsed({ text: pastedText, lineCount });
-        setPasteInsertionRange({
-          start: e.currentTarget.selectionStart,
-          end: e.currentTarget.selectionEnd,
-        });
-        setPastePreviewExpanded(false);
-        return;
-      }
-      onInputPaste(e);
-    },
-    [onInputPaste],
   );
 
   const runOptimizePrompt = useCallback(() => {
@@ -648,6 +713,23 @@ export function ChatComposer({
               }}
             >
               <div style={{ position: 'relative' }}>
+                {pasteCollapsed && (
+                  <PasteSnippetCard
+                    text={pasteCollapsed.text}
+                    lineCount={pasteCollapsed.lineCount}
+                    expanded={pastePreviewExpanded}
+                    onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
+                    onUpdateText={(updatedText) => {
+                      setPasteCollapsed((prev) =>
+                        prev ? { ...prev, text: updatedText } : prev,
+                      );
+                    }}
+                    onDiscard={() => {
+                      setPasteCollapsed(null);
+                      setPastePreviewExpanded(false);
+                    }}
+                  />
+                )}
                 <textarea
                   className="chat-composer__textarea"
                   ref={textareaRef}
@@ -775,38 +857,6 @@ export function ChatComposer({
                   </div>
                 )}
 
-              {pasteCollapsed && (
-                <ChatComposerPasteCollapse
-                  pasteCollapsed={pasteCollapsed}
-                  pastePreviewExpanded={pastePreviewExpanded}
-                  onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
-                  onInsert={(text) => {
-                    const textarea = textareaRef.current;
-                    const start =
-                      pasteInsertionRange?.start ?? textarea?.selectionStart ?? input.length;
-                    const end = pasteInsertionRange?.end ?? textarea?.selectionEnd ?? input.length;
-                    if (!textarea) {
-                      onReplaceInput?.(input.slice(0, start) + text + input.slice(end));
-                    } else {
-                      onReplaceInput?.(input.slice(0, start) + text + input.slice(end));
-                      requestAnimationFrame(() => {
-                        textarea.focus();
-                        const pos = start + text.length;
-                        textarea.setSelectionRange(pos, pos);
-                      });
-                    }
-                    setPasteCollapsed(null);
-                    setPastePreviewExpanded(false);
-                    setPasteInsertionRange(null);
-                  }}
-                  onDiscard={() => {
-                    setPasteCollapsed(null);
-                    setPastePreviewExpanded(false);
-                    setPasteInsertionRange(null);
-                  }}
-                />
-              )}
-
               <ChatComposerOptimize
                 optimizeError={optimizeError}
                 optimizeResult={optimizeResult}
@@ -875,8 +925,8 @@ export function ChatComposer({
                 onRunOptimizePrompt={runOptimizePrompt}
                 onClearOptimizeResult={() => setOptimizeResult(null)}
                 onClearOptimizeError={() => setOptimizeError(null)}
-                onQueueMessage={onQueueMessage}
-                onSend={onSend}
+                onQueueMessage={wrappedOnQueueMessage}
+                onSend={wrappedOnSend}
                 onStop={onStop}
                 onToggleModelPicker={onToggleModelPicker}
                 onToggleModelSettings={onToggleModelSettings}

@@ -203,24 +203,41 @@ async function performSettingsRequest<T>(input: {
   actionLabel: string;
   parseJson?: boolean;
   request: () => Promise<Response>;
+  maxRetries?: number;
 }): Promise<T> {
-  try {
-    const response = await input.request();
-    if (!response.ok) {
-      const data = await readJsonErrorData<JsonErrorData>(response);
-      throw new HttpError(
-        buildSettingsActionErrorMessage(input.actionLabel, response.status, data),
-        response.status,
-        data,
-      );
+  const maxRetries = input.maxRetries ?? 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await input.request();
+      if (!response.ok) {
+        const data = await readJsonErrorData<JsonErrorData>(response);
+        throw new HttpError(
+          buildSettingsActionErrorMessage(input.actionLabel, response.status, data),
+          response.status,
+          data,
+        );
+      }
+      if (input.parseJson === false || response.status === 204) {
+        return undefined as T;
+      }
+      return (await response.json()) as T;
+    } catch (error) {
+      lastError = error;
+      // 只对网络错误重试，不对 HTTP 业务错误重试
+      const isNetworkError =
+        error instanceof TypeError ||
+        (error instanceof Error && isGenericSettingsNetworkErrorMessage(error.message));
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        continue;
+      }
+      throw normalizeSettingsActionError(input.actionLabel, error);
     }
-    if (input.parseJson === false || response.status === 204) {
-      return undefined as T;
-    }
-    return (await response.json()) as T;
-  } catch (error) {
-    throw normalizeSettingsActionError(input.actionLabel, error);
   }
+
+  throw normalizeSettingsActionError(input.actionLabel, lastError);
 }
 
 export function createSettingsClient(baseUrl: string): SettingsClient {

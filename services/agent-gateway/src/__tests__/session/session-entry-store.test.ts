@@ -227,6 +227,7 @@ describe('session-entry-store', () => {
         trigger: 'automatic',
         phase: 'completed',
         cause: 'usage_overflow',
+        strategy: 'runtime_replace',
       };
       const event = translateRunEventToSessionEvent({ event: runEvent });
       expect(event?.type).toBe('compacted');
@@ -234,6 +235,24 @@ describe('session-entry-store', () => {
         expect(event.auto).toBe(true);
         expect(event.overflow).toBe(true);
       }
+    });
+
+    it('accepts runtime_replace compaction events without changing durable compaction mapping', () => {
+      const event = translateRunEventToSessionEvent({
+        event: {
+          type: 'compaction',
+          summary: 'manual compacted',
+          trigger: 'manual',
+          phase: 'completed',
+          cause: 'manual',
+          strategy: 'runtime_replace',
+        },
+      });
+
+      expect(event).toMatchObject({
+        type: 'compacted',
+        auto: false,
+      });
     });
 
     it('skips compaction phases that are not "completed"', () => {

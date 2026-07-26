@@ -17,13 +17,13 @@ describe('buildLayerCapabilitySummaries', () => {
     expect(all.map((s) => s.layer)).toEqual(['reception', 'pm1', 'pm2', 'executor', 'reviewer']);
   });
 
-  it('executor：终端层，工具天花板含 shell/lsp/test/web', () => {
+  it('executor：终端层，工具天花板含 shell/lsp/test/web/desktop', () => {
     const exec = buildLayerCapabilitySummary('executor');
     expect(exec).not.toBeNull();
     expect(exec?.terminal).toBe(true);
     expect(exec?.canHandoffTo).toEqual([]);
     const ids = exec?.toolsetCategories.map((t) => t.id) ?? [];
-    expect(ids).toEqual(['read', 'write', 'shell', 'lsp', 'test', 'web']);
+    expect(ids).toEqual(['read', 'write', 'shell', 'lsp', 'test', 'web', 'desktop']);
     expect(exec?.canWriteArtifactPhases).toContain('implementation');
   });
 

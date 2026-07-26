@@ -13,6 +13,7 @@ fn open_update_panel_command_is_registered() {
     let lib_rs = include_str!("../src/lib.rs");
     assert!(updater_commands_rs.contains("pub fn open_update_panel("));
     assert!(updater_commands_rs.contains("\"tray:check-updates\""));
-    assert!(updater_commands_rs.contains("\"autoStart\": auto_start.unwrap_or(false)"));
+    assert!(updater_commands_rs.contains("let auto_start = auto_start.unwrap_or(true);"));
+    assert!(updater_commands_rs.contains("json!({ \"autoStart\": auto_start })"));
     assert!(lib_rs.contains("open_update_panel,"));
 }

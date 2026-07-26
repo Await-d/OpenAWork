@@ -28,6 +28,8 @@ const MCP_CALL_MAX_CHARS = 80_000;
 
 /** Git diff payloads can grow with binary or refactor noise; cap below the universal limit. */
 const WORKSPACE_REVIEW_DIFF_MAX_CHARS = 60_000;
+const DESKTOP_AUTOMATION_MAX_CHARS = 24_000;
+const DESKTOP_CONTROL_MAX_CHARS = 8_000;
 
 /**
  * Universal fallback max chars applied to ALL tool outputs regardless of name.
@@ -56,6 +58,8 @@ const TRUNCATABLE_TOOLS = new Set([
   'delegate_task',
   'mcp_call',
   'workspace_review_diff',
+  'desktop_automation',
+  'desktop_control',
 ]);
 
 const TOOL_SPECIFIC_MAX_CHARS: Record<string, number> = {
@@ -63,6 +67,8 @@ const TOOL_SPECIFIC_MAX_CHARS: Record<string, number> = {
   web_fetch: WEBFETCH_MAX_CHARS,
   mcp_call: MCP_CALL_MAX_CHARS,
   workspace_review_diff: WORKSPACE_REVIEW_DIFF_MAX_CHARS,
+  desktop_automation: DESKTOP_AUTOMATION_MAX_CHARS,
+  desktop_control: DESKTOP_CONTROL_MAX_CHARS,
 };
 
 const TRUNCATION_NOTICE = `

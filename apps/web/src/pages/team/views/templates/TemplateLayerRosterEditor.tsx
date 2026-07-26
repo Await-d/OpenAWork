@@ -20,6 +20,7 @@ import {
   SPECIALTY_LABEL,
   SPECIALTY_SHORT,
   TEAM_LAYER_META,
+  LAYER_ALLOWED_TOOLSETS,
   TOOLSET_LABEL,
 } from './template-architecture.js';
 import {
@@ -39,7 +40,7 @@ export interface CapabilityRef {
   description?: string;
 }
 
-const ALL_TOOLS = ['read', 'write', 'shell', 'lsp', 'test', 'review', 'web'] as const;
+const ALL_TOOLS = ['read', 'write', 'shell', 'lsp', 'test', 'review', 'web', 'desktop'] as const;
 
 interface Props {
   roster: FixedTeamMemberSlot[];
@@ -976,15 +977,24 @@ function DetailPopover({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {ALL_TOOLS.map((tool) => {
             const enabled = slot.toolsets.includes(tool);
+            const allowed = LAYER_ALLOWED_TOOLSETS[slot.layer]?.includes(tool) ?? false;
+            const canToggle = allowed || enabled;
             return (
               <button
                 key={tool}
                 type="button"
+                disabled={!canToggle}
+                title={
+                  canToggle
+                    ? undefined
+                    : `${TEAM_LAYER_META[slot.layer].label}不允许使用「${TOOLSET_LABEL[tool] ?? tool}」工具`
+                }
                 onClick={() => {
+                  if (!canToggle) return;
                   const next = enabled
                     ? slot.toolsets.filter((t) => t !== tool)
                     : [...slot.toolsets, tool];
-                  onUpdate({ toolsets: next });
+                  onUpdate({ toolsets: next, toolsetsCustomized: true });
                 }}
                 style={{
                   appearance: 'none',
@@ -995,7 +1005,8 @@ function DetailPopover({
                   border: `1px solid ${enabled ? layerColor : 'var(--border-subtle)'}`,
                   background: enabled ? layerTint : 'transparent',
                   color: enabled ? layerColor : 'var(--fg-muted)',
-                  cursor: 'pointer',
+                  cursor: canToggle ? 'pointer' : 'not-allowed',
+                  opacity: allowed || enabled ? 1 : 0.4,
                 }}
               >
                 {TOOLSET_LABEL[tool] ?? tool}

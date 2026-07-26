@@ -86,7 +86,7 @@ const executorAdapter: TeamRoleAdapter = {
   resolve: (_ctx) => ({
     agentImplKey: 'executor',
     promptSuffix: '你是执行 Agent。在明确任务下做出可工作的代码/文档/配置。',
-    defaultToolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    defaultToolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     recommendedProvider: null,
     recommendedModel: null,
   }),

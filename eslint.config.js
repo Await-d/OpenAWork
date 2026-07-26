@@ -214,6 +214,7 @@ export default [
       'apps/web/**',
       '**/tmp-*',
       '**/vite.config.*',
+      '**/resources/skills/reference/algorithmic-art/templates/**',
     ],
   },
 ];

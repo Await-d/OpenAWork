@@ -702,6 +702,7 @@ export function createPm2Runner(): HandoffTaskRunner {
         if (teamWorkspaceId) {
           try {
             const { readFileSync } = await import('node:fs');
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- node:path 方法安全解构
             const { join, resolve } = await import('node:path');
             const sessionRow = sqliteGet<{ metadata_json: string }>(
               `SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
@@ -1000,7 +1001,7 @@ export function createPm2Runner(): HandoffTaskRunner {
         role: 'executor',
         goal: `根据任务清单执行所有任务`,
         context: `${context}\n\n**完整任务清单**：\n${fallbackTasksContent}`.slice(0, 8000),
-        toolsets: ['read', 'write', 'shell'],
+        toolsets: ['read', 'write', 'shell', 'desktop'],
         taskMarkers: {
           taskId: 'fallback-dispatch',
           parallel: false,

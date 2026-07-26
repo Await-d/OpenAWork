@@ -26,8 +26,14 @@ export function extractFilePathListFromOutput(output: unknown): string[] | null 
   return lines;
 }
 
-export function FilePathListPreview({ paths }: { paths: string[] }) {
-  const [expanded, setExpanded] = useState(false);
+export function FilePathListPreview({
+  paths,
+  defaultExpanded = false,
+}: {
+  paths: string[];
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const VISIBLE = 30;
   const isLong = paths.length > VISIBLE;
   const visible = isLong && !expanded ? paths.slice(0, VISIBLE) : paths;

@@ -88,21 +88,37 @@ function normalizeUsageError(actionLabel: string, error: unknown): Error {
 async function performUsageRequest<T>(input: {
   actionLabel: string;
   request: () => Promise<Response>;
+  maxRetries?: number;
 }): Promise<T> {
-  try {
-    const response = await input.request();
-    if (!response.ok) {
-      const data = await readJsonErrorData<JsonErrorData>(response);
-      throw new HttpError(
-        buildUsageActionErrorMessage(input.actionLabel, response.status, data),
-        response.status,
-        data,
-      );
+  const maxRetries = input.maxRetries ?? 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await input.request();
+      if (!response.ok) {
+        const data = await readJsonErrorData<JsonErrorData>(response);
+        throw new HttpError(
+          buildUsageActionErrorMessage(input.actionLabel, response.status, data),
+          response.status,
+          data,
+        );
+      }
+      return (await response.json()) as T;
+    } catch (error) {
+      lastError = error;
+      const isNetworkError =
+        error instanceof TypeError ||
+        (error instanceof Error && isGenericFetchErrorMessage(error.message));
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        continue;
+      }
+      throw normalizeUsageError(input.actionLabel, error);
     }
-    return (await response.json()) as T;
-  } catch (error) {
-    throw normalizeUsageError(input.actionLabel, error);
   }
+
+  throw normalizeUsageError(input.actionLabel, lastError);
 }
 
 export function createUsageClient(baseUrl: string): UsageClient {

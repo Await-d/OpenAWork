@@ -31,19 +31,20 @@ export interface ErrorCommandCenterProps {
 }
 
 const BTN_BASE: React.CSSProperties = {
-  borderRadius: 8,
+  borderRadius: 3,
   border: '1px solid var(--border-default)',
-  padding: '6px 10px',
+  padding: '3px 8px',
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   fontSize: 11,
+  fontWeight: 500,
   cursor: 'pointer',
 };
 
 const BTN_DISABLED: React.CSSProperties = {
   ...BTN_BASE,
   cursor: 'not-allowed',
-  opacity: 0.45,
+  opacity: 0.4,
 };
 
 function btn(enabled: boolean, extra?: React.CSSProperties): React.CSSProperties {
@@ -75,98 +76,39 @@ export function ErrorCommandCenter({
   return (
     <div
       style={{
-        borderRadius: 10,
-        border: '2px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
-        background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))',
-        padding: '10px 12px',
+        borderRadius: 3,
+        border: '1px solid color-mix(in srgb, var(--danger) 20%, var(--border-subtle))',
+        background: 'color-mix(in srgb, var(--danger) 3%, transparent)',
+        padding: '4px 6px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 10,
+        gap: 4,
       }}
       data-testid="error-command-center"
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      {/* 统计信息 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)' }}>错误指挥台</div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              flexWrap: 'wrap',
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-              marginTop: 4,
-            }}
-          >
-            <span>全部错误：{allDiagnostics.length}</span>
-            <span>当前可见：{filteredDiagnostics.length}</span>
-            <span
-              style={{
-                color: errorLogCount > 0 ? 'var(--danger)' : 'var(--fg-muted)',
-                fontWeight: errorLogCount > 0 ? 700 : 400,
-              }}
-            >
-              错误日志：{errorLogCount}
-            </span>
-            <span
-              style={{
-                color: workerErrorCount > 0 ? 'var(--danger)' : 'var(--fg-muted)',
-                fontWeight: workerErrorCount > 0 ? 700 : 400,
-              }}
-            >
-              Worker 异常：{workerErrorCount}
-            </span>
-            {selectedDiagnostic?.requestId ? (
-              <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
-                当前请求：{selectedDiagnostic.requestId}
-              </span>
-            ) : null}
-            <span
-              style={{ color: 'var(--accent)', fontWeight: 700 }}
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {copiedFeedback ?? ''}
-            </span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-muted)' }}>
+            <span>全部：{allDiagnostics.length}</span>
+            <span>可见：{filteredDiagnostics.length}</span>
+            {errorLogCount > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误：{errorLogCount}</span>}
+            {workerErrorCount > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>Worker 异常：{workerErrorCount}</span>}
+            {selectedDiagnostic?.requestId && <span style={{ color: 'var(--accent)' }}>当前：{selectedDiagnostic.requestId}</span>}
+            <span style={{ color: 'var(--accent)' }} aria-live="polite">{copiedFeedback ?? ''}</span>
           </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: hasErrors
-              ? 'color-mix(in srgb, var(--danger) 14%, transparent)'
-              : 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
-            fontSize: 11,
-            fontWeight: 700,
-            color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
-            flexShrink: 0,
-          }}
-        >
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
-              display: 'inline-block',
-            }}
-          />
+        <span style={{ fontSize: 11, fontWeight: 600, color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)' }}>
           {hasErrors ? `${filteredDiagnostics.length} 条错误` : '无错误'}
-        </div>
+        </span>
       </div>
 
-      {hasErrors ? (
-        <div
-          style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2, flexShrink: 0 }}
-        >
+      {/* 错误列表 - 水平滚动 */}
+      {hasErrors && (
+        <div style={{ display: 'flex', gap: 3, overflowX: 'auto', paddingBottom: 2 }}>
           {filteredDiagnostics.map((diagnostic) => {
             const key = buildDiagnosticKey(diagnostic);
-            const isActive =
-              selectedDiagnostic !== null && buildDiagnosticKey(selectedDiagnostic) === key;
+            const isActive = selectedDiagnostic !== null && buildDiagnosticKey(selectedDiagnostic) === key;
             return (
               <button
                 key={key}
@@ -175,17 +117,16 @@ export function ErrorCommandCenter({
                 title={diagnostic.message}
                 style={{
                   flexShrink: 0,
-                  borderRadius: 8,
-                  border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 60%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 25%, var(--border-default))'}`,
-                  background: isActive
-                    ? 'color-mix(in srgb, var(--danger) 14%, var(--bg-overlay))'
-                    : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-                  color: isActive ? 'var(--danger)' : 'var(--fg-default)',
-                  padding: '4px 8px',
+                  borderRadius: 2,
+                  border: 'none',
+                  borderBottom: `1px solid ${isActive ? 'var(--danger)' : 'var(--border-subtle)'}`,
+                  background: isActive ? 'color-mix(in srgb, var(--danger) 8%, transparent)' : 'transparent',
+                  color: isActive ? 'var(--danger)' : 'var(--fg-muted)',
+                  padding: '2px 5px',
                   fontSize: 10,
-                  fontWeight: isActive ? 700 : 400,
+                  fontWeight: isActive ? 500 : 400,
                   cursor: 'pointer',
-                  maxWidth: 160,
+                  maxWidth: 120,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -198,123 +139,54 @@ export function ErrorCommandCenter({
             );
           })}
         </div>
-      ) : null}
+      )}
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={onCopySelected}
-          disabled={!hasSelected}
-          style={btn(hasSelected)}
-        >
-          复制当前错误
+      {/* 操作按钮 */}
+      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" onClick={onCopySelected} disabled={!hasSelected} style={btn(hasSelected)}>
+          复制当前
         </button>
-        <button
-          type="button"
-          onClick={onCopyVisible}
-          disabled={!hasErrors}
-          style={btn(hasErrors, {
-            border: '1px solid color-mix(in srgb, var(--danger) 26%, var(--border-default))',
-            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
-          })}
-        >
-          复制可见错误 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
+        <button type="button" onClick={onCopyVisible} disabled={!hasErrors} style={btn(hasErrors)}>
+          复制可见 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
         </button>
-        <button
-          type="button"
-          onClick={onCopyRelatedContext}
-          disabled={!hasSelected}
-          style={btn(hasSelected, {
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-          })}
-        >
-          复制关联上下文
+        <button type="button" onClick={onCopyRelatedContext} disabled={!hasSelected} style={btn(hasSelected)}>
+          复制关联
         </button>
-        <button
-          type="button"
-          onClick={onScrollToLogs}
-          disabled={!hasRelated}
-          style={btn(hasRelated)}
-          aria-label="跳转到关联日志"
-        >
-          查看关联日志 {hasRelated ? `(${relatedLogs.length})` : ''}
+        <button type="button" onClick={onScrollToLogs} disabled={!hasRelated} style={btn(hasRelated)}>
+          查看日志 {hasRelated ? `(${relatedLogs.length})` : ''}
         </button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onExportErrorReport}
             disabled={!hasExportableContext}
             style={btn(hasExportableContext, {
-              border: '2px solid var(--danger)',
               background: 'var(--danger)',
               color: 'var(--fg-on-accent)',
-              fontWeight: 700,
-              fontSize: 11,
-              padding: '7px 14px',
+              border: 'none',
+              fontWeight: 600,
             })}
-            aria-label="一键导出错误报告"
-            title="导出自包含 HTML 错误报告，包含版本号、环境信息、全部诊断与日志"
           >
-            一键导出错误报告
+            导出报告
           </button>
-          <button
-            type="button"
-            onClick={onExportJson}
-            disabled={!hasExportableContext}
-            style={btn(hasExportableContext)}
-            aria-label="导出错误 JSON"
-          >
-            导出错误 JSON
+          <button type="button" onClick={onExportJson} disabled={!hasExportableContext} style={btn(hasExportableContext)}>
+            JSON
           </button>
-          <button
-            type="button"
-            onClick={onExportMarkdown}
-            disabled={!hasExportableContext}
-            style={btn(hasExportableContext)}
-            aria-label="导出错误 MD"
-          >
-            导出错误 MD
+          <button type="button" onClick={onExportMarkdown} disabled={!hasExportableContext} style={btn(hasExportableContext)}>
+            MD
           </button>
         </div>
       </div>
 
-      {hasSelected ? (
-        <div
-          style={{
-            borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--danger) 28%, var(--border-default))',
-            background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
-            padding: '7px 10px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)' }}>
-            {selectedDiagnostic.message}
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              flexWrap: 'wrap',
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>工具：{selectedDiagnostic.toolName ?? selectedDiagnostic.filePath}</span>
-            {selectedDiagnostic.requestId ? (
-              <span>请求：{selectedDiagnostic.requestId}</span>
-            ) : null}
-            {selectedDiagnostic.sessionId ? (
-              <span>会话：{selectedDiagnostic.sessionId}</span>
-            ) : null}
-            {typeof selectedDiagnostic.durationMs === 'number' ? (
-              <span>耗时：{selectedDiagnostic.durationMs}ms</span>
-            ) : null}
-          </div>
+      {/* 选中的错误详情 */}
+      {hasSelected && (
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          <span style={{ color: 'var(--fg-strong)', fontWeight: 500 }}>{selectedDiagnostic.message}</span>
+          {selectedDiagnostic.toolName && <span> · {selectedDiagnostic.toolName}</span>}
+          {selectedDiagnostic.requestId && <span> · {selectedDiagnostic.requestId}</span>}
+          {typeof selectedDiagnostic.durationMs === 'number' && <span> · {selectedDiagnostic.durationMs}ms</span>}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

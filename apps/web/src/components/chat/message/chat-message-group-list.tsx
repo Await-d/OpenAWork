@@ -336,6 +336,18 @@ function VirtualizedChatGroupViewport({
       }
 
       nodeMapRef.current.set(key, element);
+
+      // Immediately measure on mount. Relying only on ResizeObserver can leave
+      // the first paint on estimate heights — common when a long history jumps
+      // to the bottom and the top-of-list groups briefly enter the overscan
+      // window before true heights are known. That mismatch is the main cause
+      // of the occasional "first message is scrambled until refresh" bug.
+      const measuredHeight = Math.ceil(element.getBoundingClientRect().height);
+      if (measuredHeight > 0 && groupHeightsRef.current.get(key) !== measuredHeight) {
+        groupHeightsRef.current.set(key, measuredHeight);
+        setMeasuredVersion((value) => value + 1);
+      }
+
       resizeObserverRef.current?.observe(element);
     };
 
@@ -367,7 +379,10 @@ function VirtualizedChatGroupViewport({
                 top: layout.offsets[actualIndex] ?? 0,
                 left: 0,
                 right: 0,
-                overflow: 'hidden',
+                // Do not clip content while heights are still settling.
+                // Clipping against a stale estimate is what makes the first
+                // (and other) messages look scrambled until a full remount.
+                overflow: 'visible',
               }}
             >
               <ChatGroupBlock

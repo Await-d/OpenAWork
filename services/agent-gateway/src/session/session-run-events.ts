@@ -279,6 +279,18 @@ function buildMirroredAssistantEventClientRequestId(input: {
   seq: number | null;
 }): string {
   const runId = getRunEventRunId(input.event);
+  // All phases of one compaction run (started/completed/failed) must replace
+  // the same persisted assistant-event mirror. Event IDs are phase-specific,
+  // so using them here creates duplicate transcript cards.
+  if (input.event.type === 'compaction') {
+    if (runId) {
+      return `assistant_event:compaction:${runId}`;
+    }
+    if (typeof input.meta?.clientRequestId === 'string' && input.meta.clientRequestId.length > 0) {
+      return `assistant_event:compaction:${input.meta.clientRequestId}`;
+    }
+  }
+
   if (typeof input.event.eventId === 'string' && input.event.eventId.length > 0) {
     return `assistant_event:${input.event.eventId}`;
   }

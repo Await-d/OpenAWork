@@ -103,6 +103,7 @@ export interface ToolResultContent {
   rawOutput?: string;
   isError: boolean;
   reason?: string;
+  attachments?: InputImageContent[];
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;

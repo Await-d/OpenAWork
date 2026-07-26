@@ -70,6 +70,7 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
     'lsp_find_references',
     'lsp_diagnostics',
   ],
+  desktop: ['desktop_automation', 'desktop_control'],
   all: [], // 特殊值：不过滤
 };
 

@@ -10,7 +10,12 @@ const authState = {
 const mocks = vi.hoisted(() => ({
   createSettingsClient: vi.fn(),
   getVersion: vi.fn(),
-  openDesktopUpdatePanel: vi.fn(),
+  checkForUpdate: vi.fn(),
+  downloadAndInstallProxyUpdate: vi.fn(),
+  downloadUpdate: vi.fn(),
+  installUpdate: vi.fn(),
+  restartDesktopApp: vi.fn(),
+  stopDesktopGateway: vi.fn(),
   tauriInvoke: vi.fn(),
   toast: vi.fn(),
 }));
@@ -36,8 +41,29 @@ vi.mock('../settings/shared/settings-page-helpers.js', () => ({
   tauriInvoke: mocks.tauriInvoke,
 }));
 
-vi.mock('./about-page-desktop-update.js', () => ({
-  openDesktopUpdatePanel: mocks.openDesktopUpdatePanel,
+vi.mock('../../../../desktop/src/updater/auto-update.js', () => ({
+  checkForUpdate: mocks.checkForUpdate,
+  clearProxyCache: vi.fn(),
+  downloadUpdate: mocks.downloadUpdate,
+  installUpdate: mocks.installUpdate,
+  toUpdateError: (error: unknown) => error,
+  UpdateError: class UpdateError extends Error {
+    kind: string;
+
+    constructor(kind: string, message: string) {
+      super(message);
+      this.kind = kind;
+    }
+  },
+}));
+
+vi.mock('../../../../desktop/src/updater/proxy-update.js', () => ({
+  downloadAndInstallProxyUpdate: mocks.downloadAndInstallProxyUpdate,
+}));
+
+vi.mock('../../../../desktop/src/utils/tauri-gateway.js', () => ({
+  restartDesktopApp: mocks.restartDesktopApp,
+  stopDesktopGateway: mocks.stopDesktopGateway,
 }));
 
 import AboutPage from './AboutPage.js';
@@ -55,7 +81,12 @@ describe('AboutPage 桌面端更新入口', () => {
 
     mocks.createSettingsClient.mockReset();
     mocks.getVersion.mockReset();
-    mocks.openDesktopUpdatePanel.mockReset();
+    mocks.checkForUpdate.mockReset();
+    mocks.downloadAndInstallProxyUpdate.mockReset();
+    mocks.downloadUpdate.mockReset();
+    mocks.installUpdate.mockReset();
+    mocks.restartDesktopApp.mockReset();
+    mocks.stopDesktopGateway.mockReset();
     mocks.tauriInvoke.mockReset();
     mocks.toast.mockReset();
 
@@ -70,7 +101,16 @@ describe('AboutPage 桌面端更新入口', () => {
       checkedAt: '2026-07-24T10:00:00.000Z',
       checking: false,
     });
-    mocks.openDesktopUpdatePanel.mockResolvedValue(undefined);
+    mocks.checkForUpdate.mockResolvedValue({
+      available: true,
+      update: null,
+      version: '0.9.0',
+      notes: '## 更新亮点\n\n- 修复更新显示方案',
+      installMode: 'proxy-auto',
+      channel: 'preview',
+      proxyUsed: { name: 'FastGit', prefix: 'https://proxy.example/' },
+      proxiedDownloadUrl: 'https://proxy.example/release.exe',
+    });
     mocks.tauriInvoke.mockResolvedValue('preview');
     vi.spyOn(window, 'open').mockImplementation(() => null);
   });
@@ -81,7 +121,7 @@ describe('AboutPage 桌面端更新入口', () => {
     vi.unstubAllGlobals();
   });
 
-  it('点击检查更新时同时打开桌面更新面板并刷新版本状态', async () => {
+  it('点击检查更新时在关于页内显示桌面更新详情并刷新版本状态', async () => {
     render(<AboutPage />);
 
     await waitFor(() => {
@@ -92,13 +132,18 @@ describe('AboutPage 桌面端更新入口', () => {
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
     await waitFor(() => {
-      expect(mocks.openDesktopUpdatePanel).toHaveBeenCalledTimes(1);
+      expect(mocks.checkForUpdate).toHaveBeenCalledTimes(1);
       expect(mocks.getVersion).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('桌面端更新')).toBeTruthy();
+      expect(screen.getByText('发现新版本 0.9.0（通过 FastGit 加速）。')).toBeTruthy();
     });
   });
 
-  it('打开桌面更新面板失败时回退到 GitHub 发布页', async () => {
-    mocks.openDesktopUpdatePanel.mockRejectedValueOnce(new Error('desktop bridge failed'));
+  it('页内更新检查失败时显示错误信息而不跳 GitHub', async () => {
+    mocks.checkForUpdate.mockRejectedValueOnce({
+      kind: 'network',
+      message: 'desktop bridge failed',
+    });
 
     render(<AboutPage />);
 
@@ -109,11 +154,44 @@ describe('AboutPage 桌面端更新入口', () => {
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
 
     await waitFor(() => {
-      expect(window.open).toHaveBeenCalledWith(
-        'https://github.com/Await-d/OpenAWork/releases',
-        '_blank',
-        'noopener,noreferrer',
-      );
+      expect(screen.getByText('连接失败')).toBeTruthy();
+      expect(screen.getByText('desktop bridge failed')).toBeTruthy();
+      expect(window.open).not.toHaveBeenCalled();
+    });
+  });
+
+  it('下载过程中显示取消下载并允许恢复到可重新下载状态', async () => {
+    let resolveDownload: (() => void) | null = null;
+    mocks.downloadAndInstallProxyUpdate.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDownload = resolve;
+        }),
+    );
+
+    render(<AboutPage />);
+
+    await waitFor(() => {
+      expect(mocks.getVersion).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '下载更新 v0.9.0' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '下载更新 v0.9.0' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '取消下载' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '取消下载' }));
+    resolveDownload!();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '下载更新 v0.9.0' })).toBeTruthy();
     });
   });
 });

@@ -779,12 +779,18 @@ export function BuiltInBrowser({
 
         webview.once('tauri://error', (e: unknown) => {
           if (disposed || gen !== generationRef.current) return;
+          const raw =
+            typeof e === 'object' && e !== null && 'payload' in e
+              ? (e as Record<string, unknown>).payload
+              : e;
           const msg =
-            e instanceof Error
-              ? e.message
-              : typeof e === 'object' && e !== null && 'message' in e
-                ? String((e as Record<string, unknown>).message)
-                : String(e);
+            raw instanceof Error
+              ? raw.message
+              : typeof raw === 'object' && raw !== null && 'message' in raw
+                ? String((raw as Record<string, unknown>).message)
+                : typeof raw === 'string'
+                  ? raw
+                  : String(raw);
           console.error('[BuiltInBrowser] webview error:', msg);
           webview = null;
           activeWebviewRef.current = null;

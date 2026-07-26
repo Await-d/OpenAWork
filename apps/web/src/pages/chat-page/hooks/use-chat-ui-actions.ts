@@ -107,7 +107,7 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       return;
     }
 
-    await executeServerCommand({
+    void executeServerCommand({
       command: matchedCompactCommand,
       currentSessionId,
       gatewayUrl,
@@ -120,11 +120,13 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
         setRightPanelState((prev) =>
           events.reduce((next, event) => applyChatRightPanelEvent(next, event), prev),
         );
-        appendAssistantEventMessages(events, { excludeCompaction: true });
+        appendAssistantEventMessages(events);
       },
-      onOpenRightPanel: () => setRightOpen(true),
+      onOpenRightPanel: () => {
+        setRightOpen(true);
+        setRightTab('history');
+      },
     });
-    setRightTab('overview');
     requestSessionListRefresh();
   }, [
     appendAssistantEventMessages,

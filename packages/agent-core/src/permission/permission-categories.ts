@@ -135,4 +135,11 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
     defaultAction: 'ask',
     supportsPatterns: false,
   },
+  {
+    id: 'external_workspace',
+    label: '跨工作区访问',
+    description: '访问当前会话绑定工作区之外的路径（需用户确认）',
+    defaultAction: 'ask',
+    supportsPatterns: true,
+  },
 ];

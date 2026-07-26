@@ -63,6 +63,7 @@ const teamTemplateMemberSlotSchema = z.object({
   displayName: z.string().min(1).max(200),
   personaKey: z.string().min(1).max(160),
   toolsets: z.array(z.string().min(1).max(80)).max(20),
+  toolsetsCustomized: z.boolean().optional(),
   required: z.boolean(),
   // 可选 per-member 模型绑定（智能分配模型功能；老数据无此字段，向后兼容）。
   providerId: z.string().min(1).max(200).optional(),

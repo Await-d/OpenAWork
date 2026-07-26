@@ -2,7 +2,9 @@ mod desktop_control_bridge;
 mod desktop_control_native;
 mod updater_commands;
 
-use argon2::password_hash::{rand_core::OsRng as ArgonRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng as ArgonRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use desktop_control_bridge::DesktopControlBridgeProcess;
 use rand::{rngs::OsRng, RngCore};
@@ -17,8 +19,8 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{Emitter, Manager, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -405,8 +407,7 @@ fn load_settings(app: &tauri::AppHandle) -> PersistedSettings {
 
     // 先尝试新位置。
     if let Ok(content) = fs::read_to_string(&new_path) {
-        if let Ok(mut parsed) = serde_json::from_str::<PersistedSettings>(&content) {
-            parsed.close_behavior = CloseBehavior::Exit;
+        if let Ok(parsed) = serde_json::from_str::<PersistedSettings>(&content) {
             return parsed;
         }
     }
@@ -415,8 +416,7 @@ fn load_settings(app: &tauri::AppHandle) -> PersistedSettings {
     if let Some(legacy) = legacy_settings_file(app) {
         if legacy.exists() {
             if let Ok(content) = fs::read_to_string(&legacy) {
-                if let Ok(mut parsed) = serde_json::from_str::<PersistedSettings>(&content) {
-                    parsed.close_behavior = CloseBehavior::Exit;
+                if let Ok(parsed) = serde_json::from_str::<PersistedSettings>(&content) {
                     if let Some(parent) = new_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
@@ -441,10 +441,10 @@ fn save_settings(app: &tauri::AppHandle, settings: &PersistedSettings) {
     }
 }
 
-fn apply_close_behavior(app: &tauri::AppHandle, _behavior: CloseBehavior) {
+fn apply_close_behavior(app: &tauri::AppHandle, behavior: CloseBehavior) {
     if let Some(state) = app.try_state::<SettingsState>() {
         if let Ok(mut guard) = state.0.lock() {
-            guard.close_behavior = CloseBehavior::Exit;
+            guard.close_behavior = behavior;
             save_settings(app, &guard);
         }
     }
@@ -684,7 +684,9 @@ async fn admin_password_status(
     };
 
     let response = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{port}/auth/admin-password-status"))
+        .get(format!(
+            "http://127.0.0.1:{port}/auth/admin-password-status"
+        ))
         // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
         // timeout, so without this a wedged gateway leaves this await pending
         // forever (desktop login / settings panel freezes). Generous 30s (vs the
@@ -775,8 +777,8 @@ fn resolve_gateway_resources_path(app: &tauri::AppHandle) -> Option<String> {
         }
     }
 
-    let source_candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../packages/resources/resources");
+    let source_candidate =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../packages/resources/resources");
     if source_candidate.is_dir() {
         return Some(source_candidate.to_string_lossy().to_string());
     }
@@ -963,7 +965,24 @@ async fn spawn_gateway_sidecar(
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
-                CommandEvent::Terminated(_) | CommandEvent::Error(_) => break,
+                CommandEvent::Stdout(data) => {
+                    if let Ok(text) = String::from_utf8(data) {
+                        eprintln!("[gateway stdout] {}", text.trim());
+                    }
+                }
+                CommandEvent::Stderr(data) => {
+                    if let Ok(text) = String::from_utf8(data) {
+                        eprintln!("[gateway stderr] {}", text.trim());
+                    }
+                }
+                CommandEvent::Terminated(status) => {
+                    eprintln!("[gateway] terminated with status: {:?}", status);
+                    break;
+                }
+                CommandEvent::Error(err) => {
+                    eprintln!("[gateway] error: {}", err);
+                    break;
+                }
                 _ => {}
             }
         }
@@ -988,10 +1007,7 @@ async fn spawn_gateway_sidecar(
         }
 
         update_gateway_health(&app_for_task, GatewayHealth::Failed);
-        let _ = app_for_task.emit(
-            "gateway:crashed",
-            serde_json::json!({ "port": port }),
-        );
+        let _ = app_for_task.emit("gateway:crashed", serde_json::json!({ "port": port }));
     });
 
     // 健康等待循环。
@@ -1141,7 +1157,10 @@ async fn stop_gateway(
 }
 
 #[tauri::command]
-async fn restart_app(app: tauri::AppHandle, state: State<'_, GatewayProcess>) -> Result<(), String> {
+async fn restart_app(
+    app: tauri::AppHandle,
+    state: State<'_, GatewayProcess>,
+) -> Result<(), String> {
     let _ = stop_gateway(app.clone(), state).await;
     let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
     Command::new(current_exe)
@@ -1241,17 +1260,13 @@ async fn get_desktop_settings(
     app: tauri::AppHandle,
     state: State<'_, SettingsState>,
 ) -> Result<DesktopSettingsView, String> {
-    let snapshot = state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone();
+    let snapshot = state.0.lock().map_err(|e| e.to_string())?.clone();
     let custom = snapshot.data_root.as_ref().map(|p| path_to_string(p));
     let effective = effective_data_root(&app, &snapshot);
     let default_root = default_data_root(&app);
     let settings_path = settings_file(&app);
     Ok(DesktopSettingsView {
-        close_behavior: CloseBehavior::Exit,
+        close_behavior: snapshot.close_behavior,
         has_seen_tray_hint: snapshot.has_seen_tray_hint,
         effective_data_root: path_to_string(&effective),
         custom_data_root: custom,
@@ -1261,7 +1276,10 @@ async fn get_desktop_settings(
         has_pin: snapshot.pin_hash.is_some(),
         idle_lock_minutes: snapshot.idle_lock_minutes,
         pin_digits: PIN_DIGITS,
-        update_channel: snapshot.update_channel.clone().unwrap_or_else(|| "preview".to_string()),
+        update_channel: snapshot
+            .update_channel
+            .clone()
+            .unwrap_or_else(|| "preview".to_string()),
     })
 }
 
@@ -1337,10 +1355,7 @@ struct VerifyPinResult {
 /// - 成功 → 解锁 + 清零计数；
 /// - 失败 → `failed_attempts+1`，到 `PIN_MAX_ATTEMPTS` 上锁 `PIN_LOCKOUT_DURATION` 并清零计数。
 #[tauri::command]
-async fn verify_desktop_pin(
-    app: tauri::AppHandle,
-    pin: String,
-) -> Result<VerifyPinResult, String> {
+async fn verify_desktop_pin(app: tauri::AppHandle, pin: String) -> Result<VerifyPinResult, String> {
     // 先检查当前是否处于锁死期。
     {
         let lock_state = app.state::<LockState>();
@@ -1563,9 +1578,7 @@ async fn migrate_data_root(
     let new_gw = new_root_path.join(GATEWAY_SUBDIR);
 
     if new_gw.exists() {
-        let entries = fs::read_dir(&new_gw)
-            .map(|it| it.count())
-            .unwrap_or(0);
+        let entries = fs::read_dir(&new_gw).map(|it| it.count()).unwrap_or(0);
         if entries > 0 {
             return Err(format!(
                 "目标目录已存在且非空: {}。请清空或选择其它目录。",
@@ -1708,18 +1721,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
 
-    let show_pairing = MenuItem::with_id(
-        app,
-        "show_pairing_qr",
-        "显示配对二维码",
-        true,
-        None::<&str>,
-    )?;
-    let check_updates =
-        MenuItem::with_id(app, "check_updates", "检查更新", true, None::<&str>)?;
+    let show_pairing =
+        MenuItem::with_id(app, "show_pairing_qr", "显示配对二维码", true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(app, "check_updates", "检查更新", true, None::<&str>)?;
     // C-10 查看日志——打开 gateway 数据目录，log 文件在此目录下。
-    let view_logs =
-        MenuItem::with_id(app, "view_logs", "查看日志", true, None::<&str>)?;
+    let view_logs = MenuItem::with_id(app, "view_logs", "查看日志", true, None::<&str>)?;
     let open_config = MenuItem::with_id(app, "open_config", "打开配置目录", true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", "关于 OpenAWork", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出 OpenAWork", true, None::<&str>)?;
@@ -1745,7 +1751,9 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
 
     // 把需要动态更新 checked 状态的菜单项存到 managed state。
-    app.manage(TrayMenuHandles { autostart: autostart_item });
+    app.manage(TrayMenuHandles {
+        autostart: autostart_item,
+    });
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("OpenAWork")
@@ -1836,8 +1844,41 @@ fn show_about_dialog(app: &tauri::AppHandle) {
 }
 
 fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequestApi) {
-    api.prevent_close();
-    window.app_handle().exit(0);
+    let app = window.app_handle();
+    let behavior = app
+        .try_state::<SettingsState>()
+        .and_then(|state| state.0.lock().ok().map(|g| g.close_behavior))
+        .unwrap_or(CloseBehavior::Exit);
+
+    match behavior {
+        CloseBehavior::Exit => {
+            api.prevent_close();
+            app.exit(0);
+        }
+        CloseBehavior::Minimize => {
+            api.prevent_close();
+            if let Some(w) = app.get_webview_window("main") {
+                hide_to_tray(app, &w);
+            }
+        }
+        CloseBehavior::Ask => {
+            api.prevent_close();
+            if app.get_webview_window("main").is_some() {
+                let app_handle = app.clone();
+                app.dialog()
+                    .message("选择「确定」将退出程序并停止本地 gateway；选择「取消」将最小化到托盘继续运行。")
+                    .title("关闭 OpenAWork")
+                    .kind(MessageDialogKind::Info)
+                    .show(move |yes| {
+                        if yes {
+                            app_handle.exit(0);
+                        } else if let Some(win) = app_handle.get_webview_window("main") {
+                            hide_to_tray(&app_handle, &win);
+                        }
+                    });
+            }
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1875,8 +1916,10 @@ pub fn run() {
                     if event.state() != ShortcutState::Released {
                         return;
                     }
-                    let matches_wake = shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyO);
-                    let matches_pair = shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyP);
+                    let matches_wake =
+                        shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyO);
+                    let matches_pair =
+                        shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyP);
                     if matches_wake {
                         restore_main_window(app);
                     }
@@ -1885,11 +1928,13 @@ pub fn run() {
                         let _ = app.emit("tray:show-pairing-qr", ());
                     }
                 })
-                .build()
+                .build(),
         )
         .manage(GatewayProcess(gateway_process_for_updater))
         .manage(DesktopControlBridgeProcess::default())
-        .manage(GatewayHealthState(Arc::new(Mutex::new(GatewayHealth::Stopped))))
+        .manage(GatewayHealthState(Arc::new(Mutex::new(
+            GatewayHealth::Stopped,
+        ))))
         .invoke_handler(tauri::generate_handler![
             start_gateway,
             stop_gateway,

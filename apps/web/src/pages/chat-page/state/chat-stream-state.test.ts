@@ -126,4 +126,44 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
     expect(state.agentEvents.some((event) => event.requestId === 'req-viz-2')).toBe(true);
     expect(state.agentEvents.some((event) => event.requestId === 'req-viz-3')).toBe(true);
   });
+
+  it('同一个 compaction runId 的 started/completed 只保留一个右侧压缩项', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '压缩上下文',
+      events: [
+        {
+          type: 'compaction',
+          summary: '正在压缩会话上下文。',
+          trigger: 'manual',
+          phase: 'started',
+          cause: 'manual',
+          strategy: 'runtime_replace',
+          runId: 'command:session-1:slash-compact:run-1',
+          eventId: 'session-1:slash-compact:run-1:compaction:started',
+          occurredAt: 100,
+        },
+        {
+          type: 'compaction',
+          summary: '已压缩较早消息。',
+          trigger: 'manual',
+          phase: 'completed',
+          cause: 'manual',
+          strategy: 'runtime_replace',
+          compactedMessages: 12,
+          representedMessages: 12,
+          runId: 'command:session-1:slash-compact:run-1',
+          eventId: 'session-1:slash-compact:run-1:compaction:completed',
+          occurredAt: 200,
+        },
+      ],
+    });
+
+    expect(state.compactions).toHaveLength(1);
+    expect(state.compactions[0]).toMatchObject({
+      id: 'compaction:command:session-1:slash-compact:run-1',
+      phase: 'completed',
+      compactedMessages: 12,
+      representedMessages: 12,
+    });
+  });
 });

@@ -1,11 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import { BrandLogo } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { isTauri, tauriInvoke } from '../settings/shared/settings-page-helpers.js';
 import type { SettingsVersionInfo } from '../settings/state/settings-types.js';
-import { openDesktopUpdatePanel } from './about-page-desktop-update.js';
+import {
+  checkForUpdate,
+  clearProxyCache,
+  downloadUpdate,
+  installUpdate,
+  toUpdateError,
+  UpdateError,
+  type UpdateCheckResult,
+  type GitHubProxy,
+} from '../../../../desktop/src/updater/auto-update.js';
+import { downloadAndInstallProxyUpdate } from '../../../../desktop/src/updater/proxy-update.js';
+import {
+  restartDesktopApp,
+  stopDesktopGateway,
+} from '../../../../desktop/src/utils/tauri-gateway.js';
 
 type UpdateChannel = 'preview' | 'stable';
 
@@ -127,34 +141,280 @@ interface UpdateSectionProps {
   isTauriEnv: boolean;
 }
 
-function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectionProps) {
-  const [desktopOpening, setDesktopOpening] = useState(false);
+type DesktopUpdateState =
+  'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'done' | 'up-to-date';
 
-  const handleDesktopUpdate = useCallback(async () => {
-    if (!isTauriEnv) return;
-    setDesktopOpening(true);
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function inlineUpdateStateLabel(state: DesktopUpdateState): string {
+  switch (state) {
+    case 'idle':
+      return '待检查';
+    case 'checking':
+      return '检查中';
+    case 'available':
+      return '发现更新';
+    case 'downloading':
+      return '下载中';
+    case 'installing':
+      return '安装中';
+    case 'done':
+      return '已完成';
+    case 'up-to-date':
+      return '已最新';
+  }
+}
+
+function inlineUpdateErrorTitle(kind: UpdateError['kind']): string {
+  switch (kind) {
+    case 'network':
+      return '连接失败';
+    case 'signature':
+      return '校验失败';
+    case 'permission':
+      return '权限不足';
+    case 'no_update':
+      return '暂无更新';
+    case 'cancelled':
+      return '已取消';
+    case 'unknown':
+      return '更新出错';
+  }
+}
+
+function InlineUpdateStat({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: 'var(--spacing-3) var(--spacing-4)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border-subtle)',
+        background: 'color-mix(in srgb, var(--bg-base) 42%, var(--bg-overlay))',
+      }}
+    >
+      <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 4 }}>{label}</div>
+      <div
+        style={{
+          fontSize: 14,
+          fontWeight: 700,
+          color: accent ? 'var(--contrast)' : 'var(--fg-strong)',
+          fontVariantNumeric: 'tabular-nums',
+          fontFamily:
+            label === '目标版本'
+              ? 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)'
+              : undefined,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectionProps) {
+  const [desktopState, setDesktopState] = useState<DesktopUpdateState>('idle');
+  const [desktopProgress, setDesktopProgress] = useState(0);
+  const [desktopDownloaded, setDesktopDownloaded] = useState(0);
+  const [desktopTotal, setDesktopTotal] = useState<number | null>(null);
+  const [desktopError, setDesktopError] = useState<UpdateError | null>(null);
+  const [desktopResult, setDesktopResult] = useState<UpdateCheckResult | null>(null);
+  const [releaseNotes, setReleaseNotes] = useState<string | null>(null);
+  const [proxyUsed, setProxyUsed] = useState<GitHubProxy | null>(null);
+  const desktopAbortControllerRef = useRef<AbortController | null>(null);
+  const desktopCancelRequestedRef = useRef(false);
+
+  const stopGatewayBeforeInstall = useCallback(async () => {
     try {
-      await openDesktopUpdatePanel();
-    } catch {
-      window.open('https://github.com/Await-d/OpenAWork/releases', '_blank', 'noopener,noreferrer');
-    } finally {
-      setDesktopOpening(false);
+      await stopDesktopGateway();
+    } catch (stopError) {
+      const message = stopError instanceof Error ? stopError.message : String(stopError);
+      throw new UpdateError('unknown', `安装更新前停止本地网关失败：${message}`);
+    }
+  }, []);
+
+  const runInlineDesktopCheck = useCallback(async () => {
+    if (!isTauriEnv) return;
+    setDesktopState('checking');
+    setDesktopError(null);
+    setDesktopProgress(0);
+    setDesktopDownloaded(0);
+    setDesktopTotal(null);
+    setProxyUsed(null);
+    try {
+      console.log('[about-inline-update] 开始检查更新…');
+      const result = await checkForUpdate();
+      setDesktopResult(result);
+      setReleaseNotes(result.notes);
+      setProxyUsed(result.proxyUsed);
+      setDesktopState(result.available ? 'available' : 'up-to-date');
+    } catch (error) {
+      console.error('[about-inline-update] 检查更新失败:', error);
+      setDesktopError(toUpdateError(error));
+      setDesktopState('idle');
     }
   }, [isTauriEnv]);
 
+  const handleDesktopDownload = useCallback(async () => {
+    if (!desktopResult) return;
+    const abortController = new AbortController();
+    desktopAbortControllerRef.current = abortController;
+    desktopCancelRequestedRef.current = false;
+    setDesktopError(null);
+    setDesktopState('downloading');
+    setDesktopProgress(0);
+    setDesktopDownloaded(0);
+    setDesktopTotal(null);
+
+    try {
+      if (!desktopResult.update) {
+        if (!desktopResult.proxyUsed) {
+          throw new UpdateError('unknown', '当前更新缺少可安装句柄。');
+        }
+        if (desktopResult.installMode === 'manual') {
+          if (!desktopResult.proxiedDownloadUrl) {
+            throw new UpdateError('unknown', '当前代理模式缺少可下载的更新地址。');
+          }
+          window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
+          setDesktopState('done');
+          setDesktopProgress(100);
+          return;
+        }
+
+        try {
+          await stopGatewayBeforeInstall();
+          if (desktopCancelRequestedRef.current) return;
+          await downloadAndInstallProxyUpdate(
+            desktopResult.proxyUsed,
+            desktopResult.channel,
+            (progress) => {
+              if (desktopCancelRequestedRef.current) return;
+              setDesktopProgress(progress.percent);
+              setDesktopDownloaded(progress.downloaded);
+              setDesktopTotal(progress.total);
+            },
+          );
+          if (desktopCancelRequestedRef.current) return;
+        } catch (proxyInstallError) {
+          if (desktopCancelRequestedRef.current) return;
+          clearProxyCache();
+          if (desktopResult.proxiedDownloadUrl) {
+            window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
+            setDesktopState('done');
+            setDesktopProgress(100);
+            return;
+          }
+          throw proxyInstallError;
+        }
+
+        setDesktopProgress(100);
+        setDesktopState('done');
+        return;
+      }
+
+      await downloadUpdate(
+        desktopResult.update,
+        (progress) => {
+          if (desktopCancelRequestedRef.current) return;
+          setDesktopProgress(progress.percent);
+          setDesktopDownloaded(progress.downloaded);
+          setDesktopTotal(progress.total);
+        },
+        { signal: abortController.signal },
+      );
+      if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
+      setDesktopProgress(100);
+      setDesktopState('installing');
+      await installUpdate(desktopResult.update, {
+        beforeInstall: stopGatewayBeforeInstall,
+      });
+      setDesktopState('done');
+    } catch (error) {
+      console.error('[about-inline-update] 下载/安装失败:', error);
+      if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
+      setDesktopError(toUpdateError(error));
+      setDesktopState(desktopResult.available ? 'available' : 'idle');
+    } finally {
+      if (desktopAbortControllerRef.current === abortController) {
+        desktopAbortControllerRef.current = null;
+      }
+    }
+  }, [desktopResult, stopGatewayBeforeInstall]);
+
+  const handleCancelDesktopDownload = useCallback(() => {
+    if (desktopState !== 'downloading') return;
+    desktopCancelRequestedRef.current = true;
+    desktopAbortControllerRef.current?.abort();
+    setDesktopProgress(0);
+    setDesktopDownloaded(0);
+    setDesktopTotal(null);
+    setDesktopError(null);
+    setDesktopState(desktopResult?.available ? 'available' : 'idle');
+  }, [desktopResult, desktopState]);
+
+  useEffect(() => {
+    return () => {
+      desktopCancelRequestedRef.current = true;
+      desktopAbortControllerRef.current?.abort();
+    };
+  }, []);
+
   const handlePrimaryCheck = useCallback(() => {
     if (isTauriEnv) {
-      void handleDesktopUpdate();
+      void runInlineDesktopCheck();
       void onCheckVersion();
       return;
     }
     void onCheckVersion();
-  }, [handleDesktopUpdate, isTauriEnv, onCheckVersion]);
+  }, [isTauriEnv, onCheckVersion, runInlineDesktopCheck]);
 
   const hasUpdate = versionInfo.updateAvailable && versionInfo.latestVersion;
   const isLatest =
     versionInfo.latestVersion && !versionInfo.updateAvailable && !versionInfo.checkError;
-  const primaryBusy = isTauriEnv ? desktopOpening || versionInfo.checking : versionInfo.checking;
+  const primaryBusy = isTauriEnv
+    ? desktopState === 'checking' ||
+      desktopState === 'downloading' ||
+      desktopState === 'installing' ||
+      versionInfo.checking
+    : versionInfo.checking;
+  const primaryLabel =
+    desktopState === 'downloading'
+      ? '下载中…'
+      : desktopState === 'installing'
+        ? '安装中…'
+        : primaryBusy
+          ? '检查中…'
+          : '检查更新';
+  const inlineHasUpdate = desktopState === 'available' && desktopResult?.version;
+  const inlineShowPanel = isTauriEnv && (desktopResult || desktopError || desktopState !== 'idle');
+  const inlineStatusMessage =
+    desktopState === 'available'
+      ? `发现新版本 ${desktopResult?.version ?? ''}${proxyUsed ? `（通过 ${proxyUsed.name} 加速）` : ''}。`
+      : desktopState === 'downloading'
+        ? `下载中… ${desktopProgress}%`
+        : desktopState === 'installing'
+          ? '下载完成，正在安装更新…'
+          : desktopState === 'done'
+            ? desktopResult?.installMode === 'manual'
+              ? '已打开手动下载链接，请先完全退出 OpenAWork，再运行下载的安装包。'
+              : '更新已处理完成，可立即重启应用。'
+            : desktopState === 'up-to-date'
+              ? '当前已是最新版本。'
+              : desktopState === 'checking'
+                ? '正在检查更新…'
+                : '点击上方按钮检查当前桌面端更新。';
 
   return (
     <section
@@ -245,7 +505,7 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
             </h2>
             <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.5 }}>
               {isTauriEnv
-                ? '打开桌面端更新面板并按当前更新渠道检查 GitHub Releases'
+                ? '直接在当前关于页内检查、查看发布日志并下载安装桌面更新'
                 : '通过 GitHub Releases 检查是否有新版本发布（默认预览渠道）'}
             </span>
           </div>
@@ -273,7 +533,7 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
               transition: 'opacity 120ms ease',
             }}
           >
-            {primaryBusy ? '检查中…' : '检查更新'}
+            {primaryLabel}
           </button>
           {isTauriEnv && (
             <button
@@ -454,9 +714,7 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
             <path d="M12 17h.01" />
           </svg>
           有新版本 v{versionInfo.latestVersion} 可用
-          {isTauriEnv
-            ? '。请点「检查更新」打开桌面端更新面板确认并安装。'
-            : '，请前往 GitHub 发布记录下载。'}
+          {isTauriEnv ? '，请点击下方按钮下载安装。' : '，请前往 GitHub 发布记录下载。'}
         </div>
       )}
       {isLatest && (
@@ -507,6 +765,309 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
         >
           {versionInfo.checkError}
         </div>
+      )}
+
+      {inlineShowPanel && (
+        <section
+          style={{
+            marginTop: 'var(--spacing-4)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-default)',
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay)), var(--bg-overlay))',
+            boxShadow: 'var(--shadow-sm)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 'var(--spacing-4)',
+              flexWrap: 'wrap',
+              padding: 'var(--spacing-4) var(--spacing-5)',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+              <span
+                style={{
+                  color: 'var(--accent)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                桌面端更新
+              </span>
+              <strong style={{ fontSize: 16, color: 'var(--fg-strong)' }}>
+                {desktopResult?.version ? `OpenAWork v${desktopResult.version}` : '更新检查'}
+              </strong>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.6 }}>
+                {inlineStatusMessage}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-pill)',
+                border: '1px solid var(--accent-border)',
+                background: 'var(--accent-muted)',
+                color: 'var(--fg-default)',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {inlineUpdateStateLabel(desktopState)}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--spacing-4)',
+              padding: 'var(--spacing-5)',
+            }}
+          >
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: 'var(--spacing-3)',
+              }}
+            >
+              <InlineUpdateStat
+                label="目标版本"
+                value={desktopResult?.version ? `v${desktopResult.version}` : '—'}
+                accent={desktopState === 'available'}
+              />
+              <InlineUpdateStat
+                label="更新通道"
+                value={desktopResult?.channel === 'stable' ? '发行版' : '预览版'}
+              />
+              <InlineUpdateStat
+                label="下载进度"
+                value={
+                  desktopState === 'downloading' || desktopState === 'installing'
+                    ? `${desktopProgress}%`
+                    : desktopState === 'done'
+                      ? '100%'
+                      : '—'
+                }
+              />
+            </div>
+
+            {(desktopState === 'downloading' || desktopState === 'installing') && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div
+                  style={{
+                    height: 8,
+                    borderRadius: 'var(--radius-pill)',
+                    overflow: 'hidden',
+                    background: 'var(--accent-subtle)',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${desktopProgress}%`,
+                      background: 'var(--accent)',
+                      transition: 'width 180ms ease',
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 'var(--spacing-3)',
+                    fontSize: 12,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  <span>{desktopProgress}%</span>
+                  <span>
+                    {formatBytes(desktopDownloaded)}
+                    {desktopTotal ? ` / ${formatBytes(desktopTotal)}` : ''}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {desktopError ? (
+              <div
+                role="alert"
+                style={{
+                  padding: 'var(--spacing-3) var(--spacing-4)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid color-mix(in srgb, var(--complement) 30%, transparent)',
+                  background: 'color-mix(in srgb, var(--complement) 8%, transparent)',
+                  color: 'var(--fg-default)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <strong style={{ fontSize: 13, color: 'var(--complement)' }}>
+                  {inlineUpdateErrorTitle(desktopError.kind)}
+                </strong>
+                <span style={{ fontSize: 12, lineHeight: 1.6 }}>{desktopError.message}</span>
+              </div>
+            ) : null}
+
+            {releaseNotes ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 'var(--spacing-3)',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: 'var(--fg-default)',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    发布日志
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>可滚动查看</span>
+                </div>
+                <div
+                  style={{
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                    padding: 'var(--spacing-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'color-mix(in srgb, var(--bg-base) 42%, var(--bg-overlay))',
+                    color: 'var(--fg-default)',
+                    fontSize: 13,
+                    lineHeight: 1.65,
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {releaseNotes}
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--spacing-2)',
+                flexWrap: 'wrap',
+                justifyContent: 'flex-end',
+                paddingTop: 'var(--spacing-2)',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              {desktopState === 'downloading' && (
+                <button
+                  type="button"
+                  onClick={() => handleCancelDesktopDownload()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    height: 34,
+                    padding: '0 16px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid color-mix(in srgb, var(--complement) 35%, transparent)',
+                    background: 'color-mix(in srgb, var(--complement) 8%, transparent)',
+                    color: 'var(--complement)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  取消下载
+                </button>
+              )}
+              {(desktopState === 'idle' || desktopState === 'up-to-date' || desktopError) && (
+                <button
+                  type="button"
+                  onClick={() => void runInlineDesktopCheck()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    height: 34,
+                    padding: '0 16px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--accent-border)',
+                    background: 'var(--accent-muted)',
+                    color: 'var(--accent)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  重新检查
+                </button>
+              )}
+              {inlineHasUpdate && (
+                <button
+                  type="button"
+                  onClick={() => void handleDesktopDownload()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    height: 34,
+                    padding: '0 16px',
+                    borderRadius: 'var(--radius-md)',
+                    border: 'none',
+                    background: 'var(--accent)',
+                    color: 'var(--fg-on-accent)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  下载更新 v{desktopResult?.version}
+                </button>
+              )}
+              {desktopState === 'done' && desktopResult?.installMode !== 'manual' && (
+                <button
+                  type="button"
+                  onClick={() => void restartDesktopApp()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    height: 34,
+                    padding: '0 16px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-default)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  重启应用
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
       )}
     </section>
   );

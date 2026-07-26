@@ -12,7 +12,7 @@ export type {
   SendMessageOptions,
 } from './gateway/gateway-ws.js';
 export { createCommandsClient } from './session/commands.js';
-export type { CommandsClient } from './session/commands.js';
+export type { CommandsClient, CommandsListResult } from './session/commands.js';
 export { createNotificationsClient } from './infra/notifications.js';
 export type {
   NotificationPreferenceChannel,

@@ -111,6 +111,7 @@ export interface CompactionMarkerRecord {
   persistedMemory?: PersistedCompactionMemory | null;
   signature?: string;
   summary: string;
+  tailStartMessageId?: string;
   trigger: string;
 }
 
@@ -267,7 +268,9 @@ function isContextArtifactMessage(message: Message): boolean {
 }
 
 export function filterVisibleSessionMessages(messages: Message[]): Message[] {
-  return messages.filter((message) => !isCompactionMarkerMessage(message));
+  return filterCompactedMessages(messages, null, undefined).filter(
+    (message) => !isCompactionMarkerMessage(message),
+  );
 }
 
 /**
@@ -1164,6 +1167,20 @@ function filterCompactedMessages(
   }
 
   if (boundaryIndex >= 0) {
+    const boundaryMessage = messages[boundaryIndex]!;
+    const marker = readLatestCompactionMarker([boundaryMessage]);
+    const tailIndex = marker?.tailStartMessageId
+      ? messages.findIndex((message) => message.id === marker.tailStartMessageId)
+      : -1;
+
+    if (marker?.tailStartMessageId && tailIndex >= 0 && tailIndex <= boundaryIndex) {
+      return [
+        boundaryMessage,
+        ...messages.slice(tailIndex, boundaryIndex),
+        ...messages.slice(boundaryIndex + 1),
+      ];
+    }
+
     return messages.slice(boundaryIndex);
   }
 

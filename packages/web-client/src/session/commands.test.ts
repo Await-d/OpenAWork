@@ -48,6 +48,27 @@ describe('createCommandsClient', () => {
     await expect(client.list('token-1')).rejects.toThrow('commands unavailable');
   });
 
+  it('listResult 会标记可重试的网关失败', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({ error: 'commands unavailable' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createCommandsClient('http://localhost:3000');
+    const result = await client.listResult('token-1');
+
+    expect(result).toEqual({
+      commands: [],
+      ok: false,
+      retryable: true,
+      errorMessage: 'commands unavailable',
+      status: 503,
+    });
+  });
+
   it('execute 网络异常时会转换成中文网络错误', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('Failed to fetch');
@@ -57,6 +78,51 @@ describe('createCommandsClient', () => {
 
     await expect(client.execute('token-1', 'session-1', 'summarize')).rejects.toThrow(
       '网络异常，执行命令失败。',
+    );
+  });
+
+  it('execute 会为命令执行使用更长的超时时间', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ result: { events: [] } }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createCommandsClient('http://localhost:3000');
+    await client.execute('token-1', 'session-1', 'summarize');
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/sessions/session-1/commands/execute',
+      expect.objectContaining({
+        timeoutMs: 120000,
+      }),
+    );
+  });
+
+  it('execute 会透传 executionId 供同一次命令的事件归并', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ result: { events: [] } }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createCommandsClient('http://localhost:3000');
+    await client.execute('token-1', 'session-1', 'slash-compact', {
+      rawInput: '/compact',
+      executionId: 'compact-execution-1',
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/sessions/session-1/commands/execute',
+      expect.objectContaining({
+        body: JSON.stringify({
+          commandId: 'slash-compact',
+          rawInput: '/compact',
+          executionId: 'compact-execution-1',
+        }),
+      }),
     );
   });
 

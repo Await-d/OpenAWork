@@ -1,9 +1,9 @@
+use super::input_unavailable_reason;
 use crate::desktop_control_native::{
     command_exists, coordinate_arg, run_command, ClickAction, ClickRequest, ClickResponse,
     DesktopControlError, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse, MouseButton,
     ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse, WaitRequest, WaitResponse,
 };
-use super::input_unavailable_reason;
 use std::thread;
 use std::time::Duration;
 
@@ -206,7 +206,9 @@ fn xdotool_key(value: &str) -> Result<String, DesktopControlError> {
         "Space" => Ok("space".to_owned()),
         other if is_single_ascii_alphanumeric(other) => Ok(other.to_ascii_lowercase()),
         other if is_function_key(other) => Ok(other.to_owned()),
-        other => Err(DesktopControlError::new(format!("unsupported key: {other}"))),
+        other => Err(DesktopControlError::new(format!(
+            "unsupported key: {other}"
+        ))),
     }
 }
 

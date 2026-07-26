@@ -307,16 +307,59 @@ function UIStatus({ payload }: { payload: Record<string, unknown> }) {
 }
 
 function UICompaction({ payload }: { payload: Record<string, unknown> }) {
-  const trigger = payload['trigger'] === 'automatic' ? '自动压缩' : '手动压缩';
+  const phase =
+    payload['phase'] === 'started' || payload['phase'] === 'completed' || payload['phase'] === 'failed'
+      ? payload['phase']
+      : 'completed';
+  const trigger =
+    phase === 'started'
+      ? payload['trigger'] === 'automatic'
+        ? '正在自动压缩上下文'
+        : '正在压缩上下文'
+      : phase === 'failed'
+        ? payload['trigger'] === 'automatic'
+          ? '自动压缩未完成'
+          : '压缩未完成'
+        : payload['trigger'] === 'automatic'
+          ? '已自动压缩上下文'
+          : '已压缩上下文';
+  const toneColor =
+    phase === 'failed'
+      ? 'var(--danger)'
+      : phase === 'started'
+        ? 'var(--warning)'
+        : 'var(--fg-subtle)';
+  const bgColor =
+    phase === 'failed'
+      ? 'var(--danger-muted)'
+      : phase === 'started'
+        ? 'var(--warning-muted)'
+        : 'var(--accent-muted)';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--aux)' }}>
-        {(payload['title'] as string) ?? '会话已压缩'}
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{trigger}</div>
-      <div style={{ fontSize: 12, color: 'var(--fg-strong)', whiteSpace: 'pre-wrap' }}>
-        {(payload['summary'] as string) ?? ''}
-      </div>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minWidth: 0,
+        maxWidth: '100%',
+        color: toneColor,
+        fontSize: 11,
+        lineHeight: 1.4,
+        backgroundColor: bgColor,
+        padding: '6px 12px',
+        borderRadius: 6,
+        border: `1px solid ${phase === 'failed' ? 'var(--danger-border)' : phase === 'started' ? 'var(--warning-border)' : 'var(--accent-border)'}`,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{ color: phase === 'failed' ? 'var(--danger)' : phase === 'started' ? 'var(--warning)' : 'var(--aux)', fontSize: 10 }}
+      >
+        •
+      </span>
+      <span>{trigger}</span>
     </div>
   );
 }
@@ -399,11 +442,7 @@ export function GenerativeUIRenderer({ message }: GenerativeUIRendererProps) {
         </div>
       );
     case 'compaction':
-      return (
-        <div style={wrapper}>
-          <UICompaction payload={message.payload} />
-        </div>
-      );
+      return <UICompaction payload={message.payload} />;
     case 'tool_call':
       return (
         <div style={wrapper}>

@@ -12,6 +12,7 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^20.19.37",
     "@vitest/coverage-v8": "^4.1.10"
   },
   "dependencies": {

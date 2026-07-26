@@ -1,6 +1,6 @@
 import React from 'react';
 import type { DevtoolsSectionId } from './devtools-workbench-primitives.js';
-import { SS } from '../shared/settings-section-styles.js';
+import { SS, BADGE, BP, BS, BG, DIVIDER, TOOLBAR } from '../shared/settings-section-styles.js';
 
 interface DevtoolsToolbarSectionProps {
   anyRefreshableSourceLoading: boolean;
@@ -23,26 +23,61 @@ interface DevtoolsToolbarSectionProps {
   onToggleAutoRefresh: () => void;
 }
 
-const DANGER_BADGE: React.CSSProperties = {
+// 导航按钮样式 - 清晰可见
+const NAV_BUTTON: React.CSSProperties = {
+  borderRadius: 3,
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-overlay)',
+  padding: '3px 8px',
+  color: 'var(--fg-strong)',
+  cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
-  justifyContent: 'center',
-  minWidth: 16,
-  height: 16,
-  borderRadius: 999,
-  background: 'var(--danger)',
-  color: 'var(--fg-on-accent)',
-  fontSize: 9,
-  fontWeight: 800,
-  padding: '0 4px',
-  marginLeft: 4,
-  lineHeight: 1,
+  gap: 3,
+  fontSize: 11,
+  fontWeight: 500,
 };
 
-const WARNING_BADGE: React.CSSProperties = {
-  ...DANGER_BADGE,
-  background: 'var(--warning)',
-  color: 'var(--bg-base)',
+// 活跃导航按钮样式
+const NAV_BUTTON_ACTIVE: React.CSSProperties = {
+  ...NAV_BUTTON,
+  background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))',
+  borderColor: 'color-mix(in srgb, var(--accent) 40%, var(--border-default))',
+  color: 'var(--accent)',
+  fontWeight: 600,
+};
+
+// 导出下拉菜单样式
+const EXPORT_DROPDOWN: React.CSSProperties = {
+  position: 'relative',
+  display: 'inline-block',
+};
+
+const EXPORT_MENU: React.CSSProperties = {
+  position: 'absolute',
+  top: '100%',
+  right: 0,
+  marginTop: 2,
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 3,
+  padding: '2px',
+  minWidth: 120,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  zIndex: 10,
+};
+
+const EXPORT_ITEM: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  padding: '3px 8px',
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--fg-strong)',
+  fontSize: 11,
+  cursor: 'pointer',
+  textAlign: 'left',
+  borderRadius: 2,
 };
 
 export function DevtoolsToolbarSection({
@@ -59,266 +94,137 @@ export function DevtoolsToolbarSection({
   onScrollToSection,
   onToggleAutoRefresh,
 }: DevtoolsToolbarSectionProps) {
+  const [showExportMenu, setShowExportMenu] = React.useState(false);
+  const exportMenuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const navItems: Array<{ id: DevtoolsSectionId; label: string; count?: number; isError?: boolean }> = [
+    { id: 'overview', label: '总览', count: counts.errorSources, isError: counts.errorSources > 0 },
+    { id: 'diagnostics', label: '诊断', count: counts.diagnostics, isError: counts.diagnostics > 0 },
+    { id: 'logs', label: '日志', count: counts.logs },
+    { id: 'ssh', label: 'SSH', count: counts.sshConnections },
+    { id: 'workers', label: 'Worker', count: workerErrors, isError: workerErrors > 0 },
+  ];
+
   return (
-    <section
-      style={{
-        ...SS,
-        padding: '0.5rem 0.75rem',
-        borderBottom: '2px solid var(--accent)',
-      }}
-    >
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            color: 'var(--fg-muted)',
-            marginRight: 4,
-            flexShrink: 0,
-          }}
-        >
-          跳转
-        </span>
-        <button
-          type="button"
-          onClick={() => onScrollToSection('overview')}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-            padding: '7px 10px',
-            color: 'var(--fg-strong)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 100,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>总览</span>
-          {counts.errorSources > 0 ? (
-            <span style={WARNING_BADGE}>{counts.errorSources}</span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => onScrollToSection('diagnostics')}
-          style={{
-            borderRadius: 8,
-            border:
-              counts.diagnostics > 0
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
-                : '1px solid var(--border-default)',
-            borderLeft:
-              counts.diagnostics > 0
-                ? '3px solid var(--danger)'
-                : '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-            padding: '7px 10px',
-            color: 'var(--fg-strong)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 100,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>诊断</span>
-          {counts.diagnostics > 0 ? <span style={DANGER_BADGE}>{counts.diagnostics}</span> : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => onScrollToSection('logs')}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-            padding: '7px 10px',
-            color: 'var(--fg-strong)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 100,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>日志</span>
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{counts.logs} 条可见日志</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onScrollToSection('ssh')}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-            padding: '7px 10px',
-            color: 'var(--fg-strong)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 100,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>SSH</span>
-          {counts.sshConnections > 0 ? (
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--fg-muted)',
-                fontVariantNumeric: 'tabular-nums',
-              }}
+    <section style={{ ...SS, marginBottom: 0, padding: '4px 0' }}>
+      <div style={TOOLBAR}>
+        {/* 导航标签组 */}
+        <div style={{ display: 'flex', gap: 1 }}>
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onScrollToSection(item.id)}
+              style={item.isError ? NAV_BUTTON_ACTIVE : NAV_BUTTON}
             >
-              {counts.sshConnections}
-            </span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => onScrollToSection('workers')}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-            padding: '7px 10px',
-            color: 'var(--fg-strong)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 100,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>Worker</span>
-          {workerErrors > 0 ? <span style={DANGER_BADGE}>{workerErrors}</span> : null}
-        </button>
-        <div
-          style={{
-            width: 1,
-            height: 20,
-            background: 'var(--border-default)',
-            flexShrink: 0,
-            margin: '0 2px',
-          }}
-        />
+              {item.label}
+              {item.isError && item.count ? (
+                <span style={{ ...BADGE, color: 'var(--danger)', fontSize: 9 }}>
+                  {item.count}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div style={DIVIDER} />
+
+        {/* 刷新按钮 */}
         <button
           type="button"
           onClick={onRefreshAllSources}
           disabled={anyRefreshableSourceLoading}
-          aria-label="刷新全部数据源"
           style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            padding: '5px 8px',
-            background: 'var(--bg-overlay)',
-            color: anyRefreshableSourceLoading ? 'var(--fg-muted)' : 'var(--fg-strong)',
-            fontSize: 10,
+            ...BG,
+            opacity: anyRefreshableSourceLoading ? 0.5 : 1,
             cursor: anyRefreshableSourceLoading ? 'not-allowed' : 'pointer',
-            opacity: anyRefreshableSourceLoading ? 0.55 : 1,
           }}
         >
           {anyRefreshableSourceLoading ? '刷新中…' : '刷新'}
         </button>
+
+        {/* 自动刷新切换 */}
         <button
           type="button"
           onClick={onToggleAutoRefresh}
           style={{
-            borderRadius: 8,
-            border: `1px solid ${
-              autoRefreshEnabled
-                ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'
-                : 'var(--border-default)'
-            }`,
-            padding: '5px 8px',
-            background: autoRefreshEnabled
-              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-              : 'var(--bg-overlay)',
+            ...BG,
             color: autoRefreshEnabled ? 'var(--accent)' : 'var(--fg-muted)',
-            fontSize: 10,
-            fontWeight: autoRefreshEnabled ? 700 : 400,
-            cursor: 'pointer',
+            fontWeight: autoRefreshEnabled ? 500 : 400,
           }}
         >
-          自动 {autoRefreshEnabled ? '开' : '关'}
+          {autoRefreshEnabled ? '自动' : '手动'}
         </button>
-        <div
-          style={{
-            width: 1,
-            height: 20,
-            background: 'var(--border-default)',
-            flexShrink: 0,
-            margin: '0 2px',
-          }}
-        />
-        <button
-          type="button"
-          onClick={onExportErrorReport}
-          disabled={errorCount === 0}
-          style={{
-            borderRadius: 8,
-            border: errorCount > 0 ? '2px solid var(--danger)' : '1px solid var(--border-default)',
-            padding: '5px 10px',
-            background: errorCount > 0 ? 'var(--danger)' : 'var(--bg-overlay)',
-            color: errorCount > 0 ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
-            fontSize: 10,
-            fontWeight: 700,
-            cursor: errorCount > 0 ? 'pointer' : 'not-allowed',
-            opacity: errorCount > 0 ? 1 : 0.5,
-            whiteSpace: 'nowrap',
-          }}
-          title={
-            errorCount > 0 ? `导出包含 ${errorCount} 条错误的完整 HTML 报告` : '当前无错误可导出'
-          }
-        >
-          导出错误报告{errorCount > 0 ? ` (${errorCount})` : ''}
-        </button>
-        <button
-          type="button"
-          onClick={onExportDebugBundle}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--accent)',
-            padding: '5px 8px',
-            background: 'var(--accent)',
-            color: 'var(--fg-on-accent)',
-            fontSize: 10,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          导出 JSON
-        </button>
-        <button
-          type="button"
-          onClick={onExportMarkdownBundle}
-          style={{
-            borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
-            padding: '5px 8px',
-            background: 'var(--bg-overlay)',
-            color: 'var(--fg-strong)',
-            fontSize: 10,
-            cursor: 'pointer',
-          }}
-        >
-          导出 MD
-        </button>
-        {lastGlobalRefreshAt !== null ? (
-          <span
-            style={{
-              fontSize: 10,
-              color: 'var(--fg-muted)',
-              fontVariantNumeric: 'tabular-nums',
-              marginLeft: 4,
-              whiteSpace: 'nowrap',
-            }}
+
+        <div style={DIVIDER} />
+
+        {/* 导出按钮组 */}
+        <div style={EXPORT_DROPDOWN} ref={exportMenuRef}>
+          <button
+            type="button"
+            onClick={() => setShowExportMenu(!showExportMenu)}
+            style={BP}
           >
-            最后刷新 {new Date(lastGlobalRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}
+            导出 ▾
+          </button>
+
+          {showExportMenu && (
+            <div style={EXPORT_MENU}>
+              <button
+                type="button"
+                onClick={() => {
+                  onExportErrorReport();
+                  setShowExportMenu(false);
+                }}
+                disabled={errorCount === 0}
+                style={{
+                  ...EXPORT_ITEM,
+                  opacity: errorCount > 0 ? 1 : 0.5,
+                  cursor: errorCount > 0 ? 'pointer' : 'not-allowed',
+                }}
+              >
+                错误报告 {errorCount > 0 ? `(${errorCount})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onExportDebugBundle();
+                  setShowExportMenu(false);
+                }}
+                style={EXPORT_ITEM}
+              >
+                JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onExportMarkdownBundle();
+                  setShowExportMenu(false);
+                }}
+                style={EXPORT_ITEM}
+              >
+                MD
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 最后刷新时间 */}
+        {lastGlobalRefreshAt !== null && (
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)', marginLeft: 'auto' }}>
+            {new Date(lastGlobalRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}
           </span>
-        ) : null}
+        )}
       </div>
     </section>
   );

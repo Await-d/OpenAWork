@@ -39,6 +39,7 @@ import { appendSessionMessageV2, v2ToV1Message } from '../../message/message-v2-
 import { filterCompacted, toModelMessages } from '../../message/message-to-model-messages.js';
 import { hasSessionMessage } from '../../session/session-message-rating-store.js';
 import type { MessageID, MessageWithParts, PartID } from '../../message/message-v2-schema.js';
+import { buildCompactionMarkerContent } from '../../compaction/compaction-marker.js';
 
 function asMessageId(id: string): MessageID {
   return id as MessageID;
@@ -74,6 +75,82 @@ function assistantSummary(id: string, parentID: string): MessageWithParts {
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
     parts: [],
+  };
+}
+
+function textMessage(id: string, role: 'user' | 'assistant', text: string): MessageWithParts {
+  const messageId = asMessageId(id);
+  const part = {
+    id: asPartId(`${id}-part`),
+    sessionID: 'session-1',
+    messageID: messageId,
+    type: 'text' as const,
+    text,
+  };
+
+  if (role === 'assistant') {
+    return {
+      info: {
+        id: messageId,
+        sessionID: 'session-1',
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [part],
+    };
+  }
+
+  return {
+    info: {
+      id: messageId,
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 1 },
+    },
+    parts: [part],
+  };
+}
+
+function legacyCompactionMarker(
+  id: string,
+  summary: string,
+  tailStartMessageId?: string,
+): MessageWithParts {
+  const messageId = asMessageId(id);
+  const marker = buildCompactionMarkerContent({
+    markerType: 'compaction_marker',
+    source: 'openAwork',
+    summary,
+    trigger: 'manual',
+    ...(tailStartMessageId ? { tailStartMessageId } : {}),
+  });
+  const markerText = marker.content[0];
+  if (!markerText || markerText.type !== 'text') {
+    throw new Error('expected compaction marker text');
+  }
+
+  return {
+    info: {
+      id: messageId,
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1 },
+      finish: 'stop',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [
+      {
+        id: asPartId(`${id}-part`),
+        sessionID: 'session-1',
+        messageID: messageId,
+        type: 'text',
+        text: markerText.text,
+      },
+    ],
   };
 }
 
@@ -504,6 +581,107 @@ describe('message-v2 compatibility regressions', () => {
     expect(result.map((msg) => msg.info.id)).toEqual(['m3', 'm4', 'm1', 'm2', 'm5']);
   });
 
+  it('trims legacy compaction marker history and keeps its retained tail', () => {
+    const result = filterCompacted([
+      textMessage('old-1', 'user', '旧历史 1'),
+      textMessage('tail-1', 'user', '近期历史 1'),
+      textMessage('tail-2', 'assistant', '近期回复 2'),
+      legacyCompactionMarker('compact-1', '压缩摘要', 'tail-1'),
+      textMessage('new-1', 'user', '压缩后的新问题'),
+    ]);
+
+    expect(result.map((message) => message.info.id)).toEqual([
+      'compact-1',
+      'tail-1',
+      'tail-2',
+      'new-1',
+    ]);
+  });
+
+  it('converts legacy compaction marker to summary context instead of sending marker JSON', () => {
+    const filtered = filterCompacted([
+      textMessage('old-1', 'user', '旧历史 1'),
+      textMessage('tail-1', 'user', '近期历史 1'),
+      legacyCompactionMarker('compact-1', '压缩摘要', 'tail-1'),
+      textMessage('new-1', 'user', '压缩后的新问题'),
+    ]);
+
+    expect(toModelMessages(filtered)).toEqual([
+      { role: 'user', content: 'What did we do so far?' },
+      { role: 'assistant', content: '压缩摘要' },
+      { role: 'user', content: '近期历史 1' },
+      { role: 'user', content: '压缩后的新问题' },
+    ]);
+  });
+
+  it('does not send persisted assistant-event or command-card mirrors to the model', () => {
+    const assistantEvent = textMessage('assistant-event-1', 'assistant', '压缩展示卡片');
+    assistantEvent.info.clientRequestId = 'assistant_event:compaction:run-1';
+    const commandCard = textMessage('command-card-1', 'assistant', '命令结果展示卡片');
+    commandCard.info.clientRequestId = 'command-card:slash-compact:run-1';
+    const user = textMessage('user-1', 'user', '继续执行');
+
+    expect(toModelMessages([assistantEvent, commandCard, user])).toEqual([
+      { role: 'user', content: '继续执行' },
+    ]);
+  });
+
+  it('uses the newest legacy marker when an older marker is inside the retained tail', () => {
+    const result = filterCompacted([
+      textMessage('old-1', 'user', '旧历史 1'),
+      legacyCompactionMarker('compact-1', '第一次摘要'),
+      textMessage('tail-1', 'user', '保留的近期历史'),
+      legacyCompactionMarker('compact-2', '第二次摘要', 'compact-1'),
+      textMessage('new-1', 'user', '压缩后的新问题'),
+    ]);
+
+    expect(result.map((message) => message.info.id)).toEqual([
+      'compact-2',
+      'compact-1',
+      'tail-1',
+      'new-1',
+    ]);
+  });
+
+  it('falls back to the latest legacy marker when its tail anchor is missing', () => {
+    const result = filterCompacted([
+      textMessage('old-1', 'user', '旧历史 1'),
+      textMessage('old-2', 'assistant', '旧回复 2'),
+      legacyCompactionMarker('compact-1', '压缩摘要', 'missing-tail'),
+      textMessage('new-1', 'user', '压缩后的新问题'),
+    ]);
+
+    expect(result.map((message) => message.info.id)).toEqual(['compact-1', 'new-1']);
+  });
+
+  it('keeps a newer V2 compaction boundary ahead of an older legacy marker in the tail', () => {
+    const compaction = userMessage('compact-v2', [
+      {
+        id: asPartId('compact-v2-part'),
+        sessionID: 'session-1',
+        messageID: asMessageId('compact-v2'),
+        type: 'compaction',
+        auto: false,
+        tailStartID: asMessageId('compact-1'),
+      },
+    ]);
+    const result = filterCompacted([
+      legacyCompactionMarker('compact-1', '第一次摘要'),
+      textMessage('tail-1', 'user', '保留的近期历史'),
+      compaction,
+      assistantSummary('compact-v2-summary', 'compact-v2'),
+      textMessage('new-1', 'user', '压缩后的新问题'),
+    ]);
+
+    expect(result.map((message) => message.info.id)).toEqual([
+      'compact-v2',
+      'compact-v2-summary',
+      'compact-1',
+      'tail-1',
+      'new-1',
+    ]);
+  });
+
   // Regression: OpenAI Responses API tool_call cache stability.
   // The persisted-message → AI SDK round-trip must preserve
   // `tool-call.providerMetadata.openai.itemId` (`fc_xxx`) all the
@@ -639,5 +817,127 @@ describe('message-v2 compatibility regressions', () => {
     expect(assistant.toolCalls).toEqual([
       { id: 'call_websearch', name: 'web_search', arguments: '{}' },
     ]);
+  });
+
+  it('replays tool image attachments as a synthetic user image message', () => {
+    const sessionId = 'session-1';
+    const messageId = asMessageId('m-assistant-image-tool');
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p-tool-image'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'tool',
+          callID: 'call_desktop_image',
+          tool: 'desktop_control',
+          state: {
+            status: 'completed',
+            input: { action: 'screenshot' },
+            output: '{"success":true,"artifactId":"artifact-screen-1"}',
+            title: 'desktop_control',
+            metadata: {},
+            time: { start: 1, end: 2 },
+            attachments: [
+              {
+                id: asPartId('p-tool-image-attachment'),
+                sessionID: sessionId,
+                messageID: messageId,
+                type: 'file',
+                inputType: 'input_image',
+                mime: 'image/png',
+                artifactId: 'artifact-screen-1',
+                filename: 'desktop-control-screenshot.png',
+                url: '',
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(toModelMessages([message])).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        toolCalls: [
+          {
+            id: 'call_desktop_image',
+            name: 'desktop_control',
+            arguments: '{"action":"screenshot"}',
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        toolCallId: 'call_desktop_image',
+        toolName: 'desktop_control',
+        content: '{"success":true,"artifactId":"artifact-screen-1"}',
+      },
+      {
+        role: 'user',
+        content: '[Tool returned the following attachments]',
+        images: [
+          {
+            artifactId: 'artifact-screen-1',
+            fileName: 'desktop-control-screenshot.png',
+            mimeType: 'image/png',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('re-truncates oversized desktop tool outputs when replaying to the model', () => {
+    const sessionId = 'session-1';
+    const messageId = asMessageId('m-assistant-desktop-truncate');
+    const longOutput = 'x'.repeat(20_000);
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p-tool-truncate'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'tool',
+          callID: 'call_desktop_truncate',
+          tool: 'desktop_control',
+          state: {
+            status: 'completed',
+            input: { action: 'click', x: 1, y: 2 },
+            output: longOutput,
+            title: 'desktop_control',
+            metadata: {},
+            time: { start: 1, end: 2 },
+          },
+        },
+      ],
+    };
+
+    const toolResult = toModelMessages([message]).find(
+      (entry): entry is Extract<ReturnType<typeof toModelMessages>[number], { role: 'tool' }> =>
+        entry.role === 'tool',
+    );
+
+    expect(toolResult).toBeDefined();
+    expect(toolResult?.content.length).toBeLessThan(longOutput.length);
+    expect(toolResult?.content).toContain('[输出已截断');
   });
 });

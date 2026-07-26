@@ -74,6 +74,7 @@ const TOOLSET_CATEGORY_META: Record<string, { label: string; description: string
   lsp: { label: 'LSP', description: 'LSP 语义查询（定义 / 引用 / 重命名）' },
   test: { label: '测试', description: '测试执行' },
   review: { label: '审查', description: '代码审查工具' },
+  desktop: { label: '桌面', description: '系统桌面控制 / 浏览器自动化' },
   all: { label: '全部', description: '不限制（仅特殊层）' },
 };
 

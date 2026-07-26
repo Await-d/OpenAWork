@@ -6,7 +6,7 @@ import {
   buildWorkerKey,
   WorkerDetailsPanel,
 } from './devtools-workbench-primitives.js';
-import { SS, ST, UV } from '../shared/settings-section-styles.js';
+import { SS, ST, UV, BADGE, BS, BG } from '../shared/settings-section-styles.js';
 
 type WorkerStatusFilter = 'all' | 'error' | 'healthy';
 
@@ -44,71 +44,33 @@ export function DevtoolsWorkerSection({
 
   const statusFilteredWorkers = React.useMemo(() => {
     if (workerStatusFilter === 'error') return filteredWorkers.filter((w) => w.status === 'error');
-    if (workerStatusFilter === 'healthy')
-      return filteredWorkers.filter((w) => w.status !== 'error');
+    if (workerStatusFilter === 'healthy') return filteredWorkers.filter((w) => w.status !== 'error');
     return filteredWorkers;
   }, [filteredWorkers, workerStatusFilter]);
 
   return (
     <section style={SS}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
+      {/* 标题和统计 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
         <h3 style={ST}>Worker 状态</h3>
-        <span
-          style={{ fontSize: 11, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
-        >
-          共 {workers.length} 个 Worker · {errorCount} 个错误
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+          共 {workers.length} · 错误 {errorCount}
         </span>
       </div>
-      {sourceState.status === 'error' && sourceState.error ? (
+
+      {sourceState.status === 'error' && sourceState.error && (
         <InlineFailureNotice title="Worker 状态加载失败" message={sourceState.error} />
-      ) : null}
+      )}
+
+      {/* Worker 状态指示器 */}
       <div style={UV}>
         <WorkerStatusIndicator workers={workers} />
       </div>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 10,
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 10px',
-          borderRadius: 8,
-          border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-            Worker 工作台
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              flexWrap: 'wrap',
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>全部 Worker：{workers.length}</span>
-            <span>当前可见：{filteredWorkers.length}</span>
-            <span>错误 Worker：{errorCount}</span>
-            {selectedWorker ? <span>当前 Worker：{selectedWorker.name}</span> : null}
-            <span style={{ color: 'var(--accent)' }} aria-live="polite" aria-atomic="true">
-              {copiedWorkerAction ?? ''}
-            </span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+
+      {/* 操作栏 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* 搜索框 */}
           <input
             type="search"
             value={workerQuery}
@@ -116,133 +78,51 @@ export function DevtoolsWorkerSection({
             aria-label="搜索 Worker"
             name="worker-query"
             autoComplete="off"
-            placeholder="搜索 Worker 名称 / id / endpoint…"
+            placeholder="搜索..."
             style={{
-              minWidth: 220,
-              background: 'var(--bg-overlay)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 8,
-              padding: '6px 10px',
+              minWidth: 100,
+              background: 'transparent',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 2,
+              padding: '2px 6px',
               color: 'var(--fg-strong)',
               fontSize: 11,
+              outline: 'none',
             }}
           />
+
+          {/* 状态过滤 */}
+          <div style={{ display: 'flex', gap: 1 }}>
+            <button type="button" onClick={() => setWorkerStatusFilter('all')} style={{ ...BG, color: workerStatusFilter === 'all' ? 'var(--accent)' : 'var(--fg-muted)' }}>
+              全部 {filteredWorkers.length}
+            </button>
+            <button type="button" onClick={() => setWorkerStatusFilter('error')} style={{ ...BG, color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--fg-muted)' }}>
+              错误 {errorCount}
+            </button>
+            <button type="button" onClick={() => setWorkerStatusFilter('healthy')} style={{ ...BG, color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--fg-muted)' }}>
+              健康 {healthyCount}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: 'var(--accent)' }} aria-live="polite">{copiedWorkerAction ?? ''}</span>
+          <button type="button" onClick={onCopySelectedWorker} disabled={!selectedWorker} style={{ ...BS, opacity: selectedWorker ? 1 : 0.4, cursor: selectedWorker ? 'pointer' : 'not-allowed' }}>
+            复制当前
+          </button>
+          <button type="button" onClick={onCopyVisibleWorkers} disabled={filteredWorkers.length === 0} style={{ ...BS, opacity: filteredWorkers.length > 0 ? 1 : 0.4, cursor: filteredWorkers.length > 0 ? 'pointer' : 'not-allowed' }}>
+            复制可见
+          </button>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={() => setWorkerStatusFilter('all')}
-          style={{
-            borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            padding: '5px 10px',
-            background:
-              workerStatusFilter === 'all'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
-                : 'var(--bg-overlay)',
-            color: 'var(--fg-strong)',
-            fontSize: 11,
-            fontWeight: workerStatusFilter === 'all' ? 700 : 400,
-            cursor: 'pointer',
-          }}
-        >
-          全部 {filteredWorkers.length}
-        </button>
-        <button
-          type="button"
-          onClick={() => setWorkerStatusFilter('error')}
-          style={{
-            borderRadius: 8,
-            border:
-              workerStatusFilter === 'error'
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
-                : '1px solid var(--border-default)',
-            padding: '5px 10px',
-            background:
-              workerStatusFilter === 'error'
-                ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
-                : 'var(--bg-overlay)',
-            color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
-            fontSize: 11,
-            fontWeight: workerStatusFilter === 'error' ? 700 : 400,
-            cursor: 'pointer',
-          }}
-        >
-          错误 {errorCount}
-        </button>
-        <button
-          type="button"
-          onClick={() => setWorkerStatusFilter('healthy')}
-          style={{
-            borderRadius: 8,
-            border:
-              workerStatusFilter === 'healthy'
-                ? '1px solid color-mix(in srgb, var(--accent) 40%, var(--border-default))'
-                : '1px solid var(--border-default)',
-            padding: '5px 10px',
-            background:
-              workerStatusFilter === 'healthy'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
-                : 'var(--bg-overlay)',
-            color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--fg-strong)',
-            fontSize: 11,
-            fontWeight: workerStatusFilter === 'healthy' ? 700 : 400,
-            cursor: 'pointer',
-          }}
-        >
-          健康 {healthyCount}
-        </button>
-        <button
-          type="button"
-          onClick={onCopySelectedWorker}
-          disabled={!selectedWorker}
-          style={{
-            borderRadius: 8,
-            border: selectedWorker ? '1px solid var(--accent)' : '1px solid var(--border-default)',
-            padding: '5px 10px',
-            background: selectedWorker ? 'var(--accent)' : 'var(--bg-overlay)',
-            color: selectedWorker ? 'var(--fg-on-accent)' : 'var(--fg-strong)',
-            fontSize: 11,
-            fontWeight: selectedWorker ? 700 : 400,
-            cursor: selectedWorker ? 'pointer' : 'not-allowed',
-            opacity: selectedWorker ? 1 : 0.45,
-          }}
-        >
-          复制当前 Worker
-        </button>
-        <button
-          type="button"
-          onClick={onCopyVisibleWorkers}
-          disabled={filteredWorkers.length === 0}
-          style={{
-            borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
-            padding: '5px 10px',
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
-            color: 'var(--fg-strong)',
-            fontSize: 11,
-            cursor: filteredWorkers.length > 0 ? 'pointer' : 'not-allowed',
-            opacity: filteredWorkers.length > 0 ? 1 : 0.45,
-          }}
-        >
-          复制可见 Worker
-        </button>
-      </div>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: 10,
-        }}
-      >
+
+      {/* Worker 列表 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 3 }}>
         {statusFilteredWorkers.length > 0 ? (
           statusFilteredWorkers.map((worker) => {
             const key = buildWorkerKey(worker);
             const isError = worker.status === 'error';
-            const isActive =
-              selectedWorkerKey === key ||
-              (!selectedWorkerKey && statusFilteredWorkers[0]?.id === worker.id);
+            const isActive = selectedWorkerKey === key || (!selectedWorkerKey && statusFilteredWorkers[0]?.id === worker.id);
 
             return (
               <button
@@ -250,85 +130,41 @@ export function DevtoolsWorkerSection({
                 type="button"
                 onClick={() => onSelectWorker(key)}
                 style={{
-                  borderRadius: 8,
-                  border: isError
-                    ? '2px solid var(--danger)'
-                    : `1px solid ${
-                        isActive
-                          ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default))'
-                          : 'var(--border-default)'
-                      }`,
-                  background: isError
-                    ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
-                    : isActive
-                      ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
-                      : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                  borderRadius: 2,
+                  border: `1px solid ${isError ? 'var(--danger)' : isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
+                  background: isError ? 'color-mix(in srgb, var(--danger) 5%, transparent)' : isActive ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : 'transparent',
                   color: 'var(--fg-strong)',
-                  padding: '7px 10px',
+                  padding: '4px 6px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 4,
+                  gap: 1,
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: isError ? 'var(--danger)' : 'var(--fg-strong)',
-                  }}
-                >
+                <span style={{ fontSize: 11, fontWeight: isError ? 500 : 400, color: isError ? 'var(--danger)' : 'var(--fg-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {worker.name}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {worker.endpoint ?? worker.id}
                 </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: isError ? 'var(--danger)' : 'var(--accent)',
-                  }}
-                >
-                  {isError ? '⚠ ' : ''}
-                  {worker.status}
+                <span style={{ fontSize: 10, color: isError ? 'var(--danger)' : 'var(--accent)' }}>
+                  {isError ? '⚠ ' : ''}{worker.status}
                 </span>
               </button>
             );
           })
         ) : (
-          <div
-            style={{
-              borderRadius: 8,
-              border: '1px dashed var(--border-default)',
-              padding: '16px 14px',
-              textAlign: 'center',
-              gridColumn: '1 / -1',
-            }}
-          >
-            <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
-              {workers.length > 0 ? '筛选后没有匹配 Worker。' : '暂无 Worker 配置。'}
-            </p>
-            {workers.length > 0 && workerQuery ? (
-              <button
-                type="button"
-                onClick={() => setWorkerQuery('')}
-                style={{
-                  marginTop: 8,
-                  fontSize: 11,
-                  color: 'var(--accent)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
-              >
-                清空搜索
-              </button>
-            ) : null}
+          <div style={{ borderRadius: 2, border: '1px dashed var(--border-subtle)', padding: '8px 6px', textAlign: 'center', gridColumn: '1 / -1', fontSize: 11, color: 'var(--fg-muted)' }}>
+            {workers.length > 0 ? '筛选后没有匹配 Worker。' : '暂无 Worker 配置。'}
+            {workers.length > 0 && workerQuery && (
+              <button type="button" onClick={() => setWorkerQuery('')} style={{ ...BG, fontSize: 11, marginLeft: 4 }}>清空搜索</button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Worker 详情 */}
       <WorkerDetailsPanel worker={selectedWorker} />
     </section>
   );

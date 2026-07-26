@@ -52,6 +52,7 @@ export const TOOLSET_CATEGORIES = [
   'lsp', // LSP 语义查询
   'test', // 测试执行
   'review', // 代码审查工具
+  'desktop', // 系统桌面控制 / 浏览器自动化
   'all', // 不限制（仅 reviewer 使用）
 ] as const;
 
@@ -791,7 +792,7 @@ export function buildDispatchPackages(input: {
     const toolsets: ToolsetCategory[] =
       role === 'reviewer'
         ? (input.reviewerToolsets ?? ['read', 'lsp', 'review'])
-        : (input.executorToolsets ?? ['read', 'write', 'shell', 'lsp', 'test']);
+        : (input.executorToolsets ?? ['read', 'write', 'shell', 'lsp', 'test', 'desktop']);
 
     const dependsOn: string[] = [];
     if (!task.parallel && lastNonParallelHandoffId) {

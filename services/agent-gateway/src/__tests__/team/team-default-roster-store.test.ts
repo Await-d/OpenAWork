@@ -37,6 +37,23 @@ describe('team-default-roster-store', () => {
     expect(roster[0]).toEqual(customSlot);
   });
 
+  it('会把旧版内置 executor 工具集升级为 desktop，但尊重显式关闭', () => {
+    const legacySlot = {
+      ...DEFAULT_FIXED_TEAM_MEMBER_SLOTS.find((slot) => slot.id === 'executor-frontend')!,
+      toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    };
+    const upgraded = store.parseTeamWorkspaceDefaultRosterJson(JSON.stringify([legacySlot]));
+    expect(upgraded[0]?.toolsets).toContain('desktop');
+
+    const optedOut = {
+      ...legacySlot,
+      toolsetsCustomized: true,
+    };
+    const preserved = store.parseTeamWorkspaceDefaultRosterJson(JSON.stringify([optedOut]));
+    expect(preserved[0]?.toolsets).not.toContain('desktop');
+    expect(preserved[0]?.toolsetsCustomized).toBe(true);
+  });
+
   it('会保留自定义角色的 routingKeywords（动态识别关键词）', () => {
     const customSlot = {
       id: 'executor-custom-perf',
@@ -90,6 +107,7 @@ describe('team-default-roster-store', () => {
 
     expect(roster).toHaveLength(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.length);
     expect(roster.map((slot) => slot.id)).toContain('executor-devops');
+    expect(roster.find((slot) => slot.id === 'executor-frontend')?.toolsets).toContain('desktop');
   });
 
   it('超大花名册会被截断到上限（40），防止注入侧 prompt 膨胀', () => {

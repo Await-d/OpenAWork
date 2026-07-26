@@ -112,6 +112,7 @@ export function parseContextLimitError(error: unknown): ParsedContextLimitError 
   if (typeof errObj['body'] === 'string') textSources.push(errObj['body']);
   if (typeof errObj['details'] === 'string') textSources.push(errObj['details']);
   if (typeof errObj['reason'] === 'string') textSources.push(errObj['reason']);
+  if (typeof errObj['technicalDetail'] === 'string') textSources.push(errObj['technicalDetail']);
   if (typeof nestedError?.['message'] === 'string') textSources.push(nestedError['message']);
   if (typeof dataObj?.['message'] === 'string') textSources.push(dataObj['message']);
 

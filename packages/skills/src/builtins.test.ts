@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { INTEGRATED_RESOURCE_SKILL_NAMES, REFERENCE_ONLY_SKILL_NAMES } from '@openAwork/resources';
 import { BUILTIN_SKILLS } from './builtins.js';
 
+function normalizePathSeparators(path: string | undefined): string {
+  return path?.replaceAll('\\', '/') ?? '';
+}
+
 const LAZYCODEX_SKILL_NAMES = [
   'review-work',
   'programming',
@@ -50,7 +54,9 @@ describe('BUILTIN_SKILLS reference resource subset', () => {
       expect(manifest?.id).toBe(`com.openAwork.resource.${skillName}`);
       expect(manifest?.descriptionForModel?.length ?? 0).toBeGreaterThan(300);
       expect(
-        manifest?.references?.[0]?.path.endsWith(`/skills/reference/${skillName}/SKILL.md`),
+        normalizePathSeparators(manifest?.references?.[0]?.path).endsWith(
+          `/skills/reference/${skillName}/SKILL.md`,
+        ),
       ).toBe(true);
       expect(manifest?.lifecycle?.activation).toBe('on-demand');
     }

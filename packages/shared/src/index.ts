@@ -1,4 +1,8 @@
-import type { FileDiffContent, ToolCallObservabilityAnnotation } from './message-schema.js';
+import type {
+  FileDiffContent,
+  InputImageContent,
+  ToolCallObservabilityAnnotation,
+} from './message-schema.js';
 
 export type {
   TeamInitPhase,
@@ -168,6 +172,11 @@ export interface FixedTeamMemberSlot {
   displayName: string;
   personaKey: string;
   toolsets: string[];
+  /**
+   * 用户是否明确编辑过该成员的工具集。
+   * 缺失时允许兼容升级旧版内置 roster；为 true 时尊重用户的显式选择。
+   */
+  toolsetsCustomized?: boolean;
   required: boolean;
   /**
    * 该成员运行时使用的模型绑定（可选，向后兼容）。
@@ -283,7 +292,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'frontend',
     displayName: '前端开发者',
     personaKey: 'executor:frontend',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: true,
   },
   {
@@ -292,7 +301,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'backend',
     displayName: '后端开发者',
     personaKey: 'executor:backend',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: true,
   },
   {
@@ -301,7 +310,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'data',
     displayName: '数据工程师',
     personaKey: 'executor:data',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: false,
   },
   {
@@ -310,7 +319,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'workflow',
     displayName: '工作流工程师',
     personaKey: 'executor:workflow',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: false,
   },
   {
@@ -319,7 +328,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'integration',
     displayName: '集成工程师',
     personaKey: 'executor:integration',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'web', 'desktop'],
     required: false,
   },
   {
@@ -328,7 +337,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'qa',
     displayName: '测试验证工程师',
     personaKey: 'executor:qa',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: false,
   },
   {
@@ -346,7 +355,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'devops',
     displayName: 'DevOps 工程师',
     personaKey: 'executor:devops',
-    toolsets: ['read', 'write', 'shell', 'test'],
+    toolsets: ['read', 'write', 'shell', 'test', 'desktop'],
     required: false,
   },
   {
@@ -355,7 +364,7 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     specialty: 'platform',
     displayName: '平台工程师',
     personaKey: 'executor:platform',
-    toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
+    toolsets: ['read', 'write', 'shell', 'lsp', 'test', 'desktop'],
     required: false,
   },
   {
@@ -404,6 +413,45 @@ export const DEFAULT_FIXED_TEAM_MEMBER_SLOTS: FixedTeamMemberSlot[] = [
     required: false,
   },
 ];
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/**
+ * 把旧版内置 executor roster 升级到 desktop 工具集。
+ *
+ * 只匹配当前内置槽位的精确旧默认值，且 UI 明确编辑过工具集后不再自动升级；
+ * 自定义角色和非默认工具组合始终保持原样，避免把 desktop 变成强制权限。
+ */
+export function upgradeLegacyExecutorToolsets(input: {
+  layer: unknown;
+  specialty: unknown;
+  personaKey: unknown;
+  toolsets: readonly string[];
+  toolsetsCustomized?: unknown;
+}): string[] {
+  if (
+    input.layer !== 'executor' ||
+    input.specialty === 'custom' ||
+    input.toolsetsCustomized === true ||
+    typeof input.personaKey !== 'string'
+  ) {
+    return [...input.toolsets];
+  }
+
+  const preset = DEFAULT_FIXED_TEAM_MEMBER_SLOTS.find(
+    (slot) => slot.personaKey === input.personaKey && slot.layer === 'executor',
+  );
+  if (!preset || !preset.toolsets.includes('desktop')) {
+    return [...input.toolsets];
+  }
+
+  const legacyToolsets = preset.toolsets.filter((toolset) => toolset !== 'desktop');
+  return sameStringArray(input.toolsets, legacyToolsets)
+    ? [...preset.toolsets]
+    : [...input.toolsets];
+}
 
 export const TEAM_RUNTIME_LAYER_ORDER = [
   'reception',
@@ -1234,6 +1282,7 @@ export interface StreamToolResultChunk {
   output: unknown;
   isError: boolean;
   reason?: string;
+  attachments?: InputImageContent[];
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
@@ -1349,7 +1398,7 @@ export interface StreamCompactionChunk {
   trigger: 'manual' | 'automatic';
   phase?: 'started' | 'completed' | 'failed';
   cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
-  strategy?: 'summary_only' | 'replay' | 'synthetic_continue';
+  strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
   compactedMessages?: number;
   representedMessages?: number;
   eventId?: string;

@@ -170,7 +170,7 @@ export function ChatComposerMenu({
                   padding: '8px 10px',
                   cursor: 'pointer',
                   display: 'flex',
-                  alignItems: 'flex-start',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 10,
                 }}
@@ -180,29 +180,51 @@ export function ChatComposerMenu({
                     minWidth: 0,
                     flex: 1,
                     display: 'flex',
-                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
-                  <span style={composerListPrimaryTextStyle} title={item.label}>
+                  <span
+                    style={{
+                      ...composerListPrimaryTextStyle,
+                      flexShrink: 0,
+                      maxWidth: item.description ? '45%' : '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={item.label}
+                  >
                     {item.label}
                   </span>
                   {item.description && (
-                    <span
-                      style={{
-                        marginTop: 2,
-                        fontSize: 10,
-                        lineHeight: 1.45,
-                        color: 'var(--fg-muted)',
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        maxWidth: '100%',
-                      }}
-                      title={item.description}
-                    >
-                      {item.description}
-                    </span>
+                    <>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          color: 'var(--fg-subtle)',
+                          fontSize: 10,
+                          flexShrink: 0,
+                        }}
+                      >
+                        ·
+                      </span>
+                      <span
+                        style={{
+                          minWidth: 0,
+                          flex: 1,
+                          fontSize: 10,
+                          lineHeight: 1.45,
+                          color: 'var(--fg-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={item.description}
+                      >
+                        {item.description}
+                      </span>
+                    </>
                   )}
                 </span>
                 <span
@@ -211,7 +233,7 @@ export function ChatComposerMenu({
                     color: 'var(--fg-muted)',
                     flexShrink: 0,
                     marginLeft: 8,
-                    alignSelf: 'flex-start',
+                    alignSelf: 'center',
                   }}
                 >
                   {slashItem ? (

@@ -350,7 +350,7 @@ async function readContextFileWithinLimit(filePath: string): Promise<string | nu
         return null;
       }
     }
-    const content = await fsp.readFile(filePath, 'utf-8');
+    const content: string = await fsp.readFile(filePath, 'utf-8');
     return content || null;
   } catch {
     return null;
@@ -1862,6 +1862,7 @@ export async function executeToolCalls(input: {
           clientRequestId: input.clientRequestId,
           output: result.output,
           isError: result.isError,
+          ...(result.attachments ? { attachments: result.attachments } : {}),
           fileDiffs: tracedFileDiffs,
           pendingPermissionRequestId: result.pendingPermissionRequestId,
           observability,
@@ -1894,6 +1895,7 @@ export async function executeToolCalls(input: {
         clientRequestId: input.clientRequestId,
         output: result.output,
         isError: result.isError,
+        ...(result.attachments ? { attachments: result.attachments } : {}),
         fileDiffs: tracedFileDiffs,
         pendingPermissionRequestId: result.pendingPermissionRequestId,
         observability,
@@ -2594,7 +2596,13 @@ export async function handleStreamRequest(input: {
       );
       let syntheticContinuationPrompt: string | undefined;
       let lastRoundUsage:
-        { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined;
+        | {
+            inputTokens: number;
+            outputTokens?: number;
+            cacheReadTokens?: number;
+            cacheWriteTokens?: number;
+          }
+        | undefined;
 
       for (let round = 1; ; round += 1) {
         const roundStartedAt = Date.now();
@@ -2766,7 +2774,7 @@ export async function handleStreamRequest(input: {
           }
         }
 
-        let recoveredFromOverflowError = false;
+        let overflowTriggered = false;
         // Overflow compaction: detect context overflow and trigger recovery.
         // Encapsulates error parsing, Phase 2 truncation, and Phase 3 summarization.
         if (result.overflow === true) {
@@ -2789,7 +2797,7 @@ export async function handleStreamRequest(input: {
           });
           if (overflowResult.triggered) {
             input.sessionContext.metadataJson = overflowResult.metadataJson;
-            recoveredFromOverflowError = overflowResult.recovered;
+            overflowTriggered = true;
             if (overflowResult.syntheticContinuationPrompt) {
               syntheticContinuationPrompt = overflowResult.syntheticContinuationPrompt;
             }
@@ -2797,9 +2805,9 @@ export async function handleStreamRequest(input: {
         }
 
         if (
-          result.stopReason === 'error' &&
           result.overflow === true &&
-          recoveredFromOverflowError
+          overflowTriggered &&
+          round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
         ) {
           continue;
         }

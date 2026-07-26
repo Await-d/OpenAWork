@@ -185,6 +185,7 @@ export interface ChatRightPanelProps {
   currentSessionId: string | null;
   dialogueMode: DialogueMode;
   effectiveWorkingDirectory: string | null;
+  effectiveContextMessageCount?: number;
   messages: ChatMessage[];
   sessionStateStatus: SessionStateStatus | null;
   workspaceFileItems: WorkspaceFileMentionItem[];
@@ -248,6 +249,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     currentSessionId,
     dialogueMode,
     effectiveWorkingDirectory,
+    effectiveContextMessageCount,
     messages,
     sessionStateStatus,
     workspaceFileItems,
@@ -597,6 +599,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       currentSessionId={currentSessionId}
                       dialogueMode={dialogueMode}
                       effectiveWorkingDirectory={effectiveWorkingDirectory}
+                      effectiveContextMessageCount={effectiveContextMessageCount}
                       messages={messages}
                       pendingPermissions={pendingPermissions}
                       pendingQuestionsCount={pendingQuestions.length}

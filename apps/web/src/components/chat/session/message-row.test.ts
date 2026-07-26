@@ -22,6 +22,8 @@ describe('buildAssistantMetaItems', () => {
       showStopReason: false,
       showTokenBreakdown: false,
       showEstimatedTokens: false,
+      showRequestIndex: true,
+      showToolCount: false,
     });
 
     expect(items).toEqual([{ label: '请求 3' }]);
@@ -40,9 +42,31 @@ describe('buildAssistantMetaItems', () => {
       showStopReason: false,
       showTokenBreakdown: false,
       showEstimatedTokens: false,
+      showRequestIndex: false,
+      showToolCount: false,
     });
 
     expect(items).toEqual([{ label: '错误', tone: 'danger' }]);
+  });
+
+  it('停止消息即使关闭 stopReason 偏好也保留「已停止」提示', () => {
+    const items = buildAssistantMetaItems({
+      messageStatus: 'cancelled',
+      presentationMode: 'chat',
+      toolLabel: null,
+      modifiedFileCount: 0,
+      tokenCount: 0,
+      durationLabel: null,
+      stopReasonLabel: '已停止',
+      showDuration: false,
+      showStopReason: false,
+      showTokenBreakdown: false,
+      showEstimatedTokens: false,
+      showRequestIndex: false,
+      showToolCount: false,
+    });
+
+    expect(items).toEqual([{ label: '已停止', tone: 'accent' }]);
   });
 
   it('工具调用仍优先保留简化后的关键信号', () => {
@@ -58,6 +82,8 @@ describe('buildAssistantMetaItems', () => {
       showStopReason: false,
       showTokenBreakdown: false,
       showEstimatedTokens: false,
+      showRequestIndex: false,
+      showToolCount: false,
     });
 
     expect(items).toEqual([{ label: '2 工具' }]);
@@ -76,6 +102,8 @@ describe('buildAssistantMetaItems', () => {
       showStopReason: false,
       showTokenBreakdown: false,
       showEstimatedTokens: false,
+      showRequestIndex: false,
+      showToolCount: false,
     });
 
     expect(items).toEqual([]);

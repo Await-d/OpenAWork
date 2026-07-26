@@ -1,5 +1,30 @@
-import type { ToolResultContent } from '@openAwork/shared';
-import type { ToolPart } from '../message/message-v2-schema.js';
+import type { InputImageContent, ToolResultContent } from '@openAwork/shared';
+import type { FilePart, ToolPart } from '../message/message-v2-schema.js';
+
+function toToolResultAttachments(
+  attachments: FilePart[] | undefined,
+): InputImageContent[] | undefined {
+  if (!attachments || attachments.length === 0) {
+    return undefined;
+  }
+
+  const result = attachments
+    .filter(
+      (attachment) =>
+        attachment.inputType === 'input_image' || attachment.mime.startsWith('image/'),
+    )
+    .map<InputImageContent>((attachment) => ({
+      type: 'input_image',
+      ...(attachment.artifactId ? { artifactId: attachment.artifactId } : {}),
+      ...(attachment.detail ? { detail: attachment.detail } : {}),
+      ...(attachment.fileId ? { fileId: attachment.fileId } : {}),
+      ...(attachment.filename ? { fileName: attachment.filename } : {}),
+      ...(attachment.url ? { imageUrl: attachment.url } : {}),
+      ...(attachment.mime ? { mimeType: attachment.mime } : {}),
+    }));
+
+  return result.length > 0 ? result : undefined;
+}
 
 export function buildFallbackToolResultContentFromToolPart(
   toolPart: ToolPart,
@@ -12,6 +37,9 @@ export function buildFallbackToolResultContentFromToolPart(
       output: toolPart.state.output,
       isError: false,
       reason: 'completed',
+      ...(toolPart.state.attachments
+        ? { attachments: toToolResultAttachments(toolPart.state.attachments) }
+        : {}),
       fileDiffs: [],
     };
   }

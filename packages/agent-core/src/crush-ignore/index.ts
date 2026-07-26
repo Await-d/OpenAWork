@@ -8,6 +8,7 @@ export class CrushIgnoreManagerImpl implements CrushIgnoreManager {
   async loadPatterns(projectRoot: string): Promise<string[]> {
     try {
       const { promises: fs } = await import('node:fs');
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- node:path 方法安全解构
       const { join } = await import('node:path');
       const content = await fs.readFile(join(projectRoot, '.crushignore'), 'utf-8');
       return content

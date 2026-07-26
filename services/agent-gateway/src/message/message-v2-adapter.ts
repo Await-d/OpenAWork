@@ -9,7 +9,7 @@
  *   the pendingPermissionRequestId hack
  */
 
-import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
+import type { InputImageContent, Message, MessageContent, MessageRole } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import {
@@ -17,6 +17,7 @@ import {
   type AssistantErrorObject,
   type MessageID,
   type PartID,
+  type FilePart,
   type MessageInfo,
   type MessagePart,
   type MessageWithParts,
@@ -69,6 +70,58 @@ export type { StoredToolResult } from '../tools/tool-result-contract.js';
 import './message-v2-projectors.js';
 
 // ─── V1 → V2 Conversion ───
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 保留用于后续 V1 附件迁移
+function toToolResultAttachments(
+  attachments: FilePart[] | undefined,
+): InputImageContent[] | undefined {
+  if (!attachments || attachments.length === 0) {
+    return undefined;
+  }
+
+  const result = attachments
+    .filter(
+      (attachment) =>
+        attachment.inputType === 'input_image' || attachment.mime.startsWith('image/'),
+    )
+    .map<InputImageContent>((attachment) => ({
+      type: 'input_image',
+      ...(attachment.artifactId ? { artifactId: attachment.artifactId } : {}),
+      ...(attachment.detail ? { detail: attachment.detail } : {}),
+      ...(attachment.fileId ? { fileId: attachment.fileId } : {}),
+      ...(attachment.filename ? { fileName: attachment.filename } : {}),
+      ...(attachment.url ? { imageUrl: attachment.url } : {}),
+      ...(attachment.mime ? { mimeType: attachment.mime } : {}),
+    }));
+
+  return result.length > 0 ? result : undefined;
+}
+
+function buildToolResultAttachmentParts(input: {
+  attachments: InputImageContent[] | undefined;
+  messageId: MessageID;
+  sessionId: string;
+}): FilePart[] | undefined {
+  if (!input.attachments || input.attachments.length === 0) {
+    return undefined;
+  }
+
+  const parts = input.attachments.map<FilePart>((attachment) => ({
+    id: makePartId(),
+    sessionID: input.sessionId,
+    messageID: input.messageId,
+    type: 'file',
+    inputType: 'input_image',
+    mime: attachment.mimeType ?? 'image/png',
+    ...(attachment.artifactId ? { artifactId: attachment.artifactId } : {}),
+    ...(attachment.detail ? { detail: attachment.detail } : {}),
+    ...(attachment.fileId ? { fileId: attachment.fileId } : {}),
+    ...(attachment.fileName ? { filename: attachment.fileName } : {}),
+    url: attachment.imageUrl ?? '',
+  }));
+
+  return parts.length > 0 ? parts : undefined;
+}
 
 export function v2ToV1Message(withParts: MessageWithParts): Message {
   const { info, parts } = withParts;
@@ -621,6 +674,7 @@ export function appendSessionMessageV2(input: {
         output: c.output,
         isError: c.isError,
         ...(c.reason ? { reason: c.reason } : {}),
+        ...(c.attachments ? { attachments: c.attachments } : {}),
         ...(c.fileDiffs ? { fileDiffs: c.fileDiffs } : {}),
         ...(c.pendingPermissionRequestId
           ? { pendingPermissionRequestId: c.pendingPermissionRequestId }
@@ -640,6 +694,11 @@ export function appendSessionMessageV2(input: {
           'time' in toolPart.state && toolPart.state.time?.start
             ? toolPart.state.time.start
             : timeCreated;
+        const nextAttachments = buildToolResultAttachmentParts({
+          attachments: c.attachments,
+          messageId: toolPart.messageID,
+          sessionId: input.sessionId,
+        });
         let updatedPart: ToolPart;
         if (c.isError) {
           updatedPart = {
@@ -668,6 +727,7 @@ export function appendSessionMessageV2(input: {
                 toolResultContent,
               },
               time: { start: nextStart, end: timeCreated },
+              ...(nextAttachments ? { attachments: nextAttachments } : {}),
             },
           };
         }
@@ -677,6 +737,11 @@ export function appendSessionMessageV2(input: {
           data: { sessionID: input.sessionId, part: updatedPart, time: Date.now() },
         });
       } else {
+        const nextAttachments = buildToolResultAttachmentParts({
+          attachments: c.attachments,
+          messageId: msgId,
+          sessionId: input.sessionId,
+        });
         const fallbackToolPart: ToolPart = c.isError
           ? {
               id: partId,
@@ -707,6 +772,7 @@ export function appendSessionMessageV2(input: {
                 title: c.toolName ?? c.toolCallId,
                 metadata: { toolResultContent },
                 time: { start: timeCreated, end: timeCreated },
+                ...(nextAttachments ? { attachments: nextAttachments } : {}),
               },
             };
         emitEvent({

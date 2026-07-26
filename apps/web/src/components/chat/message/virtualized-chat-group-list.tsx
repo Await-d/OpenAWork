@@ -256,7 +256,10 @@ function VirtualizedChatGroupViewport({
                 top: layout.offsets[actualIndex] ?? 0,
                 left: 0,
                 right: 0,
-                overflow: 'hidden',
+                // Keep content visible while estimated heights catch up to
+                // real measurements — clipping here is a common source of
+                // "first message looks scrambled" glitches on long chats.
+                overflow: 'visible',
               }}
             >
               <ChatGroupBlock

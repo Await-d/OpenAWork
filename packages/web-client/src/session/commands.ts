@@ -10,13 +10,24 @@ import {
 
 export interface CommandsClient {
   list(token: string): Promise<CommandDescriptor[]>;
+  listResult(token: string): Promise<CommandsListResult>;
   execute(
     token: string,
     sessionId: string,
     commandId: string,
-    payload?: { messages?: Message[]; rawInput?: string },
+    payload?: { executionId?: string; messages?: Message[]; rawInput?: string },
   ): Promise<CommandExecutionResult>;
 }
+
+export interface CommandsListResult {
+  commands: CommandDescriptor[];
+  errorMessage?: string;
+  ok: boolean;
+  retryable: boolean;
+  status?: number;
+}
+
+const DEFAULT_COMMAND_EXECUTE_TIMEOUT_MS = 120_000;
 
 function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
@@ -45,6 +56,21 @@ function buildCommandsActionErrorMessage(
 
 function isGenericCommandsNetworkErrorMessage(message: string): boolean {
   return isGenericFetchErrorMessage(message);
+}
+
+function isRetryableCommandsStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function buildCommandsListErrorMessage(status: number, data: JsonErrorData | undefined): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取命令列表。';
+  }
+  return `读取命令列表失败（HTTP ${status}）。`;
 }
 
 function normalizeCommandsError(actionLabel: string, error: unknown): Error {
@@ -87,17 +113,47 @@ async function performCommandsRequest<T>(input: {
 }
 
 export function createCommandsClient(gatewayUrl: string): CommandsClient {
+  const listResult = async (token: string): Promise<CommandsListResult> => {
+    try {
+      const response = await fetchWithTimeout(`${gatewayUrl}/commands`, {
+        headers: authHeader(token),
+      });
+      if (!response.ok) {
+        const data = await readJsonErrorData<JsonErrorData>(response);
+        return {
+          commands: [],
+          ok: false,
+          retryable: isRetryableCommandsStatus(response.status),
+          errorMessage: buildCommandsListErrorMessage(response.status, data),
+          status: response.status,
+        };
+      }
+      const data = (await response.json()) as { commands?: CommandDescriptor[] };
+      return {
+        commands: data.commands ?? [],
+        ok: true,
+        retryable: false,
+      };
+    } catch (error: unknown) {
+      return {
+        commands: [],
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeCommandsError('读取命令列表', error).message,
+      };
+    }
+  };
+
   return {
     async list(token) {
-      const data = await performCommandsRequest<{ commands?: CommandDescriptor[] }>({
-        actionLabel: '读取命令列表',
-        request: () =>
-          fetchWithTimeout(`${gatewayUrl}/commands`, {
-            headers: authHeader(token),
-          }),
-      });
-      return data.commands ?? [];
+      const result = await listResult(token);
+      if (!result.ok) {
+        throw new Error(result.errorMessage ?? '读取命令列表失败');
+      }
+      return result.commands;
     },
+
+    listResult,
 
     async execute(token, sessionId, commandId, payload = {}) {
       const data = await performCommandsRequest<{ result?: CommandExecutionResult }>({
@@ -107,6 +163,7 @@ export function createCommandsClient(gatewayUrl: string): CommandsClient {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeader(token) },
             body: JSON.stringify({ commandId, ...payload }),
+            timeoutMs: DEFAULT_COMMAND_EXECUTE_TIMEOUT_MS,
           }),
       });
       return data.result ?? { events: [] };

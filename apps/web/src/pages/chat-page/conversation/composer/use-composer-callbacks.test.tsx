@@ -75,6 +75,38 @@ describe('useComposerCallbacks', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('完整 slash 命令在菜单打开时按 Enter 会直接发送，而不是再次补全', () => {
+    const setComposerMenu = vi.fn();
+    const { sendMessage, textarea } = renderHarness('/compact', {
+      composerMenu: {
+        type: 'slash',
+        query: 'compact',
+        start: 0,
+        end: 8,
+        selectedIndex: 0,
+      },
+      setComposerMenu,
+      slashCommandItems: [
+        {
+          id: 'slash-compact',
+          kind: 'slash',
+          source: 'command',
+          type: 'insert',
+          label: '/compact',
+          description: '压缩当前会话上下文',
+          badgeLabel: '命令',
+          insertText: '/compact ',
+          onSelect: async () => undefined,
+        },
+      ],
+    });
+
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(setComposerMenu).toHaveBeenCalledWith(null);
+  });
+
   it('单行输入按 ArrowUp 会进入历史浏览', () => {
     const { navigateInputHistory, textarea } = renderHarness('继续跟进这个问题');
 

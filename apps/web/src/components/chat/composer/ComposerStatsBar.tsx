@@ -51,6 +51,7 @@ const COLOR_SPEED = 'var(--accent)';
 const COLOR_LATENCY = 'var(--contrast)';
 const COLOR_DURATION = 'var(--fg-default)';
 const COLOR_COUNT = 'var(--aux)';
+const COLOR_COMPACTION = 'var(--warning)';
 
 // ─── 类型定义 ──────────────────────────────────────────────────────────────
 
@@ -68,6 +69,10 @@ export interface ComposerStatsData {
   messageTurns: number;
   hiddenMessageCount: number;
   serverTotalTurnCount: number | null;
+  compactionCount: number;
+  latestCompactionTrigger?: 'manual' | 'automatic';
+  latestCompactionRepresentedMessages?: number;
+  latestCompactionCompactedMessages?: number;
   childSessionCount: number;
   sessionTaskCount: number;
   tokensPerSecond?: number;
@@ -241,6 +246,13 @@ const TurnsIcon = (
     <path d="M8 10h.01M12 10h.01M16 10h.01" />
   </svg>
 );
+const LayersIcon = (
+  <svg {...ip}>
+    <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+    <path d="m3 12 9 5 9-5" />
+    <path d="m3 16 9 5 9-5" />
+  </svg>
+);
 const EyeOffIcon = (
   <svg {...ip}>
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
@@ -328,6 +340,20 @@ export const CompactComposerStatsSummary: React.FC<ComposerStatsBarProps> = Reac
         label: '上下文',
         value: `${contextPct}%`,
         valueColor: contextColor,
+      });
+    }
+
+    if (data.latestCompactionRepresentedMessages && data.latestCompactionRepresentedMessages > 0) {
+      summaryItems.push({
+        label: '摘要',
+        value: `${data.latestCompactionRepresentedMessages} 条`,
+        valueColor: COLOR_COMPACTION,
+      });
+    } else if (data.compactionCount > 0) {
+      summaryItems.push({
+        label: '压缩',
+        value: data.latestCompactionTrigger === 'manual' ? '手动' : '已生效',
+        valueColor: COLOR_COMPACTION,
       });
     }
 
@@ -434,6 +460,7 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
     const showHiddenMessages = data.hiddenMessageCount > 0;
     const showServerTurns =
       data.serverTotalTurnCount != null && data.serverTotalTurnCount > data.messageTurns;
+    const showCompaction = data.compactionCount > 0;
     const showChildSessions = data.childSessionCount > 0;
     const showSessionTasks = data.sessionTaskCount > 0;
 
@@ -570,6 +597,23 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
             value={String(data.hiddenMessageCount)}
             valueColor={COLOR_REASONING}
             title={`被折叠/隐藏的历史消息：${data.hiddenMessageCount}`}
+          />
+        )}
+        {showCompaction && (
+          <StatItem
+            icon={LayersIcon}
+            label="压缩"
+            value={
+              data.latestCompactionRepresentedMessages && data.latestCompactionRepresentedMessages > 0
+                ? `${data.latestCompactionRepresentedMessages} 条`
+                : `${data.compactionCount} 次`
+            }
+            valueColor={COLOR_COMPACTION}
+            title={
+              data.latestCompactionRepresentedMessages && data.latestCompactionRepresentedMessages > 0
+                ? `最近一次压缩后，摘要覆盖 ${data.latestCompactionRepresentedMessages} 条历史消息`
+                : `当前会话已发生 ${data.compactionCount} 次上下文压缩`
+            }
           />
         )}
         {showChildSessions && (

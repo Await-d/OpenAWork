@@ -116,6 +116,24 @@ describe('classifyUpstreamError', () => {
     });
     expect(result.category).toBe('transient_5xx');
   });
+
+  it('classifies context-length errors as context_overflow (not retryable)', () => {
+    const result = classifyUpstreamError({
+      message: 'input tokens (250000) exceeds maximum context length (200000)',
+      data: { statusCode: 400 },
+    });
+    expect(result.category).toBe('context_overflow');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('classifies Anthropic prompt_is_too_long as context_overflow', () => {
+    const result = classifyUpstreamError({
+      message: 'prompt is too long: 300000 tokens > 200000 maximum',
+      data: { statusCode: 400 },
+    });
+    expect(result.category).toBe('context_overflow');
+    expect(result.retryable).toBe(false);
+  });
 });
 
 describe('computeRetryDelayMs', () => {

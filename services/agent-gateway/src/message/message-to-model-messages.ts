@@ -21,6 +21,8 @@ import type {
   CompactionPart,
   FilePart,
 } from './message-v2-schema.js';
+import { parseCompactionMarkerText } from '../compaction/compaction-marker.js';
+import { truncateToolOutput } from '../tools/tool-output-truncator.js';
 
 // ─── Unified Message Type ───
 // Single intermediate representation, analogous to AI SDK's ModelMessage.
@@ -140,6 +142,64 @@ export interface ToModelMessagesOptions {
 }
 
 const COMPACTED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared]';
+const LEGACY_COMPACTION_MARKER_SOURCES = ['openAwork', 'openawork_internal'] as const;
+const LEGACY_COMPACTION_MARKER_TYPE = 'compaction_marker';
+
+interface LegacyCompactionMarker {
+  summary: string;
+  tailStartMessageId?: string;
+}
+
+function parseLegacyCompactionMarkerText(value: string) {
+  for (const source of LEGACY_COMPACTION_MARKER_SOURCES) {
+    const parsed = parseCompactionMarkerText(value, {
+      source,
+      markerType: LEGACY_COMPACTION_MARKER_TYPE,
+    });
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function readLegacyCompactionMarker(message: MessageWithParts): LegacyCompactionMarker | null {
+  if (message.info.role !== 'assistant' || message.parts.length === 0) {
+    return null;
+  }
+
+  const textParts = message.parts.filter((part): part is TextPart => part.type === 'text');
+  if (textParts.length !== message.parts.length || textParts.length === 0) {
+    return null;
+  }
+
+  let marker: LegacyCompactionMarker | null = null;
+  for (const part of textParts) {
+    const parsed = parseLegacyCompactionMarkerText(part.text);
+    if (!parsed) {
+      return null;
+    }
+
+    marker = {
+      summary: parsed.summary,
+      ...(parsed.tailStartMessageId ? { tailStartMessageId: parsed.tailStartMessageId } : {}),
+    };
+  }
+
+  return marker;
+}
+
+function isModelContextArtifactMessage(message: MessageWithParts): boolean {
+  if (message.info.role !== 'assistant') {
+    return false;
+  }
+
+  const clientRequestId = message.info.clientRequestId;
+  return (
+    typeof clientRequestId === 'string' &&
+    (clientRequestId.startsWith('assistant_event:') || clientRequestId.startsWith('command-card:'))
+  );
+}
 
 /**
  * Hard cap on tool output characters sent to LLM.
@@ -203,6 +263,8 @@ export function filterCompacted(
   const result: MessageWithParts[] = [];
   const completedCompactionParentIds = new Set<string>();
   let retain: string | undefined;
+  let boundaryKind: 'legacy' | 'v2' | undefined;
+  let boundaryMessageId: string | undefined;
 
   for (const msg of iterateNewestFirst(input)) {
     result.push(msg);
@@ -212,6 +274,21 @@ export function filterCompacted(
     if (retain) {
       if (msg.info.id === retain) break;
       continue;
+    }
+
+    // Backward compatibility: manual /compact currently persists a legacy
+    // assistant text marker instead of a V2 CompactionPart. Treat it as the
+    // latest boundary and retain the explicit recent tail when present.
+    const legacyMarker = readLegacyCompactionMarker(msg);
+    if (legacyMarker) {
+      boundaryKind = 'legacy';
+      boundaryMessageId = msg.info.id;
+      if (legacyMarker.tailStartMessageId) {
+        retain = legacyMarker.tailStartMessageId;
+        if (msg.info.id === retain) break;
+        continue;
+      }
+      break;
     }
 
     // Detect completed compaction boundary:
@@ -237,6 +314,8 @@ export function filterCompacted(
     if (msg.info.role === 'user' && completedCompactionParentIds.has(msg.info.id)) {
       const compactionPart = msg.parts.find((p): p is CompactionPart => p.type === 'compaction');
       if (!compactionPart) continue;
+      boundaryKind = 'v2';
+      boundaryMessageId = msg.info.id;
       if (compactionPart.tailStartID) {
         retain = compactionPart.tailStartID;
         // If the boundary message itself is already the tail start, stop now.
@@ -249,6 +328,41 @@ export function filterCompacted(
 
   // Reverse back to chronological (time-ascending) order
   result.reverse();
+
+  // Legacy markers are appended after the messages they summarize. Move the
+  // marker before its retained tail so toModelMessages emits summary first,
+  // then the verbatim recent context, matching the V2 compaction ordering.
+  if (boundaryKind === 'legacy') {
+    let legacyMarkerIndex = boundaryMessageId
+      ? result.findIndex((message) => message.info.id === boundaryMessageId)
+      : -1;
+    if (legacyMarkerIndex < 0) {
+      for (let i = result.length - 1; i >= 0; i -= 1) {
+        if (readLegacyCompactionMarker(result[i]!)) {
+          legacyMarkerIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (legacyMarkerIndex >= 0) {
+      const legacyMarker = readLegacyCompactionMarker(result[legacyMarkerIndex]!);
+      const tailIndex = legacyMarker?.tailStartMessageId
+        ? result.findIndex((message) => message.info.id === legacyMarker.tailStartMessageId)
+        : -1;
+      if (legacyMarker && tailIndex >= 0 && tailIndex <= legacyMarkerIndex) {
+        return [
+          ...result.slice(legacyMarkerIndex, legacyMarkerIndex + 1),
+          ...result.slice(tailIndex, legacyMarkerIndex),
+          ...result.slice(legacyMarkerIndex + 1),
+        ];
+      }
+      // If the retained-tail anchor is missing or malformed, still honor the
+      // compaction boundary instead of replaying the entire pre-compaction log.
+      return result.slice(legacyMarkerIndex);
+    }
+  }
+
   let compactionIndex = -1;
   for (let i = result.length - 1; i >= 0; i--) {
     const msg = result[i]!;
@@ -344,6 +458,29 @@ export function toModelMessages(
     }
 
     if (msg.info.role === 'assistant') {
+      const legacyMarker = readLegacyCompactionMarker(msg);
+      if (legacyMarker) {
+        if (legacyMarker.summary.trim().length > 0) {
+          result.push({
+            role: 'user',
+            content: 'What did we do so far?',
+          });
+          result.push({
+            role: 'assistant',
+            content: legacyMarker.summary,
+          });
+        }
+        continue;
+      }
+
+      // Display-only assistant event cards and command result cards are
+      // persisted for transcript recovery, but they are not conversation
+      // context. Sending them upstream wastes tokens and can replay long
+      // compaction summaries as ordinary assistant content.
+      if (isModelContextArtifactMessage(msg)) {
+        continue;
+      }
+
       // Skip error-status messages (failed upstream responses should not replay in recovery)
       if (msg.info.status === 'error') {
         continue;
@@ -381,6 +518,10 @@ export function toModelMessages(
       // Emit tool results from this assistant message's tool parts
       for (const part of msg.parts) {
         if (part.type !== 'tool') continue;
+        // Skip tool parts with empty names — they were also filtered
+        // from the assistant's toolCalls array above, so emitting a
+        // orphaned tool_result here would cause a mismatch.
+        if (part.tool.length === 0) continue;
         if (part.state.status === 'completed') {
           const completedPart = part as ToolPart & {
             state: {
@@ -545,10 +686,14 @@ function buildAssistantParts(
     .join('\n')
     .trim();
 
-  // Tool calls
+  // Tool calls — filter out parts with empty tool names to prevent
+  // API-level validation errors (some providers occasionally emit a
+  // tool-input-start without a toolName, which cascades into an empty
+  // `name` field in the serialized request).
   const differentModelForTools = Boolean(options?.differentModel);
   const toolCalls: AssistantToolCall[] = parts
     .filter((p): p is ToolPart => p.type === 'tool')
+    .filter((part) => part.tool.length > 0)
     .map((part) => {
       // Round-trip provider-scoped metadata (most importantly
       // `openai.itemId`) when replaying against the same provider.
@@ -689,7 +834,10 @@ function resolveToolOutput(
   }
 
   const output = part.state.output;
-  return capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE);
+  return truncateToolOutput(
+    part.tool,
+    capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
+  );
 }
 
 function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } }): string | null {
@@ -698,11 +846,17 @@ function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } })
   if (interrupted) {
     const output = part.state.metadata?.output;
     if (typeof output === 'string') {
-      return capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE);
+      return truncateToolOutput(
+        part.tool,
+        capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
+      );
     }
   }
   // Otherwise, return the error text as the tool result
   return part.state.error
-    ? capModelString(part.state.error, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE)
+    ? truncateToolOutput(
+        part.tool,
+        capModelString(part.state.error, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
+      )
     : null;
 }

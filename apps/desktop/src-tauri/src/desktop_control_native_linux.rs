@@ -1,7 +1,7 @@
 use crate::desktop_control_native::{
-    command_exists, read_png_response, run_command, temp_png_path, DesktopControlAction, DesktopControlActionResponse,
-    DesktopControlCapabilities, DesktopControlCapability, DesktopControlError, DesktopControlStatus,
-    ScreenshotRequest,
+    command_exists, read_png_response, run_command, temp_png_path, DesktopControlAction,
+    DesktopControlActionResponse, DesktopControlCapabilities, DesktopControlCapability,
+    DesktopControlError, DesktopControlStatus, ScreenshotRequest,
 };
 use std::env;
 use std::path::Path;
@@ -56,22 +56,27 @@ pub fn execute_action(
     action: DesktopControlAction,
 ) -> Result<DesktopControlActionResponse, DesktopControlError> {
     match action {
-        DesktopControlAction::Screenshot(request) => capture_screenshot(request)
-            .map(DesktopControlActionResponse::Screenshot),
-        DesktopControlAction::Click(request) => input::click(request)
-            .map(DesktopControlActionResponse::Click),
+        DesktopControlAction::Screenshot(request) => {
+            capture_screenshot(request).map(DesktopControlActionResponse::Screenshot)
+        }
+        DesktopControlAction::Click(request) => {
+            input::click(request).map(DesktopControlActionResponse::Click)
+        }
         DesktopControlAction::TypeText(request) => {
             input::type_text(request).map(DesktopControlActionResponse::TypeText)
         }
-        DesktopControlAction::Key(request) => input::key(request)
-            .map(DesktopControlActionResponse::Key),
+        DesktopControlAction::Key(request) => {
+            input::key(request).map(DesktopControlActionResponse::Key)
+        }
         DesktopControlAction::Hotkey(request) => {
             input::hotkey(request).map(DesktopControlActionResponse::Hotkey)
         }
         DesktopControlAction::Scroll(request) => {
             input::scroll(request).map(DesktopControlActionResponse::Scroll)
         }
-        DesktopControlAction::Wait(request) => Ok(DesktopControlActionResponse::Wait(input::wait(request))),
+        DesktopControlAction::Wait(request) => {
+            Ok(DesktopControlActionResponse::Wait(input::wait(request)))
+        }
     }
 }
 
@@ -176,12 +181,10 @@ fn capture_screenshot(
             Err(error) => last_error = Some(error.message().to_owned()),
         }
     }
-    Err(DesktopControlError::new(
-        match last_error {
-            Some(message) => message,
-            None => SCREENSHOT_UNAVAILABLE.to_owned(),
-        },
-    ))
+    Err(DesktopControlError::new(match last_error {
+        Some(message) => message,
+        None => SCREENSHOT_UNAVAILABLE.to_owned(),
+    }))
 }
 
 fn screenshot_commands(path: &Path) -> Vec<CommandSpec> {
@@ -200,7 +203,12 @@ fn screenshot_commands(path: &Path) -> Vec<CommandSpec> {
         CommandSpec {
             program: "spectacle",
             driver: "spectacle",
-            args: vec!["-b".to_owned(), "-n".to_owned(), "-o".to_owned(), file.clone()],
+            args: vec![
+                "-b".to_owned(),
+                "-n".to_owned(),
+                "-o".to_owned(),
+                file.clone(),
+            ],
         },
         CommandSpec {
             program: "scrot",
@@ -233,8 +241,14 @@ mod tests {
 
     #[test]
     fn detects_x11_from_explicit_session_type_or_display() {
-        assert_eq!(linux_session_kind_from_env(Some("x11"), true, true), LinuxSessionKind::X11);
-        assert_eq!(linux_session_kind_from_env(None, false, true), LinuxSessionKind::X11);
+        assert_eq!(
+            linux_session_kind_from_env(Some("x11"), true, true),
+            LinuxSessionKind::X11
+        );
+        assert_eq!(
+            linux_session_kind_from_env(None, false, true),
+            LinuxSessionKind::X11
+        );
     }
 
     #[test]

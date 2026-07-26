@@ -326,8 +326,9 @@ describe('FusionSessionSidePanel', () => {
       />,
     );
 
-    expect(screen.getByText('消息数量')).not.toBeNull();
-    expect(screen.getByText('0 条')).not.toBeNull();
+    expect(screen.getByText('有效上下文')).not.toBeNull();
+    expect(screen.getByText('会话消息')).not.toBeNull();
+    expect(screen.getAllByText('0 条')).toHaveLength(2);
     expect(screen.getByText('产物工作区')).not.toBeNull();
     expect(screen.getByText('2 个')).not.toBeNull();
     expect(screen.queryByText('剩余 Token')).toBeNull();

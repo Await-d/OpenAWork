@@ -17,7 +17,6 @@ import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
 import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
-import { UpdateActionPanel } from './updater/UpdateActionPanel.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -249,8 +248,10 @@ export default function App() {
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapRetry, setBootstrapRetry] = useState(0);
-  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
-  const [updateAutoStart, setUpdateAutoStart] = useState(false);
+
+  useEffect(() => {
+    console.log('[App] 已挂载, BUILD_V2');
+  }, []);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
 
@@ -304,40 +305,12 @@ export default function App() {
     }
   }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
 
-  useEffect(() => {
-    const unlisten = listen<unknown>('tray:check-updates', (event) => {
-      const payload = event.payload;
-      const autoStart =
-        payload === true ||
-        (typeof payload === 'object' &&
-          payload !== null &&
-          'autoStart' in payload &&
-          (payload as { autoStart?: unknown }).autoStart === true);
-      setUpdateAutoStart(autoStart);
-      setShowUpdateDialog(true);
-    });
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  const updateDialog = showUpdateDialog ? (
-    <UpdateActionPanel
-      autoStartCheck={updateAutoStart}
-      onClose={() => {
-        setShowUpdateDialog(false);
-        setUpdateAutoStart(false);
-      }}
-    />
-  ) : null;
-
   if (!onboarded) {
     return (
       <>
         <Routes>
           <Route path="*" element={<OnboardingWizard onComplete={() => setOnboarded(true)} />} />
         </Routes>
-        {updateDialog}
       </>
     );
   }
@@ -356,7 +329,6 @@ export default function App() {
             setOnboarded(false);
           }}
         />
-        {updateDialog}
       </>
     );
   }
@@ -402,7 +374,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/sessions" replace />} />
         </Routes>
       </Layout>
-      {updateDialog}
     </>
   );
 }

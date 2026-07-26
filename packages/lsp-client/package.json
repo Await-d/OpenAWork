@@ -24,6 +24,6 @@
     "vscode-languageserver-types": "^3.17.5"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.19.37"
   }
 }

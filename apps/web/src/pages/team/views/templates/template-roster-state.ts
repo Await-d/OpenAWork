@@ -11,6 +11,7 @@
 import {
   DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
   TEAM_RUNTIME_LAYER_ORDER,
+  upgradeLegacyExecutorToolsets,
   type FixedTeamMemberSlot,
   type TeamMemberSpecialty,
   type TeamRuntimeLayer,
@@ -41,14 +42,14 @@ export interface TemplateEditorState {
 }
 
 export function cloneDefaultRoster(): FixedTeamMemberSlot[] {
-  return DEFAULT_FIXED_TEAM_MEMBER_SLOTS.map((slot) => ({
-    ...slot,
-    toolsets: [...slot.toolsets],
-  }));
+  return cloneRoster(DEFAULT_FIXED_TEAM_MEMBER_SLOTS);
 }
 
 export function cloneRoster(roster: FixedTeamMemberSlot[]): FixedTeamMemberSlot[] {
-  return roster.map((slot) => ({ ...slot, toolsets: [...slot.toolsets] }));
+  return roster.map((slot) => ({
+    ...slot,
+    toolsets: upgradeLegacyExecutorToolsets(slot),
+  }));
 }
 
 export const EMPTY_TEMPLATE_STATE: TemplateEditorState = {
@@ -331,18 +332,16 @@ const SCALE_PRESETS: Record<WorkflowTemplateScale, string[]> = {
 /** 根据规模构建一份 roster（采用 catalog 预设）。 */
 export function buildRosterForScale(scale: WorkflowTemplateScale): FixedTeamMemberSlot[] {
   const keys = SCALE_PRESETS[scale] ?? SCALE_PRESETS.medium;
-  return keys
-    .map((key) => CATALOG_BY_KEY.get(key))
-    .filter((slot): slot is FixedTeamMemberSlot => slot !== undefined)
-    .map((slot) => ({ ...slot, toolsets: [...slot.toolsets] }));
+  return cloneRoster(
+    keys
+      .map((key) => CATALOG_BY_KEY.get(key))
+      .filter((slot): slot is FixedTeamMemberSlot => slot !== undefined),
+  );
 }
 
 /** 仅保留 catalog 中标记为 required 的成员。 */
 export function buildRequiredOnlyRoster(): FixedTeamMemberSlot[] {
-  return DEFAULT_FIXED_TEAM_MEMBER_SLOTS.filter((slot) => slot.required).map((slot) => ({
-    ...slot,
-    toolsets: [...slot.toolsets],
-  }));
+  return cloneRoster(DEFAULT_FIXED_TEAM_MEMBER_SLOTS.filter((slot) => slot.required));
 }
 
 /* ── metadata 互转 ─────────────────────────────────────────────────────── */
@@ -361,7 +360,7 @@ export function templateToEditorState(template: WorkflowTemplateRecord): Templat
   const team = template.metadata?.teamTemplate;
   const memberSlots: FixedTeamMemberSlot[] =
     Array.isArray(team?.memberSlots) && team!.memberSlots!.length > 0
-      ? team!.memberSlots!.map((slot) => ({ ...slot, toolsets: [...slot.toolsets] }))
+      ? cloneRoster(team!.memberSlots!)
       : cloneDefaultRoster();
   return {
     name: template.name,
@@ -382,10 +381,7 @@ export function editorStateToMetadata(state: TemplateEditorState): WorkflowTempl
   return {
     teamTemplate: {
       defaultProvider: state.defaultProvider,
-      memberSlots: sortRosterByCatalog(state.memberSlots).map((slot) => ({
-        ...slot,
-        toolsets: [...slot.toolsets],
-      })),
+      memberSlots: cloneRoster(sortRosterByCatalog(state.memberSlots)),
       templateScale: state.scale,
       templateFocus: state.focus.trim() || null,
       recommendedFor: state.recommendedFor.trim() || null,
@@ -514,10 +510,7 @@ export function exportTemplateState(state: TemplateEditorState): string {
     defaultProvider: state.defaultProvider,
     modelAssignStrategy: state.modelAssignStrategy,
     modelPool: state.modelPool.map((ref) => ({ ...ref })),
-    memberSlots: sortRosterByCatalog(state.memberSlots).map((slot) => ({
-      ...slot,
-      toolsets: [...slot.toolsets],
-    })),
+    memberSlots: cloneRoster(sortRosterByCatalog(state.memberSlots)),
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -553,20 +546,22 @@ export function importTemplateState(
     ? (rec['scale'] as WorkflowTemplateScale)
     : 'medium';
   // 复用 cloneRoster 的归一化（toolsets 拷贝），过滤掉结构不完整的槽位。
-  const memberSlots = (rec['memberSlots'] as unknown[])
-    .filter((s): s is FixedTeamMemberSlot => {
-      if (typeof s !== 'object' || s === null) return false;
-      const o = s as Record<string, unknown>;
-      return (
-        typeof o['id'] === 'string' &&
-        typeof o['layer'] === 'string' &&
-        typeof o['specialty'] === 'string' &&
-        typeof o['personaKey'] === 'string' &&
-        Array.isArray(o['toolsets'])
-      );
-    })
-    .slice(0, 40)
-    .map((slot) => ({ ...slot, toolsets: [...slot.toolsets] }));
+  const memberSlots = cloneRoster(
+    (rec['memberSlots'] as unknown[])
+      .filter((s): s is FixedTeamMemberSlot => {
+        if (typeof s !== 'object' || s === null) return false;
+        const o = s as Record<string, unknown>;
+        return (
+          typeof o['id'] === 'string' &&
+          typeof o['layer'] === 'string' &&
+          typeof o['specialty'] === 'string' &&
+          typeof o['personaKey'] === 'string' &&
+          Array.isArray(o['toolsets'])
+        );
+      })
+      .slice(0, 40)
+      .map((slot) => ({ ...slot, toolsets: [...slot.toolsets] })),
+  );
 
   const modelPool: WorkflowTeamTemplateModelRef[] = Array.isArray(rec['modelPool'])
     ? (rec['modelPool'] as unknown[])

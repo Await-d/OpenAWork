@@ -21,23 +21,13 @@ interface RuntimeCommandBinding {
   };
 }
 
-const RUNTIME_COMMAND_BINDINGS: Readonly<Record<SystemBuiltinCommandId, RuntimeCommandBinding>> = {
+const RUNTIME_COMMAND_BINDINGS: Readonly<Record<string, RuntimeCommandBinding>> = {
   'slash-compact': {
     action: { kind: 'compact_session' },
     fallback: {
       id: 'slash-compact',
       label: '/compact',
-      description: '压缩当前会话上下文（别名：/summarize）',
-      contexts: ['composer'],
-      execution: 'server',
-    },
-  },
-  'slash-summarize': {
-    action: { kind: 'compact_session' },
-    fallback: {
-      id: 'slash-summarize',
-      label: '/summarize',
-      description: '压缩当前会话——/compact 的别名',
+      description: '压缩当前会话上下文',
       contexts: ['composer'],
       execution: 'server',
     },
@@ -224,8 +214,8 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     const metadata = metadataById.get(binding.fallback.id);
     return {
       id: metadata?.id ?? binding.fallback.id,
-      label: metadata?.title ?? binding.fallback.label,
-      description: metadata?.description ?? binding.fallback.description,
+      label: binding.fallback.label,
+      description: binding.fallback.description ?? metadata?.description,
       contexts: metadata
         ? metadata.contexts.map(readCommandSurface)
         : [...binding.fallback.contexts],

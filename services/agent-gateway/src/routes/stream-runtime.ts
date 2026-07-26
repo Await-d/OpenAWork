@@ -90,9 +90,11 @@ import {
   buildCompanionPrompt,
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
+import type { InputImageContent } from '@openAwork/shared';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {
+    attachments?: InputImageContent[];
     isError: boolean;
     output: unknown;
     toolCallId: string;
@@ -384,6 +386,9 @@ async function continueFromApprovedToolResult(input: {
           clientRequestId: input.payload.clientRequestId,
           output: input.initialToolResult.output,
           isError: input.initialToolResult.isError,
+          ...(input.initialToolResult.attachments
+            ? { attachments: input.initialToolResult.attachments }
+            : {}),
           fileDiffs: resumedFileDiffs,
           resumedAfterApproval: input.resumedAfterApproval === true,
           observability,
@@ -410,6 +415,9 @@ async function continueFromApprovedToolResult(input: {
         clientRequestId: input.payload.clientRequestId,
         output: input.initialToolResult.output,
         isError: input.initialToolResult.isError,
+        ...(input.initialToolResult.attachments
+          ? { attachments: input.initialToolResult.attachments }
+          : {}),
         fileDiffs: resumedFileDiffs,
         resumedAfterApproval: input.resumedAfterApproval === true,
         observability,
@@ -674,6 +682,7 @@ export async function resumeApprovedPermissionRequest(input: {
 
     resumeResult = await continueFromApprovedToolResult({
       initialToolResult: {
+        ...(toolResult.attachments ? { attachments: toolResult.attachments } : {}),
         isError: toolResult.isError,
         output: toolResult.output,
         toolCallId: input.payload.toolCallId,

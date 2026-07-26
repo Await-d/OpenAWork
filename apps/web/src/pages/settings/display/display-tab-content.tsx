@@ -256,7 +256,7 @@ export function DisplayTabContent() {
       </div>
     ));
 
-  const messageMetaRows: SettingRowProps[] = [
+  const messageHeaderRows: SettingRowProps[] = [
     {
       title: '消息时间戳',
       description: '在每条消息头部显示发送/接收时间',
@@ -275,6 +275,9 @@ export function DisplayTabContent() {
       checked: store.showProviderLabel,
       onChange: store.setShowProviderLabel,
     },
+  ];
+
+  const metaLineSubRows: SettingRowProps[] = [
     {
       title: '消息耗时',
       description: '显示每轮回复的生成耗时（如 5.2s）',
@@ -299,27 +302,17 @@ export function DisplayTabContent() {
       checked: store.showEstimatedTokens,
       onChange: store.setShowEstimatedTokens,
     },
-  ];
-
-  const reasoningToolRows: SettingRowProps[] = [
     {
-      title: '显示推理过程',
-      description: '显示 AI 的思考过程；关闭后聊天页退化为简化提示，团队页保持精简展示',
-      checked: store.showReasoningBlock,
-      onChange: store.setShowReasoningBlock,
+      title: '请求序号',
+      description: '显示每轮请求的序号（如"请求 10"）',
+      checked: store.showRequestIndex,
+      onChange: store.setShowRequestIndex,
     },
     {
-      title: '推理过程默认展开',
-      description: 'AI 思考过程超过 3 行时默认展开，而非折叠',
-      checked: store.reasoningExpandedByDefault,
-      onChange: store.setReasoningExpandedByDefault,
-    },
-    {
-      title: '工具调用默认展开',
-      description:
-        '总开关。开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。可在下方按工具类别单独调整',
-      checked: store.toolCallsExpandedByDefault,
-      onChange: store.setToolCallsExpandedByDefault,
+      title: '工具调用计数',
+      description: '显示本轮使用的工具数量（如"3 工具"）',
+      checked: store.showToolCount,
+      onChange: store.setShowToolCount,
     },
   ];
 
@@ -368,15 +361,57 @@ export function DisplayTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>消息元信息</h3>
-        <div style={SECTION_LIST}>{renderRows(messageMetaRows)}</div>
+        <div style={SECTION_LIST}>{renderRows(messageHeaderRows)}</div>
+
+        {/* 消息统计信息分组 */}
+        <div
+          style={{
+            marginTop: 12,
+            padding: '12px 14px',
+            background: 'var(--bg-overlay)',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              marginBottom: 8,
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+                消息统计信息
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                消息底部的请求序号、耗时、Token 用量等统计信息
+              </span>
+            </div>
+            <Toggle
+              checked={store.showMetaLine}
+              onChange={store.setShowMetaLine}
+              label="消息统计信息"
+            />
+          </div>
+          {store.showMetaLine && (
+            <div
+              style={{
+                borderTop: '1px solid var(--border-subtle)',
+                paddingTop: 4,
+              }}
+            >
+              <div style={{ ...SECTION_LIST, opacity: store.showMetaLine ? 1 : 0.5 }}>
+                {renderRows(metaLineSubRows)}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
-      <section style={SS}>
-        <h3 style={ST}>推理与工具调用</h3>
-        <div style={SECTION_LIST}>{renderRows(reasoningToolRows)}</div>
-      </section>
-
-      <ToolExpandSection />
+      <ReasoningToolSection />
 
       <DialogueModeSection />
 
@@ -611,42 +646,89 @@ function ToolExpandRow({
   );
 }
 
-function ToolExpandSection() {
-  const globalExpand = useDisplayPreferencesStore((s) => s.toolCallsExpandedByDefault);
-  const overrides = useDisplayPreferencesStore((s) => s.toolExpandedOverrides);
-  const setOverride = useDisplayPreferencesStore((s) => s.setToolExpandedOverride);
+function ReasoningToolSection() {
+  const store = useDisplayPreferencesStore();
+  const globalExpand = store.toolCallsExpandedByDefault;
+  const setGlobalExpand = store.setToolCallsExpandedByDefault;
+  const overrides = store.toolExpandedOverrides;
+  const setOverride = store.setToolExpandedOverride;
 
   return (
     <section style={SS}>
-      <h3 style={ST}>工具调用折叠</h3>
-      <p
+      <h3 style={ST}>推理与工具调用</h3>
+
+      {/* 推理过程设置 */}
+      <div style={SECTION_LIST}>
+        <SettingRow
+          title="显示推理过程"
+          description="显示 AI 的思考过程；关闭后聊天页退化为简化提示，团队页保持精简展示"
+          checked={store.showReasoningBlock}
+          onChange={store.setShowReasoningBlock}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>推理过程默认展开</span>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>AI 思考过程超过 3 行时默认展开，而非折叠</span>
+          </div>
+          <Toggle checked={store.reasoningExpandedByDefault} onChange={store.setReasoningExpandedByDefault} label="推理过程默认展开" />
+        </div>
+      </div>
+
+      {/* 工具调用折叠分组 */}
+      <div
         style={{
-          fontSize: 12,
-          color: 'var(--fg-muted)',
-          lineHeight: 1.6,
-          marginBottom: 4,
+          marginTop: 12,
+          padding: '12px 14px',
+          background: 'var(--bg-overlay)',
+          borderRadius: 10,
+          border: '1px solid var(--border-subtle)',
         }}
       >
-        控制聊天页面中各类工具调用的默认展示方式。开启 = 默认展开详情，关闭 = 默认折叠为摘要行。
-        运行中和失败的工具始终自动展开，不受此设置影响。
-        {!globalExpand && (
-          <span style={{ color: 'var(--warning-fg, var(--fg-muted))', marginLeft: 4 }}>
-            需先开启上方"工具调用默认展开"总开关才能按类别调整。
-          </span>
-        )}
-      </p>
-      <div style={SECTION_LIST}>
-        {TOOL_EXPAND_CATEGORIES.map((cat, i) => (
-          <ToolExpandRow
-            key={cat}
-            title={TOOL_EXPAND_CATEGORY_LABELS[cat]}
-            description={TOOL_EXPAND_DESCRIPTIONS[cat]}
-            expanded={globalExpand && (overrides[cat] ?? false)}
-            onChange={(checked) => setOverride(cat, checked)}
-            disabled={!globalExpand}
-            isLast={i === TOOL_EXPAND_CATEGORIES.length - 1}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            marginBottom: globalExpand ? 8 : 0,
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              工具调用默认展开
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。运行中和失败的工具始终自动展开。
+            </span>
+          </div>
+          <Toggle
+            checked={globalExpand}
+            onChange={setGlobalExpand}
+            label="工具调用默认展开"
           />
-        ))}
+        </div>
+        {globalExpand && (
+          <div
+            style={{
+              borderTop: '1px solid var(--border-subtle)',
+              paddingTop: 4,
+            }}
+          >
+            <div style={SECTION_LIST}>
+              {TOOL_EXPAND_CATEGORIES.map((cat, i) => (
+                <ToolExpandRow
+                  key={cat}
+                  title={TOOL_EXPAND_CATEGORY_LABELS[cat]}
+                  description={TOOL_EXPAND_DESCRIPTIONS[cat]}
+                  expanded={overrides[cat] ?? false}
+                  onChange={(checked) => setOverride(cat, checked)}
+                  disabled={false}
+                  isLast={i === TOOL_EXPAND_CATEGORIES.length - 1}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

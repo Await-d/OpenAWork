@@ -83,11 +83,7 @@ fn local_bridge_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-async fn run_bridge(
-    listener: TcpListener,
-    token: String,
-    mut shutdown: oneshot::Receiver<()>,
-) {
+async fn run_bridge(listener: TcpListener, token: String, mut shutdown: oneshot::Receiver<()>) {
     loop {
         tokio::select! {
             accept_result = listener.accept() => {

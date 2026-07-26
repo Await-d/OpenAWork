@@ -69,7 +69,12 @@ export interface ChatRightPanelState {
     id: string;
     summary: string;
     trigger: 'manual' | 'automatic';
+    phase?: 'started' | 'completed' | 'failed';
     occurredAt: number;
+    compactedMessages?: number;
+    representedMessages?: number;
+    cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
+    strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
   }>;
   currentGoal: string;
 }
@@ -287,18 +292,64 @@ export function applyChatRightPanelEvent(
   }
 
   if (event.type === 'compaction') {
+    const compactionId = resolveCompactionPanelId(event);
+    const existingIndex = state.compactions.findIndex((item) => item.id === compactionId);
+    const existing = existingIndex >= 0 ? state.compactions[existingIndex] : undefined;
+
+    const phaseLabel =
+      event.phase === 'started'
+        ? '开始压缩会话上下文'
+        : event.phase === 'failed'
+          ? '压缩未完成'
+          : '已记录会话压缩结果';
+    const nextCompaction = {
+      id: compactionId,
+      summary: event.summary,
+      trigger: event.trigger,
+      phase: event.phase,
+      occurredAt: event.occurredAt ?? existing?.occurredAt ?? Date.now(),
+      ...(event.compactedMessages !== undefined
+        ? { compactedMessages: event.compactedMessages }
+        : existing?.compactedMessages !== undefined
+          ? { compactedMessages: existing.compactedMessages }
+          : {}),
+      ...(event.representedMessages !== undefined
+        ? { representedMessages: event.representedMessages }
+        : existing?.representedMessages !== undefined
+          ? { representedMessages: existing.representedMessages }
+          : {}),
+      ...(event.cause ? { cause: event.cause } : existing?.cause ? { cause: existing.cause } : {}),
+      ...(event.strategy
+        ? { strategy: event.strategy }
+        : existing?.strategy
+          ? { strategy: existing.strategy }
+          : {}),
+    };
+
+    if (existing && existing.phase === event.phase) {
+      return state;
+    }
+
+    const nextCompactions =
+      existingIndex >= 0
+        ? state.compactions.map((item, index) => (index === existingIndex ? nextCompaction : item))
+        : [nextCompaction, ...state.compactions];
+
     return {
       ...state,
-      compactions: [
-        {
-          id: event.eventId ?? createId('compaction'),
-          summary: event.summary,
-          trigger: event.trigger,
-          occurredAt: event.occurredAt ?? Date.now(),
-        },
-        ...state.compactions,
+      compactions: nextCompactions,
+      agentEvents: [
+        ...state.agentEvents,
+        createEvent(
+          event.phase === 'failed'
+            ? 'agent_error'
+            : event.phase === 'started'
+              ? 'agent_thinking'
+              : 'agent_done',
+          phaseLabel,
+          event.phase === 'failed' ? event.summary : undefined,
+        ),
       ],
-      agentEvents: [...state.agentEvents, createEvent('agent_done', '已记录会话压缩结果')],
     };
   }
 
@@ -394,6 +445,20 @@ export function applyChatRightPanelEvent(
   }
 
   return state;
+}
+
+function resolveCompactionPanelId(event: Extract<RunEvent, { type: 'compaction' }>): string {
+  const runId = typeof event.runId === 'string' ? event.runId.trim() : '';
+  if (runId.length > 0) {
+    return `compaction:${runId}`;
+  }
+
+  const eventId = typeof event.eventId === 'string' ? event.eventId.trim() : '';
+  if (eventId.length > 0) {
+    return `compaction:${eventId.replace(/:compaction:(?:started|completed|failed|request-failed)$/, ':compaction')}`;
+  }
+
+  return createId('compaction');
 }
 
 function applyTaskUpdateEvent(

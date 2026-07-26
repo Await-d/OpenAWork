@@ -27,7 +27,14 @@ function parseAssistantErrorContent(content: string): {
   };
 }
 
-export function AssistantErrorContent({ content }: { content: string }) {
+export function AssistantErrorContent({
+  content,
+  onRetry,
+}: {
+  content: string;
+  /** Optional inline retry for the failed turn. */
+  onRetry?: () => void;
+}) {
   const parsed = parseAssistantErrorContent(content);
 
   return (
@@ -37,6 +44,18 @@ export function AssistantErrorContent({ content }: { content: string }) {
         <span className="chat-message-error-title">{parsed.headline || '请求失败'}</span>
       </div>
       {parsed.detail && <div className="chat-message-error-detail">{parsed.detail}</div>}
+      {onRetry ? (
+        <div className="chat-message-error-actions">
+          <button
+            type="button"
+            data-testid="chat-message-error-retry"
+            className="chat-message-error-retry"
+            onClick={onRetry}
+          >
+            重试
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

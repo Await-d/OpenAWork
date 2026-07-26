@@ -123,6 +123,7 @@ export const TOOLSET_LABEL: Record<string, string> = {
   test: '测试',
   review: '评审',
   web: '联网',
+  desktop: '桌面',
 };
 
 /**
@@ -135,6 +136,6 @@ export const LAYER_ALLOWED_TOOLSETS: Record<TeamRuntimeLayer, readonly string[]>
   reception: ['read', 'web'],
   pm1: ['read', 'write'],
   pm2: ['read', 'write', 'shell', 'lsp', 'review'],
-  executor: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
+  executor: ['read', 'write', 'shell', 'lsp', 'test', 'web', 'desktop'],
   reviewer: ['read', 'lsp', 'review', 'shell', 'test'],
 };

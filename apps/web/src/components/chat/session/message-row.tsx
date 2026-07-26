@@ -6,6 +6,7 @@ import {
   formatDurationLabel,
   formatShortTime,
   formatStopReasonLabel,
+  isCompactionMessage,
 } from '../../conversation-runtime/messages/support.js';
 import { resolveAgentAccentColor } from '../misc/agent-color-map.js';
 import {
@@ -50,6 +51,8 @@ export interface BuildAssistantMetaItemsInput {
   readonly showStopReason: boolean;
   readonly showTokenBreakdown: boolean;
   readonly showEstimatedTokens: boolean;
+  readonly showRequestIndex: boolean;
+  readonly showToolCount: boolean;
 }
 
 export function buildAssistantMetaItems(
@@ -58,7 +61,9 @@ export function buildAssistantMetaItems(
   const items: MessageMetaItem[] = [];
 
   if (input.presentationMode !== 'team' && input.usageDetails) {
-    items.push({ label: `请求 ${input.usageDetails.requestIndex}` });
+    if (input.showRequestIndex) {
+      items.push({ label: `请求 ${input.usageDetails.requestIndex}` });
+    }
     if (input.usageDetails.estimatedCostUsd !== undefined) {
       items.push({ label: formatUsdCost(input.usageDetails.estimatedCostUsd) });
     }
@@ -94,7 +99,7 @@ export function buildAssistantMetaItems(
     items.push({ label: input.durationLabel });
   }
 
-  if (input.toolLabel) {
+  if (input.showToolCount && input.toolLabel) {
     items.push({ label: input.toolLabel });
   }
 
@@ -102,17 +107,34 @@ export function buildAssistantMetaItems(
     items.push({ label: `修改 ${input.modifiedFileCount} 文件` });
   }
 
-  if (input.showStopReason && input.stopReasonLabel) {
+  // Always surface abnormal terminal states (error / cancelled), even when
+  // the user has toggled off the generic stop-reason preference. Silent
+  // stops are the main complaint ("对话莫名停止了，不知道原因").
+  const isAbnormalTerminal =
+    input.messageStatus === 'error' ||
+    input.messageStatus === 'cancelled' ||
+    input.stopReasonLabel === '错误' ||
+    input.stopReasonLabel === '已停止';
+
+  if ((input.showStopReason || isAbnormalTerminal) && input.stopReasonLabel) {
     items.push({
       label: input.stopReasonLabel,
-      tone: input.messageStatus === 'error' ? 'danger' : 'accent',
+      tone:
+        input.messageStatus === 'error' || input.stopReasonLabel === '错误' ? 'danger' : 'accent',
     });
   }
 
   if (input.messageStatus === 'streaming') {
     items.push({ label: '生成中', tone: 'accent' });
   } else if (input.messageStatus === 'error') {
-    items.push({ label: '错误', tone: 'danger' });
+    // Avoid duplicating the "错误" chip when stopReason already says so.
+    if (input.stopReasonLabel !== '错误') {
+      items.push({ label: '错误', tone: 'danger' });
+    }
+  } else if (input.messageStatus === 'cancelled') {
+    if (input.stopReasonLabel !== '已停止') {
+      items.push({ label: '已停止', tone: 'accent' });
+    }
   }
 
   if (items.length > 0) {
@@ -131,6 +153,10 @@ function buildAssistantFallbackMetaItem(
 ): Readonly<MessageMetaItem> {
   if (input.messageStatus === 'error') {
     return { label: '回复异常', tone: 'danger' };
+  }
+
+  if (input.messageStatus === 'cancelled') {
+    return { label: '已停止', tone: 'accent' };
   }
 
   if (input.messageStatus === 'streaming') {
@@ -190,6 +216,9 @@ export function MessageRow({
   const showStopReasonPref = useDisplayPreferencesStore((s) => s.showStopReason);
   const showTokenBreakdownPref = useDisplayPreferencesStore((s) => s.showTokenBreakdown);
   const showEstimatedTokensPref = useDisplayPreferencesStore((s) => s.showEstimatedTokens);
+  const showRequestIndexPref = useDisplayPreferencesStore((s) => s.showRequestIndex);
+  const showToolCountPref = useDisplayPreferencesStore((s) => s.showToolCount);
+  const showMetaLinePref = useDisplayPreferencesStore((s) => s.showMetaLine);
   const resolvedProviderId = message.providerId?.trim() || providerId.trim();
   const resolvedProviderIdentity = resolveProviderIdentity({
     providerId: resolvedProviderId,
@@ -243,6 +272,8 @@ export function MessageRow({
         showStopReason: showStopReasonPref,
         showTokenBreakdown: showTokenBreakdownPref,
         showEstimatedTokens: showEstimatedTokensPref,
+        showRequestIndex: showRequestIndexPref,
+        showToolCount: showToolCountPref,
       })
     : [];
 
@@ -381,12 +412,14 @@ export function MessageRow({
           data-role={message.role}
           data-status={message.status ?? 'completed'}
         >
-          <MessageHoverActions getCopyText={() => message.content} />
+          {!isCompactionMessage(message) && (
+            <MessageHoverActions getCopyText={() => message.content} />
+          )}
           <div className="chat-message-content" data-role={message.role} style={sharedUiThemeVars}>
             {renderContent(message)}
           </div>
         </div>
-        {metaItems.length > 0 && <MetaLine items={metaItems} />}
+        {showMetaLinePref && metaItems.length > 0 && <MetaLine items={metaItems} />}
       </div>
     </article>
   );

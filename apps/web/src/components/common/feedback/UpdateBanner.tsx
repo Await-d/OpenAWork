@@ -66,7 +66,7 @@ export default function UpdateBanner() {
         style={{
           position: 'fixed',
           bottom: 8,
-          left: 8,
+          right: 8,
           fontSize: 10,
           color: 'var(--fg-muted)',
           zIndex: 10,

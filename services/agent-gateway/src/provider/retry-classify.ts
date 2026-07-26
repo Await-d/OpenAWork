@@ -1,3 +1,5 @@
+import { parseContextLimitError } from '../compaction/context-window-resolver.js';
+
 /**
  * Upstream retry classification helpers.
  *
@@ -341,6 +343,19 @@ export function classifyUpstreamError(error: unknown): UpstreamRetryClassificati
     } catch {
       /* fall through */
     }
+  }
+
+  // Context-length / prompt-too-long errors. These are never retried
+  // by the AI SDK (isRetryable=false), but the compaction recovery layer
+  // in `stream.ts` needs a stable `overflow: true` signal on the round
+  // result to trigger `triggerOverflowCompaction`. We classify them
+  // here so the upstreamError descriptor also carries a meaningful category.
+  if (parseContextLimitError(error) !== null) {
+    return {
+      retryable: false,
+      category: 'context_overflow',
+      message: info.message ?? '上下文长度超出模型限制，正在自动压缩会话历史…',
+    };
   }
 
   // Fallback: undici frequently rethrows transport failures as

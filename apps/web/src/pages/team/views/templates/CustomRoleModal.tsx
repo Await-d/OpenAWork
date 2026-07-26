@@ -27,6 +27,7 @@ const ALL_TOOLS: Array<{ id: string; label: string }> = [
   { id: 'test', label: '测试' },
   { id: 'review', label: '评审' },
   { id: 'web', label: '联网' },
+  { id: 'desktop', label: '桌面' },
 ];
 
 export interface CustomRoleDraft {

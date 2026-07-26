@@ -17,38 +17,38 @@ function getSourceTone(status: DevtoolsSourceState['status']): SourceTone {
   switch (status) {
     case 'healthy':
       return {
-        background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
-        border: 'color-mix(in srgb, var(--accent) 35%, var(--border-default))',
+        background: 'transparent',
+        border: 'var(--border-subtle)',
         text: 'var(--accent)',
-        badgeBackground: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+        badgeBackground: 'transparent',
       };
     case 'error':
       return {
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
-        border: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 5%, transparent)',
+        border: 'color-mix(in srgb, var(--danger) 30%, var(--border-subtle))',
         text: 'var(--danger)',
-        badgeBackground: 'color-mix(in srgb, var(--danger) 16%, transparent)',
+        badgeBackground: 'transparent',
       };
     case 'empty':
       return {
-        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
-        border: 'var(--border-default)',
-        text: 'var(--fg-default)',
-        badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
+        background: 'transparent',
+        border: 'var(--border-subtle)',
+        text: 'var(--fg-muted)',
+        badgeBackground: 'transparent',
       };
     case 'unavailable':
       return {
-        background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
-        border: 'color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--warning) 5%, transparent)',
+        border: 'color-mix(in srgb, var(--warning) 30%, var(--border-subtle))',
         text: 'var(--warning)',
-        badgeBackground: 'color-mix(in srgb, var(--warning) 16%, transparent)',
+        badgeBackground: 'transparent',
       };
     default:
       return {
-        background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
-        border: 'var(--border-default)',
-        text: 'var(--fg-default)',
-        badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
+        background: 'transparent',
+        border: 'var(--border-subtle)',
+        text: 'var(--fg-muted)',
+        badgeBackground: 'transparent',
       };
   }
 }
@@ -85,17 +85,17 @@ export function InlineFailureNotice({ title, message }: { title: string; message
   return (
     <div
       style={{
-        border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
-        borderRadius: 8,
-        padding: '8px 10px',
+        border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle))',
+        background: 'color-mix(in srgb, var(--danger) 5%, transparent)',
+        borderRadius: 3,
+        padding: '4px 6px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 4,
+        gap: 2,
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>{title}</div>
-      <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>
+      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--danger)' }}>{title}</div>
+      <div style={{ fontSize: 10, color: 'var(--fg-muted)', wordBreak: 'break-word' }}>
         {message}
       </div>
     </div>
@@ -116,19 +116,19 @@ export function SourceOverviewCard({
       style={{
         background: tone.background,
         border: `1px solid ${tone.border}`,
-        borderRadius: 8,
-        padding: '7px 10px',
+        borderRadius: 3,
+        padding: '4px 6px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 4,
+        gap: 2,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               fontSize: 11,
-              fontWeight: 600,
+              fontWeight: 500,
               color: 'var(--fg-strong)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -150,13 +150,13 @@ export function SourceOverviewCard({
             {source.endpoint}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
           <span
             style={{
-              padding: '2px 6px',
-              borderRadius: 999,
+              padding: '1px 4px',
+              borderRadius: 2,
               fontSize: 10,
-              fontWeight: 700,
+              fontWeight: 500,
               color: tone.text,
               background: tone.badgeBackground,
             }}
@@ -170,14 +170,14 @@ export function SourceOverviewCard({
               disabled={source.status === 'loading'}
               aria-label={`刷新${source.label}`}
               style={{
-                border: '1px solid var(--border-default)',
-                borderRadius: 6,
-                padding: '2px 7px',
-                background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
-                color: 'var(--fg-strong)',
+                border: 'none',
+                borderRadius: 2,
+                padding: '1px 4px',
+                background: 'transparent',
+                color: 'var(--fg-muted)',
                 fontSize: 10,
                 cursor: source.status === 'loading' ? 'not-allowed' : 'pointer',
-                opacity: source.status === 'loading' ? 0.55 : 1,
+                opacity: source.status === 'loading' ? 0.5 : 1,
               }}
             >
               {source.status === 'loading' ? '…' : '刷新'}
@@ -185,19 +185,19 @@ export function SourceOverviewCard({
           ) : null}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.4 }}>
+      <div style={{ fontSize: 10, color: 'var(--fg-default)', lineHeight: 1.3 }}>
         {source.detail}
       </div>
       <div
         style={{
           display: 'flex',
-          gap: 8,
+          gap: 6,
           flexWrap: 'wrap',
           fontSize: 10,
           color: 'var(--fg-muted)',
         }}
       >
-        <span>更新：{formatUpdatedAt(source.updatedAt)}</span>
+        <span>{formatUpdatedAt(source.updatedAt)}</span>
         {source.count !== null ? <span>{source.count} 条</span> : null}
       </div>
       {source.error ? (
@@ -205,7 +205,6 @@ export function SourceOverviewCard({
           style={{
             fontSize: 10,
             color: 'var(--danger)',
-            fontFamily: 'monospace',
             wordBreak: 'break-word',
           }}
         >

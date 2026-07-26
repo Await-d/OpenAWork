@@ -30,7 +30,7 @@ export interface FinalizeStreamMessageOptions {
   providerId?: string;
   requestStartedAt: number;
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  status: 'completed' | 'error';
+  status: 'completed' | 'error' | 'cancelled';
   stopReason?: string;
   toolCallIds: Set<string>;
   traceFinalStatus?: 'completed' | 'error' | 'cancelled' | 'paused';

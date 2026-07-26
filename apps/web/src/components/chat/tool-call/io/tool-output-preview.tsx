@@ -33,6 +33,7 @@ import { extractTodosFromOutput, TodoListPreview } from '../previews/todo-list-p
 import { extractTreeNodesFromOutput, TreeNodesPreview } from '../previews/tree-nodes-preview.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { extractTextFromOutput } from '../shared/extract-text.js';
+import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 
 /**
  * Render a tool's output expansion panel. Tries domain-aware paths in order:
@@ -53,6 +54,7 @@ import { extractTextFromOutput } from '../shared/extract-text.js';
  */
 export function ToolOutputPreview({ toolName, output }: { toolName: string; output: unknown }) {
   const normalized = toolName.trim().toLowerCase();
+  const shouldExpandByDefault = useToolExpandDefault()(toolName);
   const isTodoFamily =
     normalized === 'todoread' ||
     normalized === 'subtodoread' ||
@@ -71,7 +73,7 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
 
   if (normalized === 'read' || normalized === 'workspace_read_file') {
     const data = extractFileContentFromOutput(output);
-    if (data) return <FileContentPreview data={data} />;
+    if (data) return <FileContentPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'grep') {
@@ -80,12 +82,12 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     const counts = extractGrepCountsFromOutput(output);
     if (counts) return <GrepCountsPreview entries={counts} />;
     const paths = extractFilePathListFromOutput(output);
-    if (paths) return <FilePathListPreview paths={paths} />;
+    if (paths) return <FilePathListPreview paths={paths} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'glob') {
     const paths = extractFilePathListFromOutput(output);
-    if (paths) return <FilePathListPreview paths={paths} />;
+    if (paths) return <FilePathListPreview paths={paths} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'workspace_search') {
@@ -95,7 +97,7 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
 
   if (normalized === 'workspace_tree' || normalized === 'list') {
     const data = extractTreeNodesFromOutput(output);
-    if (data) return <TreeNodesPreview data={data} />;
+    if (data) return <TreeNodesPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'workspace_review_status') {
@@ -133,7 +135,7 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     const isShortOutput = textPayload.text.length < 200 && textPayload.text.split('\n').length <= 5;
     return (
       <>
-        <ExpandableOutput text={textPayload.text} maxChars={500} compact={isShortOutput} />
+        <ExpandableOutput text={textPayload.text} maxChars={500} compact={isShortOutput} defaultExpanded={shouldExpandByDefault} />
         {diagnostics && diagnostics.length > 0 && <DiagnosticsPreview items={diagnostics} />}
       </>
     );
@@ -144,5 +146,5 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   const fallbackText =
     typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
-  return <ExpandableOutput text={fallbackText} maxChars={500} compact={isShortFallback} />;
+  return <ExpandableOutput text={fallbackText} maxChars={500} compact={isShortFallback} defaultExpanded={shouldExpandByDefault} />;
 }

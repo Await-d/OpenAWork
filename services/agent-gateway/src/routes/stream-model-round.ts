@@ -8,7 +8,10 @@ import type {
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
 import { isContextOverflow } from '../session/session-message-store.js';
-import { resolveEffectiveContextWindow } from '../compaction/context-window-resolver.js';
+import {
+  resolveEffectiveContextWindow,
+  parseContextLimitError,
+} from '../compaction/context-window-resolver.js';
 import { microcompactMessages } from '../compaction/microcompact.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
@@ -1549,6 +1552,7 @@ export async function runModelRound(input: {
       // stable category — the AI SDK collapses these into opaque
       // strings otherwise.
       const classification = classifyUpstreamError(err);
+      const contextLimitError = parseContextLimitError(err);
       if (stepStream && stepStream.status === 'pending') {
         input.wl.fail(stepStream, message, { round: input.round });
       }
@@ -1597,7 +1601,7 @@ export async function runModelRound(input: {
       input.wl.flush(input.ctx, 502);
       emitStepEnded('error');
       return {
-        overflow: false,
+        overflow: contextLimitError !== null,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'error',
@@ -1728,6 +1732,7 @@ export async function runModelRound(input: {
     }
     const message = err instanceof Error ? err.message : String(err);
     const classification = classifyUpstreamError(err);
+    const contextLimitError = parseContextLimitError(err);
     if (stepStream && stepStream.status === 'pending') {
       input.wl.fail(stepStream, message, { round: input.round });
     }
@@ -1787,7 +1792,7 @@ export async function runModelRound(input: {
     input.wl.flush(input.ctx, 500);
     emitStepEnded('error');
     return {
-      overflow: false,
+      overflow: contextLimitError !== null,
       shouldContinue: false,
       shouldStop: true,
       stopReason: 'error',

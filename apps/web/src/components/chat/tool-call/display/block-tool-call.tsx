@@ -101,7 +101,7 @@ export function BlockToolCall({
   const shouldAutoExpand =
     visualState !== 'pending' &&
     !isWebEmptyResult &&
-    (shouldExpandByDefault || !(visualState === 'completed' && hasLargeOutput));
+    (shouldExpandByDefault || visualState === 'running');
 
   const [open, setOpen] = useState(shouldAutoExpand);
   const [webResultsExpanded, setWebResultsExpanded] = useState(false);
@@ -588,6 +588,7 @@ export function BlockToolCall({
                     text={webSummary.cleanedContent}
                     maxChars={600}
                     compact={searchVisualState === 'empty'}
+                    defaultExpanded={shouldExpandByDefault}
                   />
                 )}
               </div>

@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using OpenAWork.Gateway.Application.Abstractions.Settings;
 using OpenAWork.Gateway.Persistence.EFCore;
 using OpenAWork.Gateway.Persistence.EFCore.Entities;
 
@@ -122,12 +124,14 @@ public sealed class CommandsEndpointTests : IClassFixture<GatewayWebApplicationF
     {
         const string userId = "user-commands-compact";
         const string sessionId = "session-commands-compact";
-        await SeedUserAndSessionAsync(_factory, userId, sessionId);
-        using var client = CreateAuthenticatedClient(_factory, userId);
+        using var factory = CreateFactoryWithLlm(new StubWorkflowLlmClient("runtime summary from llm"));
+        await SeedUserAndSessionAsync(factory, userId, sessionId);
+        using var client = CreateAuthenticatedClient(factory, userId);
 
         var response = await client.PostAsJsonAsync($"/sessions/{sessionId}/commands/execute", new
         {
             commandId = "slash-compact",
+            executionId = "compact-execution-1",
             messages = new object[]
             {
                 new
@@ -150,14 +154,23 @@ public sealed class CommandsEndpointTests : IClassFixture<GatewayWebApplicationF
 
         response.EnsureSuccessStatusCode();
         Assert.Equal("compaction", payload.GetProperty("result").GetProperty("card").GetProperty("type").GetString());
-        Assert.Contains(payload.GetProperty("result").GetProperty("events").EnumerateArray(), (item) => item.GetProperty("type").GetString() == "compaction");
+        Assert.Contains(payload.GetProperty("result").GetProperty("events").EnumerateArray(), (item)
+            => item.GetProperty("type").GetString() == "compaction"
+                && item.GetProperty("strategy").GetString() == "runtime_replace"
+                && item.GetProperty("runId").GetString() == "command:session-commands-compact:slash-compact:compact-execution-1");
+        Assert.Contains(payload.GetProperty("result").GetProperty("events").EnumerateArray(), (item)
+            => item.GetProperty("eventId").GetString() == "session-commands-compact:slash-compact:compact-execution-1:started");
+        Assert.Contains(payload.GetProperty("result").GetProperty("events").EnumerateArray(), (item)
+            => item.GetProperty("eventId").GetString() == "session-commands-compact:slash-compact:compact-execution-1:completed");
+        Assert.Equal("runtime summary from llm", payload.GetProperty("result").GetProperty("card").GetProperty("summary").GetString());
 
-        await using var scope = _factory.Services.CreateAsyncScope();
+        await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
         var session = await dbContext.Sessions.SingleAsync((item) => item.Id == sessionId);
         using var metadata = JsonDocument.Parse(session.MetadataJson);
         Assert.Equal("manual", metadata.RootElement.GetProperty("lastCompactionTrigger").GetString());
-        Assert.Contains("Durable session compaction memory", metadata.RootElement.GetProperty("lastCompactionSummary").GetString());
+        Assert.Equal("runtime summary from llm", metadata.RootElement.GetProperty("lastCompactionSummary").GetString());
+        Assert.Equal("runtime_replace", metadata.RootElement.GetProperty("compactionMemory").GetProperty("strategy").GetString());
         Assert.Contains("compaction", session.MessagesJson, StringComparison.Ordinal);
     }
 
@@ -353,6 +366,18 @@ public sealed class CommandsEndpointTests : IClassFixture<GatewayWebApplicationF
         });
     }
 
+    private static WebApplicationFactory<OpenAWork.Gateway.Host.Program> CreateFactoryWithLlm(IWorkflowLlmClient llmClient)
+    {
+        return new GatewayWebApplicationFactory().WithWebHostBuilder((builder) =>
+        {
+            builder.ConfigureTestServices((services) =>
+            {
+                services.RemoveAll<IWorkflowLlmClient>();
+                services.AddSingleton(llmClient);
+            });
+        });
+    }
+
     private static string CreateWorkspaceRoot()
     {
         var path = Path.Combine(Path.GetTempPath(), $"openawork-commands-root-{Guid.NewGuid():N}");
@@ -400,5 +425,11 @@ public sealed class CommandsEndpointTests : IClassFixture<GatewayWebApplicationF
 
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class StubWorkflowLlmClient(string responseText) : IWorkflowLlmClient
+    {
+        public Task<string> CompleteAsync(string apiBaseUrl, string apiKey, string model, string prompt, double temperature, CancellationToken cancellationToken)
+            => Task.FromResult(responseText);
     }
 }

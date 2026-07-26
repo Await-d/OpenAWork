@@ -1,5 +1,6 @@
 import type {
   FileDiffContent,
+  InputImageContent,
   Message,
   RunEvent,
   ToolCallObservabilityAnnotation,
@@ -7,6 +8,7 @@ import type {
 } from '@openAwork/shared';
 
 export interface StoredToolResult {
+  attachments?: InputImageContent[];
   clientRequestId?: string;
   fileDiffs?: FileDiffContent[];
   isError: boolean;
@@ -25,6 +27,7 @@ export interface ToolResultPayloadInput {
   output: unknown;
   isError: boolean;
   reason?: string;
+  attachments?: InputImageContent[];
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
@@ -105,6 +108,9 @@ export function buildToolResultContent(input: ToolResultPayloadInput): ToolResul
     rawOutput,
     isError: input.isError,
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.attachments && input.attachments.length > 0
+      ? { attachments: input.attachments }
+      : {}),
     ...(fileDiffs ? { fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId
@@ -129,6 +135,9 @@ export function buildToolResultRunEvent(
     output,
     isError: input.isError,
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.attachments && input.attachments.length > 0
+      ? { attachments: input.attachments }
+      : {}),
     ...(fileDiffs ? { fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId
@@ -158,6 +167,7 @@ export function toStoredToolResult(content: ToolResultContent): StoredToolResult
     clientRequestId: content.clientRequestId,
     output: content.output,
     isError: content.isError,
+    attachments: content.attachments,
     fileDiffs: content.fileDiffs,
     pendingPermissionRequestId: content.pendingPermissionRequestId,
     resumedAfterApproval: content.resumedAfterApproval,

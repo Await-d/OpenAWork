@@ -16,6 +16,7 @@
  * 用户全局 active 选择，老会话与未配置模型的模板完全不受影响。
  */
 
+import { upgradeLegacyExecutorToolsets } from '@openAwork/shared';
 import { sqliteGet } from '../../infra/db.js';
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
 
@@ -48,6 +49,7 @@ interface RosterSlotLike {
   skillIds?: unknown;
   mcpServerIds?: unknown;
   toolsets?: unknown;
+  toolsetsCustomized?: unknown;
   routingKeywords?: unknown;
 }
 
@@ -446,10 +448,17 @@ export function resolveMemberCapabilities(input: {
     );
   }
   if (!slot) return { skillIds: [], mcpServerIds: [], toolsets: [] };
+  const toolsets = toStrArr(slot.toolsets);
   return {
     skillIds: toStrArr(slot.skillIds),
     mcpServerIds: toStrArr(slot.mcpServerIds),
-    toolsets: toStrArr(slot.toolsets),
+    toolsets: upgradeLegacyExecutorToolsets({
+      layer: slot.layer,
+      specialty: slot.specialty,
+      personaKey: slot.personaKey,
+      toolsets,
+      toolsetsCustomized: slot.toolsetsCustomized,
+    }),
   };
 }
 

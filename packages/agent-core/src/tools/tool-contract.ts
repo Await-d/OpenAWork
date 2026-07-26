@@ -1,5 +1,5 @@
 import type { ZodIssue, ZodTypeAny, infer as ZodInfer } from 'zod';
-import type { ToolCallContent, ToolResultContent } from '@openAwork/shared';
+import type { InputImageContent, ToolCallContent, ToolResultContent } from '@openAwork/shared';
 
 export interface ToolDefinition<
   TInput extends ZodTypeAny = ZodTypeAny,
@@ -25,6 +25,7 @@ export interface ToolCallResult {
   output: unknown;
   isError: boolean;
   durationMs: number;
+  attachments?: InputImageContent[];
   pendingPermissionRequestId?: string;
 }
 

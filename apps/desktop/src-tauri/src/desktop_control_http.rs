@@ -58,9 +58,7 @@ pub async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, St
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
 fn parse_request_line(headers: &str) -> Result<(String, String), String> {

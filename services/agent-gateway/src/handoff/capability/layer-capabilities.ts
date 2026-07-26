@@ -204,8 +204,8 @@ export const LAYER_CAPABILITIES: Readonly<Record<HandoffRoleLayer, LayerCapabili
     allowedInboundTypes: ['cancel_signal', 'pause_signal', 'resume_signal'],
     allowedSubstates: ['idle', 'implementing', 'completed', 'failed', 'cancelled'],
     canWriteArtifactPhases: ['implementation', 'patch'],
-    allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'test', 'web'],
-    // executor 必须能读+写+执行 shell：交付代码/补丁的三大件，缺一不可。
+    allowedToolsetCategories: ['read', 'write', 'shell', 'lsp', 'test', 'web', 'desktop'],
+    // executor 必须能读+写+执行 shell；desktop 是默认启用但可由成员配置关闭的能力。
     requiredToolsetCategories: ['read', 'write', 'shell'],
     allowedBuiltinInstructions: [
       'report_progress',

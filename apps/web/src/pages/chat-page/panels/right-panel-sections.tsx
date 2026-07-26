@@ -8,7 +8,6 @@ import type {
   HistoricalPlan,
 } from '@openAwork/shared-ui';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
-import { tryFormatJson } from '../../../utils/format-json.js';
 import { Link } from 'react-router';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
@@ -178,7 +177,83 @@ interface CompactionItem {
   id: string;
   summary: string;
   trigger: 'manual' | 'automatic';
+  phase?: 'started' | 'completed' | 'failed';
   occurredAt: number;
+  compactedMessages?: number;
+  representedMessages?: number;
+  cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
+  strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
+}
+
+function formatCompactionShortLabel(item: CompactionItem): string {
+  const triggerLabel = item.trigger === 'manual' ? '手动' : '自动';
+  if (item.phase === 'failed') {
+    return `${triggerLabel} · 压缩失败`;
+  }
+  if (item.phase === 'started') {
+    return `${triggerLabel} · 压缩中`;
+  }
+  if (typeof item.representedMessages === 'number' && item.representedMessages > 0) {
+    return `${triggerLabel} · 摘要覆盖 ${item.representedMessages} 条`;
+  }
+  if (typeof item.compactedMessages === 'number' && item.compactedMessages > 0) {
+    return `${triggerLabel} · 压缩 ${item.compactedMessages} 条`;
+  }
+  return `${triggerLabel} · 已压缩历史`;
+}
+
+function formatCompactionCauseLabel(
+  cause: CompactionItem['cause'],
+  strategy: CompactionItem['strategy'],
+): string | null {
+  const causeLabel =
+    cause === 'usage_overflow'
+      ? '达到上下文上限'
+      : cause === 'provider_overflow'
+        ? '上游窗口溢出'
+        : cause === 'proactive_near_overflow'
+          ? '接近上限提前压缩'
+          : cause === 'manual'
+            ? '手动触发'
+            : null;
+  const strategyLabel =
+    strategy === 'summary_only'
+      ? '仅保留摘要'
+      : strategy === 'replay'
+        ? '按回放尾部保留'
+        : strategy === 'synthetic_continue'
+          ? '续写模式'
+          : strategy === 'runtime_replace'
+            ? '运行态替换'
+            : null;
+  if (causeLabel && strategyLabel) {
+    return `${causeLabel} · ${strategyLabel}`;
+  }
+  return causeLabel ?? strategyLabel;
+}
+
+function formatContextCompactionHint(
+  latestCompaction: CompactionItem | null,
+  estimated: boolean,
+): string {
+  if (!latestCompaction) {
+    return estimated
+      ? '当前值基于前端窗口估算；本轮尚未发生上下文压缩。'
+      : '当前会话尚未发生上下文压缩，历史会按原始顺序参与发送。';
+  }
+
+  if (latestCompaction.phase === 'failed') {
+    return '最近一次压缩未完成；当前上下文仍可能接近上限。';
+  }
+
+  if (latestCompaction.phase === 'started') {
+    return '最近一次压缩仍在进行中，发送窗口会在完成后更新。';
+  }
+
+  return (
+    formatCompactionCauseLabel(latestCompaction.cause, latestCompaction.strategy) ??
+    formatCompactionShortLabel(latestCompaction)
+  );
 }
 
 export interface UpstreamSummaryItem {
@@ -746,13 +821,13 @@ export function ChatHistoryTabContent(props: {
                       color: 'var(--fg-strong)',
                     }}
                   >
-                    {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
+                    {formatCompactionShortLabel(item)}
                   </div>
-                  <div
-                    style={{ color: 'var(--fg-default)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}
-                  >
-                    {tryFormatJson(item.summary)}
-                  </div>
+                  {formatCompactionCauseLabel(item.cause, item.strategy) ? (
+                    <div style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                      {formatCompactionCauseLabel(item.cause, item.strategy)}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </>
@@ -1295,6 +1370,7 @@ export function ChatOverviewTabContent(props: {
   currentSessionId: string | null;
   dialogueMode: DialogueMode;
   effectiveWorkingDirectory: string | null;
+  effectiveContextMessageCount?: number;
   messages: ChatMessage[];
   pendingPermissions: PendingPermissionRequest[];
   pendingQuestionsCount: number;
@@ -1319,6 +1395,7 @@ export function ChatOverviewTabContent(props: {
     currentSessionId,
     dialogueMode,
     effectiveWorkingDirectory,
+    effectiveContextMessageCount,
     messages,
     pendingPermissions,
     pendingQuestionsCount,
@@ -1343,6 +1420,13 @@ export function ChatOverviewTabContent(props: {
       ) ?? null)
     : null;
   const focusedUpstreamSummaries = focusedUpstreamGroup?.items ?? upstreamSummaries;
+  const latestCompaction = compactions[0] ?? null;
+  const latestCompactionLabel = latestCompaction
+    ? formatCompactionShortLabel(latestCompaction)
+    : '无';
+  const latestCompactionMeta = latestCompaction
+    ? formatCompactionCauseLabel(latestCompaction.cause, latestCompaction.strategy)
+    : null;
   const artifactCountLabel =
     contentArtifactCountStatus === 'loading'
       ? '同步中…'
@@ -1398,7 +1482,11 @@ export function ChatOverviewTabContent(props: {
       label: '会话 ID',
       value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—',
     },
-    { label: '消息数量', value: `${messages.length} 条` },
+    {
+      label: '有效上下文',
+      value: `${effectiveContextMessageCount ?? messages.length} 条`,
+    },
+    { label: '会话消息', value: `${messages.length} 条` },
     {
       label: '工作区',
       value: effectiveWorkingDirectory ?? '未绑定',
@@ -1408,7 +1496,7 @@ export function ChatOverviewTabContent(props: {
       value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
     },
     { label: 'YOLO', value: yoloMode ? '开启' : '关闭', highlight: yoloMode },
-    { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
+    { label: '最近压缩', value: latestCompactionLabel },
     {
       label: '当前聚焦请求',
       value: focusedUpstreamGroup?.label ?? '全部请求',
@@ -1535,6 +1623,12 @@ export function ChatOverviewTabContent(props: {
                       transition: 'width 400ms cubic-bezier(.4, 0, .2, 1), background 300ms ease',
                     }}
                   />
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+                  {formatContextCompactionHint(
+                    latestCompaction,
+                    contextUsageSnapshot.estimated,
+                  )}
                 </div>
               </>
             );
@@ -1824,6 +1918,7 @@ export function ChatOverviewTabContent(props: {
                 yoloMode ? '⚡ YOLO' : '',
                 attachmentItems.length > 0 ? `📎 ${attachmentItems.length} 附件` : '',
                 workspaceFileItems.length > 0 ? `📂 ${workspaceFileItems.length} 索引文件` : '',
+                latestCompaction ? formatCompactionShortLabel(latestCompaction) : '',
               ]
                 .filter(Boolean)
                 .join(' · ') || '无额外上下文注入'}

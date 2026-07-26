@@ -93,7 +93,13 @@ function TreeNodeRow({
   );
 }
 
-export function TreeNodesPreview({ data }: { data: TreeNodesBundle }) {
+export function TreeNodesPreview({
+  data,
+  defaultExpanded = false,
+}: {
+  data: TreeNodesBundle;
+  defaultExpanded?: boolean;
+}) {
   if (data.nodes.length === 0) {
     return <div className="tool-call-inline-empty">（目录为空）</div>;
   }
@@ -103,7 +109,7 @@ export function TreeNodesPreview({ data }: { data: TreeNodesBundle }) {
   return (
     <div className="tool-call-tree">
       {data.nodes.map((node, idx) => (
-        <TreeNodeRow key={`${node.name}-${idx}`} node={node} depth={0} defaultExpanded={false} />
+        <TreeNodeRow key={`${node.name}-${idx}`} node={node} depth={0} defaultExpanded={defaultExpanded} />
       ))}
       {data.visited !== undefined && (
         <div className="tool-call-search-meta">共 {data.visited} 个条目 · 点击目录展开</div>

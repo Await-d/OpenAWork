@@ -49,6 +49,7 @@ const ROSTER_SNAPSHOT = {
         layer: 'executor',
         specialty: 'frontend',
         personaKey: 'executor:frontend',
+        toolsets: ['read', 'write', 'shell', 'lsp', 'test'],
         modelId: 'fe-model',
         providerId: 'p-fe',
       },
@@ -261,6 +262,15 @@ describe('resolveMemberSystemPrompt', () => {
 });
 
 describe('resolveMemberCapabilities', () => {
+  it('会为旧版内置 executor 成员补 desktop 工具集', () => {
+    const caps = resolver.resolveMemberCapabilities({
+      fromSessionId: PM2_SESSION_ID,
+      toRoleLayer: 'executor',
+      payload: { assignedMember: { personaKey: 'executor:frontend' } },
+    });
+    expect(caps.toolsets).toEqual(['read', 'write', 'shell', 'lsp', 'test', 'desktop']);
+  });
+
   it('resolves skillIds + mcpServerIds by personaKey', () => {
     const caps = resolver.resolveMemberCapabilities({
       fromSessionId: PM2_SESSION_ID,
@@ -274,8 +284,8 @@ describe('resolveMemberCapabilities', () => {
   it('returns empty arrays for a member without capability bindings', () => {
     const caps = resolver.resolveMemberCapabilities({
       fromSessionId: PM2_SESSION_ID,
-      toRoleLayer: 'executor',
-      payload: { assignedMember: { personaKey: 'executor:frontend' } },
+      toRoleLayer: 'reviewer',
+      payload: { assignedMember: { personaKey: 'reviewer:code-review' } },
     });
     expect(caps).toEqual({ skillIds: [], mcpServerIds: [], toolsets: [] });
   });
