@@ -125,7 +125,7 @@ const isQwenThinkingModel = (modelId: string): boolean => {
   );
 };
 
-const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-(?:4\.1|5)(?:[.-]|$)|o[134](?:[.-]|$))/;
 
 function isOpenAIReasoningModel(modelId: string): boolean {
   return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
