@@ -108,8 +108,9 @@ describe('UpdateProgressDialog', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('发现新版本 0.8.7');
-    expect(findButton(container, '更新')).toBeTruthy();
+    // UpdateProgressDialog 使用 createPortal 渲染到 document.body
+    expect(document.body.textContent).toContain('发现新版本 0.8.7');
+    expect(findButton(document.body, '更新')).toBeTruthy();
   });
 
   it('点击更新后完成下载与安装并显示重启按钮', async () => {
@@ -142,7 +143,7 @@ describe('UpdateProgressDialog', () => {
     });
     await flushEffects();
 
-    const updateButton = findButton(container, '更新');
+    const updateButton = findButton(document.body, '更新');
     if (!updateButton) {
       throw new Error('Expected 更新 button to be present');
     }
@@ -162,6 +163,6 @@ describe('UpdateProgressDialog', () => {
       update,
       expect.objectContaining({ beforeInstall: expect.any(Function) }),
     );
-    expect(findButton(container, '重启')).toBeTruthy();
+    expect(findButton(document.body, '重启')).toBeTruthy();
   });
 });
