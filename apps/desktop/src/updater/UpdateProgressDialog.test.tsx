@@ -53,8 +53,10 @@ function createNativeUpdateStub(): object {
 
 async function flushEffects(): Promise<void> {
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    // 等待多个微任务周期，确保异步操作（如 checkForUpdate mock）完成并触发状态更新
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
   });
 }
 

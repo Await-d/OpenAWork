@@ -74,6 +74,14 @@ vi.mock('@openAwork/shared', () => ({
   updaterJsonEndpointsForChannel: vi.fn(() => ({ endpoints: [] })),
 }));
 
+vi.mock('./github-proxy.js', () => ({
+  clearProxyCache: vi.fn(),
+  detectFastestProxy: vi.fn(),
+  GITHUB_PROXIES: [],
+  LEGACY_PROXY_PREFIXES: [],
+  proxyUrl: (url: string) => url,
+}));
+
 import { downloadAndInstallProxyUpdate } from './proxy-update.js';
 
 describe('downloadAndInstallProxyUpdate', () => {
