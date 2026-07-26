@@ -190,7 +190,7 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
     expect(row?.result_json).toBeTruthy();
     expect(JSON.parse(row!.result_json!)).toMatchObject({
       role: 'executor',
-      protocol: 'stream',
+      protocol: 'stream-degraded',
       summary: '已完成登录接口实现，并补充 JWT 校验。',
     });
   });
