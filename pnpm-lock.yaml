@@ -67,22 +67,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/web-client
       '@tauri-apps/api':
-        specifier: ^2.11.1
+        specifier: ^2.10.1
         version: 2.11.1
       '@tauri-apps/plugin-dialog':
-        specifier: ^2.7.2
+        specifier: ^2.6.0
         version: 2.7.2
       '@tauri-apps/plugin-fs':
-        specifier: ^2.5.1
+        specifier: ^2.4.5
         version: 2.5.1
       '@tauri-apps/plugin-shell':
         specifier: ^2.3.5
         version: 2.3.5
       '@tauri-apps/plugin-store':
-        specifier: ^2.4.4
+        specifier: ^2.4.2
         version: 2.4.4
       '@tauri-apps/plugin-updater':
-        specifier: ^2.10.1
+        specifier: ^2.10.0
         version: 2.10.1
       hls.js:
         specifier: ^1.6.16
@@ -110,7 +110,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@6.4.3(@types/node@25.9.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.49.0)(tsx@4.23.1)(yaml@2.9.0))
       '@tauri-apps/cli':
-        specifier: ^2.11.4
+        specifier: ^2.10.1
         version: 2.11.4
       '@types/node':
         specifier: ^25.9.5
@@ -3638,9 +3638,6 @@ packages:
 
   '@types/node@20.19.37':
     resolution: {integrity: sha512-8kzdPJ3FsNsVIurqBs7oodNnCEVbni9yUEkaHbgptDACOPW04jimGagZ51E6+lXUwJjgnBw+hyko/lkFWCldqw==}
-
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
   '@types/node@25.9.5':
     resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
@@ -12661,7 +12658,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 20.19.43
+      '@types/node': 26.1.1
 
   '@types/chai@5.2.3':
     dependencies:
@@ -12674,7 +12671,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.1.1
 
   '@types/conventional-commits-parser@5.0.2':
     dependencies:
@@ -12700,7 +12697,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.2':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.1.1
       '@types/qs': 6.15.1
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -12756,10 +12753,6 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@25.9.5':
     dependencies:
       undici-types: 7.24.6
@@ -12800,12 +12793,12 @@ snapshots:
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.1.1
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 20.19.43
+      '@types/node': 26.1.1
 
   '@types/set-cookie-parser@2.4.10':
     dependencies:
