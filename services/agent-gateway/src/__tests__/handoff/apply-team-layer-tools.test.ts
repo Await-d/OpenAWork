@@ -13,6 +13,7 @@ import {
   applyTeamLayerToolGate,
   appendTeamDynamicInstructionBlocks,
   isTeamRoleLayer,
+  resolveTeamSessionRoleLayer,
 } from '../../handoff/capability/apply-team-layer-tools.js';
 import type { GatewayToolDefinition } from '../../tools/tool-definitions.js';
 
@@ -30,6 +31,16 @@ describe('isTeamRoleLayer', () => {
     expect(isTeamRoleLayer('user')).toBe(false);
     expect(isTeamRoleLayer(null)).toBe(false);
     expect(isTeamRoleLayer('chat')).toBe(false);
+  });
+});
+
+describe('resolveTeamSessionRoleLayer', () => {
+  it('普通会话未持久化角色层时不注入团队完成协议', () => {
+    expect(resolveTeamSessionRoleLayer(null)).toBeNull();
+  });
+
+  it('团队会话使用已持久化的角色层', () => {
+    expect(resolveTeamSessionRoleLayer('executor')).toBe('executor');
   });
 });
 

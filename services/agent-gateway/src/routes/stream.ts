@@ -193,8 +193,8 @@ import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
 import {
   appendTeamDynamicInstructionBlocks,
   applyTeamLayerToolGate,
+  resolveTeamSessionRoleLayer,
 } from '../handoff/capability/apply-team-layer-tools.js';
-import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
   buildTeamResumeSystemPrompt,
   buildTeamUserFacingStatusPrompt,
@@ -2511,7 +2511,7 @@ export async function handleStreamRequest(input: {
       //   （route_to_orchestrate / submit_artifact / ...）③ MCP 扁平工具直通
       //   ④ fail-closed 退回只读。逻辑收敛到 applyTeamLayerToolGate 单一来源，避免
       //   交互（本文件）与后台执行（stream-runtime）两条入口行为漂移。
-      const sessionRoleLayer = input.sessionContext.roleLayer ?? null;
+      const sessionRoleLayer = resolveTeamSessionRoleLayer(input.sessionContext.roleLayer);
       const layerFilteredTools = await applyTeamLayerToolGate({
         roleLayer: sessionRoleLayer,
         metadataJson: input.sessionContext.metadataJson,
@@ -2534,9 +2534,6 @@ export async function handleStreamRequest(input: {
       );
 
       // 260515-team-phase-a · T-06：构建 7 层团队指令栈
-      // session metadata 中的 teamWorkspaceId 决定是否注入团队约束；
-      // route.effectiveAgentId 映射到 5 层 role_layer（reception/pm1/pm2/executor/reviewer）。
-      // 复用前面 line 1728 已经解析过的 sessionMeta（避免重复 JSON.parse）。
       const teamWorkspaceIdForStack =
         typeof sessionMeta['teamWorkspaceId'] === 'string' ? sessionMeta['teamWorkspaceId'] : null;
       // 递归解析 workingDirectory：子 session 可能没有直接设置，
@@ -2546,14 +2543,11 @@ export async function handleStreamRequest(input: {
         sessionId: input.sessionId,
         userId: input.user.sub,
       });
-      const roleLayerForStack = mapAgentToTeamRoleLayer(
-        route.effectiveAgentId ?? requestData.agentId ?? null,
-      );
       const teamInstructionStackResult = await buildTeamInstructionStack({
         userId: input.user.sub,
         workspaceRoot: workingDirectoryForStack,
         teamWorkspaceId: teamWorkspaceIdForStack,
-        roleLayer: roleLayerForStack,
+        roleLayer: sessionRoleLayer,
       });
       let teamInstructionStack = teamInstructionStackResult.stableBlock;
       // 动态注入「团队编制清单」+「当前可用工具清单」（与 stream-runtime 共享同一实现，

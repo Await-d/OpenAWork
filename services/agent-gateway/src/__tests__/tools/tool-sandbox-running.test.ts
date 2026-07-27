@@ -113,4 +113,36 @@ describe('ToolSandbox.execute', () => {
     expect(result.isError).toBe(true);
     expect(String(result.output)).toContain('Tool timed out after 10000ms');
   }, 15_000);
+
+  it('Windows 会话带有 POSIX 工作区路径时将工具失败返回给调用方', async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (!platformDescriptor) {
+      throw new Error('无法读取 Node.js platform 属性描述符');
+    }
+
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    try {
+      const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+      const sandbox = createDefaultSandbox();
+
+      const result = await sandbox.execute(
+        {
+          toolCallId: 'call-list-posix-on-windows',
+          toolName: 'list',
+          rawInput: { path: '/home/await/project/OpenAWork', depth: 1 },
+        },
+        new AbortController().signal,
+        'session-1',
+      );
+
+      expect(result).toMatchObject({
+        toolCallId: 'call-list-posix-on-windows',
+        toolName: 'list',
+        isError: true,
+      });
+      expect(String(result.output)).toContain('当前网关运行在 Windows，无法访问 POSIX 路径');
+    } finally {
+      Object.defineProperty(process, 'platform', platformDescriptor);
+    }
+  });
 });

@@ -6506,12 +6506,11 @@ export class ToolSandbox {
       this.registry.register(withTimeout);
     }
 
-    const normalizedWorkspaceRequest =
-      normalizeWorkspaceManagedRawInput(sessionId, effectiveRequest) ?? effectiveRequest;
-
     const startAt = Date.now();
     let result: ToolCallResult;
     try {
+      const normalizedWorkspaceRequest =
+        normalizeWorkspaceManagedRawInput(sessionId, effectiveRequest) ?? effectiveRequest;
       result = await this.registry.execute(normalizedWorkspaceRequest, signal);
       result.toolName = request.toolName;
     } catch (error) {

@@ -66,7 +66,6 @@ import {
   buildMemoryBlockForSession,
 } from '../memory/memory-runtime.js';
 import { buildTeamInstructionStack } from '../team/team-instruction-stack.js';
-import { mapAgentToTeamRoleLayer } from '../team/team-role-layer-mapping.js';
 import {
   buildTeamResumeSystemPrompt,
   buildTeamUserFacingStatusPrompt,
@@ -79,6 +78,7 @@ import {
   applyTeamLayerToolGate,
   appendTeamDynamicInstructionBlocks,
   isTeamRoleLayer,
+  resolveTeamSessionRoleLayer,
 } from '../handoff/capability/apply-team-layer-tools.js';
 import {
   clearSessionRuntimeThread,
@@ -177,21 +177,7 @@ async function continueFromApprovedToolResult(input: {
   // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
   //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
   //   早期本路径漏了这步，导致干活层拿不到 submit_artifact/submit_patch 等指令 + MCP。
-  // roleLayer 解析优先级：effectiveAgentId → session metadata.roleLayer
-  // （后台执行的 team session 可能没有 effectiveAgentId，但 metadata 中有 roleLayer）
-  let roleLayerForTools = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
-  if (!roleLayerForTools) {
-    // 后台执行的 team session 可能没有 effectiveAgentId，
-    // 从 session metadata 的 teamRoleInstance.roleLayer 字段 fallback 获取
-    const roleInstance = sessionMeta['teamRoleInstance'];
-    const metaRoleLayer =
-      typeof roleInstance === 'object' && roleInstance !== null
-        ? (roleInstance as Record<string, unknown>)['roleLayer']
-        : null;
-    if (typeof metaRoleLayer === 'string' && isTeamRoleLayer(metaRoleLayer)) {
-      roleLayerForTools = metaRoleLayer;
-    }
-  }
+  const roleLayerForTools = resolveTeamSessionRoleLayer(sessionContext.roleLayer);
   let toolsForSession = filteredTools;
   let flatMcpToolsEnabled = false;
   if (isTeamRoleLayer(roleLayerForTools)) {
@@ -255,17 +241,7 @@ async function continueFromApprovedToolResult(input: {
     sessionId: input.sessionId,
     userId: input.userId,
   });
-  let roleLayerForStack = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
-  if (!roleLayerForStack) {
-    const roleInstance = sessionMeta['teamRoleInstance'];
-    const metaRoleLayer =
-      typeof roleInstance === 'object' && roleInstance !== null
-        ? (roleInstance as Record<string, unknown>)['roleLayer']
-        : null;
-    if (typeof metaRoleLayer === 'string' && isTeamRoleLayer(metaRoleLayer)) {
-      roleLayerForStack = metaRoleLayer;
-    }
-  }
+  const roleLayerForStack = roleLayerForTools;
   const teamInstructionStackResult = await buildTeamInstructionStack({
     userId: input.userId,
     workspaceRoot: workingDirectoryForStack,

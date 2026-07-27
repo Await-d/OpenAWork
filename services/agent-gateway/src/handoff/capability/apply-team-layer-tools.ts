@@ -48,6 +48,10 @@ export function isTeamRoleLayer(value: string | null | undefined): value is Team
   );
 }
 
+export function resolveTeamSessionRoleLayer(value: string | null | undefined): TeamLayer | null {
+  return isTeamRoleLayer(value) ? value : null;
+}
+
 /**
  * 对已 filterEnabledGatewayToolsForSession 过的工具列表施加团队层门控。
  * roleLayer 非五层时原样返回（普通 chat session 不门控）。
