@@ -845,7 +845,12 @@ async fn spawn_gateway_sidecar(
         if !wait_for_port_released(port, Duration::from_secs(3)).await {
             update_gateway_health(&app, GatewayHealth::Failed);
             return Err(format!(
-                "端口 {port} 已被占用且无法通过桌面鉴权令牌请求其退出；请换一个端口或手动结束占用进程。"
+                "端口 {port} 已被占用，无法启动网关。\n\n\
+                 可能原因：上一次 OpenAWork 未正常退出，残留进程仍在占用端口。\n\n\
+                 解决方案：\n\
+                 1. 关闭占用端口的程序\n\
+                 2. 重启电脑释放残留端口\n\
+                 3. 更换其他端口"
             ));
         }
     }

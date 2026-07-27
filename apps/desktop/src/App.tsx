@@ -67,11 +67,15 @@ function DesktopBootstrapScreen({
   error,
   onReconfigure,
   onRetry,
+  onChangePort,
 }: {
   error: string | null;
   onReconfigure: () => void;
   onRetry: () => void;
+  onChangePort?: () => void;
 }) {
+  const isPortOccupied = error?.includes('端口') && error?.includes('占用');
+
   return (
     <div
       style={{
@@ -115,13 +119,33 @@ function DesktopBootstrapScreen({
             {error}
           </p>
         ) : null}
+        {isPortOccupied ? (
+          <div
+            style={{
+              background: 'hsl(var(--muted))',
+              borderRadius: 10,
+              padding: '12px 14px',
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: 'hsl(var(--muted-foreground))',
+            }}
+          >
+            <strong style={{ color: 'hsl(var(--foreground))' }}>端口被占用解决方案：</strong>
+            <ul style={{ margin: '8px 0 0 16px', padding: 0 }}>
+              <li>关闭占用端口的程序（如上一次未正常退出的 OpenAWork）</li>
+              <li>重启电脑释放残留端口</li>
+              <li>点击下方「更换端口」使用其他端口</li>
+            </ul>
+          </div>
+        ) : null}
         {error ? (
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={onRetry}
               style={{
                 flex: 1,
+                minWidth: 100,
                 border: '1px solid hsl(var(--primary) / 0.35)',
                 borderRadius: 10,
                 padding: '0.75rem 0.9rem',
@@ -133,11 +157,31 @@ function DesktopBootstrapScreen({
             >
               重试连接
             </button>
+            {isPortOccupied && onChangePort ? (
+              <button
+                type="button"
+                onClick={onChangePort}
+                style={{
+                  flex: 1,
+                  minWidth: 100,
+                  border: '1px solid hsl(var(--primary) / 0.35)',
+                  borderRadius: 10,
+                  padding: '0.75rem 0.9rem',
+                  background: 'hsl(var(--primary))',
+                  color: 'hsl(var(--primary-foreground))',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
+              >
+                更换端口
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onReconfigure}
               style={{
                 flex: 1,
+                minWidth: 100,
                 border: '1px solid hsl(var(--border-default))',
                 borderRadius: 10,
                 padding: '0.75rem 0.9rem',
@@ -203,7 +247,19 @@ function useDesktopGatewayBootstrap(
           setWebAccess(true, port);
           await startDesktopGateway(port, bindMode);
           if (!(await waitForGatewayHealth(localUrl))) {
-            throw new Error('本地 Gateway 健康检查失败');
+            throw new Error(
+              `本地 Gateway 启动失败（端口 ${port}）。\n\n` +
+                '可能原因：\n' +
+                '1. 端口被其他程序占用\n' +
+                '2. 网关进程启动后立即崩溃\n' +
+                '3. 防火墙阻止了连接\n\n' +
+                '解决方案：\n' +
+                '1. 检查端口是否被占用：netstat -ano | findstr :' +
+                port +
+                '\n' +
+                '2. 重启电脑释放残留端口\n' +
+                '3. 更换其他端口',
+            );
           }
         }
 
@@ -321,6 +377,14 @@ export default function App() {
         <DesktopBootstrapScreen
           error={bootstrapError}
           onRetry={() => setBootstrapRetry((value) => value + 1)}
+          onChangePort={() => {
+            // 打开设置页面让用户修改端口
+            clearAuth();
+            localStorage.removeItem('onboarded');
+            localStorage.removeItem(DESKTOP_GATEWAY_MODE_KEY);
+            setBootstrapError(null);
+            setOnboarded(false);
+          }}
           onReconfigure={() => {
             clearAuth();
             localStorage.removeItem('onboarded');
