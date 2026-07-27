@@ -240,13 +240,22 @@ function useDesktopGatewayBootstrap(
       const localUrl = localGatewayUrl(port);
       const bindMode = webExposeLan ? 'lan' : 'localhost';
 
+      console.log('[bootstrap] 开始启动网关', { port, localUrl, bindMode });
+
       try {
         setBootstrapError(null);
         if (readDesktopGatewayMode() === 'local') {
           setGatewayUrl(localUrl);
           setWebAccess(true, port);
+
+          console.log('[bootstrap] 正在启动网关...');
           await startDesktopGateway(port, bindMode);
-          if (!(await waitForGatewayHealth(localUrl))) {
+          console.log('[bootstrap] 网关启动命令已发送，等待健康检查...');
+
+          const healthy = await waitForGatewayHealth(localUrl);
+          console.log('[bootstrap] 健康检查结果:', healthy);
+
+          if (!healthy) {
             throw new Error(
               `本地 Gateway 启动失败（端口 ${port}）。\n\n` +
                 '可能原因：\n' +
@@ -268,7 +277,10 @@ function useDesktopGatewayBootstrap(
             throw new Error('远程 Gateway 需要重新输入管理员凭据');
           }
 
+          console.log('[bootstrap] 正在认证...');
           const tokenPair = await authenticateDesktopGateway(localUrl);
+          console.log('[bootstrap] 认证成功');
+
           if (!cancelled) {
             setAuth(
               tokenPair.accessToken,
@@ -279,6 +291,7 @@ function useDesktopGatewayBootstrap(
           }
         }
       } catch (error: unknown) {
+        console.error('[bootstrap] 启动失败:', error);
         setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
         console.warn('Failed to bootstrap desktop gateway session', error);
       }
