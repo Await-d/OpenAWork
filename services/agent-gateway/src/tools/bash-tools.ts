@@ -76,6 +76,7 @@ import {
 import {
   assertSessionWorkingDirectory,
   getSessionWorkingDirectory,
+  rewriteUnboundPlaceholderPath,
   validateSessionWorkspacePath,
 } from '../workspace/workspace-safety.js';
 
@@ -108,9 +109,23 @@ const SIGKILL_GRACE_MS = 3_000;
  *     commands past the permission scope which is anchored on the literal
  *     command string)
  *   - Embedded `\r` / `\n` (opencode's bash.txt: "DO NOT use newlines to
- *     separate commands"). Multi-line strings inside quotes still pass.
+ *     separate commands")
+ *
+ * PowerShell differences (Windows default shell):
+ *   - `` ` `` is the escape character (`n / `t / `" …), NOT command
+ *     substitution. Blocking it makes ordinary format strings unusable.
+ *   - Here-strings (`@'...'@` / `@"..."@`) and multi-statement scripts
+ *     require real newlines. PowerShell 5.1 also lacks `&&`, so telling the
+ *     model to "use && to chain" is actively wrong.
+ *   - `$()` is PowerShell subexpression syntax and is already allowed when
+ *     it does not look like bash-style substitution.
  */
-const DISALLOWED_PATTERNS: ReadonlyArray<{ pattern: RegExp; message: string }> = [
+const DISALLOWED_PATTERNS: ReadonlyArray<{
+  pattern: RegExp;
+  message: string;
+  /** Skip this check entirely on PowerShell (semantics differ from bash). */
+  powerShellExempt?: boolean;
+}> = [
   {
     pattern: /(?:^|\s)sudo(?:\s|$)/,
     message: 'sudo is not allowed in bash commands.',
@@ -119,14 +134,20 @@ const DISALLOWED_PATTERNS: ReadonlyArray<{ pattern: RegExp; message: string }> =
     pattern: /(?:^|\s)(?:PATH|LD_[A-Z_]+|DYLD_[A-Z_]+)=/,
     message: 'Environment variable overrides for PATH/LD_*/DYLD_* are not allowed.',
   },
-  { pattern: /`/, message: 'Backtick command substitution is not allowed.' },
+  {
+    pattern: /`/,
+    message: 'Backtick command substitution is not allowed.',
+    powerShellExempt: true,
+  },
   {
     pattern: /\$\(/,
     message: 'Command substitution `$(...)` is not allowed.',
   },
   {
     pattern: /[\r\n]/,
-    message: 'Multi-line commands are not allowed; use && to chain.',
+    message:
+      'Multi-line commands are not allowed; chain with && (bash/pwsh) or `; if ($?) { ... }` (Windows PowerShell 5.1).',
+    powerShellExempt: true,
   },
 ];
 
@@ -135,7 +156,10 @@ interface ShellSafetyOptions {
 }
 
 export function assertSafeShellCommand(command: string, options: ShellSafetyOptions): void {
-  for (const { pattern, message } of DISALLOWED_PATTERNS) {
+  for (const { pattern, message, powerShellExempt } of DISALLOWED_PATTERNS) {
+    if (options.isPowerShell && powerShellExempt) {
+      continue;
+    }
     if (
       options.isPowerShell &&
       pattern.source === '\\$\\(' &&
@@ -271,11 +295,30 @@ function loadDescriptionTemplate(): string {
 const RAW_DESCRIPTION_TEMPLATE = loadDescriptionTemplate();
 
 function renderDescription(): string {
-  const shellName = pickShellName();
-  const chaining =
-    shellName === 'powershell'
-      ? "命令之间有依赖、必须串行时，该 shell 下请避免使用 '&&'（Windows PowerShell 5.1 不支持）。后一条命令需要前一条成功后才跑时，使用 PowerShell 条件如 `cmd1; if ($?) { cmd2 }`。"
-      : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
+  const shellChoice = pickShell();
+  const shellName = path
+    .basename(shellChoice.shell)
+    .toLowerCase()
+    .replace(/\.exe$/, '');
+  // powershell.exe (5.1) 与 pwsh.exe (7+) 都是 isPowerShell，但只有 5.1 缺 &&。
+  const chaining = shellChoice.isPowerShell
+    ? shellName === 'pwsh'
+      ? [
+          '当前是 PowerShell 7 (pwsh)：',
+          '1) 有依赖的串行命令可用 `&&`，或拆成多次 bash 调用。',
+          '2) 反引号 `` ` `` 是转义符（如 `` `n `` / `` `t `` / `` `" ``），不是 bash 命令替换。',
+          '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
+          '4) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+        ].join(' ')
+      : [
+          '当前是 Windows PowerShell 5.1：',
+          "1) 不支持 '&&'。有依赖的串行命令请拆成多次 bash 调用，或用 `cmd1; if ($?) { cmd2 }`。",
+          '2) 反引号 `` ` `` 是转义符（如 `` `n `` / `` `t `` / `` `" ``），不是 bash 命令替换。',
+          '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
+          '4) 可设 OPENAWORK_WINDOWS_SHELL=pwsh.exe 切到 PowerShell 7（支持 &&）。',
+          '5) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+        ].join(' ')
+    : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
   return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', process.platform)
     .replaceAll('${shell}', shellName)
     .replaceAll('${chaining}', chaining)
@@ -284,13 +327,6 @@ function renderDescription(): string {
 }
 
 // ---------- Shell selection ----------
-
-function pickShellName(): string {
-  return path
-    .basename(pickShell().shell)
-    .toLowerCase()
-    .replace(/\.exe$/, '');
-}
 
 export function resolveShellChoiceForPlatform(
   platform: NodeJS.Platform,
@@ -315,7 +351,8 @@ async function resolveBashWorkdir(
 
   if (sessionId) {
     const sessionWorkingDirectory = assertSessionWorkingDirectory(sessionId);
-    candidate = workdir ?? sessionWorkingDirectory;
+    // 未绑定 + 显式盘符根/占位路径：改写到桌面默认目录；已绑定绝不改写。
+    candidate = rewriteUnboundPlaceholderPath(sessionId, workdir ?? sessionWorkingDirectory);
     validation = validateSessionWorkspacePath({ path: candidate, sessionId });
   } else {
     candidate = workdir ?? WORKSPACE_ROOT;
@@ -835,17 +872,41 @@ export async function runBashCommand(
   return result;
 }
 
-function buildShellCompatibilityHint(input: {
+/** Exported for unit tests; used by runBashCommand metadata footer. */
+export function buildShellCompatibilityHint(input: {
   cwd: string;
   output: string;
   shellChoice: ShellChoice;
 }): string | null {
-  if (
-    input.shellChoice.name.startsWith('powershell') &&
-    input.output.includes("The token '&&' is not a valid statement separator in this version.")
-  ) {
+  if (!input.shellChoice.isPowerShell) {
+    return null;
+  }
+
+  if (input.output.includes("The token '&&' is not a valid statement separator in this version.")) {
     return `当前 shell 为 Windows PowerShell 5.1（cwd: ${input.cwd}），不支持 '&&'。请拆成多次 bash 调用、改用 \`; if ($?) { ... }\`，或通过 OPENAWORK_WINDOWS_SHELL 切到 pwsh.exe。`;
   }
+
+  // 仅在明确是 PowerShell 解析器错误时提示，避免把业务脚本 stderr 里的
+  // "Unexpected token" / 通用 ParserError 误判成 shell 语法问题。
+  const looksLikePowerShellParserError =
+    /CategoryInfo\s*:\s*ParserError/i.test(input.output) ||
+    /FullyQualifiedErrorId\s*:\s*(?:UnexpectedToken|MissingEndParenthesis|TerminatorExpectedAtEndOfString|InvalidEndOfLine|MissingFileSpecification)/i.test(
+      input.output,
+    ) ||
+    (/At line:\d+ char:\d+/i.test(input.output) &&
+      /(?:Unexpected token|The string is missing the terminator|Missing closing)/i.test(
+        input.output,
+      ));
+
+  if (looksLikePowerShellParserError) {
+    const shellLabel = input.shellChoice.name.replace(/\.exe$/i, '');
+    const chainHint =
+      shellLabel === 'pwsh'
+        ? '串行依赖可用 `&&`，或拆成多次 bash 调用。'
+        : '串行依赖用 `; if ($?) { ... }`（PS 5.1）或安装 pwsh 后用 &&。';
+    return `当前 shell 为 ${input.shellChoice.name}（cwd: ${input.cwd}）。这是 PowerShell 语法错误，不是业务命令失败：多行内容用 here-string（@'...'@）或多次 bash 调用；反引号是转义不是命令替换；${chainHint}`;
+  }
+
   return null;
 }
 

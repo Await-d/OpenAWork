@@ -34,6 +34,7 @@ const {
   assertSafeShellCommand,
   bashToolDefinition,
   buildBashPermissionScope,
+  buildShellCompatibilityHint,
   deriveBashDescription,
   resolveShellChoiceForPlatform,
   runBashCommand,
@@ -204,6 +205,34 @@ describe('bash-tools', () => {
       ).not.toThrow();
     });
 
+    it('允许 PowerShell 反引号转义（`t/`n/`"），不按 bash 命令替换拦截', () => {
+      expect(() =>
+        assertSafeShellCommand('Write-Output ("{0}`t{1}MB`tdur={2}" -f $_.Name, $sz, $d)', {
+          isPowerShell: true,
+        }),
+      ).not.toThrow();
+    });
+
+    it('允许 PowerShell here-string / 多行脚本', () => {
+      const hereString = [
+        "@'",
+        'from pathlib import Path',
+        "print('ok')",
+        "'@",
+        ' | Set-Content -Encoding utf8 script.py',
+      ].join('\n');
+      expect(() => assertSafeShellCommand(hereString, { isPowerShell: true })).not.toThrow();
+    });
+
+    it('非 PowerShell 仍拒绝反引号命令替换与多行', () => {
+      expect(() => assertSafeShellCommand('echo `whoami`', { isPowerShell: false })).toThrow(
+        /Backtick/,
+      );
+      expect(() => assertSafeShellCommand('echo a\necho b', { isPowerShell: false })).toThrow(
+        /Multi-line/,
+      );
+    });
+
     it('仍然拒绝 bash 风格的命令替换', () => {
       expect(() => assertSafeShellCommand('echo $(whoami)', { isPowerShell: false })).toThrow(
         /Command substitution/,
@@ -253,6 +282,82 @@ describe('bash-tools', () => {
           "Write-Output \"$($_.Path.Replace((Get-Location).Path + '\\\\', '')):$($_.LineNumber)\"",
         ),
       ).toEqual([]);
+    });
+
+    it('含换行的多行命令不生成 always-allow 通配，避免误批后续语句', () => {
+      expect(
+        buildBashApprovalPatterns(
+          ['Get-ChildItem .', 'Remove-Item -Recurse C:\\Windows'].join('\n'),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('buildShellCompatibilityHint', () => {
+    const powershell51 = {
+      shell: 'powershell.exe',
+      isPowerShell: true,
+      name: 'powershell.exe',
+    };
+    const pwsh = {
+      shell: 'pwsh.exe',
+      isPowerShell: true,
+      name: 'pwsh.exe',
+    };
+
+    it('识别 PS 5.1 的 && 语法错误', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'C:\\work',
+        output:
+          "At line:1 char:10\r\n+ echo a && echo b\r\n+          ~~\r\nThe token '&&' is not a valid statement separator in this version.",
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/不支持 '&&'/);
+      expect(hint).toMatch(/OPENAWORK_WINDOWS_SHELL/);
+    });
+
+    it('仅在明确 ParserError 时提示，不把业务 stderr 当 shell 语法问题', () => {
+      expect(
+        buildShellCompatibilityHint({
+          cwd: 'C:\\work',
+          output: 'ParserError: failed to parse config.json\nUnexpected token at offset 12',
+          shellChoice: powershell51,
+        }),
+      ).toBeNull();
+
+      const realParser = buildShellCompatibilityHint({
+        cwd: 'C:\\work',
+        output: [
+          'At line:1 char:20',
+          "+ Write-Output 'abc",
+          '+                    ~',
+          "The string is missing the terminator: '.",
+          '    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException',
+          '    + FullyQualifiedErrorId : TerminatorExpectedAtEndOfString',
+        ].join('\r\n'),
+        shellChoice: powershell51,
+      });
+      expect(realParser).toMatch(/PowerShell 语法错误/);
+      expect(realParser).toMatch(/here-string/);
+      expect(realParser).not.toMatch(/不支持 '&&'/);
+    });
+
+    it('pwsh 的 ParserError 提示不鼓励改用 PS 5.1 条件链', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'C:\\work',
+        output: [
+          'At line:1 char:5',
+          '+ foo)',
+          '+     ~',
+          "Unexpected token ')' in expression or statement.",
+          '    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException',
+          '    + FullyQualifiedErrorId : UnexpectedToken',
+        ].join('\r\n'),
+        shellChoice: pwsh,
+      });
+      expect(hint).toMatch(/pwsh\.exe/);
+      expect(hint).toMatch(/&&/);
+      expect(hint).not.toMatch(/PS 5\.1/);
     });
   });
 

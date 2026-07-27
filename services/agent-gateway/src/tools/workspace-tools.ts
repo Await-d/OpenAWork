@@ -8,6 +8,7 @@ import { WORKSPACE_ROOT } from '../infra/db.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
 import {
   assertSessionWorkingDirectory,
+  assertSessionWorkspacePath,
   ensureIgnoreRulesLoadedForPath,
 } from '../workspace/workspace-safety.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
@@ -25,10 +26,6 @@ import {
 } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
-import {
-  assertSessionWorkspacePath,
-  getSessionWorkingDirectory,
-} from '../workspace/workspace-safety.js';
 
 interface WorkspaceTreeNode {
   path: string;
@@ -226,10 +223,14 @@ function assertAccessibleWorkspacePath(
   target: 'directory' | 'file',
   sessionId?: string,
 ): string {
-  assertWorkspacePathSupportedByCurrentHost(path);
+  // 有 sessionId 时：先经 assertSessionWorkspacePath（含未绑定盘符根改写 + 主机校验）。
+  // 禁止在改写前对原始 path 做主机校验，否则 Windows 上 `/` 会在改写前直接炸掉。
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : validateWorkspacePath(path);
+    : (() => {
+        assertWorkspacePathSupportedByCurrentHost(path);
+        return validateWorkspacePath(path);
+      })();
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -246,10 +247,12 @@ function assertWritableWorkspacePath(
   target: 'directory' | 'file',
   sessionId?: string,
 ): string {
-  assertWorkspacePathSupportedByCurrentHost(path);
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : validateWorkspacePath(path);
+    : (() => {
+        assertWorkspacePathSupportedByCurrentHost(path);
+        return validateWorkspacePath(path);
+      })();
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -262,10 +265,12 @@ function assertWritableWorkspacePath(
 }
 
 function assertSearchablePath(path: string, sessionId?: string): string {
-  assertWorkspacePathSupportedByCurrentHost(path);
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : validateWorkspacePath(path);
+    : (() => {
+        assertWorkspacePathSupportedByCurrentHost(path);
+        return validateWorkspacePath(path);
+      })();
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -633,6 +638,8 @@ function resolveSearchRoot(path: string | undefined, sessionId?: string): string
     return assertSearchablePath(path, sessionId);
   }
   if (sessionId) {
+    // 有会话时：已绑定用会话路径；未绑定由 assertSessionWorkingDirectory
+    // 回退到桌面端默认目录。禁止落到盘符根。
     return assertSearchablePath(assertSessionWorkingDirectory(sessionId), sessionId);
   }
   return assertSearchablePath(WORKSPACE_ROOT);
@@ -648,7 +655,7 @@ export const listTool: ToolDefinition<
 > = {
   name: 'list',
   description:
-    '列出工作区路径下的文件与目录。读取文件前先用它检视目录结构。必填 JSON：{"path":"/absolute/workspace/path","depth":2}。',
+    '列出工作区路径下的文件与目录。读取文件前先用它检视目录结构。必填 JSON：{"path":"<绝对工作区路径>","depth":2}。未绑定工作区时请省略猜测路径，使用当前会话可用的工作目录。',
   inputSchema: workspaceTreeInputSchema,
   outputSchema: workspaceTreeOutputSchema,
   timeout: 10000,
@@ -902,9 +909,11 @@ export async function executeWorkspaceWriteFile(
       })
     : undefined;
   await fsp.writeFile(safePath, input.content, 'utf8');
+  // 写后 format 的根目录：显式 workspaceRoot > 会话路径（含未绑定桌面回退）> 全局 WORKSPACE_ROOT。
+  // 已绑定会话不会被改写；未绑定会话通过 assertSessionWorkingDirectory 落到桌面端默认目录。
   const effectiveRoot =
     options?.workspaceRoot ??
-    (options?.sessionId ? getSessionWorkingDirectory(options.sessionId) : null) ??
+    (options?.sessionId ? assertSessionWorkingDirectory(options.sessionId) : null) ??
     WORKSPACE_ROOT;
   if (effectiveRoot) {
     await formatFileAfterWrite(safePath, effectiveRoot).catch((_e: unknown) => undefined);

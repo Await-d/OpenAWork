@@ -54,7 +54,7 @@ describe('resolveTaskGraphProjectRoot', () => {
     expect(resolveTaskGraphProjectRoot('session-1')).toBe('/workspace/nested');
   });
 
-  it('会话 workingDirectory 对当前主机不可访问时回落到 gateway data 目录', async () => {
+  it('已绑定 workingDirectory 对当前主机不可访问时直接抛错，不允许回退', async () => {
     mocks.getSessionWorkingDirectory.mockReturnValue('E:\\01Project\\appearance-automation');
     mocks.assertWorkspacePathSupportedByCurrentHost.mockImplementation(() => {
       throw new Error('当前网关运行在 Linux，无法访问 Windows 路径');
@@ -62,16 +62,19 @@ describe('resolveTaskGraphProjectRoot', () => {
 
     const { resolveTaskGraphProjectRoot } = await import('../../task/task-graph-root.js');
 
-    expect(resolveTaskGraphProjectRoot('session-1')).toBe('/gateway/data');
+    expect(() => resolveTaskGraphProjectRoot('session-1')).toThrow(
+      /当前网关运行在 Linux，无法访问 Windows 路径/,
+    );
+    expect(mocks.resolveGatewayDataDir).not.toHaveBeenCalled();
   });
 
-  it('没有会话 workingDirectory 且全局根不是仓库时回落到 gateway data 目录', async () => {
+  it('未绑定 workingDirectory 且全局根不是仓库时回落到桌面端默认目录', async () => {
     const { resolveTaskGraphProjectRoot } = await import('../../task/task-graph-root.js');
 
     expect(resolveTaskGraphProjectRoot('session-1')).toBe('/gateway/data');
   });
 
-  it('没有会话 workingDirectory 但全局根看起来是仓库时保留 WORKSPACE_ROOT', async () => {
+  it('未绑定 workingDirectory 但全局根看起来是仓库时保留 WORKSPACE_ROOT', async () => {
     mocks.existsSync.mockImplementation(
       (targetPath: string) =>
         targetPath === '/gateway/system32/.git' ||

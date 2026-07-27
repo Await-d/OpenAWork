@@ -223,7 +223,10 @@ const SHELL_CONTROL_TOKENS = new Set(['|', '||', '&&', ';', '&', '>', '>>', '<',
 const PARTIAL_SCOPE_SKIP_TOKENS = new Set(['--']);
 
 function containsDynamicShellEvaluation(command: string): boolean {
-  return command.includes('$(') || command.includes('`');
+  // `$()` / `` ` ``：动态求值，禁止生成 always-allow 通配。
+  // 含换行：PowerShell 允许 here-string/多语句后，tokenizer 会把后续行
+  // 误并进 primary tokens，生成过宽的 always 模式；改为仅精确匹配。
+  return command.includes('$(') || command.includes('`') || /[\r\n]/.test(command);
 }
 
 export function readPrimaryCommandTokens(tokens: string[]): string[] {

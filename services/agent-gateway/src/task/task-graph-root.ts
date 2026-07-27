@@ -23,14 +23,12 @@ function resolveWorkspaceRootForWorkingDirectory(workingDirectory: string): stri
 export function resolveTaskGraphProjectRoot(sessionId: string): string {
   const sessionWorkingDirectory = getSessionWorkingDirectory(sessionId);
   if (sessionWorkingDirectory) {
-    try {
-      assertWorkspacePathSupportedByCurrentHost(sessionWorkingDirectory);
-      return resolveWorkspaceRootForWorkingDirectory(sessionWorkingDirectory);
-    } catch {
-      return resolveGatewayDataDir();
-    }
+    // 已绑定工作区：只用会话自身路径，主机不兼容时直接抛错，不允许回退。
+    assertWorkspacePathSupportedByCurrentHost(sessionWorkingDirectory);
+    return resolveWorkspaceRootForWorkingDirectory(sessionWorkingDirectory);
   }
 
+  // 未绑定工作区：回退到当前主机桌面端默认数据目录（或看起来像仓库的全局根）。
   if (isRepositoryWorkspaceRoot(WORKSPACE_ROOT)) {
     return WORKSPACE_ROOT;
   }

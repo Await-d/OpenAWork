@@ -95,6 +95,7 @@ import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { resolveUnboundSessionWorkspaceFallback } from '../workspace/workspace-safety.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
@@ -913,7 +914,8 @@ function buildRouteOnlyUpstreamSummary(
 }
 
 function buildMissingToolArgumentsMessage(toolName: string, workingDirectory?: string): string {
-  const examplePath = workingDirectory ?? '/absolute/workspace/path';
+  // 未绑定会话不要再示范 /absolute/...，否则模型重试仍会撞 POSIX 根路径。
+  const examplePath = workingDirectory ?? resolveUnboundSessionWorkspaceFallback();
 
   if (toolName === 'list') {
     return `Tool "list" was called without arguments. Retry with JSON like {"path":"${examplePath}","depth":2}.`;
@@ -1607,7 +1609,9 @@ export async function executeToolCalls(input: {
     // Block Prometheus from writing outside .sisyphus/*.md, inject read-only
     // warning on task delegation, and workflow reminder on plan writes.
     const currentAgentId = input.agentId ?? '';
-    const workspaceRoot = input.workspaceRoot ?? workingDirectory ?? process.cwd();
+    // 已绑定：用会话路径；未绑定：回退到桌面端默认目录（禁止 process.cwd() 落到盘符根）。
+    const workspaceRoot =
+      input.workspaceRoot ?? workingDirectory ?? resolveUnboundSessionWorkspaceFallback();
     const prometheusGuard = checkPrometheusToolGuard({
       agentId: currentAgentId,
       toolName: toolCall.toolName,
@@ -2098,12 +2102,13 @@ export async function handleStreamRequest(input: {
   // Start-work (oh-my-opencode start-work pattern):
   // Detect "ultrawork/ulw" keyword and inject plan context + create boulder state.
   let startWorkContext: string | null = null;
+  // 已绑定：用会话路径；未绑定：回退到桌面端默认目录（禁止 process.cwd() 落到盘符根）。
   const workspaceRootForStartWork =
     resolveSessionWorkspacePath({
       metadataJson: input.sessionContext.metadataJson,
       sessionId: input.sessionId,
       userId: input.user.sub,
-    }) ?? process.cwd();
+    }) ?? resolveUnboundSessionWorkspaceFallback();
   if (detectUltraworkKeyword(requestData.message)) {
     startWorkContext = await processStartWork(
       workspaceRootForStartWork,

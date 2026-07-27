@@ -255,6 +255,7 @@ import {
   getSessionWorkspaceRoot,
   hasWorkspacePermanentPermission,
   requiresBoundSessionWorkspace,
+  rewriteUnboundPlaceholderPath,
   validateSessionWorkspacePath,
 } from '../workspace/workspace-safety.js';
 import {
@@ -1588,7 +1589,10 @@ function isAutoAllowedGitBashRead(input: {
   if (!filePath) {
     return false;
   }
-  return validateSessionWorkspacePath({ path: filePath, sessionId: input.sessionId }).ok;
+  return validateSessionWorkspacePath({
+    path: rewriteUnboundPlaceholderPath(input.sessionId, filePath),
+    sessionId: input.sessionId,
+  }).ok;
 }
 
 /**
@@ -1684,8 +1688,9 @@ function buildPermissionRequestContext(
 
   switch (request.toolName) {
     case 'write': {
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
@@ -1699,8 +1704,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'edit': {
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
@@ -1714,8 +1720,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'multi_edit': {
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
@@ -1843,10 +1850,12 @@ function buildPermissionRequestContext(
       const command = typeof rawInput.command === 'string' ? rawInput.command.trim() : '';
       const sessionWorkingDirectory = getSessionWorkingDirectory(sessionId);
       if (!sessionWorkingDirectory && requiresBoundSessionWorkspace(sessionId)) return null;
-      const workdirValue =
+      // 未绑定：回退桌面端默认目录；已绑定：只用会话路径。禁止静默落到盘符根。
+      const rawWorkdir =
         typeof rawInput.workdir === 'string'
           ? rawInput.workdir
-          : (sessionWorkingDirectory ?? WORKSPACE_ROOT);
+          : (sessionWorkingDirectory ?? assertSessionWorkingDirectory(sessionId));
+      const workdirValue = rewriteUnboundPlaceholderPath(sessionId, rawWorkdir);
       const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
       const safeWorkdir = validation.ok ? validation.safePath : null;
       if (!command || !safeWorkdir) return null;
@@ -1914,8 +1923,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'workspace_create_directory': {
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safePath = validation?.ok ? validation.safePath : null;
       if (!safePath) return null;
@@ -1929,8 +1939,9 @@ function buildPermissionRequestContext(
       };
     }
     case 'workspace_review_revert': {
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safeWorkspacePath = validation?.ok ? validation.safePath : null;
       const filePath = typeof rawInput.filePath === 'string' ? rawInput.filePath : null;
@@ -1949,8 +1960,9 @@ function buildPermissionRequestContext(
       if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
         return null;
       }
-      const validation = pathValue
-        ? validateSessionWorkspacePath({ path: pathValue, sessionId })
+      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
+      const validation = effectivePath
+        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
         : null;
       const safePath = validation?.ok ? validation.safePath : null;
       const newName = typeof rawInput.newName === 'string' ? rawInput.newName.trim() : '';
@@ -6366,12 +6378,18 @@ export class ToolSandbox {
         (typeof rawInput.filePath === 'string' ? rawInput.filePath : undefined);
       let safeFilePath: string | undefined;
       if (filePath) {
-        const validation = validateSessionWorkspacePath({ path: filePath, sessionId });
+        // 仅未绑定：盘符根/占位路径先改写，再做会话范围校验。已绑定绝不改写。
+        const effectiveFilePath = rewriteUnboundPlaceholderPath(sessionId, filePath);
+        const validation = validateSessionWorkspacePath({ path: effectiveFilePath, sessionId });
         if (!validation.ok) {
           const result: ToolCallResult = {
             toolCallId: request.toolCallId,
             toolName: request.toolName,
-            output: formatSessionWorkspaceViolation(sessionId, filePath, validation.reason),
+            output: formatSessionWorkspaceViolation(
+              sessionId,
+              effectiveFilePath,
+              validation.reason,
+            ),
             isError: true,
             durationMs: 0,
           };

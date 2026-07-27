@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { resolveUnboundSessionWorkspaceFallback } from '../workspace/workspace-safety.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -171,7 +172,8 @@ export async function runInteractiveBashCommand(
           kind: 'tmux',
           command: tmuxCommand,
           description: `tmux ${subcommand} ${sessionName}`.trim(),
-          cwd: trackingContext.workingDirectory ?? process.cwd(),
+          // 已绑定：用会话路径；未绑定：回退到桌面端默认目录（禁止 process.cwd() 落到盘符根）。
+          cwd: trackingContext.workingDirectory ?? resolveUnboundSessionWorkspaceFallback(),
           terminalId: buildTmuxTerminalId(sessionName),
           initialStatus: 'tmux-spawned',
           metadata: { tmuxSessionName: sessionName },

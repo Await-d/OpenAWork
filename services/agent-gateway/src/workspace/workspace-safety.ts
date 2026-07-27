@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   hasWorkspacePersistentPermission,
@@ -7,11 +7,13 @@ import {
   writeWorkspacePermissionConfig,
 } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
+import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import {
   assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
+  isWorkspaceAbsolutePath,
   resolveWorkspaceEntryPath,
   validateWorkspacePath,
 } from './workspace-paths.js';
@@ -112,14 +114,85 @@ export function requiresBoundSessionWorkspace(sessionId: string): boolean {
   );
 }
 
+/**
+ * 未绑定工作区会话的运行时回退目录：各系统桌面端默认数据目录
+ *（Windows: %LOCALAPPDATA%/OpenAWork/agent-gateway，
+ *  macOS: ~/Library/Application Support/OpenAWork/data/agent-gateway，
+ *  Linux: ~/.local/share/OpenAWork/agent-gateway）。
+ *
+ * 仅未绑定会话可回退；已绑定 workingDirectory 的会话必须使用自身路径，
+ * 不允许静默改写到其它目录。
+ */
+export function resolveUnboundSessionWorkspaceFallback(): string {
+  return resolveGatewayDataDir();
+}
+
+/**
+ * 盘符根 / 文件系统根（`/`、`C:\`、`D:/` 等）以及常见占位路径。
+ * 模型在未绑定会话里常把这些当作 path 传入，在 Windows 上会触发
+ * 「无法访问 POSIX 路径：/」。仅未绑定会话可把它们改写为桌面默认目录。
+ */
+export function isFilesystemRootOrPlaceholderPath(path: string): boolean {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  const normalized = trimmed.replace(/\\/g, '/');
+  if (
+    normalized === '/' ||
+    normalized === '/absolute/workspace/path' ||
+    normalized.startsWith('/absolute/workspace/path/')
+  ) {
+    return true;
+  }
+
+  // Windows 盘符根：C:\ / C:/ / C:
+  if (/^[A-Za-z]:[/\\]?$/.test(trimmed)) {
+    return true;
+  }
+
+  if (!isWorkspaceAbsolutePath(trimmed)) {
+    return false;
+  }
+
+  try {
+    const resolved = resolve(trimmed);
+    return dirname(resolved) === resolved;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 未绑定会话里，把盘符根 / 占位路径改写为桌面默认目录；其余路径原样返回。
+ * 已绑定会话不做任何改写。
+ */
+export function rewriteUnboundPlaceholderPath(sessionId: string, path: string): string {
+  const workingDirectory = getSessionWorkingDirectory(sessionId);
+  if (workingDirectory) {
+    return path;
+  }
+  if (requiresBoundSessionWorkspace(sessionId)) {
+    return path;
+  }
+  if (!isFilesystemRootOrPlaceholderPath(path)) {
+    return path;
+  }
+  return resolveUnboundSessionWorkspaceFallback();
+}
+
 export function assertSessionWorkingDirectory(sessionId: string): string {
   const workingDirectory = getSessionWorkingDirectory(sessionId);
   if (!workingDirectory) {
     if (requiresBoundSessionWorkspace(sessionId)) {
       throw new Error('当前会话未绑定工作区，请先设置 workingDirectory。');
     }
-    return WORKSPACE_ROOT;
+    // 普通 chat 未绑定工作区：回退到当前主机桌面端默认数据目录，
+    // 避免落到盘符根（/ 或 C:\）触发跨平台路径错误。
+    return resolveUnboundSessionWorkspaceFallback();
   }
+  // 已绑定：原样返回，不做任何回退。
   return workingDirectory;
 }
 
@@ -168,15 +241,19 @@ export function validateSessionWorkspacePath(input: {
 }
 
 export function assertSessionWorkspacePath(input: { path: string; sessionId: string }): string {
-  assertWorkspacePathSupportedByCurrentHost(input.path);
   const workingDirectory = getSessionWorkingDirectory(input.sessionId);
   if (!workingDirectory && requiresBoundSessionWorkspace(input.sessionId)) {
     throw new Error(`当前会话未绑定工作区，禁止访问路径：${input.path}`);
   }
-  const result = validateSessionWorkspacePath(input);
+
+  // 仅未绑定：盘符根 / 占位路径改写为桌面默认目录。已绑定绝不改写。
+  const effectivePath = rewriteUnboundPlaceholderPath(input.sessionId, input.path);
+  assertWorkspacePathSupportedByCurrentHost(effectivePath);
+
+  const result = validateSessionWorkspacePath({ path: effectivePath, sessionId: input.sessionId });
   if (!result.ok) {
     if (result.reason === 'forbidden-path') {
-      throw new Error(`Forbidden workspace path: ${input.path}`);
+      throw new Error(`Forbidden workspace path: ${effectivePath}`);
     }
     throw new Error(`Target path is outside current session workspace: ${result.safePath}`);
   }
