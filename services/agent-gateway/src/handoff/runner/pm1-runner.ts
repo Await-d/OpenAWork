@@ -31,6 +31,7 @@ import {
   SUBMIT_EXECUTION_RESULT_PROTOCOL,
   SUBMIT_REVIEW_REPORT_PROTOCOL,
 } from '../capability/completion-protocol-contract.js';
+import { inferExecutionSummaryVerdict } from '../workflow/execution-output-normalization.js';
 import { listSessionMessagesV2 } from '../../message/message-v2-adapter.js';
 import { extractLatestChildSessionSummary } from '../../task/task-result-extraction.js';
 import { sqliteGet } from '../../infra/db.js';
@@ -113,10 +114,10 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           '**完成协议——必须遵守**：',
           '1. 先直接读代码/查证据，不要只口头计划。禁止在第一轮就回复 end_turn。',
           '2. 必须先调用工具读取相关代码文件；如果代码不存在，明确标记"无法评审"。',
-          '3. 结束前必须调用 submit_review 提交结构化结果：',
+          '3. 结束前必须调用 submit_review 提交结果；优先使用结构化字段：',
           '   - verdict: pass | fail',
           '   - items: [{ id, status: pass|fail, reason?, fileRefs? }]',
-          '   - overallReason（可选）',
+          '   - 如果无法完整填写，至少提供 overallReason 或 content 的简要结论，系统会交给校验层检查。',
           '4. 只 mark_completed 或只写文字不算完成；hard 模式下缺少 submit_review 会 protocol-failure。',
           '5. 使用工具时必须传入完整参数，不允许空参数调用。',
         ].join('\n')
@@ -126,10 +127,11 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           '**完成协议——必须遵守**：',
           '1. 第一轮必须调用工具——先读取相关文件，再写入/修改文件。禁止在第一轮就回复 end_turn。',
           '2. 使用 write/submit_patch/edit 产出实际文件；不要只回复文字描述。',
-          '3. 结束前必须调用 submit_execution_result 提交硬契约：',
+          '3. 结束前必须调用 submit_execution_result 提交结果；优先使用结构化字段：',
           '   - taskId / status / changedFiles',
           '   - checklist: [{ id, status: pass|fail|blocked, evidence }]',
           '   - summary / verification',
+          '   - 如果无法完整填写，至少提供 summary 或 content 的简要总结，系统会从当前任务归一化后交给校验层检查。',
           '4.【自验证】checklist 覆盖任务验收条件；未覆盖标 fail/blocked，不要假 pass。',
           '5. 只 mark_completed 或只写文字不算完成；hard 模式下缺少 submit_execution_result 会 protocol-failure。',
           '6. 使用工具时必须传入完整参数，不允许空参数调用。',
@@ -581,6 +583,21 @@ function collectExecutionCompletionEvidence(input: {
     return {
       ok: false,
       reason: `缺少 ${requiredProtocol}，且缺少 artifact/有效 assistant 总结`,
+    };
+  }
+
+  const summaryVerdict = inferExecutionSummaryVerdict(summary);
+  if (summaryVerdict === 'fail' || summaryVerdict === 'blocked') {
+    return {
+      ok: false,
+      reason: `缺少 ${requiredProtocol}，且摘要明确表示${summaryVerdict === 'blocked' ? '阻塞' : '失败'}：${summary}`,
+    };
+  }
+
+  if (!hasArtifact && summaryVerdict === 'unknown') {
+    return {
+      ok: false,
+      reason: `缺少 ${requiredProtocol}，且摘要不够明确，无法作为完成证据：${summary}`,
     };
   }
 

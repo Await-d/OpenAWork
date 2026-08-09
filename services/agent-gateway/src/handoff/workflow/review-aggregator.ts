@@ -23,11 +23,13 @@ import { publishTeamEvent } from '../bus/team-events-bus.js';
 import { deriveQualityReviewDisposition } from '../../team/team-failure-policy.js';
 import {
   extractFailedItemIds,
+  inferReviewVerdictFromText,
   getResultProtocol,
   resolveSubmitProtocolMode,
   SUBMIT_EXECUTION_RESULT_PROTOCOL,
   SUBMIT_REVIEW_REPORT_PROTOCOL,
 } from '../capability/completion-protocol-contract.js';
+import { normalizeReviewOutput } from './review-output-normalization.js';
 
 export interface ReviewInput {
   userId: string;
@@ -52,6 +54,7 @@ export interface ReviewReport {
 interface ReviewReadinessResult {
   passed: boolean;
   issues: string[];
+  taskOverview: string;
   childResults: string;
   /**
    * 当存在 failed/cancelled 子任务时，ready 不会 pass，但 verdict 应该是
@@ -74,6 +77,7 @@ export type FailureDisposition =
 
 async function runSpecReview(input: {
   specContent: string;
+  taskOverview: string;
   childResults: string;
   callLlm: ReviewInput['callLlm'];
 }): Promise<{ passed: boolean; issues: string[] }> {
@@ -89,32 +93,23 @@ async function runSpecReview(input: {
    - 推测性的潜在问题（没有实际证据证明未覆盖）
    - 实现方式与预期不同但功能等价的情况
 
-**输出格式（严格遵守）**：
+**输出要求（优先结构化）**：
 每行一条，只输出以下两种格式之一：
 PASS
 ISSUE: [具体验收场景编号或描述] — [简述在实现结果中未找到的证据]
 
 如果所有验收场景都已覆盖，只输出一行 PASS。
-如果有未覆盖的场景，输出对应的 ISSUE 行，不要输出 PASS。`;
+如果有未覆盖的场景，输出对应的 ISSUE 行，不要输出 PASS。
+如果不便使用上述格式，可以用一两句简短总结明确说明是否通过及具体问题。`;
 
-  const user = `<spec>\n${input.specContent}\n</spec>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
+  const user = `<spec>\n${input.specContent}\n</spec>\n\n<task-overview>\n${input.taskOverview}\n</task-overview>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
   const result = await input.callLlm(system, user);
-  const lines = result
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (lines.some((l) => l === 'PASS') && !lines.some((l) => l.startsWith('ISSUE:'))) {
-    return { passed: true, issues: [] };
-  }
-  const issues = lines
-    .filter((l) => l.startsWith('ISSUE:'))
-    .map((l) => l.replace(/^ISSUE:\s*/, ''));
-  return { passed: issues.length === 0, issues };
+  return normalizeReviewOutput(result, inferReviewVerdictFromText);
 }
 
 async function runQualityReview(input: {
   constitutionBody: string;
+  taskOverview: string;
   childResults: string;
   callLlm: ReviewInput['callLlm'];
 }): Promise<{ passed: boolean; issues: string[] }> {
@@ -135,28 +130,18 @@ async function runQualityReview(input: {
    - spec 中未要求的质量标准
 3. 如果 constitution 为空或没有明确的禁止条款，不要以"宪法合规"为由输出 ISSUE
 
-**输出格式（严格遵守）**：
+**输出要求（优先结构化）**：
 每行一条，只输出以下两种格式之一：
 PASS
 ISSUE: [检查维度] — [具体问题描述，包含文件位置]
 
 如果所有检查维度都通过，只输出一行 PASS。
-如果有实际问题，输出对应的 ISSUE 行，不要输出 PASS。`;
+如果有实际问题，输出对应的 ISSUE 行，不要输出 PASS。
+如果不便使用上述格式，可以用一两句简短总结明确说明是否通过及具体问题。`;
 
-  const user = `<constitution>\n${input.constitutionBody}\n</constitution>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
+  const user = `<constitution>\n${input.constitutionBody}\n</constitution>\n\n<task-overview>\n${input.taskOverview}\n</task-overview>\n\n<implementation-results>\n${input.childResults}\n</implementation-results>`;
   const result = await input.callLlm(system, user);
-  const lines = result
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (lines.some((l) => l === 'PASS') && !lines.some((l) => l.startsWith('ISSUE:'))) {
-    return { passed: true, issues: [] };
-  }
-  const issues = lines
-    .filter((l) => l.startsWith('ISSUE:'))
-    .map((l) => l.replace(/^ISSUE:\s*/, ''));
-  return { passed: issues.length === 0, issues };
+  return normalizeReviewOutput(result, inferReviewVerdictFromText);
 }
 
 // ─── Report 生成 ────────────────────────────────────────────────────────────
@@ -271,17 +256,20 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
     return report;
   }
 
+  const taskOverview = readiness.taskOverview;
   const childResults = readiness.childResults;
 
   // 并行跑 spec review + quality review（仅结构化全部 pass 后做语义抽检）
   const [specResult, qualityResult] = await Promise.all([
     runSpecReview({
       specContent: input.specContent,
+      taskOverview,
       childResults,
       callLlm: input.callLlm,
     }),
     runQualityReview({
       constitutionBody: input.constitutionBody,
+      taskOverview,
       childResults,
       callLlm: input.callLlm,
     }),
@@ -367,6 +355,7 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
   const structuredFailedItems: string[] = [];
   let protocolDegraded = false;
   const mode = resolveSubmitProtocolMode();
+  const taskOverviewEntries: string[] = [];
 
   const childResults = childHandoffs
     .map((h) => {
@@ -374,6 +363,9 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
       const goal = typeof payload?.['goal'] === 'string' ? payload['goal'].trim() : '';
       const taskMarkers = isRecord(payload?.['taskMarkers']) ? payload['taskMarkers'] : null;
       const taskId = typeof taskMarkers?.['taskId'] === 'string' ? taskMarkers['taskId'] : '';
+      taskOverviewEntries.push(
+        `- [${h.toRoleLayer}:${h.id}] taskId=${taskId || '缺失'} goal=${goal || '未命名任务'}`,
+      );
 
       if (h.state === 'failed' || h.state === 'cancelled') {
         hasFailedChildren = true;
@@ -460,6 +452,22 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
       }
 
       const childFailedItems = extractFailedItemIds(resultObj);
+      const resultSummary =
+        resultObj &&
+        typeof resultObj['summary'] === 'string' &&
+        resultObj['summary'].trim().length > 0
+          ? resultObj['summary'].trim()
+          : resultObj &&
+              typeof resultObj['overallReason'] === 'string' &&
+              resultObj['overallReason'].trim().length > 0
+            ? resultObj['overallReason'].trim()
+            : '';
+      const structuredStatus =
+        resultObj && typeof resultObj['status'] === 'string'
+          ? `提交状态：${String(resultObj['status'])}`
+          : resultObj && typeof resultObj['verdict'] === 'string'
+            ? `评审结论：${String(resultObj['verdict'])}`
+            : '';
       const failedItemsLine =
         childFailedItems.length > 0
           ? `失败项：${childFailedItems.join(', ')}`
@@ -471,6 +479,8 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
         `[${h.toRoleLayer}:${h.id}]`,
         `任务：${goal || '未命名任务'}`,
         `任务ID：${taskId || '缺失'}`,
+        ...(structuredStatus ? [structuredStatus] : []),
+        ...(resultSummary ? [`摘要：${resultSummary}`] : []),
         `结果：${resultJson || '(无结果)'}`,
         failedItemsLine,
       ].join('\n');
@@ -480,6 +490,8 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
   return {
     passed: issues.length === 0,
     issues,
+    taskOverview:
+      taskOverviewEntries.length > 0 ? taskOverviewEntries.join('\n') : '- (没有可用子任务概览)',
     childResults,
     hasFailedChildren,
     structuredFailedItems: Array.from(new Set(structuredFailedItems)),

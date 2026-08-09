@@ -25,6 +25,7 @@ import {
 } from './dispatch-package.js';
 import {
   findOutOfScopePaths,
+  normalizeExecutionResult,
   normalizeReviewVerdict,
   submitExecutionResultSchema,
   submitReviewReportSchema,
@@ -705,7 +706,8 @@ registerInstruction({
   ownerLayer: 'executor',
   description:
     '【必须】executor 提交结构化执行结果。没有调用本工具，runner 不会把任务视为合法完成。' +
-    '参数需包含 taskId、status、changedFiles、checklist（逐项 pass/fail/blocked + evidence）、summary、verification。',
+    '优先提交 taskId、status、changedFiles、checklist（逐项 pass/fail/blocked + evidence）、summary、verification；' +
+    '至少提供 summary 或 content 的简要总结，缺失的任务字段会从当前 handoff 归一化。',
   schema: submitExecutionResultSchema,
   handler: async (ctx, args): Promise<InstructionResult> => {
     const handoff = resolveActiveHandoffForSession(ctx.sessionId, ctx.userId, ctx.handoffId);
@@ -719,7 +721,7 @@ registerInstruction({
 
     const payload = parseJsonObject(handoff.payload_json);
     const expectedTaskId = readTaskIdFromPayload(payload);
-    if (expectedTaskId && expectedTaskId !== args.taskId) {
+    if (args.taskId && expectedTaskId && expectedTaskId !== args.taskId) {
       return {
         ok: false,
         errorCode: 'task-id-mismatch',
@@ -727,10 +729,10 @@ registerInstruction({
       };
     }
 
+    const normalized = normalizeExecutionResult(args, expectedTaskId ?? undefined);
+    const { changedFiles, verification, checklist, status, summary, taskId, blockedReason } =
+      normalized;
     const ownedPaths = readOwnedPathsFromPayload(payload);
-    // zod .default([]) 在部分 infer 路径下仍可能是 optional，运行时兜底
-    const changedFiles = args.changedFiles ?? [];
-    const verification = args.verification ?? [];
     const outOfScope = findOutOfScopePaths({
       changedFiles,
       ownedPaths,
@@ -744,8 +746,8 @@ registerInstruction({
       };
     }
 
-    if (args.status === 'completed') {
-      const failed = args.checklist.filter((item) => item.status !== 'pass');
+    if (status === 'completed') {
+      const failed = checklist.filter((item) => item.status !== 'pass');
       if (failed.length > 0) {
         return {
           ok: false,
@@ -757,7 +759,7 @@ registerInstruction({
       }
     }
 
-    if (args.status === 'blocked' && !args.blockedReason) {
+    if (status === 'blocked' && !blockedReason) {
       return {
         ok: false,
         errorCode: 'blocked-reason-required',
@@ -765,7 +767,7 @@ registerInstruction({
       };
     }
 
-    const failedItems = args.checklist
+    const failedItems = checklist
       .filter((item) => item.status === 'fail' || item.status === 'blocked')
       .map((item) => item.id);
 
@@ -773,21 +775,21 @@ registerInstruction({
     const artifactBody = [
       `# Execution Result`,
       '',
-      `**taskId**: ${args.taskId}`,
-      `**status**: ${args.status}`,
+      `**taskId**: ${taskId}`,
+      `**status**: ${status}`,
       '',
       '## Summary',
-      args.summary,
+      summary,
       '',
       '## Changed Files',
       ...(changedFiles.length > 0 ? changedFiles.map((file) => `- ${file}`) : ['- (none)']),
       '',
       '## Checklist',
-      ...args.checklist.map((item) => `- [${item.status}] ${item.id}: ${item.evidence}`),
+      ...checklist.map((item) => `- [${item.status}] ${item.id}: ${item.evidence}`),
       '',
       '## Verification',
       ...(verification.length > 0 ? verification.map((step) => `- ${step}`) : ['- (none)']),
-      ...(args.blockedReason ? ['', `## Blocked Reason`, args.blockedReason] : []),
+      ...(blockedReason ? ['', `## Blocked Reason`, blockedReason] : []),
     ].join('\n');
 
     sqliteRun(
@@ -799,7 +801,7 @@ registerInstruction({
         artifactId,
         ctx.sessionId,
         ctx.userId,
-        `execution-result:${args.taskId}`,
+        `execution-result:${taskId}`,
         artifactBody,
         typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null,
       ],
@@ -808,14 +810,14 @@ registerInstruction({
     const resultJson = {
       protocol: SUBMIT_EXECUTION_RESULT_PROTOCOL,
       role: 'executor',
-      taskId: args.taskId,
-      status: args.status,
+      taskId,
+      status,
       changedFiles,
-      checklist: args.checklist,
+      checklist,
       failedItems,
-      summary: args.summary,
+      summary,
       verification,
-      blockedReason: args.blockedReason ?? null,
+      blockedReason: blockedReason ?? null,
       artifactId,
       submittedAt: new Date().toISOString(),
     };
@@ -829,14 +831,14 @@ registerInstruction({
 
     setSubstate({
       sessionId: ctx.sessionId,
-      substate: args.status === 'completed' ? 'completed' : 'failed',
+      substate: status === 'completed' ? 'completed' : 'failed',
       userId: ctx.userId,
       roleLayer: 'executor',
     });
 
     return {
       ok: true,
-      message: `已提交执行结果 protocol=${SUBMIT_EXECUTION_RESULT_PROTOCOL} status=${args.status} failedItems=${failedItems.length}`,
+      message: `已提交执行结果 protocol=${SUBMIT_EXECUTION_RESULT_PROTOCOL} status=${status} failedItems=${failedItems.length}`,
       data: {
         handoffId: handoff.id,
         artifactId,
@@ -855,8 +857,8 @@ registerInstruction({
   name: 'submit_review',
   ownerLayer: 'reviewer',
   description:
-    '【必须】reviewer 提交结构化评审报告。优先提供 verdict + items（checklist 级 pass/fail）；' +
-    '也可兼容旧的 decision/title/content。没有结构化提交时，hard 模式下任务不算合法完成。',
+    '【必须】reviewer 提交评审结果。优先提供 verdict + items（checklist 级 pass/fail）；' +
+    '若无法完整填写，至少提供 overallReason 或 content 的简要结论，系统会归一化后交给校验层检查。',
   schema: submitReviewReportSchema,
   handler: async (ctx, args): Promise<InstructionResult> => {
     const handoff = resolveActiveHandoffForSession(ctx.sessionId, ctx.userId, ctx.handoffId);

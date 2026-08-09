@@ -257,4 +257,86 @@ describe('review readiness classification', () => {
     expect(report.specReviewPassed).toBe(true);
     expect(report.qualityReviewPassed).toBe(true);
   });
+
+  it('联合检查时会同时注入任务概览与执行结果摘要', async () => {
+    const childId = 'h-child-review-dossier';
+    seedChildHandoff({
+      id: childId,
+      state: 'completed',
+      payload: {
+        goal: '[apps/web/src/orders.tsx] 实现订单表单并补齐校验',
+        taskMarkers: { taskId: 'T-ORDER-1' },
+      },
+      resultJson: JSON.stringify({
+        protocol: 'submit_execution_result',
+        role: 'executor',
+        status: 'completed',
+        summary: '已实现订单表单提交与前端校验。',
+        checklist: [{ id: 'AC-1', status: 'pass', evidence: '提交成功并展示结果' }],
+      }),
+    });
+
+    const capturedPrompts: Array<{ system: string; user: string }> = [];
+    const report = await reviewAggregator.runReviewAggregation({
+      userId: USER_ID,
+      pm2HandoffId: 'pm2-handoff-review-dossier',
+      pm2SessionId: PM2_SESSION_ID,
+      childHandoffs: [getHandoffAsRecord(childId)],
+      specContent: '# 规格\n- AC-1: 提交订单成功',
+      constitutionBody: '# 宪法\n- 禁止硬编码密钥',
+      callLlm: async (system, user) => {
+        capturedPrompts.push({ system, user });
+        return 'PASS';
+      },
+    });
+
+    expect(report.overallVerdict).toBe('pass');
+    expect(capturedPrompts).toHaveLength(2);
+    expect(capturedPrompts.every((entry) => entry.user.includes('<task-overview>'))).toBe(true);
+    expect(capturedPrompts.every((entry) => entry.user.includes('taskId=T-ORDER-1'))).toBe(true);
+    expect(
+      capturedPrompts.every((entry) =>
+        entry.user.includes('goal=[apps/web/src/orders.tsx] 实现订单表单并补齐校验'),
+      ),
+    ).toBe(true);
+    expect(
+      capturedPrompts.every((entry) => entry.user.includes('摘要：已实现订单表单提交与前端校验。')),
+    ).toBe(true);
+    expect(capturedPrompts.every((entry) => entry.user.includes('提交状态：completed'))).toBe(true);
+  });
+
+  it('校验层允许简短总结，但仍能识别总结中的明确问题', async () => {
+    const childId = 'h-child-review-brief-failure';
+    seedChildHandoff({
+      id: childId,
+      state: 'completed',
+      payload: {
+        goal: '实现订单提交',
+        taskMarkers: { taskId: 'T-ORDER-2' },
+      },
+      resultJson: JSON.stringify({
+        protocol: 'submit_execution_result',
+        role: 'executor',
+        status: 'completed',
+        summary: '已完成订单提交实现。',
+        checklist: [{ id: 'AC-2', status: 'pass', evidence: '提交成功' }],
+      }),
+    });
+
+    const report = await reviewAggregator.runReviewAggregation({
+      userId: USER_ID,
+      pm2HandoffId: 'pm2-handoff-review-brief-failure',
+      pm2SessionId: PM2_SESSION_ID,
+      childHandoffs: [getHandoffAsRecord(childId)],
+      specContent: '# 规格\n- AC-2: 订单提交成功',
+      constitutionBody: '# 宪法',
+      callLlm: async (system) =>
+        system.includes('Spec Review') ? '检查发现问题：AC-2 未覆盖。' : '检查完成，未发现问题。',
+    });
+
+    expect(report.overallVerdict).toBe('planning-failure');
+    expect(report.specReviewPassed).toBe(false);
+    expect(report.specIssues).toContain('检查发现问题：AC-2 未覆盖。');
+    expect(report.qualityReviewPassed).toBe(true);
+  });
 });

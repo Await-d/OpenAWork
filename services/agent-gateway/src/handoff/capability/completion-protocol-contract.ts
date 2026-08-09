@@ -13,6 +13,8 @@
 
 import { z } from 'zod';
 import { normalizeComparablePath } from './dispatch-package.js';
+export { normalizeExecutionResult } from './execution-result-normalization.js';
+export type { NormalizedExecutionResult } from './execution-result-normalization.js';
 
 export const SUBMIT_EXECUTION_RESULT_PROTOCOL = 'submit_execution_result' as const;
 export const SUBMIT_REVIEW_REPORT_PROTOCOL = 'submit_review_report' as const;
@@ -22,18 +24,33 @@ export const checklistItemSchema = z.object({
   status: z.enum(['pass', 'fail', 'blocked']),
   evidence: z.string().min(1).max(2000),
 });
+export type ChecklistItem = z.infer<typeof checklistItemSchema>;
 
-export const submitExecutionResultSchema = z.object({
-  taskId: z.string().min(1).max(200),
-  status: z.enum(['completed', 'blocked', 'failed']),
-  changedFiles: z.array(z.string().min(1).max(500)).max(200).default([]),
-  checklist: z.array(checklistItemSchema).min(1).max(100),
-  summary: z.string().min(1).max(4000),
-  verification: z.array(z.string().min(1).max(500)).max(50).default([]),
-  blockedReason: z.string().max(2000).optional(),
-});
+export const submitExecutionResultSchema = z
+  .object({
+    taskId: z.string().min(1).max(200).optional(),
+    status: z.enum(['completed', 'blocked', 'failed']).optional(),
+    content: z.string().max(4000).optional(),
+    summary: z.string().max(4000).optional(),
+    checklist: z.array(checklistItemSchema).max(100).optional(),
+    changedFiles: z.array(z.string().min(1).max(500)).max(200).default([]),
+    verification: z.array(z.string().min(1).max(500)).max(50).default([]),
+    blockedReason: z.string().max(2000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasBriefSummary =
+      (typeof value.summary === 'string' && value.summary.trim().length > 0) ||
+      (typeof value.content === 'string' && value.content.trim().length > 0);
+    if (!hasBriefSummary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '至少提供 summary 或 content 的简要总结',
+      });
+    }
+  });
 
 export type SubmitExecutionResultArgs = z.infer<typeof submitExecutionResultSchema>;
+export type SubmitExecutionResultInput = z.input<typeof submitExecutionResultSchema>;
 
 export const reviewItemSchema = z.object({
   id: z.string().min(1).max(120),
@@ -55,10 +72,16 @@ export const submitReviewReportSchema = z
     teamWorkspaceId: z.string().nullable().optional(),
   })
   .superRefine((value, ctx) => {
-    if (!value.verdict && !value.decision && !(value.items && value.items.length > 0)) {
+    const hasStructuredVerdict = Boolean(
+      value.verdict || value.decision || (value.items && value.items.length > 0),
+    );
+    const hasBriefSummary =
+      (typeof value.overallReason === 'string' && value.overallReason.trim().length > 0) ||
+      (typeof value.content === 'string' && value.content.trim().length > 0);
+    if (!hasStructuredVerdict && !hasBriefSummary) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: '必须提供 verdict/decision 或 items',
+        message: '必须提供 verdict/decision/items，或至少提供 overallReason/content 的简要总结',
       });
     }
   });
@@ -100,6 +123,63 @@ export function extractFailedItemIds(resultJson: unknown): string[] {
   return failed;
 }
 
+const REVIEW_PASS_PHRASES = [
+  /\bpass\b/i,
+  /通过/,
+  /已通过/,
+  /总体通过/,
+  /基本通过/,
+  /没有问题/,
+  /没问题/,
+  /没啥问题/,
+  /审核通过/,
+  /检查通过/,
+  /未发现问题/,
+  /没有问题/,
+  /没有明显问题/,
+  /无问题/,
+  /无明显问题/,
+  /暂无问题/,
+  /无异常/,
+  /符合预期/,
+  /可接受/,
+] as const;
+
+const REVIEW_FAIL_PHRASES = [
+  /\bfail\b/i,
+  /未通过/,
+  /不通过/,
+  /失败/,
+  /存在问题/,
+  /有问题/,
+  /问题[：:]/,
+  /需要修正/,
+  /需修正/,
+  /需要修改/,
+  /需修改/,
+  /需要重试/,
+  /阻塞/,
+  /风险/,
+  /不符合/,
+  /不能接受/,
+  /request_retry/i,
+  /escalate/i,
+] as const;
+
+export function inferReviewVerdictFromText(text: string): 'pass' | 'fail' | null {
+  const normalized = text.trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+  if (REVIEW_FAIL_PHRASES.some((pattern) => pattern.test(normalized))) {
+    return 'fail';
+  }
+  if (REVIEW_PASS_PHRASES.some((pattern) => pattern.test(normalized))) {
+    return 'pass';
+  }
+  return null;
+}
+
 /**
  * ownedPaths 校验：changedFiles 必须落在 ownedPaths 内（ownedPaths 为空则跳过）。
  * 返回越界路径列表。
@@ -135,6 +215,13 @@ export function normalizeReviewVerdict(
   if (args.decision) return args.decision;
   if (args.items && args.items.some((item) => item.status === 'fail')) {
     return 'fail';
+  }
+  const summaryText = [args.overallReason, args.content]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join('\n');
+  const inferredVerdict = inferReviewVerdictFromText(summaryText);
+  if (inferredVerdict) {
+    return inferredVerdict;
   }
   return 'pass';
 }
