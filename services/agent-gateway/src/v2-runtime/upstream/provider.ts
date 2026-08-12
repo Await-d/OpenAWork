@@ -31,30 +31,30 @@ import {
 } from '@ai-sdk/openai-compatible';
 import { createAnthropic, type AnthropicProviderSettings } from '@ai-sdk/anthropic';
 import { createOpenAI, type OpenAIProviderSettings } from '@ai-sdk/openai';
+import type { LanguageModelV4 } from '@ai-sdk/provider';
 import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../../provider/anthropic-betas.js';
 
 /**
  * Cross-version `LanguageModel` alias.
  *
  * `ai@5.x` still pins its top-level `LanguageModel` to `LanguageModelV2`,
- * while `@ai-sdk/openai-compatible@2.x` now returns the newer V3 shape.
- * Until the AI SDK unifies the type surface we infer the return type
- * directly from the adapter so callers see a future-proof handle without
- * having to chase upstream type bumps.
+ * while the vendor adapters have since diverged further: `@ai-sdk/anthropic`
+ * now returns `Experimental_BatchLanguageModelV4` (a `LanguageModelV4`
+ * superset with extra batch-operation methods) while
+ * `@ai-sdk/openai-compatible` still returns the plain `LanguageModelV4`.
+ * Pinning the shared alias to the narrower `LanguageModelV4` — the shape
+ * `streamText` actually needs — keeps every adapter's return type
+ * assignable regardless of which superset a given SDK version adds.
  */
 type AnthropicLanguageModel = ReturnType<ReturnType<typeof createAnthropic>['languageModel']>;
 type OpenAICompatibleLanguageModel = ReturnType<
   ReturnType<typeof createOpenAICompatible>['languageModel']
 >;
 type OpenAIResponsesLanguageModel = ReturnType<ReturnType<typeof createOpenAI>['responses']>;
-// All three SDK adapters currently resolve to the same
-// `LanguageModelV3` shape. We collapse the union to a single alias
-// (so ESLint's `no-duplicate-type-constituents` rule stays clean) but
-// keep the per-vendor aliases above as documentation for the day a
-// future SDK bump diverges them again.
-export type V2LanguageModel = AnthropicLanguageModel;
+export type V2LanguageModel = LanguageModelV4;
 // Touch the per-vendor aliases so the build does not flag them as
 // unused while we wait for the SDK shapes to diverge again.
+export type _AnthropicLanguageModel = AnthropicLanguageModel;
 export type _OpenAICompatibleLanguageModel = OpenAICompatibleLanguageModel;
 export type _OpenAIResponsesLanguageModel = OpenAIResponsesLanguageModel;
 

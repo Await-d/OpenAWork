@@ -120,8 +120,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 2px;
-  font-size: 10px;
+  margin-bottom: 4px; /* 增加间距 */
+  font-size: 11px; /* 增大字体 */
 }
 
 .tool-output-label {
@@ -133,12 +133,57 @@
 
 .tool-output-meta {
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-output-error-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 3px;
+}
+
+.tool-output-content {
+  margin: 0;
+  padding: 10px 12px; /* 增加内边距 */
+  font-size: 12px; /* 增大字体 */
+  line-height: 1.6; /* 增加行高 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border-radius: 6px; /* 增大圆角 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle); /* 添加边框 */
 }
 
 .tool-output-pre {
   margin: 0;
-  padding: 6px 8px;
+  padding: 10px 12px; /* 增加内边距 */
+  font-size: 12px; /* 增大字体 */
+  line-height: 1.6; /* 增加行高 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border-radius: 6px; /* 增大圆角 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px; /* 增加最大高度 */
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle); /* 添加边框 */
+}
+
+.tool-output-pre-compact {
+  margin: 0;
+  padding: 6px 8px; /* 增加内边距 */
   font-size: 11px;
   line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -147,22 +192,7 @@
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.tool-output-pre-compact {
-  margin: 0;
-  padding: 2px 4px;
-  font-size: 11px;
-  line-height: 1.5;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--fg-default);
-  background: transparent;
-  border-radius: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 120px;
+  max-height: 150px; /* 增加最大高度 */
   overflow-y: auto;
 }
 
@@ -175,29 +205,40 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 48px;
-  background: linear-gradient(transparent, var(--bg-overlay));
+  height: 60px; /* 增加渐变高度 */
+  background: linear-gradient(to bottom, transparent 0%, var(--bg-surface) 80%);
   pointer-events: none;
+  border-radius: 0 0 6px 6px;
 }
 
 .tool-output-compact .tool-output-fade {
-  height: 24px;
+  height: 40px;
 }
 
 .tool-output-toggle {
-  display: inline-block;
-  margin-top: 2px;
-  padding: 0;
-  border: none;
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-overlay);
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s;
+  transition: all 0.15s ease;
 }
 
 .tool-output-toggle:hover {
-  color: var(--text-1);
+  color: var(--fg-default);
+  border-color: var(--border-hover);
+  background: var(--bg-surface);
+}
+
+.tool-output-toggle:active {
+  transform: scale(0.98);
 }
 
 /* ── Web tool output (webfetch / websearch / google_search) ── */

@@ -15,14 +15,8 @@ import { CopyBtn } from '../shared/copy-btn.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { formatElapsed } from '../shared/format.js';
-import { extractFilePath, trimPath } from '../shared/input-paths.js';
-import {
-  buildGenericInputSummary,
-  summarizeBackgroundOutputInput,
-  summarizeBatchInput,
-  summarizeMcpCallInput,
-  summarizeSkillMcpInput,
-} from '../shared/input-summary.js';
+import { extractFilePath } from '../shared/input-paths.js';
+import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { SearchStateBadge, type SearchVisualState } from '../shared/search-state-badge.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { extractWebSummary } from '../shared/web-helpers.js';
@@ -121,6 +115,7 @@ export function BlockToolCall({
   }, [shouldAutoExpand]);
 
   const filePath = extractFilePath(input);
+  // filePath is kept for potential future use and passed to diff views
 
   const displayData = useMemo(
     () =>
@@ -133,223 +128,10 @@ export function BlockToolCall({
     [toolName, input, output, open],
   );
 
-  const title = useMemo(() => {
-    if (isBashLike) {
-      const cmd = typeof input.command === 'string' ? input.command.slice(0, 80) : '';
-      const desc = typeof input.description === 'string' ? input.description : 'Shell';
-      return cmd ? `$ ${cmd}` : desc;
-    }
-    if (normalized === 'task_create') {
-      const t =
-        typeof input.title === 'string' && input.title.trim()
-          ? input.title.trim()
-          : typeof input.subject === 'string'
-            ? input.subject.trim()
-            : '';
-      return t ? `task_create "${t.slice(0, 80)}"` : 'task_create';
-    }
-    if (normalized === 'task_get') {
-      const id = typeof input.id === 'string' ? input.id.trim() : '';
-      return id ? `task_get ${id}` : 'task_get';
-    }
-    if (normalized === 'task_list') {
-      return 'task_list';
-    }
-    if (normalized === 'task_update') {
-      const id = typeof input.id === 'string' ? input.id.trim() : '';
-      // Local var named `nextStatus` to avoid shadowing the outer
-      // `status` prop (which feeds `resolveToolVisualStatus`).
-      const nextStatus = typeof input.status === 'string' ? input.status.trim() : '';
-      const lhs = id ? `task_update ${id}` : 'task_update';
-      return nextStatus ? `${lhs} → ${nextStatus}` : lhs;
-    }
-    if (isWebTool) {
-      const url =
-        typeof input.url === 'string'
-          ? input.url
-          : typeof input.query === 'string'
-            ? input.query
-            : '';
-      const display = url.length > 60 ? `${url.slice(0, 57)}…` : url;
-      const label = normalized === 'webfetch' ? 'Fetch' : 'Search';
-      return `${label} ${display}`;
-    }
-    if (normalized === 'grep') {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      return filePath ? `grep ${filePath} · "${pattern}"` : `grep "${pattern}"`;
-    }
-    if (normalized === 'glob') {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      return filePath ? `glob ${filePath} · "${pattern}"` : `glob "${pattern}"`;
-    }
-    if (normalized === 'list') {
-      return filePath ? `list ${filePath}` : 'list';
-    }
-    if (normalized === 'codesearch') {
-      const query = typeof input.query === 'string' ? input.query : '';
-      return query ? `codesearch "${query}"` : 'codesearch';
-    }
-    if (normalized === 'ast_grep_search') {
-      // AST-aware search reuses the grep-style header but adds the language
-      // since the same pattern means very different things across langs.
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      const lang = typeof input.lang === 'string' ? input.lang : '';
-      const lhs = lang ? `ast-grep [${lang}]` : 'ast-grep';
-      return pattern ? `${lhs} "${pattern}"` : lhs;
-    }
-    if (normalized === 'ast_grep_replace') {
-      // Surface pattern → rewrite + dryRun badge so users can sanity-check
-      // destructive replacements without expanding the card.
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      const rewrite = typeof input.rewrite === 'string' ? input.rewrite : '';
-      const lang = typeof input.lang === 'string' ? input.lang : '';
-      const dryRun = input.dryRun !== false; // defaults to true server-side
-      const lhs = lang ? `ast-grep replace [${lang}]` : 'ast-grep replace';
-      const body =
-        pattern && rewrite ? ` "${pattern}" → "${rewrite}"` : pattern ? ` "${pattern}"` : '';
-      return dryRun ? `${lhs}${body} (dry-run)` : `${lhs}${body}`;
-    }
-    if (normalized === 'workspace_review_diff') {
-      // Two-part path: workspace root + file inside it. We render the file
-      // with trimPath() so deep paths don't blow out the header pill.
-      const rel = typeof input.filePath === 'string' ? input.filePath : '';
-      const trimmed = rel ? trimPath(rel) : '';
-      return trimmed ? `review diff ${trimmed}` : 'workspace_review_diff';
-    }
-    if (normalized === 'session_list') {
-      // Optional filters: limit, project_path, from/to_date. Show the most
-      // useful one (project_path) when present, otherwise just the verb.
-      const proj = typeof input.project_path === 'string' ? input.project_path.trim() : '';
-      return proj ? `session_list ${trimPath(proj)}` : 'session_list';
-    }
-    if (normalized === 'session_read') {
-      const sid = typeof input.session_id === 'string' ? input.session_id.trim() : '';
-      return sid ? `session_read ${sid}` : 'session_read';
-    }
-    if (normalized === 'session_search') {
-      const q = typeof input.query === 'string' ? input.query.trim() : '';
-      return q ? `session_search "${q.slice(0, 60)}"` : 'session_search';
-    }
-    if (normalized === 'background_output') {
-      const tid = summarizeBackgroundOutputInput(input);
-      return tid ? `background_output ${tid}` : 'background_output';
-    }
-    if (normalized === 'look_at') {
-      // `look_at` accepts file_path XOR image_data; surface whichever was
-      // passed plus the goal, since the goal disambiguates the intent.
-      const goal = typeof input.goal === 'string' ? input.goal.trim() : '';
-      const fp = typeof input.file_path === 'string' ? input.file_path : '';
-      const hasImage = typeof input.image_data === 'string' && input.image_data.length > 0;
-      const lhs = fp ? `look_at ${trimPath(fp)}` : hasImage ? 'look_at <image>' : 'look_at';
-      return goal ? `${lhs} · "${goal.slice(0, 50)}"` : lhs;
-    }
-    if (normalized === 'repo_clone') {
-      // P1-SCOUT: surface the repo identifier + status badge (cached /
-      // cloned / refreshed) in the header so users see at a glance
-      // whether scout actually did network work or reused the cache.
-      const repository = typeof input.repository === 'string' ? input.repository.trim() : '';
-      const branch = typeof input.branch === 'string' ? input.branch.trim() : '';
-      const refresh = input.refresh === true;
-      const lhs = repository ? `repo_clone ${repository}` : 'repo_clone';
-      const flags: string[] = [];
-      if (branch) flags.push(`branch=${branch}`);
-      if (refresh) flags.push('refresh');
-      return flags.length > 0 ? `${lhs} (${flags.join(', ')})` : lhs;
-    }
-    if (normalized === 'repo_overview') {
-      // Either repository or path is required; show whichever was used.
-      const repository = typeof input.repository === 'string' ? input.repository.trim() : '';
-      const pathInput = typeof input.path === 'string' ? input.path.trim() : '';
-      const depth = typeof input.depth === 'number' ? input.depth : undefined;
-      const lhs = repository
-        ? `repo_overview ${repository}`
-        : pathInput
-          ? `repo_overview ${trimPath(pathInput)}`
-          : 'repo_overview';
-      return depth ? `${lhs} · depth=${depth}` : lhs;
-    }
-    if (normalized === 'desktop_automation') {
-      // Discriminated union on `action`. Show the action verb plus the most
-      // salient parameter for that action (url for goto, selector for click,
-      // etc.) so users can spot what the agent is doing.
-      const action = typeof input.action === 'string' ? input.action.trim() : '';
-      if (!action) return 'desktop_automation';
-      const extra =
-        typeof input.url === 'string'
-          ? input.url
-          : typeof input.selector === 'string'
-            ? input.selector
-            : typeof input.text === 'string'
-              ? input.text
-              : '';
-      return extra
-        ? `desktop_automation ${action} · ${extra.slice(0, 60)}`
-        : `desktop_automation ${action}`;
-    }
-    if (normalized === 'skill_mcp') {
-      return `skill_mcp ${summarizeSkillMcpInput(input)}`;
-    }
-    if (normalized === 'read_tool_output') {
-      const id = typeof input.toolCallId === 'string' ? input.toolCallId.trim() : '';
-      if (id) return `read_tool_output ${id}`;
-      if (input.useLatestReferenced === true) return 'read_tool_output (latest)';
-      return 'read_tool_output';
-    }
-    if (normalized === 'mcp_call') {
-      // Render "mcp_call <server>.<tool> · {arg,arg}". Never dumps raw JSON.
-      return `mcp_call ${summarizeMcpCallInput(input)}`;
-    }
-    if (normalized === 'mcp_list_tools') {
-      const serverId =
-        typeof input.serverId === 'string' && input.serverId.trim() ? input.serverId.trim() : '';
-      return serverId ? `mcp_list_tools ${serverId}` : 'mcp_list_tools';
-    }
-    if (normalized.startsWith('mcp_')) {
-      // Forward-compat for future MCP-prefixed tools — still no JSON dumps.
-      const generic = buildGenericInputSummary(input);
-      return generic ? `${toolName} ${generic}` : toolName;
-    }
-    if (normalized === 'batch') {
-      // Reached when resolveBatchTerminalView() returns null (e.g. before
-      // the streaming progress arrives). Show "batch 2 个调用 · bash, grep"
-      // instead of letting the generic fallback print raw JSON.
-      const batchSummary = summarizeBatchInput(input);
-      return batchSummary ? `batch ${batchSummary}` : 'batch';
-    }
-    if (normalized === 'skill') {
-      const skillId = typeof input.skillId === 'string' ? input.skillId : '';
-      const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-      if (skillId && prompt)
-        return `skill ${skillId} · "${prompt.slice(0, 40)}${prompt.length > 40 ? '…' : ''}"`;
-      if (skillId) return `skill ${skillId}`;
-      const generic = buildGenericInputSummary(input);
-      return generic ? `skill ${generic}` : 'skill';
-    }
-    // `workspace_create_directory`, `workspace_review_revert`,
-    // `workspace_review_status` share the simple verb+path shape, so we
-    // fold them into the existing verb table instead of adding bespoke
-    // blocks. extractFilePath() already pulls the right field for each
-    // (path / filePath).
-    const verb =
-      normalized === 'write'
-        ? 'Write'
-        : normalized === 'edit' || normalized === 'multi_edit'
-          ? 'Edit'
-          : normalized === 'apply_patch'
-            ? 'Patch'
-            : normalized === 'workspace_create_directory'
-              ? 'Mkdir'
-              : normalized === 'workspace_review_revert'
-                ? 'Revert'
-                : normalized === 'workspace_review_status'
-                  ? 'Review status'
-                  : '';
-    if (verb && filePath) return `${verb} ${filePath}`;
-    if (verb) return verb;
-    // Generic fallback: show tool name + input summary
-    const generic = buildGenericInputSummary(input);
-    return generic ? `${toolName} ${generic}` : toolName;
-  }, [normalized, isBashLike, input, filePath, toolName, isWebTool]);
+  const title = useMemo(
+    () => naturalLanguageSummary(toolName, input),
+    [toolName, input],
+  );
 
   // Collapsed summary (shown when not expanded)
   const collapsedSummary = useMemo(() => {
@@ -609,7 +391,7 @@ export function BlockToolCall({
             <details className="tool-call-block-params">
               <summary>参数 ({Object.keys(input).length})</summary>
               <div className="tool-call-block-params-body">
-                <ToolInputPreview toolName={toolName} input={input} />
+                <ToolInputPreview toolName={toolName} input={input} kind={kind} />
               </div>
             </details>
           )}

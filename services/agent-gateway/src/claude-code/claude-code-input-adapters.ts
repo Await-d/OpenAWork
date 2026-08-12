@@ -20,7 +20,7 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
     presentedName: 'Bash',
     canonicalName: 'bash',
     compatLevel: 'medium',
-    note: 'The local bash tool does not support description/run_in_background fields.',
+    note: 'run_in_background maps to the gateway background-bash tool; description is retained there.',
   },
   {
     presentedName: 'Grep',
@@ -62,13 +62,13 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
     presentedName: 'Skill',
     canonicalName: 'skill',
     compatLevel: 'medium',
-    note: 'The local skill tool expects name only; args are ignored for now.',
+    note: 'The local skill tool accepts only name/skill; args are rejected rather than ignored.',
   },
   {
     presentedName: 'AskUserQuestion',
     canonicalName: 'question',
     compatLevel: 'medium',
-    note: 'The local question tool uses a simplified schema and strips preview-specific fields.',
+    note: 'The local question tool preserves preview data and renders it as plain text for single-select questions.',
   },
   {
     presentedName: 'Agent',
@@ -158,6 +158,41 @@ export interface NormalizedInput {
   readonly remapped: boolean;
 }
 
+const UNSUPPORTED_AGENT_FIELDS = [
+  'model',
+  'name',
+  'team_name',
+  'mode',
+  'isolation',
+  'cwd',
+] as const;
+
+const UNSUPPORTED_GREP_FIELDS = [
+  '-A',
+  '-B',
+  '-C',
+  '-n',
+  '-i',
+  'context',
+  'type',
+  'offset',
+  'multiline',
+] as const;
+
+function rejectUnsupportedFields(
+  presentedName: string,
+  rawInput: RawInput,
+  fieldNames: readonly string[],
+): void {
+  const unsupportedFields = fieldNames.filter((fieldName) => rawInput[fieldName] !== undefined);
+  if (unsupportedFields.length === 0) return;
+
+  throw new UnsupportedToolError(
+    presentedName,
+    `Unsupported field${unsupportedFields.length === 1 ? '' : 's'}: ${unsupportedFields.join(', ')}`,
+  );
+}
+
 function normalizeTaskMetadata(metadata: unknown, activeForm: unknown): unknown {
   if (activeForm === undefined) {
     return metadata;
@@ -231,7 +266,26 @@ export function normalizeInputForCanonical(
         remapped: false,
       };
     case 'Bash': {
-      const { command, timeout, workdir } = rawInput;
+      if (rawInput['dangerouslyDisableSandbox'] === true) {
+        throw new UnsupportedToolError(
+          'Bash',
+          'dangerouslyDisableSandbox is not permitted by the gateway.',
+        );
+      }
+
+      const { command, description, run_in_background, timeout, workdir } = rawInput;
+      if (run_in_background === true) {
+        return {
+          canonicalName: 'run_bash_in_background',
+          normalizedFields: {
+            ...(command !== undefined ? { command } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(timeout !== undefined ? { timeout } : {}),
+            ...(workdir !== undefined ? { workdir } : {}),
+          },
+          remapped: true,
+        };
+      }
       return {
         canonicalName: 'bash',
         normalizedFields: {
@@ -243,6 +297,7 @@ export function normalizeInputForCanonical(
       };
     }
     case 'Grep': {
+      rejectUnsupportedFields('Grep', rawInput, UNSUPPORTED_GREP_FIELDS);
       const { pattern, path, glob, output_mode, head_limit } = rawInput;
       return {
         canonicalName: 'grep',
@@ -285,6 +340,7 @@ export function normalizeInputForCanonical(
       };
     }
     case 'Skill': {
+      rejectUnsupportedFields('Skill', rawInput, ['args']);
       const { name, skill } = rawInput;
       return {
         canonicalName: 'skill',
@@ -316,21 +372,20 @@ export function normalizeInputForCanonical(
                     ...(normalizedOption.description !== undefined
                       ? { description: normalizedOption.description }
                       : {}),
+                    ...(normalizedOption.preview !== undefined
+                      ? { preview: normalizedOption.preview }
+                      : {}),
                   };
                 })
               : question.options;
 
-            const multiple =
-              typeof question.multiple === 'boolean'
-                ? question.multiple
-                : typeof question.multiSelect === 'boolean'
-                  ? question.multiSelect
-                  : undefined;
+            const multiSelect =
+              typeof question.multiSelect === 'boolean' ? question.multiSelect : undefined;
 
             return {
               ...(question.question !== undefined ? { question: question.question } : {}),
               ...(question.header !== undefined ? { header: question.header } : {}),
-              ...(multiple !== undefined ? { multiple } : {}),
+              ...(multiSelect !== undefined ? { multiSelect } : {}),
               ...(normalizedOptions !== undefined ? { options: normalizedOptions } : {}),
             };
           })
@@ -352,6 +407,7 @@ export function normalizeInputForCanonical(
       };
     }
     case 'Read': {
+      rejectUnsupportedFields('Read', rawInput, ['pages']);
       const { file_path, offset, limit } = rawInput;
       return {
         canonicalName: 'read',
@@ -364,19 +420,28 @@ export function normalizeInputForCanonical(
       };
     }
     case 'WebFetch':
+      rejectUnsupportedFields('WebFetch', rawInput, ['prompt']);
       return {
         canonicalName: 'webfetch',
         normalizedFields: rawInput,
         remapped: false,
       };
     case 'WebSearch':
+      rejectUnsupportedFields('WebSearch', rawInput, ['allowed_domains', 'blocked_domains']);
       return {
         canonicalName: 'websearch',
         normalizedFields: rawInput,
         remapped: false,
       };
     case 'Agent': {
+      rejectUnsupportedFields('Agent', rawInput, UNSUPPORTED_AGENT_FIELDS);
       const { description, prompt, subagent_type, run_in_background, session_id } = rawInput;
+      if (typeof subagent_type !== 'string' || subagent_type.trim().length === 0) {
+        throw new UnsupportedToolError(
+          'Agent',
+          'subagent_type is required by the gateway Agent contract.',
+        );
+      }
       return {
         canonicalName: 'call_omo_agent',
         normalizedFields: {

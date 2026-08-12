@@ -4,6 +4,7 @@ interface ParsedSessionMetadata {
   dialogueMode: SessionDialogueMode;
   icon?: string;
   modelId?: string;
+  modelLabel?: string;
   parentSessionId?: string;
   teamWorkspaceId?: string;
   workingDirectory: string | null;
@@ -41,9 +42,10 @@ export function getSessionModeLabels(metadataJson?: string): string[] {
     labels.push('YOLO');
   }
 
-  const formattedModelLabel = formatModelLabel(metadata.modelId);
-  if (formattedModelLabel) {
-    labels.push(formattedModelLabel);
+  // 优先使用保存的 modelLabel，回退到格式化 modelId
+  const modelLabel = metadata.modelLabel || formatModelLabel(metadata.modelId);
+  if (modelLabel) {
+    labels.push(modelLabel);
   }
 
   return labels;
@@ -80,6 +82,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       dialogueMode?: unknown;
       icon?: unknown;
       modelId?: unknown;
+      modelLabel?: unknown;
       parentSessionId?: unknown;
       teamWorkspaceId?: unknown;
       workingDirectory?: unknown;
@@ -95,6 +98,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
           : FALLBACK_PARSED_SESSION_METADATA.dialogueMode,
       icon: normalizeOptionalString(parsed.icon),
       modelId: normalizeOptionalString(parsed.modelId),
+      modelLabel: normalizeOptionalString(parsed.modelLabel),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
       teamWorkspaceId: normalizeOptionalString(parsed.teamWorkspaceId),
       workingDirectory: normalizeOptionalString(parsed.workingDirectory) ?? null,

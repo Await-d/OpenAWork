@@ -53,7 +53,7 @@ export function buildExitPlanModeQuestionInput(input: ExitPlanModeInput): {
   questions: Array<{
     question: string;
     header: string;
-    multiple?: boolean;
+    multiSelect?: boolean;
     options: Array<{ label: string; description: string }>;
   }>;
 } {
@@ -65,7 +65,7 @@ export function buildExitPlanModeQuestionInput(input: ExitPlanModeInput): {
           ? `是否批准当前计划并立即开始实现？\n\n${summary}`
           : '是否批准当前计划并立即开始实现？',
         header: '计划审批',
-        multiple: false,
+        multiSelect: false,
         options: [
           {
             label: EXIT_PLAN_MODE_APPROVE_LABEL,

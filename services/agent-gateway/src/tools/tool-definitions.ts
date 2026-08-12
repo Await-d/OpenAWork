@@ -18,7 +18,7 @@ import { createEditTool } from './edit-tools.js';
 import { createMultiEditTool } from './multi-edit-tool.js';
 import { batchToolDefinition } from './batch-tools.js';
 import { createSkillTool } from '../skill/skill-tools.js';
-import { bashToolDefinition } from './bash-tools.js';
+import { bashToolDefinition, MAX_BASH_TIMEOUT_MS } from './bash-tools.js';
 import { applyPatchToolDefinition } from './apply-patch-tools.js';
 import { questionToolDefinition } from './question-tools.js';
 import { taskToolDefinition } from '../task/task-tools.js';
@@ -842,10 +842,15 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         type: 'object',
         properties: {
           command: { type: 'string', description: '要运行的单行 shell 命令' },
+          description: {
+            type: 'string',
+            description: '可选：用 5-10 个词描述该命令的作用，便于审计和回放',
+          },
           timeout: {
             type: 'integer',
             minimum: 1,
-            maximum: 120000,
+            // Must stay in sync with bash-tools.ts MAX_BASH_TIMEOUT_MS (imported below).
+            maximum: MAX_BASH_TIMEOUT_MS,
             description: '命令超时（毫秒）',
           },
           workdir: {
@@ -917,39 +922,6 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['patchText'],
-        additionalProperties: false,
-      };
-    case 'question':
-      return {
-        type: 'object',
-        properties: {
-          questions: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                question: { type: 'string' },
-                header: { type: 'string' },
-                multiple: { type: 'boolean' },
-                options: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      label: { type: 'string' },
-                      description: { type: 'string' },
-                    },
-                    required: ['label', 'description'],
-                    additionalProperties: false,
-                  },
-                },
-              },
-              required: ['question', 'header', 'options'],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ['questions'],
         additionalProperties: false,
       };
     case 'read_tool_output':

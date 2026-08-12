@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { InlineQuestionPanel } from './InlineQuestionPanel.js';
 import type { PendingQuestionRequest } from '@openAwork/web-client';
 
-function makeRequest(optionCount = 2): PendingQuestionRequest {
+function makeRequest(optionCount = 2, preview?: string): PendingQuestionRequest {
   return {
     requestId: 'q-1',
     sessionId: 'sess-1',
@@ -27,6 +27,7 @@ function makeRequest(optionCount = 2): PendingQuestionRequest {
         options: Array.from({ length: optionCount }, (_, i) => ({
           label: `选项${i + 1}`,
           description: `描述${i + 1}`,
+          ...(i === 0 && preview !== undefined ? { preview } : {}),
         })),
       },
     ],
@@ -344,5 +345,43 @@ describe('InlineQuestionPanel', () => {
     const submit = screen.getByRole('button', { name: '确认' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
     expect(screen.getByText('2/2')).toBeTruthy();
+  });
+
+  it('单选时显示已选项的纯文本预览', () => {
+    render(
+      <InlineQuestionPanel
+        answers={[['选项1']]}
+        customInputs={['']}
+        request={makeRequest(2, 'const enabled = true;')}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+        onCustomInputChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('const enabled = true;')).toBeTruthy();
+  });
+
+  it('多选时不展示单选预览', () => {
+    const request = makeMultiSelectRequest();
+    const firstOption = request.questions[0]?.options[0];
+    if (firstOption) {
+      firstOption.preview = '仅支持单选的预览';
+    }
+
+    render(
+      <InlineQuestionPanel
+        answers={[['A']]}
+        customInputs={['']}
+        request={request}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+        onCustomInputChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText('已选项预览')).toBeNull();
   });
 });

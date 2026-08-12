@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import QuestionPromptCard from './QuestionPromptCard.js';
 import type { PendingQuestionRequest } from '@openAwork/web-client';
 
-function makeRequest(multiple = false): PendingQuestionRequest {
+function makeRequest(multiple = false, preview?: string): PendingQuestionRequest {
   return {
     requestId: 'q-1',
     sessionId: 'sess-1',
@@ -25,7 +25,11 @@ function makeRequest(multiple = false): PendingQuestionRequest {
         question: '选一个',
         multiple,
         options: [
-          { label: '选项1', description: '描述1' },
+          {
+            label: '选项1',
+            description: '描述1',
+            ...(preview !== undefined ? { preview } : {}),
+          },
           { label: '选项2', description: '描述2' },
         ],
       },
@@ -170,5 +174,49 @@ describe('QuestionPromptCard', () => {
     );
     expect(container.querySelectorAll('[data-select-mode="multiple"]').length).toBeGreaterThan(0);
     expect(container.querySelector('[data-select-mode="single"]')).toBeNull();
+  });
+
+  it('单选时显示已选项的纯文本预览', () => {
+    render(
+      <QuestionPromptCard
+        answers={[['选项1']]}
+        request={makeRequest(false, 'const enabled = true;')}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('const enabled = true;')).toBeTruthy();
+  });
+
+  it('预览作为文本节点渲染，不执行 HTML', () => {
+    render(
+      <QuestionPromptCard
+        answers={[['选项1']]}
+        request={makeRequest(false, '<script>alert(1)</script>')}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+      />,
+    );
+
+    const preview = screen.getByLabelText('已选项预览');
+    expect(preview.textContent).toBe('<script>alert(1)</script>');
+    expect(preview.querySelector('script')).toBeNull();
+  });
+
+  it('多选时不展示单选预览', () => {
+    render(
+      <QuestionPromptCard
+        answers={[['选项1']]}
+        request={makeRequest(true, '仅支持单选的预览')}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText('已选项预览')).toBeNull();
   });
 });

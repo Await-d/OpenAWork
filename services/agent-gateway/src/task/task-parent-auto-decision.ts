@@ -352,7 +352,7 @@ function isQuestionDecisionAnswerSetValid(input: {
     if (answers.length === 0) {
       return false;
     }
-    if (question.multiple !== true && answers.length > 1) {
+    if (question.multiSelect !== true && answers.length > 1) {
       return false;
     }
 

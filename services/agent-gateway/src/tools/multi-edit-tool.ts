@@ -130,7 +130,7 @@ export function createMultiEditTool(
             normalizedOld,
             normalizedNew,
             edit.replaceAll,
-          );
+          ).content;
         } catch (err) {
           throw new Error(
             `Edit #${appliedCount + 1}: ${err instanceof Error ? err.message : String(err)} ${EDIT_ERROR_RECOVERY_SUFFIX}`,
