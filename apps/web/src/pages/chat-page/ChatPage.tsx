@@ -584,6 +584,7 @@ export default function ChatPage() {
   const terminalPanelOpened = useUIStateStore((s) => s.terminalPanelOpened);
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const toggleTerminalPanelOpened = useUIStateStore((s) => s.toggleTerminalPanelOpened);
+  const updateTabStreaming = useUIStateStore((s) => s.updateTabStreaming);
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
   const chatView = useUIStateStore((s) => s.chatView);
@@ -660,6 +661,13 @@ export default function ChatPage() {
   // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
   // decision-relevant inputs actually change (not on every token delta).
   const attachEligibilitySignatureRef = useRef<string | null>(null);
+
+  // 同步当前会话的 streaming 状态到 Titlebar tab
+  useEffect(() => {
+    if (currentSessionId) {
+      updateTabStreaming(currentSessionId, streaming);
+    }
+  }, [currentSessionId, streaming, updateTabStreaming]);
 
   // 点击导航栏 Chat 图标时（已在 /chat 路由），清除当前会话回到欢迎页面。
   useEffect(() => {

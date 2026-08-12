@@ -88,6 +88,7 @@ export interface SessionTab {
   readonly title: string;
   readonly workspacePath?: string;
   readonly createdAt: number;
+  readonly streaming?: boolean;
 }
 
 export interface UIStateStore {
@@ -142,6 +143,7 @@ export interface UIStateStore {
   selectAdjacentTab: (direction: 'previous' | 'next') => SessionTab | null;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   updateTabTitle: (tabId: string, title: string) => void;
+  updateTabStreaming: (sessionId: string, streaming: boolean) => void;
 
   teamNewSessionSignal: { teamWorkspaceId: string; nonce: number } | null;
   triggerTeamNewSession: (teamWorkspaceId: string) => void;
@@ -634,6 +636,12 @@ export const useUIStateStore = create<UIStateStore>()(
         set((state) => ({
           tabs: state.tabs.map((tab) =>
             tab.id === tabId ? { ...tab, title: normalizeTabTitle(title, tab.title) } : tab,
+          ),
+        })),
+      updateTabStreaming: (sessionId, streaming) =>
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.type === 'session' && tab.sessionId === sessionId ? { ...tab, streaming } : tab,
           ),
         })),
 
