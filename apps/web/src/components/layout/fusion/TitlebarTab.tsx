@@ -33,6 +33,7 @@ export function TitlebarTab({
   onDrop,
 }: TitlebarTabProps) {
   const isDraft = tab.type === 'draft';
+  const isStreaming = tab.streaming === true;
 
   return (
     <div
@@ -110,6 +111,46 @@ export function TitlebarTab({
       >
         {tab.title}
       </span>
+      {/* Streaming indicator */}
+      {isStreaming && (
+        <span
+          aria-label="正在生成"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}
+          />
+          <span
+            style={{
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              animation: 'pulse 1.5s ease-in-out 0.2s infinite',
+            }}
+          />
+          <span
+            style={{
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              animation: 'pulse 1.5s ease-in-out 0.4s infinite',
+            }}
+          />
+        </span>
+      )}
       {/* Close button — always visible on active tab, hover on others */}
       <button
         type="button"
