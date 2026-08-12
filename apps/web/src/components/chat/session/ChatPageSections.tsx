@@ -47,6 +47,7 @@ import {
   tryParseIncidentJson,
   IncidentReadableCard,
 } from '../../../pages/team/conversation/extras/incident-readable-card.js';
+import { groupMessageParts } from './parts-grouping-helper.js';
 export { MessageRow } from './message-row.js';
 export { WelcomeScreen } from './welcome-screen.js';
 
@@ -597,12 +598,16 @@ function AssistantPartsContent({
     (part) => part.type === 'text' && part.text.trim().length > 0,
   );
 
+  // 将 parts 转换为支持分组的渲染序列，连续的 tool parts 会被合并
+  const groupedParts = React.useMemo(() => groupMessageParts(parts), [parts]);
+
   let reasoningCursor = 0;
 
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
-      {parts.map((part) => {
-        if (part.type === 'reasoning') {
+      {groupedParts.map((item, idx) => {
+        if (item.type === 'reasoning') {
+          const part = item.part;
           const myIndex = reasoningCursor++;
           if (!showReasoningBlock) {
             if (options?.presentationMode === 'team') {
@@ -655,7 +660,8 @@ function AssistantPartsContent({
             />
           );
         }
-        if (part.type === 'text') {
+        if (item.type === 'text') {
+          const part = item.part;
           if (part.text.length === 0) return null;
           return (
             <AssistantRichContentBody
@@ -666,7 +672,30 @@ function AssistantPartsContent({
             />
           );
         }
-        if (part.type === 'tool') {
+        if (item.type === 'tool-group') {
+          // 分组的工具调用，渲染为可展开的 pill
+          return (
+            <GroupedToolCallPill
+              key={`group-${idx}-${item.groupKey}`}
+              groupKey={item.groupKey}
+              toolName={item.toolName}
+              calls={item.calls.map((tp) => ({
+                toolCallId: tp.toolCallId,
+                toolName: tp.toolName,
+                input: tp.input,
+                output: tp.output,
+                isError: tp.isError,
+                kind: tp.kind,
+                status: tp.status,
+                durationMs: tp.durationMs,
+                pendingPermissionRequestId: tp.pendingPermissionRequestId,
+                resumedAfterApproval: tp.resumedAfterApproval,
+              }))}
+            />
+          );
+        }
+        if (item.type === 'tool-single') {
+          const part = item.part;
           return renderToolCallContent({
             reactKey: part.id,
             kind: part.kind,
@@ -688,7 +717,8 @@ function AssistantPartsContent({
             taskRuntimeLookup: options?.taskRuntimeLookup,
           });
         }
-        if (part.type === 'event') {
+        if (item.type === 'event') {
+          const part = item.part;
           // 压缩事件使用专门的 UICompaction 卡片渲染，而非通用事件行
           if (part.payload.kind === 'compaction') {
             const compactionCard = createCompactionCardContent({
@@ -838,7 +868,8 @@ function AssistantTraceContent({
         if (entry.kind === 'group') {
           return (
             <GroupedToolCallPill
-              key={`group-${entry.startIndex}-${entry.toolName}`}
+              key={`group-${entry.startIndex}-${entry.groupKey}`}
+              groupKey={entry.groupKey}
               toolName={entry.toolName}
               calls={entry.calls}
             />

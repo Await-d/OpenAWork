@@ -9,6 +9,7 @@ import {
 export interface PendingQuestionOption {
   label: string;
   description: string;
+  preview?: string;
 }
 
 export interface PendingQuestionItem {

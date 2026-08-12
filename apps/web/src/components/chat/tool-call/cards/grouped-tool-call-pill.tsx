@@ -2,22 +2,13 @@ import type { AssistantTraceToolCall } from '@openAwork/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { ToolIcon } from '../display/tool-icon.js';
-import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
+import { getToolCategory } from '../shared/colorize-summary.js';
 import { extractFilePath, trimPath } from '../shared/input-paths.js';
+import { naturalLanguageGroupSummary } from '../shared/natural-language-summary.js';
 import { ToolCallDisplay, type ToolCallDisplayProps } from '../display/tool-call-display.js';
 
 /**
- * Cap on how many group items we list inline before falling back to
- * "+N". Three keeps the pill width bounded on mobile while preserving
- * enough context to recognise the run (e.g. "page.tsx, layout.tsx,
- * api.ts +4").
- */
-const MAX_PREVIEW_ITEMS = 3;
-
-/**
- * Truncate a bash-style command string for inline preview. Long
- * commands wrap to ~32 chars and the suffix is replaced with an
- * ellipsis so the pill width stays bounded.
+ * Truncate a bash-style command string for inline preview.
  */
 function trimCommand(cmd: string, max = 32): string {
   const collapsed = cmd.replace(/\s+/g, ' ').trim();
@@ -56,22 +47,46 @@ export function formatGroupItem(toolName: string, input: Record<string, unknown>
   return path ? trimPath(path) : '';
 }
 
+/**
+ * Pill label shown for each group key. MCP / skill / lsp / session /
+ * task / todo / web groups may bundle *different* underlying tool
+ * names (e.g. mcp_sequential_thinking + mcp_filesystem_read both
+ * bucket under 'mcp'), so the header uses the group key's generic
+ * label rather than any single call's toolName.
+ */
+const GROUP_KEY_LABELS: Record<string, string> = {
+  mcp: 'MCP 工具',
+  skill: '技能',
+  lsp: '语言服务',
+  session: '会话',
+  task: '任务',
+  todo: '待办',
+  web: '网络',
+};
+
+function resolveGroupLabel(groupKey: string, toolName: string): string {
+  return GROUP_KEY_LABELS[groupKey] ?? toolName;
+}
+
 export function GroupedToolCallPill({
+  groupKey,
   toolName,
   calls,
 }: {
+  /** Shared bucket key resolved by groupConsecutiveTools (e.g. 'mcp', 'read'). */
+  groupKey?: string;
   toolName: string;
   calls: AssistantTraceToolCall[];
 }) {
+  const effectiveKey = groupKey ?? toolName.trim().toLowerCase();
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
 
-  const summary = useMemo(() => {
-    const items = calls.map((c) => formatGroupItem(toolName, c.input)).filter((s) => s.length > 0);
-    const visible = items.slice(0, MAX_PREVIEW_ITEMS);
-    const overflow = items.length - visible.length;
-    const itemPart = visible.join(', ');
-    return overflow > 0 ? `${itemPart} +${overflow}` : itemPart;
-  }, [calls, toolName]);
+  const summary = useMemo(
+    () => naturalLanguageGroupSummary(effectiveKey, calls.length),
+    [effectiveKey, calls.length],
+  );
+
+  const label = useMemo(() => resolveGroupLabel(effectiveKey, toolName), [effectiveKey, toolName]);
 
   const errorCount = useMemo(
     () => calls.filter((c) => c.isError === true || c.status === 'failed').length,
@@ -81,8 +96,6 @@ export function GroupedToolCallPill({
     () => calls.some((c) => c.status === 'running' || c.status === 'paused'),
     [calls],
   );
-  // Visual: a single error inside a group surfaces as red dot. The
-  // detailed per-call status is still visible after expansion.
   const visualState: 'completed' | 'failed' = errorCount > 0 ? 'failed' : 'completed';
   const shouldAutoExpand = shouldExpandByDefault || hasActiveCalls;
   const [expanded, setExpanded] = useState(shouldAutoExpand);
@@ -103,20 +116,13 @@ export function GroupedToolCallPill({
       >
         <ToolIcon toolName={toolName} status={visualState} size={13} />
         <span className="tool-call-grouped-name" data-tool-category={getToolCategory(toolName)}>
-          {toolName}
+          {summary || label}
         </span>
-        <span className="tool-call-grouped-count">{calls.length} 个</span>
         {errorCount > 0 && <span className="tool-call-grouped-errors">{errorCount} 失败</span>}
-        <span className="tool-call-grouped-summary">{colorizeSummary(summary)}</span>
-        <span className="tool-call-grouped-chevron">{expanded ? '▾' : '▸'}</span>
       </button>
       {expanded && (
         <div className="tool-call-grouped-children">
           {calls.map((c, idx) => {
-            // `ToolCallDisplay` only includes optional fields that are
-            // actually defined — passing `undefined` is fine, but the
-            // downstream `isInlineTool` / `BatchToolCallCard` paths
-            // re-route based on toolName so we don't filter here.
             const props: ToolCallDisplayProps = {
               toolName: c.toolName,
               input: c.input,

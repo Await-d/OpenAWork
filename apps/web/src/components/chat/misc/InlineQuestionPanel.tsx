@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { PendingQuestionRequest } from '@openAwork/web-client';
 import { OptionSelectIndicator } from '../../common/display/OptionSelectIndicator.js';
+import { QuestionOptionPreview } from '../../common/display/QuestionOptionPreview.js';
 
 interface InlineQuestionPanelProps {
   answers: string[][];
@@ -40,10 +41,42 @@ export function InlineQuestionPanel({
   const isSubmitDisabled = isSubmitting || !allAnswered;
   const containerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const progressPercentage = totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
 
   useEffect(() => {
     setCollapsed(false);
   }, [request.requestId]);
+
+  // 状态持久化：保存到 localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const stateKey = `iqp-state-${request.requestId}`;
+    const state = {
+      answers,
+      customInputs,
+      timestamp: Date.now(),
+    };
+
+    try {
+      localStorage.setItem(stateKey, JSON.stringify(state));
+    } catch (e) {
+      // localStorage 可能已满或被禁用，静默失败
+    }
+  }, [answers, customInputs, request.requestId]);
+
+  // 提交或取消时清除保存的状态
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (pendingAction !== null) {
+      const stateKey = `iqp-state-${request.requestId}`;
+      try {
+        localStorage.removeItem(stateKey);
+      } catch (e) {
+        // 静默失败
+      }
+    }
+  }, [pendingAction, request.requestId]);
 
   // Enter 提交：与 PermissionPrompt 的键盘语义一致（Enter = 主操作）。
   // 仅在面板展开、未提交、且所有问题都已回答（!isSubmitDisabled）时触发。当焦点
@@ -128,6 +161,18 @@ export function InlineQuestionPanel({
             </button>
           </div>
         </div>
+
+        {/* 进度条 */}
+        {totalQuestions > 1 && (
+          <div className="iqp-progress-bar-wrapper">
+            <div className="iqp-progress-bar">
+              <div
+                className="iqp-progress-bar-fill"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* 折叠态下保留一条精简摘要，避免「收起后完全失去上下文」。点击同样切换展开。 */}
         {collapsed && (
@@ -221,8 +266,29 @@ function QuestionBlock({
 }) {
   const multiple = question.multiple === true;
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const hasCustom = customInput.trim().length > 0;
+  const selectedPreview = multiple
+    ? undefined
+    : question.options.find((option) => selectedAnswers.includes(option.label))?.preview;
+
+  // 搜索过滤
+  const filteredOptions = question.options.filter((option) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      option.label.toLowerCase().includes(query) ||
+      option.description?.toLowerCase().includes(query) ||
+      false
+    );
+  });
+
+  const showSearch = question.options.length > 5;
+  const allOptions = [...filteredOptions, { label: '自定义回答', description: '', preview: undefined }];
 
   const handleToggleCustom = useCallback(() => {
     setShowCustomInput((v) => !v);
@@ -230,6 +296,82 @@ function QuestionBlock({
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [showCustomInput]);
+
+  // 键盘导航
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isSubmitting) return;
+
+      // 数字快捷键 (1-9)
+      if (e.key >= '1' && e.key <= '9' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        const isEditable =
+          target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if (isEditable) return;
+
+        const index = parseInt(e.key, 10) - 1;
+        if (index < filteredOptions.length && index >= 0) {
+          const option = filteredOptions[index];
+          if (option) {
+            e.preventDefault();
+            onToggleOption(questionIndex, option.label, multiple);
+          }
+        }
+        return;
+      }
+
+      // 方向键导航
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const target = e.target as HTMLElement;
+        const isInSearch = target === searchRef.current;
+        const isInCustomInput = target === inputRef.current;
+
+        if (!isInSearch && !isInCustomInput && focusedIndex === -1) return;
+
+        e.preventDefault();
+        const maxIndex = allOptions.length - 1;
+        let newIndex = focusedIndex;
+
+        if (e.key === 'ArrowDown') {
+          newIndex = focusedIndex >= maxIndex ? 0 : focusedIndex + 1;
+        } else {
+          newIndex = focusedIndex <= 0 ? maxIndex : focusedIndex - 1;
+        }
+
+        setFocusedIndex(newIndex);
+        optionRefs.current[newIndex]?.focus();
+        return;
+      }
+
+      // Space 切换选中状态
+      if (e.key === ' ' && focusedIndex >= 0 && focusedIndex < allOptions.length) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'BUTTON') {
+          e.preventDefault();
+          if (focusedIndex === allOptions.length - 1) {
+            handleToggleCustom();
+          } else {
+            const option = filteredOptions[focusedIndex];
+            if (option) {
+              onToggleOption(questionIndex, option.label, multiple);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [
+    isSubmitting,
+    focusedIndex,
+    filteredOptions,
+    questionIndex,
+    multiple,
+    onToggleOption,
+    handleToggleCustom,
+    allOptions.length,
+  ]);
 
   return (
     <div className="iqp-question-block">
@@ -248,35 +390,128 @@ function QuestionBlock({
       </div>
       <div className="iqp-question-text">{question.question}</div>
 
-      <div className="iqp-options">
-        {question.options.map((option) => {
-          const selected = selectedAnswers.includes(option.label);
-          return (
+      {/* 搜索框 */}
+      {showSearch && (
+        <div className="iqp-search-wrapper">
+          <input
+            ref={searchRef}
+            type="text"
+            className="iqp-search-input"
+            placeholder="搜索选项..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setFocusedIndex(-1);
+            }}
+            disabled={isSubmitting}
+          />
+          {searchQuery && (
             <button
-              key={option.label}
               type="button"
-              className={`iqp-option ${selected ? 'iqp-option-selected' : ''}`}
-              disabled={isSubmitting}
-              onClick={() => onToggleOption(questionIndex, option.label, multiple)}
+              className="iqp-search-clear"
+              onClick={() => {
+                setSearchQuery('');
+                searchRef.current?.focus();
+              }}
+              aria-label="清除搜索"
             >
-              <span className="iqp-option-check">
-                <OptionSelectIndicator selected={selected} multiple={multiple} />
-              </span>
-              <span className="iqp-option-content">
-                <span className="iqp-option-label">{option.label}</span>
-                {option.description && (
-                  <span className="iqp-option-desc">{option.description}</span>
-                )}
-              </span>
+              ×
             </button>
-          );
-        })}
+          )}
+        </div>
+      )}
+
+      {/* 批量操作（多选时） */}
+      {multiple && filteredOptions.length > 1 && (
+        <div className="iqp-bulk-actions">
+          <button
+            type="button"
+            className="iqp-bulk-btn"
+            disabled={isSubmitting}
+            onClick={() => {
+              filteredOptions.forEach((option) => {
+                if (!selectedAnswers.includes(option.label)) {
+                  onToggleOption(questionIndex, option.label, multiple);
+                }
+              });
+            }}
+          >
+            全选
+          </button>
+          <button
+            type="button"
+            className="iqp-bulk-btn"
+            disabled={isSubmitting}
+            onClick={() => {
+              filteredOptions.forEach((option) => {
+                if (selectedAnswers.includes(option.label)) {
+                  onToggleOption(questionIndex, option.label, multiple);
+                }
+              });
+            }}
+          >
+            取消全选
+          </button>
+          {selectedAnswers.length > 0 && (
+            <span className="iqp-selected-count">已选 {selectedAnswers.length} 项</span>
+          )}
+        </div>
+      )}
+
+      <div className="iqp-options">
+        {filteredOptions.length === 0 && searchQuery ? (
+          <div className="iqp-no-results">未找到匹配的选项</div>
+        ) : (
+          filteredOptions.map((option, index) => {
+            const selected = selectedAnswers.includes(option.label);
+            return (
+              <button
+                key={option.label}
+                ref={(el) => {
+                  optionRefs.current[index] = el;
+                }}
+                type="button"
+                className={`iqp-option ${selected ? 'iqp-option-selected' : ''}`}
+                disabled={isSubmitting}
+                onClick={() => onToggleOption(questionIndex, option.label, multiple)}
+                onFocus={() => setFocusedIndex(index)}
+                aria-pressed={selected}
+                aria-label={`${showSearch && index < 9 ? `按 ${index + 1} 键或` : ''}${option.label}${option.description ? `: ${option.description}` : ''}`}
+              >
+                <span className="iqp-option-check">
+                  <OptionSelectIndicator selected={selected} multiple={multiple} />
+                </span>
+                <span className="iqp-option-content">
+                  <span className="iqp-option-label">
+                    {showSearch && index < 9 && (
+                      <kbd className="iqp-option-kbd">{index + 1}</kbd>
+                    )}
+                    {option.label}
+                  </span>
+                  {option.description && (
+                    <span className="iqp-option-desc">{option.description}</span>
+                  )}
+                </span>
+              </button>
+            );
+          })
+        )}
+
+        {selectedPreview !== undefined && (
+          <QuestionOptionPreview preview={selectedPreview} style={{ margin: '4px 4px 0' }} />
+        )}
 
         <button
+          ref={(el) => {
+            optionRefs.current[filteredOptions.length] = el;
+          }}
           type="button"
           className={`iqp-option iqp-option-custom-trigger ${hasCustom ? 'iqp-option-selected' : ''}`}
           disabled={isSubmitting}
           onClick={handleToggleCustom}
+          onFocus={() => setFocusedIndex(filteredOptions.length)}
+          aria-pressed={hasCustom}
+          aria-label="自定义回答"
         >
           <span className="iqp-option-check">
             {hasCustom ? (
@@ -313,16 +548,17 @@ function QuestionBlock({
 
         {showCustomInput && (
           <div className="iqp-custom-input-row">
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
               className="iqp-custom-input"
               placeholder="输入自定义答案…"
               value={customInput}
               disabled={isSubmitting}
+              rows={3}
               onChange={(e) => onCustomInputChange(questionIndex, e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && customInput.trim()) {
+                if (e.key === 'Enter' && !e.shiftKey && customInput.trim()) {
+                  e.preventDefault();
                   setShowCustomInput(false);
                 }
                 if (e.key === 'Escape') {
@@ -330,6 +566,10 @@ function QuestionBlock({
                 }
               }}
             />
+            <div className="iqp-input-hint">
+              <span className="iqp-char-count">{customInput.length} 字符</span>
+              <span className="iqp-hint-text">Enter 确认 · Shift+Enter 换行 · Esc 取消</span>
+            </div>
           </div>
         )}
       </div>
@@ -345,6 +585,12 @@ const panelStyles = `
   box-sizing: border-box;
 }
 
+@media (max-width: 768px) {
+  .iqp-wrapper {
+    padding: 0 8px;
+  }
+}
+
 .inline-question-panel {
   display: flex;
   flex-direction: column;
@@ -354,6 +600,12 @@ const panelStyles = `
   overflow: hidden;
   animation: iqp-slide-up 280ms cubic-bezier(0.22, 1, 0.36, 1);
   box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 768px) {
+  .inline-question-panel {
+    border-radius: 10px;
+  }
 }
 
 @keyframes iqp-slide-up {
@@ -373,6 +625,55 @@ const panelStyles = `
 }
 .iqp-header:hover {
   background: var(--bg-surface);
+}
+
+@media (max-width: 768px) {
+  .iqp-header {
+    padding: 8px 12px;
+  }
+}
+
+/* 进度条样式 */
+.iqp-progress-bar-wrapper {
+  padding: 0 14px 8px;
+  background: var(--bg-overlay);
+}
+
+.iqp-progress-bar {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.iqp-progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.iqp-progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 40%, transparent) 50%,
+    transparent 100%
+  );
+  animation: iqp-progress-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes iqp-progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
 }
 
 .iqp-header-left {
@@ -646,7 +947,7 @@ const panelStyles = `
 
 .iqp-custom-input {
   width: 100%;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-radius: 7px;
   border: 1px solid var(--border-default);
   background: var(--bg-surface);
@@ -657,12 +958,164 @@ const panelStyles = `
   transition: border-color 120ms ease;
   font-family: inherit;
   box-sizing: border-box;
+  resize: vertical;
+  min-height: 60px;
 }
 .iqp-custom-input:focus {
   border-color: var(--accent);
 }
 .iqp-custom-input::placeholder {
   color: var(--fg-muted);
+}
+
+.iqp-input-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.iqp-char-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.iqp-hint-text {
+  opacity: 0.8;
+}
+
+/* 搜索框样式 */
+.iqp-search-wrapper {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.iqp-search-input {
+  width: 100%;
+  padding: 7px 30px 7px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--fg-strong);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 120ms ease;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.iqp-search-input:focus {
+  border-color: var(--accent);
+}
+
+.iqp-search-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.iqp-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: var(--surface-3);
+  color: var(--fg-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  transition: background 120ms ease;
+}
+
+.iqp-search-clear:hover {
+  background: var(--border-default);
+  color: var(--fg-default);
+}
+
+/* 批量操作样式 */
+.iqp-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.iqp-bulk-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+  font-family: inherit;
+}
+
+.iqp-bulk-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.iqp-bulk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.iqp-selected-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 无搜索结果 */
+.iqp-no-results {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+
+/* 选项键盘快捷键标识 */
+.iqp-option-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  margin-right: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.iqp-option-selected .iqp-option-kbd {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .iqp-actions {

@@ -481,13 +481,49 @@ export function convertToLineEnding(text: string, ending: '\n' | '\r\n'): string
 }
 
 /**
+ * Result of a successful {@link fuzzyReplace} call.
+ */
+export interface FuzzyReplaceResult {
+  /** The file content after replacement. */
+  content: string;
+  /**
+   * The number of occurrences actually replaced. For `replaceAll`, this is
+   * the true count of the resolved `search` string in the original content
+   * (which may differ from a naive count of the caller's `oldString`, since
+   * fuzzy matching levels 2-9 can resolve `search` to a different — but
+   * equivalent — substring). For a single replacement, this is always 1.
+   */
+  replacements: number;
+}
+
+/**
+ * Count non-overlapping occurrences of `search` in `content`.
+ */
+function countOccurrencesOf(content: string, search: string): number {
+  if (search.length === 0) {
+    return 0;
+  }
+
+  let count = 0;
+  let startIndex = 0;
+  while (true) {
+    const foundAt = content.indexOf(search, startIndex);
+    if (foundAt === -1) {
+      return count;
+    }
+    count += 1;
+    startIndex = foundAt + search.length;
+  }
+}
+
+/**
  * Try each replacer in the chain to find a matching replacement.
  *
  * @param content - The file content
  * @param oldString - The string to find (may have minor mismatches)
  * @param newString - The replacement string
  * @param replaceAll - Whether to replace all occurrences
- * @returns The new file content after replacement
+ * @returns The new file content and the actual number of replacements made
  * @throws Error if no match found or ambiguous matches
  */
 export function fuzzyReplace(
@@ -495,7 +531,7 @@ export function fuzzyReplace(
   oldString: string,
   newString: string,
   replaceAll = false,
-): string {
+): FuzzyReplaceResult {
   if (oldString === newString) {
     throw new Error('No changes to apply: oldString and newString are identical.');
   }
@@ -508,11 +544,17 @@ export function fuzzyReplace(
       if (index === -1) continue;
       notFound = false;
       if (replaceAll) {
-        return content.replaceAll(search, newString);
+        return {
+          content: content.replaceAll(search, newString),
+          replacements: countOccurrencesOf(content, search),
+        };
       }
       const lastIndex = content.lastIndexOf(search);
       if (index !== lastIndex) continue;
-      return content.substring(0, index) + newString + content.substring(index + search.length);
+      return {
+        content: content.substring(0, index) + newString + content.substring(index + search.length),
+        replacements: 1,
+      };
     }
   }
 

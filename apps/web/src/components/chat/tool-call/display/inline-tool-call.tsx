@@ -4,16 +4,8 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
-import { extractFilePath } from '../shared/input-paths.js';
-import {
-  buildGenericInputSummary,
-  summarizeBackgroundCancelInput,
-  summarizeExitPlanModeInput,
-  summarizeQuestionInput,
-  summarizeSessionInfoInput,
-  summarizeTodoWriteInput,
-} from '../shared/input-summary.js';
 import { buildLspInlineSummary } from '../shared/lsp-summary.js';
+import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import {
   extractTodosFromOutput,
@@ -44,7 +36,6 @@ export function InlineToolCall({
   status?: ToolCallCardProps['status'];
   isError?: boolean;
 }) {
-  const filePath = extractFilePath(input);
   const normalized = toolName.trim().toLowerCase();
   const visualState = resolveToolVisualStatus({
     defaultStatus: 'running',
@@ -69,81 +60,8 @@ export function InlineToolCall({
         ...(isError !== undefined ? { isError } : {}),
       });
     }
-    if (normalized === 'question' || normalized === 'askuserquestion') {
-      // `question` / `AskUserQuestion` carry the entire prompt list inside
-      // `input.questions`; the generic fallback would render "questions×N"
-      // which loses the actual question text. Surface the first question's
-      // header so users see *what* they're being asked.
-      const qSummary = summarizeQuestionInput(input);
-      if (qSummary) return qSummary;
-    }
-    if (normalized === 'enterplanmode') {
-      // EnterPlanMode takes no input — generic returns empty. Show a friendly
-      // label that mirrors what the model is doing.
-      return '进入计划模式';
-    }
-    if (normalized === 'exitplanmode') {
-      // ExitPlanMode carries the proposed plan as markdown text. Surface a
-      // 60-char preview so users can decide whether to drill in.
-      const planSummary = summarizeExitPlanModeInput(input);
-      if (planSummary) return `退出计划模式 · ${planSummary}`;
-      return '退出计划模式';
-    }
-    if (normalized === 'background_cancel') {
-      // Output is a short success/error message, so the pill is the entire
-      // useful UI. helper handles {all:true} vs {taskId|task_id|runId}.
-      const s = summarizeBackgroundCancelInput(input);
-      return s ?? 'background_cancel';
-    }
-    if (normalized === 'session_info') {
-      // session_info returns metadata about a single session id — surfacing
-      // the id is enough before the user drills into the output card.
-      const s = summarizeSessionInfoInput(input);
-      return s ?? 'session_info';
-    }
-    if (normalized === 'grep') {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      return filePath ? `${filePath} · "${pattern}"` : `"${pattern}"`;
-    }
-    if (normalized === 'glob') {
-      const pattern = typeof input.pattern === 'string' ? input.pattern : '';
-      return filePath ? `${filePath} · "${pattern}"` : `"${pattern}"`;
-    }
-    if (normalized === 'read') {
-      if (filePath) {
-        const offset = typeof input.offset === 'number' ? input.offset : undefined;
-        const limit = typeof input.limit === 'number' ? input.limit : undefined;
-        const suffix =
-          offset != null || limit != null
-            ? ` [${limit != null ? `limit=${limit}` : ''}${offset != null ? `${limit != null ? ', ' : ''}offset=${offset}` : ''}]`
-            : '';
-        return `${filePath}${suffix}`;
-      }
-      return 'reading…';
-    }
-    if (normalized === 'skill') {
-      const skillId = typeof input.skillId === 'string' ? input.skillId : '';
-      const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-      if (skillId && prompt)
-        return `${skillId} · "${prompt.slice(0, 40)}${prompt.length > 40 ? '…' : ''}"`;
-      if (skillId) return skillId;
-      if (prompt) return `"${prompt.slice(0, 50)}${prompt.length > 50 ? '…' : ''}"`;
-    }
-    if (normalized === 'todowrite' || normalized === 'subtodowrite') {
-      // Show "5 项 · 3待办/2完成" when the todos array is present, otherwise
-      // gracefully fall through to generic so a malformed call still renders.
-      const todoSummary = summarizeTodoWriteInput(input);
-      if (todoSummary) return todoSummary;
-    }
-    if (normalized === 'todoread' || normalized === 'subtodoread') {
-      // Reads take no input — generic summary would be empty. Use a friendly
-      // label that mirrors what the model is doing.
-      return normalized === 'subtodoread' ? '读取临时待办' : '读取主待办';
-    }
-    if (filePath) return filePath;
-    const generic = buildGenericInputSummary(input);
-    return generic || '';
-  }, [isLsp, normalized, input, output, filePath, toolName, visualState, isError]);
+    return naturalLanguageSummary(toolName, input);
+  }, [isLsp, toolName, input, output, visualState, isError]);
 
   // Every inline tool is expandable so the user can always inspect both the
   // raw input parameters and any output. Previously this was gated on a
@@ -237,7 +155,7 @@ export function InlineToolCall({
               {hasInput && (
                 <div className="tool-call-inline-section" data-inline-row="true">
                   <div className="tool-call-inline-section-label">参数</div>
-                  <ToolInputPreview toolName={toolName} input={input} />
+                  <ToolInputPreview toolName={toolName} input={input} kind={kind} />
                 </div>
               )}
               {hasOutput && (

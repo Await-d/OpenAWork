@@ -3,6 +3,10 @@ import {
   extractDiagnosticsFromOutput,
 } from '../previews/diagnostics-preview.js';
 import {
+  BashOutputPreview,
+  extractBashOutputFromOutput,
+} from '../previews/bash-output-preview.js';
+import {
   extractFileContentFromOutput,
   FileContentPreview,
 } from '../previews/file-content-preview.js';
@@ -15,6 +19,7 @@ import {
   GrepContentHitsPreview,
 } from '../previews/grep-content-hits-preview.js';
 import { extractGrepCountsFromOutput, GrepCountsPreview } from '../previews/grep-counts-preview.js';
+import { JsonPreview } from '../previews/json-preview.js';
 import { extractRepoCloneFromOutput, RepoClonePreview } from '../previews/repo-clone-preview.js';
 import {
   extractRepoOverviewFromOutput,
@@ -29,6 +34,12 @@ import {
   SearchResultsPreview,
 } from '../previews/search-results-preview.js';
 import { SuccessConfirmPreview } from '../previews/success-confirm-preview.js';
+import {
+  TaskListPreview,
+  SessionListPreview,
+  extractTaskListFromOutput,
+  extractSessionListFromOutput,
+} from '../previews/task-session-preview.js';
 import { extractTodosFromOutput, TodoListPreview } from '../previews/todo-list-preview.js';
 import { extractTreeNodesFromOutput, TreeNodesPreview } from '../previews/tree-nodes-preview.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
@@ -76,6 +87,11 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     if (data) return <FileContentPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
+  if (normalized === 'bash' || normalized === 'interactive_bash') {
+    const data = extractBashOutputFromOutput(output);
+    if (data) return <BashOutputPreview data={data} defaultExpanded={shouldExpandByDefault} />;
+  }
+
   if (normalized === 'grep') {
     const hits = extractGrepContentHitsFromOutput(output);
     if (hits) return <GrepContentHitsPreview hits={hits} />;
@@ -103,6 +119,18 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   if (normalized === 'workspace_review_status') {
     const data = extractReviewChangesFromOutput(output);
     if (data) return <ReviewStatusPreview data={data} />;
+  }
+
+  // Task tools
+  if (normalized === 'task_list' || normalized === 'task_get') {
+    const tasks = extractTaskListFromOutput(output);
+    if (tasks) return <TaskListPreview tasks={tasks} />;
+  }
+
+  // Session tools
+  if (normalized === 'session_list' || normalized === 'session_info') {
+    const sessions = extractSessionListFromOutput(output);
+    if (sessions) return <SessionListPreview sessions={sessions} />;
   }
 
   // P1-SCOUT: structured cards for the repo_clone / repo_overview
@@ -147,10 +175,25 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   }
 
   // True last resort: structured object we don't have a renderer for.
-  // Pretty-print JSON so the user can still inspect every field.
-  const fallbackText =
-    typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
+  // Use JsonPreview for objects/arrays to get syntax highlighting.
+  if (typeof output !== 'string' && output !== null && typeof output === 'object') {
+    return <JsonPreview data={output} defaultExpanded={shouldExpandByDefault} />;
+  }
+
+  // Plain string fallback
+  const fallbackText = typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
+
+  // If the string looks like JSON, parse and use JsonPreview
+  if (typeof output === 'string' && (output.trim().startsWith('{') || output.trim().startsWith('['))) {
+    try {
+      const parsed = JSON.parse(output);
+      return <JsonPreview data={parsed} defaultExpanded={shouldExpandByDefault} />;
+    } catch {
+      // Not valid JSON, fall through to text output
+    }
+  }
+
   return (
     <ExpandableOutput
       text={fallbackText}

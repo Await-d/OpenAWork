@@ -33,10 +33,21 @@ export const MAX_OUTPUT_LINES = 2000;
 export const MAX_OUTPUT_BYTES = 50 * 1024; // 50 KB
 
 /**
- * Preferred tool-output directory inside the workspace (opencode-compatible
- * layout adapted to OpenAWork's per-workspace root). Callers that only need a
- * stable "primary" path (tests, docs) can keep using this; actual writes go
- * through {@link resolveWritableTruncationDir} which may fall back.
+ * @deprecated **Do not use this to read/write/check actual truncation files.**
+ * This is a static path derived from the single `WORKSPACE_ROOT` at module
+ * load time. The real write location is chosen dynamically at call time by
+ * {@link resolveWritableTruncationDir}, which iterates `WORKSPACE_ROOTS` (all
+ * configured workspace roots, not just the first) and falls back to the
+ * gateway data dir or the OS tmp dir when the preferred candidate isn't
+ * writable — see {@link listTruncationDirCandidates}. When there are multiple
+ * workspace roots, or the first root is not writable, `TRUNCATION_DIR` will
+ * NOT match where files actually end up.
+ *
+ * Kept only as a stable "primary candidate" reference for tests/docs (e.g.
+ * asserting it's first in {@link listTruncationDirCandidates}'s output).
+ * Production code that needs to locate, read, or verify existence of a
+ * truncation file MUST call {@link resolveWritableTruncationDir} (async)
+ * instead of assuming this constant.
  */
 export const TRUNCATION_DIR = path.join(WORKSPACE_ROOT, '.openAwork', 'tool-output');
 

@@ -2052,7 +2052,13 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!currentSessionId || !token || !sessionModesHydrated || !sessionMetadataDirty) return;
-    const nextMetadata = buildSessionMetadata();
+
+    // 从 providers 列表中查找当前选中模型的 label
+    const currentProvider = providers.find((p) => p.id === activeProviderId);
+    const currentModel = currentProvider?.defaultModels.find((m) => m.id === activeModelId);
+    const modelLabel = currentModel?.label;
+
+    const nextMetadata = buildSessionMetadata(modelLabel ? { modelLabel } : {});
     const nextSnapshot = createSessionMetadataSnapshot(nextMetadata);
     const targetSessionId = currentSessionId;
 
@@ -2083,10 +2089,13 @@ export default function ChatPage() {
       })
       .catch(() => undefined);
   }, [
+    activeModelId,
+    activeProviderId,
     buildSessionMetadata,
     clearSessionMetadataDirty,
     currentSessionId,
     gatewayUrl,
+    providers,
     sessionMetadataDirty,
     sessionModesHydrated,
     token,
@@ -2477,6 +2486,7 @@ export default function ChatPage() {
     const resolvedMetadata = buildSessionMetadata({
       ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
       ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
+      ...(resolvedModel?.label ? { modelLabel: resolvedModel.label } : {}),
       ...(resolvedModelSelectionSource
         ? { modelSelectionSource: resolvedModelSelectionSource }
         : {}),

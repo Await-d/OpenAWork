@@ -82,6 +82,7 @@ export {
   GROUPABLE_TOOL_NAMES,
   type GroupOrSingle,
   groupConsecutiveTools,
+  resolveGroupKey,
 } from './shared/group-consecutive-tools.js';
 export { isInlineTool } from './shared/inline-tool-set.js';
 export { clampString, extractFilePath, trimPath } from './shared/input-paths.js';

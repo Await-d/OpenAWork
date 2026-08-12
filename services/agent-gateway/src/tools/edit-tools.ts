@@ -68,23 +68,6 @@ function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): s
   return safePath;
 }
 
-function countOccurrences(content: string, search: string): number {
-  if (search.length === 0) {
-    return 0;
-  }
-
-  let count = 0;
-  let startIndex = 0;
-  while (true) {
-    const foundAt = content.indexOf(search, startIndex);
-    if (foundAt === -1) {
-      return count;
-    }
-    count += 1;
-    startIndex = foundAt + search.length;
-  }
-}
-
 function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
   const rows = sqliteAll<AuditLogRow>(
     `SELECT input_json, output_json
@@ -213,8 +196,11 @@ export function createEditTool(
       const normalizedNew = convertToLineEnding(normalizeLineEndings(input.newString), ending);
 
       let nextContent: string;
+      let replacementCount: number;
       try {
-        nextContent = fuzzyReplace(currentContent, normalizedOld, normalizedNew, input.replaceAll);
+        const result = fuzzyReplace(currentContent, normalizedOld, normalizedNew, input.replaceAll);
+        nextContent = result.content;
+        replacementCount = result.replacements;
       } catch (err) {
         throw new Error(
           (err instanceof Error ? err.message : String(err)) + ' ' + EDIT_ERROR_RECOVERY_SUFFIX,
@@ -251,7 +237,7 @@ export function createEditTool(
         },
         success: true,
         path: safePath,
-        replacements: input.replaceAll ? countOccurrences(currentContent, normalizedOld) || 1 : 1,
+        replacements: replacementCount,
         created: false,
         diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
         projectDiagnostics: projDiags.length > 0 ? projDiags : undefined,

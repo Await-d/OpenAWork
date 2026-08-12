@@ -50,7 +50,6 @@ const MAX_READ_LINE_LIMIT = 2000;
 const MAX_READ_LINE_CHARS = 2000;
 const READ_LINE_TRUNCATION_NOTICE = '...[line truncated]';
 const MAX_GLOB_MATCHES = 100;
-const _MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 const optionalWorkspacePathSchema = z.preprocess(
@@ -796,7 +795,9 @@ export async function executeReadTool(
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
   name: 'glob',
-  description: '快速文件 glob 模式匹配（带安全限制：60s 超时、最多 100 个文件）。',
+  // NOTE: keep in sync with `timeout` below — this used to say "60s" while
+  // the actual ToolDefinition.timeout was 10000ms.
+  description: '快速文件 glob 模式匹配（带安全限制：10s 超时、最多 100 个文件）。',
   inputSchema: globToolInputSchema,
   outputSchema: globToolOutputSchema,
   timeout: 10000,
@@ -805,7 +806,13 @@ export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToo
 
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
   name: 'grep',
-  description: '快速内容搜索工具（带安全限制：60s 超时、输出上限 256KB）。',
+  // NOTE: keep in sync with `timeout` below — this used to say "60s 超时、
+  // 输出上限 256KB", but the real timeout is 15000ms and output truncation
+  // is handled post-execution by tool-output-truncator.ts's
+  // truncateToolOutput() using DEFAULT_MAX_CHARS (~200k chars, dynamically
+  // scaled down for smaller context windows), not a fixed 256KB byte cap.
+  description:
+    '快速内容搜索工具（带安全限制：15s 超时、输出过长会自动截断，约 20 万字符，随模型上下文窗口动态调整）。',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: 15000,
@@ -930,7 +937,7 @@ export async function executeWorkspaceWriteFile(
     },
     success: true,
     path: safePath,
-    bytes: input.content.length,
+    bytes: Buffer.byteLength(input.content, 'utf8'),
     diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }
@@ -1013,7 +1020,7 @@ export async function executeWorkspaceCreateFile(
     filediff: buildFileDiff({ file: safePath, before: '', after: input.content }),
     success: true,
     path: safePath,
-    bytes: input.content.length,
+    bytes: Buffer.byteLength(input.content, 'utf8'),
     diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }

@@ -499,20 +499,21 @@
 .file-content-preview {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px; /* 增加间距 */
 }
 
 .file-content-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px; /* 增加间距 */
   flex-wrap: wrap;
-  font-size: 10px;
+  font-size: 11px; /* 增大字体 */
+  padding: 4px 0;
 }
 
 .file-content-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px; /* 增大字体 */
   color: var(--fg-default);
   font-weight: 500;
   word-break: break-all;
@@ -523,28 +524,32 @@
 .file-content-path-clickable {
   border: none;
   background: transparent;
-  padding: 0;
-  margin: 0;
+  padding: 2px 4px; /* 增加点击区域 */
+  margin: -2px -4px;
+  border-radius: 3px;
   cursor: pointer;
   text-align: left;
-  transition: color 100ms ease;
+  transition: all 0.15s ease;
 }
 
 .file-content-path-clickable:hover,
 .file-content-path-clickable:focus-visible {
   color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   text-decoration: underline;
   outline: none;
 }
 
 .file-content-range {
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: 11px; /* 增大字体 */
+  font-weight: 500;
 }
 
 .file-content-flag {
   font-size: 10px;
-  padding: 1px 6px;
+  font-weight: 600;
+  padding: 2px 8px; /* 增加内边距 */
   border-radius: 999px;
   background: var(--bg-surface);
   color: var(--fg-muted);
@@ -563,13 +568,14 @@
 
 .file-content-pre {
   margin: 0;
-  padding: 6px 0;
+  padding: 8px 0; /* 增加内边距 */
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.55;
+  font-size: 12px; /* 增大字体 */
+  line-height: 1.6; /* 增加行高 */
   background: var(--bg-surface);
-  border-radius: 4px;
-  max-height: 280px;
+  border-radius: 6px; /* 增大圆角 */
+  border: 1px solid var(--border-subtle); /* 添加边框 */
+  max-height: 400px; /* 增加最大高度 */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -578,12 +584,13 @@
 .file-content-line {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 10px;
-  padding: 0 8px;
+  gap: 12px; /* 增加间距 */
+  padding: 1px 12px; /* 增加内边距 */
+  transition: background 0.1s ease;
 }
 
 .file-content-line:hover {
-  background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
 }
 
 .file-content-line-num {
@@ -591,7 +598,8 @@
   user-select: none;
   text-align: right;
   white-space: pre;
-  opacity: 0.7;
+  opacity: 0.6; /* 稍微降低透明度 */
+  font-weight: 500;
 }
 
 /* Clickable gutter line numbers: jump straight to that line in the editor. */
@@ -627,58 +635,64 @@
 .path-list-preview {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px; /* 增加间距 */
 }
 
 .grep-hits-meta {
-  font-size: 10px;
+  font-size: 11px; /* 增大字体 */
   color: var(--fg-muted);
   letter-spacing: 0.04em;
+  font-weight: 500;
 }
 
 .grep-hits-summary {
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--fg-default);
 }
 
 .grep-hits-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 320px;
+  gap: 10px; /* 增加间距 */
+  max-height: 450px; /* 增加最大高度 */
   overflow-y: auto;
   background: var(--bg-surface);
-  border-radius: 4px;
-  padding: 6px 8px;
+  border-radius: 6px; /* 增大圆角 */
+  border: 1px solid var(--border-subtle); /* 添加边框 */
+  padding: 10px 12px; /* 增加内边距 */
 }
 
 .grep-hits-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px; /* 增加间距 */
 }
 
 .grep-hits-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px; /* 增大字体 */
   color: var(--fg-default);
-  font-weight: 500;
+  font-weight: 600; /* 增加粗细 */
   word-break: break-all;
-  padding-bottom: 2px;
-  border-bottom: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
+  padding-bottom: 4px; /* 增加间距 */
+  margin-bottom: 2px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border-subtle) 60%, transparent);
 }
 
 .grep-hits-row {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 10px;
-  padding: 1px 0;
+  gap: 12px; /* 增加间距 */
+  padding: 2px 4px; /* 增加内边距 */
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px; /* 增大字体 */
+  line-height: 1.6; /* 增加行高 */
+  border-radius: 3px;
+  transition: background 0.1s ease;
 }
 
 .grep-hits-row:hover {
-  background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
 }
 
 /* Button variant of a hit row: resets the native button chrome but keeps
@@ -689,12 +703,13 @@
   width: 100%;
   text-align: left;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 4px; /* 增大圆角 */
 }
 
 .grep-hits-row-clickable:hover .grep-hits-text,
 .grep-hits-row-clickable:focus-visible .grep-hits-text {
   color: var(--accent);
+  font-weight: 500;
 }
 
 .grep-hits-row-clickable:focus-visible {
@@ -844,6 +859,369 @@
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
 }
 
+/* ── Task/Session List Preview ── */
+
+.task-list-preview,
+.session-list-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-list-summary,
+.session-list-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding: 6px 0;
+}
+
+.task-list-total,
+.session-list-total {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+.task-list-stat {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+}
+
+.task-list-stat[data-status='completed'] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.task-list-stat[data-status='in_progress'] {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+}
+
+.task-list-stat[data-status='pending'] {
+  color: var(--fg-muted);
+  background: var(--bg-surface);
+}
+
+.task-list-items,
+.session-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.task-list-item,
+.session-list-item {
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.task-list-item:hover,
+.session-list-item:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.task-list-item[data-status='completed'] {
+  opacity: 0.7;
+}
+
+.task-list-item-header,
+.session-list-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-list-item-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+}
+
+.task-list-item[data-status='completed'] .task-list-item-status {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.task-list-item[data-status='in_progress'] .task-list-item-status {
+  background: color-mix(in srgb, var(--info) 15%, transparent);
+  color: var(--info);
+}
+
+.task-list-item-id,
+.session-list-item-id {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg-muted);
+}
+
+.task-list-item-subject,
+.session-list-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-default);
+  line-height: 1.4;
+}
+
+.task-list-item[data-status='completed'] .task-list-item-subject {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+
+.task-list-item-description {
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+
+.task-list-item-meta,
+.session-list-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.session-list-item-status {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-overlay);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.task-list-empty,
+.session-list-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* ── Bash Output Preview ── */
+
+.bash-output-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bash-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bash-output-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bash-output-command {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bash-output-stats {
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.bash-output-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bash-exit-code {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.bash-exit-code[data-success='true'] {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.bash-error-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+.bash-output-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bash-output-stdout,
+.bash-output-stderr {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.bash-output-stderr {
+  background: color-mix(in srgb, var(--danger) 3%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--danger) 20%, var(--border-subtle));
+}
+
+.bash-stderr-label {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: 4px;
+}
+
+.bash-output-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bash-output-toggle:hover {
+  color: var(--fg-default);
+  border-color: var(--border-hover);
+  background: var(--bg-surface);
+}
+
+.bash-output-toggle:active {
+  transform: scale(0.98);
+}
+
+/* ── JSON Preview (syntax highlighted JSON output) ── */
+
+.json-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.json-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.json-preview-meta {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.json-preview-content {
+  position: relative;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.json-preview-content[data-collapsed='true'] {
+  max-height: 300px;
+  overflow: hidden;
+}
+
+.json-preview-code {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.json-preview-code code {
+  display: block;
+}
+
+/* JSON 语法高亮 */
+.json-key {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.json-colon {
+  color: var(--fg-muted);
+  margin: 0 4px;
+}
+
+.json-string {
+  color: var(--success);
+}
+
+.json-number {
+  color: var(--info);
+  font-weight: 500;
+}
+
+.json-boolean {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.json-null {
+  color: var(--fg-muted);
+  font-style: italic;
+  opacity: 0.7;
+}
+
 /* ── ParameterListPreview ──
  * Single-row inline layout: parameters are secondary context, so the whole
  * panel collapses into one wrap-friendly line of `key value · key value`
@@ -851,26 +1229,27 @@
 
 .param-list {
   margin: 0;
-  padding: 2px 0;
+  padding: 8px 0; /* 增加上下内边距 */
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
-  font-size: 11px;
-  line-height: 1.55;
+  align-items: flex-start; /* 允许参数换行对齐 */
+  gap: 8px 12px; /* 增加间距 */
+  font-size: 12px; /* 增大字体 */
+  line-height: 1.6; /* 增加行高 */
   color: var(--fg-muted);
 }
 
 .param-list-row {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+  max-width: 100%; /* 允许换行 */
 }
 
 .param-list-sep {
   color: var(--fg-muted);
-  opacity: 0.5;
+  opacity: 0.4; /* 降低分隔符透明度 */
   user-select: none;
 }
 
@@ -879,6 +1258,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 500;
   opacity: 0.85;
+  flex-shrink: 0; /* 键名不换行 */
 }
 
 .param-list-key::after {
@@ -890,11 +1270,13 @@
 .param-list-value {
   color: var(--fg-default);
   min-width: 0;
-  word-break: break-word;
+  word-break: break-word; /* 长字符串自动换行 */
+  overflow-wrap: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .param-list-empty {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-muted);
   font-style: italic;
   padding: 4px 0;

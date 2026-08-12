@@ -5,12 +5,13 @@ import { z } from 'zod';
 const questionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().min(1),
+  preview: z.string().min(1).optional(),
 });
 
 const questionItemSchema = z.object({
   question: z.string().min(1),
   header: z.string().min(1),
-  multiple: z.boolean().optional(),
+  multiSelect: z.boolean().optional(),
   options: z.array(questionOptionSchema).min(1),
 });
 

@@ -13,19 +13,18 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border: 1px solid color-mix(in oklch, var(--border-default) 70%, transparent);
-  border-radius: 6px;
-  padding: 5px 8px;
-  background: var(--bg-overlay);
+  border: none;
+  padding: 0;
+  background: transparent;
 }
 
 .tool-call-batch[data-tool-status='failed'] {
-  border-color: color-mix(in oklch, var(--danger) 35%, var(--border-default));
-  background: color-mix(in oklch, var(--danger) 4%, var(--bg-overlay));
+  border-color: transparent;
+  background: transparent;
 }
 
 .tool-call-batch[data-tool-status='running'] {
-  border-color: color-mix(in oklch, var(--accent) 35%, var(--border-default));
+  border-color: transparent;
 }
 
 .tool-call-batch-header {
@@ -176,11 +175,7 @@
 }
 
 .tool-call-batch-child-chevron {
-  flex-shrink: 0;
-  width: 12px;
-  text-align: center;
-  font-size: 10px;
-  color: var(--fg-muted);
+  display: none;
 }
 
 /* Expanded panel: indent + left rail to make nested ToolCallDisplay

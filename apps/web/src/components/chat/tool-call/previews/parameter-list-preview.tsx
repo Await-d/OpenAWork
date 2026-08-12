@@ -3,22 +3,16 @@ import type { ReactElement } from 'react';
 /* ── ParameterListPreview (universal input panel) ── */
 
 /**
- * Why inline (not a `<dl>` table): parameters are *secondary* information —
- * the tool header already carries the salient fields (path, pattern,
- * command, ...), and users only crack open the params row when they need to
- * cross-check what the model emitted. A multi-row table dominates the
- * vertical space of every expanded tool card; a single wrap-friendly row
- * keeps the panel skimmable and lets the eye stay on the output.
- *
- * Long strings get truncated inline with the full text preserved in the
- * `title` tooltip + a `<details>` drill-down for anything that wouldn't
- * fit, so no information is lost — it just doesn't shout.
+ * 优化后的参数列表预览，提升可读性：
+ * - 长字符串允许换行而不是截断
+ * - 对象和数组默认展开第一层
+ * - 增加字段间的视觉间隔
  */
 
 /** Max characters before a string value is collapsed into a `<details>`. */
-const INLINE_STRING_LIMIT = 80;
+const INLINE_STRING_LIMIT = 120;
 /** Max characters for the primary inline preview text inside that details. */
-const INLINE_PREVIEW_LIMIT = 60;
+const INLINE_PREVIEW_LIMIT = 80;
 
 function flattenWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();

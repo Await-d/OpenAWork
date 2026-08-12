@@ -32,7 +32,7 @@ const EXTENSION_FILE_RE =
   /(?:^|\/)(?:userscript\.html|frame(?:_\w+)?\.js|content(?:_\w+)?\.js|injected(?:_\w+)?\.js)\b|\bchrome-extension:\/\/|\bmoz-extension:\/\/|\bsafari-(?:extension|web-extension):\/\//i;
 
 const EXTENSION_MESSAGE_RE =
-  /sandboxed and lacks the 'allow-same-origin' flag|userscript\.html\?name=/i;
+  /sandboxed and lacks the 'allow-same-origin' flag|userscript\.html\?name=|runtime\.lastError|Could not establish connection\. Receiving end does not exist/i;
 
 function looksLikeExtensionNoise(meta: {
   message?: string;

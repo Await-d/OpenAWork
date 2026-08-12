@@ -91,7 +91,9 @@ const DEFAULT_BASH_TIMEOUT_MS = (() => {
 
 // Hard ceiling kept conservative to avoid runaway commands hogging a worker
 // process slot. Models can still request the maximum explicitly.
-const MAX_BASH_TIMEOUT_MS = 30 * 60 * 1000;
+// Exported so the model-visible JSON Schema in tool-definitions.ts can stay
+// in sync with the actual runtime ceiling instead of hardcoding a stale copy.
+export const MAX_BASH_TIMEOUT_MS = 30 * 60 * 1000;
 
 const SIGKILL_GRACE_MS = 3_000;
 
@@ -931,7 +933,10 @@ export const bashToolDefinition: ToolDefinition<typeof bashInputSchema, typeof b
 };
 
 // Re-export so callers (e.g. the truncation cleanup task or tests) have a
-// single import surface.
+// single import surface. NOTE: `TRUNCATION_DIR` is @deprecated for actual
+// file lookups — it's a static, single-workspace-root path that can diverge
+// from where files are really written. Use `resolveWritableTruncationDir()`
+// (from bash-output-truncator.js) for any real read/write/existence check.
 export { TRUNCATION_DIR, listTruncationDirCandidates } from './bash-output-truncator.js';
 
 // Best-effort directory cleanup on module load. Keeps truncation directories
