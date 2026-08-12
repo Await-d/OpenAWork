@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
 import { TeamTitlebarSummary } from '../shared/TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
@@ -43,7 +44,9 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const addSessionTab = useUIStateStore((s) => s.addSessionTab);
   const addDraftTab = useUIStateStore((s) => s.addDraftTab);
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
+  const updateTabTitle = useUIStateStore((s) => s.updateTabTitle);
 
+  const { sessions } = useSessions();
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
   const { stackedTeamTitlebar } = useTitlebarResponsiveState();
 
@@ -55,17 +58,25 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
       return;
     }
 
+    const session = sessions.find((s) => s.id === currentSessionId);
+    const title = session?.title || `会话 ${currentSessionId.slice(0, 8)}`;
+
     const existingTab = tabs.find(
       (tab) => tab.type === 'session' && tab.sessionId === currentSessionId,
     );
-    if (existingTab && existingTab.id !== activeTabId) {
-      selectTab(existingTab.id);
+    if (existingTab) {
+      // 更新已存在 tab 的标题
+      if (existingTab.title !== title) {
+        updateTabTitle(existingTab.id, title);
+      }
+      if (existingTab.id !== activeTabId) {
+        selectTab(existingTab.id);
+      }
       return;
     }
-    if (!existingTab) {
-      addSessionTab(currentSessionId, `会话 ${currentSessionId.slice(0, 8)}`);
-    }
-  }, [activeTabId, addSessionTab, currentSessionId, selectTab, tabs]);
+    // 创建新 tab
+    addSessionTab(currentSessionId, title);
+  }, [activeTabId, addSessionTab, currentSessionId, selectTab, sessions, tabs, updateTabTitle]);
 
   const handleClickTab = useCallback(
     (tabId: string) => {
@@ -192,7 +203,9 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
           />
         </div>
       ) : null}
-      <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
+      <div className="titlebar-tab-strip__home-slot">
+        <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
+      </div>
     </div>
   );
   const layoutControls = (

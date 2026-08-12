@@ -69,7 +69,7 @@ export function TitlebarTab({
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         flexShrink: 0,
-        maxWidth: 200,
+        maxWidth: 280,
         transition: 'background 120ms ease, border-color 120ms ease',
         userSelect: 'none',
         whiteSpace: 'nowrap',
@@ -105,7 +105,7 @@ export function TitlebarTab({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          maxWidth: 140,
+          maxWidth: 220,
         }}
       >
         {tab.title}

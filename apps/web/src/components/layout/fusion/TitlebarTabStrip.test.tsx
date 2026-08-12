@@ -15,6 +15,32 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => tauriWindowControls,
 }));
 
+vi.mock('../../../hooks/workspace/useSessions.js', () => ({
+  useSessions: () => ({
+    sessions: [
+      { id: 'chat-session-1', title: 'Chat 会话一', workspacePath: null },
+      { id: 'chat-session-2', title: 'Chat 会话二', workspacePath: null },
+    ],
+    groupedSessions: [],
+    groupedSessionTrees: [],
+    sessionCountByWorkspace: new Map(),
+    collapsedGroups: new Set(),
+    toggleGroupCollapsed: vi.fn(),
+    renamingSessionId: null,
+    renameValue: '',
+    setRenameValue: vi.fn(),
+    hoveredSessionId: null,
+    setHoveredSessionId: vi.fn(),
+    isDeletingSession: false,
+    sessionSearch: '',
+    setSessionSearch: vi.fn(),
+    startRename: vi.fn(),
+    commitRename: vi.fn(),
+    quickDeleteSession: vi.fn(),
+    quickExportSession: vi.fn(),
+  }),
+}));
+
 function resetUiState(): void {
   useUIStateStore.setState({
     activeTabId: null,

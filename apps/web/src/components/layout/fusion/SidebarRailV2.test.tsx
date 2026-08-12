@@ -100,4 +100,27 @@ describe('SidebarRailV2', () => {
     expect(screen.getByTestId('location-probe').textContent).toBe('/team');
     expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/team');
   });
+
+  it('Panel 收起时点击对话或团队图标重新展开 Panel', () => {
+    useUIStateStore.setState({ leftSidebarOpen: false });
+
+    renderRail({}, '/settings');
+
+    fireEvent.click(screen.getByRole('button', { name: '对话' }));
+    expect(useUIStateStore.getState().leftSidebarOpen).toBe(true);
+
+    useUIStateStore.setState({ leftSidebarOpen: false });
+
+    fireEvent.click(screen.getByRole('button', { name: '团队' }));
+    expect(useUIStateStore.getState().leftSidebarOpen).toBe(true);
+  });
+
+  it('Panel 收起时点击项目头像重新展开 Panel', () => {
+    useUIStateStore.setState({ leftSidebarOpen: false });
+
+    renderRail({}, '/chat/session-1');
+
+    fireEvent.click(screen.getByRole('button', { name: /切换工作区 MA/ }));
+    expect(useUIStateStore.getState().leftSidebarOpen).toBe(true);
+  });
 });

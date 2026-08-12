@@ -103,11 +103,25 @@ describe('FusionSidebar 展开 Panel', () => {
       workspaces: [],
     });
 
+    renderFusionSidebar('/team');
+
+    expect(screen.getByText('暂无团队工作空间')).not.toBeNull();
+  });
+
+  it('点击会话行收起 Panel 后，焦点不会残留在 aria-hidden 容器内', () => {
     renderFusionSidebar('/chat/open-session');
 
-    expect(screen.getByText('团队工作空间')).not.toBeNull();
-    expect(screen.getByText('暂无团队工作空间')).not.toBeNull();
-    expect(screen.getByTitle('新建团队工作区')).not.toBeNull();
+    const sessionButton = screen.getByRole('button', { name: 'OpenAWork plan' });
+    sessionButton.focus();
+    expect(document.activeElement).toBe(sessionButton);
+
+    fireEvent.click(sessionButton);
+
+    expect(useUIStateStore.getState().leftSidebarOpen).toBe(false);
+    const hiddenPanel = document.querySelector('[data-fusion-sidebar-panel="true"]');
+    expect(hiddenPanel).not.toBeNull();
+    expect(hiddenPanel?.getAttribute('aria-hidden')).toBe('true');
+    expect(hiddenPanel?.contains(document.activeElement)).toBe(false);
   });
 
   it('紧凑视口下通过抽屉承载 Panel，并支持打开后关闭', () => {

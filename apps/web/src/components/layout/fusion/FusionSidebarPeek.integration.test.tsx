@@ -60,13 +60,13 @@ describe('FusionSidebar 折叠预览', () => {
     expect(screen.queryByRole('complementary', { name: '工作区会话预览' })).toBeNull();
   });
 
-  it('从预览选择会话后展开 Panel 并进入对应 Chat 会话', async () => {
+  it('从预览选择会话后保持 Panel 收起并进入对应 Chat 会话', async () => {
     renderFusionSidebar();
 
     fireEvent.mouseEnter(screen.getByRole('button', { name: /切换工作区 MA/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Market roadmap' }));
 
-    expect(useUIStateStore.getState().leftSidebarOpen).toBe(true);
+    expect(useUIStateStore.getState().leftSidebarOpen).toBe(false);
     expect(screen.queryByRole('complementary', { name: '工作区会话预览' })).toBeNull();
     await waitFor(() => {
       expect(screen.getByTestId('location-probe').textContent).toBe('/chat/market-session');

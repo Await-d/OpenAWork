@@ -199,6 +199,7 @@ export function SidebarRailV2({
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
+  const setLeftSidebarOpen = useUIStateStore((s) => s.setLeftSidebarOpen);
 
   const isTeamRoute = location.pathname.startsWith('/team');
   const isChatRoute = location.pathname.startsWith('/chat');
@@ -211,28 +212,31 @@ export function SidebarRailV2({
     (path: string) => {
       setSelectedWorkspacePath(path);
       setFileTreeRootPath(path);
+      setLeftSidebarOpen(true);
       onSelectWorkspace?.(path);
     },
-    [onSelectWorkspace, setFileTreeRootPath, setSelectedWorkspacePath],
+    [onSelectWorkspace, setFileTreeRootPath, setLeftSidebarOpen, setSelectedWorkspacePath],
   );
 
   const handleNavigateChat = useCallback(() => {
     preloadRoute('/chat');
+    setLeftSidebarOpen(true);
     if (isChatRoute) {
       triggerResetToWelcome('chat');
       return;
     }
     void navigate('/chat');
-  }, [isChatRoute, navigate, preloadRoute]);
+  }, [isChatRoute, navigate, preloadRoute, setLeftSidebarOpen, triggerResetToWelcome]);
 
   const handleNavigateTeam = useCallback(() => {
     preloadRoute('/team');
+    setLeftSidebarOpen(true);
     if (isTeamRoute) {
       triggerResetToWelcome('team');
       return;
     }
     void navigate('/team');
-  }, [isTeamRoute, navigate, preloadRoute]);
+  }, [isTeamRoute, navigate, preloadRoute, setLeftSidebarOpen, triggerResetToWelcome]);
 
   return (
     <div className="sidebar-rail-v2" style={RAIL_STYLE}>

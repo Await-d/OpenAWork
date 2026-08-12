@@ -343,7 +343,9 @@ describe('FusionSessionSidePanel', () => {
 
     render(<FusionDockedSidePanel {...createBaseProps()} activeTab="files" />);
 
-    expect(screen.getByTestId('fusion-docked-side-panel').style.flex).toBe('1 1 400px');
+    const panel = screen.getByTestId('fusion-docked-side-panel');
+    expect(panel.style.width).toBe('400px');
+    expect(panel.style.flexShrink).toBe('0');
 
     const handle = screen.getByRole('separator', { name: '拖拽调整面板宽度' });
     fireEvent.pointerDown(handle, { clientX: 500, pointerId: 1 });
