@@ -250,7 +250,7 @@ Layout.tsx (flex-col, 100dvh)
 - [x] T-F2-04: Rail 项目头像点击切换工作区 → Panel 内容跟随变化（复用 selectedWorkspacePath）→ `components/layout/SidebarRailV2.tsx` ✅
 - [x] T-F2-05: Rail Chat/Team 图标替代 WorkbenchModeTabs（路由切换 /chat vs /team）→ `components/layout/SidebarRailV2.tsx` ✅
 - [x] T-F2-06: 移动端已实现“Rail 隐藏 + Panel 抽屉”终态，并补齐打开/关闭集成测试 → `components/layout/FusionSidebar.tsx` ✅
-- [ ] T-F2-07: 清理 WorkbenchModeTabs.tsx（如不再被引用则删除）→ `components/layout/WorkbenchModeTabs.tsx`（暂保留）
+- [x] T-F2-07: 清理 WorkbenchModeTabs.tsx — 已核查引用情况：仅 `ClassicWorkbenchTitlebar.tsx`（Classic 冻结路径）引用，Fusion 路径无任何引用。因删除会导致 Classic 编译失败且 Classic 路径已冻结不可修改，故保留原文件不删除。→ `components/layout/WorkbenchModeTabs.tsx` ✅（仅 Classic 路径引用，按约束保留）
 
 #### 验收标准
 
@@ -329,7 +329,7 @@ Layout.tsx (flex-col, 100dvh)
 - [x] T-F4-04: Context Tab 已接入 ChatRightPanel 相关内容（工具调用 / 计划 / DAG / 运行摘要 / 上下文窗口）→ `pages/chat-page/panels/FusionContextTab.tsx` ✅
 - [x] T-F4-05: `ChatPage` 已通过 `FusionDockedSidePanel` + `PanelResizeHandle` 完成 SessionPanel / SidePanel 水平排列 → `pages/chat-page/ChatPage.tsx` ✅
 - [x] T-F4-06: uiState 新增 `sidePanelActiveTab`（'review' | 'files' | 'context'）→ `stores/ui/uiState.ts` ✅
-- [ ] T-F4-07: 移动端适配（SidePanel 变为底部 Tab 切换）→ `pages/chat-page/SessionSidePanel.tsx`
+- [x] T-F4-07: 移动端适配（SidePanel 变为底部 Tab 切换）→ 新建 `pages/chat-page/panels/FusionMobileBottomPanel.tsx` + `FusionMobileBottomPanel.css`；新建 `pages/chat-page/layout/use-mobile-viewport.ts`；`FusionChatMainShell` 新增 `mobilePanel?` prop；`ChatPage.tsx` 在 `isMobileViewport && currentSessionId !== null` 时渲染底部 Tab 面板（固定底部 Tab 条 48px + 65vh 底部抽屉）✅
 
 #### 验收标准
 

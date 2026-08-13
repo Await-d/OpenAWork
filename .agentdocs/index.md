@@ -1,18 +1,22 @@
 # .agentdocs 索引
 
 ## Active Workflows
-- [260725-team-layer-todo-workbench](workflow/260725-team-layer-todo-workbench.md) — Team classic 对话工作台 MVP 已落地：左运营壳(ChatOps/Attention/InlineOps) + 右 layer/role/todo 工作台；仅 `workbenchLayoutMode==='classic'`；Fusion 不变；composer 三模式/服务端决策持久化后置
-- [260723-mobile-pen-visual-alignment](workflow/260723-mobile-pen-visual-alignment.md) — 手机端主流程按 pen 视觉对齐：Full orchestration；方案 A 共享 UI 组件后逐屏套用（连接/登录/会话/聊天/设置 + 壳层）；逻辑不改
-- [260723-team-lifecycle-hard-contract-tools](workflow/260723-team-lifecycle-hard-contract-tools.md) — Team 生命周期硬契约工具化：Full orchestration；不推翻 5 层架构，将 executor/reviewer 完成输出升级为强制 Builtin Instruction（`submit_execution_result` + 结构化 `submit_review`），runner 门禁 + quality review 优先消费 checklist；本轮仅方案，待批准后实现
-- [260708-opencowork-tooling-integration-plan](workflow/260708-opencowork-tooling-integration-plan.md) — OpenCowork 工具生态集成方案：Full orchestration；坚持 OpenAWork 原生 MCP runtime、gateway tool registry、skill registry、channel manager 与 plugin settings 为主路径，已有简单工具只登记/补别名/补文档，不重复完整集成；P1 聚焦 `streamable-http`、文档数据 skills、Browser alias、通用 channel tools
-- [260707-omo-mcp-adapter-integration](workflow/260707-omo-mcp-adapter-integration.md) — OMO/LazyCodex MCP 适配器集成：9 任务 / Full orchestration；坚持 OpenAWork 原生 MCP runtime 为主路径，OMO/Hook 仅作为 typed manifest 输入源，落到 MCP catalog、flat tool 注入、sandbox 权限审计、Settings 管理与 team 最小授权链路
-- [260706-lazycodex-native-workflow](workflow/260706-lazycodex-native-workflow.md) — LazyCodex/OmO 原生化接入：8 任务 / 6 Wave / Full orchestration；不直接依赖 `lazycodex-ai`，而是把 `ulw-plan` / `start-work` / `ulw-loop` / skills / reviewer gate / 证据包映射到 OpenAWork 原生 session、run events、artifacts、skill registry、Web 对话 UI 与 Team runtime
-- [260704-composer-optimization](workflow/260704-composer-optimization.md) — 输入框 ChatComposer 整体优化：13 项 / 3 Phase / Full orchestration；拆分超限文件 + 动画微交互(发送脉冲/拖拽淡入/按钮微弹/弹窗入场/队列pill) + 功能增强(字符计数/placeholder轮换/Esc清空/大文本折叠) + 视觉样式(流式呼吸光效/home glassmorphism/工具栏分组)
-- [260704-companion-linkage-enhancement](workflow/260704-companion-linkage-enhancement.md) — 伴侣系统联动场景强化：8 任务 / 5 Phase / Full orchestration；补齐工具调用联动、错误/重试反应、附件/队列真实计数、空闲检测提醒、后端上下文增强
-- [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：6 波次方案（W1 顶部标签页栏 / W2 双层侧边栏 Rail+Panel / W3 会话页面板化 Diff+终端 / W4 消息时间线智能滚动+预取 / W5 首页视图双栏+时间分组 / W6 拖拽排序+内联重命名+命令扩充）；2026-07-14 起剩余任务只允许落在 Fusion 新版布局，Classic 旧版布局冻结
-- [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：5 波次 / Full orchestration；这是当前唯一允许继续演进的布局主线，继续推进 Titlebar 精简、Rail+Panel、SessionPanel 卡片化、侧面板 Tab 聚合与底部终端
+- [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：W3(会话页面板化 Diff+终端) / W4(消息时间线导航+预取) / W6(拖拽排序+内联重命名+命令扩充) 仍有未完成任务；W1/W2/W5 已完成；2026-07-14 起只允许落在 Fusion 新版布局
+- [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：剩余 T-F2-07(WorkbenchModeTabs 清理) + T-F4-07(移动端侧面板 Tab 适配)；其余 F1/F2/F3/F4/F5 已完成
+
+- [companion-settings-enhancement-plan](companion-settings-enhancement-plan.md) — Buddy 伴侣设置完整化：hook 补 4 个 setter + resetPreferencesToDefault/retrySync + 拆分 7 个新 section 组件（全局语音/默认主题/feature-banner/试聊预览）；整体未开始实施
 
 ## Done Workflows
+- [260725-team-layer-todo-workbench](workflow/done/260725-team-layer-todo-workbench.md) — ✅ 已完成 2026-08-13：Team classic 对话工作台 MVP；左运营壳(ChatOps/Attention/InlineOps) + 右 layer/role/todo 工作台；仅 classic 路径；Fusion 不变
+- [260724-media-rendering](workflow/done/260724-media-rendering.md) — ✅ 已完成 2026-08-13：聊天界面音视频渲染 + AI 媒体转换工具（FFmpeg/Edge TTS/AudioPlayer/VideoPlayer）全链路闭环
+- [260723-team-lifecycle-hard-contract-tools](workflow/done/260723-team-lifecycle-hard-contract-tools.md) — ✅ 已完成 2026-08-13：Team executor/reviewer 硬契约（submit_execution_result + 结构化 submit_review + runner 门禁 + quality review checklist 机器判定）
+- [260723-mobile-pen-visual-alignment](workflow/done/260723-mobile-pen-visual-alignment.md) — ✅ 已完成 2026-08-13：手机端主流程按 pen 视觉对齐（token/共享组件/主流程屏全套浅色化）
+- [260712-multi-theme-system](workflow/done/260712-multi-theme-system.md) — ✅ 已完成 2026-08-13：多主题系统改造（Nebula/Aurora/Linear × Dark/Light/System 六组 data-theme+data-mode CSS 变量）
+- [260708-opencowork-tooling-integration-plan](workflow/done/260708-opencowork-tooling-integration-plan.md) — ✅ 已完成 2026-08-13：OpenCowork 工具生态集成（原生优先/不重复简单工具/通道串行队列/QQ图片/cron 回发/诊断 UI）
+- [260707-omo-mcp-adapter-integration](workflow/done/260707-omo-mcp-adapter-integration.md) — ✅ 已完成 2026-08-13：OMO MCP 适配器全链路（Virtual MCP Registry / OMO adapter manifest / flat catalog / hook 边界 / Settings / Team 授权 / 文档 ADR）
+- [260706-lazycodex-native-workflow](workflow/done/260706-lazycodex-native-workflow.md) — ✅ 已完成 2026-08-13：LazyCodex/OmO 原生化（计划发现/运行状态协议/ULW证据闭环/skills子集/reviewer gate/Web UI/团队角色映射/文档smoke）
+- [260704-composer-optimization](workflow/done/260704-composer-optimization.md) — ✅ 已完成 2026-08-13：ChatComposer 整体优化（文件拆分+动画微交互+功能增强+视觉样式，13 项全部完成）
+- [260704-companion-linkage-enhancement](workflow/done/260704-companion-linkage-enhancement.md) — ✅ 已完成 2026-08-13：伴侣系统联动场景强化（工具调用/错误重试/附件队列真实计数/空闲检测/后端上下文增强）
 - [260813-chat-right-panel-completion](workflow/done/260813-chat-right-panel-completion.md) — ✅ 已完成 2026-08-13：ChatRightPanel 四个 tab 功能补全（Full orchestration，9 任务）——MCP 重试连接接线（组件已支持仅调用方漏传 `onRetry`）+ 数据映射修复（`toolCount` 曾硬编码为 0）、Plan 面板空状态补齐（原裸 `return null`）、DAG 节点点击接线（`AgentDAGGraph onNodeClick` 曾未传）+ 新增详情提示条、工具面板筛选数量徽标+搜索框（`renderToolsPanel` 重构为 `ToolsPanel` 组件）；均为前端展示层改动，未新增后端路由；四个交互的浏览器手动验证因工具限制未完成，已转交用户
 - [260708-layout-isolation-refactor](workflow/done/260708-layout-isolation-refactor.md) — ✅ 已完成 2026-07-18：Fusion/Shared 目录隔离、`useFusionLayout`/`useFusionChatLayout` 抽离、ChatPage Fusion 壳解耦、相关定向测试与 Web/桌面端验收闭环已全部收口；Classic 旧布局保持冻结兼容
 - [260715-composer-input-history-recall](workflow/done/260715-composer-input-history-recall.md) — ✅ 已完成 2026-07-15：chat/team 共用 `UnifiedComposer` 已支持 `ArrowUp / ArrowDown` 输入历史回显；历史按 `gatewayUrl + currentUserEmail + sessionId` 隔离在前端运行期内存 store 中，默认只保留最新 50 条，并支持 pending→session 迁移；兼容 slash/@ 菜单、busy 队列、Esc 清空/恢复与 chat 双 Esc 编辑上一条消息

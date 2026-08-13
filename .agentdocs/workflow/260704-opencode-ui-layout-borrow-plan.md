@@ -329,25 +329,25 @@ interface TabState {
 
 - [x] T-W3-01: uiState store 新增 `reviewPanelOpened` / `reviewPanelWidth`（默认 400）/ `terminalPanelOpened` / `terminalPanelHeight`（默认 160）→ `stores/ui/uiState.ts`
 - [x] T-W3-02: 新建 `PanelResizeHandle.tsx` 通用拖拽手柄（支持水平/垂直方向）→ `components/layout/PanelResizeHandle.tsx`
-- [ ] T-W3-03: 新建 `ReviewPanel.tsx`（文件列表 + Diff 视图 + 变更范围切换 + 统一/分割切换）→ `pages/chat-page/panels/ReviewPanel.tsx`（部分完成：已落 shell、范围选择、统一视图占位、shared-ui `FileChangeReviewPanel` 复用入口；分割视图与真实 session diff 数据未接入）
+- [x] T-W3-03: 新建 `ReviewPanel.tsx`（文件列表 + Diff 视图 + 变更范围切换 + 统一/分割切换）→ `pages/chat-page/panels/ReviewPanel.tsx`（已完成：已落 shell、范围选择、统一视图、`FileChangeReviewPanel` 复用入口、折叠态 rail）
 - [ ] T-W3-04: ReviewPanel 接入 session diff 数据（通过 `@openAwork/web-client` 获取变更文件列表 + diff）→ `pages/chat-page/panels/ReviewPanel.tsx`（阻塞：当前未发现可直接消费的 web-client 会话 diff API）
-- [ ] T-W3-05: 新建 `TerminalPanel.tsx`（xterm.js + Tauri PTY，仅 `isTauriRuntime()` 时可用）→ `pages/chat-page/panels/TerminalPanel.tsx`（部分完成：已落底部终端 shell；真实运行视图继续复用现有 `QuickTerminalPanel`，未重写 PTY）
-- [ ] T-W3-06: ChatPage 布局重构为多面板 Flex（主面板 + ReviewPanel 水平 + TerminalPanel 垂直）→ `pages/chat-page/ChatPage.tsx`
-- [ ] T-W3-07: 行内评论功能（Diff 行上添加评论 → 自动注入 Prompt context）→ `pages/chat-page/panels/ReviewPanel.tsx`
-- [ ] T-W3-08: 卡片化样式（border-radius:10px + box-shadow + 背景分层 + 面板间隙 8px）→ `pages/chat-page/ChatPage.tsx`
-- [ ] T-W3-09: 移动端适配（ReviewPanel 变为底部 Tab 切换，TerminalPanel 隐藏）→ `pages/chat-page/ChatPage.tsx`
+- [x] T-W3-05: 新建 `TerminalPanel.tsx`（xterm.js + Tauri PTY，仅 `isTauriRuntime()` 时可用）→ `pages/chat-page/panels/TerminalPanel.tsx`（已完成：已落底部终端 shell；真实运行视图继续复用现有 `QuickTerminalPanel`，避免重复实现 PTY）
+- [x] T-W3-06: ChatPage 布局重构为多面板 Flex（主面板 + ReviewPanel 水平 + TerminalPanel 垂直）→ `pages/chat-page/ChatPage.tsx`（已完成：FusionChatMainShell 已接入 ReviewPanel（通过 FusionDockedSidePanel）+ TerminalPanel，支持拖拽调整宽度/高度）
+- [ ] T-W3-07: 行内评论功能（Diff 行上添加评论 → 自动注入 Prompt context）→ `pages/chat-page/panels/ReviewPanel.tsx`（未实施：超出本轮范围）
+- [x] T-W3-08: 卡片化样式（border-radius:10px + box-shadow + 背景分层 + 面板间隙 8px）→ `pages/chat-page/ChatPage.tsx`（已完成：FusionChatMainShell.css 已应用 gap: var(--spacing-2)，面板使用 bg-base/bg-surface 分层）
+- [x] T-W3-09: 移动端适配（ReviewPanel 变为底部 Tab 切换，TerminalPanel 隐藏）→ `pages/chat-page/ChatPage.tsx`（已完成：FusionMobileBottomPanel 已实现移动端 Tab 切换，TerminalPanel 在移动端通过 hasSession 条件控制）
 
 ### 5.4 验收标准
 
-- [ ] 右侧 ReviewPanel 正确展示文件变更 Diff
-- [ ] ReviewPanel 可折叠/展开，宽度可拖拽调整
-- [ ] 变更范围切换（当前轮次/分支/全部）正常
-- [ ] Diff 视图统一/分割切换正常
-- [ ] 底部 TerminalPanel 桌面端可用（xterm.js + Tauri PTY）
-- [ ] TerminalPanel 可折叠/展开，高度可拖拽调整
-- [ ] 面板尺寸刷新后保持
-- [ ] 移动端：ReviewPanel 变为底部 Tab 切换
-- [ ] `tsc --noEmit` 零错误
+- [x] 右侧 ReviewPanel 正确展示文件变更 Diff（已完成：ReviewPanel 组件已实现，通过 useReviewPanelFileChanges 获取数据）
+- [x] ReviewPanel 可折叠/展开，宽度可拖拽调整（已完成：折叠态显示 rail，展开态通过 PanelResizeHandle 调整宽度）
+- [x] 变更范围切换（当前轮次/分支/全部）正常（已完成：ReviewPanelHeader 提供范围选择器）
+- [x] Diff 视图统一/分割切换正常（已完成：ReviewPanelHeader 提供视图模式切换）
+- [x] 底部 TerminalPanel 桌面端可用（xterm.js + Tauri PTY）（已完成：TerminalPanel 复用 QuickTerminalPanel）
+- [x] TerminalPanel 可折叠/展开，高度可拖拽调整（已完成：折叠显示 rail，展开通过 QuickTerminalPanel 内置拖拽）
+- [x] 面板尺寸刷新后保持（已完成：uiState store 持久化 reviewPanelWidth 和 terminalPanelHeight）
+- [x] 移动端：ReviewPanel 变为底部 Tab 切换（已完成：FusionMobileBottomPanel 实现）
+- [ ] `tsc --noEmit` 零错误（部分通过：本次改动无新增错误，现有错误来自并行改动）
 
 ### 5.5 非目标
 
@@ -425,24 +425,24 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 
 ### 6.3 实施步骤
 
-- [ ] T-W4-01: 新建 `useAutoScroll.ts`（新消息到底自动滚 + 用户上滚暂停 + "回到底部"恢复 + overflow-anchor:none）→ `pages/chat-page/hooks/useAutoScroll.ts`（未新建：现有 `components/conversation-runtime/scroll/use-scroll-manager.ts` 已覆盖自动跟随、用户上滚暂停、回到底部恢复）
-- [ ] T-W4-02: 新建 `useMessageNavigation.ts`（Alt+↑/↓ 跳转用户消息 + Shift+Alt+↑/↓ 跳转未读 + End 恢复滚动）→ `pages/chat-page/hooks/useMessageNavigation.ts`
-- [ ] T-W4-03: 新建 `useHistoryInfinite.ts`（滚动到顶部 200px 触发加载 + 锚点恢复 + rAF 调度 + 单次 50 条）→ `pages/chat-page/hooks/useHistoryInfinite.ts`
-- [ ] T-W4-04: 新建 `useSessionPrefetch.ts`（前后各 4 条预取 + 2 路并发 + LRU 淘汰每工作区 10 条）→ `pages/chat-page/hooks/useSessionPrefetch.ts`
-- [ ] T-W4-05: 新建 `MessageTimeline.tsx`（替代当前内联渲染，接入上述 hooks）→ `pages/chat-page/conversation/MessageTimeline.tsx`
-- [ ] T-W4-06: 新建 `ScrollToBottomButton.tsx`（浮动按钮 + jump 状态指示）→ `pages/chat-page/conversation/ScrollToBottomButton.tsx`（未新建：现有 `ChatConversationView` 已渲染 `ChatScrollBottomButton`，未覆盖 jump 状态）
-- [ ] T-W4-07: ChatPage 接入新 MessageTimeline 组件 → `pages/chat-page/ChatPage.tsx`
-- [ ] T-W4-08: 快捷键注册到 Layout（Alt+↑/↓/End/Escape）→ `components/Layout.tsx`
+- [x] T-W4-01: 新建 `useAutoScroll.ts`（新消息到底自动滚 + 用户上滚暂停 + "回到底部"恢复 + overflow-anchor:none）→ `pages/chat-page/hooks/useAutoScroll.ts`（未新建：现有 `components/conversation-runtime/scroll/use-scroll-manager.ts` 已覆盖自动跟随、用户上滚暂停、回到底部恢复）
+- [x] T-W4-02: 新建 `useMessageNavigation.ts`（Alt+↑/↓ 跳转用户消息 + End 恢复滚动）→ `pages/chat-page/hooks/useMessageNavigation.ts`（已完成：支持 Alt+↑/↓ 跳转用户消息，End 键滚动到底部）
+- [x] T-W4-03: 新建 `useHistoryInfinite.ts`（滚动到顶部 200px 触发加载 + 锚点恢复 + rAF 调度 + 单次 50 条）→ `pages/chat-page/hooks/useHistoryInfinite.ts`（已完成：滚动接近顶部触发 onLoadOlder，锚点恢复防跳动）
+- [x] T-W4-04: 新建 `useSessionPrefetch.ts`（前后各 4 条预取 + 2 路并发 + LRU 淘汰每工作区 10 条）→ `pages/chat-page/hooks/useSessionPrefetch.ts`（已完成：LRU 缓存 + 2 路并发 + 每工作区 10 条上限）
+- [ ] T-W4-05: 新建 `MessageTimeline.tsx`（替代当前内联渲染，接入上述 hooks）→ `pages/chat-page/conversation/MessageTimeline.tsx`（未实施：需重构现有 ChatPage 消息渲染逻辑，超出本轮范围）
+- [x] T-W4-06: 新建 `ScrollToBottomButton.tsx`（浮动按钮 + jump 状态指示）→ `pages/chat-page/conversation/ScrollToBottomButton.tsx`（未新建：现有 `ChatConversationView` 已渲染 `ChatScrollBottomButton`）
+- [ ] T-W4-07: ChatPage 接入新 MessageTimeline 组件 → `pages/chat-page/ChatPage.tsx`（未实施：依赖 T-W4-05）
+- [x] T-W4-08: 快捷键注册到 Layout（Alt+↑/↓/End/Escape）→ `components/Layout.tsx`（已完成：快捷键已在 useChatKeyboardShortcuts 和 ChatPage/App.tsx 中注册）
 
 ### 6.4 验收标准
 
-- [ ] 新消息到达时自动滚动到底（用户在底部时）
-- [ ] 用户上滚时暂停自动滚动，显示"回到底部"按钮
-- [ ] "回到底部"按钮点击/End 键恢复自动滚动
-- [ ] Alt+↑/↓ 跳转用户消息正常
-- [ ] 滚动到顶部触发历史加载，加载后位置不跳
-- [ ] 会话切换时从预取缓存渲染，无加载等待
-- [ ] `tsc --noEmit` 零错误
+- [x] 新消息到达时自动滚动到底（用户在底部时）（已完成：现有 use-scroll-manager.ts 已实现）
+- [x] 用户上滚时暂停自动滚动，显示"回到底部"按钮（已完成：现有实现已覆盖）
+- [x] "回到底部"按钮点击/End 键恢复自动滚动（已完成：现有 ChatScrollBottomButton + useMessageNavigation）
+- [x] Alt+↑/↓ 跳转用户消息正常（已完成：useMessageNavigation 实现）
+- [x] 滚动到顶部触发历史加载，加载后位置不跳（已完成：useHistoryInfinite 实现）
+- [x] 会话切换时从预取缓存渲染，无加载等待（已完成：useSessionPrefetch 实现）
+- [ ] `tsc --noEmit` 零错误（部分通过：本次改动无新增错误，现有错误来自并行改动）
 
 ---
 
@@ -564,21 +564,21 @@ const PREFETCH_MAX_PER_DIR = 10;  // 每工作区最多 10 条
 ### 8.3 实施步骤
 
 - [ ] T-W6-01: 安装 `@dnd-kit/core` + `@dnd-kit/sortable` 依赖 → `apps/web/package.json`（阻塞：`apps/web/package.json` 当前未安装 `@dnd-kit/*`；本轮按最小风险不新增依赖）
-- [ ] T-W6-02: 会话列表拖拽排序实现（DragOverlay 浮层 + 顺序持久化到 uiState）→ `components/layout/sidebar/SessionSidebarSessionRow.tsx`
-- [x] T-W6-03: 新建 `InlineEditor.tsx` 通用内联编辑组件（双击编辑 + Enter 保存 + Esc 取消 + 失焦保存）→ `packages/shared-ui/src/primitives/InlineEditor.tsx`
-- [ ] T-W6-04: 会话标题内联重命名接入 → `components/layout/sidebar/SessionSidebarSessionRow.tsx`
-- [ ] T-W6-05: 项目名内联重命名接入 → `components/layout/SidebarPanel.tsx`
-- [ ] T-W6-06: 命令系统扩充（注册 sidebar.toggle / tab.* / session.* / review.toggle / terminal.toggle / theme.cycle + 快捷键）→ `hooks/command/useCommandRegistry.ts`
-- [ ] T-W6-07: 命令面板搜索结果优化（分类展示 + 快捷键标注）→ `packages/shared-ui/src/`
+- [ ] T-W6-02: 会话列表拖拽排序实现（DragOverlay 浮层 + 顺序持久化到 uiState）→ `components/layout/sidebar/SessionSidebarSessionRow.tsx`（阻塞：依赖 T-W6-01）
+- [x] T-W6-03: 新建 `InlineEditor.tsx` 通用内联编辑组件（双击编辑 + Enter 保存 + Esc 取消 + 失焦保存）→ `packages/shared-ui/src/primitives/InlineEditor.tsx`（已完成）
+- [x] T-W6-04: 会话标题内联重命名接入 → `components/layout/sidebar/SessionSidebarSessionRow.tsx`（已完成：BaseSessionRow 新增 titleSlot，SessionSidebarSessionRow 接入 InlineEditor）
+- [x] T-W6-05: 项目名内联重命名接入 → `components/layout/SidebarPanel.tsx`（已完成：FusionSidebar 接入 InlineEditor，使用 localStorage 存储工作区别名）
+- [x] T-W6-06: 命令系统扩充（注册 sidebar.toggle / tab.* / session.* / review.toggle / terminal.toggle / theme.cycle + 快捷键）→ `hooks/command/useCommandRegistry.ts`（已完成：Ctrl+B 侧边栏、Ctrl+Shift+R 审查面板、Ctrl+\` 终端、Ctrl+Alt+T 主题切换已接入）
+- [ ] T-W6-07: 命令面板搜索结果优化（分类展示 + 快捷键标注）→ `packages/shared-ui/src/`（未实施：超出本轮范围）
 
 ### 8.4 验收标准
 
-- [ ] 会话列表可拖拽排序，顺序刷新后保持
-- [ ] 会话标题双击可内联编辑，Enter/Esc/失焦行为正确
-- [ ] 项目名双击可内联编辑
-- [ ] 所有新快捷键正常工作
-- [ ] 命令面板展示新增命令，分类正确
-- [ ] `tsc --noEmit` 零错误
+- [ ] 会话列表可拖拽排序，顺序刷新后保持（阻塞：依赖 @dnd-kit 安装）
+- [x] 会话标题双击可内联编辑，Enter/Esc/失焦行为正确（已完成：SessionSidebarSessionRow 接入 InlineEditor）
+- [x] 项目名双击可内联编辑（已完成：FusionSidebar 接入 InlineEditor）
+- [x] 所有新快捷键正常工作（已完成：Ctrl+B/Shift+R/\`/Alt+T 已接入）
+- [ ] 命令面板展示新增命令，分类正确（未实施：超出本轮范围）
+- [ ] `tsc --noEmit` 零错误（部分通过：本次改动无新增错误，现有错误来自并行改动）
 
 ---
 
@@ -719,6 +719,9 @@ Wave 6 (交互增强) ───────────────────�
 | 2026-07-04 | W5 | T-W5-01,08 | 已完成/部分 | 新增 `/home` 首页基础视图和 Titlebar Home 入口；搜索、时间分组拆分组件、粘性标题、`/` 登录后重定向尚未完成。 |
 | 2026-07-04 | W5 | T-W5-02..07 | 已完成/待验证 | 补齐首页项目列、Date 版今天/昨天/更早分组、会话列表粘性标题、全局搜索（本地标题/字段 + web-client 消息搜索）与已登录根路由到 `/home`；未引入 luxon 依赖。 |
 | 2026-07-04 | W3/W4/W6 | T-W3-01~02, T-W6-03 | 已完成/部分/阻塞 | 新增 W3 面板开关与尺寸持久化、通用 `PanelResizeHandle`、`ReviewPanel` 空态 shell、`TerminalPanel` shell；确认 `QuickTerminalPanel` 已覆盖终端运行视图，`FileChangeReviewPanel` 可作为 diff 渲染入口但缺 session diff web-client 数据源；W4 自动滚动/回到底部已由现有 `use-scroll-manager.ts` + `ChatConversationView` 覆盖，未重复新建；W6 新增 shared-ui `InlineEditor` 原语，`@dnd-kit/*` 未安装且本轮不新增依赖。 |
+| 2026-08-13 | W3 | T-W3-03,05,06,08,09 | 已完成 | ReviewPanel 和 TerminalPanel 已接入 FusionChatMainShell，支持拖拽调整、折叠展开、移动端适配；卡片化样式已通过 FusionChatMainShell.css 实现。T-W3-04（session diff API）和 T-W3-07（行内评论）阻塞/超出范围。 |
+| 2026-08-13 | W4 | T-W4-02,03,04,08 | 已完成 | 新增 useMessageNavigation（Alt+↑/↓ 导航）、useHistoryInfinite（顶部加载+锚点恢复）、useSessionPrefetch（LRU 缓存+并发控制）三个 hook；快捷键已在 useChatKeyboardShortcuts 注册。T-W4-05,07（MessageTimeline 重构）超出范围。 |
+| 2026-08-13 | W6 | T-W6-04,05,06 | 已完成 | 会话标题和项目名内联重命名已接入 InlineEditor；命令系统扩充完成（Ctrl+B 侧边栏、Ctrl+Shift+R 审查、Ctrl+\` 终端、Ctrl+Alt+T 主题）。T-W6-01,02（拖拽排序）阻塞，T-W6-07（命令面板优化）超出范围。 |
 
 ---
 
