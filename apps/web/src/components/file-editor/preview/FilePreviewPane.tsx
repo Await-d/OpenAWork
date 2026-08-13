@@ -312,11 +312,12 @@ const MarkdownRendererInner = lazy(async () => {
             <blockquote
               style={{
                 margin: '12px 0',
-                padding: '8px 16px',
-                borderLeft: '3px solid var(--accent)',
-                background: 'color-mix(in oklch, var(--accent) 5%, transparent)',
-                borderRadius: '0 6px 6px 0',
-                color: 'var(--fg-default)',
+                padding: '12px 16px',
+                border: '1px solid var(--border-default)',
+                background: 'white',
+                borderRadius: '6px',
+                boxShadow: 'var(--shadow-sm)',
+                color: 'var(--fg-strong)',
               }}
             >
               {children}

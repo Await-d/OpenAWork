@@ -252,7 +252,9 @@ export function ReviewTab({
                     borderRadius: 10,
                     display: 'grid',
                     gap: 8,
-                    borderLeft: `3px solid ${typeMeta.color}`,
+                    border: '1px solid var(--border-default)',
+                    background: 'white',
+                    boxShadow: 'var(--shadow-md)',
                     ['--tint' as string]: typeMeta.color,
                   }}
                 >
@@ -379,12 +381,13 @@ export function ReviewTab({
                         <div
                           key={i}
                           style={{
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             borderRadius: 6,
-                            background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+                            border: '1px solid var(--border-default)',
+                            background: 'white',
+                            boxShadow: 'var(--shadow-sm)',
                             fontSize: 11,
-                            color: 'var(--fg-default)',
-                            borderLeft: '2px solid var(--accent)',
+                            color: 'var(--fg-strong)',
                           }}
                         >
                           {c.replace(`[${card.id}] `, '')}
@@ -726,12 +729,14 @@ export function ReviewTab({
             {converge.error && (
               <div
                 style={{
-                  padding: '6px 10px',
+                  padding: '8px 10px',
                   borderRadius: 6,
-                  background: 'color-mix(in oklch, var(--danger) 8%, transparent)',
-                  borderLeft: '2px solid var(--danger)',
+                  border:
+                    '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)',
+                  background: 'white',
+                  boxShadow: '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)',
                   fontSize: 11,
-                  color: 'var(--fg-default)',
+                  color: 'var(--fg-strong)',
                 }}
               >
                 {converge.error}
@@ -743,10 +748,12 @@ export function ReviewTab({
                 {converge.result.hasCriticalDeviations && (
                   <div
                     style={{
-                      padding: '6px 10px',
+                      padding: '8px 10px',
                       borderRadius: 6,
-                      background: 'color-mix(in oklch, var(--danger) 12%, transparent)',
-                      borderLeft: '2px solid var(--danger)',
+                      border:
+                        '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)',
+                      background: 'white',
+                      boxShadow: '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)',
                       fontSize: 11,
                       color: 'var(--danger)',
                       fontWeight: 700,
@@ -758,10 +765,12 @@ export function ReviewTab({
                 {converge.result.deviations.length === 0 ? (
                   <div
                     style={{
-                      padding: '6px 10px',
+                      padding: '8px 10px',
                       borderRadius: 6,
-                      background: 'color-mix(in oklch, var(--success) 8%, transparent)',
-                      borderLeft: '2px solid var(--success)',
+                      border:
+                        '1px solid color-mix(in oklch, var(--success) 40%, var(--border-default) 60%)',
+                      background: 'white',
+                      boxShadow: '0 1px 3px color-mix(in oklch, var(--success) 10%, transparent)',
                       fontSize: 11,
                       color: 'var(--success)',
                     }}
@@ -777,23 +786,25 @@ export function ReviewTab({
                       <div
                         key={i}
                         style={{
-                          padding: '6px 10px',
+                          padding: '8px 10px',
                           borderRadius: 6,
-                          background:
+                          border: `1px solid ${
                             d.severity === 'warning'
-                              ? 'color-mix(in oklch, var(--warning) 8%, transparent)'
+                              ? 'color-mix(in oklch, var(--warning) 40%, var(--border-default) 60%)'
                               : d.severity === 'critical'
-                                ? 'color-mix(in oklch, var(--danger) 8%, transparent)'
-                                : 'color-mix(in oklch, var(--accent) 6%, transparent)',
-                          borderLeft: `2px solid ${
+                                ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
+                                : 'color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%)'
+                          }`,
+                          background: 'white',
+                          boxShadow: `0 1px 3px ${
                             d.severity === 'warning'
-                              ? 'var(--warning)'
+                              ? 'color-mix(in oklch, var(--warning) 10%, transparent)'
                               : d.severity === 'critical'
-                                ? 'var(--danger)'
-                                : 'var(--accent)'
+                                ? 'color-mix(in oklch, var(--danger) 10%, transparent)'
+                                : 'color-mix(in oklch, var(--accent) 10%, transparent)'
                           }`,
                           fontSize: 11,
-                          color: 'var(--fg-default)',
+                          color: 'var(--fg-strong)',
                           display: 'grid',
                           gap: 2,
                         }}

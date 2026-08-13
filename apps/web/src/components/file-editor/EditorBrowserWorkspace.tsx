@@ -404,15 +404,16 @@ function EditorPaneTabButton({
         gap: 4,
         height: 28,
         padding: '0 10px',
-        borderRadius: '6px 6px 0 0',
-        border: 'none',
-        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-        background: active ? 'color-mix(in oklch, var(--accent) 6%, transparent)' : 'transparent',
-        color: active ? 'var(--accent)' : 'var(--fg-muted)',
+        borderRadius: 6,
+        border: active ? '1px solid var(--border-default)' : '1px solid transparent',
+        background: active ? 'white' : 'transparent',
+        boxShadow: active ? 'var(--shadow-sm)' : 'none',
+        color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
         fontSize: 11,
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
-        transition: 'color 100ms ease, border-color 100ms ease, background 100ms ease',
+        transition:
+          'color 100ms ease, border-color 100ms ease, background 100ms ease, box-shadow 100ms ease',
         position: 'relative',
       }}
     >

@@ -200,6 +200,41 @@ describe('runUpstreamStream', () => {
     expect(thinkingDelta?.delta).toBe('plan');
   });
 
+  // Regression: @ai-sdk/anthropic streams the Anthropic native
+  // `signature_delta` content-block-delta as an *empty-text*
+  // `reasoning-delta` event carrying `providerMetadata.anthropic.signature`
+  // — the signature never appears on the subsequent `reasoning-end` event.
+  // The runner must capture it off the delta (not just the end event) or
+  // every replayed thinking block loses its signature and gets silently
+  // dropped by Anthropic on the next turn ("unsupported reasoning
+  // metadata"), which is effectively "thinking never reaches upstream".
+  it('captures an Anthropic signature carried on an empty-text reasoning-delta', async () => {
+    const model = buildMockModel([
+      { type: 'reasoning-start', id: 'r1' },
+      { type: 'reasoning-delta', id: 'r1', delta: 'plan carefully' },
+      {
+        type: 'reasoning-delta',
+        id: 'r1',
+        delta: '',
+        providerMetadata: { anthropic: { signature: 'sig-xyz' } },
+      },
+      { type: 'reasoning-end', id: 'r1' },
+      {
+        type: 'finish',
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
+      },
+    ] as unknown as Parameters<typeof buildMockModel>[0]);
+
+    const chunks = await collectChunks(
+      runUpstreamStream({ model, messages: [{ role: 'user', content: 'q' }] }),
+    );
+    const thinkingEnd = chunks.find(
+      (c): c is Extract<StreamChunk, { type: 'thinking_end' }> => c.type === 'thinking_end',
+    );
+    expect(thinkingEnd?.providerMetadata?.signature).toBe('sig-xyz');
+  });
+
   it('translates tool input deltas into tool_call_delta chunks', async () => {
     const model = buildMockModel([
       {

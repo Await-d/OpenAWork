@@ -82,62 +82,94 @@ export interface ProviderCatalogEntry {
   defaultModels: AIModelConfig[];
 }
 
+// 按版本号数值比较（k-major.minor >= 2.5），覆盖 k2.5/k2p5/k2-5 等分隔符变体，
+// 不需要每次发新版本（k2.6、k3...）都加一行硬编码。与前端
+// shared-ui/model-reasoning-support.ts 的 isMoonshotThinkingModel 完全对齐。
 const isMoonshotThinkingModel = (modelId: string): boolean => {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('kimi-k2.5') ||
-    id.includes('kimi-k2-thinking') ||
-    id.includes('kimi-k2p5') ||
-    id.includes('kimi-k2-5')
-  );
+  if (id.includes('kimi-k2-thinking')) return true;
+  const match = /kimi-k(\d+)(?:[.p-](\d+))?/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 2 || (major === 2 && minor >= 5);
 };
 
-/** 智谱：GLM-4.5+ / GLM-Z1 等思考模型。 */
+/**
+ * 智谱：GLM major.minor >= 4.5（4.5/4.6/未来 4.7、5.0...）视为思考模型；
+ * glm-z1 是独立系列前缀，无法数值化，保留字符串匹配。与前端对齐。
+ */
 const isZhipuThinkingModel = (modelId: string): boolean => {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('glm-4.5') ||
-    id.includes('glm-4-5') ||
-    id.includes('glm-z1') ||
-    id.includes('glm-4.6')
-  );
+  if (id.includes('glm-z1')) return true;
+  const match = /glm-(\d+)[.-](\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 4 || (major === 4 && minor >= 5);
 };
 
-/** 豆包 / 方舟：Seed 1.6 与显式 thinking/reasoner 系列。 */
+/**
+ * 豆包 / 方舟：Seed major.minor >= 1.6（1.6/未来 1.7、2.0...），或显式
+ * thinking/reasoner 关键字兜底。与前端对齐。
+ */
 const isDoubaoThinkingModel = (modelId: string): boolean => {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('doubao-seed-1.6') ||
-    id.includes('doubao-seed-1-6') ||
-    id.includes('doubao-1.5-thinking') ||
-    id.includes('doubao-thinking') ||
-    id.includes('seed-1.6') ||
-    ((id.includes('doubao') || id.includes('seed')) &&
-      (id.includes('thinking') || id.includes('reasoner')))
-  );
+  if (id.includes('doubao-1.5-thinking') || id.includes('doubao-thinking')) return true;
+  if (
+    (id.includes('doubao') || id.includes('seed')) &&
+    (id.includes('thinking') || id.includes('reasoner'))
+  ) {
+    return true;
+  }
+  const match = /seed-(\d+)[.-](\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 1 || (major === 1 && minor >= 6);
 };
 
-/** Qwen：仅 Qwen3 / QwQ / 显式 thinking 系列响应 enable_thinking。 */
+/** Qwen：major >= 3（qwen3、未来 qwen4...）或 qwq / thinking / reasoner 关键字。与前端对齐。 */
 const isQwenThinkingModel = (modelId: string): boolean => {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('qwen3') || id.includes('qwq') || id.includes('thinking') || id.includes('reasoner')
-  );
+  if (id.includes('qwq') || id.includes('thinking') || id.includes('reasoner')) return true;
+  const match = /qwen-?(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 3;
 };
 
-const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-(?:4\.1|5)(?:[.-]|$)|o[134](?:[.-]|$))/;
+// o 系列（o1/o3/o4/未来 o5...）统一用 `o\d+` 匹配；GPT-4.1 仍精确匹配
+// （4.1 是唯一支持 reasoning 的 4.x 版本，无法泛化成数值区间）。
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-(?:4\.1|5)(?:[.-]|$)|o\d+(?:[.-]|$))/;
 
 function isOpenAIReasoningModel(modelId: string): boolean {
   return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
 }
 
+// Anthropic：opus/sonnet 系列 major >= 4 视为支持思考；3.7 是版本号之外的显式
+// 例外（3.x 系列里只有 3.7 支持，无法用数值区间泛化，需保留字符串匹配）。
 function isAnthropicThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('claude-opus-4') ||
-    id.includes('claude-sonnet-4') ||
-    id.includes('claude-3-7-sonnet')
-  );
+  if (id.includes('claude-3-7-sonnet')) return true;
+  const match = /claude-(?:opus|sonnet)-(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 4;
+}
+
+// Gemini：major.minor >= 2.5 视为支持 thinking_config（2.5 / 3.x / 未来 4.x...）。
+function isGeminiThinkingModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  const match = /gemini-(\d+)(?:\.(\d+))?/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 2 || (major === 2 && minor >= 5);
 }
 
 /** OpenRouter：仅对已知推理系列下发 reasoning，避免 gpt-4o 等误开。 */
@@ -146,17 +178,20 @@ const isOpenRouterReasoningModel = (modelId: string): boolean => {
   return (
     isOpenAIReasoningModel(id) ||
     isAnthropicThinkingModel(id) ||
-    id.includes('gemini-2.5') ||
-    id.includes('gemini-3') ||
+    isGeminiThinkingModel(id) ||
     id.includes('deepseek-r') ||
     id.includes('reasoner') ||
     id.includes('thinking')
   );
 };
 
+// xAI：grok major >= 2（grok-2/3/4/未来 grok-5...）。
 function isXaiThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return id.includes('grok-3') || id.includes('grok-4') || id.includes('grok-2');
+  const match = /grok-(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 2;
 }
 
 export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
@@ -1191,10 +1226,9 @@ function inferModelThinkingSupport(entry: ProviderCatalogEntry, modelId: string)
   if (entry.thinkingStyle === 'deepseek_thinking') {
     return true;
   }
-  // Gemini 2.5 / 3 系列支持 thinking_config。
+  // Gemini 2.5+ 系列支持 thinking_config。
   if (entry.thinkingStyle === 'gemini_thinking') {
-    const id = modelId.toLowerCase();
-    return id.includes('gemini-2.5') || id.includes('gemini-3');
+    return isGeminiThinkingModel(modelId);
   }
   return false;
 }
@@ -1260,7 +1294,13 @@ export const catalogModelSupportsThinking = (providerType: string, modelId: stri
         return inferModelThinkingSupport(catalogEntry, modelId);
       }
     }
-    // 推断失败：不要恢复 thinking，保持保守。
+    // 推断失败：providerType 明确是 openai 时，直接按 isOpenAIReasoningModel
+    // 判断而不是彻底判否——避免 modelIdPrefixes 白名单滞后于新模型发布（如
+    // 未来的 o5、gpt-5.7）导致新模型被误判为不支持思考。
+    // custom / siliconflow 场景无法确定真实厂商，保持保守返回 false。
+    if (normalized === 'openai' && modelId) {
+      return isOpenAIReasoningModel(modelId);
+    }
     return false;
   }
 

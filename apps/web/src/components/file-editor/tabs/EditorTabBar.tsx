@@ -210,8 +210,9 @@ export function EditorTabBar({
               height: 34,
               flexShrink: 0,
               borderRight: '1px solid var(--border-subtle)',
-              borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-              background: active ? 'var(--bg-base)' : 'transparent',
+              borderBottom: active ? '1px solid var(--border-default)' : '1px solid transparent',
+              background: active ? 'white' : 'transparent',
+              boxShadow: active ? 'var(--shadow-sm)' : 'none',
               color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
             }}
           >

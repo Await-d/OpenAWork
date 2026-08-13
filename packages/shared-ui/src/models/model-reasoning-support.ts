@@ -23,31 +23,47 @@ function isOpenAIProModel(modelId: string): boolean {
   return OPENAI_PRO_MODEL_PATTERN.test(modelId);
 }
 
-// Moonshot 思考模型匹配——与后端 catalog.ts 的 isMoonshotThinkingModel 完全对齐，
-// 覆盖 kimi-k2.5 / kimi-k2-thinking / kimi-k2p5 / kimi-k2-5 等命名变体。
+// Moonshot 思考模型匹配——与后端 catalog.ts 的 isMoonshotThinkingModel 完全对齐。
+// 按版本号数值比较（k-major.minor >= 2.5），覆盖 k2.5/k2p5/k2-5 等分隔符变体，
+// 不需要每次发新版本（k2.6、k3...）都加一行硬编码。
 function isMoonshotThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('kimi-k2.5') ||
-    id.includes('kimi-k2-thinking') ||
-    id.includes('kimi-k2p5') ||
-    id.includes('kimi-k2-5')
-  );
+  if (id.includes('kimi-k2-thinking')) return true;
+  const match = /kimi-k(\d+)(?:[.p-](\d+))?/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 2 || (major === 2 && minor >= 5);
 }
 
-const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
+// o 系列（o1/o3/o4/未来 o5...）统一用 `o\d+` 匹配，不逐个枚举代号。
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o\d+(?:[.-]|$))/;
 
 function isOpenAIReasoningModel(modelId: string): boolean {
   return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
 }
 
+// Anthropic：opus/sonnet 系列 major >= 4 视为支持思考；3.7 是版本号之外的显式例外
+// （3.x 系列里只有 3.7 支持，无法用数值区间泛化，需保留字符串匹配）。
 function isAnthropicThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('claude-opus-4') ||
-    id.includes('claude-sonnet-4') ||
-    id.includes('claude-3-7-sonnet')
-  );
+  if (id.includes('claude-3-7-sonnet')) return true;
+  const match = /claude-(?:opus|sonnet)-(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 4;
+}
+
+// Gemini：major.minor >= 2.5 视为支持 thinking_config（2.5 / 3.x / 未来 4.x...）。
+function isGeminiThinkingModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  const match = /gemini-(\d+)(?:\.(\d+))?/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 2 || (major === 2 && minor >= 5);
 }
 
 // OpenRouter reasoning 模型匹配——与后端 provider-options.ts 对齐。
@@ -57,47 +73,62 @@ function isOpenRouterReasoningModel(modelId: string): boolean {
   return (
     isOpenAIReasoningModel(id) ||
     isAnthropicThinkingModel(id) ||
-    id.includes('gemini-2.5') ||
-    id.includes('gemini-3') ||
+    isGeminiThinkingModel(id) ||
     id.includes('deepseek-r') ||
     id.includes('reasoner') ||
     id.includes('thinking')
   );
 }
 
+// Qwen：major >= 3（qwen3、未来 qwen4...）或 qwq / thinking / reasoner 关键字。
 function isQwenThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('qwen3') || id.includes('qwq') || id.includes('thinking') || id.includes('reasoner')
-  );
+  if (id.includes('qwq') || id.includes('thinking') || id.includes('reasoner')) return true;
+  const match = /qwen-?(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 3;
 }
 
+// 智谱：glm major.minor >= 4.5（4.5/4.6/未来 4.7、5.0...）；glm-z1 是独立系列前缀，
+// 无法数值化，保留字符串匹配。
 function isZhipuThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('glm-4.5') ||
-    id.includes('glm-4-5') ||
-    id.includes('glm-z1') ||
-    id.includes('glm-4.6')
-  );
+  if (id.includes('glm-z1')) return true;
+  const match = /glm-(\d+)[.-](\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 4 || (major === 4 && minor >= 5);
 }
 
+// 豆包 / 方舟：Seed major.minor >= 1.6（1.6/未来 1.7、2.0...），或显式
+// thinking/reasoner 关键字兜底（已足够泛化，不依赖版本号）。
 function isDoubaoThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return (
-    id.includes('doubao-seed-1.6') ||
-    id.includes('doubao-seed-1-6') ||
-    id.includes('doubao-1.5-thinking') ||
-    id.includes('doubao-thinking') ||
-    id.includes('seed-1.6') ||
-    ((id.includes('doubao') || id.includes('seed')) &&
-      (id.includes('thinking') || id.includes('reasoner')))
-  );
+  if (id.includes('doubao-1.5-thinking') || id.includes('doubao-thinking')) return true;
+  if (
+    (id.includes('doubao') || id.includes('seed')) &&
+    (id.includes('thinking') || id.includes('reasoner'))
+  ) {
+    return true;
+  }
+  const match = /seed-(\d+)[.-](\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 1 || (major === 1 && minor >= 6);
 }
 
+// xAI：grok major >= 2（grok-2/3/4/未来 grok-5...）。
 function isXaiThinkingModel(modelId: string): boolean {
   const id = modelId.toLowerCase();
-  return id.includes('grok-3') || id.includes('grok-4') || id.includes('grok-2');
+  const match = /grok-(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 2;
 }
 
 function modelIdCandidates(modelId: string): string[] {
@@ -215,8 +246,7 @@ export function inferSupportsThinking(
     return true;
   }
   if (providerType === 'gemini') {
-    const id = actualModelId.toLowerCase();
-    return id.includes('gemini-2.5') || id.includes('gemini-3');
+    return isGeminiThinkingModel(actualModelId);
   }
   if (providerType === 'anthropic' || providerType === 'claude') {
     return isAnthropicThinkingModel(actualModelId);
@@ -237,16 +267,25 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
     efforts: ['medium', 'high', 'xhigh'],
     matches: (modelId) => modelId.includes('codex-max'),
   },
-  // GPT-5.6 系列（Sol/Terra/Luna）：支持 none/low/medium/high/max。
+  // GPT-5.6 系列（Sol/Terra/Luna）及以上未来次版本：支持 none/low/medium/high/max。
+  // 未知的更高次版本（5.7、5.8...）继承已知最高档位，而不是掉回更窄的默认集合。
   {
     efforts: ['none', 'low', 'medium', 'high', 'max'],
-    matches: (modelId) => /^gpt-5\.6\b/.test(modelId),
+    matches: (modelId) => {
+      const match = /^gpt-5\.(\d+)(?=$|[^\d])/.exec(modelId);
+      const minorRaw = match?.[1];
+      if (!minorRaw) return false;
+      const minor = Number.parseInt(minorRaw, 10);
+      return Number.isFinite(minor) && minor >= 6;
+    },
   },
   // GPT-5.5：支持 none/low/medium/high/xhigh。
   {
     efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
     matches: (modelId) => /^gpt-5\.5\b/.test(modelId),
   },
+  // GPT-5.2 及以上（含未来 5.7、5.8...）：规则数组按顺序匹配，5.5/5.6 已被上面
+  // 更具体的规则先行捕获，这里作为开区间兜底，未来次版本不会掉回默认三档。
   {
     efforts: ['low', 'medium', 'high', 'xhigh'],
     matches: (modelId) => {
@@ -254,7 +293,7 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
       const minorRaw = match?.[1];
       if (!minorRaw) return false;
       const minor = Number.parseInt(minorRaw, 10);
-      return Number.isFinite(minor) && minor >= 2 && minor < 5;
+      return Number.isFinite(minor) && minor >= 2;
     },
   },
   {
@@ -318,8 +357,7 @@ export function canConfigureThinkingForModel(
   }
 
   if (effectiveType === 'gemini') {
-    const id = actualModelId.toLowerCase();
-    return id.includes('gemini-2.5') || id.includes('gemini-3');
+    return isGeminiThinkingModel(actualModelId);
   }
   if (effectiveType === 'qwen') {
     return isQwenThinkingModel(actualModelId);

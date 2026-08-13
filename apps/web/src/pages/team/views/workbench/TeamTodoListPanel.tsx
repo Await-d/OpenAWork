@@ -148,11 +148,11 @@ const itemStyle = (isActive: boolean): CSSProperties => ({
   flexDirection: 'column',
   gap: 2,
   padding: '7px 10px',
-  borderRadius: 0,
-  border: 'none',
+  borderRadius: 6,
+  border: isActive ? '1px solid var(--border-default)' : '1px solid var(--border-subtle)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
-  borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-  background: isActive ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))' : 'transparent',
+  background: isActive ? 'white' : 'var(--bg-overlay)',
+  boxShadow: isActive ? 'var(--shadow-md)' : 'none',
   cursor: 'pointer',
 });
 

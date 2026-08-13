@@ -1760,13 +1760,16 @@ export default function SettingsPage() {
                               borderRadius: 8,
                               fontSize: 12,
                               fontWeight: isActive ? 600 : 400,
-                              background: isActive ? 'var(--accent-muted)' : 'transparent',
-                              color: isActive ? 'var(--accent)' : 'var(--fg-default)',
-                              boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
+                              background: isActive ? 'white' : 'transparent',
+                              color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
+                              border: isActive
+                                ? '1px solid var(--border-default)'
+                                : '1px solid transparent',
+                              boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                               textDecoration: 'none',
-                              border: 'none',
                               cursor: 'pointer',
-                              transition: 'background 150ms ease, color 150ms ease',
+                              transition:
+                                'background 150ms ease, color 150ms ease, box-shadow 150ms ease',
                               overflow: 'hidden',
                             };
                           }}

@@ -121,9 +121,12 @@ export function DeveloperModePanel({
                 textAlign: 'left',
                 padding: '3px 10px',
                 cursor: 'pointer',
-                background: selected?.id === ev.id ? 'var(--bg-overlay)' : 'transparent',
-                border: 'none',
-                borderLeft: `3px solid ${TYPE_COLOR[ev.type] ?? 'var(--fg-muted)'}`,
+                background: selected?.id === ev.id ? 'white' : 'transparent',
+                border:
+                  selected?.id === ev.id
+                    ? '1px solid var(--border-default)'
+                    : '1px solid transparent',
+                boxShadow: selected?.id === ev.id ? 'var(--shadow-sm)' : 'none',
                 display: 'flex',
                 gap: 8,
                 alignItems: 'baseline',

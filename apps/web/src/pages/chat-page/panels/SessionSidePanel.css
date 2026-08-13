@@ -43,17 +43,13 @@
 }
 
 .session-side-panel__tab {
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
   font-size: 12px;
   font-weight: 600;
   gap: 5px;
   height: 30px;
   padding: 0 var(--spacing-3);
   white-space: nowrap;
-}
-
-.session-side-panel__tab[data-active='true'] {
-  border-bottom-color: var(--accent);
 }
 
 .session-side-panel__tab-badge {
@@ -89,8 +85,10 @@
 
 .session-side-panel__tab[data-active='true'],
 .session-side-panel__tab[data-active='true']:hover {
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: white;
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-sm);
+  color: var(--fg-strong);
 }
 
 .session-side-panel__tab:active,

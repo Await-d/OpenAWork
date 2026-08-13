@@ -203,6 +203,28 @@ describe('TitlebarTabStrip', () => {
     expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
   });
 
+  it('关闭当前激活的会话标签后不会被路由同步 effect 重新加回', async () => {
+    useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
+    useUIStateStore.getState().addSessionTab('chat-session-2', 'Chat 会话二');
+    useUIStateStore
+      .getState()
+      .selectTab(
+        useUIStateStore.getState().tabs.find((tab) => tab.sessionId === 'chat-session-1')!.id,
+      );
+
+    renderTitlebar('/chat/chat-session-1');
+
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭标签' })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-probe').textContent).toBe('/chat/chat-session-2');
+    });
+
+    const tabs = useUIStateStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]!.sessionId).toBe('chat-session-2');
+  });
+
   it('在工具菜单中仍可切换 classic/fusion 布局', () => {
     useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
 

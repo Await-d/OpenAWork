@@ -166,14 +166,16 @@ export function DevtoolsLogsSection({
                     type="button"
                     onClick={() => setSelectedLogKey(key)}
                     style={{
-                      borderRadius: 2,
-                      border: 'none',
-                      borderBottom: `1px solid ${isActive ? (isError ? 'var(--danger)' : 'var(--accent)') : 'var(--border-subtle)'}`,
-                      background: isActive
+                      borderRadius: 6,
+                      border: isActive
+                        ? `1px solid ${isError ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)' : 'var(--border-default)'}`
+                        : '1px solid transparent',
+                      background: isActive ? 'white' : 'transparent',
+                      boxShadow: isActive
                         ? isError
-                          ? 'color-mix(in srgb, var(--danger) 5%, transparent)'
-                          : 'color-mix(in srgb, var(--accent) 5%, transparent)'
-                        : 'transparent',
+                          ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'
+                          : 'var(--shadow-sm)'
+                        : 'none',
                       color: 'var(--fg-strong)',
                       padding: '3px 6px',
                       display: 'flex',

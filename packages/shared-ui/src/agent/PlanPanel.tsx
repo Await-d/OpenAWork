@@ -32,7 +32,24 @@ const statusColor: Record<PlanTask['status'], string> = {
 };
 
 export function PlanPanel({ tasks, style }: PlanPanelProps) {
-  if (tasks.length === 0) return null;
+  if (tasks.length === 0) {
+    return (
+      <div
+        style={{
+          border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+          borderRadius: 8,
+          padding: '0.75rem 1rem',
+          background: 'var(--bg-overlay)',
+          color: 'var(--fg-muted)',
+          fontSize: 12,
+          lineHeight: 1.5,
+          ...style,
+        }}
+      >
+        当前会话暂无计划任务。
+      </div>
+    );
+  }
 
   const orderedTasks = buildOrderedTasks(tasks);
   return (

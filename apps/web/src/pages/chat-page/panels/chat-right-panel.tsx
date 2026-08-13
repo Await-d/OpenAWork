@@ -168,6 +168,7 @@ export interface ChatRightPanelProps {
   dagEdges: DAGEdgeInfo[];
   agentEvents: AgentVizEvent[];
   mcpServers: MCPServerStatus[];
+  onRetryMcpServer?: (serverId: string) => void;
   sharedUiThemeVars: CSSProperties;
   resolveTaskToolRuntimeSnapshot: (
     input: Record<string, unknown>,
@@ -236,6 +237,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     dagEdges,
     agentEvents,
     mcpServers,
+    onRetryMcpServer,
     sharedUiThemeVars,
     resolveTaskToolRuntimeSnapshot,
     onCompactSession,
@@ -256,6 +258,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     yoloMode,
   } = props;
 
+  const [selectedDagNodeId, setSelectedDagNodeId] = useState<string | null>(null);
   const rightPanelWidth = rightOpen
     ? rightTab === 'agent'
       ? 'clamp(360px, 40vw, 520px)'
@@ -488,19 +491,20 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                   }}
                 >
                   {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
-                  {rightTab === 'tools' &&
-                    renderToolsPanel(
-                      toolCallCards,
-                      toolFilter,
-                      setToolFilter,
-                      focusedRequestId,
-                      focusedRequestToolCalls.length,
-                      focusedRequestSummary,
-                      openChildSessionInspector,
-                      taskToolRuntimeLookup,
-                      resolveTaskToolRuntimeSnapshot,
-                      selectedChildSessionId,
-                    )}
+                  {rightTab === 'tools' && (
+                    <ToolsPanel
+                      toolCallCards={toolCallCards}
+                      toolFilter={toolFilter}
+                      setToolFilter={setToolFilter}
+                      focusedRequestId={focusedRequestId}
+                      focusedToolCount={focusedRequestToolCalls.length}
+                      focusedRequestSummary={focusedRequestSummary}
+                      openChildSessionInspector={openChildSessionInspector}
+                      taskToolRuntimeLookup={taskToolRuntimeLookup}
+                      resolveTaskToolRuntimeSnapshot={resolveTaskToolRuntimeSnapshot}
+                      selectedChildSessionId={selectedChildSessionId}
+                    />
+                  )}
                   {rightTab === 'bookmarks' && (
                     <BookmarksPanel
                       sessionId={currentSessionId ?? ''}
@@ -547,26 +551,43 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       }}
                     />
                   )}
-                  {rightTab === 'viz' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {focusedRequestId && (
-                        <RequestScopeEffectNote
-                          title="当前可视化已聚焦"
-                          requestId={focusedRequestId}
-                          visibleCount={visibleAgentEvents.length}
-                          totalCount={agentEvents.length}
-                          summary={focusedRequestSummary ?? undefined}
-                          description="下方事件时间线仅显示当前 request 的相关事件。"
-                        />
-                      )}
-                      <div style={sharedUiThemeVars}>
-                        <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
-                      </div>
-                      <div style={sharedUiThemeVars}>
-                        <AgentVizPanel events={visibleAgentEvents} title="Agent 活动" />
-                      </div>
-                    </div>
-                  )}
+                  {rightTab === 'viz' &&
+                    (() => {
+                      const selectedDagNode =
+                        dagNodes.find((node) => node.id === selectedDagNodeId) ?? null;
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {focusedRequestId && (
+                            <RequestScopeEffectNote
+                              title="当前可视化已聚焦"
+                              requestId={focusedRequestId}
+                              visibleCount={visibleAgentEvents.length}
+                              totalCount={agentEvents.length}
+                              summary={focusedRequestSummary ?? undefined}
+                              description="下方事件时间线仅显示当前 request 的相关事件。"
+                            />
+                          )}
+                          <div style={sharedUiThemeVars}>
+                            <AgentDAGGraph
+                              nodes={dagNodes}
+                              edges={dagEdges}
+                              onNodeClick={(nodeId) =>
+                                setSelectedDagNodeId((prev) => (prev === nodeId ? null : nodeId))
+                              }
+                            />
+                          </div>
+                          {selectedDagNode && (
+                            <DagNodeDetailStrip
+                              node={selectedDagNode}
+                              onClose={() => setSelectedDagNodeId(null)}
+                            />
+                          )}
+                          <div style={sharedUiThemeVars}>
+                            <AgentVizPanel events={visibleAgentEvents} title="Agent 活动" />
+                          </div>
+                        </div>
+                      );
+                    })()}
                   {rightTab === 'history' && (
                     <ChatHistoryTabContent
                       childSessions={childSessions}
@@ -628,7 +649,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                   )}
                   {rightTab === 'mcp' && (
                     <div style={sharedUiThemeVars}>
-                      <MCPServerList servers={mcpServers} />
+                      <MCPServerList servers={mcpServers} onRetry={onRetryMcpServer} />
                     </div>
                   )}
                   {rightTab === 'skills' && (
@@ -648,6 +669,67 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const DAG_NODE_TYPE_LABELS: Record<DAGNodeInfo['type'], string> = {
+  orchestrator: '编排者',
+  subagent: '子代理',
+  tool: '工具',
+  human_input: '用户输入',
+};
+
+const DAG_NODE_STATUS_LABELS: Record<DAGNodeInfo['status'], string> = {
+  pending: '待开始',
+  running: '进行中',
+  paused: '已暂停',
+  completed: '已完成',
+  failed: '失败',
+  skipped: '已跳过',
+};
+
+function DagNodeDetailStrip({ node, onClose }: { node: DAGNodeInfo; onClose: () => void }) {
+  return (
+    <div
+      data-testid="dag-node-detail-strip"
+      style={{
+        margin: 0,
+        padding: '6px 8px',
+        borderRadius: 8,
+        border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-default))',
+        background: 'color-mix(in oklch, var(--accent) 8%, var(--bg-overlay))',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ minWidth: 0, fontSize: 10.5, color: 'var(--fg-default)' }}>
+        <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{node.label}</span>
+        <span style={{ color: 'var(--fg-muted)' }}>
+          {' '}
+          · {DAG_NODE_TYPE_LABELS[node.type]} · {DAG_NODE_STATUS_LABELS[node.status]}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        style={{
+          borderRadius: 999,
+          border: '1px solid color-mix(in oklch, var(--accent) 26%, var(--border-default))',
+          background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+          color: 'var(--accent)',
+          fontSize: 10,
+          fontWeight: 700,
+          padding: '2px 7px',
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        关闭
+      </button>
     </div>
   );
 }
@@ -894,40 +976,82 @@ function RightPanelTerminalsContent({
   );
 }
 
-function renderToolsPanel(
-  toolCallCards: ToolCallCardEntry[],
-  toolFilter: string,
-  setToolFilter: (f: 'all' | 'lsp' | 'file' | 'network' | 'other') => void,
-  focusedRequestId: string | null,
-  focusedToolCount: number,
-  focusedRequestSummary: string | null,
-  openChildSessionInspector: (sessionId: string) => void,
-  taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined,
+const TOOL_FILTER_LSP_PREFIXES = ['lsp_', 'ast_grep'];
+const TOOL_FILTER_FILE_PREFIXES = ['read', 'write', 'edit', 'glob', 'multi_edit', 'workspace_'];
+const TOOL_FILTER_NETWORK_PREFIXES = [
+  'webfetch',
+  'websearch',
+  'google_search',
+  'playwright',
+  'mcp_',
+];
+
+function matchesToolFilterCategory(
+  toolName: string,
+  category: 'all' | 'lsp' | 'file' | 'network' | 'other',
+): boolean {
+  if (category === 'all') return true;
+  const n = toolName.toLowerCase();
+  if (category === 'lsp') return TOOL_FILTER_LSP_PREFIXES.some((p) => n.startsWith(p));
+  if (category === 'file') return TOOL_FILTER_FILE_PREFIXES.some((p) => n.startsWith(p));
+  if (category === 'network') return TOOL_FILTER_NETWORK_PREFIXES.some((p) => n.startsWith(p));
+  return (
+    !TOOL_FILTER_LSP_PREFIXES.some((p) => n.startsWith(p)) &&
+    !TOOL_FILTER_FILE_PREFIXES.some((p) => n.startsWith(p)) &&
+    !TOOL_FILTER_NETWORK_PREFIXES.some((p) => n.startsWith(p))
+  );
+}
+
+function matchesToolSearchQuery(toolCall: ToolCallCardEntry, query: string): boolean {
+  const keyword = query.trim().toLowerCase();
+  if (keyword.length === 0) return true;
+  return [toolCall.toolName, toolCall.requestId]
+    .filter((field): field is string => Boolean(field))
+    .some((field) => field.toLowerCase().includes(keyword));
+}
+
+function ToolsPanel({
+  toolCallCards,
+  toolFilter,
+  setToolFilter,
+  focusedRequestId,
+  focusedToolCount,
+  focusedRequestSummary,
+  openChildSessionInspector,
+  taskToolRuntimeLookup,
+  resolveTaskToolRuntimeSnapshot,
+  selectedChildSessionId,
+}: {
+  toolCallCards: ToolCallCardEntry[];
+  toolFilter: string;
+  setToolFilter: (f: 'all' | 'lsp' | 'file' | 'network' | 'other') => void;
+  focusedRequestId: string | null;
+  focusedToolCount: number;
+  focusedRequestSummary: string | null;
+  openChildSessionInspector: (sessionId: string) => void;
+  taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined;
   resolveTaskToolRuntimeSnapshot: (
     input: Record<string, unknown>,
     output: unknown,
     lookup: TaskToolRuntimeLookup | undefined,
-  ) => TaskToolRuntimeSnapshot | undefined,
-  selectedChildSessionId: string | null,
-) {
-  const lspPrefixes = ['lsp_', 'ast_grep'];
-  const filePrefixes = ['read', 'write', 'edit', 'glob', 'multi_edit', 'workspace_'];
-  const networkPrefixes = ['webfetch', 'websearch', 'google_search', 'playwright', 'mcp_'];
+  ) => TaskToolRuntimeSnapshot | undefined;
+  selectedChildSessionId: string | null;
+}) {
+  const [searchQuery, setSearchQuery] = useState('');
   const isInFocusedScope = Boolean(focusedRequestId);
-  const filtered = toolCallCards.filter((tc) => {
-    if (focusedRequestId && tc.requestId !== focusedRequestId) return false;
-    if (toolFilter === 'all') return true;
-    const n = tc.toolName.toLowerCase();
-    if (toolFilter === 'lsp') return lspPrefixes.some((p) => n.startsWith(p));
-    if (toolFilter === 'file') return filePrefixes.some((p) => n.startsWith(p));
-    if (toolFilter === 'network') return networkPrefixes.some((p) => n.startsWith(p));
-    return (
-      !lspPrefixes.some((p) => n.startsWith(p)) &&
-      !filePrefixes.some((p) => n.startsWith(p)) &&
-      !networkPrefixes.some((p) => n.startsWith(p))
-    );
-  });
-  const scopeVisibleCount = filtered.length;
+  const scopedToolCallCards = focusedRequestId
+    ? toolCallCards.filter((tc) => tc.requestId === focusedRequestId)
+    : toolCallCards;
+  const categoryCounts = (['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => ({
+    id: f,
+    count: scopedToolCallCards.filter((tc) => matchesToolFilterCategory(tc.toolName, f)).length,
+  }));
+  const filtered = scopedToolCallCards.filter(
+    (tc) =>
+      matchesToolFilterCategory(tc.toolName, toolFilter as (typeof categoryCounts)[number]['id']) &&
+      matchesToolSearchQuery(tc, searchQuery),
+  );
+  const scopeVisibleCount = scopedToolCallCards.length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {isInFocusedScope && (
@@ -940,8 +1064,22 @@ function renderToolsPanel(
           description="工具分类筛选只会在这个 request 的工具调用范围内继续细分。"
         />
       )}
+      <input
+        type="search"
+        value={searchQuery}
+        onChange={(event) => setSearchQuery(event.target.value)}
+        placeholder="搜索工具名 / requestId…"
+        style={{
+          borderRadius: 8,
+          border: '1px solid var(--border-default)',
+          background: 'var(--bg-overlay)',
+          color: 'var(--fg-strong)',
+          fontSize: 11,
+          padding: '5px 8px',
+        }}
+      />
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
+        {categoryCounts.map(({ id: f, count }) => (
           <button
             key={f}
             type="button"
@@ -972,7 +1110,8 @@ function renderToolsPanel(
                   ? '文件'
                   : f === 'network'
                     ? '网络'
-                    : '其他'}
+                    : '其他'}{' '}
+            ({count})
           </button>
         ))}
       </div>

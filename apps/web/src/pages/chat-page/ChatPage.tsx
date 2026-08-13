@@ -21,6 +21,7 @@ import {
   createPendingPermissionRequestSnapshot,
   createQuestionsClient,
   createSessionsClient,
+  createSettingsClient,
   createWorkflowsClient,
   dedupePendingPermissionRequests,
 } from '@openAwork/web-client';
@@ -581,6 +582,7 @@ export default function ChatPage() {
   const layoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const reviewPanelOpened = useUIStateStore((s) => s.reviewPanelOpened);
   const setReviewPanelOpened = useUIStateStore((s) => s.setReviewPanelOpened);
+  const fusionDockSplitPos = useUIStateStore((s) => s.fusionDockSplitPos);
   const terminalPanelOpened = useUIStateStore((s) => s.terminalPanelOpened);
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const toggleTerminalPanelOpened = useUIStateStore((s) => s.toggleTerminalPanelOpened);
@@ -3531,6 +3533,76 @@ export default function ChatPage() {
     token,
   });
 
+  const handleRetryMcpServer = useCallback(
+    (serverId: string) => {
+      if (!token) return;
+      setMcpServers((prev) =>
+        prev.map((server) =>
+          server.id === serverId
+            ? { ...server, retryFeedback: { kind: 'pending' as const } }
+            : server,
+        ),
+      );
+
+      void (async () => {
+        try {
+          const data = (await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId)) as {
+            status: 'connected' | 'error' | 'disabled';
+            toolCount: number;
+            durationMs: number;
+            error?: string;
+          };
+          setMcpServers((prev) =>
+            prev.map((server) => {
+              if (server.id !== serverId) return server;
+              if (data.status === 'connected') {
+                return {
+                  ...server,
+                  status: 'connected' as const,
+                  toolCount: data.toolCount,
+                  retryFeedback: {
+                    kind: 'ok' as const,
+                    toolCount: data.toolCount,
+                    durationMs: data.durationMs,
+                  },
+                };
+              }
+              if (data.status === 'error') {
+                return {
+                  ...server,
+                  status: 'error' as const,
+                  retryFeedback: {
+                    kind: 'fail' as const,
+                    error: data.error ?? '未知错误',
+                  },
+                };
+              }
+              return {
+                ...server,
+                status: 'disabled' as const,
+                retryFeedback: undefined,
+              };
+            }),
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setMcpServers((prev) =>
+            prev.map((server) =>
+              server.id === serverId
+                ? {
+                    ...server,
+                    status: 'error' as const,
+                    retryFeedback: { kind: 'fail' as const, error: message },
+                  }
+                : server,
+            ),
+          );
+        }
+      })();
+    },
+    [gatewayUrl, setMcpServers, token],
+  );
+
   const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
     useChatUiActions({
       token,
@@ -5183,6 +5255,7 @@ export default function ChatPage() {
 
       {isFusionLayout ? (
         <FusionChatMainShell
+          dockSplitPos={fusionDockSplitPos}
           editorFullScreen={editorFullScreen}
           editorMode={editorMode}
           editorPane={
@@ -6292,6 +6365,7 @@ export default function ChatPage() {
           dagEdges={dagEdges}
           agentEvents={agentEvents}
           mcpServers={mcpServers}
+          onRetryMcpServer={handleRetryMcpServer}
           sharedUiThemeVars={sharedUiThemeVars}
           resolveTaskToolRuntimeSnapshot={resolveTaskToolRuntimeSnapshot}
           onCompactSession={() => void handleCompactCurrentSession()}

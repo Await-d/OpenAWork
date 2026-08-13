@@ -55,6 +55,7 @@ function resetUiState(): void {
   useUIStateStore.setState({
     reviewPanelOpened: true,
     reviewPanelWidth: 400,
+    fusionDockSplitPos: 35,
     sidePanelActiveTab: 'review',
   });
 }
@@ -338,20 +339,20 @@ describe('FusionSessionSidePanel', () => {
     expect(openRecoveryStrategy).toHaveBeenCalledTimes(1);
   });
 
-  it('在融合 dock 内拖拽手柄可调整右侧面板宽度', () => {
+  it('在融合 dock 内拖拽手柄可调整对话列/侍审查面板的分栏百分比', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
 
     render(<FusionDockedSidePanel {...createBaseProps()} activeTab="files" />);
 
     const panel = screen.getByTestId('fusion-docked-side-panel');
-    expect(panel.style.width).toBe('400px');
-    expect(panel.style.flexShrink).toBe('0');
+    expect(panel.style.flex).toBe('1 1 auto');
 
     const handle = screen.getByRole('separator', { name: '拖拽调整面板宽度' });
     fireEvent.pointerDown(handle, { clientX: 500, pointerId: 1 });
     fireEvent.pointerMove(handle, { clientX: 460, pointerId: 1 });
     fireEvent.pointerUp(handle, { clientX: 460, pointerId: 1 });
 
-    expect(useUIStateStore.getState().reviewPanelWidth).toBe(440);
+    // 拖拽手柄向左移动 40px（delta 为负，对话列收窄），fusionDockSplitPos 应下降。
+    expect(useUIStateStore.getState().fusionDockSplitPos).toBeLessThan(35);
   });
 });

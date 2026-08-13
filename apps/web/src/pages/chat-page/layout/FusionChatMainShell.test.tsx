@@ -8,6 +8,7 @@ function renderShell(overrides: Partial<FusionChatMainShellProps> = {}) {
   const splitDragging: MutableRefObject<boolean> = { current: false };
   const baseProps: FusionChatMainShellProps = {
     children: <div data-testid="conversation-content">conversation</div>,
+    dockSplitPos: 35,
     editorFullScreen: false,
     editorMode: false,
     editorPane: <div data-testid="editor-pane">editor</div>,

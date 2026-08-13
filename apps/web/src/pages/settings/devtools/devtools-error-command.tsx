@@ -144,12 +144,14 @@ export function ErrorCommandCenter({
                 title={diagnostic.message}
                 style={{
                   flexShrink: 0,
-                  borderRadius: 2,
-                  border: 'none',
-                  borderBottom: `1px solid ${isActive ? 'var(--danger)' : 'var(--border-subtle)'}`,
-                  background: isActive
-                    ? 'color-mix(in srgb, var(--danger) 8%, transparent)'
-                    : 'transparent',
+                  borderRadius: 6,
+                  border: isActive
+                    ? '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
+                    : '1px solid transparent',
+                  background: isActive ? 'white' : 'transparent',
+                  boxShadow: isActive
+                    ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'
+                    : 'none',
                   color: isActive ? 'var(--danger)' : 'var(--fg-muted)',
                   padding: '2px 5px',
                   fontSize: 10,
@@ -581,7 +583,11 @@ summary {
 }
 summary::-webkit-details-marker { display: none; }
 summary:hover { background: var(--surface-2); }
-.error-item.active { border-left: 3px solid var(--danger); }
+.error-item.active {
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
+}
 .error-item summary .error-severity {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
   background: var(--danger-muted); color: var(--danger); text-transform: uppercase; flex-shrink: 0;
@@ -604,7 +610,11 @@ pre {
   padding: 10px 12px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace;
   overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto;
 }
-.log-item.error { border-left: 3px solid var(--danger); }
+.log-item.error {
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
+}
 .log-item summary .log-level {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
   text-transform: uppercase; flex-shrink: 0;
@@ -618,7 +628,11 @@ pre {
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 14px; margin-bottom: 8px;
 }
-.worker-card.error { border-left: 3px solid var(--danger); }
+.worker-card.error {
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
+}
 .worker-header { display: flex; justify-content: space-between; align-items: center; }
 .worker-name { font-size: 13px; font-weight: 600; }
 .worker-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
@@ -630,9 +644,21 @@ pre {
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 14px; margin-bottom: 8px;
 }
-.source-card.error { border-left: 3px solid var(--danger); }
-.source-card.ok { border-left: 3px solid var(--accent); }
-.source-card.warn { border-left: 3px solid var(--warning); }
+.source-card.error {
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
+}
+.source-card.ok {
+  border: 1px solid var(--border-default);
+  background: white;
+  box-shadow: var(--shadow-md);
+}
+.source-card.warn {
+  border: 1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--warning) 10%, transparent);
+}
 .source-header { display: flex; justify-content: space-between; align-items: center; }
 .source-label { font-size: 12px; font-weight: 600; }
 .source-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }

@@ -107,7 +107,8 @@ export function OverviewTab({
                   borderRadius: 10,
                   display: 'grid',
                   gap: 6,
-                  borderLeft: `3px solid var(--accent)`,
+                  border: '1px solid var(--border-default)',
+                  background: 'white',
                   transition: 'background 0.15s, outline 0.15s, box-shadow 0.15s',
                   outline: isExpanded ? '1px solid var(--accent)' : 'none',
                   outlineOffset: -1,
@@ -397,16 +398,13 @@ export function OverviewTab({
                       gap: 8,
                       padding: '8px 10px',
                       borderRadius: 8,
-                      background: isExpanded
-                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))'
-                        : 'var(--bg-overlay)',
+                      background: isExpanded ? 'white' : 'var(--bg-overlay)',
                       alignItems: 'flex-start',
                       cursor: 'pointer',
-                      borderLeft: `3px solid ${isExpanded ? config.color : 'transparent'}`,
-                      boxShadow: isExpanded ? 'var(--shadow-sm)' : 'none',
-                      borderTop: 'none',
-                      borderRight: 'none',
-                      borderBottom: 'none',
+                      border: isExpanded
+                        ? `1px solid color-mix(in oklch, ${config.color} 40%, var(--border-default) 60%)`
+                        : '1px solid transparent',
+                      boxShadow: isExpanded ? 'var(--shadow-md)' : 'none',
                       width: '100%',
                       textAlign: 'left',
                     }}

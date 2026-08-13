@@ -66,7 +66,7 @@ export default function Layout({ theme = 'dark', onToggleTheme }: LayoutProps = 
 .layout-switch-wrapper > *:nth-child(2) { animation-delay:50ms; }
 .layout-switch-wrapper > *:nth-child(3) { animation-delay:100ms; }
 .layout-switch-wrapper > *:nth-child(4) { animation-delay:150ms; }
-.layout-titlebar-fusion { animation: layout-titlebar-slide-down 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }`}</style>
+.layout-titlebar-fusion { position: relative; z-index: 20; animation: layout-titlebar-slide-down 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }`}</style>
       <LayoutTransitionOverlay />
       {shared.layoutMode === 'fusion' ? (
         <LayoutFusion shared={shared} theme={theme} onToggleTheme={onToggleTheme} />

@@ -132,9 +132,9 @@
 }
 
 .review-panel-file-button--selected {
-  background: color-mix(in oklch, var(--accent) 10%, var(--bg-base));
-  border-color: var(--accent-border);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--bg-overlay);
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-md);
 }
 
 .review-panel-file-button__path {

@@ -409,26 +409,31 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 3px 6px;
-  border-radius: 3px;
-  border-left: 2px solid transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .tool-call-diagnostic[data-severity='error'] {
-  border-left-color: var(--danger);
-  background: color-mix(in oklch, var(--danger) 5%, transparent);
+  border-color: color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 
 .tool-call-diagnostic[data-severity='warning'],
 .tool-call-diagnostic[data-severity='warn'] {
-  border-left-color: var(--warning);
-  background: color-mix(in oklch, var(--warning) 5%, transparent);
+  border-color: color-mix(in oklch, var(--warning) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--warning) 10%, transparent);
 }
 
 .tool-call-diagnostic[data-severity='info'],
 .tool-call-diagnostic[data-severity='hint'] {
-  border-left-color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 5%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--accent) 10%, transparent);
 }
 
 .tool-call-diagnostic-sev {

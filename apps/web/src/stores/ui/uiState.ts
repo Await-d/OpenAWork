@@ -293,6 +293,12 @@ export interface UIStateStore {
   toggleReviewPanelOpened: () => void;
   reviewPanelWidth: number;
   setReviewPanelWidth: (width: number) => void;
+  /**
+   * Fusion 融合布局下，审查/文件/Context 侧栏停靠打开时，对话列占工作区总宽度的
+   * 百分比（默认落在 30%-40% 区间，可拖拽调整，范围 20-55）。侍审查面板占用剩余宽度。
+   */
+  fusionDockSplitPos: number;
+  setFusionDockSplitPos: (percent: number) => void;
   sidePanelActiveTab: 'review' | 'files' | 'context';
   setSidePanelActiveTab: (tab: 'review' | 'files' | 'context') => void;
   terminalPanelOpened: boolean;
@@ -353,6 +359,9 @@ const SIDEBAR_PANEL_DEFAULT_WIDTH = 288;
 const REVIEW_PANEL_MIN_WIDTH = 300;
 const REVIEW_PANEL_MAX_WIDTH = 640;
 const REVIEW_PANEL_DEFAULT_WIDTH = 400;
+const FUSION_DOCK_SPLIT_MIN_PERCENT = 20;
+const FUSION_DOCK_SPLIT_MAX_PERCENT = 55;
+const FUSION_DOCK_SPLIT_DEFAULT_PERCENT = 35;
 const TERMINAL_PANEL_MIN_HEIGHT = 120;
 const TERMINAL_PANEL_MAX_HEIGHT = 360;
 const TERMINAL_PANEL_DEFAULT_HEIGHT = 160;
@@ -477,6 +486,23 @@ export const REVIEW_PANEL_WIDTH_BOUNDS = {
   min: REVIEW_PANEL_MIN_WIDTH,
   max: REVIEW_PANEL_MAX_WIDTH,
   default: REVIEW_PANEL_DEFAULT_WIDTH,
+} as const;
+
+export function clampFusionDockSplitPos(percent: number): number {
+  if (!Number.isFinite(percent)) {
+    return FUSION_DOCK_SPLIT_DEFAULT_PERCENT;
+  }
+
+  return Math.min(
+    FUSION_DOCK_SPLIT_MAX_PERCENT,
+    Math.max(FUSION_DOCK_SPLIT_MIN_PERCENT, Math.round(percent)),
+  );
+}
+
+export const FUSION_DOCK_SPLIT_BOUNDS = {
+  min: FUSION_DOCK_SPLIT_MIN_PERCENT,
+  max: FUSION_DOCK_SPLIT_MAX_PERCENT,
+  default: FUSION_DOCK_SPLIT_DEFAULT_PERCENT,
 } as const;
 
 export function clampTerminalPanelHeight(height: number): number {
@@ -898,6 +924,9 @@ export const useUIStateStore = create<UIStateStore>()(
         set((state) => ({ reviewPanelOpened: !state.reviewPanelOpened })),
       reviewPanelWidth: REVIEW_PANEL_WIDTH_BOUNDS.default,
       setReviewPanelWidth: (width) => set({ reviewPanelWidth: clampReviewPanelWidth(width) }),
+      fusionDockSplitPos: FUSION_DOCK_SPLIT_BOUNDS.default,
+      setFusionDockSplitPos: (percent) =>
+        set({ fusionDockSplitPos: clampFusionDockSplitPos(percent) }),
       sidePanelActiveTab: 'review',
       setSidePanelActiveTab: (tab) => set({ sidePanelActiveTab: tab }),
       terminalPanelOpened: false,
@@ -940,7 +969,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 20,
+      version: 21,
       // reviewPanelOpened / editorMode 不持久化——每次启动默认关闭。
       partialize: (state) => {
         const { reviewPanelOpened: _rp, editorMode: _em, ...rest } = state;
@@ -1084,6 +1113,12 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.editorMode = false;
         }
 
+        // v21:Fusion 停靠侧栏改用百分比分栏（对话列默认占 35%），替代固定像素审查
+        // 面板宽度独占剩余空间的旧机制。
+        if (version < 21) {
+          nextState.fusionDockSplitPos = FUSION_DOCK_SPLIT_BOUNDS.default;
+        }
+
         if (!isStringArray(nextState.savedWorkspacePaths)) {
           nextState.savedWorkspacePaths = [];
         }
@@ -1122,6 +1157,12 @@ export const useUIStateStore = create<UIStateStore>()(
           typeof nextState.reviewPanelWidth === 'number'
             ? nextState.reviewPanelWidth
             : REVIEW_PANEL_WIDTH_BOUNDS.default,
+        );
+
+        nextState.fusionDockSplitPos = clampFusionDockSplitPos(
+          typeof nextState.fusionDockSplitPos === 'number'
+            ? nextState.fusionDockSplitPos
+            : FUSION_DOCK_SPLIT_BOUNDS.default,
         );
 
         if (typeof nextState.reviewPanelOpened !== 'boolean') {

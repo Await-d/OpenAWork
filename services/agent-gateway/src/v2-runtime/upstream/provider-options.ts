@@ -284,6 +284,8 @@ function gpt5SupportedEfforts(apiId: string): readonly ReasoningEffort[] | undef
   const version = gpt5Version(apiId);
   if (version === 5) return GPT5_5_EFFORTS;
   if (version === 6) return GPT5_6_EFFORTS;
+  // 未来次版本（5.7、5.8...）继承已知最高档位（5.6），而不是掉回更窄的默认集合。
+  if (version !== undefined && version > 6) return GPT5_6_EFFORTS;
   if (version === 1) return GPT5_1_EFFORTS;
   if (version !== undefined && version >= 2) return GPT5_2_PLUS_EFFORTS;
   return GPT5_DEFAULT_EFFORTS;
@@ -319,16 +321,33 @@ export function clampReasoningEffortForModel(
   return sortedDesc[sortedDesc.length - 1] as ReasoningEffort;
 }
 
+// Anthropic opus/sonnet major >= 4 视为思考模型；3.7 是数值区间之外的显式例外。
+function isAnthropicReasoningModel(id: string): boolean {
+  if (id.includes('claude-3-7-sonnet')) return true;
+  const match = /claude-(?:opus|sonnet)-(\d+)/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  return Number.isFinite(major) && major >= 4;
+}
+
+// Gemini major.minor >= 2.5 视为思考模型（2.5 / 3.x / 未来 4.x...）。
+function isGeminiReasoningModel(id: string): boolean {
+  const match = /gemini-(\d+)(?:\.(\d+))?/.exec(id);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 2 || (major === 2 && minor >= 5);
+}
+
 function supportsOpenRouterReasoning(model: string): boolean {
   // 与 catalog / 前端 isOpenRouterReasoningModel 对齐：不要用裸 `gpt` 匹配。
+  // o 系列用 `o\d+` 泛化匹配未来代号（o1/o3/o4/o5...）。
   const id = model.toLowerCase();
   return (
-    /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/.test(id) ||
-    id.includes('claude-opus-4') ||
-    id.includes('claude-sonnet-4') ||
-    id.includes('claude-3-7-sonnet') ||
-    id.includes('gemini-2.5') ||
-    id.includes('gemini-3') ||
+    /(?:^|\/)(?:gpt-5(?:[.-]|$)|o\d+(?:[.-]|$))/.test(id) ||
+    isAnthropicReasoningModel(id) ||
+    isGeminiReasoningModel(id) ||
     id.includes('deepseek-r') ||
     id.includes('reasoner') ||
     id.includes('thinking')

@@ -13,6 +13,7 @@
 - [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：5 波次 / Full orchestration；这是当前唯一允许继续演进的布局主线，继续推进 Titlebar 精简、Rail+Panel、SessionPanel 卡片化、侧面板 Tab 聚合与底部终端
 
 ## Done Workflows
+- [260813-chat-right-panel-completion](workflow/done/260813-chat-right-panel-completion.md) — ✅ 已完成 2026-08-13：ChatRightPanel 四个 tab 功能补全（Full orchestration，9 任务）——MCP 重试连接接线（组件已支持仅调用方漏传 `onRetry`）+ 数据映射修复（`toolCount` 曾硬编码为 0）、Plan 面板空状态补齐（原裸 `return null`）、DAG 节点点击接线（`AgentDAGGraph onNodeClick` 曾未传）+ 新增详情提示条、工具面板筛选数量徽标+搜索框（`renderToolsPanel` 重构为 `ToolsPanel` 组件）；均为前端展示层改动，未新增后端路由；四个交互的浏览器手动验证因工具限制未完成，已转交用户
 - [260708-layout-isolation-refactor](workflow/done/260708-layout-isolation-refactor.md) — ✅ 已完成 2026-07-18：Fusion/Shared 目录隔离、`useFusionLayout`/`useFusionChatLayout` 抽离、ChatPage Fusion 壳解耦、相关定向测试与 Web/桌面端验收闭环已全部收口；Classic 旧布局保持冻结兼容
 - [260715-composer-input-history-recall](workflow/done/260715-composer-input-history-recall.md) — ✅ 已完成 2026-07-15：chat/team 共用 `UnifiedComposer` 已支持 `ArrowUp / ArrowDown` 输入历史回显；历史按 `gatewayUrl + currentUserEmail + sessionId` 隔离在前端运行期内存 store 中，默认只保留最新 50 条，并支持 pending→session 迁移；兼容 slash/@ 菜单、busy 队列、Esc 清空/恢复与 chat 双 Esc 编辑上一条消息
 - [260709-资源能力集成使用方案](workflow/done/260709-资源能力集成使用方案.md) — ✅ 已完成 2026-07-09：资源能力完整集成闭环；后台保留完整 catalog，前端按 `visibility / feature / usageKind` 分层展示；Channels persona、Team 模板、Commands/Prompts 材料边界、Skill/MCP 现有管理面合流、上传/删除实时识别与真实浏览器 QA 已完成；已有简单工具只登记/补说明，不新增第二套执行器
@@ -121,6 +122,8 @@
 - 最小 RUN-010 的 timeout stop 路径里，必须先写 `terminalReason=timeout` 再 stop active request；否则真实 registry 的 wait-for-completion 语义会让 cancelled 收尾提前清空 context。
 - RUN-003 最小读面里，child tasks 的失败判定不能只看 `terminalReason`；若 child session 已回到 `idle` 但最新 assistant message `status=error`，`/sessions/{id}/tasks` 仍必须把它投影为 `failed`。
 - RUN-008 最小 owner-session reply/resume 里，不要把 `.NET` 自己的 question 过期/后台 dismiss 语义混进 TS 真值；pending list、reply、background reconcile 都必须保持同一最小口径。
+- [2026-08-13] `packages/shared-ui` 里不少展示型组件（`MCPServerList.onRetry`、`AgentDAGGraph.onNodeClick`）已经把交互回调设计成可选 prop，但消费方（`ChatRightPanel` 等页面级容器）经常漏传，导致组件看起来"功能不完整"其实是"接线遗漏"。排查 UI 交互缺失时，先读 shared-ui 组件的 props 定义，再看调用处是否真的传了对应回调，往往比重写组件更省事。
+- [2026-08-13] `PlanPanel`（`packages/shared-ui/src/agent/PlanPanel.tsx`）任务为空时以前会裸 `return null`（现已改为渲染空状态文案）；`PlanTask` 数据来自 agent 执行进度的只读 WS 推送（`task_update`），不是用户可编辑任务清单，后续如果有人想加"可勾选"交互，需要先确认这个语义边界，不要直接在展示组件上加 `onToggle`。
 
 ## Global Important Memory
 - `.agentdocs/runtime/` 已在仓库 `.gitignore` 中忽略，可安全存放本次 orchestration 的临时执行产物。

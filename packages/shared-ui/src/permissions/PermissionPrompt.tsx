@@ -442,7 +442,7 @@ export function PermissionPrompt({
       aria-label="权限请求"
       aria-busy={isSubmitting}
       style={{
-        border: `1px solid ${riskLevel === 'high' ? 'rgba(248,113,113,0.45)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
+        border: `1px solid ${riskLevel === 'high' ? 'color-mix(in oklch, var(--danger) 45%, transparent)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
         borderRadius: 12,
         padding: 14,
         background: 'var(--bg-overlay)',
@@ -620,13 +620,15 @@ export function PermissionPrompt({
                     padding: '8px 10px',
                     borderRadius: 6,
                     border: isSelected
-                      ? '1px solid rgba(99,102,241,0.55)'
+                      ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
                       : '1px solid rgba(148,163,184,0.15)',
-                    background: isSelected ? 'rgba(99,102,241,0.10)' : 'rgba(15,23,42,0.30)',
+                    background: isSelected ? 'white' : 'rgba(15,23,42,0.30)',
+                    boxShadow: isSelected ? 'var(--shadow-md)' : 'none',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
                     opacity: isSubmitting ? 0.7 : 1,
                     textAlign: 'left',
-                    transition: 'border-color 120ms ease, background 120ms ease',
+                    transition:
+                      'border-color 120ms ease, background 120ms ease, box-shadow 120ms ease',
                   }}
                 >
                   <span
@@ -826,13 +828,10 @@ function btnStyle(
   } as const;
   const palette = base[tone];
   return {
-    background: options?.active
-      ? tone === 'primary'
-        ? color.aux
-        : 'rgba(99,102,241,0.28)'
-      : palette.bg,
-    color: palette.fg,
-    border: `1px solid ${palette.border}`,
+    background: options?.active ? (tone === 'primary' ? color.aux : 'white') : palette.bg,
+    boxShadow: options?.active && tone !== 'primary' ? 'var(--shadow-sm)' : 'none',
+    color: options?.active && tone !== 'primary' ? 'var(--fg-strong)' : palette.fg,
+    border: `1px solid ${options?.active && tone !== 'primary' ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : palette.border}`,
     borderRadius: 7,
     padding: tone === 'primary' ? '0.4rem 0.85rem' : '0.35rem 0.75rem',
     fontSize: 12,

@@ -476,10 +476,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: 'pointer',
-                    color: active ? 'var(--accent)' : 'var(--fg-default)',
-                    background: active
-                      ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
-                      : 'var(--bg-overlay)',
+                    color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
+                    background: active ? 'white' : 'var(--bg-overlay)',
+                    boxShadow: active ? 'var(--shadow-sm)' : 'none',
                   }}
                   title={variant.baseUrl}
                 >
@@ -781,10 +780,9 @@ export function ProviderSettings({
               fontWeight: 600,
               cursor: controlEnabled ? 'pointer' : 'not-allowed',
               opacity: controlEnabled ? 1 : 0.45,
-              color: !current.enabled ? 'var(--accent)' : 'var(--fg-default)',
-              background: !current.enabled
-                ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
-                : 'var(--bg-raised)',
+              color: !current.enabled ? 'var(--fg-strong)' : 'var(--fg-default)',
+              background: !current.enabled ? 'white' : 'var(--bg-raised)',
+              boxShadow: !current.enabled ? 'var(--shadow-sm)' : 'none',
             }}
           >
             关闭思考
@@ -805,10 +803,9 @@ export function ProviderSettings({
                   fontWeight: 600,
                   cursor: controlEnabled ? 'pointer' : 'not-allowed',
                   opacity: controlEnabled ? 1 : 0.45,
-                  color: activeLevel ? 'var(--accent)' : 'var(--fg-default)',
-                  background: activeLevel
-                    ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
-                    : 'var(--bg-raised)',
+                  color: activeLevel ? 'var(--fg-strong)' : 'var(--fg-default)',
+                  background: activeLevel ? 'white' : 'var(--bg-raised)',
+                  boxShadow: activeLevel ? 'var(--shadow-sm)' : 'none',
                   textTransform: 'uppercase',
                 }}
                 title={describeReasoningEffort(level)}
@@ -914,7 +911,8 @@ export function ProviderSettings({
             gap: 8,
             textAlign: 'left',
             cursor: 'pointer',
-            background: isActive ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))' : 'transparent',
+            background: isActive ? 'white' : 'transparent',
+            boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
             color: 'var(--fg-default)',
           }}
         >
@@ -1129,10 +1127,9 @@ export function ProviderSettings({
                     gap: 6,
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 999,
-                    background: isActiveProvider
-                      ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
-                      : 'transparent',
-                    color: isActiveProvider ? 'var(--accent)' : 'var(--fg-default)',
+                    background: isActiveProvider ? 'white' : 'transparent',
+                    boxShadow: isActiveProvider ? 'var(--shadow-sm)' : 'none',
+                    color: isActiveProvider ? 'var(--fg-strong)' : 'var(--fg-default)',
                     padding: '0.28rem 0.65rem',
                     fontSize: 11,
                     fontWeight: 600,
