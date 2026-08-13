@@ -235,7 +235,7 @@ export function DevtoolsDiagnosticsSection({
                       border: isActive
                         ? '1px solid var(--border-default)'
                         : '1px solid transparent',
-                      background: isActive ? 'white' : 'transparent',
+                      background: isActive ? 'var(--bg-raised)' : 'transparent',
                       boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                       color: 'var(--fg-strong)',
                       padding: '4px 6px',

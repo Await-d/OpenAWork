@@ -155,6 +155,12 @@ export interface BaseSessionRowProps {
   /** 提交重命名 */
   onRenameCommit?: (sessionId: string) => void;
   /**
+   * 标题插槽：当提供时，替换默认的 `<span>{title}</span>` 渲染，
+   * 用于注入 InlineEditor 等自定义标题组件。当外部 `renaming=true` 时，
+   * 仍然显示内置的重命名 input（保持动作按钮触发的重命名流程正常工作）。
+   */
+  titleSlot?: ReactNode;
+  /**
    * 行密度。compact = chat 端紧凑模式，cozy = team 端宽松模式（默认）。
    * 影响内边距、行间距、meta 行最小高度。
    */
@@ -193,6 +199,7 @@ export function BaseSessionRow({
   renameValue,
   onRenameChange,
   onRenameCommit,
+  titleSlot,
   density = 'cozy',
 }: BaseSessionRowProps) {
   const tokens = DENSITY[density];
@@ -342,16 +349,18 @@ export function BaseSessionRow({
               }}
             />
           ) : (
-            <span
-              style={{
-                ...TITLE_STYLE,
-                lineHeight: density === 'compact' ? '1.25' : '1.35',
-                fontWeight: active ? 600 : 400,
-                color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
-              }}
-            >
-              {title}
-            </span>
+            titleSlot ?? (
+              <span
+                style={{
+                  ...TITLE_STYLE,
+                  lineHeight: density === 'compact' ? '1.25' : '1.35',
+                  fontWeight: active ? 600 : 400,
+                  color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
+                }}
+              >
+                {title}
+              </span>
+            )
           )}
 
           {/* compact 模式下 meta 直接嵌入在标题正下方，与标题同 X 对齐；actions 不再覆盖 meta，而是浮到行右下角（日期正下方） */}

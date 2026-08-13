@@ -920,7 +920,7 @@
 /* 高优先级 + 未完成：微妙高亮样式 */
 .chat-todo-row[data-priority='high'][data-done='false'] {
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
   padding-left: 8px;
 }
@@ -1739,7 +1739,7 @@
   line-height: 1.55;
   padding: 10px 12px;
   border: 1px solid var(--border-default);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: var(--shadow-md);
   border-radius: 6px;
   margin: 2px 0;
@@ -2460,7 +2460,7 @@
 }
 
 .chat-path-preview-row[data-highlight='true'] {
-  background: white;
+  background: var(--accent-subtle);
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%);
 }
 

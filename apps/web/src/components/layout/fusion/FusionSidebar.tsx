@@ -12,12 +12,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
 import { createWorkspaceClient, createTeamClient } from '@openAwork/web-client';
+import { InlineEditor } from '@openAwork/shared-ui';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import { useTeamSidebarSessions } from '../../../hooks/workspace/useTeamSidebarSessions.js';
 import type { TeamWorkspaceGroup } from '../../../hooks/workspace/useTeamSidebarSessions.js';
 import { SessionSidebarSessionRow } from '../sidebar/SessionSidebarSessionRow.js';
 import { BaseSessionRow } from '../sidebar/BaseSessionRow.js';
+import SessionContextMenu from '../sidebar/SessionContextMenu.js';
 import TeamSessionContextMenu from '../sidebar/TeamSessionContextMenu.js';
 import TeamWorkspaceContextMenu from '../sidebar/TeamWorkspaceContextMenu.js';
 import { getWorkspaceGroupKey } from '../../../utils/session/session-grouping.js';
@@ -192,11 +194,15 @@ function TeamWorkspaceGroupItem({
   renameValue,
   onRenameChange,
   onRenameCommit,
+  onStartRename,
   onWorkspaceContextMenu,
   workspaceRenamingId,
   workspaceRenameValue,
   onWorkspaceRenameChange,
   onWorkspaceRenameCommit,
+  onNewSession,
+  onTogglePause,
+  onDelete,
 }: {
   group: TeamWorkspaceGroup;
   activeTeamSessionId: string | null;
@@ -217,11 +223,15 @@ function TeamWorkspaceGroupItem({
   renameValue: string;
   onRenameChange: (value: string) => void;
   onRenameCommit: (sessionId: string) => void;
+  onStartRename: (session: { id: string; title: string }) => void;
   onWorkspaceContextMenu: (workspace: { id: string; name: string }, x: number, y: number) => void;
   workspaceRenamingId: string | null;
   workspaceRenameValue: string;
   onWorkspaceRenameChange: (value: string) => void;
   onWorkspaceRenameCommit: (workspaceId: string) => void;
+  onNewSession: (workspaceId: string) => void;
+  onTogglePause: (sessionId: string, stateStatus: string) => void;
+  onDelete: (sessionId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -339,6 +349,44 @@ function TeamWorkspaceGroupItem({
             {group.sessions.length}
           </span>
         </button>
+        {group.id !== '__unbound__' && (
+          <button
+            type="button"
+            title={`在 ${group.label} 中新建会话`}
+            aria-label={`在 ${group.label} 中新建会话`}
+            onClick={() => onNewSession(group.id)}
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 20,
+              height: 20,
+              borderRadius: 5,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--fg-muted)',
+              cursor: 'pointer',
+              padding: 0,
+              marginRight: 4,
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {!collapsed && (
@@ -356,6 +404,8 @@ function TeamWorkspaceGroupItem({
             const isActive = activeTeamSessionId === ts.id;
             const isRunning = ts.stateStatus === 'running';
             const statusColor = isRunning ? 'var(--accent)' : 'var(--border-default)';
+            const isRenaming = renamingSessionId === ts.id;
+
             return (
               <BaseSessionRow
                 key={ts.id}
@@ -387,10 +437,91 @@ function TeamWorkspaceGroupItem({
                   );
                 }}
                 onPreload={() => preloadRoute('/team')}
-                renaming={renamingSessionId === ts.id}
+                renaming={isRenaming}
                 renameValue={renameValue}
                 onRenameChange={onRenameChange}
                 onRenameCommit={onRenameCommit}
+                actions={[
+                  {
+                    key: 'rename',
+                    title: '重命名',
+                    icon: (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
+                    ),
+                    onClick: () => onStartRename({ id: ts.id, title: ts.title }),
+                    disabled: isRenaming,
+                  },
+                  {
+                    key: 'toggle-pause',
+                    title: isRunning ? '暂停' : '恢复',
+                    icon: isRunning ? (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="6" y="4" width="4" height="16" />
+                        <rect x="14" y="4" width="4" height="16" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                    ),
+                    onClick: () => onTogglePause(ts.id, ts.stateStatus),
+                  },
+                  {
+                    key: 'delete',
+                    title: '删除',
+                    icon: (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    ),
+                    onClick: () => onDelete(ts.id),
+                    danger: true,
+                  },
+                ]}
                 icon={
                   <span
                     style={{
@@ -446,12 +577,58 @@ export function FusionSidebar({
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
   const triggerTeamSelectSession = useUIStateStore((s) => s.triggerTeamSelectSession);
+  const togglePinSession = useUIStateStore((s) => s.togglePinSession);
+  const isPinned = useUIStateStore((s) => s.isPinned);
 
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
   const [peekWorkspacePath, setPeekWorkspacePath] = useState<string | null>(null);
   const [compactViewport, setCompactViewport] = useState(isCompactFusionSidebarViewport);
   const peekCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
+
+  // 工作区显示别名：localStorage 持久化，key = 'ws-alias:' + path
+  const [workspaceAlias, setWorkspaceAlias] = useState<string>(() => {
+    if (!selectedWorkspacePath) return '';
+    try {
+      return localStorage.getItem(`ws-alias:${selectedWorkspacePath}`) ?? '';
+    } catch {
+      return '';
+    }
+  });
+
+  // 当 selectedWorkspacePath 变化时，从 localStorage 重新读取别名
+  useEffect(() => {
+    if (!selectedWorkspacePath) {
+      setWorkspaceAlias('');
+      return;
+    }
+    try {
+      setWorkspaceAlias(localStorage.getItem(`ws-alias:${selectedWorkspacePath}`) ?? '');
+    } catch {
+      setWorkspaceAlias('');
+    }
+  }, [selectedWorkspacePath]);
+
+  const handleWorkspaceAliasChange = useCallback(
+    (newAlias: string): void => {
+      if (!selectedWorkspacePath) return;
+      setWorkspaceAlias(newAlias);
+      try {
+        if (newAlias) {
+          localStorage.setItem(`ws-alias:${selectedWorkspacePath}`, newAlias);
+        } else {
+          localStorage.removeItem(`ws-alias:${selectedWorkspacePath}`);
+        }
+      } catch {
+        // localStorage 不可用时静默失败
+      }
+    },
+    [selectedWorkspacePath],
+  );
+
+  const workspaceDisplayName = workspaceAlias || basename(selectedWorkspacePath);
+
   const workspacePickerDataSource = useState(() =>
     buildWorkspacePickerDataSource({
       client: createWorkspaceClient(gatewayUrl),
@@ -485,6 +662,7 @@ export function FusionSidebar({
   }, []);
 
   const {
+    sessions,
     groupedSessions,
     groupedSessionTrees,
     sessionCountByWorkspace,
@@ -498,10 +676,13 @@ export function FusionSidebar({
     isDeletingSession,
     sessionSearch,
     setSessionSearch,
+    newSession,
     startRename,
     commitRename,
     quickDeleteSession,
     quickExportSession,
+    exportSessionAsMarkdown,
+    exportSessionAsJson,
   } = useSessions();
 
   const {
@@ -518,12 +699,6 @@ export function FusionSidebar({
   const chatSessionNodes = useMemo(
     () =>
       groupedSessions
-        .filter(
-          (group) =>
-            selectedWorkspacePath === null ||
-            getWorkspaceGroupKey(group.workspacePath) ===
-              getWorkspaceGroupKey(selectedWorkspacePath),
-        )
         .flatMap((group) => {
           const groupKey = getWorkspaceGroupKey(group.workspacePath);
           const treeGroup = groupedSessionTrees.find(
@@ -531,7 +706,7 @@ export function FusionSidebar({
           );
           return treeGroup?.roots ?? [];
         }),
-    [groupedSessionTrees, groupedSessions, selectedWorkspacePath],
+    [groupedSessionTrees, groupedSessions],
   );
   const peekSessionNodes = useMemo(() => {
     const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
@@ -541,6 +716,17 @@ export function FusionSidebar({
     return treeGroup?.roots ?? chatSessionNodes;
   }, [chatSessionNodes, groupedSessionTrees, peekWorkspacePath]);
 
+  const filteredTeamGroups = useMemo(() => {
+    if (!teamSearch.trim()) return teamWorkspaceGroups;
+    const lower = teamSearch.toLowerCase();
+    return teamWorkspaceGroups
+      .map((wg) => ({
+        ...wg,
+        sessions: wg.sessions.filter((s) => s.title.toLowerCase().includes(lower)),
+      }))
+      .filter((wg) => wg.label.toLowerCase().includes(lower) || wg.sessions.length > 0);
+  }, [teamSearch, teamWorkspaceGroups]);
+
   const preloadChatRoute = useCallback((sessionIdToPreload: string) => {
     void preloadRouteModuleByPath(`/chat/${sessionIdToPreload}`);
   }, []);
@@ -548,18 +734,21 @@ export function FusionSidebar({
   const openChatSession = useCallback(
     (sessionIdToOpen: string) => {
       preloadChatRoute(sessionIdToOpen);
-      setLeftSidebarOpen(false);
       void navigate(`/chat/${sessionIdToOpen}`);
     },
-    [navigate, preloadChatRoute, setLeftSidebarOpen],
+    [navigate, preloadChatRoute],
   );
 
   const handleNewTask = useCallback(() => {
     navigateToHome();
     preloadRoute('/chat');
-    setLeftSidebarOpen(false);
     void navigate('/chat');
-  }, [navigate, navigateToHome, preloadRoute, setLeftSidebarOpen]);
+  }, [navigate, navigateToHome, preloadRoute]);
+
+  const handleNewTeamWorkspace = useCallback(() => {
+    preloadRoute('/team');
+    void navigate('/team');
+  }, [navigate, preloadRoute]);
   const clearPeekCloseTimer = useCallback(() => {
     if (peekCloseTimerRef.current) {
       clearTimeout(peekCloseTimerRef.current);
@@ -591,8 +780,17 @@ export function FusionSidebar({
     },
     [openChatSession],
   );
+  // ─── Chat 会话右键菜单状态 ───
+  const [chatContextMenu, setChatContextMenu] = useState<{
+    sessionId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const handleSessionContextMenu = useCallback(
-    (_sessionId: string, _x: number, _y: number) => undefined,
+    (sessionId: string, x: number, y: number) => {
+      setChatContextMenu({ sessionId, x, y });
+    },
     [],
   );
 
@@ -695,6 +893,14 @@ export function FusionSidebar({
       setTeamDeletingSessionId(null);
     },
     [teamAccessToken, teamDeletingSessionId, teamGatewayUrl],
+  );
+
+  const handleNewTeamSession = useCallback(
+    (workspaceId: string) => {
+      preloadRoute('/team');
+      void navigate(`/team/${workspaceId}`);
+    },
+    [navigate, preloadRoute],
   );
 
   // ─── 团队工作区右键菜单状态 ───
@@ -822,46 +1028,177 @@ export function FusionSidebar({
   const mobileDrawerOpen = compactViewport && leftSidebarOpen;
   const panelContent = (
     <>
-      {/* 项目名 + 路径 + 菜单 */}
+      {/* 项目名 + 路径 + 菜单 / 团队专属 Header */}
       <div style={PANEL_HEADER_STYLE}>
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
-          <span style={PANEL_TITLE_STYLE}>{basename(selectedWorkspacePath)}</span>
-          <span style={PANEL_SUBTITLE_STYLE}>{selectedWorkspacePath ?? '未选择工作区'}</span>
-        </div>
-        <button
-          type="button"
-          title="更多"
-          aria-label="更多"
-          onClick={() => setShowWorkspacePicker(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 26,
-            height: 26,
-            borderRadius: 6,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--fg-muted)',
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-          >
-            <circle cx="12" cy="5" r="1" />
-            <circle cx="12" cy="12" r="1" />
-            <circle cx="12" cy="19" r="1" />
-          </svg>
-        </button>
+        {isTeamRoute ? (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
+              <span style={PANEL_TITLE_STYLE}>团队工作空间</span>
+              <span style={PANEL_SUBTITLE_STYLE}>
+                {teamLoading ? '加载中…' : `${teamWorkspaceGroups.length} 个工作空间`}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+              <button
+                type="button"
+                title="新建工作空间"
+                aria-label="新建工作空间"
+                onClick={handleNewTeamWorkspace}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+              {!compactViewport && (
+                <button
+                  type="button"
+                  title="收起面板"
+                  aria-label="收起面板"
+                  onClick={() => setLeftSidebarOpen(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 26,
+                    height: 26,
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--fg-muted)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
+              <InlineEditor
+                value={workspaceDisplayName}
+                label="项目名称"
+                emptyFallback={basename(selectedWorkspacePath)}
+                onSave={handleWorkspaceAliasChange}
+                style={{ ...PANEL_TITLE_STYLE, width: '100%' }}
+                buttonStyle={{ ...PANEL_TITLE_STYLE, padding: '1px 2px' }}
+                inputStyle={{ fontSize: 13, fontWeight: 800 }}
+              />
+              <span style={PANEL_SUBTITLE_STYLE}>{selectedWorkspacePath ?? '未选择工作区'}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+              <button
+                type="button"
+                title="更多"
+                aria-label="更多"
+                onClick={() => setShowWorkspacePicker(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                >
+                  <circle cx="12" cy="5" r="1" />
+                  <circle cx="12" cy="12" r="1" />
+                  <circle cx="12" cy="19" r="1" />
+                </svg>
+              </button>
+              {!compactViewport && (
+                <button
+                  type="button"
+                  title="收起面板"
+                  aria-label="收起面板"
+                  onClick={() => setLeftSidebarOpen(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 26,
+                    height: 26,
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--fg-muted)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* 搜索 + 会话列表 */}
@@ -877,9 +1214,11 @@ export function FusionSidebar({
         <div style={{ padding: '6px 8px', flexShrink: 0 }}>
           <input
             type="text"
-            placeholder="搜索会话…"
-            value={sessionSearch}
-            onChange={(e) => setSessionSearch(e.target.value)}
+            placeholder={isTeamRoute ? '搜索工作空间…' : '搜索会话…'}
+            value={isTeamRoute ? teamSearch : sessionSearch}
+            onChange={(e) =>
+              isTeamRoute ? setTeamSearch(e.target.value) : setSessionSearch(e.target.value)
+            }
             style={SEARCH_STYLE}
           />
         </div>
@@ -919,7 +1258,20 @@ export function FusionSidebar({
                   暂无团队工作空间
                 </div>
               )}
-              {teamWorkspaceGroups.map((wg) => (
+              {!teamLoading && !teamError && teamWorkspaceGroups.length > 0 && filteredTeamGroups.length === 0 && (
+                <div
+                  style={{
+                    padding: '16px 10px',
+                    textAlign: 'center',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  无匹配结果
+                </div>
+              )}
+              {filteredTeamGroups.map((wg) => (
                 <TeamWorkspaceGroupItem
                   key={wg.id}
                   group={wg}
@@ -929,7 +1281,6 @@ export function FusionSidebar({
                   onSelectSession={(wsId, sessionId) => {
                     preloadRoute('/team');
                     triggerTeamSelectSession(wsId, sessionId);
-                    setLeftSidebarOpen(false);
                     void navigate(`/team/${wsId}`);
                   }}
                   onSessionContextMenu={handleTeamSessionContextMenu}
@@ -937,11 +1288,15 @@ export function FusionSidebar({
                   renameValue={teamRenameValue}
                   onRenameChange={setTeamRenameValue}
                   onRenameCommit={(id) => void handleTeamRenameCommit(id)}
+                  onStartRename={handleTeamRename}
                   onWorkspaceContextMenu={handleTeamWorkspaceContextMenu}
                   workspaceRenamingId={teamWorkspaceRenamingId}
                   workspaceRenameValue={teamWorkspaceRenameValue}
                   onWorkspaceRenameChange={setTeamWorkspaceRenameValue}
                   onWorkspaceRenameCommit={(id) => void handleTeamWorkspaceRenameCommit(id)}
+                  onNewSession={handleNewTeamSession}
+                  onTogglePause={handleTeamTogglePause}
+                  onDelete={handleTeamDelete}
                 />
               ))}
             </>
@@ -961,12 +1316,6 @@ export function FusionSidebar({
                 </p>
               )}
               {groupedSessions
-                .filter(
-                  (group) =>
-                    selectedWorkspacePath === null ||
-                    getWorkspaceGroupKey(group.workspacePath) ===
-                      getWorkspaceGroupKey(selectedWorkspacePath),
-                )
                 .map((group) => {
                 const groupKey = getWorkspaceGroupKey(group.workspacePath);
                 const isCollapsed = collapsedGroups.has(groupKey);
@@ -987,78 +1336,120 @@ export function FusionSidebar({
                     }}
                   >
                     {/* 工作区标题 */}
-                    <button
-                      type="button"
-                      onClick={() => toggleGroupCollapsed(groupKey)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '4px 8px',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: 'var(--fg-muted)',
-                        background: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                        style={{
-                          flexShrink: 0,
-                          transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                          transition: 'transform 150ms ease',
-                        }}
-                      >
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                        style={{ flexShrink: 0 }}
-                      >
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      </svg>
-                      <span
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroupCollapsed(groupKey)}
                         style={{
                           flex: 1,
-                          minWidth: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '4px 4px 4px 8px',
                           fontSize: 11,
                           fontWeight: 700,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {group.workspaceLabel}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
                           color: 'var(--fg-muted)',
-                          flexShrink: 0,
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          minWidth: 0,
                         }}
                       >
-                        {actualSessionCount}
-                      </span>
-                    </button>
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                          style={{
+                            flexShrink: 0,
+                            transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                            transition: 'transform 150ms ease',
+                          }}
+                        >
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <span
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {group.workspaceLabel}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: 'var(--fg-muted)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {actualSessionCount}
+                        </span>
+                      </button>
+                      {group.workspacePath && (
+                        <button
+                          type="button"
+                          title={`在 ${group.workspaceLabel} 中新建会话`}
+                          aria-label={`在 ${group.workspaceLabel} 中新建会话`}
+                          onClick={() => void newSession(group.workspacePath)}
+                          style={{
+                            flexShrink: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 20,
+                            height: 20,
+                            borderRadius: 5,
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--fg-muted)',
+                            cursor: 'pointer',
+                            padding: 0,
+                            marginRight: 4,
+                          }}
+                        >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                     {/* 工作区下的会话列表 */}
                     {!isCollapsed &&
                       roots.map((node) => (
@@ -1068,7 +1459,7 @@ export function FusionSidebar({
                           commitRename={commitRename}
                           hoveredSessionId={hoveredSessionId}
                           isDeletingSession={isDeletingSession}
-                          isPinned={() => false}
+                          isPinned={isPinned}
                           node={node}
                           onHoveredSessionChange={setHoveredSessionId}
                           onOpenContextMenu={handleSessionContextMenu}
@@ -1091,8 +1482,12 @@ export function FusionSidebar({
         </div>
       </div>
 
-      {/* 新建会话 */}
-      <button type="button" onClick={handleNewTask} style={NEW_SESSION_BTN_STYLE}>
+      {/* 新建会话 / 新建工作空间 */}
+      <button
+        type="button"
+        onClick={isTeamRoute ? handleNewTeamWorkspace : handleNewTask}
+        style={NEW_SESSION_BTN_STYLE}
+      >
         <svg
           width="14"
           height="14"
@@ -1106,7 +1501,7 @@ export function FusionSidebar({
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
-        新建会话
+        {isTeamRoute ? '新建工作空间' : '新建会话'}
       </button>
     </>
   );
@@ -1128,17 +1523,6 @@ export function FusionSidebar({
           onToggleTheme={onToggleTheme}
           onLogout={onLogout}
           pendingPermissionIndicator={pendingPermissionIndicator}
-          onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-          onProjectHover={(path) => {
-            if (path) {
-              openProjectPeek(path);
-            } else {
-              scheduleCloseProjectPeek();
-            }
-          }}
-          onSelectWorkspace={(path) => {
-            void handleSelectWorkspace(path);
-          }}
         />
       ) : !mobileDrawerOpen ? (
         <button
@@ -1217,6 +1601,38 @@ export function FusionSidebar({
         />,
         document.body,
       )}
+
+      {/* Chat 会话右键菜单 Portal */}
+      {chatContextMenu &&
+        createPortal(
+          (() => {
+            const ctxSession = sessions.find((s) => s.id === chatContextMenu.sessionId);
+            return (
+              <SessionContextMenu
+                sessionId={chatContextMenu.sessionId}
+                sessionTitle={ctxSession?.title ?? null}
+                x={chatContextMenu.x}
+                y={chatContextMenu.y}
+                isPinned={isPinned(chatContextMenu.sessionId)}
+                hasMessages
+                onClose={() => setChatContextMenu(null)}
+                onRename={() => {
+                  if (ctxSession) startRename(ctxSession);
+                  setChatContextMenu(null);
+                }}
+                onExportMarkdown={() => exportSessionAsMarkdown(chatContextMenu.sessionId)}
+                onExportJson={() => exportSessionAsJson(chatContextMenu.sessionId)}
+                onClearMessages={() => setChatContextMenu(null)}
+                onPin={() => togglePinSession(chatContextMenu.sessionId)}
+                onDelete={() => {
+                  void quickDeleteSession(chatContextMenu.sessionId);
+                  setChatContextMenu(null);
+                }}
+              />
+            );
+          })(),
+          document.body,
+        )}
 
       {/* 团队会话右键菜单 Portal */}
       {teamContextMenu &&

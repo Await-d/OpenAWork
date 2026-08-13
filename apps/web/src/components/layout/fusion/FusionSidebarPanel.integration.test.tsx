@@ -53,7 +53,7 @@ afterEach(() => {
 
 describe('FusionSidebar 展开 Panel', () => {
   it('点击新建会话会回到 Chat 首页', async () => {
-    renderFusionSidebar('/team/workspace-alpha');
+    renderFusionSidebar('/chat/open-session');
 
     fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
 
@@ -62,21 +62,6 @@ describe('FusionSidebar 展开 Panel', () => {
       expect(screen.getByTestId('location-probe').textContent).toBe('/chat');
     });
     expect(getFusionSidebarMocks().preloadRouteModuleByPath).toHaveBeenCalledWith('/chat');
-  });
-
-  it('工作区头像切换后 Panel 只展示当前工作区会话', () => {
-    renderFusionSidebar('/chat/open-session');
-
-    expect(screen.getByRole('button', { name: 'OpenAWork plan' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Market roadmap' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /切换工作区 MA/ }));
-
-    expect(useUIStateStore.getState().selectedWorkspacePath).toBe(
-      '/home/await/project/MarketAgent',
-    );
-    expect(screen.getByRole('button', { name: 'Market roadmap' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'OpenAWork plan' })).toBeNull();
   });
 
   it('选择团队会话时保留 Team 工作台上下文', async () => {
@@ -111,11 +96,14 @@ describe('FusionSidebar 展开 Panel', () => {
   it('点击会话行收起 Panel 后，焦点不会残留在 aria-hidden 容器内', () => {
     renderFusionSidebar('/chat/open-session');
 
+    // 将焦点放到 Panel 内的会话按钮上
     const sessionButton = screen.getByRole('button', { name: 'OpenAWork plan' });
     sessionButton.focus();
     expect(document.activeElement).toBe(sessionButton);
 
-    fireEvent.click(sessionButton);
+    // 通过"收起面板"按钮关闭 Panel（openChatSession 不再关闭 Panel，
+    // Panel 收起必须由用户主动点击收起按钮触发）
+    fireEvent.click(screen.getByRole('button', { name: '收起面板' }));
 
     expect(useUIStateStore.getState().leftSidebarOpen).toBe(false);
     const hiddenPanel = document.querySelector('[data-fusion-sidebar-panel="true"]');

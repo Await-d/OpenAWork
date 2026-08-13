@@ -406,7 +406,7 @@ function EditorPaneTabButton({
         padding: '0 10px',
         borderRadius: 6,
         border: active ? '1px solid var(--border-default)' : '1px solid transparent',
-        background: active ? 'white' : 'transparent',
+        background: active ? 'var(--bg-raised)' : 'transparent',
         boxShadow: active ? 'var(--shadow-sm)' : 'none',
         color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
         fontSize: 11,

@@ -170,7 +170,7 @@ export function DevtoolsLogsSection({
                       border: isActive
                         ? `1px solid ${isError ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)' : 'var(--border-default)'}`
                         : '1px solid transparent',
-                      background: isActive ? 'white' : 'transparent',
+                      background: isActive ? 'var(--bg-raised)' : 'transparent',
                       boxShadow: isActive
                         ? isError
                           ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'

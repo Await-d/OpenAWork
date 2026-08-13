@@ -267,7 +267,7 @@ export function SnapshotTimelinePanel({ sessionId, gatewayUrl }: SnapshotTimelin
               fontSize: 12,
               fontWeight: 600,
               background: 'var(--accent)',
-              color: 'white',
+              color: 'var(--accent-fg)',
               border: 'none',
               borderRadius: 4,
               cursor: restoring ? 'wait' : 'pointer',

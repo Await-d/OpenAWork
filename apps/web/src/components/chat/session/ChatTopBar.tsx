@@ -17,66 +17,40 @@ interface ChatTopBarProps {
   onToggleEditorMode: () => void;
   rightOpen: boolean;
   onToggleRightOpen: () => void;
-  /**
-   * 编辑器/浏览器工作区是否处于全屏(占据整个内容区)模式。
-   */
   editorFullScreen?: boolean;
-  /** 切换编辑器全屏模式。提供时在编辑器按钮旁渲染一个全屏切换按钮。 */
   onToggleEditorFullScreen?: () => void;
-  /**
-   * Editor pane 当前激活的 tab(用于 code/browser 按钮的 active 视觉状态)。
-   * 不传时 fallback 到只看 editorMode。
-   */
   editorPaneTab?: 'code' | 'browser';
-  /** 进入/切到 code tab。默认行为:进入分屏 + 设置 tab='code'。 */
   onActivateCodeTab?: () => void;
-  /** 进入/切到 browser tab。默认行为:进入分屏 + 设置 tab='browser'。 */
   onActivateBrowserTab?: () => void;
-  /**
-   * Optional terminals chip (running terminal indicator + popover trigger).
-   * Rendered inside the right-side pill so it sits next to the YOLO toggle
-   * without forcing a layout shift when undefined.
-   */
   terminalsChip?: ReactNode;
-  /**
-   * Optional quick terminal toggle button. Rendered alongside the
-   * terminals chip; toggles the bottom QuickTerminalPanel.
-   */
   quickTerminalToggle?: ReactNode;
-  /** Callback to open the command palette (Cmd+K). */
   onOpenCommandPalette?: () => void;
-  /** Number of bookmarked messages in the current session. */
   bookmarkCount?: number;
-  /** Whether multi-select mode is active. */
   multiSelectActive?: boolean;
   onToggleMultiSelect?: () => void;
-  /** Callback to open browser preview in editor pane. */
   onOpenBrowser?: () => void;
-  /** Whether browser preview is currently active. */
   browserActive?: boolean;
-  /** 是否显示会话列表切换按钮(左侧)。 */
   sidebarOpen?: boolean;
-  /** 切换左侧会话列表 sidebar 的回调。 */
   onToggleSidebar?: () => void;
   density?: 'normal' | 'compact';
-  /** Todo controller from upstream (shared with ChatTodoFloatingPanel). */
   todoController?: ChatTodoController;
-  /** id for aria-controls linking the slot button to the floating panel. */
   todoDetailsId?: string;
-  /**
-   * 隐藏 DialogueModeToggle（澄清/编程/程序员切换器）。
-   * team 页面使用：reception 层的路由决策由后端 b.router 自动判断，
-   * 不需要用户手动切换对话模式。
-   */
   hideDialogueModeToggle?: boolean;
-  /**
-   * 隐藏 YOLO 模式切换。team 页面不支持 YOLO（工具权限由 layer capability 控制）。
-   */
   hideYoloToggle?: boolean;
-  /**
-   * 隐藏右面板切换按钮。team 页面暂不接入 ChatRightPanel。
-   */
   hideRightPanelToggle?: boolean;
+  /** 会话信息 slot：标题 + 模型 + 模式 + 工作区，合并展示在左侧 */
+  sessionInfo?: {
+    title: string;
+    modelLabel?: string | null;
+    modeLabel?: string | null;
+    workspacePath?: string | null;
+  };
+  /** 审查面板切换（从 SessionHeaderBar 迁移） */
+  reviewPanelOpened?: boolean;
+  onToggleReviewPanel?: () => void;
+  /** 终端面板切换（从 SessionHeaderBar 迁移） */
+  terminalPanelOpened?: boolean;
+  onToggleTerminalPanel?: () => void;
 }
 
 // ChatTopBar 总宽度小于此阈值时，todo 入口切到 compact 徽章形态。
@@ -112,6 +86,11 @@ export function ChatTopBar({
   hideDialogueModeToggle = false,
   hideYoloToggle = false,
   hideRightPanelToggle = false,
+  sessionInfo,
+  reviewPanelOpened = false,
+  onToggleReviewPanel,
+  terminalPanelOpened = false,
+  onToggleTerminalPanel,
 }: ChatTopBarProps) {
   const showCommandPaletteButton = useDisplayPreferencesStore((s) => s.showCommandPaletteButton);
   const showTerminalButton = useDisplayPreferencesStore((s) => s.showTerminalButton);
@@ -147,11 +126,11 @@ export function ChatTopBar({
         // 一定不换行 — 一旦换行右侧 pill 会跑到下一行,而 SessionTerminalsPanel
         // 等 popover 是相对 pill 定位的,跟随换行就会显示在错乱位置。
         flexWrap: 'nowrap',
-        padding: compactDensity ? '4px 8px' : '6px 12px',
+        padding: sessionInfo ? '4px 8px' : compactDensity ? '4px 8px' : '6px 12px',
         borderBottom: '1px solid var(--border-subtle)',
         flexShrink: 0,
-        background: compactDensity ? 'var(--bg-surface)' : 'var(--bg-overlay)',
-        minHeight: compactDensity ? 36 : 44,
+        background: 'var(--bg-overlay)',
+        minHeight: sessionInfo ? 36 : compactDensity ? 36 : 44,
         // 让中间 group 在窄屏时可被压缩,但本行不换。
         overflow: 'hidden',
       }}
@@ -162,8 +141,6 @@ export function ChatTopBar({
           alignItems: 'center',
           gap: 8,
           minWidth: 0,
-          // 抢占除右侧 pill 与 todo anchor 之外的所有可用宽度;窄屏时
-          // 内部子元素自身有 ellipsis / compact 模式(见 isCompact)。
           flex: '1 1 0',
           flexWrap: 'nowrap',
           overflow: 'hidden',
@@ -210,6 +187,72 @@ export function ChatTopBar({
               <line x1="9" y1="3" x2="9" y2="21" />
             </svg>
           </button>
+        )}
+
+        {/* 会话信息：标题 + 模型/模式/工作区（来自 SessionHeaderBar 合并） */}
+        {sessionInfo && (
+          <>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--fg-strong)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                flexShrink: 1,
+                minWidth: 0,
+                maxWidth: 160,
+              }}
+              title={sessionInfo.title}
+            >
+              {sessionInfo.title}
+            </span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                color: 'var(--fg-muted)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                flexShrink: 1,
+                minWidth: 0,
+              }}
+            >
+              {sessionInfo.modelLabel && (
+                <span
+                  style={{ color: 'var(--aux)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {sessionInfo.modelLabel}
+                </span>
+              )}
+              {sessionInfo.modeLabel && (
+                <>
+                  <span>·</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sessionInfo.modeLabel}</span>
+                </>
+              )}
+              {sessionInfo.workspacePath && (
+                <>
+                  <span>·</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {sessionInfo.workspacePath.split(/[\\/]/).pop()}
+                  </span>
+                </>
+              )}
+            </span>
+            {/* 分隔线 */}
+            <span
+              style={{
+                width: 1,
+                height: 14,
+                background: 'var(--border-subtle)',
+                flexShrink: 0,
+              }}
+            />
+          </>
         )}
 
         {hideDialogueModeToggle ? null : (
@@ -342,7 +385,70 @@ export function ChatTopBar({
         }}
       >
         {showTerminalButton && terminalsChip}
-        {showTerminalButton && quickTerminalToggle}
+        {/* 审查面板切换 */}
+        {onToggleReviewPanel && (
+          <button
+            type="button"
+            onClick={onToggleReviewPanel}
+            title={reviewPanelOpened ? '收起审查面板' : '展开审查面板'}
+            className={`icon-btn${reviewPanelOpened ? ' active' : ''}`}
+            style={{
+              height: 26,
+              padding: '0 7px',
+              borderRadius: 5,
+              border: 'none',
+              background: reviewPanelOpened
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+              color: reviewPanelOpened ? 'var(--accent)' : 'var(--fg-muted)',
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+            }}
+          >
+            <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            审查
+          </button>
+        )}
+        {/* 终端面板切换 */}
+        {onToggleTerminalPanel && (
+          <button
+            type="button"
+            onClick={onToggleTerminalPanel}
+            title={terminalPanelOpened ? '收起终端面板' : '展开终端面板'}
+            className={`icon-btn${terminalPanelOpened ? ' active' : ''}`}
+            style={{
+              height: 26,
+              padding: '0 7px',
+              borderRadius: 5,
+              border: 'none',
+              background: terminalPanelOpened
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+              color: terminalPanelOpened ? 'var(--accent)' : 'var(--fg-muted)',
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+            }}
+          >
+            <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            终端
+          </button>
+        )}
         {hideYoloToggle ? null : (
           <button
             type="button"

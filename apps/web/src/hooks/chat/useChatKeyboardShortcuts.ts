@@ -11,6 +11,9 @@ export interface ChatKeyboardShortcutHandlers {
   onScrollToPrevUser?: () => void;
   onToggleSidebar?: () => void;
   onToggleRightPanel?: () => void;
+  onToggleReviewPanel?: () => void;
+  onToggleTerminalPanel?: () => void;
+  onCycleTheme?: () => void;
   onNewSession?: () => void;
 }
 
@@ -29,6 +32,10 @@ export interface ChatKeyboardShortcutHandlers {
  * - Cmd+↓ / Ctrl+↓: Scroll to next user message
  * - Cmd+B / Ctrl+B: Toggle sidebar
  * - Cmd+\\ / Ctrl+\\: Toggle right panel
+ * - Cmd+Shift+R: Toggle review panel
+ * - Ctrl+` / Cmd+`: Toggle terminal panel
+ * - Cmd+Shift+T: Open prompt templates (theme.cycle is Ctrl+Alt+T to avoid conflict)
+ * - Ctrl+Alt+T: Cycle theme
  * - Cmd+N / Ctrl+N: New session
  */
 export function useChatKeyboardShortcuts(
@@ -116,6 +123,27 @@ export function useChatKeyboardShortcuts(
       if (mod && e.key === '\\') {
         e.preventDefault();
         handlers.onToggleRightPanel?.();
+        return;
+      }
+
+      // Cmd+Shift+R — toggle review panel
+      if (mod && e.shiftKey && e.key === 'R') {
+        e.preventDefault();
+        handlers.onToggleReviewPanel?.();
+        return;
+      }
+
+      // Ctrl+` — toggle terminal panel
+      if (mod && e.key === '`') {
+        e.preventDefault();
+        handlers.onToggleTerminalPanel?.();
+        return;
+      }
+
+      // Ctrl+Alt+T — cycle theme (Ctrl+Shift+T is taken by templates)
+      if (mod && e.altKey && e.key === 't') {
+        e.preventDefault();
+        handlers.onCycleTheme?.();
         return;
       }
 

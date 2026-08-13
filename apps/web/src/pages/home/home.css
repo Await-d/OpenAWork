@@ -238,7 +238,7 @@
 
 .home-project-row[data-active='true'] {
   border-color: var(--border-default);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: var(--shadow-md);
 }
 
@@ -833,7 +833,7 @@
 
 .home-status-filter-button[data-active='true'] {
   border-color: var(--border-default);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: var(--shadow-sm);
   color: var(--fg-strong);
 }
