@@ -121,7 +121,7 @@ export function DeveloperModePanel({
                 textAlign: 'left',
                 padding: '3px 10px',
                 cursor: 'pointer',
-                background: selected?.id === ev.id ? 'white' : 'transparent',
+                background: selected?.id === ev.id ? 'var(--bg-raised)' : 'transparent',
                 border:
                   selected?.id === ev.id
                     ? '1px solid var(--border-default)'

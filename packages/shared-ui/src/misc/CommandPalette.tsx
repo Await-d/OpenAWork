@@ -206,7 +206,7 @@ export function CommandPalette({
                       index === 0
                         ? 'none'
                         : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                    background: selected ? 'white' : 'transparent',
+                    background: selected ? 'var(--bg-raised)' : 'transparent',
                     boxShadow: selected ? 'var(--shadow-sm)' : 'none',
                     color: 'var(--fg-strong)',
                     padding: '0.65rem 0.75rem',

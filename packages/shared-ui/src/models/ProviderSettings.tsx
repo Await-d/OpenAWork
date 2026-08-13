@@ -477,7 +477,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
                     fontWeight: 600,
                     cursor: 'pointer',
                     color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
-                    background: active ? 'white' : 'var(--bg-overlay)',
+                    background: active ? 'var(--bg-raised)' : 'var(--bg-overlay)',
                     boxShadow: active ? 'var(--shadow-sm)' : 'none',
                   }}
                   title={variant.baseUrl}
@@ -781,7 +781,7 @@ export function ProviderSettings({
               cursor: controlEnabled ? 'pointer' : 'not-allowed',
               opacity: controlEnabled ? 1 : 0.45,
               color: !current.enabled ? 'var(--fg-strong)' : 'var(--fg-default)',
-              background: !current.enabled ? 'white' : 'var(--bg-raised)',
+              background: !current.enabled ? 'var(--bg-raised)' : 'var(--bg-raised)',
               boxShadow: !current.enabled ? 'var(--shadow-sm)' : 'none',
             }}
           >
@@ -804,7 +804,7 @@ export function ProviderSettings({
                   cursor: controlEnabled ? 'pointer' : 'not-allowed',
                   opacity: controlEnabled ? 1 : 0.45,
                   color: activeLevel ? 'var(--fg-strong)' : 'var(--fg-default)',
-                  background: activeLevel ? 'white' : 'var(--bg-raised)',
+                  background: activeLevel ? 'var(--bg-raised)' : 'var(--bg-raised)',
                   boxShadow: activeLevel ? 'var(--shadow-sm)' : 'none',
                   textTransform: 'uppercase',
                 }}
@@ -911,7 +911,7 @@ export function ProviderSettings({
             gap: 8,
             textAlign: 'left',
             cursor: 'pointer',
-            background: isActive ? 'white' : 'transparent',
+            background: isActive ? 'var(--bg-raised)' : 'transparent',
             boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
             color: 'var(--fg-default)',
           }}
@@ -1127,7 +1127,7 @@ export function ProviderSettings({
                     gap: 6,
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 999,
-                    background: isActiveProvider ? 'white' : 'transparent',
+                    background: isActiveProvider ? 'var(--bg-raised)' : 'transparent',
                     boxShadow: isActiveProvider ? 'var(--shadow-sm)' : 'none',
                     color: isActiveProvider ? 'var(--fg-strong)' : 'var(--fg-default)',
                     padding: '0.28rem 0.65rem',

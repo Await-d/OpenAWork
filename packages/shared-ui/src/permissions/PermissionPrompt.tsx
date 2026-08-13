@@ -622,7 +622,7 @@ export function PermissionPrompt({
                     border: isSelected
                       ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
                       : '1px solid rgba(148,163,184,0.15)',
-                    background: isSelected ? 'white' : 'rgba(15,23,42,0.30)',
+                    background: isSelected ? 'var(--bg-raised)' : 'var(--bg-overlay)',
                     boxShadow: isSelected ? 'var(--shadow-md)' : 'none',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
                     opacity: isSubmitting ? 0.7 : 1,
@@ -828,7 +828,7 @@ function btnStyle(
   } as const;
   const palette = base[tone];
   return {
-    background: options?.active ? (tone === 'primary' ? color.aux : 'white') : palette.bg,
+    background: options?.active ? (tone === 'primary' ? color.aux : 'var(--bg-raised)') : palette.bg,
     boxShadow: options?.active && tone !== 'primary' ? 'var(--shadow-sm)' : 'none',
     color: options?.active && tone !== 'primary' ? 'var(--fg-strong)' : palette.fg,
     border: `1px solid ${options?.active && tone !== 'primary' ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : palette.border}`,
