@@ -162,10 +162,11 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
+          gap: 16,
           minHeight: 0,
           flex: 1,
           overflow: 'hidden',
+          padding: '16px 20px',
         }}
       >
         {/* 流水线 + 密度切换 */}
@@ -176,7 +177,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
             gridTemplateColumns: isNarrowLayout ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) auto',
             alignItems: 'flex-start',
             gap: 12,
-            padding: '12px 16px',
+            padding: '16px 20px',
             flexShrink: 0,
           }}
         >
@@ -215,7 +216,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
                   minHeight: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 12,
+                  gap: 16,
                   overflow: 'hidden',
                 }
               : undefined
@@ -223,7 +224,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
         >
           <div
             className={isNarrowLayout ? 'team-conv-panel' : 'team-conv-split__sidebar'}
-            style={isNarrowLayout ? { maxHeight: 280, minHeight: 0, flex: '0 0 auto' } : undefined}
+            style={isNarrowLayout ? { maxHeight: 300, minHeight: 0, flex: '0 0 auto' } : undefined}
           >
             <LayerFlowTimelinePanel
               sections={timelineSections}

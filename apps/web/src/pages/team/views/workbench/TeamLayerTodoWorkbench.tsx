@@ -110,7 +110,7 @@ function tabBtnStyle(isActive: boolean): CSSProperties {
     padding: '0 11px',
     border: isActive ? '1px solid var(--border-default)' : '1px solid transparent',
     borderRight: '1px solid var(--border-default)',
-    background: isActive ? 'white' : 'transparent',
+    background: isActive ? 'var(--bg-raised)' : 'transparent',
     boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
     color: isActive ? 'var(--fg-strong, var(--fg-default))' : 'var(--fg-muted)',
     fontSize: 11,

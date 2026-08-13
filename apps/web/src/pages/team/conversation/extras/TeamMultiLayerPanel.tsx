@@ -123,7 +123,7 @@ const TAB_ACTIVE_STYLE: CSSProperties = {
   borderBottomColor: 'var(--border-default)',
   borderLeftColor: 'var(--border-default)',
   borderBottomWidth: 1,
-  background: 'white',
+  background: 'var(--bg-raised)',
   boxShadow: 'var(--shadow-sm)',
 };
 

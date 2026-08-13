@@ -427,7 +427,7 @@ export function WorkspaceKnowledgeGraphView({
   }
 
   return (
-    <TabContainer title="知识图谱" subtitle={graphSubtitle}>
+    <TabContainer title="知识图谱" subtitle={graphSubtitle} scroll={false}>
       <div className="workspace-knowledge-graph-content">
         <GraphToolbar
           activeRoleLayer={activeRoleLayer}
@@ -590,7 +590,7 @@ function KnowledgeGraphNoMatchView({
     workspaceKnowledgeLoading,
   });
   return (
-    <TabContainer title="知识图谱" subtitle={graphSubtitle}>
+    <TabContainer title="知识图谱" subtitle={graphSubtitle} scroll={false}>
       <div className="workspace-knowledge-graph-content">
         <GraphToolbar
           activeRoleLayer={activeRoleLayer}

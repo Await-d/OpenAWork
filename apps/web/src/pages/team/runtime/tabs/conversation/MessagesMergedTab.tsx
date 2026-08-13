@@ -83,7 +83,7 @@ export function MessagesMergedTab({
         className="team-conv-panel-header"
         role="tablist"
         aria-label="消息视图切换"
-        style={{ gap: 4, padding: '6px 12px' }}
+        style={{ gap: 6, padding: '12px 20px', alignItems: 'center' }}
       >
         <button
           type="button"
@@ -111,9 +111,9 @@ export function MessagesMergedTab({
               aria-label={`${mentionsLabel} ${mentionsBadgeCount} 条`}
               className="team-conv-stat-pill"
               data-tone="danger"
-              style={{ padding: '0 5px', minWidth: 16, height: 16, gap: 0 }}
+              style={{ padding: '0 6px', minWidth: 18, height: 18, gap: 0 }}
             >
-              <strong style={{ fontSize: 9 }}>
+              <strong style={{ fontSize: 10 }}>
                 {mentionsBadgeCount > 99 ? '99+' : mentionsBadgeCount}
               </strong>
             </span>
@@ -127,7 +127,7 @@ export function MessagesMergedTab({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '12px 14px 16px',
+          padding: '16px 20px 20px',
         }}
       >
         {segment === 'bus' ? (

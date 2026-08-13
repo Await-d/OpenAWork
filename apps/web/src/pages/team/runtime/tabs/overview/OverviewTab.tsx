@@ -108,7 +108,7 @@ export function OverviewTab({
                   display: 'grid',
                   gap: 6,
                   border: '1px solid var(--border-default)',
-                  background: 'white',
+                  background: 'var(--bg-raised)',
                   transition: 'background 0.15s, outline 0.15s, box-shadow 0.15s',
                   outline: isExpanded ? '1px solid var(--accent)' : 'none',
                   outlineOffset: -1,
@@ -398,7 +398,7 @@ export function OverviewTab({
                       gap: 8,
                       padding: '8px 10px',
                       borderRadius: 8,
-                      background: isExpanded ? 'white' : 'var(--bg-overlay)',
+                      background: isExpanded ? 'var(--bg-raised)' : 'var(--bg-overlay)',
                       alignItems: 'flex-start',
                       cursor: 'pointer',
                       border: isExpanded

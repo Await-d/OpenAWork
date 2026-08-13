@@ -82,7 +82,7 @@ function TaskCard({
         gap: 6,
         padding: '10px 12px',
         borderRadius: 8,
-        background: 'white',
+        background: 'var(--bg-raised)',
         border: `1px solid color-mix(in oklch, ${priorityMeta.color} 40%, var(--border-default) 60%)`,
         boxShadow: `0 1px 3px color-mix(in oklch, ${priorityMeta.color} 10%, transparent)`,
         transition: 'border-color 150ms ease, box-shadow 150ms ease',

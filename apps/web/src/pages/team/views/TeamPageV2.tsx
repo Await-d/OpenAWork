@@ -1219,7 +1219,7 @@ export default function TeamPageV2() {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
+        alignItems: 'stretch',
         flex: 1,
         minHeight: 0,
         overflow: 'hidden',

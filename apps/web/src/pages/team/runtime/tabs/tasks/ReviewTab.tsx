@@ -253,7 +253,7 @@ export function ReviewTab({
                     display: 'grid',
                     gap: 8,
                     border: '1px solid var(--border-default)',
-                    background: 'white',
+                    background: 'var(--bg-raised)',
                     boxShadow: 'var(--shadow-md)',
                     ['--tint' as string]: typeMeta.color,
                   }}
@@ -384,7 +384,7 @@ export function ReviewTab({
                             padding: '8px 10px',
                             borderRadius: 6,
                             border: '1px solid var(--border-default)',
-                            background: 'white',
+                            background: 'var(--bg-raised)',
                             boxShadow: 'var(--shadow-sm)',
                             fontSize: 11,
                             color: 'var(--fg-strong)',
@@ -733,7 +733,7 @@ export function ReviewTab({
                   borderRadius: 6,
                   border:
                     '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)',
-                  background: 'white',
+                  background: 'var(--bg-raised)',
                   boxShadow: '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)',
                   fontSize: 11,
                   color: 'var(--fg-strong)',
@@ -752,7 +752,7 @@ export function ReviewTab({
                       borderRadius: 6,
                       border:
                         '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)',
-                      background: 'white',
+                      background: 'var(--bg-raised)',
                       boxShadow: '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)',
                       fontSize: 11,
                       color: 'var(--danger)',
@@ -769,7 +769,7 @@ export function ReviewTab({
                       borderRadius: 6,
                       border:
                         '1px solid color-mix(in oklch, var(--success) 40%, var(--border-default) 60%)',
-                      background: 'white',
+                      background: 'var(--bg-raised)',
                       boxShadow: '0 1px 3px color-mix(in oklch, var(--success) 10%, transparent)',
                       fontSize: 11,
                       color: 'var(--success)',
@@ -795,7 +795,7 @@ export function ReviewTab({
                                 ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
                                 : 'color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%)'
                           }`,
-                          background: 'white',
+                          background: 'var(--bg-raised)',
                           boxShadow: `0 1px 3px ${
                             d.severity === 'warning'
                               ? 'color-mix(in oklch, var(--warning) 10%, transparent)'

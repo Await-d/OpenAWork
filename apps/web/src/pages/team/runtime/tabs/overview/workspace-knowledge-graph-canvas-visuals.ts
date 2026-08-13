@@ -2,7 +2,20 @@ import type { GraphNode } from '../../data/build-knowledge-graph.js';
 import { seededUnit } from './workspace-knowledge-graph-canvas-helpers.js';
 
 export type NodeGlyphKind =
-  'workspace' | 'category' | 'architecture' | 'constitution' | 'memory' | 'knowledge' | 'artifact';
+  | 'workspace'
+  | 'category'
+  | 'architecture'
+  | 'constitution'
+  | 'memory'
+  | 'knowledge'
+  | 'artifact-spec'
+  | 'artifact-plan'
+  | 'artifact-tasks'
+  | 'artifact-implementation'
+  | 'artifact-patch'
+  | 'artifact-review'
+  | 'artifact-review_report'
+  | 'artifact';
 
 export interface NodeVisualStyle {
   baseColor: string;
@@ -13,7 +26,8 @@ export interface NodeVisualStyle {
   sweepColor: string;
 }
 
-export function nodeGlyphKind(kind: GraphNode['kind']): NodeGlyphKind {
+export function nodeGlyphKind(node: GraphNode): NodeGlyphKind {
+  const kind = node.kind;
   switch (kind) {
     case 'workspace':
       return 'workspace';
@@ -27,8 +41,18 @@ export function nodeGlyphKind(kind: GraphNode['kind']): NodeGlyphKind {
       return 'memory';
     case 'knowledge':
       return 'knowledge';
-    case 'artifact':
+    case 'artifact': {
+      // 根据 artifact phase（存储在 state 字段）返回对应图标类型
+      const phase = node.state;
+      if (phase === 'spec') return 'artifact-spec';
+      if (phase === 'plan') return 'artifact-plan';
+      if (phase === 'tasks') return 'artifact-tasks';
+      if (phase === 'implementation') return 'artifact-implementation';
+      if (phase === 'patch') return 'artifact-patch';
+      if (phase === 'review') return 'artifact-review';
+      if (phase === 'review_report') return 'artifact-review_report';
       return 'artifact';
+    }
   }
 }
 
@@ -360,7 +384,7 @@ export function drawNodeGlyph({
   context,
   dimmed,
   focusWeight,
-  nodeKind,
+  node,
   scaledRadius,
   secondaryColor,
   selected,
@@ -374,7 +398,7 @@ export function drawNodeGlyph({
   context: CanvasRenderingContext2D;
   dimmed: boolean;
   focusWeight: number;
-  nodeKind: GraphNode['kind'];
+  node: GraphNode;
   scaledRadius: number;
   secondaryColor: string;
   selected: boolean;
@@ -384,11 +408,11 @@ export function drawNodeGlyph({
   y: number;
   zoom: number;
 }) {
-  const glyphKind = nodeGlyphKind(nodeKind);
+  const glyphKind = nodeGlyphKind(node);
   const radius = Math.max(3.2, scaledRadius * 0.52);
-  const alpha = dimmed ? 0.3 : selected ? 0.9 + pulse(tick, `${nodeKind}:glyph`, 0.1, 0) : 0.85;
-  const sweepAngle = nodeGlyphSweepAngle(nodeKind, tick, selected);
-  const detailPulse = pulse(tick, `${nodeKind}:glyph-detail`, 0.18, 0.76);
+  const alpha = dimmed ? 0.3 : selected ? 0.9 + pulse(tick, `${node.id}:glyph`, 0.1, 0) : 0.85;
+  const sweepAngle = nodeGlyphSweepAngle(node.kind, tick, selected);
+  const detailPulse = pulse(tick, `${node.id}:glyph-detail`, 0.18, 0.76);
 
   context.save();
   context.globalAlpha = alpha;
@@ -534,6 +558,152 @@ export function drawNodeGlyph({
       context.stroke();
       break;
     }
+    case 'artifact-spec': {
+      // 规格：文档 + 标尺线
+      context.beginPath();
+      context.moveTo(x - radius * 0.52, y - radius * 0.72);
+      context.lineTo(x + radius * 0.52, y - radius * 0.72);
+      context.lineTo(x + radius * 0.52, y + radius * 0.72);
+      context.lineTo(x - radius * 0.52, y + radius * 0.72);
+      safeClosePath(context);
+      context.stroke();
+      context.globalAlpha = alpha * (0.4 + detailPulse * 0.15);
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y - radius * 0.38);
+      context.lineTo(x + radius * 0.32, y - radius * 0.38);
+      context.moveTo(x - radius * 0.32, y - radius * 0.02);
+      context.lineTo(x + radius * 0.32, y - radius * 0.02);
+      context.moveTo(x - radius * 0.32, y + radius * 0.34);
+      context.lineTo(x + radius * 0.12, y + radius * 0.34);
+      context.moveTo(x + radius * 0.22, y + radius * 0.34);
+      context.lineTo(x + radius * 0.32, y + radius * 0.34);
+      context.stroke();
+      break;
+    }
+    case 'artifact-plan': {
+      // 计划：日历 + 检查点
+      context.beginPath();
+      context.rect(x - radius * 0.52, y - radius * 0.58, radius * 1.04, radius * 1.28);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x - radius * 0.52, y - radius * 0.18);
+      context.lineTo(x + radius * 0.52, y - radius * 0.18);
+      context.stroke();
+      context.globalAlpha = alpha * (0.3 + detailPulse * 0.2);
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y - radius * 0.58);
+      context.lineTo(x - radius * 0.32, y - radius * 0.72);
+      context.moveTo(x + radius * 0.32, y - radius * 0.58);
+      context.lineTo(x + radius * 0.32, y - radius * 0.72);
+      context.stroke();
+      context.fillStyle = accent;
+      context.beginPath();
+      context.arc(x - radius * 0.32, y + radius * 0.22, radius * 0.08, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.arc(x, y + radius * 0.22, radius * 0.08, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.arc(x + radius * 0.32, y + radius * 0.22, radius * 0.08, 0, Math.PI * 2);
+      context.fill();
+      break;
+    }
+    case 'artifact-tasks': {
+      // 任务：检查列表
+      context.beginPath();
+      context.rect(x - radius * 0.52, y - radius * 0.72, radius * 1.04, radius * 1.44);
+      context.stroke();
+      context.globalAlpha = alpha * (0.45 + detailPulse * 0.15);
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y - radius * 0.38);
+      context.lineTo(x - radius * 0.08, y - radius * 0.14);
+      context.lineTo(x + radius * 0.22, y - radius * 0.54);
+      context.moveTo(x - radius * 0.32, y + radius * 0.08);
+      context.lineTo(x - radius * 0.08, y + radius * 0.32);
+      context.lineTo(x + radius * 0.22, y - radius * 0.08);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y + radius * 0.54);
+      context.lineTo(x + radius * 0.12, y + radius * 0.54);
+      context.stroke();
+      break;
+    }
+    case 'artifact-implementation': {
+      // 实现：代码符号
+      context.beginPath();
+      context.rect(x - radius * 0.52, y - radius * 0.72, radius * 1.04, radius * 1.44);
+      context.stroke();
+      context.globalAlpha = alpha * (0.5 + detailPulse * 0.2);
+      context.beginPath();
+      context.moveTo(x - radius * 0.18, y - radius * 0.22);
+      context.lineTo(x - radius * 0.42, y + radius * 0.02);
+      context.lineTo(x - radius * 0.18, y + radius * 0.26);
+      context.moveTo(x + radius * 0.18, y - radius * 0.22);
+      context.lineTo(x + radius * 0.42, y + radius * 0.02);
+      context.lineTo(x + radius * 0.18, y + radius * 0.26);
+      context.moveTo(x + radius * 0.08, y - radius * 0.32);
+      context.lineTo(x - radius * 0.08, y + radius * 0.46);
+      context.stroke();
+      break;
+    }
+    case 'artifact-patch': {
+      // 补丁：文档 + 创可贴标记
+      context.beginPath();
+      context.rect(x - radius * 0.52, y - radius * 0.72, radius * 1.04, radius * 1.44);
+      context.stroke();
+      context.globalAlpha = alpha * (0.4 + detailPulse * 0.18);
+      context.beginPath();
+      context.rect(x - radius * 0.22, y - radius * 0.22, radius * 0.44, radius * 0.44);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x, y - radius * 0.22);
+      context.lineTo(x, y + radius * 0.22);
+      context.moveTo(x - radius * 0.22, y);
+      context.lineTo(x + radius * 0.22, y);
+      context.stroke();
+      break;
+    }
+    case 'artifact-review': {
+      // 评审：放大镜 + 对勾
+      context.beginPath();
+      context.arc(x - radius * 0.08, y - radius * 0.08, radius * 0.52, 0, Math.PI * 2);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x + radius * 0.28, y + radius * 0.28);
+      context.lineTo(x + radius * 0.52, y + radius * 0.52);
+      context.stroke();
+      context.globalAlpha = alpha * (0.5 + detailPulse * 0.2);
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y - radius * 0.08);
+      context.lineTo(x - radius * 0.14, y + radius * 0.16);
+      context.lineTo(x + radius * 0.14, y - radius * 0.22);
+      context.stroke();
+      break;
+    }
+    case 'artifact-review_report': {
+      // 评审报告：文档 + 评分星标
+      context.beginPath();
+      context.rect(x - radius * 0.52, y - radius * 0.72, radius * 1.04, radius * 1.44);
+      context.stroke();
+      context.globalAlpha = alpha * (0.35 + detailPulse * 0.15);
+      context.beginPath();
+      context.moveTo(x - radius * 0.32, y - radius * 0.38);
+      context.lineTo(x + radius * 0.32, y - radius * 0.38);
+      context.moveTo(x - radius * 0.32, y - radius * 0.02);
+      context.lineTo(x + radius * 0.32, y - radius * 0.02);
+      context.stroke();
+      context.globalAlpha = alpha * (0.55 + detailPulse * 0.25);
+      context.beginPath();
+      context.moveTo(x, y + radius * 0.22);
+      context.lineTo(x + radius * 0.12, y + radius * 0.5);
+      context.lineTo(x + radius * 0.32, y + radius * 0.44);
+      context.lineTo(x + radius * 0.2, y + radius * 0.26);
+      context.lineTo(x + radius * 0.24, y + radius * 0.06);
+      context.lineTo(x, y + radius * 0.18);
+      safeClosePath(context);
+      context.stroke();
+      break;
+    }
   }
 
   context.restore();
@@ -601,8 +771,7 @@ export function drawGraphNode({
   focusDistance,
   focusWeight,
   focused,
-  nodeId,
-  nodeKind,
+  node,
   nodeRadius,
   renderScale,
   selected,
@@ -620,8 +789,7 @@ export function drawGraphNode({
   focusDistance: number | null;
   focusWeight: number;
   focused: boolean;
-  nodeId: string;
-  nodeKind: GraphNode['kind'];
+  node: GraphNode;
   nodeRadius: number;
   renderScale: number;
   selected: boolean;
@@ -631,6 +799,8 @@ export function drawGraphNode({
   y: number;
   zoom: number;
 }) {
+  const nodeId = node.id;
+  const nodeKind = node.kind;
   const animatedTick = focusWaveTick(tick, focusDistance, 7);
   const motionProfile = nodeMotionProfile(nodeKind, focusWeight);
   const scanPulse = pulse(
@@ -833,7 +1003,7 @@ export function drawGraphNode({
     context,
     dimmed,
     focusWeight,
-    nodeKind,
+    node,
     selected,
     scaledRadius,
     secondaryColor: style.secondaryColor,

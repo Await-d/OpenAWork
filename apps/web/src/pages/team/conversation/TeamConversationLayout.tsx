@@ -708,7 +708,19 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                 </>
               ) : (
                 <>
-                  {emptyContent ?? null}
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'stretch',
+                      justifyContent: 'center',
+                      width: '100%',
+                      minHeight: 0,
+                    }}
+                  >
+                    {emptyContent ?? null}
+                  </div>
                   <div ref={bottomRef} style={EMPTY_BOTTOM_REF_STYLE} />
                 </>
               )}
