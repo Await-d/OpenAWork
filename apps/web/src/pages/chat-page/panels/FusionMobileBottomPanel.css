@@ -1,0 +1,183 @@
+/* ─── Fusion 移动端底部面板 ─────────────────────────────────────── */
+
+/* ─── Backdrop ─────────────────────────────────────────────────── */
+.fusion-mobile-bottom__backdrop {
+  appearance: none;
+  background: color-mix(in oklch, var(--bg-base) 60%, transparent);
+  border: none;
+  bottom: 0;
+  cursor: pointer;
+  left: 0;
+  padding: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 398;
+}
+
+/* ─── Bottom sheet ─────────────────────────────────────────────── */
+.fusion-mobile-bottom__sheet {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-top: 1px solid var(--border-default);
+  bottom: 48px;
+  box-shadow: var(--shadow-raised);
+  display: flex;
+  flex-direction: column;
+  height: 65vh;
+  left: 0;
+  max-height: calc(100dvh - 96px);
+  overflow: hidden;
+  position: fixed;
+  right: 0;
+  z-index: 400;
+  animation: fusionMobileSheetIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fusionMobileSheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.fusion-mobile-bottom__sheet-drag-handle {
+  background: var(--border-emphasis);
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  height: 4px;
+  margin: var(--spacing-2) auto var(--spacing-1);
+  width: 36px;
+}
+
+.fusion-mobile-bottom__sheet-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── Bottom tab strip ─────────────────────────────────────────── */
+.fusion-mobile-bottom__strip {
+  align-items: center;
+  background: var(--bg-overlay);
+  border-top: 1px solid var(--border-subtle);
+  bottom: 0;
+  display: flex;
+  gap: 2px;
+  height: 48px;
+  left: 0;
+  padding: 0 var(--spacing-3);
+  position: fixed;
+  right: 0;
+  z-index: 401;
+}
+
+/* ─── Tab buttons ─────────────────────────────────────────────── */
+.fusion-mobile-bottom__tab {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 10px;
+  font-weight: 650;
+  gap: 3px;
+  height: 40px;
+  justify-content: center;
+  max-width: 96px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-1);
+  position: relative;
+  transition:
+    background var(--dur-micro, 80ms) var(--ease-micro, ease),
+    border-color var(--dur-micro, 80ms) var(--ease-micro, ease),
+    box-shadow var(--dur-micro, 80ms) var(--ease-micro, ease),
+    color var(--dur-micro, 80ms) var(--ease-micro, ease),
+    transform var(--dur-micro, 80ms) var(--ease-micro, ease);
+}
+
+.fusion-mobile-bottom__tab[data-active='true'] {
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-overlay));
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.fusion-mobile-bottom__tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.fusion-mobile-bottom__tab:active {
+  transform: translateY(1px);
+}
+
+.fusion-mobile-bottom__tab:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.fusion-mobile-bottom__tab-label {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.fusion-mobile-bottom__tab-badge {
+  background: var(--accent-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  display: grid;
+  font-size: 9px;
+  font-weight: 800;
+  height: 14px;
+  min-width: 14px;
+  padding: 0 3px;
+  place-items: center;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+/* ─── Close button ────────────────────────────────────────────── */
+.fusion-mobile-bottom__close {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  height: 32px;
+  justify-content: center;
+  margin-left: auto;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    background var(--dur-micro, 80ms) var(--ease-micro, ease),
+    color var(--dur-micro, 80ms) var(--ease-micro, ease);
+  width: 32px;
+}
+
+.fusion-mobile-bottom__close:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.fusion-mobile-bottom__close:active {
+  transform: translateY(1px);
+}
+
+.fusion-mobile-bottom__close:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}

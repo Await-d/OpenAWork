@@ -2026,7 +2026,7 @@ textarea {
 .nav-rail-link-active {
   position: relative;
   isolation: isolate;
-  background: white !important;
+  background: var(--bg-raised) !important;
   box-shadow:
     inset 0 0 0 1px var(--border-default),
     var(--shadow-md);
@@ -4796,7 +4796,6 @@ body.theme-transitioning *::after {
 
 /* ── D. 输入框区域 — Aurora focus ring ──────────────────── */
 [data-mode='light'] .composer-shell,
-[data-mode='light'] .chat-composer,
 [data-mode='light'] [data-composer] {
   background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)) !important;
   backdrop-filter: none;
@@ -4850,7 +4849,7 @@ body.theme-transitioning *::after {
 [data-mode='light'] [role='tab'][aria-selected='true'],
 [data-mode='light'] .mode-pill-btn[data-active='true'],
 [data-mode='light'] .toolbar-btn.active {
-  background: white;
+  background: var(--bg-raised);
   box-shadow: inset 0 0 0 1px var(--border-default), var(--shadow-sm);
 }
 
@@ -4885,7 +4884,7 @@ body.theme-transitioning *::after {
 [data-mode='light'] .nav-rail-link-active,
 [data-mode='light'] a[aria-current='page'] {
   position: relative;
-  background: white !important;
+  background: var(--bg-raised) !important;
   color: var(--fg-strong) !important;
   border: 1px solid var(--border-default);
   box-shadow: var(--shadow-md);

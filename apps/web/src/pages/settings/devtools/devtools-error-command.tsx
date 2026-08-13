@@ -148,7 +148,7 @@ export function ErrorCommandCenter({
                   border: isActive
                     ? '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
                     : '1px solid transparent',
-                  background: isActive ? 'white' : 'transparent',
+                  background: isActive ? 'var(--bg-raised)' : 'transparent',
                   boxShadow: isActive
                     ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'
                     : 'none',
@@ -585,7 +585,7 @@ summary::-webkit-details-marker { display: none; }
 summary:hover { background: var(--surface-2); }
 .error-item.active {
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 .error-item summary .error-severity {
@@ -612,7 +612,7 @@ pre {
 }
 .log-item.error {
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 .log-item summary .log-level {
@@ -630,7 +630,7 @@ pre {
 }
 .worker-card.error {
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 .worker-header { display: flex; justify-content: space-between; align-items: center; }
@@ -646,17 +646,17 @@ pre {
 }
 .source-card.error {
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 .source-card.ok {
   border: 1px solid var(--border-default);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: var(--shadow-md);
 }
 .source-card.warn {
   border: 1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default) 60%);
-  background: white;
+  background: var(--bg-raised);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--warning) 10%, transparent);
 }
 .source-header { display: flex; justify-content: space-between; align-items: center; }

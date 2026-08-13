@@ -73,7 +73,7 @@
   padding: 8px 12px;
   border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: white;
+  background: var(--bg-raised);
   box-shadow: var(--shadow-sm);
   color: var(--fg-strong);
 }

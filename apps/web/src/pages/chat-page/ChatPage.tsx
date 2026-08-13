@@ -321,7 +321,6 @@ import { useChatKeyboardShortcuts } from '../../hooks/chat/useChatKeyboardShortc
 import { ChatConversationView } from './conversation/ChatConversationView.js';
 import { TerminalPanel } from './panels/TerminalPanel.js';
 import { ChatTerminalToggle } from './panels/ChatTerminalToggle.js';
-import { SessionHeaderBar } from './panels/SessionHeaderBar.js';
 import { SessionPanelFrame } from './panels/SessionPanelFrame.js';
 import { FusionDockedSidePanel } from './panels/FusionDockedSidePanel.js';
 import type {
@@ -331,7 +330,9 @@ import type {
 import { FusionChatMainShell } from './layout/FusionChatMainShell.js';
 import { useFusionChatLayout } from './layout/use-fusion-chat-layout.js';
 import { useFusionDockedPanelViewport } from './layout/use-fusion-docked-panel-viewport.js';
+import { useMobileViewport } from './layout/use-mobile-viewport.js';
 import { resolveClassicConversationLayoutState } from './layout/conversation-layout-state.js';
+import { FusionMobileBottomPanel } from './panels/FusionMobileBottomPanel.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
 const LOAD_MORE_MESSAGE_INCREMENT = 20;
@@ -600,6 +601,7 @@ export default function ChatPage() {
   const consumeResetToWelcomeSignal = useUIStateStore((s) => s.consumeResetToWelcomeSignal);
   const isFusionLayout = layoutMode === 'fusion';
   const canDockFusionSidePanel = useFusionDockedPanelViewport();
+  const isMobileViewport = useMobileViewport();
 
   // sidebar / viewport / overlay 自愈 + 整个 UI 状态域 — 抽到 useChatUiState。
   // 参见 docs/architecture/chat-page-split-plan.md 域 D。
@@ -5169,12 +5171,28 @@ export default function ChatPage() {
           }
         }
       },
+      onToggleSidebar: () => {
+        useUIStateStore.getState().toggleLeftSidebar();
+      },
       onToggleRightPanel: () => {
         if (isFusionLayout) {
           fusionChatLayout.toggleReviewPanel();
           return;
         }
         setRightOpen((v) => !v);
+      },
+      onToggleReviewPanel: () => {
+        if (isFusionLayout) {
+          fusionChatLayout.toggleReviewPanel();
+        }
+      },
+      onToggleTerminalPanel: () => {
+        toggleTerminalPanelOpened();
+      },
+      onCycleTheme: () => {
+        // theme toggle is handled in Layout/App level via onToggleTheme prop
+        // dispatch a custom event that App.tsx listens for
+        window.dispatchEvent(new CustomEvent('app:cycle-theme'));
       },
       onNewSession: () => {
         setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
@@ -5303,6 +5321,40 @@ export default function ChatPage() {
             />
           }
           hasSession={currentSessionId !== null}
+          mobilePanel={
+            isMobileViewport && currentSessionId !== null ? (
+              <FusionMobileBottomPanel
+                activeEditorFilePath={fileEditor.activeFilePath}
+                activeTab={sidePanelActiveTab}
+                contextUsageSnapshot={contextUsageSnapshot}
+                currentSessionId={currentSessionId}
+                editorMode={editorMode}
+                editorFileState={fileEditor}
+                editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
+                effectiveWorkingDirectory={effectiveWorkingDirectory}
+                fetchTree={workspace.fetchTree}
+                gatewayUrl={gatewayUrl}
+                handleSaveFile={handleSaveFile}
+                isOpen={reviewPanelOpened}
+                onClose={() => {
+                  setReviewPanelOpened(false);
+                }}
+                onOpen={() => {
+                  setReviewPanelOpened(true);
+                }}
+                onCompactSession={() => void handleCompactCurrentSession()}
+                onOpenFileInEditor={handleOpenFusionEditorFile}
+                onOpenWorkspace={() => setShowWorkspaceSelector(true)}
+                onShowEditor={handleShowFusionEditor}
+                onTabChange={setSidePanelActiveTab}
+                overview={fusionContextOverview}
+                runtimeSummary={fusionContextRuntimeSummary}
+                saving={saving}
+                token={token}
+                workspaceFileItems={workspaceFileItems}
+              />
+            ) : null
+          }
           showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
           sidePanel={
             <FusionDockedSidePanel
@@ -5380,19 +5432,6 @@ export default function ChatPage() {
                 token={token}
                 topBar={
                   <>
-                    {currentSessionId ? (
-                      <SessionHeaderBar
-                        title={`会话 ${currentSessionId.slice(0, 8)}`}
-                        modelLabel={activeModelOption?.label ?? effectiveModelId}
-                        modeLabel={dialogueModeLabel}
-                        workspacePath={effectiveWorkingDirectory}
-                        reviewPanelOpened={reviewPanelOpened}
-                        terminalPanelOpened={terminalPanelOpened}
-                        onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
-                        onToggleTerminalPanel={handleTerminalPanelToggle}
-                        onMore={commandPalette.open}
-                      />
-                    ) : null}
                     <ChatTopBar
                       dialogueMode={dialogueMode}
                       onChangeDialogueMode={handleDialogueModeChange}
@@ -5494,6 +5533,16 @@ export default function ChatPage() {
                       }}
                       todoController={todoController}
                       todoDetailsId={todoDetailsId}
+                      sessionInfo={currentSessionId ? {
+                        title: `会话 ${currentSessionId.slice(0, 8)}`,
+                        modelLabel: activeModelOption?.label ?? effectiveModelId,
+                        modeLabel: dialogueModeLabel,
+                        workspacePath: effectiveWorkingDirectory,
+                      } : undefined}
+                      reviewPanelOpened={reviewPanelOpened}
+                      onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
+                      terminalPanelOpened={terminalPanelOpened}
+                      onToggleTerminalPanel={handleTerminalPanelToggle}
                     />
                     {multiSelect.multiSelect.enabled && (
                       <MultiSelectToolbar

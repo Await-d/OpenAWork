@@ -1760,7 +1760,7 @@ export default function SettingsPage() {
                               borderRadius: 8,
                               fontSize: 12,
                               fontWeight: isActive ? 600 : 400,
-                              background: isActive ? 'white' : 'transparent',
+                              background: isActive ? 'var(--bg-raised)' : 'transparent',
                               color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
                               border: isActive
                                 ? '1px solid var(--border-default)'

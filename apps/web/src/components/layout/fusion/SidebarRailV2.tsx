@@ -1,16 +1,13 @@
 /**
  * SidebarRailV2 — 左侧固定 Rail (64px)。
  *
- * S2 方案：项目头像 + 功能导航 + 底部图标。
- *
  * 结构：
- *   顶部: 项目头像列表 [OA][MA][+]  ← 点击切换工作区
+ *   顶部: [💬Chat] [👥Team]
  *   分隔线
- *   中部: [💬Chat] [👥Team] [📅定时] [🔧技能] [🤖智能体]
+ *   中部: 功能导航
  *   底部: [🔔通知] [⚙️设置] [❓帮助]
  *
  * Rail 始终可见，不可折叠。
- * Panel 折叠时 hover 项目头像触发 SidebarPeek 浮层。
  */
 
 import { useCallback, type CSSProperties } from 'react';
@@ -28,12 +25,6 @@ export interface SidebarRailV2Props {
   readonly onToggleTheme?: () => void;
   readonly onLogout?: () => void;
   readonly pendingPermissionIndicator?: boolean;
-  /** hover 项目头像时触发 peek（Panel 折叠态） */
-  readonly onProjectHover?: (workspacePath: string | null) => void;
-  /** 点击项目头像时切换工作区 */
-  readonly onSelectWorkspace?: (workspacePath: string) => void;
-  /** 打开工作区选择器 */
-  readonly onOpenWorkspacePicker?: () => void;
 }
 
 const RAIL_STYLE: CSSProperties = {
@@ -45,54 +36,16 @@ const RAIL_STYLE: CSSProperties = {
   height: '100%',
   overflow: 'hidden',
   background: 'var(--bg-surface)',
+  paddingTop: 8,
 };
 
-const AVATAR_SECTION_STYLE: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  gap: 8,
-  padding: '12px 0 8px',
-  flexShrink: 0,
-};
-
-const AVATAR_STYLE: CSSProperties = {
-  width: 36,
-  height: 36,
-  padding: 0,
-  borderRadius: 8,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontFamily: 'inherit',
-  fontSize: 11,
-  fontWeight: 800,
-  cursor: 'pointer',
-  border: '2px solid transparent',
-  flexShrink: 0,
-  transition: 'border-color 150ms ease, box-shadow 150ms ease',
-};
-
-const ADD_BUTTON_STYLE: CSSProperties = {
-  width: 36,
-  height: 28,
-  borderRadius: 8,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'pointer',
-  border: '1px dashed var(--border-default)',
-  background: 'transparent',
-  color: 'var(--fg-muted)',
-  flexShrink: 0,
-};
 
 const DIVIDER_STYLE: CSSProperties = {
   width: 32,
   height: 1,
   background: 'var(--border-subtle)',
   border: 'none',
-  margin: '4px 0',
+  margin: '6px 0',
   flexShrink: 0,
 };
 
@@ -131,13 +84,6 @@ const BOTTOM_SECTION_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
-function pathToInitials(path: string): string {
-  const normalized = path.replace(/\/+$/, '').replace(/\\/g, '/');
-  const parts = normalized.split('/').filter(Boolean);
-  const name = parts.at(-1) ?? normalized;
-  if (name.length <= 2) return name.toUpperCase();
-  return name.slice(0, 2).toUpperCase();
-}
 
 function ModeIconButton({
   active,
@@ -187,17 +133,10 @@ export function SidebarRailV2({
   onToggleTheme,
   onLogout,
   pendingPermissionIndicator = false,
-  onProjectHover,
-  onSelectWorkspace,
-  onOpenWorkspacePicker,
 }: SidebarRailV2Props) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
-  const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
-  const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
-  const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const triggerResetToWelcome = useUIStateStore((s) => s.triggerResetToWelcome);
   const setLeftSidebarOpen = useUIStateStore((s) => s.setLeftSidebarOpen);
 
@@ -207,16 +146,6 @@ export function SidebarRailV2({
   const preloadRoute = useCallback((path: string) => {
     void preloadRouteModuleByPath(path);
   }, []);
-
-  const handleSelectProject = useCallback(
-    (path: string) => {
-      setSelectedWorkspacePath(path);
-      setFileTreeRootPath(path);
-      setLeftSidebarOpen(true);
-      onSelectWorkspace?.(path);
-    },
-    [onSelectWorkspace, setFileTreeRootPath, setLeftSidebarOpen, setSelectedWorkspacePath],
-  );
 
   const handleNavigateChat = useCallback(() => {
     preloadRoute('/chat');
@@ -240,72 +169,6 @@ export function SidebarRailV2({
 
   return (
     <div className="sidebar-rail-v2" style={RAIL_STYLE}>
-      {/* 项目头像区 */}
-      <div style={AVATAR_SECTION_STYLE}>
-        {savedWorkspacePaths.slice(0, 5).map((path) => {
-          const isActive = selectedWorkspacePath === path;
-          return (
-            <button
-              type="button"
-              key={path}
-              className="sidebar-rail-v2__project-button"
-              title={path}
-              aria-label={`切换工作区 ${pathToInitials(path)} ${path}`}
-              aria-pressed={isActive}
-              onClick={() => handleSelectProject(path)}
-              onMouseEnter={() => onProjectHover?.(path)}
-              onMouseLeave={() => onProjectHover?.(null)}
-              onFocus={() => onProjectHover?.(path)}
-              onBlur={() => onProjectHover?.(null)}
-              style={{
-                ...AVATAR_STYLE,
-                background: isActive
-                  ? 'color-mix(in oklch, var(--accent) 15%, var(--bg-elevated))'
-                  : 'var(--bg-elevated)',
-                color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
-                borderColor: isActive ? 'var(--accent)' : 'transparent',
-                boxShadow: isActive ? '0 0 12px -2px var(--accent)' : 'none',
-              }}
-            >
-              {pathToInitials(path)}
-            </button>
-          );
-        })}
-
-        <button
-          type="button"
-          title="添加工作区"
-          aria-label="添加工作区"
-          onClick={() => onOpenWorkspacePicker?.()}
-          style={ADD_BUTTON_STYLE}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--accent-border)';
-            e.currentTarget.style.color = 'var(--accent)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border-default)';
-            e.currentTarget.style.color = 'var(--fg-muted)';
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-      </div>
-
-      <hr style={DIVIDER_STYLE} />
-
       {/* Chat / Team 模式切换 */}
       <div
         style={{

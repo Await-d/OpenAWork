@@ -511,8 +511,6 @@ export function ChatComposer({
       className="chat-composer"
       style={{
         padding: '0 16px 12px',
-        background: 'var(--bg-base)',
-        borderTop: '1px solid var(--border-default)',
         transition: 'padding 220ms ease',
       }}
     >

@@ -20,6 +20,11 @@ export interface FusionChatMainShellProps {
   readonly editorMode: boolean;
   readonly editorPane: ReactNode;
   readonly hasSession: boolean;
+  /**
+   * 移动端底部 Tab 面板（< 768px）。
+   * 仅在 mobile 视口 + 有活跃会话时由 ChatPage 传入，桌面端传 null/undefined。
+   */
+  readonly mobilePanel?: ReactNode;
   readonly showDockedSidePanel: boolean;
   readonly sidePanel: ReactNode;
   readonly splitContainerRef: RefObject<HTMLDivElement | null>;
@@ -35,6 +40,7 @@ export function FusionChatMainShell({
   editorMode,
   editorPane,
   hasSession,
+  mobilePanel,
   showDockedSidePanel,
   sidePanel,
   splitContainerRef,
@@ -108,6 +114,7 @@ export function FusionChatMainShell({
       </div>
 
       {hasSession ? <div className="fusion-chat-main-shell__terminal">{terminal}</div> : null}
+      {mobilePanel}
     </div>
   );
 }

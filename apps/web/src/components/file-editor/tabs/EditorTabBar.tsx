@@ -211,7 +211,7 @@ export function EditorTabBar({
               flexShrink: 0,
               borderRight: '1px solid var(--border-subtle)',
               borderBottom: active ? '1px solid var(--border-default)' : '1px solid transparent',
-              background: active ? 'white' : 'transparent',
+              background: active ? 'var(--bg-raised)' : 'transparent',
               boxShadow: active ? 'var(--shadow-sm)' : 'none',
               color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
             }}

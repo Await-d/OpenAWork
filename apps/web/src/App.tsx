@@ -561,6 +561,14 @@ export default function App() {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   }
 
+  // 监听 app:cycle-theme 自定义事件（由 ChatPage 快捷键 Ctrl+Alt+T 触发）
+  useEffect(() => {
+    const handler = () => toggleTheme();
+    window.addEventListener('app:cycle-theme', handler);
+    return () => window.removeEventListener('app:cycle-theme', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme, themeMode]);
+
   // 锁定时全屏遮罩，阻断主界面交互。解锁后 Rust 端会 emit
   // 'lock-state-changed'（locked=false），desktopLocked 随之变 false 自动隐藏 overlay。
   if (desktopLocked) {

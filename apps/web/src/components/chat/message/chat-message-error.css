@@ -112,7 +112,7 @@
   word-break: break-word;
   padding: 10px 12px;
   border-radius: 6px;
-  background: white;
+  background: var(--bg-raised);
   border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }

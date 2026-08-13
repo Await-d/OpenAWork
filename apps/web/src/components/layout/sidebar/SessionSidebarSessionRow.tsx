@@ -7,6 +7,7 @@ import {
   hasParentSession,
 } from '../../../utils/session/session-metadata.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
+import { InlineEditor } from '@openAwork/shared-ui';
 import {
   BaseSessionRow,
   RenameIcon,
@@ -300,6 +301,31 @@ export function SessionSidebarSessionRow({
         renameValue={renameValue}
         onRenameChange={setRenameValue}
         onRenameCommit={(id) => void commitRename(id)}
+        titleSlot={
+          !isRenaming ? (
+            <InlineEditor
+              value={session.title ?? '未命名'}
+              label="会话标题"
+              onSave={async (newTitle) => {
+                setRenameValue(newTitle);
+                await commitRename(session.id);
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 12,
+                lineHeight: '1.25',
+                fontWeight: isActive ? 600 : 400,
+              }}
+              buttonStyle={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
+              }}
+            />
+          ) : undefined
+        }
       />
       {node.children.length > 0 && (
         <div

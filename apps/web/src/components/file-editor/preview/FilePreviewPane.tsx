@@ -314,7 +314,7 @@ const MarkdownRendererInner = lazy(async () => {
                 margin: '12px 0',
                 padding: '12px 16px',
                 border: '1px solid var(--border-default)',
-                background: 'white',
+                background: 'var(--bg-raised)',
                 borderRadius: '6px',
                 boxShadow: 'var(--shadow-sm)',
                 color: 'var(--fg-strong)',

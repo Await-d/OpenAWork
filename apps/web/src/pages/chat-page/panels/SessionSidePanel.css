@@ -85,7 +85,7 @@
 
 .session-side-panel__tab[data-active='true'],
 .session-side-panel__tab[data-active='true']:hover {
-  background: white;
+  background: var(--bg-raised);
   border-color: var(--border-default);
   box-shadow: var(--shadow-sm);
   color: var(--fg-strong);

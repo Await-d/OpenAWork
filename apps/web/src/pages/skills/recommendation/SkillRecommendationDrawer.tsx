@@ -440,7 +440,7 @@ export default function SkillRecommendationDrawer(
                         style={{
                           ...ROW,
                           border: '1px solid var(--border-default)',
-                          background: 'white',
+                          background: 'var(--bg-raised)',
                           boxShadow: 'var(--shadow-sm)',
                         }}
                       >

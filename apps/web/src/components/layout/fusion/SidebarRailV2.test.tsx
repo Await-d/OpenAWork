@@ -47,48 +47,6 @@ afterEach(() => {
 });
 
 describe('SidebarRailV2', () => {
-  it('项目头像是可聚焦按钮，并支持 hover/focus 触发 peek', () => {
-    const onProjectHover = vi.fn();
-
-    renderRail({ onProjectHover });
-
-    const openAWorkButton = screen.getByRole('button', { name: /切换工作区 OP/ });
-    expect(openAWorkButton.getAttribute('aria-pressed')).toBe('true');
-
-    fireEvent.focus(openAWorkButton);
-    fireEvent.blur(openAWorkButton);
-    fireEvent.mouseEnter(openAWorkButton);
-    fireEvent.mouseLeave(openAWorkButton);
-
-    expect(onProjectHover).toHaveBeenNthCalledWith(1, '/home/await/project/OpenAWork');
-    expect(onProjectHover).toHaveBeenNthCalledWith(2, null);
-    expect(onProjectHover).toHaveBeenNthCalledWith(3, '/home/await/project/OpenAWork');
-    expect(onProjectHover).toHaveBeenNthCalledWith(4, null);
-  });
-
-  it('点击项目头像切换工作区并通知父级', () => {
-    const onSelectWorkspace = vi.fn();
-
-    renderRail({ onSelectWorkspace });
-
-    fireEvent.click(screen.getByRole('button', { name: /切换工作区 MA/ }));
-
-    expect(useUIStateStore.getState().selectedWorkspacePath).toBe(
-      '/home/await/project/MarketAgent',
-    );
-    expect(onSelectWorkspace).toHaveBeenCalledWith('/home/await/project/MarketAgent');
-  });
-
-  it('点击添加工作区按钮会打开工作区选择器', () => {
-    const onOpenWorkspacePicker = vi.fn();
-
-    renderRail({ onOpenWorkspacePicker });
-
-    fireEvent.click(screen.getByRole('button', { name: '添加工作区' }));
-
-    expect(onOpenWorkspacePicker).toHaveBeenCalledTimes(1);
-  });
-
   it('对话和团队入口使用点击切换路由', () => {
     renderRail({}, '/settings');
 
@@ -120,7 +78,7 @@ describe('SidebarRailV2', () => {
 
     renderRail({}, '/chat/session-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /切换工作区 MA/ }));
+    fireEvent.click(screen.getByRole('button', { name: '团队' }));
     expect(useUIStateStore.getState().leftSidebarOpen).toBe(true);
   });
 });

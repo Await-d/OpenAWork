@@ -146,7 +146,7 @@ export function FusionSidebarPeek({
                 onClick={() => onSelectSession(node.session.id)}
                 style={{
                   ...ITEM_STYLE,
-                  background: active ? 'white' : 'var(--bg-overlay)',
+                  background: active ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
                   border: active
                     ? '1px solid var(--border-default)'
                     : '1px solid var(--border-subtle)',
