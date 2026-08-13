@@ -99,7 +99,7 @@ function tabBtn(active: boolean): CSSProperties {
     cursor: 'pointer',
     fontWeight: 500,
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    background: active ? 'white' : 'transparent',
+    background: active ? 'var(--bg-raised)' : 'transparent',
     boxShadow: active ? 'var(--shadow-sm)' : 'none',
     color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
   };
@@ -126,7 +126,7 @@ function pagerBtn(active: boolean, disabled = false): CSSProperties {
     padding: '0 0.8rem',
     borderRadius: 8,
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    background: active ? 'white' : 'transparent',
+    background: active ? 'var(--bg-raised)' : 'transparent',
     boxShadow: active ? 'var(--shadow-sm)' : 'none',
     color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
     fontSize: 12,
