@@ -25,10 +25,9 @@
   --layer-color-glow: color-mix(in srgb, var(--fg-default) 35%, transparent);
 
   flex: 1;
+  width: 100%;
   min-height: 0;
   min-width: 0;
-  max-width: 1080px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -141,14 +140,24 @@
   flex: 1;
   overflow: hidden;
   border-radius: var(--radius-lg, 12px);
-  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-default) 28%, transparent);
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base)) 0%,
-    color-mix(in srgb, var(--bg-base) 96%, transparent) 100%
+    color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base)) 0%,
+    color-mix(in srgb, var(--bg-base) 98%, transparent) 100%
   );
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(10px);
+  box-shadow:
+    0 1px 2px -1px rgba(0, 0, 0, 0.04),
+    0 2px 4px -2px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(12px);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.team-conv-panel:hover {
+  border-color: color-mix(in srgb, var(--border-default) 40%, transparent);
+  box-shadow:
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    0 4px 8px -2px rgba(0, 0, 0, 0.08);
 }
 
 /* 面板顶部装饰线 */
@@ -160,7 +169,7 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, var(--fg-strong) 8%, transparent) 50%,
+    color-mix(in srgb, var(--fg-strong) 10%, transparent) 50%,
     transparent 100%
   );
   pointer-events: none;
@@ -175,22 +184,25 @@
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-3, 12px);
-  padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+  padding: 16px 20px;
   border-bottom: 1px solid
-    color-mix(in srgb, var(--border-subtle, var(--border-default)) 40%, transparent);
+    color-mix(in srgb, var(--border-subtle, var(--border-default)) 35%, transparent);
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--bg-overlay) 60%, transparent) 0%,
+    color-mix(in srgb, var(--bg-overlay) 70%, transparent) 0%,
     transparent 100%
   );
   flex-shrink: 0;
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
 }
 
 .team-conv-panel-header__title-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   flex: 1;
   min-width: 0;
 }
@@ -217,7 +229,7 @@
 .team-conv-panel-header__actions {
   display: flex;
   align-items: center;
-  gap: var(--spacing-2, 8px);
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -334,16 +346,17 @@
 .team-conv-filter-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
   flex-shrink: 0;
+  padding: 2px 0;
 }
 
 .team-conv-filter-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm, 6px);
   border: 1px solid transparent;
   background: transparent;
@@ -352,12 +365,19 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 160ms ease;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  min-height: 28px;
 }
 
 .team-conv-filter-btn:hover {
-  background: color-mix(in srgb, var(--fg-strong) 5%, transparent);
+  background: color-mix(in srgb, var(--fg-strong) 6%, transparent);
   color: var(--fg-default);
+  border-color: color-mix(in srgb, var(--border-default) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.team-conv-filter-btn:active {
+  transform: translateY(0);
 }
 
 .team-conv-filter-btn:focus-visible {
@@ -367,9 +387,10 @@
 }
 
 .team-conv-filter-btn[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--fg-strong);
+  box-shadow: 0 1px 3px -1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .team-conv-filter-btn[data-layer-filter] {
@@ -383,6 +404,7 @@
   background: var(--layer-color-soft, color-mix(in srgb, var(--accent) 10%, transparent));
   border-color: var(--layer-color, var(--accent));
   color: var(--layer-color, var(--fg-strong));
+  box-shadow: 0 1px 3px -1px var(--layer-color-glow, rgba(0, 0, 0, 0.1));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -570,25 +592,29 @@
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 16px;
-  padding: var(--spacing-3, 12px);
+  gap: 20px;
+  padding: 16px;
   align-content: start;
 }
 
 .team-conv-timeline__section {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .team-conv-timeline__section-header {
   display: flex;
   align-items: center;
-  gap: var(--spacing-2, 8px);
-  padding: 6px 4px;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm, 6px);
-  background: color-mix(in srgb, var(--bg-overlay) 45%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 55%, transparent);
   border-bottom: 1px solid
-    color-mix(in srgb, var(--border-subtle, var(--border-default)) 35%, transparent);
+    color-mix(in srgb, var(--border-subtle, var(--border-default)) 30%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  backdrop-filter: blur(6px);
 }
 
 .team-conv-timeline__section-title {
@@ -597,40 +623,49 @@
   color: var(--fg-strong);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   white-space: nowrap;
   flex-shrink: 0;
+  letter-spacing: 0.02em;
 }
 
 .team-conv-timeline__section-meta {
   font-size: 10px;
   color: var(--fg-muted);
   margin-left: auto;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: var(--radius-pill, 9999px);
   background: color-mix(in srgb, var(--fg-muted) 10%, transparent);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+  font-weight: 600;
 }
 
 /* 会话行卡片 */
 .team-conv-session-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: var(--spacing-2, 8px);
+  gap: 10px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: var(--radius-md, 8px);
-  border: 1px solid color-mix(in srgb, var(--border-default) 28%, transparent);
-  background: color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base));
+  border: 1px solid color-mix(in srgb, var(--border-default) 25%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base));
   cursor: pointer;
-  transition: all 160ms ease;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
+  min-height: 52px;
 }
 
 .team-conv-session-row:hover {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-overlay));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-overlay));
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px -2px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.team-conv-session-row:active {
+  transform: translateY(0);
 }
 
 .team-conv-session-row:focus-visible {
@@ -640,32 +675,39 @@
 }
 
 .team-conv-session-row[data-selected='true'] {
-  border-color: var(--border-default);
-  background: white;
-  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-overlay));
+  box-shadow:
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    0 4px 8px -2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .team-conv-session-row__avatar {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  font-size: 13px;
+  font-size: 14px;
   background: var(--layer-color-soft, color-mix(in srgb, var(--fg-muted) 10%, transparent));
-  border: 1.5px solid var(--layer-color, var(--fg-muted));
+  border: 2px solid var(--layer-color, var(--fg-muted));
   flex-shrink: 0;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.team-conv-session-row:hover .team-conv-session-row__avatar {
+  transform: scale(1.08);
 }
 
 .team-conv-session-row__body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .team-conv-session-row__title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--fg-default);
   overflow: hidden;
@@ -687,45 +729,49 @@
 
 .team-conv-message-card {
   display: grid;
-  gap: 6px;
-  padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
-  border-radius: var(--radius-md, 8px);
-  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
-  background: color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base));
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 28%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base));
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .team-conv-message-card:hover {
-  border-color: color-mix(in srgb, var(--border-default) 55%, transparent);
-  box-shadow: var(--shadow-sm);
+  border-color: color-mix(in srgb, var(--border-default) 50%, transparent);
+  box-shadow:
+    0 2px 6px -2px rgba(0, 0, 0, 0.08),
+    0 4px 12px -4px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
 
 .team-conv-message-card[data-blocking='true'] {
   border-color: color-mix(in srgb, var(--warning) 40%, var(--border-default) 60%);
-  background: white;
+  background: color-mix(in srgb, var(--warning) 5%, var(--bg-overlay));
   box-shadow: 0 1px 3px color-mix(in oklch, var(--warning) 10%, transparent);
 }
 
 .team-conv-message-card__header {
   display: flex;
   align-items: center;
-  gap: var(--spacing-2, 8px);
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .team-conv-message-card__body {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--fg-default);
-  line-height: 1.6;
+  line-height: 1.65;
   overflow: hidden;
 }
 
 .team-conv-message-card__footer {
   display: flex;
   align-items: center;
-  gap: var(--spacing-2, 8px);
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -770,9 +816,9 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  gap: var(--spacing-3, 12px);
+  gap: 16px;
   overflow: hidden;
 }
 
@@ -783,8 +829,11 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--radius-lg, 12px);
-  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
-  background: color-mix(in srgb, var(--bg-overlay) 55%, var(--bg-base));
+  border: 1px solid color-mix(in srgb, var(--border-default) 28%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base));
+  box-shadow:
+    0 1px 2px -1px rgba(0, 0, 0, 0.04),
+    0 2px 4px -2px rgba(0, 0, 0, 0.06);
 }
 
 .team-conv-split__main {
@@ -794,15 +843,19 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--radius-lg, 12px);
-  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
-  background: color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base));
+  border: 1px solid color-mix(in srgb, var(--border-default) 28%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 65%, var(--bg-base));
+  box-shadow:
+    0 1px 2px -1px rgba(0, 0, 0, 0.04),
+    0 2px 4px -2px rgba(0, 0, 0, 0.06);
 }
 
 /* 窄屏时切换为纵向堆叠 */
 @media (max-width: 1220px) {
   .team-conv-split {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 280px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 300px) minmax(0, 1fr);
+    gap: 12px;
   }
 
   .team-conv-split__sidebar {
@@ -823,12 +876,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--spacing-3, 12px);
-  padding: 10px var(--spacing-4, 16px);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
-  background: color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base));
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 25%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 75%, transparent) 0%,
+    transparent 100%
+  );
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 52px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
 }
 
 .team-conv-detail-toolbar__title {
@@ -852,7 +913,7 @@
   }
 
   .team-conv-panel-header {
-    padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+    padding: 12px 14px;
   }
 
   .team-conv-panel-header__title {
@@ -865,6 +926,16 @@
 
   .team-conv-split {
     grid-template-rows: minmax(0, 240px) minmax(0, 1fr);
+  }
+
+  .team-conv-filter-btn {
+    padding: 5px 10px;
+    min-height: 32px;
+  }
+
+  .team-conv-session-row {
+    padding: 10px 12px;
+    min-height: 48px;
   }
 
   .team-conv-flow-node {

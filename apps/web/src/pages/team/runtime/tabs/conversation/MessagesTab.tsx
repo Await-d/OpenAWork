@@ -195,7 +195,7 @@ export function MessagesTab({
   const showSuccess = feedback && feedback.tone === 'success';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* ─── 操作反馈 / 错误提示 ─── */}
       {showFeedback ? (
         <div style={FEEDBACK_STYLE_DANGER}>
@@ -216,7 +216,7 @@ export function MessagesTab({
         </div>
       ) : null}
       {/* ─── 顶部标题栏 + 筛选器 ─── */}
-      <div className="team-conv-panel-header" style={{ gap: 12, flexWrap: 'wrap' }}>
+      <div className="team-conv-panel-header" style={{ gap: 12, flexWrap: 'wrap', padding: '14px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span
             style={{
@@ -369,13 +369,15 @@ export function MessagesTab({
                 className="team-card-tinted team-message-card-enter"
                 style={{
                   ...PANEL_STYLE,
-                  padding: '12px 14px',
+                  padding: '14px 16px',
                   borderRadius: 12,
                   display: 'grid',
-                  gap: 8,
-                  border: '1px solid var(--border-default)',
-                  background: 'white',
-                  boxShadow: 'var(--shadow-md)',
+                  gap: 10,
+                  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+                  boxShadow:
+                    '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
+                  transition: 'box-shadow 200ms ease, transform 200ms ease',
                   ['--tint' as string]: meta.color,
                 }}
               >
@@ -853,7 +855,7 @@ export function MessagesTab({
                       display: 'grid',
                       gap: 4,
                       border: '1px solid var(--border-default)',
-                      background: 'white',
+                      background: 'var(--bg-raised)',
                       boxShadow: 'var(--shadow-sm)',
                     }}
                   >

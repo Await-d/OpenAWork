@@ -151,7 +151,7 @@ const itemStyle = (isActive: boolean): CSSProperties => ({
   borderRadius: 6,
   border: isActive ? '1px solid var(--border-default)' : '1px solid var(--border-subtle)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
-  background: isActive ? 'white' : 'var(--bg-overlay)',
+  background: isActive ? 'var(--bg-raised)' : 'var(--bg-overlay)',
   boxShadow: isActive ? 'var(--shadow-md)' : 'none',
   cursor: 'pointer',
 });

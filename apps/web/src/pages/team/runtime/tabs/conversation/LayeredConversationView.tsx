@@ -218,10 +218,11 @@ export function LayeredConversationView({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
+          gap: 16,
           flex: 1,
           minHeight: 0,
           overflow: 'hidden',
+          padding: '16px 20px',
         }}
       >
         {/* 头部面板 */}
@@ -246,7 +247,8 @@ export function LayeredConversationView({
               alignItems: 'center',
               gap: 8,
               flexWrap: 'wrap',
-              padding: '8px 16px',
+              padding: '10px 20px',
+              borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
             }}
           >
             <SegmentedToggle<'split' | 'thread'>
@@ -303,7 +305,10 @@ export function LayeredConversationView({
         </div>
 
         {/* 过滤栏 */}
-        <div className="team-conv-filter-bar">
+        <div
+          className="team-conv-filter-bar"
+          style={{ padding: '0 2px' }}
+        >
           <button
             type="button"
             className="team-conv-filter-btn"
@@ -346,21 +351,32 @@ export function LayeredConversationView({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 8,
-                  padding: '0 6px 4px',
+                  padding: '12px 16px 8px',
                   flexShrink: 0,
                 }}
               >
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 700,
                     color: 'var(--fg-muted)',
-                    letterSpacing: '0.08em',
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
                   }}
                 >
                   会话树
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--fg-muted)',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
+                    fontVariantNumeric: 'tabular-nums',
+                    fontWeight: 600,
+                  }}
+                >
                   {visibleRows.length} / {rows.length}
                 </span>
               </div>
@@ -372,8 +388,8 @@ export function LayeredConversationView({
                   overflowX: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 4,
-                  padding: '0 4px',
+                  gap: 6,
+                  padding: '0 10px 12px',
                 }}
               >
                 {visibleRows.length === 0 ? (
@@ -456,9 +472,9 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
-        padding: '10px 14px',
-        borderBottom: '1px solid color-mix(in srgb, var(--border-default) 32%, transparent)',
+        gap: 12,
+        padding: '14px 20px',
+        borderBottom: '1px solid color-mix(in srgb, var(--border-default) 25%, transparent)',
         background:
           'linear-gradient(180deg, color-mix(in srgb, var(--layer-color-soft) 60%, var(--bg-overlay)) 0%, transparent 100%)',
         flexShrink: 0,

@@ -78,7 +78,7 @@ const REOPEN_BANNER_STYLE: CSSProperties = {
   padding: '10px 14px',
   borderRadius: 12,
   border: '1px solid var(--border-default)',
-  background: 'white',
+  background: 'var(--bg-raised)',
   boxShadow: 'var(--shadow-md)',
   margin: '10px 12px 2px',
 };

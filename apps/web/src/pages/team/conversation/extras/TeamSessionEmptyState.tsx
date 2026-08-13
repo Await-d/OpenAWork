@@ -18,6 +18,7 @@
  *   - docs/team-architecture-deferred-decisions.md D26（b 直答 vs 走 c 路由）
  */
 
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { TEAM_RUNTIME_LAYER_LABELS, TEAM_RUNTIME_LAYER_ORDER } from '@openAwork/shared';
 import type { TeamRuntimeLayer } from '@openAwork/shared';
@@ -219,7 +220,7 @@ const SPINNER_STYLE: CSSProperties = {
 const RECEPTION_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 18,
-  margin: '20px 0 24px',
+  margin: '20px auto 24px',
   padding: '24px 28px',
   width: '100%',
   maxWidth: 1280,
@@ -502,6 +503,15 @@ function ReceptionStarterCard({
   teamDef: ParsedTeamDefinition;
   onSelectStarter?: (text: string) => void;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const totalFixed = teamDef.memberSlots.length;
+  const totalOptional = teamDef.optionalMembers.length;
+  const summaryParts: string[] = [];
+  if (totalFixed > 0 || totalOptional > 0)
+    summaryParts.push(`${totalFixed + totalOptional} 名成员`);
+  if (teamDef.defaultProvider) summaryParts.push(`provider ${teamDef.defaultProvider}`);
+  summaryParts.push(teamDef.sourceLabel);
+
   return (
     <div style={RECEPTION_CARD_STYLE} role="status" aria-label="团队会话已就位">
       <div style={CARD_HEADER_STYLE}>
@@ -518,16 +528,54 @@ function ReceptionStarterCard({
         </span>
       </div>
 
-      {/* 初始化清单已改为进入会话时自动弹出的 TeamInitModal（挂在 TeamConversationView
-          根部），此处不再内联渲染，避免与弹窗重复 + 两份独立状态分歧。 */}
-
-      <div>
-        <div style={SECTION_LABEL_STYLE}>来源</div>
-        <span style={CARD_SUBTITLE_STYLE}>
-          {teamDef.sourceLabel}
-          {teamDef.defaultProvider ? ` · provider ${teamDef.defaultProvider}` : ''}
-        </span>
-      </div>
+      {summaryParts.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+            {summaryParts.join(' · ')}
+          </span>
+          {(totalFixed > 0 || totalOptional > 0) && (
+            <button
+              type="button"
+              onClick={() => setShowDetails((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 999,
+                border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                background: 'transparent',
+                color: 'var(--accent)',
+                fontSize: 11,
+                cursor: 'pointer',
+                flexShrink: 0,
+                fontWeight: 600,
+              }}
+            >
+              {showDetails ? '收起详情' : '查看成员'}
+              <span
+                style={{
+                  display: 'inline-block',
+                  transform: showDetails ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s',
+                  lineHeight: 1,
+                }}
+                aria-hidden
+              >
+                ▾
+              </span>
+            </button>
+          )}
+        </div>
+      )}
 
       {teamDef.requiredRoleBindings.length > 0 ? (
         <div>
@@ -569,7 +617,7 @@ function ReceptionStarterCard({
         </div>
       ) : null}
 
-      {teamDef.memberSlots.length > 0 ? (
+      {showDetails && teamDef.memberSlots.length > 0 ? (
         <div>
           <div
             style={{
@@ -648,7 +696,7 @@ function ReceptionStarterCard({
         </div>
       ) : null}
 
-      {teamDef.optionalMembers.length > 0 ? (
+      {showDetails && teamDef.optionalMembers.length > 0 ? (
         <div>
           <div style={SECTION_LABEL_STYLE}>额外成员（{teamDef.optionalMembers.length}）</div>
           <div style={{ display: 'grid', gap: 8 }}>
