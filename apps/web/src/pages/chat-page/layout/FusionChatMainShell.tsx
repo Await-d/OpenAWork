@@ -2,12 +2,20 @@ import type { CSSProperties, MutableRefObject, ReactNode, RefObject } from 'reac
 import './FusionChatMainShell.css';
 
 type SplitStyle = {
+  readonly flex?: CSSProperties['flex'];
   readonly minWidth: CSSProperties['minWidth'];
+  readonly width?: CSSProperties['width'];
   readonly '--split-pos': string;
 };
 
 export interface FusionChatMainShellProps {
   readonly children: ReactNode;
+  /**
+   * 侍审查/文件/Context 面板停靠打开时，对话+编辑器分组占工作台总宽度的百分比。
+   * 默认落在 30%-40% 区间（见 {@link FUSION_DOCK_SPLIT_BOUNDS}），可拖拽调整。
+   * 仅在 `showDockedSidePanel` 为 true 时生效。
+   */
+  readonly dockSplitPos: number;
   readonly editorFullScreen: boolean;
   readonly editorMode: boolean;
   readonly editorPane: ReactNode;
@@ -22,6 +30,7 @@ export interface FusionChatMainShellProps {
 
 export function FusionChatMainShell({
   children,
+  dockSplitPos,
   editorFullScreen,
   editorMode,
   editorPane,
@@ -35,7 +44,9 @@ export function FusionChatMainShell({
 }: FusionChatMainShellProps) {
   const conversationHidden = editorMode && editorFullScreen;
   const splitStyle = {
+    flex: showDockedSidePanel ? '0 0 auto' : undefined,
     minWidth: 0,
+    width: showDockedSidePanel ? `${dockSplitPos}%` : undefined,
     '--split-pos': `${splitPos}%`,
   } satisfies SplitStyle;
 

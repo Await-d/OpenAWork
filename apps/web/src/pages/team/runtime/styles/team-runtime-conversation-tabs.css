@@ -640,9 +640,9 @@
 }
 
 .team-conv-session-row[data-selected='true'] {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-overlay));
-  box-shadow: inset 3px 0 0 var(--accent);
+  border-color: var(--border-default);
+  background: white;
+  box-shadow: var(--shadow-md);
 }
 
 .team-conv-session-row__avatar {
@@ -703,17 +703,9 @@
 }
 
 .team-conv-message-card[data-blocking='true'] {
-  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-  background: color-mix(in srgb, var(--warning) 6%, var(--bg-overlay));
-}
-
-.team-conv-message-card[data-blocking='true']::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  border-radius: var(--radius-md, 8px) 0 0 var(--radius-md, 8px);
-  background: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--warning) 10%, transparent);
 }
 
 .team-conv-message-card__header {

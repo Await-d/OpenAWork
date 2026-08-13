@@ -8,7 +8,7 @@
 }
 
 .fusion-chat-main-shell--fusion {
-  background: var(--bg-base);
+  background: transparent;
   gap: var(--spacing-2);
   padding: var(--spacing-2) var(--spacing-2) 0;
 }
@@ -36,11 +36,12 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  gap: 0;
 }
 
 .fusion-chat-main-shell__split {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -81,8 +82,9 @@
 }
 
 .fusion-chat-main-shell__conversation-pane--docked {
-  flex: 0 0 600px;
-  max-width: min(100%, 600px);
+  flex: 1 1 auto;
+  max-width: none;
+  min-width: 280px;
 }
 
 .fusion-chat-main-shell__conversation-pane--fluid {

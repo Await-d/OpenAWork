@@ -148,4 +148,32 @@ describe('model reasoning support', () => {
     expect(canConfigureThinkingForModel('openrouter', 'openai/gpt-4.1')).toBe(false);
     expect(inferSupportsThinking('openrouter', 'openai/gpt-5', false)).toBe(true);
   });
+
+  it('recognizes future vendor versions above the highest hardcoded example', () => {
+    // Anthropic: major >= 4（未来的 opus-5/sonnet-5 系列）。
+    expect(inferSupportsThinking('anthropic', 'claude-opus-5-0', false)).toBe(true);
+    expect(inferSupportsThinking('anthropic', 'claude-sonnet-5-0', false)).toBe(true);
+    // xAI: grok major >= 2（未来 grok-5）。
+    expect(inferSupportsThinking('xai', 'grok-5', false)).toBe(true);
+    // Gemini: major.minor >= 2.5（未来 gemini-4）。
+    expect(inferSupportsThinking('gemini', 'gemini-4-pro', false)).toBe(true);
+    // Qwen: major >= 3（未来 qwen4）。
+    expect(inferSupportsThinking('qwen', 'qwen4-max', false)).toBe(true);
+    // 智谱: major.minor >= 4.5（未来 glm-5.0）。
+    expect(inferSupportsThinking('zhipu', 'glm-5.0', false)).toBe(true);
+    // 豆包: seed major.minor >= 1.6（未来 seed-2.0）。
+    expect(inferSupportsThinking('doubao', 'doubao-seed-2.0', false)).toBe(true);
+    // Moonshot: k-major.minor >= 2.5（未来 kimi-k3）。
+    expect(inferSupportsThinking('moonshot', 'kimi-k3', false)).toBe(true);
+    // OpenAI o 系列：未来的 o5 不应因为硬编码枚举漏配。
+    expect(inferSupportsThinking('openai', 'o5', false)).toBe(true);
+    // GPT-5.x 未来次版本继承已知最高档位，而不是掉回默认三档。
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.7')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'max',
+    ]);
+  });
 });

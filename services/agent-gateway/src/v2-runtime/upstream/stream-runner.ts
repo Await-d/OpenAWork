@@ -333,6 +333,17 @@ interface RunnerState {
    */
   thinkingEncryptedContent?: string;
   /**
+   * Anthropic extended-thinking signature captured from a
+   * `reasoning-delta` event. `@ai-sdk/anthropic` streams the block's
+   * `signature_delta` as an empty-text `reasoning-delta` carrying
+   * `providerMetadata.anthropic.signature` (Bedrock-hosted Claude
+   * reuses the same shape under `.bedrock`) — the signature never
+   * appears on `reasoning-end`. Captured here and forwarded on
+   * reasoning-end so downstream accumulators can persist it for
+   * multi-turn replay.
+   */
+  thinkingSignature?: string;
+  /**
    * AI SDK fires both `finish-step` (per round) and `finish` (overall)
    * for non-multi-step calls; legacy emits exactly one `done` chunk
    * per upstream completion. We collapse the two into a single emit
@@ -734,6 +745,22 @@ export async function* runUpstreamStream(
         diagnostics.reasoningDeltaCount += 1;
         emitDiagnostics();
         const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
+        // Anthropic extended-thinking streams the block's signature as a
+        // *separate*, empty-text `reasoning-delta` event (mirroring the
+        // native `signature_delta` content block delta) rather than on
+        // `reasoning-end`. Capture it here so the eventual reasoning-end
+        // emit can forward it downstream — without this the signature is
+        // silently dropped and replayed thinking blocks fail Anthropic's
+        // "unsupported reasoning metadata" validation on the next turn.
+        const deltaPmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
+        const deltaSignatureSource = (deltaPmd?.['anthropic'] ?? deltaPmd?.['bedrock']) as
+          { signature?: unknown } | undefined;
+        if (
+          typeof deltaSignatureSource?.signature === 'string' &&
+          deltaSignatureSource.signature.length > 0
+        ) {
+          state.thinkingSignature = deltaSignatureSource.signature;
+        }
         yield {
           type: 'thinking_delta',
           delta: part.text,
@@ -746,18 +773,23 @@ export async function* runUpstreamStream(
         const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
         state.thinkingActive = false;
         state.thinkingItemId = undefined;
-        // Anthropic extended thinking attaches the per-block signature
+        // Anthropic extended thinking may attach the per-block signature
         // here via providerMetadata.anthropic.signature (Bedrock-hosted
-        // Claude reuses the same shape under .bedrock). Forward it so
-        // downstream accumulators can persist it on the matching
-        // ReasoningPart for multi-turn replay.
+        // Claude reuses the same shape under .bedrock) on some adapter
+        // versions; on the currently-vendored @ai-sdk/anthropic it instead
+        // arrives on a `reasoning-delta` event (captured into
+        // `state.thinkingSignature` above). Prefer the delta-captured
+        // value and fall back to an end-carried one for forward/backward
+        // compatibility with adapter versions that differ.
         const pmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
         const anthropicMeta = (pmd?.['anthropic'] ?? pmd?.['bedrock']) as
           { signature?: unknown } | undefined;
-        const signature =
+        const endSignature =
           typeof anthropicMeta?.signature === 'string' && anthropicMeta.signature.length > 0
             ? anthropicMeta.signature
             : undefined;
+        const signature = state.thinkingSignature ?? endSignature;
+        state.thinkingSignature = undefined;
         const encryptedContent = state.thinkingEncryptedContent;
         state.thinkingEncryptedContent = undefined;
         const providerMetadata =

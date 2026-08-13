@@ -231,12 +231,12 @@ export function DevtoolsDiagnosticsSection({
                     type="button"
                     onClick={() => onSelectDiagnostic(key)}
                     style={{
-                      borderRadius: 2,
-                      border: 'none',
-                      borderBottom: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
-                      background: isActive
-                        ? 'color-mix(in srgb, var(--accent) 5%, transparent)'
-                        : 'transparent',
+                      borderRadius: 6,
+                      border: isActive
+                        ? '1px solid var(--border-default)'
+                        : '1px solid transparent',
+                      background: isActive ? 'white' : 'transparent',
+                      boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                       color: 'var(--fg-strong)',
                       padding: '4px 6px',
                       display: 'flex',

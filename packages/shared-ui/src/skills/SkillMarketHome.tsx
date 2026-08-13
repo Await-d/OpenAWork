@@ -98,9 +98,10 @@ function tabBtn(active: boolean): CSSProperties {
     borderRadius: 6,
     cursor: 'pointer',
     fontWeight: 500,
-    border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
-    background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-    color: active ? 'var(--accent)' : 'var(--fg-muted)',
+    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+    background: active ? 'white' : 'transparent',
+    boxShadow: active ? 'var(--shadow-sm)' : 'none',
+    color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
   };
 }
 
@@ -124,9 +125,10 @@ function pagerBtn(active: boolean, disabled = false): CSSProperties {
     height: 34,
     padding: '0 0.8rem',
     borderRadius: 8,
-    border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
-    background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-    color: active ? 'var(--accent)' : 'var(--fg-default)',
+    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+    background: active ? 'white' : 'transparent',
+    boxShadow: active ? 'var(--shadow-sm)' : 'none',
+    color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
     fontSize: 12,
     fontWeight: active ? 700 : 600,
     cursor: disabled ? 'not-allowed' : 'pointer',

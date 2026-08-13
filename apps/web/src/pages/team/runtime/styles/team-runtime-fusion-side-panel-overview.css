@@ -114,7 +114,6 @@
   min-height: 0;
   gap: var(--spacing-1) !important;
   padding: var(--spacing-2) !important;
-  border-left-width: var(--spacing-1) !important;
   border-radius: var(--radius-md) !important;
 }
 

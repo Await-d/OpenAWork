@@ -373,7 +373,9 @@ export function MessagesTab({
                   borderRadius: 12,
                   display: 'grid',
                   gap: 8,
-                  borderLeft: `3px solid ${meta.color}`,
+                  border: '1px solid var(--border-default)',
+                  background: 'white',
+                  boxShadow: 'var(--shadow-md)',
                   ['--tint' as string]: meta.color,
                 }}
               >
@@ -850,8 +852,9 @@ export function MessagesTab({
                       borderRadius: 10,
                       display: 'grid',
                       gap: 4,
-                      borderLeft: `3px solid var(--accent)`,
-                      background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
+                      border: '1px solid var(--border-default)',
+                      background: 'white',
+                      boxShadow: 'var(--shadow-sm)',
                     }}
                   >
                     <div

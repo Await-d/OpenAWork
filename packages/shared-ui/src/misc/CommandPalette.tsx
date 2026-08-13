@@ -199,12 +199,15 @@ export function CommandPalette({
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    border: 'none',
+                    border: selected
+                      ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
+                      : '1px solid transparent',
                     borderTop:
                       index === 0
                         ? 'none'
                         : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                    background: selected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                    background: selected ? 'white' : 'transparent',
+                    boxShadow: selected ? 'var(--shadow-sm)' : 'none',
                     color: 'var(--fg-strong)',
                     padding: '0.65rem 0.75rem',
                     cursor: 'pointer',

@@ -72,7 +72,7 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
     if (!token || !rightOpen || rightTab !== 'mcp') return;
     let cancelled = false;
     void createSettingsClient(gatewayUrl)
-      .getMcpStatus(token)
+      .getMcpStatus(token, { includeTools: true })
       .then((rawData) => {
         const data = rawData as {
           servers?: Array<{
@@ -82,6 +82,9 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
             status?: string;
             enabled?: boolean;
             builtin?: boolean;
+            error?: string;
+            disabledTools?: string[];
+            tools?: Array<{ description?: string; name: string }>;
           }>;
         };
         if (!cancelled) {
@@ -97,9 +100,12 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
                   : server.enabled === false
                     ? 'disconnected'
                     : 'connecting',
-              toolCount: 0,
+              toolCount: server.tools?.length ?? 0,
               authType: server.type,
               builtin: server.builtin === true,
+              disabledTools: server.disabledTools ?? [],
+              error: server.error,
+              tools: server.tools ?? [],
             })),
           );
         }

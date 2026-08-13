@@ -70,9 +70,12 @@
 }
 .docx-preview-content blockquote {
   margin: 0.8em 0;
-  padding: 4px 12px;
-  border-left: 3px solid var(--border-default);
-  color: var(--fg-muted);
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: white;
+  box-shadow: var(--shadow-sm);
+  color: var(--fg-strong);
 }
 .docx-preview-content ul,
 .docx-preview-content ol {

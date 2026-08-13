@@ -85,7 +85,7 @@ const GHOST_BTN: React.CSSProperties = {
 const DANGER_BTN: React.CSSProperties = {
   ...GHOST_BTN,
   color: color.danger,
-  borderColor: 'rgba(248, 113, 113, 0.35)',
+  borderColor: color.dangerBorder,
 };
 
 function ActionToggle({

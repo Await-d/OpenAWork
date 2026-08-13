@@ -917,10 +917,12 @@
   background: var(--bg-overlay);
 }
 
-/* 高优先级 + 未完成：左边一条红色提示线 */
+/* 高优先级 + 未完成：微妙高亮样式 */
 .chat-todo-row[data-priority='high'][data-done='false'] {
-  border-left: 2px solid color-mix(in srgb, var(--danger) 65%, transparent);
-  padding-left: 6px;
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: white;
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
+  padding-left: 8px;
 }
 
 /* 进行中：淡蓝色背景，强调当前关注项 */
@@ -1732,14 +1734,14 @@
 }
 
 .chat-markdown-blockquote {
-  color: var(--fg-default);
+  color: var(--fg-strong);
   font-size: 12.8px;
   line-height: 1.55;
-  padding: 6px 10px;
-  border-left: 3px solid
-    var(--accent-border, color-mix(in oklch, var(--accent) 60%, var(--border-default) 40%));
-  background: var(--accent-subtle, color-mix(in oklch, var(--accent) 8%, transparent));
-  border-radius: 0 6px 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  background: white;
+  box-shadow: var(--shadow-md);
+  border-radius: 6px;
   margin: 2px 0;
 }
 .chat-markdown-blockquote > p:first-child {
@@ -2458,8 +2460,8 @@
 }
 
 .chat-path-preview-row[data-highlight='true'] {
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
-  box-shadow: inset 2px 0 0 0 var(--accent);
+  background: white;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%);
 }
 
 .chat-path-preview-lineno {

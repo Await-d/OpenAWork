@@ -439,7 +439,9 @@ export default function SkillRecommendationDrawer(
                         key={skillId}
                         style={{
                           ...ROW,
-                          borderLeft: `3px solid ${deltaColor(row.origin)}`,
+                          border: '1px solid var(--border-default)',
+                          background: 'white',
+                          boxShadow: 'var(--shadow-sm)',
                         }}
                       >
                         <div style={{ minWidth: 0 }}>

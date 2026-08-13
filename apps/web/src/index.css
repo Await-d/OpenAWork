@@ -2026,31 +2026,10 @@ textarea {
 .nav-rail-link-active {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(
-    135deg,
-    color-mix(in oklch, var(--accent) 18%, var(--bg-overlay) 50%),
-    color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 80%)
-  ) !important;
+  background: white !important;
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
-    inset 0 1px 0 color-mix(in oklch, var(--accent) 22%, transparent),
-    0 4px 14px -8px color-mix(in oklch, var(--accent) 60%, transparent);
-}
-.nav-rail-link-active::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 60%;
-  border-radius: 0 3px 3px 0;
-  background: linear-gradient(
-    180deg,
-    var(--accent),
-    color-mix(in oklch, var(--accent) 60%, transparent)
-  );
-  box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 60%, transparent);
+    inset 0 0 0 1px var(--border-default),
+    var(--shadow-md);
 }
 .nav-rail-link-active .nav-rail-icon {
   color: var(--accent);
@@ -2492,7 +2471,7 @@ textarea {
 .composer-shell {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-xl);
-  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
+  background: transparent;
   box-shadow:
     0 1px 0 var(--border-subtle),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -4858,27 +4837,21 @@ body.theme-transitioning *::after {
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* ── E. 顶部 Tabs — 渐变下划线 ──────────────────────────── */
+/* ── E. 顶部 Tabs — 微妙高亮 ──────────────────────────── */
 [data-mode='light'] [role='tab'],
 [data-mode='light'] .mode-pill-btn,
 [data-mode='light'] .toolbar-btn {
   position: relative;
   transition:
     color var(--dur-micro) var(--ease-micro),
-    background var(--dur-micro) var(--ease-micro);
+    background var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
 }
-[data-mode='light'] [role='tab'][aria-selected='true']::after,
-[data-mode='light'] .mode-pill-btn[data-active='true']::after,
-[data-mode='light'] .toolbar-btn.active::after {
-  content: '';
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--accent), var(--contrast));
-  box-shadow: 0 0 8px rgba(100, 113, 240, 0.4);
+[data-mode='light'] [role='tab'][aria-selected='true'],
+[data-mode='light'] .mode-pill-btn[data-active='true'],
+[data-mode='light'] .toolbar-btn.active {
+  background: white;
+  box-shadow: inset 0 0 0 1px var(--border-default), var(--shadow-sm);
 }
 
 /* ── F. 退出登录按钮 — Complement 危险提示 ─────────────────── */
@@ -4908,24 +4881,14 @@ body.theme-transitioning *::after {
   background: var(--complement-muted);
 }
 
-/* ── 额外:亮色下导航激活态的玻璃质感 ──────────────────────── */
+/* ── 额外:亮色下导航激活态 ──────────────────────── */
 [data-mode='light'] .nav-rail-link-active,
 [data-mode='light'] a[aria-current='page'] {
   position: relative;
-  background: linear-gradient(90deg, var(--accent-subtle), var(--contrast-subtle)) !important;
+  background: white !important;
   color: var(--fg-strong) !important;
-  border: 1px solid var(--accent-border);
-}
-[data-mode='light'] .nav-rail-link-active::before {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, var(--aux), var(--chart-5));
-  box-shadow: 0 0 8px rgba(100, 113, 240, 0.3);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-md);
 }
 
 /* ── 会话项在亮色下的 hover/active 极光感 ─────────────────── */

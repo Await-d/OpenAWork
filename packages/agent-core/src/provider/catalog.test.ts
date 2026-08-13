@@ -106,6 +106,18 @@ describe('provider catalog (single source of truth)', () => {
     expect(catalogModelSupportsThinking('custom', 'moonshot-v1-32k')).toBe(false);
   });
 
+  it('识别硬编码示例之上的未来厂商版本（版本号数值比较，不需逐版本加规则）', () => {
+    expect(catalogModelSupportsThinking('anthropic', 'claude-opus-5-0')).toBe(true);
+    expect(catalogModelSupportsThinking('anthropic', 'claude-sonnet-5-0')).toBe(true);
+    expect(catalogModelSupportsThinking('xai', 'grok-5')).toBe(true);
+    expect(catalogModelSupportsThinking('gemini', 'gemini-4-pro')).toBe(true);
+    expect(catalogModelSupportsThinking('qwen', 'qwen4-max')).toBe(true);
+    expect(catalogModelSupportsThinking('zhipu', 'glm-5.0')).toBe(true);
+    expect(catalogModelSupportsThinking('doubao', 'doubao-seed-2.0')).toBe(true);
+    expect(catalogModelSupportsThinking('moonshot', 'kimi-k3')).toBe(true);
+    expect(catalogModelSupportsThinking('openai', 'o5')).toBe(true);
+  });
+
   it('智谱 / 豆包 / Azure / xAI / OpenRouter 按模型放开 thinking', () => {
     expect(catalogModelSupportsThinking('zhipu', 'glm-4.5')).toBe(true);
     expect(catalogModelSupportsThinking('zhipu', 'glm-4-flash')).toBe(false);

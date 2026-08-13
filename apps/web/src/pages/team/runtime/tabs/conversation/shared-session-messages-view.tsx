@@ -32,7 +32,9 @@ const COMMENT_CARD_STYLE: CSSProperties = {
   borderRadius: 10,
   display: 'grid',
   gap: 6,
-  borderLeft: '3px solid var(--accent)',
+  border: '1px solid var(--border-default)',
+  background: 'white',
+  boxShadow: 'var(--shadow-md)',
 };
 
 const EMPTY_STYLE: CSSProperties = {

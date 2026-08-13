@@ -18,6 +18,8 @@ export interface PanelResizeHandleProps {
   direction: 'horizontal' | 'vertical';
   /** 拖拽过程中持续回调，delta 为像素位移（horizontal: 正=向右扩大，vertical: 正=向上扩大） */
   onResize: (delta: number) => void;
+  /** 拖拽开始回调（pointerdown），用于在拖拽前捕获基准状态（如容器宽度） */
+  onResizeStart?: () => void;
   /** 拖拽结束回调（pointerup），用于持久化最终尺寸 */
   onResizeEnd?: () => void;
   /** 可选的 aria-label */
@@ -29,6 +31,7 @@ export interface PanelResizeHandleProps {
 export function PanelResizeHandle({
   direction,
   onResize,
+  onResizeStart,
   onResizeEnd,
   ariaLabel,
   style,
@@ -43,11 +46,12 @@ export function PanelResizeHandle({
       // Capture pointer so we keep getting move events even outside the handle
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
 
+      onResizeStart?.();
       dragRef.current = {
         startPos: direction === 'horizontal' ? event.clientX : event.clientY,
       };
     },
-    [direction],
+    [direction, onResizeStart],
   );
 
   const handlePointerMove = useCallback(

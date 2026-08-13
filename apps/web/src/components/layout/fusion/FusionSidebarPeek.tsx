@@ -146,10 +146,13 @@ export function FusionSidebarPeek({
                 onClick={() => onSelectSession(node.session.id)}
                 style={{
                   ...ITEM_STYLE,
-                  background: active ? 'var(--accent-subtle)' : 'transparent',
-                  borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
-                  color: active ? 'var(--accent)' : 'var(--fg-muted)',
-                  fontWeight: active ? 700 : 500,
+                  background: active ? 'white' : 'var(--bg-overlay)',
+                  border: active
+                    ? '1px solid var(--border-default)'
+                    : '1px solid var(--border-subtle)',
+                  boxShadow: active ? 'var(--shadow-md)' : 'none',
+                  color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
+                  fontWeight: active ? 600 : 500,
                 }}
               >
                 <span aria-hidden="true" style={{ flexShrink: 0 }}>

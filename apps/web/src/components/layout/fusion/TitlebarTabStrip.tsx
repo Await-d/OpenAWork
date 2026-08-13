@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
@@ -53,8 +53,24 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
 
+  // 记录"正在被主动关闭"的会话 ID：closeTab 同步移除 tab 后，navigate 的路由变化
+  // 要到下一轮渲染才提交，中间会有一次 currentSessionId 仍指向旧会话、但 tabs 里
+  // 已经没有它的"夹缝"渲染。若不跳过，下面的同步 effect 会把它误判为新会话重新建 tab。
+  const pendingCloseSessionIdRef = useRef<string | null>(null);
+
   useEffect(() => {
+    // 一旦路由不再指向"正在关闭"的会话（无论是切到新会话还是回到首页），
+    // 待跳过标记就失去意义，必须清掉，否则用户之后重新打开同一会话时会被误跳过。
+    const pendingCloseSessionId = pendingCloseSessionIdRef.current;
+    if (pendingCloseSessionId !== null && pendingCloseSessionId !== currentSessionId) {
+      pendingCloseSessionIdRef.current = null;
+    }
+
     if (!currentSessionId) {
+      return;
+    }
+
+    if (pendingCloseSessionIdRef.current === currentSessionId) {
       return;
     }
 
@@ -92,6 +108,11 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
+      const closingTab = tabs.find((tab) => tab.id === tabId);
+      if (closingTab?.type === 'session' && closingTab.sessionId === currentSessionId) {
+        pendingCloseSessionIdRef.current = closingTab.sessionId;
+      }
+
       const nextTab = closeTab(tabId);
       if (nextTab?.type === 'session' && nextTab.sessionId) {
         void navigate(`/chat/${nextTab.sessionId}`);
@@ -102,7 +123,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
         void navigate('/chat');
       }
     },
-    [closeTab, navigate, navigateToHome],
+    [closeTab, currentSessionId, navigate, navigateToHome, tabs],
   );
 
   const handleNewTab = useCallback(() => {

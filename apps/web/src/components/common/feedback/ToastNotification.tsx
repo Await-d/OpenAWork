@@ -160,7 +160,7 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: stri
         backdropFilter: 'blur(12px)',
         color: 'var(--fg-strong)',
         borderRadius: 10,
-        padding: '10px 12px 10px 14px',
+        padding: '10px 12px',
         fontSize: 12,
         fontWeight: 500,
         boxShadow: 'var(--shadow-md)',
@@ -168,8 +168,7 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: stri
         minWidth: 260,
         lineHeight: 1.4,
         pointerEvents: 'auto',
-        border: '1px solid var(--border-subtle)',
-        borderLeft: `3px solid ${config.accent}`,
+        border: '1px solid var(--border-default)',
         animation: exiting
           ? 'toast-out 180ms cubic-bezier(0.4,0,0.2,1) forwards'
           : 'toast-in 220ms cubic-bezier(0.16,1,0.3,1)',

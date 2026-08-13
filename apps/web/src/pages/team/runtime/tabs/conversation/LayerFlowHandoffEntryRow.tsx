@@ -19,11 +19,11 @@ export function LayerFlowHandoffEntryRow({
   const color = STATE_COLOR[entry.state] ?? 'var(--fg-muted)';
 
   const borderStyle = selected
-    ? `1px solid color-mix(in srgb, ${color} 45%, transparent)`
+    ? `1px solid color-mix(in srgb, ${color} 45%, var(--border-default) 55%)`
     : '1px solid color-mix(in srgb, var(--border-default) 25%, transparent)';
 
   const backgroundStyle = selected
-    ? `color-mix(in srgb, ${color} 6%, var(--bg-overlay))`
+    ? 'white'
     : 'color-mix(in srgb, var(--bg-overlay) 50%, var(--bg-base))';
 
   return (
@@ -43,10 +43,11 @@ export function LayerFlowHandoffEntryRow({
         borderRadius: 'var(--radius-sm, 6px)',
         border: borderStyle,
         background: backgroundStyle,
+        boxShadow: selected ? 'var(--shadow-md)' : 'none',
         cursor: 'pointer',
         width: '100%',
         minWidth: 0,
-        transition: 'border-color 0.12s, background 0.12s',
+        transition: 'border-color 0.12s, background 0.12s, box-shadow 0.12s',
       }}
     >
       <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>

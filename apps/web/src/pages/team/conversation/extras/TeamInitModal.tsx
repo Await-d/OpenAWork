@@ -77,9 +77,9 @@ const REOPEN_BANNER_STYLE: CSSProperties = {
   flexShrink: 0,
   padding: '10px 14px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--accent) 38%, transparent)',
-  borderLeft: '3px solid var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+  border: '1px solid var(--border-default)',
+  background: 'white',
+  boxShadow: 'var(--shadow-md)',
   margin: '10px 12px 2px',
 };
 

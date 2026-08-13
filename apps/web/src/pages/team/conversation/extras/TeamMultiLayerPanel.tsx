@@ -118,8 +118,13 @@ const TAB_STYLE: CSSProperties = {
 const TAB_ACTIVE_STYLE: CSSProperties = {
   ...TAB_STYLE,
   color: 'var(--fg-strong)',
-  borderBottomColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 5%, transparent)',
+  borderTopColor: 'var(--border-default)',
+  borderRightColor: 'var(--border-default)',
+  borderBottomColor: 'var(--border-default)',
+  borderLeftColor: 'var(--border-default)',
+  borderBottomWidth: 1,
+  background: 'white',
+  boxShadow: 'var(--shadow-sm)',
 };
 
 const CONTENT_STYLE: CSSProperties = {

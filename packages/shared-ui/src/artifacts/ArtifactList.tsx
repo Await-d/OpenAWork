@@ -76,10 +76,9 @@ export function ArtifactList({ artifacts, onSelect, selectedId, style }: Artifac
                 alignItems: 'center',
                 gap: 8,
                 padding: '0.4rem 0.6rem',
-                background: isSelected ? 'rgba(99,102,241,0.15)' : 'var(--bg-base)',
-                border: isSelected
-                  ? '1px solid rgba(99,102,241,0.4)'
-                  : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                background: isSelected ? 'white' : 'var(--bg-base)',
+                border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                boxShadow: isSelected ? 'var(--shadow-md)' : 'none',
                 borderRadius: 6,
                 cursor: 'pointer',
                 textAlign: 'left',

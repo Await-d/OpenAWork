@@ -128,6 +128,15 @@ describe('clampReasoningEffortForModel', () => {
     });
   });
 
+  describe('future gpt-5.x minor versions inherit the highest known tier', () => {
+    it('gpt-5.7 (未来次版本) behaves like gpt-5.6, not the default tier', () => {
+      expect(clampReasoningEffortForModel('gpt-5.7', 'minimal')).toBe('none');
+      expect(clampReasoningEffortForModel('gpt-5.7', 'xhigh')).toBe('high');
+      expect(clampReasoningEffortForModel('gpt-5.7', 'max')).toBe('max');
+      expect(clampReasoningEffortForModel('gpt-5.7', 'high')).toBe('high');
+    });
+  });
+
   describe('OpenRouter-style aliases', () => {
     it('matches openai/gpt-5.1 alias correctly', () => {
       expect(clampReasoningEffortForModel('openai/gpt-5.1', 'xhigh')).toBe('high');
