@@ -256,25 +256,64 @@ export async function runUpstreamGenerate(
       model: input.model,
     });
 
-    const request = OpenCodeLLM.LLM.request({
+    const requestOptions: any = {
       model: llmModel,
       messages: decoratedMessages as OpenCodeLLM.Message[],
-      ...(decoratedSystem ? { system: decoratedSystem } : {}),
-      ...(typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')
-        ? { generation: { temperature: input.temperature } }
-        : {}),
-      ...(typeof input.maxOutputTokens === 'number' &&
-      !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
-        ? { generation: { maxOutputTokens: input.maxOutputTokens } }
-        : {}),
-      ...(typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')
-        ? { generation: { topP: input.topP } }
-        : {}),
+    };
+
+    // Add system messages if present
+    if (decoratedSystem) {
+      requestOptions.system = decoratedSystem;
+    }
+
+    // Add generation options
+    const generation: any = {};
+    if (typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')) {
+      generation.temperature = input.temperature;
+    }
+    if (typeof input.maxOutputTokens === 'number' &&
+        !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
+      generation.maxOutputTokens = input.maxOutputTokens;
+    }
+    if (typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
+      generation.topP = input.topP;
+    }
+    if (typeof input.frequencyPenalty === 'number' &&
+        !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')) {
+      generation.frequencyPenalty = input.frequencyPenalty;
+    }
+    if (typeof input.presencePenalty === 'number' &&
+        !shouldOmit(omit, 'presence_penalty', 'presencePenalty')) {
+      generation.presencePenalty = input.presencePenalty;
+    }
+    if (Object.keys(generation).length > 0) {
+      requestOptions.generation = generation;
+    }
+
+    const request = OpenCodeLLM.LLM.request(requestOptions);
+
+    // Execute request using LLMClient
+    const client = OpenCodeLLM.LLMClient;
+
+    // Create auth from API key
+    const auth = OpenCodeLLM.Auth.apiKey(model.apiKey || '');
+
+    // Execute non-streaming generate
+    // Note: This is a simplified implementation. Full implementation would use Effect runtime
+    const response = await new Promise<any>((resolve, reject) => {
+      // Placeholder: actual implementation needs Effect runtime integration
+      reject(new Error('OpenCode LLM generate - Effect runtime integration needed'));
     });
 
-    // TODO: Execute OpenCode LLM request
-    // For now, throw an error indicating this needs implementation
-    throw new Error('OpenCode LLM generate text implementation pending');
+    result = {
+      text: response.text || '',
+      usage: {
+        inputTokens: response.usage?.promptTokens || 0,
+        outputTokens: response.usage?.completionTokens || 0,
+      },
+      finishReason: response.finishReason || 'stop',
+      raw: response,
+    };
   } catch (err) {
     if (timedOut) {
       throw new Error(`upstream generate timeout (${timeoutMs}ms)`);

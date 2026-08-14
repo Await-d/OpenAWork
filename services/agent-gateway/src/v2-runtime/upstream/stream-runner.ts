@@ -687,11 +687,60 @@ export async function* runUpstreamStream(
   // aborted even when the client never disconnects.
   const idleController = new AbortController();
 
-  // TODO: Replace with OpenCode LLM streamText implementation
-  // For now, create a placeholder that returns a mock result
+  // Create OpenCode LLM stream request
+  const llmModel = new OpenCodeLLM.Model({
+    provider: input.providerType || 'openai',
+    model: typeof input.model === 'string' ? input.model : (input.model as any).modelId || 'gpt-4',
+  });
+
+  const requestOptions: any = {
+    model: llmModel,
+    messages: decoratedMessages as OpenCodeLLM.Message[],
+  };
+
+  // Add system messages if present
+  if (decoratedSystem) {
+    requestOptions.system = decoratedSystem;
+  }
+
+  // Add tools if present
+  if (effectiveTools && Object.keys(effectiveTools).length > 0) {
+    requestOptions.tools = Object.values(effectiveTools);
+  }
+
+  // Add generation options
+  const generation: any = {};
+  if (typeof temperature === 'number' && !shouldOmit(omit, 'temperature')) {
+    generation.temperature = temperature;
+  }
+  if (typeof maxOutputTokens === 'number' &&
+      !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
+    generation.maxOutputTokens = maxOutputTokens;
+  }
+  if (typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
+    generation.topP = topP;
+  }
+  if (typeof frequencyPenalty === 'number' &&
+      !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')) {
+    generation.frequencyPenalty = frequencyPenalty;
+  }
+  if (typeof presencePenalty === 'number' &&
+      !shouldOmit(omit, 'presence_penalty', 'presencePenalty')) {
+    generation.presencePenalty = presencePenalty;
+  }
+  if (Object.keys(generation).length > 0) {
+    requestOptions.generation = generation;
+  }
+
+  const request = OpenCodeLLM.LLM.request(requestOptions);
+
+  // Placeholder: Create mock result structure
+  // Full implementation requires Effect runtime integration
   const result = {
     fullStream: (async function* () {
-      throw new Error('OpenCode LLM stream implementation pending - stream-runner.ts');
+      // This is a placeholder that throws an error
+      // Full implementation would integrate with OpenCode LLM's streaming API
+      throw new Error('OpenCode LLM stream - Effect runtime integration needed');
     })(),
   };
 
