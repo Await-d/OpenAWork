@@ -174,6 +174,20 @@ interface SessionResponseLike {
   role_layer?: string | null;
   /** 团队会话子状态机位置（L1.3）。 */
   substate?: string | null;
+  /**
+   * Session Recovery Enhancement: 会话元数据扩展字段 (2026-08-14)
+   * 以下字段用于 Claude Code 兼容的会话恢复功能
+   */
+  agent_name?: string | null;
+  agent_color?: string | null;
+  agent_setting?: string | null;
+  custom_title?: string | null;
+  tag?: string | null;
+  mode?: 'normal' | 'coordinator' | null;
+  worktree_session?: string | null;
+  pr_number?: number | null;
+  pr_url?: string | null;
+  pr_repository?: string | null;
 }
 
 export interface PublicSessionResponse extends SessionResponseLike {
@@ -207,6 +221,19 @@ export function toPublicSessionResponse(
     // role_layer === 'reception' 才渲染）。chat 会话缺失时为 null。
     ...(session.role_layer !== undefined ? { role_layer: session.role_layer } : {}),
     ...(session.substate !== undefined ? { substate: session.substate } : {}),
+    // Session Recovery Enhancement: 会话元数据扩展字段
+    ...(session.agent_name !== undefined ? { agent_name: session.agent_name } : {}),
+    ...(session.agent_color !== undefined ? { agent_color: session.agent_color } : {}),
+    ...(session.agent_setting !== undefined ? { agent_setting: session.agent_setting } : {}),
+    ...(session.custom_title !== undefined ? { custom_title: session.custom_title } : {}),
+    ...(session.tag !== undefined ? { tag: session.tag } : {}),
+    ...(session.mode !== undefined ? { mode: session.mode } : {}),
+    ...(session.worktree_session !== undefined
+      ? { worktree_session: session.worktree_session }
+      : {}),
+    ...(session.pr_number !== undefined ? { pr_number: session.pr_number } : {}),
+    ...(session.pr_url !== undefined ? { pr_url: session.pr_url } : {}),
+    ...(session.pr_repository !== undefined ? { pr_repository: session.pr_repository } : {}),
     messages,
     runEvents,
     todos,

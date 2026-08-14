@@ -141,6 +141,20 @@ export interface SessionRow {
   role_layer?: string | null;
   /** Team L1.3 substate machine position. Real column, optionally projected. */
   substate?: string | null;
+  /**
+   * Session Recovery Enhancement: 会话元数据扩展字段 (2026-08-14)
+   * 以下字段用于 Claude Code 兼容的会话恢复功能
+   */
+  agent_name?: string | null;
+  agent_color?: string | null;
+  agent_setting?: string | null;
+  custom_title?: string | null;
+  tag?: string | null;
+  mode?: 'normal' | 'coordinator' | null;
+  worktree_session?: string | null;
+  pr_number?: number | null;
+  pr_url?: string | null;
+  pr_repository?: string | null;
 }
 
 interface RecoveryPermissionRequestRow {
@@ -711,6 +725,17 @@ function buildSafeSessionSelectColumns(): string {
     'execution_depth',
     'paused',
     'last_heartbeat',
+    // Session Recovery Enhancement: 会话元数据扩展字段
+    'agent_name',
+    'agent_color',
+    'agent_setting',
+    'custom_title',
+    'tag',
+    'mode',
+    'worktree_session',
+    'pr_number',
+    'pr_url',
+    'pr_repository',
   ];
   const existing = new Set(
     sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name),
