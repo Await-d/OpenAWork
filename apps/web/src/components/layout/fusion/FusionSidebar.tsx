@@ -698,14 +698,13 @@ export function FusionSidebar({
   const expanded = leftSidebarOpen && !compactViewport;
   const chatSessionNodes = useMemo(
     () =>
-      groupedSessions
-        .flatMap((group) => {
-          const groupKey = getWorkspaceGroupKey(group.workspacePath);
-          const treeGroup = groupedSessionTrees.find(
-            (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
-          );
-          return treeGroup?.roots ?? [];
-        }),
+      groupedSessions.flatMap((group) => {
+        const groupKey = getWorkspaceGroupKey(group.workspacePath);
+        const treeGroup = groupedSessionTrees.find(
+          (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
+        );
+        return treeGroup?.roots ?? [];
+      }),
     [groupedSessionTrees, groupedSessions],
   );
   const peekSessionNodes = useMemo(() => {
@@ -787,12 +786,9 @@ export function FusionSidebar({
     y: number;
   } | null>(null);
 
-  const handleSessionContextMenu = useCallback(
-    (sessionId: string, x: number, y: number) => {
-      setChatContextMenu({ sessionId, x, y });
-    },
-    [],
-  );
+  const handleSessionContextMenu = useCallback((sessionId: string, x: number, y: number) => {
+    setChatContextMenu({ sessionId, x, y });
+  }, []);
 
   // ─── 团队会话右键菜单状态 ───
   const [teamContextMenu, setTeamContextMenu] = useState<{
@@ -1258,19 +1254,22 @@ export function FusionSidebar({
                   暂无团队工作空间
                 </div>
               )}
-              {!teamLoading && !teamError && teamWorkspaceGroups.length > 0 && filteredTeamGroups.length === 0 && (
-                <div
-                  style={{
-                    padding: '16px 10px',
-                    textAlign: 'center',
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: 'var(--fg-muted)',
-                  }}
-                >
-                  无匹配结果
-                </div>
-              )}
+              {!teamLoading &&
+                !teamError &&
+                teamWorkspaceGroups.length > 0 &&
+                filteredTeamGroups.length === 0 && (
+                  <div
+                    style={{
+                      padding: '16px 10px',
+                      textAlign: 'center',
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      color: 'var(--fg-muted)',
+                    }}
+                  >
+                    无匹配结果
+                  </div>
+                )}
               {filteredTeamGroups.map((wg) => (
                 <TeamWorkspaceGroupItem
                   key={wg.id}
@@ -1315,8 +1314,7 @@ export function FusionSidebar({
                   暂无工作区
                 </p>
               )}
-              {groupedSessions
-                .map((group) => {
+              {groupedSessions.map((group) => {
                 const groupKey = getWorkspaceGroupKey(group.workspacePath);
                 const isCollapsed = collapsedGroups.has(groupKey);
                 const actualSessionCount =

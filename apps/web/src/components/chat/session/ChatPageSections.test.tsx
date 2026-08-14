@@ -28,7 +28,7 @@ describe('renderChatMessageContentWithOptions', () => {
     render(<>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>);
 
     expect(screen.getByText('思考过程')).not.toBeNull();
-    expect(screen.getByText('已简化展示')).not.toBeNull();
+    expect(screen.getByText('已完成')).not.toBeNull();
   });
 
   it('team 模式隐藏推理时不展示 chat 专属占位提示', () => {
@@ -47,6 +47,6 @@ describe('renderChatMessageContentWithOptions', () => {
     render(<>{renderChatMessageContentWithOptions(message, { presentationMode: 'team' })}</>);
 
     expect(screen.queryByText('思考过程')).toBeNull();
-    expect(screen.queryByText('已简化展示')).toBeNull();
+    expect(screen.queryByText('已完成')).toBeNull();
   });
 });

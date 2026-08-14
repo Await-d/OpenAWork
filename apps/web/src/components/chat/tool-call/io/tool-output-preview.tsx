@@ -2,10 +2,7 @@ import {
   DiagnosticsPreview,
   extractDiagnosticsFromOutput,
 } from '../previews/diagnostics-preview.js';
-import {
-  BashOutputPreview,
-  extractBashOutputFromOutput,
-} from '../previews/bash-output-preview.js';
+import { BashOutputPreview, extractBashOutputFromOutput } from '../previews/bash-output-preview.js';
 import {
   extractFileContentFromOutput,
   FileContentPreview,
@@ -181,11 +178,15 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   }
 
   // Plain string fallback
-  const fallbackText = typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
+  const fallbackText =
+    typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
 
   // If the string looks like JSON, parse and use JsonPreview
-  if (typeof output === 'string' && (output.trim().startsWith('{') || output.trim().startsWith('['))) {
+  if (
+    typeof output === 'string' &&
+    (output.trim().startsWith('{') || output.trim().startsWith('['))
+  ) {
     try {
       const parsed = JSON.parse(output);
       return <JsonPreview data={parsed} defaultExpanded={shouldExpandByDefault} />;

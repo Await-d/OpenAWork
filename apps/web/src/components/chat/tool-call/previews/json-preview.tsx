@@ -45,10 +45,7 @@ function highlightJson(json: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(
-      /"([^"]+)":/g,
-      '<span class="json-key">"$1"</span><span class="json-colon">:</span>',
-    )
+    .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span><span class="json-colon">:</span>')
     .replace(/"([^"]*)"/g, '<span class="json-string">"$1"</span>')
     .replace(/\b(true|false)\b/g, '<span class="json-boolean">$1</span>')
     .replace(/\bnull\b/g, '<span class="json-null">null</span>')

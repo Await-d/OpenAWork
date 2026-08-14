@@ -538,9 +538,7 @@ function ReceptionStarterCard({
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-            {summaryParts.join(' · ')}
-          </span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{summaryParts.join(' · ')}</span>
           {(totalFixed > 0 || totalOptional > 0) && (
             <button
               type="button"

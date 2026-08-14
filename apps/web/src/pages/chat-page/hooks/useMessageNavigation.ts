@@ -42,9 +42,7 @@ function findUserMessageEl(
   const THRESHOLD = 60;
 
   if (direction === 'next') {
-    return (
-      els.find((el) => el.getBoundingClientRect().top > containerRect.top + THRESHOLD) ?? null
-    );
+    return els.find((el) => el.getBoundingClientRect().top > containerRect.top + THRESHOLD) ?? null;
   } else {
     // 向上：从后往前找第一个 bottom 小于当前可见区域 top 的消息
     return (

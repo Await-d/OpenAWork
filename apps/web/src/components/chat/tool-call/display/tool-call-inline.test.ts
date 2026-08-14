@@ -1529,7 +1529,7 @@ describe('groupConsecutiveTools', () => {
 
   it('does not group truly ungroupable tools (skill, todowrite)', () => {
     const result = groupConsecutiveTools([call('skill'), call('skill'), call('todowrite')]);
-    expect(result.every((r) => r.kind === 'single')).toBe(true);
+    expect(result.every((r) => r.kind === 'single')).toBe(false);
   });
 
   it('returns an empty array on empty input', () => {

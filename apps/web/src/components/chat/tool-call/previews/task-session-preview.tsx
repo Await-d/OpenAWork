@@ -57,7 +57,11 @@ export function extractSessionListFromOutput(output: unknown): SessionLike[] | n
   }
   if (Array.isArray(output)) {
     const first = (output as any[])[0];
-    if (first && typeof first === 'object' && ('messageCount' in first || 'lastActivity' in first)) {
+    if (
+      first &&
+      typeof first === 'object' &&
+      ('messageCount' in first || 'lastActivity' in first)
+    ) {
       return output as SessionLike[];
     }
   }
@@ -106,7 +110,11 @@ export function TaskListPreview({ tasks }: { tasks: TaskLike[] }) {
       </div>
       <div className="task-list-items">
         {tasks.map((task, idx) => (
-          <div key={task.id || idx} className="task-list-item" data-status={task.status || 'pending'}>
+          <div
+            key={task.id || idx}
+            className="task-list-item"
+            data-status={task.status || 'pending'}
+          >
             <div className="task-list-item-header">
               <span className="task-list-item-status">
                 {STATUS_LABELS[task.status || 'pending'] || task.status}
@@ -146,9 +154,7 @@ export function SessionListPreview({ sessions }: { sessions: SessionLike[] }) {
               {session.id && <span className="session-list-item-id">{session.id}</span>}
             </div>
             <div className="session-list-item-meta">
-              {session.messageCount !== undefined && (
-                <span>{session.messageCount} 条消息</span>
-              )}
+              {session.messageCount !== undefined && <span>{session.messageCount} 条消息</span>}
               {session.lastActivity && (
                 <span>最后活动: {formatTimestamp(session.lastActivity)}</span>
               )}

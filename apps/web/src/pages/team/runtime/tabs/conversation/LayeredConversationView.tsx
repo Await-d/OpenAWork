@@ -305,10 +305,7 @@ export function LayeredConversationView({
         </div>
 
         {/* 过滤栏 */}
-        <div
-          className="team-conv-filter-bar"
-          style={{ padding: '0 2px' }}
-        >
+        <div className="team-conv-filter-bar" style={{ padding: '0 2px' }}>
           <button
             type="button"
             className="team-conv-filter-btn"

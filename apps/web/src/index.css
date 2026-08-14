@@ -4850,7 +4850,9 @@ body.theme-transitioning *::after {
 [data-mode='light'] .mode-pill-btn[data-active='true'],
 [data-mode='light'] .toolbar-btn.active {
   background: var(--bg-raised);
-  box-shadow: inset 0 0 0 1px var(--border-default), var(--shadow-sm);
+  box-shadow:
+    inset 0 0 0 1px var(--border-default),
+    var(--shadow-sm);
 }
 
 /* ── F. 退出登录按钮 — Complement 危险提示 ─────────────────── */

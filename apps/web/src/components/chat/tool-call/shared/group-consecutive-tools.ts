@@ -71,7 +71,12 @@ export function resolveGroupKey(
   if (lower.startsWith('task_')) {
     return 'task';
   }
-  if (lower === 'todoread' || lower === 'subtodoread' || lower === 'todowrite' || lower === 'subtodowrite') {
+  if (
+    lower === 'todoread' ||
+    lower === 'subtodoread' ||
+    lower === 'todowrite' ||
+    lower === 'subtodowrite'
+  ) {
     return 'todo';
   }
   if (lower === 'websearch' || lower === 'webfetch' || lower === 'google_search') {

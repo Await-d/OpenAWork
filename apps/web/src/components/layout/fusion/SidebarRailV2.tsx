@@ -39,7 +39,6 @@ const RAIL_STYLE: CSSProperties = {
   paddingTop: 8,
 };
 
-
 const DIVIDER_STYLE: CSSProperties = {
   width: 32,
   height: 1,
@@ -83,7 +82,6 @@ const BOTTOM_SECTION_STYLE: CSSProperties = {
   padding: '4px 0 12px',
   flexShrink: 0,
 };
-
 
 function ModeIconButton({
   active,

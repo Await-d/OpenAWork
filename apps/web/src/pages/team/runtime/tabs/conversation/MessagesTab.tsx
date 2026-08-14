@@ -216,7 +216,10 @@ export function MessagesTab({
         </div>
       ) : null}
       {/* ─── 顶部标题栏 + 筛选器 ─── */}
-      <div className="team-conv-panel-header" style={{ gap: 12, flexWrap: 'wrap', padding: '14px 20px' }}>
+      <div
+        className="team-conv-panel-header"
+        style={{ gap: 12, flexWrap: 'wrap', padding: '14px 20px' }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span
             style={{
@@ -375,8 +378,7 @@ export function MessagesTab({
                   gap: 10,
                   border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
                   background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
-                  boxShadow:
-                    '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
+                  boxShadow: '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
                   transition: 'box-shadow 200ms ease, transform 200ms ease',
                   ['--tint' as string]: meta.color,
                 }}

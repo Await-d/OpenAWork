@@ -9,6 +9,11 @@ import {
   sharedUiThemeVars,
 } from '../session/ChatPageSections.js';
 import { decideTimeDivider } from './time-divider.js';
+import {
+  detectCrossMessageToolGroups,
+  shouldHideMessageInToolGroup,
+  getToolCallsForMessage,
+} from '../../conversation-runtime/messages/group-cross-message-tools.js';
 
 export interface ChatRenderAction {
   id: string;
@@ -429,6 +434,10 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   timeDividerLabel?: string | null;
 }) {
+  // 检测当前 group 内可以跨消息合并的工具调用序列
+  const messages = useMemo(() => group.entries.map((e) => e.message), [group.entries]);
+  const toolGroups = useMemo(() => detectCrossMessageToolGroups(messages), [messages]);
+
   return (
     <div
       className="chat-message-group"
@@ -438,15 +447,30 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
     >
       {timeDividerLabel ? <TimeDividerRow label={timeDividerLabel} /> : null}
       {group.entries.map((entry, entryIndex) => {
+        // 如果这条消息被合并到前面的消息中，跳过渲染
+        if (shouldHideMessageInToolGroup(entryIndex, toolGroups)) {
+          return null;
+        }
+
         const resolvedProviderId = entry.message.providerId?.trim() || activeProviderId;
         const resolvedProvider = resolvedProviderId
           ? providerCatalog?.get(resolvedProviderId)
           : undefined;
 
+        // 如果这条消息是合并组的首条，创建包含所有合并工具调用的虚拟消息
+        const mergedToolCalls = toolGroups.has(entryIndex)
+          ? getToolCallsForMessage(entryIndex, messages, toolGroups)
+          : undefined;
+
+        const messageToRender =
+          mergedToolCalls && mergedToolCalls.length > 0
+            ? createMessageWithMergedToolCalls(entry.message, mergedToolCalls)
+            : entry.message;
+
         return (
           <MessageRow
             key={entry.message.id}
-            message={entry.message}
+            message={messageToRender}
             providerId={resolvedProviderId}
             providerName={resolvedProvider?.name}
             providerType={resolvedProvider?.type}
@@ -466,6 +490,34 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
     </div>
   );
 });
+
+/**
+ * 创建一个包含合并工具调用的虚拟消息
+ */
+function createMessageWithMergedToolCalls(
+  originalMessage: ChatMessage,
+  mergedToolCalls: import('@openAwork/shared').AssistantTraceToolCall[],
+): ChatMessage {
+  const payload = readAssistantTracePayload(originalMessage);
+  if (!payload) {
+    return originalMessage;
+  }
+
+  // 创建新的 payload，替换工具调用列表
+  const modifiedPayload = {
+    ...payload,
+    toolCalls: mergedToolCalls,
+  };
+
+  // 将 payload 序列化回内容字符串
+  const modifiedContent = JSON.stringify(modifiedPayload);
+
+  return {
+    ...originalMessage,
+    content: modifiedContent,
+    toolCallCount: mergedToolCalls.length,
+  };
+}
 
 function TimeDividerRow({ label }: { label: string }) {
   return (
