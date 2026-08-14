@@ -86,7 +86,7 @@ describe('buildAssistantMetaItems', () => {
       showToolCount: false,
     });
 
-    expect(items).toEqual([{ label: '2 工具' }]);
+    expect(items).toEqual([{ label: '已执行工具', tone: 'accent' }]);
   });
 
   it('team 模式在没有额外元信息时不注入 chat 专属兜底文案', () => {

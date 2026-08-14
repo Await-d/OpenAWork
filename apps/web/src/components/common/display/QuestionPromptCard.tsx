@@ -277,10 +277,7 @@ function QuestionSection({
     <section style={questionBlockStyle}>
       <div style={questionHeaderStyle}>
         {questionCount > 1 && (
-          <span
-            style={answered ? questionNumDoneStyle : questionNumStyle}
-            aria-hidden
-          >
+          <span style={answered ? questionNumDoneStyle : questionNumStyle} aria-hidden>
             {answered ? '✓' : questionIndex + 1}
           </span>
         )}
@@ -384,9 +381,7 @@ function QuestionSection({
                 <OptionSelectIndicator selected={selected} multiple={multiple} />
                 <span style={optionContentStyle}>
                   <span style={optionLabelStyle}>
-                    {showSearch && index < 9 && (
-                      <kbd style={optionKbdStyle}>{index + 1}</kbd>
-                    )}
+                    {showSearch && index < 9 && <kbd style={optionKbdStyle}>{index + 1}</kbd>}
                     {option.label}
                   </span>
                   <span style={optionDescriptionStyle}>{option.description}</span>
@@ -458,7 +453,7 @@ const questionNumDoneStyle: CSSProperties = {
   ...questionNumStyle,
   color: 'var(--fg-on-accent)',
   background: 'var(--accent)',
-  borderColor: 'var(--accent)',
+  border: '1px solid var(--accent)',
 };
 
 const searchWrapperStyle: CSSProperties = {

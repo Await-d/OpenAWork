@@ -6,10 +6,7 @@
  * 例：已编辑了文件 / 已运行了命令 / 已查看 4 个文件 / 已调用 MCP 工具
  */
 
-export function naturalLanguageSummary(
-  toolName: string,
-  input: Record<string, unknown>,
-): string {
+export function naturalLanguageSummary(toolName: string, input: Record<string, unknown>): string {
   const n = toolName.trim().toLowerCase();
 
   // ── 文件读取 ──

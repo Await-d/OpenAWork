@@ -8,13 +8,7 @@
 import type { ReactNode } from 'react';
 
 export type ArtifactPhase =
-  | 'spec'
-  | 'plan'
-  | 'tasks'
-  | 'implementation'
-  | 'patch'
-  | 'review'
-  | 'review_report';
+  'spec' | 'plan' | 'tasks' | 'implementation' | 'patch' | 'review' | 'review_report';
 
 interface ArtifactPhaseIconProps {
   readonly phase: ArtifactPhase;
@@ -144,60 +138,25 @@ export function ArtifactPhaseIcon({ phase, size = 14 }: ArtifactPhaseIconProps) 
 export function getArtifactPhasePathData(phase: ArtifactPhase): string[] {
   switch (phase) {
     case 'spec':
-      return [
-        'M5 4h10v12H5z',
-        'M7 7h6',
-        'M7 10h6',
-        'M7 13h4',
-        'M12 13h1',
-      ];
+      return ['M5 4h10v12H5z', 'M7 7h6', 'M7 10h6', 'M7 13h4', 'M12 13h1'];
 
     case 'plan':
-      return [
-        'M4 5h12v11H4z',
-        'M4 9h12',
-        'M7 5V3',
-        'M13 5V3',
-      ];
+      return ['M4 5h12v11H4z', 'M4 9h12', 'M7 5V3', 'M13 5V3'];
 
     case 'tasks':
-      return [
-        'M5 4h10v12H5z',
-        'M7 7l1.5 1.5 2.5-2.5',
-        'M7 11l1.5 1.5 2.5-2.5',
-        'M7 15h4',
-      ];
+      return ['M5 4h10v12H5z', 'M7 7l1.5 1.5 2.5-2.5', 'M7 11l1.5 1.5 2.5-2.5', 'M7 15h4'];
 
     case 'implementation':
-      return [
-        'M5 4h10v12H5z',
-        'M8 8l-2 2 2 2',
-        'M12 8l2 2-2 2',
-        'M10.5 7l-1 6',
-      ];
+      return ['M5 4h10v12H5z', 'M8 8l-2 2 2 2', 'M12 8l2 2-2 2', 'M10.5 7l-1 6'];
 
     case 'patch':
-      return [
-        'M5 4h10v12H5z',
-        'M8 8h4v4H8z',
-        'M10 8v4',
-        'M8 10h4',
-      ];
+      return ['M5 4h10v12H5z', 'M8 8h4v4H8z', 'M10 8v4', 'M8 10h4'];
 
     case 'review':
-      return [
-        'M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10z',
-        'M13 13l3 3',
-        'M7 9l1.5 1.5L11 8',
-      ];
+      return ['M9 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10z', 'M13 13l3 3', 'M7 9l1.5 1.5L11 8'];
 
     case 'review_report':
-      return [
-        'M5 4h10v12H5z',
-        'M7 7h6',
-        'M7 10h6',
-        'M10 12l1 2 2-0.5-1-1.5 1-1.5-2-0.5-1 2z',
-      ];
+      return ['M5 4h10v12H5z', 'M7 7h6', 'M7 10h6', 'M10 12l1 2 2-0.5-1-1.5 1-1.5-2-0.5-1 2z'];
 
     default:
       return assertNever(phase);

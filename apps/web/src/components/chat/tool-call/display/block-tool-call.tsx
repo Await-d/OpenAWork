@@ -128,10 +128,7 @@ export function BlockToolCall({
     [toolName, input, output, open],
   );
 
-  const title = useMemo(
-    () => naturalLanguageSummary(toolName, input),
-    [toolName, input],
-  );
+  const title = useMemo(() => naturalLanguageSummary(toolName, input), [toolName, input]);
 
   // Collapsed summary (shown when not expanded)
   const collapsedSummary = useMemo(() => {

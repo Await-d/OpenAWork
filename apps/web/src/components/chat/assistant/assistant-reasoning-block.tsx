@@ -1,8 +1,9 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import {
   buildLocalReasoningBlockKey,
   getLocalReasoningLabel,
 } from './assistant-reasoning-block.helpers.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
 const reasoningOpenStateCache = new Map<string, boolean>();
 
@@ -16,19 +17,19 @@ const REASONING_COLLAPSED_MAX_LINES = 3;
 
 function formatReasoningEndedBadge(durationMs?: number): string {
   if (typeof durationMs !== 'number' || durationMs < 0) {
-    return '已完成思考';
+    return '思考完成';
   }
   if (durationMs < 1000) {
-    return `已完成思考 · ${durationMs} 毫秒`;
+    return `${durationMs}ms`;
   }
   const seconds = durationMs / 1000;
   if (seconds < 60) {
     const formatted = seconds >= 10 ? seconds.toFixed(1) : seconds.toFixed(2);
-    return `已完成思考 · ${formatted} 秒`;
+    return `${formatted}s`;
   }
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.round(seconds - minutes * 60);
-  return `已完成思考 · ${minutes} 分 ${remainingSeconds} 秒`;
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
 // Memoized: all props are primitives EXCEPT `renderBody` (function) which
@@ -59,7 +60,22 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   streaming?: boolean;
   total: number;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  // 直接从 store 读取设置，确保设置变化时能响应
+  const reasoningExpandedByDefaultPref = useDisplayPreferencesStore(
+    (s) => s.reasoningExpandedByDefault,
+  );
+
+  // 使用用户设置作为初始值，但仍允许手动展开/折叠
+  const [expanded, setExpanded] = useState(reasoningExpandedByDefaultPref);
+
+  // 当设置变化时，重置展开状态（仅当用户没有手动操作过时）
+  const [userInteracted, setUserInteracted] = useState(false);
+
+  useEffect(() => {
+    if (!userInteracted) {
+      setExpanded(reasoningExpandedByDefaultPref);
+    }
+  }, [reasoningExpandedByDefaultPref, userInteracted]);
   const label = getLocalReasoningLabel({ index, streaming, total });
   const labeledContent = `*${label}* ${content}`;
   const lineCount = content.split('\n').length;
@@ -91,52 +107,29 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
         {renderBody(labeledContent, streaming)}
       </div>
       {shouldCollapse && (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => setExpanded(true)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') setExpanded(true);
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(true);
+            setUserInteracted(true);
           }}
-          style={{
-            position: 'relative',
-            marginTop: -22,
-            height: 22,
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            cursor: 'pointer',
-          }}
+          className="chat-markdown-code-copy"
+          style={{ fontSize: 10, marginTop: 4, display: 'inline', color: 'var(--fg-muted)' }}
         >
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background:
-                'linear-gradient(to bottom, transparent 0%, var(--bg-base) 50%, var(--bg-base) 100%)',
-              pointerEvents: 'none',
-            }}
-          />
-          <span
-            style={{
-              position: 'relative',
-              fontSize: 10,
-              color: 'var(--fg-muted)',
-              lineHeight: 1,
-            }}
-          >
-            展开思考
-          </span>
-        </div>
+          展开
+        </button>
       )}
       {isCollapsible && expanded && (
         <button
           type="button"
-          onClick={() => setExpanded(false)}
+          onClick={() => {
+            setExpanded(false);
+            setUserInteracted(true);
+          }}
           className="chat-markdown-code-copy"
-          style={{ fontSize: 10, marginTop: 2, display: 'inline', color: 'var(--fg-muted)' }}
+          style={{ fontSize: 10, marginTop: 4, display: 'inline', color: 'var(--fg-muted)' }}
         >
-          收起思考
+          收起
         </button>
       )}
       {showLiveEndedBadge && (
@@ -146,10 +139,10 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
           style={{
             fontSize: 10,
             color: 'var(--fg-muted)',
-            marginTop: 2,
+            marginTop: 4,
           }}
         >
-          ✓ {formatReasoningEndedBadge(durationMs)}
+          {formatReasoningEndedBadge(durationMs)}
         </span>
       )}
     </section>

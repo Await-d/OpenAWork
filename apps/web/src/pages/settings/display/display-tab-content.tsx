@@ -85,27 +85,6 @@ const SettingRow: React.FC<SettingRowProps> = ({ title, description, checked, on
   </div>
 );
 
-// ── 页面头部 ────────────────────────────────────────────────
-
-const PAGE_HEADER: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  marginBottom: '1.5rem',
-};
-
-const PAGE_TITLE: React.CSSProperties = {
-  fontSize: 18,
-  fontWeight: 700,
-  color: 'var(--fg-strong)',
-};
-
-const PAGE_SUBTITLE: React.CSSProperties = {
-  fontSize: 13,
-  color: 'var(--fg-muted)',
-  lineHeight: 1.6,
-};
-
 // ── Section 容器 ────────────────────────────────────────────
 
 const SECTION_LIST: React.CSSProperties = {
@@ -125,11 +104,11 @@ const RESET_BUTTON: React.CSSProperties = {
   background: 'transparent',
   color: 'var(--fg-default)',
   border: '1px solid var(--border-default)',
-  borderRadius: 8,
-  padding: '8px 14px',
-  fontSize: 12,
-  fontWeight: 600,
+  borderRadius: 6,
+  padding: '6px 12px',
+  fontSize: 13,
   cursor: 'pointer',
+  transition: 'all 0.15s ease',
 };
 
 // ── 主题模式选择器 ──────────────────────────────────────────
@@ -197,11 +176,11 @@ const THEME_STYLE_OPTIONS: {
 ];
 
 const THEME_SELECT: React.CSSProperties = {
-  background: 'var(--bg-surface)',
+  background: 'var(--bg-overlay)',
   border: '1px solid var(--border-default)',
-  borderRadius: 8,
+  borderRadius: 6,
   padding: '6px 10px',
-  fontSize: 12,
+  fontSize: 13,
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   outline: 'none',
@@ -223,6 +202,7 @@ const SelectRow: React.FC<SelectRowProps> = ({ title, description, value, option
       justifyContent: 'space-between',
       gap: 16,
       padding: '10px 0',
+      borderBottom: '1px solid var(--border-subtle)',
     }}
   >
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
@@ -348,13 +328,6 @@ export function DisplayTabContent() {
 
   return (
     <>
-      <div style={PAGE_HEADER}>
-        <h2 style={PAGE_TITLE}>显示设置</h2>
-        <p style={PAGE_SUBTITLE}>
-          控制聊天消息、工具调用、界面元素和主题的展示行为。所有设置即时生效并自动保存。
-        </p>
-      </div>
-
       <CurrentUserProfileSection />
 
       <MessageLayoutSection />
@@ -369,7 +342,7 @@ export function DisplayTabContent() {
             marginTop: 12,
             padding: '12px 14px',
             background: 'var(--bg-overlay)',
-            borderRadius: 10,
+            borderRadius: 8,
             border: '1px solid var(--border-subtle)',
           }}
         >
@@ -379,7 +352,7 @@ export function DisplayTabContent() {
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 16,
-              marginBottom: 8,
+              marginBottom: store.showMetaLine ? 8 : 0,
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
@@ -444,7 +417,7 @@ export function DisplayTabContent() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 12,
+            gap: 16,
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -497,14 +470,20 @@ function ThemeStyleRow() {
   const setThemeStyle = useDisplayPreferencesStore((s) => s.setThemeStyle);
 
   return (
-    <div style={{ padding: '10px 0' }}>
+    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>主题风格</span>
         <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           选择界面的设计风格，与明暗模式独立组合
         </span>
       </div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+          gap: 10,
+        }}
+      >
         {THEME_STYLE_OPTIONS.map((opt) => {
           const active = themeStyle === opt.value;
           return (
@@ -517,15 +496,13 @@ function ThemeStyleRow() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,
-                padding: '10px 14px',
-                borderRadius: 10,
-                border: `1px solid ${active ? 'var(--accent-border)' : 'var(--border-default)'}`,
-                background: active ? 'var(--accent-subtle)' : 'var(--bg-surface)',
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
+                background: active ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
                 cursor: 'pointer',
-                transition: 'all 180ms ease',
-                minWidth: 120,
                 textAlign: 'left',
-                boxShadow: active ? 'var(--shadow-glow)' : 'none',
+                outline: 'none',
               }}
             >
               <div style={{ display: 'flex', gap: 4 }}>
@@ -535,7 +512,7 @@ function ThemeStyleRow() {
                     style={{
                       width: 16,
                       height: 16,
-                      borderRadius: 4,
+                      borderRadius: 3,
                       background: sw,
                       border: '1px solid var(--border-subtle)',
                       flexShrink: 0,
@@ -545,14 +522,14 @@ function ThemeStyleRow() {
               </div>
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 600,
                   color: active ? 'var(--accent)' : 'var(--fg-strong)',
                 }}
               >
                 {opt.label}
               </span>
-              <span style={{ fontSize: 10.5, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
                 {opt.description}
               </span>
             </button>
@@ -612,25 +589,25 @@ function ToolExpandRow({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 16,
-        padding: '10px 0',
+        gap: 20,
+        padding: '12px 0',
         ...(isLast ? {} : { borderBottom: '1px solid var(--border-subtle)' }),
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
         <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>{title}</span>
         <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           {description}
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         <span
           style={{
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 600,
             color: expanded ? 'var(--accent)' : 'var(--fg-muted)',
-            minWidth: 48,
+            minWidth: 56,
             textAlign: 'right',
           }}
         >
@@ -670,12 +647,13 @@ function ReasoningToolSection() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 16,
-            padding: '10px 0',
+            gap: 20,
+            padding: '12px 0',
+            borderBottom: '1px solid var(--border-subtle)',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg-strong)' }}>
               推理过程默认展开
             </span>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
@@ -693,8 +671,8 @@ function ReasoningToolSection() {
       {/* 工具调用折叠分组 */}
       <div
         style={{
-          marginTop: 12,
-          padding: '12px 14px',
+          marginTop: 16,
+          padding: '16px 18px',
           background: 'var(--bg-overlay)',
           borderRadius: 10,
           border: '1px solid var(--border-subtle)',
@@ -705,12 +683,12 @@ function ReasoningToolSection() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 16,
-            marginBottom: globalExpand ? 8 : 0,
+            gap: 20,
+            marginBottom: globalExpand ? 12 : 0,
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-strong)' }}>
               工具调用默认展开
             </span>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
@@ -723,7 +701,7 @@ function ReasoningToolSection() {
           <div
             style={{
               borderTop: '1px solid var(--border-subtle)',
-              paddingTop: 4,
+              paddingTop: 8,
             }}
           >
             <div style={SECTION_LIST}>
@@ -757,10 +735,10 @@ function DialogueModeSection() {
       <h3 style={ST}>默认对话模式</h3>
       <p
         style={{
-          fontSize: 12,
+          fontSize: 13,
           color: 'var(--fg-muted)',
           lineHeight: 1.6,
-          marginBottom: 4,
+          marginBottom: 8,
         }}
       >
         新建会话时使用的默认对话模式。已有会话从其元数据恢复，不受此项影响。
@@ -776,17 +754,17 @@ function DialogueModeSection() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 16,
-                padding: '10px 0',
+                gap: 20,
+                padding: '12px 0',
                 borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
               }}
             >
               <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}
               >
                 <span
                   style={{
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: 500,
                     color: active ? 'var(--accent)' : 'var(--fg-strong)',
                   }}
@@ -804,15 +782,22 @@ function DialogueModeSection() {
                 aria-label={option.label}
                 style={{
                   position: 'relative',
-                  width: 18,
-                  height: 18,
+                  width: 20,
+                  height: 20,
                   borderRadius: '50%',
                   border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                   background: 'transparent',
                   cursor: 'pointer',
                   flexShrink: 0,
-                  transition: 'border-color 180ms ease',
+                  transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
                   padding: 0,
+                  outline: 'none',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-muted)';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               >
                 {active && (
@@ -822,11 +807,11 @@ function DialogueModeSection() {
                       top: '50%',
                       left: '50%',
                       transform: 'translate(-50%, -50%)',
-                      width: 8,
-                      height: 8,
+                      width: 10,
+                      height: 10,
                       borderRadius: '50%',
                       background: 'var(--accent)',
-                      transition: 'opacity 180ms ease',
+                      transition: 'opacity 200ms ease',
                     }}
                   />
                 )}
@@ -876,17 +861,17 @@ function MessageLayoutSection() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 16,
-                padding: '10px 0',
+                gap: 20,
+                padding: '12px 0',
                 borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
               }}
             >
               <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}
               >
                 <span
                   style={{
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: 500,
                     color: active ? 'var(--accent)' : 'var(--fg-strong)',
                   }}
@@ -904,15 +889,22 @@ function MessageLayoutSection() {
                 aria-label={opt.label}
                 style={{
                   position: 'relative',
-                  width: 18,
-                  height: 18,
+                  width: 20,
+                  height: 20,
                   borderRadius: '50%',
                   border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                   background: 'transparent',
                   cursor: 'pointer',
                   flexShrink: 0,
-                  transition: 'border-color 180ms ease',
+                  transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
                   padding: 0,
+                  outline: 'none',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-muted)';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               >
                 {active && (
@@ -922,8 +914,8 @@ function MessageLayoutSection() {
                       top: '50%',
                       left: '50%',
                       transform: 'translate(-50%, -50%)',
-                      width: 8,
-                      height: 8,
+                      width: 10,
+                      height: 10,
                       borderRadius: '50%',
                       background: 'var(--accent)',
                     }}

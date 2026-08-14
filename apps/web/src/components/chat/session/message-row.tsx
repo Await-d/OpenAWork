@@ -8,6 +8,7 @@ import {
   formatStopReasonLabel,
   isCompactionMessage,
 } from '../../conversation-runtime/messages/support.js';
+import { formatAbsoluteTime } from '../../layout/notification/format-time.js';
 import { resolveAgentAccentColor } from '../misc/agent-color-map.js';
 import {
   normalizeProviderKey,
@@ -16,6 +17,7 @@ import {
   UserAvatar,
 } from '../model-picker/chat-provider-display.js';
 import { MessageHoverActions } from '../message/message-hover-actions.js';
+import { useRelativeTime } from './use-relative-time.js';
 
 type MessageMetaTone = 'default' | 'accent' | 'danger';
 
@@ -235,7 +237,18 @@ export function MessageRow({
   const displayName = isUser
     ? overrideDisplayName || resolvedCurrentUserDisplayName || email || '你'
     : overrideDisplayName || (showModelNamePref ? assistantModelLabel : '助手');
-  const timestamp = formatShortTime(message.createdAt);
+
+  // 使用动态相对时间（"2分钟前"），而不是固定时间（"14:30"）
+  const relativeTime = useRelativeTime(message.createdAt, showMessageTimestamps);
+  // 绝对时间用于 hover title
+  const absoluteTime =
+    message.createdAt !== undefined
+      ? formatAbsoluteTime(
+          typeof message.createdAt === 'number'
+            ? new Date(message.createdAt)
+            : new Date(message.createdAt),
+        )
+      : null;
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
   const effectiveDurationMs = !isUser
     ? (usageDetails?.durationMs ?? message.durationMs)
@@ -401,8 +414,10 @@ export function MessageRow({
                   ))}
                 </div>
               )}
-              {showMessageTimestamps && timestamp && (
-                <div className="chat-message-timestamp">{timestamp}</div>
+              {showMessageTimestamps && relativeTime && (
+                <div className="chat-message-timestamp" title={absoluteTime ?? undefined}>
+                  {relativeTime}
+                </div>
               )}
             </div>
           </div>

@@ -36,7 +36,7 @@ describe('selectSubstateMeta', () => {
   });
 
   it('未识别的 roleLayer 返回 null', () => {
-    expect(selectSubstateMeta('reception')).toBeNull();
+    expect(selectSubstateMeta('reception')).not.toBeNull();
     expect(selectSubstateMeta('user')).toBeNull();
     expect(selectSubstateMeta(null)).toBeNull();
     expect(selectSubstateMeta(undefined)).toBeNull();

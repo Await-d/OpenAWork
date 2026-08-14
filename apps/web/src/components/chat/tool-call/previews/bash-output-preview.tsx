@@ -85,7 +85,9 @@ export function BashOutputPreview({
 
       <div className="bash-output-content">
         {hasStdout && data.stdout && (
-          <pre className="bash-output-stdout">{expanded ? data.stdout : displayLines.join('\n')}</pre>
+          <pre className="bash-output-stdout">
+            {expanded ? data.stdout : displayLines.join('\n')}
+          </pre>
         )}
         {hasStderr && data.stderr && (
           <pre className="bash-output-stderr">
@@ -97,11 +99,7 @@ export function BashOutputPreview({
       </div>
 
       {shouldCollapse && (
-        <button
-          type="button"
-          className="bash-output-toggle"
-          onClick={() => setExpanded((v) => !v)}
-        >
+        <button type="button" className="bash-output-toggle" onClick={() => setExpanded((v) => !v)}>
           {expanded ? '收起' : `展开全部 (${lines.length} 行)`}
         </button>
       )}

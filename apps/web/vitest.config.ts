@@ -24,7 +24,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['node_modules/**'],
-    environment: 'node',
+    environment: 'jsdom',
     passWithNoTests: true,
   },
 });

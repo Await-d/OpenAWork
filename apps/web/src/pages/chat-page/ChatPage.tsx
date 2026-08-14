@@ -5533,12 +5533,16 @@ export default function ChatPage() {
                       }}
                       todoController={todoController}
                       todoDetailsId={todoDetailsId}
-                      sessionInfo={currentSessionId ? {
-                        title: `会话 ${currentSessionId.slice(0, 8)}`,
-                        modelLabel: activeModelOption?.label ?? effectiveModelId,
-                        modeLabel: dialogueModeLabel,
-                        workspacePath: effectiveWorkingDirectory,
-                      } : undefined}
+                      sessionInfo={
+                        currentSessionId
+                          ? {
+                              title: `会话 ${currentSessionId.slice(0, 8)}`,
+                              modelLabel: activeModelOption?.label ?? effectiveModelId,
+                              modeLabel: dialogueModeLabel,
+                              workspacePath: effectiveWorkingDirectory,
+                            }
+                          : undefined
+                      }
                       reviewPanelOpened={reviewPanelOpened}
                       onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
                       terminalPanelOpened={terminalPanelOpened}

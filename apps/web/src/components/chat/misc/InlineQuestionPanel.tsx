@@ -166,10 +166,7 @@ export function InlineQuestionPanel({
         {totalQuestions > 1 && (
           <div className="iqp-progress-bar-wrapper">
             <div className="iqp-progress-bar">
-              <div
-                className="iqp-progress-bar-fill"
-                style={{ width: `${progressPercentage}%` }}
-              />
+              <div className="iqp-progress-bar-fill" style={{ width: `${progressPercentage}%` }} />
             </div>
           </div>
         )}
@@ -288,7 +285,10 @@ function QuestionBlock({
   });
 
   const showSearch = question.options.length > 5;
-  const allOptions = [...filteredOptions, { label: '自定义回答', description: '', preview: undefined }];
+  const allOptions = [
+    ...filteredOptions,
+    { label: '自定义回答', description: '', preview: undefined },
+  ];
 
   const handleToggleCustom = useCallback(() => {
     setShowCustomInput((v) => !v);
@@ -483,9 +483,7 @@ function QuestionBlock({
                 </span>
                 <span className="iqp-option-content">
                   <span className="iqp-option-label">
-                    {showSearch && index < 9 && (
-                      <kbd className="iqp-option-kbd">{index + 1}</kbd>
-                    )}
+                    {showSearch && index < 9 && <kbd className="iqp-option-kbd">{index + 1}</kbd>}
                     {option.label}
                   </span>
                   {option.description && (

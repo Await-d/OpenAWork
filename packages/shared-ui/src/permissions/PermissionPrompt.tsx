@@ -828,7 +828,11 @@ function btnStyle(
   } as const;
   const palette = base[tone];
   return {
-    background: options?.active ? (tone === 'primary' ? color.aux : 'var(--bg-raised)') : palette.bg,
+    background: options?.active
+      ? tone === 'primary'
+        ? color.aux
+        : 'var(--bg-raised)'
+      : palette.bg,
     boxShadow: options?.active && tone !== 'primary' ? 'var(--shadow-sm)' : 'none',
     color: options?.active && tone !== 'primary' ? 'var(--fg-strong)' : palette.fg,
     border: `1px solid ${options?.active && tone !== 'primary' ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : palette.border}`,

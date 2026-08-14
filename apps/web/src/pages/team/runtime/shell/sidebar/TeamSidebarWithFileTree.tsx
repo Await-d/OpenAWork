@@ -696,6 +696,141 @@ export function TeamSidebarWithFileTree({
           initialWorkingDirectory={effectiveInitialWorkingDirectory}
         />
       ) : null}
+
+      {/* 文件树容器 */}
+      <div style={FILE_TREE_CONTAINER_STYLE}>
+        {workspacePath ? (
+          <>
+            <div style={FILE_TREE_HEADER_STYLE}>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--fg-default)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={workspacePath}
+              >
+                工作区目录
+              </span>
+              {canRefreshWorkspaceTree ? (
+                <button
+                  type="button"
+                  onClick={handleRefreshTree}
+                  title="刷新文件树"
+                  aria-label="刷新文件树"
+                  style={FILE_TREE_TOOL_BTN_STYLE}
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+
+            {treeLoading && treeNodes.length === 0 ? (
+              <div
+                style={{
+                  padding: '20px 10px',
+                  textAlign: 'center',
+                  fontSize: 11,
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                加载文件树中...
+              </div>
+            ) : treeError ? (
+              <div
+                style={{
+                  padding: '20px 10px',
+                  textAlign: 'center',
+                  fontSize: 11,
+                  color: 'var(--danger)',
+                }}
+              >
+                {treeError}
+              </div>
+            ) : (
+              <FileTreeView
+                nodes={treeNodes}
+                expandedDirs={expandedDirs}
+                onToggleDir={handleToggleDir}
+                onOpenFile={handlePreviewFile}
+                onNodeContextMenu={handleNodeContextMenu}
+              />
+            )}
+          </>
+        ) : (
+          <div
+            style={{
+              padding: '20px 10px',
+              textAlign: 'center',
+              fontSize: 11,
+              color: 'var(--fg-muted)',
+            }}
+          >
+            未选择工作区
+          </div>
+        )}
+      </div>
+
+      {/* 右键菜单 */}
+      {contextMenu &&
+        createPortal(
+          <FileTreeContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            targetLabel={contextMenu.target.name}
+            targetType={contextMenu.target.type}
+            relativePath={
+              workspacePath ? getFileTreeRelativePath(workspacePath, contextMenu.target.path) : null
+            }
+            canOpen={Boolean(onOpenFile && contextMenu.target.type === 'file')}
+            canCreateSession={Boolean(
+              canManageSessionEntries && teamWorkspaceId && contextMenu.target.type === 'directory',
+            )}
+            onClose={handleCloseContextMenu}
+            onOpen={handleContextMenuOpen}
+            onCopyPath={handleCopyPath}
+            onCopyRelativePath={handleCopyRelativePath}
+            onReferenceInChat={handleReferenceInChat}
+            onCreateSession={handleCreateSessionFromDirectory}
+            onCreateFile={canMutateWorkspaceTree ? () => handleCreateEntry('file') : undefined}
+            onCreateFolder={
+              canMutateWorkspaceTree ? () => handleCreateEntry('directory') : undefined
+            }
+            onRefresh={handleRefreshTree}
+            onDelete={canMutateWorkspaceTree ? handleDeleteEntry : undefined}
+            onRename={canMutateWorkspaceTree ? handleRenameEntry : undefined}
+          />,
+          document.body,
+        )}
+
+      {/* 文件预览浮层 */}
+      {filePreview.path && filePreview.content && (
+        <TeamFilePreviewPanel
+          path={filePreview.path}
+          content={filePreview.content}
+          loading={filePreview.loading}
+          error={filePreview.error}
+          onClose={filePreview.close}
+          onOpenInEditor={onOpenFile ? () => onOpenFile(filePreview.path ?? '') : undefined}
+        />
+      )}
     </div>
   );
 }

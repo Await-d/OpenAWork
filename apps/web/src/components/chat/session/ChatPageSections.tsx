@@ -601,6 +601,21 @@ function AssistantPartsContent({
   // 将 parts 转换为支持分组的渲染序列，连续的 tool parts 会被合并
   const groupedParts = React.useMemo(() => groupMessageParts(parts), [parts]);
 
+  // 管理简化思考过程的展开/收起状态
+  const [expandedReasoningIds, setExpandedReasoningIds] = useState<Set<string>>(new Set());
+
+  const toggleReasoning = (id: string) => {
+    setExpandedReasoningIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   let reasoningCursor = 0;
 
   return (
@@ -619,6 +634,9 @@ function AssistantPartsContent({
                 index={myIndex}
                 streaming={streaming}
                 total={totalReasoning}
+                content={part.text}
+                onToggle={() => toggleReasoning(part.id)}
+                expanded={expandedReasoningIds.has(part.id)}
               />
             );
           }
@@ -786,6 +804,21 @@ function AssistantTraceContent({
     (s) => s.reasoningExpandedByDefault,
   );
 
+  // 管理简化思考过程的展开/收起状态
+  const [expandedReasoningIds, setExpandedReasoningIds] = useState<Set<string>>(new Set());
+
+  const toggleReasoning = (id: string) => {
+    setExpandedReasoningIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {(payload.reasoningBlocks ?? []).map((reasoning, index) => {
@@ -793,16 +826,18 @@ function AssistantTraceContent({
           if (presentationMode === 'team') {
             return null;
           }
+          const reasoningId = streaming
+            ? `streaming-hidden-reasoning-${index}`
+            : buildReasoningBlockKey(reasoning, index);
           return (
             <HiddenReasoningNotice
-              key={
-                streaming
-                  ? `streaming-hidden-reasoning-${index}`
-                  : buildReasoningBlockKey(reasoning, index)
-              }
+              key={reasoningId}
               index={index}
               streaming={streaming}
               total={payload.reasoningBlocks?.length ?? 0}
+              content={reasoning}
+              onToggle={() => toggleReasoning(reasoningId)}
+              expanded={expandedReasoningIds.has(reasoningId)}
             />
           );
         }
@@ -908,32 +943,61 @@ function HiddenReasoningNotice({
   index,
   streaming,
   total,
+  content,
+  onToggle,
+  expanded,
 }: {
   index: number;
   streaming: boolean;
   total: number;
+  content: string;
+  onToggle: () => void;
+  expanded: boolean;
 }) {
   const label = total > 1 ? `思考过程 ${index + 1}` : '思考过程';
 
   return (
-    <div
-      aria-label={`${label}已简化展示`}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        maxWidth: '100%',
-        padding: '6px 10px',
-        borderRadius: 8,
-        border: '1px solid var(--border-subtle)',
-        background: 'color-mix(in oklch, var(--bg-overlay) 90%, var(--accent) 10%)',
-        color: 'var(--fg-muted)',
-        fontSize: 11,
-        lineHeight: 1.5,
-      }}
-    >
-      <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{label}</span>
-      <span>{streaming ? '简化展示中' : '已简化展示'}</span>
+    <div style={{ marginBottom: 6 }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={label}
+        style={{
+          all: 'unset',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          maxWidth: '100%',
+          padding: '6px 10px',
+          borderRadius: 8,
+          color: 'var(--fg-muted)',
+          fontSize: 11,
+          lineHeight: 1.5,
+          cursor: 'pointer',
+          transition: 'background 140ms ease, color 140ms ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'var(--bg-overlay)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent';
+        }}
+      >
+        <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{label}</span>
+        <span>{streaming ? '生成中' : '已完成'}</span>
+        <span style={{ marginLeft: 4, fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+      </button>
+      {expanded && content && (
+        <div
+          className="assistant-reasoning-block"
+          data-streaming="false"
+          style={{ marginTop: 8, marginBottom: 0 }}
+        >
+          <div className="assistant-reasoning-body">
+            <AssistantRichContentBody content={content} streaming={false} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

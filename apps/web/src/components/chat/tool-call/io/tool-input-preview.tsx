@@ -4,13 +4,7 @@ import { type TodoLikeItem, TodoListPreview } from '../previews/todo-list-previe
 /**
  * MCP 工具调用时的元数据字段，这些字段对用户无意义，只在输入预览中过滤
  */
-const MCP_METADATA_FIELDS = new Set([
-  'serverId',
-  'serverName',
-  'toolName',
-  '_meta',
-  'method',
-]);
+const MCP_METADATA_FIELDS = new Set(['serverId', 'serverName', 'toolName', '_meta', 'method']);
 
 /**
  * 过滤 MCP 工具输入中的元数据字段，只保留实际业务参数。

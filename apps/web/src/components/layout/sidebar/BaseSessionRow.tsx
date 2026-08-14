@@ -322,6 +322,7 @@ export function BaseSessionRow({
             display: 'flex',
             flexDirection: 'column',
             gap: density === 'compact' ? 1 : 1,
+            pointerEvents: 'none',
           }}
         >
           {renaming ? (
@@ -349,18 +350,19 @@ export function BaseSessionRow({
               }}
             />
           ) : (
-            titleSlot ?? (
+            (titleSlot ?? (
               <span
                 style={{
                   ...TITLE_STYLE,
                   lineHeight: density === 'compact' ? '1.25' : '1.35',
                   fontWeight: active ? 600 : 400,
                   color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
+                  pointerEvents: 'auto',
                 }}
               >
                 {title}
               </span>
-            )
+            ))
           )}
 
           {/* compact 模式下 meta 直接嵌入在标题正下方，与标题同 X 对齐；actions 不再覆盖 meta，而是浮到行右下角（日期正下方） */}
@@ -371,6 +373,7 @@ export function BaseSessionRow({
                 minHeight: 14,
                 display: 'flex',
                 alignItems: 'center',
+                pointerEvents: 'auto',
               }}
             >
               <span
