@@ -367,6 +367,16 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_file_diffs', 'before_backup_id', 'TEXT');
   ensureColumn('session_file_diffs', 'after_backup_id', 'TEXT');
   ensureColumn('session_messages', 'agent_id', 'TEXT');
+
+  // ─── Session Recovery Enhancement (2026-08-14) ───
+  // 中断续写机制：添加中断状态和续写标记字段
+  ensureColumn(
+    'session_messages',
+    'interruption_state',
+    "TEXT DEFAULT 'none' CHECK(interruption_state IN ('none', 'interrupted_prompt', 'interrupted_turn'))",
+  );
+  ensureColumn('session_messages', 'is_continuation', 'INTEGER DEFAULT 0');
+
   migrateSessionFileDiffsDropLegacyTextColumns();
 
   db.exec(`
@@ -508,6 +518,39 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_file_backups_kind_hash_tier ON session_file_backups(kind, content_hash, content_tier, hash_scope)',
   );
+
+  // ─── Session Recovery Enhancement: 粘贴内容管理 (2026-08-14) ───
+  // 大文本（>1KB）哈希存储，减少 session_messages 体积
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_paste_contents (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      content_hash TEXT NOT NULL UNIQUE,
+      content TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_accessed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_paste_content_hash ON session_paste_contents(content_hash)',
+  );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_paste_session ON session_paste_contents(session_id)');
+
+  // ─── Session Recovery Enhancement: 技能状态持久化 (2026-08-14) ───
+  // 会话恢复时保留已加载的技能上下文
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_invoked_skills (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      skill_name TEXT NOT NULL,
+      skill_path TEXT NOT NULL,
+      skill_content TEXT NOT NULL,
+      invoked_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(session_id, skill_name)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_skill_session ON session_invoked_skills(session_id)');
 
   // ─── Shadow Git snapshot trees（docs/design/ultra-file-change-tracking.md） ───
   // 每个 step / turn 对应一个 tree_hash，parent_tree_hash 形成因果链。
@@ -1156,6 +1199,18 @@ export async function migrate(): Promise<void> {
   ensureColumn('sessions', 'summary_deletions', 'INTEGER DEFAULT NULL');
   ensureColumn('sessions', 'summary_files', 'INTEGER DEFAULT NULL');
   ensureColumn('sessions', 'summary_diffs', 'TEXT DEFAULT NULL');
+
+  // ─── Session Recovery Enhancement: 会话元数据扩展 (2026-08-14) ───
+  ensureColumn('sessions', 'agent_name', 'TEXT');
+  ensureColumn('sessions', 'agent_color', 'TEXT');
+  ensureColumn('sessions', 'agent_setting', 'TEXT');
+  ensureColumn('sessions', 'custom_title', 'TEXT');
+  ensureColumn('sessions', 'tag', 'TEXT');
+  ensureColumn('sessions', 'mode', "TEXT CHECK(mode IN ('normal', 'coordinator'))");
+  ensureColumn('sessions', 'worktree_session', 'TEXT');
+  ensureColumn('sessions', 'pr_number', 'INTEGER');
+  ensureColumn('sessions', 'pr_url', 'TEXT');
+  ensureColumn('sessions', 'pr_repository', 'TEXT');
   ensureColumn('sessions', 'revert', 'TEXT DEFAULT NULL');
   ensureColumn('sessions', 'permission', 'TEXT DEFAULT NULL');
 
