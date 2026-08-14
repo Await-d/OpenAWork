@@ -40,12 +40,26 @@ import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/a
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ProviderReasoningEffort = ReasoningEffort;
 
-export interface ThinkingConfig {
-  enabled: boolean;
-  effort: ProviderReasoningEffort;
-  /** Provider type (e.g. 'anthropic', 'openai', 'qwen', 'moonshot'). */
+/**
+ * 思考等级配置 — 对齐参考实现（claude-code）的设计
+ *
+ * 支持三种模式：
+ *   1. `{ type: 'adaptive' }` — Anthropic 自适应思考（Claude 4.6+）
+ *   2. `{ type: 'enabled'; budgetTokens: number }` — 显式思考预算
+ *   3. `{ type: 'disabled' }` — 禁用思考
+ */
+export type ThinkingConfig =
+  | { type: 'adaptive' }
+  | { type: 'enabled'; budgetTokens: number }
+  | { type: 'disabled' };
+
+/**
+ * 扩展的思考配置（内部使用）— 在基础 ThinkingConfig 之上增加 Provider 元信息
+ */
+export interface ExtendedThinkingConfig {
+  config: ThinkingConfig;
+  effort?: ReasoningEffort;
   providerType: string;
-  /** Whether the upstream model is known to support thinking. */
   supportsThinking: boolean;
 }
 
@@ -521,12 +535,37 @@ export function providerOptions(
 }
 
 /**
+ * 检查模型是否支持 adaptive thinking
+ *
+ * 对齐参考实现的判定逻辑：
+ *   - Claude 4.6+ (opus-4-6, sonnet-4-6)
+ *   - 未来新模型在 1P/Foundry 上默认支持
+ */
+export function modelSupportsAdaptiveThinking(modelId: string, providerType: string): boolean {
+  const canonical = modelId.toLowerCase();
+
+  // Claude 4.6+ 系列
+  if (canonical.includes('opus-4-6') || canonical.includes('sonnet-4-6')) {
+    return true;
+  }
+
+  // 排除已知的旧模型
+  if (canonical.includes('opus') || canonical.includes('sonnet') || canonical.includes('haiku')) {
+    return false;
+  }
+
+  // 1P 和 Foundry 上的未知模型默认支持（与参考实现对齐）
+  const provider = providerType.toLowerCase();
+  return provider === 'anthropic' || provider === 'claude' || provider === 'foundry';
+}
+
+/**
  * Build the AI SDK `providerOptions` payload for a given thinking
  * config + model. Returns `undefined` when no provider-specific tuning
  * is required (most callers will then omit the field entirely).
  */
 export function buildProviderOptions(input: {
-  thinking?: ThinkingConfig;
+  thinking?: ThinkingConfig | ExtendedThinkingConfig;
   model: string;
 }): SharedV2ProviderOptions | undefined {
   const { thinking } = input;
@@ -534,26 +573,28 @@ export function buildProviderOptions(input: {
     return undefined;
   }
 
-  let effectiveSupportsThinking = thinking.supportsThinking;
-  if (!effectiveSupportsThinking) {
-    const inferredStyle = resolveThinkingStyle(thinking.providerType, input.model);
-    if (
-      inferredStyle !== 'none' &&
-      catalogModelSupportsThinking(thinking.providerType, input.model)
-    ) {
-      effectiveSupportsThinking = true;
-    }
-  }
+  // 判断是新版 ThinkingConfig 还是旧版 ExtendedThinkingConfig
+  const isExtendedConfig = 'config' in thinking;
+  const thinkingConfig: ThinkingConfig = isExtendedConfig ? thinking.config : thinking;
+  const providerType = isExtendedConfig ? thinking.providerType : 'anthropic';
+  const supportsThinking = isExtendedConfig ? thinking.supportsThinking : true;
+
+  // 对于新版 ThinkingConfig，通过 catalog 推断支持情况
+  const inferredStyle = resolveThinkingStyle(providerType, input.model);
+  const catalogSupports = catalogModelSupportsThinking(providerType, input.model);
+
+  const effectiveSupportsThinking =
+    supportsThinking === true || (inferredStyle !== 'none' && catalogSupports);
+
   if (!effectiveSupportsThinking) {
     return undefined;
   }
 
   const model = input.model.toLowerCase();
-  const effort = normalizeProviderReasoningEffort(thinking.effort);
-  const style = resolveThinkingStyle(thinking.providerType, input.model);
-  const normalizedProviderType = thinking.providerType.toLowerCase();
+  const style = inferredStyle;
+  const normalizedProviderType = providerType.toLowerCase();
   const modelInfo = buildProviderOptionsModelInfo({
-    providerType: thinking.providerType,
+    providerType,
     model: input.model,
     ...(shouldUseOpenAICompatibleBodyFlatten(normalizedProviderType, style)
       ? { sdkNpmOverride: '@ai-sdk/openai-compatible' }
@@ -568,21 +609,43 @@ export function buildProviderOptions(input: {
         // legacy renderer's behaviour for Anthropic/Claude routes).
         sendReasoning: true,
       };
-      if (thinking.enabled) {
+
+      // 处理三种思考模式
+      if (thinkingConfig.type === 'adaptive') {
+        // Adaptive thinking — Claude 4.6+
+        if (modelSupportsAdaptiveThinking(input.model, providerType)) {
+          anthropic['thinking'] = { type: 'adaptive' };
+        } else {
+          // 模型不支持 adaptive，降级为 enabled + 默认预算
+          anthropic['thinking'] = {
+            type: 'enabled',
+            budgetTokens: ANTHROPIC_THINKING_BUDGETS['medium'],
+          };
+        }
+      } else if (thinkingConfig.type === 'enabled') {
         anthropic['thinking'] = {
           type: 'enabled',
-          budgetTokens: ANTHROPIC_THINKING_BUDGETS[effort],
+          budgetTokens: thinkingConfig.budgetTokens,
         };
       } else {
+        // type === 'disabled'
         anthropic['thinking'] = { type: 'disabled' };
       }
+
       return providerOptions(modelInfo, anthropic);
     }
 
     case 'openai_effort': {
-      if (!thinking.enabled) {
+      if (thinkingConfig.type === 'disabled') {
         return undefined;
       }
+      // 从 ThinkingConfig 推断 effort（adaptive 模式使用 medium 作为默认）
+      const effort: ReasoningEffort =
+        thinkingConfig.type === 'adaptive'
+          ? 'medium'
+          : isExtendedConfig && thinking.effort
+            ? thinking.effort
+            : 'medium';
       // GPT-5 sub-models accept different reasoning_effort subsets;
       // clamp before send to avoid 400s on e.g. gpt-5.1 (no `minimal`),
       // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
@@ -596,12 +659,23 @@ export function buildProviderOptions(input: {
       if (!supportsOpenRouterReasoning(model)) {
         return undefined;
       }
+      if (thinkingConfig.type === 'disabled') {
+        return providerOptions(modelInfo, {
+          body: { reasoning: { enabled: false } },
+        });
+      }
       // OpenRouter routes GPT-5 traffic to OpenAI; the same per-model
       // effort subset rules apply when the upstream is GPT-5.
+      const effort: ReasoningEffort =
+        thinkingConfig.type === 'adaptive'
+          ? 'medium'
+          : isExtendedConfig && thinking.effort
+            ? thinking.effort
+            : 'medium';
       const openRouterEffort = clampReasoningEffortForModel(input.model, effort);
       return providerOptions(modelInfo, {
         body: {
-          reasoning: thinking.enabled ? { effort: openRouterEffort } : { enabled: false },
+          reasoning: { effort: openRouterEffort },
         },
       });
     }
@@ -614,7 +688,7 @@ export function buildProviderOptions(input: {
       }
       // DeepSeek API 默认 thinking=enabled。用户关闭时需要显式下发
       // thinking: { type: 'disabled' } 才能真正关闭思考。
-      if (!thinking.enabled) {
+      if (thinkingConfig.type === 'disabled') {
         return providerOptions(modelInfo, {
           body: { thinking: { type: 'disabled' } },
         });
@@ -623,6 +697,12 @@ export function buildProviderOptions(input: {
       //   - thinking: { type: 'enabled' } 开启思维链
       //   - reasoning_effort: 'high' | 'max' 控制推理力度
       // minimal/low 不发送 reasoning_effort（让上游用默认行为）。
+      const effort: ReasoningEffort =
+        thinkingConfig.type === 'adaptive'
+          ? 'medium'
+          : isExtendedConfig && thinking.effort
+            ? thinking.effort
+            : 'medium';
       const effortParam = deepseekReasoningEffort(effort);
       return providerOptions(modelInfo, {
         body: {
@@ -636,7 +716,7 @@ export function buildProviderOptions(input: {
       // Gemini 通过 OpenAI 兼容端点接入时，thinking_config 直接作为请求体
       // 顶层字段 google.thinking_config 传递。注意：extra_body 是 OpenAI SDK
       // 客户端库的概念，原生 HTTP 请求不应包含 extra_body 包裹层。
-      if (!thinking.enabled) {
+      if (thinkingConfig.type === 'disabled') {
         if (model.includes('gemini-3')) {
           // gemini-3 only accepts thinking_level (string), not numeric
           // thinking_budget. Use the lowest supported level for "off".
@@ -654,6 +734,12 @@ export function buildProviderOptions(input: {
           },
         });
       }
+      const effort: ReasoningEffort =
+        thinkingConfig.type === 'adaptive'
+          ? 'medium'
+          : isExtendedConfig && thinking.effort
+            ? thinking.effort
+            : 'medium';
       if (model.includes('gemini-3')) {
         return providerOptions(modelInfo, {
           body: {
@@ -681,11 +767,17 @@ export function buildProviderOptions(input: {
     case 'qwen_enable_thinking': {
       // Qwen3 系列：enable_thinking 开关 + thinking_budget 力度控制。
       // QwQ 系列不响应这两个参数但也不会报错，所以统一下发即可。
-      if (!thinking.enabled) {
+      if (thinkingConfig.type === 'disabled') {
         return providerOptions(modelInfo, {
           body: { enable_thinking: false },
         });
       }
+      const effort: ReasoningEffort =
+        thinkingConfig.type === 'adaptive'
+          ? 'medium'
+          : isExtendedConfig && thinking.effort
+            ? thinking.effort
+            : 'medium';
       return providerOptions(modelInfo, {
         body: {
           enable_thinking: true,
@@ -698,18 +790,23 @@ export function buildProviderOptions(input: {
       // body.thinking = { type: 'enabled' | 'disabled' } —— Moonshot / 小米 MiMo
       // 等使用这种 chat-completions body 字段。部分平台仅特定模型支持(如
       // Moonshot 仅 kimi-k2.5 系列)，由 catalog 的 thinkingModelMatcher 决定。
-      if (!catalogModelSupportsThinking(thinking.providerType, model)) {
+      if (!catalogModelSupportsThinking(providerType, model)) {
         return undefined;
       }
       // MiMo V2.5+ 支持 reasoning_effort 参数（low/medium/high），
       // 在 thinking 开启时一并下发，与 DeepSeek "deepseek" 格式一致。
-      if (thinking.providerType === 'mimo' && thinking.enabled) {
+      if (providerType === 'mimo' && thinkingConfig.type !== 'disabled') {
+        const effort: ReasoningEffort =
+          thinkingConfig.type === 'adaptive'
+            ? 'medium'
+            : isExtendedConfig && thinking.effort
+              ? thinking.effort
+              : 'medium';
         const mimoSupported: ReasoningEffort[] = ['low', 'medium', 'high'];
-        const requested = normalizeProviderReasoningEffort(thinking.effort ?? 'medium');
-        const mimoEffort = mimoSupported.includes(requested)
-          ? requested
+        const mimoEffort = mimoSupported.includes(effort)
+          ? effort
           : (() => {
-              const rank = EFFORT_RANK[requested];
+              const rank = EFFORT_RANK[effort];
               const sorted = [...mimoSupported].sort((a, b) => EFFORT_RANK[a] - EFFORT_RANK[b]);
               for (const eff of [...sorted].reverse()) {
                 if (EFFORT_RANK[eff] <= rank) return eff;
@@ -724,7 +821,9 @@ export function buildProviderOptions(input: {
         });
       }
       return providerOptions(modelInfo, {
-        body: { thinking: { type: thinking.enabled ? 'enabled' : 'disabled' } },
+        body: {
+          thinking: { type: thinkingConfig.type === 'disabled' ? 'disabled' : 'enabled' },
+        },
       });
     }
 

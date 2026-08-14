@@ -383,7 +383,20 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   const hiddenMessageCount = localHiddenCount + serverUnloadedTurns;
 
   const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
-    return visibleMessages.map((message) => ({
+    // 先检测并移除重复消息
+    const seenIds = new Set<string>();
+    const deduplicatedMessages = visibleMessages.filter((message) => {
+      if (seenIds.has(message.id)) {
+        console.warn(
+          `[ChatRender] 检测到重复消息 ID: ${message.id}, role: ${message.role}, 已自动过滤`,
+        );
+        return false;
+      }
+      seenIds.add(message.id);
+      return true;
+    });
+
+    return deduplicatedMessages.map((message) => ({
       message,
       actions: buildMessageActions(message),
       // Keep compaction markers as their own visual group so they don't

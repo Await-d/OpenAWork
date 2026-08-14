@@ -508,6 +508,16 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
 
 const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
+// 新版 thinking 参数 schema — 对齐参考实现
+const thinkingConfigSchema = z.union([
+  z.object({ type: z.literal('adaptive') }),
+  z.object({
+    type: z.literal('enabled'),
+    budgetTokens: z.number().int().min(0).max(100000),
+  }),
+  z.object({ type: z.literal('disabled') }),
+]);
+
 const inputImagePartSchema = z
   .object({
     type: z.literal('input_image'),
@@ -549,6 +559,20 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
   teamTaskThreadId: z.string().trim().min(1).max(128).optional(),
+  // 新版 thinking 参数（对齐参考实现）
+  thinking: z
+    .preprocess((value) => {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }, thinkingConfigSchema)
+    .optional(),
+  // 旧版参数（向后兼容）
   thinkingEnabled: z
     .preprocess((value) => {
       if (typeof value === 'boolean') return value;

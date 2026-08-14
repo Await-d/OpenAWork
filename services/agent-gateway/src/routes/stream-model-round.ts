@@ -996,13 +996,42 @@ export async function runModelRound(input: {
 }> {
   const compactionAutoEnabled = input.compactionAutoEnabled ?? true;
   let streamDiagnostics = createEmptyStreamDiagnosticsSummary();
-  const shouldApplyThinkingConfig =
-    input.requestData.thinkingEnabled !== undefined ||
-    input.requestData.reasoningEffort !== undefined;
-  const thinkingLanguagePrompt =
-    shouldApplyThinkingConfig && input.requestData.thinkingEnabled
-      ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
-      : null;
+
+  // ── 构建 ThinkingConfig（支持新版 + 旧版参数）──
+  // 优先使用新版 thinking 参数；如果不存在，则从旧版参数构建
+  const thinkingConfig: import('../v2-runtime/upstream/provider-options.js').ThinkingConfig | undefined =
+    input.requestData.thinking ??
+    (input.requestData.thinkingEnabled !== undefined ||
+    input.requestData.reasoningEffort !== undefined
+      ? (() => {
+          if (input.requestData.thinkingEnabled === false) {
+            return { type: 'disabled' as const };
+          }
+          const effort = input.requestData.reasoningEffort ?? 'medium';
+          // 从 effort 推断 budgetTokens（使用 Anthropic 映射表作为默认）
+          const BUDGET_MAP: Record<string, number> = {
+            none: 0,
+            minimal: 1024,
+            low: 4096,
+            medium: 8192,
+            high: 16384,
+            xhigh: 31999,
+            max: 31999,
+          };
+          return {
+            type: 'enabled' as const,
+            budgetTokens: BUDGET_MAP[effort] ?? 8192,
+          };
+        })()
+      : undefined);
+
+  const shouldApplyThinkingConfig = thinkingConfig !== undefined;
+  const isThinkingEnabled =
+    thinkingConfig?.type === 'adaptive' || thinkingConfig?.type === 'enabled';
+
+  const thinkingLanguagePrompt = shouldApplyThinkingConfig && isThinkingEnabled
+    ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
+    : null;
 
   // ── New 2-layer pipeline (opencode pattern) ──
   // Layer 0: Filter messages after the most recent compaction boundary
@@ -1046,14 +1075,13 @@ export async function runModelRound(input: {
   const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
-  const thinkingUserHint =
-    shouldApplyThinkingConfig && input.requestData.thinkingEnabled
-      ? buildThinkingLanguageHint(
-          unifiedMessages.filter(
-            (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
-          ),
-        )
-      : null;
+  const thinkingUserHint = shouldApplyThinkingConfig && isThinkingEnabled
+    ? buildThinkingLanguageHint(
+        unifiedMessages.filter(
+          (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
+        ),
+      )
+    : null;
   const messagesWithHint = thinkingUserHint
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)
     : unifiedMessages;
@@ -1446,14 +1474,14 @@ export async function runModelRound(input: {
         ...(typeof input.requestData.upstreamRetryMaxRetries === 'number'
           ? { maxRetries: input.requestData.upstreamRetryMaxRetries }
           : {}),
-        ...(shouldApplyThinkingConfig && input.route.providerType
+        ...(shouldApplyThinkingConfig && input.route.providerType && thinkingConfig
           ? {
               thinking: {
-                enabled: input.requestData.thinkingEnabled === true,
-                effort: input.requestData.reasoningEffort ?? 'medium',
+                config: thinkingConfig,
+                effort: input.requestData.reasoningEffort,
                 providerType: input.route.providerType,
-                supportsThinking: input.route.supportsThinking,
-              },
+                supportsThinking: input.route.supportsThinking ?? true,
+              } as import('../v2-runtime/upstream/provider-options.js').ExtendedThinkingConfig,
             }
           : {}),
         onDiagnostics: (info) => {

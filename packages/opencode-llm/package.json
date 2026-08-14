@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@openAwork/opencode-llm",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "description": "OpenCode LLM protocol implementations (OpenAI, Anthropic, etc.) with Effect",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocols": "./src/protocols/index.ts",
+    "./protocols/openai-chat": "./src/protocols/openai-chat.ts",
+    "./protocols/openai-responses": "./src/protocols/openai-responses.ts",
+    "./route": "./src/route/index.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.83",
+    "@effect/platform-node": "4.0.0-beta.83",
+    "@smithy/eventstream-codec": "^4.2.14",
+    "@smithy/util-utf8": "^4.2.2",
+    "aws4fetch": "^1.0.20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
