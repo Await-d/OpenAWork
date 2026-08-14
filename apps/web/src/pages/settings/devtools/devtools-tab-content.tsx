@@ -722,48 +722,52 @@ export function DevtoolsTabContent({
         <div
           style={{
             display: 'flex',
-            gap: 8,
+            gap: 12,
             flexWrap: 'wrap',
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--fg-muted)',
+            padding: '8px 12px',
+            background: 'var(--bg-overlay)',
+            borderRadius: 6,
+            border: '1px solid var(--border-subtle)',
           }}
         >
-          <span style={{ color: 'var(--accent)' }}>正常 {healthyCount}</span>
-          {loadingCount > 0 && <span>加载 {loadingCount}</span>}
-          {emptyCount > 0 && <span>空 {emptyCount}</span>}
+          <span style={{ color: 'var(--accent)', fontWeight: 500 }}>正常 {healthyCount}</span>
+          {loadingCount > 0 && <span>加载中 {loadingCount}</span>}
+          {emptyCount > 0 && <span>暂无数据 {emptyCount}</span>}
           {unavailableCount > 0 && (
-            <span style={{ color: 'var(--warning)' }}>未接入 {unavailableCount}</span>
+            <span style={{ color: 'var(--warning)', fontWeight: 500 }}>未接入 {unavailableCount}</span>
           )}
           {errorSources.length > 0 && (
-            <span style={{ color: 'var(--danger)' }}>失败 {errorSources.length}</span>
+            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>失败 {errorSources.length}</span>
           )}
-          {logErrors > 0 && <span style={{ color: 'var(--danger)' }}>日志错误 {logErrors}</span>}
+          {logErrors > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误 {logErrors}</span>}
           {workerErrors > 0 && (
-            <span style={{ color: 'var(--danger)' }}>Worker 异常 {workerErrors}</span>
+            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>Worker 异常 {workerErrors}</span>
           )}
         </div>
 
         {/* 错误提示 - 仅在有错误时显示 */}
         {errorSources.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {errorSources.map((source) => (
               <div
                 key={source.label}
                 style={{
-                  border: '1px solid color-mix(in srgb, var(--danger) 20%, var(--border-subtle))',
-                  borderRadius: 3,
-                  padding: '3px 6px',
-                  background: 'color-mix(in srgb, var(--danger) 3%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--danger) 25%, var(--border-default))',
+                  borderRadius: 6,
+                  padding: '10px 12px',
+                  background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
-                  fontSize: 10,
+                  gap: 10,
+                  fontSize: 12,
                 }}
               >
-                <span style={{ color: 'var(--danger)', fontWeight: 500 }}>✗ {source.label}</span>
+                <span style={{ color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>✗ {source.label}</span>
                 <span
                   style={{
-                    color: 'var(--fg-muted)',
+                    color: 'var(--fg-default)',
                     flex: 1,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -777,13 +781,13 @@ export function DevtoolsTabContent({
           </div>
         )}
 
-        {/* 数据源卡片 - 紧凑网格 */}
+        {/* 数据源卡片 - 优化网格 */}
         <div
           style={{
             ...UV,
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-            gap: 3,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gap: 10,
           }}
         >
           {(Object.entries(sourceStates) as Array<[DevtoolsSourceKey, DevtoolsSourceState]>).map(

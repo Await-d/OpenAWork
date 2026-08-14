@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelMessage } from 'ai';
+import type { ModelMessage } from '../../v2-runtime/upstream/opencode-llm-compat.js';
 
 import {
   applyProviderMessageTransforms,

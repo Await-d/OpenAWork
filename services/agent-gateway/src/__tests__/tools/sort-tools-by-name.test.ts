@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { ToolSet } from 'ai';
+import type { ToolSet } from '../../v2-runtime/upstream/opencode-llm-compat.js';
 
 import { sortToolsByName } from '../../v2-runtime/upstream/stream-runner.js';
 

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
+import {
+  extractSessionIcon,
+  extractDialogueMode,
+} from '../../../utils/session/session-metadata.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
 import { TeamTitlebarSummary } from '../shared/TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
@@ -45,6 +49,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const addDraftTab = useUIStateStore((s) => s.addDraftTab);
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const updateTabTitle = useUIStateStore((s) => s.updateTabTitle);
+  const isPinned = useUIStateStore((s) => s.isPinned);
 
   const { sessions } = useSessions();
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
@@ -257,19 +262,36 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
 
           {!isTeamRoute ? (
             <div role="tablist" aria-label="Chat 会话标签" className="titlebar-tab-strip__tab-list">
-              {tabs.map((tab, index) => (
-                <TitlebarTab
-                  key={tab.id}
-                  tab={tab}
-                  active={tab.id === activeTabId}
-                  index={index}
-                  onClick={() => handleClickTab(tab.id)}
-                  onClose={() => handleCloseTab(tab.id)}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                />
-              ))}
+              {tabs.map((tab, index) => {
+                const session =
+                  tab.type === 'session' && tab.sessionId
+                    ? sessions.find((s) => s.id === tab.sessionId)
+                    : undefined;
+                const sessionIcon = session ? extractSessionIcon(session.metadata_json) : undefined;
+                const sessionDialogueMode = session
+                  ? extractDialogueMode(session.metadata_json)
+                  : undefined;
+                const sessionPinned =
+                  tab.type === 'session' && tab.sessionId ? isPinned(tab.sessionId) : false;
+
+                return (
+                  <TitlebarTab
+                    key={tab.id}
+                    tab={tab}
+                    active={tab.id === activeTabId}
+                    index={index}
+                    sessionIcon={sessionIcon}
+                    sessionDialogueMode={sessionDialogueMode}
+                    sessionStateStatus={session?.state_status}
+                    isPinned={sessionPinned}
+                    onClick={() => handleClickTab(tab.id)}
+                    onClose={() => handleCloseTab(tab.id)}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                  />
+                );
+              })}
             </div>
           ) : (
             <TeamTitlebarSummary pathname={location.pathname} />

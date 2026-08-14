@@ -13,7 +13,6 @@ import {
   type ShellType,
 } from '@openAwork/agent-core';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
-import { getSessionWorkingDirectory } from '../workspace/workspace-safety.js';
 
 // 输入 Schema
 const shellCommandInputSchema = z.object({

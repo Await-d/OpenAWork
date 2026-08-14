@@ -25,24 +25,25 @@ interface DevtoolsToolbarSectionProps {
 
 // 导航按钮样式 - 清晰可见
 const NAV_BUTTON: React.CSSProperties = {
-  borderRadius: 3,
+  borderRadius: 6,
   border: '1px solid var(--border-default)',
   background: 'var(--bg-overlay)',
-  padding: '3px 8px',
+  padding: '6px 12px',
   color: 'var(--fg-strong)',
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 3,
-  fontSize: 11,
+  gap: 6,
+  fontSize: 12,
   fontWeight: 500,
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // 活跃导航按钮样式
 const NAV_BUTTON_ACTIVE: React.CSSProperties = {
   ...NAV_BUTTON,
-  background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))',
-  borderColor: 'color-mix(in srgb, var(--accent) 40%, var(--border-default))',
+  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
+  borderColor: 'var(--accent)',
   color: 'var(--accent)',
   fontWeight: 600,
 };
@@ -57,27 +58,28 @@ const EXPORT_MENU: React.CSSProperties = {
   position: 'absolute',
   top: '100%',
   right: 0,
-  marginTop: 2,
+  marginTop: 4,
   background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 3,
-  padding: '2px',
-  minWidth: 120,
-  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 6,
+  padding: '4px',
+  minWidth: 140,
+  boxShadow: 'var(--shadow-md)',
   zIndex: 10,
 };
 
 const EXPORT_ITEM: React.CSSProperties = {
   display: 'block',
   width: '100%',
-  padding: '3px 8px',
+  padding: '6px 12px',
   border: 'none',
   background: 'transparent',
   color: 'var(--fg-strong)',
-  fontSize: 11,
+  fontSize: 12,
   cursor: 'pointer',
   textAlign: 'left',
-  borderRadius: 2,
+  borderRadius: 4,
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 export function DevtoolsToolbarSection({
@@ -126,10 +128,10 @@ export function DevtoolsToolbarSection({
   ];
 
   return (
-    <section style={{ ...SS, marginBottom: 0, padding: '4px 0' }}>
-      <div style={TOOLBAR}>
+    <section style={{ ...SS, marginBottom: 0, padding: '8px 0', borderBottom: 'none' }}>
+      <div style={{ ...TOOLBAR, gap: 8, padding: '8px 12px', background: 'var(--bg-overlay)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
         {/* 导航标签组 */}
-        <div style={{ display: 'flex', gap: 1 }}>
+        <div style={{ display: 'flex', gap: 4 }}>
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -139,7 +141,7 @@ export function DevtoolsToolbarSection({
             >
               {item.label}
               {item.isError && item.count ? (
-                <span style={{ ...BADGE, color: 'var(--danger)', fontSize: 9 }}>{item.count}</span>
+                <span style={{ ...BADGE, fontSize: 10, padding: '1px 5px' }}>{item.count}</span>
               ) : null}
             </button>
           ))}
@@ -158,7 +160,7 @@ export function DevtoolsToolbarSection({
             cursor: anyRefreshableSourceLoading ? 'not-allowed' : 'pointer',
           }}
         >
-          {anyRefreshableSourceLoading ? '刷新中…' : '刷新'}
+          {anyRefreshableSourceLoading ? '刷新中…' : '刷新全部'}
         </button>
 
         {/* 自动刷新切换 */}
@@ -168,10 +170,10 @@ export function DevtoolsToolbarSection({
           style={{
             ...BG,
             color: autoRefreshEnabled ? 'var(--accent)' : 'var(--fg-muted)',
-            fontWeight: autoRefreshEnabled ? 500 : 400,
+            fontWeight: autoRefreshEnabled ? 600 : 400,
           }}
         >
-          {autoRefreshEnabled ? '自动' : '手动'}
+          {autoRefreshEnabled ? '自动刷新' : '手动刷新'}
         </button>
 
         <div style={DIVIDER} />
@@ -207,7 +209,7 @@ export function DevtoolsToolbarSection({
                 }}
                 style={EXPORT_ITEM}
               >
-                JSON
+                调试包 (JSON)
               </button>
               <button
                 type="button"
@@ -217,7 +219,7 @@ export function DevtoolsToolbarSection({
                 }}
                 style={EXPORT_ITEM}
               >
-                MD
+                调试包 (Markdown)
               </button>
             </div>
           )}
@@ -225,8 +227,8 @@ export function DevtoolsToolbarSection({
 
         {/* 最后刷新时间 */}
         {lastGlobalRefreshAt !== null && (
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)', marginLeft: 'auto' }}>
-            {new Date(lastGlobalRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)', marginLeft: 'auto' }}>
+            最后刷新 {new Date(lastGlobalRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}
           </span>
         )}
       </div>

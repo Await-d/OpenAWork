@@ -1,7 +1,7 @@
 /**
  * unified-message-bridge — translate the gateway's `UnifiedMessage[]`
  * (the post-Phase-A canonical conversation format produced by
- * `message-to-model-messages.ts`) into AI SDK `ModelMessage[]`.
+ * `message-to-model-messages.ts`) into OpenCode LLM `Message[]`.
  *
  * Why this bridge is separate from `normalized-message-bridge.ts`:
  *   - The legacy `NormalizedConversationMessage` format pre-dates the
@@ -9,7 +9,7 @@
  *     model with a parallel `toolCalls` field.
  *   - `UnifiedMessage` keeps the same role split but adds optional
  *     `images[]` on user turns and a richer `reasoning` envelope on
- *     assistant turns. We map those extras structurally so the AI SDK
+ *     assistant turns. We map those extras structurally so OpenCode LLM
  *     receives the same payload the legacy renderer would have built.
  *
  * Mapping rules:
@@ -24,22 +24,14 @@
  *                          (no text, no tool calls, no reasoning)
  *                          are skipped — providers reject vacuous
  *                          turns.
- *   - `tool`             → single ToolModelMessage with a textual
+ *   - `tool`             → single Message with a textual
  *                          `tool-result` part. `toolName` is left
  *                          empty for now: the unified format does not
  *                          carry it, and Anthropic / chat-completions
  *                          providers match on `toolCallId` alone.
  */
 
-import type {
-  AssistantModelMessage,
-  ImagePart,
-  ModelMessage,
-  SystemModelMessage,
-  TextPart,
-  ToolCallPart,
-  UserModelMessage,
-} from 'ai';
+import type { ModelMessage } from './opencode-llm-compat.js';
 import type {
   AssistantMessageUnified,
   SystemMessage,
@@ -47,6 +39,14 @@ import type {
   UnifiedMessage,
   UserMessageUnified,
 } from '../../message/message-to-model-messages.js';
+
+// Type aliases for message parts (compatible with OpenCode LLM)
+type AssistantModelMessage = ModelMessage;
+type ImagePart = any; // Will be properly typed based on OpenCode LLM schema
+type SystemModelMessage = ModelMessage;
+type TextPart = any; // Will be properly typed based on OpenCode LLM schema
+type ToolCallPart = any; // Will be properly typed based on OpenCode LLM schema
+type UserModelMessage = ModelMessage;
 
 interface ReasoningPart {
   type: 'reasoning';

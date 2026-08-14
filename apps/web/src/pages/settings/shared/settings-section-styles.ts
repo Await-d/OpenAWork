@@ -18,32 +18,35 @@ export const UV: CSSProperties = {
   '--color-primary-foreground': 'var(--fg-on-accent)',
 } as CSSProperties;
 
-// 输入框样式 - 极简
+// 输入框样式 - 增强可读性
 export const IS: CSSProperties = {
-  background: 'transparent',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 3,
-  padding: '3px 6px',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 6,
+  padding: '6px 10px',
   color: 'var(--fg-strong)',
-  fontSize: 11,
+  fontSize: 12,
   outline: 'none',
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
-// Section 容器样式 - 极简
+// Section 容器样式 - 优化间距
 export const SS: CSSProperties = {
-  marginBottom: '2px',
-  padding: '6px 0',
+  marginBottom: '16px',
+  padding: '12px 0',
   display: 'flex',
   flexDirection: 'column',
-  gap: '4px',
+  gap: '12px',
+  borderBottom: '1px solid var(--border-invisible)',
 };
 
-// Section 标题样式 - 极简
+// Section 标题样式 - 增强可读性
 export const ST: CSSProperties = {
-  fontSize: 10,
-  fontWeight: 500,
-  color: 'var(--fg-muted)',
-  letterSpacing: '0.04em',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--fg-strong)',
+  letterSpacing: '0.02em',
+  marginBottom: '4px',
 };
 
 // Primary Button 样式 - 清晰可见
@@ -51,12 +54,13 @@ export const BP: CSSProperties = {
   background: 'var(--accent)',
   color: 'var(--fg-on-accent)',
   border: 'none',
-  borderRadius: 3,
-  padding: '4px 10px',
-  fontSize: 11,
+  borderRadius: 6,
+  padding: '6px 12px',
+  fontSize: 12,
   fontWeight: 600,
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // Secondary Button 样式 - 清晰可见
@@ -64,12 +68,13 @@ export const BS: CSSProperties = {
   background: 'var(--bg-overlay)',
   color: 'var(--fg-strong)',
   border: '1px solid var(--border-default)',
-  borderRadius: 3,
-  padding: '4px 10px',
-  fontSize: 11,
+  borderRadius: 6,
+  padding: '6px 12px',
+  fontSize: 12,
   fontWeight: 500,
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // Ghost Button 样式 - 次要操作
@@ -77,12 +82,13 @@ export const BG: CSSProperties = {
   background: 'transparent',
   color: 'var(--fg-default)',
   border: '1px solid transparent',
-  borderRadius: 3,
-  padding: '3px 8px',
+  borderRadius: 6,
+  padding: '5px 10px',
   fontSize: 11,
   fontWeight: 400,
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // Danger Button 样式 - 危险操作
@@ -98,30 +104,35 @@ export const BD: CSSProperties = {
   cursor: 'pointer',
 };
 
-// 标签 Badge 样式 - 极简
+// 标签 Badge 样式 - 增强可读性
 export const BADGE: CSSProperties = {
-  borderRadius: 2,
-  padding: '0 4px',
-  fontSize: 10,
+  borderRadius: 4,
+  padding: '2px 6px',
+  fontSize: 11,
   fontWeight: 500,
   fontVariantNumeric: 'tabular-nums',
+  background: 'var(--accent-subtle)',
+  color: 'var(--accent)',
 };
 
-// 卡片样式 - 极简
+// 卡片样式 - 增强呼吸感
 export const CARD: CSSProperties = {
-  borderRadius: 3,
-  border: '1px solid var(--border-subtle)',
-  padding: '4px 6px',
+  borderRadius: 6,
+  border: '1px solid var(--border-default)',
+  padding: '12px',
+  background: 'var(--bg-overlay)',
 };
 
-// 面板样式 - 极简
+// 面板样式 - 增强呼吸感
 export const PANEL: CSSProperties = {
-  borderRadius: 3,
-  padding: '4px 6px',
+  borderRadius: 6,
+  padding: '12px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 3,
+  gap: 8,
   minWidth: 0,
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-subtle)',
 };
 
 // 分隔线样式 - 极简
@@ -140,17 +151,18 @@ export const TOOLBAR: CSSProperties = {
   alignItems: 'center',
 };
 
-// 搜索输入框样式 - 极简
+// 搜索输入框样式 - 增强可读性
 export const SEARCH_INPUT: CSSProperties = {
   flex: 1,
-  minWidth: 120,
-  background: 'transparent',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 3,
-  padding: '3px 6px',
+  minWidth: 140,
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 6,
+  padding: '6px 10px',
   color: 'var(--fg-strong)',
-  fontSize: 11,
+  fontSize: 12,
   outline: 'none',
+  transition: 'all 100ms cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // 详情预览样式 - 限制高度
@@ -175,33 +187,34 @@ export const CODE_BLOCK: CSSProperties = {
 export const TWO_COLUMN: CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
-  gap: 8,
+  gap: 16,
   alignItems: 'flex-start',
 };
 
 // 左侧面板（列表）
 export const LEFT_PANEL: CSSProperties = {
   flex: '1 1 45%',
-  minWidth: 200,
+  minWidth: 280,
   display: 'flex',
   flexDirection: 'column',
-  gap: 4,
+  gap: 8,
 };
 
 // 右侧面板（详情）
 export const RIGHT_PANEL: CSSProperties = {
   flex: '1 1 45%',
-  minWidth: 200,
+  minWidth: 280,
   display: 'flex',
   flexDirection: 'column',
-  gap: 4,
+  gap: 8,
 };
 
 // 列表容器 - 限制高度，允许滚动
 export const LIST_CONTAINER: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
-  maxHeight: 300,
+  gap: 6,
+  maxHeight: 400,
   overflowY: 'auto',
+  padding: '4px',
 };

@@ -1,6 +1,6 @@
 /**
  * message-transforms — provider-specific normalisation of
- * `ModelMessage[]` before they hit AI SDK / upstream providers.
+ * `Message[]` before they hit OpenCode LLM / upstream providers.
  *
  * Mirrors opencode's `normalizeMessages` (`packages/opencode/src/
  * provider/transform.ts`). The goal is **prefix stability**: any
@@ -11,7 +11,7 @@
  *     same logical string always serialises to the same bytes.
  *   - Drop empty assistant/user messages (Anthropic + Bedrock reject
  *     them) and strip empty `text` / `reasoning` parts inside arrays
- *     before they reach the AI SDK.
+ *     before they reach OpenCode LLM.
  *   - Scrub `[^a-zA-Z0-9_-]` from `toolCallId` for Claude-family
  *     models, so retried/relayed tool ids do not break tool_use ↔
  *     tool_result pairing or hash differently across rounds.
@@ -26,7 +26,7 @@
  *   - Inject empty `reasoning` part on DeepSeek assistant turns.
  */
 
-import type { ModelMessage } from 'ai';
+import type { ModelMessage } from './opencode-llm-compat.js';
 
 type ContentPart = Record<string, unknown>;
 

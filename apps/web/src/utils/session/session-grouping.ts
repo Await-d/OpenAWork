@@ -58,8 +58,11 @@ export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
 export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
   savedWorkspacePaths: readonly string[] = [],
+  pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionGroup<TSession>[] {
-  const orderedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
+  const orderedSessions = [...sessions].sort((a, b) =>
+    compareSessionsByUpdatedAt(a, b, pinnedSessionIds),
+  );
   const groups = new Map<string, WorkspaceSessionGroup<TSession>>();
   const savedWorkspaceOrder = new Map<string, number>();
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
@@ -112,15 +115,18 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
 export function groupSessionTreesByWorkspace<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
   savedWorkspacePaths: readonly string[] = [],
+  pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionTreeGroup<TSession>[] {
-  return buildWorkspaceSessionCollections(sessions, savedWorkspacePaths).treeGroups;
+  return buildWorkspaceSessionCollections(sessions, savedWorkspacePaths, pinnedSessionIds)
+    .treeGroups;
 }
 
 export function buildWorkspaceSessionCollections<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
   savedWorkspacePaths: readonly string[] = [],
+  pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionCollections<TSession> {
-  const groups = groupSessionsByWorkspace(sessions, savedWorkspacePaths);
+  const groups = groupSessionsByWorkspace(sessions, savedWorkspacePaths, pinnedSessionIds);
   const sessionCountByWorkspace = new Map<string, number>();
   const sessionIdsByGroupKey = new Map<string, string[]>();
   const treeGroups = groups.map((group) => {
@@ -299,7 +305,15 @@ function sortWorkspaceGroups<TSession extends SessionWithWorkspaceLike>(
 function compareSessionsByUpdatedAt<TSession extends SessionWithWorkspaceLike>(
   a: TSession,
   b: TSession,
+  pinnedSessionIds: readonly string[] = [],
 ): number {
+  const aPinned = pinnedSessionIds.includes(a.id);
+  const bPinned = pinnedSessionIds.includes(b.id);
+
+  // 置顶的会话优先
+  if (aPinned && !bPinned) return -1;
+  if (!aPinned && bPinned) return 1;
+
   const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
   if (byUpdatedAt !== 0) {
     return byUpdatedAt;
