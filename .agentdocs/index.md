@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260814-session-recovery-enhancement](workflow/260814-session-recovery-enhancement.md) — 会话恢复功能增强：补齐中断续写机制、粘贴内容管理、技能状态持久化三大关键功能，使本地实现达到与 Claude Code 参考库功能对等（90%+ 完整度）；包含数据库迁移、核心模块实现、测试验证全流程；预计 8-12 小时
 - [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：W3(会话页面板化 Diff+终端) / W4(消息时间线导航+预取) / W6(拖拽排序+内联重命名+命令扩充) 仍有未完成任务；W1/W2/W5 已完成；2026-07-14 起只允许落在 Fusion 新版布局
 - [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：剩余 T-F2-07(WorkbenchModeTabs 清理) + T-F4-07(移动端侧面板 Tab 适配)；其余 F1/F2/F3/F4/F5 已完成
 
