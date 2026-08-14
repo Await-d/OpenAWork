@@ -34,7 +34,7 @@ export function detectTurnInterruption(messages: Message[]): InterruptionDetecti
     return { kind: 'none' };
   }
 
-  // 从后往前找最后一条相关消息，跳过系统消息和进度消息
+  // 从后往前找最后一条相关消息，跳过系统消息、进度消息和 API 错误消息
   const lastMessageIdx = findLastRelevantMessageIndex(messages);
   if (lastMessageIdx === -1) {
     return { kind: 'none' };
@@ -42,11 +42,16 @@ export function detectTurnInterruption(messages: Message[]): InterruptionDetecti
 
   const lastMessage = messages[lastMessageIdx]!;
 
+  // 检查是否为元数据消息或压缩摘要
+  // @ts-expect-error - 扩展字段
+  if (lastMessage.isMeta || lastMessage.isCompactSummary) {
+    return { kind: 'none' };
+  }
+
   // 最后消息是 assistant → 正常结束
   if (lastMessage.role === 'assistant') {
     // Claude Code 参考实现中，流式输出的 stop_reason 在持久化时总是 null
     // 因此只要最后消息是 assistant，就认为是正常结束
-    // 如果有未解析的 tool_use，应该在之前的过滤步骤中已被移除
     return { kind: 'none' };
   }
 
@@ -67,6 +72,13 @@ export function detectTurnInterruption(messages: Message[]): InterruptionDetecti
     return { kind: 'interrupted_prompt', message: lastMessage };
   }
 
+  // 检查是否为 attachment 类型（附件作为用户 turn 的一部分）
+  // @ts-expect-error - 可能存在的扩展字段
+  if (lastMessage.type === 'attachment') {
+    // 用户提供了上下文但 assistant 从未响应
+    return { kind: 'interrupted_turn' };
+  }
+
   // 其他情况（理论上不应该到达）
   return { kind: 'none' };
 }
@@ -78,11 +90,18 @@ export function detectTurnInterruption(messages: Message[]): InterruptionDetecti
 function findLastRelevantMessageIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!;
-    // 跳过系统消息和进度消息
+
+    // 跳过系统消息
     if (msg.role === 'system') continue;
-    // 跳过内部元数据消息（如果有的话）
+
+    // 跳过进度消息和元数据消息
     // @ts-expect-error - 可能存在的内部字段
     if (msg.isProgress || msg.isMeta) continue;
+
+    // 跳过 API 错误消息（assistant 消息且标记为 API 错误）
+    // @ts-expect-error - 可能存在的内部字段
+    if (msg.role === 'assistant' && msg.isApiErrorMessage) continue;
+
     return i;
   }
   return -1;
