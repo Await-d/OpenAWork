@@ -688,24 +688,24 @@ export async function* runUpstreamStream(
   const idleController = new AbortController();
 
   // Create OpenCode LLM stream request
-  const llmModel = new OpenCodeLLM.Model({
-    provider: input.providerType || 'openai',
+  const llmModel = OpenCodeLLM.Model.make({
+    provider: input.providerType as any || 'openai',
     model: typeof input.model === 'string' ? input.model : (input.model as any).modelId || 'gpt-4',
   });
 
-  const requestOptions: any = {
+  const requestOptions: OpenCodeLLM.RequestInput = {
     model: llmModel,
     messages: decoratedMessages as OpenCodeLLM.Message[],
   };
 
   // Add system messages if present
   if (decoratedSystem) {
-    requestOptions.system = decoratedSystem;
+    requestOptions.system = decoratedSystem as any;
   }
 
   // Add tools if present
   if (effectiveTools && Object.keys(effectiveTools).length > 0) {
-    requestOptions.tools = Object.values(effectiveTools);
+    requestOptions.tools = Object.values(effectiveTools) as any;
   }
 
   // Add generation options
@@ -715,7 +715,7 @@ export async function* runUpstreamStream(
   }
   if (typeof maxOutputTokens === 'number' &&
       !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
-    generation.maxOutputTokens = maxOutputTokens;
+    generation.maxTokens = maxOutputTokens;
   }
   if (typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
     generation.topP = topP;
@@ -732,7 +732,7 @@ export async function* runUpstreamStream(
     requestOptions.generation = generation;
   }
 
-  const request = OpenCodeLLM.LLM.request(requestOptions);
+  const request = OpenCodeLLM.request(requestOptions);
 
   // Placeholder: Create mock result structure
   // Full implementation requires Effect runtime integration
@@ -740,7 +740,12 @@ export async function* runUpstreamStream(
     fullStream: (async function* () {
       // This is a placeholder that throws an error
       // Full implementation would integrate with OpenCode LLM's streaming API
-      throw new Error('OpenCode LLM stream - Effect runtime integration needed');
+      // Example: const stream = await Effect.runPromise(OpenCodeLLM.stream(request));
+      // for await (const event of stream) { yield event; }
+      throw new Error(
+        'OpenCode LLM Effect runtime integration not yet implemented. ' +
+        'This requires setting up Effect runtime with proper layers and executing the Effect stream.'
+      );
     })(),
   };
 
