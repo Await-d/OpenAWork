@@ -192,3 +192,9 @@ export class HashAnchoredEditorImpl implements HashAnchoredEditor {
     return { success: true, failed: [], lintFeedback };
   }
 }
+
+// 导出提示词
+export {
+  HASH_EDIT_TOOL_USAGE_GUIDE,
+  HASH_EDIT_TOOLS_LIST,
+} from './prompts/hash-edit-prompt.js';

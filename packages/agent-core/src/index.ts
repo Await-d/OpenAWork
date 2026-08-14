@@ -1,3 +1,6 @@
+// 工具提示词模块
+export * from './tools/prompts/index.js';
+
 export type {
   MessageRole,
   TextContent,
@@ -79,7 +82,7 @@ export {
 } from './hooks/system-directive.js';
 
 export { lspDiagnosticsTool, lspTouchTool, LSP_TOOLS } from './tools/lsp.js';
-export type { LspToolMetadata } from './tools/lsp.js';
+export type { LspToolMetadata, LspToolName } from './tools/lsp.js';
 export {
   gotoDefinitionInputSchema,
   gotoImplementationInputSchema,
@@ -99,6 +102,8 @@ export {
   lspCallHierarchyMeta,
   LSP_RICHER_TOOL_METADATA,
   ALL_LSP_TOOL_NAMES,
+  LSP_TOOL_USAGE_GUIDE,
+  LSP_TOOLS_LIST,
 } from './tools/lsp.js';
 export {
   webSearchTool,
@@ -108,10 +113,17 @@ export {
   type WebSearchMultiEntry,
   type WebSearchMultiConfig,
   type WebSearchRolloutMode,
+  WEB_SEARCH_TOOL_USAGE_GUIDE,
+  WEB_SEARCH_TOOLS_LIST,
+  WEB_SEARCH_PROVIDERS,
 } from './tools/web-search.js';
 export * from './tools/hash-edit.js';
 export type { LintResult } from './tools/post-write-lint.js';
 export { lintFile, lintFiles, formatLintFeedback } from './tools/post-write-lint.js';
+export {
+  POST_WRITE_LINT_USAGE_GUIDE,
+  POST_WRITE_LINT_TOOLS_LIST,
+} from './tools/prompts/lint-prompt.js';
 
 export type {
   WorkspacePermissionAction,
@@ -450,3 +462,32 @@ export {
   extractMemoriesFromText,
   evaluateMemoryCandidateForPersistence,
 } from './memory/index.js';
+
+// 跨平台 Shell 执行
+export type { Platform } from './utils/platform.js';
+export {
+  getPlatform,
+  getWslVersion,
+  isWindowsEnvironment,
+  supportsPosixShell,
+} from './utils/platform.js';
+
+export type {
+  ShellType,
+  ShellProvider,
+  ShellExecOptions,
+  ShellCommandResult,
+  ShellExecuteOptions,
+  ShellExecuteResult,
+} from './utils/shell/index.js';
+export {
+  createBashShellProvider,
+  createPowerShellProvider,
+  buildPowerShellArgs,
+  findSuitableShell,
+  findPowerShell,
+  isPowerShellAvailable,
+  executeShellCommand,
+  getDefaultShellType,
+  resetProviderCache,
+} from './utils/shell/index.js';

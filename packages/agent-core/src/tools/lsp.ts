@@ -202,3 +202,7 @@ export const ALL_LSP_TOOL_NAMES = [
   'lsp_hover',
   'lsp_call_hierarchy',
 ] as const;
+
+// 导出 LSP 工具提示词
+export { LSP_TOOL_USAGE_GUIDE, LSP_TOOLS_LIST } from './prompts/lsp-prompt.js';
+export type { LspToolName } from './prompts/lsp-prompt.js';

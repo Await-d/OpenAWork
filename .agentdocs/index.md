@@ -1,134 +1,93 @@
-# .agentdocs 索引
+# OpenAWork Agent Docs 索引
 
-## Active Workflows
-- [260814-session-recovery-enhancement](workflow/260814-session-recovery-enhancement.md) — 会话恢复功能增强：补齐中断续写机制、粘贴内容管理、技能状态持久化三大关键功能，使本地实现达到与 Claude Code 参考库功能对等（90%+ 完整度）；包含数据库迁移、核心模块实现、测试验证全流程；预计 8-12 小时
-- [260704-opencode-ui-layout-borrow-plan](workflow/260704-opencode-ui-layout-borrow-plan.md) — OpenCode UI 布局借鉴升级：W3(会话页面板化 Diff+终端) / W4(消息时间线导航+预取) / W6(拖拽排序+内联重命名+命令扩充) 仍有未完成任务；W1/W2/W5 已完成；2026-07-14 起只允许落在 Fusion 新版布局
-- [260706-fusion-layout-t1-s2-refactor](workflow/260706-fusion-layout-t1-s2-refactor.md) — 融合布局重构 T1+S2：剩余 T-F2-07(WorkbenchModeTabs 清理) + T-F4-07(移动端侧面板 Tab 适配)；其余 F1/F2/F3/F4/F5 已完成
+## 当前进行中的任务
 
-- [companion-settings-enhancement-plan](companion-settings-enhancement-plan.md) — Buddy 伴侣设置完整化：hook 补 4 个 setter + resetPreferencesToDefault/retrySync + 拆分 7 个新 section 组件（全局语音/默认主题/feature-banner/试聊预览）；整体未开始实施
+### 260814-tool-prompt-system - 工具提示词系统优化
+**状态**: 🔵 规划完成，等待执行  
+**创建日期**: 2026-08-14  
+**负责人**: Team Lead + 4 名开发者  
+**文档**: [workflow/260814-tool-prompt-system.md](workflow/260814-tool-prompt-system.md)
 
-## Done Workflows
-- [260725-team-layer-todo-workbench](workflow/done/260725-team-layer-todo-workbench.md) — ✅ 已完成 2026-08-13：Team classic 对话工作台 MVP；左运营壳(ChatOps/Attention/InlineOps) + 右 layer/role/todo 工作台；仅 classic 路径；Fusion 不变
-- [260724-media-rendering](workflow/done/260724-media-rendering.md) — ✅ 已完成 2026-08-13：聊天界面音视频渲染 + AI 媒体转换工具（FFmpeg/Edge TTS/AudioPlayer/VideoPlayer）全链路闭环
-- [260723-team-lifecycle-hard-contract-tools](workflow/done/260723-team-lifecycle-hard-contract-tools.md) — ✅ 已完成 2026-08-13：Team executor/reviewer 硬契约（submit_execution_result + 结构化 submit_review + runner 门禁 + quality review checklist 机器判定）
-- [260723-mobile-pen-visual-alignment](workflow/done/260723-mobile-pen-visual-alignment.md) — ✅ 已完成 2026-08-13：手机端主流程按 pen 视觉对齐（token/共享组件/主流程屏全套浅色化）
-- [260712-multi-theme-system](workflow/done/260712-multi-theme-system.md) — ✅ 已完成 2026-08-13：多主题系统改造（Nebula/Aurora/Linear × Dark/Light/System 六组 data-theme+data-mode CSS 变量）
-- [260708-opencowork-tooling-integration-plan](workflow/done/260708-opencowork-tooling-integration-plan.md) — ✅ 已完成 2026-08-13：OpenCowork 工具生态集成（原生优先/不重复简单工具/通道串行队列/QQ图片/cron 回发/诊断 UI）
-- [260707-omo-mcp-adapter-integration](workflow/done/260707-omo-mcp-adapter-integration.md) — ✅ 已完成 2026-08-13：OMO MCP 适配器全链路（Virtual MCP Registry / OMO adapter manifest / flat catalog / hook 边界 / Settings / Team 授权 / 文档 ADR）
-- [260706-lazycodex-native-workflow](workflow/done/260706-lazycodex-native-workflow.md) — ✅ 已完成 2026-08-13：LazyCodex/OmO 原生化（计划发现/运行状态协议/ULW证据闭环/skills子集/reviewer gate/Web UI/团队角色映射/文档smoke）
-- [260704-composer-optimization](workflow/done/260704-composer-optimization.md) — ✅ 已完成 2026-08-13：ChatComposer 整体优化（文件拆分+动画微交互+功能增强+视觉样式，13 项全部完成）
-- [260704-companion-linkage-enhancement](workflow/done/260704-companion-linkage-enhancement.md) — ✅ 已完成 2026-08-13：伴侣系统联动场景强化（工具调用/错误重试/附件队列真实计数/空闲检测/后端上下文增强）
-- [260813-chat-right-panel-completion](workflow/done/260813-chat-right-panel-completion.md) — ✅ 已完成 2026-08-13：ChatRightPanel 四个 tab 功能补全（Full orchestration，9 任务）——MCP 重试连接接线（组件已支持仅调用方漏传 `onRetry`）+ 数据映射修复（`toolCount` 曾硬编码为 0）、Plan 面板空状态补齐（原裸 `return null`）、DAG 节点点击接线（`AgentDAGGraph onNodeClick` 曾未传）+ 新增详情提示条、工具面板筛选数量徽标+搜索框（`renderToolsPanel` 重构为 `ToolsPanel` 组件）；均为前端展示层改动，未新增后端路由；四个交互的浏览器手动验证因工具限制未完成，已转交用户
-- [260708-layout-isolation-refactor](workflow/done/260708-layout-isolation-refactor.md) — ✅ 已完成 2026-07-18：Fusion/Shared 目录隔离、`useFusionLayout`/`useFusionChatLayout` 抽离、ChatPage Fusion 壳解耦、相关定向测试与 Web/桌面端验收闭环已全部收口；Classic 旧布局保持冻结兼容
-- [260715-composer-input-history-recall](workflow/done/260715-composer-input-history-recall.md) — ✅ 已完成 2026-07-15：chat/team 共用 `UnifiedComposer` 已支持 `ArrowUp / ArrowDown` 输入历史回显；历史按 `gatewayUrl + currentUserEmail + sessionId` 隔离在前端运行期内存 store 中，默认只保留最新 50 条，并支持 pending→session 迁移；兼容 slash/@ 菜单、busy 队列、Esc 清空/恢复与 chat 双 Esc 编辑上一条消息
-- [260709-资源能力集成使用方案](workflow/done/260709-资源能力集成使用方案.md) — ✅ 已完成 2026-07-09：资源能力完整集成闭环；后台保留完整 catalog，前端按 `visibility / feature / usageKind` 分层展示；Channels persona、Team 模板、Commands/Prompts 材料边界、Skill/MCP 现有管理面合流、上传/删除实时识别与真实浏览器 QA 已完成；已有简单工具只登记/补说明，不新增第二套执行器
-- [260706-desktop-control-plugin-integration](workflow/done/260706-desktop-control-plugin-integration.md) — ✅ 已完成 2026-07-06：系统桌面控制插件集成闭环，包含前端插件开关、工作区状态/操作控制台、`plugin_settings.desktopControl`、后端按用户注入过滤、sandbox 二次门控、desktop-control route/web-client、Tauri loopback bridge 与多项验证
-- [260704-telemetry-consent-implementation](workflow/done/260704-telemetry-consent-implementation.md) — ✅ 已完成：遥测同意状态、网关遥测路由、web-client 封装、通用事件采集与 GitHub Issue 同步链路已收口
-- [260704-display-settings-expansion](workflow/done/260704-display-settings-expansion.md) — ✅ 已完成：显示设置新增推理块显隐、命令面板/网关状态/终端按钮显隐与主题模式切换
-- [260627-sidebar-layout-refactor-plan](workflow/done/260627-sidebar-layout-refactor-plan.md) — ✅ 已完成 2026-06-27：主界面左侧栏合并为统一 AppSidebar，路由与设置入口同步清理，typecheck 与 lint 通过
-- [260530-team-page-内容区功能加强方案](workflow/done/260530-team-page-内容区功能加强方案.md) — ✅ 全部完成 2026-05-31：content-kit 视觉地基、会话统计、层级消耗、文件内联预览、跨层对话线程、知识图谱、3D 真实联动与验证闭环已完成
-- [260516-team-page-重构调整方案](workflow/done/260516-team-page-重构调整方案.md) — ✅ 已完成：TeamPage 从左侧 Sidebar + Tab 工作台重构为对话中心 + 右侧可收起面板 + 顶部固定状态栏
-- [260507-web-图片生成工作台实施](workflow/done/260507-web-图片生成工作台实施.md) — ✅ 已完成：Web 图片工作台独立路由、专用 session、生成/编辑/历史与跨会话图片画廊已落地并通过验证
-- [260522-team-fixed-roster-specialists](workflow/done/260522-team-fixed-roster-specialists.md) — ✅ 已完成 2026-05-22：默认固定团队升级为全层级可见成员槽位，含 DevOps/SRE/Platform/Security/Release/Observability，并写入 session teamDefinition 快照
-- [260522-team-explicit-task-profile-markers](workflow/done/260522-team-explicit-task-profile-markers.md) — ✅ 已完成 2026-05-22：PM1 tasks.md 显式输出 `[KIND] [SURFACE]` 画像标记，PM2 解析优先使用显式标记并保留 fallback 推断
-- [260522-team-task-classification-taxonomy](workflow/done/260522-team-task-classification-taxonomy.md) — ✅ 已完成 2026-05-22：Team / dispatch 链路引入任务画像 `kind + surface`，executor / reviewer prompt 可按任务类型与领域注入更具体的提示词
-- [260516-team-phase-e-实施方案](workflow/done/260516-team-phase-e-实施方案.md) — ✅ 已完成 2026-05-16：Workflow 模板栈 + Role Adapter 矩阵 + 5 个内置 workflow 包 + 模板编辑器 + 模板驱动 handoff；12 项任务全部完成
-- [260516-team-phase-d-实施方案](workflow/done/260516-team-phase-d-实施方案.md) — ✅ 已完成 2026-05-16：d 层结构化派发 + dispatch_package + 双重 review + D29 B3 失败分流 + toolset 门控 + 动态编制 + pm2-runner 生产接入；11 项任务全部完成
-- [260515-team-phase-c-实施方案](workflow/done/260515-team-phase-c-实施方案.md) — ✅ 已完成 2026-05-16：c 层产物链（spec/plan/tasks）+ Constitution Check + [NEEDS CLARIFICATION] 推送 + 产物查看器 + 标记高亮 + 三步向导 UI + pm1-runner 运行时接入；10 项任务全部完成 + 3 项补完全部完成
-- [260515-team-phase-b-实施方案](workflow/done/260515-team-phase-b-实施方案.md) — ✅ 已完成 2026-05-15：Session 状态机 + Handoff 协议 + Watcher + BackgroundTaskScheduler + 五层骨架 + 前端 TeamStatusBar/Session树/暂停取消/层级对话查看器；15 项任务全部完成 + 7 项补完任务全部完成
-- [260515-team-phase-a-实施方案](workflow/done/260515-team-phase-a-实施方案.md) — ✅ 已完成 2026-05-15：团队宪法 + 角色 SOUL + 7 层指令分层栈 + memory 安全扫描 + ForceApply；12 项任务全部完成；3 项偏差记录
-- [260509-opencode借鉴升级总览](workflow/done/260509-opencode借鉴升级总览.md) — ✅ 已归档 2026-05-09：8 份子工作流（P0×1 + P1×3 + P2×2 + P3×2）整批落地或显式推迟决议；agent-gateway 测试 335 → 472（+137），agent-core 新增 14 项；新增 6 个源码模块；修复 mutex 泄漏 / sandbox 未注册 / dev-browser 误导 prompt / GPT-5 400 / overloaded 重试 共 4 个真实 bug；推迟项跟踪表见文末
-- [260509-p0-provider兼容性修复批](workflow/done/260509-p0-provider兼容性修复批.md) — ✅ P0 五项已完成 2026-05-09：GPT-5 reasoning clamp + Gemini-3/2.5 thinking 子集对齐 + `server_is_overloaded` 显式分支 + 工具确定性排序 + Anthropic adaptive thinking 空 text 保留（已存在），typecheck + 335/335 vitest 通过
-- [260509-p1-compaction锚点摘要升级](workflow/done/260509-p1-compaction锚点摘要升级.md) — ✅ P1 已完成 2026-05-09：新建 `compaction-prompt.ts` 引入锚点风格 system prompt 与 `<previous-summary>` 更新指令；S3/S4/S5（工具截断、PRUNE_PROTECTED_TOOLS、summary/tail 顺序）已存在；8 项 prompt 单元 + 353/353 全量通过
-- [260509-p1-子任务取消正确传播](workflow/done/260509-p1-子任务取消正确传播.md) — ✅ P1 核心已完成 2026-05-09：`cancel-descendant-streams.ts` 在 stream.ts 父 abort 分支 await BFS 级联取消（10s timeout、visited 防环、per-child 错误吞掉）；10 项单元 + 345/345 全量；UI reason 推迟
-- [260509-p1-scout-agent与repo研究工具](workflow/done/260509-p1-scout-agent与repo研究工具.md) — ✅ P1 backend 完成 2026-05-09：`repo-reference.ts` / `repo-clone-tools.ts` / `repo-overview-tools.ts` + scout 内置 agent；并修复 mutex 内存泄漏 + tool-sandbox 未注册的两个 bug；67 项单元 + 420/420 全量；UI 卡片推迟
-- [260509-p2-并行websearch-rollout](workflow/done/260509-p2-并行websearch-rollout.md) — ✅ P2 core 层完成 2026-05-09：`searchMultiProvider` + first-success/merge/sequential 三档 + canonical URL 去 utm_ + weight 排序；14 项单元 + agent-gateway 436/436 未受影响；settings UI 推迟
-- [260509-p2-task工具schema与slashcommand补齐](workflow/done/260509-p2-task工具schema与slashcommand补齐.md) — ✅ P2-DELEGATE 已完成 2026-05-09：盘点发现 `session_id` 替代 `resume` 早就到位；本批补 `command` 为 reserved no-op + 15 项 schema 单元；T-DEADCODE 推迟独立工作流
-- [260509-p3-session-warping评估](workflow/done/260509-p3-session-warping评估.md) — ✅ P3 ADR 产出 2026-05-09：结论不实施完整 warping（OpenAWork 单 instance 无 sync 层，`owner_id` 不适用），推荐阶段 0 但本批不做；ADR 全文见 `done/260509-session-warping-ADR.md`
-- [260509-session-warping-ADR](workflow/done/260509-session-warping-ADR.md) — ✅ ADR 已归档 2026-05-09：OpenAWork 不复刻完整 session warping，推荐阶段 0 轻量切换 workspace
-- [260509-p3-会话路径过滤与devbrowser-skill](workflow/done/260509-p3-会话路径过滤与devbrowser-skill.md) — ✅ P3 后端完成 2026-05-09：(1) `/sessions?path=&includeDescendants=` + `session-path-filter.ts` 纯函数 + `/a` vs `/abc` 守卫 + 18 项单元；(2) `dev-browser` SKILL prompt 从虚假 oh-my-opencode API 改写到真实 `desktop_automation` 6 action + 反回归 token 黑名单 18 项单元；51 文件 / 472 全过
-- [260422-gpt-image2-集成方案](workflow/done/260422-gpt-image2-集成方案.md) — 已完成 GPT Image 2 从设置、生成路由、Web/Desktop 聊天、生图结果联动、多模态 `input_image` 到移动端补齐的最小全链路闭环，并通过收口后的移动端安全/入口修复与复查
-- [260420-net10-wave2-stop-active迁移](workflow/done/260420-net10-wave2-stop-active迁移.md) — 已完成 RUN-006 的最小 stop-active 收口：`.NET` 现已提供 `POST /sessions/{id}/stream/stop-active`，具备 owner/auth 校验、`{ stopped: boolean }` 返回、等待清理后返回，以及 session 级原子 active-slot 管理与 replay-slot 释放修复
-- [260421-net10-wave2-run-008-question-reply-resume迁移](workflow/done/260421-net10-wave2-run-008-question-reply-resume迁移.md) — 已完成 RUN-008 的最小 owner-session question reply / resume 子切片：`.NET` 现已提供 `GET /sessions/{id}/questions/pending` 与 `POST /sessions/{id}/questions/reply`，支持 answered/dismissed、`ExitPlanMode`、owner-session runtime resume、规范化 observability 与严格 `nextRound` 约束
-- [260421-net10-wave2-run-007-permanent-permission-materialization迁移](workflow/done/260421-net10-wave2-run-007-permanent-permission-materialization迁移.md) — 已完成 RUN-007 的最小 owner-session `decision=permanent` materialization 子切片：`.NET` 现已支持多根 workspace root 解析、`.openawork.permissions.json` 原子写入与 complete-phase 文件/DB 回滚，并通过集成测试覆盖 permanent 落盘、坏配置恢复、unresolved root rollback 与 complete failure 补偿
-- [260420-net10-wave2-permissions-pause-resume迁移](workflow/done/260420-net10-wave2-permissions-pause-resume迁移.md) — 已完成 RUN-007 permissions pause / reply / resume 主线：`.NET` 现已提供 pending/create/reply、authoritative `tool_result` continuation bridge、continue-on-deny、multiroot session metadata 与 approved-bash workdir 校验，对齐 standalone-session scope 的 permission pause/resume 语义
-- [260420-net10-wave2-commands-execute迁移](workflow/done/260420-net10-wave2-commands-execute迁移.md) — 已完成 RUN-009 的最小 commands execute 子集：`.NET` 现已提供 `/commands` 公开 server subset、`/sessions/{id}/commands/execute`、compact/summarize/handoff 与 standalone-session continuation bridge，为后续命令生态切片提供 substrate
-- [260422-net10-wave2-run-009-init-deep迁移](workflow/done/260422-net10-wave2-run-009-init-deep迁移.md) — 已完成 RUN-009 的 `/init-deep` 最小 server command 子切片：`.NET` 现已公开 `slash-init-deep`，按 workspace-root scope 汇总现有 Instructions 文件到 `initDeepContext` metadata，并通过集成测试覆盖 list 可见、正向执行与 empty-context 护栏
-- [260422-net10-wave2-run-009-refactor迁移](workflow/done/260422-net10-wave2-run-009-refactor迁移.md) — 已完成 RUN-009 的 `/refactor` 最小 server command 子切片：`.NET` 现已公开 `slash-refactor`，支持完整 slash `rawInput` / 引号 / `--key=value`，并以最小 `task_update + status card + metadata` 回写收口，同时保证 `/commands` 与 `/capabilities` 不再泄露 `slash-start-work`
-- [260422-net10-wave2-run-002-sessions-search迁移](workflow/done/260422-net10-wave2-run-002-sessions-search迁移.md) — 已完成 RUN-002 的最小 `/sessions/search` 子切片：`.NET` 现已提供 `GET /sessions/search`，支持 `q + limit`、text / modified_files_summary 匹配、当前用户隔离、按时间倒序返回与 `<mark>` snippet，高级 FTS/bm25 parity 继续后置
-- [260421-net10-wave2-data-014-task-parent-auto-resume-contexts迁移](workflow/done/260421-net10-wave2-data-014-task-parent-auto-resume-contexts迁移.md) — 已完成 DATA-014 的 durable model 子切片：`.NET` 现已提供 `task_parent_auto_resume_contexts` entity/store/migrations 与 `AutoResumeStoreTests`，并以 `version_token` compare-delete 封住 same-second retry 与旧消费者误删新行的 race
-- [260421-net10-wave2-run-003-child-lineage-read-surface迁移](workflow/done/260421-net10-wave2-run-003-child-lineage-read-surface迁移.md) — 已完成 RUN-003 的最小 child lineage / children-tasks 读面子切片：`.NET` 现已提供 `GET /sessions/{id}/children` 与 `GET /sessions/{id}/tasks`，并用 session-derived task summary 暴露 child lineage、parentTaskId、depth、terminalReason 与 error-state
-- [260421-net10-wave2-run-010-task-child-runtime-reconcile迁移](workflow/done/260421-net10-wave2-run-010-task-child-runtime-reconcile迁移.md) — 已完成 RUN-010 的最小 task-child runtime reconcile + parent auto-resume 子切片：`.NET` 现已能在 child terminal/stale/expired pending interaction 后消费 DATA-014 context 并自动续跑 parent session，且用 `version_token` compare-delete 封住 same-second retry 与旧消费者误删新行的 race
-- [260420-message-runtime-assistant-trace-协议下沉实施](workflow/done/260420-message-runtime-assistant-trace-协议下沉实施.md) — 已完成 assistant_trace 协议 helper 下沉：shared 获得统一的 assistant_trace types + codec + parts transform，apps/web 改为消费共享实现，不再定义协议本体
-- [260420-message-runtime-前端运行时协议收口实施](workflow/done/260420-message-runtime-前端运行时协议收口实施.md) — 已完成前端第二真相源的最小收口：assistant message 前端内部读取改为 parts-first，runtime 协议维持 transport/view 边界，流式本地消息不再把 assistant_trace JSON 当事实层
-- [260420-message-runtime-compaction-结构收口实施](workflow/done/260420-message-runtime-compaction-结构收口实施.md) — 已完成 compaction 最高优先级差异的最小收口：`resolveCompactionContext()` 固定 marker 优先、metadata 仅 fallback，并接入 request context / prepared conversation / compaction driver
-- [260420-message-runtime-参考库稳定结构移植实施](workflow/done/260420-message-runtime-参考库稳定结构移植实施.md) — 已完成 sender/read/tool-state 的下一轮参考库式移植：边缘 sender 统一到 `normalizedMessages`，主流 request context 读取收口到 `loadRequestContextConversation()`，`ToolPart.state` 读侧映射收口到 `tool-state-read-model.ts`
-- [260420-message-runtime-对话存储与上游格式收敛方案](workflow/done/260420-message-runtime-对话存储与上游格式收敛方案.md) — 已完成消息存储/上游格式收敛的前三阶段最小代码收口（tool_result truth、normalized IR、request lineage + compaction codec），并沉淀前端协议脆弱点矩阵、风险与验证矩阵
-- [260419-permission-第六阶段公开导出收缩](workflow/done/260419-permission-第六阶段公开导出收缩.md) — 已完成权限体系最后一层公开导出收缩：移除 `web-client` 与 `agent-core` 包根中无人消费的权限相关导出，并保留 gateway 仍在使用的 workspace permission API
-- [260419-permission-第五阶段兼容面退役评估](workflow/done/260419-permission-第五阶段兼容面退役评估.md) — 已完成最后一层兼容面退役评估与实施：删除 web-client 内部无消费的 shared-session 权限别名，退役 agent-core 历史 `permissions/*` 兼容层，并保留仍在使用的 workspace permission 包根导出
-- [260418-permission-第四阶段收尾评估](workflow/done/260418-permission-第四阶段收尾评估.md) — 已完成权限体系第四阶段收尾：browser 权限边界被确认为独立领域，shared-session 权限回复入口收成正式命名，Web 侧权限回复提交改为共用 helper
-- [260418-permission-第三阶段内核收口](workflow/done/260418-permission-第三阶段内核收口.md) — 已完成权限体系第三阶段：gateway 内部统一 permission-contract，agent-core 旧权限管理器降级为兼容层，并打通构建级验证
-- [260418-permission-第二阶段协议收口](workflow/done/260418-permission-第二阶段协议收口.md) — 已完成权限协议第二阶段收口：共享权限字面量与读模型 helper 下沉到 `shared/web-client`，`apps/web` 改为消费统一 helper，`shared-ui` 不再本地复制核心权限联合类型
-- [260418-permission-统一使用方式改造](workflow/done/260418-permission-统一使用方式改造.md) — 已完成首轮权限收口：workspace 权限配置语义统一、`PermissionManagerImpl` 最终规则求值对齐、跨 workspace 持久化隔离与验证闭环
-- [260417-net10-settings-第二批只读迁移](workflow/done/260417-net10-settings-第二批只读迁移.md) — 已完成 `/settings/mcp-status`、`/settings/upstream-retry`、`/settings/compaction`、`/settings/file-patterns` 第二批只读迁移
-- [260417-net10-settings-首批只读迁移](workflow/done/260417-net10-settings-首批只读迁移.md) — 已完成最小 JWT 鉴权基础与 `/settings/model-prices`、`/settings/workers` 首批只读迁移
-- [260417-net10-网关框架搭建实施方案](workflow/done/260417-net10-网关框架搭建实施方案.md) — .NET 10 gateway 骨架开发已完成：EF Core/MediatR、SQLite+PostgreSQL migrations、树结构工作流日志、SSE/WS/HostedService skeleton、sidecar publish/smoke
-- [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md) — Team 页面收口、契约稳定化、shell adapter 与验收闭环
+**任务概述**:
+为 OpenAWork 项目实施完整的工具提示词系统，参考 Claude Code 的最佳实践，为每个内置工具创建详细的使用指南。
 
-## Architecture Decisions
-- [2026-07-25] Team「经典对话页」原型（`demo/team-layer-todo-detail-demo.html`）落点固定为 **Team 并排工作台（`TeamPageV2` sidePanel + `TeamLayerTodoWorkbench`）**，不是复活 Classic 全局布局：左侧永驻对话，右侧默认任务台（layer rail → role strip → todo list → detail messages），概览/度量/治理嵌入既有 tab 内容；数据用前端派生 view-model，不新建第二套消息/任务真相源。MVP 不含 composer 三模式真协议与决策集服务端持久化。
-- [2026-07-23] 手机端主流程视觉对齐固定为「pen 为视觉真源 + 共享 ui 组件 + 逻辑不跟 pen 盲改」：token 已抽取；`components/ui` 提供 PageHeader/SearchField/Chip/SurfaceCard/ListRow/StatusBadge/HintCard/Buttons；主流程屏 sessions/connection/login/settings/chat 先视觉对齐，业务语义问题由产品后续点名。
-- [2026-07-23] Team 完成态固定为「Builtin Instruction 硬契约优先，prompt 仅兜底」：executor 必须 `submit_execution_result`，reviewer 必须结构化 `submit_review`；`result_json.protocol` 是完成真相源。`OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=soft|hard` 控制兼容期（默认 soft：缺 protocol 记 degraded；hard：execution-protocol-failure）。Quality Review 优先机器判定 checklist/items fail，LLM 仅做语义抽检；返工按 failedItems 精确反馈。不把 PM1/PM2 主编排改为 LLM 自由工具流。
-- [2026-07-15] Composer 输入历史固定为“`gatewayUrl + currentUserEmail + sessionId` scope 的内存 ring buffer”：`chat` 与 `team` 复用同一 `UnifiedComposer` 输入历史，最多保留最新 50 条；未建 session 时先记到 pending scope，首条发送创建 session 后再迁移；只在 direct send 成功或 queued send 成功入队时记录，不在每次编辑时落盘；多行输入仅在 caret 位于文本起点时允许 `ArrowUp` 进入历史浏览，避免抢占原生跨行导航。
-- [2026-07-14] 布局后续迭代固定为“Fusion-only，Classic 冻结”：只允许继续调整新版本 Fusion 布局；`LayoutClassic.tsx`、`AppSidebar.tsx`、`ClassicWorkbenchTitlebar.tsx`、`WorkbenchModeTabs.tsx` 等旧版路径只作为兼容边界保留。目录隔离、ChatPage 解耦、侧边栏/Titlebar/SessionPanel 后续演进都必须在 Fusion 路径内完成，不能以“对称重构”名义继续修改 Classic。
-- [2026-07-09] 资源能力集成固定为“后台完整 catalog + 前端/功能按用途分层读取”：`GET /resources` 必须保留 `souls`、`agentTemplates`、`commands`、`prompts` 等 feature 资源供 Channels/Team/Commands/Prompts 读取；资源中心 UI 只在前端按 `visibility / feature / usageKind` 分主目录与功能专用区；`souls` 是 channel persona，`agentTemplates` 是 team/workspace template，不能作为普通 Skill/Agent 混入主目录。
-- [2026-07-09] 资源中心固定为“目录管理，不是运行时执行器”：Skill/MCP 资源详情只展示定义、来源、路径和用途边界；Skill 安装/启停/更新/系统目录扫描继续走技能库或 Settings 插件页，MCP server 配置/状态/重试/工具禁用继续走 Settings 插件页。资源页在设置页嵌入态应优先单列内容高度排布，避免列表和详情面板因外层高度压缩发生重叠。
-- [2026-07-08] OpenCowork 工具生态接入固定为“OpenAWork 原生表面优先 + 已有简单工具不重复完整集成”：MCP 继续走原生 runtime/flat naming/catalog/OAuth/authorization，只补 `streamable-http` 等缺口；Read/Write/Edit/Glob/Grep/Bash/WebSearch/WebFetch/Task/Plan/AskUser/Memory/Goal/Cron/Image/Desktop/Browser 基础动作只做登记、别名或文档；OpenCowork 文档/数据 skills 选择性迁移；Channel 细分能力走 provider-specific action；Custom Extension 另建声明式 HTTP v1，JS/HTML renderer 暂缓。
-- [2026-07-09] 外部 Channel session 的 LLM 工具声明与本地 channel 发送/回复工具必须分离：默认不向上游 LLM 暴露 gateway tools，执行层也必须 fail-closed；只有显式 `channelLlmToolsEnabled:true` 且命中 channel policy / permissions 的映射工具类别才可开放，避免 QQ/飞书/Telegram 等外部聊天入口把 shell、repo、codegraph、image、task 等高风险工具意外暴露给模型或不兼容上游。
-- [2026-07-09] 外部 Channel 自动回复必须按 `pluginId + chatId` 串行进入 Agent run：同一 QQ/飞书/Telegram 等聊天的连续消息不能并发撞到 session single-flight，否则 `SESSION_ALREADY_RUNNING` 会在用户消息持久化前返回并造成“一发一回、非多轮状态”；不同 chatId 仍必须保持并发，不能退化成全局锁；串行队列必须有 per-chat 上限和忙碌回执，避免外部消息无限积压。
-- [2026-07-08] OpenCowork `resources/` 存放方式可借鉴但不应原样放到仓库根目录：OpenAWork 推荐新增 `packages/resources/resources/*` 作为默认资产包，skills/agents/souls/commands/prompts/workflows/extensions 示例都从这里 seed 或构建索引；运行时真相源仍分别是 skill registry/installed_skills、agent catalog DB、agent_personas、command 白名单、prompt snippets/workflow template API，避免形成第二套用户态配置。
-- [2026-07-07] OMO MCP 适配固定为“原生 MCP runtime 主路径 + OMO adapter typed manifest 输入源”：Agent 可见工具只来自 OpenAWork MCP catalog / gateway tool registry；`codegraph`、`git_bash`、`lsp`、`grep_app`、`websearch` 等已有 builtin/virtual MCP 不重复注册为 `mcp__omo__*`；hook 只允许 before/after 修改 args 或观察结果，不能绕过 `tool-sandbox`、permission、session visibility、audit；Settings 必须通过 gateway runtime 与 `@openAwork/web-client` 同源管理 builtin、virtual、adapter MCP；team `allowedServerIds: []` 只保留 system builtin，用户私有/插件来源 OMO MCP 不默认继承。ADR 见 [omo-mcp-adapter-architecture](../docs/chat/omo-mcp-adapter-architecture.md)。
-- [2026-07-06] 系统桌面控制采用“用户级插件开关 + 后端工具注入过滤 + sandbox 二次门控 + Tauri loopback bridge”四层闭环：前端只保存意图，Agent 可见工具和实际执行权限均由 gateway 按 `plugin_settings.desktopControl.enabled` 判定，避免仅靠 UI 开关导致历史/恢复调用绕过门控。
-- [2026-07-06] LazyCodex/OmO 新版工作流只作为语义参考，不作为 OpenAWork runtime 依赖：计划发现、ULW/start-work、reviewer gate、证据包、skills 与团队角色分别落到 OpenAWork 原生 session/read model、`WorkflowRuntimeState`、`session_run_events`、artifacts、`@openAwork/skills`、agent catalog aliases 与 team `role_layer`；不得引入 `lazycodex-ai` SDK 或 Codex `agent_type` 作为产品协议。
-- [2026-05-23] ChatPage 流式域采用“状态容器 hook + 页面内 attach/recovery 协调层”分离；`useChatStreaming` 只承接流式 state/refs/reset/reveal，跨域 attach/recovery effect 继续留在 `ChatPage.tsx`，避免形成第二套流式真相源。
-- [2026-05-22] Team workspace 默认固定团队最终采用 `team_workspaces.default_team_roster_json` 持久化；新 session 默认快照使用 workspace roster，PM2 派发通过 `resolveAssignedMember()` 按 `taskProfile + roster` 选择具体 `assignedMember`。
-- [2026-05-22] Team 默认固定团队采用 visible member slots / specialist personas，而不是新增 `roleLayer`；DevOps/Platform 归 executor，Release 归 pm2，Security/SRE/Observability/Quality 归 reviewer，并在 session `teamDefinition.version=2` 中保存不可变快照。
-- [2026-04-23] GPT Image 2 的最小产品闭环固定为“专用图片模型档 + 专用图片生成 route + 正常聊天流 `input_image` 扩展”，而不是复用 `activeSelection.chat` 或把文生图硬塞进文本主链。
-- [2026-04-23] 移动端的真实入口以 Expo Router `app/*` 为准；若共享实现放在 `src/screens/*`，必须由 `app/*` 明确委托，不能只修改未接入的 screen 文件。
-- [2026-04-20] `assistant_trace` 协议 helper 的最小治理固定为“shared 持有协议、web 保留接线”：`packages/shared/src/assistant-trace.ts` 负责类型、codec 与 parts transform，`apps/web/src/pages/chat-page/support.ts` 只保留 parse 依赖适配与业务接线，不再定义协议本体。
-- [2026-04-20] 前端运行时协议的最小收口固定为“parts-first、trace-fallback”：assistant message 在 browser 内部读取时优先使用 `ChatMessage.parts`，`assistant_trace` JSON 仅作为 fallback/兼容内容；web-client 继续只是 transport，`chat-stream-state.ts` 继续只是 runtime overlay，不应再承担消息树真相源角色。
-- [2026-04-20] compaction 的 canonical 判定固定为“marker 优先、metadata 仅 fallback”：`session-message-store.ts` 的 `resolveCompactionContext()` 是唯一的 compaction context 解析入口，`buildPreparedUpstreamConversation()`、`loadRequestContextConversation()` 与 `session-compaction.ts` 必须复用它，不能各自再手写 marker/fallback 分支。
-- [2026-04-20] `.NET` 的 RUN-007 / RUN-009 组合固定采用“最小 tool-result continuation bridge”策略：permissions reply 后先从 `request_payload_json` 解析 `toolCallId/rawInput/nextRound/requestData`，approve/reject 先生成 authoritative `tool_result`（并落 `tool` part 的 `metadata.toolResultContent` + `session_run_events`），再把 `InitialToolResult` 送入 `ISessionStreamRuntimeService` 继续 completion；这已解除 standalone-session blocker，但 task child reconciliation 与 workspace permanent-rule materialization 继续留给 `DATA-014` 之后的切片。
-- [2026-04-20] `.NET` 当前对 RUN-007 / RUN-009 的边界固定为“公开命令子集 + hardened bash bridge”：`GET /commands` 只暴露当前已实现的 server commands，`POST /sessions/{id}/commands/execute` 也只接受这一公开子集；handoff 明确保持 text-only/minimal。permissions approve 的 bash continuation 现已收口到固定 `/bin/bash` + 命令安全约束检查（当前为黑名单约束而非独立 allowlist）、基于 `WORKSPACE_ROOTS + WORKSPACE_ROOT` 的配置根与 session-root 回退的 workdir 校验、symlink 拒绝、输出截断与 generic error text；owner-session `decision=permanent` 的最小 materialization 现已由后续切片补齐，但完整 workspace persistent-permission 命中短路仍未对齐 TS tool-sandbox。
-- [2026-04-21] `RUN-007/RUN-009` 当前 acceptance 之后，Wave 2 的下一硬前置固定为 `DATA-014 / task_parent_auto_resume_contexts`：standalone-session continuation 已够用，但 task-child lineage / parent-child auto-resume 与后续 `RUN-010` reconcile 需要先有 child→parent auto-resume context 的 durable model，不能继续仅靠最小 commands execute 子集硬推。
-- [2026-04-22] `RUN-009 /init-deep` 的当前 `.NET` 对齐边界固定为 workspace-root scope：它只汇总 workspace root 作用域内现有 Instructions 文件到 `initDeepContext` metadata，并返回 status card + `audit_ref`；不要把它实现成 workingDirectory 祖先链聚合，也不要把 command template 文案误读成“生成 AGENTS 文件”。
-- [2026-04-22] `RUN-009 /refactor` 的当前 `.NET` 对齐边界固定为“最小任务启动面”：它只解析完整 slash `rawInput`（含引号参数与 `--key=value`）、写入 `refactorStartedAt/refactorStrategy/refactorScope/refactorTarget/refactorTaskId`、返回 `task_update + status card`；不要把它扩成真实 LSP 重构执行，也不要让 `/capabilities` 比 `/commands` 暴露更多隐藏 server commands。
-- [2026-04-22] `RUN-002 /sessions/search` 的当前 `.NET` 对齐边界固定为最小读闭环：只支持 `q + limit -> { results[] }`、只搜索 `text` 与 `modified_files_summary`、基于现有 `sessions + message_v2 + part_v2` 读模型返回结果；完整 `session_messages_fts / bm25 / snippet(...)` parity 继续留给后续子切片。
-- [2026-04-21] `DATA-014` 的 durable context 不能再用秒级时间戳充当隐式版本号；`.NET` 侧最终改成内部 `version_token` compare-delete，专门防止 same-second retry 与旧消费者误删新行。
-- [2026-04-21] 最小 `RUN-010` 子切片的 `.NET` 对齐边界固定为：child terminal/stale/expired pending interaction → auto-resume parent session；timeout stop 路径必须保留 `terminalReason=timeout` 优先级，不能被后续 cancelled 收尾覆盖。
-- [2026-04-21] 最小 `RUN-003` 读面子切片固定采用“专用 `/children` + `/tasks` 读路由，而不是把 child lineage 再塞回 `GET /sessions/{id}`”的对齐方式；children 走 descendant session public shape，tasks 走 session-derived child task summary。
-- [2026-04-21] 最小 `RUN-008` owner-session reply/resume 子切片固定按 TS 真值收口：pending 列表不主动过期；expired pending 仍可 answered；background reconciler 不替 question 做 expiry/dismiss；resume 的 `observability` 只保留 `presentedToolName/canonicalToolName/adapterVersion`；`nextRound` 必填。
-- [2026-04-21] 最小 `RUN-006` stop-active 子切片固定要求 stream single-flight 的 active slot 在 registry 层 session 级原子化；即使命中 persisted replay，`SessionStreamRuntimeService` 也必须走 `finally` 释放 slot，不能留下隐形 active request。
+**核心目标**:
+1. 为 LSP、Web 搜索、哈希编辑、Lint 工具创建详细提示词
+2. 实现系统提示词构建器，集成到网关
+3. 实施提示词缓存策略，优化性能
+4. 完整的测试验证体系
 
-## Coding Conventions
-- 移动端 provider 密钥仅允许存于 `SecureStore`；任何写入 SQLite / settings JSON 的 provider config 都必须先去密钥化。
-- 多模态附件的传输分层固定为：图片走结构化 `inputParts` / `input_image`，非图片可做文本摘要，但内部 `artifactId` 与 preview 不应进入用户可见聊天正文。
-- 若 gateway 需要同时支持 `chat_completions` 与 `responses`，优先先产出协议无关 IR，再由末端 renderer 负责最终 body；不要在 `stream-model-round.ts` 或任意 provider-specific helper 里重新拼一套语义。
+**开发分工**:
+- **Team Lead**: 基础设施、架构设计、集成、代码审查
+- **开发者 A**: LSP 工具提示词 + 系统集成
+- **开发者 B**: Web 搜索提示词 + 集成测试
+- **开发者 C**: 哈希编辑提示词 + 场景测试
+- **开发者 D**: Lint 提示词 + 性能优化
 
-## Known Pitfalls
-- Team 并排工作台改造时不要误改 Classic 冻结路径（`LayoutClassic` / `AppSidebar` 等）；`TeamPageV2` 当前 `workbenchSidePanel = undefined`，恢复 sidePanel 时应挂新 `TeamLayerTodoWorkbench`，并避免继续膨胀 `TeamPageV2` / `TeamConversationView` 超大文件——必须拆 view-model 与子组件。
-- `ChatPage` 的流式状态如果同时存在于页面本体和 `useChatStreaming`，会立刻引发重复声明与状态分叉；迁移时必须先统一单一真相源，再改调用点。
-- 移动端若继续同时保留 Expo Router `app/*` 与 `src/screens/*` 两套实现，后续功能很容易再次只改到未接入路径；改动前先确认真实入口。
-- WebSocket 鉴权若继续把 bearer token 放进 query string，会泄露给代理日志和调试链路；移动端现已改为 Authorization header，其他客户端也应避免回退。
-- `pendingPermissionRequestId` 的 paused 识别依赖 `isError !== true`；如果 gateway 在 fallback `tool_result` 里把“等待审批”继续标成 error，前端会把它当 failed 而不是 paused。
-- Channel 自动回复如果把普通 gateway tools 透传给不兼容 OpenAI-compatible 上游，外部平台会表现为“入站成功但无回复”；根因通常是上游 400 被 session stream 吃成 error。默认 channel session 应保持 `channelLlmToolsEnabled:false`，本地 `PluginReplyMessage` 等 channel tools 仍通过 sandbox active service 执行。
-- Channel 自动回复如果没有按 `pluginId + chatId` 排队，快速连续私聊/群聊消息会撞到 stream single-flight，且第二条会在持久化前被 `SESSION_ALREADY_RUNNING` 拦掉；修复应放在公共 `AutoReplyPipeline`，不要只给 QQ 单独打补丁。排队也不能无界，超过单 chat 上限时应回忙碌提示，不继续启动新的 Agent run。
-- `DATA-014` / RUN-010 这条链路不能再用秒级时间戳充当 compare-delete 的版本条件；必须使用独立 `version_token`，否则 same-second retry 会重新打开旧消费者误删新行的 race。
-- 最小 RUN-010 的 timeout stop 路径里，必须先写 `terminalReason=timeout` 再 stop active request；否则真实 registry 的 wait-for-completion 语义会让 cancelled 收尾提前清空 context。
-- RUN-003 最小读面里，child tasks 的失败判定不能只看 `terminalReason`；若 child session 已回到 `idle` 但最新 assistant message `status=error`，`/sessions/{id}/tasks` 仍必须把它投影为 `failed`。
-- RUN-008 最小 owner-session reply/resume 里，不要把 `.NET` 自己的 question 过期/后台 dismiss 语义混进 TS 真值；pending list、reply、background reconcile 都必须保持同一最小口径。
-- [2026-08-13] `packages/shared-ui` 里不少展示型组件（`MCPServerList.onRetry`、`AgentDAGGraph.onNodeClick`）已经把交互回调设计成可选 prop，但消费方（`ChatRightPanel` 等页面级容器）经常漏传，导致组件看起来"功能不完整"其实是"接线遗漏"。排查 UI 交互缺失时，先读 shared-ui 组件的 props 定义，再看调用处是否真的传了对应回调，往往比重写组件更省事。
-- [2026-08-13] `PlanPanel`（`packages/shared-ui/src/agent/PlanPanel.tsx`）任务为空时以前会裸 `return null`（现已改为渲染空状态文案）；`PlanTask` 数据来自 agent 执行进度的只读 WS 推送（`task_update`），不是用户可编辑任务清单，后续如果有人想加"可勾选"交互，需要先确认这个语义边界，不要直接在展示组件上加 `onToggle`。
+**预期成果**:
+- 4个工具的完整提示词文档
+- 系统提示词构建器模块
+- 完整的测试套件
+- 性能优化报告
 
-## Global Important Memory
-- `.agentdocs/runtime/` 已在仓库 `.gitignore` 中忽略，可安全存放本次 orchestration 的临时执行产物。
+---
+
+## 项目记忆
+
+### 架构决策
+- [2026-08-14] 采用 Claude Code 的工具提示词模式：每个工具独立 prompt.ts 文件，通过系统提示词构建器动态组装
+
+### 编码约定
+- 所有提示词使用中文编写
+- 提示词文件命名: `<tool-name>-prompt.ts`
+- 导出常量命名: `<TOOL>_USAGE_GUIDE`
+
+### 已知陷阱
+- 提示词过长会影响性能 → 使用动态边界分隔静态和动态内容
+- 工具提示词需要定期更新 → 每次工具更新时同步更新提示词
+
+### 全局重要记忆
+- Claude Code 源码位置: `E:\01.Projects\OpenAWork\temp\claude-code-sourcemap\restored-src`
+- 系统提示词构建参考: `src/constants/prompts.ts`
+- 工具提示词参考: `src/tools/*/prompt.ts`
+
+---
+
+## 相关资源
+
+### 外部参考
+- Claude Code 源码库: `E:\01.Projects\OpenAWork\temp\claude-code-sourcemap\restored-src`
+- 项目 CLAUDE.md: `E:\01.Projects\OpenAWork\CLAUDE.md`
+
+### 内部文档
+- 提交规范: `docs/commit-convention.md`
+- 设计规范: `packages/shared-ui/DESIGN-TOKENS.md`
+
+---
+
+## 使用说明
+
+本目录用于 OpenAWork 项目的 Agent 工作流管理和知识积累。
+
+### 目录结构
+```
+.agentdocs/
+├── index.md              # 本文件：知识入口
+├── workflow/             # 任务规划（持久化，提交到 git）
+│   ├── 260814-tool-prompt-system.md
+│   └── done/             # 已完成任务归档
+└── runtime/              # 执行协调（临时，.gitignore）
+    └── 260814-tool-prompt-system/
+        ├── master_plan.md
+        ├── agent_tasks/   # 4个开发者的详细任务
+        └── results/       # 执行结果（测试报告等）
+```
+
+### Git 配置
+请确保 `.gitignore` 包含：
+```
+.agentdocs/runtime/
+```
+
+### 更新记录
+- 2026-08-14: 创建工具提示词系统优化任务，完成详细规划

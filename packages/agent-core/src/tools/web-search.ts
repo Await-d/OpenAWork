@@ -766,3 +766,10 @@ export const webSearchTool: ToolDefinition = {
 };
 
 export const WEB_SEARCH_TOOLS = [webSearchTool] as const;
+
+// 导出提示词
+export {
+  WEB_SEARCH_TOOL_USAGE_GUIDE,
+  WEB_SEARCH_TOOLS_LIST,
+  WEB_SEARCH_PROVIDERS,
+} from './prompts/web-search-prompt.js';

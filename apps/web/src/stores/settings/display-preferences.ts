@@ -19,12 +19,12 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 
 /**
  * 主题风格。
- * - `nebula`：靛青+琥珀四色系（项目默认）
+ * - `carbon`：纯碳灰 + 电光蓝（项目默认）
+ * - `nebula`：靛青+琥珀四色系
  * - `aurora`：极光毛玻璃 + 渐变
  * - `linear`：极简精致 + 单一靛蓝
  * - `forest`：森林墨绿 + 暖橙
  * - `sakura`：樱花粉墨 + 玫红
- * - `carbon`：纯碳灰 + 电光蓝
  * - `sunset`：暮光紫橙 + 落日金
  * - `ocean`：深海青蓝 + 珊瑚
  */
@@ -278,7 +278,7 @@ const DEFAULTS: DisplayPreferenceValues = {
   showTerminalButton: true,
   // 直接从 localStorage 读取，不依赖 Zustand persist 水合时序
   themeMode: typeof window !== 'undefined' ? storageReadThemeMode() : 'system',
-  themeStyle: typeof window !== 'undefined' ? storageReadThemeStyle() : 'nebula',
+  themeStyle: typeof window !== 'undefined' ? storageReadThemeStyle() : 'carbon',
 };
 
 export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(

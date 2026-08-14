@@ -47,7 +47,6 @@ export function ChatStreamErrorBar({
       data-testid="chat-stream-error-bar"
       style={{
         padding: '0 10px 6px',
-        background: 'var(--bg-base)',
         flexShrink: 0,
       }}
     >

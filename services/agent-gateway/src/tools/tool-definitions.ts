@@ -48,6 +48,7 @@ import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
+import { shellCommandToolDefinition } from './shell-command-tools.js';
 import { generateImageToolDefinition } from './image-generation-tool.js';
 import { convertMediaToolDefinition } from './convert-media-tool.js';
 import { extractMediaInfoToolDefinition } from './extract-media-info-tool.js';
@@ -167,6 +168,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   skillTool,
   batchToolDefinition,
   bashToolDefinition,
+  shellCommandToolDefinition,
   runBashInBackgroundToolDefinition,
   bashOutputToolDefinition,
   bashKillToolDefinition,

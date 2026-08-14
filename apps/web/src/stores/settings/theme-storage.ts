@@ -40,7 +40,7 @@ function isValidMode(v: unknown): v is ThemeMode {
  * 读取主题风格。读取顺序：
  * 1. theme-style 独立 key
  * 2. openAwork-display-preferences persist key 中的 state.themeStyle
- * 3. 默认 nebula
+ * 3. 默认 carbon
  */
 export function readThemeStyle(): ThemeStyle {
   try {
@@ -61,7 +61,7 @@ export function readThemeStyle(): ThemeStyle {
   } catch {
     // ignore
   }
-  return 'nebula';
+  return 'carbon';
 }
 
 /**

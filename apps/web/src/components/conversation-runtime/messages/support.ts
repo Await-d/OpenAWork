@@ -2223,7 +2223,17 @@ export function reconcileSnapshotChatMessages(
     }
   }
 
-  return reconciled;
+  // 最终去重：确保没有重复的 message.id（防御性编程）
+  const seen = new Set<string>();
+  const deduplicated: ChatMessage[] = [];
+  for (const message of reconciled) {
+    if (!seen.has(message.id)) {
+      seen.add(message.id);
+      deduplicated.push(message);
+    }
+  }
+
+  return deduplicated;
 }
 
 /**
@@ -2307,7 +2317,20 @@ export function replaceOrAppendStreamedAssistantMessage(
     if (traceMessagesChecked >= maxTraceMessagesToCheck) break;
   }
 
-  return [...previousMessages, onDoneMessage];
+  // 追加新消息，但先检查是否已经存在相同 ID
+  const result = [...previousMessages, onDoneMessage];
+
+  // 去重：如果 onDoneMessage.id 已经存在，移除旧的
+  const seen = new Set<string>();
+  const deduplicated: ChatMessage[] = [];
+  for (const message of result) {
+    if (!seen.has(message.id)) {
+      seen.add(message.id);
+      deduplicated.push(message);
+    }
+  }
+
+  return deduplicated;
 }
 
 function resolveNormalizedChatMessageStatus(

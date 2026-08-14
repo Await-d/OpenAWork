@@ -1,16 +1,9 @@
-import type { CanonicalRoleDescriptor } from '@openAwork/shared';
 import type { DAGEvent } from './types.js';
+import type { TeamMember, MemberStatus } from './team-member.js';
+import type { TeamMessage, MessageType, MessagePriority } from './team-message.js';
+import { MessageBusImpl } from './message-bus.js';
 
-export type MemberStatus = 'idle' | 'working' | 'done' | 'error';
-
-export interface TeamMember {
-  id: string;
-  name: string;
-  role: string;
-  canonicalRole?: CanonicalRoleDescriptor;
-  status: MemberStatus;
-  currentTask?: string;
-}
+export type { TeamMember, MemberStatus, TeamMessage, MessageType, MessagePriority };
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
@@ -20,14 +13,6 @@ export interface TeamTask {
   assignedTo?: string;
   status: TaskStatus;
   result?: string;
-}
-
-export interface TeamMessage {
-  id: string;
-  memberId: string;
-  content: string;
-  timestamp: number;
-  type: 'update' | 'question' | 'result' | 'error';
 }
 
 export interface ActiveTeam {
@@ -61,6 +46,7 @@ function nextMsgId(): string {
 export class TeamStoreImpl implements TeamStore {
   private teams = new Map<string, ActiveTeam>();
   private history: ActiveTeam[] = [];
+  private messageBus = new MessageBusImpl();
 
   getTeam(sessionId: string): ActiveTeam | undefined {
     return this.teams.get(sessionId);
@@ -99,6 +85,19 @@ export class TeamStoreImpl implements TeamStore {
     const exists = team.members.some((m) => m.id === member.id || m.name === member.name);
     if (!exists) {
       team.members.push({ ...member });
+
+      // 自动订阅消息总线
+      this.messageBus.subscribe(member.id, (message) => {
+        // 消息处理逻辑（更新成员的 messageQueue）
+        const m = team.members.find((m) => m.id === member.id);
+        if (m && m.messageQueue) {
+          // 队列长度限制，防止内存泄漏
+          if (m.messageQueue.length >= 100) {
+            m.messageQueue.shift(); // 移除最旧的消息
+          }
+          m.messageQueue.push(message);
+        }
+      });
     }
   }
 
@@ -132,7 +131,33 @@ export class TeamStoreImpl implements TeamStore {
   addMessage(sessionId: string, message: Omit<TeamMessage, 'id'>): void {
     const team = this.teams.get(sessionId);
     if (!team) return;
-    team.messages.push({ ...message, id: nextMsgId() });
+
+    // 向后兼容：memberId 映射到 from
+    const from = message.from ?? message.memberId ?? 'unknown';
+
+    // 自动生成 threadId（如果是新对话）
+    const threadId =
+      message.threadId ??
+      (message.replyTo ? this.findThreadId(team, message.replyTo) : crypto.randomUUID());
+
+    const fullMessage: TeamMessage = {
+      ...message,
+      id: nextMsgId(),
+      from,
+      threadId,
+      priority: message.priority ?? 'normal',
+      timestamp: message.timestamp ?? Date.now(),
+    };
+
+    team.messages.push(fullMessage);
+
+    // 通过消息总线发布
+    this.messageBus.publish(fullMessage);
+  }
+
+  private findThreadId(team: ActiveTeam, messageId: string): string | undefined {
+    const msg = team.messages.find((m) => m.id === messageId);
+    return msg?.threadId;
   }
 
   handleDAGEvent(event: DAGEvent, sessionId: string): void {
@@ -147,12 +172,10 @@ export class TeamStoreImpl implements TeamStore {
           name: event.agentRoleId ?? event.nodeId,
           role: event.agentRoleId ?? 'agent',
           canonicalRole: event.canonicalRole,
-          status: 'idle',
-        });
-        this.updateMember(sessionId, event.nodeId, {
-          canonicalRole: event.canonicalRole,
           status: 'working',
           currentTask: event.nodeId,
+          messageQueue: [],
+          capabilities: [],
         });
         this.addTask(sessionId, {
           id: event.nodeId,
@@ -164,27 +187,35 @@ export class TeamStoreImpl implements TeamStore {
       }
 
       case 'node_completed': {
-        this.updateMember(sessionId, event.nodeId, { status: 'done' });
+        this.updateMember(sessionId, event.nodeId, {
+          status: 'done',
+          lastActiveAt: Date.now(),
+        });
         const result =
           typeof event.output === 'string' ? event.output : JSON.stringify(event.output);
         this.updateTask(sessionId, event.nodeId, { status: 'completed', result });
         this.addMessage(sessionId, {
-          memberId: event.nodeId,
+          from: event.nodeId,
           content: `Node ${event.nodeId} completed`,
           timestamp: event.timestamp,
           type: 'result',
+          priority: 'normal',
         });
         break;
       }
 
       case 'node_failed': {
-        this.updateMember(sessionId, event.nodeId, { status: 'error' });
+        this.updateMember(sessionId, event.nodeId, {
+          status: 'error',
+          lastActiveAt: Date.now(),
+        });
         this.updateTask(sessionId, event.nodeId, { status: 'failed' });
         this.addMessage(sessionId, {
-          memberId: event.nodeId,
+          from: event.nodeId,
           content: `Node ${event.nodeId} failed: ${event.error}`,
           timestamp: event.timestamp,
           type: 'error',
+          priority: 'high',
         });
         break;
       }
@@ -196,30 +227,40 @@ export class TeamStoreImpl implements TeamStore {
 
       case 'edge_activated': {
         this.addMessage(sessionId, {
-          memberId: 'dag',
+          from: 'dag',
           content: `Edge ${event.edgeId} activated`,
           timestamp: event.timestamp,
           type: 'update',
+          priority: 'low',
         });
         break;
       }
 
       case 'human_approval_required': {
+        this.updateMember(sessionId, event.nodeId, {
+          status: 'waiting_for_approval',
+        });
         this.addMessage(sessionId, {
-          memberId: event.nodeId,
+          from: event.nodeId,
           content: `Human approval required: ${event.plan}`,
           timestamp: Date.now(),
           type: 'question',
+          priority: 'high',
+          requiresAck: true,
         });
         break;
       }
 
       case 'risk_escalation': {
+        this.updateMember(sessionId, event.nodeId, {
+          status: 'blocked',
+        });
         this.addMessage(sessionId, {
-          memberId: event.nodeId,
+          from: event.nodeId,
           content: `Risk escalation: ${event.riskDetail}. Suggested: ${event.suggestedAction}`,
           timestamp: Date.now(),
-          type: 'error',
+          type: 'escalation',
+          priority: 'urgent',
         });
         break;
       }

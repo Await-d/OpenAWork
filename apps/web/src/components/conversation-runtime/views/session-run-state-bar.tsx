@@ -177,7 +177,6 @@ export function SessionRunStateBar({
       data-testid="chat-session-runtime-status"
       style={{
         padding: '0 10px 4px',
-        background: 'var(--bg-base)',
         flexShrink: 0,
       }}
     >

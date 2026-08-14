@@ -58,6 +58,7 @@ import {
   buildProviderOptionsModelInfo,
   providerOptions,
   type ThinkingConfig,
+  type ExtendedThinkingConfig,
 } from './provider-options.js';
 import { applyProviderMessageTransforms } from './message-transforms.js';
 import { sanitizeSurrogates } from './message-transforms.js';
@@ -115,7 +116,7 @@ export interface RunUpstreamStreamInput {
    * Optional thinking / reasoning configuration. When present we
    * derive AI SDK `providerOptions` automatically.
    */
-  thinking?: ThinkingConfig;
+  thinking?: ThinkingConfig | ExtendedThinkingConfig;
   /**
    * When true, inject a `_noop` stub tool whenever the conversation
    * history contains tool_call / tool_result parts but the caller
@@ -519,6 +520,41 @@ export async function* runUpstreamStream(
     decoratedSystem = sanitizeSurrogates(decoratedSystem);
   }
   const omit = input.requestOverrides?.omitBodyKeys;
+
+  // 调试日志：检查 thinking 配置
+  if (input.thinking) {
+    const isExtendedConfig = 'config' in input.thinking;
+    if (isExtendedConfig) {
+      // ExtendedThinkingConfig
+      console.log('[DEBUG] stream-runner thinking 配置 (ExtendedThinkingConfig):', {
+        providerType: input.thinking.providerType,
+        modelId: modelIdForOptions,
+        config: input.thinking.config,
+        effort: input.thinking.effort,
+        supportsThinking: input.thinking.supportsThinking,
+      });
+    } else {
+      // ThinkingConfig
+      console.log('[DEBUG] stream-runner thinking 配置 (ThinkingConfig):', {
+        providerType: input.providerType,
+        modelId: modelIdForOptions,
+        config: input.thinking,
+      });
+    }
+  }
+
+  const thinkingProviderOptions = buildProviderOptions({
+    ...(input.thinking ? { thinking: input.thinking } : {}),
+    model: modelIdForOptions,
+  });
+
+  // 调试日志：检查生成的 providerOptions
+  if (thinkingProviderOptions) {
+    console.log('[DEBUG] 生成的 thinking providerOptions:', JSON.stringify(thinkingProviderOptions, null, 2));
+  } else if (input.thinking) {
+    console.warn('[WARN] thinking 配置存在但未生成 providerOptions');
+  }
+
   const providerOptions = mergeProviderOptions(
     buildBaseProviderOptions({
       model: modelIdForOptions,
@@ -530,10 +566,7 @@ export async function* runUpstreamStream(
       providerType: input.providerType,
       requestOverrides: input.requestOverrides,
     }),
-    buildProviderOptions({
-      ...(input.thinking ? { thinking: input.thinking } : {}),
-      model: modelIdForOptions,
-    }),
+    thinkingProviderOptions,
   );
   let temperature = input.requestOverrides?.temperature ?? input.temperature;
   let maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
@@ -549,13 +582,19 @@ export async function* runUpstreamStream(
   // 兼容代理使用 MiMo/Moonshot 模型的场景。不检查 supportsThinking，因为
   // 该字段在代理场景下可能为 false（modelConfig 找不到），但 modelId 推断
   // 仍能识别出真实厂商。
-  if (input.thinking?.enabled) {
-    const style = resolveThinkingStyle(input.providerType ?? '', modelIdForOptions);
-    if (style === 'body_thinking_type') {
-      temperature = undefined;
-      topP = undefined;
-      frequencyPenalty = undefined;
-      presencePenalty = undefined;
+  if (input.thinking) {
+    const isExtendedConfig = 'config' in input.thinking;
+    const thinkingConfig = isExtendedConfig ? input.thinking.config : input.thinking;
+    const isThinkingEnabled = thinkingConfig.type === 'enabled' || thinkingConfig.type === 'adaptive';
+
+    if (isThinkingEnabled) {
+      const style = resolveThinkingStyle(input.providerType ?? '', modelIdForOptions);
+      if (style === 'body_thinking_type') {
+        temperature = undefined;
+        topP = undefined;
+        frequencyPenalty = undefined;
+        presencePenalty = undefined;
+      }
     }
   }
 

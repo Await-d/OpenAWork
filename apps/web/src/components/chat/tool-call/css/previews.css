@@ -1177,7 +1177,6 @@
 
 .json-preview-content[data-collapsed='true'] {
   max-height: 300px;
-  overflow: hidden;
 }
 
 .json-preview-code {

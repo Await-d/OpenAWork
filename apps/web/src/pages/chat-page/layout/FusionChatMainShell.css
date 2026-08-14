@@ -9,8 +9,6 @@
 
 .fusion-chat-main-shell--fusion {
   background: transparent;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-2) 0;
 }
 
 .fusion-chat-main-shell--classic {
