@@ -251,19 +251,19 @@ export async function runUpstreamGenerate(
   let result: UpstreamGenerateTextResult;
   try {
     // Create OpenCode LLM request
-    const llmModel = new OpenCodeLLM.Model({
-      provider: input.providerType,
+    const llmModel = OpenCodeLLM.Model.make({
+      provider: input.providerType as any,
       model: input.model,
     });
 
-    const requestOptions: any = {
+    const requestOptions: OpenCodeLLM.RequestInput = {
       model: llmModel,
       messages: decoratedMessages as OpenCodeLLM.Message[],
     };
 
     // Add system messages if present
     if (decoratedSystem) {
-      requestOptions.system = decoratedSystem;
+      requestOptions.system = decoratedSystem as any;
     }
 
     // Add generation options
@@ -273,7 +273,7 @@ export async function runUpstreamGenerate(
     }
     if (typeof input.maxOutputTokens === 'number' &&
         !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
-      generation.maxOutputTokens = input.maxOutputTokens;
+      generation.maxTokens = input.maxOutputTokens;
     }
     if (typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
       generation.topP = input.topP;
@@ -290,30 +290,27 @@ export async function runUpstreamGenerate(
       requestOptions.generation = generation;
     }
 
-    const request = OpenCodeLLM.LLM.request(requestOptions);
+    const request = OpenCodeLLM.request(requestOptions);
 
-    // Execute request using LLMClient
-    const client = OpenCodeLLM.LLMClient;
+    // Execute non-streaming generate using OpenCode LLM
+    // TODO: Integrate with Effect runtime properly
+    // For now, we throw a clear error indicating this needs implementation
+    throw new Error(
+      'OpenCode LLM Effect runtime integration not yet implemented. ' +
+      'This requires setting up Effect runtime with proper layers and executing the Effect.'
+    );
 
-    // Create auth from API key
-    const auth = OpenCodeLLM.Auth.apiKey(model.apiKey || '');
-
-    // Execute non-streaming generate
-    // Note: This is a simplified implementation. Full implementation would use Effect runtime
-    const response = await new Promise<any>((resolve, reject) => {
-      // Placeholder: actual implementation needs Effect runtime integration
-      reject(new Error('OpenCode LLM generate - Effect runtime integration needed'));
-    });
-
-    result = {
-      text: response.text || '',
-      usage: {
-        inputTokens: response.usage?.promptTokens || 0,
-        outputTokens: response.usage?.completionTokens || 0,
-      },
-      finishReason: response.finishReason || 'stop',
-      raw: response,
-    };
+    // Future implementation would look like:
+    // const response = await Effect.runPromise(OpenCodeLLM.generate(request));
+    // result = {
+    //   text: response.text || '',
+    //   usage: {
+    //     inputTokens: response.usage?.inputTokens || 0,
+    //     outputTokens: response.usage?.outputTokens || 0,
+    //   },
+    //   finishReason: response.finishReason || 'stop',
+    //   raw: response,
+    // };
   } catch (err) {
     if (timedOut) {
       throw new Error(`upstream generate timeout (${timeoutMs}ms)`);
@@ -324,10 +321,10 @@ export async function runUpstreamGenerate(
   }
 
   return {
-    text: result.text,
-    inputTokens: result.usage?.inputTokens ?? 0,
-    outputTokens: result.usage?.outputTokens ?? 0,
-    finishReason: result.finishReason ?? 'unknown',
-    raw: result,
+    text: '',
+    inputTokens: 0,
+    outputTokens: 0,
+    finishReason: 'error',
+    raw: {},
   };
 }
