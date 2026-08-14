@@ -8,18 +8,30 @@
  * - tool_result_missing: LLM sent tool_call but no tool_result was provided
  * - thinking_block_order: Thinking blocks are in wrong order for Anthropic API
  * - thinking_disabled_violation: Thinking blocks present when thinking is disabled
+ *
+ * Session Recovery Enhancement (2026-08-14):
+ * - interruption_detection: Automatically detect and recover from interrupted conversations
  */
 
 import type { Message, MessageContent } from '@openAwork/shared';
 import { appendSessionMessageV2 } from '../message/message-v2-adapter.js';
 import { extractToolResultContentsFromMessage } from '../tools/tool-result-contract.js';
+import {
+  detectTurnInterruption,
+  type InterruptionDetectionResult,
+} from './session-interruption-detector.js';
+import { createContinuationMessage } from './session-continuation-injector.js';
 
 // ---------------------------------------------------------------------------
 // Error type detection
 // ---------------------------------------------------------------------------
 
 export type RecoveryErrorType =
-  'tool_result_missing' | 'thinking_block_order' | 'thinking_disabled_violation' | null;
+  | 'tool_result_missing'
+  | 'thinking_block_order'
+  | 'thinking_disabled_violation'
+  | 'interruption_detected'
+  | null;
 
 export function detectRecoveryErrorType(error: unknown): RecoveryErrorType {
   const message = extractErrorMessageText(error);
@@ -229,4 +241,87 @@ export function recoverThinkingBlockOrder(
     errorType: 'thinking_block_order',
     action: 'flagged_for_thinking_reorder',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Interruption Recovery (Session Recovery Enhancement 2026-08-14)
+// ---------------------------------------------------------------------------
+
+/**
+ * 检测并恢复中断的对话
+ *
+ * 当对话在以下情况下被中断时，自动注入续写消息：
+ * - interrupted_prompt: 用户发送消息后，AI 未开始响应
+ * - interrupted_turn: AI 响应过程中被中断（例如工具调用后无响应）
+ *
+ * @param sessionId 会话 ID
+ * @param userId 用户 ID
+ * @param clientRequestId 客户端请求 ID
+ * @param messages 消息历史
+ * @returns 中断检测和恢复结果
+ */
+export function detectAndRecoverInterruption(
+  sessionId: string,
+  userId: string,
+  clientRequestId: string,
+  messages: Message[],
+): RecoveryResult & { interruption: InterruptionDetectionResult } {
+  const interruption = detectTurnInterruption(messages);
+
+  if (interruption.kind === 'none') {
+    return {
+      recovered: false,
+      errorType: null,
+      action: 'no_interruption_detected',
+      interruption,
+    };
+  }
+
+  // 注入续写消息
+  const continuationMessage = createContinuationMessage();
+  appendSessionMessageV2({
+    sessionId,
+    userId,
+    role: 'user',
+    content: continuationMessage.content,
+    clientRequestId: `${clientRequestId}:session-recovery:continuation`,
+    // 扩展字段，数据库已支持，类型暂不包含
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-expect-error - 扩展字段
+    isMeta: true,
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-expect-error - 扩展字段
+    is_continuation: true,
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-expect-error - 扩展字段
+    interruption_state: interruption.kind,
+  });
+
+  return {
+    recovered: true,
+    errorType: 'interruption_detected',
+    action: `injected_continuation_for_${interruption.kind}`,
+    interruption,
+  };
+}
+
+/**
+ * 在会话恢复时检查是否需要自动续写
+ *
+ * 这个函数应该在加载会话消息后、开始新的流式响应前调用
+ *
+ * @param sessionId 会话 ID
+ * @param userId 用户 ID
+ * @param clientRequestId 客户端请求 ID
+ * @param messages 消息历史
+ * @returns 是否注入了续写消息
+ */
+export function checkAndInjectContinuationOnResume(
+  sessionId: string,
+  userId: string,
+  clientRequestId: string,
+  messages: Message[],
+): boolean {
+  const result = detectAndRecoverInterruption(sessionId, userId, clientRequestId, messages);
+  return result.recovered;
 }
