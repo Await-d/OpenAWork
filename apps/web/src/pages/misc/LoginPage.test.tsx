@@ -46,6 +46,10 @@ vi.mock('@openAwork/web-client', () => ({
   login: vi.fn(),
 }));
 
+vi.mock('@openAwork/shared-ui', () => ({
+  BrandLogo: () => null,
+}));
+
 vi.mock('../../utils/gateway/desktop-gateway.js', () => ({
   DEFAULT_GATEWAY_PORT: 3000,
   desktopGatewayModeForUrl: gatewayMocks.desktopGatewayModeForUrl,

@@ -92,9 +92,15 @@ const originalCanvasGetContext = HTMLCanvasElement.prototype.getContext;
 beforeEach(() => {
   cleanup();
   vi.stubGlobal('CanvasRenderingContext2D', Object);
+  const mockContext = createMockCanvasContext();
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,
-    value: vi.fn(() => createMockCanvasContext()),
+    value: vi.fn((contextType: string) => {
+      if (contextType === '2d') {
+        return mockContext;
+      }
+      return null;
+    }),
   });
   mockKnowledgeState.artifacts = [];
   mockKnowledgeState.error = null;
@@ -138,8 +144,24 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
     globalAlpha: 1,
     lineTo: vi.fn(),
     lineWidth: 1,
+    measureText: vi.fn((text: string) => ({
+      width: text.length * 8,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: text.length * 8,
+      actualBoundingBoxAscent: 10,
+      actualBoundingBoxDescent: 2,
+      fontBoundingBoxAscent: 12,
+      fontBoundingBoxDescent: 3,
+      alphabeticBaseline: 0,
+      emHeightAscent: 12,
+      emHeightDescent: 3,
+      hangingBaseline: 0,
+      ideographicBaseline: 0,
+    })),
     moveTo: vi.fn(),
+    rect: vi.fn(),
     restore: vi.fn(),
+    roundRect: vi.fn(),
     save: vi.fn(),
     scale: vi.fn(),
     createLinearGradient: vi.fn(

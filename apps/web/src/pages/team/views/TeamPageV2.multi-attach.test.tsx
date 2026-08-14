@@ -14,6 +14,7 @@ const testState = vi.hoisted(() => ({
 vi.mock('react-router', () => ({
   useNavigate: () => testState.navigate,
   useParams: () => ({ teamWorkspaceId: 'workspace-1' }),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
 vi.mock('../../../stores/auth/auth.js', () => ({
@@ -167,6 +168,10 @@ vi.mock('../../../stores/team/team-events.js', () => ({
   useHandoffStore: (
     selector: (state: { handoffs: Map<string, Record<string, unknown>> }) => unknown,
   ) => selector({ handoffs: new Map() }),
+  useLayerStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {};
+    return typeof selector === 'function' ? selector(state) : state;
+  },
   useTeamNotificationStore: (
     selector: (state: {
       events: Array<Record<string, unknown>>;
