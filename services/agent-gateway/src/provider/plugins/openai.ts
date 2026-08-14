@@ -26,11 +26,14 @@ registerProviderPlugin({
   name: 'openai',
   hooks: {
     'resolve.protocol': ({ baseUrl }: ResolveProtocolContext) => {
-      // 只有官方 OpenAI API 才用 Responses API
-      // 代理（one-api, new-api 等）只支持 /chat/completions
-      if (!baseUrl || isOfficialOpenAI(baseUrl)) {
-        return 'responses';
-      }
+      // 临时方案：强制使用 Chat Completions API
+      // 原因：@ai-sdk/openai 的 Responses API 存在 bug (Issue #13439, #8572, #7854)
+      //      providerOptions 中的 reasoning_effort 参数不会被传递到上游
+      //
+      // 一旦 SDK 修复此 bug，可以恢复原逻辑：
+      // if (!baseUrl || isOfficialOpenAI(baseUrl)) {
+      //   return 'responses';
+      // }
       return 'chat_completions';
     },
 

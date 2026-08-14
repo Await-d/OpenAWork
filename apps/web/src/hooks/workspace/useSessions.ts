@@ -432,9 +432,10 @@ export function useSessions() {
 
   const deferredSessionSearch = useDeferredValue(sessionSearch);
   const normalizedSessionSearch = deferredSessionSearch.trim().toLowerCase();
+  const pinnedSessions = useUIStateStore((s) => s.pinnedSessions);
   const workspaceCollections = useMemo(
-    () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths),
-    [savedWorkspacePaths, sessions],
+    () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths, pinnedSessions),
+    [savedWorkspacePaths, sessions, pinnedSessions],
   );
 
   const groupedSessionTrees = useMemo(

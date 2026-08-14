@@ -1,14 +1,14 @@
 /**
- * AI SDK stream runner — Phase 4 façade that turns Vercel AI SDK
- * `streamText` events into OpenAWork's `StreamChunk` taxonomy.
+ * OpenCode LLM stream runner — Phase 4 façade that turns OpenCode LLM
+ * stream events into OpenAWork's `StreamChunk` taxonomy.
  *
  * The runner is intentionally minimal: `routes/stream-model-round.ts`
  * owns the outer multi-round agent loop, while this file is responsible
- * only for translating AI SDK stream parts into OpenAWork's existing
+ * only for translating OpenCode LLM stream events into OpenAWork's existing
  * `StreamChunk` wire format.
  *
  * Why this layer exists:
- *   - opencode delegates protocol parsing to the AI SDK, gaining vendor
+ *   - opencode delegates protocol parsing to OpenCode LLM, gaining vendor
  *     coverage and saving thousands of lines of bespoke SSE handling.
  *   - OpenAWork needs to keep emitting the existing `StreamChunk` types
  *     to preserve the SSE wire format every web/mobile/desktop client
@@ -17,7 +17,7 @@
  * Phase 4 scope (this file):
  *   - Map text deltas, reasoning deltas, tool input deltas onto
  *     `text_delta` / `thinking_*` / `tool_call_delta` chunks.
- *   - Emit a final `done` chunk with the AI SDK finish reason.
+ *   - Emit a final `done` chunk with the OpenCode LLM finish reason.
  *   - Surface upstream errors via `error` chunks.
  *
  * Out of scope (deferred to follow-up Phase 4 work):
@@ -25,12 +25,12 @@
  *     persistStreamChunkAsSessionEvents from the legacy path; reuse).
  *   - Provider-specific middleware (cache_control breakpoints,
  *     `previous_response_id`, anthropic-betas, thinking budgets).
- *   - Tool execution loop — `streamText` invokes tools itself, so the
+ *   - Tool execution loop — OpenCode LLM invokes tools itself, so the
  *     legacy `tool-sandbox` integration moves to the new path later.
  *
  * Phase C.1 additions (this revision):
  *   - Track toolName per tool input id so tool-input-delta events
- *     emit a complete `StreamToolCallChunk` (AI SDK only carries the
+ *     emit a complete `StreamToolCallChunk` (OpenCode LLM only carries the
  *     name on `tool-input-start`).
  *   - Emit a zero-length `tool_call_delta` on `tool-input-start` to
  *     mirror the Anthropic `content_block_start type=tool_use`
@@ -43,8 +43,8 @@ import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/
 import { resolveThinkingStyle } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
-import type { ModelMessage, SystemModelMessage, ToolSet } from 'ai';
-import { streamText, tool as defineTool, jsonSchema } from 'ai';
+import type { ModelMessage, SystemModelMessage, ToolSet } from './opencode-llm-compat.js';
+import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import {
   applyCaching,
   applyCachingToSystemMessages,
@@ -568,6 +568,13 @@ export async function* runUpstreamStream(
     }),
     thinkingProviderOptions,
   );
+
+  // 调试日志：检查最终合并的 providerOptions
+  if (providerOptions) {
+    console.log('[DEBUG] 最终合并的 providerOptions:', JSON.stringify(providerOptions, null, 2));
+  } else {
+    console.log('[DEBUG] 最终 providerOptions 为空');
+  }
   let temperature = input.requestOverrides?.temperature ?? input.temperature;
   let maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
   let topP = input.requestOverrides?.topP ?? input.topP;
@@ -679,53 +686,14 @@ export async function* runUpstreamStream(
   // internal controller so a stalled-but-open upstream socket can be
   // aborted even when the client never disconnects.
   const idleController = new AbortController();
-  const result = streamText({
-    model: input.model,
-    messages: decoratedMessages,
-    // Allow system messages that may appear mid-conversation (from
-    // persisted session history) to pass through without triggering the
-    // SDK's security warning. Leading system messages are already
-    // extracted and passed via the dedicated `system` parameter by
-    // callers; this only covers residual system messages embedded in
-    // historical turns.
-    allowSystemInMessages: true,
-    ...(effectiveTools ? { tools: effectiveTools } : {}),
-    // Repair tool calls whose name only differs in case before the AI
-    // SDK rejects them. Matches opencode's `experimental_repairToolCall`.
-    ...(effectiveTools
-      ? {
-          experimental_repairToolCall: (async (failed: { toolCall: { toolName: string } }) => {
-            const requested = failed.toolCall.toolName;
-            const lower = requested.toLowerCase();
-            const canonical = toolNameLookup.get(lower);
-            if (canonical && canonical !== requested) {
-              return { ...failed.toolCall, toolName: canonical };
-            }
-            return null;
-          }) as Parameters<typeof streamText>[0]['experimental_repairToolCall'],
-        }
-      : {}),
-    ...(decoratedSystem ? { system: decoratedSystem } : {}),
-    ...(providerOptions ? { providerOptions } : {}),
-    ...(typeof temperature === 'number' && !shouldOmit(omit, 'temperature') ? { temperature } : {}),
-    ...(typeof maxOutputTokens === 'number' &&
-    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
-      ? { maxOutputTokens }
-      : {}),
-    ...(typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP') ? { topP } : {}),
-    ...(typeof frequencyPenalty === 'number' &&
-    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
-      ? { frequencyPenalty }
-      : {}),
-    ...(typeof presencePenalty === 'number' &&
-    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
-      ? { presencePenalty }
-      : {}),
-    ...(typeof input.maxRetries === 'number' ? { maxRetries: input.maxRetries } : {}),
-    abortSignal: input.signal
-      ? AbortSignal.any([input.signal, idleController.signal])
-      : idleController.signal,
-  });
+
+  // TODO: Replace with OpenCode LLM streamText implementation
+  // For now, create a placeholder that returns a mock result
+  const result = {
+    fullStream: (async function* () {
+      throw new Error('OpenCode LLM stream implementation pending - stream-runner.ts');
+    })(),
+  };
 
   const meta = (extra: Record<string, unknown>) => ({
     ...(state.runId ? { runId: state.runId } : {}),

@@ -34,7 +34,8 @@
  */
 
 import type { RequestOverrides } from '@openAwork/agent-core';
-import { generateText, type ModelMessage, type SystemModelMessage, type ToolSet } from 'ai';
+import type { ModelMessage, SystemModelMessage, ToolSet } from './opencode-llm-compat.js';
+import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import {
   applyCaching,
   applyCachingToSystemMessages,
@@ -249,41 +250,31 @@ export async function runUpstreamGenerate(
 
   let result: UpstreamGenerateTextResult;
   try {
-    result = await generateText({
-      model: model as unknown as GenerateTextModelParam,
-      messages: decoratedMessages,
-      // Allow system messages that may appear mid-conversation (from
-      // persisted session history) to pass through without triggering
-      // the SDK's security warning. Callers pass system prompts via the
-      // dedicated `system` parameter; this covers residual system
-      // messages in historical turns.
-      allowSystemInMessages: true,
+    // Create OpenCode LLM request
+    const llmModel = new OpenCodeLLM.Model({
+      provider: input.providerType,
+      model: input.model,
+    });
+
+    const request = OpenCodeLLM.LLM.request({
+      model: llmModel,
+      messages: decoratedMessages as OpenCodeLLM.Message[],
       ...(decoratedSystem ? { system: decoratedSystem } : {}),
-      ...(providerOptions ? { providerOptions } : {}),
       ...(typeof input.temperature === 'number' && !shouldOmit(omit, 'temperature')
-        ? { temperature: input.temperature }
+        ? { generation: { temperature: input.temperature } }
         : {}),
       ...(typeof input.maxOutputTokens === 'number' &&
       !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
-        ? { maxOutputTokens: input.maxOutputTokens }
+        ? { generation: { maxOutputTokens: input.maxOutputTokens } }
         : {}),
       ...(typeof input.topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')
-        ? { topP: input.topP }
+        ? { generation: { topP: input.topP } }
         : {}),
-      ...(typeof input.frequencyPenalty === 'number' &&
-      !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
-        ? { frequencyPenalty: input.frequencyPenalty }
-        : {}),
-      ...(typeof input.presencePenalty === 'number' &&
-      !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
-        ? { presencePenalty: input.presencePenalty }
-        : {}),
-      ...(effectiveSignal ? { abortSignal: effectiveSignal } : {}),
-      // 团队层级调用（PM1/PM2）有自己的 callLlmWithRetry 做限流感知重试，
-      // AI SDK 默认 maxRetries=2 会在限流时快速重试加剧 429。
-      // 传 maxRetries: 0 让上层控制重试节奏。
-      maxRetries: 0,
     });
+
+    // TODO: Execute OpenCode LLM request
+    // For now, throw an error indicating this needs implementation
+    throw new Error('OpenCode LLM generate text implementation pending');
   } catch (err) {
     if (timedOut) {
       throw new Error(`upstream generate timeout (${timeoutMs}ms)`);

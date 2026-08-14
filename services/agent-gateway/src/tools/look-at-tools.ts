@@ -13,7 +13,7 @@ import { getProviderConfigForSelection } from '../provider/provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
 import type { UpstreamProtocol } from '../routes/upstream-protocol.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
-import type { UserContent } from 'ai';
+import type { UserContent } from '../v2-runtime/upstream/opencode-llm-compat.js';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import {
   getReferenceAgentModelEntries,

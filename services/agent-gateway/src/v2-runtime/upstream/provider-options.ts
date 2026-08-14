@@ -579,6 +579,15 @@ export function buildProviderOptions(input: {
   const providerType = isExtendedConfig ? thinking.providerType : 'anthropic';
   const supportsThinking = isExtendedConfig ? thinking.supportsThinking : true;
 
+  // 调试日志
+  console.log('[DEBUG buildProviderOptions] 输入参数:', {
+    model: input.model,
+    isExtendedConfig,
+    thinkingConfig,
+    providerType,
+    supportsThinking,
+  });
+
   // 对于新版 ThinkingConfig，通过 catalog 推断支持情况
   const inferredStyle = resolveThinkingStyle(providerType, input.model);
   const catalogSupports = catalogModelSupportsThinking(providerType, input.model);
@@ -613,26 +622,39 @@ export function buildProviderOptions(input: {
       // 处理三种思考模式
       if (thinkingConfig.type === 'adaptive') {
         // Adaptive thinking — Claude 4.6+
-        if (modelSupportsAdaptiveThinking(input.model, providerType)) {
+        const supportsAdaptive = modelSupportsAdaptiveThinking(input.model, providerType);
+        console.log('[DEBUG anthropic_budget] adaptive 模式检测:', {
+          model: input.model,
+          providerType,
+          supportsAdaptive,
+        });
+
+        if (supportsAdaptive) {
           anthropic['thinking'] = { type: 'adaptive' };
+          console.log('[DEBUG anthropic_budget] 使用 adaptive thinking');
         } else {
           // 模型不支持 adaptive，降级为 enabled + 默认预算
           anthropic['thinking'] = {
             type: 'enabled',
             budgetTokens: ANTHROPIC_THINKING_BUDGETS['medium'],
           };
+          console.log('[DEBUG anthropic_budget] adaptive 降级为 enabled，budgetTokens=8192');
         }
       } else if (thinkingConfig.type === 'enabled') {
         anthropic['thinking'] = {
           type: 'enabled',
           budgetTokens: thinkingConfig.budgetTokens,
         };
+        console.log('[DEBUG anthropic_budget] 使用 enabled，budgetTokens=', thinkingConfig.budgetTokens);
       } else {
         // type === 'disabled'
         anthropic['thinking'] = { type: 'disabled' };
+        console.log('[DEBUG anthropic_budget] thinking 已禁用');
       }
 
-      return providerOptions(modelInfo, anthropic);
+      const result = providerOptions(modelInfo, anthropic);
+      console.log('[DEBUG anthropic_budget] 最终 providerOptions:', JSON.stringify(result, null, 2));
+      return result;
     }
 
     case 'openai_effort': {
@@ -650,8 +672,38 @@ export function buildProviderOptions(input: {
       // clamp before send to avoid 400s on e.g. gpt-5.1 (no `minimal`),
       // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
       // GPT-5.5/5.6 use `none`/`max` as native effort values.
+
+      const clampedEffort = clampReasoningEffortForModel(input.model, effort);
+
+      // Chat Completions API 和 Responses API 需要不同的参数传递方式：
+      //
+      // 1. Chat Completions (@ai-sdk/openai-compatible):
+      //    providerOptions[name] 下的字段直接作为请求体顶层字段。
+      //    例如：{ openai: { reasoning_effort: 'high' } } → body 中 reasoning_effort='high'
+      //
+      // 2. Responses API (@ai-sdk/openai):
+      //    SDK 存在已知 bug（Issue #13439, #8572, #7854）：
+      //    providerOptions 被解构但从不使用，reasoning_effort 无法传递。
+      //
+      //    绕过方案：统一使用 @ai-sdk/openai-compatible 协议（Chat Completions），
+      //    即使对于 Responses API 端点也强制使用 openai-compatible 包装，
+      //    因为它能正确展开 body 字段到请求体顶层。
+      //
+      //    或者：等待 SDK 修复后，改用：
+      //    { openai: { reasoningEffort: clampedEffort } }
+      //
+      // 通过 modelInfo.api.npm 判断使用哪种协议。
+      if (modelInfo.api.npm === '@ai-sdk/openai') {
+        // Responses API: 由于 SDK bug，需要强制使用 body 包裹
+        // 但即使如此，SDK 可能仍然不会正确传递，需要监控日志验证
+        return providerOptions(modelInfo, {
+          body: { reasoning_effort: clampedEffort },
+        });
+      }
+
+      // Chat Completions API: 直接传递（已验证可用）
       return providerOptions(modelInfo, {
-        reasoningEffort: clampReasoningEffortForModel(input.model, effort),
+        reasoning_effort: clampedEffort,
       });
     }
 

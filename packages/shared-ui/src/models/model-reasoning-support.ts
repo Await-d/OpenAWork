@@ -311,13 +311,26 @@ export function canConfigureThinkingForModel(
   modelId: string | undefined,
   declaredSupportsThinking = false,
 ): boolean {
+  // 调试日志
+  console.log('[DEBUG] canConfigureThinkingForModel 调用:', {
+    providerType,
+    modelId,
+    declaredSupportsThinking,
+  });
+
   if (!providerType || !modelId) {
+    console.log('[DEBUG] canConfigureThinkingForModel 返回 false: providerType 或 modelId 为空');
     return false;
   }
 
   // 当用户通过 OpenAI 兼容代理使用非 OpenAI 模型时，通过 modelId 推断真实厂商。
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
   const actualModelId = leafModelId(modelId);
+
+  console.log('[DEBUG] canConfigureThinkingForModel 推断结果:', {
+    effectiveType,
+    actualModelId,
+  });
 
   // 自定义渠道 / Azure 部署名 / OpenAI 兼容代理：用户显式勾选 supportsThinking 后
   // 必须可配置。否则「思考」勾选只是假控件——聊天侧会因 canConfigure=false 强制关闭。
@@ -340,45 +353,65 @@ export function canConfigureThinkingForModel(
   // 模型下发 `body.thinking = { type: 'enabled' }`；reasoner 模型自带思考，后端
   // 会跳过（不额外下发），前端也应跳过配置。
   if (effectiveType === 'deepseek') {
-    return !actualModelId.includes('reasoner');
+    const result = !actualModelId.includes('reasoner');
+    console.log('[DEBUG] DeepSeek 判断:', { actualModelId, result });
+    return result;
   }
 
   // Moonshot：与后端 catalog 的 isMoonshotThinkingMatcher 对齐。
   if (effectiveType === 'moonshot') {
-    return isMoonshotThinkingModel(actualModelId);
+    const result = isMoonshotThinkingModel(actualModelId);
+    console.log('[DEBUG] Moonshot 判断:', { actualModelId, result });
+    return result;
   }
 
   if (effectiveType === 'mimo') {
+    console.log('[DEBUG] MiMo 判断: true');
     return true;
   }
 
   if (effectiveType === 'anthropic' || effectiveType === 'claude') {
-    return isAnthropicThinkingModel(actualModelId);
+    const result = isAnthropicThinkingModel(actualModelId);
+    console.log('[DEBUG] Anthropic 判断:', { actualModelId, result });
+    return result;
   }
 
   if (effectiveType === 'gemini') {
-    return isGeminiThinkingModel(actualModelId);
+    const result = isGeminiThinkingModel(actualModelId);
+    console.log('[DEBUG] Gemini 判断:', { actualModelId, result });
+    return result;
   }
   if (effectiveType === 'qwen') {
-    return isQwenThinkingModel(actualModelId);
+    const result = isQwenThinkingModel(actualModelId);
+    console.log('[DEBUG] Qwen 判断:', { actualModelId, result });
+    return result;
   }
 
   if (effectiveType === 'openrouter') {
-    return isOpenRouterReasoningModel(modelId);
+    const result = isOpenRouterReasoningModel(modelId);
+    console.log('[DEBUG] OpenRouter 判断:', { modelId, result });
+    return result;
   }
 
   if (effectiveType === 'xai') {
-    return isXaiThinkingModel(actualModelId);
+    const result = isXaiThinkingModel(actualModelId);
+    console.log('[DEBUG] xAI (Grok) 判断:', { actualModelId, result });
+    return result;
   }
 
   if (effectiveType === 'zhipu') {
-    return isZhipuThinkingModel(actualModelId);
+    const result = isZhipuThinkingModel(actualModelId);
+    console.log('[DEBUG] 智谱 判断:', { actualModelId, result });
+    return result;
   }
 
   if (effectiveType === 'doubao') {
-    return isDoubaoThinkingModel(actualModelId);
+    const result = isDoubaoThinkingModel(actualModelId);
+    console.log('[DEBUG] 豆包 判断:', { actualModelId, result });
+    return result;
   }
 
+  console.log('[DEBUG] 所有平台都不匹配，返回 false');
   return false;
 }
 

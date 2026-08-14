@@ -1,13 +1,13 @@
 /**
- * cache-breakpoints — annotate AI SDK `ModelMessage[]` with prompt-caching
+ * cache-breakpoints — annotate OpenCode LLM `Message[]` with prompt-caching
  * breakpoints so the upstream caches the leading
  *     system / context messages and keeps the most recent
  * user/assistant turn reusable across consecutive requests.
  *
  * Why this lives here:
  *   - The legacy `applyCacheBreakpoints` (in routes/upstream-request.ts)
- *     decorates the wire-format Chat-Completions JSON directly. AI SDK
- *     hides the wire shape behind `ModelMessage`, so we have to
+ *     decorates the wire-format Chat-Completions JSON directly. OpenCode LLM
+ *     hides the wire shape behind `Message`, so we have to
  *     inject the same prompt-cache markers through providerOptions.
  *   - The same heuristic (system + last turn) keeps cache hit
  *     rates aligned between the legacy and v2 paths.
@@ -22,7 +22,7 @@
  *   - Other providers with array content use the last content part.
  */
 
-import type { ModelMessage, SystemModelMessage } from 'ai';
+import type { ModelMessage, SystemModelMessage } from './opencode-llm-compat.js';
 
 type ProviderOptionsRecord = Record<string, unknown>;
 

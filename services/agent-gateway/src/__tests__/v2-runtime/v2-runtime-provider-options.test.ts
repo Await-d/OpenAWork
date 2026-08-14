@@ -10,7 +10,7 @@ import {
   type ProviderOptionsModelInfo,
   type ThinkingConfig,
 } from '../../v2-runtime/upstream/index.js';
-import type { ModelMessage, SystemModelMessage } from 'ai';
+import type { ModelMessage, SystemModelMessage } from '../../v2-runtime/upstream/opencode-llm-compat.js';
 
 const baseThinking: ThinkingConfig = {
   enabled: true,

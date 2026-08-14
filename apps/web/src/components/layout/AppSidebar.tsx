@@ -183,20 +183,20 @@ function TeamWorkspaceGroupItem({
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
+            gap: 8,
             minWidth: 0,
-            padding: '5px 4px 4px 8px',
+            padding: '6px 6px 6px 8px',
             borderRadius: 6,
             border: 'none',
-            background: 'transparent',
+            background: 'color-mix(in srgb, var(--fg-muted) 4%, transparent)',
             cursor: 'pointer',
             color: 'var(--fg-default)',
             textAlign: 'left',
           }}
         >
           <svg
-            width="9"
-            height="9"
+            width="10"
+            height="10"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -213,8 +213,8 @@ function TeamWorkspaceGroupItem({
             <polyline points="9 18 15 12 9 6" />
           </svg>
           <svg
-            width="13"
-            height="13"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -222,7 +222,7 @@ function TeamWorkspaceGroupItem({
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-            style={{ flexShrink: 0 }}
+            style={{ flexShrink: 0, color: 'var(--accent)' }}
           >
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
@@ -230,11 +230,13 @@ function TeamWorkspaceGroupItem({
             style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 11,
+              fontSize: 12.5,
               fontWeight: 700,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              letterSpacing: '0.015em',
+              color: 'var(--fg-strong)',
             }}
           >
             {isWorkspaceRenaming ? (
