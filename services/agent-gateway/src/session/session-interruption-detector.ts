@@ -117,7 +117,8 @@ function isTerminalToolResult(result: Message, messages: Message[], resultIdx: n
   const toolResultBlock = content.find((block) => block && block.type === 'tool_result');
   if (!toolResultBlock || typeof toolResultBlock !== 'object') return false;
 
-  const toolUseId = (toolResultBlock as Record<string, unknown>).toolCallId as string | undefined;
+  const toolUseId = (toolResultBlock as unknown as Record<string, unknown>).toolCallId as
+    string | undefined;
   if (!toolUseId) return false;
 
   // 从当前位置往前查找对应的 tool_call
@@ -132,7 +133,7 @@ function isTerminalToolResult(result: Message, messages: Message[], resultIdx: n
       if (!block || typeof block !== 'object') continue;
       if (block.type !== 'tool_call') continue;
 
-      const toolBlock = block as Record<string, unknown>;
+      const toolBlock = block as unknown as Record<string, unknown>;
       if (toolBlock.toolCallId === toolUseId) {
         const toolName = toolBlock.toolName as string;
         // 检查是否为终端工具

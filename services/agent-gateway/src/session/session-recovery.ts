@@ -287,13 +287,13 @@ export function detectAndRecoverInterruption(
     clientRequestId: `${clientRequestId}:session-recovery:continuation`,
     // 扩展字段，数据库已支持，类型暂不包含
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error - 扩展字段
+    // @ts-ignore - 扩展字段
     isMeta: true,
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error - 扩展字段
+    // @ts-ignore - 扩展字段
     is_continuation: true,
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error - 扩展字段
+    // @ts-ignore - 扩展字段
     interruption_state: interruption.kind,
   });
 
