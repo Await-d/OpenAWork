@@ -52,6 +52,7 @@
     "@openAwork/logger": "workspace:*",
     "@openAwork/lsp-client": "workspace:*",
     "@openAwork/mcp-client": "workspace:*",
+    "@openAwork/opencode-llm": "workspace:*",
     "@openAwork/pairing": "workspace:*",
     "@openAwork/platform-adapter": "workspace:*",
     "@openAwork/resources": "workspace:*",
