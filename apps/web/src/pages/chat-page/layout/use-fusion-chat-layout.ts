@@ -57,11 +57,10 @@ export function useFusionChatLayout({
       return;
     }
 
-    if (previousRunningCount === 0 && terminalRunningCount > 0 && !terminalPanelOpened) {
-      autoOpenedTerminalPanelRef.current = true;
-      setTerminalPanelOpened(true);
-    }
+    // 移除自动打开逻辑，避免界面跳动
+    // 用户可以通过折叠栏的状态提示或手动点击来打开终端面板
 
+    // 保留自动关闭逻辑：当所有终端都结束且面板是自动打开的，则自动关闭
     if (terminalRunningCount === 0 && autoOpenedTerminalPanelRef.current && terminalPanelOpened) {
       autoOpenedTerminalPanelRef.current = false;
       setTerminalPanelOpened(false);

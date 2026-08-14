@@ -85,6 +85,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
         title="展开终端面板"
         onClick={() => setTerminalPanelOpened(true)}
         className="terminal-panel-collapsed-rail"
+        data-has-running={activeTerminalCount > 0 ? 'true' : 'false'}
       >
         <span className="terminal-panel-collapsed-rail__label">
           <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 24 24" width="14">

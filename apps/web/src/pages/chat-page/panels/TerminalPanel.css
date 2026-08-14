@@ -14,6 +14,7 @@
   outline: 2px solid transparent;
   outline-offset: -4px;
   padding: 0 var(--spacing-3);
+  position: relative;
   transition:
     background var(--dur-micro) var(--ease-micro),
     box-shadow var(--dur-micro) var(--ease-micro),
@@ -22,9 +23,43 @@
   width: 100%;
 }
 
+.terminal-panel-collapsed-rail[data-has-running='true'] {
+  background: color-mix(in oklch, var(--accent) 4%, var(--bg-base));
+  border-top-color: color-mix(in oklch, var(--accent) 20%, var(--border-subtle));
+  color: var(--accent);
+}
+
+.terminal-panel-collapsed-rail[data-has-running='true']::before {
+  animation: terminal-pulse 2s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  content: '';
+  height: 6px;
+  left: var(--spacing-3);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) translateX(-10px);
+  width: 6px;
+}
+
+@keyframes terminal-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .terminal-panel-collapsed-rail:hover {
   background: color-mix(in oklch, var(--accent) 8%, var(--bg-base));
   color: var(--accent);
+}
+
+.terminal-panel-collapsed-rail[data-has-running='true']:hover {
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg-base));
+  border-top-color: color-mix(in oklch, var(--accent) 30%, var(--border-subtle));
 }
 
 .terminal-panel-collapsed-rail:active {

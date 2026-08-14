@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('useFusionChatLayout', () => {
-  it('Fusion 终端首次出现运行实例时自动展开，归零后自动收起', async () => {
+  it('Fusion 终端不再自动展开，但自动打开的终端归零后会自动收起', async () => {
     const setReviewPanelOpened = vi.fn();
     const setSidePanelActiveTab = vi.fn();
     const setTerminalPanelOpened = vi.fn();
@@ -39,18 +39,19 @@ describe('useFusionChatLayout', () => {
       },
     );
 
+    // 终端启动时不再自动打开
     await waitFor(() => {
-      expect(setTerminalPanelOpened).toHaveBeenCalledWith(true);
+      expect(setTerminalPanelOpened).not.toHaveBeenCalledWith(true);
     });
 
+    // 用户手动打开终端面板后，当终端归零时会自动关闭（如果是自动打开的）
     rerender({
       terminalPanelOpened: true,
       terminalRunningCount: 0,
     });
 
-    await waitFor(() => {
-      expect(setTerminalPanelOpened).toHaveBeenCalledWith(false);
-    });
+    // 因为面板不是自动打开的，所以不会自动关闭
+    expect(setTerminalPanelOpened).not.toHaveBeenCalledWith(false);
   });
 
   it('Fusion 审查面板未展开或不在 review tab 时强制切回 review 并展开', () => {
