@@ -6,6 +6,7 @@
  * rejects oversized files before a single byte is read.
  */
 
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
@@ -112,12 +113,14 @@ describe('runLookAtTool — file size guard', () => {
     mocks.validateWorkspacePath.mockImplementation((p: string) => p);
     mocks.resolveModelRoute.mockReturnValue(createRoute());
     mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 1,
-      outputTokens: 1,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
     vi.stubGlobal('fetch', mocks.fetch);
   });
 

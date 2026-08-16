@@ -370,6 +370,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
           model: llmConfig.model,
           ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
           ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
           prompt,
           temperature: 0.7,
         });
@@ -445,6 +446,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
           model: llmConfig.model,
           ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
           ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
           prompt,
           temperature: 0.3,
         });
@@ -500,6 +502,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
               model: cfg.model,
               ...(cfg.providerType ? { providerType: cfg.providerType } : {}),
               ...(cfg.upstreamProtocol ? { upstreamProtocol: cfg.upstreamProtocol } : {}),
+              ...(cfg.openaiFastMode === true ? { openaiFastMode: true } : {}),
               prompt,
               // 低温度让结构化 JSON 输出更稳定。
               temperature: 0.2,

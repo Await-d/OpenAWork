@@ -13,15 +13,18 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { ToolSet } from '../../v2-runtime/upstream/opencode-llm-compat.js';
+import * as OpenCodeLLM from '@openAwork/opencode-llm';
 
 import { sortToolsByName } from '../../v2-runtime/upstream/stream-runner.js';
 
-function fakeTool(name: string): ToolSet[string] {
-  // The actual shape is irrelevant for the sort helper — we only
-  // observe key order. Cast through `unknown` to avoid pulling in
-  // the entire ToolSet entry type just for this test.
-  return { description: name } as unknown as ToolSet[string];
+type NativeToolSet = Record<string, OpenCodeLLM.ToolDefinition>;
+
+function fakeTool(name: string): OpenCodeLLM.ToolDefinition {
+  return new OpenCodeLLM.ToolDefinition({
+    name,
+    description: name,
+    inputSchema: { type: 'object', properties: {} },
+  });
 }
 
 describe('sortToolsByName', () => {
@@ -32,11 +35,11 @@ describe('sortToolsByName', () => {
   it('returns an empty record when input is empty', () => {
     const sorted = sortToolsByName({});
     expect(sorted).not.toBeUndefined();
-    expect(Object.keys(sorted as ToolSet)).toEqual([]);
+    expect(Object.keys(sorted as NativeToolSet)).toEqual([]);
   });
 
   it('orders entries by name using localeCompare', () => {
-    const tools: ToolSet = {
+    const tools: NativeToolSet = {
       write: fakeTool('write'),
       read: fakeTool('read'),
       bash: fakeTool('bash'),
@@ -44,30 +47,30 @@ describe('sortToolsByName', () => {
     };
 
     const sorted = sortToolsByName(tools);
-    expect(Object.keys(sorted as ToolSet)).toEqual(['bash', 'grep', 'read', 'write']);
+    expect(Object.keys(sorted as NativeToolSet)).toEqual(['bash', 'grep', 'read', 'write']);
   });
 
   it('produces the same key order regardless of insertion order', () => {
-    const insertionA: ToolSet = {
+    const insertionA: NativeToolSet = {
       glob: fakeTool('glob'),
       ast_grep_search: fakeTool('ast_grep_search'),
       Bash: fakeTool('Bash'),
       websearch: fakeTool('websearch'),
     };
-    const insertionB: ToolSet = {
+    const insertionB: NativeToolSet = {
       websearch: fakeTool('websearch'),
       Bash: fakeTool('Bash'),
       ast_grep_search: fakeTool('ast_grep_search'),
       glob: fakeTool('glob'),
     };
 
-    expect(Object.keys(sortToolsByName(insertionA) as ToolSet)).toEqual(
-      Object.keys(sortToolsByName(insertionB) as ToolSet),
+    expect(Object.keys(sortToolsByName(insertionA) as NativeToolSet)).toEqual(
+      Object.keys(sortToolsByName(insertionB) as NativeToolSet),
     );
   });
 
   it('does not mutate the input record', () => {
-    const tools: ToolSet = {
+    const tools: NativeToolSet = {
       zeta: fakeTool('zeta'),
       alpha: fakeTool('alpha'),
     };
@@ -77,7 +80,7 @@ describe('sortToolsByName', () => {
   });
 
   it('preserves the tool definitions associated with each name', () => {
-    const tools: ToolSet = {
+    const tools: NativeToolSet = {
       write: fakeTool('write-def'),
       read: fakeTool('read-def'),
     };

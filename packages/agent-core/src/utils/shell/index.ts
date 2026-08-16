@@ -6,18 +6,19 @@
  */
 
 // 核心类型
-export type { ShellType, ShellProvider, ShellExecOptions, ShellCommandResult } from './shell-provider.js';
+export type {
+  ShellType,
+  ShellProvider,
+  ShellExecOptions,
+  ShellCommandResult,
+} from './shell-provider.js';
 
 // Provider 实现
 export { createBashShellProvider } from './bash-provider.js';
 export { createPowerShellProvider, buildPowerShellArgs } from './powershell-provider.js';
 
 // Shell 检测
-export {
-  findSuitableShell,
-  findPowerShell,
-  isPowerShellAvailable,
-} from './shell-detection.js';
+export { findSuitableShell, findPowerShell, isPowerShellAvailable } from './shell-detection.js';
 
 // Shell 执行器
 export {

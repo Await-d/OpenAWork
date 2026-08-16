@@ -6,9 +6,9 @@ import { parseContextLimitError } from '../compaction/context-window-resolver.js
  * Ports opencode's `session/retry.ts` parsing logic so the v2 path
  * can surface `retry-after` headers, free-tier exhaustion, and
  * provider-overload errors in the `UpstreamErrorDescriptor` chunk
- * that reaches the client. The AI SDK's internal retry loop already
+ * that reaches the client. The native client retry loop already
  * honours `retry-after` for transport-level retries; this module is
- * about *post-exhaustion* classification — once AI SDK gives up, we
+ * about *post-exhaustion* classification — once the client gives up, we
  * still want the UI to know "retry-after-ms = 4200, message =
  * 'Provider is overloaded'" instead of an opaque "stream failed".
  *
@@ -102,7 +102,7 @@ interface ClassifyInput {
 function readResponseHeaders(error: unknown): Record<string, string | undefined> | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const obj = error as Record<string, unknown>;
-  // AI SDK APICallError shape: error.responseHeaders
+  // A common upstream call-error shape: error.responseHeaders.
   if (obj['responseHeaders'] && typeof obj['responseHeaders'] === 'object') {
     return obj['responseHeaders'] as Record<string, string | undefined>;
   }
@@ -346,7 +346,7 @@ export function classifyUpstreamError(error: unknown): UpstreamRetryClassificati
   }
 
   // Context-length / prompt-too-long errors. These are never retried
-  // by the AI SDK (isRetryable=false), but the compaction recovery layer
+  // by the native client (isRetryable=false), but the compaction recovery layer
   // in `stream.ts` needs a stable `overflow: true` signal on the round
   // result to trigger `triggerOverflowCompaction`. We classify them
   // here so the upstreamError descriptor also carries a meaningful category.

@@ -12,6 +12,7 @@ import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { withTempEnv } from './task-verification-helpers.js';
 
 type ScenarioName =
+  | 'title'
   | 'text'
   | 'tool'
   | 'tool_plain_reasoning'
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
               return;
             case 'incomplete':
               // Full Responses lifecycle up to incomplete so
-              // @ai-sdk/openai registers the text part before the delta
+              // The native parser registers the text part before the delta
               // arrives (same rationale as writeTextCompletion).
               writeResponseEvent(res, 'response.output_item.added', {
                 output_index: 0,
@@ -475,7 +476,7 @@ async function verifyToolMetadataReasoningScenario(input: VerificationContext): 
   const events = parseSseChunks(response.body);
   // Note: the legacy custom Responses parser had a "metadata-only"
   // mode that captured summary text from the final completed response
-  // without streaming a `thinking_delta` event. `@ai-sdk/openai` always
+  // without streaming a `thinking_delta` event. The native parser always
   // sources reasoning content from streaming `reasoning_summary_text`
   // events, so the metadata scenario now also surfaces a streamed
   // summary delta. This is intentional post-migration — the assertion
@@ -1026,7 +1027,7 @@ function handleToolMetadataReasoningScenario(
         encrypted_content: 'enc_meta_1',
       },
     });
-    // Stream the summary text. @ai-sdk/openai uses summary_text events
+    // Stream the summary text. The native parser uses summary_text events
     // as the canonical reasoning content (it does not read
     // `response.completed.response.output[].summary`), so without these
     // streaming events the gateway has no summary to replay on round 2.
@@ -1272,7 +1273,7 @@ function handleToolEofScenario(body: Record<string, unknown>, res: ServerRespons
 function handleChatToolEofScenario(body: Record<string, unknown>, res: ServerResponse): void {
   if (!hasChatToolResult(body)) {
     // Simulates an upstream that cuts off mid-stream (no `\n\n`
-    // separator, no `data: [DONE]`). `@ai-sdk/openai-compatible` is
+    // separator, no `data: [DONE]`). The native parser is
     // stricter than the legacy custom parser and needs at least the
     // SSE event terminator to emit the buffered chunk; provide it so
     // the tool_call_delta still propagates while the absence of a
@@ -1296,7 +1297,7 @@ function handleChatToolEofScenario(body: Record<string, unknown>, res: ServerRes
 function writeTextCompletion(res: ServerResponse, text: string): void {
   // Emit the full Responses API event lifecycle. The legacy custom
   // parser only cared about `output_text.delta` + `completed`, but
-  // `@ai-sdk/openai@3.x` requires `output_item.added` +
+  // The native parser requires `output_item.added` +
   // `content_part.added` to register the text part before any delta
   // arrives (otherwise it raises `text part <id> not found`).
   writeResponseEvent(res, 'response.output_item.added', {
@@ -1361,7 +1362,7 @@ function writeResponseEvent(
   event: string,
   body: Record<string, unknown>,
 ): void {
-  // @ai-sdk/openai validates the `type` discriminator inside the JSON
+  // The native parser validates the `type` discriminator inside the JSON
   // payload (OpenAI's real stream emits it both as the SSE `event:`
   // line and as `{ type: ... }` in the body). Historically this mock
   // only emitted the SSE event name, which satisfied OpenAWork's
@@ -1376,6 +1377,7 @@ function resolveScenario(body: Record<string, unknown>): ScenarioName {
   const latestUserText = extractLatestUserRequestText(body);
   const matches = (needle: string) => latestUserText.includes(needle);
 
+  if (matches('请为下面这段会话生成标题')) return 'title';
   if (matches('元数据推理工具验证')) return 'tool_metadata_reasoning';
   if (matches('本地推理工具验证')) return 'tool_plain_reasoning';
   if (matches('工具错误后恢复成功')) return 'tool_error_recovery';

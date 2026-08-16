@@ -11,6 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
 const mocks = vi.hoisted(() => ({
@@ -52,13 +53,15 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
     vi.restoreAllMocks();
   });
 
-  it('forwards anthropic_messages so the AI SDK targets the native API', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'summary text',
-      inputTokens: 100,
-      outputTokens: 20,
-      finishReason: 'stop',
-    });
+  it('forwards anthropic_messages so the native upstream targets the native API', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'summary text',
+        inputTokens: 100,
+        outputTokens: 20,
+        finishReason: 'stop',
+      }),
+    );
 
     await callCompactionLlm({
       route: createRoute({
@@ -78,12 +81,14 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
   });
 
   it('forwards responses for OpenAI providers configured for the Responses API', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'summary',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'summary',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
 
     await callCompactionLlm({
       route: createRoute({ upstreamProtocol: 'responses' }),

@@ -120,6 +120,8 @@ export interface ModifiedFilesSummaryContent {
 export interface ReasoningContent {
   type: 'reasoning';
   text: string;
+  /** For Responses API: the reasoning output item id needed for replay. */
+  itemId?: string;
   /** For Responses API: the encrypted_content from the upstream response, needed for multi-turn. */
   encryptedContent?: string;
   /** For Responses API: the reasoning summary from the upstream response. */

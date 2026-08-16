@@ -18,6 +18,7 @@ export interface ProviderEditData {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
+  openaiFastMode?: boolean;
   upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
 }
 

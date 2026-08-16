@@ -1,81 +1,135 @@
-/**
- * Regression (§0.131, runUpstreamGenerate intrinsic wall-clock backstop):
- * The non-streaming upstream entry point only forwarded the caller's signal to
- * the AI SDK `generateText`, which has NO built-in deadline. Its streaming
- * sibling `runUpstreamStream` already bounds a connects-but-hangs upstream with
- * an idle watchdog; the non-streaming path had no equivalent floor, so a
- * forgetful / future caller (or one whose request-scoped signal only fires on
- * client disconnect) could leave a half-open upstream call pending forever.
- * The runner now arms its own AbortSignal.timeout backstop (env-overridable,
- * combined with any caller signal via AbortSignal.any) and surfaces a clear
- * `upstream generate timeout` error.
- *
- * We mock the `ai` SDK so generateText hangs until its abortSignal fires, set a
- * tiny intrinsic timeout, and assert the call rejects with the timeout message.
- */
-
+import { createServer } from 'node:http';
+import { Effect } from 'effect';
+import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runUpstreamGenerate } from '../../v2-runtime/upstream/run-upstream-generate.js';
 
-// `generateText` hangs until the provided abortSignal aborts, then rejects like
-// the AI SDK does on abort. Lets us prove the intrinsic backstop fires.
-const generateTextMock = vi.fn(
-  (opts: { abortSignal?: AbortSignal }) =>
-    new Promise((_resolve, reject) => {
-      const signal = opts.abortSignal;
-      if (!signal) return; // no signal → would hang forever (the bug)
-      if (signal.aborted) {
-        reject(new DOMException('aborted', 'AbortError'));
-        return;
-      }
-      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
-        once: true,
-      });
-    }),
-);
+const response = () =>
+  new OpenCodeLLM.LLMResponse({
+    message: OpenCodeLLM.Message.assistant('hello'),
+    events: [
+      OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'hello' }),
+      OpenCodeLLM.LLMEvent.finish({
+        reason: 'stop',
+        usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
+      }),
+    ],
+    usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
+    finishReason: 'stop',
+  });
 
-vi.mock('ai', () => ({
-  generateText: (opts: unknown) => generateTextMock(opts as { abortSignal?: AbortSignal }),
-}));
-
-// Stub the provider factory so no real network / SDK provider is constructed.
-vi.mock('../../v2-runtime/upstream/provider.js', () => ({
-  buildAISdkProvider: () => ({
-    languageModel: () => ({ modelId: 'stub-model' }),
-  }),
-}));
-
-const { runUpstreamGenerate } = await import('../../v2-runtime/upstream/run-upstream-generate.js');
+const generateSpy = vi.spyOn(OpenCodeLLM.LLMClient, 'generate');
 
 afterEach(() => {
-  generateTextMock.mockClear();
+  generateSpy.mockReset();
   delete process.env['OPENAWORK_UPSTREAM_GENERATE_TIMEOUT_MS'];
 });
 
-describe('runUpstreamGenerate intrinsic timeout', () => {
-  it('上游 connects-but-hangs 时，内置墙钟超时触发并抛出可识别错误', async () => {
-    process.env['OPENAWORK_UPSTREAM_GENERATE_TIMEOUT_MS'] = '50';
+describe('runUpstreamGenerate', () => {
+  it('returns a lazy Effect contract without starting the upstream request', () => {
+    const program = runUpstreamGenerate({
+      providerType: 'openai',
+      model: 'stub-model',
+      baseURL: 'https://example.test/v1',
+      messages: [OpenCodeLLM.Message.user('ping')],
+    });
 
-    await expect(
+    expect(Effect.isEffect(program)).toBe(true);
+    expect(generateSpy).not.toHaveBeenCalled();
+  });
+
+  it('maps a native response and forwards generation options', async () => {
+    const nativeResponse = response();
+    generateSpy.mockReturnValue(Effect.succeed(nativeResponse));
+
+    const result = await Effect.runPromise(
       runUpstreamGenerate({
         providerType: 'openai',
         model: 'stub-model',
-        messages: [{ role: 'user', content: 'ping' }],
-        // No caller signal — the intrinsic backstop is the only thing that can
-        // unwedge this call.
+        baseURL: 'https://example.test/v1',
+        messages: [OpenCodeLLM.Message.user('ping')],
+        system: 'be concise',
+        temperature: 0.2,
+        maxOutputTokens: 42,
+        topP: 0.8,
+        frequencyPenalty: 0.1,
+        presencePenalty: 0.05,
       }),
-    ).rejects.toThrow(/upstream generate timeout/);
+    );
+
+    expect(result).toEqual({
+      text: 'hello',
+      inputTokens: 3,
+      outputTokens: 5,
+      finishReason: 'stop',
+      raw: nativeResponse,
+    });
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    const request = generateSpy.mock.calls[0]?.[0];
+    expect(request?.messages).toEqual([OpenCodeLLM.Message.user('ping')]);
+    expect(request?.system).toEqual([{ type: 'text', text: 'be concise' }]);
+    expect(request?.tools).toEqual([]);
+    expect(request?.generation).toMatchObject({
+      maxTokens: 42,
+      temperature: 0.2,
+      topP: 0.8,
+      frequencyPenalty: 0.1,
+      presencePenalty: 0.05,
+    });
   });
 
-  it('timeoutMs<=0 显式禁用内置超时（交由调用方/上游自行决定）', async () => {
-    // With the backstop disabled and no caller signal, generateText receives no
-    // abortSignal at all — assert we passed through without arming a timer by
-    // racing against a short real timer.
-    const pending = runUpstreamGenerate({
-      providerType: 'openai',
-      model: 'stub-model',
-      messages: [{ role: 'user', content: 'ping' }],
-      timeoutMs: 0,
+  it('raises a stable error when the native Effect exceeds its intrinsic timeout', async () => {
+    process.env['OPENAWORK_UPSTREAM_GENERATE_TIMEOUT_MS'] = '50';
+    generateSpy.mockReturnValue(Effect.never);
+
+    await expect(
+      Effect.runPromise(
+        runUpstreamGenerate({
+          providerType: 'openai',
+          model: 'stub-model',
+          baseURL: 'https://example.test/v1',
+          messages: [OpenCodeLLM.Message.user('ping')],
+        }),
+      ),
+    ).rejects.toThrow('upstream generate timeout (50ms)');
+  });
+
+  it('preserves native upstream errors', async () => {
+    const upstreamError = new OpenCodeLLM.LLMError({
+      module: 'test',
+      method: 'generate',
+      reason: new OpenCodeLLM.TransportReason({
+        _tag: 'Transport',
+        message: 'provider failed',
+      }),
     });
+    generateSpy.mockReturnValue(Effect.fail(upstreamError));
+
+    await expect(
+      Effect.runPromise(
+        runUpstreamGenerate({
+          providerType: 'openai',
+          model: 'stub-model',
+          baseURL: 'https://example.test/v1',
+          messages: [OpenCodeLLM.Message.user('ping')],
+        }),
+      ),
+    ).rejects.toBe(upstreamError);
+  });
+
+  it('does not arm an intrinsic timeout when timeoutMs is non-positive', async () => {
+    const controller = new AbortController();
+    generateSpy.mockReturnValue(Effect.never);
+    const pending = Effect.runPromise(
+      runUpstreamGenerate({
+        providerType: 'openai',
+        model: 'stub-model',
+        baseURL: 'https://example.test/v1',
+        messages: [OpenCodeLLM.Message.user('ping')],
+        timeoutMs: 0,
+        signal: controller.signal,
+      }),
+    );
     let settled = false;
     void pending.then(
       () => {
@@ -85,11 +139,85 @@ describe('runUpstreamGenerate intrinsic timeout', () => {
         settled = true;
       },
     );
-    await new Promise((r) => setTimeout(r, 120));
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
     expect(settled).toBe(false);
-    // The mock's generateText got no abortSignal (backstop disabled, no caller
-    // signal), confirming the intrinsic timer was not armed.
-    const callArg = generateTextMock.mock.calls[0]?.[0];
-    expect(callArg?.abortSignal).toBeUndefined();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'upstream generate aborted',
+    });
+  });
+
+  it('drives a native Responses request through a local HTTP fixture', async () => {
+    generateSpy.mockRestore();
+    let requestBody = '';
+    const server = createServer((request, responseStream) => {
+      const chunks: string[] = [];
+      request.on('data', (chunk) => chunks.push(String(chunk)));
+      request.on('end', () => {
+        requestBody = chunks.join('');
+        responseStream.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const writeEvent = (type: string, body: Readonly<Record<string, unknown>>) => {
+          responseStream.write(`event: ${type}\n`);
+          responseStream.write(`data: ${JSON.stringify({ type, ...body })}\n\n`);
+        };
+        writeEvent('response.output_item.added', {
+          output_index: 0,
+          item: { id: 'msg_fixture', type: 'message', role: 'assistant', status: 'in_progress' },
+        });
+        writeEvent('response.content_part.added', {
+          item_id: 'msg_fixture',
+          output_index: 0,
+          content_index: 0,
+          part: { type: 'output_text', text: '', annotations: [] },
+        });
+        writeEvent('response.output_text.delta', {
+          output_index: 0,
+          content_index: 0,
+          item_id: 'msg_fixture',
+          delta: 'fixture-ok',
+        });
+        writeEvent('response.completed', {
+          response: {
+            id: 'resp_fixture',
+            status: 'completed',
+            output: [],
+            usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 },
+          },
+        });
+        responseStream.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      server.close();
+      throw new Error('local fixture did not expose a TCP port');
+    }
+
+    try {
+      const result = await Effect.runPromise(
+        runUpstreamGenerate({
+          providerType: 'openai',
+          upstreamProtocol: 'responses',
+          apiKey: 'fixture-key',
+          baseURL: `http://127.0.0.1:${address.port}/v1`,
+          allowInsecureLocalhost: true,
+          model: 'fixture-model',
+          messages: [OpenCodeLLM.Message.user('ping')],
+          maxOutputTokens: 17,
+        }),
+      );
+
+      expect(result.text).toBe('fixture-ok');
+      expect(result.inputTokens).toBe(2);
+      expect(result.outputTokens).toBe(3);
+      expect(requestBody).toContain('"max_output_tokens":17');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });

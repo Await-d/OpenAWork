@@ -22,9 +22,7 @@
  *    模型直接生成回复，不进行显式推理。
  */
 export type ThinkingConfig =
-  | { type: 'adaptive' }
-  | { type: 'enabled'; budgetTokens: number }
-  | { type: 'disabled' };
+  { type: 'adaptive' } | { type: 'enabled'; budgetTokens: number } | { type: 'disabled' };
 
 /**
  * 推理力度枚举 — 7 档统一抽象，映射到各家厂商的实际参数

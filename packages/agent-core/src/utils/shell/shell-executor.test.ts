@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getPlatform, isWindowsEnvironment, supportsPosixShell } from '../platform.js';
-import {
-  executeShellCommand,
-  getDefaultShellType,
-  resetProviderCache,
-} from './shell-executor.js';
+import { executeShellCommand, getDefaultShellType, resetProviderCache } from './shell-executor.js';
 
 describe('跨平台 Shell 执行', () => {
   beforeEach(() => {
@@ -111,11 +107,9 @@ describe('跨平台 Shell 执行', () => {
         return; // PowerShell 主要在 Windows 上使用
       }
 
-      const result = await executeShellCommand(
-        'Write-Output "Hello OpenAWork"',
-        'powershell',
-        { timeout: 5000 },
-      );
+      const result = await executeShellCommand('Write-Output "Hello OpenAWork"', 'powershell', {
+        timeout: 5000,
+      });
 
       expect(result.process).toBeDefined();
       expect(result.provider.type).toBe('powershell');

@@ -94,6 +94,7 @@ export interface AIProvider {
   apiKey?: string;
   apiKeyEnv?: string;
   oauth?: OAuthConfig;
+  openaiFastMode?: boolean;
   requestOverrides?: RequestOverrides;
   /** Override the auto-detected upstream protocol for this provider.
    *  When set, this takes priority over model-id and base-URL heuristics.

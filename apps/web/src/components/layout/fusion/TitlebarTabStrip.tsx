@@ -80,7 +80,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
     }
 
     const session = sessions.find((s) => s.id === currentSessionId);
-    const title = session?.title || `会话 ${currentSessionId.slice(0, 8)}`;
+    const title = session?.title?.trim() || `会话 ${currentSessionId.slice(0, 8)}`;
 
     const existingTab = tabs.find(
       (tab) => tab.type === 'session' && tab.sessionId === currentSessionId,

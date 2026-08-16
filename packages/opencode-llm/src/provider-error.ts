@@ -1,5 +1,5 @@
-import { Schema } from "effect"
-import { LLMError, ProviderErrorEvent } from "./schema/index.js"
+import { Schema } from 'effect';
+import { LLMError, ProviderErrorEvent } from './schema/index.js';
 
 const patterns = [
   /prompt is too long/i,
@@ -29,18 +29,21 @@ const patterns = [
   /model_context_window_exceeded/i,
   /too many tokens/i,
   /token limit exceeded/i,
-]
+];
 
-const exclusions = [/^(throttling error|service unavailable):/i, /rate limit/i, /too many requests/i]
+const exclusions = [
+  /^(throttling error|service unavailable):/i,
+  /rate limit/i,
+  /too many requests/i,
+];
 
 export const isContextOverflow = (message: string) =>
   !exclusions.some((pattern) => pattern.test(message)) &&
-  (patterns.some((pattern) => pattern.test(message)) || /^4(00|13)\s*(status code)?\s*\(no body\)/i.test(message))
+  (patterns.some((pattern) => pattern.test(message)) ||
+    /^4(00|13)\s*(status code)?\s*\(no body\)/i.test(message));
 
 export const isContextOverflowFailure = (failure: unknown) =>
   failure instanceof LLMError
-    ? failure.reason._tag === "InvalidRequest" && failure.reason.classification === "context-overflow"
-    : Schema.is(ProviderErrorEvent)(failure) && failure.classification === "context-overflow"
-
-
-
+    ? failure.reason._tag === 'InvalidRequest' &&
+      failure.reason.classification === 'context-overflow'
+    : Schema.is(ProviderErrorEvent)(failure) && failure.classification === 'context-overflow';

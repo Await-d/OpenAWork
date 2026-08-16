@@ -79,6 +79,7 @@ export interface TextPart extends PartBase {
 export interface ReasoningPart extends PartBase {
   type: 'reasoning';
   text: string;
+  itemId?: string;
   metadata?: Record<string, unknown>;
   time: { start: number; end?: number };
   /** Response ID from Responses API, used as previous_response_id for caching. */

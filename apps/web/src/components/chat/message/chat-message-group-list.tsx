@@ -73,6 +73,7 @@ interface ChatMessageGroupListProps {
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
+  trailingContent?: React.ReactNode;
 }
 
 const DEFAULT_GROUP_HEIGHT = 148;
@@ -97,6 +98,7 @@ export function ChatMessageGroupList({
   providerCatalog,
   resolveInlinePermissionActions,
   scrollRegionRef,
+  trailingContent,
 }: ChatMessageGroupListProps) {
   const shouldVirtualize = groups.length >= VIRTUALIZATION_GROUP_THRESHOLD;
   const activePendingPermissions = pendingPermissions?.filter((p) => p.requestId) ?? [];
@@ -127,6 +129,7 @@ export function ChatMessageGroupList({
             resolveActions={resolveInlinePermissionActions}
           />
         )}
+        {trailingContent}
         <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
       </>
     );
@@ -146,6 +149,7 @@ export function ChatMessageGroupList({
       providerCatalog={providerCatalog}
       resolveInlinePermissionActions={showQuickBar ? resolveInlinePermissionActions : undefined}
       scrollRegionRef={scrollRegionRef}
+      trailingContent={trailingContent}
     />
   );
 }
@@ -191,6 +195,7 @@ function VirtualizedChatGroupViewport({
   providerCatalog,
   resolveInlinePermissionActions,
   scrollRegionRef,
+  trailingContent,
 }: ChatMessageGroupListProps & { dividerLabels: Array<string | null> }) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
@@ -410,6 +415,7 @@ function VirtualizedChatGroupViewport({
           resolveActions={resolveInlinePermissionActions}
         />
       )}
+      {trailingContent}
       <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
     </>
   );

@@ -1,0 +1,4 @@
+
+> @openAwork/opencode-llm@0.1.0 build E:\01.Projects\OpenAWork\packages\opencode-llm
+> tsc --build
+

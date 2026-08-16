@@ -659,11 +659,21 @@ export const useUIStateStore = create<UIStateStore>()(
           return { tabs: nextTabs };
         }),
       updateTabTitle: (tabId, title) =>
-        set((state) => ({
-          tabs: state.tabs.map((tab) =>
-            tab.id === tabId ? { ...tab, title: normalizeTabTitle(title, tab.title) } : tab,
-          ),
-        })),
+        set((state) => {
+          const currentTab = state.tabs.find((tab) => tab.id === tabId);
+          if (!currentTab) {
+            return state;
+          }
+
+          const nextTitle = normalizeTabTitle(title, currentTab.title);
+          if (nextTitle === currentTab.title) {
+            return state;
+          }
+
+          return {
+            tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, title: nextTitle } : tab)),
+          };
+        }),
       updateTabStreaming: (sessionId, streaming) =>
         set((state) => ({
           tabs: state.tabs.map((tab) =>

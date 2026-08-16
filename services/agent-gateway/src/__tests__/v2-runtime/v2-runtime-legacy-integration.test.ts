@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 import type { DatabaseSync as NodeDatabaseSync } from 'node:sqlite';
+import { Effect, Stream } from 'effect';
 
 const requireFromHere = createRequire(import.meta.url);
 const sqliteModule = requireFromHere('node:sqlite') as {
@@ -195,14 +196,16 @@ describe('v2-runtime integration with legacy schema', () => {
     const { V2Storage } = await import('../../v2-runtime/storage/index.js');
     const storage = V2Storage.fromConnection(db);
 
-    const ids: string[] = [];
-    for await (const row of storage.streamMessagesNewestFirst({
-      sessionId: 's-stream',
-      userId: 'u-stream',
-      pageSize: 2,
-    })) {
-      ids.push(row.id);
-    }
+    const rows = await Effect.runPromise(
+      Stream.runCollect(
+        storage.streamMessagesNewestFirst({
+          sessionId: 's-stream',
+          userId: 'u-stream',
+          pageSize: 2,
+        }),
+      ),
+    );
+    const ids = Array.from(rows).map((row) => row.id);
     expect(ids).toEqual(['m-3', 'm-2', 'm-1', 'm-0']);
   });
 

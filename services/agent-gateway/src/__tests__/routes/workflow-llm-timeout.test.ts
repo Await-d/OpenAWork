@@ -2,7 +2,7 @@
  * Robustness: `requestWorkflowLlmCompletion` must enforce a wall-clock
  * deadline on the non-streaming upstream call.
  *
- * The AI SDK `generateText` only honours an `abortSignal`; it has no
+ * The native upstream generator only honours an `abortSignal`; it has no
  * built-in timeout. Every team-runtime LLM hop (reception router /
  * intent rewrite, pm1 artifact chain, pm2 constitution + architecture
  * review, d.4 quality review) routes through this helper. Without an
@@ -18,6 +18,7 @@
  *   4. surfaces caller-abort distinctly from a timeout.
  */
 
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -55,12 +56,14 @@ describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
   });
 
   it('forwards an AbortSignal to runUpstreamGenerate', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 1,
-      outputTokens: 1,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
 
     await requestWorkflowLlmCompletion({ ...BASE_INPUT });
 
@@ -70,18 +73,37 @@ describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
     expect(callArg.signal?.aborted).toBe(false);
   });
 
+  it('forwards the configured OpenAI Fast mode to the native upstream caller', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
+
+    await requestWorkflowLlmCompletion({ ...BASE_INPUT, openaiFastMode: true });
+
+    const callArg = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as {
+      openaiFastMode?: boolean;
+    };
+    expect(callArg.openaiFastMode).toBe(true);
+  });
+
   it('aborts and throws a stable timeout error when upstream hangs', async () => {
     vi.useFakeTimers();
 
     let abortedReason: unknown;
-    mocks.runUpstreamGenerate.mockImplementation(
-      (arg: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          arg.signal?.addEventListener('abort', () => {
-            abortedReason = (arg.signal as AbortSignal).reason;
-            reject(new Error('aborted by signal'));
-          });
-        }),
+    mocks.runUpstreamGenerate.mockImplementation((arg: { signal?: AbortSignal }) =>
+      Effect.callback<never, Error>((resume) => {
+        const abort = () => {
+          abortedReason = arg.signal?.reason;
+          resume(Effect.fail(new Error('aborted by signal')));
+        };
+        arg.signal?.addEventListener('abort', abort, { once: true });
+        return Effect.sync(() => arg.signal?.removeEventListener('abort', abort));
+      }),
     );
 
     const promise = requestWorkflowLlmCompletion({ ...BASE_INPUT, timeoutMs: 1_000 });
@@ -104,12 +126,14 @@ describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
   });
 
   it('does not arm a deadline when timeoutMs is 0 (caller opt-out)', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 1,
-      outputTokens: 1,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
 
     await requestWorkflowLlmCompletion({ ...BASE_INPUT, timeoutMs: 0 });
 
@@ -120,18 +144,19 @@ describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
   });
 
   it('propagates a non-timeout upstream error unchanged', async () => {
-    mocks.runUpstreamGenerate.mockRejectedValue(new Error('upstream 500'));
+    mocks.runUpstreamGenerate.mockReturnValue(Effect.fail(new Error('upstream 500')));
 
     await expect(requestWorkflowLlmCompletion({ ...BASE_INPUT })).rejects.toThrow('upstream 500');
   });
 
   it('honours a caller-supplied abort signal distinctly from timeout', async () => {
     const controller = new AbortController();
-    mocks.runUpstreamGenerate.mockImplementation(
-      (arg: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          arg.signal?.addEventListener('abort', () => reject(new Error('caller aborted')));
-        }),
+    mocks.runUpstreamGenerate.mockImplementation((arg: { signal?: AbortSignal }) =>
+      Effect.callback<never, Error>((resume) => {
+        const abort = () => resume(Effect.fail(new Error('caller aborted')));
+        arg.signal?.addEventListener('abort', abort, { once: true });
+        return Effect.sync(() => arg.signal?.removeEventListener('abort', abort));
+      }),
     );
 
     const promise = requestWorkflowLlmCompletion({

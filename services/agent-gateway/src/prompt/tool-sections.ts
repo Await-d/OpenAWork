@@ -52,20 +52,16 @@ export function getAllToolSections(): ToolSection[] {
 /**
  * 根据启用的工具筛选章节
  */
-export function getEnabledToolSections(
-  enabledTools: Set<string>,
-): ToolSection[] {
-  return getAllToolSections().filter(section =>
-    section.tools.some(tool => enabledTools.has(tool)),
+export function getEnabledToolSections(enabledTools: Set<string>): ToolSection[] {
+  return getAllToolSections().filter((section) =>
+    section.tools.some((tool) => enabledTools.has(tool)),
   );
 }
 
 /**
  * 生成工具使用章节文本
  */
-export function buildToolUsageSections(
-  enabledTools: Set<string>,
-): string {
+export function buildToolUsageSections(enabledTools: Set<string>): string {
   const sections = getEnabledToolSections(enabledTools);
 
   if (sections.length === 0) {
@@ -73,7 +69,7 @@ export function buildToolUsageSections(
   }
 
   const header = '# 工具使用指南\n\n';
-  const content = sections.map(s => s.content).join('\n\n---\n\n');
+  const content = sections.map((s) => s.content).join('\n\n---\n\n');
 
   return header + content;
 }

@@ -1,6 +1,6 @@
 /**
  * Workflow non-streaming LLM caller — routes the upstream call through
- * the v2 `runUpstreamGenerate` wrapper (Vercel AI SDK `generateText`)
+ * the native `runUpstreamGenerate` wrapper
  * so the workflow / team / settings paths share the same provider
  * factory, retry surface, and provider middleware as the rest of the
  * gateway.
@@ -19,7 +19,8 @@
 
 import type { AIProvider } from '@openAwork/agent-core';
 import { inferProviderTypeFromHostname } from '@openAwork/agent-core';
-import type { UpstreamProtocolKind } from '../v2-runtime/upstream/provider.js';
+import { Effect } from 'effect';
+import type { UpstreamProtocolKind } from '../v2-runtime/upstream/native-model.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
@@ -36,8 +37,8 @@ function estimateTokensFromText(text: string | null | undefined): number {
 
 /**
  * Default wall-clock timeout for non-streaming workflow / team LLM
- * calls. The AI SDK `generateText` honours `abortSignal` but has no
- * built-in wall-clock deadline, so without this a hung upstream socket
+ * calls. The native request honours `abortSignal` but has no built-in
+ * wall-clock deadline, so without this a hung upstream socket
  * would leave reception / pm1 / pm2 / quality-review calls pending
  * forever (and, via the in-flight dedup sets, wedge the whole runtime).
  */
@@ -60,10 +61,11 @@ export interface WorkflowLlmRequestConfig {
   /**
    * Per-provider explicit upstream protocol override (e.g. when the
    * configured provider uses Responses or anthropic_messages instead
-   * of chat_completions). Forwarded straight to the AI SDK provider
+   * of chat_completions). Forwarded straight to the native provider
    * factory.
    */
   upstreamProtocol?: UpstreamProtocolKind;
+  openaiFastMode?: boolean;
   /** Session ID — reserved for future cache-key routing. */
   sessionId?: string;
   /**
@@ -163,20 +165,23 @@ export async function requestWorkflowLlmCompletion(
     : timeoutController.signal;
 
   try {
-    const result = await runUpstreamGenerate({
-      providerType,
-      ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
-      apiKey: input.apiKey,
-      baseURL: input.apiBaseUrl,
-      model: input.model,
-      messages: [{ role: 'user', content: input.prompt }],
-      temperature: input.temperature,
-      maxOutputTokens:
-        typeof input.maxOutputTokens === 'number' && input.maxOutputTokens > 0
-          ? input.maxOutputTokens
-          : WORKFLOW_MAX_OUTPUT_TOKENS,
-      signal,
-    });
+    const result = await Effect.runPromise(
+      runUpstreamGenerate({
+        providerType,
+        ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
+        ...(input.openaiFastMode === true ? { openaiFastMode: true } : {}),
+        apiKey: input.apiKey,
+        baseURL: input.apiBaseUrl,
+        model: input.model,
+        messages: [{ role: 'user', content: input.prompt }],
+        temperature: input.temperature,
+        maxOutputTokens:
+          typeof input.maxOutputTokens === 'number' && input.maxOutputTokens > 0
+            ? input.maxOutputTokens
+            : WORKFLOW_MAX_OUTPUT_TOKENS,
+        signal,
+      }),
+    );
 
     // 团队用量统计：把这次非流式调用的 usage 发给团队度量面板（按层聚合）。
     // best-effort——发布失败不影响主返回。

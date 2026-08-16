@@ -25,21 +25,22 @@ describe('reception-router', () => {
       });
     });
 
-    it('知识问答和解释类提问默认走 orchestrate，而不是 direct', () => {
+    it('知识问答和解释类只读提问走 light，而不是完整 orchestrate', () => {
       expect(routeByRules('什么是 OAuth 2.0')).toMatchObject({
-        decision: 'orchestrate',
+        decision: 'light',
         decisionSource: 'rule',
-        reason: '需要分析/检索/解释的提问',
+      });
+      expect(routeByRules('了解一下当前项目')).toMatchObject({
+        decision: 'light',
+        decisionSource: 'rule',
       });
       expect(routeByRules('为什么最近这个页面很卡？')).toMatchObject({
-        decision: 'orchestrate',
+        decision: 'light',
         decisionSource: 'rule',
-        reason: '需要分析/检索/解释的提问',
       });
       expect(routeByRules('帮我查一下 React Compiler 和 useMemo 的关系')).toMatchObject({
-        decision: 'orchestrate',
+        decision: 'light',
         decisionSource: 'rule',
-        reason: '需要分析/检索/解释的提问',
       });
     });
 
@@ -49,10 +50,22 @@ describe('reception-router', () => {
         decisionSource: 'rule',
         reason: '开发任务',
       });
+      expect(routeByRules('如何实现 OAuth 登录？')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
+      });
       expect(routeByRules('修复一下团队会话的路由 bug')).toMatchObject({
         decision: 'orchestrate',
         decisionSource: 'rule',
         reason: '修复任务',
+      });
+      expect(routeByRules('请处理一下生产数据库')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
+      });
+      expect(routeByRules('如何把这个配置改成生产值')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
       });
       expect(routeByRules('设计一个更合理的 team 会话分层方案')).toMatchObject({
         decision: 'orchestrate',
@@ -215,13 +228,54 @@ describe('reception-router', () => {
   });
 
   describe('routeByLlm', () => {
-    it('当 LLM 输出格式不匹配时默认 orchestrate', async () => {
+    it('当 LLM 输出格式不匹配且没有修改意图时降级 light', async () => {
       await expect(
         routeByLlm('解释一下这个问题', async () => 'not-a-valid-router-output'),
+      ).resolves.toMatchObject({
+        decision: 'light',
+        decisionSource: 'llm',
+      });
+    });
+
+    it('当 LLM 输出格式不匹配但有明确修改意图时仍降级 orchestrate', async () => {
+      await expect(
+        routeByLlm('请修复这个登录 bug', async () => 'not-a-valid-router-output'),
       ).resolves.toMatchObject({
         decision: 'orchestrate',
         decisionSource: 'llm',
       });
+    });
+
+    it('当 LLM 调用失败且没有修改意图时降级 light', async () => {
+      await expect(
+        routeByLlm('查看一下当前项目结构', async () => {
+          throw new Error('upstream unavailable');
+        }),
+      ).resolves.toMatchObject({
+        decision: 'light',
+        decisionSource: 'llm',
+      });
+    });
+
+    it('当 LLM 输出格式不匹配且意图不明确时要求澄清', async () => {
+      await expect(
+        routeByLlm('这个请求', async () => 'not-a-valid-router-output'),
+      ).resolves.toMatchObject({
+        decision: 'clarify',
+        decisionSource: 'llm',
+        clarifyKind: 'ambiguous',
+      });
+    });
+
+    it('向 LLM 回调传递可取消的 AbortSignal', async () => {
+      let receivedSignal: AbortSignal | undefined;
+      await routeByLlm('什么是 OAuth 2.0', async (_prompt, signal) => {
+        receivedSignal = signal;
+        return 'DECISION: LIGHT\nREASON: 只读问答';
+      });
+
+      expect(receivedSignal).toBeInstanceOf(AbortSignal);
+      expect(receivedSignal?.aborted).toBe(false);
     });
 
     it('LLM prompt 包含历史任务上下文，让 LLM 能看到上次任务状态', async () => {
@@ -282,6 +336,19 @@ describe('reception-router', () => {
         decision: 'clarify',
         decisionSource: 'llm',
         reason: '纯语气词无意图',
+      });
+    });
+
+    it('LLM 返回 LIGHT 时正确解析', async () => {
+      const result = await routeByLlm(
+        '什么是 OAuth 2.0',
+        async () => 'DECISION: LIGHT\nREASON: 这是只读知识问答',
+      );
+
+      expect(result).toMatchObject({
+        decision: 'light',
+        decisionSource: 'llm',
+        reason: '这是只读知识问答',
       });
     });
 

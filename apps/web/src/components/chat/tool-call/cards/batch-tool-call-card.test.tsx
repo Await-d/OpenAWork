@@ -84,4 +84,46 @@ describe('BatchToolCallCard', () => {
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
     expect(screen.getByTestId('batch-detail')).toBeTruthy();
   });
+
+  it('运行期间自动展开的批量子工具详情在完成后按默认折叠设置收起', () => {
+    const view = render(
+      <BatchToolCallCard
+        input={{
+          tool_calls: [{ tool: 'read', parameters: { file_path: 'src/a.ts' } }],
+        }}
+        output={{
+          results: [
+            {
+              tool: 'read',
+              status: 'running',
+              output: 'partial content',
+            },
+          ],
+        }}
+        renderToolCallDisplay={({ toolName }) => <div data-testid="batch-detail">{toolName}</div>}
+      />,
+    );
+
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
+    view.rerender(
+      <BatchToolCallCard
+        input={{
+          tool_calls: [{ tool: 'read', parameters: { file_path: 'src/a.ts' } }],
+        }}
+        output={{
+          results: [
+            {
+              tool: 'read',
+              status: 'completed',
+              output: 'file content',
+            },
+          ],
+        }}
+        renderToolCallDisplay={({ toolName }) => <div data-testid="batch-detail">{toolName}</div>}
+      />,
+    );
+
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryByTestId('batch-detail')).toBeNull();
+  });
 });

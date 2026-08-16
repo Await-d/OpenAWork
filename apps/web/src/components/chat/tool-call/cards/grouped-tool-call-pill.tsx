@@ -1,6 +1,7 @@
 import type { AssistantTraceToolCall } from '@openAwork/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
+import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 import { ToolIcon } from '../display/tool-icon.js';
 import { getToolCategory } from '../shared/colorize-summary.js';
 import { extractFilePath, trimPath } from '../shared/input-paths.js';
@@ -98,20 +99,17 @@ export function GroupedToolCallPill({
   );
   const visualState: 'completed' | 'failed' = errorCount > 0 ? 'failed' : 'completed';
   const shouldAutoExpand = shouldExpandByDefault || hasActiveCalls;
-  const [expanded, setExpanded] = useState(shouldAutoExpand);
-
-  useEffect(() => {
-    if (shouldAutoExpand) {
-      setExpanded(true);
-    }
-  }, [shouldAutoExpand]);
+  const [expanded, toggleExpanded] = useToolCallExpandState({
+    shouldAutoExpand,
+    shouldExpandByDefault,
+  });
 
   return (
     <div className="tool-call-grouped" data-tool-status={visualState}>
       <button
         type="button"
         className="tool-call-grouped-header"
-        onClick={() => setExpanded((p) => !p)}
+        onClick={toggleExpanded}
         aria-expanded={expanded}
       >
         <ToolIcon toolName={toolName} status={visualState} size={13} />

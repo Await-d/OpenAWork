@@ -6,14 +6,18 @@ import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { Effect } from 'effect';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
 import type { UpstreamProtocol } from '../routes/upstream-protocol.js';
-import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
-import type { UserContent } from '../v2-runtime/upstream/opencode-llm-compat.js';
+import {
+  runUpstreamGenerate,
+  type RunUpstreamGenerateResult,
+} from '../v2-runtime/upstream/index.js';
+import type { Message } from '@openAwork/opencode-llm';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
 import {
   getReferenceAgentModelEntries,
@@ -25,8 +29,8 @@ import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
  * Wall-clock timeout for the multimodal `look_at` upstream call. The
  * tool runs through the gateway-managed sandbox path (see
  * `tool-sandbox.ts`), which bypasses the ToolRegistry's own
- * timeout/abort wrapper, and `runUpstreamGenerate` (AI SDK
- * `generateText`) has no built-in deadline. Without this an upstream
+ * timeout/abort wrapper, and `runUpstreamGenerate` has no built-in
+ * deadline. Without this an upstream
  * socket that connects but never responds would leave the look_at
  * call pending forever.
  */
@@ -497,10 +501,11 @@ async function requestLookAtText(input: {
   mimeType: string;
   model: string;
   providerType?: string;
+  openaiFastMode?: boolean;
   /**
    * Resolved upstream protocol (e.g. `anthropic_messages`, `responses`).
    * Forwarding this is required for multimodal calls that target a non-
-   * OpenAI provider; without it the AI SDK silently degrades to OpenAI
+   * OpenAI provider; without it the native client silently degrades to OpenAI
    * Chat Completions which most providers do not support.
    */
   upstreamProtocol?: UpstreamProtocol;
@@ -509,15 +514,15 @@ async function requestLookAtText(input: {
   systemPrompt?: string;
   textContent?: string;
 }): Promise<string> {
-  const userContent: UserContent = [
+  const userContent: Message.ContentInput = [
     { type: 'text', text: input.prompt },
     ...(input.textContent
       ? ([{ type: 'text', text: input.textContent }] as const)
       : input.imageDataUrl
         ? ([
             {
-              type: 'image',
-              image: input.imageDataUrl,
+              type: 'media',
+              data: input.imageDataUrl,
               mediaType: input.mimeType,
             },
           ] as const)
@@ -532,24 +537,27 @@ async function requestLookAtText(input: {
   }, LOOK_AT_LLM_TIMEOUT_MS);
   timer.unref?.();
 
-  let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+  let result: RunUpstreamGenerateResult;
   try {
-    result = await runUpstreamGenerate({
-      providerType: input.providerType ?? 'openai',
-      ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
-      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
-      ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
-      ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
-        ? { headers: input.requestOverrides.headers }
-        : {}),
-      model: input.model,
-      ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
-      messages: [{ role: 'user', content: userContent }],
-      maxOutputTokens: 2048,
-      temperature: 0.2,
-      requestOverrides: input.requestOverrides,
-      signal: controller.signal,
-    });
+    result = await Effect.runPromise(
+      runUpstreamGenerate({
+        providerType: input.providerType ?? 'openai',
+        ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
+        ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+        ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
+        ...(input.openaiFastMode === true ? { openaiFastMode: true } : {}),
+        ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
+          ? { headers: input.requestOverrides.headers }
+          : {}),
+        model: input.model,
+        ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
+        messages: [{ role: 'user', content: userContent }],
+        maxOutputTokens: 2048,
+        temperature: 0.2,
+        requestOverrides: input.requestOverrides,
+        signal: controller.signal,
+      }),
+    );
   } catch (err) {
     if (timedOut) {
       throw new Error(`look_at LLM timeout (${LOOK_AT_LLM_TIMEOUT_MS}ms)`);
@@ -635,6 +643,7 @@ export async function runLookAtTool(input: {
       mimeType: resolvedImageSource.mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),
@@ -650,6 +659,7 @@ export async function runLookAtTool(input: {
       mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),
@@ -666,6 +676,7 @@ export async function runLookAtTool(input: {
       mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),

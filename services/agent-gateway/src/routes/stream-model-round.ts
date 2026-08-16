@@ -5,6 +5,8 @@ import type {
   StreamChunk,
   UpstreamStreamSummary,
 } from '@openAwork/shared';
+import { Effect, Layer, Stream } from 'effect';
+import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
 import { isContextOverflow } from '../session/session-message-store.js';
@@ -70,13 +72,28 @@ import {
 } from '../session/session-entry-store.js';
 import { makeSessionEventId } from '../session/session-event.js';
 import {
-  buildAISdkProvider,
-  extractSystemFromUnifiedMessages,
+  buildNativeModel,
+  extractNativeSystemFromUnifiedMessages,
   runUpstreamStream,
-  wrapGatewayToolsForAiSdkDeclarationsOnly,
-  type GatewayToolFunctionShape,
+  wrapGatewayToolsForNativeDeclarationsOnly,
 } from '../v2-runtime/upstream/index.js';
+import type {
+  ExtendedThinkingConfig,
+  ThinkingConfig,
+} from '../v2-runtime/upstream/provider-options.js';
 import { matchesRequestScope } from '../runtime/request-lineage.js';
+
+const nativeLLMLayer = OpenCodeLLM.LLMClient.layer.pipe(
+  Layer.provide(OpenCodeLLM.RequestExecutor.fetchLayer),
+);
+
+const pendingSnapshotTreeCaptures = new Set<Promise<void>>();
+
+export async function waitForPendingSnapshotTreeCaptures(): Promise<void> {
+  while (pendingSnapshotTreeCaptures.size > 0) {
+    await Promise.all(Array.from(pendingSnapshotTreeCaptures));
+  }
+}
 
 // `UpstreamErrorDescriptor` is preserved as a structural type so the
 // `RunResult.upstreamError` field stays stable for downstream recovery
@@ -124,6 +141,7 @@ export interface UpstreamStreamDiagnosticsSummary {
   sawDone: boolean;
   sawError: boolean;
   stalled: boolean;
+  openaiServiceTier?: string;
 }
 
 interface UpstreamSummaryRouteMeta {
@@ -163,6 +181,7 @@ export function buildUpstreamStreamSummaryLog(input: {
     sawDone: boolean;
     sawError: boolean;
     stalled: boolean;
+    openaiServiceTier?: string;
   };
   isError: boolean;
 } {
@@ -180,6 +199,9 @@ export function buildUpstreamStreamSummaryLog(input: {
       sawDone: input.diagnostics.sawDone,
       sawError: input.diagnostics.sawError,
       stalled: input.diagnostics.stalled,
+      ...(input.diagnostics.openaiServiceTier === undefined
+        ? {}
+        : { openaiServiceTier: input.diagnostics.openaiServiceTier }),
     },
     isError: false,
   };
@@ -201,6 +223,9 @@ export function toUpstreamStreamSummary(
     sawDone: diagnostics.sawDone,
     sawError: diagnostics.sawError,
     stalled: diagnostics.stalled,
+    ...(diagnostics.openaiServiceTier === undefined
+      ? {}
+      : { openaiServiceTier: diagnostics.openaiServiceTier }),
   };
 }
 
@@ -241,7 +266,7 @@ interface StreamAccumulationState {
    * the OpenAI Responses adapter sends `openai.itemId` (`fc_xxx`)
    * here, and replaying it on subsequent rounds is required for the
    * upstream prompt-cache prefix to stay byte-stable across turns
-   * (without it, AI SDK rebuilds `function_call.id` from the call_id
+   * (without it, the native upstream rebuilds `function_call.id` from the call_id
    * fallback, OpenAI re-keys the item, and every subsequent round 2+
    * cache-prefix from this point on misses).
    */
@@ -268,6 +293,8 @@ interface StreamAccumulationState {
   firstContentAt?: number;
   /** Encrypted reasoning content from Responses API, needed for multi-turn. */
   reasoningEncryptedContent?: string;
+  /** Reasoning output item id from Responses API, needed for multi-turn replay. */
+  reasoningItemId?: string;
   /** Reasoning summary from Responses API. */
   reasoningSummary?: string;
   /** Response ID from Responses API, used as previous_response_id for caching. */
@@ -500,6 +527,9 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
     if (pmd && typeof pmd.responseId === 'string' && pmd.responseId.length > 0) {
       state.responseId = pmd.responseId;
     }
+    if (typeof chunk.itemId === 'string' && chunk.itemId.trim().length > 0) {
+      state.reasoningItemId = chunk.itemId;
+    }
     // Mark every matching segment's endedAt. With the trailing-segment
     // accumulation strategy, a single reasoning block may have produced
     // multiple non-contiguous segments; closing all of them prevents the
@@ -572,8 +602,8 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
  * `{ ...(merged ? { providerMetadata: merged } : {}) }` without
  * persisting an empty object.
  *
- * Why "earlier-wins": the OpenAI Responses adapter in @ai-sdk/openai
- * 3.x emits `openai.itemId` on the first `tool-call` event for a
+ * Why "earlier-wins": the OpenAI Responses protocol emits `openai.itemId`
+ * on the first `tool-call` event for a
  * given call_id. A late re-emit (e.g. after a retry) carrying the
  * same id is harmless, but a closer that arrives with an empty
  * payload must NOT overwrite the previously-captured itemId.
@@ -634,12 +664,18 @@ function buildAssistantContent(
   // segment-based path covers every accumulator entry point, this branch
   // can be removed.
   const content: MessageContent[] = [];
+  const reasoningItemId =
+    state.reasoningItemId ??
+    state.assistantThinkingBlocks
+      .map((block) => /^item:(.*):output:-?\d+:summary:-?\d+$/.exec(block.key)?.[1])
+      .find((itemId): itemId is string => typeof itemId === 'string' && itemId.length > 0);
 
   // Store reasoning as a separate part so it can be reconstructed
   // as a reasoning item for the Responses API in multi-turn conversations.
   const reasoningEntries = extractReasoningEntries(state.assistantThinkingBlocks);
   if (
     reasoningEntries.length > 0 ||
+    Boolean(reasoningItemId) ||
     Boolean(state.reasoningEncryptedContent) ||
     Boolean(state.reasoningSummary) ||
     Boolean(state.responseId)
@@ -648,6 +684,7 @@ function buildAssistantContent(
       content.push({
         type: 'reasoning',
         text: '',
+        ...(reasoningItemId ? { itemId: reasoningItemId } : {}),
         ...(state.reasoningEncryptedContent
           ? { encryptedContent: state.reasoningEncryptedContent }
           : {}),
@@ -664,6 +701,7 @@ function buildAssistantContent(
           ...(typeof entry.signature === 'string' && entry.signature.length > 0
             ? { signature: entry.signature }
             : {}),
+          ...(index === 0 && reasoningItemId ? { itemId: reasoningItemId } : {}),
           ...(index === 0 && state.reasoningEncryptedContent
             ? { encryptedContent: state.reasoningEncryptedContent }
             : {}),
@@ -705,6 +743,11 @@ function buildOrderedAssistantContent(
   turnFileDiffs?: Map<string, FileDiffContent>,
 ): MessageContent[] {
   const content: MessageContent[] = [];
+  const reasoningItemId =
+    state.reasoningItemId ??
+    state.assistantThinkingBlocks
+      .map((block) => /^item:(.*):output:-?\d+:summary:-?\d+$/.exec(block.key)?.[1])
+      .find((itemId): itemId is string => typeof itemId === 'string' && itemId.length > 0);
   // Some Responses-API metadata only attaches once per assistant message, so
   // we apply it to the first reasoning segment we emit (matching the legacy
   // path's `index === 0` semantics).
@@ -715,6 +758,7 @@ function buildOrderedAssistantContent(
   // a placeholder ahead of any other content when no reasoning segment will
   // otherwise carry the metadata.
   const hasResponsesMeta =
+    Boolean(reasoningItemId) ||
     Boolean(state.reasoningEncryptedContent) ||
     Boolean(state.reasoningSummary) ||
     Boolean(state.responseId);
@@ -723,6 +767,7 @@ function buildOrderedAssistantContent(
     content.push({
       type: 'reasoning',
       text: '',
+      ...(reasoningItemId ? { itemId: reasoningItemId } : {}),
       ...(state.reasoningEncryptedContent
         ? { encryptedContent: state.reasoningEncryptedContent }
         : {}),
@@ -771,6 +816,7 @@ function buildOrderedAssistantContent(
         ...(typeof startedAt === 'number' ? { startedAt } : {}),
         ...(typeof endedAt === 'number' ? { endedAt } : {}),
         ...(typeof signature === 'string' && signature.length > 0 ? { signature } : {}),
+        ...(shouldAttachMeta && reasoningItemId ? { itemId: reasoningItemId } : {}),
         ...(shouldAttachMeta && state.reasoningEncryptedContent
           ? { encryptedContent: state.reasoningEncryptedContent }
           : {}),
@@ -999,7 +1045,7 @@ export async function runModelRound(input: {
 
   // ── 构建 ThinkingConfig（支持新版 + 旧版参数）──
   // 优先使用新版 thinking 参数；如果不存在，则从旧版参数构建
-  const thinkingConfig: import('../v2-runtime/upstream/provider-options.js').ThinkingConfig | undefined =
+  const thinkingConfig: ThinkingConfig | undefined =
     input.requestData.thinking ??
     (input.requestData.thinkingEnabled !== undefined ||
     input.requestData.reasoningEffort !== undefined
@@ -1029,9 +1075,10 @@ export async function runModelRound(input: {
   const isThinkingEnabled =
     thinkingConfig?.type === 'adaptive' || thinkingConfig?.type === 'enabled';
 
-  const thinkingLanguagePrompt = shouldApplyThinkingConfig && isThinkingEnabled
-    ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
-    : null;
+  const thinkingLanguagePrompt =
+    shouldApplyThinkingConfig && isThinkingEnabled
+      ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
+      : null;
 
   // ── New 2-layer pipeline (opencode pattern) ──
   // Layer 0: Filter messages after the most recent compaction boundary
@@ -1075,13 +1122,14 @@ export async function runModelRound(input: {
   const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
-  const thinkingUserHint = shouldApplyThinkingConfig && isThinkingEnabled
-    ? buildThinkingLanguageHint(
-        unifiedMessages.filter(
-          (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
-        ),
-      )
-    : null;
+  const thinkingUserHint =
+    shouldApplyThinkingConfig && isThinkingEnabled
+      ? buildThinkingLanguageHint(
+          unifiedMessages.filter(
+            (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
+          ),
+        )
+      : null;
   const messagesWithHint = thinkingUserHint
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)
     : unifiedMessages;
@@ -1164,7 +1212,7 @@ export async function runModelRound(input: {
   );
 
   // Audit-log the outbound transformation summary. The legacy v1 path
-  // serialised a fully-rendered upstream body here; with v2 the AI SDK
+  // serialised a fully-rendered upstream body here; with v2 the native client
   // owns serialisation, so we only record the conversation-shape inputs
   // that drove the call (sufficient for compliance/debug). The actual
   // wire payload is reconstructable from the v2 stream events.
@@ -1299,7 +1347,6 @@ export async function runModelRound(input: {
       state,
       reason === 'tool_use' ? undefined : input.turnFileDiffs,
     );
-
     const assistantMessage = appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -1366,7 +1413,7 @@ export async function runModelRound(input: {
       // request-scope snapshotRef. When shadow git is unavailable the
       // engine returns a noop and we silently skip (legacy backup path
       // already handled the diffs above).
-      void captureSnapshotTreeBestEffort({
+      const capturePromise = captureSnapshotTreeBestEffort({
         clientRequestId: input.clientRequestId,
         round: input.round,
         reason,
@@ -1375,6 +1422,11 @@ export async function runModelRound(input: {
         userId: input.userId,
         diffFiles,
       });
+      pendingSnapshotTreeCaptures.add(capturePromise);
+      void capturePromise.then(
+        () => pendingSnapshotTreeCaptures.delete(capturePromise),
+        () => pendingSnapshotTreeCaptures.delete(capturePromise),
+      );
     }
   };
   const markFailedRequestScopeMessages = () => {
@@ -1390,17 +1442,17 @@ export async function runModelRound(input: {
   // ── v2-only upstream pipeline ─────────────────────────────────────
   //
   // The legacy v1 fetch + manual SSE parser was removed in the v2
-  // cutover. Every round now goes through the AI SDK provider factory
+  // cutover. Every round now goes through the native provider factory
   // (`runUpstreamStream`) which handles cache breakpoints, message
   // normalisation, provider-specific thinking options, and protocol
   // decoding uniformly across `chat_completions`, `anthropic_messages`,
-  // and Responses (`@ai-sdk/openai`) once the user opts in via
+  // and Responses once the user opts in via
   // `upstreamProtocol: 'responses'` in provider settings.
   void compactionAutoEnabled;
 
   try {
-    const provider = buildAISdkProvider({
-      providerType: input.route.providerType ?? 'custom',
+    const modelHandle = buildNativeModel({
+      providerType: input.route.providerType,
       upstreamProtocol: input.route.upstreamProtocol,
       ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
       ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
@@ -1409,18 +1461,16 @@ export async function runModelRound(input: {
         ? { headers: input.route.requestOverrides.headers }
         : {}),
       model: input.route.model,
-      supportsThinking: input.route.supportsThinking,
     });
-    const modelHandle = provider.languageModel(input.route.model);
 
     // Extract leading system messages from the conversation so they can be
-    // passed via the AI SDK's dedicated `system` parameter instead of being
+    // passed via the native client's dedicated `system` parameter instead of being
     // embedded in the `messages` array. This avoids the SDK's
     // "system messages in messages can be a security risk" warning while
     // preserving the multi-segment system-prompt design (stable prefix +
     // dynamic suffix) used for prompt-cache breakpoints.
     const { system: systemMessages, messages: nonSystemModelMessages } =
-      extractSystemFromUnifiedMessages(allUnifiedMessages);
+      extractNativeSystemFromUnifiedMessages(allUnifiedMessages);
     const modelMessages = nonSystemModelMessages;
 
     // Declarations-only ToolSet — the gateway's `enabledTools` are
@@ -1430,9 +1480,7 @@ export async function runModelRound(input: {
     // out-of-band.
     const v2Tools =
       input.enabledTools.length > 0
-        ? wrapGatewayToolsForAiSdkDeclarationsOnly(
-            input.enabledTools as unknown as GatewayToolFunctionShape[],
-          )
+        ? wrapGatewayToolsForNativeDeclarationsOnly(input.enabledTools)
         : undefined;
 
     input.wl.succeed(stepUpstream, undefined, {
@@ -1453,12 +1501,12 @@ export async function runModelRound(input: {
         touchSessionHeartbeat(input.sessionId);
       }
 
-      for await (const chunk of runUpstreamStream({
+      const streamProgram = runUpstreamStream({
         model: modelHandle,
         modelId: input.route.model,
         messages: modelMessages,
         // Pass system prompts via the dedicated `system` parameter to avoid
-        // the AI SDK security warning about system messages in `messages`.
+        // the client's security warning about system messages in `messages`.
         // The multi-segment design (stable prefix + dynamic suffix) is
         // preserved because `system` accepts `SystemModelMessage[]`.
         ...(systemMessages.length > 0 ? { system: systemMessages } : {}),
@@ -1467,6 +1515,10 @@ export async function runModelRound(input: {
         ...(input.agentId ? { agentId: input.agentId } : {}),
         sessionId: input.sessionId,
         providerType: input.route.providerType,
+        ...(input.route.openaiFastMode ? { openaiFastMode: true } : {}),
+        ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
+        ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+        ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
         temperature: input.route.temperature,
         maxOutputTokens: input.route.maxTokens,
         requestOverrides: input.route.requestOverrides,
@@ -1481,7 +1533,7 @@ export async function runModelRound(input: {
                 effort: input.requestData.reasoningEffort,
                 providerType: input.route.providerType,
                 supportsThinking: input.route.supportsThinking ?? true,
-              } as import('../v2-runtime/upstream/provider-options.js').ExtendedThinkingConfig,
+              } satisfies ExtendedThinkingConfig,
             }
           : {}),
         onDiagnostics: (info) => {
@@ -1518,55 +1570,53 @@ export async function runModelRound(input: {
           v2Usage = mergeStreamUsageSummary(v2Usage, nextUsage);
           v2UsageOccurredAt = Date.now();
         },
-      })) {
-        input.eventSequence.value += 1;
-        const meta = createRunEventMeta(input.runId, input.eventSequence);
-        const chunkWithMeta = {
-          ...chunk,
-          requestId: input.clientRequestId,
-          ...meta,
-        } as StreamChunk;
+      });
+      await Effect.runPromise(
+        Stream.runForEach(streamProgram, (chunk) =>
+          Effect.sync(() => {
+            input.eventSequence.value += 1;
+            const meta = createRunEventMeta(input.runId, input.eventSequence);
+            const chunkWithMeta = {
+              ...chunk,
+              requestId: input.clientRequestId,
+              ...meta,
+            } as StreamChunk;
 
-        if (chunkWithMeta.type === 'done') {
-          doneEmitted = true;
-          stopReason = chunkWithMeta.stopReason;
-          // Suppress intermediate `done(tool_use)` chunks: the agent
-          // loop in `routes/stream.ts` continues into another round to
-          // dispatch the tool calls, and SSE consumers expect exactly
-          // one terminal `done` per stream. Only the final round —
-          // which ends with `end_turn` / `error` / `cancelled` etc. —
-          // surfaces a `done` event downstream.
-          if (chunkWithMeta.stopReason !== 'tool_use') {
+            if (chunkWithMeta.type === 'done') {
+              doneEmitted = true;
+              stopReason = chunkWithMeta.stopReason;
+              if (chunkWithMeta.stopReason !== 'tool_use') {
+                input.writeChunk({
+                  ...chunkWithMeta,
+                  upstreamSummary: toUpstreamStreamSummary(
+                    chunkWithMeta.stopReason,
+                    streamDiagnostics,
+                    input.route,
+                  ),
+                });
+              }
+              return;
+            }
+
+            if (chunkWithMeta.type === 'error') {
+              doneEmitted = true;
+              stopReason = 'error';
+              markFailedRequestScopeMessages();
+            }
+
+            accumulateChunk(state, chunkWithMeta);
             input.writeChunk(chunkWithMeta);
-          }
-          break;
-        }
-
-        // An error chunk from the upstream runner is terminal for this
-        // round: suppress the synthetic fallback `done` emission below
-        // so SSE consumers see only the error, matching the legacy
-        // custom-parser contract the verifier asserts. Also mark any
-        // pending assistant/tool messages from this round as `error`
-        // so the next turn's history-building (message-to-model-messages)
-        // prunes stale tool_use/tool_result pairs instead of replaying
-        // them into the recovery request.
-        if (chunkWithMeta.type === 'error') {
-          doneEmitted = true;
-          stopReason = 'error';
-          markFailedRequestScopeMessages();
-        }
-
-        accumulateChunk(state, chunkWithMeta);
-        input.writeChunk(chunkWithMeta);
-        ensureStepStarted();
-        persistStreamChunkAsSessionEvents({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          clientRequestId: input.clientRequestId,
-          chunk: chunkWithMeta,
-          state: streamSessionEventState,
-        });
-      }
+            ensureStepStarted();
+            persistStreamChunkAsSessionEvents({
+              sessionId: input.sessionId,
+              userId: input.userId,
+              clientRequestId: input.clientRequestId,
+              chunk: chunkWithMeta,
+              state: streamSessionEventState,
+            });
+          }),
+        ).pipe(Effect.provide(nativeLLMLayer)),
+      );
     } catch (err) {
       // Re-throw cancellation so the outer try/catch handles it
       // uniformly with the AbortSignal path.
@@ -1577,7 +1627,7 @@ export async function runModelRound(input: {
       // Classify rate-limit / overload / free-usage / 5xx so the
       // recovery layer (`routes/stream.ts`) and the wire-level
       // `upstreamError` surface keep the retry-after hint and a
-      // stable category — the AI SDK collapses these into opaque
+      // stable category — the native client collapses these into opaque
       // strings otherwise.
       const classification = classifyUpstreamError(err);
       const contextLimitError = parseContextLimitError(err);

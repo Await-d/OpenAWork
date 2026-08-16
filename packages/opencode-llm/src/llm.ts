@@ -1,5 +1,5 @@
-import { Effect, JsonSchema, Schema } from "effect"
-import { LLMClient } from "./route/client.js"
+import { Effect, JsonSchema, Schema } from 'effect';
+import { LLMClient } from './route/client.js';
 import {
   GenerationOptions,
   HttpOptions,
@@ -15,40 +15,40 @@ import {
   ToolDefinition,
   type ContentPart,
   ToolResultPart,
-} from "./schema/index.js"
-import { make as makeTool, toDefinitions, type ToolSchema } from "./tool.js"
+} from './schema/index.js';
+import { make as makeTool, toDefinitions, type ToolSchema } from './tool.js';
 
-export type ModelInput = SchemaModelInput
+export type ModelInput = SchemaModelInput;
 
-export type MessageInput = Message.Input
+export type MessageInput = Message.Input;
 
-export type ToolChoiceInput = ToolChoice.Input
-export type ToolChoiceMode = ToolChoice.Mode
+export type ToolChoiceInput = ToolChoice.Input;
+export type ToolChoiceMode = ToolChoice.Mode;
 
-export type ToolResultInput = Parameters<typeof ToolResultPart.make>[0]
+export type ToolResultInput = Parameters<typeof ToolResultPart.make>[0];
 
 /** Input accepted by `LLM.request`, normalized into the canonical `LLMRequest` class. */
 export type RequestInput = Omit<
   ConstructorParameters<typeof LLMRequest>[0],
-  "system" | "messages" | "tools" | "toolChoice" | "generation" | "http" | "providerOptions"
+  'system' | 'messages' | 'tools' | 'toolChoice' | 'generation' | 'http' | 'providerOptions'
 > & {
-  readonly system?: string | SystemPart | ReadonlyArray<SystemPart>
-  readonly prompt?: string | ContentPart | ReadonlyArray<ContentPart>
-  readonly messages?: ReadonlyArray<Message | MessageInput>
-  readonly tools?: ReadonlyArray<ToolDefinition.Input>
-  readonly toolChoice?: ToolChoiceInput
-  readonly generation?: GenerationOptions.Input
-  readonly providerOptions?: ConstructorParameters<typeof LLMRequest>[0]["providerOptions"]
-  readonly http?: HttpOptions.Input
-}
+  readonly system?: string | SystemPart | ReadonlyArray<SystemPart>;
+  readonly prompt?: string | ContentPart | ReadonlyArray<ContentPart>;
+  readonly messages?: ReadonlyArray<Message | MessageInput>;
+  readonly tools?: ReadonlyArray<ToolDefinition.Input>;
+  readonly toolChoice?: ToolChoiceInput;
+  readonly generation?: GenerationOptions.Input;
+  readonly providerOptions?: ConstructorParameters<typeof LLMRequest>[0]['providerOptions'];
+  readonly http?: HttpOptions.Input;
+};
 
-export const generate = LLMClient.generate
+export const generate = LLMClient.generate;
 
-export const stream = LLMClient.stream
+export const stream = LLMClient.stream;
 
 export const requestInput = (input: LLMRequest): RequestInput => ({
   ...LLMRequest.input(input),
-})
+});
 
 export const request = (input: RequestInput) => {
   const {
@@ -61,27 +61,31 @@ export const request = (input: RequestInput) => {
     providerOptions: requestProviderOptions,
     http: requestHttp,
     ...rest
-  } = input
+  } = input;
   return new LLMRequest({
     ...rest,
     system: SystemPart.content(requestSystem),
-    messages: [...(messages?.map(Message.make) ?? []), ...(prompt === undefined ? [] : [Message.user(prompt)])],
+    messages: [
+      ...(messages?.map(Message.make) ?? []),
+      ...(prompt === undefined ? [] : [Message.user(prompt)]),
+    ],
     tools: tools?.map(ToolDefinition.make) ?? [],
     toolChoice: requestToolChoice ? ToolChoice.make(requestToolChoice) : undefined,
-    generation: requestGeneration === undefined ? undefined : GenerationOptions.make(requestGeneration),
+    generation:
+      requestGeneration === undefined ? undefined : GenerationOptions.make(requestGeneration),
     providerOptions: requestProviderOptions,
     http: requestHttp === undefined ? undefined : HttpOptions.make(requestHttp),
-  })
-}
+  });
+};
 
 export const updateRequest = (input: LLMRequest, patch: Partial<RequestInput>) =>
-  request({ ...requestInput(input), ...patch })
+  request({ ...requestInput(input), ...patch });
 
-const GENERATE_OBJECT_TOOL_NAME = "generate_object"
+const GENERATE_OBJECT_TOOL_NAME = 'generate_object';
 
-const GENERATE_OBJECT_TOOL_DESCRIPTION = "Return the structured result by calling this tool."
+const GENERATE_OBJECT_TOOL_DESCRIPTION = 'Return the structured result by calling this tool.';
 
-type GenerateObjectBase = Omit<RequestInput, "tools" | "toolChoice" | "responseFormat">
+type GenerateObjectBase = Omit<RequestInput, 'tools' | 'toolChoice' | 'responseFormat'>;
 
 export class GenerateObjectResponse<T> {
   constructor(
@@ -90,58 +94,58 @@ export class GenerateObjectResponse<T> {
   ) {}
 
   get events() {
-    return this.response.events
+    return this.response.events;
   }
 
   get usage() {
-    return this.response.usage
+    return this.response.usage;
   }
 }
 
 export interface GenerateObjectOptions<S extends ToolSchema<any>> extends GenerateObjectBase {
-  readonly schema: S
+  readonly schema: S;
 }
 
 export interface GenerateObjectDynamicOptions extends GenerateObjectBase {
   /** Raw JSON Schema object describing the expected output shape. */
-  readonly jsonSchema: JsonSchema.JsonSchema
+  readonly jsonSchema: JsonSchema.JsonSchema;
 }
 
-const runGenerateObject = Effect.fn("LLM.generateObject")(function* (
+const runGenerateObject = Effect.fn('LLM.generateObject')(function* (
   options: GenerateObjectBase,
   tool: ReturnType<typeof makeTool>,
 ) {
-  const baseRequest = request(options)
+  const baseRequest = request(options);
   const generateRequest = LLMRequest.update(baseRequest, {
     tools: toDefinitions({ [GENERATE_OBJECT_TOOL_NAME]: tool }),
     toolChoice: ToolChoice.named(GENERATE_OBJECT_TOOL_NAME),
-  })
-  const response = yield* LLMClient.generate(generateRequest)
+  });
+  const response = yield* LLMClient.generate(generateRequest);
   const call = response.toolCalls.find(
     (event) => LLMEvent.is.toolCall(event) && event.name === GENERATE_OBJECT_TOOL_NAME,
-  )
+  );
   if (!call || !LLMEvent.is.toolCall(call))
     return yield* new LLMError({
-      module: "LLM",
-      method: "generateObject",
+      module: 'LLM',
+      method: 'generateObject',
       reason: new InvalidProviderOutputReason({
         message: `generateObject: model did not call the forced \`${GENERATE_OBJECT_TOOL_NAME}\` tool`,
       }),
-    })
+    });
   const object = yield* tool._decode(call.input).pipe(
     Effect.mapError(
       (error) =>
         new LLMError({
-          module: "LLM",
-          method: "generateObject",
+          module: 'LLM',
+          method: 'generateObject',
           reason: new InvalidProviderOutputReason({
             message: `generateObject: tool input failed schema decode: ${error.message}`,
           }),
         }),
     ),
-  )
-  return new GenerateObjectResponse(object, response)
-})
+  );
+  return new GenerateObjectResponse(object, response);
+});
 
 /**
  * Run a model and decode its output against `schema`. Works on every protocol
@@ -157,13 +161,15 @@ const runGenerateObject = Effect.fn("LLM.generateObject")(function* (
  */
 export function generateObject<S extends ToolSchema<any>>(
   options: GenerateObjectOptions<S>,
-): Effect.Effect<GenerateObjectResponse<Schema.Schema.Type<S>>, LLMError>
+): Effect.Effect<GenerateObjectResponse<Schema.Schema.Type<S>>, LLMError>;
 export function generateObject(
   options: GenerateObjectDynamicOptions,
-): Effect.Effect<GenerateObjectResponse<unknown>, LLMError>
-export function generateObject(options: GenerateObjectOptions<ToolSchema<any>> | GenerateObjectDynamicOptions) {
-  if ("schema" in options) {
-    const { schema, ...rest } = options
+): Effect.Effect<GenerateObjectResponse<unknown>, LLMError>;
+export function generateObject(
+  options: GenerateObjectOptions<ToolSchema<any>> | GenerateObjectDynamicOptions,
+) {
+  if ('schema' in options) {
+    const { schema, ...rest } = options;
     return runGenerateObject(
       rest,
       makeTool({
@@ -172,9 +178,9 @@ export function generateObject(options: GenerateObjectOptions<ToolSchema<any>> |
         success: Schema.Unknown as ToolSchema<unknown>,
         execute: () => Effect.void,
       }),
-    )
+    );
   }
-  const { jsonSchema, ...rest } = options
+  const { jsonSchema, ...rest } = options;
   return runGenerateObject(
     rest,
     makeTool({
@@ -182,8 +188,5 @@ export function generateObject(options: GenerateObjectOptions<ToolSchema<any>> |
       jsonSchema,
       execute: () => Effect.void,
     }),
-  )
+  );
 }
-
-
-

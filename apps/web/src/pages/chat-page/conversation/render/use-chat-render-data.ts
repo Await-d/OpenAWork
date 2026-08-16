@@ -58,6 +58,7 @@ export interface ChatRenderDataInput {
   visibleStreamThinkingBlocks: string[];
   visibleStreamStartedAt: number | null;
   visibleReportedStreamUsage: ChatBackendUsageSnapshot | null;
+  activeStreamClientRequestId: string | null;
   activeStreamFirstTokenLatencyMs: number | null;
   activeStreamMessageId: string | null;
   toolCallCards: ToolCallCardModel[];
@@ -134,6 +135,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
     visibleReportedStreamUsage,
+    activeStreamClientRequestId,
     activeStreamFirstTokenLatencyMs,
     activeStreamMessageId,
     toolCallCards,
@@ -432,6 +434,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       message: {
         id: activeStreamMessageId ?? '__streaming__',
         role: 'assistant',
+        ...(activeStreamClientRequestId ? { clientRequestId: activeStreamClientRequestId } : {}),
         content:
           toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
             ? createAssistantTraceContent({
@@ -526,6 +529,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         : {}),
     };
   }, [
+    activeStreamClientRequestId,
     activeModelId,
     activeModelOption?.label,
     activeProviderId,
@@ -559,6 +563,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       historicalRenderedMessageEntries,
       streamingRenderedMessageEntry,
       activeStreamMessageId,
+      activeStreamClientRequestId,
     );
 
     if (mergedEntries === historicalRenderedMessageEntries) {
@@ -569,6 +574,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       decorateAssistantGroupActions(group, handleCopyMessageGroup),
     );
   }, [
+    activeStreamClientRequestId,
     activeStreamMessageId,
     handleCopyMessageGroup,
     historicalGroupedMessageEntries,

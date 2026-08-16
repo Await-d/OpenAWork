@@ -3,6 +3,7 @@
 // `createRequire` which preserves the `node:` prefix end-to-end.
 import { createRequire } from 'node:module';
 import type * as NodeSqlite from 'node:sqlite';
+import { Effect, Stream } from 'effect';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { V2Storage } from '../../v2-runtime/storage/index.js';
 
@@ -157,14 +158,16 @@ describe('V2Storage (drizzle proxy over node:sqlite)', () => {
       stmt.run(`m-${String(i).padStart(2, '0')}`, 's-1', 'u-1', i * 10, '{}');
     }
 
-    const yielded: string[] = [];
-    for await (const row of storage.streamMessagesNewestFirst({
-      sessionId: 's-1',
-      userId: 'u-1',
-      pageSize: 2,
-    })) {
-      yielded.push(row.id);
-    }
+    const rows = await Effect.runPromise(
+      Stream.runCollect(
+        storage.streamMessagesNewestFirst({
+          sessionId: 's-1',
+          userId: 'u-1',
+          pageSize: 2,
+        }),
+      ),
+    );
+    const yielded = Array.from(rows).map((row) => row.id);
     expect(yielded).toEqual(['m-04', 'm-03', 'm-02', 'm-01', 'm-00']);
   });
 

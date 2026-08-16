@@ -25,6 +25,6 @@ export function resolveFusionConversationLayoutState({
 }: FusionConversationLayoutStateInput): ConversationLayoutState {
   return {
     centerContent: !showDockedReviewPanel,
-    contentMaxWidth: showDockedReviewPanel ? 'fluid' : 720,
+    contentMaxWidth: showDockedReviewPanel ? 'fluid' : 820,
   };
 }

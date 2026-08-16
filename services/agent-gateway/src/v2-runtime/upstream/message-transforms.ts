@@ -26,9 +26,9 @@
  *   - Inject empty `reasoning` part on DeepSeek assistant turns.
  */
 
-import type { ModelMessage } from './opencode-llm-compat.js';
+import { Message, type ContentPart } from '@openAwork/opencode-llm';
 
-type ContentPart = Record<string, unknown>;
+type ModelMessage = Message;
 
 interface TargetInput {
   providerType?: string;
@@ -71,10 +71,6 @@ function isMistralTarget(input: TargetInput): boolean {
   return provider === 'mistral' || model.includes('mistral') || model.includes('devstral');
 }
 
-function isRecord(value: unknown): value is ContentPart {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 // ─── Surrogate sanitisation (opencode parity) ───
 //
 // Replace lone/unpaired UTF-16 surrogate code-units with U+FFFD so
@@ -90,58 +86,44 @@ export function sanitizeSurrogates(content: string): string {
   return content.replace(SURROGATE_RE, '\uFFFD');
 }
 
-function sanitizeToolResultOutput(part: ContentPart): ContentPart {
-  if (part['type'] === 'tool-result') {
-    const output = part['output'];
-    if (isRecord(output)) {
-      if (output['type'] === 'text' || output['type'] === 'error-text') {
-        const value = output['value'];
-        if (typeof value === 'string') {
-          return { ...part, output: { ...output, value: sanitizeSurrogates(value) } };
-        }
-      }
-      if (output['type'] === 'content' && Array.isArray(output['value'])) {
-        return {
-          ...part,
-          output: {
-            ...output,
-            value: output['value'].map((item: unknown) => {
-              if (isRecord(item) && item['type'] === 'text' && typeof item['text'] === 'string') {
-                return { ...item, text: sanitizeSurrogates(item['text']) };
-              }
-              return item;
-            }),
-          },
-        };
-      }
+function sanitizeToolResultOutput(part: Extract<ContentPart, { type: 'tool-result' }>): ContentPart {
+  switch (part.result.type) {
+    case 'text':
+    case 'error':
+      return typeof part.result.value === 'string'
+        ? {
+            ...part,
+            result: { ...part.result, value: sanitizeSurrogates(part.result.value) },
+          }
+        : part;
+    case 'content':
+      return {
+        ...part,
+        result: {
+          ...part.result,
+          value: part.result.value.map((item) =>
+            item.type === 'text' ? { ...item, text: sanitizeSurrogates(item.text) } : item,
+          ),
+        },
+      };
+    case 'json':
+      return part;
+    default: {
+      const exhaustive: never = part.result;
+      return exhaustive;
     }
   }
-  return part;
 }
 
 function sanitizeAllTextContent(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
-    const content = message.content as unknown;
-    // String content — system / user / assistant
-    if (typeof content === 'string') {
-      return { ...message, content: sanitizeSurrogates(content) } as ModelMessage;
-    }
-    if (!Array.isArray(content)) return message;
-    // Array content — assistant / tool / user with parts
-    const next = content.map((part) => {
-      if (!isRecord(part)) return part;
-      const type = part['type'];
-      // text / reasoning parts
-      if (type === 'text' || type === 'reasoning') {
-        const text = part['text'];
-        if (typeof text === 'string') {
-          return { ...part, text: sanitizeSurrogates(text) };
-        }
+    const next = message.content.map((part) => {
+      if (part.type === 'text' || part.type === 'reasoning') {
+        return { ...part, text: sanitizeSurrogates(part.text) };
       }
-      // tool-result parts
-      return sanitizeToolResultOutput(part);
+      return part.type === 'tool-result' ? sanitizeToolResultOutput(part) : part;
     });
-    return { ...message, content: next } as ModelMessage;
+    return Message.make({ ...message, content: next });
   });
 }
 
@@ -150,27 +132,13 @@ function sanitizeAllTextContent(messages: ModelMessage[]): ModelMessage[] {
 function dropEmptyContent(messages: ModelMessage[]): ModelMessage[] {
   const result: ModelMessage[] = [];
   for (const message of messages) {
-    const content = message.content as unknown;
-    if (typeof content === 'string') {
-      if (content.length === 0) continue;
-      result.push(message);
-      continue;
-    }
-    if (!Array.isArray(content)) {
-      result.push(message);
-      continue;
-    }
-    const filtered = content.filter((part) => {
-      if (!isRecord(part)) return true;
-      const type = part['type'];
-      if (type === 'text' || type === 'reasoning') {
-        const text = part['text'];
-        return typeof text === 'string' && text.length > 0;
-      }
-      return true;
+    const filtered = message.content.filter((part) => {
+      return part.type !== 'text' && part.type !== 'reasoning'
+        ? true
+        : part.text.length > 0;
     });
     if (filtered.length === 0) continue;
-    result.push({ ...message, content: filtered } as ModelMessage);
+    result.push(Message.make({ ...message, content: filtered }));
   }
   return result;
 }
@@ -180,20 +148,13 @@ function dropEmptyContent(messages: ModelMessage[]): ModelMessage[] {
 function scrubClaudeToolIds(messages: ModelMessage[]): ModelMessage[] {
   const scrub = (id: string): string => id.replace(/[^a-zA-Z0-9_-]/g, '_');
   return messages.map((message) => {
-    if (!Array.isArray(message.content)) return message;
     if (message.role !== 'assistant' && message.role !== 'tool') return message;
-    const next = (message.content as unknown[]).map((part) => {
-      if (!isRecord(part)) return part;
-      const type = part['type'];
-      if (type === 'tool-call' || type === 'tool-result') {
-        const id = part['toolCallId'];
-        if (typeof id === 'string') {
-          return { ...part, toolCallId: scrub(id) };
-        }
-      }
-      return part;
+    const next = message.content.map((part) => {
+      return part.type === 'tool-call' || part.type === 'tool-result'
+        ? { ...part, id: scrub(part.id) }
+        : part;
     });
-    return { ...message, content: next } as ModelMessage;
+    return Message.make({ ...message, content: next });
   });
 }
 
@@ -204,20 +165,13 @@ function scrubMistralToolIds(messages: ModelMessage[]): ModelMessage[] {
       .substring(0, 9)
       .padEnd(9, '0');
   return messages.map((message) => {
-    if (!Array.isArray(message.content)) return message;
     if (message.role !== 'assistant' && message.role !== 'tool') return message;
-    const next = (message.content as unknown[]).map((part) => {
-      if (!isRecord(part)) return part;
-      const type = part['type'];
-      if (type === 'tool-call' || type === 'tool-result') {
-        const id = part['toolCallId'];
-        if (typeof id === 'string') {
-          return { ...part, toolCallId: scrub(id) };
-        }
-      }
-      return part;
+    const next = message.content.map((part) => {
+      return part.type === 'tool-call' || part.type === 'tool-result'
+        ? { ...part, id: scrub(part.id) }
+        : part;
     });
-    return { ...message, content: next } as ModelMessage;
+    return Message.make({ ...message, content: next });
   });
 }
 
@@ -230,21 +184,19 @@ function scrubMistralToolIds(messages: ModelMessage[]): ModelMessage[] {
 // them in the expected order.
 function splitAnthropicAssistantToolCallText(messages: ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) return [message];
-    const parts = message.content as unknown[];
-    const firstToolCall = parts.findIndex((part) => isRecord(part) && part['type'] === 'tool-call');
+    if (message.role !== 'assistant') return [message];
+    const parts = message.content;
+    const firstToolCall = parts.findIndex((part) => part.type === 'tool-call');
     if (firstToolCall === -1) return [message];
     const trailing = parts.slice(firstToolCall);
-    const trailingHasNonToolCall = trailing.some(
-      (part) => !isRecord(part) || part['type'] !== 'tool-call',
-    );
+    const trailingHasNonToolCall = trailing.some((part) => part.type !== 'tool-call');
     if (!trailingHasNonToolCall) return [message];
-    const nonToolParts = parts.filter((part) => !isRecord(part) || part['type'] !== 'tool-call');
-    const toolParts = parts.filter((part) => isRecord(part) && part['type'] === 'tool-call');
+    const nonToolParts = parts.filter((part) => part.type !== 'tool-call');
+    const toolParts = parts.filter((part) => part.type === 'tool-call');
     if (nonToolParts.length === 0 || toolParts.length === 0) return [message];
     return [
-      { ...message, content: nonToolParts } as ModelMessage,
-      { ...message, content: toolParts } as ModelMessage,
+      Message.make({ ...message, content: nonToolParts }),
+      Message.make({ ...message, content: toolParts }),
     ];
   });
 }
@@ -261,10 +213,7 @@ function interleaveMistralToolUser(messages: ModelMessage[]): ModelMessage[] {
     result.push(msg);
     const nextMsg = messages[i + 1];
     if (msg.role === 'tool' && nextMsg?.role === 'user') {
-      result.push({
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Done.' }],
-      });
+      result.push(Message.assistant('Done.'));
     }
   }
   return result;
@@ -275,22 +224,11 @@ function interleaveMistralToolUser(messages: ModelMessage[]): ModelMessage[] {
 function withDeepSeekReasoning(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') return message;
-    const content = message.content;
-    if (Array.isArray(content)) {
-      if ((content as unknown[]).some((part) => isRecord(part) && part['type'] === 'reasoning'))
-        return message;
-      return { ...message, content: [...content, { type: 'reasoning', text: '' }] };
-    }
-    if (typeof content === 'string') {
-      return {
-        ...message,
-        content: [
-          ...(content.length > 0 ? [{ type: 'text', text: content }] : []),
-          { type: 'reasoning', text: '' },
-        ],
-      } as ModelMessage;
-    }
-    return { ...message, content: [{ type: 'reasoning', text: '' }] };
+    if (message.content.some((part) => part.type === 'reasoning')) return message;
+    return Message.make({
+      ...message,
+      content: [...message.content, { type: 'reasoning', text: '' }],
+    });
   });
 }
 

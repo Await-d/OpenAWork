@@ -10,23 +10,27 @@
  *
  *   - `EffectBridge.run(layer, program)` — fire-and-await; rejects on
  *     failure with the original cause.
- *   - `EffectBridge.runOption(layer, program)` — succeeds with `null`
- *     when the program fails, useful for routes that want to fall
- *     back to the v1 path on any v2 error.
+ *   - `EffectBridge.runOption(layer, program, options)` — returns `null`
+ *     after the caller explicitly observes a failed program. Omitting the
+ *     options makes the program reject, so a v2 failure cannot silently fall
+ *     back to the v1 path.
  *
  * The bridge is opinionated about supplying `BusService.live()` by
  * default so the Effect tree can publish bus events without the caller
  * having to compose the layer manually each time.
  */
 
-import { Cause, Effect, Exit, Layer, Runtime } from 'effect';
+import { Cause, Effect, Exit, Layer } from 'effect';
 import { BusService } from './bus-service.js';
 import type { StorageService } from './storage-service.js';
 import { resolveStorageLayer } from '../boot.js';
 
-const defaultRuntime = Runtime.defaultRuntime;
-
 const liveBusLayer = BusService.live();
+
+export interface EffectFallbackOptions<E> {
+  readonly allowLegacyFallback: true;
+  readonly onFailure?: (cause: Cause.Cause<E>) => void;
+}
 
 /**
  * Compose any caller-supplied layer with the `BusService.live` baseline
@@ -47,21 +51,25 @@ export const EffectBridge = {
     program: Effect.Effect<A, E, R | BusService>,
   ): Promise<A> {
     const provided = program.pipe(Effect.provide(withBaseline(layer)));
-    return Runtime.runPromise(defaultRuntime)(provided);
+    return Effect.runPromise(provided);
   },
 
   /**
-   * Run an Effect program and return `null` if it fails. Useful for
-   * v2-runtime experimental code paths that should silently fall
-   * through to the legacy v1 path on error.
+   * Run an Effect program with an explicit, observable fallback. Without
+   * `options`, failures reject just like `run` and cannot enter a legacy path
+   * silently.
    */
   async runOption<R, E, A>(
     layer: Layer.Layer<R>,
     program: Effect.Effect<A, E, R | BusService>,
+    options?: EffectFallbackOptions<E>,
   ): Promise<A | null> {
     const provided = program.pipe(Effect.provide(withBaseline(layer)));
-    const exit = await Runtime.runPromiseExit(defaultRuntime)(provided);
+    if (options === undefined) return Effect.runPromise(provided);
+    const exit = await Effect.runPromiseExit(provided);
     if (Exit.isSuccess(exit)) return exit.value;
+    console.warn('[v2-runtime] explicit legacy fallback enabled after native Effect failure');
+    options.onFailure?.(exit.cause);
     return null;
   },
 
@@ -75,21 +83,23 @@ export const EffectBridge = {
     program: Effect.Effect<A, E, StorageService | BusService>,
   ): Promise<A> {
     const provided = program.pipe(Effect.provide(withBaseline(resolveStorageLayer())));
-    return Runtime.runPromise(defaultRuntime)(provided);
+    return Effect.runPromise(provided);
   },
 
   /**
-   * Soft-fail variant of `runWithStorage`. Returns `null` if the
-   * program errors out, matching `runOption`'s contract. Use this in
-   * routes that want to opt into v2 storage but transparently fall
-   * back to legacy behaviour on any failure.
+   * Storage variant with an explicit, observable fallback. Without `options`,
+   * failures reject just like `runWithStorage`.
    */
   async runWithStorageOption<E, A>(
     program: Effect.Effect<A, E, StorageService | BusService>,
+    options?: EffectFallbackOptions<E>,
   ): Promise<A | null> {
     const provided = program.pipe(Effect.provide(withBaseline(resolveStorageLayer())));
-    const exit = await Runtime.runPromiseExit(defaultRuntime)(provided);
+    if (options === undefined) return Effect.runPromise(provided);
+    const exit = await Effect.runPromiseExit(provided);
     if (Exit.isSuccess(exit)) return exit.value;
+    console.warn('[v2-runtime] explicit legacy fallback enabled after native Effect failure');
+    options.onFailure?.(exit.cause);
     return null;
   },
 

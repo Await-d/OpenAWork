@@ -23,9 +23,9 @@
  *    可观测性 / 埋点；不参与业务分支（team 接入应由父级控制 props）。
  */
 
+import { useMemo } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
-import type { CommandDescriptor } from '@openAwork/shared';
-import type { UpstreamStreamSummary } from '@openAwork/shared';
+import type { CommandDescriptor, InputImageContent, UpstreamStreamSummary } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import './ChatConversationView.css';
@@ -58,12 +58,12 @@ import {
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
 } from './render/chat-page-utils.js';
 import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
-import HistoryEditDialog from './views/history-edit-dialog.js';
+import HistoryEditInlineEditor from './views/history-edit-dialog.js';
 import RetryModeDialog from './views/retry-mode-dialog.js';
 import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
 import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
 import { ChatScrollBottomButton } from '../../../components/conversation-runtime/views/scroll-bottom-button.js';
-import { ChatStreamErrorBar } from '../../../components/conversation-runtime/views/stream-error-bar.js';
+import { ChatStreamErrorBarV2 as ChatStreamErrorBar } from '../../../components/conversation-runtime/views/stream-error-bar-v2.js';
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
 // 仅保留与 todo 相关的最小 props（sessionTodos / rightOpen），用于消息列展示。
 import { SessionRunStateBar } from '../../../components/conversation-runtime/views/session-run-state-bar.js';
@@ -91,11 +91,10 @@ export interface ConversationComposerExtras {
   agentSwitch?: boolean;
 }
 
-/** 历史编辑提示。chat 用 truncate 重发，team 暂不支持（Phase 2a 只读模式）。 */
 export interface HistoryEditPromptInput {
   text: string;
   messageId: string;
-  inputParts?: unknown[];
+  inputParts?: InputImageContent[];
 }
 
 /** 重试提示。 */
@@ -115,7 +114,7 @@ export interface RetryPromptInput {
  * - 流式状态 props（streaming、stoppingStream、streamError 等）
  * - 滚动 / 加载 props
  * - composer props（继承自 UnifiedComposer）
- * - 对话框 props（HistoryEditDialog / RetryModeDialog）
+ * - 编辑与重试交互 props（历史消息原位编辑 / RetryModeDialog）
  * - 业务回调
  */
 export interface ChatConversationViewProps {
@@ -248,9 +247,9 @@ export interface ChatConversationViewProps {
 
   historyEditPrompt: HistoryEditPromptInput | null;
   onCloseHistoryEdit: () => void;
-  onResendHistoryEdit: (text: string, inputParts?: unknown[]) => void;
-  onContinueHistoryEdit: (text: string, inputParts?: unknown[]) => void;
-  onCreateBranchFromHistoryEdit: (text: string, inputParts?: unknown[]) => void;
+  onResendHistoryEdit: (text: string, inputParts?: InputImageContent[]) => void;
+  onContinueHistoryEdit: (text: string, inputParts?: InputImageContent[]) => void;
+  onCreateBranchFromHistoryEdit: (text: string, inputParts?: InputImageContent[]) => void;
 
   retryPrompt: RetryPromptInput | null;
   onCloseRetry: () => void;
@@ -550,6 +549,46 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
 
+  const groupsWithHistoryEdit = useMemo(() => {
+    if (!historyEditPrompt) return groupedMessageEntries;
+
+    return groupedMessageEntries.map((group) => ({
+      ...group,
+      entries: group.entries.map((entry) => {
+        if (entry.message.id !== historyEditPrompt.messageId) return entry;
+
+        return {
+          ...entry,
+          renderContent: () => (
+            <HistoryEditInlineEditor
+              key={historyEditPrompt.messageId}
+              initialText={historyEditPrompt.text}
+              inputParts={historyEditPrompt.inputParts}
+              onClose={onCloseHistoryEdit}
+              onResendCurrent={(text, editedInputParts) => {
+                snapshotAwareAction.checkAndExecute({
+                  action: 'edit',
+                  sourceMessageId: historyEditPrompt.messageId,
+                  onProceed: () => onResendHistoryEdit(text, editedInputParts),
+                });
+              }}
+              onContinueCurrent={onContinueHistoryEdit}
+              onCreateBranch={onCreateBranchFromHistoryEdit}
+            />
+          ),
+        };
+      }),
+    }));
+  }, [
+    groupedMessageEntries,
+    historyEditPrompt,
+    onCloseHistoryEdit,
+    onContinueHistoryEdit,
+    onCreateBranchFromHistoryEdit,
+    onResendHistoryEdit,
+    snapshotAwareAction,
+  ]);
+
   const showWelcome =
     welcomeScreen !== undefined &&
     !showSessionSwitchSkeleton &&
@@ -575,12 +614,12 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   const resolvedContentMaxWidth =
     contentMaxWidth === 'fluid'
       ? '100%'
-      : (contentMaxWidth ?? (compact ? '100%' : editorMode ? 720 : 1024));
+      : (contentMaxWidth ?? (compact ? '100%' : editorMode ? 820 : 1024));
 
   // split 布局下内容区域增宽 15%，为左右分列留出更多空间
   const effectiveContentMaxWidth =
     messageLayout === 'split' && resolvedContentMaxWidth !== '100%'
-      ? `calc(${resolvedContentMaxWidth}px * 1.15)`
+      ? `calc(${resolvedContentMaxWidth}px * 1.5)`
       : resolvedContentMaxWidth;
 
   const shouldCenterContent = centerContent ?? !compact;
@@ -605,26 +644,6 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   return (
     <>
       {topBar}
-
-      <HistoryEditDialog
-        open={historyEditPrompt !== null}
-        initialText={historyEditPrompt?.text ?? ''}
-        inputParts={historyEditPrompt?.inputParts as never}
-        onClose={onCloseHistoryEdit}
-        onResendCurrent={(text, editedInputParts) => {
-          snapshotAwareAction.checkAndExecute({
-            action: 'edit',
-            sourceMessageId: historyEditPrompt?.messageId,
-            onProceed: () => onResendHistoryEdit(text, editedInputParts),
-          });
-        }}
-        onContinueCurrent={(text, editedInputParts) => {
-          onContinueHistoryEdit(text, editedInputParts);
-        }}
-        onCreateBranch={(text, editedInputParts) => {
-          onCreateBranchFromHistoryEdit(text, editedInputParts);
-        }}
-      />
 
       <RetryModeDialog
         open={retryPrompt !== null}
@@ -708,15 +727,17 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     bottomRef={bottomRef}
                     currentUserDisplayName={currentUserDisplayName}
                     currentUserEmail={currentUserEmail}
-                    groups={groupedMessageEntries}
+                    groups={groupsWithHistoryEdit}
                     pendingPermissions={pendingPermissions}
                     providerCatalog={providerCatalog}
                     resolveInlinePermissionActions={resolveInlinePermissionActions}
                     scrollRegionRef={scrollRegionRef}
+                    trailingContent={
+                      !visibleStreaming && remoteSessionBusyState ? (
+                        <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
+                      ) : null
+                    }
                   />
-                  {!visibleStreaming && remoteSessionBusyState ? (
-                    <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
-                  ) : null}
                 </>
               ) : (
                 <>

@@ -1,11 +1,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { join as posixJoin } from 'node:path/posix';
-import type {
-  ShellCommandResult,
-  ShellExecOptions,
-  ShellProvider,
-} from './shell-provider.js';
+import type { ShellCommandResult, ShellExecOptions, ShellProvider } from './shell-provider.js';
 
 /**
  * PowerShell 启动参数构建

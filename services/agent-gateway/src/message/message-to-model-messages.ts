@@ -25,7 +25,7 @@ import { parseCompactionMarkerText } from '../compaction/compaction-marker.js';
 import { truncateToolOutput } from '../tools/tool-output-truncator.js';
 
 // ─── Unified Message Type ───
-// Single intermediate representation, analogous to AI SDK's ModelMessage.
+// Single intermediate representation for all native upstream model messages.
 // All upstream protocol rendering reads from this type only.
 
 export interface SystemMessage {
@@ -78,6 +78,7 @@ export interface AssistantReasoningBlock {
 
 export interface AssistantReasoning {
   text?: string;
+  itemId?: string;
   encryptedContent?: string;
   summary?: string;
   /** Response ID from Responses API, used as previous_response_id for caching. */
@@ -413,6 +414,13 @@ export function toModelMessages(
 ): UnifiedMessage[] {
   const result: UnifiedMessage[] = [];
   const emittedToolResultIds = new Set<string>();
+  let latestUserMessageIndex = -1;
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (input[index]?.info.role === 'user') {
+      latestUserMessageIndex = index;
+      break;
+    }
+  }
 
   const pushToolResult = (
     toolCallId: string,
@@ -446,11 +454,15 @@ export function toModelMessages(
     }
   };
 
-  for (const msg of input) {
+  for (const [messageIndex, msg] of input.entries()) {
     if (msg.parts.length === 0) continue;
 
     if (msg.info.role === 'user') {
-      const { text, images } = buildUserInput(msg.parts);
+      const parts =
+        messageIndex === latestUserMessageIndex
+          ? msg.parts
+          : msg.parts.filter((part) => part.type !== 'text' || part.synthetic !== true);
+      const { text, images } = buildUserInput(parts);
       if (text.length > 0 || images.length > 0) {
         result.push({ role: 'user', content: text, ...(images.length > 0 ? { images } : {}) });
       }
@@ -505,7 +517,6 @@ export function toModelMessages(
       const { text, toolCalls, reasoning } = buildAssistantParts(msg.parts, msg.info, {
         differentModel,
       });
-
       if (text.length > 0 || toolCalls.length > 0 || reasoning) {
         result.push({
           role: 'assistant',
@@ -733,6 +744,9 @@ function buildAssistantParts(
   const summary = reasoningParts
     .map((p) => p.metadata?.['summary'])
     .find((v): v is string => typeof v === 'string' && v.length > 0);
+  const itemId = reasoningParts
+    .map((p) => p.itemId ?? p.metadata?.['itemId'])
+    .find((v): v is string => typeof v === 'string' && v.length > 0);
 
   // Per-block reasoning. Anthropic extended-thinking signatures are
   // attached per-block under `metadata.anthropic.signature` (or
@@ -773,9 +787,10 @@ function buildAssistantParts(
 
   const reasoning: AssistantReasoning | undefined =
     trimmedReasoningText.length > 0 ||
-    (!differentModel && (responseId || encryptedContent || summary))
+    (!differentModel && (itemId || responseId || encryptedContent || summary))
       ? {
           ...(trimmedReasoningText.length > 0 ? { text: trimmedReasoningText } : {}),
+          ...(!differentModel && itemId ? { itemId } : {}),
           ...(!differentModel && responseId ? { responseId } : {}),
           ...(!differentModel && encryptedContent ? { encryptedContent } : {}),
           ...(!differentModel && summary ? { summary } : {}),

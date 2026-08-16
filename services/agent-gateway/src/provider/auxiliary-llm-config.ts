@@ -15,7 +15,7 @@
  *      as the last-resort legacy path.
  *
  * The resolved record carries `providerType` and `upstreamProtocol`
- * so callers can forward both to the AI SDK provider factory — the
+ * so callers can forward both to the native provider factory — the
  * critical bit that prevents silent degradation to OpenAI Chat
  * Completions for users on `anthropic_messages` / `responses`. The 3
  * call sites that previously read env vars directly all bypassed
@@ -71,10 +71,11 @@ export interface ResolvedAuxiliaryLlmConfig {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
-  /** Forwarded so the workflow LLM picks the right AI SDK adapter. */
+  /** Forwarded so the workflow LLM picks the right native adapter. */
   providerType?: AIProvider['type'];
   /** Forwarded so per-provider Responses/anthropic_messages overrides apply. */
   upstreamProtocol?: AIProvider['upstreamProtocol'];
+  openaiFastMode?: boolean;
   /**
    * 该 model 的每百万 token 单价（USD），来自用户 provider 配置里的 model 条目。
    * 提供给团队用量统计估算成本（reception/pm1/pm2 等非流式路径）。缺省时成本记 0。
@@ -219,6 +220,7 @@ function resolveProviderCredentials(
     apiKey,
     model: modelId,
     providerType: provider.type,
+    ...(provider.openaiFastMode === true ? { openaiFastMode: true } : {}),
     ...(provider.upstreamProtocol ? { upstreamProtocol: provider.upstreamProtocol } : {}),
     ...(typeof modelEntry?.inputPricePerMillion === 'number'
       ? { inputPricePerMillion: modelEntry.inputPricePerMillion }
@@ -233,6 +235,7 @@ function buildResolvedConfigKey(config: ResolvedAuxiliaryLlmConfig): string {
   return [
     config.providerType ?? '',
     config.upstreamProtocol ?? '',
+    config.openaiFastMode === true ? 'priority' : '',
     config.apiBaseUrl,
     config.model,
     config.apiKey,

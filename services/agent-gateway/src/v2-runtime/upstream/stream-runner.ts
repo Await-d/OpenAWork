@@ -1,201 +1,83 @@
-/**
- * OpenCode LLM stream runner — Phase 4 façade that turns OpenCode LLM
- * stream events into OpenAWork's `StreamChunk` taxonomy.
- *
- * The runner is intentionally minimal: `routes/stream-model-round.ts`
- * owns the outer multi-round agent loop, while this file is responsible
- * only for translating OpenCode LLM stream events into OpenAWork's existing
- * `StreamChunk` wire format.
- *
- * Why this layer exists:
- *   - opencode delegates protocol parsing to OpenCode LLM, gaining vendor
- *     coverage and saving thousands of lines of bespoke SSE handling.
- *   - OpenAWork needs to keep emitting the existing `StreamChunk` types
- *     to preserve the SSE wire format every web/mobile/desktop client
- *     already speaks. The runner bridges the two.
- *
- * Phase 4 scope (this file):
- *   - Map text deltas, reasoning deltas, tool input deltas onto
- *     `text_delta` / `thinking_*` / `tool_call_delta` chunks.
- *   - Emit a final `done` chunk with the OpenCode LLM finish reason.
- *   - Surface upstream errors via `error` chunks.
- *
- * Out of scope (deferred to follow-up Phase 4 work):
- *   - Real session_entry persistence (already covered by
- *     persistStreamChunkAsSessionEvents from the legacy path; reuse).
- *   - Provider-specific middleware (cache_control breakpoints,
- *     `previous_response_id`, anthropic-betas, thinking budgets).
- *   - Tool execution loop — OpenCode LLM invokes tools itself, so the
- *     legacy `tool-sandbox` integration moves to the new path later.
- *
- * Phase C.1 additions (this revision):
- *   - Track toolName per tool input id so tool-input-delta events
- *     emit a complete `StreamToolCallChunk` (OpenCode LLM only carries the
- *     name on `tool-input-start`).
- *   - Emit a zero-length `tool_call_delta` on `tool-input-start` to
- *     mirror the Anthropic `content_block_start type=tool_use`
- *     behavior the legacy parser produces.
- *   - Map `tool-error` and `abort` to `StreamErrorChunk` so the
- *     SSE consumer surfaces failures without waiting for a finish.
- */
-
-import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/shared';
-import { resolveThinkingStyle } from '@openAwork/agent-core';
-import type { RequestOverrides } from '@openAwork/agent-core';
-import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
-import type { ModelMessage, SystemModelMessage, ToolSet } from './opencode-llm-compat.js';
+import { Duration, Effect, Layer, Stream } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
-import {
-  applyCaching,
-  applyCachingToSystemMessages,
-  buildPromptCacheModelInfo,
-} from './cache-breakpoints.js';
+import type { RequestOverrides } from '@openAwork/agent-core';
+import type {
+  StreamChunk,
+  StreamDoneChunk,
+  StreamErrorChunk,
+  StreamToolResultChunk,
+} from '@openAwork/shared';
+import type { Message, SystemPart, ToolDefinition } from '@openAwork/opencode-llm';
 import { dispatchChatParams } from '../../runtime/plugin-host.js';
-import type { V2LanguageModel } from './provider.js';
 import {
   buildBaseProviderOptions,
   buildProviderOptions,
-  buildProviderOptionsModelInfo,
-  providerOptions,
+  mergeProviderOptions,
   type ThinkingConfig,
   type ExtendedThinkingConfig,
 } from './provider-options.js';
-import { applyProviderMessageTransforms } from './message-transforms.js';
-import { sanitizeSurrogates } from './message-transforms.js';
+import type { UpstreamProtocolKind } from './native-model.js';
+import { applyProviderMessageTransforms, sanitizeSurrogates } from './message-transforms.js';
+
+type NativeToolSet = Record<string, ToolDefinition>;
 
 export interface RunUpstreamStreamInput {
-  /** AI SDK language model handle (build via `buildAISdkProvider`). */
-  model: V2LanguageModel;
-  /** Model identifier used for provider transform decisions. */
-  modelId?: string;
-  /** Conversation history in AI SDK's `ModelMessage` shape. */
-  messages: ModelMessage[];
-  /** Optional tool set — disabled by default during the migration. */
-  tools?: ToolSet;
-  /** RNG-style identifiers carried into emitted StreamChunks for replay. */
-  runId?: string;
-  agentId?: string;
-  sessionId?: string;
-  /** Abort signal forwarded to the AI SDK. */
-  signal?: AbortSignal;
-  /**
-   * Idle (inter-chunk) wall-clock timeout in milliseconds. The AI SDK
-   * `streamText` only honours `abortSignal`; it has no notion of a
-   * stalled stream. When an upstream connects, emits a first chunk,
-   * then stops producing data without closing the socket, the
-   * `for await (fullStream)` loop would otherwise block forever. The
-   * runner arms a watchdog that aborts the upstream and surfaces a
-   * stable `STREAM_STALL` error if no chunk arrives within this window.
-   * Each received chunk resets the timer. Pass `0` (or a non-finite
-   * value) to disable. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS`.
-   */
-  idleTimeoutMs?: number;
-  /**
-   * Optional system prompt(s). Supports a plain string (single prompt)
-   * or an array of `SystemModelMessage` objects (multi-segment prompts
-   * used for prompt-cache breakpoints). When provided, these are passed
-   * via the AI SDK's dedicated `system` parameter rather than embedded
-   * in the `messages` array, avoiding the SDK's security warning about
-   * system messages in `messages`.
-   */
-  system?: string | SystemModelMessage | SystemModelMessage[];
-  /** Temperature / max tokens / top-p — pass-through to streamText. */
-  temperature?: number;
-  maxOutputTokens?: number;
-  topP?: number;
-  frequencyPenalty?: number;
-  presencePenalty?: number;
-  requestOverrides?: RequestOverrides;
-  /**
-   * Provider type — used to decide whether to apply prompt-cache
-   * breakpoints. Pass the OpenAWork-side identifier
-   * (e.g. `'anthropic'`, `'openai'`, `'openrouter'`).
-   */
-  providerType?: string;
-  /**
-   * Optional thinking / reasoning configuration. When present we
-   * derive AI SDK `providerOptions` automatically.
-   */
-  thinking?: ThinkingConfig | ExtendedThinkingConfig;
-  /**
-   * When true, inject a `_noop` stub tool whenever the conversation
-   * history contains tool_call / tool_result parts but the caller
-   * passed no active tools. Mirrors opencode's LiteLLM/Bedrock
-   * compatibility shim — those proxies reject requests where the
-   * message history references tools but the request has no `tools`
-   * parameter (e.g. during compaction). Default: auto-detect via
-   * `providerType` containing "litellm" / "bedrock".
-   */
-  litellmProxy?: boolean;
-  /**
-   * Maximum number of retry attempts the AI SDK should perform on
-   * transient transport / 5xx / 429 errors. Mirrors the legacy
-   * `fetchUpstreamStreamWithRetry` behaviour: when the caller passes
-   * `n`, AI SDK retries the upstream call up to `n` times before
-   * surfacing the error. Defaults to AI SDK's own default (2).
-   */
-  maxRetries?: number;
-  /**
-   * Optional callback fired exactly once when the AI SDK emits the
-   * top-level `finish` event with `totalUsage`. The runner does not
-   * await the callback — use it to side-effect (e.g. populate a
-   * caller-side `usageSummary` variable) without blocking the
-   * stream. Errors thrown from inside the callback are swallowed.
-   */
-  onFinish?: (info: {
-    finishReason: string | undefined;
-    usage: {
-      inputTokens: number | undefined;
-      outputTokens: number | undefined;
-      totalTokens: number | undefined;
-      reasoningTokens?: number | undefined;
-      cachedInputTokens?: number | undefined;
-      inputTokenDetails?: {
-        cacheReadTokens?: number | undefined;
-        cacheWriteTokens?: number | undefined;
+  readonly model: OpenCodeLLM.Model;
+  readonly modelId?: string;
+  readonly messages: Message[];
+  readonly tools?: NativeToolSet;
+  readonly runId?: string;
+  readonly agentId?: string;
+  readonly sessionId?: string;
+  readonly signal?: AbortSignal;
+  readonly idleTimeoutMs?: number;
+  readonly system?: string | SystemPart | SystemPart[];
+  readonly temperature?: number;
+  readonly maxOutputTokens?: number;
+  readonly topP?: number;
+  readonly frequencyPenalty?: number;
+  readonly presencePenalty?: number;
+  readonly requestOverrides?: RequestOverrides;
+  readonly providerType?: string;
+  readonly openaiFastMode?: boolean;
+  readonly upstreamProtocol?: UpstreamProtocolKind;
+  readonly thinking?: ThinkingConfig | ExtendedThinkingConfig;
+  readonly litellmProxy?: boolean;
+  readonly maxRetries?: number;
+  readonly onFinish?: (info: {
+    readonly finishReason: string | undefined;
+    readonly providerMetadata?: OpenCodeLLM.ProviderMetadata;
+    readonly usage: {
+      readonly inputTokens: number | undefined;
+      readonly outputTokens: number | undefined;
+      readonly totalTokens: number | undefined;
+      readonly reasoningTokens?: number | undefined;
+      readonly cachedInputTokens?: number | undefined;
+      readonly inputTokenDetails?: {
+        readonly cacheReadTokens?: number | undefined;
+        readonly cacheWriteTokens?: number | undefined;
       };
-      outputTokenDetails?: {
-        reasoningTokens?: number | undefined;
-      };
+      readonly outputTokenDetails?: { readonly reasoningTokens?: number | undefined };
     };
   }) => void;
-  /**
-   * Optional observer for lightweight stream diagnostics. Called
-   * synchronously as chunks are translated so the outer runtime can
-   * distinguish "upstream streamed many deltas" from "upstream only
-   * delivered a terminal event / error".
-   */
-  onDiagnostics?: (info: {
-    textDeltaCount: number;
-    reasoningDeltaCount: number;
-    toolCallDeltaCount: number;
-    sawDone: boolean;
-    sawError: boolean;
-    stalled: boolean;
+  readonly onDiagnostics?: (info: {
+    readonly textDeltaCount: number;
+    readonly reasoningDeltaCount: number;
+    readonly toolCallDeltaCount: number;
+    readonly sawDone: boolean;
+    readonly sawError: boolean;
+    readonly stalled: boolean;
+    readonly openaiServiceTier?: string;
   }) => void;
 }
 
-export type RunUpstreamStreamEvent = StreamChunk;
+export type RunUpstreamStreamEvent = StreamChunk | StreamToolResultChunk;
+export type NativeUpstreamStream = Stream.Stream<RunUpstreamStreamEvent, never>;
 
-/**
- * Return a copy of `tools` whose entries are ordered by tool name
- * (`localeCompare`). The serialised tool list is hashed as part of the
- * prompt-cache key by Anthropic, OpenAI Responses, and Bedrock; running
- * with a stable subset of tools but inconsistent iteration order would
- * therefore cause spurious cache misses across requests in the same
- * session. Mirrors opencode #26370.
- *
- * Returns `undefined` when `tools` is `undefined` so callers can
- * forward "no tools" through unchanged.
- */
-export function sortToolsByName(tools: ToolSet | undefined): ToolSet | undefined {
+export function sortToolsByName(tools: NativeToolSet | undefined): NativeToolSet | undefined {
   if (!tools) return undefined;
-  // `Array#toSorted` is ES2023 and our typecheck lib targets ES2022.
-  // Use `slice().sort()` for the same non-mutating semantics.
-  const sortedEntries = Object.entries(tools)
-    .slice()
-    .sort(([a]: [string, unknown], [b]: [string, unknown]) => a.localeCompare(b));
-  return Object.fromEntries(sortedEntries);
+  const entries = Object.entries(tools).sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries);
 }
 
 const FINISH_REASON_TO_STOP: Record<string, StreamDoneChunk['stopReason']> = {
@@ -209,259 +91,431 @@ const FINISH_REASON_TO_STOP: Record<string, StreamDoneChunk['stopReason']> = {
 };
 
 function mapFinishReason(value: string | undefined): StreamDoneChunk['stopReason'] {
-  if (!value) return 'end_turn';
-  return FINISH_REASON_TO_STOP[value] ?? 'end_turn';
+  return value === undefined ? 'end_turn' : (FINISH_REASON_TO_STOP[value] ?? 'end_turn');
 }
 
-function shouldOmit(upstreamKeys: string[] | undefined, ...candidates: string[]): boolean {
-  if (!upstreamKeys || upstreamKeys.length === 0) return false;
-  return candidates.some((k) => upstreamKeys.includes(k));
+function hasToolCallsInHistory(messages: readonly Message[]): boolean {
+  return messages.some((message) =>
+    message.content.some((part) => part.type === 'tool-call' || part.type === 'tool-result'),
+  );
 }
 
-type ProviderOptionsRecord = SharedV2ProviderOptions;
-type ProviderSettingsRecord = Record<string, JSONValue>;
-type UpstreamStreamTextResult = ReturnType<typeof streamText<ToolSet>>;
-
-function isRecord(value: unknown): value is ProviderSettingsRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function mergeDeep(
-  target: ProviderSettingsRecord,
-  source: ProviderSettingsRecord,
-): ProviderSettingsRecord {
-  const result: ProviderSettingsRecord = { ...target };
-  for (const [key, value] of Object.entries(source)) {
-    const current = result[key];
-    result[key] = isRecord(current) && isRecord(value) ? mergeDeep(current, value) : value;
-  }
-  return result;
-}
-
-function mergeProviderOptions(
-  ...items: Array<SharedV2ProviderOptions | undefined>
-): SharedV2ProviderOptions | undefined {
-  const merged = items.reduce<ProviderOptionsRecord>((acc, item) => {
-    if (!item) return acc;
-    const next: ProviderOptionsRecord = { ...acc };
-    for (const [provider, settings] of Object.entries(item)) {
-      const current = next[provider];
-      next[provider] = current ? mergeDeep(current, settings) : settings;
-    }
-    return next;
-  }, {});
-  return Object.keys(merged).length > 0 ? merged : undefined;
-}
-
-/**
- * True if any message in the history carries a `tool-call` /
- * `tool-result` part. Used to decide whether the LiteLLM/Bedrock
- * `_noop` stub must be injected to satisfy proxies that demand a
- * `tools` parameter whenever the conversation references tools.
- *
- * Mirrors opencode's `hasToolCalls` (`session/llm.ts`).
- */
-function hasToolCallsInHistory(messages: ModelMessage[]): boolean {
-  for (const msg of messages) {
-    if (!Array.isArray(msg.content)) continue;
-    for (const part of msg.content) {
-      const partType = (part as { type?: unknown }).type;
-      if (partType === 'tool-call' || partType === 'tool-result') return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Heuristic: does this provider need the LiteLLM/Bedrock `_noop`
- * compatibility stub? Auto-detected from the OpenAWork-side provider
- * type identifier; explicit `litellmProxy: true/false` always wins.
- */
-function shouldInjectNoopStub(input: { litellmProxy?: boolean; providerType?: string }): boolean {
+function shouldInjectNoopStub(input: {
+  readonly litellmProxy?: boolean;
+  readonly providerType?: string;
+}): boolean {
   if (typeof input.litellmProxy === 'boolean') return input.litellmProxy;
-  const pt = (input.providerType ?? '').toLowerCase();
-  return pt.includes('litellm') || pt.includes('bedrock') || pt.includes('github-copilot');
+  const provider = input.providerType?.toLowerCase() ?? '';
+  return (
+    provider.includes('litellm') ||
+    provider.includes('bedrock') ||
+    provider.includes('github-copilot')
+  );
 }
 
-const NOOP_TOOL_DEFINITION = defineTool({
+const NOOP_TOOL_DEFINITION = OpenCodeLLM.ToolDefinition.make({
+  name: '_noop',
   description: '请勿调用此工具。它仅为 API 兼容性而存在，绝不应被调用。',
-  inputSchema: jsonSchema({
+  inputSchema: {
     type: 'object',
-    properties: {
-      reason: { type: 'string', description: '未使用' },
-    },
-  }),
-  execute: async () => ({ output: '', title: '', metadata: {} }),
+    properties: { reason: { type: 'string', description: '未使用' } },
+  },
 });
 
-function buildRequestOverrideProviderOptions(input: {
-  model: string;
-  providerType?: string;
-  requestOverrides?: RequestOverrides;
-}): SharedV2ProviderOptions | undefined {
-  const body = input.requestOverrides?.body;
-  if (!body || Object.keys(body).length === 0) return undefined;
-  const omitted = new Set(input.requestOverrides?.omitBodyKeys ?? []);
-  const filteredBody = Object.fromEntries(
-    Object.entries(body).filter(([key]) => !omitted.has(key)),
-  );
-  if (Object.keys(filteredBody).length === 0) return undefined;
-  const modelInfo = buildProviderOptionsModelInfo({
-    providerType: input.providerType ?? 'custom',
-    model: input.model,
-  });
-  return providerOptions(modelInfo, { body: filteredBody as JSONValue });
+const nativeStreamLayer = OpenCodeLLM.LLMClient.layer.pipe(
+  Layer.provide(OpenCodeLLM.RequestExecutor.fetchLayer),
+);
+
+function shouldOmit(
+  keys: readonly string[] | undefined,
+  ...candidates: readonly string[]
+): boolean {
+  return keys !== undefined && candidates.some((candidate) => keys.includes(candidate));
 }
 
 interface RunnerState {
-  runId?: string;
-  agentId?: string;
-  sessionId?: string;
-  thinkingActive: boolean;
-  thinkingItemId?: string;
-  /**
-   * AI SDK only emits the tool name on `tool-input-start`; subsequent
-   * `tool-input-delta` parts only carry the id. We cache the mapping
-   * here so each delta we yield has the full `(toolCallId, toolName)`
-   * pair downstream consumers expect.
-   */
-  toolNamesById: Map<string, string>;
-  /**
-   * Responses API encrypted reasoning payload captured from the
-   * provider's reasoning-start providerMetadata. Forwarded on
-   * reasoning-end so downstream accumulators can persist it for
-   * round-2 replay.
-   */
-  thinkingEncryptedContent?: string;
-  /**
-   * Anthropic extended-thinking signature captured from a
-   * `reasoning-delta` event. `@ai-sdk/anthropic` streams the block's
-   * `signature_delta` as an empty-text `reasoning-delta` carrying
-   * `providerMetadata.anthropic.signature` (Bedrock-hosted Claude
-   * reuses the same shape under `.bedrock`) — the signature never
-   * appears on `reasoning-end`. Captured here and forwarded on
-   * reasoning-end so downstream accumulators can persist it for
-   * multi-turn replay.
-   */
-  thinkingSignature?: string;
-  /**
-   * AI SDK fires both `finish-step` (per round) and `finish` (overall)
-   * for non-multi-step calls; legacy emits exactly one `done` chunk
-   * per upstream completion. We collapse the two into a single emit
-   * so downstream consumers see the same shape on both paths.
-   */
+  readonly runId?: string;
+  readonly agentId?: string;
   doneEmitted: boolean;
+  finishCallbackEmitted: boolean;
+  thinkingItemId?: string;
+  thinkingEncryptedContent?: string;
+  thinkingSignature?: string;
+  readonly toolNamesById: Map<string, string>;
 }
 
-/**
- * Drive an AI SDK `streamText` call and yield OpenAWork StreamChunks.
- *
- * Returns an async iterable so the caller can pipe the events into the
- * existing `writeChunk(...)` consumer in `runModelRound` without further
- * adaptation.
- */
-/**
- * Default idle (inter-chunk) timeout for streaming upstream calls.
- * Generous enough to absorb slow first tokens and long reasoning gaps
- * on large models, while still bounding a hung-but-open upstream
- * socket so the agent turn cannot wedge indefinitely.
- */
-export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
-
-/**
- * Wrap an async iterable with an inter-chunk (idle) deadline. If no value
- * arrives within `idleTimeoutMs`, `onStall` is invoked (used to abort the
- * upstream and release the hung socket), the source iterator is closed via
- * `return()`, and iteration ends gracefully so the caller can surface a
- * stable error. Each yielded value resets the timer. A non-finite or
- * non-positive timeout disables the watchdog (passes the source through).
- *
- * Exported for isolated unit testing — the production caller
- * (`runUpstreamStream`) wraps the AI SDK `fullStream` with it.
- */
-/**
- * Close a source async-iterator without letting its `return()` escape or hang.
- * The idle watchdog calls this AFTER aborting the upstream, at which point the
- * AI SDK iterator's `return()` (or the abandoned pending `next()`) may reject
- * with the abort error or never settle. We race the close against a short
- * deadline and swallow any rejection so the watchdog always ends gracefully.
- */
-const ITERATOR_CLOSE_TIMEOUT_MS = 5_000;
-async function closeIteratorSafely<T>(iterator: AsyncIterator<T>): Promise<void> {
-  if (typeof iterator.return !== 'function') {
-    return;
-  }
-  try {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const deadline = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ITERATOR_CLOSE_TIMEOUT_MS);
-      timer.unref?.();
-    });
-    try {
-      await Promise.race([
-        Promise.resolve(iterator.return(undefined)).then(() => undefined),
-        deadline,
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  } catch {
-    // `return()` rejected (commonly the upstream abort error) — already handled
-    // by surfacing STREAM_STALL downstream; nothing to do here.
-  }
+interface DiagnosticsState {
+  textDeltaCount: number;
+  reasoningDeltaCount: number;
+  toolCallDeltaCount: number;
+  sawDone: boolean;
+  sawError: boolean;
+  stalled: boolean;
+  openaiServiceTier?: string;
 }
 
-export async function* withStreamIdleWatchdog<T>(
-  source: AsyncIterable<T>,
-  options: { idleTimeoutMs: number; onStall: () => void },
-): AsyncGenerator<T> {
-  const { idleTimeoutMs, onStall } = options;
-  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
-    yield* source;
-    return;
+function providerMetadataText(
+  metadata: OpenCodeLLM.ProviderMetadata | undefined,
+  provider: string,
+  ...keys: readonly string[]
+): string | undefined {
+  const values = metadata?.[provider];
+  if (!values) return undefined;
+  for (const key of keys) {
+    const value = values[key];
+    if (typeof value === 'string' && value.length > 0) return value;
   }
-  const iterator = source[Symbol.asyncIterator]();
-  while (true) {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const idlePromise = new Promise<'__idle__'>((resolve) => {
-      timer = setTimeout(() => resolve('__idle__'), idleTimeoutMs);
-      timer.unref?.();
-    });
-    let res: IteratorResult<T> | '__idle__';
-    try {
-      res = await Promise.race([iterator.next(), idlePromise]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-    if (res === '__idle__') {
-      onStall();
-      // Close the source iterator defensively: after `onStall` aborts the
-      // upstream, the AI SDK iterator's `return()` (or the abandoned pending
-      // `next()`) can REJECT with the abort error, or — for a misbehaving
-      // adapter — never settle. An unguarded `await` here would either throw
-      // the rejection out of this generator (escaping the `for await` in
-      // `runUpstreamStream`, bypassing the stable STREAM_STALL chunk + `return
-      // result`) or re-hang the very turn the watchdog exists to bound. Swallow
-      // the rejection and cap the close with its own short deadline.
-      await closeIteratorSafely(iterator);
+  return undefined;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'unknown upstream error';
+}
+
+function outputValue(event: OpenCodeLLM.ToolResult): unknown {
+  if (event.output !== undefined) return event.output.structured;
+  return event.result.value;
+}
+
+function diagnosticsSnapshot(diagnostics: DiagnosticsState): {
+  readonly textDeltaCount: number;
+  readonly reasoningDeltaCount: number;
+  readonly toolCallDeltaCount: number;
+  readonly sawDone: boolean;
+  readonly sawError: boolean;
+  readonly stalled: boolean;
+  readonly openaiServiceTier?: string;
+} {
+  return { ...diagnostics };
+}
+
+function makeSignalEffect(
+  signal: AbortSignal | undefined,
+  onAbort: () => void,
+): Effect.Effect<void> {
+  if (!signal) return Effect.never;
+  return Effect.callback<void>((resume) => {
+    const abort = () => {
+      onAbort();
+      resume(Effect.void);
+    };
+    if (signal.aborted) {
+      abort();
       return;
     }
-    if (res.done) return;
-    yield res.value;
+    signal.addEventListener('abort', abort, { once: true });
+    return Effect.sync(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+function reportFinish(
+  input: RunUpstreamStreamInput,
+  state: RunnerState,
+  reason: string | undefined,
+  usage: OpenCodeLLM.Usage | undefined,
+  providerMetadata: OpenCodeLLM.ProviderMetadata | undefined,
+): void {
+  if (state.finishCallbackEmitted || !input.onFinish || usage === undefined) return;
+  state.finishCallbackEmitted = true;
+  try {
+    input.onFinish({
+      finishReason: reason,
+      ...(providerMetadata === undefined ? {} : { providerMetadata }),
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        reasoningTokens: usage.reasoningTokens,
+        cachedInputTokens: usage.cacheReadInputTokens,
+        inputTokenDetails: {
+          cacheReadTokens: usage.cacheReadInputTokens,
+          cacheWriteTokens: usage.cacheWriteInputTokens,
+        },
+        outputTokenDetails: { reasoningTokens: usage.reasoningTokens },
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[stream-runner] onFinish callback failed', message);
   }
 }
 
-export async function* runUpstreamStream(
+function makeMapper(
   input: RunUpstreamStreamInput,
-): AsyncGenerator<RunUpstreamStreamEvent, UpstreamStreamTextResult | undefined, void> {
-  const state: RunnerState = {
-    runId: input.runId,
-    agentId: input.agentId,
-    thinkingActive: false,
-    toolNamesById: new Map<string, string>(),
-    doneEmitted: false,
+  state: RunnerState,
+  diagnostics: DiagnosticsState,
+): (event: OpenCodeLLM.LLMEvent) => readonly RunUpstreamStreamEvent[] {
+  const meta = (extra: Record<string, unknown>) => ({
+    ...(state.runId === undefined ? {} : { runId: state.runId }),
+    ...(state.agentId === undefined ? {} : { agentId: state.agentId }),
+    occurredAt: Date.now(),
+    ...extra,
+  });
+
+  return (event) => {
+    switch (event.type) {
+      case 'step-start':
+      case 'text-start':
+      case 'text-end':
+      case 'tool-input-end':
+        return [];
+      case 'text-delta':
+        diagnostics.textDeltaCount += 1;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [{ type: 'text_delta', delta: event.text, ...meta({}) }];
+      case 'reasoning-start':
+        state.thinkingItemId = event.id;
+        state.thinkingEncryptedContent =
+          providerMetadataText(
+            event.providerMetadata,
+            'openai',
+            'reasoningEncryptedContent',
+            'encryptedContent',
+          ) ??
+          providerMetadataText(
+            event.providerMetadata,
+            'responses',
+            'reasoningEncryptedContent',
+            'encryptedContent',
+          );
+        return [{ type: 'thinking_start', itemId: event.id, ...meta({}) }];
+      case 'reasoning-delta': {
+        diagnostics.reasoningDeltaCount += 1;
+        const signature =
+          providerMetadataText(event.providerMetadata, 'anthropic', 'signature') ??
+          providerMetadataText(event.providerMetadata, 'bedrock', 'signature');
+        if (signature !== undefined) state.thinkingSignature = signature;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [{ type: 'thinking_delta', delta: event.text, itemId: event.id, ...meta({}) }];
+      }
+      case 'reasoning-end': {
+        const signature =
+          state.thinkingSignature ??
+          providerMetadataText(event.providerMetadata, 'anthropic', 'signature') ??
+          providerMetadataText(event.providerMetadata, 'bedrock', 'signature');
+        const encryptedContent =
+          state.thinkingEncryptedContent ??
+          providerMetadataText(
+            event.providerMetadata,
+            'openai',
+            'reasoningEncryptedContent',
+            'encryptedContent',
+          );
+        state.thinkingSignature = undefined;
+        state.thinkingEncryptedContent = undefined;
+        state.thinkingItemId = undefined;
+        const providerMetadata =
+          signature === undefined && encryptedContent === undefined
+            ? undefined
+            : {
+                ...(signature === undefined ? {} : { signature }),
+                ...(encryptedContent === undefined ? {} : { encryptedContent }),
+              };
+        return [
+          {
+            type: 'thinking_end',
+            itemId: event.id,
+            ...(providerMetadata === undefined ? {} : { providerMetadata }),
+            ...meta({}),
+          },
+        ];
+      }
+      case 'tool-input-start':
+        state.toolNamesById.set(event.id, event.name);
+        diagnostics.toolCallDeltaCount += 1;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [
+          {
+            type: 'tool_call_delta',
+            toolCallId: event.id,
+            toolName: event.name,
+            inputDelta: '',
+            ...meta({}),
+          },
+        ];
+      case 'tool-input-delta':
+        state.toolNamesById.set(event.id, event.name);
+        diagnostics.toolCallDeltaCount += 1;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [
+          {
+            type: 'tool_call_delta',
+            toolCallId: event.id,
+            toolName: event.name,
+            inputDelta: event.text,
+            ...meta({}),
+          },
+        ];
+      case 'tool-call': {
+        const toolName = event.name || state.toolNamesById.get(event.id) || '';
+        if (toolName.length === 0) return [];
+        const hadInputDeltas = state.toolNamesById.has(event.id);
+        state.toolNamesById.set(event.id, toolName);
+        const metadata = event.providerMetadata;
+        const inputDelta =
+          typeof event.input === 'string' ? event.input : (JSON.stringify(event.input) ?? '');
+        const closer =
+          metadata === undefined || Object.keys(metadata).length === 0
+            ? undefined
+            : {
+                type: 'tool_call_delta' as const,
+                toolCallId: event.id,
+                toolName,
+                inputDelta: '',
+                providerMetadata: metadata,
+                ...meta({}),
+              };
+        const output = hadInputDeltas
+          ? closer === undefined
+            ? []
+            : [closer]
+          : [
+              {
+                type: 'tool_call_delta' as const,
+                toolCallId: event.id,
+                toolName,
+                inputDelta: '',
+                ...meta({}),
+              },
+              ...(inputDelta.length === 0
+                ? []
+                : [
+                    {
+                      type: 'tool_call_delta' as const,
+                      toolCallId: event.id,
+                      toolName,
+                      inputDelta,
+                      ...meta({}),
+                    },
+                  ]),
+              ...(closer === undefined ? [] : [closer]),
+            ];
+        diagnostics.toolCallDeltaCount += output.length;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return output;
+      }
+      case 'tool-result':
+        return [
+          {
+            type: 'tool_result',
+            toolCallId: event.id,
+            toolName: event.name,
+            output: outputValue(event),
+            isError: event.result.type === 'error',
+            ...meta({}),
+          },
+        ];
+      case 'tool-error':
+        diagnostics.sawError = true;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [
+          {
+            type: 'error',
+            code: 'TOOL_ERROR',
+            message: event.message,
+            ...meta({}),
+          },
+        ];
+      case 'step-finish': {
+        const serviceTier = providerMetadataText(
+          event.providerMetadata,
+          'openai',
+          'serviceTier',
+          'service_tier',
+        );
+        if (serviceTier !== undefined) diagnostics.openaiServiceTier = serviceTier;
+        reportFinish(input, state, event.reason, event.usage, event.providerMetadata);
+        return [];
+      }
+      case 'finish': {
+        const serviceTier = providerMetadataText(
+          event.providerMetadata,
+          'openai',
+          'serviceTier',
+          'service_tier',
+        );
+        if (serviceTier !== undefined) diagnostics.openaiServiceTier = serviceTier;
+        reportFinish(input, state, event.reason, event.usage, event.providerMetadata);
+        if (state.doneEmitted) return [];
+        state.doneEmitted = true;
+        diagnostics.sawDone = true;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [{ type: 'done', stopReason: mapFinishReason(event.reason), ...meta({}) }];
+      }
+      case 'provider-error':
+        diagnostics.sawError = true;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [
+          {
+            type: 'error',
+            code: 'MODEL_ERROR',
+            status: 502,
+            message: event.message,
+            ...meta({}),
+          },
+        ];
+      default: {
+        const _exhaustive: never = event;
+        void _exhaustive;
+        return [];
+      }
+    }
   };
-  const diagnostics = {
+}
+
+function buildGeneration(
+  input: RunUpstreamStreamInput,
+): OpenCodeLLM.GenerationOptions.Input | undefined {
+  const omit = input.requestOverrides?.omitBodyKeys;
+  const temperature = input.requestOverrides?.temperature ?? input.temperature;
+  const maxTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
+  const topP = input.requestOverrides?.topP ?? input.topP;
+  const frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
+  const presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
+  const generation: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+  } = {};
+  if (typeof temperature === 'number' && !shouldOmit(omit, 'temperature'))
+    generation.temperature = temperature;
+  if (
+    typeof maxTokens === 'number' &&
+    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
+  ) {
+    generation.maxTokens = maxTokens;
+  }
+  if (typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) generation.topP = topP;
+  if (
+    typeof frequencyPenalty === 'number' &&
+    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
+  ) {
+    generation.frequencyPenalty = frequencyPenalty;
+  }
+  if (
+    typeof presencePenalty === 'number' &&
+    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
+  ) {
+    generation.presencePenalty = presencePenalty;
+  }
+  return Object.keys(generation).length === 0 ? undefined : generation;
+}
+
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
+
+export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstreamStream {
+  const state: RunnerState = {
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+    ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+    doneEmitted: false,
+    finishCallbackEmitted: false,
+    toolNamesById: new Map<string, string>(),
+  };
+  const diagnostics: DiagnosticsState = {
     textDeltaCount: 0,
     reasoningDeltaCount: 0,
     toolCallDeltaCount: 0,
@@ -469,661 +523,178 @@ export async function* runUpstreamStream(
     sawError: false,
     stalled: false,
   };
-  const emitDiagnostics = (): void => {
-    input.onDiagnostics?.({
-      textDeltaCount: diagnostics.textDeltaCount,
-      reasoningDeltaCount: diagnostics.reasoningDeltaCount,
-      toolCallDeltaCount: diagnostics.toolCallDeltaCount,
-      sawDone: diagnostics.sawDone,
-      sawError: diagnostics.sawError,
-      stalled: diagnostics.stalled,
-    });
-  };
-
-  // Synthesise AI SDK providerOptions for thinking / reasoning when
-  // a thinking config is provided.
-  const modelIdForOptions =
-    input.modelId ??
-    ('modelId' in input.model && typeof (input.model as { modelId?: unknown }).modelId === 'string'
-      ? (input.model as { modelId: string }).modelId
-      : '');
+  const modelId = input.modelId ?? input.model.id;
   const transformedMessages = applyProviderMessageTransforms(input.messages, {
     providerType: input.providerType,
-    model: modelIdForOptions,
+    model: modelId,
   });
-  // Decorate the conversation with prompt-cache breakpoints when applicable.
-  const cacheModelInfo = buildPromptCacheModelInfo({
-    providerType: input.providerType,
-    model: modelIdForOptions,
-  });
-  const decoratedMessages = applyCaching(transformedMessages, cacheModelInfo);
-
-  // Apply cache breakpoints to system messages passed via the dedicated
-  // `system` parameter (when callers extract leading system messages from
-  // the conversation). This preserves the multi-segment cache breakpoint
-  // design (stable prefix + dynamic suffix) that previously worked when
-  // system messages were embedded in the `messages` array.
-  //
-  // We also apply surrogate sanitisation to system message text content,
-  // mirroring `applyProviderMessageTransforms` → `sanitizeAllTextContent`
-  // for the `messages` array. Without this, lone UTF-16 surrogates in
-  // system prompts could produce different serialised bytes across rounds
-  // and silently invalidate Anthropic prompt cache prefixes.
-  let decoratedSystem: typeof input.system = input.system;
-  if (decoratedSystem && typeof decoratedSystem !== 'string') {
-    const systemArray = Array.isArray(decoratedSystem) ? decoratedSystem : [decoratedSystem];
-    const sanitizedSystem = systemArray.map((msg) =>
-      typeof msg.content === 'string' ? { ...msg, content: sanitizeSurrogates(msg.content) } : msg,
-    );
-    decoratedSystem = applyCachingToSystemMessages(sanitizedSystem, cacheModelInfo);
-  } else if (typeof decoratedSystem === 'string') {
-    decoratedSystem = sanitizeSurrogates(decoratedSystem);
-  }
-  const omit = input.requestOverrides?.omitBodyKeys;
-
-  // 调试日志：检查 thinking 配置
-  if (input.thinking) {
-    const isExtendedConfig = 'config' in input.thinking;
-    if (isExtendedConfig) {
-      // ExtendedThinkingConfig
-      console.log('[DEBUG] stream-runner thinking 配置 (ExtendedThinkingConfig):', {
-        providerType: input.thinking.providerType,
-        modelId: modelIdForOptions,
-        config: input.thinking.config,
-        effort: input.thinking.effort,
-        supportsThinking: input.thinking.supportsThinking,
-      });
-    } else {
-      // ThinkingConfig
-      console.log('[DEBUG] stream-runner thinking 配置 (ThinkingConfig):', {
-        providerType: input.providerType,
-        modelId: modelIdForOptions,
-        config: input.thinking,
-      });
-    }
-  }
-
+  const system =
+    input.system === undefined || typeof input.system === 'string'
+      ? input.system === undefined
+        ? undefined
+        : sanitizeSurrogates(input.system)
+      : (Array.isArray(input.system) ? input.system : [input.system]).map((part) => ({
+          ...part,
+          text: sanitizeSurrogates(part.text),
+        }));
+  const incomingTools = input.tools;
+  const needsStub =
+    (incomingTools === undefined || Object.keys(incomingTools).length === 0) &&
+    hasToolCallsInHistory(transformedMessages) &&
+    shouldInjectNoopStub({ litellmProxy: input.litellmProxy, providerType: input.providerType });
+  const effectiveTools = needsStub
+    ? { _noop: NOOP_TOOL_DEFINITION }
+    : sortToolsByName(incomingTools);
+  const diagnosticsReport = () => input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+  const mapper = makeMapper(input, state, diagnostics);
+  const generation = buildGeneration(input);
   const thinkingProviderOptions = buildProviderOptions({
-    ...(input.thinking ? { thinking: input.thinking } : {}),
-    model: modelIdForOptions,
+    ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
+    ...(input.providerType === undefined ? {} : { providerType: input.providerType }),
+    ...(input.upstreamProtocol === undefined ? {} : { upstreamProtocol: input.upstreamProtocol }),
+    model: modelId,
   });
-
-  // 调试日志：检查生成的 providerOptions
-  if (thinkingProviderOptions) {
-    console.log('[DEBUG] 生成的 thinking providerOptions:', JSON.stringify(thinkingProviderOptions, null, 2));
-  } else if (input.thinking) {
-    console.warn('[WARN] thinking 配置存在但未生成 providerOptions');
-  }
-
   const providerOptions = mergeProviderOptions(
     buildBaseProviderOptions({
-      model: modelIdForOptions,
+      model: modelId,
       providerType: input.providerType,
       sessionId: input.sessionId,
-    }),
-    buildRequestOverrideProviderOptions({
-      model: modelIdForOptions,
-      providerType: input.providerType,
-      requestOverrides: input.requestOverrides,
+      openaiFastMode: input.openaiFastMode,
     }),
     thinkingProviderOptions,
   );
-
-  // 调试日志：检查最终合并的 providerOptions
-  if (providerOptions) {
-    console.log('[DEBUG] 最终合并的 providerOptions:', JSON.stringify(providerOptions, null, 2));
-  } else {
-    console.log('[DEBUG] 最终 providerOptions 为空');
-  }
-  let temperature = input.requestOverrides?.temperature ?? input.temperature;
-  let maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
-  let topP = input.requestOverrides?.topP ?? input.topP;
-  let frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
-  let presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
-
-  // MiMo / Moonshot（body_thinking_type 风格）在思考模式下会强制锁定
-  // temperature=1.0 / top_p=0.95，发送自定义值无意义且部分代理可能因参数
-  // 冲突导致首次请求失败触发 AI SDK 自动重试。在思考启用时主动省略这些
-  // 采样参数，减少不必要的请求体体积和潜在冲突。
-  // 通过 resolveThinkingStyle 判断（含 modelId 推断），覆盖用户通过 OpenAI
-  // 兼容代理使用 MiMo/Moonshot 模型的场景。不检查 supportsThinking，因为
-  // 该字段在代理场景下可能为 false（modelConfig 找不到），但 modelId 推断
-  // 仍能识别出真实厂商。
-  if (input.thinking) {
-    const isExtendedConfig = 'config' in input.thinking;
-    const thinkingConfig = isExtendedConfig ? input.thinking.config : input.thinking;
-    const isThinkingEnabled = thinkingConfig.type === 'enabled' || thinkingConfig.type === 'adaptive';
-
-    if (isThinkingEnabled) {
-      const style = resolveThinkingStyle(input.providerType ?? '', modelIdForOptions);
-      if (style === 'body_thinking_type') {
-        temperature = undefined;
-        topP = undefined;
-        frequencyPenalty = undefined;
-        presencePenalty = undefined;
-      }
-    }
-  }
-
-  // PR-D-Plugin: `chat.params` hook — let plugins override sampling
-  // params + arbitrary `options` immediately before the AI SDK
-  // `streamText` call. Mirrors opencode's
-  // `@/temp/opencode/packages/plugin/src/index.ts:140-160` contract:
-  // plugins receive the resolved params as a mutable output object,
-  // mutate fields in place, and we read the mutations back into the
-  // local `let` bindings. The shared `options` bag carries
-  // frequency/presence penalty + future provider extensions.
-  //
-  // Hook errors are isolated inside the dispatcher (see
-  // `plugin-host.ts`) so a misbehaving plugin can't crash a turn.
   const chatParamsOutput: {
     temperature?: number;
     topP?: number;
-    topK?: number;
     maxOutputTokens?: number;
     options: Record<string, unknown>;
-  } = {
-    options: {},
-  };
-  if (typeof temperature === 'number') chatParamsOutput.temperature = temperature;
-  if (typeof topP === 'number') chatParamsOutput.topP = topP;
-  if (typeof maxOutputTokens === 'number') chatParamsOutput.maxOutputTokens = maxOutputTokens;
-  if (typeof frequencyPenalty === 'number')
-    chatParamsOutput.options['frequencyPenalty'] = frequencyPenalty;
-  if (typeof presencePenalty === 'number')
-    chatParamsOutput.options['presencePenalty'] = presencePenalty;
-
-  await dispatchChatParams(
-    {
-      sessionID: input.sessionId ?? '',
-      modelId: input.modelId ?? '',
-    },
-    chatParamsOutput,
+  } = { options: {} };
+  const initialGeneration = generation;
+  if (initialGeneration?.temperature !== undefined)
+    chatParamsOutput.temperature = initialGeneration.temperature;
+  if (initialGeneration?.topP !== undefined) chatParamsOutput.topP = initialGeneration.topP;
+  if (initialGeneration?.maxTokens !== undefined)
+    chatParamsOutput.maxOutputTokens = initialGeneration.maxTokens;
+  if (initialGeneration?.frequencyPenalty !== undefined)
+    chatParamsOutput.options['frequencyPenalty'] = initialGeneration.frequencyPenalty;
+  if (initialGeneration?.presencePenalty !== undefined)
+    chatParamsOutput.options['presencePenalty'] = initialGeneration.presencePenalty;
+  const cancelled = { value: false };
+  const source = Stream.unwrap(
+    Effect.promise(() =>
+      dispatchChatParams({ sessionID: input.sessionId ?? '', modelId }, chatParamsOutput),
+    ).pipe(
+      Effect.map(() => {
+        const resolvedGeneration: OpenCodeLLM.GenerationOptions.Input = {
+          ...(chatParamsOutput.temperature === undefined
+            ? {}
+            : { temperature: chatParamsOutput.temperature }),
+          ...(chatParamsOutput.maxOutputTokens === undefined
+            ? {}
+            : { maxTokens: chatParamsOutput.maxOutputTokens }),
+          ...(chatParamsOutput.topP === undefined ? {} : { topP: chatParamsOutput.topP }),
+          ...(typeof chatParamsOutput.options['frequencyPenalty'] === 'number'
+            ? { frequencyPenalty: chatParamsOutput.options['frequencyPenalty'] }
+            : {}),
+          ...(typeof chatParamsOutput.options['presencePenalty'] === 'number'
+            ? { presencePenalty: chatParamsOutput.options['presencePenalty'] }
+            : {}),
+        };
+        const body = input.requestOverrides?.body;
+        const headers = input.requestOverrides?.headers;
+        const http =
+          body === undefined && headers === undefined
+            ? undefined
+            : {
+                ...(body === undefined ? {} : { body }),
+                ...(headers === undefined ? {} : { headers }),
+              };
+        const request = OpenCodeLLM.LLM.request({
+          model: input.model,
+          ...(system === undefined ? {} : { system }),
+          messages: transformedMessages,
+          tools: effectiveTools === undefined ? [] : Object.values(effectiveTools),
+          ...(Object.keys(resolvedGeneration).length === 0
+            ? {}
+            : { generation: resolvedGeneration }),
+          ...(providerOptions === undefined ? {} : { providerOptions }),
+          ...(http === undefined ? {} : { http }),
+        });
+        return OpenCodeLLM.LLMClient.stream(request).pipe(Stream.provide(nativeStreamLayer));
+      }),
+    ),
   );
-
-  // Read the (possibly-mutated) values back. We deliberately allow
-  // plugins to NULL these out (set to `undefined`) — that's a valid
-  // signal "stop sending this param to the model".
-  temperature = chatParamsOutput.temperature;
-  topP = chatParamsOutput.topP;
-  maxOutputTokens = chatParamsOutput.maxOutputTokens;
-  const optsFreq = chatParamsOutput.options['frequencyPenalty'];
-  frequencyPenalty = typeof optsFreq === 'number' ? optsFreq : undefined;
-  const optsPres = chatParamsOutput.options['presencePenalty'];
-  presencePenalty = typeof optsPres === 'number' ? optsPres : undefined;
-
-  // `ai@5.x` types `streamText`'s model parameter as the V2 union, but
-  // `@ai-sdk/openai-compatible@2.x` already emits V3 instances. Both
-  // shapes are runtime-compatible; until the SDK aligns the type
-  // surface we cast through `unknown` at this single boundary instead
-  // of forcing every caller to do so.
-  // LiteLLM/Bedrock proxies reject requests where the message history
-  // references tools but no `tools` parameter is present. When there are
-  // no active tools (e.g. compaction round) inject a `_noop` stub.
-  const incomingTools = input.tools;
-  const needsStub =
-    (!incomingTools || Object.keys(incomingTools).length === 0) &&
-    hasToolCallsInHistory(decoratedMessages) &&
-    shouldInjectNoopStub({ litellmProxy: input.litellmProxy, providerType: input.providerType });
-  // Sort tool entries by name for deterministic ordering. Many providers
-  // hash the serialised tool list as part of the prompt-cache key (Anthropic
-  // prompt caching, OpenAI Responses cached tools, Bedrock prompt-cache),
-  // so even a stable subset of tools that arrives in shifting insertion
-  // order causes spurious cache misses across requests in the same session.
-  // Mirrors opencode #26370.
-  const sortedIncomingTools = sortToolsByName(incomingTools);
-  const effectiveTools: ToolSet | undefined = needsStub
-    ? { _noop: NOOP_TOOL_DEFINITION }
-    : sortedIncomingTools;
-  const toolNameLookup = new Map<string, string>();
-  if (effectiveTools) {
-    for (const name of Object.keys(effectiveTools)) {
-      toolNameLookup.set(name.toLowerCase(), name);
-    }
-  }
-
-  // Idle (inter-chunk) watchdog: combine the caller signal with an
-  // internal controller so a stalled-but-open upstream socket can be
-  // aborted even when the client never disconnects.
-  const idleController = new AbortController();
-
-  // Create OpenCode LLM stream request
-  const llmModel = OpenCodeLLM.Model.make({
-    provider: input.providerType as any || 'openai',
-    model: typeof input.model === 'string' ? input.model : (input.model as any).modelId || 'gpt-4',
-  });
-
-  const requestOptions: OpenCodeLLM.RequestInput = {
-    model: llmModel,
-    messages: decoratedMessages as OpenCodeLLM.Message[],
-  };
-
-  // Add system messages if present
-  if (decoratedSystem) {
-    requestOptions.system = decoratedSystem as any;
-  }
-
-  // Add tools if present
-  if (effectiveTools && Object.keys(effectiveTools).length > 0) {
-    requestOptions.tools = Object.values(effectiveTools) as any;
-  }
-
-  // Add generation options
-  const generation: any = {};
-  if (typeof temperature === 'number' && !shouldOmit(omit, 'temperature')) {
-    generation.temperature = temperature;
-  }
-  if (typeof maxOutputTokens === 'number' &&
-      !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
-    generation.maxTokens = maxOutputTokens;
-  }
-  if (typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
-    generation.topP = topP;
-  }
-  if (typeof frequencyPenalty === 'number' &&
-      !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')) {
-    generation.frequencyPenalty = frequencyPenalty;
-  }
-  if (typeof presencePenalty === 'number' &&
-      !shouldOmit(omit, 'presence_penalty', 'presencePenalty')) {
-    generation.presencePenalty = presencePenalty;
-  }
-  if (Object.keys(generation).length > 0) {
-    requestOptions.generation = generation;
-  }
-
-  const request = OpenCodeLLM.request(requestOptions);
-
-  // Placeholder: Create mock result structure
-  // Full implementation requires Effect runtime integration
-  const result = {
-    fullStream: (async function* () {
-      // This is a placeholder that throws an error
-      // Full implementation would integrate with OpenCode LLM's streaming API
-      // Example: const stream = await Effect.runPromise(OpenCodeLLM.stream(request));
-      // for await (const event of stream) { yield event; }
-      throw new Error(
-        'OpenCode LLM Effect runtime integration not yet implemented. ' +
-        'This requires setting up Effect runtime with proper layers and executing the Effect stream.'
-      );
-    })(),
-  };
-
-  const meta = (extra: Record<string, unknown>) => ({
-    ...(state.runId ? { runId: state.runId } : {}),
-    ...(state.agentId ? { agentId: state.agentId } : {}),
-    occurredAt: Date.now(),
-    ...extra,
-  });
-
+  let translated: NativeUpstreamStream = source.pipe(
+    Stream.flatMap((event) => Stream.fromIterable(mapper(event))),
+    Stream.catch((error) => {
+      diagnostics.sawError = true;
+      state.doneEmitted = true;
+      diagnosticsReport();
+      const chunk: StreamErrorChunk & { readonly status: number } = {
+        type: 'error',
+        code: 'MODEL_ERROR',
+        status: 502,
+        message: errorMessage(error),
+        ...(input.runId === undefined ? {} : { runId: input.runId }),
+        ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+        occurredAt: Date.now(),
+      };
+      return Stream.succeed(chunk);
+    }),
+  );
   const idleTimeoutMs = input.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
-  const stallState = { stalled: false };
-
-  for await (const part of withStreamIdleWatchdog(result.fullStream, {
-    idleTimeoutMs,
-    onStall: () => {
-      stallState.stalled = true;
-      idleController.abort();
-    },
-  })) {
-    switch (part.type) {
-      case 'text-delta':
-        diagnostics.textDeltaCount += 1;
-        emitDiagnostics();
-        yield {
-          type: 'text_delta',
-          delta: part.text,
-          ...meta({}),
-        };
-        break;
-      case 'reasoning-start': {
-        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : undefined;
-        state.thinkingActive = true;
-        state.thinkingItemId = itemId;
-        // Responses API encrypted reasoning replay: the OpenAI SDK
-        // attaches `encrypted_content` (and the source `itemId`) to the
-        // reasoning-start providerMetadata. Capture it so the
-        // reasoning-end emit can forward it downstream where the
-        // accumulator persists it for round-2 replay (`previous_response_id`
-        // / `input.reasoning` parity).
-        const startPmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
-        const openaiStartMeta = startPmd?.['openai'] as
-          { reasoningEncryptedContent?: unknown; itemId?: unknown } | undefined;
-        if (
-          typeof openaiStartMeta?.reasoningEncryptedContent === 'string' &&
-          openaiStartMeta.reasoningEncryptedContent.length > 0
-        ) {
-          state.thinkingEncryptedContent = openaiStartMeta.reasoningEncryptedContent;
-        }
-        yield {
-          type: 'thinking_start',
-          ...(itemId ? { itemId } : {}),
-          ...meta({}),
-        };
-        break;
-      }
-      case 'reasoning-delta': {
-        diagnostics.reasoningDeltaCount += 1;
-        emitDiagnostics();
-        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
-        // Anthropic extended-thinking streams the block's signature as a
-        // *separate*, empty-text `reasoning-delta` event (mirroring the
-        // native `signature_delta` content block delta) rather than on
-        // `reasoning-end`. Capture it here so the eventual reasoning-end
-        // emit can forward it downstream — without this the signature is
-        // silently dropped and replayed thinking blocks fail Anthropic's
-        // "unsupported reasoning metadata" validation on the next turn.
-        const deltaPmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
-        const deltaSignatureSource = (deltaPmd?.['anthropic'] ?? deltaPmd?.['bedrock']) as
-          { signature?: unknown } | undefined;
-        if (
-          typeof deltaSignatureSource?.signature === 'string' &&
-          deltaSignatureSource.signature.length > 0
-        ) {
-          state.thinkingSignature = deltaSignatureSource.signature;
-        }
-        yield {
-          type: 'thinking_delta',
-          delta: part.text,
-          ...(itemId ? { itemId } : {}),
-          ...meta({}),
-        };
-        break;
-      }
-      case 'reasoning-end': {
-        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
-        state.thinkingActive = false;
-        state.thinkingItemId = undefined;
-        // Anthropic extended thinking may attach the per-block signature
-        // here via providerMetadata.anthropic.signature (Bedrock-hosted
-        // Claude reuses the same shape under .bedrock) on some adapter
-        // versions; on the currently-vendored @ai-sdk/anthropic it instead
-        // arrives on a `reasoning-delta` event (captured into
-        // `state.thinkingSignature` above). Prefer the delta-captured
-        // value and fall back to an end-carried one for forward/backward
-        // compatibility with adapter versions that differ.
-        const pmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
-        const anthropicMeta = (pmd?.['anthropic'] ?? pmd?.['bedrock']) as
-          { signature?: unknown } | undefined;
-        const endSignature =
-          typeof anthropicMeta?.signature === 'string' && anthropicMeta.signature.length > 0
-            ? anthropicMeta.signature
-            : undefined;
-        const signature = state.thinkingSignature ?? endSignature;
-        state.thinkingSignature = undefined;
-        const encryptedContent = state.thinkingEncryptedContent;
-        state.thinkingEncryptedContent = undefined;
-        const providerMetadata =
-          signature || encryptedContent
-            ? {
-                ...(signature ? { signature } : {}),
-                ...(encryptedContent ? { encryptedContent } : {}),
+  if (Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0) {
+    translated = translated.pipe(Stream.timeout(Duration.millis(idleTimeoutMs)));
+  }
+  if (input.signal !== undefined) {
+    const abortChunk: StreamErrorChunk = {
+      type: 'error',
+      code: 'ABORTED',
+      message: 'upstream stream aborted',
+      ...(input.runId === undefined ? {} : { runId: input.runId }),
+      occurredAt: Date.now(),
+    };
+    const abortStream = Stream.fromEffect(
+      makeSignalEffect(input.signal, () => {
+        cancelled.value = true;
+      }).pipe(Effect.as(abortChunk)),
+    );
+    translated = Stream.merge(translated, abortStream, { haltStrategy: 'either' });
+  }
+  return translated.pipe(
+    Stream.concat(
+      Stream.unwrap(
+        Effect.sync(() =>
+          Stream.fromIterable(
+            (() => {
+              if (cancelled.value) {
+                diagnostics.sawError = true;
+                diagnosticsReport();
+                return [];
               }
-            : undefined;
-        yield {
-          type: 'thinking_end',
-          ...(itemId ? { itemId } : {}),
-          ...(providerMetadata ? { providerMetadata } : {}),
-          ...meta({}),
-        };
-        break;
-      }
-      case 'tool-input-start': {
-        const callId = typeof part.id === 'string' ? part.id : undefined;
-        const toolName = typeof part.toolName === 'string' ? part.toolName : '';
-        if (!callId || !toolName) break;
-        state.toolNamesById.set(callId, toolName);
-        // Emit a zero-length delta so downstream accumulators register
-        // the (toolCallId, toolName) pair before any input streams in.
-        // Matches legacy `content_block_start type=tool_use` output.
-        yield {
-          type: 'tool_call_delta',
-          toolCallId: callId,
-          toolName,
-          inputDelta: '',
-          ...meta({}),
-        };
-        diagnostics.toolCallDeltaCount += 1;
-        emitDiagnostics();
-        break;
-      }
-      case 'tool-input-delta': {
-        const callId =
-          'id' in part && typeof part.id === 'string'
-            ? part.id
-            : 'toolCallId' in part && typeof part.toolCallId === 'string'
-              ? part.toolCallId
-              : undefined;
-        if (!callId) break;
-        const toolName =
-          state.toolNamesById.get(callId) ??
-          ('toolName' in part && typeof part.toolName === 'string' ? part.toolName : '');
-        // Skip deltas for tool calls that had no resolvable name — the
-        // opener (tool-input-start) was already dropped for this callId,
-        // so yielding here would emit a delta with an empty toolName.
-        if (!toolName) break;
-        yield {
-          type: 'tool_call_delta',
-          toolCallId: callId,
-          toolName,
-          inputDelta: part.delta ?? '',
-          ...meta({}),
-        };
-        diagnostics.toolCallDeltaCount += 1;
-        emitDiagnostics();
-        break;
-      }
-      case 'tool-input-end':
-        // No StreamChunk equivalent; the accumulator wraps up on the
-        // next `tool-call` part or the round's `finish` event.
-        break;
-      case 'tool-call': {
-        // The provider has resolved a complete tool call. Many
-        // upstreams stream the whole input via tool-input-delta
-        // already; for those that emit a single `tool-call` (e.g.
-        // legacy OpenAI `function_call`), surface the JSON payload
-        // as a final `tool_call_delta` so accumulators see it once.
-        const callId =
-          'toolCallId' in part && typeof part.toolCallId === 'string' ? part.toolCallId : undefined;
-        const toolName =
-          ('toolName' in part && typeof part.toolName === 'string' ? part.toolName : undefined) ??
-          (callId ? state.toolNamesById.get(callId) : undefined) ??
-          '';
-        if (!callId || !toolName) break;
-        const inputValue = (part as { input?: unknown }).input;
-        const inputDelta =
-          typeof inputValue === 'string'
-            ? inputValue
-            : inputValue !== undefined
-              ? JSON.stringify(inputValue)
-              : '';
-        // Capture provider metadata so it can ride on the *closer*
-        // delta we emit below. The OpenAI Responses adapter attaches
-        // `openai.itemId` (`fc_xxx`) here — without persisting it,
-        // round-2 input rebuilds `function_call.id` from the
-        // call_id (`call_xxx`), OpenAI re-keys the item, and the
-        // prompt-cache prefix from this point on misses on every
-        // subsequent request.
-        const providerMetadata = (
-          part as {
-            providerMetadata?: Record<string, Record<string, unknown>>;
-          }
-        ).providerMetadata;
-        if (!state.toolNamesById.has(callId)) {
-          // No prior tool-input-start was emitted (legacy path, e.g.
-          // OpenAI Chat Completions `function_call`): register name +
-          // emit zero-length delta first so downstream sees the
-          // binding, then emit the full JSON payload below.
-          state.toolNamesById.set(callId, toolName);
-          yield {
-            type: 'tool_call_delta',
-            toolCallId: callId,
-            toolName,
-            inputDelta: '',
-            ...meta({}),
-          };
-          diagnostics.toolCallDeltaCount += 1;
-          emitDiagnostics();
-          if (inputDelta.length > 0) {
-            yield {
-              type: 'tool_call_delta',
-              toolCallId: callId,
-              toolName,
-              inputDelta,
-              ...meta({}),
-            };
-            diagnostics.toolCallDeltaCount += 1;
-            emitDiagnostics();
-          }
-        }
-        // If we *did* see a prior tool-input-start, the input has
-        // already been streamed via tool-input-delta chunks, so we
-        // must NOT emit the final `tool-call.input` again — doing so
-        // would double the JSON in the accumulator (e.g. `{}{}`),
-        // make `JSON.parse` fail, and force callers to fall back to
-        // `{ raw: '{}{}' }`, which Zod-validated tools then reject.
-        //
-        // We *do* emit a zero-length closer delta carrying
-        // `providerMetadata` whenever the provider supplied one, so
-        // the accumulator can attach `openai.itemId` (and any future
-        // provider-specific metadata) without re-streaming the input.
-        if (providerMetadata && Object.keys(providerMetadata).length > 0) {
-          yield {
-            type: 'tool_call_delta',
-            toolCallId: callId,
-            toolName,
-            inputDelta: '',
-            providerMetadata,
-            ...meta({}),
-          };
-          diagnostics.toolCallDeltaCount += 1;
-          emitDiagnostics();
-        }
-        break;
-      }
-      case 'tool-error': {
-        const errPart = part as {
-          error?: unknown;
-          toolName?: string;
-          toolCallId?: string;
-        };
-        const message =
-          errPart.error instanceof Error
-            ? errPart.error.message
-            : typeof errPart.error === 'string'
-              ? errPart.error
-              : 'tool execution error';
-        const errorChunk: StreamErrorChunk = {
-          type: 'error',
-          code: 'TOOL_ERROR',
-          message,
-          ...meta({}),
-        };
-        diagnostics.sawError = true;
-        emitDiagnostics();
-        yield errorChunk;
-        break;
-      }
-      case 'abort': {
-        const errorChunk: StreamErrorChunk = {
-          type: 'error',
-          code: 'ABORTED',
-          message: 'upstream stream aborted',
-          ...meta({}),
-        };
-        diagnostics.sawError = true;
-        emitDiagnostics();
-        yield errorChunk;
-        break;
-      }
-      case 'finish':
-      case 'finish-step': {
-        // Capture usage from whichever event provides it. The
-        // top-level `finish` carries `totalUsage`; per-step events
-        // carry `usage`. Either is acceptable as the canonical
-        // round-level total since the v2 path runs a single round.
-        if (input.onFinish) {
-          const usage =
-            part.type === 'finish' && 'totalUsage' in part && part.totalUsage
-              ? part.totalUsage
-              : 'usage' in part && part.usage
-                ? part.usage
-                : undefined;
-          if (usage) {
-            try {
-              input.onFinish({
-                finishReason:
-                  'finishReason' in part && typeof part.finishReason === 'string'
-                    ? part.finishReason
-                    : undefined,
-                usage,
-              });
-            } catch {
-              // best-effort — caller-side telemetry must never
-              // break the stream.
-            }
-          }
-        }
-        if (state.doneEmitted) break;
-        const stopReason = mapFinishReason(
-          'finishReason' in part && typeof part.finishReason === 'string'
-            ? part.finishReason
-            : undefined,
-        );
-        const done: StreamDoneChunk = {
-          type: 'done',
-          stopReason,
-          ...meta({}),
-        };
-        state.doneEmitted = true;
-        diagnostics.sawDone = true;
-        emitDiagnostics();
-        yield done;
-        break;
-      }
-      case 'error': {
-        const message =
-          part.error instanceof Error
-            ? part.error.message
-            : typeof part.error === 'string'
-              ? part.error
-              : 'unknown upstream error';
-        // Emit the legacy-compatible `MODEL_ERROR` code + HTTP-ish
-        // `status: 502` so SSE consumers (and the
-        // verify-openai-responses verifier) continue to see the same
-        // error shape the custom parser produced pre-migration.
-        const errorChunk = {
-          type: 'error' as const,
-          code: 'MODEL_ERROR',
-          status: 502,
-          message,
-          ...meta({}),
-        } as StreamErrorChunk;
-        diagnostics.sawError = true;
-        emitDiagnostics();
-        yield errorChunk;
-        break;
-      }
-      default:
-        // Unknown / vendor-specific events are ignored deliberately.
-        // The caller only relies on the normalized StreamChunk surface.
-        break;
-    }
-  }
-
-  if (stallState.stalled) {
-    diagnostics.stalled = true;
-    diagnostics.sawError = true;
-    emitDiagnostics();
-    const stallChunk = {
-      type: 'error' as const,
-      code: 'STREAM_STALL',
-      status: 504,
-      message: `upstream stream stalled (no data for ${idleTimeoutMs}ms)`,
-      ...meta({}),
-    } as StreamErrorChunk;
-    yield stallChunk;
-  }
-
-  return result;
+              if (!state.doneEmitted) {
+                diagnostics.stalled = true;
+                diagnostics.sawError = true;
+                diagnosticsReport();
+                return [
+                  {
+                    type: 'error' as const,
+                    code: 'STREAM_STALL',
+                    message: `upstream stream stalled (no data for ${idleTimeoutMs}ms)`,
+                    ...(input.runId === undefined ? {} : { runId: input.runId }),
+                    occurredAt: Date.now(),
+                  } satisfies StreamErrorChunk,
+                ];
+              }
+              diagnosticsReport();
+              return [];
+            })(),
+          ),
+        ),
+      ),
+    ),
+    Stream.filter(
+      (chunk) => chunk.type !== 'error' || chunk.code !== 'STREAM_STALL' || !state.doneEmitted,
+    ),
+  );
 }

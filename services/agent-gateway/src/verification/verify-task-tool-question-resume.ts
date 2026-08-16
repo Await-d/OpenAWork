@@ -10,7 +10,7 @@ import {
   assert,
   extractStructuredToolResultOutput,
   extractToolResultPart,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
   seedPendingToolCallConversation,
   waitFor,
   withMockFetch,
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async () => createChatCompletionsStream('问题恢复后的子代理结论'),
+        async (input) => createProtocolAwareStream(input, '问题恢复后的子代理结论'),
         async () => {
           await connectDb();
           await migrate();

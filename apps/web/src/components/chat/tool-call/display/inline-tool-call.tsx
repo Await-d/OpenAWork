@@ -1,6 +1,7 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
+import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
@@ -77,13 +78,11 @@ export function InlineToolCall({
   const canExpand = !isLsp && (hasInput || hasOutput);
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
   const shouldAutoExpand = shouldExpandByDefault || visualState === 'running';
-  const [expanded, setExpanded] = useState(shouldAutoExpand);
-
-  useEffect(() => {
-    if (canExpand && shouldAutoExpand) {
-      setExpanded(true);
-    }
-  }, [canExpand, shouldAutoExpand]);
+  const [expanded, toggleExpanded] = useToolCallExpandState({
+    canExpand,
+    shouldAutoExpand,
+    shouldExpandByDefault,
+  });
 
   // Surface a short red error line in the header on failure so users
   // see *what went wrong* without expanding. The full payload (stack
@@ -125,7 +124,7 @@ export function InlineToolCall({
           ? {
               role: 'button',
               tabIndex: 0,
-              onClick: () => setExpanded((p) => !p),
+              onClick: toggleExpanded,
               style: { cursor: 'pointer' },
             }
           : {})}

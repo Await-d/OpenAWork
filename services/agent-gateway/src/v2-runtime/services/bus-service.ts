@@ -15,7 +15,7 @@
  * Effect-flavoured plumbing.
  */
 
-import { Context, Effect, Layer, Stream } from 'effect';
+import { Context, Effect, Layer, Queue, Stream } from 'effect';
 import { publishBusEvent, subscribeBusEvents } from '../../session/sync-event.js';
 
 export interface BusEventEnvelope {
@@ -34,24 +34,29 @@ export interface BusServiceImpl {
   readonly stream: Stream.Stream<BusEventEnvelope>;
 }
 
-export class BusService extends Context.Tag('@openAwork/BusService')<BusService, BusServiceImpl>() {
+export class BusService extends Context.Service<BusService, BusServiceImpl>()(
+  '@openAwork/BusService',
+) {
   static live(): Layer.Layer<BusService> {
-    const impl: BusServiceImpl = {
-      publish: (envelope) =>
-        Effect.sync(() => {
-          publishBusEvent(envelope.type, envelope.data);
-        }),
-      stream: Stream.async<BusEventEnvelope>((emit) => {
-        const dispose = subscribeBusEvents((type, data) => {
-          // Stream.async wants a Promise<void>; emit.single returns one.
-          void emit.single({ type, data });
-        });
-        return Effect.sync(() => {
-          dispose();
-        });
+    return Layer.succeed(
+      BusService,
+      BusService.of({
+        publish: (envelope) =>
+          Effect.sync(() => {
+            publishBusEvent(envelope.type, envelope.data);
+          }),
+        stream: Stream.callback((queue) =>
+          Effect.acquireRelease(
+            Effect.sync(() =>
+              subscribeBusEvents((type, data) => {
+                Queue.offerUnsafe(queue, { type, data });
+              }),
+            ),
+            (dispose) => Effect.sync(dispose),
+          ),
+        ),
       }),
-    };
-    return Layer.succeed(BusService, impl);
+    );
   }
 
   /**
@@ -61,9 +66,12 @@ export class BusService extends Context.Tag('@openAwork/BusService')<BusService,
    * the `Effect.gen` block that constructs it.
    */
   static test(): Layer.Layer<BusService> {
-    return Layer.succeed(BusService, {
-      publish: () => Effect.succeed(undefined),
-      stream: Stream.empty,
-    });
+    return Layer.succeed(
+      BusService,
+      BusService.of({
+        publish: () => Effect.succeed(undefined),
+        stream: Stream.empty,
+      }),
+    );
   }
 }

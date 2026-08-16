@@ -5,10 +5,7 @@
  * 可以正确从 @openAwork/agent-core 导入
  */
 
-import {
-  POST_WRITE_LINT_USAGE_GUIDE,
-  POST_WRITE_LINT_TOOLS_LIST,
-} from '@openAwork/agent-core';
+import { POST_WRITE_LINT_USAGE_GUIDE, POST_WRITE_LINT_TOOLS_LIST } from '@openAwork/agent-core';
 
 console.log('=== Lint 提示词导出验证 ===\n');
 
@@ -23,7 +20,10 @@ console.log();
 
 // 验证 POST_WRITE_LINT_TOOLS_LIST
 console.log('2. POST_WRITE_LINT_TOOLS_LIST:');
-console.log('   - 类型:', Array.isArray(POST_WRITE_LINT_TOOLS_LIST) ? 'Array' : typeof POST_WRITE_LINT_TOOLS_LIST);
+console.log(
+  '   - 类型:',
+  Array.isArray(POST_WRITE_LINT_TOOLS_LIST) ? 'Array' : typeof POST_WRITE_LINT_TOOLS_LIST,
+);
 console.log('   - 长度:', POST_WRITE_LINT_TOOLS_LIST.length);
 console.log('   - 内容:', POST_WRITE_LINT_TOOLS_LIST);
 console.log();
@@ -53,12 +53,20 @@ console.log();
 
 // 验证工具列表
 console.log('4. 工具列表检查:');
-console.log('   - 包含 post_write_lint:', POST_WRITE_LINT_TOOLS_LIST.includes('post_write_lint') ? '✓' : '✗');
+console.log(
+  '   - 包含 post_write_lint:',
+  POST_WRITE_LINT_TOOLS_LIST.includes('post_write_lint') ? '✓' : '✗',
+);
 console.log();
 
 // 总结
 console.log('=== 验证结果 ===');
-console.log('导出正确:', typeof POST_WRITE_LINT_USAGE_GUIDE === 'string' && Array.isArray(POST_WRITE_LINT_TOOLS_LIST) ? '✓' : '✗');
+console.log(
+  '导出正确:',
+  typeof POST_WRITE_LINT_USAGE_GUIDE === 'string' && Array.isArray(POST_WRITE_LINT_TOOLS_LIST)
+    ? '✓'
+    : '✗',
+);
 console.log('内容完整:', allSectionsPresent ? '✓' : '✗');
 console.log('工具列表正确:', POST_WRITE_LINT_TOOLS_LIST.includes('post_write_lint') ? '✓' : '✗');
 console.log();

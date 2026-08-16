@@ -1261,6 +1261,8 @@ export interface UpstreamStreamSummary {
   sawDone: boolean;
   sawError: boolean;
   stalled: boolean;
+  /** OpenAI's service tier echoed by the upstream response, when provided. */
+  openaiServiceTier?: string;
 }
 
 export interface StreamErrorChunk {

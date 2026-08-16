@@ -93,6 +93,7 @@ export interface AIProviderRef {
   enabled: boolean;
   apiKey?: string;
   baseUrl?: string;
+  openaiFastMode?: boolean;
   /** Override the auto-detected upstream protocol.
    *  - 'responses':       Use OpenAI Responses API (/v1/responses)
    *  - 'chat_completions': Use OpenAI Chat Completions API (/v1/chat/completions)
@@ -134,6 +135,7 @@ export interface ProviderEditData {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
+  openaiFastMode?: boolean;
   upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
 }
 
@@ -207,6 +209,7 @@ function emptyForm(provider?: AIProviderRef): ProviderEditData {
     enabled: provider?.enabled ?? true,
     apiKey: provider?.apiKey ?? '',
     baseUrl: provider?.baseUrl ?? '',
+    openaiFastMode: provider?.openaiFastMode === true,
     upstreamProtocol: provider?.upstreamProtocol,
   };
 }
@@ -304,6 +307,9 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
       name: form.name.trim(),
       baseUrl: base,
       apiKey: form.apiKey.trim(),
+      ...(form.type === 'openai' && form.openaiFastMode === true
+        ? { openaiFastMode: true }
+        : {}),
     });
   }
 
@@ -560,6 +566,23 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           启用
         </label>
       </div>
+      {form.type === 'openai' ? (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <input
+            id="provider-form-openai-fast-mode"
+            type="checkbox"
+            checked={form.openaiFastMode === true}
+            onChange={(e) => set('openaiFastMode', e.target.checked)}
+            style={{ cursor: 'pointer', marginTop: 4 }}
+          />
+          <label
+            htmlFor="provider-form-openai-fast-mode"
+            style={{ ...labelStyle, marginBottom: 0, cursor: 'pointer' }}
+          >
+            OpenAI Fast 模式（service_tier=priority）
+          </label>
+        </div>
+      ) : null}
       {formError ? (
         <div style={{ color: 'var(--danger, #ef4444)', fontSize: 12 }}>{formError}</div>
       ) : null}

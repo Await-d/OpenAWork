@@ -21,7 +21,6 @@ const FRAME_STYLE: CSSProperties = {
   minHeight: 0,
   display: 'flex',
   flexDirection: 'column',
-  borderRadius: 10,
   overflow: 'hidden',
   background: 'var(--bg-surface)',
   border: '1px solid var(--border-subtle)',

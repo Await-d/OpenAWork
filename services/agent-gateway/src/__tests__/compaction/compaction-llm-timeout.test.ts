@@ -3,13 +3,14 @@
  * its upstream summary call.
  *
  * Compaction fires automatically on context pressure (often mid-turn).
- * The AI SDK `generateText` honours `abortSignal` but has no built-in
+ * The native upstream generator honours `abortSignal` but has no built-in
  * deadline, and the request-scoped signal callers pass only fires when
  * the client disconnects — not when an upstream socket connects but
  * never responds. Without an internal timeout a hung summary call would
  * stall the session indefinitely.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 import type { UnifiedMessage } from '../../message/message-to-model-messages.js';
 
@@ -56,12 +57,14 @@ describe('callCompactionLlm — wall-clock timeout', () => {
   });
 
   it('forwards an AbortSignal to runUpstreamGenerate', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'summary',
-      inputTokens: 1,
-      outputTokens: 1,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'summary',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
     await callCompactionLlm({ conversationMessages: CONVERSATION, route: createRoute() });
 
     const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as { signal?: AbortSignal };
@@ -73,14 +76,15 @@ describe('callCompactionLlm — wall-clock timeout', () => {
     vi.useFakeTimers();
 
     let abortFired = false;
-    mocks.runUpstreamGenerate.mockImplementation(
-      (arg: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          arg.signal?.addEventListener('abort', () => {
-            abortFired = true;
-            reject(new Error('aborted by signal'));
-          });
-        }),
+    mocks.runUpstreamGenerate.mockImplementation((arg: { signal?: AbortSignal }) =>
+      Effect.callback<never, Error>((resume) => {
+        const abort = () => {
+          abortFired = true;
+          resume(Effect.fail(new Error('aborted by signal')));
+        };
+        arg.signal?.addEventListener('abort', abort, { once: true });
+        return Effect.sync(() => arg.signal?.removeEventListener('abort', abort));
+      }),
     );
 
     const promise = callCompactionLlm({ conversationMessages: CONVERSATION, route: createRoute() });

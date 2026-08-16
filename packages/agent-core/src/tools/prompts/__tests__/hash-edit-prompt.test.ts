@@ -21,12 +21,7 @@ describe('哈希编辑工具提示词', () => {
   });
 
   it('应该包含所有工具函数的说明', () => {
-    const functions = [
-      'computeLineHashes',
-      'formatWithHashes',
-      'applyEdit',
-      'applyEdits',
-    ];
+    const functions = ['computeLineHashes', 'formatWithHashes', 'applyEdit', 'applyEdits'];
 
     for (const func of functions) {
       expect(HASH_EDIT_TOOL_USAGE_GUIDE).toContain(func);

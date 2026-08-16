@@ -158,6 +158,11 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
         content.push({
           type: 'reasoning',
           text: part.text,
+          ...(typeof part.itemId === 'string' && part.itemId.length > 0
+            ? { itemId: part.itemId }
+            : typeof part.metadata?.['itemId'] === 'string' && part.metadata['itemId'].length > 0
+              ? { itemId: part.metadata['itemId'] }
+              : {}),
           ...(part.metadata?.['encryptedContent']
             ? { encryptedContent: part.metadata['encryptedContent'] as string }
             : {}),
@@ -178,7 +183,7 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
         // Round-trip persisted `tool-call.providerMetadata` (e.g. the
         // OpenAI Responses `openai.itemId`) so listSessionMessagesV2
         // consumers — most importantly `toModelMessages` →
-        // `unifiedConversationToModelMessages` → AI SDK — can replay
+        // `unifiedConversationToModelMessages` → native upstream — can replay
         // the original `function_call.id` on subsequent rounds.
         const persistedToolCallProviderMetadata =
           toolPart.metadata && typeof toolPart.metadata['providerMetadata'] === 'object'
@@ -591,9 +596,10 @@ export function appendSessionMessageV2(input: {
         type: 'reasoning',
         text: c.text,
         time: { start: startedAt, ...(typeof endedAt === 'number' ? { end: endedAt } : {}) },
-        ...(c.encryptedContent || c.summary || c.signature
+        ...(c.itemId || c.encryptedContent || c.summary || c.signature
           ? {
               metadata: {
+                ...(c.itemId ? { itemId: c.itemId } : {}),
                 ...(c.encryptedContent ? { encryptedContent: c.encryptedContent } : {}),
                 ...(c.summary ? { summary: c.summary } : {}),
                 // Persist Anthropic signature in opencode-shaped metadata
@@ -650,7 +656,7 @@ export function appendSessionMessageV2(input: {
         // error) and can be replayed on later rounds via
         // `providerOptions.openai.itemId`. This is what keeps the
         // upstream prompt-cache prefix byte-stable across turns when
-        // a tool call sits in history (otherwise AI SDK falls back
+        // a tool call sits in history (otherwise the native upstream falls back
         // to the call_id and OpenAI re-keys the function_call item).
         ...(c.providerMetadata && Object.keys(c.providerMetadata).length > 0
           ? { metadata: { providerMetadata: c.providerMetadata } }

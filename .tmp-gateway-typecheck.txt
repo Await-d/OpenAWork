@@ -1,0 +1,9 @@
+
+> @openAwork/agent-gateway@0.9.6 typecheck E:\01.Projects\OpenAWork\services\agent-gateway
+> tsc -b tsconfig.typecheck.json --force
+
+error TS5083: Cannot read file 'E:/01.Projects/OpenAWork/packages/opencode-llm/tsconfig.typecheck.json'.
+tsconfig.typecheck.json(11,5): error TS6053: File 'E:/01.Projects/OpenAWork/packages/opencode-llm/tsconfig.typecheck.json' not found.
+E:\01.Projects\OpenAWork\services\agent-gateway:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openAwork/agent-gateway@0.9.6 typecheck: `tsc -b tsconfig.typecheck.json --force`
+Exit status 2

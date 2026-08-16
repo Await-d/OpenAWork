@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 async function main(): Promise<void> {
-  const workspaceRoot = `/tmp/openawork-session-task-root-${randomUUID()}`;
+  const workspaceRoot = join(tmpdir(), `openawork-session-task-root-${randomUUID()}`);
 
   await withTempEnv(
     {
@@ -12,13 +14,19 @@ async function main(): Promise<void> {
       WORKSPACE_ROOT: workspaceRoot,
     },
     async () => {
-      const [{ default: Fastify }, { default: authPlugin }, { sessionsRoutes }, dbModule] =
-        await Promise.all([
-          import('fastify'),
-          import('../infra/auth.js'),
-          import('../routes/sessions.js'),
-          import('../infra/db.js'),
-        ]);
+      const [
+        { default: Fastify },
+        { default: authPlugin },
+        { sessionsRoutes },
+        dbModule,
+        { resolveTaskGraphProjectRoot },
+      ] = await Promise.all([
+        import('fastify'),
+        import('../infra/auth.js'),
+        import('../routes/sessions.js'),
+        import('../infra/db.js'),
+        import('../task/task-graph-root.js'),
+      ]);
       const { default: requestWorkflowPlugin } = await import('../runtime/request-workflow.js');
 
       await dbModule.connectDb();
@@ -42,8 +50,8 @@ async function main(): Promise<void> {
         const accessToken = app.jwt.sign({ sub: userId, email });
         const sessionId = randomUUID();
         dbModule.sqliteRun(
-          `INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json) VALUES (?, ?, '[]', 'idle', '{}')`,
-          [sessionId, userId],
+          `INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json) VALUES (?, ?, '[]', 'idle', ?)`,
+          [sessionId, userId, JSON.stringify({ workingDirectory: workspaceRoot })],
         );
 
         const taskManager = new AgentTaskManagerImpl();
@@ -76,6 +84,13 @@ async function main(): Promise<void> {
             }),
             '过期子代理会话',
           ],
+        );
+
+        assert(
+          [sessionId, childSessionId, grandchildSessionId, staleTimeoutSessionId].every(
+            (id) => resolveTaskGraphProjectRoot(id) === workspaceRoot,
+          ),
+          'saved task graph and session tasks route should resolve the same project root',
         );
         const parentTask = taskManager.addTask(graph, {
           title: '根任务',

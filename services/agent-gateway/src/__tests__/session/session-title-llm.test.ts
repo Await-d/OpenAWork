@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
 const mocks = vi.hoisted(() => ({
@@ -74,12 +75,14 @@ describe('generateSessionTitleLlm', () => {
     mocks.sqliteGet
       .mockReturnValueOnce({ title: '启发式标题', metadata_json: null })
       .mockReturnValue({ metadata_json: null });
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: '启发式标题\n🔧',
-      inputTokens: 10,
-      outputTokens: 5,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '启发式标题\n🔧',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+      }),
+    );
 
     await generateSessionTitleLlm({
       route: createRoute(),
@@ -104,12 +107,14 @@ describe('generateSessionTitleLlm', () => {
 
   it('calls upstream and updates the session title when title is empty', async () => {
     mocks.sqliteGet.mockReturnValue({ title: '' });
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: '升级后的标题',
-      inputTokens: 10,
-      outputTokens: 5,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '升级后的标题',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+      }),
+    );
 
     await generateSessionTitleLlm({
       route: createRoute(),
@@ -129,12 +134,14 @@ describe('generateSessionTitleLlm', () => {
     // Regression: prior to forwarding, anthropic / openai-responses providers
     // silently degraded to OpenAI Chat Completions inside session-title.
     mocks.sqliteGet.mockReturnValue({ title: '' });
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: '标题',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '标题',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
 
     await generateSessionTitleLlm({
       route: createRoute({
@@ -157,7 +164,7 @@ describe('generateSessionTitleLlm', () => {
 
   it('swallows upstream errors and keeps the heuristic title', async () => {
     mocks.sqliteGet.mockReturnValue({ title: '' });
-    mocks.runUpstreamGenerate.mockRejectedValue(new Error('upstream blew up'));
+    mocks.runUpstreamGenerate.mockReturnValue(Effect.fail(new Error('upstream blew up')));
 
     await expect(
       generateSessionTitleLlm({

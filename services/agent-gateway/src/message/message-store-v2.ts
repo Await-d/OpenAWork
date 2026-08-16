@@ -662,7 +662,7 @@ export function getMessageWithParts(input: {
 }
 
 // ─── toUIMessages (opencode pattern) ───
-// Converts V2 MessageWithParts[] into AI SDK compatible UIMessage[] format
+// Converts V2 MessageWithParts[] into the client-compatible UIMessage[] format
 // for frontend UI projection. Distinct from toModelMessages() in
 // message-to-model-messages.ts, which produces UnifiedMessage[] for
 // upstream LLM requests.

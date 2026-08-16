@@ -34,6 +34,7 @@ export interface ModelRouteConfig {
   variant?: string;
   apiBaseUrl: string;
   apiKey: string;
+  openaiFastMode?: boolean;
   contextWindow?: number;
   /** Model's maximum output token limit (from preset). Used by the
    *  compaction overflow formula to calculate usable input space.
@@ -215,6 +216,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     variant: request.variant,
     apiBaseUrl,
     apiKey,
+    ...(builtinProvider?.openaiFastMode === true ? { openaiFastMode: true } : {}),
     maxTokens: requestOverrides.maxTokens ?? request.maxTokens,
     temperature: requestOverrides.temperature ?? request.temperature,
     upstreamProtocol,
@@ -289,6 +291,7 @@ export function resolveModelRouteFromProvider(
     variant: request.variant,
     apiBaseUrl: resolvedProviderBaseUrl,
     apiKey,
+    ...(provider.openaiFastMode === true ? { openaiFastMode: true } : {}),
     maxTokens: mergedOverrides.maxTokens ?? request.maxTokens,
     temperature: mergedOverrides.temperature ?? request.temperature,
     upstreamProtocol,
@@ -361,6 +364,7 @@ export function resolveCompactionRoute(
     providerId: provider.id,
     apiBaseUrl: resolvedCompactionBaseUrl,
     apiKey,
+    ...(provider.openaiFastMode === true ? { openaiFastMode: true } : {}),
     maxTokens: mergedOverrides.maxTokens ?? 4096,
     temperature: 0,
     upstreamProtocol,

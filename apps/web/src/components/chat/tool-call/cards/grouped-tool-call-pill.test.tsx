@@ -84,4 +84,46 @@ describe('GroupedToolCallPill', () => {
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
     expect(screen.getAllByTestId('grouped-tool-child')).toHaveLength(2);
   });
+
+  it('运行期间自动展开的分组详情在完成后按默认折叠设置收起', () => {
+    const view = render(
+      <GroupedToolCallPill
+        toolName="read"
+        calls={[
+          {
+            toolName: 'read',
+            input: { file_path: 'src/a.ts' },
+            status: 'running',
+          },
+          {
+            toolName: 'read',
+            input: { file_path: 'src/b.ts' },
+            status: 'completed',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
+    view.rerender(
+      <GroupedToolCallPill
+        toolName="read"
+        calls={[
+          {
+            toolName: 'read',
+            input: { file_path: 'src/a.ts' },
+            status: 'completed',
+          },
+          {
+            toolName: 'read',
+            input: { file_path: 'src/b.ts' },
+            status: 'completed',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryAllByTestId('grouped-tool-child')).toHaveLength(0);
+  });
 });

@@ -28,12 +28,78 @@
  */
 
 import type { ToolDefinition } from '@openAwork/agent-core';
-import type { Tool, ToolSet } from './opencode-llm-compat.js';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
-import type { JSONSchema7 } from '@ai-sdk/provider';
+
+type NativeTool = OpenCodeLLM.ToolDefinition;
+type NativeToolSet = Record<string, NativeTool>;
+
+type JsonRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const zodTypeName = (value: unknown): string | undefined => {
+  if (!isRecord(value) || !isRecord(value['_def'])) return undefined;
+  const name = value['_def']['typeName'];
+  return typeof name === 'string' ? name : undefined;
+};
+
+const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
+  const definition = isRecord(value) && isRecord(value['_def']) ? value['_def'] : undefined;
+  switch (zodTypeName(value)) {
+    case 'ZodObject': {
+      const shapeValue = definition?.['shape'];
+      const shape =
+        typeof shapeValue === 'function'
+          ? shapeValue()
+          : shapeValue;
+      const properties: Record<string, OpenCodeLLM.JsonSchema> = {};
+      const required: string[] = [];
+      if (isRecord(shape)) {
+        for (const [key, field] of Object.entries(shape)) {
+          properties[key] = zodToJsonSchema(field);
+          if (zodTypeName(field) !== 'ZodOptional') required.push(key);
+        }
+      }
+      return {
+        type: 'object',
+        properties,
+        ...(required.length === 0 ? {} : { required }),
+      };
+    }
+    case 'ZodArray':
+      return {
+        type: 'array',
+        items: zodToJsonSchema(definition?.['type']),
+      };
+    case 'ZodBoolean':
+      return { type: 'boolean' };
+    case 'ZodNumber':
+      return { type: 'number' };
+    case 'ZodEnum': {
+      const values = definition?.['values'];
+      return { type: 'string', ...(Array.isArray(values) ? { enum: values } : {}) };
+    }
+    case 'ZodLiteral': {
+      const literal = definition?.['value'];
+      return {
+        type: typeof literal === 'string' ? 'string' : typeof literal === 'boolean' ? 'boolean' : 'number',
+        const: literal,
+      };
+    }
+    case 'ZodUnion': {
+      const options = definition?.['options'];
+      return {
+        anyOf: Array.isArray(options) ? options.map((option) => zodToJsonSchema(option)) : [],
+      };
+    }
+    default:
+      return { type: 'string' };
+  }
+};
 
 /**
- * Wrap a single OpenAWork `ToolDefinition` as an OpenCode LLM `Tool`.
+ * Wrap a single OpenAWork `ToolDefinition` as an OpenCode LLM tool.
  *
  * The wrapper forwards `execute(input, signal)` directly. OpenCode LLM
  * may not always pass an abort signal (e.g. when a tool is called as
@@ -41,23 +107,23 @@ import type { JSONSchema7 } from '@ai-sdk/provider';
  * already-completed AbortController as a no-op fallback to satisfy
  * the underlying contract.
  */
-export function wrapToolForAiSdk(toolDef: ToolDefinition): Tool {
+export function wrapToolForNative(toolDef: ToolDefinition): NativeTool {
   return new OpenCodeLLM.ToolDefinition({
     name: toolDef.name,
     description: toolDef.description,
-    inputSchema: toolDef.inputSchema,
+    inputSchema: zodToJsonSchema(toolDef.inputSchema),
   });
 }
 
 /**
- * Wrap a list of `ToolDefinition`s as an OpenCode LLM `ToolSet` keyed by
+ * Wrap a list of `ToolDefinition`s as an OpenCode LLM tool set keyed by
  * tool name. Duplicate names overwrite earlier registrations to
  * mirror `ToolRegistry.register`'s last-write-wins semantics.
  */
-export function wrapToolsForAiSdk(tools: ToolDefinition[]): ToolSet {
-  const set: Record<string, Tool> = {};
+export function wrapToolsForNative(tools: ToolDefinition[]): NativeToolSet {
+  const set: NativeToolSet = {};
   for (const definition of tools) {
-    set[definition.name] = wrapToolForAiSdk(definition);
+    set[definition.name] = wrapToolForNative(definition);
   }
   return set;
 }
@@ -73,13 +139,13 @@ export function wrapToolsForAiSdk(tools: ToolDefinition[]): ToolSet {
  * permissions, sandboxing, file-diff capture, and child sessions while
  * the model side moves to OpenCode LLM.
  */
-export function wrapToolsForAiSdkDeclarationsOnly(tools: ToolDefinition[]): ToolSet {
-  const set: Record<string, Tool> = {};
+export function wrapToolsForNativeDeclarationsOnly(tools: ToolDefinition[]): NativeToolSet {
+  const set: NativeToolSet = {};
   for (const definition of tools) {
     set[definition.name] = new OpenCodeLLM.ToolDefinition({
       name: definition.name,
       description: definition.description,
-      inputSchema: definition.inputSchema,
+      inputSchema: zodToJsonSchema(definition.inputSchema),
     });
   }
   return set;
@@ -97,7 +163,7 @@ export interface GatewayToolFunctionShape {
   function: {
     name: string;
     description: string;
-    parameters: JSONSchema7;
+    parameters: OpenCodeLLM.JsonSchema;
     strict?: boolean;
     deferLoading?: boolean;
   };
@@ -106,12 +172,12 @@ export interface GatewayToolFunctionShape {
 /**
  * Wrap a list of gateway tool definitions (the OpenAI-style
  * `function`-typed declarations the v1 path already builds) as an OpenCode
- * LLM `ToolSet` without `execute`. OpenCode LLM validates inputs against the
+ * LLM tool set without `execute`. OpenCode LLM validates inputs against the
  * supplied JSON Schema and surfaces tool-call deltas through the
  * stream; the actual tool invocation stays in the existing
  * agent loop driven by `routes/stream.ts`.
  *
- * Why this complements `wrapToolsForAiSdkDeclarationsOnly`:
+ * Why this complements `wrapToolsForNativeDeclarationsOnly`:
  *   - The reference variant takes `ToolDefinition[]` (zod-validated)
  *     and is the right call site for static, hand-written tools.
  *   - This variant takes the gateway's already-rendered JSON Schema,
@@ -119,10 +185,10 @@ export interface GatewayToolFunctionShape {
  *     uniformly. The Phase B.1 / B.2 v2 path consumes whatever the v1
  *     path consumes, so this is the practical bridge.
  */
-export function wrapGatewayToolsForAiSdkDeclarationsOnly(
+export function wrapGatewayToolsForNativeDeclarationsOnly(
   tools: GatewayToolFunctionShape[],
-): ToolSet {
-  const set: Record<string, Tool> = {};
+): NativeToolSet {
+  const set: NativeToolSet = {};
   for (const def of tools) {
     set[def.function.name] = new OpenCodeLLM.ToolDefinition({
       name: def.function.name,

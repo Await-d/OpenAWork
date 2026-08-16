@@ -1,12 +1,13 @@
-import type { LLMRequest } from "../schema/index.js"
-import * as ProviderShared from "../protocols/shared.js"
+import type { LLMRequest } from '../schema/index.js';
+import * as ProviderShared from '../protocols/shared.js';
+import { validateProviderBaseUrl } from '../provider/types.js';
 
 export interface EndpointInput<Body> {
-  readonly request: LLMRequest
-  readonly body: Body
+  readonly request: LLMRequest;
+  readonly body: Body;
 }
 
-export type EndpointPart<Body> = string | ((input: EndpointInput<Body>) => string)
+export type EndpointPart<Body> = string | ((input: EndpointInput<Body>) => string);
 
 /**
  * Declarative URL construction for one route.
@@ -19,40 +20,56 @@ export type EndpointPart<Body> = string | ((input: EndpointInput<Body>) => strin
  * URL embeds the model id, region, or another body field (e.g. Bedrock,
  * Gemini).
  */
-export interface Endpoint<Body> {
-  readonly baseURL?: string
-  readonly path: EndpointPart<Body>
-  readonly query?: Record<string, string>
+export interface EndpointDefinition<Body> {
+  readonly baseURL?: string;
+  readonly path: EndpointPart<Body>;
+  readonly query?: Record<string, string>;
+  readonly allowInsecureLocalhost?: boolean;
 }
 
-// Export before using in type alias to fix TS4081
-export type EndpointPatch<Body> = Partial<Endpoint<Body>>
+export type Endpoint<Body> = EndpointDefinition<Body>;
+export type EndpointPatch<Body> = Partial<EndpointDefinition<Body>>;
 
 /** Construct an `Endpoint` from a path string or path function. */
-export const path = <Body>(value: EndpointPart<Body>, options: Omit<Endpoint<Body>, "path"> = {}): Endpoint<Body> => ({
+export const path = <Body>(
+  value: EndpointPart<Body>,
+  options: Omit<EndpointDefinition<Body>, 'path'> = {},
+): EndpointDefinition<Body> => ({
   ...options,
   path: value,
-})
+});
 
-export const merge = <Body>(base: Endpoint<Body>, patch: EndpointPatch<Body>): Endpoint<Body> => ({
-  ...base,
-  ...patch,
-  baseURL: patch.baseURL ?? base.baseURL,
-  path: patch.path ?? base.path,
-  query: patch.query === undefined ? base.query : { ...base.query, ...patch.query },
-})
+export const merge = <Body>(
+  base: EndpointDefinition<Body>,
+  patch: EndpointPatch<Body>,
+): EndpointDefinition<Body> => {
+  const allowInsecureLocalhost = patch.allowInsecureLocalhost ?? base.allowInsecureLocalhost;
+  return {
+    ...base,
+    ...patch,
+    baseURL: patch.baseURL ?? base.baseURL,
+    path: patch.path ?? base.path,
+    query: patch.query === undefined ? base.query : { ...base.query, ...patch.query },
+    ...(allowInsecureLocalhost === undefined ? {} : { allowInsecureLocalhost }),
+  };
+};
+
+export const validate = <Body>(endpoint: EndpointDefinition<Body>): void => {
+  validateProviderBaseUrl(endpoint.baseURL, {
+    allowInsecureLocalhost: endpoint.allowInsecureLocalhost,
+  });
+};
 
 const renderPart = <Body>(part: EndpointPart<Body>, input: EndpointInput<Body>) =>
-  typeof part === "function" ? part(input) : part
+  typeof part === 'function' ? part(input) : part;
 
-export const render = <Body>(endpoint: Endpoint<Body>, input: EndpointInput<Body>) => {
-  const url = new URL(`${ProviderShared.trimBaseUrl(endpoint.baseURL ?? "")}${renderPart(endpoint.path, input)}`)
-  for (const [key, value] of Object.entries(endpoint.query ?? {})) url.searchParams.set(key, value)
-  return url
-}
+export const render = <Body>(endpoint: EndpointDefinition<Body>, input: EndpointInput<Body>) => {
+  validate(endpoint);
+  const url = new URL(
+    `${ProviderShared.trimBaseUrl(endpoint.baseURL ?? '')}${renderPart(endpoint.path, input)}`,
+  );
+  for (const [key, value] of Object.entries(endpoint.query ?? {})) url.searchParams.set(key, value);
+  return url;
+};
 
-export * as Endpoint from "./endpoint.js"
-
-
-
-
+export * as Endpoint from './endpoint.js';

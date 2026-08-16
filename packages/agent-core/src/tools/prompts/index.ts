@@ -3,10 +3,7 @@
  */
 
 // LSP 工具
-export {
-  LSP_TOOL_USAGE_GUIDE,
-  LSP_TOOLS_LIST,
-} from './lsp-prompt.js';
+export { LSP_TOOL_USAGE_GUIDE, LSP_TOOLS_LIST } from './lsp-prompt.js';
 
 // Web 搜索工具
 export {
@@ -16,18 +13,10 @@ export {
 } from './web-search-prompt.js';
 
 // 哈希编辑工具
-export {
-  HASH_EDIT_TOOL_USAGE_GUIDE,
-  HASH_EDIT_TOOLS_LIST,
-} from './hash-edit-prompt.js';
+export { HASH_EDIT_TOOL_USAGE_GUIDE, HASH_EDIT_TOOLS_LIST } from './hash-edit-prompt.js';
 
 // Lint 工具
-export {
-  POST_WRITE_LINT_USAGE_GUIDE,
-  POST_WRITE_LINT_TOOLS_LIST,
-} from './lint-prompt.js';
+export { POST_WRITE_LINT_USAGE_GUIDE, POST_WRITE_LINT_TOOLS_LIST } from './lint-prompt.js';
 
 // 类型定义
-export type {
-  ToolUsageGuide,
-} from './types.js';
+export type { ToolUsageGuide } from './types.js';

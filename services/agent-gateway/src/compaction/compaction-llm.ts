@@ -1,8 +1,10 @@
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
+import { Effect } from 'effect';
 import {
   runUpstreamGenerate,
-  unifiedConversationToModelMessages,
+  unifiedConversationToNativeMessages,
+  type RunUpstreamGenerateResult,
 } from '../v2-runtime/upstream/index.js';
 import {
   COMPACTION_SYSTEM_PROMPT,
@@ -14,8 +16,7 @@ import {
  * Filter out system messages from the conversation history before sending
  * to the compaction LLM. The compaction prompt is already passed via the
  * dedicated `system` parameter — any system messages from the persisted
- * session history would trigger the AI SDK security warning and are not
- * relevant for summarization.
+ * session history are not relevant for summarization.
  */
 function filterSystemMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
   return messages.filter((msg) => msg.role !== 'system');
@@ -57,8 +58,8 @@ const PTL_ERROR_PATTERNS = [
 ];
 
 /**
- * Wall-clock timeout for a single compaction summary call. The AI SDK
- * `generateText` honours `abortSignal` but has no built-in deadline;
+ * Wall-clock timeout for a single compaction summary call. The native
+ * generator honours `abortSignal` but has no built-in deadline;
  * the request-scoped signal passed by callers only fires when the
  * client disconnects, not when an upstream socket connects-but-hangs.
  * Compaction runs on context pressure (often mid-turn), so a hung
@@ -94,7 +95,7 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
     ...filterSystemMessages(input.conversationMessages),
     { role: 'user', content: userPrompt },
   ];
-  const messages = unifiedConversationToModelMessages(conversation);
+  const messages = unifiedConversationToNativeMessages(conversation);
 
   const timeoutController = new AbortController();
   let timedOut = false;
@@ -107,29 +108,32 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
     ? AbortSignal.any([timeoutController.signal, input.signal])
     : timeoutController.signal;
 
-  let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+  let result: RunUpstreamGenerateResult;
   try {
-    result = await runUpstreamGenerate({
-      providerType: input.route.providerType ?? 'openai',
-      // Forward the resolved upstream protocol so providers configured for
-      // `anthropic_messages` / `responses` actually hit their native API
-      // surface instead of silently degrading to OpenAI Chat Completions.
-      ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
-      ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
-      ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
-      ...(input.route.requestOverrides.headers &&
-      Object.keys(input.route.requestOverrides.headers).length > 0
-        ? { headers: input.route.requestOverrides.headers }
-        : {}),
-      model: input.route.model,
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      system: COMPACTION_SYSTEM_PROMPT,
-      messages,
-      maxOutputTokens: input.route.maxTokens,
-      temperature: 0,
-      requestOverrides: input.route.requestOverrides,
-      signal,
-    });
+    result = await Effect.runPromise(
+      runUpstreamGenerate({
+        providerType: input.route.providerType ?? 'openai',
+        // Forward the resolved upstream protocol so providers configured for
+        // `anthropic_messages` / `responses` actually hit their native API
+        // surface instead of silently degrading to OpenAI Chat Completions.
+        ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
+        ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+        ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
+        ...(input.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
+        ...(input.route.requestOverrides.headers &&
+        Object.keys(input.route.requestOverrides.headers).length > 0
+          ? { headers: input.route.requestOverrides.headers }
+          : {}),
+        model: input.route.model,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        system: COMPACTION_SYSTEM_PROMPT,
+        messages,
+        maxOutputTokens: input.route.maxTokens,
+        temperature: 0,
+        requestOverrides: input.route.requestOverrides,
+        signal,
+      }),
+    );
   } catch (err) {
     if (timedOut) {
       throw new Error(`compaction LLM timeout (${COMPACTION_LLM_TIMEOUT_MS}ms)`);

@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { closeDb, connectDb, migrate, sqliteAll, sqliteRun } from '../infra/db.js';
 import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
 import { listSessionSnapshots } from '../session/session-snapshot-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
+import { waitForPendingSnapshotTreeCaptures } from '../routes/stream-model-round.js';
+import { collectFileDiffsFromToolOutput } from '../tools/modified-files-summary.js';
 import { listStoredToolResults } from '../tools/tool-result-contract.js';
 import { withTempEnv } from './task-verification-helpers.js';
 
@@ -13,6 +16,10 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function writeChatToolCall(res: ServerResponse, filePath: string): void {
@@ -71,7 +78,7 @@ function writeTextCompletion(res: ServerResponse, text: string): void {
 
 async function main(): Promise<void> {
   const upstreamPort = 3352;
-  const workspaceRoot = path.join('/tmp', `openawork-background-${randomUUID()}`);
+  const workspaceRoot = path.join(tmpdir(), `openawork-background-${randomUUID()}`);
   mkdirSync(workspaceRoot, { recursive: true });
 
   await withTempEnv(
@@ -79,6 +86,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
       AI_API_KEY: 'test-key',
+      OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER: '1',
       WORKSPACE_ROOT: workspaceRoot,
     },
     async () => {
@@ -179,6 +187,24 @@ async function main(): Promise<void> {
         assert(result.statusCode === 200, 'background execution should succeed');
         assert(chunks.length > 0, 'background execution should emit run events');
 
+        const writeToolResult = chunks.find(
+          (chunk): chunk is Record<string, unknown> =>
+            isRecord(chunk) && chunk['type'] === 'tool_result' && chunk['toolName'] === 'write',
+        );
+        assert(writeToolResult, 'background write should emit a write tool result');
+        assert(
+          isRecord(writeToolResult['output']),
+          'write tool result should contain an object output',
+        );
+        const writeOutput = writeToolResult['output'];
+        assert(isRecord(writeOutput['filediff']), 'write tool output should contain a filediff');
+        const collectedDiffs = collectFileDiffsFromToolOutput(writeOutput);
+        assert(collectedDiffs.length === 1, 'write tool filediff should be collected');
+        assert(
+          collectedDiffs[0]?.backupBeforeRef?.kind === 'before_write',
+          'collected filediff should retain beforeWriteBackup metadata',
+        );
+
         const backupRows = sqliteAll<{ backup_id: string; storage_path: string | null }>(
           'SELECT backup_id, storage_path FROM session_file_backups WHERE session_id = ? ORDER BY backup_id',
           [sessionId],
@@ -213,6 +239,7 @@ async function main(): Promise<void> {
 
         console.log('verify-stream-runtime-durable-continuity: ok');
       } finally {
+        await waitForPendingSnapshotTreeCaptures();
         await closeDb();
         await new Promise<void>((resolve) => upstream.close(() => resolve()));
       }

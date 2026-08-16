@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Effect, Layer } from 'effect';
+import { Context, Effect, Layer } from 'effect';
 
 // Same rationale as v2-runtime-services.test.ts — stub the legacy
 // db helpers so BusService.live's transitive sync-event import does
@@ -43,7 +43,7 @@ describe('EffectBridge.run', () => {
 
   it('lets multiple services be supplied via Layer.merge', async () => {
     type CounterImpl = { readonly bump: () => Effect.Effect<number> };
-    class Counter extends Effect.Tag('test/Counter')<Counter, CounterImpl>() {}
+    class Counter extends Context.Service<Counter, CounterImpl>()('test/Counter') {}
 
     const counterLayer = Layer.succeed(Counter, {
       bump: () => Effect.succeed(123),
@@ -60,6 +60,14 @@ describe('EffectBridge.run', () => {
 });
 
 describe('EffectBridge.runOption', () => {
+  it('rejects by default so an Effect failure cannot silently enter a legacy fallback', async () => {
+    const program = Effect.fail(new Error('default fallback is forbidden'));
+
+    await expect(EffectBridge.runOption(StorageService.test({}), program)).rejects.toThrow(
+      /default fallback is forbidden/,
+    );
+  });
+
   it('returns the success value on success', async () => {
     const program = Effect.gen(function* () {
       const storage = yield* StorageService;
@@ -75,22 +83,40 @@ describe('EffectBridge.runOption', () => {
     expect(result).toBe(2);
   });
 
-  it('returns null on failure instead of rejecting', async () => {
+  it('returns null only after an explicit failure observer is called', async () => {
     const program = Effect.gen(function* () {
       yield* Effect.fail(new Error('soft failure'));
       return 'unreachable';
     });
+    const onFailure = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const result = await EffectBridge.runOption(StorageService.test({}), program);
-    expect(result).toBeNull();
+    try {
+      const result = await EffectBridge.runOption(StorageService.test({}), program, {
+        allowLegacyFallback: true,
+        onFailure,
+      });
+      expect(result).toBeNull();
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        '[v2-runtime] explicit legacy fallback enabled after native Effect failure',
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('returns null when the program throws synchronously inside Effect.sync', async () => {
+  it('returns null after observing synchronous Effect.sync failures', async () => {
     const program = Effect.sync<string>(() => {
       throw new Error('sync boom');
     });
+    const onFailure = vi.fn();
 
-    const result = await EffectBridge.runOption(StorageService.test({}), program);
+    const result = await EffectBridge.runOption(StorageService.test({}), program, {
+      allowLegacyFallback: true,
+      onFailure,
+    });
     expect(result).toBeNull();
+    expect(onFailure).toHaveBeenCalledTimes(1);
   });
 });

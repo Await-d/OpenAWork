@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
 
@@ -30,31 +30,39 @@ export function ChatStreamErrorBarV2({
   onDismiss,
 }: ChatStreamErrorBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   if (!streamError && !retryProgress) {
     return null;
   }
 
+  const handleCopy = async () => {
+    if (!streamError) return;
+    try {
+      await navigator.clipboard.writeText(streamError);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('复制失败:', err);
+    }
+  };
+
   const summaryLine = formatChatUpstreamSummaryLabel(latestUpstreamSummary);
   const isRetrying = Boolean(retryProgress) && !streamError;
   const primaryText = streamError ?? retryProgress ?? '';
 
-  // 判断是否需要折叠（超过80字符）
+  // 判断是否需要折叠(超过80字符)
   const needsExpand = primaryText.length > 80;
   const displayText = needsExpand && !isExpanded ? primaryText.slice(0, 80) + '...' : primaryText;
 
   const toneBorder = isRetrying ? 'var(--warning)' : 'var(--danger-border)';
-  const toneBg = isRetrying
-    ? 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))'
-    : 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))';
   const toneFg = isRetrying ? 'var(--warning)' : 'var(--danger)';
 
   return (
     <div
       data-testid="chat-stream-error-bar"
       style={{
-        padding: '0 10px 8px',
-        background: 'var(--bg-base)',
+        padding: '0 8px 8px',
         flexShrink: 0,
       }}
     >
@@ -64,9 +72,8 @@ export function ChatStreamErrorBarV2({
           margin: '0 auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 4,
           border: `1.5px solid ${toneBorder}`,
-          background: toneBg,
           borderRadius: 10,
           padding: '10px 12px',
           boxShadow: `0 2px 8px color-mix(in srgb, ${toneFg} 12%, transparent)`,
@@ -76,7 +83,7 @@ export function ChatStreamErrorBarV2({
         <div
           style={{
             display: 'flex',
-            alignItems: 'flex-start',
+            alignItems: 'center',
             gap: 10,
           }}
         >
@@ -235,33 +242,97 @@ export function ChatStreamErrorBarV2({
             ) : null}
 
             {streamError ? (
-              <button
-                type="button"
-                data-testid="chat-stream-error-dismiss"
-                onClick={onDismiss}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`,
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  flexShrink: 0,
-                  borderRadius: 5,
-                  transition: 'all 120ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = `color-mix(in srgb, ${toneFg} 10%, transparent)`;
-                  e.currentTarget.style.color = toneFg;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`;
-                }}
-              >
-                知道了
-              </button>
+              <>
+                <button
+                  type="button"
+                  data-testid="chat-stream-error-copy"
+                  onClick={handleCopy}
+                  title={copySuccess ? '已复制' : '复制错误信息'}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    flexShrink: 0,
+                    borderRadius: 5,
+                    transition: 'all 120ms ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = `color-mix(in srgb, ${toneFg} 10%, transparent)`;
+                    e.currentTarget.style.color = toneFg;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`;
+                  }}
+                >
+                  {copySuccess ? (
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                  {copySuccess ? '已复制' : '复制'}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="chat-stream-error-dismiss"
+                  onClick={onDismiss}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    flexShrink: 0,
+                    borderRadius: 5,
+                    transition: 'all 120ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = `color-mix(in srgb, ${toneFg} 10%, transparent)`;
+                    e.currentTarget.style.color = toneFg;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = `color-mix(in srgb, ${toneFg} 75%, var(--fg-muted))`;
+                  }}
+                >
+                  知道了
+                </button>
+              </>
             ) : null}
           </div>
         </div>

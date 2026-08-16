@@ -2,11 +2,7 @@ import { tmpdir } from 'node:os';
 import { join as nativeJoin } from 'node:path';
 import { join as posixJoin } from 'node:path/posix';
 import { getPlatform } from '../platform.js';
-import type {
-  ShellCommandResult,
-  ShellExecOptions,
-  ShellProvider,
-} from './shell-provider.js';
+import type { ShellCommandResult, ShellExecOptions, ShellProvider } from './shell-provider.js';
 
 /**
  * 引号转义工具函数

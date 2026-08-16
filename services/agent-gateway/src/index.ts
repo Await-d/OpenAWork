@@ -2,9 +2,12 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import compress from '@fastify/compress';
 import websocket from '@fastify/websocket';
+import { Effect } from 'effect';
 import { WorkflowLogger } from '@openAwork/logger';
+import { ConfigService, LoggerService, makeEffectRuntime } from './runtime/effect-runtime.js';
 import authPlugin from './infra/auth.js';
 import { registerErrorHandler } from './infra/error-handler.js';
+import { makeGatewayMetrics } from './infra/gateway-metrics.js';
 import { registerOpenApi } from './infra/openapi.js';
 import {
   connectDb,
@@ -116,14 +119,68 @@ const app = Fastify({
   routerOptions: { maxParamLength: GATEWAY_MAX_PARAM_LENGTH },
 });
 
+const gatewayEnv = {
+  ...globalThis.process?.env,
+  GATEWAY_HOST: globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0',
+};
+
+const effectRuntime = makeEffectRuntime({
+  config: { env: gatewayEnv },
+  logger: {
+    sink: (record) => {
+      const fields = record.fields === undefined ? {} : { ...record.fields };
+      if (record.level === 'error') {
+        app.log.error(fields, record.message);
+      } else if (record.level === 'warn') {
+        app.log.warn(fields, record.message);
+      } else if (record.level === 'debug') {
+        app.log.debug(fields, record.message);
+      } else {
+        app.log.info(fields, record.message);
+      }
+    },
+  },
+});
+
+const gatewayConfig = await effectRuntime.runPromise(
+  Effect.gen(function* () {
+    const config = yield* ConfigService;
+    return yield* config.all;
+  }),
+);
+await effectRuntime.runPromise(
+  Effect.gen(function* () {
+    const logger = yield* LoggerService;
+    yield* logger.info('gateway.effect-runtime.ready', {
+      host: gatewayConfig.gatewayHost,
+      port: gatewayConfig.gatewayPort,
+    });
+  }),
+);
+const { gatewayHost: host, gatewayPort: port } = gatewayConfig;
+const gatewayMetrics = makeGatewayMetrics();
+const requestStartTimes = new WeakMap<object, number>();
+
+app.addHook('onRequest', async (request) => {
+  requestStartTimes.set(request, performance.now());
+});
+
+app.addHook('onResponse', async (request, reply) => {
+  const startedAt = requestStartTimes.get(request);
+  const durationMs = startedAt === undefined ? 0 : Math.max(0, performance.now() - startedAt);
+  try {
+    await effectRuntime.runPromise(gatewayMetrics.recordResponse(reply.statusCode, durationMs));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    app.log.error({ err: error }, `gateway metrics update failed: ${message}`);
+  }
+});
+
 // Last-resort process-level error handlers. Installed before any route or
 // background work so a stray unhandled rejection / uncaught exception from a
 // fire-and-forget path logs loudly instead of terminating the whole gateway
 // (and every connected session). See infra/process-safety.ts.
 installProcessSafetyHandlers({ logger: app.log });
-
-const port = Number(globalThis.process?.env['GATEWAY_PORT'] ?? 3000);
-const host = globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0';
 
 /**
  * 自定义域名，用于生成分享链接等对外 URL。
@@ -212,6 +269,17 @@ app.get(
   },
 );
 
+app.get(
+  '/metrics',
+  {
+    schema: { hide: true },
+  },
+  async (_request, reply) => {
+    const exposition = await effectRuntime.runPromise(gatewayMetrics.prometheus);
+    return reply.type('text/plain; version=0.0.4; charset=utf-8').send(exposition);
+  },
+);
+
 // OpenAPI spec as JSON (for SDK generators / CI)
 app.get(
   '/docs/openapi.json',
@@ -280,11 +348,30 @@ app.addHook('onClose', async () => {
     app.log.error({ err }, 'shutdownV2Runtime failed');
   }
   try {
+    await effectRuntime.dispose();
+  } catch (err) {
+    app.log.error({ err }, 'effect runtime dispose failed');
+  }
+  try {
     await closeDb();
   } catch (err) {
     app.log.error({ err }, 'closeDb failed');
   }
 });
+
+let shutdownPromise: Promise<void> | undefined;
+const requestShutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
+  if (shutdownPromise !== undefined) return;
+  app.log.info({ signal }, 'gateway shutdown requested');
+  shutdownPromise = app.close().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    app.log.error({ err: error }, `gateway shutdown failed: ${message}`);
+    globalThis.process.exitCode = 1;
+  });
+};
+
+process.once('SIGINT', () => requestShutdown('SIGINT'));
+process.once('SIGTERM', () => requestShutdown('SIGTERM'));
 
 const bootLogger = new WorkflowLogger();
 const bootContext = {

@@ -113,6 +113,29 @@ describe('applyTeamLayerToolGate', () => {
     expect(names).toContain('request_user_input');
     expect(names).not.toContain('AskUserQuestion');
   });
+
+  it('reception 只读工具契约不暴露写入、shell 或任务委派工具', async () => {
+    const out = await applyTeamLayerToolGate({
+      roleLayer: 'reception',
+      metadataJson: META,
+      filteredTools: [
+        tool('read'),
+        tool('websearch'),
+        tool('webfetch'),
+        tool('write'),
+        tool('bash'),
+        tool('task'),
+      ],
+    });
+    const names = new Set(out.map((t) => t.function.name));
+
+    expect(names).toContain('read');
+    expect(names).toContain('websearch');
+    expect(names).toContain('webfetch');
+    expect(names).not.toContain('write');
+    expect(names).not.toContain('bash');
+    expect(names).not.toContain('task');
+  });
 });
 
 describe('appendTeamDynamicInstructionBlocks', () => {

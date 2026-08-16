@@ -533,6 +533,7 @@ export async function reconcilePm2QualityReview(input: {
               ...(llmConfig.upstreamProtocol
                 ? { upstreamProtocol: llmConfig.upstreamProtocol }
                 : {}),
+              ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
               prompt: `${prependAuxiliaryTeamInstructionPrefix({
                 instructionPrefix,
                 prompt: system,

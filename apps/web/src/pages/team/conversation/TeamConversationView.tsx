@@ -730,12 +730,12 @@ export function TeamConversationView({
   );
 
   const handleResendHistoryEdit = useCallback(
-    (text: string, editedInputParts?: unknown[]) => {
+    (text: string, editedInputParts?: InputImageContent[]) => {
       if (!historyEditPrompt) return;
       void truncateAndResend(
         historyEditPrompt.messageId,
         text,
-        editedInputParts as InputImageContent[] | undefined,
+        editedInputParts,
       );
       setHistoryEditPrompt(null);
     },
@@ -743,9 +743,9 @@ export function TeamConversationView({
   );
 
   const handleContinueHistoryEdit = useCallback(
-    (text: string) => {
+    (text: string, editedInputParts?: InputImageContent[]) => {
       // 「追加到末尾」：不截断，直接作为新一条发送（同样走统一路由）。
-      void dispatchTeamText(text);
+      void dispatchTeamText(text, editedInputParts);
       setHistoryEditPrompt(null);
     },
     [dispatchTeamText],

@@ -40,6 +40,7 @@ import { filterCompacted, toModelMessages } from '../../message/message-to-model
 import { hasSessionMessage } from '../../session/session-message-rating-store.js';
 import type { MessageID, MessageWithParts, PartID } from '../../message/message-v2-schema.js';
 import { buildCompactionMarkerContent } from '../../compaction/compaction-marker.js';
+import { unifiedConversationToNativeMessages } from '../../v2-runtime/upstream/native-message-bridge.js';
 
 function asMessageId(id: string): MessageID {
   return id as MessageID;
@@ -683,7 +684,7 @@ describe('message-v2 compatibility regressions', () => {
   });
 
   // Regression: OpenAI Responses API tool_call cache stability.
-  // The persisted-message → AI SDK round-trip must preserve
+  // The persisted-message → native upstream round-trip must preserve
   // `tool-call.providerMetadata.openai.itemId` (`fc_xxx`) all the
   // way through V1 (`ToolCallContent.providerMetadata`) → V2
   // (`ToolPart.metadata.providerMetadata`) → V1 (read path) →
@@ -939,5 +940,57 @@ describe('message-v2 compatibility regressions', () => {
     expect(toolResult).toBeDefined();
     expect(toolResult?.content.length).toBeLessThan(longOutput.length);
     expect(toolResult?.content).toContain('[输出已截断');
+  });
+
+  it('replays Responses reasoning item metadata through the native message shape', () => {
+    const sessionId = 'session-reasoning-item';
+    const messageId = asMessageId('m-reasoning-item');
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p-reasoning-item'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'reasoning',
+          text: 'summary-1',
+          itemId: 'rs_metadata_reasoning:0',
+          metadata: { encryptedContent: 'encrypted-1', summary: 'summary-1' },
+          time: { start: 1, end: 2 },
+        },
+      ],
+    };
+
+    expect(toModelMessages([message])).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: {
+          text: 'summary-1',
+          itemId: 'rs_metadata_reasoning:0',
+          encryptedContent: 'encrypted-1',
+          summary: 'summary-1',
+        },
+      },
+    ]);
+    const native = unifiedConversationToNativeMessages(toModelMessages([message]));
+    expect(native[0]?.content[0]).toMatchObject({
+      type: 'reasoning',
+      providerMetadata: {
+        openai: {
+          itemId: 'rs_metadata_reasoning:0',
+          reasoningEncryptedContent: 'encrypted-1',
+          summary: 'summary-1',
+        },
+      },
+    });
   });
 });

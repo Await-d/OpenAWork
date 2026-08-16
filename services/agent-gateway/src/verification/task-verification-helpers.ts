@@ -1,5 +1,15 @@
 import type { MessageContent } from '@openAwork/shared';
 
+let activeMockFetch: typeof fetch | undefined;
+
+const mockFetchDispatcher: typeof fetch = (input, init) => {
+  if (!activeMockFetch) {
+    return Promise.reject(new Error('No active fetch mock'));
+  }
+
+  return activeMockFetch(input, init);
+};
+
 export function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
@@ -11,12 +21,34 @@ export async function withMockFetch<T>(
   callback: () => Promise<T>,
 ): Promise<T> {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = mockFetch;
+  const previousMockFetch = activeMockFetch;
+  activeMockFetch = mockFetch;
+  globalThis.fetch = mockFetchDispatcher;
   try {
     return await callback();
   } finally {
+    activeMockFetch = previousMockFetch;
     globalThis.fetch = originalFetch;
   }
+}
+
+export async function readFetchBody(input: RequestInfo | URL, init?: RequestInit): Promise<string> {
+  if (init?.body !== undefined && init.body !== null) {
+    return new Response(init.body).text();
+  }
+
+  if (input instanceof Request) {
+    return input.clone().text();
+  }
+
+  return '';
+}
+
+export function readFetchSignal(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): AbortSignal | undefined {
+  return init?.signal ?? (input instanceof Request ? input.signal : undefined);
 }
 
 export async function withTempEnv<T>(
@@ -68,6 +100,14 @@ function createChatCompletionsSseFrames(text: string): string[] {
       choices: [
         {
           delta: { content: text },
+        },
+      ],
+    })}`,
+    '',
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          delta: {},
           finish_reason: 'stop',
         },
       ],
@@ -86,6 +126,80 @@ export function createChatCompletionsStream(text: string): Response {
     new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(chatCompletionFrames.join('\n')));
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+}
+
+function createAnthropicMessagesSseFrames(text: string): string[] {
+  return [
+    'event: message_start',
+    `data: ${JSON.stringify({
+      type: 'message_start',
+      message: {
+        id: 'msg_fixture',
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model: 'fixture-model',
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    })}`,
+    '',
+    'event: content_block_start',
+    `data: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    })}`,
+    '',
+    'event: content_block_delta',
+    `data: ${JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text },
+    })}`,
+    '',
+    'event: content_block_stop',
+    `data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}`,
+    '',
+    'event: message_delta',
+    `data: ${JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 1 },
+    })}`,
+    '',
+    'event: message_stop',
+    `data: ${JSON.stringify({ type: 'message_stop' })}`,
+    '',
+  ];
+}
+
+function isAnthropicMessagesRequest(input: RequestInfo | URL): boolean {
+  const rawUrl = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+  try {
+    return new URL(rawUrl).pathname.replace(/\/+$/, '').endsWith('/messages');
+  } catch {
+    return false;
+  }
+}
+
+export function createProtocolAwareStream(input: RequestInfo | URL, text: string): Response {
+  if (!isAnthropicMessagesRequest(input)) {
+    return createChatCompletionsStream(text);
+  }
+
+  const encoder = new TextEncoder();
+  const frames = createAnthropicMessagesSseFrames(text);
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frames.join('\n')));
         controller.close();
       },
     }),
@@ -119,15 +233,20 @@ export function createHangingChatCompletionsStream(signal?: AbortSignal): Respon
 export function createDelayedChatCompletionsStream(input: {
   delayMs: number;
   ignoreAbort?: boolean;
+  request?: RequestInfo | URL;
   signal?: AbortSignal;
   text: string;
 }): Response {
   const encoder = new TextEncoder();
+  const frames =
+    input.request && isAnthropicMessagesRequest(input.request)
+      ? createAnthropicMessagesSseFrames(input.text)
+      : createChatCompletionsSseFrames(input.text);
   return new Response(
     new ReadableStream({
       start(controller) {
         const timer = setTimeout(() => {
-          controller.enqueue(encoder.encode(createChatCompletionsSseFrames(input.text).join('\n')));
+          controller.enqueue(encoder.encode(frames.join('\n')));
           controller.close();
         }, input.delayMs);
 

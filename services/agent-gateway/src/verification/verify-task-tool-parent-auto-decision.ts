@@ -7,7 +7,8 @@ import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-auto-decision.js';
 import {
   assert,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
+  readFetchBody,
   readLastUserMessage,
   seedPendingToolCallConversation,
   waitFor,
@@ -182,8 +183,9 @@ async function verifyInvalidQuestionDecisionFallback(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async () =>
-          createChatCompletionsStream(
+        async (_url) =>
+          createProtocolAwareStream(
+            _url,
             JSON.stringify({ kind: 'question', answers: [['not-an-option']] }),
           ),
         async () => {
@@ -327,8 +329,9 @@ async function verifyLateQuestionDecisionFallback(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async () =>
-          createChatCompletionsStream(
+        async (_url) =>
+          createProtocolAwareStream(
+            _url,
             JSON.stringify({
               kind: 'question',
               answers: [['Start implementation']],
@@ -515,10 +518,11 @@ async function verifyExitPlanModeAutoDecision(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
-            return createChatCompletionsStream(
+            return createProtocolAwareStream(
+              _url,
               JSON.stringify({
                 kind: 'question',
                 answers: [['Start implementation']],
@@ -526,7 +530,7 @@ async function verifyExitPlanModeAutoDecision(): Promise<void> {
               }),
             );
           }
-          return createChatCompletionsStream(RESUMED_RESULT);
+          return createProtocolAwareStream(_url, RESUMED_RESULT);
         },
         async () => {
           await connectDb();
@@ -694,11 +698,12 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
-            return createChatCompletionsStream(
+            return createProtocolAwareStream(
+              _url,
               JSON.stringify({
                 kind: 'question',
                 answers: [['workspace']],
@@ -706,7 +711,7 @@ async function main(): Promise<void> {
               }),
             );
           }
-          return createChatCompletionsStream(RESUMED_RESULT);
+          return createProtocolAwareStream(_url, RESUMED_RESULT);
         },
         async () => {
           await connectDb();

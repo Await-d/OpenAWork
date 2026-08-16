@@ -102,9 +102,7 @@ export function TitlebarTab({
       {/* Session icon (pinned/custom emoji/dialogue mode) */}
       {!isDraft && tab.type === 'session' && (
         <span
-          aria-label={
-            isPinned ? '已固定' : isRunning ? '运行中' : isPaused ? '已暂停' : '空闲'
-          }
+          aria-label={isPinned ? '已固定' : isRunning ? '运行中' : isPaused ? '已暂停' : '空闲'}
           title={isPinned ? '已固定' : isRunning ? '运行中' : isPaused ? '已暂停' : '空闲'}
           style={{
             position: 'relative',
@@ -118,11 +116,7 @@ export function TitlebarTab({
             background: active
               ? 'color-mix(in oklch, var(--accent) 8%, transparent)'
               : 'transparent',
-            color: active
-              ? 'var(--accent)'
-              : isPinned
-                ? 'var(--accent)'
-                : 'var(--fg-muted)',
+            color: active ? 'var(--accent)' : isPinned ? 'var(--accent)' : 'var(--fg-muted)',
             transition: 'background 120ms ease, color 120ms ease',
           }}
         >

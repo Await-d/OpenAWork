@@ -326,13 +326,15 @@ async function runReceptionOrchestrationBody(
     const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
     routeResult = await routeByLlm(
       input.userIntent,
-      async (prompt) => {
+      async (prompt, signal) => {
         return requestWorkflowLlmCompletion({
           apiBaseUrl: llmConfig.apiBaseUrl,
           apiKey: llmConfig.apiKey,
           model: llmConfig.model,
           ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
           ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
+          signal,
           prompt: prependAuxiliaryTeamInstructionPrefix({
             instructionPrefix,
             prompt,
@@ -359,11 +361,13 @@ async function runReceptionOrchestrationBody(
   logRouteDecision(input.userId, input.receptionSessionId, routeResult);
 
   // 路由决策过程消息不写入 message_v2——用户不需要看到"路由判断：orchestrate"
-  // 这样的内部过程信息。路由失败时静默降级继续，由后续路径（direct/orchestrate/
+  // 这样的内部过程信息。路由失败时静默降级继续，由后续路径（direct/light/orchestrate/
   // clarify/resume）的处理逻辑决定给用户展示什么。
 
-  // ─── 路径 A：direct → b.companion 直接回答（走 stream） ─────────────────
-  if (routeResult.decision === 'direct') {
+  // ─── 路径 A：direct/light → b.companion 直接回答（走 stream） ─────────────
+  // light 只读任务和 direct 前台消息都留在 reception：不自动初始化、不做意图改写、
+  // 不创建 reception→pm1 handoff，避免简单了解任务展开成完整团队层级。
+  if (routeResult.decision === 'direct' || routeResult.decision === 'light') {
     setSubstate({
       sessionId: input.receptionSessionId,
       substate: SUBSTATES_RECEPTION.CHATTING,
@@ -394,7 +398,7 @@ async function runReceptionOrchestrationBody(
       });
     } catch (err) {
       console.warn(
-        `[reception-orchestrator] direct stream 失败：${err instanceof Error ? err.message : String(err)}`,
+        `[reception-orchestrator] reception direct/light stream 失败：${err instanceof Error ? err.message : String(err)}`,
       );
       if (persistAck) {
         writeAck(input.userId, input.receptionSessionId, '直接回答时出错，请重试。');
@@ -408,7 +412,10 @@ async function runReceptionOrchestrationBody(
       userId: input.userId,
       roleLayer: 'reception',
     });
-    return { triggered: false, reason: 'direct-answer' };
+    return {
+      triggered: false,
+      reason: routeResult.decision === 'light' ? 'light-answer' : 'direct-answer',
+    };
   }
 
   // ─── 路径 B：clarify → b.companion 追问 ────────────────────────────────
@@ -541,6 +548,7 @@ async function runReceptionOrchestrationBody(
       model: llmConfig.model,
       ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+      ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
       prompt: prependAuxiliaryTeamInstructionPrefix({
         instructionPrefix,
         prompt: INTERACTION_AGENT_PROMPT_TEMPLATE(input.userIntent, contextBlock),

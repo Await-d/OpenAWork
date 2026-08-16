@@ -18,6 +18,7 @@
  */
 
 import type { Message } from '@openAwork/shared';
+import { Effect } from 'effect';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import {
@@ -28,7 +29,8 @@ import {
 import { estimateMessageTokens } from './compaction-tail-budget.js';
 import {
   runUpstreamGenerate,
-  unifiedConversationToModelMessages,
+  unifiedConversationToNativeMessages,
+  type RunUpstreamGenerateResult,
 } from '../v2-runtime/upstream/index.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 
@@ -237,7 +239,7 @@ export async function extractSessionMemory(input: {
     conversationMessages.push({ role: 'user', content: userPrompt });
 
     // Call LLM
-    const modelMessages = unifiedConversationToModelMessages(conversationMessages);
+    const modelMessages = unifiedConversationToNativeMessages(conversationMessages);
     const timeoutController = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -248,25 +250,30 @@ export async function extractSessionMemory(input: {
     const signal: AbortSignal = input.signal
       ? AbortSignal.any([timeoutController.signal, input.signal])
       : timeoutController.signal;
-    let result: Awaited<ReturnType<typeof runUpstreamGenerate>>;
+    let result: RunUpstreamGenerateResult;
     try {
-      result = await runUpstreamGenerate({
-        providerType: input.route.providerType ?? 'openai',
-        ...(input.route.upstreamProtocol ? { upstreamProtocol: input.route.upstreamProtocol } : {}),
-        ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
-        ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
-        ...(input.route.requestOverrides.headers &&
-        Object.keys(input.route.requestOverrides.headers).length > 0
-          ? { headers: input.route.requestOverrides.headers }
-          : {}),
-        model: input.route.model,
-        system: SESSION_MEMORY_SYSTEM_PROMPT,
-        messages: modelMessages,
-        maxOutputTokens: config.maxOutputTokens,
-        temperature: 0,
-        requestOverrides: input.route.requestOverrides,
-        signal,
-      });
+      result = await Effect.runPromise(
+        runUpstreamGenerate({
+          providerType: input.route.providerType ?? 'openai',
+          ...(input.route.upstreamProtocol
+            ? { upstreamProtocol: input.route.upstreamProtocol }
+            : {}),
+          ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+          ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
+          ...(input.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
+          ...(input.route.requestOverrides.headers &&
+          Object.keys(input.route.requestOverrides.headers).length > 0
+            ? { headers: input.route.requestOverrides.headers }
+            : {}),
+          model: input.route.model,
+          system: SESSION_MEMORY_SYSTEM_PROMPT,
+          messages: modelMessages,
+          maxOutputTokens: config.maxOutputTokens,
+          temperature: 0,
+          requestOverrides: input.route.requestOverrides,
+          signal,
+        }),
+      );
     } catch (err) {
       if (timedOut) {
         throw new Error(`session memory LLM timeout (${SESSION_MEMORY_LLM_TIMEOUT_MS}ms)`);

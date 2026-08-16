@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ChatMessage } from '../../components/conversation-runtime/messages/support.js';
-import {
-  detectDuplicateMessages,
-  deduplicateMessages,
-} from './message-duplication-detector.js';
+import { detectDuplicateMessages, deduplicateMessages } from './message-duplication-detector.js';
 
 describe('message-duplication-detector', () => {
   describe('detectDuplicateMessages', () => {

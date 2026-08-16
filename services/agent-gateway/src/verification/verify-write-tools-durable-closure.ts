@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -12,6 +13,7 @@ import { listSessionMessagesV2 as listSessionMessages } from '../message/message
 import { listSessionRunEvents } from '../session/session-run-events.js';
 import { listSessionSnapshots } from '../session/session-snapshot-store.js';
 import { sessionsRoutes } from '../routes/sessions.js';
+import { waitForPendingSnapshotTreeCaptures } from '../routes/stream-model-round.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { listStoredToolResults } from '../tools/tool-result-contract.js';
 import { withTempEnv } from './task-verification-helpers.js';
@@ -53,7 +55,7 @@ function writeChatToolCall(res: ServerResponse, filePath: string): void {
 
 async function main(): Promise<void> {
   const upstreamPort = 3351;
-  const workspaceRoot = path.join('/tmp', `openawork-durable-${randomUUID()}`);
+  const workspaceRoot = path.join(tmpdir(), `openawork-durable-${randomUUID()}`);
   mkdirSync(workspaceRoot, { recursive: true });
 
   await withTempEnv(
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
       AI_API_KEY: 'test-key',
+      OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER: '1',
       WORKSPACE_ROOT: workspaceRoot,
     },
     async () => {
@@ -238,6 +241,7 @@ async function main(): Promise<void> {
           await app.close();
         }
       } finally {
+        await waitForPendingSnapshotTreeCaptures();
         await closeDb();
         await new Promise<void>((resolve) => upstream.close(() => resolve()));
       }

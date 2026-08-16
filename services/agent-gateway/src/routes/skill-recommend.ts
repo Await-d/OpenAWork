@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { Effect } from 'effect';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { SkillManifest } from '@openAwork/skill-types';
@@ -277,27 +278,30 @@ async function resolveRecommendRoute(userId: string): Promise<ResolvedRouteHandl
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), RECOMMEND_LLM_TIMEOUT_MS);
       try {
-        const result = await runUpstreamGenerate({
-          providerType: route.providerType ?? 'openai',
-          // Forward the resolved upstream protocol so providers configured
-          // for `anthropic-messages` / `openai-responses` (and the GPT-5 /
-          // o-series API) actually hit their native API surface instead of
-          // silently degrading to OpenAI Chat Completions.
-          ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
-          ...(route.apiKey ? { apiKey: route.apiKey } : {}),
-          ...(route.apiBaseUrl ? { baseURL: route.apiBaseUrl } : {}),
-          ...(route.requestOverrides.headers &&
-          Object.keys(route.requestOverrides.headers).length > 0
-            ? { headers: route.requestOverrides.headers }
-            : {}),
-          model: route.model,
-          system,
-          messages: [{ role: 'user', content: userMessage }],
-          maxOutputTokens: 1500,
-          temperature: 0.2,
-          requestOverrides: route.requestOverrides,
-          signal: controller.signal,
-        });
+        const result = await Effect.runPromise(
+          runUpstreamGenerate({
+            providerType: route.providerType ?? 'openai',
+            // Forward the resolved upstream protocol so providers configured
+            // for `anthropic-messages` / `openai-responses` (and the GPT-5 /
+            // o-series API) actually hit their native API surface instead of
+            // silently degrading to OpenAI Chat Completions.
+            ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
+            ...(route.apiKey ? { apiKey: route.apiKey } : {}),
+            ...(route.apiBaseUrl ? { baseURL: route.apiBaseUrl } : {}),
+            ...(route.openaiFastMode === true ? { openaiFastMode: true } : {}),
+            ...(route.requestOverrides.headers &&
+            Object.keys(route.requestOverrides.headers).length > 0
+              ? { headers: route.requestOverrides.headers }
+              : {}),
+            model: route.model,
+            system,
+            messages: [{ role: 'user', content: userMessage }],
+            maxOutputTokens: 1500,
+            temperature: 0.2,
+            requestOverrides: route.requestOverrides,
+            signal: controller.signal,
+          }),
+        );
         return result.text;
       } finally {
         clearTimeout(timer);

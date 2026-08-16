@@ -129,7 +129,16 @@ export function DevtoolsToolbarSection({
 
   return (
     <section style={{ ...SS, marginBottom: 0, padding: '8px 0', borderBottom: 'none' }}>
-      <div style={{ ...TOOLBAR, gap: 8, padding: '8px 12px', background: 'var(--bg-overlay)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+      <div
+        style={{
+          ...TOOLBAR,
+          gap: 8,
+          padding: '8px 12px',
+          background: 'var(--bg-overlay)',
+          borderRadius: 6,
+          border: '1px solid var(--border-subtle)',
+        }}
+      >
         {/* 导航标签组 */}
         <div style={{ display: 'flex', gap: 4 }}>
           {navItems.map((item) => (

@@ -5,7 +5,7 @@ import {
   type ToolCallCardProps,
   UnifiedCodeDiff,
 } from '@openAwork/shared-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ImageLightbox } from '../../image/image-lightbox.js';
@@ -23,6 +23,7 @@ import { extractWebSummary } from '../shared/web-helpers.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
+import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 
 /* ── BlockToolCall (write / edit / bash / web / apply_patch / multi_edit) ── */
 
@@ -97,7 +98,10 @@ export function BlockToolCall({
     !isWebEmptyResult &&
     (shouldExpandByDefault || visualState === 'running');
 
-  const [open, setOpen] = useState(shouldAutoExpand);
+  const [open, toggleOpen] = useToolCallExpandState({
+    shouldAutoExpand,
+    shouldExpandByDefault,
+  });
   const [webResultsExpanded, setWebResultsExpanded] = useState(false);
   const [webImageLightboxOpen, setWebImageLightboxOpen] = useState(false);
 
@@ -107,12 +111,6 @@ export function BlockToolCall({
   const visibleWebResults = webResultsExpanded
     ? webResults
     : webResults.slice(0, MAX_VISIBLE_RESULTS);
-
-  // Re-open if the visual state transitions out of pending mid-stream
-  // (e.g. the model just finished emitting input + output deltas).
-  useEffect(() => {
-    if (shouldAutoExpand) setOpen(true);
-  }, [shouldAutoExpand]);
 
   const filePath = extractFilePath(input);
   // filePath is kept for potential future use and passed to diff views
@@ -165,7 +163,7 @@ export function BlockToolCall({
       <button
         type="button"
         className="tool-call-block-header"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={toggleOpen}
         aria-expanded={open}
       >
         <ToolIcon kind={kind} toolName={toolName} status={visualState} size={14} />

@@ -3,7 +3,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-import { ChatStreamErrorBar } from './stream-error-bar.js';
+import { ChatStreamErrorBarV2 as ChatStreamErrorBar } from './stream-error-bar-v2.js';
 
 afterEach(() => {
   cleanup();

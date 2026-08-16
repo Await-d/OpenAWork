@@ -23,18 +23,27 @@ describe('v2-runtime feature flag', () => {
   });
 
   describe('readRuntimeFlags', () => {
-    it('defaults every layer to v1 when no env vars are set', () => {
+    it('defaults staged layers to v1 and upstream to native v2', () => {
       const flags = readRuntimeFlags({});
       expect(flags).toMatchObject({
         global: 'v1',
         storage: 'v1',
-        upstream: 'v1',
+        upstream: 'v2',
         services: 'v1',
       });
       expect(flags.upstreamProviderAllowlist.size).toBe(0);
     });
 
-    it('propagates the global flag to every layer', () => {
+    it('keeps upstream native by default when the staged global flag remains v1', () => {
+      const flags = readRuntimeFlags({ OPENAWORK_RUNTIME: 'v1' });
+
+      expect(flags.global).toBe('v1');
+      expect(flags.storage).toBe('v1');
+      expect(flags.services).toBe('v1');
+      expect(flags.upstream).toBe('v2');
+    });
+
+    it('propagates the global v2 flag to every layer', () => {
       const flags = readRuntimeFlags({ OPENAWORK_RUNTIME: 'v2' });
       expect(flags).toMatchObject({
         global: 'v2',
@@ -51,7 +60,15 @@ describe('v2-runtime feature flag', () => {
       });
       expect(flags.global).toBe('v1');
       expect(flags.storage).toBe('v2');
+      expect(flags.upstream).toBe('v2');
+      expect(flags.services).toBe('v1');
+    });
+
+    it('uses legacy upstream only when the upstream sub-flag explicitly selects v1', () => {
+      const flags = readRuntimeFlags({ OPENAWORK_RUNTIME_UPSTREAM: 'v1' });
+
       expect(flags.upstream).toBe('v1');
+      expect(flags.storage).toBe('v1');
       expect(flags.services).toBe('v1');
     });
 

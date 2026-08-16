@@ -1,6 +1,6 @@
-import type { Model, ModelID, ProviderID } from "./schema/index.js"
+import type { Model, ModelID, ProviderID } from './schema/index.js';
 
-export type ModelOptions = Pick<Model.Input, "defaults" | "compatibility">
+export type ModelOptions = Pick<Model.Input, 'defaults' | 'compatibility'>;
 
 /**
  * Advanced structural provider definition helper. Built-in providers should
@@ -11,29 +11,26 @@ export type ModelOptions = Pick<Model.Input, "defaults" | "compatibility">
 export type ModelFactory<Options extends ModelOptions = ModelOptions> = (
   id: string | ModelID,
   options?: Options,
-) => Model
+) => Model;
 
-type AnyModelFactory = (...args: never[]) => Model
+type AnyModelFactory = (...args: never[]) => Model;
 
 export interface Definition<Factory extends AnyModelFactory = ModelFactory> {
-  readonly id: ProviderID
-  readonly model: Factory
-  readonly apis?: Record<string, AnyModelFactory>
+  readonly id: ProviderID;
+  readonly model: Factory;
+  readonly apis?: Record<string, AnyModelFactory>;
 }
 
 type DefinitionShape = {
-  readonly id: ProviderID
-  readonly model: (...args: never[]) => Model
-  readonly apis?: Record<string, (...args: never[]) => Model>
-}
+  readonly id: ProviderID;
+  readonly model: (...args: never[]) => Model;
+  readonly apis?: Record<string, (...args: never[]) => Model>;
+};
 
-type NoExtraFields<Input, Shape> = Input & Record<Exclude<keyof Input, keyof Shape>, never>
+type NoExtraFields<Input, Shape> = Input & Record<Exclude<keyof Input, keyof Shape>, never>;
 
 export const make = <DefinitionType extends DefinitionShape>(
   definition: NoExtraFields<DefinitionType, DefinitionShape>,
-) => definition
+) => definition;
 
-export * as Provider from "./provider.js"
-
-
-
+export * as Provider from './provider.js';

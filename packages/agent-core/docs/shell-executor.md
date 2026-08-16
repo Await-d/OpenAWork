@@ -137,13 +137,10 @@ import { createBashShellProvider, createPowerShellProvider } from '@openAwork/ag
 const bashProvider = createBashShellProvider('/usr/local/bin/zsh');
 
 // 构建命令
-const { commandString, cwdFilePath } = await bashProvider.buildExecCommand(
-  'echo "Hello"',
-  {
-    id: 'test-001',
-    useSandbox: false,
-  },
-);
+const { commandString, cwdFilePath } = await bashProvider.buildExecCommand('echo "Hello"', {
+  id: 'test-001',
+  useSandbox: false,
+});
 
 // 获取 spawn 参数
 const spawnArgs = bashProvider.getSpawnArgs(commandString);
