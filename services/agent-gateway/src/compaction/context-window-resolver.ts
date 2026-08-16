@@ -473,17 +473,18 @@ interface ToolOutputCandidate {
  *
  * Returns a new message array with truncated outputs (does NOT mutate input).
  */
-export function aggressiveTruncateToolOutputs(
-  messages: Array<{
-    role: string;
-    content: Array<{
-      type: string;
-      output?: string;
-      toolName?: string;
-      toolCallId?: string;
-      [key: string]: unknown;
-    }>;
-  }>,
+type AggressiveTruncationMessage = {
+  role: string;
+  content: Array<{
+    type: string;
+    output?: unknown;
+    toolName?: string;
+    toolCallId?: string;
+  }>;
+};
+
+export function aggressiveTruncateToolOutputs<T extends AggressiveTruncationMessage>(
+  messages: T[],
   currentTokens: number,
   maxTokens: number,
   config = AGGRESSIVE_TRUNCATION_CONFIG,
@@ -568,15 +569,7 @@ export function aggressiveTruncateToolOutputs(
 
 /** Helper to resolve tool name from a tool_call in the message history. */
 function resolveToolNameFromMessages(
-  messages: Array<{
-    role: string;
-    content: Array<{
-      type: string;
-      toolCallId?: string;
-      toolName?: string;
-      [key: string]: unknown;
-    }>;
-  }>,
+  messages: AggressiveTruncationMessage[],
   toolCallId: string | undefined,
 ): string | undefined {
   if (!toolCallId) return undefined;

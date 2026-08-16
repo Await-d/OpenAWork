@@ -373,7 +373,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
 
   if (discoveredLimit && discoveredLimit.currentTokens > 0) {
     const truncationResult = aggressiveTruncateToolOutputs(
-      allMessages as unknown as Parameters<typeof aggressiveTruncateToolOutputs>[0],
+      allMessages,
       discoveredLimit.currentTokens,
       discoveredLimit.maxTokens,
     );
@@ -385,7 +385,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
           kind: 'tool_output',
           metadataJson: input.metadataJson,
           originalMessages: allMessages,
-          projectedMessages: truncationResult.messages as unknown as typeof allMessages,
+          projectedMessages: truncationResult.messages,
           round: input.round,
           sessionId: input.sessionId,
           truncatedCount: truncationResult.truncatedCount,
