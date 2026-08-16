@@ -11,6 +11,7 @@ import {
   extractStructuredToolResultOutput,
   extractToolResultPart,
   createChatCompletionsStream,
+  readFetchBody,
   readLastUserMessage,
   seedPendingToolCallConversation,
   waitFor,
@@ -21,6 +22,39 @@ import {
 interface PendingPermissionRow {
   id: string;
   request_payload_json: string | null;
+}
+
+function configureOpenAIProvider(userId: string): void {
+  const now = new Date().toISOString();
+  const providerConfig = [
+    {
+      id: 'openai',
+      type: 'openai',
+      name: 'OpenAI',
+      enabled: true,
+      baseUrl: 'https://unit-test.invalid/v1',
+      apiKey: 'test-key',
+      upstreamProtocol: 'chat_completions',
+      defaultModels: [{ id: 'gpt-4o', label: 'GPT-4o', enabled: true }],
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+  const activeSelection = {
+    chat: { providerId: 'openai', modelId: 'gpt-4o' },
+    fast: { providerId: 'openai', modelId: 'gpt-4o' },
+  };
+
+  sqliteRun(
+    `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
+     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    [userId, JSON.stringify(providerConfig)],
+  );
+  sqliteRun(
+    `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'active_selection', ?)
+     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    [userId, JSON.stringify(activeSelection)],
+  );
 }
 
 function hasToolResultInChatRequest(body: string): boolean {
@@ -54,7 +88,7 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
             return createChatCompletionsStream('我已收到审批恢复后的子代理结果，并同步回主对话。');
@@ -82,6 +116,7 @@ async function main(): Promise<void> {
               `pending-${userId}@openawork.local`,
               'hash',
             ]);
+            configureOpenAIProvider(userId);
             sqliteRun(
               `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
               [parentSessionId, userId, JSON.stringify({ workingDirectory: WORKSPACE_ROOT })],

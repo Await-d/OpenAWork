@@ -13,12 +13,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildProviderOptions,
-  type ThinkingConfig,
+  type ExtendedThinkingConfig,
   type ReasoningEffort,
 } from '../../v2-runtime/upstream/provider-options.js';
 
-const baseThinking: ThinkingConfig = {
-  enabled: true,
+const baseThinking: ExtendedThinkingConfig = {
+  config: { type: 'enabled', budgetTokens: 8192 },
   effort: 'medium',
   providerType: 'gemini',
   supportsThinking: true,
@@ -26,7 +26,11 @@ const baseThinking: ThinkingConfig = {
 
 function geminiCfg(model: string, effort: ReasoningEffort, enabled = true) {
   const options = buildProviderOptions({
-    thinking: { ...baseThinking, effort, enabled },
+    thinking: {
+      ...baseThinking,
+      effort,
+      config: enabled ? { type: 'enabled', budgetTokens: 8192 } : { type: 'disabled' },
+    },
     model,
   });
   return options?.['gemini'] as

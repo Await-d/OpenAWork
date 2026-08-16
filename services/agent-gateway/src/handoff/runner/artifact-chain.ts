@@ -521,7 +521,7 @@ async function callLlmWithRetry(
       }
     }
     // 降级正则匹配：覆盖所有可重试的服务端临时错误
-    // 同时检查 message、name 和 toString()，因为 AI SDK 的错误对象
+    // 同时检查 message、name 和 toString()，因为上游客户端的错误对象
     // 可能把关键信息放在 name 而非 message 中（如 AI_JSONParseError）
     const errStr = [
       err instanceof Error ? err.message : '',

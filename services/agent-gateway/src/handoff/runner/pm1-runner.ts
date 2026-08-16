@@ -906,6 +906,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       model: llmConfig.model,
       ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+      ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
       prompt: `${systemWithKnowledge}\n\n---\n\n${userMessage}`,
       temperature: 0.3,
       usageContext: {

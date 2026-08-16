@@ -29,16 +29,11 @@ const shellCommandInputSchema = z.object({
     .optional()
     .default(2 * 60 * 1000) // 默认 2 分钟
     .describe('超时时间（毫秒），默认 120000ms（2 分钟）'),
-  workdir: z
-    .string()
-    .optional()
-    .describe('工作目录，默认为当前会话工作目录'),
+  workdir: z.string().optional().describe('工作目录，默认为当前会话工作目录'),
   description: z
     .string()
     .optional()
-    .describe(
-      '命令描述（5-10 个词），用于审计日志。省略时自动从命令生成。',
-    ),
+    .describe('命令描述（5-10 个词），用于审计日志。省略时自动从命令生成。'),
 });
 
 export type ShellCommandInput = z.infer<typeof shellCommandInputSchema>;
@@ -53,9 +48,7 @@ const shellCommandOutputSchema = z.object({
   exitCode: z.number().describe('退出码（-1 表示异常）'),
   output: z.string().describe('命令输出（stdout + stderr）'),
   duration: z.number().describe('执行时长（毫秒）'),
-  kind: z
-    .enum(['exit', 'timeout', 'aborted', 'error'])
-    .describe('执行结果类型'),
+  kind: z.enum(['exit', 'timeout', 'aborted', 'error']).describe('执行结果类型'),
 });
 
 export type ShellCommandOutput = z.infer<typeof shellCommandOutputSchema>;

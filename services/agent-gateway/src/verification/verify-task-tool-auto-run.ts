@@ -10,8 +10,10 @@ import {
   extractStructuredToolResultOutput,
   extractToolResultPart,
   isTaskToolOutput,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
   createDelayedChatCompletionsStream,
+  readFetchBody,
+  readFetchSignal,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -71,10 +73,8 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          if (typeof init?.body === 'string') {
-            fetchCalls.push(init.body);
-          }
-          return createChatCompletionsStream('子代理已经执行完成。');
+          fetchCalls.push(await readFetchBody(_url, init));
+          return createProtocolAwareStream(_url, '子代理已经执行完成。');
         },
         async () => {
           await connectDb();
@@ -708,12 +708,11 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          if (typeof init?.body === 'string') {
-            startupActivityFetchCalls.push(init.body);
-          }
+          startupActivityFetchCalls.push(await readFetchBody(_url, init));
           return createDelayedChatCompletionsStream({
             delayMs: 80,
-            signal: init?.signal instanceof AbortSignal ? init.signal : undefined,
+            request: _url,
+            signal: readFetchSignal(_url, init),
             text: '子代理启动后的最终结论。',
           });
         },

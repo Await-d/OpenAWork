@@ -1,6 +1,7 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
+import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 import { ToolIcon } from '../display/tool-icon';
 import { formatElapsed } from '../shared/format.js';
 import { extractFilePath } from '../shared/input-paths.js';
@@ -154,7 +155,10 @@ function BatchSubCallRow({
   const shouldExpandByDefault = useToolExpandDefault()(tool);
   const visualState = batchSubVisualState(result, parentTerminalState);
   const shouldAutoExpand = shouldExpandByDefault || visualState === 'running';
-  const [open, setOpen] = useState(shouldAutoExpand);
+  const [open, toggleOpen] = useToolCallExpandState({
+    shouldAutoExpand,
+    shouldExpandByDefault,
+  });
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
   const childStatus: ToolCallCardProps['status'] =
     visualState === 'running' ? 'running' : 'completed';
@@ -178,19 +182,13 @@ function BatchSubCallRow({
     return output;
   }, [output, visualState, tool, result?.partialOutput, input]);
 
-  useEffect(() => {
-    if (shouldAutoExpand) {
-      setOpen(true);
-    }
-  }, [shouldAutoExpand]);
-
   return (
     <div className="tool-call-batch-child" data-batch-sub-status={visualState}>
       <button
         type="button"
         className="tool-call-batch-child-row"
         aria-expanded={open}
-        onClick={() => setOpen((p) => !p)}
+        onClick={toggleOpen}
       >
         <span className="tool-call-batch-child-status" aria-hidden>
           {visualState === 'running' && <span className="tool-call-batch-spinner" />}

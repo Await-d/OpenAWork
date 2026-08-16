@@ -132,7 +132,11 @@ describe('ThinkingConfig 协议升级', () => {
       }
 
       // 排除已知的旧模型
-      if (canonical.includes('opus') || canonical.includes('sonnet') || canonical.includes('haiku')) {
+      if (
+        canonical.includes('opus') ||
+        canonical.includes('sonnet') ||
+        canonical.includes('haiku')
+      ) {
         return false;
       }
 
@@ -255,20 +259,12 @@ describe('ThinkingConfig 协议升级', () => {
     }
 
     it('claude-opus-4-6 使用 adaptive 应该保持不变', () => {
-      const result = applyAdaptiveFallback(
-        { type: 'adaptive' },
-        'claude-opus-4-6',
-        'anthropic',
-      );
+      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-opus-4-6', 'anthropic');
       expect(result).toEqual({ type: 'adaptive' });
     });
 
     it('claude-sonnet-4 使用 adaptive 应该降级为 enabled', () => {
-      const result = applyAdaptiveFallback(
-        { type: 'adaptive' },
-        'claude-sonnet-4',
-        'anthropic',
-      );
+      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-sonnet-4', 'anthropic');
       expect(result).toEqual({ type: 'enabled', budgetTokens: 8192 });
     });
 

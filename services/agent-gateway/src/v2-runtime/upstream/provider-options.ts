@@ -1,22 +1,20 @@
 /**
- * provider-options — translate OpenAWork's "thinking" /
- * reasoning-effort configuration into the AI SDK
- * `providerOptions` payload that `streamText` / `generateText` accept.
+ * provider-options — translate OpenAWork's thinking /
+ * reasoning-effort configuration into native OpenCode LLM provider options.
  *
  * The legacy upstream-request.ts hand-builds vendor-specific JSON
  * fields (`reasoning_effort`, `thinking: { type: 'enabled' }`,
  * `enable_thinking`, etc.) and merges them into the request body.
- * AI SDK already understands a subset of these via
+ * Native protocol adapters understand a subset of these via
  * `providerOptions.<vendor>.<field>`; for the long tail of
- * vendor-specific fields we still need to spill into
- * `providerOptions.<provider>.body` (extra body fields). This
- * module is the single mapping table.
+ * vendor-specific fields we retain a provider-scoped body record.
+ * This module is the single mapping table.
  *
  * Coverage today (stay aligned with upstream-request.ts):
  *   - anthropic   → providerOptions.anthropic.thinking + sendReasoning
  *   - openai      → providerOptions.openai.reasoningEffort
  *                   (works for both OpenAI-compatible chat completions and
- *                   @ai-sdk/openai Responses models.)
+ *                   native OpenAI Responses models.)
  *   - openrouter  → providerOptions.openrouter.body.reasoning
  *   - deepseek    → providerOptions.deepseek.body.thinking + reasoning_effort
  *   - gemini      → providerOptions.gemini.body.google.thinking_config
@@ -29,13 +27,12 @@
  * 不必在本文件新增分支。
  *
  * NOT covered yet:
- *   - OpenAI Responses API `previous_response_id` continuation
- *     (requires `@ai-sdk/openai`; tracked in PROGRESS.md as Phase D
- *     follow-up).
+ *   - OpenAI Responses API `previous_response_id` continuation.
  */
 
-import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
+import type { ProviderOptions as NativeProviderOptions } from '@openAwork/opencode-llm';
 import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/agent-core';
+import type { UpstreamProtocolKind } from './native-model.js';
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ProviderReasoningEffort = ReasoningEffort;
@@ -49,9 +46,7 @@ export type ProviderReasoningEffort = ReasoningEffort;
  *   3. `{ type: 'disabled' }` — 禁用思考
  */
 export type ThinkingConfig =
-  | { type: 'adaptive' }
-  | { type: 'enabled'; budgetTokens: number }
-  | { type: 'disabled' };
+  { type: 'adaptive' } | { type: 'enabled'; budgetTokens: number } | { type: 'disabled' };
 
 /**
  * 扩展的思考配置（内部使用）— 在基础 ThinkingConfig 之上增加 Provider 元信息
@@ -372,47 +367,48 @@ const SLUG_OVERRIDES: Record<string, string> = {
   amazon: 'bedrock',
 };
 
-function sdkKey(npm: string): string | undefined {
+function nativeProviderKey(npm: string): string | undefined {
   switch (npm) {
-    case '@ai-sdk/github-copilot':
+    case 'copilot':
       return 'copilot';
-    case '@ai-sdk/azure':
+    case 'azure':
       return 'azure';
-    case '@ai-sdk/openai':
+    case 'openai':
       return 'openai';
-    case '@ai-sdk/amazon-bedrock':
+    case 'bedrock':
       return 'bedrock';
-    case '@ai-sdk/anthropic':
-    case '@ai-sdk/google-vertex/anthropic':
+    case 'anthropic':
+    case 'vertex-anthropic':
       return 'anthropic';
-    case '@ai-sdk/google-vertex':
+    case 'vertex':
       return 'vertex';
-    case '@ai-sdk/google':
+    case 'google':
       return 'google';
-    case '@ai-sdk/gateway':
+    case 'gateway':
       return 'gateway';
     default:
       return undefined;
   }
 }
 
-function sdkNpmForProviderType(providerType: string): string {
+function nativeProviderKeyForType(providerType: string): string {
   if (providerType === 'anthropic' || providerType === 'claude') {
-    return '@ai-sdk/anthropic';
+    return 'anthropic';
   }
   if (providerType === 'azure') {
-    return '@ai-sdk/azure';
+    return 'azure';
   }
   if (providerType === 'copilot' || providerType === 'github-copilot') {
-    return '@ai-sdk/github-copilot';
+    return 'copilot';
   }
   if (providerType.includes('bedrock')) {
-    return '@ai-sdk/amazon-bedrock';
+    return 'bedrock';
   }
   if (providerType === 'gateway') {
-    return '@ai-sdk/gateway';
+    return 'gateway';
   }
-  return '@ai-sdk/openai-compatible';
+  if (providerType === 'openai') return 'openai';
+  return 'openai-compatible';
 }
 
 export function buildProviderOptionsModelInfo(input: {
@@ -426,7 +422,7 @@ export function buildProviderOptionsModelInfo(input: {
     id: input.model,
     api: {
       id: input.model,
-      npm: input.sdkNpmOverride ?? sdkNpmForProviderType(providerID),
+      npm: input.sdkNpmOverride ?? nativeProviderKeyForType(providerID),
     },
   };
 }
@@ -447,7 +443,7 @@ function shouldUseOpenAICompatibleBodyFlatten(
   );
 }
 
-function isJsonRecord(value: unknown): value is Record<string, JSONValue> {
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -470,31 +466,36 @@ function mergeDeep(
 }
 
 export function mergeProviderOptions(
-  ...items: Array<SharedV2ProviderOptions | undefined>
-): SharedV2ProviderOptions | undefined {
+  ...items: Array<NativeProviderOptions | undefined>
+): NativeProviderOptions | undefined {
   const merged = items.reduce<ProviderOptionsRecord>((acc, item) => {
     if (!item) return acc;
     return mergeDeep(acc, item);
   }, {});
-  return Object.keys(merged).length > 0 ? (merged as SharedV2ProviderOptions) : undefined;
+  const native = Object.fromEntries(
+    Object.entries(merged).filter((entry): entry is [string, ProviderOptionsRecord] =>
+      isRecord(entry[1]),
+    ),
+  );
+  return Object.keys(native).length > 0 ? native : undefined;
 }
 
 export function providerOptions(
   model: ProviderOptionsModelInfo,
-  options: Record<string, JSONValue>,
-): SharedV2ProviderOptions {
-  if (model.api.npm === '@ai-sdk/gateway') {
+  options: Record<string, unknown>,
+): NativeProviderOptions {
+  if (model.api.npm === 'gateway') {
     const i = model.api.id.indexOf('/');
     const rawSlug = i > 0 ? model.api.id.slice(0, i) : undefined;
     const slug = rawSlug ? (SLUG_OVERRIDES[rawSlug] ?? rawSlug) : undefined;
     const gateway = options['gateway'];
-    const rest = Object.fromEntries(
+    const rest: Record<string, unknown> = Object.fromEntries(
       Object.entries(options).filter(([key]) => key !== 'gateway'),
-    ) as Record<string, JSONValue>;
+    );
     const has = Object.keys(rest).length > 0;
 
-    const result: Record<string, unknown> = {};
-    if (gateway !== undefined) result['gateway'] = gateway;
+    const result: Record<string, Record<string, unknown>> = {};
+    if (isRecord(gateway)) result['gateway'] = gateway;
 
     if (has) {
       if (slug) {
@@ -506,28 +507,26 @@ export function providerOptions(
       }
     }
 
-    return result as SharedV2ProviderOptions;
+    return result;
   }
 
   const usesDotSplitOptions =
-    model.api.npm === '@ai-sdk/openai-compatible' ||
-    model.api.npm === '@ai-sdk/openai' ||
-    model.api.npm === '@ai-sdk/anthropic';
+    model.api.npm === 'openai-compatible' ||
+    model.api.npm === 'openai' ||
+    model.api.npm === 'anthropic';
   const key =
-    sdkKey(model.api.npm) ??
+    nativeProviderKey(model.api.npm) ??
     (usesDotSplitOptions ? (model.providerID.split('.')[0] ?? model.providerID) : model.providerID);
 
-  if (model.api.npm === '@ai-sdk/azure') {
+  if (model.api.npm === 'azure') {
     return { openai: options, azure: options };
   }
 
-  // @ai-sdk/openai-compatible 会把 providerOptions[name] 下的所有 key 直接
-  // 作为顶层字段插入请求体。它不会展开 `body` 字段——如果传入
-  // `{ body: { thinking: ... } }`，请求体顶层会出现 `body: { thinking: ... }`
-  // 而不是 `thinking: ...`。因此对 openai-compatible，展开 `body` 字段。
-  if (model.api.npm === '@ai-sdk/openai-compatible' && 'body' in options) {
+  // Native OpenAI-compatible routes expect provider-scoped fields directly,
+  // so flatten the legacy body envelope before returning them.
+  if (model.api.npm === 'openai-compatible' && 'body' in options) {
     const { body, ...rest } = options;
-    const merged = { ...(body as Record<string, JSONValue>), ...rest };
+    const merged = { ...(isRecord(body) ? body : {}), ...rest };
     return { [key]: merged };
   }
 
@@ -560,14 +559,16 @@ export function modelSupportsAdaptiveThinking(modelId: string, providerType: str
 }
 
 /**
- * Build the AI SDK `providerOptions` payload for a given thinking
+ * Build the native `providerOptions` payload for a given thinking
  * config + model. Returns `undefined` when no provider-specific tuning
  * is required (most callers will then omit the field entirely).
  */
 export function buildProviderOptions(input: {
   thinking?: ThinkingConfig | ExtendedThinkingConfig;
   model: string;
-}): SharedV2ProviderOptions | undefined {
+  providerType?: string;
+  upstreamProtocol?: UpstreamProtocolKind;
+}): NativeProviderOptions | undefined {
   const { thinking } = input;
   if (!thinking) {
     return undefined;
@@ -576,7 +577,15 @@ export function buildProviderOptions(input: {
   // 判断是新版 ThinkingConfig 还是旧版 ExtendedThinkingConfig
   const isExtendedConfig = 'config' in thinking;
   const thinkingConfig: ThinkingConfig = isExtendedConfig ? thinking.config : thinking;
-  const providerType = isExtendedConfig ? thinking.providerType : 'anthropic';
+  const configuredProviderType = isExtendedConfig
+    ? thinking.providerType
+    : (input.providerType ?? 'anthropic');
+  const providerType =
+    input.upstreamProtocol === 'anthropic_messages'
+      ? 'anthropic'
+      : input.upstreamProtocol === 'responses'
+        ? 'openai'
+        : configuredProviderType;
   const supportsThinking = isExtendedConfig ? thinking.supportsThinking : true;
 
   // 调试日志
@@ -606,13 +615,13 @@ export function buildProviderOptions(input: {
     providerType,
     model: input.model,
     ...(shouldUseOpenAICompatibleBodyFlatten(normalizedProviderType, style)
-      ? { sdkNpmOverride: '@ai-sdk/openai-compatible' }
+      ? { sdkNpmOverride: 'openai-compatible' }
       : {}),
   });
 
   switch (style) {
     case 'anthropic_budget': {
-      const anthropic: Record<string, JSONValue> = {
+      const anthropic: Record<string, unknown> = {
         // We always send reasoning back to upstream so multi-turn
         // tool flows preserve thinking continuity (matches the
         // legacy renderer's behaviour for Anthropic/Claude routes).
@@ -645,7 +654,10 @@ export function buildProviderOptions(input: {
           type: 'enabled',
           budgetTokens: thinkingConfig.budgetTokens,
         };
-        console.log('[DEBUG anthropic_budget] 使用 enabled，budgetTokens=', thinkingConfig.budgetTokens);
+        console.log(
+          '[DEBUG anthropic_budget] 使用 enabled，budgetTokens=',
+          thinkingConfig.budgetTokens,
+        );
       } else {
         // type === 'disabled'
         anthropic['thinking'] = { type: 'disabled' };
@@ -653,7 +665,10 @@ export function buildProviderOptions(input: {
       }
 
       const result = providerOptions(modelInfo, anthropic);
-      console.log('[DEBUG anthropic_budget] 最终 providerOptions:', JSON.stringify(result, null, 2));
+      console.log(
+        '[DEBUG anthropic_budget] 最终 providerOptions:',
+        JSON.stringify(result, null, 2),
+      );
       return result;
     }
 
@@ -677,31 +692,16 @@ export function buildProviderOptions(input: {
 
       // Chat Completions API 和 Responses API 需要不同的参数传递方式：
       //
-      // 1. Chat Completions (@ai-sdk/openai-compatible):
+      // 1. Chat Completions (native OpenAI-compatible route):
       //    providerOptions[name] 下的字段直接作为请求体顶层字段。
       //    例如：{ openai: { reasoning_effort: 'high' } } → body 中 reasoning_effort='high'
       //
-      // 2. Responses API (@ai-sdk/openai):
-      //    SDK 存在已知 bug（Issue #13439, #8572, #7854）：
-      //    providerOptions 被解构但从不使用，reasoning_effort 无法传递。
-      //
-      //    绕过方案：统一使用 @ai-sdk/openai-compatible 协议（Chat Completions），
-      //    即使对于 Responses API 端点也强制使用 openai-compatible 包装，
-      //    因为它能正确展开 body 字段到请求体顶层。
-      //
-      //    或者：等待 SDK 修复后，改用：
-      //    { openai: { reasoningEffort: clampedEffort } }
-      //
-      // 通过 modelInfo.api.npm 判断使用哪种协议。
-      if (modelInfo.api.npm === '@ai-sdk/openai') {
-        // Responses API: 由于 SDK bug，需要强制使用 body 包裹
-        // 但即使如此，SDK 可能仍然不会正确传递，需要监控日志验证
-        return providerOptions(modelInfo, {
-          body: { reasoning_effort: clampedEffort },
-        });
+      // 2. Responses API uses the native OpenAI provider key.
+      if (modelInfo.api.npm === 'openai') {
+        return providerOptions(modelInfo, { reasoningEffort: clampedEffort });
       }
 
-      // Chat Completions API: 直接传递（已验证可用）
+      // Chat Completions API: pass the native reasoning field directly.
       return providerOptions(modelInfo, {
         reasoning_effort: clampedEffort,
       });
@@ -759,14 +759,14 @@ export function buildProviderOptions(input: {
       return providerOptions(modelInfo, {
         body: {
           thinking: { type: 'enabled' },
-          ...(effortParam ? { reasoningEffort: effortParam } : {}),
+          ...(effortParam ? { reasoning_effort: effortParam } : {}),
         },
       });
     }
 
     case 'gemini_thinking': {
       // Gemini 通过 OpenAI 兼容端点接入时，thinking_config 直接作为请求体
-      // 顶层字段 google.thinking_config 传递。注意：extra_body 是 OpenAI SDK
+      // 顶层字段 google.thinking_config 传递。注意：extra_body 是旧 OpenAI 客户端库
       // 客户端库的概念，原生 HTTP 请求不应包含 extra_body 包裹层。
       if (thinkingConfig.type === 'disabled') {
         if (model.includes('gemini-3')) {
@@ -868,7 +868,7 @@ export function buildProviderOptions(input: {
         return providerOptions(modelInfo, {
           body: {
             thinking: { type: 'enabled' },
-            reasoningEffort: mimoEffort,
+            reasoning_effort: mimoEffort,
           },
         });
       }
@@ -889,7 +889,8 @@ export function buildBaseProviderOptions(input: {
   providerType?: string;
   model: string;
   sessionId?: string;
-}): SharedV2ProviderOptions | undefined {
+  openaiFastMode?: boolean;
+}): NativeProviderOptions | undefined {
   const providerType = (input.providerType ?? '').toLowerCase();
   if (!providerType) return undefined;
   const modelInfo = buildProviderOptionsModelInfo({
@@ -898,6 +899,13 @@ export function buildBaseProviderOptions(input: {
   });
   const model = input.model.toLowerCase();
 
+  if (input.openaiFastMode === true && providerType !== 'openai') {
+    return providerOptions(
+      buildProviderOptionsModelInfo({ providerType: 'openai', model: input.model }),
+      { serviceTier: 'priority' },
+    );
+  }
+
   if (providerType === 'openai') {
     // OpenAI's prompt cache hits are keyed by `prompt_cache_key`. Without
     // it, concurrent sessions in the same org evict each other's prefix
@@ -905,6 +913,7 @@ export function buildBaseProviderOptions(input: {
     return providerOptions(modelInfo, {
       store: false,
       ...(input.sessionId ? { promptCacheKey: input.sessionId } : {}),
+      ...(input.openaiFastMode === true ? { serviceTier: 'priority' } : {}),
     });
   }
 

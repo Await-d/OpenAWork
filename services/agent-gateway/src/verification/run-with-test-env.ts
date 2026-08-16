@@ -13,6 +13,7 @@ const tempDataDir = mkdtempSync(join(tmpdir(), 'openawork-verification-'));
 process.env['NODE_ENV'] = 'test';
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_DATA_DIR'] = tempDataDir;
+process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
 delete process.env['OPENAWORK_DATABASE_PATH'];
 
 if (!process.env['OPENAWORK_APP_VERSION']) {

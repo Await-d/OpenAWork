@@ -60,15 +60,12 @@ packages/agent-core/src/utils/
 
 ```typescript
 interface ShellProvider {
-  type: ShellType;                    // 'bash' | 'powershell'
-  shellPath: string;                  // Shell 可执行文件路径
-  detached: boolean;                  // 是否以 detached 模式启动
+  type: ShellType; // 'bash' | 'powershell'
+  shellPath: string; // Shell 可执行文件路径
+  detached: boolean; // 是否以 detached 模式启动
 
   // 构建完整的 shell 命令
-  buildExecCommand(
-    command: string,
-    options: ShellExecOptions
-  ): Promise<ShellCommandResult>;
+  buildExecCommand(command: string, options: ShellExecOptions): Promise<ShellCommandResult>;
 
   // 获取 spawn 参数
   getSpawnArgs(commandString: string): string[];
@@ -82,12 +79,12 @@ interface ShellProvider {
 
 ### 支持的平台
 
-| 平台 | 默认 Shell | 备选 Shell | 路径转换 |
-|------|-----------|-----------|---------|
-| macOS | Bash/Zsh | - | 不需要 |
-| Linux | Bash/Zsh | - | 不需要 |
-| WSL | Bash/Zsh | - | POSIX ↔ Windows |
-| Windows | PowerShell | Git Bash | Windows ↔ POSIX |
+| 平台    | 默认 Shell | 备选 Shell | 路径转换        |
+| ------- | ---------- | ---------- | --------------- |
+| macOS   | Bash/Zsh   | -          | 不需要          |
+| Linux   | Bash/Zsh   | -          | 不需要          |
+| WSL     | Bash/Zsh   | -          | POSIX ↔ Windows |
+| Windows | PowerShell | Git Bash   | Windows ↔ POSIX |
 
 ### 平台检测
 
@@ -146,6 +143,7 @@ if (supportsPosixShell()) {
 ### 核心功能
 
 1. **退出码捕获**
+
    ```powershell
    $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
    ```
@@ -220,20 +218,22 @@ async function executeShellCommand(command, shellType, options) {
   const provider = await getProvider(shellType);
 
   // 2. 构建命令
-  const { commandString, cwdFilePath } = await provider.buildExecCommand(
-    command,
-    { id, sandboxTmpDir, useSandbox }
-  );
+  const { commandString, cwdFilePath } = await provider.buildExecCommand(command, {
+    id,
+    sandboxTmpDir,
+    useSandbox,
+  });
 
   // 3. 获取环境变量
   const envOverrides = await provider.getEnvironmentOverrides(command);
 
   // 4. 启动子进程
-  const childProcess = spawn(
-    provider.shellPath,
-    provider.getSpawnArgs(commandString),
-    { env, cwd, detached: provider.detached, windowsHide: true }
-  );
+  const childProcess = spawn(provider.shellPath, provider.getSpawnArgs(commandString), {
+    env,
+    cwd,
+    detached: provider.detached,
+    windowsHide: true,
+  });
 
   // 5. 返回结果
   return { process: childProcess, cwdFilePath, provider };
@@ -298,11 +298,11 @@ const result = await executeShellCommand('rm -rf /', 'bash', {
 
 ### 自动设置的环境变量
 
-| 变量 | Bash | PowerShell | 说明 |
-|------|------|------------|------|
-| `SHELL` | ✓ | - | Shell 路径 |
-| `OPENAWORK` | ✓ | ✓ | 标记为 OpenAWork 进程 |
-| `TMPDIR` | ✓ (沙箱) | ✓ (沙箱) | 临时目录 |
+| 变量        | Bash     | PowerShell | 说明                  |
+| ----------- | -------- | ---------- | --------------------- |
+| `SHELL`     | ✓        | -          | Shell 路径            |
+| `OPENAWORK` | ✓        | ✓          | 标记为 OpenAWork 进程 |
+| `TMPDIR`    | ✓ (沙箱) | ✓ (沙箱)   | 临时目录              |
 
 ### 用户自定义
 
@@ -417,13 +417,13 @@ registry.register(shellCommandToolDefinition);
 
 ### 实现差异
 
-| 功能 | 权威实现 | OpenAWork 实现 | 说明 |
-|------|---------|---------------|------|
-| Shell 快照 | ✓ | - | 暂时简化，未来可添加 |
-| Tmux 隔离 | ✓ | - | 非核心功能 |
-| 路径转换 | ✓ | ✓ | 完全实现 |
-| 命令修正 | ✓ | ✓ | 完全实现 |
-| 沙箱支持 | ✓ | ✓ (骨架) | 需要实际沙箱运行时 |
+| 功能       | 权威实现 | OpenAWork 实现 | 说明                 |
+| ---------- | -------- | -------------- | -------------------- |
+| Shell 快照 | ✓        | -              | 暂时简化，未来可添加 |
+| Tmux 隔离  | ✓        | -              | 非核心功能           |
+| 路径转换   | ✓        | ✓              | 完全实现             |
+| 命令修正   | ✓        | ✓              | 完全实现             |
+| 沙箱支持   | ✓        | ✓ (骨架)       | 需要实际沙箱运行时   |
 
 ## 相关文档
 

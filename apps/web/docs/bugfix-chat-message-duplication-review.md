@@ -9,24 +9,24 @@
 
 ### 1. 核心修复文件
 
-| 文件路径 | 修改内容 | 状态 |
-|---------|---------|------|
-| `apps/web/src/components/conversation-runtime/messages/support.ts` | 在 `reconcileSnapshotChatMessages` 和 `replaceOrAppendStreamedAssistantMessage` 中添加去重逻辑 | ✅ 已完成 |
-| `apps/web/src/pages/chat-page/conversation/render/use-chat-render-data.ts` | 在 `historicalRenderedMessageEntries` 中添加去重和日志 | ✅ 已完成 |
+| 文件路径                                                                   | 修改内容                                                                                       | 状态      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------- |
+| `apps/web/src/components/conversation-runtime/messages/support.ts`         | 在 `reconcileSnapshotChatMessages` 和 `replaceOrAppendStreamedAssistantMessage` 中添加去重逻辑 | ✅ 已完成 |
+| `apps/web/src/pages/chat-page/conversation/render/use-chat-render-data.ts` | 在 `historicalRenderedMessageEntries` 中添加去重和日志                                         | ✅ 已完成 |
 
 ### 2. 新增工具文件
 
-| 文件路径 | 用途 | 状态 |
-|---------|------|------|
-| `apps/web/src/utils/debug/message-duplication-detector.ts` | 消息重复检测和去重工具函数 | ✅ 已创建 |
+| 文件路径                                                        | 用途                          | 状态      |
+| --------------------------------------------------------------- | ----------------------------- | --------- |
+| `apps/web/src/utils/debug/message-duplication-detector.ts`      | 消息重复检测和去重工具函数    | ✅ 已创建 |
 | `apps/web/src/utils/debug/message-duplication-detector.test.ts` | 工具函数的单元测试（7个测试） | ✅ 已创建 |
 
 ### 3. 文档文件
 
-| 文件路径 | 用途 | 状态 |
-|---------|------|------|
-| `docs/bugfix-chat-message-duplication.md` | 完整的修复说明文档 | ✅ 已创建 |
-| `docs/bugfix-chat-message-duplication-review.md` | 本复查报告 | ✅ 已创建 |
+| 文件路径                                         | 用途               | 状态      |
+| ------------------------------------------------ | ------------------ | --------- |
+| `docs/bugfix-chat-message-duplication.md`        | 完整的修复说明文档 | ✅ 已创建 |
+| `docs/bugfix-chat-message-duplication-review.md` | 本复查报告         | ✅ 已创建 |
 
 ## 代码修改详情
 
@@ -84,26 +84,29 @@ return deduplicated;
 **位置：** 行 385-424
 
 ```typescript
-const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
-  // 先检测并移除重复消息
-  const seenIds = new Set<string>();
-  const deduplicatedMessages = visibleMessages.filter((message) => {
-    if (seenIds.has(message.id)) {
-      console.warn(
-        `[ChatRender] 检测到重复消息 ID: ${message.id}, role: ${message.role}, 已自动过滤`,
-      );
-      return false;
-    }
-    seenIds.add(message.id);
-    return true;
-  });
+const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(
+  () => {
+    // 先检测并移除重复消息
+    const seenIds = new Set<string>();
+    const deduplicatedMessages = visibleMessages.filter((message) => {
+      if (seenIds.has(message.id)) {
+        console.warn(
+          `[ChatRender] 检测到重复消息 ID: ${message.id}, role: ${message.role}, 已自动过滤`,
+        );
+        return false;
+      }
+      seenIds.add(message.id);
+      return true;
+    });
 
-  return deduplicatedMessages.map((message) => ({
-    message,
-    actions: buildMessageActions(message),
-    // ... 其他渲染逻辑
-  }));
-}, [/* 依赖项 */]);
+    return deduplicatedMessages.map((message) => ({
+      message,
+      actions: buildMessageActions(message),
+      // ... 其他渲染逻辑
+    }));
+  },
+  [/* 依赖项 */],
+);
 ```
 
 **复查结果：** ✅ 代码正确，日志清晰，useMemo 依赖项正确
@@ -117,11 +120,13 @@ pnpm --filter @openAwork/web test message-duplication
 ```
 
 **结果：** ✅ 全部通过
+
 - Test Files: 1 passed (1)
 - Tests: 7 passed (7)
 - Duration: 1.18s
 
 **测试覆盖：**
+
 - ✅ 检测重复的消息 ID
 - ✅ 检测无重复情况
 - ✅ 检测多个不同 ID 的重复
@@ -136,6 +141,7 @@ pnpm typecheck
 ```
 
 **结果：** ✅ 全部通过
+
 - 所有包（21 个）类型检查通过
 - 无新增类型错误
 
@@ -146,6 +152,7 @@ pnpm --filter @openAwork/web test support.test.ts -t "reconcileSnapshotChatMessa
 ```
 
 **结果：** ✅ 通过
+
 - Test Files: 1 passed
 - Tests: 1 passed
 
@@ -191,7 +198,7 @@ pnpm --filter @openAwork/web test support.test.ts -t "reconcileSnapshotChatMessa
 
 ### 需要监控的点
 
-1. **日志频率：** 
+1. **日志频率：**
    - 如果 `[ChatRender] 检测到重复消息` 频繁出现，说明上游逻辑仍有问题
    - 建议：监控此日志，若频繁出现需进一步排查根本原因
 
@@ -267,12 +274,15 @@ git commit -m "fix(chat): 修复聊天消息重复渲染问题
 采用**多层防御**策略：
 
 ### 第一层：消息协调层
+
 在 `reconcileSnapshotChatMessages` 函数末尾添加最终去重
 
 ### 第二层：流式消息追加层
+
 在 `replaceOrAppendStreamedAssistantMessage` 函数末尾添加去重
 
 ### 第三层：渲染层
+
 在 `useChatRenderData` Hook 中添加渲染前去重和日志
 
 ## 测试结果

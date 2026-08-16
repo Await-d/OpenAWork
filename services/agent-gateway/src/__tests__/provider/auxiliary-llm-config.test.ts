@@ -113,6 +113,7 @@ describe('resolveAuxiliaryLlmConfig', () => {
         baseUrl: 'https://api.openai.com/v1',
         apiKey: 'sk-openai-fast',
         upstreamProtocol: 'responses',
+        openaiFastMode: true,
       },
       modelId: 'gpt-5.4-nano',
     });
@@ -125,8 +126,31 @@ describe('resolveAuxiliaryLlmConfig', () => {
       model: 'gpt-5.4-nano',
       providerType: 'openai',
       upstreamProtocol: 'responses',
+      openaiFastMode: true,
     });
     expect(mocks.getActiveChatProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it('forwards Fast mode for a custom OpenAI-compatible provider', async () => {
+    mockStoredSettings({ providers: [{ id: 'stored-fast-relay' }] });
+    mocks.getFastProviderConfig.mockResolvedValue({
+      provider: {
+        id: 'custom-fast',
+        type: 'custom',
+        name: 'Custom OpenAI Fast relay',
+        baseUrl: 'https://relay.example.com/v1',
+        apiKey: 'sk-relay-fast',
+        upstreamProtocol: 'responses',
+        openaiFastMode: true,
+      },
+      modelId: 'relay-model',
+    });
+
+    const cfg = await resolveAuxiliaryLlmConfig('user-1');
+
+    expect(cfg?.providerType).toBe('custom');
+    expect(cfg?.upstreamProtocol).toBe('responses');
+    expect(cfg?.openaiFastMode).toBe(true);
   });
 
   it('falls back to active-chat provider when fast is unavailable', async () => {

@@ -11,6 +11,10 @@ const tauriWindowControls = vi.hoisted(() => ({
   toggleMaximize: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }));
 
+const sessionFixtures = vi.hoisted(() => ({
+  firstTitle: 'Chat 会话一',
+}));
+
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => tauriWindowControls,
 }));
@@ -18,7 +22,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 vi.mock('../../../hooks/workspace/useSessions.js', () => ({
   useSessions: () => ({
     sessions: [
-      { id: 'chat-session-1', title: 'Chat 会话一', workspacePath: null },
+      { id: 'chat-session-1', title: sessionFixtures.firstTitle, workspacePath: null },
       { id: 'chat-session-2', title: 'Chat 会话二', workspacePath: null },
     ],
     groupedSessions: [],
@@ -135,6 +139,7 @@ function installMatchMedia(width: number): () => void {
 beforeEach(() => {
   cleanup();
   resetUiState();
+  sessionFixtures.firstTitle = 'Chat 会话一';
   tauriWindowControls.close.mockClear();
   tauriWindowControls.minimize.mockClear();
   tauriWindowControls.toggleMaximize.mockClear();
@@ -201,6 +206,18 @@ describe('TitlebarTabStrip', () => {
     expect(screen.getByText('Chat 会话一')).not.toBeNull();
     expect(screen.getByRole('button', { name: '工具菜单' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
+  });
+
+  it('会规范化会话标题首尾空白且不会触发循环更新', () => {
+    sessionFixtures.firstTitle = ' Chat 会话一 ';
+    useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
+
+    expect(() => renderTitlebar('/chat/chat-session-1')).not.toThrow();
+
+    const sessionTab = useUIStateStore
+      .getState()
+      .tabs.find((tab) => tab.sessionId === 'chat-session-1');
+    expect(sessionTab?.title).toBe('Chat 会话一');
   });
 
   it('关闭当前激活的会话标签后不会被路由同步 effect 重新加回', async () => {

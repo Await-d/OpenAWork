@@ -15,6 +15,7 @@
  * to deterministically yield a route whose protocol we control.
  */
 
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
@@ -133,12 +134,14 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
     mocks.resolveModelRoute.mockReturnValue(
       createRoute({ upstreamProtocol: 'anthropic_messages', providerType: 'anthropic' }),
     );
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'image describes a transparent pixel',
-      inputTokens: 10,
-      outputTokens: 5,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'image describes a transparent pixel',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+      }),
+    );
 
     await runLookAtTool({
       imageData: SAMPLE_IMAGE_DATA_URL,
@@ -163,12 +166,14 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
         apiBaseUrl: 'https://api.openai.com/v1',
       }),
     );
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
 
     await runLookAtTool({
       imageData: SAMPLE_IMAGE_DATA_URL,
@@ -191,12 +196,14 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
         apiBaseUrl: 'https://api.openai.com/v1',
       }),
     );
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
 
     await runLookAtTool({
       imageData: SAMPLE_JPG_DATA_URL,
@@ -209,11 +216,11 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
       { messages?: Array<{ content?: unknown }> } | undefined;
     const content = callArgs?.messages?.[0]?.content;
     expect(Array.isArray(content)).toBe(true);
-    const imagePart = (content as Array<Record<string, unknown>>).find(
-      (part) => part['type'] === 'image',
+    const mediaPart = (content as Array<Record<string, unknown>>).find(
+      (part) => part['type'] === 'media',
     );
-    expect(imagePart).toMatchObject({
-      image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==',
+    expect(mediaPart).toMatchObject({
+      data: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==',
       mediaType: 'image/jpeg',
     });
   });
@@ -235,12 +242,14 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
         },
       }),
     );
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
 
     await runLookAtTool({
       imageData: 'https://ichef.bbci.co.uk/ace/standard/640/example.jpg',
@@ -261,14 +270,14 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
       { messages?: Array<{ content?: unknown }> } | undefined;
     const content = callArgs?.messages?.[0]?.content;
     expect(Array.isArray(content)).toBe(true);
-    const imagePart = (content as Array<Record<string, unknown>>).find(
-      (part) => part['type'] === 'image',
+    const mediaPart = (content as Array<Record<string, unknown>>).find(
+      (part) => part['type'] === 'media',
     );
-    expect(imagePart).toMatchObject({
+    expect(mediaPart).toMatchObject({
       mediaType: 'image/jpeg',
     });
-    expect(String(imagePart?.['image'] ?? '')).toContain('data:image/jpeg;base64,');
-    expect(String(imagePart?.['image'] ?? '')).not.toContain('https://');
+    expect(String(mediaPart?.['data'] ?? '')).toContain('data:image/jpeg;base64,');
+    expect(String(mediaPart?.['data'] ?? '')).not.toContain('https://');
   });
 
   it('rejects remote image URLs that return non-image content', async () => {

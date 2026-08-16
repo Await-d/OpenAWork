@@ -223,6 +223,8 @@ export function useSessionSnapshotLoader(
           setMessages(prepared.normalizedMessages);
         } else if (streamingRef.current) {
           // skip reconciliation during streaming
+        } else if (prepared.normalizedMessages.length === 0) {
+          // skip — server returned empty snapshot, don't wipe local messages
         } else {
           setMessages((previous) =>
             reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),

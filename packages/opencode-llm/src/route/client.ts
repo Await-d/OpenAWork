@@ -1,16 +1,22 @@
-import { Cause, Context, Effect, Layer, Schema, Stream } from "effect"
-import * as Option from "effect/Option"
-import { Auth, type Auth as AuthDef } from "./auth.js"
-import { Endpoint, type EndpointPatch } from "./endpoint.js"
-import { RequestExecutor } from "./executor.js"
-import type { Framing } from "./framing.js"
-import { HttpTransport } from "./transport/index.js"
-import type { Transport, TransportRuntime } from "./transport/index.js"
-import { WebSocketExecutor } from "./transport/index.js"
-import type { Protocol } from "./protocol.js"
-import { applyCachePolicy } from "../cache-policy.js"
-import * as ProviderShared from "../protocols/shared.js"
-import type { LLMError, LLMEvent, PreparedRequestOf, ProtocolID, ProviderOptions } from "../schema/index.js"
+import { Cause, Context, Effect, Layer, Schema, Stream } from 'effect';
+import * as Option from 'effect/Option';
+import { Auth, type Auth as AuthDef } from './auth.js';
+import { Endpoint, type EndpointPatch } from './endpoint.js';
+import { RequestExecutor } from './executor.js';
+import type { Framing } from './framing.js';
+import { HttpTransport } from './transport/index.js';
+import type { Transport, TransportRuntime } from './transport/index.js';
+import { WebSocketExecutor } from './transport/index.js';
+import type { Protocol } from './protocol.js';
+import { applyCachePolicy } from '../cache-policy.js';
+import * as ProviderShared from '../protocols/shared.js';
+import type {
+  LLMError,
+  LLMEvent,
+  PreparedRequestOf,
+  ProtocolID,
+  ProviderOptions,
+} from '../schema/index.js';
 import {
   GenerationOptions,
   HttpOptions,
@@ -24,119 +30,129 @@ import {
   mergeGenerationOptions,
   mergeHttpOptions,
   mergeProviderOptions,
-} from "../schema/index.js"
+} from '../schema/index.js';
 
 export interface RouteBody<Body> {
   /** Schema for the validated provider-native body sent as the JSON request. */
-  readonly schema: Schema.Codec<Body, unknown>
+  readonly schema: Schema.Codec<Body, unknown>;
   /** Build the provider-native body from a common `LLMRequest`. */
-  readonly from: (request: LLMRequest) => Effect.Effect<Body, LLMError>
+  readonly from: (request: LLMRequest) => Effect.Effect<Body, LLMError>;
 }
 
 export interface Route<Body, Prepared = unknown> {
-  readonly id: string
-  readonly provider?: ProviderID
-  readonly protocol: ProtocolID
-  readonly endpoint: Endpoint<Body>
-  readonly auth: AuthDef
-  readonly transport: Transport<Body, Prepared, unknown>
-  readonly defaults: RouteDefaults
-  readonly body: RouteBody<Body>
-  readonly with: (patch: RoutePatch<Body, Prepared>) => Route<Body, Prepared>
-  readonly model: (input: RouteMappedModelInput) => Model
-  readonly prepareTransport: (body: Body, request: LLMRequest) => Effect.Effect<Prepared, LLMError>
+  readonly id: string;
+  readonly provider?: ProviderID;
+  readonly protocol: ProtocolID;
+  readonly endpoint: Endpoint<Body>;
+  readonly auth: AuthDef;
+  readonly transport: Transport<Body, Prepared, unknown>;
+  readonly defaults: RouteDefaults;
+  readonly body: RouteBody<Body>;
+  readonly with: (patch: RoutePatch<Body, Prepared>) => Route<Body, Prepared>;
+  readonly model: (input: RouteMappedModelInput) => Model;
+  readonly prepareTransport: (body: Body, request: LLMRequest) => Effect.Effect<Prepared, LLMError>;
   readonly streamPrepared: (
     prepared: Prepared,
     request: LLMRequest,
     runtime: TransportRuntime,
-  ) => Stream.Stream<LLMEvent, LLMError>
+  ) => Stream.Stream<LLMEvent, LLMError>;
 }
 
 // Route registries intentionally erase body generics after construction.
 // Normal call sites use `OpenAIChat.route`; callers only need body types
 // when preparing a request with a protocol-specific type assertion.
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
-export type AnyRoute = Route<any, any>
+export type AnyRoute = Route<any, any>;
 
-export type HttpOptionsInput = HttpOptions.Input
+export type HttpOptionsInput = HttpOptions.Input;
 
-export type RouteModelInput = Omit<Model.Input, "provider" | "route">
+export type RouteModelInput = Omit<Model.Input, 'provider' | 'route'>;
 
-export type RouteRoutedModelInput = Omit<Model.Input, "route">
+export type RouteRoutedModelInput = Omit<Model.Input, 'route'>;
 
 export interface RouteDefaults {
-  readonly headers?: Record<string, string>
-  readonly limits?: ModelLimits
-  readonly generation?: GenerationOptions
-  readonly providerOptions?: ProviderOptions
-  readonly http?: HttpOptions
+  readonly headers?: Record<string, string>;
+  readonly limits?: ModelLimits;
+  readonly generation?: GenerationOptions;
+  readonly providerOptions?: ProviderOptions;
+  readonly http?: HttpOptions;
 }
 
 export interface RouteDefaultsInput {
-  readonly headers?: Record<string, string>
-  readonly limits?: ModelLimits.Input
-  readonly generation?: GenerationOptions.Input
-  readonly providerOptions?: ProviderOptions
-  readonly http?: HttpOptions.Input
+  readonly headers?: Record<string, string>;
+  readonly limits?: ModelLimits.Input;
+  readonly generation?: GenerationOptions.Input;
+  readonly providerOptions?: ProviderOptions;
+  readonly http?: HttpOptions.Input;
 }
 
 export interface RoutePatch<Body, Prepared> extends RouteDefaultsInput {
-  readonly id?: string
-  readonly provider?: string | ProviderID
-  readonly auth?: AuthDef
-  readonly transport?: Transport<Body, Prepared, unknown>
-  readonly endpoint?: EndpointPatch<Body>
+  readonly id?: string;
+  readonly provider?: string | ProviderID;
+  readonly auth?: AuthDef;
+  readonly transport?: Transport<Body, Prepared, unknown>;
+  readonly endpoint?: EndpointPatch<Body>;
 }
 
-type RouteMappedModelInput = RouteModelInput | RouteRoutedModelInput
+type RouteMappedModelInput = RouteModelInput | RouteRoutedModelInput;
 
 const makeRouteModel = (route: AnyRoute, mapped: RouteMappedModelInput) => {
-  const provider = route.provider ?? ("provider" in mapped ? mapped.provider : undefined)
-  if (!provider) throw new Error(`Route.model(${route.id}) requires a provider`)
+  const provider = route.provider ?? ('provider' in mapped ? mapped.provider : undefined);
+  if (!provider) throw new Error(`Route.model(${route.id}) requires a provider`);
   if (!endpointBaseURL(route.endpoint))
-    throw new Error(`Route.model(${route.id}) requires an endpoint baseURL — configure it on the route first`)
+    throw new Error(
+      `Route.model(${route.id}) requires an endpoint baseURL — configure it on the route first`,
+    );
   return Model.make({
     ...mapped,
     provider,
     route,
-  })
-}
+  });
+};
 
-const mergeRouteDefaults = (base: RouteDefaults | undefined, patch: RouteDefaultsInput): RouteDefaults => {
-  const headers = mergeHeaders(base?.headers, patch.headers)
+const mergeRouteDefaults = (
+  base: RouteDefaults | undefined,
+  patch: RouteDefaultsInput,
+): RouteDefaults => {
+  const headers = mergeHeaders(base?.headers, patch.headers);
   return {
     ...base,
     ...patch,
     headers,
     limits: patch.limits === undefined ? base?.limits : ModelLimits.make(patch.limits),
-    generation: mergeGenerationOptions(generationOptions(base?.generation), generationOptions(patch.generation)),
+    generation: mergeGenerationOptions(
+      generationOptions(base?.generation),
+      generationOptions(patch.generation),
+    ),
     providerOptions: mergeProviderOptions(base?.providerOptions, patch.providerOptions),
     http: mergeHttpOptions(
       base?.http,
       httpOptions(patch.http),
       headers === undefined ? undefined : new HttpOptions({ headers }),
     ),
-  }
-}
+  };
+};
 
 const endpointBaseURL = <Body>(endpoint: Endpoint<Body>) =>
-  typeof endpoint.baseURL === "string" ? endpoint.baseURL : undefined
+  typeof endpoint.baseURL === 'string' ? endpoint.baseURL : undefined;
 
 const mergeHeaders = (...items: ReadonlyArray<Record<string, string> | undefined>) => {
   const entries = items.flatMap((item) =>
-    item === undefined ? [] : Object.entries(item).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  )
-  if (entries.length === 0) return undefined
-  return Object.fromEntries(entries)
-}
+    item === undefined
+      ? []
+      : Object.entries(item).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries);
+};
 
 export const generationOptions = (input: GenerationOptions.Input | undefined) =>
-  input === undefined ? undefined : GenerationOptions.make(input)
+  input === undefined ? undefined : GenerationOptions.make(input);
 
 export const httpOptions = (input: HttpOptionsInput | undefined) => {
-  if (input === undefined) return input
-  return HttpOptions.make(input)
-}
+  if (input === undefined) return input;
+  return HttpOptions.make(input);
+};
 
 export interface Interface {
   /**
@@ -149,25 +165,31 @@ export interface Interface {
    * identical, so this is a type-level assertion the caller makes about which
    * route the request will resolve to.
    */
-  readonly prepare: <Body = unknown>(request: LLMRequest) => Effect.Effect<PreparedRequestOf<Body>, LLMError>
-  readonly stream: StreamMethod
-  readonly generate: GenerateMethod
+  readonly prepare: <Body = unknown>(
+    request: LLMRequest,
+  ) => Effect.Effect<PreparedRequestOf<Body>, LLMError>;
+  readonly stream: StreamMethod;
+  readonly generate: GenerateMethod;
 }
 
 export interface StreamMethod {
-  (request: LLMRequest): Stream.Stream<LLMEvent, LLMError>
+  (request: LLMRequest): Stream.Stream<LLMEvent, LLMError>;
 }
 
 export interface GenerateMethod {
-  (request: LLMRequest): Effect.Effect<LLMResponse, LLMError>
+  (request: LLMRequest): Effect.Effect<LLMResponse, LLMError>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/LLMClient") {}
+export class Service extends Context.Service<Service, Interface>()('@opencode/LLMClient') {}
 
 const resolveRequestOptions = (request: LLMRequest) => {
-  const routeDefaults = request.model.route.defaults
-  const modelDefaults = request.model.defaults
-  const generation = mergeGenerationOptions(routeDefaults.generation, modelDefaults?.generation, request.generation)
+  const routeDefaults = request.model.route.defaults;
+  const modelDefaults = request.model.defaults;
+  const generation = mergeGenerationOptions(
+    routeDefaults.generation,
+    modelDefaults?.generation,
+    request.generation,
+  );
   return LLMRequest.update(request, {
     generation: generation ?? new GenerationOptions({}),
     providerOptions: mergeProviderOptions(
@@ -176,78 +198,83 @@ const resolveRequestOptions = (request: LLMRequest) => {
       request.providerOptions,
     ),
     http: mergeHttpOptions(routeDefaults.http, modelDefaults?.http, request.http),
-  })
-}
+  });
+};
 
 export interface MakeInput<Body, Frame, Event, State> {
   /** Route id used in diagnostics and prepared request metadata. */
-  readonly id: string
+  readonly id: string;
   /** Provider identity for route-owned model construction. */
-  readonly provider?: string | ProviderID
+  readonly provider?: string | ProviderID;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
-  readonly protocol: Protocol<Body, Frame, Event, State>
+  readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
-  readonly endpoint: Endpoint<Body>
+  readonly endpoint: Endpoint<Body>;
   /** Per-request transport auth. Provider facades override this via `route.with(...)`. */
-  readonly auth?: AuthDef
+  readonly auth?: AuthDef;
   /** Stream framing — bytes -> frames before `protocol.stream.event` decoding. */
-  readonly framing: Framing<Frame>
+  readonly framing: Framing<Frame>;
   /** Static / per-request headers added before `auth` runs. */
-  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>
+  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>;
   /** Route/request defaults used when compiling requests for this route. */
-  readonly defaults?: RouteDefaultsInput
+  readonly defaults?: RouteDefaultsInput;
 }
 
 export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
   /** Route id used in diagnostics and prepared request metadata. */
-  readonly id: string
+  readonly id: string;
   /** Provider identity for route-owned model construction. */
-  readonly provider?: string | ProviderID
+  readonly provider?: string | ProviderID;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
-  readonly protocol: Protocol<Body, Frame, Event, State>
+  readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
-  readonly endpoint: Endpoint<Body>
+  readonly endpoint: Endpoint<Body>;
   /** Per-request transport auth. Provider facades override this via `route.with(...)`. */
-  readonly auth?: AuthDef
+  readonly auth?: AuthDef;
   /** Static / per-request headers added before `auth` runs. */
-  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>
+  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>;
   /** Runnable transport route. */
-  readonly transport: Transport<Body, Prepared, Frame>
+  readonly transport: Transport<Body, Prepared, Frame>;
   /** Route/request defaults used when compiling requests for this route. */
-  readonly defaults?: RouteDefaultsInput
+  readonly defaults?: RouteDefaultsInput;
 }
 
 const streamError = (route: string, message: string, cause: Cause.Cause<unknown>) => {
-  const failed = cause.reasons.find(Cause.isFailReason)?.error
-  if (failed instanceof LLMErrorClass) return failed
-  return ProviderShared.eventError(route, message, Cause.pretty(cause))
-}
+  const failed = cause.reasons.find(Cause.isFailReason)?.error;
+  if (failed instanceof LLMErrorClass) return failed;
+  return ProviderShared.eventError(route, message, Cause.pretty(cause));
+};
 
 function makeFromTransport<Body, Prepared, Frame, Event, State>(
   input: MakeTransportInput<Body, Prepared, Frame, Event, State>,
 ): Route<Body, Prepared> {
-  const protocol = input.protocol
-  const encodeBody = Schema.encodeSync(Schema.fromJsonString(protocol.body.schema))
-  const decodeEventEffect = Schema.decodeUnknownEffect(protocol.stream.event)
+  const protocol = input.protocol;
+  const encodeBody = Schema.encodeSync(Schema.fromJsonString(protocol.body.schema));
+  const decodeEventEffect = Schema.decodeUnknownEffect(protocol.stream.event);
   const decodeEvent = (route: string) => (frame: Frame) =>
     decodeEventEffect(frame).pipe(
       Effect.mapError(() =>
         ProviderShared.eventError(
           input.id,
           `Invalid ${route} stream event`,
-          typeof frame === "string" ? frame : ProviderShared.encodeJson(frame),
+          typeof frame === 'string' ? frame : ProviderShared.encodeJson(frame),
         ),
       ),
-    )
+    );
 
-  type BuiltRouteInput = Omit<MakeTransportInput<Body, Prepared, Frame, Event, State>, "defaults"> & {
-    readonly defaults?: RouteDefaults
-  }
+  type BuiltRouteInput = Omit<
+    MakeTransportInput<Body, Prepared, Frame, Event, State>,
+    'defaults'
+  > & {
+    readonly defaults?: RouteDefaults;
+  };
 
   const build = (routeInput: BuiltRouteInput): Route<Body, Prepared> => {
+    Endpoint.validate(routeInput.endpoint);
     const route: Route<Body, Prepared> = {
       id: routeInput.id,
-      provider: routeInput.provider === undefined ? undefined : ProviderID.make(routeInput.provider),
+      provider:
+        routeInput.provider === undefined ? undefined : ProviderID.make(routeInput.provider),
       protocol: protocol.id,
       endpoint: routeInput.endpoint,
       auth: routeInput.auth ?? Auth.none,
@@ -255,16 +282,17 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       defaults: routeInput.defaults ?? {},
       body: protocol.body,
       with: (patch: RoutePatch<Body, Prepared>) => {
-        const { id, provider, auth, transport, endpoint, ...defaults } = patch
+        const { id, provider, auth, transport, endpoint, ...defaults } = patch;
         return build({
           ...routeInput,
           id: id ?? routeInput.id,
           provider: provider ?? routeInput.provider,
           auth: auth ?? routeInput.auth,
           endpoint: endpoint ? Endpoint.merge(routeInput.endpoint, endpoint) : routeInput.endpoint,
-          transport: (transport as Transport<Body, Prepared, Frame> | undefined) ?? routeInput.transport,
+          transport:
+            (transport as Transport<Body, Prepared, Frame> | undefined) ?? routeInput.transport,
           defaults: mergeRouteDefaults(route.defaults, defaults),
-        })
+        });
       },
       model: (input) => makeRouteModel(route, input),
       prepareTransport: (body, request) =>
@@ -277,32 +305,36 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
           headers: routeInput.headers,
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
-        const route = `${request.model.provider}/${request.model.route.id}`
+        const route = `${request.model.provider}/${request.model.route.id}`;
         const events = routeInput.transport
           .frames(prepared, request, runtime)
           .pipe(
             Stream.mapEffect(decodeEvent(route)),
-            protocol.stream.terminal ? Stream.takeUntil(protocol.stream.terminal) : (stream) => stream,
-          )
+            protocol.stream.terminal
+              ? Stream.takeUntil(protocol.stream.terminal)
+              : (stream) => stream,
+          );
         return events.pipe(
           Stream.mapAccumEffect(
             () => protocol.stream.initial(request),
             protocol.stream.step,
             protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
           ),
-          Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
-        )
+          Stream.catchCause((cause) =>
+            Stream.fail(streamError(route, `Failed to read ${route} stream`, cause)),
+          ),
+        );
       },
-    } satisfies Route<Body, Prepared>
-    return route
-  }
+    } satisfies Route<Body, Prepared>;
+    return route;
+  };
 
-  return build({ ...input, defaults: mergeRouteDefaults(undefined, input.defaults ?? {}) })
+  return build({ ...input, defaults: mergeRouteDefaults(undefined, input.defaults ?? {}) });
 }
 
 export function make<Body, Prepared, Frame, Event, State>(
   input: MakeTransportInput<Body, Prepared, Frame, Event, State>,
-): Route<Body, Prepared>
+): Route<Body, Prepared>;
 /**
  * Build a `Route` by composing the four orthogonal pieces of a deployment:
  *
@@ -320,12 +352,13 @@ export function make<Body, Prepared, Frame, Event, State>(
  */
 export function make<Body, Frame, Event, State>(
   input: MakeInput<Body, Frame, Event, State>,
-): Route<Body, HttpTransport.HttpPrepared<Frame>>
+): Route<Body, HttpTransport.HttpPrepared<Frame>>;
 export function make<Body, Prepared, Frame, Event, State>(
-  input: MakeInput<Body, Frame, Event, State> | MakeTransportInput<Body, Prepared, Frame, Event, State>,
+  input:
+    MakeInput<Body, Frame, Event, State> | MakeTransportInput<Body, Prepared, Frame, Event, State>,
 ): Route<Body, Prepared> | Route<Body, HttpTransport.HttpPrepared<Frame>> {
-  if ("transport" in input) return makeFromTransport(input)
-  const protocol = input.protocol
+  if ('transport' in input) return makeFromTransport(input);
+  const protocol = input.protocol;
   return makeFromTransport({
     id: input.id,
     provider: input.provider,
@@ -335,84 +368,88 @@ export function make<Body, Prepared, Frame, Event, State>(
     headers: input.headers,
     transport: HttpTransport.httpJson({ framing: input.framing }),
     defaults: input.defaults,
-  })
+  });
 }
 
 // `compile` is the important boundary: it turns a common `LLMRequest` into a
 // validated provider body plus transport-private prepared data, but does not
 // execute transport.
-const compile = Effect.fn("LLM.compile")(function* (request: LLMRequest) {
-  const resolved = applyCachePolicy(resolveRequestOptions(request))
-  const route = resolved.model.route
+const compile = Effect.fn('LLM.compile')(function* (request: LLMRequest) {
+  const resolved = applyCachePolicy(resolveRequestOptions(request));
+  const route = resolved.model.route;
 
   const body = yield* route.body
     .from(resolved)
-    .pipe(Effect.flatMap(ProviderShared.validateWith(Schema.decodeUnknownEffect(route.body.schema))))
-  const prepared = yield* route.prepareTransport(body, resolved)
+    .pipe(
+      Effect.flatMap(ProviderShared.validateWith(Schema.decodeUnknownEffect(route.body.schema))),
+    );
+  const prepared = yield* route.prepareTransport(body, resolved);
 
   return {
     request: resolved,
     route,
     body,
     prepared,
-  }
-})
+  };
+});
 
-const prepareWith = Effect.fn("LLMClient.prepare")(function* (request: LLMRequest) {
-  const compiled = yield* compile(request)
+const prepareWith = Effect.fn('LLMClient.prepare')(function* (request: LLMRequest) {
+  const compiled = yield* compile(request);
 
   return new PreparedRequest({
-    id: compiled.request.id ?? "request",
+    id: compiled.request.id ?? 'request',
     route: compiled.route.id,
     protocol: compiled.route.protocol,
     model: compiled.request.model,
     body: compiled.body,
     metadata: { transport: compiled.route.transport.id },
-  })
-})
+  });
+});
 
 const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest) =>
   Stream.unwrap(
     Effect.gen(function* () {
-      const compiled = yield* compile(request)
-      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime)
+      const compiled = yield* compile(request);
+      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime);
     }),
-  )
+  );
 
-const generateWith = (stream: Interface["stream"]) =>
-  Effect.fn("LLM.generate")(function* (request: LLMRequest) {
-    const state = yield* stream(request).pipe(Stream.runFold(LLMResponse.empty, LLMResponse.reduce))
-    const response = LLMResponse.complete(state)
-    if (response) return response
+const generateWith = (stream: Interface['stream']) =>
+  Effect.fn('LLM.generate')(function* (request: LLMRequest) {
+    const state = yield* stream(request).pipe(
+      Stream.runFold(LLMResponse.empty, LLMResponse.reduce),
+    );
+    const response = LLMResponse.complete(state);
+    if (response) return response;
     return yield* ProviderShared.eventError(
       `${request.model.provider}/${request.model.route.id}`,
-      "Provider stream ended without a terminal finish event",
-    )
-  })
+      'Provider stream ended without a terminal finish event',
+    );
+  });
 
 export const prepare = <Body = unknown>(request: LLMRequest) =>
-  prepareWith(request) as Effect.Effect<PreparedRequestOf<Body>, LLMError>
+  prepareWith(request) as Effect.Effect<PreparedRequestOf<Body>, LLMError>;
 
 export function stream(request: LLMRequest): Stream.Stream<LLMEvent, LLMError> {
   return Stream.unwrap(
     Effect.gen(function* () {
-      return (yield* Service).stream(request)
+      return (yield* Service).stream(request);
     }),
-  ) as Stream.Stream<LLMEvent, LLMError>
+  ) as Stream.Stream<LLMEvent, LLMError>;
 }
 
 export function generate(request: LLMRequest): Effect.Effect<LLMResponse, LLMError> {
   return Effect.gen(function* () {
-    return yield* (yield* Service).generate(request)
-  }) as Effect.Effect<LLMResponse, LLMError>
+    return yield* (yield* Service).generate(request);
+  }) as Effect.Effect<LLMResponse, LLMError>;
 }
 
 export const streamRequest = (request: LLMRequest) =>
   Stream.unwrap(
     Effect.gen(function* () {
-      return (yield* Service).stream(request)
+      return (yield* Service).stream(request);
     }),
-  )
+  );
 
 export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer.effect(
   Service,
@@ -420,12 +457,16 @@ export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer
     const stream = streamRequestWith({
       http: yield* RequestExecutor.Service,
       webSocket: Option.getOrUndefined(yield* Effect.serviceOption(WebSocketExecutor.Service)),
-    })
-    return Service.of({ prepare: prepareWith as Interface["prepare"], stream, generate: generateWith(stream) })
+    });
+    return Service.of({
+      prepare: prepareWith as Interface['prepare'],
+      stream,
+      generate: generateWith(stream),
+    });
   }),
-)
+);
 
-export const Route = { make } as const
+export const Route = { make } as const;
 
 export const LLMClient = {
   Service,
@@ -433,8 +474,4 @@ export const LLMClient = {
   prepare,
   stream,
   generate,
-} as const
-
-
-
-
+} as const;

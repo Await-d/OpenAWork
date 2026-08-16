@@ -29,11 +29,12 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async (_input, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+        async (input, init) => {
+          const body = await new Request(input, init).text();
           const isStreamingRequest = body.includes('"stream":true');
+          const isSessionTitleRequest = body.includes('你是一个标题生成器');
           if (isStreamingRequest) {
-            upstreamCallCount += 1;
+            if (!isSessionTitleRequest) upstreamCallCount += 1;
             return createChatCompletionsStream('bookend fallback reached upstream');
           }
 

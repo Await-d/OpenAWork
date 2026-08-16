@@ -180,7 +180,7 @@ describe('stream replay race', () => {
 
     const responsePromise = withMockFetch(
       async (_input, init) => {
-        const body = typeof init?.body === 'string' ? init.body : '';
+        const body = await new Request(_input, init).text();
         if (body.includes('"stream":true')) {
           return createOpenAIChatCompletionStream('continued after in-flight');
         }

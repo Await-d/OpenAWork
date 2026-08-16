@@ -5,7 +5,7 @@
  * `look_at` executes through the gateway-managed sandbox path
  * (`tool-sandbox.ts` returns `runLookAtTool(...)` directly), which
  * bypasses the ToolRegistry's own `timeout` + abort wrapper. The
- * underlying `runUpstreamGenerate` (AI SDK `generateText`) has no
+ * underlying `runUpstreamGenerate` has no
  * built-in deadline, so without an internal timeout an upstream socket
  * that connects but never responds would leave the look_at call — and
  * the agent turn that issued it — pending forever.
@@ -17,6 +17,7 @@
  *      upstream never settles before the deadline.
  */
 
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
@@ -122,12 +123,14 @@ describe('runLookAtTool — wall-clock timeout', () => {
   });
 
   it('forwards an AbortSignal to runUpstreamGenerate', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'describes a pixel',
-      inputTokens: 1,
-      outputTokens: 1,
-      finishReason: 'stop',
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'describes a pixel',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+      }),
+    );
 
     await runLookAtTool({
       imageData: SAMPLE_IMAGE_DATA_URL,
@@ -145,14 +148,15 @@ describe('runLookAtTool — wall-clock timeout', () => {
     vi.useFakeTimers();
 
     let abortFired = false;
-    mocks.runUpstreamGenerate.mockImplementation(
-      (arg: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          arg.signal?.addEventListener('abort', () => {
-            abortFired = true;
-            reject(new Error('aborted by signal'));
-          });
-        }),
+    mocks.runUpstreamGenerate.mockImplementation((arg: { signal?: AbortSignal }) =>
+      Effect.callback<never, Error>((resume) => {
+        const abort = () => {
+          abortFired = true;
+          resume(Effect.fail(new Error('aborted by signal')));
+        };
+        arg.signal?.addEventListener('abort', abort, { once: true });
+        return Effect.sync(() => arg.signal?.removeEventListener('abort', abort));
+      }),
     );
 
     const promise = runLookAtTool({

@@ -5,7 +5,8 @@ import { listSessionMessagesV2 as listSessionMessages } from '../message/message
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
+  readFetchBody,
   readLastUserMessage,
   waitFor,
   withMockFetch,
@@ -35,13 +36,13 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(AUTO_RESUME_HEADER)) {
-            return createChatCompletionsStream(AUTO_RESUME_RESULT);
+            return createProtocolAwareStream(_url, AUTO_RESUME_RESULT);
           }
-          return createChatCompletionsStream(CHILD_RESULT);
+          return createProtocolAwareStream(_url, CHILD_RESULT);
         },
         async () => {
           await connectDb();

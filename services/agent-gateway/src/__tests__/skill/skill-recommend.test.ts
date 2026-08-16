@@ -12,6 +12,7 @@
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Effect } from 'effect';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
@@ -133,25 +134,27 @@ describe('POST /skills/recommend', () => {
   it('drops hallucinated skill_ids returned by the LLM', async () => {
     seedInstalled('com.example.frontend', ['frontend.react']);
     seedInstalled('com.example.backend', ['backend.api']);
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [
-          {
-            skill_id: 'com.example.frontend',
-            pinned: true,
-            reason: 'matches react usage',
-            score: 92,
-          },
-          {
-            skill_id: 'com.hallucinated.unknown',
-            pinned: false,
-            reason: 'pretend match',
-            score: 70,
-          },
-        ],
-        rejected: [{ skill_id: 'com.example.backend', reason: 'no backend code' }],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            {
+              skill_id: 'com.example.frontend',
+              pinned: true,
+              reason: 'matches react usage',
+              score: 92,
+            },
+            {
+              skill_id: 'com.hallucinated.unknown',
+              pinned: false,
+              reason: 'pretend match',
+              score: 70,
+            },
+          ],
+          rejected: [{ skill_id: 'com.example.backend', reason: 'no backend code' }],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -177,12 +180,16 @@ describe('POST /skills/recommend', () => {
 
   it('serves a 24h cache hit on identical signals + force=false', async () => {
     seedInstalled('com.example.alpha', ['cap']);
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [{ skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 50 }],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            { skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 50 },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -241,12 +248,16 @@ describe('POST /skills/recommend', () => {
        ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
       [USER_ID, JSON.stringify(activeSelection)],
     );
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [{ skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 50 }],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            { skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 50 },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -262,7 +273,7 @@ describe('POST /skills/recommend', () => {
         { providerType?: string; upstreamProtocol?: string; model?: string } | undefined;
       expect(callArgs).toBeDefined();
       expect(callArgs?.providerType).toBe('anthropic');
-      // The bug fix: protocol must be propagated so the AI SDK uses
+      // The bug fix: protocol must be propagated so the native upstream uses
       // anthropic_messages instead of silently degrading to chat_completions.
       expect(callArgs?.upstreamProtocol).toBe('anthropic_messages');
       expect(typeof callArgs?.model).toBe('string');
@@ -273,7 +284,7 @@ describe('POST /skills/recommend', () => {
 
   it('falls back to the heuristic when the LLM call rejects', async () => {
     seedInstalled('com.example.frontend', ['frontend.react']);
-    upstreamMock.runUpstreamGenerate.mockRejectedValue(new Error('upstream blew up'));
+    upstreamMock.runUpstreamGenerate.mockReturnValue(Effect.fail(new Error('upstream blew up')));
 
     const app = await buildApp();
     try {
@@ -298,19 +309,21 @@ describe('POST /skills/recommend', () => {
 describe('POST /skills/recommend/:id/apply', () => {
   it('replaces selection rows with source ai-recommend and marks applied=1', async () => {
     seedInstalled('com.example.frontend');
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [
-          {
-            skill_id: 'com.example.frontend',
-            pinned: true,
-            reason: 'core',
-            score: 90,
-          },
-        ],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            {
+              skill_id: 'com.example.frontend',
+              pinned: true,
+              reason: 'core',
+              score: 90,
+            },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -359,14 +372,16 @@ describe('POST /skills/recommend/:id/apply', () => {
 
   it('rejects overrides that target a BUILTIN skill id', async () => {
     seedInstalled('com.example.frontend');
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [
-          { skill_id: 'com.example.frontend', pinned: false, reason: 'r', score: 70 },
-        ],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            { skill_id: 'com.example.frontend', pinned: false, reason: 'r', score: 70 },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -405,14 +420,16 @@ describe('POST /skills/recommend/:id/apply', () => {
 
   it('drops overrides whose skillId is not currently installed', async () => {
     seedInstalled('com.example.frontend');
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [
-          { skill_id: 'com.example.frontend', pinned: false, reason: 'r', score: 70 },
-        ],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            { skill_id: 'com.example.frontend', pinned: false, reason: 'r', score: 70 },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {
@@ -467,12 +484,16 @@ describe('POST /skills/recommend/:id/apply', () => {
 describe('GET /skills/recommend/latest', () => {
   it('returns the most recent applied + pending pair', async () => {
     seedInstalled('com.example.alpha');
-    upstreamMock.runUpstreamGenerate.mockResolvedValue({
-      text: JSON.stringify({
-        recommendations: [{ skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 60 }],
-        rejected: [],
+    upstreamMock.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: JSON.stringify({
+          recommendations: [
+            { skill_id: 'com.example.alpha', pinned: false, reason: 'r', score: 60 },
+          ],
+          rejected: [],
+        }),
       }),
-    });
+    );
 
     const app = await buildApp();
     try {

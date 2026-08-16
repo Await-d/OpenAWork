@@ -23,8 +23,9 @@
  *    可观测性 / 埋点；不参与业务分支（team 接入应由父级控制 props）。
  */
 
+import { useMemo } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
-import type { CommandDescriptor } from '@openAwork/shared';
+import type { CommandDescriptor, InputImageContent } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
 import type {
@@ -53,10 +54,10 @@ import {
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
 } from '../../../components/conversation-runtime/scroll/scroll-constants.js';
 import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
-import HistoryEditDialog from '../../chat-page/conversation/views/history-edit-dialog.js';
+import HistoryEditInlineEditor from '../../chat-page/conversation/views/history-edit-dialog.js';
 import RetryModeDialog from '../../chat-page/conversation/views/retry-mode-dialog.js';
 import { ChatScrollBottomButton } from '../../../components/conversation-runtime/views/scroll-bottom-button.js';
-import { ChatStreamErrorBar } from '../../../components/conversation-runtime/views/stream-error-bar.js';
+import { ChatStreamErrorBarV2 as ChatStreamErrorBar } from '../../../components/conversation-runtime/views/stream-error-bar-v2.js';
 // ChatTodoFloatingPanel 现在由 ChatTopBar 内部挂载（顶部右侧），本组件不再渲染浮层；
 // 仅保留与 todo 相关的最小 props（sessionTodos / rightOpen），用于消息列展示。
 import { SessionRunStateBar } from '../../../components/conversation-runtime/views/session-run-state-bar.js';
@@ -88,7 +89,7 @@ export interface ConversationComposerExtras {
 export interface HistoryEditPromptInput {
   text: string;
   messageId: string;
-  inputParts?: unknown[];
+  inputParts?: InputImageContent[];
 }
 
 /** 重试提示。 */
@@ -110,7 +111,7 @@ export interface RetryPromptInput {
  * - 流式状态 props（streaming、stoppingStream、streamError 等）
  * - 滚动 / 加载 props
  * - composer props（继承自 UnifiedComposer）
- * - 对话框 props（HistoryEditDialog / RetryModeDialog）
+ * - 编辑与重试交互 props（历史消息原位编辑 / RetryModeDialog）
  * - 业务回调
  */
 export interface TeamConversationLayoutProps {
@@ -245,9 +246,9 @@ export interface TeamConversationLayoutProps {
 
   historyEditPrompt: HistoryEditPromptInput | null;
   onCloseHistoryEdit: () => void;
-  onResendHistoryEdit: (text: string, inputParts?: unknown[]) => void;
-  onContinueHistoryEdit: (text: string, inputParts?: unknown[]) => void;
-  onCreateBranchFromHistoryEdit?: (text: string, inputParts?: unknown[]) => void;
+  onResendHistoryEdit: (text: string, inputParts?: InputImageContent[]) => void;
+  onContinueHistoryEdit: (text: string, inputParts?: InputImageContent[]) => void;
+  onCreateBranchFromHistoryEdit?: (text: string, inputParts?: InputImageContent[]) => void;
 
   retryPrompt: RetryPromptInput | null;
   onCloseRetry: () => void;
@@ -549,6 +550,39 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
 
   const composerFeatures = buildComposerFeatures(composerExtras);
 
+  const groupsWithHistoryEdit = useMemo(() => {
+    if (!historyEditPrompt) return groupedMessageEntries;
+
+    return groupedMessageEntries.map((group) => ({
+      ...group,
+      entries: group.entries.map((entry) => {
+        if (entry.message.id !== historyEditPrompt.messageId) return entry;
+
+        return {
+          ...entry,
+          renderContent: () => (
+            <HistoryEditInlineEditor
+              key={historyEditPrompt.messageId}
+              initialText={historyEditPrompt.text}
+              inputParts={historyEditPrompt.inputParts}
+              onClose={onCloseHistoryEdit}
+              onResendCurrent={onResendHistoryEdit}
+              onContinueCurrent={onContinueHistoryEdit}
+              onCreateBranch={onCreateBranchFromHistoryEdit}
+            />
+          ),
+        };
+      }),
+    }));
+  }, [
+    groupedMessageEntries,
+    historyEditPrompt,
+    onCloseHistoryEdit,
+    onContinueHistoryEdit,
+    onCreateBranchFromHistoryEdit,
+    onResendHistoryEdit,
+  ]);
+
   const showWelcome =
     welcomeScreen !== undefined &&
     !showSessionSwitchSkeleton &&
@@ -592,26 +626,6 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
   return (
     <>
       {topBar}
-
-      <HistoryEditDialog
-        open={historyEditPrompt !== null}
-        initialText={historyEditPrompt?.text ?? ''}
-        inputParts={historyEditPrompt?.inputParts as never}
-        onClose={onCloseHistoryEdit}
-        onResendCurrent={(text, editedInputParts) => {
-          onResendHistoryEdit(text, editedInputParts);
-        }}
-        onContinueCurrent={(text, editedInputParts) => {
-          onContinueHistoryEdit(text, editedInputParts);
-        }}
-        {...(onCreateBranchFromHistoryEdit
-          ? {
-              onCreateBranch: (text: string, editedInputParts?: unknown[]) => {
-                onCreateBranchFromHistoryEdit(text, editedInputParts);
-              },
-            }
-          : {})}
-      />
 
       <RetryModeDialog
         open={retryPrompt !== null}
@@ -696,15 +710,17 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
                     bottomRef={bottomRef}
                     currentUserDisplayName={currentUserDisplayName}
                     currentUserEmail={currentUserEmail}
-                    groups={groupedMessageEntries}
+                    groups={groupsWithHistoryEdit}
                     pendingPermissions={pendingPermissions}
                     providerCatalog={providerCatalog}
                     resolveInlinePermissionActions={resolveInlinePermissionActions}
                     scrollRegionRef={scrollRegionRef}
+                    trailingContent={
+                      !visibleStreaming && remoteSessionBusyState ? (
+                        <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
+                      ) : null
+                    }
                   />
-                  {!visibleStreaming && remoteSessionBusyState ? (
-                    <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
-                  ) : null}
                 </>
               ) : (
                 <>

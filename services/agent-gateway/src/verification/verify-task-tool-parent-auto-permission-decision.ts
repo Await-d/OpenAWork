@@ -8,7 +8,8 @@ import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
+  readFetchBody,
   readLastUserMessage,
   seedPendingToolCallConversation,
   waitFor,
@@ -37,12 +38,12 @@ async function verifyParentPermissionDecisionErrorFallback(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
             throw new Error('simulated parent permission decision transport failure');
           }
-          return createChatCompletionsStream(APPROVED_RESULT);
+          return createProtocolAwareStream(_url, APPROVED_RESULT);
         },
         async () => {
           await connectDb();
@@ -203,10 +204,11 @@ async function verifyLatePermissionDecisionFallback(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
-            return createChatCompletionsStream(
+            return createProtocolAwareStream(
+              _url,
               JSON.stringify({
                 kind: 'permission',
                 decision: 'approve',
@@ -214,7 +216,7 @@ async function verifyLatePermissionDecisionFallback(): Promise<void> {
               }),
             );
           }
-          return createChatCompletionsStream(APPROVED_RESULT);
+          return createProtocolAwareStream(_url, APPROVED_RESULT);
         },
         async () => {
           await connectDb();
@@ -399,11 +401,12 @@ async function verifyParentRejectsPermission(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
-            return createChatCompletionsStream(
+            return createProtocolAwareStream(
+              _url,
               JSON.stringify({
                 kind: 'permission',
                 decision: 'reject',
@@ -412,7 +415,7 @@ async function verifyParentRejectsPermission(): Promise<void> {
               }),
             );
           }
-          return createChatCompletionsStream(REJECTED_RESULT);
+          return createProtocolAwareStream(_url, REJECTED_RESULT);
         },
         async () => {
           await connectDb();
@@ -577,11 +580,12 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(DECISION_MARKER)) {
-            return createChatCompletionsStream(
+            return createProtocolAwareStream(
+              _url,
               JSON.stringify({
                 kind: 'permission',
                 decision: 'approve',
@@ -589,7 +593,7 @@ async function main(): Promise<void> {
               }),
             );
           }
-          return createChatCompletionsStream(APPROVED_RESULT);
+          return createProtocolAwareStream(_url, APPROVED_RESULT);
         },
         async () => {
           await connectDb();

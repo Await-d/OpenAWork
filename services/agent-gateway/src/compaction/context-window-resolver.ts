@@ -99,7 +99,7 @@ export function parseContextLimitError(error: unknown): ParsedContextLimitError 
   const errObj = error as Record<string, unknown>;
   const textSources: string[] = [];
 
-  // Collect text from various error shapes (AI SDK, Anthropic, OpenAI, Bedrock)
+  // Collect text from various upstream error shapes (Anthropic, OpenAI, Bedrock).
   const dataObj = errObj['data'] as Record<string, unknown> | undefined;
   const responseBody = dataObj?.['responseBody'] ?? errObj['responseBody'];
   const errorMessage = errObj['message'] as string | undefined;

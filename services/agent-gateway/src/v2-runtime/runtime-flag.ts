@@ -2,26 +2,29 @@
  * Runtime flag — central entry for the staged opencode-alignment migration.
  *
  * Phases 3 / 4 / 5 introduce new runtime backends (Drizzle ORM storage,
- * Vercel AI SDK upstream, Effect-TS service layer) that need to ship behind
+ * native upstream, Effect-TS service layer) that need to ship behind
  * a feature flag so we can switch a single deployment between the legacy
  * code paths and the new ones without redeploying.
  *
  * Today the only consumer is internal: reading the flag is a side-effect
  * free way for upcoming `v2-runtime/*` modules to know whether they should
- * activate. Production code keeps running on `'v1'` until each phase is
- * fully wired up and verified.
+ * activate. Storage and service orchestration remain staged behind their
+ * legacy defaults until those phases are fully wired up and verified; LLM
+ * upstream is native v2 by default so it cannot silently publish through the
+ * legacy upstream path.
  *
- *   OPENAWORK_RUNTIME=v1  → legacy stack (default)
- *   OPENAWORK_RUNTIME=v2  → opencode-aligned stack (Drizzle + AI SDK + Effect)
+ *   OPENAWORK_RUNTIME=v1  → legacy storage/services (default), native upstream
+ *   OPENAWORK_RUNTIME=v2  → opencode-aligned stack (Drizzle + native upstream + Effect)
  *
  * Sub-flags can override granularly:
  *   OPENAWORK_RUNTIME_STORAGE   = v1 | v2
  *   OPENAWORK_RUNTIME_UPSTREAM  = v1 | v2
  *   OPENAWORK_RUNTIME_SERVICES  = v1 | v2
  *
- * Sub-flags fall back to the global flag when unset, allowing teams to
- * roll out one layer at a time (e.g. `OPENAWORK_RUNTIME=v1` plus
- * `OPENAWORK_RUNTIME_STORAGE=v2`).
+ * Storage and service sub-flags fall back to the global flag when unset,
+ * allowing teams to roll out one layer at a time (e.g. `OPENAWORK_RUNTIME=v1`
+ * plus `OPENAWORK_RUNTIME_STORAGE=v2`). Upstream defaults to v2 independently;
+ * selecting its legacy path requires an explicit upstream sub-flag.
  */
 
 export type RuntimeVariant = 'v1' | 'v2';
@@ -33,7 +36,7 @@ export interface RuntimeFlags {
   global: RuntimeVariant;
   /** Storage / persistence layer (Drizzle vs node:sqlite raw). */
   storage: RuntimeVariant;
-  /** Upstream LLM call layer (AI SDK vs self-rolled SSE). */
+  /** Upstream LLM call layer (native client vs self-rolled SSE). */
   upstream: RuntimeVariant;
   /** Service-layer orchestration (Effect-TS vs imperative async/await). */
   services: RuntimeVariant;
@@ -82,7 +85,7 @@ export function readRuntimeFlags(env: NodeJS.ProcessEnv = process.env): RuntimeF
   return {
     global,
     storage: parseRuntimeVariant(env['OPENAWORK_RUNTIME_STORAGE'], global),
-    upstream: parseRuntimeVariant(env['OPENAWORK_RUNTIME_UPSTREAM'], global),
+    upstream: parseRuntimeVariant(env['OPENAWORK_RUNTIME_UPSTREAM'], 'v2'),
     services: parseRuntimeVariant(env['OPENAWORK_RUNTIME_SERVICES'], global),
     upstreamProviderAllowlist: parseProviderAllowlist(env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS']),
   };

@@ -46,10 +46,9 @@ export interface StorageServiceImpl {
   readonly allocateNextEventSeq: (aggregateId: string) => Effect.Effect<number>;
 }
 
-export class StorageService extends Context.Tag('@openAwork/StorageService')<
-  StorageService,
-  StorageServiceImpl
->() {
+export class StorageService extends Context.Service<StorageService, StorageServiceImpl>()(
+  '@openAwork/StorageService',
+) {
   /**
    * Build a `Layer` that wires a concrete `V2Storage` (drizzle façade)
    * into the Effect context. Gateway boot calls this once with the
@@ -58,17 +57,20 @@ export class StorageService extends Context.Tag('@openAwork/StorageService')<
    */
   static live(handle: DrizzleHandle): Layer.Layer<StorageService> {
     const storage = V2Storage.fromHandle(handle);
-    const impl: StorageServiceImpl = {
-      getSession: (id) => Effect.promise(() => storage.getSession(id)),
-      getMessage: (input) => Effect.promise(() => storage.getMessage(input)),
-      listMessages: (input) => Effect.promise(() => storage.listMessages(input)),
-      listPartsForMessage: (id) => Effect.promise(() => storage.listPartsForMessage(id)),
-      listSessionEntries: (input) => Effect.promise(() => storage.listSessionEntries(input)),
-      listEventLog: (aggregateId) => Effect.promise(() => storage.listEventLog(aggregateId)),
-      allocateNextEventSeq: (aggregateId) =>
-        Effect.promise(() => storage.allocateNextEventSeq(aggregateId)),
-    };
-    return Layer.succeed(StorageService, impl);
+    return Layer.succeed(
+      StorageService,
+      StorageService.of({
+        getSession: (sessionId) => Effect.promise(() => storage.getSession(sessionId)),
+        getMessage: (input) => Effect.promise(() => storage.getMessage(input)),
+        listMessages: (input) => Effect.promise(() => storage.listMessages(input)),
+        listPartsForMessage: (messageId) =>
+          Effect.promise(() => storage.listPartsForMessage(messageId)),
+        listSessionEntries: (input) => Effect.promise(() => storage.listSessionEntries(input)),
+        listEventLog: (aggregateId) => Effect.promise(() => storage.listEventLog(aggregateId)),
+        allocateNextEventSeq: (aggregateId) =>
+          Effect.promise(() => storage.allocateNextEventSeq(aggregateId)),
+      }),
+    );
   }
 
   /**
@@ -87,6 +89,6 @@ export class StorageService extends Context.Tag('@openAwork/StorageService')<
       listEventLog: () => Effect.succeed([]),
       allocateNextEventSeq: () => Effect.succeed(1),
     };
-    return Layer.succeed(StorageService, { ...fallback, ...impl });
+    return Layer.succeed(StorageService, StorageService.of({ ...fallback, ...impl }));
   }
 }

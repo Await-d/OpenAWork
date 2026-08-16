@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  POST_WRITE_LINT_USAGE_GUIDE,
-  POST_WRITE_LINT_TOOLS_LIST,
-} from '../lint-prompt.js';
+import { POST_WRITE_LINT_USAGE_GUIDE, POST_WRITE_LINT_TOOLS_LIST } from '../lint-prompt.js';
 
 describe('Post-Write Lint 工具提示词', () => {
   describe('基本结构', () => {
@@ -225,8 +222,7 @@ describe('Post-Write Lint 工具提示词', () => {
 
     it('应该包含完整的代码示例', () => {
       // 检查是否有足够的代码示例（至少10个代码块）
-      const codeBlockCount = (POST_WRITE_LINT_USAGE_GUIDE.match(/```typescript/g) || [])
-        .length;
+      const codeBlockCount = (POST_WRITE_LINT_USAGE_GUIDE.match(/```typescript/g) || []).length;
       expect(codeBlockCount).toBeGreaterThanOrEqual(10);
     });
   });
@@ -234,8 +230,7 @@ describe('Post-Write Lint 工具提示词', () => {
   describe('中文内容', () => {
     it('应该使用中文编写', () => {
       // 检查是否包含足够的中文字符
-      const chineseCharCount = (POST_WRITE_LINT_USAGE_GUIDE.match(/[一-龥]/g) || [])
-        .length;
+      const chineseCharCount = (POST_WRITE_LINT_USAGE_GUIDE.match(/[一-龥]/g) || []).length;
       expect(chineseCharCount).toBeGreaterThan(1000);
     });
 

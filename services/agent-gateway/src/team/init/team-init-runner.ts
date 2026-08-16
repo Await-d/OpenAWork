@@ -428,6 +428,7 @@ async function runInitLlm(
       model: llmConfig.model,
       ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+      ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
       prompt,
       temperature: opts?.temperature ?? 0.2,
       ...(opts?.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}),

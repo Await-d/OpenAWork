@@ -9,7 +9,7 @@
  *
  * Roadmap (matches the alignment plan checked into `progress` notes):
  *   - Phase 3 → `./storage/`     (drizzle-orm schemas + read/write APIs)
- *   - Phase 4 → `./upstream/`    (Vercel AI SDK provider adapters)
+ *   - Phase 4 → `./upstream/`    (native upstream provider adapters)
  *   - Phase 5 → `./services/`    (Effect-TS Service / Layer / Bus)
  */
 

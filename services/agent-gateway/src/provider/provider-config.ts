@@ -143,6 +143,7 @@ export const aiProviderSchema = z
     apiKey: z.string().optional(),
     apiKeyEnv: z.string().optional(),
     oauth: oauthConfigSchema.optional(),
+    openaiFastMode: z.boolean().optional(),
     requestOverrides: requestOverridesSchema.optional(),
     upstreamProtocol: z.enum(['chat_completions', 'responses', 'anthropic_messages']).optional(),
     defaultModels: z.array(aiModelConfigSchema),

@@ -13,9 +13,9 @@
 ```typescript
 // 类型定义
 type ThinkingConfig =
-  | { type: 'adaptive' }                           // 自适应思考（Claude 4.6+）
-  | { type: 'enabled'; budgetTokens: number }      // 显式思考预算
-  | { type: 'disabled' };                          // 禁用思考
+  | { type: 'adaptive' } // 自适应思考（Claude 4.6+）
+  | { type: 'enabled'; budgetTokens: number } // 显式思考预算
+  | { type: 'disabled' }; // 禁用思考
 ```
 
 ### 2. 支持 Adaptive Thinking
@@ -33,6 +33,7 @@ POST /v1/stream
 ```
 
 支持的模型：
+
 - `claude-opus-4-6`
 - `claude-sonnet-4-6`
 - 未来 1P/Foundry 上的新模型
@@ -116,38 +117,38 @@ curl -X POST http://localhost:3000/v1/stream \
 
 ## 参数对比
 
-| 场景 | 新版 API | 旧版 API（兼容） |
-|------|---------|----------------|
-| 自适应思考 | `thinking: { type: 'adaptive' }` | ❌ 不支持 |
-| 中等强度思考 | `thinking: { type: 'enabled', budgetTokens: 8192 }` | `thinkingEnabled: true, reasoningEffort: 'medium'` |
-| 高强度思考 | `thinking: { type: 'enabled', budgetTokens: 16384 }` | `thinkingEnabled: true, reasoningEffort: 'high'` |
-| 禁用思考 | `thinking: { type: 'disabled' }` | `thinkingEnabled: false` |
+| 场景         | 新版 API                                             | 旧版 API（兼容）                                   |
+| ------------ | ---------------------------------------------------- | -------------------------------------------------- |
+| 自适应思考   | `thinking: { type: 'adaptive' }`                     | ❌ 不支持                                          |
+| 中等强度思考 | `thinking: { type: 'enabled', budgetTokens: 8192 }`  | `thinkingEnabled: true, reasoningEffort: 'medium'` |
+| 高强度思考   | `thinking: { type: 'enabled', budgetTokens: 16384 }` | `thinkingEnabled: true, reasoningEffort: 'high'`   |
+| 禁用思考     | `thinking: { type: 'disabled' }`                     | `thinkingEnabled: false`                           |
 
 ## 预算映射表
 
 当使用旧版 `reasoningEffort` 参数时，系统自动映射为 `budgetTokens`：
 
 | reasoningEffort | budgetTokens (Anthropic) | budgetTokens (Gemini) | budgetTokens (Qwen) |
-|----------------|--------------------------|----------------------|---------------------|
-| `none`         | 0                        | 0                    | 0                   |
-| `minimal`      | 1024                     | 1024                 | 512                 |
-| `low`          | 4096                     | 4096                 | 2048                |
-| `medium`       | 8192                     | 8192                 | 8192                |
-| `high`         | 16384                    | 16384                | 16384               |
-| `xhigh`        | 31999                    | 24576                | 32768               |
-| `max`          | 31999                    | 24576                | 32768               |
+| --------------- | ------------------------ | --------------------- | ------------------- |
+| `none`          | 0                        | 0                     | 0                   |
+| `minimal`       | 1024                     | 1024                  | 512                 |
+| `low`           | 4096                     | 4096                  | 2048                |
+| `medium`        | 8192                     | 8192                  | 8192                |
+| `high`          | 16384                    | 16384                 | 16384               |
+| `xhigh`         | 31999                    | 24576                 | 32768               |
+| `max`           | 31999                    | 24576                 | 32768               |
 
 ## Provider 支持情况
 
-| Provider | Adaptive | Enabled + Budget | Reasoning Effort | 备注 |
-|----------|----------|------------------|------------------|------|
-| Anthropic | ✅ | ✅ | ✅ | 完整支持所有模式 |
-| OpenAI    | ❌ | ✅ | ✅ | 通过 `reasoningEffort` 参数 |
-| Gemini    | ❌ | ✅ | ✅ | 2.5+: `thinking_budget`; 3.x: `thinking_level` |
-| DeepSeek  | ❌ | ✅ | ✅ | `thinking` + `reasoning_effort` |
-| Qwen      | ❌ | ✅ | ✅ | `enable_thinking` + `thinking_budget` |
-| Moonshot  | ❌ | ✅ | ❌ | `thinking: { type: 'enabled' }` |
-| OpenRouter| ❌ | ✅ | ✅ | 转发到上游 Provider |
+| Provider   | Adaptive | Enabled + Budget | Reasoning Effort | 备注                                           |
+| ---------- | -------- | ---------------- | ---------------- | ---------------------------------------------- |
+| Anthropic  | ✅       | ✅               | ✅               | 完整支持所有模式                               |
+| OpenAI     | ❌       | ✅               | ✅               | 通过 `reasoningEffort` 参数                    |
+| Gemini     | ❌       | ✅               | ✅               | 2.5+: `thinking_budget`; 3.x: `thinking_level` |
+| DeepSeek   | ❌       | ✅               | ✅               | `thinking` + `reasoning_effort`                |
+| Qwen       | ❌       | ✅               | ✅               | `enable_thinking` + `thinking_budget`          |
+| Moonshot   | ❌       | ✅               | ❌               | `thinking: { type: 'enabled' }`                |
+| OpenRouter | ❌       | ✅               | ✅               | 转发到上游 Provider                            |
 
 ## 迁移建议
 
@@ -161,12 +162,12 @@ const response = await fetch('/v1/stream', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
+    Authorization: `Bearer ${token}`,
   },
   body: JSON.stringify({
     message: '你的问题',
     model: 'claude-sonnet-4-6',
-    thinking: { type: 'adaptive' },  // 推荐！
+    thinking: { type: 'adaptive' }, // 推荐！
     clientRequestId: generateUUID(),
   }),
 });
@@ -183,8 +184,8 @@ const response = await fetch('/v1/stream', {
   body: JSON.stringify({
     message: '你的问题',
     model: 'claude-sonnet-4',
-    thinkingEnabled: true,        // 继续有效
-    reasoningEffort: 'high',      // 继续有效
+    thinkingEnabled: true, // 继续有效
+    reasoningEffort: 'high', // 继续有效
     clientRequestId: generateUUID(),
   }),
 });
@@ -205,6 +206,7 @@ const response = await fetch('/v1/stream', {
 ### Q3: 如何判断模型是否支持 adaptive thinking？
 
 **A:** 当前支持 adaptive 的模型：
+
 - `claude-opus-4-6`
 - `claude-sonnet-4-6`
 - 1P/Foundry 上的未来新模型默认支持
@@ -234,9 +236,7 @@ const response = await fetch('/v1/stream', {
 ```typescript
 // 新版 ThinkingConfig（对齐参考实现）
 export type ThinkingConfig =
-  | { type: 'adaptive' }
-  | { type: 'enabled'; budgetTokens: number }
-  | { type: 'disabled' };
+  { type: 'adaptive' } | { type: 'enabled'; budgetTokens: number } | { type: 'disabled' };
 
 // 扩展配置（内部使用）
 export interface ExtendedThinkingConfig {
@@ -256,13 +256,13 @@ export interface ExtendedThinkingConfig {
 
 ### 参考实现对齐
 
-| 特性 | 参考实现 | 当前项目 | 状态 |
-|------|---------|---------|------|
-| `type: 'adaptive'` | ✅ | ✅ | ✅ 已对齐 |
-| `type: 'enabled'` + `budgetTokens` | ✅ | ✅ | ✅ 已对齐 |
-| `type: 'disabled'` | ✅ | ✅ | ✅ 已对齐 |
-| 旧版兼容 | ❌ | ✅ | ✅ 超越参考实现 |
-| 跨 Provider 支持 | ❌ | ✅ | ✅ 超越参考实现 |
+| 特性                               | 参考实现 | 当前项目 | 状态            |
+| ---------------------------------- | -------- | -------- | --------------- |
+| `type: 'adaptive'`                 | ✅       | ✅       | ✅ 已对齐       |
+| `type: 'enabled'` + `budgetTokens` | ✅       | ✅       | ✅ 已对齐       |
+| `type: 'disabled'`                 | ✅       | ✅       | ✅ 已对齐       |
+| 旧版兼容                           | ❌       | ✅       | ✅ 超越参考实现 |
+| 跨 Provider 支持                   | ❌       | ✅       | ✅ 超越参考实现 |
 
 ## 相关文件
 

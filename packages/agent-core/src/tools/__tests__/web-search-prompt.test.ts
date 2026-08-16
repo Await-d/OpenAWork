@@ -245,15 +245,7 @@ describe('Web 搜索工具提示词', () => {
   describe('内容质量', () => {
     it('应该使用中文编写', () => {
       // 检查是否包含常见的中文关键词
-      const chineseKeywords = [
-        '使用',
-        '提供商',
-        '搜索',
-        '结果',
-        '优化',
-        '错误',
-        '场景',
-      ];
+      const chineseKeywords = ['使用', '提供商', '搜索', '结果', '优化', '错误', '场景'];
 
       for (const keyword of chineseKeywords) {
         expect(WEB_SEARCH_TOOL_USAGE_GUIDE).toContain(keyword);
@@ -304,12 +296,7 @@ describe('Web 搜索工具提示词', () => {
     });
 
     it('应该说明每种策略的适用场景', () => {
-      const strategyScenarios = [
-        '使用场景',
-        '工作原理',
-        '适用场景',
-        '注意事项',
-      ];
+      const strategyScenarios = ['使用场景', '工作原理', '适用场景', '注意事项'];
 
       for (const scenario of strategyScenarios) {
         const count = (WEB_SEARCH_TOOL_USAGE_GUIDE.match(new RegExp(scenario, 'g')) || []).length;

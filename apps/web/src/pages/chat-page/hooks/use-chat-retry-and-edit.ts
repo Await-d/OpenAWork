@@ -2,7 +2,7 @@
  * ChatPage 重试与历史编辑域 hook（域 E · Phase E）
  *
  * 聚合"重试 / 编辑历史消息"的状态与操作：
- * - `retryPrompt` / `historyEditPrompt` 弹窗状态
+ * - `retryPrompt` / `historyEditPrompt` 交互状态
  * - `handleRetryInCurrentSession`：在当前会话截断后重发
  * - `handleEditResendInCurrentSession`：编辑后截断重发
  * - `handleRetryInNewSession`：分支到新会话后重发
@@ -12,8 +12,8 @@
  *   1. 本 hook 不拥有 `sendMessage` / `createBranchSessionFromMessage` —
  *      它们由调用方注入（域 B 暴露后可改为从 B 导入）。
  *   2. `setMessages` / `resetStreamState` / `setStreamError` 同样注入。
- *   3. 弹窗状态（`retryPrompt` / `historyEditPrompt`）的 setter 也暴露,
- *      因为 `useChatMessageActions` 需要它们来触发弹窗。
+ *   3. 交互状态（`retryPrompt` / `historyEditPrompt`）的 setter 也暴露,
+ *      因为 `useChatMessageActions` 需要它们来触发编辑或重试。
  *
  * @see docs/architecture/chat-page-split-plan.md 域 E
  */

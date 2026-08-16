@@ -85,4 +85,28 @@ describe('InlineToolCall', () => {
     expect(screen.getByTestId('inline-input-preview')).toBeTruthy();
     expect(screen.getByTestId('inline-output-preview')).toBeTruthy();
   });
+
+  it('运行期间自动展开的详情在完成后按默认折叠设置收起', () => {
+    const view = render(
+      <InlineToolCall
+        toolName="skill"
+        input={{ skillId: 'frontend', prompt: '整理展示逻辑' }}
+        output={{ ok: true }}
+        status="running"
+      />,
+    );
+
+    expect(screen.getByTestId('inline-input-preview')).toBeTruthy();
+    view.rerender(
+      <InlineToolCall
+        toolName="skill"
+        input={{ skillId: 'frontend', prompt: '整理展示逻辑' }}
+        output={{ ok: true }}
+        status="completed"
+      />,
+    );
+
+    expect(screen.queryByTestId('inline-input-preview')).toBeNull();
+    expect(screen.queryByTestId('inline-output-preview')).toBeNull();
+  });
 });

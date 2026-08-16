@@ -9,7 +9,7 @@ import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async () => createChatCompletionsStream('子代理已经执行完成。'),
+        async (input) => createProtocolAwareStream(input, '子代理已经执行完成。'),
         async () => {
           await connectDb();
           await migrate();

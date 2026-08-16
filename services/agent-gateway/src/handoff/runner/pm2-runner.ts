@@ -555,6 +555,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                     ...(llmConfig.upstreamProtocol
                       ? { upstreamProtocol: llmConfig.upstreamProtocol }
                       : {}),
+                    ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
                     prompt: `${systemWithKnowledge}\n\n---\n\n${user}`,
                     temperature: 0.1,
                     usageContext: {

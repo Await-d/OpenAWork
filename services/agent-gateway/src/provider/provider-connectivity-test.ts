@@ -4,7 +4,7 @@
  *
  * 设计要点：
  *   - 复用 `resolveModelRouteFromProvider`(解析 apiKey / baseUrl / 协议 /
- *     requestOverrides)与 `runUpstreamGenerate`(AI SDK 非流式单发)，与真实
+ *     requestOverrides)与 `runUpstreamGenerate`（原生非流式单发），与真实
  *     聊天链路走同一套 provider 工厂，确保自检结果与实际使用一致。
  *   - 只发一个极短 prompt、限制极小 maxTokens，并施加独立 wall-clock 超时，
  *     避免自检本身拖垮或挂死。
@@ -14,6 +14,7 @@
  */
 
 import type { AIProvider } from '@openAwork/agent-core';
+import { Effect } from 'effect';
 import { resolveModelRouteFromProvider } from './model-router.js';
 import { classifyUpstreamError } from './retry-classify.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
@@ -173,23 +174,26 @@ export async function testProviderConnectivity(
 
   const startedAt = Date.now();
   try {
-    const result = await runUpstreamGenerate({
-      providerType: route.providerType ?? input.provider.type,
-      ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
-      apiKey: route.apiKey,
-      baseURL: route.apiBaseUrl,
-      // 透传 provider/model 级自定义 headers(部分中转网关需要特定头才放行)。
-      ...(route.requestOverrides.headers ? { headers: route.requestOverrides.headers } : {}),
-      model: route.model,
-      messages: [{ role: 'user', content: PROBE_PROMPT }],
-      temperature: 0,
-      maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
-      // 透传 requestOverrides 以复用 omitBodyKeys —— 否则 GPT-5 系列会因为收到
-      // `temperature` 被上游 400 拒绝，导致自检误报失败。
-      requestOverrides: route.requestOverrides,
-      // 自检不传 thinking 配置，避免触发更慢/更贵的推理路径；只验证连通与鉴权。
-      signal: controller.signal,
-    });
+    const result = await Effect.runPromise(
+      runUpstreamGenerate({
+        providerType: route.providerType ?? input.provider.type,
+        ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
+        apiKey: route.apiKey,
+        baseURL: route.apiBaseUrl,
+        ...(route.openaiFastMode === true ? { openaiFastMode: true } : {}),
+        // 透传 provider/model 级自定义 headers(部分中转网关需要特定头才放行)。
+        ...(route.requestOverrides.headers ? { headers: route.requestOverrides.headers } : {}),
+        model: route.model,
+        messages: [{ role: 'user', content: PROBE_PROMPT }],
+        temperature: 0,
+        maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
+        // 透传 requestOverrides 以复用 omitBodyKeys —— 否则 GPT-5 系列会因为收到
+        // `temperature` 被上游 400 拒绝，导致自检误报失败。
+        requestOverrides: route.requestOverrides,
+        // 自检不传 thinking 配置，避免触发更慢/更贵的推理路径；只验证连通与鉴权。
+        signal: controller.signal,
+      }),
+    );
 
     const latencyMs = Date.now() - startedAt;
     return {

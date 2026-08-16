@@ -26,6 +26,12 @@ process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 process.env['OPENAWORK_TEAM_INBOUND_POLL_MS'] = '20';
 process.env['OPENAWORK_TEAM_CLARIFICATION_TIMEOUT_MS'] = '200';
 
+const runSessionInBackgroundMock = vi.fn(async () => ({ statusCode: 200 }));
+
+vi.mock('../../routes/stream-runtime.js', () => ({
+  runSessionInBackground: runSessionInBackgroundMock,
+}));
+
 let db: typeof DbModule;
 let inboundStore: typeof InboundStoreModule;
 let handoffStore: typeof HandoffStoreModule;
@@ -85,6 +91,7 @@ beforeEach(() => {
   seedUser();
   seedTeamWorkspace();
   seedReceptionSession();
+  runSessionInBackgroundMock.mockClear();
 });
 
 afterEach(() => {
@@ -98,6 +105,25 @@ afterAll(async () => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('b 层（reception）', () => {
+  it('只读了解输入留在 reception，不创建 pm1 handoff', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: RECEPTION_SESSION_ID,
+      userIntent: '了解一下当前项目',
+      persistUserMessage: false,
+      persistAckMessage: false,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'light-answer' });
+    expect(runSessionInBackgroundMock).toHaveBeenCalledTimes(1);
+
+    const handoffs = db.sqliteAll<{ id: string }>(
+      `SELECT id FROM handoff_records WHERE from_session_id = ?`,
+      [RECEPTION_SESSION_ID],
+    );
+    expect(handoffs).toHaveLength(0);
+  });
+
   it('inbound user_input 写入 session_inbound_messages 表', () => {
     const result = inboundStore.submitInboundMessage({
       userId: USER_ID,

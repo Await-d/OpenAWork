@@ -54,6 +54,7 @@ type GatewayErrorChunk = Extract<StreamChunk | RunEvent, { type: 'error' }>;
 
 interface GatewayClient {
   attachToActiveStream: (sessionId: string, callbacks: StreamCallbacks) => Promise<boolean>;
+  getActiveStreamClientRequestId: () => string | null;
   getActiveStreamSessionId: () => string | null;
   stream: (sessionId: string, message: string, callbacks: StreamCallbacks) => void;
   stopStream: () => Promise<boolean>;
@@ -760,6 +761,10 @@ export function useGatewayClient(token: string | null): GatewayClient {
     return activeStreamSessionId;
   }, [activeStreamSessionId]);
 
+  const getActiveStreamClientRequestId = useCallback((): string | null => {
+    return activeRequestRef.current?.clientRequestId ?? null;
+  }, []);
+
   const stream = useCallback(
     (sessionId: string, message: string, callbacks: StreamCallbacks) => {
       callbacksRef.current = callbacks;
@@ -1052,7 +1057,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
     [syncActiveRequest, token],
   );
 
-  return { attachToActiveStream, getActiveStreamSessionId, stream, stopStream };
+  return {
+    attachToActiveStream,
+    getActiveStreamClientRequestId,
+    getActiveStreamSessionId,
+    stream,
+    stopStream,
+  };
 }
 
 export { classifyAttachStreamError };

@@ -1,14 +1,15 @@
-import { Effect, Schema } from "effect"
-import { Route } from "../route/client.js"
-import { Auth } from "../route/auth.js"
-import { Endpoint } from "../route/endpoint.js"
-import { HttpTransport } from "../route/transport/index.js"
-import { Protocol } from "../route/protocol.js"
+import { Effect, Schema } from 'effect';
+import { Route } from '../route/client.js';
+import { Auth } from '../route/auth.js';
+import { Endpoint } from '../route/endpoint.js';
+import { HttpTransport } from '../route/transport/index.js';
+import { Protocol } from '../route/protocol.js';
 import {
-  LLMEvent,
+  ReasoningEfforts,
   Usage,
   type FinishReason,
   type JsonSchema,
+  type LLMEvent,
   type LLMRequest,
   type MediaPart,
   type ReasoningPart,
@@ -16,17 +17,17 @@ import {
   type ToolCallPart,
   type ToolDefinition,
   type ToolContent,
-} from "../schema/index.js"
-import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from "./shared.js"
-import { OpenAIOptions } from "./utils/openai-options.js"
-import { Lifecycle } from "./utils/lifecycle.js"
-import { ToolSchemaProjection } from "./utils/tool-schema.js"
-import { ToolStream } from "./utils/tool-stream.js"
+} from '../schema/index.js';
+import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
+import { OpenAIOptions, type OpenAIServiceTier } from './utils/openai-options.js';
+import { Lifecycle } from './utils/lifecycle.js';
+import { ToolSchemaProjection } from './utils/tool-schema.js';
+import { ToolStream } from './utils/tool-stream.js';
 
-const ADAPTER = "openai-chat"
-const IMAGE_MIMES = new Set<string>(ProviderShared.IMAGE_MIMES)
-export const DEFAULT_BASE_URL = "https://api.openai.com/v1"
-export const PATH = "/chat/completions"
+const ADAPTER = 'openai-chat';
+const IMAGE_MIMES = new Set<string>(ProviderShared.IMAGE_MIMES);
+export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+export const PATH = '/chat/completions';
 
 // =============================================================================
 // Request Body Schema
@@ -38,55 +39,59 @@ const OpenAIChatFunction = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   parameters: JsonObject,
-})
+});
 
 const OpenAIChatTool = Schema.Struct({
-  type: Schema.tag("function"),
+  type: Schema.tag('function'),
   function: OpenAIChatFunction,
-})
-type OpenAIChatTool = Schema.Schema.Type<typeof OpenAIChatTool>
+});
+type OpenAIChatTool = Schema.Schema.Type<typeof OpenAIChatTool>;
 
 const OpenAIChatAssistantToolCall = Schema.Struct({
   id: Schema.String,
-  type: Schema.tag("function"),
+  type: Schema.tag('function'),
   function: Schema.Struct({
     name: Schema.String,
     arguments: Schema.String,
   }),
-})
-type OpenAIChatAssistantToolCall = Schema.Schema.Type<typeof OpenAIChatAssistantToolCall>
+});
+type OpenAIChatAssistantToolCall = Schema.Schema.Type<typeof OpenAIChatAssistantToolCall>;
 
 const OpenAIChatUserContent = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal('text'), text: Schema.String }),
   Schema.Struct({
-    type: Schema.Literal("image_url"),
+    type: Schema.Literal('image_url'),
     image_url: Schema.Struct({ url: Schema.String }),
   }),
-])
+]);
 
 const OpenAIChatMessage = Schema.Union([
-  Schema.Struct({ role: Schema.Literal("system"), content: Schema.String }),
+  Schema.Struct({ role: Schema.Literal('system'), content: Schema.String }),
   Schema.Struct({
-    role: Schema.Literal("user"),
+    role: Schema.Literal('user'),
     content: Schema.Union([Schema.String, Schema.Array(OpenAIChatUserContent)]),
   }),
   Schema.Struct({
-    role: Schema.Literal("assistant"),
+    role: Schema.Literal('assistant'),
     content: Schema.NullOr(Schema.String),
     tool_calls: optionalArray(OpenAIChatAssistantToolCall),
     reasoning_content: Schema.optional(Schema.String),
   }),
-  Schema.Struct({ role: Schema.Literal("tool"), tool_call_id: Schema.String, content: Schema.String }),
-]).pipe(Schema.toTaggedUnion("role"))
-type OpenAIChatMessage = Schema.Schema.Type<typeof OpenAIChatMessage>
+  Schema.Struct({
+    role: Schema.Literal('tool'),
+    tool_call_id: Schema.String,
+    content: Schema.String,
+  }),
+]).pipe(Schema.toTaggedUnion('role'));
+type OpenAIChatMessage = Schema.Schema.Type<typeof OpenAIChatMessage>;
 
 const OpenAIChatToolChoice = Schema.Union([
-  Schema.Literals(["auto", "none", "required"]),
+  Schema.Literals(['auto', 'none', 'required']),
   Schema.Struct({
-    type: Schema.tag("function"),
+    type: Schema.tag('function'),
     function: Schema.Struct({ name: Schema.String }),
   }),
-])
+]);
 
 export const bodyFields = {
   model: Schema.String,
@@ -96,7 +101,13 @@ export const bodyFields = {
   stream: Schema.Literal(true),
   stream_options: Schema.optional(Schema.Struct({ include_usage: Schema.Boolean })),
   store: Schema.optional(Schema.Boolean),
-  reasoning_effort: Schema.optional(OpenAIOptions.OpenAIReasoningEffort),
+  service_tier: Schema.optional(OpenAIOptions.OpenAIServiceTier),
+  reasoning_effort: Schema.optional(Schema.Literals(ReasoningEfforts)),
+  reasoning: Schema.optional(JsonObject),
+  thinking: Schema.optional(JsonObject),
+  enable_thinking: Schema.optional(Schema.Boolean),
+  thinking_budget: Schema.optional(Schema.Number),
+  google: Schema.optional(JsonObject),
   max_tokens: Schema.optional(Schema.Number),
   temperature: Schema.optional(Schema.Number),
   top_p: Schema.optional(Schema.Number),
@@ -104,9 +115,9 @@ export const bodyFields = {
   presence_penalty: Schema.optional(Schema.Number),
   seed: Schema.optional(Schema.Number),
   stop: optionalArray(Schema.String),
-}
-const OpenAIChatBody = Schema.Struct(bodyFields)
-export type OpenAIChatBody = Schema.Schema.Type<typeof OpenAIChatBody>
+};
+const OpenAIChatBody = Schema.Struct(bodyFields);
+export type OpenAIChatBody = Schema.Schema.Type<typeof OpenAIChatBody>;
 
 // =============================================================================
 // Streaming Event Schema
@@ -128,47 +139,49 @@ const OpenAIChatUsage = Schema.Struct({
       reasoning_tokens: Schema.optional(Schema.Number),
     }),
   ),
-})
+});
 
 const OpenAIChatToolCallDeltaFunction = Schema.Struct({
   name: optionalNull(Schema.String),
   arguments: optionalNull(Schema.String),
-})
+});
 
 const OpenAIChatToolCallDelta = Schema.Struct({
   index: Schema.Number,
   id: optionalNull(Schema.String),
   function: optionalNull(OpenAIChatToolCallDeltaFunction),
-})
-type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta>
+});
+type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta>;
 
 const OpenAIChatDelta = Schema.Struct({
   content: optionalNull(Schema.String),
   reasoning_content: optionalNull(Schema.String),
   tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
-})
+});
 
 const OpenAIChatChoice = Schema.Struct({
   delta: optionalNull(OpenAIChatDelta),
   finish_reason: optionalNull(Schema.String),
-})
+});
 
 const OpenAIChatEvent = Schema.Struct({
   choices: Schema.Array(OpenAIChatChoice),
   usage: optionalNull(OpenAIChatUsage),
-})
-type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>
-type OpenAIChatRequestMessage = LLMRequest["messages"][number]
+  service_tier: optionalNull(OpenAIOptions.OpenAIServiceTier),
+});
+type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>;
+type OpenAIChatRequestMessage = LLMRequest['messages'][number];
 
 export interface ParserState {
-  readonly tools: ToolStream.State<number>
-  readonly toolCallEvents: ReadonlyArray<LLMEvent>
-  readonly usage?: Usage
-  readonly finishReason?: FinishReason
-  readonly lifecycle: Lifecycle.State
+  readonly tools: ToolStream.State<number>;
+  readonly toolCallEvents: ReadonlyArray<LLMEvent>;
+  readonly usage?: Usage;
+  readonly finishReason?: FinishReason;
+  readonly serviceTier?: OpenAIServiceTier;
+  readonly lifecycle: Lifecycle.State;
 }
 
-const invalid = ProviderShared.invalidRequest
+const invalid = ProviderShared.invalidRequest;
 
 // =============================================================================
 // Request Lowering
@@ -177,183 +190,222 @@ const invalid = ProviderShared.invalidRequest
 // OpenAI Chat wire format. Keep provider quirks here instead of leaking native
 // fields into `LLMRequest`.
 const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema): OpenAIChatTool => ({
-  type: "function",
+  type: 'function',
   function: {
     name: tool.name,
     description: tool.description,
     parameters: ToolSchemaProjection.openAI(inputSchema),
   },
-})
+});
 
-const lowerToolChoice = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
-  ProviderShared.matchToolChoice("OpenAI Chat", toolChoice, {
-    auto: () => "auto" as const,
-    none: () => "none" as const,
-    required: () => "required" as const,
-    tool: (name) => ({ type: "function" as const, function: { name } }),
-  })
+const lowerToolChoice = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
+  ProviderShared.matchToolChoice('OpenAI Chat', toolChoice, {
+    auto: () => 'auto' as const,
+    none: () => 'none' as const,
+    required: () => 'required' as const,
+    tool: (name) => ({ type: 'function' as const, function: { name } }),
+  });
 
 const lowerToolCall = (part: ToolCallPart): OpenAIChatAssistantToolCall => ({
   id: part.id,
-  type: "function",
+  type: 'function',
   function: {
     name: part.name,
     arguments: ProviderShared.encodeJson(part.input),
   },
-})
+});
 
-const lowerMedia = Effect.fn("OpenAIChat.lowerMedia")(function* (part: MediaPart) {
-  const media = yield* ProviderShared.validateMedia("OpenAI Chat", part, IMAGE_MIMES)
-  return { type: "image_url" as const, image_url: { url: media.dataUrl } }
-})
+const lowerMedia = Effect.fn('OpenAIChat.lowerMedia')(function* (part: MediaPart) {
+  const media = yield* ProviderShared.validateMedia('OpenAI Chat', part, IMAGE_MIMES);
+  return { type: 'image_url' as const, image_url: { url: media.dataUrl } };
+});
 
 const openAICompatibleReasoningContent = (native: unknown) =>
-  isRecord(native) && typeof native.reasoning_content === "string" ? native.reasoning_content : undefined
+  isRecord(native) && typeof native.reasoning_content === 'string'
+    ? native.reasoning_content
+    : undefined;
 
-const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (message: OpenAIChatRequestMessage) {
-  const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
-  for (const part of message.content) {
-    if (part.type === "text") {
-      content.push({ type: "text", text: part.text })
-      continue
-    }
-    if (part.type === "media") {
-      content.push(yield* lowerMedia(part))
-      continue
-    }
-    return yield* ProviderShared.unsupportedContent("OpenAI Chat", "user", ["text", "media"])
-  }
-  if (content.every((part) => part.type === "text"))
-    return { role: "user" as const, content: content.map((part) => part.text).join("") }
-  return { role: "user" as const, content }
-})
-
-const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(function* (
+const lowerUserMessage = Effect.fn('OpenAIChat.lowerUserMessage')(function* (
   message: OpenAIChatRequestMessage,
 ) {
-  const content: TextPart[] = []
-  const reasoning: ReasoningPart[] = []
-  const toolCalls: OpenAIChatAssistantToolCall[] = []
+  const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
   for (const part of message.content) {
-    if (!ProviderShared.supportsContent(part, ["text", "reasoning", "tool-call"]))
-      return yield* ProviderShared.unsupportedContent("OpenAI Chat", "assistant", ["text", "reasoning", "tool-call"])
-    if (part.type === "text") {
-      content.push(part)
-      continue
+    if (part.type === 'text') {
+      content.push({ type: 'text', text: part.text });
+      continue;
     }
-    if (part.type === "reasoning") {
-      reasoning.push(part)
-      continue
+    if (part.type === 'media') {
+      content.push(yield* lowerMedia(part));
+      continue;
     }
-    if (part.type === "tool-call") {
-      toolCalls.push(lowerToolCall(part))
-      continue
+    return yield* ProviderShared.unsupportedContent('OpenAI Chat', 'user', ['text', 'media']);
+  }
+  if (content.every((part) => part.type === 'text'))
+    return { role: 'user' as const, content: content.map((part) => part.text).join('') };
+  return { role: 'user' as const, content };
+});
+
+const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(function* (
+  message: OpenAIChatRequestMessage,
+) {
+  const content: TextPart[] = [];
+  const reasoning: ReasoningPart[] = [];
+  const toolCalls: OpenAIChatAssistantToolCall[] = [];
+  for (const part of message.content) {
+    if (!ProviderShared.supportsContent(part, ['text', 'reasoning', 'tool-call']))
+      return yield* ProviderShared.unsupportedContent('OpenAI Chat', 'assistant', [
+        'text',
+        'reasoning',
+        'tool-call',
+      ]);
+    if (part.type === 'text') {
+      content.push(part);
+      continue;
+    }
+    if (part.type === 'reasoning') {
+      reasoning.push(part);
+      continue;
+    }
+    if (part.type === 'tool-call') {
+      toolCalls.push(lowerToolCall(part));
+      continue;
     }
   }
   return {
-    role: "assistant" as const,
+    role: 'assistant' as const,
     content: content.length === 0 ? null : ProviderShared.joinText(content),
     tool_calls: toolCalls.length === 0 ? undefined : toolCalls,
     reasoning_content:
       reasoning.length > 0
-        ? reasoning.map((part) => part.text).join("")
+        ? reasoning.map((part) => part.text).join('')
         : openAICompatibleReasoningContent(message.native?.openaiCompatible),
-  }
-})
+  };
+});
 
-const lowerToolMessages = Effect.fn("OpenAIChat.lowerToolMessages")(function* (message: OpenAIChatRequestMessage) {
-  const messages: OpenAIChatMessage[] = []
-  const images: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
+const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
+  message: OpenAIChatRequestMessage,
+) {
+  const messages: OpenAIChatMessage[] = [];
+  const images: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
   for (const part of message.content) {
-    if (!ProviderShared.supportsContent(part, ["tool-result"]))
-      return yield* ProviderShared.unsupportedContent("OpenAI Chat", "tool", ["tool-result"])
-    if (part.result.type !== "content") {
-      messages.push({ role: "tool", tool_call_id: part.id, content: ProviderShared.toolResultText(part) })
-      continue
+    if (!ProviderShared.supportsContent(part, ['tool-result']))
+      return yield* ProviderShared.unsupportedContent('OpenAI Chat', 'tool', ['tool-result']);
+    if (part.result.type !== 'content') {
+      messages.push({
+        role: 'tool',
+        tool_call_id: part.id,
+        content: ProviderShared.toolResultText(part),
+      });
+      continue;
     }
-    const content: ReadonlyArray<ToolContent> = part.result.value
-    const text = content.filter((item): item is Extract<ToolContent, { type: "text" }> => item.type === "text").map((item) => item.text)
-    messages.push({ role: "tool", tool_call_id: part.id, content: text.join("\n") })
-    const files = content.filter((item): item is Extract<ToolContent, { type: "file" }> => item.type === "file")
+    const content: ReadonlyArray<ToolContent> = part.result.value;
+    const text = content
+      .filter((item): item is Extract<ToolContent, { type: 'text' }> => item.type === 'text')
+      .map((item) => item.text);
+    messages.push({ role: 'tool', tool_call_id: part.id, content: text.join('\n') });
+    const files = content.filter(
+      (item): item is Extract<ToolContent, { type: 'file' }> => item.type === 'file',
+    );
     images.push(
       ...(yield* Effect.forEach(files, (item) =>
-        lowerMedia({ type: "media", mediaType: item.mime, data: item.uri, filename: item.name }),
+        lowerMedia({ type: 'media', mediaType: item.mime, data: item.uri, filename: item.name }),
       )),
-    )
+    );
   }
-  return { messages, images }
-})
+  return { messages, images };
+});
 
-const lowerMessage = Effect.fn("OpenAIChat.lowerMessage")(function* (message: OpenAIChatRequestMessage) {
-  if (message.role === "user") return [yield* lowerUserMessage(message)]
-  if (message.role === "assistant") return [yield* lowerAssistantMessage(message)]
-  return (yield* lowerToolMessages(message)).messages
-})
+const lowerMessage = Effect.fn('OpenAIChat.lowerMessage')(function* (
+  message: OpenAIChatRequestMessage,
+) {
+  if (message.role === 'user') return [yield* lowerUserMessage(message)];
+  if (message.role === 'assistant') return [yield* lowerAssistantMessage(message)];
+  return (yield* lowerToolMessages(message)).messages;
+});
 
-const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: LLMRequest) {
+const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: LLMRequest) {
   const system: OpenAIChatMessage[] =
-    request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
-  const messages = [...system]
-  const pendingImages: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
+    request.system.length === 0
+      ? []
+      : [{ role: 'system', content: ProviderShared.joinText(request.system) }];
+  const messages = [...system];
+  const pendingImages: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
   const flushImages = () => {
-    if (pendingImages.length === 0) return
-    messages.push({ role: "user", content: pendingImages.splice(0) })
-  }
+    if (pendingImages.length === 0) return;
+    messages.push({ role: 'user', content: pendingImages.splice(0) });
+  };
   for (const message of request.messages) {
-    if (message.role === "system") {
-      const part = yield* ProviderShared.wrappedSystemUpdate("OpenAI Chat", message)
+    if (message.role === 'system') {
+      const part = yield* ProviderShared.wrappedSystemUpdate('OpenAI Chat', message);
       if (pendingImages.length > 0) {
-        messages.push({ role: "user", content: [...pendingImages.splice(0), { type: "text", text: part.text }] })
-        continue
+        messages.push({
+          role: 'user',
+          content: [...pendingImages.splice(0), { type: 'text', text: part.text }],
+        });
+        continue;
       }
-      const previous = messages.at(-1)
-      if (previous?.role === "user" && typeof previous.content === "string")
-        messages[messages.length - 1] = { role: "user", content: `${previous.content}\n${part.text}` }
-      else if (previous?.role === "user" && Array.isArray(previous.content))
+      const previous = messages.at(-1);
+      if (previous?.role === 'user' && typeof previous.content === 'string')
         messages[messages.length - 1] = {
-          role: "user",
-          content: [...previous.content, { type: "text", text: part.text }],
-        }
-      else messages.push({ role: "user", content: part.text })
-      continue
+          role: 'user',
+          content: `${previous.content}\n${part.text}`,
+        };
+      else if (previous?.role === 'user' && Array.isArray(previous.content))
+        messages[messages.length - 1] = {
+          role: 'user',
+          content: [...previous.content, { type: 'text', text: part.text }],
+        };
+      else messages.push({ role: 'user', content: part.text });
+      continue;
     }
-    if (message.role === "tool") {
-      const lowered = yield* lowerToolMessages(message)
-      messages.push(...lowered.messages)
-      pendingImages.push(...lowered.images)
-      continue
+    if (message.role === 'tool') {
+      const lowered = yield* lowerToolMessages(message);
+      messages.push(...lowered.messages);
+      pendingImages.push(...lowered.images);
+      continue;
     }
-    flushImages()
-    messages.push(...(yield* lowerMessage(message)))
+    flushImages();
+    messages.push(...(yield* lowerMessage(message)));
   }
-  flushImages()
-  return messages
-})
+  flushImages();
+  return messages;
+});
 
-const lowerOptions = Effect.fn("OpenAIChat.lowerOptions")(function* (request: LLMRequest) {
-  const store = OpenAIOptions.store(request)
-  const reasoningEffort = OpenAIOptions.reasoningEffort(request)
+const lowerOptions = Effect.fn('OpenAIChat.lowerOptions')(function* (request: LLMRequest) {
+  const store = OpenAIOptions.store(request);
+  const serviceTier = OpenAIOptions.serviceTier(request);
+  const reasoningEffort = OpenAIOptions.reasoningEffort(request);
   if (reasoningEffort && !OpenAIOptions.isReasoningEffort(reasoningEffort))
-    return yield* invalid(`OpenAI Chat does not support reasoning effort ${reasoningEffort}`)
+    return yield* invalid(`OpenAI Chat does not support reasoning effort ${reasoningEffort}`);
   return {
     ...(store !== undefined ? { store } : {}),
+    ...(serviceTier ? { service_tier: serviceTier } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-  }
-})
+  };
+});
 
-const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMRequest) {
+const lowerCompatibleProviderOptions = (request: LLMRequest) =>
+  request.model.route.id === 'openai-compatible-chat'
+    ? (request.providerOptions?.[request.model.provider] ?? {})
+    : {};
+
+const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMRequest) {
   // `fromRequest` returns the provider body only. Endpoint, auth, framing,
   // validation, and HTTP execution are composed by `Route.make`.
-  const generation = request.generation
-  const toolSchemaCompatibility = request.model.compatibility?.toolSchema
+  const generation = request.generation;
+  const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
   return {
+    ...lowerCompatibleProviderOptions(request),
     model: request.model.id,
     messages: yield* lowerMessages(request),
     tools:
       request.tools.length === 0
         ? undefined
         : request.tools.map((tool) =>
-            lowerTool(tool, ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility)),
+            lowerTool(
+              tool,
+              ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
+            ),
           ),
     tool_choice: request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
@@ -366,8 +418,8 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
     seed: generation?.seed,
     stop: generation?.stop,
     ...(yield* lowerOptions(request)),
-  }
-})
+  };
+});
 
 // =============================================================================
 // Stream Parsing
@@ -376,76 +428,94 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
 // plus the common `LLMEvent`s produced by that event. Tool calls are accumulated
 // because OpenAI streams JSON arguments across multiple deltas.
 const mapFinishReason = (reason: string | null | undefined): FinishReason => {
-  if (reason === "stop") return "stop"
-  if (reason === "length") return "length"
-  if (reason === "content_filter") return "content-filter"
-  if (reason === "function_call" || reason === "tool_calls") return "tool-calls"
-  return "unknown"
-}
+  if (reason === 'stop') return 'stop';
+  if (reason === 'length') return 'length';
+  if (reason === 'content_filter') return 'content-filter';
+  if (reason === 'function_call' || reason === 'tool_calls') return 'tool-calls';
+  return 'unknown';
+};
 
 // OpenAI Chat reports `prompt_tokens` (inclusive total) with a
 // `cached_tokens` subset, and `completion_tokens` (inclusive total) with
 // a `reasoning_tokens` subset. We pass the inclusive totals through and
 // derive the non-cached breakdown so the `LLM.Usage` contract is
 // satisfied on both sides.
-const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
-  if (!usage) return undefined
-  const cached = usage.prompt_tokens_details?.cached_tokens
-  const reasoning = usage.completion_tokens_details?.reasoning_tokens
-  const nonCached = ProviderShared.subtractTokens(usage.prompt_tokens, cached)
+const mapUsage = (usage: OpenAIChatEvent['usage']): Usage | undefined => {
+  if (!usage) return undefined;
+  const cached = usage.prompt_tokens_details?.cached_tokens;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  const nonCached = ProviderShared.subtractTokens(usage.prompt_tokens, cached);
   return new Usage({
     inputTokens: usage.prompt_tokens,
     outputTokens: usage.completion_tokens,
     nonCachedInputTokens: nonCached,
     cacheReadInputTokens: cached,
     reasoningTokens: reasoning,
-    totalTokens: ProviderShared.totalTokens(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens),
+    totalTokens: ProviderShared.totalTokens(
+      usage.prompt_tokens,
+      usage.completion_tokens,
+      usage.total_tokens,
+    ),
     providerMetadata: { openai: usage },
-  })
-}
+  });
+};
 
 const step = (state: ParserState, event: OpenAIChatEvent) =>
   Effect.gen(function* () {
-    const events: LLMEvent[] = []
-    const usage = mapUsage(event.usage) ?? state.usage
-    const choice = event.choices[0]
-    const finishReason = choice?.finish_reason ? mapFinishReason(choice.finish_reason) : state.finishReason
-    const delta = choice?.delta
-    const toolDeltas = delta?.tool_calls ?? []
-    let tools = state.tools
+    const events: LLMEvent[] = [];
+    const usage = mapUsage(event.usage) ?? state.usage;
+    const serviceTier = event.service_tier ?? state.serviceTier;
+    const choice = event.choices[0];
+    const finishReason = choice?.finish_reason
+      ? mapFinishReason(choice.finish_reason)
+      : state.finishReason;
+    const delta = choice?.delta;
+    const toolDeltas = delta?.tool_calls ?? [];
+    let tools = state.tools;
 
-    let lifecycle = state.lifecycle
+    let lifecycle = state.lifecycle;
 
     if (delta?.reasoning_content)
-      lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", delta.reasoning_content)
+      lifecycle = Lifecycle.reasoningDelta(
+        lifecycle,
+        events,
+        'reasoning-0',
+        delta.reasoning_content,
+      );
 
     if (delta?.content) {
-      lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0")
-      lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.content)
+      lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
+      lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', delta.content);
     }
 
-    if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0")
+    if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
 
     for (const tool of toolDeltas) {
       const result = ToolStream.appendOrStart(
         ADAPTER,
         tools,
         tool.index,
-        { id: tool.id ?? undefined, name: tool.function?.name ?? undefined, text: tool.function?.arguments ?? "" },
-        "OpenAI Chat tool call delta is missing id or name",
-      )
-      if (ToolStream.isError(result)) return yield* result
-      tools = result.tools
-      if (result.events.length) lifecycle = Lifecycle.stepStart(lifecycle, events)
-      events.push(...result.events)
+        {
+          id: tool.id ?? undefined,
+          name: tool.function?.name ?? undefined,
+          text: tool.function?.arguments ?? '',
+        },
+        'OpenAI Chat tool call delta is missing id or name',
+      );
+      if (ToolStream.isError(result)) return yield* result;
+      tools = result.tools;
+      if (result.events.length) lifecycle = Lifecycle.stepStart(lifecycle, events);
+      events.push(...result.events);
     }
 
     // Finalize accumulated tool inputs eagerly when finish_reason arrives so
     // JSON parse failures fail the stream at the boundary rather than at halt.
     const finished =
-      finishReason !== undefined && state.finishReason === undefined && Object.keys(tools).length > 0
+      finishReason !== undefined &&
+      state.finishReason === undefined &&
+      Object.keys(tools).length > 0
         ? yield* ToolStream.finishAll(ADAPTER, tools)
-        : undefined
+        : undefined;
 
     return [
       {
@@ -453,21 +523,32 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         toolCallEvents: finished?.events ?? state.toolCallEvents,
         usage,
         finishReason,
+        serviceTier,
         lifecycle,
       },
       events,
-    ] as const
-  })
+    ] as const;
+  });
 
 const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
-  const events: LLMEvent[] = []
-  const hasToolCalls = state.toolCallEvents.length > 0
-  const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
-  const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
-  events.push(...state.toolCallEvents)
-  if (reason) Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
-  return events
-}
+  const events: LLMEvent[] = [];
+  const hasToolCalls = state.toolCallEvents.length > 0;
+  const reason = state.finishReason === 'stop' && hasToolCalls ? 'tool-calls' : state.finishReason;
+  const lifecycle = state.toolCallEvents.length
+    ? Lifecycle.stepStart(state.lifecycle, events)
+    : state.lifecycle;
+  events.push(...state.toolCallEvents);
+  if (reason) {
+    Lifecycle.finish(lifecycle, events, {
+      reason,
+      usage: state.usage,
+      ...(state.serviceTier === undefined
+        ? {}
+        : { providerMetadata: { openai: { serviceTier: state.serviceTier } } }),
+    });
+  }
+  return events;
+};
 
 // =============================================================================
 // Protocol And OpenAI Route
@@ -486,24 +567,25 @@ export const protocol = Protocol.make({
   },
   stream: {
     event: Protocol.jsonEvent(OpenAIChatEvent),
-    initial: () => ({ tools: ToolStream.empty<number>(), toolCallEvents: [], lifecycle: Lifecycle.initial() }),
+    initial: () => ({
+      tools: ToolStream.empty<number>(),
+      toolCallEvents: [],
+      lifecycle: Lifecycle.initial(),
+    }),
     step,
     onHalt: finishEvents,
   },
-})
+});
 
-export const httpTransport = HttpTransport.sseJson.with<OpenAIChatBody>()
+export const httpTransport = HttpTransport.sseJson.with<OpenAIChatBody>();
 
 export const route = Route.make({
   id: ADAPTER,
-  provider: "openai",
+  provider: 'openai',
   protocol,
   endpoint: Endpoint.path(PATH, { baseURL: DEFAULT_BASE_URL }),
   auth: Auth.none,
   transport: httpTransport,
-})
+});
 
-export * as OpenAIChat from "./openai-chat.js"
-
-
-
+export * as OpenAIChat from './openai-chat.js';

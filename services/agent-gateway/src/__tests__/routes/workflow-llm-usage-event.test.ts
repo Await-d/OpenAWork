@@ -8,6 +8,7 @@
  * 度量界面里完全统计不到——「每次使用都没正确统计」的根因。
  */
 
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -70,13 +71,15 @@ afterEach(() => {
 
 describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
   it('提供 usageContext.layer 时发出 team_usage 事件（含 token + 估算成本）', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 1000,
-      outputTokens: 500,
-      finishReason: 'stop',
-      raw: {},
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1000,
+        outputTokens: 500,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
 
     const text = await requestWorkflowLlmCompletion({
       ...BASE_INPUT,
@@ -106,26 +109,30 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
   });
 
   it('未提供 usageContext 时不发任何 team 事件（chat 端不受影响）', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 10,
-      outputTokens: 5,
-      finishReason: 'stop',
-      raw: {},
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
 
     await requestWorkflowLlmCompletion(BASE_INPUT);
     expect(mocks.publishTeamEvent).not.toHaveBeenCalled();
   });
 
   it('usageContext.layer 为空时不发事件', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'ok',
-      inputTokens: 10,
-      outputTokens: 5,
-      finishReason: 'stop',
-      raw: {},
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
 
     await requestWorkflowLlmCompletion({
       ...BASE_INPUT,
@@ -135,13 +142,15 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
   });
 
   it('prompt 与响应都为空时不发事件（避免噪声）', async () => {
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: '',
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-      raw: {},
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
 
     await requestWorkflowLlmCompletion({
       ...BASE_INPUT,
@@ -153,13 +162,15 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
 
   it('provider 不回 usage（token=0）时按文本长度估算，仍发出事件', async () => {
     // 响应有文本但 usage 缺失（常见于 OpenAI 兼容中转 / 自建 provider）。
-    mocks.runUpstreamGenerate.mockResolvedValue({
-      text: 'x'.repeat(40), // ~10 tokens
-      inputTokens: 0,
-      outputTokens: 0,
-      finishReason: 'stop',
-      raw: {},
-    });
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'x'.repeat(40), // ~10 tokens
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
 
     await requestWorkflowLlmCompletion({
       ...BASE_INPUT,

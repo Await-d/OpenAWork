@@ -1,0 +1,9 @@
+
+> @openAwork/agent-gateway@0.9.6 build E:\01.Projects\OpenAWork\services\agent-gateway
+> tsc -b tsconfig.build.json --force
+
+error TS5083: Cannot read file 'E:/01.Projects/OpenAWork/packages/opencode-llm/tsconfig.build.json'.
+tsconfig.build.json(28,5): error TS6053: File 'E:/01.Projects/OpenAWork/packages/opencode-llm/tsconfig.build.json' not found.
+E:\01.Projects\OpenAWork\services\agent-gateway:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openAwork/agent-gateway@0.9.6 build: `tsc -b tsconfig.build.json --force`
+Exit status 2

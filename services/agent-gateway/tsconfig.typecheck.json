@@ -8,6 +8,7 @@
     { "path": "../../packages/artifacts/tsconfig.typecheck.json" },
     { "path": "../../packages/browser-automation/tsconfig.typecheck.json" },
     { "path": "../../packages/logger/tsconfig.typecheck.json" },
+    { "path": "../../packages/opencode-llm/tsconfig.json" },
     { "path": "../../packages/lsp-client" },
     { "path": "../../packages/mcp-client/tsconfig.typecheck.json" },
     { "path": "../../packages/pairing" },

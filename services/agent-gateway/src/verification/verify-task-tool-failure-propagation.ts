@@ -9,7 +9,8 @@ import {
   extractToolResultPart,
   isTaskToolOutput,
   readSingleTextMessage,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
+  readFetchBody,
   readLastUserMessage,
   waitFor,
   withMockFetch,
@@ -29,10 +30,10 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
+          const body = await readFetchBody(_url, init);
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
-            return createChatCompletionsStream('我已收到失败的子代理结果，并同步回主对话。');
+            return createProtocolAwareStream(_url, '我已收到失败的子代理结果，并同步回主对话。');
           }
 
           return new Response(JSON.stringify({ error: { message: '子代理上游失败' } }), {

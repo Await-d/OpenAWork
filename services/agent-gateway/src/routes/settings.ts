@@ -1776,6 +1776,7 @@ ${contextBlock}
           model: llmConfig.model,
           ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
           ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
           prompt,
           temperature: 0.7,
         });

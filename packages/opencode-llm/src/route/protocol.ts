@@ -1,5 +1,5 @@
-import { Schema, type Effect } from "effect"
-import type { LLMError, LLMEvent, LLMRequest, ProtocolID } from "../schema/index.js"
+import { Schema, type Effect } from 'effect';
+import type { LLMError, LLMEvent, LLMRequest, ProtocolID } from '../schema/index.js';
 
 /**
  * The semantic API contract of one model server family.
@@ -35,31 +35,34 @@ import type { LLMError, LLMEvent, LLMRequest, ProtocolID } from "../schema/index
  */
 export interface Protocol<Body, Frame, Event, State> {
   /** Stable id for the wire protocol implementation. */
-  readonly id: ProtocolID
+  readonly id: ProtocolID;
   /** Request side: schema for the provider-native body and how to build it. */
-  readonly body: ProtocolBody<Body>
+  readonly body: ProtocolBody<Body>;
   /** Response side: streaming state machine. */
-  readonly stream: ProtocolStream<Frame, Event, State>
+  readonly stream: ProtocolStream<Frame, Event, State>;
 }
 
 export interface ProtocolBody<Body> {
   /** Schema for the validated provider-native body sent as the JSON request. */
-  readonly schema: Schema.Codec<Body, unknown>
+  readonly schema: Schema.Codec<Body, unknown>;
   /** Build the provider-native body from a common `LLMRequest`. */
-  readonly from: (request: LLMRequest) => Effect.Effect<Body, LLMError>
+  readonly from: (request: LLMRequest) => Effect.Effect<Body, LLMError>;
 }
 
 export interface ProtocolStream<Frame, Event, State> {
   /** Schema for one decoded streaming event, decoded from a transport frame. */
-  readonly event: Schema.Codec<Event, Frame>
+  readonly event: Schema.Codec<Event, Frame>;
   /** Initial parser state. Called once per response with the resolved request. */
-  readonly initial: (request: LLMRequest) => State
+  readonly initial: (request: LLMRequest) => State;
   /** Translate one event into emitted `LLMEvent`s plus the next state. */
-  readonly step: (state: State, event: Event) => Effect.Effect<readonly [State, ReadonlyArray<LLMEvent>], LLMError>
+  readonly step: (
+    state: State,
+    event: Event,
+  ) => Effect.Effect<readonly [State, ReadonlyArray<LLMEvent>], LLMError>;
   /** Optional request-completion signal for transports that do not end naturally. */
-  readonly terminal?: (event: Event) => boolean
+  readonly terminal?: (event: Event) => boolean;
   /** Optional flush emitted when the framed stream ends. */
-  readonly onHalt?: (state: State) => ReadonlyArray<LLMEvent>
+  readonly onHalt?: (state: State) => ReadonlyArray<LLMEvent>;
 }
 
 /**
@@ -77,12 +80,8 @@ export interface ProtocolStream<Frame, Event, State> {
  */
 export const make = <Body, Frame, Event, State>(
   input: Protocol<Body, Frame, Event, State>,
-): Protocol<Body, Frame, Event, State> => input
+): Protocol<Body, Frame, Event, State> => input;
 
-export const jsonEvent = <const S extends Schema.Top>(schema: S) => Schema.fromJsonString(schema)
+export const jsonEvent = <const S extends Schema.Top>(schema: S) => Schema.fromJsonString(schema);
 
-export * as Protocol from "./protocol.js"
-
-
-
-
+export * as Protocol from './protocol.js';

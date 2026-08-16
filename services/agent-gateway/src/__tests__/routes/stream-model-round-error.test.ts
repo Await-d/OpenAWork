@@ -124,6 +124,7 @@ describe('toUpstreamStreamSummary', () => {
           sawDone: true,
           sawError: false,
           stalled: false,
+          openaiServiceTier: 'priority',
         },
         {
           model: 'gpt-5.4',
@@ -138,6 +139,7 @@ describe('toUpstreamStreamSummary', () => {
       toolCallDeltaCount: 0,
       modelId: 'gpt-5.4',
       providerId: 'openai-fast',
+      openaiServiceTier: 'priority',
       sawDone: true,
       sawError: false,
       stalled: false,

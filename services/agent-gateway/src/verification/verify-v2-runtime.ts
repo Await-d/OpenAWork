@@ -171,11 +171,20 @@ async function main(): Promise<void> {
       `Effect-driven listSessionEntries should yield ≥ 4 rows, got ${listed.length}`,
     );
 
-    // ── runWithStorageOption must swallow failures ──────────────
+    let failureObserved = false;
     const softFailure = await EffectBridge.runWithStorageOption(
       Effect.fail(new Error('intentional failure')),
+      {
+        allowLegacyFallback: true,
+        onFailure: () => {
+          failureObserved = true;
+        },
+      },
     );
-    assert(softFailure === null, 'runWithStorageOption should resolve with null on failure');
+    assert(
+      softFailure === null && failureObserved,
+      'runWithStorageOption should require an observable explicit fallback',
+    );
 
     // ── Phase 2.2 follow-up: tool.called must be persisted when a
     // ToolPart transitions from pending → running. Without this hook

@@ -132,8 +132,7 @@ import {
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 import type { RightPanelTabId } from './panels/right-panel-tabs.js';
 import { ChatScrollBottomButton } from '../../components/conversation-runtime/views/scroll-bottom-button.js';
-import { ChatStreamErrorBar } from '../../components/conversation-runtime/views/stream-error-bar.js';
-import HistoryEditDialog from './conversation/views/history-edit-dialog.js';
+import { ChatStreamErrorBarV2 as ChatStreamErrorBar } from '../../components/conversation-runtime/views/stream-error-bar-v2.js';
 import {
   type ImageEditReferenceArtifact,
   toImageEditReferenceArtifacts,
@@ -265,6 +264,7 @@ import {
 } from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
+import { shouldPreserveActiveLocalStream } from './conversation/snapshot/session-reload-transition.js';
 import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
 import { type SessionViewStreamingSnapshot } from './conversation/snapshot/use-session-view-cache.js';
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
@@ -289,6 +289,7 @@ import {
 } from './mode/dialogue-mode.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
+import { usePersistedStreamError } from './hooks/use-persisted-stream-error.js';
 import { buildStreamAssistantTrace } from './conversation/render/build-stream-assistant-trace.js';
 import { commitStreamingRound } from './conversation/render/commit-streaming-round.js';
 import {
@@ -428,7 +429,7 @@ export default function ChatPage() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamError, setStreamError] = usePersistedStreamError(currentSessionId);
   const modelPrices = useModelPrices(gatewayUrl, token);
   const [rightPanelState, setRightPanelState] = useState(() => createInitialChatRightPanelState());
   const streamingState = useChatStreaming();
@@ -484,6 +485,7 @@ export default function ChatPage() {
   activeStreamStartedAtRef.current = activeStreamStartedAt;
   const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
   rightPanelStateRef.current = rightPanelState;
+  const lastAttachAttemptTimestampRef = useRef<number>(0);
 
   // ─── 待处理操作域 — 抽到 useChatPendingActions。
   // 参见 docs/architecture/chat-page-split-plan.md 域 C。
@@ -562,6 +564,8 @@ export default function ChatPage() {
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
   const sessionRestoredFromCacheRef = useRef(false);
+  const [showSkeletonAfterDelay, setShowSkeletonAfterDelay] = useState(false);
+  const skeletonDelayTimerRef = useRef<number | null>(null);
   const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPrompt | null>(null);
   const [retryPrompt, setRetryPrompt] = useState<RetryPrompt | null>(null);
   const [, startSessionSwitchTransition] = useTransition();
@@ -1375,6 +1379,18 @@ export default function ChatPage() {
       return null;
     }
 
+    // 如果刚发送消息（5秒内），不显示"正在重新接入"提示
+    // 这是正常的发送流程，不是远程流恢复场景
+    const timeSinceStreamStart = activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
+    if (timeSinceStreamStart < 5000) {
+      return null;
+    }
+
+    // 如果会话状态是 idle 且没有 active stream，不应该显示忙碌状态
+    if (sessionStateStatus === 'idle' && recoveryActiveStream === null) {
+      return null;
+    }
+
     if (sessionStateStatus === 'running' || sessionStateStatus === 'paused') {
       return sessionStateStatus;
     }
@@ -1384,7 +1400,8 @@ export default function ChatPage() {
     }
 
     return null;
-  }, [recoveryActiveStream, sessionStateStatus, streaming]);
+  }, [recoveryActiveStream, sessionStateStatus, streaming, activeStreamStartedAt]);
+  const activeGatewayStreamClientRequestId = client.getActiveStreamClientRequestId();
   const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
   const isCurrentSessionRunning = sessionStateStatus === 'running';
   const canStopCurrentSessionStream = Boolean(
@@ -1515,9 +1532,32 @@ export default function ChatPage() {
         // markdown / reasoning / tool cards — keep it non-urgent so React
         // can split work across frames instead of blocking the main thread.
         startSessionSwitchTransition(() => {
-          setMessages((previous) =>
-            reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
-          );
+          // 如果当前正在流式发送，不更新消息列表——流式状态是权威的，
+          // 避免用服务器的旧快照覆盖本地刚添加的用户消息和流式内容。
+          // 额外保护：即使 streaming 为 false，但距离流式开始不到 3 秒，也跳过更新。
+          const timeSinceStreamStart =
+            activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
+          if (!streamingRef.current && timeSinceStreamStart > 3000) {
+            setMessages((previous) => {
+              const reconciled = reconcileSnapshotChatMessages(previous, prepared.normalizedMessages);
+              // 额外保护：如果协调后的消息为空，但本地有消息，保留本地消息
+              // 这防止在对话完成后消息被意外清空
+              if (reconciled.length === 0 && previous.length > 0) {
+                console.log('[RECOVERY] 跳过清空消息，保护本地状态', {
+                  previousLength: previous.length,
+                  reconciledLength: reconciled.length,
+                  snapshotLength: prepared.normalizedMessages.length,
+                });
+                return previous;
+              }
+              return reconciled;
+            });
+          } else {
+            console.log('[RECOVERY] 跳过消息协调，保护本地流式状态', {
+              streaming: streamingRef.current,
+              timeSinceStreamStart,
+            });
+          }
           setMessageRatings(prepared.messageRatings);
           setRightPanelState(
             buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
@@ -1563,6 +1603,14 @@ export default function ChatPage() {
   useEffect(() => {
     const requestedSessionId = sessionId ?? null;
     const shouldPreserveBootstrapState = pendingBootstrapSessionRef.current === requestedSessionId;
+    const shouldPreserveActiveStream =
+      !shouldPreserveBootstrapState &&
+      shouldPreserveActiveLocalStream({
+        activeSessionId: activeSessionRef.current,
+        isStreaming: streamingRef.current,
+        loadedSessionId: currentLoadedSessionIdRef.current,
+        requestedSessionId,
+      });
     const shouldSoftReloadCurrentSession =
       sessionReloadNonce > 0 &&
       requestedSessionId !== null &&
@@ -1570,7 +1618,7 @@ export default function ChatPage() {
     void sessionReloadNonce;
 
     const sessionViewEpoch =
-      shouldPreserveBootstrapState || shouldSoftReloadCurrentSession
+      shouldPreserveBootstrapState || shouldPreserveActiveStream || shouldSoftReloadCurrentSession
         ? activateSessionView(requestedSessionId, { incrementEpoch: false })
         : activateSessionView(requestedSessionId);
 
@@ -1601,9 +1649,15 @@ export default function ChatPage() {
         clearSessionMetadataDirty();
         lastPersistedSessionMetadataSnapshotRef.current = null;
         resetStreamState();
-        setStreamError(null);
         setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
         currentLoadedSessionIdRef.current = null;
+      }
+      return;
+    }
+
+    if (shouldPreserveActiveStream) {
+      if (chatView !== 'session') {
+        navigateToSession();
       }
       return;
     }
@@ -1764,9 +1818,29 @@ export default function ChatPage() {
       sessionRestoredFromCacheRef.current = false;
       startSessionSwitchTransition(() => {
         setIsSessionLoading(true);
-        setMessages([]);
+        // 如果是同一个会话且对话已完成，不清空消息列表
+        // 避免在对话完成后重新加载导致消息短暂消失
+        if (requestedSessionId !== currentLoadedSessionIdRef.current || sessionStateStatus !== 'idle') {
+          setMessages([]);
+        } else {
+          console.log('[SESSION_LOAD] 跳过清空消息，同一会话且已完成', {
+            requestedSessionId,
+            currentLoadedSessionId: currentLoadedSessionIdRef.current,
+            sessionStateStatus,
+          });
+        }
         setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
       });
+      // 延迟显示骨架屏，避免快速加载时的闪烁
+      // 只有在加载时间超过 300ms 时才显示骨架屏
+      setShowSkeletonAfterDelay(false);
+      if (skeletonDelayTimerRef.current !== null) {
+        window.clearTimeout(skeletonDelayTimerRef.current);
+      }
+      skeletonDelayTimerRef.current = window.setTimeout(() => {
+        setShowSkeletonAfterDelay(true);
+        skeletonDelayTimerRef.current = null;
+      }, 300);
     }
     setRightPanelState(createInitialChatRightPanelState());
     setServerTotalTurnCount(null);
@@ -1787,7 +1861,6 @@ export default function ChatPage() {
     sessionModelSelectionSourceRef.current = null;
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
-    setStreamError(null);
     setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
     setManualAgentId('');
     setYoloMode(false);
@@ -1920,6 +1993,12 @@ export default function ChatPage() {
             }
             setSessionModesHydrated(true);
             setIsSessionLoading(false);
+            // 清除骨架屏延迟定时器
+            if (skeletonDelayTimerRef.current !== null) {
+              window.clearTimeout(skeletonDelayTimerRef.current);
+              skeletonDelayTimerRef.current = null;
+            }
+            setShowSkeletonAfterDelay(false);
           });
         };
 
@@ -3449,11 +3528,13 @@ export default function ChatPage() {
         }
         setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
         resetStreamState();
+        // 流式完成后延迟快照恢复，给服务器足够时间持久化消息。
+        // 使用较短的延迟（800ms）避免用户感知到不一致，同时确保服务器已完成持久化。
         window.setTimeout(() => {
           void loadCurrentSessionSnapshot(sid, {
             messageLimit: INITIAL_TURN_LIMIT,
           }).catch(() => undefined);
-        }, 500);
+        }, 800);
         requestSessionListRefresh();
       },
       onError: (code: string, message?: string) => {
@@ -3674,16 +3755,42 @@ export default function ChatPage() {
 
     if (!shouldAttemptAttach || !currentSessionId) {
       cancelAttachRetry();
-      if (shouldResetAttachAttempt(attachEligibility)) {
+      // 只在会话切换时重置 attach 标记，避免同一会话内重复触发 attach
+      // 额外保护：如果上次 attach 尝试在 10 秒内，不要重置（防止 attach 刚完成就被重置导致重复触发）
+      const timeSinceLastAttach = Date.now() - lastAttachAttemptTimestampRef.current;
+      if (shouldResetAttachAttempt(attachEligibility) &&
+          attachAttemptedSessionRef.current !== currentSessionId &&
+          timeSinceLastAttach > 10000) {
         attachAttemptedSessionRef.current = null;
       }
       return;
     }
 
-    if (attachAttemptedSessionRef.current === currentSessionId) {
+    // 如果 sessionStateStatus 是 'idle'，说明对话已经完成
+    // 只有在有明确的 running 状态或 recovery stream 时才允许 attach
+    if (sessionStateStatus === 'idle' && !recoveryActiveStream) {
+      console.log('[ATTACH_ELIGIBILITY] 跳过 attach，会话已完成（idle）', {
+        currentSessionId,
+        sessionStateStatus,
+        recoveryActiveStream,
+        activeGatewayStreamSessionId,
+      });
       return;
     }
+
+    if (attachAttemptedSessionRef.current === currentSessionId) {
+      console.log('[ATTACH_ELIGIBILITY] 已经尝试过 attach，跳过', currentSessionId);
+      return;
+    }
+
+    // 如果本地流式刚开始（2秒内），阻止 attach 触发，避免覆盖本地刚添加的用户消息。
+    // 这个保护确保用户发送第一条消息后，本地状态有足够时间稳定，不会被 attach 流程覆盖。
+    if (activeStreamStartedAt !== null && Date.now() - activeStreamStartedAt < 2000) {
+      return;
+    }
+
     attachAttemptedSessionRef.current = currentSessionId;
+    lastAttachAttemptTimestampRef.current = Date.now();
     console.log('[ATTACH_ELIGIBILITY] proceeding with attach for', currentSessionId);
 
     const sid = currentSessionId;
@@ -4512,12 +4619,13 @@ export default function ChatPage() {
           }
           setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
           resetStreamState();
+          // 流式完成后延迟快照恢复，给服务器足够时间持久化消息。
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
               messageLimit: INITIAL_TURN_LIMIT,
             }).catch(() => undefined);
-          }, 500);
+          }, 800);
           requestSessionListRefresh();
         },
         onError: (code, message) => {
@@ -4561,6 +4669,7 @@ export default function ChatPage() {
           setSessionStateStatus('idle');
           resetStreamState();
           setStreamError(resolvedMessage);
+          // 错误后的快照恢复可以更快，因为不需要等待服务器持久化。
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
@@ -4580,6 +4689,8 @@ export default function ChatPage() {
         }
         if (attached) {
           cancelAttachRetry();
+          // 标记这个会话的 attach 已成功完成，防止后续重复触发
+          console.log('[ATTACH_ELIGIBILITY] attach succeeded for', sid);
           return;
         }
 
@@ -4699,6 +4810,7 @@ export default function ChatPage() {
     visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
     visibleReportedStreamUsage,
+    activeStreamClientRequestId: activeGatewayStreamClientRequestId,
     activeStreamFirstTokenLatencyMs,
     activeStreamMessageId,
     toolCallCards,
@@ -5203,7 +5315,15 @@ export default function ChatPage() {
     isPageActive,
   );
 
-  const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
+  // 只在真正的会话切换加载时显示骨架屏，而不是在发送新消息时显示
+  // 如果距离上次流式开始不到 5 秒，说明是正常的对话流程，不显示骨架屏
+  const timeSinceStreamStart = activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
+  const showSessionSwitchSkeleton =
+    currentSessionId !== null &&
+    isSessionLoading &&
+    !streaming &&
+    showSkeletonAfterDelay &&
+    timeSinceStreamStart > 5000;
   const dialogueModeLabel =
     DIALOGUE_MODE_OPTIONS.find((option) => option.value === dialogueMode)?.label ?? dialogueMode;
 
@@ -5731,14 +5851,14 @@ export default function ChatPage() {
                   void handleEditResendInCurrentSession(
                     text,
                     historyEditPrompt.messageId,
-                    editedInputParts as never,
+                    editedInputParts,
                   );
                   setHistoryEditPrompt(null);
                 }}
                 onContinueHistoryEdit={(text, editedInputParts) => {
-                  if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
+                  if (editedInputParts && editedInputParts.length > 0) {
                     void sendMessage(text, {
-                      existingInputParts: editedInputParts as never,
+                      existingInputParts: editedInputParts,
                     });
                   } else {
                     focusComposerWithText(text);
@@ -5750,7 +5870,7 @@ export default function ChatPage() {
                   void createBranchSessionFromMessage(
                     text,
                     historyEditPrompt.messageId,
-                    editedInputParts as never,
+                    editedInputParts,
                   );
                   setHistoryEditPrompt(null);
                 }}
@@ -6206,14 +6326,14 @@ export default function ChatPage() {
                     void handleEditResendInCurrentSession(
                       text,
                       historyEditPrompt.messageId,
-                      editedInputParts as never,
+                      editedInputParts,
                     );
                     setHistoryEditPrompt(null);
                   }}
                   onContinueHistoryEdit={(text, editedInputParts) => {
-                    if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
+                    if (editedInputParts && editedInputParts.length > 0) {
                       void sendMessage(text, {
-                        existingInputParts: editedInputParts as never,
+                        existingInputParts: editedInputParts,
                       });
                     } else {
                       focusComposerWithText(text);
@@ -6225,7 +6345,7 @@ export default function ChatPage() {
                     void createBranchSessionFromMessage(
                       text,
                       historyEditPrompt.messageId,
-                      editedInputParts as never,
+                      editedInputParts,
                     );
                     setHistoryEditPrompt(null);
                   }}

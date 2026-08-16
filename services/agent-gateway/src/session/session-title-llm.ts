@@ -1,4 +1,5 @@
 import type { ModelRouteConfig } from '../provider/model-router.js';
+import { Effect } from 'effect';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
@@ -124,31 +125,34 @@ async function callTitleLlm(
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
   try {
-    const result = await runUpstreamGenerate({
-      providerType: route.providerType ?? 'openai',
-      // Forward the resolved upstream protocol so providers configured for
-      // `anthropic_messages` / `responses` actually hit their native API
-      // surface instead of silently degrading to OpenAI Chat Completions.
-      ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
-      ...(route.apiKey ? { apiKey: route.apiKey } : {}),
-      ...(route.apiBaseUrl ? { baseURL: route.apiBaseUrl } : {}),
-      ...(route.requestOverrides.headers && Object.keys(route.requestOverrides.headers).length > 0
-        ? { headers: route.requestOverrides.headers }
-        : {}),
-      model: route.model,
-      sessionId,
-      system: TITLE_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `请为下面这段会话生成标题：\n${userMessage}`,
-        },
-      ],
-      maxOutputTokens: 100,
-      temperature: 0.5,
-      requestOverrides: route.requestOverrides,
-      signal: controller.signal,
-    });
+    const result = await Effect.runPromise(
+      runUpstreamGenerate({
+        providerType: route.providerType ?? 'openai',
+        // Forward the resolved upstream protocol so providers configured for
+        // `anthropic_messages` / `responses` actually hit their native API
+        // surface instead of silently degrading to OpenAI Chat Completions.
+        ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
+        ...(route.apiKey ? { apiKey: route.apiKey } : {}),
+        ...(route.apiBaseUrl ? { baseURL: route.apiBaseUrl } : {}),
+        ...(route.openaiFastMode === true ? { openaiFastMode: true } : {}),
+        ...(route.requestOverrides.headers && Object.keys(route.requestOverrides.headers).length > 0
+          ? { headers: route.requestOverrides.headers }
+          : {}),
+        model: route.model,
+        sessionId,
+        system: TITLE_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `请为下面这段会话生成标题：\n${userMessage}`,
+          },
+        ],
+        maxOutputTokens: 100,
+        temperature: 0.5,
+        requestOverrides: route.requestOverrides,
+        signal: controller.signal,
+      }),
+    );
     const text = result.text.trim();
     return text.length > 0 ? text : null;
   } catch {

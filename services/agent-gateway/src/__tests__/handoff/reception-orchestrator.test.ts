@@ -227,6 +227,61 @@ describe('orchestrateReceptionInput', () => {
     );
   });
 
+  it('light 路径直接留在 reception，不创建 handoff 或调用改写 LLM', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '了解一下当前项目',
+      persistUserMessage: false,
+      persistAckMessage: false,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'light-answer' });
+    expect(runSessionInBackgroundMock).toHaveBeenCalledTimes(1);
+    expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: expect.objectContaining({
+          message: '了解一下当前项目',
+        }),
+      }),
+    );
+    expect(llmCompletion).not.toHaveBeenCalled();
+
+    const handoffs = dbModule.sqliteAll<{ id: string }>(
+      `SELECT id FROM handoff_records WHERE from_session_id = ?`,
+      [SESSION_ID],
+    );
+    expect(handoffs).toHaveLength(0);
+  });
+
+  it('路由超时信号透传给 workflow LLM', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+
+    let receivedSignal: AbortSignal | undefined;
+    llmCompletion.mockImplementationOnce(
+      async (config: { prompt: string; signal?: AbortSignal }) => {
+        receivedSignal = config.signal;
+        return 'DECISION: CLARIFY\nREASON: 意图不明确';
+      },
+    );
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '这个请求',
+      persistUserMessage: false,
+      persistAckMessage: false,
+    });
+
+    expect(result.reason).toBe('clarify-needed');
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+    expect(receivedSignal?.aborted).toBe(false);
+  });
+
   it('并发编排同一 reception 会话时只创建一条 handoff（in-flight 守卫，防并行 pm1 链路）', async () => {
     // 无 LLM 配置：body 在 await resolveAuxiliaryLlmConfig 后立刻返回 no-llm-config。
     // 第一次调用同步取得 in-flight 守卫后在该 await 处让出事件循环；第二次调用同步
@@ -350,7 +405,7 @@ describe('orchestrateReceptionInput', () => {
     const result = await orchestrator.orchestrateReceptionInput({
       userId: USER_ID,
       receptionSessionId: SESSION_ID,
-      userIntent: '优化团队知识图谱展示和入库流程',
+      userIntent: '优化代码中的团队知识图谱展示和入库流程',
       teamWorkspaceId: TEAM_WORKSPACE_ID,
       persistUserMessage: false,
       persistAckMessage: false,

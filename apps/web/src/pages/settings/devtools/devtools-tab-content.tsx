@@ -736,14 +736,22 @@ export function DevtoolsTabContent({
           {loadingCount > 0 && <span>加载中 {loadingCount}</span>}
           {emptyCount > 0 && <span>暂无数据 {emptyCount}</span>}
           {unavailableCount > 0 && (
-            <span style={{ color: 'var(--warning)', fontWeight: 500 }}>未接入 {unavailableCount}</span>
+            <span style={{ color: 'var(--warning)', fontWeight: 500 }}>
+              未接入 {unavailableCount}
+            </span>
           )}
           {errorSources.length > 0 && (
-            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>失败 {errorSources.length}</span>
+            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
+              失败 {errorSources.length}
+            </span>
           )}
-          {logErrors > 0 && <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误 {logErrors}</span>}
+          {logErrors > 0 && (
+            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误 {logErrors}</span>
+          )}
           {workerErrors > 0 && (
-            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>Worker 异常 {workerErrors}</span>
+            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
+              Worker 异常 {workerErrors}
+            </span>
           )}
         </div>
 
@@ -764,7 +772,9 @@ export function DevtoolsTabContent({
                   fontSize: 12,
                 }}
               >
-                <span style={{ color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>✗ {source.label}</span>
+                <span style={{ color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>
+                  ✗ {source.label}
+                </span>
                 <span
                   style={{
                     color: 'var(--fg-default)',

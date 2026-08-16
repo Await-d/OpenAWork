@@ -10,6 +10,7 @@
  */
 
 import { and, asc, desc, eq, gte, lt } from 'drizzle-orm';
+import { Effect, Stream } from 'effect';
 import { type DrizzleHandle, createDrizzleHandle } from './db.js';
 import {
   eventLog,
@@ -105,42 +106,61 @@ export class V2Storage {
    * so callers like `filterCompacted` can short-circuit at the latest
    * compaction boundary without buffering the full session history.
    */
-  async *streamMessagesNewestFirst(input: {
+  streamMessagesNewestFirst(input: {
     sessionId: string;
     userId: string;
     pageSize?: number;
-  }): AsyncGenerator<MessageV2Row, void, unknown> {
+  }): Stream.Stream<MessageV2Row> {
     const pageSize = input.pageSize ?? 50;
-    let beforeTime: number | undefined;
-    let beforeId: string | undefined;
+    type Cursor = {
+      readonly rows: readonly MessageV2Row[];
+      readonly beforeTime?: number;
+      readonly beforeId?: string;
+      readonly done: boolean;
+    };
 
-    while (true) {
-      const conditions = [
-        eq(messageV2.sessionId, input.sessionId),
-        eq(messageV2.userId, input.userId),
-      ];
-      if (beforeTime !== undefined && beforeId !== undefined) {
-        conditions.push(lt(messageV2.timeCreated, beforeTime));
-      }
-      const page = await this.db
-        .select()
-        .from(messageV2)
-        .where(and(...conditions))
-        .orderBy(desc(messageV2.timeCreated), desc(messageV2.id))
-        .limit(pageSize + 1);
+    const initial: Cursor = { rows: [], done: false };
+    return Stream.unfold(initial, (cursor) =>
+      Effect.promise(async () => {
+        if (cursor.rows.length > 0) {
+          const row = cursor.rows[0];
+          if (!row) return undefined;
+          const rows = cursor.rows.slice(1);
+          return [row, { ...cursor, rows }] as const;
+        }
+        if (cursor.done) return undefined;
 
-      if (page.length === 0) return;
+        const conditions = [
+          eq(messageV2.sessionId, input.sessionId),
+          eq(messageV2.userId, input.userId),
+        ];
+        if (cursor.beforeTime !== undefined && cursor.beforeId !== undefined) {
+          conditions.push(lt(messageV2.timeCreated, cursor.beforeTime));
+        }
+        const page = await this.db
+          .select()
+          .from(messageV2)
+          .where(and(...conditions))
+          .orderBy(desc(messageV2.timeCreated), desc(messageV2.id))
+          .limit(pageSize + 1);
+        if (page.length === 0) return undefined;
 
-      const slice = page.length > pageSize ? page.slice(0, pageSize) : page;
-      for (const row of slice) {
-        yield row;
-      }
-
-      if (page.length <= pageSize) return;
-      const tail = slice[slice.length - 1]!;
-      beforeTime = tail.timeCreated;
-      beforeId = tail.id;
-    }
+        const rows = page.length > pageSize ? page.slice(0, pageSize) : page;
+        const first = rows[0];
+        const last = rows[rows.length - 1];
+        if (!first) return undefined;
+        return [
+          first,
+          {
+            rows: rows.slice(1),
+            done: page.length <= pageSize,
+            ...(page.length > pageSize && last
+              ? { beforeTime: last.timeCreated, beforeId: last.id }
+              : {}),
+          },
+        ] as const;
+      }),
+    );
   }
 
   // ─── Parts ────────────────────────────────────────────────────────

@@ -184,12 +184,25 @@ describe('EffectBridge.runWithStorage', () => {
     expect(result).toBe(1);
   });
 
-  it('runWithStorageOption returns null on failure', async () => {
+  it('runWithStorageOption returns null only after an explicit failure observer', async () => {
     const program = Effect.gen(function* () {
       yield* Effect.fail(new Error('boom'));
       return 'unreachable';
     });
-    const result = await EffectBridge.runWithStorageOption(program);
+    const onFailure = vi.fn();
+    const result = await EffectBridge.runWithStorageOption(program, {
+      allowLegacyFallback: true,
+      onFailure,
+    });
     expect(result).toBeNull();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('runWithStorageOption rejects by default instead of silently falling back', async () => {
+    const program = Effect.fail(new Error('storage fallback is forbidden by default'));
+
+    await expect(EffectBridge.runWithStorageOption(program)).rejects.toThrow(
+      /storage fallback is forbidden by default/,
+    );
   });
 });
