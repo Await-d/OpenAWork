@@ -210,6 +210,21 @@ export const validateToolFile = (route: string, part: ToolFileContent, supported
 
 export const trimBaseUrl = (value: string) => value.replace(/\/+$/, "")
 
+export const isAnthropicOfficialBaseUrl = (value: string | undefined) => {
+  if (value === undefined) return true
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" && url.hostname === "api.anthropic.com"
+  } catch {
+    return false
+  }
+}
+
+export const supportsAnthropicContextManagement = (request: LLMRequest) =>
+  String(request.model.provider) === "anthropic" &&
+  String(request.model.route.protocol) === "anthropic-messages" &&
+  isAnthropicOfficialBaseUrl(request.model.route.endpoint.baseURL)
+
 export const toolResultText = (part: ToolResultPart) => {
   if (part.result.type === "text") return String(part.result.value)
   if (part.result.type === "error") {
@@ -324,6 +339,4 @@ export const jsonPost = (input: { readonly url: string; readonly body: string; r
   )
 
 export * as ProviderShared from "./shared.js"
-
-
 

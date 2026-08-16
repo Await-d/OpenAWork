@@ -2693,6 +2693,7 @@ export async function handleStreamRequest(input: {
             signal: abortController.signal,
             round,
             lastRoundUsage,
+            requestKind: 'conversation',
           });
           if (proactiveResult.triggered) {
             input.sessionContext.metadataJson = proactiveResult.metadataJson;
@@ -2735,6 +2736,29 @@ export async function handleStreamRequest(input: {
           syntheticContinuationPrompt,
           memoryBlock,
           agentId: route.effectiveAgentId ?? requestData.agentId,
+          ...(round === 1
+            ? {
+                beforeUpstreamCall: async (renderedMessageTokens: number) => {
+                  const proactiveResult = await triggerProactiveCompaction({
+                    userId: input.user.sub,
+                    sessionId: input.sessionId,
+                    metadataJson: input.sessionContext.metadataJson,
+                    clientRequestId: requestData.clientRequestId,
+                    runId,
+                    route,
+                    compactionSettings,
+                    signal: abortController.signal,
+                    round,
+                    lastRoundUsage: { inputTokens: renderedMessageTokens },
+                    requestKind: 'conversation',
+                  });
+                  if (proactiveResult.triggered) {
+                    input.sessionContext.metadataJson = proactiveResult.metadataJson;
+                  }
+                  return proactiveResult.triggered;
+                },
+              }
+            : {}),
           writeChunk: emitChunk,
         });
         syntheticContinuationPrompt = undefined;
@@ -2811,6 +2835,7 @@ export async function handleStreamRequest(input: {
             compactionSettings,
             signal: abortController.signal,
             round,
+            requestKind: 'conversation',
             roundResult: {
               overflow: result.overflow,
               stopReason: result.stopReason,

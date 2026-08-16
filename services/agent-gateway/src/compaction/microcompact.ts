@@ -29,8 +29,12 @@ export interface MicrocompactConfig {
   triggerThreshold: number;
   /** Number of most-recent compactable tool_results to keep intact. */
   keepRecent: number;
+  /** Whether the time-based trigger is enabled. */
+  timeBasedEnabled: boolean;
   /** Time-based trigger: minutes since last assistant message. */
   timeGapThresholdMinutes: number;
+  /** Number of recent compactable results kept by the time-based trigger. */
+  timeBasedKeepRecent: number;
   /** Tool names whose results are eligible for clearing. */
   compactableTools: ReadonlySet<string>;
   /** Tool names whose results must never be cleared. */
@@ -65,7 +69,9 @@ export const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
   enabled: true,
   triggerThreshold: 20,
   keepRecent: 8,
-  timeGapThresholdMinutes: 30,
+  timeBasedEnabled: false,
+  timeGapThresholdMinutes: 60,
+  timeBasedKeepRecent: 5,
   compactableTools: DEFAULT_COMPACTABLE_TOOLS,
   protectedTools: DEFAULT_PROTECTED_TOOLS,
 };
@@ -129,18 +135,19 @@ function collectCompactableToolResults(
 }
 
 /**
- * Find the timestamp of the last assistant message (approximated from
- * message position — in a server-side context we don't have wall-clock
- * timestamps on UnifiedMessage, so we use position as a proxy).
- *
- * For time-based triggering, the caller provides `lastAssistantTimestamp`
- * from the session metadata or the last persisted assistant message.
+ * The caller provides the persisted timestamp of the last assistant message.
  */
 function shouldTimeBasedTrigger(
   config: MicrocompactConfig,
   lastAssistantTimestamp: number | undefined,
 ): boolean {
-  if (!lastAssistantTimestamp) return false;
+  if (
+    !config.timeBasedEnabled ||
+    lastAssistantTimestamp === undefined ||
+    !Number.isFinite(lastAssistantTimestamp)
+  ) {
+    return false;
+  }
   const gapMs = Date.now() - lastAssistantTimestamp;
   const gapMinutes = gapMs / 60_000;
   return gapMinutes >= config.timeGapThresholdMinutes;
@@ -180,11 +187,9 @@ export function microcompactMessages(
   let trigger: 'count' | 'time' | 'none' = 'none';
   let keepCount: number;
 
-  // Time-based trigger takes priority (cache is cold, clear aggressively)
   if (shouldTimeBasedTrigger(config, context?.lastAssistantTimestamp)) {
     trigger = 'time';
-    // Keep fewer when time-triggered (cache is cold anyway)
-    keepCount = Math.max(1, Math.floor(config.keepRecent / 2));
+    keepCount = config.timeBasedKeepRecent;
   } else if (candidates.length > config.triggerThreshold) {
     trigger = 'count';
     keepCount = config.keepRecent;

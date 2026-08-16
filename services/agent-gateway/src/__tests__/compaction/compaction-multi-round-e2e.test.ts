@@ -22,6 +22,7 @@ import type { Message } from '@openAwork/shared';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
 const sqliteRunMock = vi.hoisted(() => vi.fn());
+const sqliteTransactionMock = vi.hoisted(() => vi.fn(<T>(fn: () => T): T => fn()));
 const appendMarkerMock = vi.hoisted(() => vi.fn());
 const callCompactionLlmMock = vi.hoisted(() =>
   vi.fn(async (_input: unknown) => ({
@@ -33,6 +34,7 @@ const callCompactionLlmMock = vi.hoisted(() =>
 
 vi.mock('../../infra/db.js', () => ({
   sqliteRun: sqliteRunMock,
+  sqliteTransaction: sqliteTransactionMock,
   // unused but referenced by indirect imports
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(),
@@ -90,6 +92,7 @@ const ROUTE: ModelRouteConfig = {
 beforeEach(() => {
   callCompactionLlmMock.mockReset();
   sqliteRunMock.mockReset();
+  sqliteTransactionMock.mockClear();
   appendMarkerMock.mockReset();
 });
 
@@ -170,6 +173,7 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
     // Each round must persist a marker message + write the row.
     expect(sqliteRunMock).toHaveBeenCalledTimes(3);
     expect(appendMarkerMock).toHaveBeenCalledTimes(3);
+    expect(sqliteTransactionMock).toHaveBeenCalledTimes(3);
   });
 
   it('clears any prior anchor when a round produces empty messagesToSummarize', async () => {
@@ -247,5 +251,68 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
     // failure was recorded without a successful summary leaking
     // into the metadata as a "real" v2).
     expect(r2.llmSummary).toBeUndefined();
+  });
+
+  it('atomically persists metadata and one replayable marker for the same request round', async () => {
+    callCompactionLlmMock.mockResolvedValueOnce({
+      summary: 'atomic summary',
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+
+    const result = await executeSessionCompaction({
+      clientRequestId: 'request-atomic',
+      metadataJson: '{}',
+      messages: [userMessage('m1', 'a'), assistantMessage('m2', 'b')],
+      round: 7,
+      route: ROUTE,
+      sessionId: 'sess-atomic',
+      trigger: 'automatic',
+      userId: 'user-1',
+    });
+
+    const signature = result.durableSummary?.signature;
+    expect(signature).toBeDefined();
+    expect(sqliteTransactionMock).toHaveBeenCalledTimes(2);
+    expect(appendMarkerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: `compaction-marker:request-atomic:7:${signature}`,
+        signature,
+      }),
+    );
+  });
+
+  it('allows the third automatic LLM failure and rejects the fourth request', async () => {
+    callCompactionLlmMock.mockRejectedValue(new Error('upstream 503'));
+
+    const third = await executeSessionCompaction({
+      clientRequestId: 'request-breaker-third',
+      metadataJson: JSON.stringify({ consecutiveCompactionFailures: 2 }),
+      messages: [userMessage('m1', 'a'), assistantMessage('m2', 'b')],
+      round: 3,
+      route: ROUTE,
+      sessionId: 'sess-breaker',
+      trigger: 'automatic',
+      userId: 'user-1',
+    });
+
+    expect(callCompactionLlmMock).toHaveBeenCalledTimes(1);
+    expect(third.llmErrorMessage).toContain('503');
+    expect(third.metadata['consecutiveCompactionFailures']).toBe(3);
+
+    const fourth = await executeSessionCompaction({
+      clientRequestId: 'request-breaker-fourth',
+      metadataJson: third.metadataJson,
+      messages: [userMessage('m1', 'a'), assistantMessage('m2', 'b')],
+      round: 4,
+      route: ROUTE,
+      sessionId: 'sess-breaker',
+      trigger: 'automatic',
+      userId: 'user-1',
+    });
+
+    expect(callCompactionLlmMock).toHaveBeenCalledTimes(1);
+    expect(fourth.llmErrorMessage).toContain('circuit breaker');
+    expect(fourth.metadata['consecutiveCompactionFailures']).toBe(3);
   });
 });

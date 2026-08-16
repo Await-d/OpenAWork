@@ -1,3 +1,5 @@
+import { parsePositiveOverride, resolveCompactionThreshold } from './compaction-parity-contract.js';
+
 /**
  * Dynamic Context Window Resolver
  *
@@ -221,8 +223,8 @@ function buildEnvContextOverrides(): Map<string, number> {
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith('CONTEXT_WINDOW_OVERRIDE_') || !value) continue;
     const pattern = key.slice('CONTEXT_WINDOW_OVERRIDE_'.length).toLowerCase().replace(/_/g, '-');
-    const limit = parseInt(value, 10);
-    if (!Number.isNaN(limit) && limit > 0) {
+    const limit = parsePositiveOverride(value);
+    if (limit !== undefined) {
       overrides.set(pattern, limit);
     }
   }
@@ -236,12 +238,13 @@ function buildEnvContextOverrides(): Map<string, number> {
  */
 function getEnvContextOverride(modelId: string): number | undefined {
   const lower = modelId.toLowerCase();
+  let override = parsePositiveOverride(process.env['CLAUDE_CODE_AUTO_COMPACT_WINDOW']);
   for (const [pattern, limit] of ENV_CONTEXT_OVERRIDES) {
     if (lower.includes(pattern)) {
-      return limit;
+      override = override === undefined ? limit : Math.min(override, limit);
     }
   }
-  return undefined;
+  return override;
 }
 
 /**
@@ -344,28 +347,23 @@ export function resolveEffectiveContextWindow(
   modelId: string,
   presetContextWindow: number | undefined,
 ): number {
-  // Priority 1: Runtime-discovered limit (from provider error)
   const key = cacheKey(userId, modelId);
   const cached = effectiveContextWindowCache.get(key);
+  let discoveredContextWindow: number | undefined;
   if (cached) {
     const age = Date.now() - cached.discoveredAt;
     if (age < CACHE_TTL_MS) {
-      return cached.maxTokens;
+      discoveredContextWindow = cached.maxTokens;
+    } else {
+      effectiveContextWindowCache.delete(key);
     }
-    effectiveContextWindowCache.delete(key);
   }
 
-  // Priority 2: Environment variable override
-  const envOverride = getEnvContextOverride(modelId);
-  if (envOverride !== undefined) {
-    // Only apply if it's lower than the preset (don't increase beyond preset)
-    const preset = presetContextWindow ?? 128_000;
-    return Math.min(envOverride, preset);
-  }
-
-  // Priority 3: Model preset contextWindow
-  // Priority 4: Fallback
-  return presetContextWindow ?? 128_000;
+  return resolveCompactionThreshold({
+    modelContextWindow: presetContextWindow,
+    discoveredContextWindow,
+    contextWindowOverride: getEnvContextOverride(modelId),
+  }).contextWindow;
 }
 
 /**

@@ -115,6 +115,20 @@ type CommandTask = CommandTaskGraph['tasks'][string];
 
 const taskManager = new AgentTaskManagerImpl();
 
+type SessionCompactionResult = Awaited<ReturnType<typeof executeSessionCompaction>>;
+
+function requireCompactionSummary(result: SessionCompactionResult): string {
+  if (typeof result.summary === 'string') {
+    return result.summary;
+  }
+
+  const message = result.llmErrorMessage ?? '压缩未生成摘要。';
+  if (result.retryable) {
+    throw new ApiError(409, 'BadRequest', message);
+  }
+  throw ApiError.internal(message);
+}
+
 function parseStoredJson<T>(value: string | undefined): T | undefined {
   if (!value) {
     return undefined;
@@ -312,7 +326,8 @@ async function executeCompactCommand(params: {
     clientRequestId: `${params.sessionId}:${params.commandId}:${executionId}`,
   });
 
-  let compaction: Awaited<ReturnType<typeof executeSessionCompaction>>;
+  let compaction: SessionCompactionResult;
+  let summary: string;
   try {
     compaction = await executeSessionCompaction({
       metadataJson: params.metadataJson,
@@ -324,6 +339,7 @@ async function executeCompactCommand(params: {
       trigger: 'manual',
       userId: params.userId,
     });
+    summary = requireCompactionSummary(compaction);
   } catch (error: unknown) {
     publishSessionRunEvent(
       params.sessionId,
@@ -346,7 +362,7 @@ async function executeCompactCommand(params: {
   const card = {
     type: 'compaction' as const,
     title: 'compact',
-    summary: compaction.summary,
+    summary,
     trigger: 'manual' as const,
   };
 
@@ -354,7 +370,7 @@ async function executeCompactCommand(params: {
     params.sessionId,
     params.userId,
   ]);
-  taskManager.completeTask(params.graph, task.id, compaction.summary);
+  taskManager.completeTask(params.graph, task.id, summary);
   await taskManager.save(params.graph);
 
   const failedEvent = compaction.llmErrorMessage
@@ -372,7 +388,7 @@ async function executeCompactCommand(params: {
     : null;
   const completedEvent = {
     type: 'compaction' as const,
-    summary: compaction.summary,
+    summary,
     trigger: 'manual' as const,
     phase: 'completed' as const,
     cause: 'manual' as const,
@@ -2120,6 +2136,7 @@ function toWorkspaceRelativePath(filePath: string, workspaceRoot: string): strin
 }
 
 export const __testing = {
+  requireCompactionSummary,
   executeStartWorkDoneClaimCommand,
   executeStartWorkReviewCommand,
   findLatestWorkflowPlan,

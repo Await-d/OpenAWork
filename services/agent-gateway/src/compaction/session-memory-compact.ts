@@ -17,8 +17,9 @@
  *   Reactive Compact → Session Memory Compact → Aggressive Truncation → Full Compact
  */
 
+import { createHash } from 'node:crypto';
 import type { Message } from '@openAwork/shared';
-import { sqliteRun } from '../infra/db.js';
+import { sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from '../message/message-v2-adapter.js';
 import { mergeCompactionMetadata } from './compaction-metadata.js';
 import { estimateMessageTokens } from './compaction-tail-budget.js';
@@ -56,6 +57,16 @@ export interface SessionMemoryCompactResult {
   preCompactTokenEstimate: number;
   /** Post-compact token estimate. */
   postCompactTokenEstimate: number;
+  signature: string;
+  committed: boolean;
+}
+
+interface SessionMetadataRow {
+  readonly metadata_json: string;
+}
+
+interface SessionMemoryMarkerRow {
+  readonly id: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -83,6 +94,28 @@ function readSessionMemoryForSession(sessionId: string, userId: string): string 
   if (!content) return null;
   if (isSessionMemoryEmpty(content)) return null;
   return content;
+}
+
+function buildSessionMemorySignature(input: {
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly sessionMemory: string;
+}): string {
+  return createHash('sha256')
+    .update(input.sessionId)
+    .update('\u0000')
+    .update(input.userId)
+    .update('\u0000')
+    .update(input.sessionMemory)
+    .digest('hex');
+}
+
+function buildSessionMemoryMarkerRequestId(input: {
+  readonly clientRequestId: string;
+  readonly round: number;
+  readonly signature: string;
+}): string {
+  return `compaction-marker:${input.clientRequestId}:${input.round}:${input.signature}`;
 }
 
 /**
@@ -203,12 +236,15 @@ function adjustForToolPairing(messages: Message[], startIndex: number): number {
  * just like full compaction does.
  */
 export async function trySessionMemoryCompaction(input: {
-  sessionId: string;
-  userId: string;
-  messages: Message[];
-  metadataJson: string;
-  autoCompactThreshold?: number;
-  config?: Partial<SessionMemoryCompactConfig>;
+  readonly clientRequestId: string;
+  readonly round: number;
+  readonly requestKind: 'session_memory';
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly messages: Message[];
+  readonly metadataJson: string;
+  readonly autoCompactThreshold?: number;
+  readonly config?: Partial<SessionMemoryCompactConfig>;
 }): Promise<SessionMemoryCompactResult | null> {
   const config: SessionMemoryCompactConfig = {
     ...DEFAULT_SESSION_MEMORY_COMPACT_CONFIG,
@@ -245,11 +281,26 @@ export async function trySessionMemoryCompaction(input: {
   // Build the summary message (Claude Code pattern: session memory + continuation instruction)
   const summary = buildSessionMemorySummary(sessionMemory, messagesToKeep.length > 0);
   const preCompactTokenEstimate = estimateMessagesTokens(input.messages);
+  const signature = buildSessionMemorySignature({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    sessionMemory,
+  });
+  const markerClientRequestId = buildSessionMemoryMarkerRequestId({
+    clientRequestId: input.clientRequestId,
+    round: input.round,
+    signature,
+  });
+  const persistedSession = sqliteGet<SessionMetadataRow>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+    [input.sessionId, input.userId],
+  );
+  const sourceMetadataJson = persistedSession?.metadata_json ?? input.metadataJson;
 
   // Update session metadata
   const omittedMessages = input.messages.length - messagesToKeep.length;
   const metadata = {
-    ...mergeCompactionMetadata(input.metadataJson, {
+    ...mergeCompactionMetadata(sourceMetadataJson, {
       summary,
       trigger: 'automatic',
       omittedMessages,
@@ -260,31 +311,54 @@ export async function trySessionMemoryCompaction(input: {
     consecutiveCompactionFailures: 0,
   };
   const metadataJson = JSON.stringify(metadata);
+  let committed = false;
+  let persistedMetadataJson = metadataJson;
 
-  // Persist metadata update
-  sqliteRun(
-    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [metadataJson, input.sessionId, input.userId],
-  );
+  sqliteTransaction(() => {
+    const existingMarker = sqliteGet<SessionMemoryMarkerRow>(
+      `SELECT id FROM message_v2
+       WHERE session_id = ? AND user_id = ?
+         AND json_extract(data, '$.clientRequestId') = ?
+       LIMIT 1`,
+      [input.sessionId, input.userId, markerClientRequestId],
+    );
+    if (existingMarker) {
+      persistedMetadataJson =
+        sqliteGet<SessionMetadataRow>(
+          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+          [input.sessionId, input.userId],
+        )?.metadata_json ?? input.metadataJson;
+      return;
+    }
 
-  // Append compaction marker
-  const tailStartMessageId = messagesToKeep[0]?.id;
-  appendCompactionMarkerMessage({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    summary,
-    trigger: 'automatic',
-    omittedMessages,
-    ...(tailStartMessageId ? { tailStartMessageId } : {}),
+    sqliteRun(
+      "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+      [metadataJson, input.sessionId, input.userId],
+    );
+
+    const tailStartMessageId = messagesToKeep[0]?.id;
+    appendCompactionMarkerMessage({
+      clientRequestId: markerClientRequestId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+      signature,
+      summary,
+      trigger: 'automatic',
+      omittedMessages,
+      ...(tailStartMessageId ? { tailStartMessageId } : {}),
+    });
+    committed = true;
   });
 
   return {
     success: true,
+    committed,
     summary,
     messagesToKeep,
-    metadataJson,
+    metadataJson: persistedMetadataJson,
     preCompactTokenEstimate,
     postCompactTokenEstimate,
+    signature,
   };
 }
 

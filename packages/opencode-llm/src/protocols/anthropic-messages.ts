@@ -5,6 +5,7 @@ import { Endpoint } from "../route/endpoint.js"
 import { Framing } from "../route/framing.js"
 import { Protocol } from "../route/protocol.js"
 import {
+  AnthropicContextManagement,
   LLMEvent,
   Usage,
   type CacheHint,
@@ -166,6 +167,7 @@ const AnthropicBodyFields = {
   top_k: Schema.optional(Schema.Number),
   stop_sequences: optionalArray(Schema.String),
   thinking: Schema.optional(AnthropicThinking),
+  context_management: Schema.optional(AnthropicContextManagement),
 }
 const AnthropicMessagesBody = Schema.Struct(AnthropicBodyFields)
 export type AnthropicMessagesBody = Schema.Schema.Type<typeof AnthropicMessagesBody>
@@ -492,6 +494,14 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
 
 const anthropicOptions = (request: LLMRequest) => request.providerOptions?.anthropic
 
+const lowerContextManagement = Effect.fn("AnthropicMessages.lowerContextManagement")(function* (
+  request: LLMRequest,
+) {
+  const input = anthropicOptions(request)?.contextManagement
+  if (input === undefined || !ProviderShared.supportsAnthropicContextManagement(request)) return undefined
+  return yield* ProviderShared.validateWith(Schema.decodeUnknownEffect(AnthropicContextManagement))(input)
+})
+
 const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (request: LLMRequest) {
   const thinking = anthropicOptions(request)?.thinking
   if (!ProviderShared.isRecord(thinking) || thinking.type !== "enabled") return undefined
@@ -533,6 +543,7 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
           cache_control: cacheControl(breakpoints, part.cache),
         }))
   const messages = yield* lowerMessages(request, breakpoints)
+  const contextManagement = yield* lowerContextManagement(request)
   if (breakpoints.dropped > 0) {
     yield* Effect.logWarning(
       `Anthropic Messages: dropped ${breakpoints.dropped} cache breakpoint(s); the API allows at most ${ANTHROPIC_BREAKPOINT_CAP} per request.`,
@@ -551,6 +562,7 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
     top_k: generation?.topK,
     stop_sequences: generation?.stop,
     thinking: yield* lowerThinking(request),
+    ...(contextManagement === undefined ? {} : { context_management: contextManagement }),
   }
 })
 
@@ -851,10 +863,14 @@ export const route = Route.make({
   endpoint: Endpoint.path(PATH, { baseURL: DEFAULT_BASE_URL }),
   auth: Auth.none,
   framing: Framing.sse,
-  headers: () => ({ "anthropic-version": "2023-06-01" }),
+  headers: ({ request }) => ({
+    "anthropic-version": "2023-06-01",
+    ...(anthropicOptions(request)?.contextManagement !== undefined &&
+    ProviderShared.supportsAnthropicContextManagement(request)
+      ? { "anthropic-beta": "context-management-2025-06-27" }
+      : {}),
+  }),
 })
 
 export * as AnthropicMessages from "./anthropic-messages.js"
-
-
 

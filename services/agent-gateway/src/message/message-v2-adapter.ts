@@ -831,6 +831,7 @@ const COMPACTION_MARKER_TYPE = 'compaction_marker';
 const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openAwork';
 
 export function appendCompactionMarkerMessageV2(input: {
+  clientRequestId?: string;
   omittedMessages?: number;
   persistedMemory?: unknown;
   sessionId: string;
@@ -851,7 +852,8 @@ export function appendCompactionMarkerMessageV2(input: {
     userId: input.userId,
     role: 'assistant',
     content: marker.content,
-    clientRequestId: marker.clientRequestId,
+    clientRequestId: input.clientRequestId ?? marker.clientRequestId,
+    replaceExisting: input.clientRequestId !== undefined,
   });
 }
 

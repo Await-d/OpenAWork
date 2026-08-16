@@ -6,7 +6,7 @@ import {
   readPersistedCompactionMemory,
   type CompactionTrigger,
 } from '../compaction/compaction-metadata.js';
-import { sqliteRun } from '../infra/db.js';
+import { sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import {
@@ -27,8 +27,10 @@ import {
 export const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
 
 const PRUNED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared by compaction prune]';
+const COMPACTION_RESERVATION_LEASE_MINUTES = 5;
 
 export interface ExecuteSessionCompactionInput {
+  clientRequestId?: string;
   metadataJson: string;
   messages: Message[];
   prune?: boolean;
@@ -56,6 +58,7 @@ export interface ExecuteSessionCompactionInput {
    */
   tailTurns?: number;
   route: ModelRouteConfig | null;
+  round?: number;
   sessionId: string;
   signal?: AbortSignal;
   trigger: CompactionTrigger;
@@ -69,7 +72,120 @@ export interface ExecuteSessionCompactionResult {
   messagesToKeep?: Message[];
   metadata: Record<string, unknown>;
   metadataJson: string;
-  summary: string;
+  retryable?: boolean;
+  summary?: string;
+}
+
+interface CompactionRequestIdentity {
+  clientRequestId: string;
+  round: number;
+  sessionId: string;
+  signature: string;
+  userId: string;
+}
+
+interface CompactionRequestRow {
+  reservation_expired: number;
+  llm_error_message: string | null;
+  llm_summary: string | null;
+  metadata_json: string | null;
+  status: string;
+  summary: string | null;
+}
+
+type CompactionRequestReservation =
+  { kind: 'acquired' } | { kind: 'existing'; row: CompactionRequestRow };
+
+function getCompactionRequestIdentity(
+  input: ExecuteSessionCompactionInput,
+  signature: string | undefined,
+): CompactionRequestIdentity | undefined {
+  if (
+    !input.clientRequestId ||
+    typeof input.round !== 'number' ||
+    !Number.isInteger(input.round) ||
+    !signature
+  ) {
+    return undefined;
+  }
+
+  return {
+    clientRequestId: input.clientRequestId,
+    round: input.round,
+    sessionId: input.sessionId,
+    signature,
+    userId: input.userId,
+  };
+}
+
+function reserveCompactionRequest(
+  identity: CompactionRequestIdentity,
+): CompactionRequestReservation {
+  return sqliteTransaction(() => {
+    const existing = sqliteGet<CompactionRequestRow>(
+      `SELECT status, metadata_json, summary, llm_summary, llm_error_message
+              , (status = 'reserved' AND created_at <= datetime('now', '-${COMPACTION_RESERVATION_LEASE_MINUTES} minutes')) AS reservation_expired
+       FROM compaction_requests
+       WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ? AND signature = ?`,
+      [
+        identity.sessionId,
+        identity.userId,
+        identity.clientRequestId,
+        identity.round,
+        identity.signature,
+      ],
+    );
+    if (existing && existing.reservation_expired !== 1) {
+      return { kind: 'existing', row: existing };
+    }
+
+    if (existing) {
+      sqliteRun(
+        `DELETE FROM compaction_requests
+         WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ?
+           AND signature = ? AND status = 'reserved'`,
+        [
+          identity.sessionId,
+          identity.userId,
+          identity.clientRequestId,
+          identity.round,
+          identity.signature,
+        ],
+      );
+    }
+
+    sqliteRun(
+      `INSERT INTO compaction_requests
+       (session_id, user_id, client_request_id, round, signature, status)
+       VALUES (?, ?, ?, ?, ?, 'reserved')`,
+      [
+        identity.sessionId,
+        identity.userId,
+        identity.clientRequestId,
+        identity.round,
+        identity.signature,
+      ],
+    );
+    return { kind: 'acquired' };
+  });
+}
+
+function isMetadataRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseCompactionRequestMetadata(metadataJson: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(metadataJson);
+    if (isMetadataRecord(parsed)) {
+      return parsed;
+    }
+  } catch (error: unknown) {
+    if (!(error instanceof SyntaxError)) {
+      throw error;
+    }
+  }
+  return {};
 }
 
 export function pruneMessagesForCompaction(
@@ -305,10 +421,54 @@ export async function executeSessionCompaction(
     recentMessagesKept,
     trigger: input.trigger,
   });
+  const signature = durableSummary?.signature;
+  const compactionRequest = getCompactionRequestIdentity(input, signature);
+  const reservation = compactionRequest ? reserveCompactionRequest(compactionRequest) : undefined;
+  const fallbackSummary =
+    durableSummary?.structuredSummary ??
+    buildStructuredCompactionSummary({
+      messages: messagesToSummarize,
+      recentMessagesKept,
+      trigger: input.trigger,
+    });
 
+  if (reservation?.kind === 'existing') {
+    const isCompleted = reservation.row.status === 'completed';
+    if (!isCompleted) {
+      return {
+        durableSummary,
+        llmErrorMessage: 'compaction request is in progress; retry this request',
+        ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
+        metadata: parseCompactionRequestMetadata(input.metadataJson),
+        metadataJson: input.metadataJson,
+        retryable: true,
+      };
+    }
+    const metadataJson = reservation.row.metadata_json ?? input.metadataJson;
+    const metadata = parseCompactionRequestMetadata(metadataJson);
+    const summary = reservation.row.summary ?? fallbackSummary;
+
+    return {
+      durableSummary,
+      ...(reservation.row.llm_error_message
+        ? { llmErrorMessage: reservation.row.llm_error_message }
+        : {}),
+      ...(reservation.row.llm_summary ? { llmSummary: reservation.row.llm_summary } : {}),
+      ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
+      metadata,
+      metadataJson,
+      summary,
+    };
+  }
+
+  const previousFailures = readConsecutiveCompactionFailures(input.metadataJson);
+  const tripsAutomaticCircuitBreaker =
+    input.trigger === 'automatic' && previousFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES;
   let llmSummary: string | undefined;
-  let llmErrorMessage: string | undefined;
-  if (input.route) {
+  let llmErrorMessage = tripsAutomaticCircuitBreaker
+    ? `automatic compaction circuit breaker tripped after ${MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES} consecutive failures`
+    : undefined;
+  if (input.route && !tripsAutomaticCircuitBreaker) {
     const prunedMessages =
       input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
     // `NormalizedConversationMessage` and `UnifiedMessage` are
@@ -335,18 +495,12 @@ export async function executeSessionCompaction(
     }
   }
 
-  const summary =
-    llmSummary ??
-    durableSummary?.structuredSummary ??
-    buildStructuredCompactionSummary({
-      messages: messagesToSummarize,
-      recentMessagesKept,
-      trigger: input.trigger,
-    });
+  const summary = llmSummary ?? fallbackSummary;
 
   const isFailure = !!llmErrorMessage;
-  const prevFailures = readConsecutiveCompactionFailures(input.metadataJson);
-  const nextFailures = isFailure ? prevFailures + 1 : 0;
+  const nextFailures = isFailure
+    ? Math.min(previousFailures + 1, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES)
+    : 0;
 
   const metadata = {
     ...mergeCompactionMetadata(input.metadataJson, {
@@ -362,21 +516,67 @@ export async function executeSessionCompaction(
   };
   const metadataJson = JSON.stringify(metadata);
 
-  sqliteRun(
-    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [metadataJson, input.sessionId, input.userId],
-  );
+  try {
+    sqliteTransaction(() => {
+      sqliteRun(
+        "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        [metadataJson, input.sessionId, input.userId],
+      );
 
-  appendCompactionMarkerMessage({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    persistedMemory: durableSummary?.persistedMemory,
-    signature: durableSummary?.signature,
-    summary,
-    trigger: input.trigger,
-    omittedMessages: durableSummary?.totalRepresentedMessages ?? messagesToSummarize.length,
-    ...(tailStartMessageId ? { tailStartMessageId } : {}),
-  });
+      appendCompactionMarkerMessage({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        persistedMemory: durableSummary?.persistedMemory,
+        signature,
+        summary,
+        trigger: input.trigger,
+        omittedMessages: durableSummary?.totalRepresentedMessages ?? messagesToSummarize.length,
+        ...(tailStartMessageId ? { tailStartMessageId } : {}),
+        ...(input.clientRequestId && typeof input.round === 'number' && signature
+          ? {
+              clientRequestId: `compaction-marker:${input.clientRequestId}:${input.round}:${signature}`,
+            }
+          : {}),
+      });
+
+      if (compactionRequest) {
+        sqliteRun(
+          `UPDATE compaction_requests
+           SET status = 'completed', metadata_json = ?, summary = ?, llm_summary = ?,
+               llm_error_message = ?, completed_at = datetime('now')
+           WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ?
+             AND signature = ? AND status = 'reserved'`,
+          [
+            metadataJson,
+            summary,
+            llmSummary,
+            llmErrorMessage,
+            compactionRequest.sessionId,
+            compactionRequest.userId,
+            compactionRequest.clientRequestId,
+            compactionRequest.round,
+            compactionRequest.signature,
+          ],
+        );
+      }
+    });
+  } catch (error: unknown) {
+    if (compactionRequest) {
+      sqliteRun(
+        `DELETE FROM compaction_requests
+         WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ?
+           AND signature = ? AND status = 'reserved'`,
+        [
+          compactionRequest.sessionId,
+          compactionRequest.userId,
+          compactionRequest.clientRequestId,
+          compactionRequest.round,
+          compactionRequest.signature,
+        ],
+      );
+    }
+    throw error;
+  }
 
   return {
     durableSummary,
