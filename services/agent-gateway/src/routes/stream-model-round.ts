@@ -102,6 +102,7 @@ import {
   extractSystemFromUnifiedMessages,
   runUpstreamStream,
   wrapGatewayToolsForAiSdkDeclarationsOnly,
+  type GatewayToolFunctionShape,
 } from '../v2-runtime/upstream/index.js';
 import { matchesRequestScope } from '../runtime/request-lineage.js';
 import type {
