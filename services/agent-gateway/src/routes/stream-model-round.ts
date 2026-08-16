@@ -1501,7 +1501,7 @@ export async function runModelRound(input: {
     // out-of-band.
     const v2Tools =
       input.enabledTools.length > 0
-        ? wrapGatewayToolsForAiSdkDeclarationsOnly(input.enabledTools)
+        ? wrapGatewayToolsForAiSdkDeclarationsOnly(input.enabledTools as GatewayToolFunctionShape[])
         : undefined;
 
     input.wl.succeed(stepUpstream, undefined, {
