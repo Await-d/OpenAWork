@@ -471,16 +471,14 @@ export async function executeSessionCompaction(
   if (input.route && !tripsAutomaticCircuitBreaker) {
     const prunedMessages =
       input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
-    // `NormalizedConversationMessage` and `UnifiedMessage` are
-    // structurally equivalent for the role/content/toolCalls/reasoning
-    // fields the compaction LLM consumes; we cast at the boundary so
-    // `callCompactionLlm` (which now consumes `UnifiedMessage[]`)
-    // does not re-encode the same shape.
-    const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
-      contextWindow: 1,
-      metadataJson: input.metadataJson,
-      persistedMemory: existingMemory,
-    }).normalizedMessages as unknown as UnifiedMessage[];
+    const conversationMessages: UnifiedMessage[] = buildPreparedUpstreamConversation(
+      prunedMessages,
+      {
+        contextWindow: 1,
+        metadataJson: input.metadataJson,
+        persistedMemory: existingMemory,
+      },
+    ).normalizedMessages;
     try {
       const result = await callCompactionLlm({
         conversationMessages,

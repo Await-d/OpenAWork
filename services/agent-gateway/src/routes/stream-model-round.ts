@@ -1051,7 +1051,8 @@ export async function runModelRound(input: {
 
   // ── 构建 ThinkingConfig（支持新版 + 旧版参数）──
   // 优先使用新版 thinking 参数；如果不存在，则从旧版参数构建
-  const thinkingConfig: ThinkingConfig | undefined = input.requestData.thinking ??
+  const thinkingConfig: ThinkingConfig | undefined =
+    input.requestData.thinking ??
     (input.requestData.thinkingEnabled !== undefined ||
     input.requestData.reasoningEffort !== undefined
       ? (() => {
