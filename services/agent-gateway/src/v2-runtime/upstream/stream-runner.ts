@@ -43,8 +43,8 @@ import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/
 import { resolveThinkingStyle } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
+import { jsonSchema, streamText, tool as defineTool } from 'ai';
 import type { ModelMessage, SystemModelMessage, ToolSet } from './opencode-llm-compat.js';
-import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import {
   applyCaching,
   applyCachingToSystemMessages,
@@ -687,67 +687,31 @@ export async function* runUpstreamStream(
   // aborted even when the client never disconnects.
   const idleController = new AbortController();
 
-  // Create OpenCode LLM stream request
-  const llmModel = OpenCodeLLM.Model.make({
-    provider: input.providerType as any || 'openai',
-    model: typeof input.model === 'string' ? input.model : (input.model as any).modelId || 'gpt-4',
+  const result = streamText({
+    model: input.model,
+    messages: decoratedMessages,
+    ...(decoratedSystem ? { system: decoratedSystem } : {}),
+    ...(effectiveTools ? { tools: effectiveTools } : {}),
+    ...(typeof temperature === 'number' && !shouldOmit(omit, 'temperature')
+      ? { temperature }
+      : {}),
+    ...(typeof maxOutputTokens === 'number' &&
+    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
+      ? { maxOutputTokens }
+      : {}),
+    ...(typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP') ? { topP } : {}),
+    ...(typeof frequencyPenalty === 'number' &&
+    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
+      ? { frequencyPenalty }
+      : {}),
+    ...(typeof presencePenalty === 'number' &&
+    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
+      ? { presencePenalty }
+      : {}),
+    ...(providerOptions ? { providerOptions } : {}),
+    ...(input.signal ? { abortSignal: input.signal } : {}),
+    ...(typeof input.maxRetries === 'number' ? { maxRetries: input.maxRetries } : {}),
   });
-
-  const requestOptions: OpenCodeLLM.RequestInput = {
-    model: llmModel,
-    messages: decoratedMessages as OpenCodeLLM.Message[],
-  };
-
-  // Add system messages if present
-  if (decoratedSystem) {
-    requestOptions.system = decoratedSystem as any;
-  }
-
-  // Add tools if present
-  if (effectiveTools && Object.keys(effectiveTools).length > 0) {
-    requestOptions.tools = Object.values(effectiveTools) as any;
-  }
-
-  // Add generation options
-  const generation: any = {};
-  if (typeof temperature === 'number' && !shouldOmit(omit, 'temperature')) {
-    generation.temperature = temperature;
-  }
-  if (typeof maxOutputTokens === 'number' &&
-      !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')) {
-    generation.maxTokens = maxOutputTokens;
-  }
-  if (typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP')) {
-    generation.topP = topP;
-  }
-  if (typeof frequencyPenalty === 'number' &&
-      !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')) {
-    generation.frequencyPenalty = frequencyPenalty;
-  }
-  if (typeof presencePenalty === 'number' &&
-      !shouldOmit(omit, 'presence_penalty', 'presencePenalty')) {
-    generation.presencePenalty = presencePenalty;
-  }
-  if (Object.keys(generation).length > 0) {
-    requestOptions.generation = generation;
-  }
-
-  const request = OpenCodeLLM.request(requestOptions);
-
-  // Placeholder: Create mock result structure
-  // Full implementation requires Effect runtime integration
-  const result = {
-    fullStream: (async function* () {
-      // This is a placeholder that throws an error
-      // Full implementation would integrate with OpenCode LLM's streaming API
-      // Example: const stream = await Effect.runPromise(OpenCodeLLM.stream(request));
-      // for await (const event of stream) { yield event; }
-      throw new Error(
-        'OpenCode LLM Effect runtime integration not yet implemented. ' +
-        'This requires setting up Effect runtime with proper layers and executing the Effect stream.'
-      );
-    })(),
-  };
 
   const meta = (extra: Record<string, unknown>) => ({
     ...(state.runId ? { runId: state.runId } : {}),

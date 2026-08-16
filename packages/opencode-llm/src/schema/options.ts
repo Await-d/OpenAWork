@@ -33,7 +33,53 @@ const mergeStringRecords = (
   return Object.keys(result).length === 0 ? undefined : result
 }
 
-export const ProviderOptions = Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown))
+const AnthropicInputTokens = Schema.Struct({
+  type: Schema.Literal("input_tokens"),
+  value: Schema.Number,
+})
+
+const AnthropicThinkingTurns = Schema.Struct({
+  type: Schema.Literal("thinking_turns"),
+  value: Schema.Number,
+})
+
+const AnthropicToolUses = Schema.Struct({
+  type: Schema.Literal("tool_uses"),
+  value: Schema.Number,
+})
+
+const AnthropicClearThinkingEdit = Schema.Struct({
+  type: Schema.Literal("clear_thinking_20251015"),
+  keep: Schema.optional(AnthropicThinkingTurns),
+})
+
+const AnthropicClearToolUsesEdit = Schema.Struct({
+  type: Schema.Literal("clear_tool_uses_20250919"),
+  trigger: Schema.optional(AnthropicInputTokens),
+  keep: Schema.optional(AnthropicToolUses),
+  clear_at_least: Schema.optional(AnthropicInputTokens),
+  exclude_tools: Schema.optional(Schema.Array(Schema.String)),
+})
+
+export const AnthropicContextManagement = Schema.Struct({
+  edits: Schema.Array(Schema.Union([AnthropicClearThinkingEdit, AnthropicClearToolUsesEdit])),
+})
+export type AnthropicContextManagement = Schema.Schema.Type<typeof AnthropicContextManagement>
+
+export const AnthropicProviderOptions = Schema.StructWithRest(
+  Schema.Struct({
+    contextManagement: Schema.optional(AnthropicContextManagement),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+)
+export type AnthropicProviderOptions = Schema.Schema.Type<typeof AnthropicProviderOptions>
+
+export const ProviderOptions = Schema.StructWithRest(
+  Schema.Struct({
+    anthropic: Schema.optional(AnthropicProviderOptions),
+  }),
+  [Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown))],
+)
 export type ProviderOptions = Schema.Schema.Type<typeof ProviderOptions>
 
 export const mergeProviderOptions = (
@@ -281,6 +327,5 @@ export type CachePolicyObject = Schema.Schema.Type<typeof CachePolicyObject>
 
 export const CachePolicy = Schema.Union([Schema.Literal("auto"), Schema.Literal("none"), CachePolicyObject])
 export type CachePolicy = Schema.Schema.Type<typeof CachePolicy>
-
 
 

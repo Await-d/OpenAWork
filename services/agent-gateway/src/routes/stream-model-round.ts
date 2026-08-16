@@ -7,11 +7,14 @@ import type {
 } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
-import { isContextOverflow } from '../session/session-message-store.js';
 import {
   resolveEffectiveContextWindow,
   parseContextLimitError,
 } from '../compaction/context-window-resolver.js';
+import {
+  isCompactionThresholdReached,
+  parsePercentageOverride,
+} from '../compaction/compaction-parity-contract.js';
 import { microcompactMessages } from '../compaction/microcompact.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
@@ -43,6 +46,31 @@ import {
 } from '../snapshot/snapshot-tree-store.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import type { StreamStopReason } from './stream-types.js';
+
+export function resolveModelRoundOverflow(input: {
+  readonly usage?: StreamUsageSummary;
+  readonly effectiveContextWindow?: number;
+  readonly modelMaxOutputTokens?: number;
+  readonly autoCompactPercentOverride?: number;
+  readonly contextLimitError: ReturnType<typeof parseContextLimitError>;
+  readonly compactionReservedTokens?: number;
+}): boolean {
+  if (input.contextLimitError !== null) {
+    return true;
+  }
+  if (input.usage === undefined || input.effectiveContextWindow === undefined) {
+    return false;
+  }
+  return isCompactionThresholdReached(input.usage, {
+    modelContextWindow: input.effectiveContextWindow,
+    ...(input.modelMaxOutputTokens !== undefined
+      ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
+      : {}),
+    ...(input.autoCompactPercentOverride !== undefined
+      ? { autoCompactPercentOverride: input.autoCompactPercentOverride }
+      : {}),
+  });
+}
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
   buildSyntheticRequestContextBlock,
@@ -74,9 +102,12 @@ import {
   extractSystemFromUnifiedMessages,
   runUpstreamStream,
   wrapGatewayToolsForAiSdkDeclarationsOnly,
-  type GatewayToolFunctionShape,
 } from '../v2-runtime/upstream/index.js';
 import { matchesRequestScope } from '../runtime/request-lineage.js';
+import type {
+  ExtendedThinkingConfig,
+  ThinkingConfig,
+} from '../v2-runtime/upstream/provider-options.js';
 
 // `UpstreamErrorDescriptor` is preserved as a structural type so the
 // `RunResult.upstreamError` field stays stable for downstream recovery
@@ -111,6 +142,26 @@ export function filterMessagesByTeamTaskThread(
       }
     }
   })();
+}
+
+export function findLastAssistantTimestamp(
+  messages: readonly MessageWithParts[],
+): number | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.info.role === 'assistant') {
+      return message.info.time.created;
+    }
+  }
+  return undefined;
+}
+
+export function getMicrocompactTimeContext(
+  messages: readonly MessageWithParts[],
+  teamTaskThreadId?: string,
+): { lastAssistantTimestamp?: number } | undefined {
+  if (teamTaskThreadId) return undefined;
+  return { lastAssistantTimestamp: findLastAssistantTimestamp(messages) };
 }
 
 const STREAM_RUNTIME_ERROR_MESSAGES = {
@@ -983,6 +1034,7 @@ export async function runModelRound(input: {
   /** Agent ID for the current stream round (for per-agent color rendering). */
   agentId?: string;
   writeChunk: (chunk: RunEvent) => void;
+  beforeUpstreamCall?: (renderedMessageTokens: number) => Promise<boolean>;
 }): Promise<{
   overflow: boolean;
   shouldContinue: boolean;
@@ -999,8 +1051,7 @@ export async function runModelRound(input: {
 
   // ── 构建 ThinkingConfig（支持新版 + 旧版参数）──
   // 优先使用新版 thinking 参数；如果不存在，则从旧版参数构建
-  const thinkingConfig: import('../v2-runtime/upstream/provider-options.js').ThinkingConfig | undefined =
-    input.requestData.thinking ??
+  const thinkingConfig: ThinkingConfig | undefined = input.requestData.thinking ??
     (input.requestData.thinkingEnabled !== undefined ||
     input.requestData.reasoningEffort !== undefined
       ? (() => {
@@ -1029,9 +1080,10 @@ export async function runModelRound(input: {
   const isThinkingEnabled =
     thinkingConfig?.type === 'adaptive' || thinkingConfig?.type === 'enabled';
 
-  const thinkingLanguagePrompt = shouldApplyThinkingConfig && isThinkingEnabled
-    ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
-    : null;
+  const thinkingLanguagePrompt =
+    shouldApplyThinkingConfig && isThinkingEnabled
+      ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
+      : null;
 
   // ── New 2-layer pipeline (opencode pattern) ──
   // Layer 0: Filter messages after the most recent compaction boundary
@@ -1071,17 +1123,22 @@ export async function runModelRound(input: {
   // Clear stale tool_result outputs before sending to upstream.
   // Zero LLM cost, delays full compaction trigger, keeps context lean.
   // Operates on the rendered UnifiedMessage[] so DB data stays intact.
-  const microcompactResult = microcompactMessages(unifiedMessagesRaw);
+  const microcompactResult = microcompactMessages(
+    unifiedMessagesRaw,
+    undefined,
+    getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
+  );
   const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
-  const thinkingUserHint = shouldApplyThinkingConfig && isThinkingEnabled
-    ? buildThinkingLanguageHint(
-        unifiedMessages.filter(
-          (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
-        ),
-      )
-    : null;
+  const thinkingUserHint =
+    shouldApplyThinkingConfig && isThinkingEnabled
+      ? buildThinkingLanguageHint(
+          unifiedMessages.filter(
+            (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
+          ),
+        )
+      : null;
   const messagesWithHint = thinkingUserHint
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)
     : unifiedMessages;
@@ -1150,6 +1207,15 @@ export async function runModelRound(input: {
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt } as UnifiedMessage]
       : []),
   ];
+
+  if (input.beforeUpstreamCall) {
+    const compacted = await input.beforeUpstreamCall(
+      estimateModelMessagesTokens(allUnifiedMessages),
+    );
+    if (compacted) {
+      return runModelRound({ ...input, beforeUpstreamCall: undefined });
+    }
+  }
 
   // Thinking block validator (oh-my-opencode thinking-block-validator pattern):
   // Proactively validate and fix message structure BEFORE sending to Anthropic API.
@@ -1399,6 +1465,10 @@ export async function runModelRound(input: {
   void compactionAutoEnabled;
 
   try {
+    if (input.signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     const provider = buildAISdkProvider({
       providerType: input.route.providerType ?? 'custom',
       upstreamProtocol: input.route.upstreamProtocol,
@@ -1430,9 +1500,7 @@ export async function runModelRound(input: {
     // out-of-band.
     const v2Tools =
       input.enabledTools.length > 0
-        ? wrapGatewayToolsForAiSdkDeclarationsOnly(
-            input.enabledTools as unknown as GatewayToolFunctionShape[],
-          )
+        ? wrapGatewayToolsForAiSdkDeclarationsOnly(input.enabledTools)
         : undefined;
 
     input.wl.succeed(stepUpstream, undefined, {
@@ -1448,6 +1516,8 @@ export async function runModelRound(input: {
     let doneEmitted = false;
     let v2Usage: StreamUsageSummary | undefined;
     let v2UsageOccurredAt: number | undefined;
+    let streamedUpstreamError: UpstreamErrorDescriptor | undefined;
+    let streamedContextLimitError: ReturnType<typeof parseContextLimitError> = null;
     try {
       if (isTeamSession(input.sessionContext)) {
         touchSessionHeartbeat(input.sessionId);
@@ -1481,7 +1551,7 @@ export async function runModelRound(input: {
                 effort: input.requestData.reasoningEffort,
                 providerType: input.route.providerType,
                 supportsThinking: input.route.supportsThinking ?? true,
-              } as import('../v2-runtime/upstream/provider-options.js').ExtendedThinkingConfig,
+              } satisfies ExtendedThinkingConfig,
             }
           : {}),
         onDiagnostics: (info) => {
@@ -1553,6 +1623,12 @@ export async function runModelRound(input: {
         if (chunkWithMeta.type === 'error') {
           doneEmitted = true;
           stopReason = 'error';
+          streamedContextLimitError = parseContextLimitError({ message: chunkWithMeta.message });
+          streamedUpstreamError = {
+            code: `V2_${chunkWithMeta.code}`,
+            message: chunkWithMeta.message,
+            technicalDetail: chunkWithMeta.message,
+          };
           markFailedRequestScopeMessages();
         }
 
@@ -1701,15 +1777,16 @@ export async function runModelRound(input: {
       input.route.model,
       input.route.contextWindow,
     );
-    const overflow =
-      !!v2Usage &&
-      typeof effectiveCtxWindow === 'number' &&
-      isContextOverflow(
-        v2Usage,
-        effectiveCtxWindow,
-        input.compactionReservedTokens,
-        input.route.maxOutputTokens,
-      );
+    const overflow = resolveModelRoundOverflow({
+      usage: v2Usage,
+      effectiveContextWindow: effectiveCtxWindow,
+      modelMaxOutputTokens: input.route.maxOutputTokens,
+      autoCompactPercentOverride: parsePercentageOverride(
+        process.env['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'],
+      ),
+      contextLimitError: streamedContextLimitError,
+      compactionReservedTokens: input.compactionReservedTokens,
+    });
     return {
       overflow,
       shouldContinue,
@@ -1717,6 +1794,7 @@ export async function runModelRound(input: {
       stopReason,
       statusCode: 200,
       state,
+      ...(streamedUpstreamError ? { upstreamError: streamedUpstreamError } : {}),
       ...(v2Usage ? { usage: v2Usage } : {}),
       ...(v2UsageOccurredAt !== undefined ? { usageOccurredAt: v2UsageOccurredAt } : {}),
     };

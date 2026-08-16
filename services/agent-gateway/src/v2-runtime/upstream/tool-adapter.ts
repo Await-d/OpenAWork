@@ -29,8 +29,8 @@
 
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { Tool, ToolSet } from './opencode-llm-compat.js';
-import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import type { JSONSchema7 } from '@ai-sdk/provider';
+import { jsonSchema, tool as defineTool } from 'ai';
 
 /**
  * Wrap a single OpenAWork `ToolDefinition` as an OpenCode LLM `Tool`.
@@ -42,10 +42,11 @@ import type { JSONSchema7 } from '@ai-sdk/provider';
  * the underlying contract.
  */
 export function wrapToolForAiSdk(toolDef: ToolDefinition): Tool {
-  return new OpenCodeLLM.ToolDefinition({
-    name: toolDef.name,
+  return defineTool({
     description: toolDef.description,
     inputSchema: toolDef.inputSchema,
+    execute: (input, options) =>
+      toolDef.execute(input, options.abortSignal ?? new AbortController().signal),
   });
 }
 
@@ -76,8 +77,7 @@ export function wrapToolsForAiSdk(tools: ToolDefinition[]): ToolSet {
 export function wrapToolsForAiSdkDeclarationsOnly(tools: ToolDefinition[]): ToolSet {
   const set: Record<string, Tool> = {};
   for (const definition of tools) {
-    set[definition.name] = new OpenCodeLLM.ToolDefinition({
-      name: definition.name,
+    set[definition.name] = defineTool({
       description: definition.description,
       inputSchema: definition.inputSchema,
     });
@@ -124,10 +124,9 @@ export function wrapGatewayToolsForAiSdkDeclarationsOnly(
 ): ToolSet {
   const set: Record<string, Tool> = {};
   for (const def of tools) {
-    set[def.function.name] = new OpenCodeLLM.ToolDefinition({
-      name: def.function.name,
+    set[def.function.name] = defineTool({
       description: def.function.description,
-      inputSchema: def.function.parameters,
+      inputSchema: jsonSchema(def.function.parameters),
     });
   }
   return set;

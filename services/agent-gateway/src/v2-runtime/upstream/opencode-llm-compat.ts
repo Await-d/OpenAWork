@@ -4,6 +4,7 @@
  * 提供 AI SDK 和 OpenCode LLM 之间的类型兼容性
  */
 
+import { SystemPart } from '@openAwork/opencode-llm';
 import type * as OpenCodeLLM from '@openAwork/opencode-llm'
 
 // ============================================================================
@@ -25,15 +26,9 @@ export type SystemModelMessage = OpenCodeLLM.SystemPart
  */
 export type UserContent = OpenCodeLLM.ContentPart
 
-/**
- * ToolSet - 兼容 AI SDK 的 ToolSet 类型
- */
-export type ToolSet = Record<string, OpenCodeLLM.ToolDefinition>
+export type { Tool, ToolSet } from 'ai';
 
-/**
- * Tool - 兼容 AI SDK 的 Tool 类型
- */
-export type Tool = OpenCodeLLM.ToolDefinition
+export type OpenCodeToolSet = Record<string, OpenCodeLLM.ToolDefinition>;
 
 // ============================================================================
 // 消息转换函数
@@ -46,9 +41,9 @@ export function toOpenCodeSystemPart(
   message: SystemModelMessage | string
 ): OpenCodeLLM.SystemPart {
   if (typeof message === 'string') {
-    return OpenCodeLLM.SystemPart.make(message)
+    return SystemPart.make(message)
   }
-  return message as OpenCodeLLM.SystemPart
+  return message
 }
 
 /**
@@ -57,7 +52,7 @@ export function toOpenCodeSystemPart(
 export function toOpenCodeMessages(
   messages: ModelMessage[]
 ): OpenCodeLLM.Message[] {
-  return messages as OpenCodeLLM.Message[]
+  return messages
 }
 
 /**
@@ -66,14 +61,14 @@ export function toOpenCodeMessages(
 export function fromOpenCodeMessage(
   message: OpenCodeLLM.Message
 ): ModelMessage {
-  return message as ModelMessage
+  return message
 }
 
 /**
  * 将 AI SDK ToolSet 转换为 OpenCode LLM ToolDefinition 数组
  */
 export function toOpenCodeTools(
-  tools: ToolSet | undefined
+  tools: OpenCodeToolSet | undefined
 ): OpenCodeLLM.ToolDefinition[] | undefined {
   if (!tools) return undefined
   return Object.values(tools)
@@ -84,7 +79,7 @@ export function toOpenCodeTools(
  */
 export function fromOpenCodeTools(
   tools: OpenCodeLLM.ToolDefinition[] | undefined
-): ToolSet | undefined {
+): OpenCodeToolSet | undefined {
   if (!tools) return undefined
   return Object.fromEntries(
     tools.map(tool => [tool.name, tool])
