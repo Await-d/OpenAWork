@@ -17,6 +17,7 @@ describe('platform-adapter android defaults', () => {
     expect(adapter.getConfigDir()).toBe('/data/data/com.openAwork.mobile/files/config');
     expect(adapter.getDataDir()).toBe('/data/data/com.openAwork.mobile/files/data');
     expect(adapter.getTempDir()).toBe('/data/data/com.openAwork.mobile/cache');
+    expect(adapter.getSkillsDir()).toBe('/data/data/com.openAwork.mobile/files/config/skills');
   });
 
   it('技能目录默认落到同一个 Android 包名下', () => {

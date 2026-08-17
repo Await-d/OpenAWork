@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema } from 'effect';
 /**
  * Construct a `Protocol` from its body and stream pieces:
  *
@@ -14,5 +14,5 @@ import { Schema } from "effect";
  */
 export const make = (input) => input;
 export const jsonEvent = (schema) => Schema.fromJsonString(schema);
-export * as Protocol from "./protocol.js";
+export * as Protocol from './protocol.js';
 //# sourceMappingURL=protocol.js.map

@@ -307,9 +307,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
       name: form.name.trim(),
       baseUrl: base,
       apiKey: form.apiKey.trim(),
-      ...(form.type === 'openai' && form.openaiFastMode === true
-        ? { openaiFastMode: true }
-        : {}),
+      ...(form.type === 'openai' && form.openaiFastMode === true ? { openaiFastMode: true } : {}),
     });
   }
 

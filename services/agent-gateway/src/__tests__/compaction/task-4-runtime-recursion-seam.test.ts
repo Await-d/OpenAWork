@@ -13,15 +13,25 @@ vi.mock('../../session/session-compaction.js', () => ({
   isAutoCompactCircuitBreakerTripped: vi.fn(() => false),
 }));
 
-vi.mock('../../v2-runtime/upstream/stream-runner.js', () => ({
-  async *runUpstreamStream(input: { messages: unknown[]; onFinish?: (value: unknown) => void }) {
-    calls.upstream += 1;
-    calls.payloads.push(input.messages);
-    input.onFinish?.({ usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 } });
-    yield { type: 'text_delta' as const, delta: 'ok' };
-    yield { type: 'done' as const, stopReason: 'end_turn' as const };
-  },
-}));
+vi.mock('../../v2-runtime/upstream/index.js', async () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- typeof import() 是 vitest mock 常见模式
+  const actual = await vi.importActual<typeof import('../../v2-runtime/upstream/index.js')>(
+    '../../v2-runtime/upstream/index.js',
+  );
+  const { Stream } = await import('effect');
+  return {
+    ...actual,
+    runUpstreamStream(input: { messages: unknown[]; onFinish?: (value: unknown) => void }) {
+      calls.upstream += 1;
+      calls.payloads.push(input.messages);
+      input.onFinish?.({ usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 } });
+      return Stream.fromIterable([
+        { type: 'text_delta' as const, delta: 'ok' },
+        { type: 'done' as const, stopReason: 'end_turn' as const },
+      ]);
+    },
+  };
+});
 
 import {
   triggerOverflowCompaction,
@@ -35,6 +45,7 @@ import * as db from '../../infra/db.js';
 
 const USER_ID = 'task4-runtime-recursion-user';
 const SESSION_ID = 'task4-runtime-recursion-session';
+let previousAllowInsecureLocalhost: string | undefined;
 const ROUTE: ModelRouteConfig = {
   model: 'task4-runtime-model',
   apiBaseUrl: 'http://127.0.0.1:1',
@@ -50,6 +61,8 @@ const ROUTE: ModelRouteConfig = {
 
 describe('任务4 runtime requestKind seam', () => {
   beforeAll(async () => {
+    previousAllowInsecureLocalhost = process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+    process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
     await db.connectDb();
     await db.migrate();
     it('closeDb reload 后真实下一轮只发送 marker 摘要和近期尾部，且终态不是 502', async () => {
@@ -161,6 +174,11 @@ describe('任务4 runtime requestKind seam', () => {
   afterAll(() => {
     db.sqliteRun('DELETE FROM sessions WHERE id = ?', [SESSION_ID]);
     db.sqliteRun('DELETE FROM users WHERE id = ?', [USER_ID]);
+    if (previousAllowInsecureLocalhost === undefined) {
+      delete process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+    } else {
+      process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = previousAllowInsecureLocalhost;
+    }
   });
 
   it.each(['compaction', 'session_memory'] as const)(

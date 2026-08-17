@@ -1668,7 +1668,9 @@ export async function runModelRound(input: {
             if (chunkWithMeta.type === 'error') {
               doneEmitted = true;
               stopReason = 'error';
-              streamedContextLimitError = parseContextLimitError({ message: chunkWithMeta.message });
+              streamedContextLimitError = parseContextLimitError({
+                message: chunkWithMeta.message,
+              });
               streamedUpstreamError = {
                 code: `V2_${chunkWithMeta.code}`,
                 message: chunkWithMeta.message,

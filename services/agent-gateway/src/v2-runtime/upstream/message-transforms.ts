@@ -86,7 +86,9 @@ export function sanitizeSurrogates(content: string): string {
   return content.replace(SURROGATE_RE, '\uFFFD');
 }
 
-function sanitizeToolResultOutput(part: Extract<ContentPart, { type: 'tool-result' }>): ContentPart {
+function sanitizeToolResultOutput(
+  part: Extract<ContentPart, { type: 'tool-result' }>,
+): ContentPart {
   switch (part.result.type) {
     case 'text':
     case 'error':
@@ -133,9 +135,7 @@ function dropEmptyContent(messages: ModelMessage[]): ModelMessage[] {
   const result: ModelMessage[] = [];
   for (const message of messages) {
     const filtered = message.content.filter((part) => {
-      return part.type !== 'text' && part.type !== 'reasoning'
-        ? true
-        : part.text.length > 0;
+      return part.type !== 'text' && part.type !== 'reasoning' ? true : part.text.length > 0;
     });
     if (filtered.length === 0) continue;
     result.push(Message.make({ ...message, content: filtered }));

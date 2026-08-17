@@ -41,13 +41,10 @@ export const protocol = Protocol.make({
     schema: OpenRouterBody,
     from: (request) =>
       OpenAIChat.protocol.body.from(request).pipe(
-        Effect.map(
-          (body) =>
-            ({
-              ...body,
-              ...bodyOptions(request.providerOptions?.openrouter),
-            }) as OpenRouterBody,
-        ),
+        Effect.map((body) => ({
+          ...body,
+          ...bodyOptions(request.providerOptions?.openrouter),
+        })),
       ),
   },
   stream: OpenAIChat.protocol.stream,

@@ -2132,7 +2132,9 @@ function extractMarkdownTitle(content: string, fallback: string): string {
 
 function toWorkspaceRelativePath(filePath: string, workspaceRoot: string): string {
   const relativePath = path.relative(workspaceRoot, filePath);
-  return relativePath && !relativePath.startsWith('..') ? relativePath : filePath;
+  return relativePath && !relativePath.startsWith('..')
+    ? relativePath.replaceAll('\\', '/')
+    : filePath;
 }
 
 export const __testing = {

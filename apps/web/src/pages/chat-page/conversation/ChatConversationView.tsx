@@ -25,7 +25,11 @@
 
 import { useMemo } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
-import type { CommandDescriptor, InputImageContent, UpstreamStreamSummary } from '@openAwork/shared';
+import type {
+  CommandDescriptor,
+  InputImageContent,
+  UpstreamStreamSummary,
+} from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import './ChatConversationView.css';

@@ -16,10 +16,7 @@ vi.mock('../../session/session-compaction.js', () => ({
   isAutoCompactCircuitBreakerTripped: vi.fn(() => false),
 }));
 
-import {
-  appendSessionMessageV2,
-  listSessionMessagesV2,
-} from '../../message/message-v2-adapter.js';
+import { appendSessionMessageV2, listSessionMessagesV2 } from '../../message/message-v2-adapter.js';
 import { filterCompacted, toModelMessages } from '../../message/message-to-model-messages.js';
 import { streamMessagesWithParts } from '../../message/message-store-v2.js';
 import { triggerOverflowCompaction } from '../../compaction/auto-compaction-trigger.js';
@@ -67,10 +64,11 @@ function textMessage(
 function seedSession(): void {
   db.sqliteRun('DELETE FROM sessions WHERE id = ?', [SESSION_ID]);
   db.sqliteRun('DELETE FROM users WHERE id = ?', [USER_ID]);
-  db.sqliteRun(
-    'INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)',
-    [USER_ID, `${USER_ID}@example.test`, 'test'],
-  );
+  db.sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+    USER_ID,
+    `${USER_ID}@example.test`,
+    'test',
+  ]);
   db.sqliteRun('INSERT INTO sessions (id, user_id, title, metadata_json) VALUES (?, ?, ?, ?)', [
     SESSION_ID,
     USER_ID,
@@ -105,7 +103,9 @@ afterAll(() => {
 describe('automatic compaction SQLite reload', () => {
   it('stub upstream overflow 后，reload 的模型输入只保留 reactive 投影尾部', async () => {
     expect(listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID })).toHaveLength(2);
-    expect(parseContextLimitError({ message: 'prompt is too long: 120000 tokens > 100000 maximum' })).toMatchObject({
+    expect(
+      parseContextLimitError({ message: 'prompt is too long: 120000 tokens > 100000 maximum' }),
+    ).toMatchObject({
       currentTokens: 120_000,
       maxTokens: 100_000,
     });
@@ -139,14 +139,20 @@ describe('automatic compaction SQLite reload', () => {
     const persistedMessages = Array.from(
       streamMessagesWithParts({ sessionId: SESSION_ID, userId: USER_ID }),
     );
-    expect(persistedMessages.map((message) => message.info.id)).toContain('message-recent-assistant');
-    const modelInput = toModelMessages(
-      filterCompacted(persistedMessages),
+    expect(persistedMessages.map((message) => message.info.id)).toContain(
+      'message-recent-assistant',
     );
+    const modelInput = toModelMessages(filterCompacted(persistedMessages));
     const serializedInput = JSON.stringify(modelInput);
 
-    expect(reloaded.some((message) => message.content.some((part) => part.type === 'text' && part.text.includes('old history')))).toBe(true);
-    expect(modelInput.some((message) => message.content === 'old history '.repeat(10_000))).toBe(false);
+    expect(
+      reloaded.some((message) =>
+        message.content.some((part) => part.type === 'text' && part.text.includes('old history')),
+      ),
+    ).toBe(true);
+    expect(modelInput.some((message) => message.content === 'old history '.repeat(10_000))).toBe(
+      false,
+    );
     expect(serializedInput).toContain('old history');
     expect(serializedInput).toContain('recent answer');
   });

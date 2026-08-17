@@ -48,6 +48,8 @@ export default [
       ...tsPlugin.configs['recommended'].rules,
       ...tsPlugin.configs['recommended-type-checked'].rules,
       'no-undef': 'off',
+      'no-redeclare': 'off',
+      '@typescript-eslint/no-redeclare': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
@@ -174,6 +176,29 @@ export default [
     },
   },
   {
+    files: ['packages/opencode-llm/src/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-redeclare': 'off',
+      '@typescript-eslint/no-namespace': 'off',
+      '@typescript-eslint/no-empty-object-type': 'off',
+      '@typescript-eslint/no-duplicate-type-constituents': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-empty-function': 'off',
+    },
+  },
+  {
+    files: ['packages/opencode-llm/src/route/client.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  {
+    files: ['packages/opencode-llm/src/tool.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  {
     files: ['packages/resources/resources/extensions/reference/**/*.js'],
     languageOptions: {
       globals: {
@@ -215,6 +240,16 @@ export default [
       '**/tmp-*',
       '**/vite.config.*',
       '**/resources/skills/reference/algorithmic-art/templates/**',
+      'packages/opencode-llm/src/**/*.d.ts',
+      'packages/opencode-llm/src/**/*.js',
+      'packages/opencode-llm/src/**/*.js.map',
+      'packages/opencode-llm/src/**/*.test.ts',
+      'packages/opencode-llm/src/**/__tests__/**',
+      '**/docs/**/*.ts',
+      '**/examples/**',
+      'packages/*/scripts/**/*.ts',
+      'packages/opencode-llm/packages/**',
+      'scripts/diagnose-mcp-tools.ts',
     ],
   },
 ];

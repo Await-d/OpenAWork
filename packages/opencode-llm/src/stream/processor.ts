@@ -5,7 +5,8 @@
  */
 
 import { Effect, Stream } from 'effect';
-import { LLMError, LLMEvent } from '../schema/index.js';
+import type { LLMEvent } from '../schema/index.js';
+import { LLMError } from '../schema/index.js';
 import { sseFraming } from '../protocols/shared.js';
 import { IncrementalJsonParser } from './incremental-json-parser.js';
 import { RetryHandler, type RetryConfig } from './retry-handler.js';

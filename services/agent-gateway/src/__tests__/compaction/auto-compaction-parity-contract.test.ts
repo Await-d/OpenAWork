@@ -73,10 +73,10 @@ describe('auto compaction reference threshold', () => {
     const usage = { inputTokens: 95_000 };
 
     // When
-    const reached = isCompactionThresholdReached(
-      usage,
-      { modelContextWindow: 128_000, modelMaxOutputTokens: 32_000 },
-    );
+    const reached = isCompactionThresholdReached(usage, {
+      modelContextWindow: 128_000,
+      modelMaxOutputTokens: 32_000,
+    });
 
     // Then
     expect(reached).toBe(true);

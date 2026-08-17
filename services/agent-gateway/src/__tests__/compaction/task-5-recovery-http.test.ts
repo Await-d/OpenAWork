@@ -17,6 +17,7 @@ const SESSION_ID = 'task-5-recovery-session';
 const MODEL_ID = 'task-5-recovery-model';
 const PROVIDER_ID = 'task-5-recovery-provider';
 let upstream: HttpSseStub;
+let previousAllowInsecureLocalhost: string | undefined;
 
 function providerSettings(): void {
   const now = new Date().toISOString();
@@ -172,6 +173,8 @@ function queueNoHistory413Responses(count: number): void {
 }
 
 beforeAll(async () => {
+  previousAllowInsecureLocalhost = process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
   await connectDb();
   await migrate();
   upstream = await startHttpSseStub();
@@ -185,6 +188,11 @@ beforeEach(() => {
 afterAll(async () => {
   await upstream.close();
   await closeDb();
+  if (previousAllowInsecureLocalhost === undefined) {
+    delete process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  } else {
+    process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = previousAllowInsecureLocalhost;
+  }
 });
 
 describe('任务5权限/问题恢复真实 stream seam', () => {
@@ -220,7 +228,7 @@ describe('任务5权限/问题恢复真实 stream seam', () => {
 
   it('无历史的连续 413 在真实 HTTP 路径上到达既定轮数上限后停止', async () => {
     seedEmptySession();
-    queueNoHistory413Responses(10);
+    queueNoHistory413Responses(11);
     const sessionContext = loadSessionContext(SESSION_ID, USER_ID);
     if (!sessionContext) {
       throw new Error('任务 5 空历史会话未能从 SQLite 重载');
@@ -245,7 +253,12 @@ describe('任务5权限/问题恢复真实 stream seam', () => {
       writeChunk: () => undefined,
     });
 
-    expect(upstream.requests).toHaveLength(10);
+    expect(upstream.requests).toHaveLength(11);
+    expect(
+      upstream.requests.filter(
+        (body) => (JSON.parse(body) as { stream?: boolean }).stream === true,
+      ),
+    ).toHaveLength(10);
     expect(result.stopReason).toBe('error');
     expect(result.statusCode).toBe(200);
   });

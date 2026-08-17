@@ -27,11 +27,9 @@ describe('ChatStreamErrorBar', () => {
       />,
     );
 
-    expect(
-      screen.getByText(
-        /上游模型服务暂时不可用，请稍后重试。 · 流摘要 文本 0 \/ 思考 1 \/ 工具 0 \/ stalled/,
-      ),
-    ).toBeTruthy();
+    const errorBar = screen.getByTestId('chat-stream-error-bar');
+    expect(errorBar.textContent).toContain('上游模型服务暂时不可用，请稍后重试。');
+    expect(errorBar.textContent).toContain('流摘要 文本 0 / 思考 1 / 工具 0 / stalled');
   });
 
   it('提供重试按钮并在点击时回调', () => {

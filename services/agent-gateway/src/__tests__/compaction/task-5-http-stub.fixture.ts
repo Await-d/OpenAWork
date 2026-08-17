@@ -51,22 +51,26 @@ export function createSseBody(text: string, usage?: UsageFixture): string {
 export async function startHttpSseStub(): Promise<HttpSseStub> {
   const responses: HttpStubResponse[] = [];
   const requests: string[] = [];
-  const server: Server = createServer(async (request, response) => {
-    let body = '';
-    for await (const chunk of request) {
-      body += String(chunk);
-    }
-    requests.push(body);
-    const next = responses.shift() ?? {
-      body: createSseBody('default task-5 response'),
-      contentType: 'text/event-stream',
-      status: 200,
-    };
-    response.writeHead(next.status, {
-      'Content-Type': next.contentType ?? 'application/json',
-      'Cache-Control': 'no-cache',
+  const server: Server = createServer((request, response) => {
+    void (async () => {
+      let body = '';
+      for await (const chunk of request) {
+        body += String(chunk);
+      }
+      requests.push(body);
+      const next = responses.shift() ?? {
+        body: createSseBody('default task-5 response'),
+        contentType: 'text/event-stream',
+        status: 200,
+      };
+      response.writeHead(next.status, {
+        'Content-Type': next.contentType ?? 'application/json',
+        'Cache-Control': 'no-cache',
+      });
+      response.end(next.body);
+    })().catch((error: unknown) => {
+      response.destroy(error instanceof Error ? error : new Error(String(error), { cause: error }));
     });
-    response.end(next.body);
   });
 
   await new Promise<void>((resolve, reject) => {

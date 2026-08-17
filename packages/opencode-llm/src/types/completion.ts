@@ -4,7 +4,6 @@ import {
   ToolDefinitionSchema,
   ToolChoiceSchema,
   ResponseFormatSchema,
-  ToolCallSchema,
   type Message,
   type ToolDefinition,
   type ToolChoice,

@@ -29,14 +29,14 @@ describe('resolveFusionConversationLayoutState', () => {
     });
   });
 
-  it('在 Fusion 未停靠侧栏时恢复 720px 居中宽度', () => {
+  it('在 Fusion 未停靠侧栏时恢复 820px 居中宽度', () => {
     expect(
       resolveFusionConversationLayoutState({
         showDockedReviewPanel: false,
       }),
     ).toEqual({
       centerContent: true,
-      contentMaxWidth: 720,
+      contentMaxWidth: 820,
     });
   });
 });

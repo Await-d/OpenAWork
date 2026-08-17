@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Effect, Layer } from 'effect';
-import {
-  LLMClient,
-  LLMRequest,
-  Message,
-  Model,
-  RequestExecutor,
-} from '../../index.js';
+import { LLMClient, LLMRequest, Message, Model, RequestExecutor } from '../../index.js';
 import { Auth } from '../../route/auth.js';
 import * as OpenAI from '../../providers/openai.js';
 import { HttpClientRequest, HttpClientResponse } from 'effect/unstable/http';

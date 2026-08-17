@@ -294,10 +294,20 @@ export function BatchToolCallCard({
           const rec = (r ?? {}) as Record<string, unknown>;
           const errFlag = rec.isError === true;
           const dur = rec.durationMs;
+          const reportedStatus = rec.status;
+          const status: BatchSubResultLike['status'] =
+            reportedStatus === 'running' ||
+            reportedStatus === 'completed' ||
+            reportedStatus === 'error' ||
+            reportedStatus === 'skipped'
+              ? reportedStatus
+              : errFlag
+                ? 'error'
+                : 'completed';
           return {
             index: idx,
             tool: typeof rec.tool === 'string' ? (rec.tool as string) : 'unknown',
-            status: errFlag ? 'error' : 'completed',
+            status,
             output: rec.output,
             isError: errFlag,
             durationMs: typeof dur === 'number' ? dur : undefined,

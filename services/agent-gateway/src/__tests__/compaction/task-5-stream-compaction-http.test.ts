@@ -10,6 +10,7 @@ import { createSseBody, startHttpSseStub, type HttpSseStub } from './task-5-http
 const USER_ID = 'task-5-http-user';
 const SESSION_ID = 'task-5-http-session';
 let upstream: HttpSseStub;
+let previousAllowInsecureLocalhost: string | undefined;
 
 function route(overrides: Partial<ModelRouteConfig> = {}): ModelRouteConfig {
   return {
@@ -82,6 +83,8 @@ async function runRound(currentRoute: ModelRouteConfig, signal = new AbortContro
 }
 
 beforeAll(async () => {
+  previousAllowInsecureLocalhost = process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
   await db.connectDb();
   await db.migrate();
   upstream = await startHttpSseStub();
@@ -95,6 +98,11 @@ beforeEach(() => {
 afterAll(async () => {
   await upstream.close();
   await db.closeDb();
+  if (previousAllowInsecureLocalhost === undefined) {
+    delete process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  } else {
+    process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = previousAllowInsecureLocalhost;
+  }
 });
 
 describe('任务5真实 HTTP/SSE stream seam', () => {

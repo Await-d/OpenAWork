@@ -928,6 +928,7 @@ async function deleteSessionTree(input: {
 
   try {
     for (const session of input.sessionsToDelete) {
+      const taskGraphProjectRoot = resolveTaskGraphProjectRoot(session.id);
       const candidatePaths = collectSessionBackupStoragePaths({
         sessionId: session.id,
         userId: input.userId,
@@ -951,7 +952,7 @@ async function deleteSessionTree(input: {
       }
 
       backupStoragePaths.push(...candidatePaths);
-      await taskStore.deleteGraph(resolveTaskGraphProjectRoot(session.id), session.id);
+      await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
     }
   } finally {
     await garbageCollectBackupStoragePaths(backupStoragePaths);

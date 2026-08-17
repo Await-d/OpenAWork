@@ -9,7 +9,10 @@ export const id = ProviderID.make('anthropic');
 export const routes = [AnthropicMessages.route];
 
 export type Config = RouteDefaultsInput &
-  ProviderAuthOption<'optional'> & { readonly baseURL?: string };
+  ProviderAuthOption<'optional'> & {
+    readonly baseURL?: string;
+    readonly allowInsecureLocalhost?: boolean;
+  };
 
 const auth = (options: ProviderAuthOption<'optional'>) => {
   if ('auth' in options && options.auth) return options.auth;
@@ -19,8 +22,12 @@ const auth = (options: ProviderAuthOption<'optional'>) => {
 };
 
 const configuredRoute = (input: Config) => {
-  const { apiKey: _, auth: _auth, baseURL, ...rest } = input;
-  return AnthropicMessages.route.with({ ...rest, endpoint: { baseURL }, auth: auth(input) });
+  const { apiKey: _, auth: _auth, baseURL, allowInsecureLocalhost, ...rest } = input;
+  return AnthropicMessages.route.with({
+    ...rest,
+    endpoint: { baseURL, ...(allowInsecureLocalhost ? { allowInsecureLocalhost: true } : {}) },
+    auth: auth(input),
+  });
 };
 
 export const configure = (input: Config = {}) => {

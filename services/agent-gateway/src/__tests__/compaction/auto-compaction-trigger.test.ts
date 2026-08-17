@@ -181,7 +181,11 @@ describe('自动压缩续跑', () => {
     mocks.persistCompactionProjection.mockImplementation(
       (input: { projectedMessages: Message[] }) => {
         reloadedModelInput = input.projectedMessages;
-        return { metadataJson: '{}', projectedMessages: input.projectedMessages, summary: '快速投影' };
+        return {
+          metadataJson: '{}',
+          projectedMessages: input.projectedMessages,
+          summary: '快速投影',
+        };
       },
     );
 
@@ -221,7 +225,11 @@ describe('自动压缩续跑', () => {
     mocks.persistCompactionProjection.mockImplementation(
       (input: { projectedMessages: Message[] }) => {
         reloadedModelInput = input.projectedMessages;
-        return { metadataJson: '{}', projectedMessages: input.projectedMessages, summary: '快速投影' };
+        return {
+          metadataJson: '{}',
+          projectedMessages: input.projectedMessages,
+          summary: '快速投影',
+        };
       },
     );
 

@@ -30,7 +30,9 @@ describe('native stream idle timeout', () => {
       }),
     );
     expect(values.some((value) => value.type === 'done')).toBe(true);
-    expect(values.some((value) => value.type === 'error' && value.code === 'STREAM_STALL')).toBe(false);
+    expect(values.some((value) => value.type === 'error' && value.code === 'STREAM_STALL')).toBe(
+      false,
+    );
   });
 
   it('emits STREAM_STALL when a native source remains open', async () => {
@@ -47,6 +49,8 @@ describe('native stream idle timeout', () => {
         idleTimeoutMs: 15,
       }),
     );
-    expect(values.some((value) => value.type === 'error' && value.code === 'STREAM_STALL')).toBe(true);
+    expect(values.some((value) => value.type === 'error' && value.code === 'STREAM_STALL')).toBe(
+      true,
+    );
   });
 });

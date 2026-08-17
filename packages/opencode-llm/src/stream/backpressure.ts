@@ -4,8 +4,8 @@
  * 管理流式数据的流量控制，防止内存溢出和消费者阻塞。
  */
 
-import { Effect, Queue, Stream } from 'effect';
-import { LLMError } from '../schema/index.js';
+import { Effect, Stream } from 'effect';
+import type { LLMError } from '../schema/index.js';
 import { formatBytes, streamError } from './utils.js';
 
 /**

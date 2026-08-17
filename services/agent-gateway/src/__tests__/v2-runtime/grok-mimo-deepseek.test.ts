@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildProviderOptions, type ExtendedThinkingConfig } from '../../v2-runtime/upstream/provider-options.js';
+import {
+  buildProviderOptions,
+  type ExtendedThinkingConfig,
+} from '../../v2-runtime/upstream/provider-options.js';
 
 const thinking = (
   providerType: string,

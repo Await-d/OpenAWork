@@ -1,3 +1,4 @@
 /** Plain-record narrowing. Excludes arrays so JSON object checks don't accept tuples as key/value bags. */
-export const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+export const isRecord = (value) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 //# sourceMappingURL=record.js.map

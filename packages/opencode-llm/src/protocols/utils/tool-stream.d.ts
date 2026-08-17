@@ -1,6 +1,6 @@
-import { Effect } from "effect";
-import { LLMError, LLMEvent, type ProviderMetadata } from "../../schema/index.js";
-import { type ToolAccumulator } from "../shared.js";
+import { Effect } from 'effect';
+import { LLMError, LLMEvent, type ProviderMetadata } from '../../schema/index.js';
+import { type ToolAccumulator } from '../shared.js';
 type StreamKey = string | number;
 /**
  * One pending streamed tool call. Providers emit the tool identity and JSON
@@ -8,8 +8,8 @@ type StreamKey = string | number;
  * so far, not the parsed object.
  */
 export interface PendingTool extends ToolAccumulator {
-    readonly providerExecuted?: boolean;
-    readonly providerMetadata?: ProviderMetadata;
+  readonly providerExecuted?: boolean;
+  readonly providerMetadata?: ProviderMetadata;
 }
 /**
  * Sparse parser state keyed by the provider's stream-local tool identifier.
@@ -27,130 +27,195 @@ export type State<K extends StreamKey> = Partial<Record<K, PendingTool>>;
  * produced by the append; metadata-only deltas update identity without output.
  */
 export interface AppendOutcome<K extends StreamKey> {
-    readonly tools: State<K>;
-    readonly tool: PendingTool;
-    readonly events: ReadonlyArray<LLMEvent>;
+  readonly tools: State<K>;
+  readonly tool: PendingTool;
+  readonly events: ReadonlyArray<LLMEvent>;
 }
 /** Create empty accumulator state for one provider stream. */
 export declare const empty: <K extends StreamKey>() => State<K>;
-export declare const isError: <K extends StreamKey>(result: AppendOutcome<K> | LLMError) => result is LLMError;
+export declare const isError: <K extends StreamKey>(
+  result: AppendOutcome<K> | LLMError,
+) => result is LLMError;
 /**
  * Register a tool call whose start event arrived before any argument deltas.
  * Used by Anthropic `content_block_start`, Bedrock `contentBlockStart`, and
  * OpenAI Responses `response.output_item.added`.
  */
-export declare const start: <K extends StreamKey>(tools: State<K>, key: K, tool: Omit<PendingTool, "input"> & {
+export declare const start: <K extends StreamKey>(
+  tools: State<K>,
+  key: K,
+  tool: Omit<PendingTool, 'input'> & {
     readonly input?: string;
-}) => Partial<Record<K, PendingTool>>;
+  },
+) => Partial<Record<K, PendingTool>>;
 /**
  * Append a streamed argument delta, starting the tool if this provider encodes
  * identity on the first delta instead of a separate start event. OpenAI Chat has
  * this shape: `tool_calls[].index` is the stream key, and `id` / `name` may only
  * appear on the first delta for that index.
  */
-export declare const appendOrStart: <K extends StreamKey>(route: string, tools: State<K>, key: K, delta: {
+export declare const appendOrStart: <K extends StreamKey>(
+  route: string,
+  tools: State<K>,
+  key: K,
+  delta: {
     readonly id?: string;
     readonly name?: string;
     readonly text: string;
-}, missingToolMessage: string) => AppendOutcome<K> | LLMError;
+  },
+  missingToolMessage: string,
+) => AppendOutcome<K> | LLMError;
 /**
  * Append argument text to a tool that must already have been started. This keeps
  * protocols honest when their stream grammar promises a start event before any
  * argument delta.
  */
-export declare const appendExisting: <K extends StreamKey>(route: string, tools: State<K>, key: K, text: string, missingToolMessage: string) => AppendOutcome<K> | LLMError;
+export declare const appendExisting: <K extends StreamKey>(
+  route: string,
+  tools: State<K>,
+  key: K,
+  text: string,
+  missingToolMessage: string,
+) => AppendOutcome<K> | LLMError;
 /**
  * Finalize one pending tool call: parse the accumulated raw JSON, remove it
  * from state, and return the optional public `tool-call` event. Missing keys are
  * a no-op because some providers emit stop events for non-tool content blocks.
  */
-export declare const finish: <K extends StreamKey>(route: string, tools: State<K>, key: K) => Effect.Effect<{
-    tools: Partial<Record<K, PendingTool>>;
-    events?: undefined;
-} | {
-    tools: Partial<Record<K, PendingTool>>;
-    events: ({
-        readonly type: "tool-input-end";
-        readonly id: string;
-        readonly name: string;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    } | {
-        readonly type: "tool-call";
-        readonly id: string;
-        readonly name: string;
-        readonly input: unknown;
-        readonly providerExecuted?: boolean | undefined;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    })[];
-}, LLMError, never>;
+export declare const finish: <K extends StreamKey>(
+  route: string,
+  tools: State<K>,
+  key: K,
+) => Effect.Effect<
+  | {
+      tools: Partial<Record<K, PendingTool>>;
+      events?: undefined;
+    }
+  | {
+      tools: Partial<Record<K, PendingTool>>;
+      events: (
+        | {
+            readonly type: 'tool-input-end';
+            readonly id: string;
+            readonly name: string;
+            readonly providerMetadata?:
+              | {
+                  readonly [x: string]: {
+                    readonly [x: string]: unknown;
+                  };
+                }
+              | undefined;
+          }
+        | {
+            readonly type: 'tool-call';
+            readonly id: string;
+            readonly name: string;
+            readonly input: unknown;
+            readonly providerExecuted?: boolean | undefined;
+            readonly providerMetadata?:
+              | {
+                  readonly [x: string]: {
+                    readonly [x: string]: unknown;
+                  };
+                }
+              | undefined;
+          }
+      )[];
+    },
+  LLMError,
+  never
+>;
 /**
  * Finalize one pending tool call with an authoritative final input string.
  * OpenAI Responses can send accumulated deltas and then repeat the completed
  * arguments on `response.output_item.done`; the final value wins.
  */
-export declare const finishWithInput: <K extends StreamKey>(route: string, tools: State<K>, key: K, input: string) => Effect.Effect<{
-    tools: Partial<Record<K, PendingTool>>;
-    events?: undefined;
-} | {
-    tools: Partial<Record<K, PendingTool>>;
-    events: ({
-        readonly type: "tool-input-end";
-        readonly id: string;
-        readonly name: string;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    } | {
-        readonly type: "tool-call";
-        readonly id: string;
-        readonly name: string;
-        readonly input: unknown;
-        readonly providerExecuted?: boolean | undefined;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    })[];
-}, LLMError, never>;
+export declare const finishWithInput: <K extends StreamKey>(
+  route: string,
+  tools: State<K>,
+  key: K,
+  input: string,
+) => Effect.Effect<
+  | {
+      tools: Partial<Record<K, PendingTool>>;
+      events?: undefined;
+    }
+  | {
+      tools: Partial<Record<K, PendingTool>>;
+      events: (
+        | {
+            readonly type: 'tool-input-end';
+            readonly id: string;
+            readonly name: string;
+            readonly providerMetadata?:
+              | {
+                  readonly [x: string]: {
+                    readonly [x: string]: unknown;
+                  };
+                }
+              | undefined;
+          }
+        | {
+            readonly type: 'tool-call';
+            readonly id: string;
+            readonly name: string;
+            readonly input: unknown;
+            readonly providerExecuted?: boolean | undefined;
+            readonly providerMetadata?:
+              | {
+                  readonly [x: string]: {
+                    readonly [x: string]: unknown;
+                  };
+                }
+              | undefined;
+          }
+      )[];
+    },
+  LLMError,
+  never
+>;
 /**
  * Finalize every pending tool call at once. OpenAI Chat has this shape: it does
  * not emit per-tool stop events, so all accumulated calls finish when the choice
  * receives a terminal `finish_reason`.
  */
-export declare const finishAll: <K extends StreamKey>(route: string, tools: State<K>) => Effect.Effect<{
+export declare const finishAll: <K extends StreamKey>(
+  route: string,
+  tools: State<K>,
+) => Effect.Effect<
+  {
     tools: Partial<Record<K, PendingTool>>;
-    events: ({
-        readonly type: "tool-input-end";
-        readonly id: string;
-        readonly name: string;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    } | {
-        readonly type: "tool-call";
-        readonly id: string;
-        readonly name: string;
-        readonly input: unknown;
-        readonly providerExecuted?: boolean | undefined;
-        readonly providerMetadata?: {
-            readonly [x: string]: {
-                readonly [x: string]: unknown;
-            };
-        } | undefined;
-    })[];
-}, LLMError, never>;
-export * as ToolStream from "./tool-stream.js";
+    events: (
+      | {
+          readonly type: 'tool-input-end';
+          readonly id: string;
+          readonly name: string;
+          readonly providerMetadata?:
+            | {
+                readonly [x: string]: {
+                  readonly [x: string]: unknown;
+                };
+              }
+            | undefined;
+        }
+      | {
+          readonly type: 'tool-call';
+          readonly id: string;
+          readonly name: string;
+          readonly input: unknown;
+          readonly providerExecuted?: boolean | undefined;
+          readonly providerMetadata?:
+            | {
+                readonly [x: string]: {
+                  readonly [x: string]: unknown;
+                };
+              }
+            | undefined;
+        }
+    )[];
+  },
+  LLMError,
+  never
+>;
+export * as ToolStream from './tool-stream.js';
 //# sourceMappingURL=tool-stream.d.ts.map

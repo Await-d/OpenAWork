@@ -52,7 +52,11 @@ function streamEvent(observation: StreamObservation, payload: unknown): StreamOb
   if (!isRecord(payload) || typeof payload.type !== 'string') return observation;
   if (payload.type === 'message_start') {
     const message = isRecord(payload.message) ? payload.message : undefined;
-    return { ...observation, sawMessageStart: true, inputTokens: numberField(message?.usage, 'input_tokens') };
+    return {
+      ...observation,
+      sawMessageStart: true,
+      inputTokens: numberField(message?.usage, 'input_tokens'),
+    };
   }
   if (payload.type === 'message_delta') {
     const delta = isRecord(payload.delta) ? payload.delta : undefined;
@@ -127,7 +131,10 @@ export function isOfficialAnthropicBaseUrl(value: string): boolean {
   }
 }
 
-function responseEvidence(status: number, stream?: StreamObservation): AnthropicGateResult['response'] {
+function responseEvidence(
+  status: number,
+  stream?: StreamObservation,
+): AnthropicGateResult['response'] {
   return {
     status,
     sawMessageStart: stream?.sawMessageStart ?? false,
@@ -139,7 +146,9 @@ function responseEvidence(status: number, stream?: StreamObservation): Anthropic
   };
 }
 
-export async function runRealAnthropic(fetcher: Fetcher = globalThis.fetch): Promise<AnthropicGateResult> {
+export async function runRealAnthropic(
+  fetcher: Fetcher = globalThis.fetch,
+): Promise<AnthropicGateResult> {
   const key = process.env['ANTHROPIC_API_KEY']?.trim();
   const model = process.env['ANTHROPIC_TEST_MODEL']?.trim();
   if (!key || !model) {
@@ -198,7 +207,11 @@ export async function runRealAnthropic(fetcher: Fetcher = globalThis.fetch): Pro
     if (response.status !== 200) return responseBase(`gate_outcome=http_${response.status}`);
     const stream = await readAnthropicStream(response);
     if (!stream) return responseBase('gate_outcome=disconnected_stream');
-    if (!stream.sawMessageStart || stream.inputTokens === undefined || stream.outputTokens === undefined) {
+    if (
+      !stream.sawMessageStart ||
+      stream.inputTokens === undefined ||
+      stream.outputTokens === undefined
+    ) {
       return responseBase('gate_outcome=missing_response_usage', stream);
     }
     if (!stream.sawMessageDelta || !stream.stopReason) {

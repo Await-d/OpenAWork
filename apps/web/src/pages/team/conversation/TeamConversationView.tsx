@@ -732,11 +732,7 @@ export function TeamConversationView({
   const handleResendHistoryEdit = useCallback(
     (text: string, editedInputParts?: InputImageContent[]) => {
       if (!historyEditPrompt) return;
-      void truncateAndResend(
-        historyEditPrompt.messageId,
-        text,
-        editedInputParts,
-      );
+      void truncateAndResend(historyEditPrompt.messageId, text, editedInputParts);
       setHistoryEditPrompt(null);
     },
     [historyEditPrompt, truncateAndResend],

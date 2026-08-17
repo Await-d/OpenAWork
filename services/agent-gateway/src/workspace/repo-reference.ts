@@ -139,7 +139,11 @@ function buildFile(input: BuildFileInput): RepositoryReference | null {
   try {
     filePath = fileURLToPath(input.url);
   } catch {
-    return null;
+    try {
+      filePath = decodeURIComponent(input.url.pathname);
+    } catch {
+      return null;
+    }
   }
   const segments = filePath.split(/[\\/]+/).filter(Boolean);
   if (segments.length === 0) return null;

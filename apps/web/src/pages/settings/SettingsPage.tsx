@@ -995,11 +995,11 @@ export default function SettingsPage() {
             id: makeStableId(existingTemplate.id),
             name: data.name.trim() || existingTemplate.name,
             enabled: data.enabled,
-             apiKey: data.apiKey.trim() || undefined,
-             baseUrl: data.baseUrl.trim() || existingTemplate.baseUrl,
-             openaiFastMode:
-               data.type === 'openai' && data.openaiFastMode === true ? true : undefined,
-             upstreamProtocol: data.upstreamProtocol,
+            apiKey: data.apiKey.trim() || undefined,
+            baseUrl: data.baseUrl.trim() || existingTemplate.baseUrl,
+            openaiFastMode:
+              data.type === 'openai' && data.openaiFastMode === true ? true : undefined,
+            upstreamProtocol: data.upstreamProtocol,
           }
         : {
             id: makeStableId(baseId),

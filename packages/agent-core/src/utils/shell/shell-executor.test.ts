@@ -65,7 +65,7 @@ describe('跨平台 Shell 执行', () => {
           stdout += data.toString();
         });
 
-        result.process.on('exit', (code) => {
+        result.process.on('close', (code) => {
           if (code === 0) {
             expect(stdout).toContain('Hello OpenAWork');
             resolve();
@@ -89,7 +89,7 @@ describe('跨平台 Shell 执行', () => {
           stdout += data.toString();
         });
 
-        result.process.on('exit', (code) => {
+        result.process.on('close', (code) => {
           if (code === 0) {
             expect(stdout.trim()).toBeTruthy();
             resolve();
@@ -121,7 +121,7 @@ describe('跨平台 Shell 执行', () => {
           stdout += data.toString();
         });
 
-        result.process.on('exit', (code) => {
+        result.process.on('close', (code) => {
           if (code === 0) {
             expect(stdout).toContain('Hello OpenAWork');
             resolve();
@@ -147,7 +147,7 @@ describe('跨平台 Shell 执行', () => {
           stdout += data.toString();
         });
 
-        result.process.on('exit', (code) => {
+        result.process.on('close', (code) => {
           if (code === 0) {
             expect(stdout.trim()).toBeTruthy();
             resolve();

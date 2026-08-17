@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 async function main(): Promise<void> {
-  const workspaceRoot = path.join('/tmp', `openawork-session-delete-${randomUUID()}`);
+  const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'openawork-session-delete-'));
+  const workingDirectory = path.join(workspaceRoot, 'project');
+  mkdirSync(workingDirectory, { recursive: true });
 
   await withTempEnv(
     {
@@ -91,6 +94,11 @@ async function main(): Promise<void> {
 
         dbModule.sqliteRun(
           "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?",
+          [JSON.stringify({ workingDirectory }), parentSessionId],
+        );
+
+        dbModule.sqliteRun(
+          "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?",
           [
             JSON.stringify({
               parentSessionId,
@@ -98,7 +106,7 @@ async function main(): Promise<void> {
               subagentType: 'explore',
               taskParentToolCallId: 'task-call-1',
               taskParentToolRequestId: 'task-parent-request-1',
-              workingDirectory: '/tmp/openawork-session-root-child/project',
+              workingDirectory,
             }),
             childSessionId,
           ],

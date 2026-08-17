@@ -64,28 +64,38 @@ vi.mock('../../compaction/auto-compaction-trigger.js', () => ({
 
 vi.mock('../../provider/provider-catalog.js', () => providerCatalogStub);
 
-vi.mock('../../v2-runtime/upstream/stream-runner.js', () => ({
-  async *runUpstreamStream(input: StubStreamInput) {
-    const callIndex = streamStub.calls.length;
-    streamStub.calls.push({
-      messages: JSON.stringify(input.messages),
-      system: JSON.stringify(input.system ?? null),
-    });
-    streamStub.abort();
-    if (input.signal?.aborted) {
-      const error = new Error('task-5 aborted upstream stream');
-      error.name = 'AbortError';
-      throw error;
-    }
-    if (streamStub.emitContextLimitOnFirst && callIndex === 0) {
-      throw new Error('context length 1,000 maximum 100');
-    }
-    const inputTokens = streamStub.emitHighUsageOnFirst && callIndex === 0 ? 1_000_000 : 2;
-    input.onFinish?.({ usage: { inputTokens, outputTokens: 1, totalTokens: inputTokens + 1 } });
-    yield { type: 'text_delta' as const, delta: 'ok' };
-    yield { type: 'done' as const, stopReason: 'end_turn' as const };
-  },
-}));
+vi.mock('../../v2-runtime/upstream/index.js', async () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- typeof import() 是 vitest mock 常见模式
+  const actual = await vi.importActual<typeof import('../../v2-runtime/upstream/index.js')>(
+    '../../v2-runtime/upstream/index.js',
+  );
+  const { Stream } = await import('effect');
+  return {
+    ...actual,
+    runUpstreamStream(input: StubStreamInput) {
+      const callIndex = streamStub.calls.length;
+      streamStub.calls.push({
+        messages: JSON.stringify(input.messages),
+        system: JSON.stringify(input.system ?? null),
+      });
+      streamStub.abort();
+      if (input.signal?.aborted) {
+        const error = new Error('task-5 aborted upstream stream');
+        error.name = 'AbortError';
+        return Stream.fail(error);
+      }
+      if (streamStub.emitContextLimitOnFirst && callIndex === 0) {
+        return Stream.fail(new Error('context length 1,000 maximum 100'));
+      }
+      const inputTokens = streamStub.emitHighUsageOnFirst && callIndex === 0 ? 1_000_000 : 2;
+      input.onFinish?.({ usage: { inputTokens, outputTokens: 1, totalTokens: inputTokens + 1 } });
+      return Stream.fromIterable([
+        { type: 'text_delta' as const, delta: 'ok' },
+        { type: 'done' as const, stopReason: 'end_turn' as const },
+      ]);
+    },
+  };
+});
 
 const userId = 'task-5-preflight-user';
 const sessionId = 'task-5-preflight-session';
@@ -103,6 +113,7 @@ const route: ModelRouteConfig = {
 };
 
 let previousDatabasePath: string | undefined;
+let previousAllowInsecureLocalhost: string | undefined;
 let temporaryDatabaseDirectory = '';
 
 function configureProvider(): void {
@@ -244,6 +255,8 @@ async function runHandleStreamRequest(signal?: AbortSignal) {
 
 beforeAll(async () => {
   previousDatabasePath = process.env['OPENAWORK_DATABASE_PATH'];
+  previousAllowInsecureLocalhost = process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
   temporaryDatabaseDirectory = await mkdtemp(join(tmpdir(), 'openawork-task-5-stream-'));
   await db.closeDb();
   process.env['OPENAWORK_DATABASE_PATH'] = join(temporaryDatabaseDirectory, 'gateway.sqlite');
@@ -274,6 +287,11 @@ afterAll(async () => {
     delete process.env['OPENAWORK_DATABASE_PATH'];
   } else {
     process.env['OPENAWORK_DATABASE_PATH'] = previousDatabasePath;
+  }
+  if (previousAllowInsecureLocalhost === undefined) {
+    delete process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  } else {
+    process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = previousAllowInsecureLocalhost;
   }
   await rm(temporaryDatabaseDirectory, { force: true, recursive: true });
   await db.connectDb();

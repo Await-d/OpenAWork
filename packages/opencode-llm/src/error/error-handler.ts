@@ -5,15 +5,13 @@
  */
 
 import { Effect } from 'effect';
-import type { LLMRequest, LLMResponse } from '../schema/index.js';
+import type { LLMRequest } from '../schema/index.js';
 import type { Model } from '../schema/index.js';
-import {
-  createCircuitBreaker,
-  type CircuitBreakerConfig,
-  CircuitBreakerOpenError,
-} from './circuit-breaker.js';
+import type { CircuitBreakerOpenError } from './circuit-breaker.js';
+import { createCircuitBreaker, type CircuitBreakerConfig } from './circuit-breaker.js';
 import { withRetry, type RetryPolicyConfig } from './retry-policy.js';
-import { withFallback, type FallbackConfig, AllFallbacksFailedError } from './fallback.js';
+import type { AllFallbacksFailedError } from './fallback.js';
+import { withFallback, type FallbackConfig } from './fallback.js';
 
 /**
  * 错误处理策略
@@ -99,7 +97,6 @@ export function createResilientExecutor<A, E, R>(
     circuitBreakerConfig,
     enableFallback = false,
     fallbackConfig,
-    transformError,
   } = { ...DEFAULT_ERROR_HANDLING_STRATEGY, ...strategy };
 
   return Effect.gen(function* () {
@@ -108,7 +105,10 @@ export function createResilientExecutor<A, E, R>(
       if (!enableRetry) {
         return execute(m, req);
       }
-      return withRetry(Effect.suspend(() => execute(m, req)), retryConfig);
+      return withRetry(
+        Effect.suspend(() => execute(m, req)),
+        retryConfig,
+      );
     };
 
     // 层次 2：降级
@@ -215,7 +215,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'reason' in error &&
-      typeof (error as { reason: unknown }).reason === 'object' &&
+      typeof error.reason === 'object' &&
       (error as { reason: { _tag?: unknown } }).reason !== null
     ) {
       const tag = (error as { reason: { _tag?: string } }).reason._tag;
@@ -232,7 +232,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'reason' in error &&
-      typeof (error as { reason: unknown }).reason === 'object' &&
+      typeof error.reason === 'object' &&
       (error as { reason: { _tag?: unknown } }).reason !== null
     ) {
       const tag = (error as { reason: { _tag?: string } }).reason._tag;
@@ -249,7 +249,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'reason' in error &&
-      typeof (error as { reason: unknown }).reason === 'object' &&
+      typeof error.reason === 'object' &&
       (error as { reason: { _tag?: unknown } }).reason !== null
     ) {
       const tag = (error as { reason: { _tag?: string } }).reason._tag;
@@ -266,7 +266,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'reason' in error &&
-      typeof (error as { reason: unknown }).reason === 'object' &&
+      typeof error.reason === 'object' &&
       (error as { reason: { _tag?: unknown; classification?: unknown } }).reason !== null
     ) {
       const reason = (error as { reason: { _tag?: string; classification?: string } }).reason;
@@ -283,7 +283,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'retryable' in error &&
-      typeof (error as { retryable: unknown }).retryable === 'boolean'
+      typeof error.retryable === 'boolean'
     ) {
       return (error as { retryable: boolean }).retryable;
     }
@@ -298,7 +298,7 @@ export const ErrorClassifier = {
       typeof error === 'object' &&
       error !== null &&
       'retryAfterMs' in error &&
-      typeof (error as { retryAfterMs: unknown }).retryAfterMs === 'number'
+      typeof error.retryAfterMs === 'number'
     ) {
       return (error as { retryAfterMs: number }).retryAfterMs;
     }
