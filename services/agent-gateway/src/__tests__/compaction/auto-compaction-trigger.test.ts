@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   isAutoCompactCircuitBreakerTripped: vi.fn(),
   listSessionMessagesV2: vi.fn(),
   parseContextLimitError: vi.fn(),
+  persistCompactionProjection: vi.fn(),
   publishSessionRunEvent: vi.fn(),
   reactiveCompactByTokenGap: vi.fn(),
   recordDiscoveredContextWindow: vi.fn(),
@@ -29,12 +30,17 @@ vi.mock('../../compaction/reactive-compact.js', () => ({
   reactiveCompactByTokenGap: mocks.reactiveCompactByTokenGap,
 }));
 
+vi.mock('../../compaction/compaction-projection.js', () => ({
+  persistCompactionProjection: mocks.persistCompactionProjection,
+}));
+
 vi.mock('../../compaction/session-memory-compact.js', () => ({
   trySessionMemoryCompaction: mocks.trySessionMemoryCompaction,
 }));
 
 vi.mock('../../infra/db.js', () => ({
   sqliteGet: vi.fn(),
+  sqliteTransaction: vi.fn(<T>(fn: () => T): T => fn()),
 }));
 
 vi.mock('../../message/message-v2-adapter.js', () => ({
@@ -137,6 +143,7 @@ beforeEach(() => {
   mocks.listSessionMessagesV2.mockReturnValue([]);
   mocks.parseContextLimitError.mockReset();
   mocks.parseContextLimitError.mockReturnValue(null);
+  mocks.persistCompactionProjection.mockReset();
   mocks.publishSessionRunEvent.mockReset();
   mocks.reactiveCompactByTokenGap.mockReset();
   mocks.reactiveCompactByTokenGap.mockReturnValue(null);
@@ -149,6 +156,88 @@ beforeEach(() => {
 });
 
 describe('自动压缩续跑', () => {
+  it('reactive 快速路径必须持久化投影，reload 后完整压缩不得继续读取原始历史', async () => {
+    const originalMessages = [
+      textMessage('user-old', 'user', '旧问题'),
+      textMessage('assistant-old', 'assistant', '旧回答'),
+      textMessage('user-recent', 'user', '近期问题'),
+      textMessage('assistant-recent', 'assistant', '近期回答'),
+    ];
+    const projectedMessages = originalMessages.slice(2);
+    let reloadedModelInput = originalMessages;
+
+    mocks.listSessionMessagesV2.mockReturnValue(originalMessages);
+    mocks.parseContextLimitError.mockReturnValue({
+      currentTokens: 120_000,
+      maxTokens: 100_000,
+    });
+    mocks.reactiveCompactByTokenGap.mockReturnValue({
+      recovered: true,
+      droppedMessages: 2,
+      droppedGroups: 1,
+      tokensFreed: 20_000,
+      remainingMessages: projectedMessages,
+    });
+    mocks.persistCompactionProjection.mockImplementation(
+      (input: { projectedMessages: Message[] }) => {
+        reloadedModelInput = input.projectedMessages;
+        return { metadataJson: '{}', projectedMessages: input.projectedMessages, summary: '快速投影' };
+      },
+    );
+
+    await triggerOverflowCompaction({
+      ...baseContext(),
+      round: 2,
+      roundResult: {
+        overflow: true,
+        stopReason: 'error',
+        upstreamError: { message: 'context_length_exceeded' },
+      },
+    });
+
+    expect(reloadedModelInput).toEqual(projectedMessages);
+  });
+
+  it('aggressive 工具输出快速路径必须把截断后的投影交给持久化 reload 输入', async () => {
+    const originalMessages = [
+      textMessage('user-old', 'user', '旧问题'),
+      textMessage('assistant-old', 'assistant', '旧回答'),
+    ];
+    const projectedMessages = [textMessage('user-projected', 'user', '截断后的问题')];
+    let reloadedModelInput = originalMessages;
+
+    mocks.listSessionMessagesV2.mockReturnValue(originalMessages);
+    mocks.parseContextLimitError.mockReturnValue({
+      currentTokens: 120_000,
+      maxTokens: 100_000,
+    });
+    mocks.aggressiveTruncateToolOutputs.mockReturnValue({
+      success: true,
+      sufficient: true,
+      truncatedCount: 1,
+      totalCharsRemoved: 4_000,
+      messages: projectedMessages,
+    });
+    mocks.persistCompactionProjection.mockImplementation(
+      (input: { projectedMessages: Message[] }) => {
+        reloadedModelInput = input.projectedMessages;
+        return { metadataJson: '{}', projectedMessages: input.projectedMessages, summary: '快速投影' };
+      },
+    );
+
+    await triggerOverflowCompaction({
+      ...baseContext(),
+      round: 2,
+      roundResult: {
+        overflow: true,
+        stopReason: 'error',
+        upstreamError: { message: 'context_length_exceeded' },
+      },
+    });
+
+    expect(reloadedModelInput).toEqual(projectedMessages);
+  });
+
   it('provider 在发送当前用户请求前报上下文溢出时，会排除压缩标记后的当前请求并重放', async () => {
     const previousMessages = [
       textMessage('user-old', 'user', '旧问题'),
@@ -243,6 +332,58 @@ describe('自动压缩续跑', () => {
         metadataJson: '{}',
         trigger: 'automatic',
       }),
+    );
+  });
+
+  it('自动压缩阈值不受旧 reserved 设置改写', async () => {
+    // Given
+    const input = {
+      ...baseContext(),
+      compactionSettings: { ...COMPACTION_SETTINGS, reserved: 50_000 },
+      round: 2,
+      lastRoundUsage: {
+        inputTokens: 60_000,
+        outputTokens: 5_000,
+      },
+    };
+
+    // When
+    const result = await triggerProactiveCompaction(input);
+
+    // Then
+    expect(result).toEqual({ triggered: false, metadataJson: '{}' });
+    expect(mocks.executeSessionCompaction).not.toHaveBeenCalled();
+  });
+
+  it('V2 round 的 95K 用量会进入 triggerOverflowCompaction seam', async () => {
+    // Given
+    mocks.resolveEffectiveContextWindow.mockReturnValue(128_000);
+    mocks.listSessionMessagesV2.mockReturnValue([
+      textMessage('user-old', 'user', '旧问题'),
+      textMessage('assistant-old', 'assistant', '旧回答'),
+    ]);
+
+    // When
+    const result = await triggerOverflowCompaction({
+      ...baseContext(),
+      route: { ...ROUTE, contextWindow: 128_000, maxTokens: 32_000 },
+      compactionSettings: { ...COMPACTION_SETTINGS, reserved: 50_000 },
+      round: 2,
+      roundResult: {
+        overflow: true,
+        stopReason: 'end_turn',
+        usage: {
+          inputTokens: 95_000,
+          outputTokens: 0,
+          totalTokens: 95_000,
+        },
+      },
+    });
+
+    // Then
+    expect(result.triggered).toBe(true);
+    expect(mocks.executeSessionCompaction).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'automatic' }),
     );
   });
 

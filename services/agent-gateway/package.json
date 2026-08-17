@@ -28,6 +28,7 @@
     "test:v2-runtime": "pnpm run verify -- src/verification/verify-v2-runtime.ts",
     "test:claude-tools": "pnpm run verify -- src/verification/verify-claude-first-tools.ts",
     "verify": "tsx src/verification/run-with-test-env.ts",
+    "verify:compaction-parity": "tsx src/verification/verify-compaction-parity.ts",
     "lint": "eslint .",
     "clean": "rm -rf dist"
   },

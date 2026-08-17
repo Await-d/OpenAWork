@@ -60,6 +60,16 @@ import {
   registerInFlightStreamRequest,
 } from './stream-cancellation.js';
 import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
+import { sqliteGet } from '../infra/db.js';
+import {
+  COMPACTION_SETTINGS_KEY,
+  readCompactionSettings,
+} from '../compaction/compaction-policy.js';
+import {
+  triggerOverflowCompaction,
+  triggerProactiveCompaction,
+} from '../compaction/auto-compaction-trigger.js';
+import { MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES } from '../task/task-parent-auto-resume.js';
 import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
 import {
   autoExtractMemoriesForRequest,
@@ -115,6 +125,19 @@ async function continueFromApprovedToolResult(input: {
     requestData: streamRequestSchema.parse(input.payload.requestData),
     userId: input.userId,
   });
+  const settingsRow = sqliteGet<{ value: string }>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+    [input.userId, COMPACTION_SETTINGS_KEY],
+  );
+  let storedSettings: unknown;
+  if (settingsRow?.value) {
+    try {
+      storedSettings = JSON.parse(settingsRow.value) as unknown;
+    } catch {
+      storedSettings = undefined;
+    }
+  }
+  const compactionSettings = readCompactionSettings(storedSettings);
 
   const runId = randomUUID();
   const eventSequence = { value: 1 };
@@ -435,7 +458,36 @@ async function continueFromApprovedToolResult(input: {
     });
 
     try {
+      let syntheticContinuationPrompt: string | undefined;
+      let lastRoundUsage:
+        | {
+            inputTokens: number;
+            outputTokens?: number;
+            cacheReadTokens?: number;
+            cacheWriteTokens?: number;
+          }
+        | undefined;
+
       for (let round = input.payload.nextRound; ; round += 1) {
+        if (round > input.payload.nextRound && lastRoundUsage) {
+          const proactiveResult = await triggerProactiveCompaction({
+            userId: input.userId,
+            sessionId: input.sessionId,
+            metadataJson: sessionContext.metadataJson,
+            clientRequestId: input.payload.clientRequestId,
+            runId,
+            route,
+            compactionSettings,
+            signal: abortController.signal,
+            round,
+            lastRoundUsage,
+            requestKind: 'conversation',
+          });
+          if (proactiveResult.triggered) {
+            sessionContext.metadataJson = proactiveResult.metadataJson;
+          }
+        }
+
         const result = await runModelRound({
           clientRequestId: input.payload.clientRequestId,
           enabledTools,
@@ -452,6 +504,8 @@ async function continueFromApprovedToolResult(input: {
           userId: input.userId,
           wl,
           ctx,
+          compactionAutoEnabled: compactionSettings.auto,
+          compactionReservedTokens: compactionSettings.reserved,
           workspaceCtx,
           injectedPrompt,
           capabilityContext,
@@ -464,10 +518,36 @@ async function continueFromApprovedToolResult(input: {
           teamInstructionStack,
           teamResumePrompt,
           teamStatusPrompt,
+          ...(round === input.payload.nextRound
+            ? {
+                beforeUpstreamCall: async (renderedMessageTokens: number) => {
+                  const proactiveResult = await triggerProactiveCompaction({
+                    userId: input.userId,
+                    sessionId: input.sessionId,
+                    metadataJson: sessionContext.metadataJson,
+                    clientRequestId: input.payload.clientRequestId,
+                    runId,
+                    route,
+                    compactionSettings,
+                    signal: abortController.signal,
+                    round,
+                    lastRoundUsage: { inputTokens: renderedMessageTokens },
+                    requestKind: 'conversation',
+                  });
+                  if (proactiveResult.triggered) {
+                    sessionContext.metadataJson = proactiveResult.metadataJson;
+                  }
+                  return proactiveResult.triggered;
+                },
+              }
+            : {}),
+          syntheticContinuationPrompt,
           writeChunk,
         });
+        syntheticContinuationPrompt = undefined;
 
         if (result.usage) {
+          lastRoundUsage = result.usage;
           writeChunk(
             buildStreamUsageChunk({
               eventSequence,
@@ -483,6 +563,43 @@ async function continueFromApprovedToolResult(input: {
             usage: result.usage,
             userId: input.userId,
           });
+        }
+
+        let overflowTriggered = false;
+        if (result.overflow === true) {
+          const overflowResult = await triggerOverflowCompaction({
+            userId: input.userId,
+            sessionId: input.sessionId,
+            metadataJson: sessionContext.metadataJson,
+            clientRequestId: input.payload.clientRequestId,
+            runId,
+            route,
+            compactionSettings,
+            signal: abortController.signal,
+            round,
+            requestKind: 'conversation',
+            roundResult: {
+              overflow: result.overflow,
+              stopReason: result.stopReason,
+              usage: result.usage,
+              upstreamError: result.upstreamError,
+            },
+          });
+          if (overflowResult.triggered) {
+            sessionContext.metadataJson = overflowResult.metadataJson;
+            overflowTriggered = true;
+            if (overflowResult.syntheticContinuationPrompt) {
+              syntheticContinuationPrompt = overflowResult.syntheticContinuationPrompt;
+            }
+          }
+        }
+
+        if (
+          result.overflow === true &&
+          overflowTriggered &&
+          round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
+        ) {
+          continue;
         }
 
         if (result.stopReason === 'error' || result.shouldStop) {

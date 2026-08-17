@@ -642,6 +642,88 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
       return Stream.succeed(chunk);
     }),
   );
+/*
+
+  // Read the (possibly-mutated) values back. We deliberately allow
+  // plugins to NULL these out (set to `undefined`) — that's a valid
+  // signal "stop sending this param to the model".
+  temperature = chatParamsOutput.temperature;
+  topP = chatParamsOutput.topP;
+  maxOutputTokens = chatParamsOutput.maxOutputTokens;
+  const optsFreq = chatParamsOutput.options['frequencyPenalty'];
+  frequencyPenalty = typeof optsFreq === 'number' ? optsFreq : undefined;
+  const optsPres = chatParamsOutput.options['presencePenalty'];
+  presencePenalty = typeof optsPres === 'number' ? optsPres : undefined;
+
+  // `ai@5.x` types `streamText`'s model parameter as the V2 union, but
+  // `@ai-sdk/openai-compatible@2.x` already emits V3 instances. Both
+  // shapes are runtime-compatible; until the SDK aligns the type
+  // surface we cast through `unknown` at this single boundary instead
+  // of forcing every caller to do so.
+  // LiteLLM/Bedrock proxies reject requests where the message history
+  // references tools but no `tools` parameter is present. When there are
+  // no active tools (e.g. compaction round) inject a `_noop` stub.
+  const incomingTools = input.tools;
+  const needsStub =
+    (!incomingTools || Object.keys(incomingTools).length === 0) &&
+    hasToolCallsInHistory(decoratedMessages) &&
+    shouldInjectNoopStub({ litellmProxy: input.litellmProxy, providerType: input.providerType });
+  // Sort tool entries by name for deterministic ordering. Many providers
+  // hash the serialised tool list as part of the prompt-cache key (Anthropic
+  // prompt caching, OpenAI Responses cached tools, Bedrock prompt-cache),
+  // so even a stable subset of tools that arrives in shifting insertion
+  // order causes spurious cache misses across requests in the same session.
+  // Mirrors opencode #26370.
+  const sortedIncomingTools = sortToolsByName(incomingTools);
+  const effectiveTools: ToolSet | undefined = needsStub
+    ? { _noop: NOOP_TOOL_DEFINITION }
+    : sortedIncomingTools;
+  const toolNameLookup = new Map<string, string>();
+  if (effectiveTools) {
+    for (const name of Object.keys(effectiveTools)) {
+      toolNameLookup.set(name.toLowerCase(), name);
+    }
+  }
+
+  // Idle (inter-chunk) watchdog: combine the caller signal with an
+  // internal controller so a stalled-but-open upstream socket can be
+  // aborted even when the client never disconnects.
+  const idleController = new AbortController();
+
+  const result = streamText({
+    model: input.model,
+    messages: decoratedMessages,
+    ...(decoratedSystem ? { system: decoratedSystem } : {}),
+    ...(effectiveTools ? { tools: effectiveTools } : {}),
+    ...(typeof temperature === 'number' && !shouldOmit(omit, 'temperature')
+      ? { temperature }
+      : {}),
+    ...(typeof maxOutputTokens === 'number' &&
+    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
+      ? { maxOutputTokens }
+      : {}),
+    ...(typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP') ? { topP } : {}),
+    ...(typeof frequencyPenalty === 'number' &&
+    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
+      ? { frequencyPenalty }
+      : {}),
+    ...(typeof presencePenalty === 'number' &&
+    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
+      ? { presencePenalty }
+      : {}),
+    ...(providerOptions ? { providerOptions } : {}),
+    ...(input.signal ? { abortSignal: input.signal } : {}),
+    ...(typeof input.maxRetries === 'number' ? { maxRetries: input.maxRetries } : {}),
+  });
+
+  const meta = (extra: Record<string, unknown>) => ({
+    ...(state.runId ? { runId: state.runId } : {}),
+    ...(state.agentId ? { agentId: state.agentId } : {}),
+    occurredAt: Date.now(),
+    ...extra,
+  });
+
+*/
   const idleTimeoutMs = input.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   if (Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0) {
     translated = translated.pipe(Stream.timeout(Duration.millis(idleTimeoutMs)));
