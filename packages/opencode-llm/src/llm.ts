@@ -1,5 +1,7 @@
-import { Effect, JsonSchema, Schema } from 'effect';
+import type { JsonSchema } from 'effect';
+import { Effect, Schema } from 'effect';
 import { LLMClient } from './route/client.js';
+import type { LLMResponse, ToolResultPart } from './schema/index.js';
 import {
   GenerationOptions,
   HttpOptions,
@@ -7,14 +9,12 @@ import {
   LLMError,
   LLMEvent,
   LLMRequest,
-  LLMResponse,
   Message,
   type ModelInput as SchemaModelInput,
   SystemPart,
   ToolChoice,
   ToolDefinition,
   type ContentPart,
-  ToolResultPart,
 } from './schema/index.js';
 import { make as makeTool, toDefinitions, type ToolSchema } from './tool.js';
 
@@ -102,7 +102,7 @@ export class GenerateObjectResponse<T> {
   }
 }
 
-export interface GenerateObjectOptions<S extends ToolSchema<any>> extends GenerateObjectBase {
+export interface GenerateObjectOptions<S extends ToolSchema<unknown>> extends GenerateObjectBase {
   readonly schema: S;
 }
 
@@ -159,23 +159,23 @@ const runGenerateObject = Effect.fn('LLM.generateObject')(function* (
  * 2. `jsonSchema: JsonSchema.JsonSchema` — `.object` is `unknown`. Use when
  *    the schema is only available at runtime (MCP, plugin manifests). Caller validates.
  */
-export function generateObject<S extends ToolSchema<any>>(
+export function generateObject<S extends ToolSchema<unknown>>(
   options: GenerateObjectOptions<S>,
 ): Effect.Effect<GenerateObjectResponse<Schema.Schema.Type<S>>, LLMError>;
 export function generateObject(
   options: GenerateObjectDynamicOptions,
 ): Effect.Effect<GenerateObjectResponse<unknown>, LLMError>;
 export function generateObject(
-  options: GenerateObjectOptions<ToolSchema<any>> | GenerateObjectDynamicOptions,
+  options: GenerateObjectOptions<ToolSchema<unknown>> | GenerateObjectDynamicOptions,
 ) {
   if ('schema' in options) {
     const { schema, ...rest } = options;
     return runGenerateObject(
       rest,
-      makeTool({
+      makeTool<ToolSchema<unknown>, ToolSchema<unknown>>({
         description: GENERATE_OBJECT_TOOL_DESCRIPTION,
         parameters: schema,
-        success: Schema.Unknown as ToolSchema<unknown>,
+        success: Schema.Unknown,
         execute: () => Effect.void,
       }),
     );

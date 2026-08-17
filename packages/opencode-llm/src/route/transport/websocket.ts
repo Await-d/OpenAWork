@@ -1,5 +1,5 @@
 import { Cause, Context, Effect, Layer, Queue, Stream } from 'effect';
-import { Headers } from 'effect/unstable/http';
+import type { Headers } from 'effect/unstable/http';
 import { LLMError, TransportReason } from '../../schema/index.js';
 import * as HttpTransport from './http.js';
 import { redactTransportText, redactTransportUrl } from './redaction.js';

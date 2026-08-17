@@ -1,7 +1,6 @@
 import { Effect, Stream } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import * as OpenAI from '@openAwork/opencode-llm/providers/openai';
-import type { StreamChunk } from '@openAwork/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runUpstreamStream, sortToolsByName } from '../../v2-runtime/upstream/stream-runner.js';
 
@@ -54,9 +53,11 @@ describe('runUpstreamStream', () => {
       }),
     );
 
-    expect(chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) =>
-      chunk.type === 'text_delta' ? chunk.delta : '',
-    )).toEqual(['Hello']);
+    expect(
+      chunks
+        .filter((chunk) => chunk.type === 'text_delta')
+        .map((chunk) => (chunk.type === 'text_delta' ? chunk.delta : '')),
+    ).toEqual(['Hello']);
     expect(chunks.some((chunk) => chunk.type === 'thinking_start')).toBe(true);
     expect(chunks.some((chunk) => chunk.type === 'thinking_delta')).toBe(true);
     expect(chunks.filter((chunk) => chunk.type === 'tool_call_delta')).toHaveLength(2);
@@ -129,7 +130,10 @@ describe('runUpstreamStream', () => {
 
   it('emits a stable stall error after an idle native stream', async () => {
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockReturnValue(
-      Stream.concat(Stream.make(OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'first' })), Stream.never),
+      Stream.concat(
+        Stream.make(OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'first' })),
+        Stream.never,
+      ),
     );
 
     const chunks = await collect(
@@ -167,9 +171,7 @@ describe('runUpstreamStream', () => {
   });
 
   it('passes native generation and HTTP override fields to LLMClient.request', async () => {
-    const streamSpy = mockNativeStream([
-      OpenCodeLLM.LLMEvent.finish({ reason: 'stop' }),
-    ]);
+    const streamSpy = mockNativeStream([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
     await collect(
       runUpstreamStream({
         model,

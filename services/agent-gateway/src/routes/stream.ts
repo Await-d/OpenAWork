@@ -2996,12 +2996,9 @@ export async function handleStreamRequest(input: {
           }
           return {
             errorSummary:
-              result.upstreamError?.message && result.upstreamError.technicalDetail
-                ? `${result.upstreamError.message}
-${result.upstreamError.technicalDetail}`
-                : (result.upstreamError?.message ??
-                  result.upstreamError?.technicalDetail ??
-                  (result.stopReason === 'error' ? '模型服务内部错误，请稍后重试' : undefined)),
+              result.stopReason === 'error'
+                ? '模型服务内部错误，请稍后重试'
+                : (result.upstreamError?.message ?? result.upstreamError?.technicalDetail),
             statusCode: result.statusCode,
             stopReason: toStreamStopReason(result.stopReason),
           };

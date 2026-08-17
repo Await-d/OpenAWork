@@ -25,6 +25,10 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['node_modules/**'],
     environment: 'jsdom',
+    environmentOptions: {
+      jsdom: { url: 'http://localhost/' },
+    },
     passWithNoTests: true,
+    setupFiles: ['./src/test/setup.ts'],
   },
 });

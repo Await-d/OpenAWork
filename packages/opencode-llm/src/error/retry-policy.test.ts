@@ -122,7 +122,7 @@ describe('withRetry', () => {
     const error = new LLMError({
       module: 'test',
       method: 'noretry',
-        reason: new InvalidRequestReason({ message: 'Invalid request' }),
+      reason: new InvalidRequestReason({ message: 'Invalid request' }),
     });
 
     const fn = vi.fn(() => Effect.fail(error));

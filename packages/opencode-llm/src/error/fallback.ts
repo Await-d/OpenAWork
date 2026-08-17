@@ -8,7 +8,7 @@
  */
 
 import { Cause, Effect, Option } from 'effect';
-import type { LLMRequest, LLMResponse } from '../schema/index.js';
+import type { LLMRequest } from '../schema/index.js';
 import type { Model } from '../schema/index.js';
 
 /**
@@ -43,7 +43,7 @@ export const DEFAULT_FALLBACK_CONFIG: Partial<FallbackConfig> = {
       typeof error === 'object' &&
       error !== null &&
       'retryable' in error &&
-      typeof (error as { retryable: unknown }).retryable === 'boolean'
+      typeof error.retryable === 'boolean'
     ) {
       return (error as { retryable: boolean }).retryable;
     }
@@ -233,7 +233,7 @@ export function createAdaptiveFallback(strategies: {
       typeof error === 'object' &&
       error !== null &&
       'reason' in error &&
-      typeof (error as { reason: unknown }).reason === 'object' &&
+      typeof error.reason === 'object' &&
       (error as { reason: { _tag?: unknown } }).reason !== null
     ) {
       const reason = (error as { reason: { _tag?: string } }).reason;

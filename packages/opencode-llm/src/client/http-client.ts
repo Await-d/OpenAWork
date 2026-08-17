@@ -192,7 +192,7 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxDelayMs: 30000,
   backoffMultiplier: 2,
   jitterFactor: 0.2,
-  shouldRetry: (error: HttpError, attempt: number) => {
+  shouldRetry: (error: HttpError) => {
     // 不重试客户端错误（除了特定的可重试状态码）
     if (error.status && error.status >= 400 && error.status < 500) {
       // 408 Request Timeout, 429 Too Many Requests 可以重试
@@ -617,7 +617,7 @@ export class HttpClient {
         data = response.body as T;
         break;
       default:
-        throw new HttpError(`不支持的响应类型: ${responseType}`, config);
+        throw new HttpError('不支持的响应类型', config);
     }
 
     return {
@@ -725,7 +725,7 @@ export class HttpClient {
           if (settled) return;
           settled = true;
           cleanup();
-          reject(error);
+          reject(error instanceof Error ? error : new Error(String(error), { cause: error }));
         },
       );
     });

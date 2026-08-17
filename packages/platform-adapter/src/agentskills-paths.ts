@@ -42,7 +42,9 @@ function getDefaultSkillsPaths(platform: SupportedPlatform): string[] {
       );
       break;
     case 'android': {
-      paths.push(path.join('/data', 'data', getAndroidPackageName(), 'files', 'config', 'skills'));
+      paths.push(
+        path.posix.join('/data', 'data', getAndroidPackageName(), 'files', 'config', 'skills'),
+      );
       break;
     }
     default:

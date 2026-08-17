@@ -47,7 +47,7 @@ function resolveConfigDir(platform: SupportedPlatform): string {
     case 'darwin':
       return path.join(os.homedir(), 'Library', 'Application Support', APP_NAME);
     case 'android':
-      return path.join('/data', 'data', getAndroidPackageName(), 'files', 'config');
+      return path.posix.join('/data', 'data', getAndroidPackageName(), 'files', 'config');
     default:
       return path.join(
         process.env['XDG_CONFIG_HOME'] ?? path.join(os.homedir(), '.config'),
@@ -66,7 +66,7 @@ function resolveDataDir(platform: SupportedPlatform): string {
     case 'darwin':
       return path.join(os.homedir(), 'Library', 'Application Support', APP_NAME, 'data');
     case 'android':
-      return path.join('/data', 'data', getAndroidPackageName(), 'files', 'data');
+      return path.posix.join('/data', 'data', getAndroidPackageName(), 'files', 'data');
     default:
       return path.join(
         process.env['XDG_DATA_HOME'] ?? path.join(os.homedir(), '.local', 'share'),
@@ -77,13 +77,15 @@ function resolveDataDir(platform: SupportedPlatform): string {
 
 function resolveTempDir(platform: SupportedPlatform): string {
   if (platform === 'android') {
-    return path.join('/data', 'data', getAndroidPackageName(), 'cache');
+    return path.posix.join('/data', 'data', getAndroidPackageName(), 'cache');
   }
   return path.join(os.tmpdir(), APP_NAME);
 }
 
-function resolveSkillsDir(configDir: string): string {
-  return path.join(configDir, 'skills');
+function resolveSkillsDir(configDir: string, platform: SupportedPlatform): string {
+  return platform === 'android'
+    ? path.posix.join(configDir, 'skills')
+    : path.join(configDir, 'skills');
 }
 
 class DefaultPlatformAdapter implements PlatformAdapter {
@@ -98,7 +100,7 @@ class DefaultPlatformAdapter implements PlatformAdapter {
     this.configDir = resolveConfigDir(this.platform);
     this.dataDir = resolveDataDir(this.platform);
     this.tempDir = resolveTempDir(this.platform);
-    this.skillsDir = resolveSkillsDir(this.configDir);
+    this.skillsDir = resolveSkillsDir(this.configDir, this.platform);
   }
 
   getPlatform(): SupportedPlatform {

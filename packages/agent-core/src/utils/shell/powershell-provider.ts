@@ -59,7 +59,7 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       const cwdTracking = `
 ; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
 ; (Get-Location).Path | Out-File -FilePath '${escapedCwdFilePath}' -Encoding utf8 -NoNewline
-; exit $_ec`;
+; [Environment]::ExitCode = $_ec`;
 
       const psCommand = command + cwdTracking;
 

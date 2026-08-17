@@ -138,7 +138,7 @@ describe('useFusionChatLayout', () => {
     expect(result.current.pageRootClassName).toBe('page-root page-root-fusion-col');
     expect(result.current.conversationLayoutState).toEqual({
       centerContent: true,
-      contentMaxWidth: 720,
+      contentMaxWidth: 820,
     });
     expect(setTerminalPanelOpened).not.toHaveBeenCalled();
   });

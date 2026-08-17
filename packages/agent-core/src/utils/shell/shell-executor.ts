@@ -79,7 +79,7 @@ async function getProvider(shellType: ShellType): Promise<ShellProvider> {
     case 'powershell':
       return getPowerShellProvider();
     default:
-      throw new Error(`Unsupported shell type: ${shellType}`);
+      throw new Error('Unsupported shell type');
   }
 }
 

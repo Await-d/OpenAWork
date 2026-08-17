@@ -2,10 +2,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
-  runRealAnthropic,
-  type AnthropicGateResult,
-} from './verify-compaction-parity-gate.js';
+import { runRealAnthropic, type AnthropicGateResult } from './verify-compaction-parity-gate.js';
 
 export const EVIDENCE_PATH = join(
   process.cwd(),
@@ -18,7 +15,11 @@ const SELECTED = [
   'src/__tests__/compaction/task-5-stream-compaction-preflight.test.ts',
 ] as const;
 
-type CommandResult = { readonly exitCode: number; readonly output: string; readonly timedOut: boolean };
+type CommandResult = {
+  readonly exitCode: number;
+  readonly output: string;
+  readonly timedOut: boolean;
+};
 
 function appendEvidence(content: string): void {
   try {
@@ -46,8 +47,12 @@ function runVitest(files: readonly string[]): Promise<CommandResult> {
       timedOut = true;
       child.kill();
     }, 120_000);
-    child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-    child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
     child.on('close', (exitCode) => {
       clearTimeout(timer);
       resolve({ exitCode: exitCode ?? 1, output, timedOut });
@@ -83,9 +88,13 @@ function appendGateEvidence(result: AnthropicGateResult): void {
 async function main(): Promise<void> {
   mkdirSync(join(process.cwd(), '../../.omo/evidence'), { recursive: true });
   const baseline = `Baseline failing-first: pnpm --filter @openAwork/agent-gateway verify:compaction-parity\n${process.env['TASK8_BASELINE_RESULT'] ?? 'recorded in the task-8 evidence before this verifier existed'}\n`;
-  appendEvidence(`Task 8 — compaction parity verifier\nDate: ${new Date().toISOString()}\n\n${baseline}`);
+  appendEvidence(
+    `Task 8 — compaction parity verifier\nDate: ${new Date().toISOString()}\n\n${baseline}`,
+  );
   const matrix = await runVitest([MATRIX, ...SELECTED]);
-  appendEvidence(`offline_matrix_exit=${matrix.exitCode} timed_out=${matrix.timedOut}\n${matrix.output}\n`);
+  appendEvidence(
+    `offline_matrix_exit=${matrix.exitCode} timed_out=${matrix.timedOut}\n${matrix.output}\n`,
+  );
   if (matrix.exitCode !== 0) {
     console.error('compaction-parity: offline verification failed');
     process.exitCode = 1;

@@ -5,7 +5,12 @@ import {
   OFFICIAL_BASE_URL,
 } from '../../verification/verify-compaction-parity-gate.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_TEST_MODEL', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_BASE_URL'] as const;
+const ENV_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_TEST_MODEL',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_API_BASE_URL',
+] as const;
 const ENV_BACKUP = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 afterEach(() => {
@@ -80,7 +85,10 @@ describe('verify-compaction-parity external gate', () => {
     let request: RequestInit | undefined;
     const result = await runRealAnthropic(async (_input, init) => {
       request = init;
-      return new Response(SUCCESS_STREAM, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      return new Response(SUCCESS_STREAM, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
     });
 
     const headers = new Headers(request?.headers);
@@ -97,7 +105,12 @@ describe('verify-compaction-parity external gate', () => {
         },
       ],
     });
-    expect(result.response).toMatchObject({ inputTokens: 3, outputTokens: 2, stopReason: 'end_turn', sawMessageStop: true });
+    expect(result.response).toMatchObject({
+      inputTokens: 3,
+      outputTokens: 2,
+      stopReason: 'end_turn',
+      sawMessageStop: true,
+    });
   });
 
   it('keeps unauthorized, invalid-model, and disconnected-stream outcomes explicit', async () => {

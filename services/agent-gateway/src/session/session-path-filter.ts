@@ -14,7 +14,7 @@
  * for the descendants case.
  */
 
-import { resolve, sep } from 'node:path';
+import { posix, win32 } from 'node:path';
 
 import {
   extractSessionWorkingDirectory,
@@ -39,6 +39,15 @@ export interface SessionPathFilterInput {
   includeDescendants?: boolean;
 }
 
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+function filterPathFlavor(raw: string): typeof posix {
+  if (WINDOWS_ABSOLUTE_PATH_PATTERN.test(raw) || raw.includes('\\')) {
+    return win32;
+  }
+  return process.platform === 'win32' && !raw.startsWith('/') ? win32 : posix;
+}
+
 /**
  * Normalise a path for comparison. Resolves to an absolute path and
  * strips a trailing separator (except on the root `/`).
@@ -46,11 +55,10 @@ export interface SessionPathFilterInput {
 export function normaliseFilterPath(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return '';
-  const resolved = resolve(trimmed);
-  if (resolved.length > 1 && resolved.endsWith(sep)) {
-    return resolved.slice(0, -1);
-  }
-  return resolved;
+  const flavor = filterPathFlavor(trimmed);
+  const resolved = flavor.resolve(trimmed);
+  const root = flavor.parse(resolved).root;
+  return resolved === root ? resolved : resolved.replace(/[\\/]+$/, '');
 }
 
 /**
@@ -72,6 +80,8 @@ export function sessionMatchesPath(
 
   const normalisedSession = normaliseFilterPath(workingDirectory);
   if (!normalisedSession) return false;
+  const flavor = filterPathFlavor(normalisedFilter);
+  if (flavor !== filterPathFlavor(normalisedSession)) return false;
 
   if (filter.includeDescendants === false) {
     return normalisedSession === normalisedFilter;
@@ -79,7 +89,7 @@ export function sessionMatchesPath(
 
   if (normalisedSession === normalisedFilter) return true;
   // Descendant match: prefix + separator so `/a` doesn't match `/abc`.
-  return normalisedSession.startsWith(normalisedFilter + sep);
+  return normalisedSession.startsWith(normalisedFilter + flavor.sep);
 }
 
 /**

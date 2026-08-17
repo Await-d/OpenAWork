@@ -5,5 +5,6 @@ export const newBreakpoints = (cap) => ({ remaining: cap, dropped: 0 });
 // Returns `"1h"` for any `ttlSeconds >= 3600`, otherwise `undefined` (the
 // provider default 5m). Anthropic & Bedrock both treat anything shorter than
 // an hour as 5m.
-export const ttlBucket = (ttlSeconds) => ttlSeconds !== undefined && ttlSeconds >= 3600 ? "1h" : undefined;
+export const ttlBucket = (ttlSeconds) =>
+  ttlSeconds !== undefined && ttlSeconds >= 3600 ? '1h' : undefined;
 //# sourceMappingURL=cache.js.map

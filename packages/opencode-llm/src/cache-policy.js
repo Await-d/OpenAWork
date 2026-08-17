@@ -12,12 +12,12 @@
 //
 // Manual `cache: CacheHint` placements on individual parts are preserved —
 // this function only fills gaps the caller left empty.
-import { CacheHint } from "./schema/options.js";
-import { LLMRequest, Message, ToolDefinition } from "./schema/messages.js";
+import { CacheHint } from './schema/options.js';
+import { LLMRequest, Message, ToolDefinition } from './schema/messages.js';
 const AUTO = {
-    tools: true,
-    system: true,
-    messages: "latest-user-message",
+  tools: true,
+  system: true,
+  messages: 'latest-user-message',
 };
 const NONE = {};
 // Resolution rules:
@@ -28,96 +28,89 @@ const NONE = {};
 //   - "none"      → no auto placement; manual `CacheHint`s still flow.
 //   - object form → exactly what the caller asked for.
 const resolve = (policy) => {
-    if (policy === undefined || policy === "auto")
-        return AUTO;
-    if (policy === "none")
-        return NONE;
-    return policy;
+  if (policy === undefined || policy === 'auto') return AUTO;
+  if (policy === 'none') return NONE;
+  return policy;
 };
 // Protocols whose wire format ignores inline cache markers (OpenAI's implicit
 // prefix caching, Gemini's implicit + out-of-band CachedContent). Skip the
 // whole policy pass for these — emitting hints would be harmless but pointless.
-const RESPECTS_INLINE_HINTS = new Set(["anthropic-messages", "bedrock-converse"]);
-const makeHint = (ttlSeconds) => ttlSeconds !== undefined ? new CacheHint({ type: "ephemeral", ttlSeconds }) : new CacheHint({ type: "ephemeral" });
+const RESPECTS_INLINE_HINTS = new Set(['anthropic-messages', 'bedrock-converse']);
+const makeHint = (ttlSeconds) =>
+  ttlSeconds !== undefined
+    ? new CacheHint({ type: 'ephemeral', ttlSeconds })
+    : new CacheHint({ type: 'ephemeral' });
 const markLastTool = (tools, hint) => {
-    if (tools.length === 0)
-        return tools;
-    const last = tools.length - 1;
-    if (tools[last].cache)
-        return tools;
-    return tools.map((tool, i) => (i === last ? new ToolDefinition({ ...tool, cache: hint }) : tool));
+  if (tools.length === 0) return tools;
+  const last = tools.length - 1;
+  if (tools[last].cache) return tools;
+  return tools.map((tool, i) => (i === last ? new ToolDefinition({ ...tool, cache: hint }) : tool));
 };
 const markLastSystem = (system, hint) => {
-    if (system.length === 0)
-        return system;
-    const last = system.length - 1;
-    if (system[last].cache)
-        return system;
-    return system.map((part, i) => (i === last ? { ...part, cache: hint } : part));
+  if (system.length === 0) return system;
+  const last = system.length - 1;
+  if (system[last].cache) return system;
+  return system.map((part, i) => (i === last ? { ...part, cache: hint } : part));
 };
 const lastIndexOfRole = (messages, role) => {
-    // findLastIndex polyfill for older TypeScript versions
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === role)
-            return i;
-    }
-    return -1;
+  // findLastIndex polyfill for older TypeScript versions
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === role) return i;
+  }
+  return -1;
 };
 // Mark the last text part of `messages[index]`. If no text part exists, mark
 // the last content part regardless of type — that's the breakpoint position
 // in tool-result-only messages too.
 const markMessageAt = (messages, index, hint) => {
-    if (index < 0 || index >= messages.length)
-        return messages;
-    const target = messages[index];
-    if (target.content.length === 0)
-        return messages;
-    // findLastIndex polyfill
-    let lastTextIndex = -1;
-    for (let i = target.content.length - 1; i >= 0; i--) {
-        if (target.content[i].type === "text") {
-            lastTextIndex = i;
-            break;
-        }
+  if (index < 0 || index >= messages.length) return messages;
+  const target = messages[index];
+  if (target.content.length === 0) return messages;
+  // findLastIndex polyfill
+  let lastTextIndex = -1;
+  for (let i = target.content.length - 1; i >= 0; i--) {
+    if (target.content[i].type === 'text') {
+      lastTextIndex = i;
+      break;
     }
-    const markAt = lastTextIndex >= 0 ? lastTextIndex : target.content.length - 1;
-    const existing = target.content[markAt];
-    if ("cache" in existing && existing.cache)
-        return messages;
-    const nextContent = target.content.map((part, i) => (i === markAt ? { ...part, cache: hint } : part));
-    const next = new Message({ ...target, content: nextContent });
-    // Single pass over `messages`, substituting the one updated entry. Long
-    // conversations call this on every request, so avoid `.map()` here — its
-    // closure dispatch and identity copies show up in profiling.
-    const result = messages.slice();
-    result[index] = next;
-    return result;
+  }
+  const markAt = lastTextIndex >= 0 ? lastTextIndex : target.content.length - 1;
+  const existing = target.content[markAt];
+  if ('cache' in existing && existing.cache) return messages;
+  const nextContent = target.content.map((part, i) =>
+    i === markAt ? { ...part, cache: hint } : part,
+  );
+  const next = new Message({ ...target, content: nextContent });
+  // Single pass over `messages`, substituting the one updated entry. Long
+  // conversations call this on every request, so avoid `.map()` here — its
+  // closure dispatch and identity copies show up in profiling.
+  const result = messages.slice();
+  result[index] = next;
+  return result;
 };
 const markMessages = (messages, strategy, hint) => {
-    if (messages.length === 0)
-        return messages;
-    if (strategy === "latest-user-message")
-        return markMessageAt(messages, lastIndexOfRole(messages, "user"), hint);
-    if (strategy === "latest-assistant")
-        return markMessageAt(messages, lastIndexOfRole(messages, "assistant"), hint);
-    const start = Math.max(0, messages.length - strategy.tail);
-    let next = messages;
-    for (let i = start; i < messages.length; i++)
-        next = markMessageAt(next, i, hint);
-    return next;
+  if (messages.length === 0) return messages;
+  if (strategy === 'latest-user-message')
+    return markMessageAt(messages, lastIndexOfRole(messages, 'user'), hint);
+  if (strategy === 'latest-assistant')
+    return markMessageAt(messages, lastIndexOfRole(messages, 'assistant'), hint);
+  const start = Math.max(0, messages.length - strategy.tail);
+  let next = messages;
+  for (let i = start; i < messages.length; i++) next = markMessageAt(next, i, hint);
+  return next;
 };
 export const applyCachePolicy = (request) => {
-    if (!RESPECTS_INLINE_HINTS.has(request.model.route.id))
-        return request;
-    const policy = resolve(request.cache);
-    if (!policy.tools && !policy.system && !policy.messages)
-        return request;
-    const hint = makeHint(policy.ttlSeconds);
-    const tools = policy.tools ? markLastTool(request.tools, hint) : request.tools;
-    const system = policy.system ? markLastSystem(request.system, hint) : request.system;
-    const messages = policy.messages ? markMessages(request.messages, policy.messages, hint) : request.messages;
-    if (tools === request.tools && system === request.system && messages === request.messages)
-        return request;
-    return LLMRequest.update(request, { tools, system, messages });
+  if (!RESPECTS_INLINE_HINTS.has(request.model.route.id)) return request;
+  const policy = resolve(request.cache);
+  if (!policy.tools && !policy.system && !policy.messages) return request;
+  const hint = makeHint(policy.ttlSeconds);
+  const tools = policy.tools ? markLastTool(request.tools, hint) : request.tools;
+  const system = policy.system ? markLastSystem(request.system, hint) : request.system;
+  const messages = policy.messages
+    ? markMessages(request.messages, policy.messages, hint)
+    : request.messages;
+  if (tools === request.tools && system === request.system && messages === request.messages)
+    return request;
+  return LLMRequest.update(request, { tools, system, messages });
 };
 //# sourceMappingURL=cache-policy.js.map

@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const ROOT = '/home/await/project/OpenAWork/apps/web/src';
+const ROOT = resolve(process.cwd(), 'src');
 const SCAN_DIRS = ['components', 'pages'];
 
 function collectFiles(dir: string): string[] {

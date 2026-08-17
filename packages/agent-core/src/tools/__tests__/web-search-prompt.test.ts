@@ -59,6 +59,7 @@ describe('Web 搜索工具提示词', () => {
       for (const provider of providers) {
         // 每个提供商应该有"特点"部分
         expect(WEB_SEARCH_TOOL_USAGE_GUIDE).toContain('特点');
+        expect(WEB_SEARCH_TOOL_USAGE_GUIDE).toContain(provider);
       }
     });
 

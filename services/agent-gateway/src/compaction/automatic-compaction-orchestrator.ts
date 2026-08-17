@@ -29,8 +29,6 @@ import {
 } from './compaction-tail-budget.js';
 import { persistCompactionProjection } from './compaction-projection.js';
 
-/* eslint-disable no-redeclare -- TypeScript overload signatures intentionally share one API name. */
-
 const RUNTIME_REPLACE_STRATEGY = 'runtime_replace' as const;
 const SUMMARY_ONLY_STRATEGY = 'summary_only' as const;
 type CompactionCause = NonNullable<StreamCompactionChunk['cause']>;

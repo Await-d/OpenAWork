@@ -34,6 +34,7 @@ type StoredRowBytes = {
 };
 
 let previousDatabasePath: string | undefined;
+let previousAllowInsecureLocalhost: string | undefined;
 let temporaryDatabaseDirectory = '';
 let upstreamOrigin = '';
 let upstreamServer: Server;
@@ -116,23 +117,27 @@ function writeAnthropicSse(response: ServerResponse): void {
 }
 
 async function startUpstreamStub(): Promise<void> {
-  upstreamServer = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    request.on('data', (chunk) => {
-      chunks.push(Buffer.from(chunk));
-    });
-    await once(request, 'end');
+  upstreamServer = createServer((request, response) => {
+    void (async () => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk) => {
+        chunks.push(Buffer.from(chunk));
+      });
+      await once(request, 'end');
 
-    capturedRequests.push({
-      body: Buffer.concat(chunks).toString('utf8'),
-      url: request.url ?? '',
-    });
+      capturedRequests.push({
+        body: Buffer.concat(chunks).toString('utf8'),
+        url: request.url ?? '',
+      });
 
-    if (request.url?.endsWith('/messages')) {
-      writeAnthropicSse(response);
-      return;
-    }
-    writeOpenAiSse(response);
+      if (request.url?.endsWith('/messages')) {
+        writeAnthropicSse(response);
+        return;
+      }
+      writeOpenAiSse(response);
+    })().catch((error: unknown) => {
+      response.destroy(error instanceof Error ? error : new Error(String(error), { cause: error }));
+    });
   });
   upstreamServer.listen(0, '127.0.0.1');
   await once(upstreamServer, 'listening');
@@ -292,6 +297,8 @@ function countOccurrences(value: string, needle: string): number {
 
 beforeAll(async () => {
   previousDatabasePath = process.env['OPENAWORK_DATABASE_PATH'];
+  previousAllowInsecureLocalhost = process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
   temporaryDatabaseDirectory = await mkdtemp(join(tmpdir(), 'openawork-task-2-runtime-'));
   await db.closeDb();
   process.env['OPENAWORK_DATABASE_PATH'] = join(temporaryDatabaseDirectory, 'gateway.sqlite');
@@ -313,6 +320,11 @@ afterAll(async () => {
     delete process.env['OPENAWORK_DATABASE_PATH'];
   } else {
     process.env['OPENAWORK_DATABASE_PATH'] = previousDatabasePath;
+  }
+  if (previousAllowInsecureLocalhost === undefined) {
+    delete process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'];
+  } else {
+    process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = previousAllowInsecureLocalhost;
   }
   await rm(temporaryDatabaseDirectory, { force: true, recursive: true });
   await db.connectDb();

@@ -6,13 +6,16 @@ import { join } from 'node:path';
 const OriginalFetch = globalThis.fetch;
 let dir: string;
 let prevXdgData: string | undefined;
+let prevLocalAppData: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'models-dev-test-'));
   // Point the platform adapter's data dir at the temp dir so the local
   // cache read/write in get()/fetchAndCache() never touches the real HOME.
   prevXdgData = process.env['XDG_DATA_HOME'];
+  prevLocalAppData = process.env['LOCALAPPDATA'];
   process.env['XDG_DATA_HOME'] = dir;
+  process.env['LOCALAPPDATA'] = dir;
   vi.resetModules();
 });
 
@@ -21,6 +24,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   if (prevXdgData === undefined) delete process.env['XDG_DATA_HOME'];
   else process.env['XDG_DATA_HOME'] = prevXdgData;
+  if (prevLocalAppData === undefined) delete process.env['LOCALAPPDATA'];
+  else process.env['LOCALAPPDATA'] = prevLocalAppData;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -44,12 +49,11 @@ describe('models-dev single-flight fetch', () => {
     const b = mod.get();
     const c = mod.get();
 
-    // Allow the readLocalCache() microtasks to settle so all three reach
-    // fetchAndCache() before we assert.
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The local-cache probe is asynchronous. Wait for the observable network
+    // boundary rather than assuming a fixed number of microtask turns.
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
 
     (resolveFetch as ((r: Response) => void) | null)?.(
       new Response(JSON.stringify(payload), {

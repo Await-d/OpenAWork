@@ -96,7 +96,10 @@ export interface RoutePatch<Body, Prepared> extends RouteDefaultsInput {
 
 type RouteMappedModelInput = RouteModelInput | RouteRoutedModelInput;
 
-const makeRouteModel = (route: AnyRoute, mapped: RouteMappedModelInput) => {
+const makeRouteModel = <Body, Prepared>(
+  route: Route<Body, Prepared>,
+  mapped: RouteMappedModelInput,
+) => {
   const provider = route.provider ?? ('provider' in mapped ? mapped.provider : undefined);
   if (!provider) throw new Error(`Route.model(${route.id}) requires a provider`);
   if (!endpointBaseURL(route.endpoint))

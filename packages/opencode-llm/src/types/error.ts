@@ -332,10 +332,10 @@ export function parseErrorResponse(response: unknown): ExtendedError {
 
   // Fallback for non-standard error formats
   if (typeof response === 'object' && response !== null && 'error' in response) {
-    const error = (response as { error: unknown }).error;
+    const error = response.error;
     if (typeof error === 'object' && error !== null && 'message' in error) {
       return {
-        message: String((error as { message: unknown }).message),
+        message: String(error.message),
         type: 'api_error',
         code: 'unknown_error',
       };

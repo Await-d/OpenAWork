@@ -5402,8 +5402,8 @@ async function runChildTaskSessionInBackground(input: {
           pendingInteraction,
           statusCode,
           summary:
-            statusCode >= 400 && childSummary.length === 0
-              ? (result.errorSummary ?? '子代理执行失败：未产生可用结果。')
+            statusCode >= 400
+              ? (result.errorSummary ?? (childSummary || '子代理执行失败：未产生可用结果。'))
               : childSummary,
         };
         break;

@@ -4,7 +4,6 @@
  * 负责将 OpenAWork 工具定义转换为 OpenCode LLM 兼容的格式
  */
 
-import { Schema } from 'effect';
 import type { ZodTypeAny } from 'zod';
 import { ToolDefinition as OpenCodeToolDefinition } from '../schema/index.js';
 import type { JsonSchema } from '../schema/ids.js';

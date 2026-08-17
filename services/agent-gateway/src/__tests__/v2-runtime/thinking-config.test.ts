@@ -240,11 +240,7 @@ describe('ThinkingConfig 协议升级', () => {
   });
 
   describe('ThinkingConfig 降级逻辑', () => {
-    function applyAdaptiveFallback(
-      config: ThinkingConfig,
-      modelId: string,
-      providerType: string,
-    ): ThinkingConfig {
+    function applyAdaptiveFallback(config: ThinkingConfig, modelId: string): ThinkingConfig {
       if (config.type !== 'adaptive') {
         return config;
       }
@@ -259,12 +255,12 @@ describe('ThinkingConfig 协议升级', () => {
     }
 
     it('claude-opus-4-6 使用 adaptive 应该保持不变', () => {
-      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-opus-4-6', 'anthropic');
+      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-opus-4-6');
       expect(result).toEqual({ type: 'adaptive' });
     });
 
     it('claude-sonnet-4 使用 adaptive 应该降级为 enabled', () => {
-      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-sonnet-4', 'anthropic');
+      const result = applyAdaptiveFallback({ type: 'adaptive' }, 'claude-sonnet-4');
       expect(result).toEqual({ type: 'enabled', budgetTokens: 8192 });
     });
 
@@ -272,7 +268,6 @@ describe('ThinkingConfig 协议升级', () => {
       const result = applyAdaptiveFallback(
         { type: 'enabled', budgetTokens: 16384 },
         'claude-sonnet-4',
-        'anthropic',
       );
       expect(result).toEqual({ type: 'enabled', budgetTokens: 16384 });
     });

@@ -49,10 +49,7 @@ const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
   switch (zodTypeName(value)) {
     case 'ZodObject': {
       const shapeValue = definition?.['shape'];
-      const shape =
-        typeof shapeValue === 'function'
-          ? shapeValue()
-          : shapeValue;
+      const shape = typeof shapeValue === 'function' ? shapeValue() : shapeValue;
       const properties: Record<string, OpenCodeLLM.JsonSchema> = {};
       const required: string[] = [];
       if (isRecord(shape)) {
@@ -83,7 +80,12 @@ const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
     case 'ZodLiteral': {
       const literal = definition?.['value'];
       return {
-        type: typeof literal === 'string' ? 'string' : typeof literal === 'boolean' ? 'boolean' : 'number',
+        type:
+          typeof literal === 'string'
+            ? 'string'
+            : typeof literal === 'boolean'
+              ? 'boolean'
+              : 'number',
         const: literal,
       };
     }

@@ -26,13 +26,14 @@
  *      `enabled=1`, because user-level uninstall/disable takes precedence.
  */
 
-import { resolve } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 
 export const DEFAULT_WORKSPACE_PATH_KEY = '__default__';
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
 export type SkillOrigin = 'workspace' | 'workspace-fallback' | 'session-override' | 'builtin';
 
@@ -60,6 +61,10 @@ export interface ResolveEffectiveSkillsInput {
   requestedSkillIds?: string[];
 }
 
+function workspacePathFlavor(raw: string): typeof posix {
+  return WINDOWS_ABSOLUTE_PATH_PATTERN.test(raw) ? win32 : posix;
+}
+
 /**
  * Normalize a user-provided workspace path to the canonical sentinel used as
  * the selection table's `workspace_path` column. Returns `__default__` for
@@ -79,7 +84,12 @@ export function normalizeWorkspacePathKey(raw: string | null | undefined): strin
     return DEFAULT_WORKSPACE_PATH_KEY;
   }
   try {
-    return resolve(trimmed).replace(/\/+$/, '') || DEFAULT_WORKSPACE_PATH_KEY;
+    const flavor = workspacePathFlavor(trimmed);
+    const resolved = flavor.resolve(trimmed);
+    const root = flavor.parse(resolved).root;
+    return (
+      (resolved === root ? resolved : resolved.replace(/[\\/]+$/, '')) || DEFAULT_WORKSPACE_PATH_KEY
+    );
   } catch {
     return DEFAULT_WORKSPACE_PATH_KEY;
   }

@@ -1,12 +1,6 @@
 import { Cause, Context, Effect, Layer, Random } from 'effect';
-import {
-  FetchHttpClient,
-  Headers,
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse,
-} from 'effect/unstable/http';
+import type { HttpClientRequest, HttpClientResponse } from 'effect/unstable/http';
+import { FetchHttpClient, Headers, HttpClient, HttpClientError } from 'effect/unstable/http';
 import {
   AuthenticationReason,
   ContentPolicyReason,
@@ -67,7 +61,7 @@ const isSensitiveQueryName = (name: string) =>
 const redactHeaders = (headers: Headers.Headers, redactedNames: ReadonlyArray<string | RegExp>) =>
   Object.fromEntries(
     Object.entries(Headers.redact(headers, [...redactedNames, SENSITIVE_NAME])).map(
-      ([name, value]) => [name, String(value)],
+      ([name, value]) => [name, typeof value === 'string' ? value : (JSON.stringify(value) ?? '')],
     ),
   );
 

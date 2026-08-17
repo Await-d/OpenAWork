@@ -1381,7 +1381,8 @@ export default function ChatPage() {
 
     // 如果刚发送消息（5秒内），不显示"正在重新接入"提示
     // 这是正常的发送流程，不是远程流恢复场景
-    const timeSinceStreamStart = activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
+    const timeSinceStreamStart =
+      activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
     if (timeSinceStreamStart < 5000) {
       return null;
     }
@@ -1539,7 +1540,10 @@ export default function ChatPage() {
             activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
           if (!streamingRef.current && timeSinceStreamStart > 3000) {
             setMessages((previous) => {
-              const reconciled = reconcileSnapshotChatMessages(previous, prepared.normalizedMessages);
+              const reconciled = reconcileSnapshotChatMessages(
+                previous,
+                prepared.normalizedMessages,
+              );
               // 额外保护：如果协调后的消息为空，但本地有消息，保留本地消息
               // 这防止在对话完成后消息被意外清空
               if (reconciled.length === 0 && previous.length > 0) {
@@ -1820,7 +1824,10 @@ export default function ChatPage() {
         setIsSessionLoading(true);
         // 如果是同一个会话且对话已完成，不清空消息列表
         // 避免在对话完成后重新加载导致消息短暂消失
-        if (requestedSessionId !== currentLoadedSessionIdRef.current || sessionStateStatus !== 'idle') {
+        if (
+          requestedSessionId !== currentLoadedSessionIdRef.current ||
+          sessionStateStatus !== 'idle'
+        ) {
           setMessages([]);
         } else {
           console.log('[SESSION_LOAD] 跳过清空消息，同一会话且已完成', {
@@ -3758,9 +3765,11 @@ export default function ChatPage() {
       // 只在会话切换时重置 attach 标记，避免同一会话内重复触发 attach
       // 额外保护：如果上次 attach 尝试在 10 秒内，不要重置（防止 attach 刚完成就被重置导致重复触发）
       const timeSinceLastAttach = Date.now() - lastAttachAttemptTimestampRef.current;
-      if (shouldResetAttachAttempt(attachEligibility) &&
-          attachAttemptedSessionRef.current !== currentSessionId &&
-          timeSinceLastAttach > 10000) {
+      if (
+        shouldResetAttachAttempt(attachEligibility) &&
+        attachAttemptedSessionRef.current !== currentSessionId &&
+        timeSinceLastAttach > 10000
+      ) {
         attachAttemptedSessionRef.current = null;
       }
       return;
@@ -5317,7 +5326,8 @@ export default function ChatPage() {
 
   // 只在真正的会话切换加载时显示骨架屏，而不是在发送新消息时显示
   // 如果距离上次流式开始不到 5 秒，说明是正常的对话流程，不显示骨架屏
-  const timeSinceStreamStart = activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
+  const timeSinceStreamStart =
+    activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
   const showSessionSwitchSkeleton =
     currentSessionId !== null &&
     isSessionLoading &&

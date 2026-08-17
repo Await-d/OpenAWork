@@ -1,4 +1,4 @@
-import { Effect } from '../../../../../packages/opencode-llm/node_modules/effect';
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROVIDER_CATALOG } from '../../../../../packages/agent-core/src/provider/catalog.js';
 import type {
@@ -121,7 +121,9 @@ function textMessage(id: string, role: 'user' | 'assistant', text: string): Mess
 }
 
 function hasOwn(value: unknown, key: string): boolean {
-  return typeof value === 'object' && value !== null && Object.prototype.hasOwnProperty.call(value, key);
+  return (
+    typeof value === 'object' && value !== null && Object.prototype.hasOwnProperty.call(value, key)
+  );
 }
 
 function markerMessage(input: {
@@ -157,7 +159,10 @@ function baseHistory(): Message[] {
 
 function isOfficialAnthropicRoute(testCase: MatrixCase): boolean {
   try {
-    return testCase.provider === 'anthropic' && new URL(testCase.baseUrl).hostname === 'api.anthropic.com';
+    return (
+      testCase.provider === 'anthropic' &&
+      new URL(testCase.baseUrl).hostname === 'api.anthropic.com'
+    );
   } catch (error: unknown) {
     if (error instanceof TypeError) return false;
     throw error;
@@ -189,7 +194,9 @@ describe('compaction provider parity matrix', () => {
     vi.useRealTimers();
   });
 
-  it.each(MATRIX_CASES.flatMap((testCase) => SCENARIOS.map((scenario) => ({ testCase, scenario }))))(
+  it.each(
+    MATRIX_CASES.flatMap((testCase) => SCENARIOS.map((scenario) => ({ testCase, scenario }))),
+  )(
     '$testCase.provider / $testCase.protocol / $testCase.entryPoint / $scenario.entryPoint',
     async ({ testCase, scenario }) => {
       const history = baseHistory();
@@ -201,7 +208,7 @@ describe('compaction provider parity matrix', () => {
       expect(durable).not.toBeNull();
       if (!durable) return;
 
-      const metadata = {
+      const metadata: Record<string, unknown> = {
         ...mergeCompactionMetadata('{}', {
           summary: durable.structuredSummary,
           trigger: scenario.trigger,
