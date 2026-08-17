@@ -103,6 +103,7 @@ function createDatabase(dbPath: string): GatewayDatabase {
 
 let currentDbPath = resolveDbPath();
 let dbClosed = false;
+let sqliteTransactionDepth = 0;
 
 export let db = createDatabase(currentDbPath);
 
@@ -225,6 +226,24 @@ export async function migrate(): Promise<void> {
       title TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS compaction_requests (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT NOT NULL,
+      round INTEGER NOT NULL,
+      signature TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('reserved', 'completed')),
+      metadata_json TEXT,
+      summary TEXT,
+      llm_summary TEXT,
+      llm_error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      PRIMARY KEY (session_id, user_id, client_request_id, round, signature)
     )
   `);
 
@@ -2229,7 +2248,12 @@ export function sqliteAll<T>(query: string, params: readonly SqliteBindableValue
 }
 
 export function sqliteTransaction<T>(fn: () => T): T {
+  if (sqliteTransactionDepth > 0) {
+    return fn();
+  }
+
   db.exec('BEGIN IMMEDIATE');
+  sqliteTransactionDepth = 1;
   try {
     const result = fn();
     db.exec('COMMIT');
@@ -2237,5 +2261,7 @@ export function sqliteTransaction<T>(fn: () => T): T {
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
+  } finally {
+    sqliteTransactionDepth = 0;
   }
 }

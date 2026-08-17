@@ -83,13 +83,53 @@ const bodyWithOverlay = <Body>(
         `http.body cannot overlay protocol-owned field(s): ${forbiddenKeys.join(', ')}`,
       );
     if (ProviderShared.isRecord(body)) {
-      const overlaid = mergeJsonRecords(body, request.http.body) ?? {};
+      const overlay = ProviderShared.supportsAnthropicContextManagement(request)
+        ? request.http.body
+        : Object.fromEntries(
+            Object.entries(request.http.body).filter(
+              ([key]) => key !== 'context_management' && !key.startsWith('clear_'),
+            ),
+          );
+      const overlaid = mergeJsonRecords(body, overlay) ?? {};
       return { jsonBody: overlaid, bodyText: ProviderShared.encodeJson(overlaid) };
     }
     return yield* ProviderShared.invalidRequest(
       'http.body can only overlay JSON object request bodies',
     );
   });
+
+const stripContextManagementBeta = (value: string) =>
+  value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && !entry.toLowerCase().startsWith('context-management'))
+    .join(',');
+
+const requestHeaders = <Body>(input: JsonRequestInput<Body>) => {
+  const routeHeaders = input.headers?.({ request: input.request }) ?? {};
+  const customHeaders = input.request.http?.headers ?? {};
+  const routeBeta = routeHeaders['anthropic-beta'];
+  const customBeta = customHeaders['anthropic-beta'];
+  const beta =
+    routeBeta === undefined
+      ? customBeta
+      : customBeta === undefined || customBeta === routeBeta
+        ? routeBeta
+        : `${customBeta},${routeBeta}`;
+  const merged = {
+    ...routeHeaders,
+    ...customHeaders,
+    ...(beta === undefined ? {} : { 'anthropic-beta': beta }),
+  };
+  if (ProviderShared.supportsAnthropicContextManagement(input.request)) return merged;
+  return Object.fromEntries(
+    Object.entries(merged).flatMap(([key, value]) => {
+      if (key.toLowerCase() !== 'anthropic-beta') return [[key, value]];
+      const sanitized = stripContextManagementBeta(value);
+      return sanitized.length === 0 ? [] : [[key, sanitized]];
+    }),
+  );
+};
 
 export const jsonRequestParts = <Body>(input: JsonRequestInput<Body>) =>
   Effect.gen(function* () {
@@ -103,10 +143,7 @@ export const jsonRequestParts = <Body>(input: JsonRequestInput<Body>) =>
       method: 'POST',
       url,
       body: body.bodyText,
-      headers: Headers.fromInput({
-        ...input.headers?.({ request: input.request }),
-        ...input.request.http?.headers,
-      }),
+      headers: Headers.fromInput(requestHeaders(input)),
     });
     return { url, jsonBody: body.jsonBody, bodyText: body.bodyText, headers };
   });

@@ -9,11 +9,14 @@ import { Effect, Layer, Stream } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
-import { isContextOverflow } from '../session/session-message-store.js';
 import {
   resolveEffectiveContextWindow,
   parseContextLimitError,
 } from '../compaction/context-window-resolver.js';
+import {
+  isCompactionThresholdReached,
+  parsePercentageOverride,
+} from '../compaction/compaction-parity-contract.js';
 import { microcompactMessages } from '../compaction/microcompact.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
@@ -45,6 +48,31 @@ import {
 } from '../snapshot/snapshot-tree-store.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import type { StreamStopReason } from './stream-types.js';
+
+export function resolveModelRoundOverflow(input: {
+  readonly usage?: StreamUsageSummary;
+  readonly effectiveContextWindow?: number;
+  readonly modelMaxOutputTokens?: number;
+  readonly autoCompactPercentOverride?: number;
+  readonly contextLimitError: ReturnType<typeof parseContextLimitError>;
+  readonly compactionReservedTokens?: number;
+}): boolean {
+  if (input.contextLimitError !== null) {
+    return true;
+  }
+  if (input.usage === undefined || input.effectiveContextWindow === undefined) {
+    return false;
+  }
+  return isCompactionThresholdReached(input.usage, {
+    modelContextWindow: input.effectiveContextWindow,
+    ...(input.modelMaxOutputTokens !== undefined
+      ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
+      : {}),
+    ...(input.autoCompactPercentOverride !== undefined
+      ? { autoCompactPercentOverride: input.autoCompactPercentOverride }
+      : {}),
+  });
+}
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
   buildSyntheticRequestContextBlock,
@@ -128,6 +156,26 @@ export function filterMessagesByTeamTaskThread(
       }
     }
   })();
+}
+
+export function findLastAssistantTimestamp(
+  messages: readonly MessageWithParts[],
+): number | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.info.role === 'assistant') {
+      return message.info.time.created;
+    }
+  }
+  return undefined;
+}
+
+export function getMicrocompactTimeContext(
+  messages: readonly MessageWithParts[],
+  teamTaskThreadId?: string,
+): { lastAssistantTimestamp?: number } | undefined {
+  if (teamTaskThreadId) return undefined;
+  return { lastAssistantTimestamp: findLastAssistantTimestamp(messages) };
 }
 
 const STREAM_RUNTIME_ERROR_MESSAGES = {
@@ -1029,6 +1077,7 @@ export async function runModelRound(input: {
   /** Agent ID for the current stream round (for per-agent color rendering). */
   agentId?: string;
   writeChunk: (chunk: RunEvent) => void;
+  beforeUpstreamCall?: (renderedMessageTokens: number) => Promise<boolean>;
 }): Promise<{
   overflow: boolean;
   shouldContinue: boolean;
@@ -1118,7 +1167,11 @@ export async function runModelRound(input: {
   // Clear stale tool_result outputs before sending to upstream.
   // Zero LLM cost, delays full compaction trigger, keeps context lean.
   // Operates on the rendered UnifiedMessage[] so DB data stays intact.
-  const microcompactResult = microcompactMessages(unifiedMessagesRaw);
+  const microcompactResult = microcompactMessages(
+    unifiedMessagesRaw,
+    undefined,
+    getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
+  );
   const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
@@ -1198,6 +1251,15 @@ export async function runModelRound(input: {
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt } as UnifiedMessage]
       : []),
   ];
+
+  if (input.beforeUpstreamCall) {
+    const compacted = await input.beforeUpstreamCall(
+      estimateModelMessagesTokens(allUnifiedMessages),
+    );
+    if (compacted) {
+      return runModelRound({ ...input, beforeUpstreamCall: undefined });
+    }
+  }
 
   // Thinking block validator (oh-my-opencode thinking-block-validator pattern):
   // Proactively validate and fix message structure BEFORE sending to Anthropic API.
@@ -1451,6 +1513,9 @@ export async function runModelRound(input: {
   void compactionAutoEnabled;
 
   try {
+    if (input.signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     const modelHandle = buildNativeModel({
       providerType: input.route.providerType,
       upstreamProtocol: input.route.upstreamProtocol,
@@ -1496,6 +1561,8 @@ export async function runModelRound(input: {
     let doneEmitted = false;
     let v2Usage: StreamUsageSummary | undefined;
     let v2UsageOccurredAt: number | undefined;
+    let streamedUpstreamError: UpstreamErrorDescriptor | undefined;
+    let streamedContextLimitError: ReturnType<typeof parseContextLimitError> = null;
     try {
       if (isTeamSession(input.sessionContext)) {
         touchSessionHeartbeat(input.sessionId);
@@ -1601,6 +1668,12 @@ export async function runModelRound(input: {
             if (chunkWithMeta.type === 'error') {
               doneEmitted = true;
               stopReason = 'error';
+              streamedContextLimitError = parseContextLimitError({ message: chunkWithMeta.message });
+              streamedUpstreamError = {
+                code: `V2_${chunkWithMeta.code}`,
+                message: chunkWithMeta.message,
+                technicalDetail: chunkWithMeta.message,
+              };
               markFailedRequestScopeMessages();
             }
 
@@ -1751,15 +1824,16 @@ export async function runModelRound(input: {
       input.route.model,
       input.route.contextWindow,
     );
-    const overflow =
-      !!v2Usage &&
-      typeof effectiveCtxWindow === 'number' &&
-      isContextOverflow(
-        v2Usage,
-        effectiveCtxWindow,
-        input.compactionReservedTokens,
-        input.route.maxOutputTokens,
-      );
+    const overflow = resolveModelRoundOverflow({
+      usage: v2Usage,
+      effectiveContextWindow: effectiveCtxWindow,
+      modelMaxOutputTokens: input.route.maxOutputTokens,
+      autoCompactPercentOverride: parsePercentageOverride(
+        process.env['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'],
+      ),
+      contextLimitError: streamedContextLimitError,
+      compactionReservedTokens: input.compactionReservedTokens,
+    });
     return {
       overflow,
       shouldContinue,
@@ -1767,6 +1841,7 @@ export async function runModelRound(input: {
       stopReason,
       statusCode: 200,
       state,
+      ...(streamedUpstreamError ? { upstreamError: streamedUpstreamError } : {}),
       ...(v2Usage ? { usage: v2Usage } : {}),
       ...(v2UsageOccurredAt !== undefined ? { usageOccurredAt: v2UsageOccurredAt } : {}),
     };

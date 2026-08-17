@@ -23,6 +23,8 @@ import type { Message } from '@openAwork/shared';
  * compaction rounds, especially for long multi-step tasks. */
 export const MIN_PRESERVE_RECENT_TOKENS = 10_000;
 export const MAX_PRESERVE_RECENT_TOKENS = 40_000;
+export const DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS = 13_000;
+export const DEFAULT_AUTOMATIC_TAIL_TURNS = 4;
 
 /**
  * Default token estimator. ~4 characters per token is a coarse but
@@ -78,7 +80,11 @@ interface Turn {
 function buildTurns(messages: Message[]): Turn[] {
   const turns: Turn[] = [];
   for (let i = 0; i < messages.length; i++) {
-    if (messages[i]?.role === 'user') {
+    const message = messages[i];
+    if (
+      message?.role === 'user' &&
+      !message.content.every((content) => content.type === 'tool_result')
+    ) {
       turns.push({ start: i, end: messages.length });
     }
   }
@@ -86,6 +92,58 @@ function buildTurns(messages: Message[]): Turn[] {
     turns[i]!.end = turns[i + 1]!.start;
   }
   return turns;
+}
+
+function alignBoundaryForToolPairing(messages: Message[], boundary: number): number {
+  let aligned = boundary;
+  const callsBeforeBoundary = new Map<string, number>();
+  for (let index = 0; index < boundary; index += 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant') continue;
+    for (const content of message.content) {
+      if (content.type === 'tool_call') callsBeforeBoundary.set(content.toolCallId, index);
+    }
+  }
+  for (let index = boundary; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message) continue;
+    for (const content of message.content) {
+      if (content.type !== 'tool_result') continue;
+      const callIndex = callsBeforeBoundary.get(content.toolCallId);
+      if (callIndex !== undefined) aligned = Math.min(aligned, callIndex);
+    }
+  }
+  return aligned;
+}
+
+function estimateTailTokens(
+  messages: Message[],
+  boundary: number,
+  estimate: (message: Message) => number,
+): number {
+  let total = 0;
+  for (let index = boundary; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message) total += estimate(message);
+  }
+  return total;
+}
+
+function reapplyTailBudgetAfterToolPairAlignment(
+  messages: Message[],
+  boundary: number,
+  budget: number,
+  estimate: (message: Message) => number,
+): number {
+  let cappedBoundary = boundary;
+  while (
+    cappedBoundary < messages.length &&
+    (estimateTailTokens(messages, cappedBoundary, estimate) > budget ||
+      alignBoundaryForToolPairing(messages, cappedBoundary) !== cappedBoundary)
+  ) {
+    cappedBoundary += 1;
+  }
+  return cappedBoundary;
 }
 
 function turnTokens(messages: Message[], turn: Turn, estimate: (m: Message) => number): number {
@@ -190,9 +248,16 @@ export function selectTailByTokenBudget(input: {
     return { boundary: input.messages.length, tailStartMessageId: undefined, tailTokenEstimate: 0 };
   }
 
+  const alignedBoundary = alignBoundaryForToolPairing(input.messages, keepStart);
+  const budgetBoundary = reapplyTailBudgetAfterToolPairAlignment(
+    input.messages,
+    alignedBoundary,
+    input.preserveRecentTokens,
+    estimate,
+  );
   return {
-    boundary: keepStart,
-    tailStartMessageId: input.messages[keepStart]?.id,
-    tailTokenEstimate: total,
+    boundary: budgetBoundary,
+    tailStartMessageId: input.messages[budgetBoundary]?.id,
+    tailTokenEstimate: estimateTailTokens(input.messages, budgetBoundary, estimate),
   };
 }

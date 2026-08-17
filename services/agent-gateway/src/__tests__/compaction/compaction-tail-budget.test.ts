@@ -32,6 +32,24 @@ function assistantMsg(id: string, text: string): Message {
   } as unknown as Message;
 }
 
+function assistantToolCall(id: string, toolCallId: string, input: string): Message {
+  return {
+    id,
+    role: 'assistant',
+    content: [{ type: 'tool_call', toolCallId, toolName: 'bash', input: { command: input } }],
+    createdAt: 0,
+  };
+}
+
+function userToolResult(id: string, toolCallId: string, output: string): Message {
+  return {
+    id,
+    role: 'user',
+    content: [{ type: 'tool_result', toolCallId, output, isError: false }],
+    createdAt: 0,
+  };
+}
+
 describe('selectTailByTokenBudget', () => {
   it('returns no tail when message list is empty', () => {
     const result = selectTailByTokenBudget({ messages: [], preserveRecentTokens: 5_000 });
@@ -88,6 +106,32 @@ describe('selectTailByTokenBudget', () => {
     // boundary lands at u3 even though earlier turns would also fit.
     expect(result.boundary).toBe(4);
     expect(result.tailStartMessageId).toBe('u3');
+  });
+
+  it('drops an oversized tool pair rather than exceeding the 13K tail budget after alignment', () => {
+    const messages: Message[] = [
+      userMsg('u1', 'run the tool'),
+      assistantToolCall('a1', 'call-1', 'x'.repeat(2_000)),
+      userToolResult('u2', 'call-1', 'done'),
+      assistantMsg('a2', 'finished'),
+    ];
+    const estimatedTokens = new Map([
+      ['u1', 200],
+      ['a1', 8_000],
+      ['u2', 8_000],
+      ['a2', 1_000],
+    ]);
+
+    const result = selectTailByTokenBudget({
+      messages,
+      preserveRecentTokens: 13_000,
+      maxTurns: 1,
+      estimate: (message) => estimatedTokens.get(message.id) ?? 0,
+    });
+
+    expect(result.boundary).toBe(3);
+    expect(result.tailStartMessageId).toBe('a2');
+    expect(result.tailTokenEstimate).toBeLessThanOrEqual(13_000);
   });
 });
 
