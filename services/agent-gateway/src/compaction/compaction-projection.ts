@@ -1,14 +1,9 @@
 import type { Message } from '@openAwork/shared';
 import { sqliteRun, sqliteTransaction } from '../infra/db.js';
-import {
-  appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage,
-} from '../message/message-v2-adapter.js';
+import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from '../message/message-v2-adapter.js';
 import { findToolPartByCallID, updatePart } from '../message/message-store-v2.js';
 import type { ToolPart } from '../message/message-v2-schema.js';
-import {
-  mergeCompactionMetadata,
-  readPersistedCompactionMemory,
-} from './compaction-metadata.js';
+import { mergeCompactionMetadata, readPersistedCompactionMemory } from './compaction-metadata.js';
 import { buildDurableCompactionSummary } from '../session/session-message-store.js';
 import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
 
@@ -105,7 +100,9 @@ export function persistCompactionProjection(
       : `上下文超限后已持久化 ${input.truncatedCount ?? 0} 个工具输出截断。`;
   const metadata = {
     ...mergeCompactionMetadata(input.metadataJson, {
-      ...(durableSummary?.persistedMemory ? { persistedMemory: durableSummary.persistedMemory } : {}),
+      ...(durableSummary?.persistedMemory
+        ? { persistedMemory: durableSummary.persistedMemory }
+        : {}),
       omittedMessages: durableSummary?.totalRepresentedMessages ?? 0,
       recentMessagesKept: input.projectedMessages.length,
       ...(durableSummary?.signature ? { signature: durableSummary.signature } : {}),
