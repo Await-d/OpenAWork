@@ -74,6 +74,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build OpenCode LLM dependency
+        run: pnpm --filter "@openAwork/opencode-llm" build
+
       - name: Lint
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
 
@@ -101,6 +104,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build OpenCode LLM dependency
+        run: pnpm --filter "@openAwork/opencode-llm" build
+
       - name: Test
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
 
@@ -120,6 +126,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build OpenCode LLM dependency
+        run: pnpm --filter "@openAwork/opencode-llm" build
 
       - name: Run gateway chat fast checks
         run: pnpm --filter "@openAwork/agent-gateway" run test:chat:fast
@@ -187,6 +196,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build OpenCode LLM dependency
+        run: pnpm --filter "@openAwork/opencode-llm" build
 
       - name: Build packages
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" build
