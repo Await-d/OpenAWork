@@ -1,0 +1,78 @@
+OpenAWork 上游 User-Agent 与版本来源复查记录
+
+变更分支/字段
+- 分支：main
+- 字段：HTTP/WebSocket 共同请求头装配层的 `user-agent`
+- 格式：OpenAWork/<应用版本> (<系统类型> <系统版本>; <架构>)
+- 当前观测值：OpenAWork/0.9.7 (Linux 5.15.0-174-generic; x64)
+
+版本来源结论
+- 生产运行：使用桌面端/启动器显式注入的 OPENAWORK_APP_VERSION。
+- 源码与测试运行：未注入时只读取仓库根 package.json 的 version。
+- 不再读取 packages/opencode-llm/package.json 的 version，避免子包版本成为第二个回退源。
+- 发布脚本 scripts/release/release-version.mjs 以根 package.json 为当前版本计算起点，并同步扫描 apps、packages、services 下的 package.json；本次核对全部 workspace package 版本均为 0.9.7。
+
+四个工件
+- MODIFIED_FILE: /home/await/project/OpenAWork/.artifacts/user-agent/MODIFIED_FILE
+- DIFF_FILE: /home/await/project/OpenAWork/.artifacts/user-agent/DIFF_FILE
+- VERIFICATION.txt: /home/await/project/OpenAWork/.artifacts/user-agent/VERIFICATION.txt
+- ROLLBACK.sh: /home/await/project/OpenAWork/.artifacts/user-agent/ROLLBACK.sh
+
+哈希
+- 原始 packages/opencode-llm/src/route/transport/http.ts（HEAD）：32f8e6df79c00d23155e7d5f40298388a4e2d0ed8158070781bec7dbf141fcc6
+- MODIFIED_FILE：3f9bf11936a511e81b93dac40700df55453fcaa10d28536297b560fabfa99e7e
+- 回滚副本恢复后：与原始文件 cmp 相等
+- MODIFIED_FILE 最终状态：保持修改后哈希，未回滚
+
+BASELINE
+- 命令：pnpm --filter @openAwork/opencode-llm exec vitest run src/route/__tests__/user-agent.test.ts
+- 输入/状态：固定 User-Agent 注入前的 2 个请求标识测试。
+- 字面输出/结果：
+  ❯ src/route/__tests__/user-agent.test.ts (2 tests | 2 failed)
+  Test Files 1 failed (1)
+  Tests 2 failed (2)
+- 退出状态：1
+- 基线行为：HTTP 与 WebSocket 准备请求中的 user-agent 均为 undefined。
+
+MODIFIED
+- 命令：pnpm --filter @openAwork/opencode-llm exec vitest run src/route/__tests__/user-agent.test.ts
+- 输入：HTTP 自定义头、HTTP 认证头、Responses WebSocket 认证头、根版本与当前系统环境。
+- 字面输出/结果：
+  ✓ src/route/__tests__/user-agent.test.ts (4 tests) 15ms
+  Test Files 1 passed (1)
+  Tests 4 passed (4)
+- 退出状态：0
+- 观测结果：HTTP 与 WebSocket 均为 OpenAWork/0.9.7 (Linux 5.15.0-174-generic; x64)；调用方与认证模块的 User-Agent 均无法覆盖固定值。
+
+FULL TEST
+- 命令：pnpm --filter @openAwork/opencode-llm test
+- 字面输出/结果：28 个测试文件通过，455 个测试通过。
+- 退出状态：0
+
+TYPECHECK
+- 命令：pnpm --filter @openAwork/opencode-llm run typecheck
+- 字面输出/结果：tsc --noEmit 完成，无错误。
+- 退出状态：0
+
+BUILD
+- 命令：pnpm --filter @openAwork/opencode-llm build
+- 字面输出/结果：tsc --build 完成，无错误；构建产物输出 OpenAWork/0.9.7 (Linux 5.15.0-174-generic; x64)。
+- 退出状态：0
+
+ROLLBACK
+- 命令：cp MODIFIED_FILE rollback-target.ts && cp HEAD/http.ts rollback-target.ts.original && ROLLBACK.sh rollback-target.ts && cmp -s rollback-target.ts rollback-target.ts.original
+- 实际执行命令：
+  cp .artifacts/user-agent/MODIFIED_FILE .artifacts/user-agent/rollback-target.ts
+  git show HEAD:packages/opencode-llm/src/route/transport/http.ts > .artifacts/user-agent/rollback-target.ts.original
+  .artifacts/user-agent/ROLLBACK.sh .artifacts/user-agent/rollback-target.ts
+  cmp -s .artifacts/user-agent/rollback-target.ts .artifacts/user-agent/rollback-target.ts.original
+- 字面输出/结果：rollback_result=restored，rollback_executable=yes
+- 退出状态：0
+- 恢复行为/状态：回滚副本恢复为原始内容；MODIFIED_FILE 仍保持修改后状态。
+
+版本链路复查（2026-08-18）
+- 根 package.json.version：0.9.7（规范版本源）。
+- apps/desktop/src-tauri/tauri.conf.json 的 version 是 ../../../package.json，Tauri 包版本直接引用根版本。
+- apps/desktop/src-tauri/Cargo.toml 与 apps/desktop/package.json 当前均为 0.9.7；scripts/release/release-version.mjs 会同步 workspace package.json 和该 Cargo 版本。
+- 桌面端由 app.package_info().version 注入 OPENAWORK_APP_VERSION；因此生产 User-Agent 使用的运行时版本来自同一 Tauri 包版本链路。
+- 当前扫描 22 个 workspace package.json：唯一版本集合为 [0.9.7]，差异集合为空。

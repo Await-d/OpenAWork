@@ -1,49 +1,34 @@
-import { release } from 'node:os';
-import process from 'node:process';
-import rootPackageJson from '../../../../../package.json' with { type: 'json' };
 import { Effect, Stream } from 'effect';
+import type { HttpClientRequest } from 'effect/unstable/http';
 import { Headers } from 'effect/unstable/http';
 import { Auth } from '../auth.js';
 import { render as renderEndpoint } from '../endpoint.js';
-import { Framing } from '../framing.js';
+import { Framing, type Framing as FramingDef } from '../framing.js';
+import type { Transport, TransportPrepareInput } from './index.js';
 import * as ProviderShared from '../../protocols/shared.js';
-import { mergeJsonRecords } from '../../schema/index.js';
-const SYSTEM_NAMES = {
-  aix: 'AIX',
-  android: 'Android',
-  darwin: 'macOS',
-  freebsd: 'FreeBSD',
-  linux: 'Linux',
-  openbsd: 'OpenBSD',
-  win32: 'Windows',
-};
-const ARCHITECTURE_NAMES = {
-  arm: 'arm',
-  arm64: 'arm64',
-  ia32: 'x86',
-  ppc: 'ppc',
-  ppc64: 'ppc64',
-  riscv64: 'riscv64',
-  s390x: 's390x',
-  x32: 'x32',
-  x64: 'x64',
-};
-const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
-const configuredVersion = process.env['OPENAWORK_APP_VERSION']?.trim();
-const appVersion =
-  configuredVersion !== undefined && VERSION_PATTERN.test(configuredVersion)
-    ? configuredVersion
-    : rootPackageJson.version;
-const systemName = SYSTEM_NAMES[process.platform] ?? process.platform;
-const systemVersion = release();
-const architecture = ARCHITECTURE_NAMES[process.arch] ?? process.arch;
-export const OPENAWORK_USER_AGENT = `OpenAWork/${appVersion} (${systemName} ${systemVersion}; ${architecture})`;
-const applyQuery = (url, query) => {
+import { mergeJsonRecords, type LLMRequest } from '../../schema/index.js';
+
+export type JsonRequestInput<Body> = TransportPrepareInput<Body>;
+
+export interface JsonRequestParts<Body = unknown> {
+  readonly url: string;
+  readonly jsonBody: Body | Record<string, unknown>;
+  readonly bodyText: string;
+  readonly headers: Headers.Headers;
+}
+
+export interface HttpPrepared<Frame> {
+  readonly request: HttpClientRequest.HttpClientRequest;
+  readonly framing: FramingDef<Frame>;
+}
+
+const applyQuery = (url: string, query: Record<string, string> | undefined) => {
   if (!query) return url;
   const next = new URL(url);
   Object.entries(query).forEach(([key, value]) => next.searchParams.set(key, value));
   return next.toString();
 };
+
 const PROTOCOL_BODY_OVERLAY_DENYLIST = new Set([
   'content',
   'contents',
@@ -82,9 +67,15 @@ const PROTOCOL_BODY_OVERLAY_DENYLIST = new Set([
   'top_k',
   'top_p',
 ]);
-const forbiddenBodyOverlayKeys = (body) =>
+
+const forbiddenBodyOverlayKeys = (body: Record<string, unknown>) =>
   Object.keys(body).filter((key) => PROTOCOL_BODY_OVERLAY_DENYLIST.has(key));
-const bodyWithOverlay = (body, request, encodeBody) =>
+
+const bodyWithOverlay = <Body>(
+  body: Body,
+  request: LLMRequest,
+  encodeBody: (body: Body) => string,
+) =>
   Effect.gen(function* () {
     if (request.http?.body === undefined) return { jsonBody: body, bodyText: encodeBody(body) };
     const forbiddenKeys = forbiddenBodyOverlayKeys(request.http.body);
@@ -107,13 +98,15 @@ const bodyWithOverlay = (body, request, encodeBody) =>
       'http.body can only overlay JSON object request bodies',
     );
   });
-const stripContextManagementBeta = (value) =>
+
+const stripContextManagementBeta = (value: string) =>
   value
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0 && !entry.toLowerCase().startsWith('context-management'))
     .join(',');
-const requestHeaders = (input) => {
+
+const requestHeaders = <Body>(input: JsonRequestInput<Body>) => {
   const routeHeaders = input.headers?.({ request: input.request }) ?? {};
   const customHeaders = input.request.http?.headers ?? {};
   const routeBeta = routeHeaders['anthropic-beta'];
@@ -138,24 +131,41 @@ const requestHeaders = (input) => {
     }),
   );
 };
-export const jsonRequestParts = (input) =>
+
+export const jsonRequestParts = <Body>(input: JsonRequestInput<Body>) =>
   Effect.gen(function* () {
     const url = applyQuery(
       renderEndpoint(input.endpoint, { request: input.request, body: input.body }).toString(),
       input.request.http?.query,
     );
     const body = yield* bodyWithOverlay(input.body, input.request, input.encodeBody);
-    const authenticatedHeaders = yield* Auth.toEffect(input.auth)({
+    const headers = yield* Auth.toEffect(input.auth)({
       request: input.request,
       method: 'POST',
       url,
       body: body.bodyText,
       headers: Headers.fromInput(requestHeaders(input)),
     });
-    const headers = Headers.set(authenticatedHeaders, 'user-agent', OPENAWORK_USER_AGENT);
     return { url, jsonBody: body.jsonBody, bodyText: body.bodyText, headers };
   });
-export const httpJson = (input) => ({
+
+export interface HttpJsonInput<_Body, Frame> {
+  readonly framing: FramingDef<Frame>;
+}
+
+export type HttpJsonPatch<Body, Frame> = Partial<HttpJsonInput<Body, Frame>>;
+
+export interface HttpJsonTransport<Body, Frame> extends Transport<
+  Body,
+  HttpPrepared<Frame>,
+  Frame
+> {
+  readonly with: (patch: HttpJsonPatch<Body, Frame>) => HttpJsonTransport<Body, Frame>;
+}
+
+export const httpJson = <Body, Frame>(
+  input: HttpJsonInput<Body, Frame>,
+): HttpJsonTransport<Body, Frame> => ({
   id: 'http-json',
   with: (patch) => httpJson({ ...input, ...patch }),
   prepare: (prepareInput) =>
@@ -192,8 +202,8 @@ export const httpJson = (input) => ({
         ),
     ),
 });
+
 export const sseJson = {
   id: 'http-json/sse',
-  with: () => httpJson({ framing: Framing.sse }),
-};
-//# sourceMappingURL=http.js.map
+  with: <Body>() => httpJson<Body, string>({ framing: Framing.sse }),
+} as const;

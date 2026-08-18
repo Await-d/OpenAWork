@@ -3,6 +3,7 @@ import { Headers, HttpClientRequest } from 'effect/unstable/http';
 import { type Framing as FramingDef } from '../framing.js';
 import type { Transport, TransportPrepareInput } from './index.js';
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>;
+export declare const OPENAWORK_USER_AGENT: string;
 export interface JsonRequestParts<Body = unknown> {
   readonly url: string;
   readonly jsonBody: Body | Record<string, unknown>;
