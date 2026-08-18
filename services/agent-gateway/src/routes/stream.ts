@@ -103,9 +103,8 @@ import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js
 import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
-  getInFlightStreamRequest,
   readPendingCancelReason,
-  registerInFlightStreamRequest,
+  reserveInFlightStreamRequest,
 } from './stream-cancellation.js';
 import {
   isTaskParentAutoResumeClientRequestId,
@@ -2009,6 +2008,63 @@ export async function handleStreamRequest(input: {
     requestData: input.requestData,
     userId: input.user.sub,
   });
+  let reservation = reserveInFlightStreamRequest({
+    clientRequestId: requestData.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.user.sub,
+  });
+  while (!reservation.owner) {
+    await reservation.execution.catch(() => undefined);
+    clearStaleReplayRequestArtifacts({
+      clientRequestId: requestData.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+    });
+    if (
+      replayPersistedAssistantResponse({
+        clientRequestId: requestData.clientRequestId,
+        runId: randomUUID(),
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+        writeChunk: input.writeChunk,
+      })
+    ) {
+      return {
+        statusCode: 200,
+        errorSummary: '请求被 single-flight replay 拦截，未执行新 LLM 调用',
+      };
+    }
+    reservation = reserveInFlightStreamRequest({
+      clientRequestId: requestData.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+    });
+  }
+  const clearReservation = (): void => {
+    clearInFlightStreamRequest({
+      clientRequestId: requestData.clientRequestId,
+      execution: reservation.execution,
+      sessionId: input.sessionId,
+    });
+  };
+  const finishReservation = (result: HandleStreamResult): HandleStreamResult => {
+    reservation.resolve(result);
+    clearReservation();
+    return result;
+  };
+  const failReservation = (error: unknown): never => {
+    reservation.reject(error);
+    clearReservation();
+    throw error;
+  };
+  const abortController = reservation.abortController;
+  if (input.signal) {
+    if (input.signal.aborted) {
+      abortController.abort();
+    } else {
+      input.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    }
+  }
   const runId = randomUUID();
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(input.method, input.path, input.headers, input.ip);
@@ -2063,13 +2119,13 @@ export async function handleStreamRequest(input: {
     if (error instanceof TeamModelBindingUnavailableError) {
       input.writeChunk(createStreamErrorChunk(error.code, message, runId));
       wl.flush(ctx, 409);
-      return { statusCode: 409, errorSummary: `模型绑定不可用：${message}` };
+      return finishReservation({ statusCode: 409, errorSummary: `模型绑定不可用：${message}` });
     }
     wl.flush(ctx, 500);
-    throw error;
+    return failReservation(error);
   }
   if (!route) {
-    throw new Error('resolved stream route missing');
+    return failReservation(new Error('resolved stream route missing'));
   }
 
   // PR-D-Plugin: notify `chat.message` plugins that a new user
@@ -2083,22 +2139,31 @@ export async function handleStreamRequest(input: {
   // plugins rewrite `parts` to inject system context; this MVP keeps
   // the contract narrow because the surrounding stream pipeline
   // doesn't re-read `requestData.message` after this point.)
-  await dispatchChatMessage(
-    {
-      sessionID: input.sessionId,
-      modelId: route.model,
-      messageID: requestData.clientRequestId,
-    },
-    {
-      message: { role: 'user', content: userVisibleMessage },
-      parts: [],
-    },
-  );
+  try {
+    await dispatchChatMessage(
+      {
+        sessionID: input.sessionId,
+        modelId: route.model,
+        messageID: requestData.clientRequestId,
+      },
+      {
+        message: { role: 'user', content: userVisibleMessage },
+        parts: [],
+      },
+    );
+  } catch (error) {
+    return failReservation(error);
+  }
 
-  const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson, {
-    sessionId: input.sessionId,
-    userId: input.user.sub,
-  });
+  let workspaceCtx: Awaited<ReturnType<typeof buildWorkspaceContext>>;
+  try {
+    workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson, {
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+    });
+  } catch (error) {
+    return failReservation(error);
+  }
   const interactionModes = resolveStreamInteractionModes({
     metadataJson: input.sessionContext.metadataJson,
     requestData,
@@ -2134,11 +2199,15 @@ export async function handleStreamRequest(input: {
       userId: input.user.sub,
     }) ?? resolveUnboundSessionWorkspaceFallback();
   if (detectUltraworkKeyword(requestData.message)) {
-    startWorkContext = await processStartWork(
-      workspaceRootForStartWork,
-      input.sessionId,
-      requestData.message,
-    );
+    try {
+      startWorkContext = await processStartWork(
+        workspaceRootForStartWork,
+        input.sessionId,
+        requestData.message,
+      );
+    } catch (error) {
+      return failReservation(error);
+    }
   }
 
   // Command templates (oh-my-opencode builtin-commands pattern):
@@ -2174,32 +2243,10 @@ export async function handleStreamRequest(input: {
     })
   ) {
     wl.flush(ctx, 200);
-    return {
+    return finishReservation({
       statusCode: 200,
       errorSummary: '请求被 replay 拦截（同 clientRequestId 已有持久化结果），未执行新 LLM 调用',
-    };
-  }
-
-  const inFlight = getInFlightStreamRequest(input.sessionId, requestData.clientRequestId);
-  if (inFlight) {
-    await inFlight.execution.catch(() => undefined);
-    clearStaleReplayRequestArtifacts({
-      clientRequestId: requestData.clientRequestId,
-      sessionId: input.sessionId,
-      userId: input.user.sub,
     });
-    if (
-      replayPersistedAssistantResponse({
-        clientRequestId: requestData.clientRequestId,
-        runId,
-        sessionId: input.sessionId,
-        userId: input.user.sub,
-        writeChunk: input.writeChunk,
-      })
-    ) {
-      wl.flush(ctx, 200);
-      return { statusCode: 200, errorSummary: '请求被 in-flight replay 拦截，未执行新 LLM 调用' };
-    }
   }
 
   if (
@@ -2227,17 +2274,12 @@ export async function handleStreamRequest(input: {
         runId,
       ),
     );
-    return { statusCode: 409, errorSummary: '会话已有其他请求运行中（SESSION_ALREADY_RUNNING）' };
+    return finishReservation({
+      statusCode: 409,
+      errorSummary: '会话已有其他请求运行中（SESSION_ALREADY_RUNNING）',
+    });
   }
 
-  const abortController = new AbortController();
-  if (input.signal) {
-    if (input.signal.aborted) {
-      abortController.abort();
-    } else {
-      input.signal.addEventListener('abort', () => abortController.abort(), { once: true });
-    }
-  }
   const eventSequence = { value: 1 };
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(input.sessionContext.metadataJson);
   // Tracks events emitted by this stream's own emitChunk so the
@@ -3171,21 +3213,11 @@ export async function handleStreamRequest(input: {
     throw err;
   });
 
-  registerInFlightStreamRequest({
-    abortController,
-    clientRequestId: requestData.clientRequestId,
-    execution,
-    sessionId: input.sessionId,
-    userId: input.user.sub,
-  });
+  void execution.then(reservation.resolve, reservation.reject);
   try {
     return await execution;
   } finally {
-    clearInFlightStreamRequest({
-      clientRequestId: requestData.clientRequestId,
-      execution,
-      sessionId: input.sessionId,
-    });
+    clearReservation();
   }
 }
 
