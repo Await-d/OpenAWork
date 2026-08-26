@@ -6,6 +6,8 @@ export interface MonthlyRecord {
   totalCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheReadTokens?: number;
+  totalCacheWriteTokens?: number;
   byProvider: Record<string, number>;
 }
 
@@ -88,6 +90,12 @@ export function UsageDashboard({ records, budgetUsd, style }: UsageDashboardProp
               >
                 <span>{r.totalInputTokens.toLocaleString()} 输入</span>
                 <span>{r.totalOutputTokens.toLocaleString()} 输出</span>
+                {r.totalCacheReadTokens !== undefined && (
+                  <span>{r.totalCacheReadTokens.toLocaleString()} 缓存读取</span>
+                )}
+                {r.totalCacheWriteTokens !== undefined && (
+                  <span>{r.totalCacheWriteTokens.toLocaleString()} 缓存写入</span>
+                )}
                 {budgetUsd && <span>{budgetPct?.toFixed(0)}% 预算</span>}
               </div>
             </div>

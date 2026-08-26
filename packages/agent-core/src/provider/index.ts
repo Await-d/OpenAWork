@@ -60,4 +60,10 @@ export {
   mergeBuiltinModels,
   buildRequestOverrides,
   calculateTokenCost,
+  calculateTokenUsageCost,
+  MAX_PRICE_PER_MILLION,
+  MAX_USAGE_TOKENS,
+  normalizeOptionalTokenPrice,
+  normalizeTokenCount,
 } from './utils.js';
+export type { TokenUsageCostInput } from './utils.js';

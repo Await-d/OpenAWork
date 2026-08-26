@@ -30,7 +30,7 @@ import {
   LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
   YOLO_MODE_SYSTEM_PROMPT,
 } from './stream-system-prompts.js';
-import { KeywordDetectorImpl } from '@openAwork/agent-core';
+import { calculateTokenUsageCost, KeywordDetectorImpl } from '@openAwork/agent-core';
 import { buildCapabilityContext } from './capabilities.js';
 import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import {
@@ -53,6 +53,7 @@ import {
   streamRequestSchema,
 } from './stream.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
+import { publishTeamUsageEvent } from './stream-team-events.js';
 import { runModelRound } from './stream-model-round.js';
 import {
   clearInFlightStreamRequest,
@@ -560,8 +561,40 @@ async function continueFromApprovedToolResult(input: {
             occurredAt: result.usageOccurredAt,
             inputPricePerMillion: route.inputPricePerMillion,
             outputPricePerMillion: route.outputPricePerMillion,
+            cacheReadPricePerMillion: route.cacheReadPricePerMillion,
+            cacheWritePricePerMillion: route.cacheWritePricePerMillion,
             usage: result.usage,
             userId: input.userId,
+          });
+          publishTeamUsageEvent({
+            userId: input.userId,
+            sessionId: input.sessionId,
+            sessionContext,
+            round,
+            agentId: route.effectiveAgentId ?? undefined,
+            provider: route.providerType ?? undefined,
+            model: route.model ?? undefined,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            reasoningTokens: result.usage.reasoningTokens,
+            cacheReadTokens: result.usage.cacheReadTokens,
+            cacheWriteTokens: result.usage.cacheWriteTokens,
+            costUsd:
+              route.inputPricePerMillion !== undefined ||
+              route.outputPricePerMillion !== undefined ||
+              route.cacheReadPricePerMillion !== undefined ||
+              route.cacheWritePricePerMillion !== undefined
+                ? calculateTokenUsageCost({
+                    inputTokens: result.usage.inputTokens,
+                    outputTokens: result.usage.outputTokens,
+                    cacheReadTokens: result.usage.cacheReadTokens,
+                    cacheWriteTokens: result.usage.cacheWriteTokens,
+                    inputPricePerMillion: route.inputPricePerMillion,
+                    outputPricePerMillion: route.outputPricePerMillion,
+                    cacheReadPricePerMillion: route.cacheReadPricePerMillion,
+                    cacheWritePricePerMillion: route.cacheWritePricePerMillion,
+                  })
+                : undefined,
           });
         }
 

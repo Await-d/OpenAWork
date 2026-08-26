@@ -15,6 +15,19 @@ function readFiniteNumber(record: Record<string, unknown>, key: string): number 
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function readOptionalPrice(
+  record: Record<string, unknown>,
+  primaryKey: string,
+  aliasKey: string,
+): number | undefined {
+  return readFiniteNumber(record, primaryKey) ?? readFiniteNumber(record, aliasKey) ?? undefined;
+}
+
+function readOptionalContextWindow(record: Record<string, unknown>): number | undefined {
+  const value = record['contextWindow'];
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
 function inferProviderLabel(modelId: string): string {
   // 由 catalog 的 modelIdPrefixes 反推，新增平台无需改这里。
   const fromCatalog = inferProviderLabelFromModelId(modelId);
@@ -53,12 +66,26 @@ export function normalizeSettingsModelPrices(value: unknown): ModelPriceEntry[] 
     const displayName =
       readNonEmptyString(entry, 'displayName') ?? readNonEmptyString(entry, 'modelName') ?? id;
     const provider = readNonEmptyString(entry, 'provider') ?? inferProviderLabel(id);
+    const cacheReadPricePerMillion = readOptionalPrice(
+      entry,
+      'cacheReadPricePerMillion',
+      'cacheReadPer1m',
+    );
+    const cacheWritePricePerMillion = readOptionalPrice(
+      entry,
+      'cacheWritePricePerMillion',
+      'cacheWritePer1m',
+    );
+    const contextWindow = readOptionalContextWindow(entry);
 
     return [
       {
         id,
         displayName,
         provider,
+        ...(readNonEmptyString(entry, 'providerId')
+          ? { providerId: readNonEmptyString(entry, 'providerId') ?? undefined }
+          : {}),
         inputPricePerMillion:
           readFiniteNumber(entry, 'inputPricePerMillion') ??
           readFiniteNumber(entry, 'inputPer1m') ??
@@ -67,6 +94,9 @@ export function normalizeSettingsModelPrices(value: unknown): ModelPriceEntry[] 
           readFiniteNumber(entry, 'outputPricePerMillion') ??
           readFiniteNumber(entry, 'outputPer1m') ??
           0,
+        ...(cacheReadPricePerMillion !== undefined ? { cacheReadPricePerMillion } : {}),
+        ...(cacheWritePricePerMillion !== undefined ? { cacheWritePricePerMillion } : {}),
+        ...(contextWindow !== undefined ? { contextWindow } : {}),
       },
     ];
   });

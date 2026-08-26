@@ -25,6 +25,7 @@ const sample: ModelsDevData = {
         id: 'meta-llama/Llama-3-8b',
         name: 'Llama 3 8B',
         tool_call: true,
+        cost: { input: 1, output: 2, cache_read: 0.1, cache_write: 1.25 },
       },
       old: { id: 'old', name: 'Old', status: 'deprecated' },
     },
@@ -56,6 +57,16 @@ describe('models-dev-discover', () => {
     expect(provider.defaultModels.some((m) => m.id === 'meta-llama/Llama-3-8b')).toBe(true);
     expect(provider.defaultModels.some((m) => m.id === 'old')).toBe(false);
     expect(provider.id.startsWith('custom-md-together-')).toBe(true);
+  });
+
+  it('从 models.dev 保留缓存读取和写入价格', () => {
+    const provider = buildCustomProviderFromModelsDev(sample, 'together');
+    const model = provider.defaultModels.find((item) => item.id === 'meta-llama/Llama-3-8b');
+
+    expect(model).toMatchObject({
+      cacheReadPricePerMillion: 0.1,
+      cacheWritePricePerMillion: 1.25,
+    });
   });
 
   it('未知 id 抛错', () => {

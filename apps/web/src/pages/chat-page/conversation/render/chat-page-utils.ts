@@ -160,22 +160,77 @@ export function resolveModelPriceEntry(
 ): ModelPriceEntry | undefined {
   const normalizedCandidates = candidates.map(normalizeModelLookupKey).filter((c) => c.length > 0);
   if (normalizedCandidates.length === 0) return undefined;
+  const qualifiedCandidates = normalizedCandidates.filter((candidate) => candidate.includes('/'));
+  const qualifiedMatch = prices.find((entry) => {
+    const normalizedProviderModel = entry.providerId
+      ? normalizeModelLookupKey(`${entry.providerId}/${entry.modelName}`)
+      : '';
+    return qualifiedCandidates.some(
+      (candidate) =>
+        candidate === normalizedProviderModel || normalizedProviderModel.includes(candidate),
+    );
+  });
+  if (qualifiedMatch) return qualifiedMatch;
   return prices.find((entry) => {
     const normalizedModelName = normalizeModelLookupKey(entry.modelName);
     return normalizedCandidates.some(
-      (c) =>
-        c === normalizedModelName ||
-        c.includes(normalizedModelName) ||
-        normalizedModelName.includes(c),
+      (candidate) =>
+        !candidate.includes('/') &&
+        (candidate === normalizedModelName ||
+          candidate.includes(normalizedModelName) ||
+          normalizedModelName.includes(candidate)),
     );
   });
 }
 
 export interface ModelPriceEntry {
   modelName: string;
+  providerId?: string;
   inputPer1m: number;
   outputPer1m: number;
-  cachedPer1m?: number;
+  cacheReadPer1m?: number;
+  cacheWritePer1m?: number;
+}
+
+const MAX_USAGE_TOKENS = 1_000_000_000;
+const MAX_PRICE_PER_MILLION = 1_000_000;
+
+function normalizeUsageTokens(value: number | undefined): number {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_USAGE_TOKENS
+    ? value
+    : 0;
+}
+
+function normalizeUsagePrice(value: number | undefined, fallback = 0): number {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_PRICE_PER_MILLION
+    ? value
+    : fallback;
+}
+
+export function estimateModelUsageCost(input: {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  price: ModelPriceEntry;
+}): number {
+  const inputPrice = normalizeUsagePrice(input.price.inputPer1m);
+  const outputPrice = normalizeUsagePrice(input.price.outputPer1m);
+  const cacheReadPrice = normalizeUsagePrice(input.price.cacheReadPer1m, inputPrice);
+  const cacheWritePrice = normalizeUsagePrice(input.price.cacheWritePer1m, inputPrice);
+  return (
+    (normalizeUsageTokens(input.inputTokens) * inputPrice +
+      normalizeUsageTokens(input.outputTokens) * outputPrice +
+      normalizeUsageTokens(input.cacheReadTokens) * cacheReadPrice +
+      normalizeUsageTokens(input.cacheWriteTokens) * cacheWritePrice) /
+    1_000_000
+  );
 }
 
 // 协议工具 SSOT 已抽到 conversation-runtime/messages/。

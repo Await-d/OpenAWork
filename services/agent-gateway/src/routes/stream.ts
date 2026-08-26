@@ -49,7 +49,7 @@ import {
   YOLO_MODE_SYSTEM_PROMPT,
   detectThinkingLanguageHintFromText,
 } from './stream-system-prompts.js';
-import { KeywordDetectorImpl, redactText } from '@openAwork/agent-core';
+import { calculateTokenUsageCost, KeywordDetectorImpl, redactText } from '@openAwork/agent-core';
 import {
   deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
@@ -2819,6 +2819,8 @@ export async function handleStreamRequest(input: {
             occurredAt: result.usageOccurredAt,
             inputPricePerMillion: route.inputPricePerMillion,
             outputPricePerMillion: route.outputPricePerMillion,
+            cacheReadPricePerMillion: route.cacheReadPricePerMillion,
+            cacheWritePricePerMillion: route.cacheWritePricePerMillion,
             usage: result.usage,
             userId: input.user.sub,
           });
@@ -2842,11 +2844,20 @@ export async function handleStreamRequest(input: {
               cacheReadTokens: result.usage.cacheReadTokens,
               cacheWriteTokens: result.usage.cacheWriteTokens,
               costUsd:
-                typeof route.inputPricePerMillion === 'number' &&
-                typeof route.outputPricePerMillion === 'number'
-                  ? (result.usage.inputTokens * route.inputPricePerMillion +
-                      result.usage.outputTokens * route.outputPricePerMillion) /
-                    1_000_000
+                route.inputPricePerMillion !== undefined ||
+                route.outputPricePerMillion !== undefined ||
+                route.cacheReadPricePerMillion !== undefined ||
+                route.cacheWritePricePerMillion !== undefined
+                  ? calculateTokenUsageCost({
+                      inputTokens: result.usage.inputTokens,
+                      outputTokens: result.usage.outputTokens,
+                      cacheReadTokens: result.usage.cacheReadTokens,
+                      cacheWriteTokens: result.usage.cacheWriteTokens,
+                      inputPricePerMillion: route.inputPricePerMillion,
+                      outputPricePerMillion: route.outputPricePerMillion,
+                      cacheReadPricePerMillion: route.cacheReadPricePerMillion,
+                      cacheWritePricePerMillion: route.cacheWritePricePerMillion,
+                    })
                   : undefined,
             });
             publishTeamTimingEvent({

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   runUpstreamGenerate: vi.fn(),
   publishTeamEvent: vi.fn(),
   persistTeamUsageRecord: vi.fn(),
+  persistMonthlyUsageRecord: vi.fn(),
 }));
 
 vi.mock('../../v2-runtime/upstream/index.js', async (orig) => {
@@ -45,10 +46,20 @@ vi.mock('../../team/team-usage-records-store.js', async (orig) => {
   };
 });
 
+vi.mock('../../session/usage-records-store.js', async (orig) => {
+  type UsageModule = typeof UsageActual;
+  const actual = await (orig() as Promise<UsageModule>);
+  return {
+    ...actual,
+    persistMonthlyUsageRecord: mocks.persistMonthlyUsageRecord,
+  };
+});
+
 import { requestWorkflowLlmCompletion } from '../../routes/workflow-llm.js';
 import type * as UpstreamActual from '../../v2-runtime/upstream/index.js';
 import type * as BusActual from '../../handoff/bus/team-events-bus.js';
 import type * as RecordsActual from '../../team/team-usage-records-store.js';
+import type * as UsageActual from '../../session/usage-records-store.js';
 
 const BASE_INPUT = {
   apiBaseUrl: 'https://api.openai.com/v1',
@@ -63,6 +74,7 @@ beforeEach(() => {
   mocks.runUpstreamGenerate.mockReset();
   mocks.publishTeamEvent.mockReset();
   mocks.persistTeamUsageRecord.mockReset();
+  mocks.persistMonthlyUsageRecord.mockReset();
 });
 
 afterEach(() => {
@@ -106,6 +118,111 @@ describe('requestWorkflowLlmCompletion · team_usage 事件', () => {
     expect(envelope.payload?.['outputTokens']).toBe(500);
     // 成本 = (1000*3 + 500*15) / 1e6 = 0.0105
     expect(envelope.payload?.['costUsd']).toBeCloseTo(0.0105, 6);
+    expect(mocks.persistMonthlyUsageRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u-1',
+        usage: expect.objectContaining({ inputTokens: 1000, outputTokens: 500 }),
+      }),
+    );
+  });
+
+  it('缓存 token 使用缓存单价并写入团队用量事件', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 1_000,
+        outputTokens: 500,
+        cacheReadTokens: 4_000,
+        cacheWriteTokens: 2_000,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
+
+    await requestWorkflowLlmCompletion({
+      ...BASE_INPUT,
+      usageContext: {
+        userId: 'u-1',
+        sessionId: 's-1',
+        layer: 'pm1',
+        inputPricePerMillion: 3,
+        outputPricePerMillion: 15,
+        cacheReadPricePerMillion: 0.3,
+        cacheWritePricePerMillion: 3.75,
+      },
+    });
+
+    const envelope = mocks.publishTeamEvent.mock.calls[0]?.[0] as {
+      payload?: Record<string, unknown>;
+    };
+    expect(envelope.payload).toMatchObject({
+      cacheReadTokens: 4_000,
+      cacheWriteTokens: 2_000,
+    });
+    expect(envelope.payload?.['costUsd']).toBeCloseTo(0.0192, 8);
+  });
+
+  it('缺少输出单价时仍独立计算缓存读取费用', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 4_000,
+        cacheWriteTokens: 0,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
+
+    await requestWorkflowLlmCompletion({
+      ...BASE_INPUT,
+      usageContext: {
+        userId: 'u-1',
+        sessionId: 's-1',
+        layer: 'pm1',
+        inputPricePerMillion: 3,
+        cacheReadPricePerMillion: 0.3,
+      },
+    });
+
+    const envelope = mocks.publishTeamEvent.mock.calls[0]?.[0] as {
+      payload?: Record<string, unknown>;
+    };
+    expect(envelope.payload?.['costUsd']).toBeCloseTo(0.0012, 8);
+  });
+
+  it('纯缓存用量不会被文本兜底重复估算普通输入', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 4_000,
+        cacheWriteTokens: 0,
+        finishReason: 'stop',
+        raw: {},
+      }),
+    );
+
+    await requestWorkflowLlmCompletion({
+      ...BASE_INPUT,
+      usageContext: {
+        userId: 'u-1',
+        sessionId: 's-1',
+        layer: 'pm1',
+        inputPricePerMillion: 3,
+        outputPricePerMillion: 15,
+        cacheReadPricePerMillion: 0.3,
+      },
+    });
+
+    const envelope = mocks.publishTeamEvent.mock.calls[0]?.[0] as {
+      payload?: Record<string, unknown>;
+    };
+    expect(envelope.payload?.['inputTokens']).toBe(0);
+    expect(envelope.payload?.['outputTokens']).toBe(0);
+    expect(envelope.payload?.['costUsd']).toBeCloseTo(0.0012, 8);
   });
 
   it('未提供 usageContext 时不发任何 team 事件（chat 端不受影响）', async () => {

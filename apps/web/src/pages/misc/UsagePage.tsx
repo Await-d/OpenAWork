@@ -19,9 +19,12 @@ const sharedUiThemeVars = {
 
 interface ModelPriceEntry {
   modelName: string;
+  providerId?: string;
   inputPer1m: number;
   outputPer1m: number;
-  cachedPer1m?: number;
+  contextWindow?: number;
+  cacheReadPer1m?: number;
+  cacheWritePer1m?: number;
 }
 
 export default function UsagePage() {
@@ -136,12 +139,17 @@ export default function UsagePage() {
                     <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>暂无模型价格数据</span>
                   )}
                   {modelPrices.map((m) => (
-                    <div key={m.modelName} style={sharedUiThemeVars}>
+                    <div
+                      key={`${m.providerId ?? 'unknown'}:${m.modelName}`}
+                      style={sharedUiThemeVars}
+                    >
                       <ModelCostDisplay
                         modelName={m.modelName}
                         inputPer1m={m.inputPer1m}
                         outputPer1m={m.outputPer1m}
-                        cachedPer1m={m.cachedPer1m}
+                        contextWindow={m.contextWindow}
+                        cacheReadPer1m={m.cacheReadPer1m}
+                        cacheWritePer1m={m.cacheWritePer1m}
                       />
                     </div>
                   ))}

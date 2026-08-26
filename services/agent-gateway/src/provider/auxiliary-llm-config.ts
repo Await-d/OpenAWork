@@ -82,6 +82,8 @@ export interface ResolvedAuxiliaryLlmConfig {
    */
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
+  cacheReadPricePerMillion?: number;
+  cacheWritePricePerMillion?: number;
 }
 
 /**
@@ -227,6 +229,12 @@ function resolveProviderCredentials(
       : {}),
     ...(typeof modelEntry?.outputPricePerMillion === 'number'
       ? { outputPricePerMillion: modelEntry.outputPricePerMillion }
+      : {}),
+    ...(typeof modelEntry?.cacheReadPricePerMillion === 'number'
+      ? { cacheReadPricePerMillion: modelEntry.cacheReadPricePerMillion }
+      : {}),
+    ...(typeof modelEntry?.cacheWritePricePerMillion === 'number'
+      ? { cacheWritePricePerMillion: modelEntry.cacheWritePricePerMillion }
       : {}),
   };
 }

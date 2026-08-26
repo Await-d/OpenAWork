@@ -7,6 +7,7 @@ import type {
 } from '@openAwork/shared';
 import { Effect, Layer, Stream } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
+import { normalizeTokenCount } from '@openAwork/agent-core';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../session/thinking-block-validator.js';
 import {
@@ -1607,18 +1608,25 @@ export async function runModelRound(input: {
           streamDiagnostics = info;
         },
         onFinish: ({ usage }) => {
-          const reasoningTokens =
-            usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? 0;
-          const cacheReadTokens =
-            usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
-          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
-          let rawInputTokens = usage.inputTokens ?? 0;
-          let rawOutputTokens = usage.outputTokens ?? 0;
+          const reasoningTokens = normalizeTokenCount(
+            usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens,
+          );
+          const cacheReadTokens = normalizeTokenCount(
+            usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+          );
+          const cacheWriteTokens = normalizeTokenCount(usage.inputTokenDetails?.cacheWriteTokens);
+          let rawInputTokens = normalizeTokenCount(usage.inputTokens);
+          let rawOutputTokens = normalizeTokenCount(usage.outputTokens);
           // 兜底：部分 provider 流式响应不回 usage（token 全 0）。为了让团队度量
           // 面板与月度用量统计不至于「用了却归零」，按 ~4 字符/token 的粗略口径，
           // 从本轮入参消息 / 已累积的助手文本估算。仅在 provider 完全没给时启用，
           // 有真实 usage 时绝不覆盖。
-          if (rawInputTokens === 0 && rawOutputTokens === 0) {
+          if (
+            rawInputTokens === 0 &&
+            rawOutputTokens === 0 &&
+            cacheReadTokens === 0 &&
+            cacheWriteTokens === 0
+          ) {
             const estimatedInput = estimateModelMessagesTokens(modelMessages);
             const estimatedOutput = estimateTokensFromText(state.assistantText);
             if (estimatedInput > 0 || estimatedOutput > 0) {
@@ -1629,7 +1637,7 @@ export async function runModelRound(input: {
           const nextUsage: StreamUsageSummary = {
             inputTokens: Math.max(0, rawInputTokens - cacheReadTokens - cacheWriteTokens),
             outputTokens: Math.max(0, rawOutputTokens - reasoningTokens),
-            totalTokens: usage.totalTokens ?? rawInputTokens + rawOutputTokens,
+            totalTokens: normalizeTokenCount(usage.totalTokens ?? rawInputTokens + rawOutputTokens),
             ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
             ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
             ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),

@@ -18,10 +18,11 @@
  */
 
 import type { AIProvider } from '@openAwork/agent-core';
-import { inferProviderTypeFromHostname } from '@openAwork/agent-core';
+import { calculateTokenUsageCost, inferProviderTypeFromHostname } from '@openAwork/agent-core';
 import { Effect } from 'effect';
 import type { UpstreamProtocolKind } from '../v2-runtime/upstream/native-model.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
+import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 
@@ -33,6 +34,20 @@ const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 function estimateTokensFromText(text: string | null | undefined): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
+}
+
+function hasUsagePricing(input: {
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+  cacheReadPricePerMillion?: number;
+  cacheWritePricePerMillion?: number;
+}): boolean {
+  return (
+    typeof input.inputPricePerMillion === 'number' ||
+    typeof input.outputPricePerMillion === 'number' ||
+    typeof input.cacheReadPricePerMillion === 'number' ||
+    typeof input.cacheWritePricePerMillion === 'number'
+  );
 }
 
 /**
@@ -106,6 +121,8 @@ export interface WorkflowLlmRequestConfig {
     inputPricePerMillion?: number;
     /** 每百万输出 token 单价（USD）。 */
     outputPricePerMillion?: number;
+    cacheReadPricePerMillion?: number;
+    cacheWritePricePerMillion?: number;
   };
 }
 
@@ -193,17 +210,47 @@ export async function requestWorkflowLlmCompletion(
         // 此时 result.inputTokens/outputTokens 为 0，会导致这层用量「永远统计不到」。
         // 用 ~4 字符/token 的粗略口径从 prompt / 响应文本估算，保证度量面板看得到
         // 近似真实用量（标注为估算），而不是一片空白。
+        const cacheReadTokens = result.cacheReadTokens;
+        const cacheWriteTokens = result.cacheWriteTokens;
+        const hasProviderUsage =
+          result.inputTokens > 0 ||
+          result.outputTokens > 0 ||
+          cacheReadTokens > 0 ||
+          cacheWriteTokens > 0;
         const inputTokens =
-          result.inputTokens > 0 ? result.inputTokens : estimateTokensFromText(input.prompt);
+          result.inputTokens > 0 || hasProviderUsage
+            ? result.inputTokens
+            : estimateTokensFromText(input.prompt);
         const outputTokens =
-          result.outputTokens > 0 ? result.outputTokens : estimateTokensFromText(result.text);
-        const costUsd =
-          typeof usageContext.inputPricePerMillion === 'number' &&
-          typeof usageContext.outputPricePerMillion === 'number'
-            ? (inputTokens * usageContext.inputPricePerMillion +
-                outputTokens * usageContext.outputPricePerMillion) /
-              1_000_000
-            : undefined;
+          result.outputTokens > 0 || hasProviderUsage
+            ? result.outputTokens
+            : estimateTokensFromText(result.text);
+        const costUsd = hasUsagePricing(usageContext)
+          ? calculateTokenUsageCost({
+              inputTokens,
+              outputTokens,
+              cacheReadTokens,
+              cacheWriteTokens,
+              inputPricePerMillion: usageContext.inputPricePerMillion,
+              outputPricePerMillion: usageContext.outputPricePerMillion,
+              cacheReadPricePerMillion: usageContext.cacheReadPricePerMillion,
+              cacheWritePricePerMillion: usageContext.cacheWritePricePerMillion,
+            })
+          : undefined;
+        try {
+          persistMonthlyUsageRecord({
+            userId: usageContext.userId,
+            inputPricePerMillion: usageContext.inputPricePerMillion,
+            outputPricePerMillion: usageContext.outputPricePerMillion,
+            cacheReadPricePerMillion: usageContext.cacheReadPricePerMillion,
+            cacheWritePricePerMillion: usageContext.cacheWritePricePerMillion,
+            usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+          });
+        } catch (err) {
+          console.warn(
+            `[workflow-llm] persist monthly usage 失败：${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         publishTeamWorkflowUsageEvent({
           userId: usageContext.userId,
           sessionId: usageContext.sessionId,
@@ -213,6 +260,8 @@ export async function requestWorkflowLlmCompletion(
           model: input.model,
           inputTokens,
           outputTokens,
+          ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+          ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
           ...(costUsd !== undefined ? { costUsd } : {}),
         });
       } catch (err) {

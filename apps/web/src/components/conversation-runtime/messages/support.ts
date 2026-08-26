@@ -177,6 +177,8 @@ export interface ChatUsageDetails {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   estimatedCostUsd?: number;
   durationMs?: number;
   firstTokenLatencyMs?: number;

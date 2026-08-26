@@ -61,6 +61,8 @@ describe('runUpstreamGenerate', () => {
       text: 'hello',
       inputTokens: 3,
       outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       finishReason: 'stop',
       raw: nativeResponse,
     });

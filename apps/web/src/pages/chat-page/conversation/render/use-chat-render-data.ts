@@ -13,6 +13,7 @@ import type { ToolCallCardModel } from '../../state/chat-stream-state.js';
 import type { ModelPriceEntry } from './chat-page-utils.js';
 import {
   decorateAssistantGroupActions,
+  estimateModelUsageCost,
   groupChatRenderEntries,
   resolveModelPriceEntry,
 } from './chat-page-utils.js';
@@ -173,15 +174,24 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         requestIndex += 1;
         const inputTokens = providerUsage?.inputTokens ?? contextTokens;
         const outputTokens = providerUsage?.outputTokens ?? messageTokens;
+        const cacheReadTokens = providerUsage?.cacheReadTokens ?? 0;
+        const cacheWriteTokens = providerUsage?.cacheWriteTokens ?? 0;
         const totalTokens = providerUsage?.totalTokens ?? inputTokens + outputTokens;
         const matchedPrice = resolveModelPriceEntry(modelPrices, [
+          message.providerId ? `${message.providerId}/${message.model ?? ''}` : undefined,
+          activeProviderId ? `${activeProviderId}/${activeModelId}` : undefined,
           message.model,
           activeModelId,
           activeModelOption?.label,
         ]);
         const estimatedCostUsd = matchedPrice
-          ? (inputTokens * matchedPrice.inputPer1m + outputTokens * matchedPrice.outputPer1m) /
-            1_000_000
+          ? estimateModelUsageCost({
+              inputTokens,
+              outputTokens,
+              cacheReadTokens,
+              cacheWriteTokens,
+              price: matchedPrice,
+            })
           : undefined;
 
         usageByMessageId.set(message.id, {
@@ -189,6 +199,8 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
           inputTokens,
           outputTokens,
           totalTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
           estimatedCostUsd,
           durationMs: message.durationMs,
           firstTokenLatencyMs: message.firstTokenLatencyMs,
@@ -264,14 +276,22 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
 
     const inputTokens = effectiveReportedStreamUsage?.inputTokens ?? messageInputTokens;
     const outputTokens = effectiveReportedStreamUsage?.outputTokens ?? streamingOutputTokens;
+    const cacheReadTokens = effectiveReportedStreamUsage?.cacheReadTokens ?? 0;
+    const cacheWriteTokens = effectiveReportedStreamUsage?.cacheWriteTokens ?? 0;
     const totalTokens = effectiveReportedStreamUsage?.totalTokens ?? inputTokens + outputTokens;
     const matchedPrice = resolveModelPriceEntry(modelPrices, [
+      activeProviderId ? `${activeProviderId}/${activeModelId}` : undefined,
       activeModelId,
       activeModelOption?.label,
     ]);
     const estimatedCostUsd = matchedPrice
-      ? (inputTokens * matchedPrice.inputPer1m + outputTokens * matchedPrice.outputPer1m) /
-        1_000_000
+      ? estimateModelUsageCost({
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
+          price: matchedPrice,
+        })
       : undefined;
     const activeDurationMs = visibleStreamStartedAt
       ? Date.now() - visibleStreamStartedAt
@@ -282,6 +302,8 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       inputTokens,
       outputTokens,
       totalTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
       estimatedCostUsd,
       durationMs: activeDurationMs,
       firstTokenLatencyMs: activeStreamFirstTokenLatencyMs ?? undefined,

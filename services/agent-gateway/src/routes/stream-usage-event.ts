@@ -1,4 +1,5 @@
 import type { StreamUsageChunk } from '@openAwork/shared';
+import { normalizeTokenCount } from '@openAwork/agent-core';
 import type { StreamUsageSummary } from './stream-usage.js';
 import { createRunEventMeta } from './stream.js';
 
@@ -10,17 +11,17 @@ export function buildStreamUsageChunk(input: {
 }): StreamUsageChunk {
   return {
     type: 'usage',
-    inputTokens: Math.max(0, input.usage.inputTokens),
-    outputTokens: Math.max(0, input.usage.outputTokens),
-    totalTokens: Math.max(0, input.usage.totalTokens),
+    inputTokens: normalizeTokenCount(input.usage.inputTokens),
+    outputTokens: normalizeTokenCount(input.usage.outputTokens),
+    totalTokens: normalizeTokenCount(input.usage.totalTokens),
     ...(typeof input.usage.reasoningTokens === 'number'
-      ? { reasoningTokens: Math.max(0, input.usage.reasoningTokens) }
+      ? { reasoningTokens: normalizeTokenCount(input.usage.reasoningTokens) }
       : {}),
     ...(typeof input.usage.cacheReadTokens === 'number'
-      ? { cacheReadTokens: Math.max(0, input.usage.cacheReadTokens) }
+      ? { cacheReadTokens: normalizeTokenCount(input.usage.cacheReadTokens) }
       : {}),
     ...(typeof input.usage.cacheWriteTokens === 'number'
-      ? { cacheWriteTokens: Math.max(0, input.usage.cacheWriteTokens) }
+      ? { cacheWriteTokens: normalizeTokenCount(input.usage.cacheWriteTokens) }
       : {}),
     round: Math.max(1, input.round),
     ...createRunEventMeta(input.runId, input.eventSequence),
