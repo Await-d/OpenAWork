@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { useChatUiState } from './use-chat-ui-state.js';
+import { resolveChatUiWorkspaceScope, useChatUiState } from './use-chat-ui-state.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 const WS_A = '/workspace/alpha';
@@ -217,6 +217,37 @@ describe('useChatUiState — workspace-keyed 字段', () => {
     rerender({ ws: '' });
     // 空串也走同一桶
     expect(result.current.browserPreviewUrl).toBe('http://nullbucket.test');
+  });
+
+  it('无工作目录的已打开会话不会读取或写入 __default__ 浏览器桶', () => {
+    const sessionAScope = resolveChatUiWorkspaceScope(null, 'session-a');
+    const sessionBScope = resolveChatUiWorkspaceScope(null, 'session-b');
+
+    expect(sessionAScope).toBe('__session__:session-a');
+    expect(sessionBScope).toBe('__session__:session-b');
+    expect(resolveChatUiWorkspaceScope(null, null)).toBeNull();
+    expect(resolveChatUiWorkspaceScope(WS_A, 'session-a')).toBe(WS_A);
+
+    const { result, rerender } = renderHook(
+      ({ uiWorkspaceScope }: { uiWorkspaceScope: string | null }) =>
+        useChatUiState({
+          effectiveWorkingDirectory: null,
+          uiWorkspaceScope,
+        }),
+      { initialProps: { uiWorkspaceScope: sessionAScope } },
+    );
+
+    act(() => {
+      result.current.setBrowserPreviewUrl('http://session-a.test');
+      result.current.setEditorPaneTab('browser');
+    });
+    expect(useUIStateStore.getState().browserPreviewUrlByWorkspace.__default__).toBeUndefined();
+    expect(result.current.browserPreviewUrl).toBe('http://session-a.test');
+    expect(result.current.editorPaneTab).toBe('browser');
+
+    rerender({ uiWorkspaceScope: sessionBScope });
+    expect(result.current.browserPreviewUrl).toBeNull();
+    expect(result.current.editorPaneTab).toBe('code');
   });
 });
 

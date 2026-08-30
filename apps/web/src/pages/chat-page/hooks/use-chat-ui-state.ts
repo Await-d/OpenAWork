@@ -41,10 +41,14 @@ export type ChatEditorPaneTab = 'code' | 'browser';
 export interface UseChatUiStateOptions {
   /**
    * 当前会话的有效工作目录（已经做过 currentSessionId / selectedWorkspacePath
-   * fallback）。决定 by-workspace 持久化字段的查询桶。`null` / 空字符串归入
-   * `__default__` 桶，与 useFileEditor / BuiltInBrowser 的兜底一致。
+   * fallback）。保留真实路径语义，供终端等需要工作目录的功能使用。
    */
   effectiveWorkingDirectory: string | null;
+  /**
+   * 仅供编辑器与浏览器 UI 持久化使用的作用域。无工作目录的已打开会话传入
+   * 会话级作用域，避免读取欢迎页的 `__default__` 桶。
+   */
+  uiWorkspaceScope?: string | null;
 }
 
 export interface ChatUiState extends ChatSidebarLayout {
@@ -121,14 +125,23 @@ export interface ChatUiState extends ChatSidebarLayout {
  * 解析 by-workspace 字段的查询桶 key，保持与 useFileEditor /
  * BuiltInBrowser / quickTerminal 的兜底一致。
  */
-function resolveWorkspaceKey(effectiveWorkingDirectory: string | null): string {
-  return effectiveWorkingDirectory && effectiveWorkingDirectory.trim().length > 0
-    ? effectiveWorkingDirectory
-    : '__default__';
+function resolveWorkspaceKey(workspaceScope: string | null): string {
+  return workspaceScope && workspaceScope.trim().length > 0 ? workspaceScope : '__default__';
+}
+
+export function resolveChatUiWorkspaceScope(
+  effectiveWorkingDirectory: string | null,
+  sessionId: string | null,
+): string | null {
+  if (effectiveWorkingDirectory?.trim()) {
+    return effectiveWorkingDirectory;
+  }
+  return sessionId ? `__session__:${sessionId}` : null;
 }
 
 export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
-  const { effectiveWorkingDirectory } = options;
+  const { effectiveWorkingDirectory, uiWorkspaceScope } = options;
+  const persistenceWorkspaceScope = uiWorkspaceScope ?? effectiveWorkingDirectory;
 
   // ── 右侧面板 ────────────────────────────────────────────────────────────
   // zustand 接口只接受具体值；这里用 useCallback 包一层，让消费方可以
@@ -185,13 +198,13 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   // ── editor pane tab（workspace-keyed） ─────────────────────────────────
   const editorPaneTabByWorkspace = useUIStateStore((s) => s.editorPaneTabByWorkspace);
   const setEditorPaneTabForWorkspace = useUIStateStore((s) => s.setEditorPaneTabForWorkspace);
-  const editorPaneWorkspaceKey = resolveWorkspaceKey(effectiveWorkingDirectory);
+  const editorPaneWorkspaceKey = resolveWorkspaceKey(persistenceWorkspaceScope);
   const editorPaneTab = editorPaneTabByWorkspace[editorPaneWorkspaceKey] ?? 'code';
   const setEditorPaneTab = useCallback(
     (tab: ChatEditorPaneTab) => {
-      setEditorPaneTabForWorkspace(effectiveWorkingDirectory, tab);
+      setEditorPaneTabForWorkspace(persistenceWorkspaceScope, tab);
     },
-    [effectiveWorkingDirectory, setEditorPaneTabForWorkspace],
+    [persistenceWorkspaceScope, setEditorPaneTabForWorkspace],
   );
 
   // ── 浏览器预览（workspace-keyed） ──────────────────────────────────────
@@ -205,10 +218,10 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   const browserPreviewUrl = browserPreviewUrlByWorkspace[browserWorkspaceKey] ?? null;
   const setBrowserPreviewUrl = useCallback(
     (url: string | null) => {
-      setBrowserPreviewUrlForWorkspace(effectiveWorkingDirectory, url);
+      setBrowserPreviewUrlForWorkspace(persistenceWorkspaceScope, url);
       if (url) setBrowserActive(true);
     },
-    [effectiveWorkingDirectory, setBrowserActive, setBrowserPreviewUrlForWorkspace],
+    [persistenceWorkspaceScope, setBrowserActive, setBrowserPreviewUrlForWorkspace],
   );
 
   // ── 快捷终端（workspace-keyed） ────────────────────────────────────────
@@ -216,7 +229,8 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   const setQuickTerminalOpenForWorkspace = useUIStateStore(
     (s) => s.setQuickTerminalOpenForWorkspace,
   );
-  const quickTerminalOpen = quickTerminalOpenByWorkspace[browserWorkspaceKey] ?? false;
+  const quickTerminalWorkspaceKey = resolveWorkspaceKey(effectiveWorkingDirectory);
+  const quickTerminalOpen = quickTerminalOpenByWorkspace[quickTerminalWorkspaceKey] ?? false;
 
   // ── 弹窗 / 面板信号 ─────────────────────────────────────────────────────
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);

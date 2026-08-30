@@ -90,12 +90,13 @@ function releaseOpenFileContent(file: OpenFile | null | undefined): void {
  * 这样跨 workspace 切回 A 时,A 上次留下的文件会被重新加载;不会再共享一个全局
  * openFilePaths 列表导致跨 workspace 文件路径串。
  */
-export function useFileEditor(workspacePath?: string | null) {
+export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: string | null) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
 
-  const wsKey = workspaceKey(workspacePath);
+  const persistenceWorkspaceScope = uiWorkspaceScope ?? workspacePath ?? null;
+  const wsKey = workspaceKey(persistenceWorkspaceScope);
   const openFilePathsByWorkspace = useUIStateStore((s) => s.openFilePathsByWorkspace);
   const activeFilePathByWorkspace = useUIStateStore((s) => s.activeFilePathByWorkspace);
   const setOpenFilePathsForWorkspace = useUIStateStore((s) => s.setOpenFilePathsForWorkspace);
@@ -151,15 +152,15 @@ export function useFileEditor(workspacePath?: string | null) {
     const next = openFilePathsRef.current;
     const current = openFilePathsByWorkspace[wsKey] ?? [];
     if (current.length === next.length && current.every((p, i) => p === next[i])) return;
-    setOpenFilePathsForWorkspace(workspacePath ?? null, next);
+    setOpenFilePathsForWorkspace(persistenceWorkspaceScope, next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFiles, wsKey]);
 
   const setActiveFilePath = useCallback(
     (path: string | null) => {
-      setActiveFilePathForWorkspace(workspacePath ?? null, path);
+      setActiveFilePathForWorkspace(persistenceWorkspaceScope, path);
     },
-    [workspacePath, setActiveFilePathForWorkspace],
+    [persistenceWorkspaceScope, setActiveFilePathForWorkspace],
   );
 
   const openFile = useCallback(
@@ -312,12 +313,12 @@ export function useFileEditor(workspacePath?: string | null) {
         // 关到最后一个时,sync effect 不会回写(因为 openFiles=[] 时跳过),这里直接
         // 清掉 store 的当前 workspace 桶,让持久化与内存一致。
         if (next.length === 0) {
-          setOpenFilePathsForWorkspace(workspacePath ?? null, []);
+          setOpenFilePathsForWorkspace(persistenceWorkspaceScope, []);
         }
         return next;
       });
     },
-    [activeFilePath, setActiveFilePath, setOpenFilePathsForWorkspace, workspacePath],
+    [activeFilePath, persistenceWorkspaceScope, setActiveFilePath, setOpenFilePathsForWorkspace],
   );
 
   const updateContent = useCallback((path: string, content: string) => {
@@ -343,13 +344,13 @@ export function useFileEditor(workspacePath?: string | null) {
         next.splice(toIndex, 0, moved);
         // Persist the new order immediately so a refresh restores it.
         setOpenFilePathsForWorkspace(
-          workspacePath ?? null,
+          persistenceWorkspaceScope,
           next.map((f) => f.path),
         );
         return next;
       });
     },
-    [setOpenFilePathsForWorkspace, workspacePath],
+    [persistenceWorkspaceScope, setOpenFilePathsForWorkspace],
   );
 
   const saveFile = useCallback(

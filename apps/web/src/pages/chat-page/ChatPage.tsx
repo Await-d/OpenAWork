@@ -247,7 +247,7 @@ import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
 import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
-import { useChatUiState } from './hooks/use-chat-ui-state.js';
+import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui-state.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX } from '../../components/conversation-runtime/scroll/scroll-constants.js';
@@ -612,10 +612,11 @@ export default function ChatPage() {
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  const uiWorkspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
   // useFileEditor 按 workspace 隔离打开的文件:跨 workspace 切换时自动加载对应 workspace
   // 上次留下的文件,而不是共享一个全局文件列表。
-  const fileEditor = useFileEditor(effectiveWorkingDirectory);
-  const ui = useChatUiState({ effectiveWorkingDirectory });
+  const fileEditor = useFileEditor(effectiveWorkingDirectory, uiWorkspaceScope);
+  const ui = useChatUiState({ effectiveWorkingDirectory, uiWorkspaceScope });
   const {
     // 右侧面板
     rightTab,
@@ -5434,7 +5435,7 @@ export default function ChatPage() {
               saving={saving}
               handleSaveFile={handleSaveFile}
               browserPreviewUrl={browserPreviewUrl}
-              workspacePath={effectiveWorkingDirectory}
+              workspacePath={uiWorkspaceScope}
               activeTab={editorPaneTab}
               onTabChange={setEditorPaneTab}
               fullScreen={editorFullScreen}
@@ -6496,7 +6497,7 @@ export default function ChatPage() {
                 saving={saving}
                 handleSaveFile={handleSaveFile}
                 browserPreviewUrl={browserPreviewUrl}
-                workspacePath={effectiveWorkingDirectory}
+                workspacePath={uiWorkspaceScope}
                 activeTab={editorPaneTab}
                 onTabChange={setEditorPaneTab}
                 fullScreen={editorFullScreen}
