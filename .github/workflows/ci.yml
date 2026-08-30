@@ -40,6 +40,8 @@ jobs:
             FROM_SHA="${{ github.event.before }}"
             TO_SHA="${{ github.sha }}"
 
+            FROM_SHA="${TO_SHA}~1"
+
             # force-push / 历史重写后，github.event.before 可能已不在当前仓库，
             # 直接 commitlint --from 会报 Invalid revision range。
             if [ -z "$FROM_SHA" ] \
