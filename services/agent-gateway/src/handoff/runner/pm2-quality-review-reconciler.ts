@@ -549,6 +549,12 @@ export async function reconcilePm2QualityReview(input: {
                 ...(typeof llmConfig.outputPricePerMillion === 'number'
                   ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
                   : {}),
+                ...(typeof llmConfig.cacheReadPricePerMillion === 'number'
+                  ? { cacheReadPricePerMillion: llmConfig.cacheReadPricePerMillion }
+                  : {}),
+                ...(typeof llmConfig.cacheWritePricePerMillion === 'number'
+                  ? { cacheWritePricePerMillion: llmConfig.cacheWritePricePerMillion }
+                  : {}),
               },
             });
           } catch (err) {

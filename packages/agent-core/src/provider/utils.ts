@@ -87,17 +87,65 @@ export const buildRequestOverrides = (
   return merged;
 };
 
+export type TokenUsageCostInput = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly inputPricePerMillion?: number;
+  readonly outputPricePerMillion?: number;
+  readonly cacheReadPricePerMillion?: number;
+  readonly cacheWritePricePerMillion?: number;
+};
+
+export const MAX_USAGE_TOKENS = 1_000_000_000;
+export const MAX_PRICE_PER_MILLION = 1_000_000;
+
+export const normalizeTokenCount = (value: number | undefined): number => {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_USAGE_TOKENS
+    ? value
+    : 0;
+};
+
+export const normalizeOptionalTokenPrice = (value: number | undefined): number | undefined => {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_PRICE_PER_MILLION
+    ? value
+    : undefined;
+};
+
+function normalizePrice(value: number | undefined, fallback = 0): number {
+  return normalizeOptionalTokenPrice(value) ?? fallback;
+}
+
+export const calculateTokenUsageCost = (input: TokenUsageCostInput): number => {
+  const inputPrice = normalizePrice(input.inputPricePerMillion);
+  const cacheReadPrice = normalizePrice(input.cacheReadPricePerMillion, inputPrice);
+  const cacheWritePrice = normalizePrice(input.cacheWritePricePerMillion, inputPrice);
+  const totalUsd =
+    (normalizeTokenCount(input.inputTokens) * inputPrice +
+      normalizeTokenCount(input.outputTokens) * normalizePrice(input.outputPricePerMillion) +
+      normalizeTokenCount(input.cacheReadTokens) * cacheReadPrice +
+      normalizeTokenCount(input.cacheWriteTokens) * cacheWritePrice) /
+    1_000_000;
+  return Number.isFinite(totalUsd) ? totalUsd : 0;
+};
+
 export const calculateTokenCost = (
   inputTokens: number,
   outputTokens: number,
   inputPricePerMillion?: number,
   outputPricePerMillion?: number,
 ): number => {
-  const safeInputTokens = Math.max(0, inputTokens);
-  const safeOutputTokens = Math.max(0, outputTokens);
-  const inPrice = inputPricePerMillion ?? 0;
-  const outPrice = outputPricePerMillion ?? 0;
-
-  const totalUsd = (safeInputTokens * inPrice + safeOutputTokens * outPrice) / 1_000_000;
-  return Number(totalUsd.toFixed(8));
+  return calculateTokenUsageCost({
+    inputTokens,
+    outputTokens,
+    inputPricePerMillion,
+    outputPricePerMillion,
+  });
 };

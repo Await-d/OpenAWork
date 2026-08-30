@@ -7,6 +7,7 @@
 import {
   PROVIDER_CATALOG,
   normalizeProviderAlias,
+  normalizeOptionalTokenPrice,
   type AIModelConfig,
   type AIProvider,
   type ModelsDevData,
@@ -82,8 +83,10 @@ function mapLiveModel(modelId: string, live: ModelsDevModel): AIModelConfig {
     supportsTools: live.tool_call ?? false,
     supportsVision: live.modalities?.input?.includes('image') ?? false,
     supportsThinking: live.reasoning ?? false,
-    inputPricePerMillion: live.cost?.input,
-    outputPricePerMillion: live.cost?.output,
+    inputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.input),
+    outputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.output),
+    cacheReadPricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_read),
+    cacheWritePricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_write),
   };
 }
 

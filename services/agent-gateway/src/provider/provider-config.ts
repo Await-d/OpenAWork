@@ -1,5 +1,9 @@
 import type { AIProvider, ActiveSelection, ProviderType } from '@openAwork/agent-core';
-import { ProviderManagerImpl, PROVIDER_CATALOG } from '@openAwork/agent-core';
+import {
+  MAX_PRICE_PER_MILLION,
+  ProviderManagerImpl,
+  PROVIDER_CATALOG,
+} from '@openAwork/agent-core';
 import {
   DEFAULT_IMAGE_GENERATION_SIZE,
   normalizeImageGenerationSize,
@@ -115,6 +119,7 @@ const oauthConfigSchema = z.object({
 });
 
 const nonNegativeIntegerMetadataSchema = z.number().int().nonnegative().optional();
+const compactionRatioMetadataSchema = z.number().gt(0).lt(1).optional();
 
 export const aiModelConfigSchema = z.object({
   id: z.string().min(1),
@@ -122,13 +127,17 @@ export const aiModelConfigSchema = z.object({
   enabled: z.boolean(),
   contextWindow: nonNegativeIntegerMetadataSchema,
   maxOutputTokens: nonNegativeIntegerMetadataSchema,
+  autoCompactThresholdRatio: compactionRatioMetadataSchema,
+  autoCompactTargetRatio: compactionRatioMetadataSchema,
   supportsTools: z.boolean().optional(),
   supportsVision: z.boolean().optional(),
   supportsImageGeneration: z.boolean().optional(),
   supportsImageGeneration4K: z.boolean().optional(),
   supportsThinking: z.boolean().optional(),
-  inputPricePerMillion: z.number().min(0).optional(),
-  outputPricePerMillion: z.number().min(0).optional(),
+  inputPricePerMillion: z.number().finite().min(0).max(MAX_PRICE_PER_MILLION).optional(),
+  outputPricePerMillion: z.number().finite().min(0).max(MAX_PRICE_PER_MILLION).optional(),
+  cacheReadPricePerMillion: z.number().finite().min(0).max(MAX_PRICE_PER_MILLION).optional(),
+  cacheWritePricePerMillion: z.number().finite().min(0).max(MAX_PRICE_PER_MILLION).optional(),
   thinking: thinkingConfigSchema.optional(),
   requestOverrides: requestOverridesSchema.optional(),
 });

@@ -1,0 +1,70 @@
+--- .debug-artifacts/ORIGINAL_FILE	2026-08-18 14:57:41.873058442 +0800
++++ .debug-artifacts/MODIFIED_FILE	2026-08-18 15:32:56.312904713 +0800
+@@ -25,8 +25,19 @@
+   pendingCancelReason?: StreamCancelHint;
+ }
+ 
++export interface InFlightStreamReservation {
++  abortController: AbortController;
++  execution: Promise<{ statusCode: number }>;
++  owner: boolean;
++  reject: (reason: unknown) => void;
++  resolve: (value: { statusCode: number }) => void;
++}
++
+ const inFlightStreamRequests = new Map<string, InFlightStreamRequestEntry>();
+ 
++const NOOP_RESOLVE = (_value: { statusCode: number }): void => undefined;
++const NOOP_REJECT = (_reason: unknown): void => undefined;
++
+ function getStreamRequestKey(sessionId: string, clientRequestId: string): string {
+   return `${sessionId}:${clientRequestId}`;
+ }
+@@ -38,6 +49,47 @@
+   return inFlightStreamRequests.get(getStreamRequestKey(sessionId, clientRequestId));
+ }
+ 
++export function reserveInFlightStreamRequest(input: {
++  clientRequestId: string;
++  sessionId: string;
++  userId: string;
++}): InFlightStreamReservation {
++  const key = getStreamRequestKey(input.sessionId, input.clientRequestId);
++  const existing = inFlightStreamRequests.get(key);
++  if (existing) {
++    return {
++      abortController: existing.abortController,
++      execution: existing.execution,
++      owner: false,
++      reject: NOOP_REJECT,
++      resolve: NOOP_RESOLVE,
++    };
++  }
++
++  let resolveExecution: (value: { statusCode: number }) => void = NOOP_RESOLVE;
++  let rejectExecution: (reason: unknown) => void = NOOP_REJECT;
++  const execution = new Promise<{ statusCode: number }>((resolve, reject) => {
++    resolveExecution = resolve;
++    rejectExecution = reject;
++  });
++  void execution.catch(() => undefined);
++  const abortController = new AbortController();
++  inFlightStreamRequests.set(key, {
++    abortController,
++    clientRequestId: input.clientRequestId,
++    execution,
++    userId: input.userId,
++  });
++
++  return {
++    abortController,
++    execution,
++    owner: true,
++    reject: rejectExecution,
++    resolve: resolveExecution,
++  };
++}
++
+ export function registerInFlightStreamRequest(input: {
+   abortController: AbortController;
+   clientRequestId: string;

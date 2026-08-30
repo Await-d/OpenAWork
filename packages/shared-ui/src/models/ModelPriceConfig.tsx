@@ -5,8 +5,12 @@ export interface ModelPriceEntry {
   id: string;
   displayName: string;
   provider: string;
+  providerId?: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
+  cacheReadPricePerMillion?: number;
+  cacheWritePricePerMillion?: number;
+  contextWindow?: number;
 }
 
 export interface ModelPriceConfigProps {
@@ -110,7 +114,15 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
           <tr
             style={{ borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
           >
-            {['模型', '提供商', '输入 $/M', '输出 $/M'].map((h) => (
+            {[
+              '模型',
+              '提供商',
+              '上下文',
+              '输入 $/M',
+              '输出 $/M',
+              '缓存读取 $/M',
+              '缓存写入 $/M',
+            ].map((h) => (
               <th
                 key={h}
                 style={{
@@ -153,11 +165,29 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
                 <td style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-muted)' }}>
                   {m.provider}
                 </td>
+                <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right' }}>
+                  {m.contextWindow === undefined
+                    ? '—'
+                    : new Intl.NumberFormat('zh-CN', {
+                        notation: 'compact',
+                        maximumFractionDigits: 1,
+                      }).format(m.contextWindow)}
+                </td>
                 <td style={{ padding: '0.4rem 0.75rem' }}>
                   <PriceCell value={row.in} onSave={(v) => save(m.id, 'in', v)} />
                 </td>
                 <td style={{ padding: '0.4rem 0.75rem' }}>
                   <PriceCell value={row.out} onSave={(v) => save(m.id, 'out', v)} />
+                </td>
+                <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right' }}>
+                  {m.cacheReadPricePerMillion === undefined
+                    ? '—'
+                    : `$${m.cacheReadPricePerMillion.toFixed(2)}`}
+                </td>
+                <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right' }}>
+                  {m.cacheWritePricePerMillion === undefined
+                    ? '—'
+                    : `$${m.cacheWritePricePerMillion.toFixed(2)}`}
                 </td>
               </tr>
             );

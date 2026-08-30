@@ -20,6 +20,8 @@ export interface UsageMonthlyRecord {
   totalCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
   byProvider: Record<string, number>;
 }
 

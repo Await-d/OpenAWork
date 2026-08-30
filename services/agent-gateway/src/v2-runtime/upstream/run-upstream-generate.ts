@@ -30,7 +30,7 @@
  *     provider-specific headers through the same request object.
  */
 
-import type { RequestOverrides } from '@openAwork/agent-core';
+import { normalizeTokenCount, type RequestOverrides } from '@openAwork/agent-core';
 import type { Message, SystemPart } from '@openAwork/opencode-llm';
 import { Effect, Layer, Option } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
@@ -117,6 +117,8 @@ export interface RunUpstreamGenerateResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   finishReason: string;
   /** Raw native response — surfaced for callers that need provider metadata. */
   raw: UpstreamGenerateTextResult;
@@ -326,8 +328,12 @@ export function runUpstreamGenerate(
 
     return {
       text: result.text,
-      inputTokens: result.usage?.inputTokens ?? 0,
-      outputTokens: result.usage?.outputTokens ?? 0,
+      inputTokens: normalizeTokenCount(
+        result.usage?.nonCachedInputTokens ?? result.usage?.inputTokens,
+      ),
+      outputTokens: normalizeTokenCount(result.usage?.outputTokens),
+      cacheReadTokens: normalizeTokenCount(result.usage?.cacheReadInputTokens),
+      cacheWriteTokens: normalizeTokenCount(result.usage?.cacheWriteInputTokens),
       finishReason: result.finishReason,
       raw: result,
     } satisfies RunUpstreamGenerateResult;

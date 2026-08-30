@@ -47,6 +47,8 @@ export interface ModelRouteConfig {
   providerType?: AIProvider['type'];
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
+  cacheReadPricePerMillion?: number;
+  cacheWritePricePerMillion?: number;
   supportsThinking: boolean;
   systemPrompt?: string;
 }
@@ -226,6 +228,8 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     providerType,
     inputPricePerMillion: builtinModel?.inputPricePerMillion,
     outputPricePerMillion: builtinModel?.outputPricePerMillion,
+    cacheReadPricePerMillion: builtinModel?.cacheReadPricePerMillion,
+    cacheWritePricePerMillion: builtinModel?.cacheWritePricePerMillion,
     supportsThinking: builtinModel?.supportsThinking === true,
     systemPrompt: request.systemPrompt,
   };
@@ -301,6 +305,8 @@ export function resolveModelRouteFromProvider(
     providerType: provider.type,
     inputPricePerMillion: modelConfig?.inputPricePerMillion,
     outputPricePerMillion: modelConfig?.outputPricePerMillion,
+    cacheReadPricePerMillion: modelConfig?.cacheReadPricePerMillion,
+    cacheWritePricePerMillion: modelConfig?.cacheWritePricePerMillion,
     supportsThinking: modelConfig?.supportsThinking === true,
     systemPrompt: request.systemPrompt,
   };

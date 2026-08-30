@@ -1,3 +1,6 @@
+import { release } from 'node:os';
+import process from 'node:process';
+import rootPackageJson from '../../../../../package.json' with { type: 'json' };
 import { Effect, Stream } from 'effect';
 import { Headers } from 'effect/unstable/http';
 import { Auth } from '../auth.js';
@@ -5,6 +8,36 @@ import { render as renderEndpoint } from '../endpoint.js';
 import { Framing } from '../framing.js';
 import * as ProviderShared from '../../protocols/shared.js';
 import { mergeJsonRecords } from '../../schema/index.js';
+const SYSTEM_NAMES = {
+  aix: 'AIX',
+  android: 'Android',
+  darwin: 'macOS',
+  freebsd: 'FreeBSD',
+  linux: 'Linux',
+  openbsd: 'OpenBSD',
+  win32: 'Windows',
+};
+const ARCHITECTURE_NAMES = {
+  arm: 'arm',
+  arm64: 'arm64',
+  ia32: 'x86',
+  ppc: 'ppc',
+  ppc64: 'ppc64',
+  riscv64: 'riscv64',
+  s390x: 's390x',
+  x32: 'x32',
+  x64: 'x64',
+};
+const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
+const configuredVersion = process.env['OPENAWORK_APP_VERSION']?.trim();
+const appVersion =
+  configuredVersion !== undefined && VERSION_PATTERN.test(configuredVersion)
+    ? configuredVersion
+    : rootPackageJson.version;
+const systemName = SYSTEM_NAMES[process.platform] ?? process.platform;
+const systemVersion = release();
+const architecture = ARCHITECTURE_NAMES[process.arch] ?? process.arch;
+export const OPENAWORK_USER_AGENT = `OpenAWork/${appVersion} (${systemName} ${systemVersion}; ${architecture})`;
 const applyQuery = (url, query) => {
   if (!query) return url;
   const next = new URL(url);
@@ -112,13 +145,14 @@ export const jsonRequestParts = (input) =>
       input.request.http?.query,
     );
     const body = yield* bodyWithOverlay(input.body, input.request, input.encodeBody);
-    const headers = yield* Auth.toEffect(input.auth)({
+    const authenticatedHeaders = yield* Auth.toEffect(input.auth)({
       request: input.request,
       method: 'POST',
       url,
       body: body.bodyText,
       headers: Headers.fromInput(requestHeaders(input)),
     });
+    const headers = Headers.set(authenticatedHeaders, 'user-agent', OPENAWORK_USER_AGENT);
     return { url, jsonBody: body.jsonBody, bodyText: body.bodyText, headers };
   });
 export const httpJson = (input) => ({

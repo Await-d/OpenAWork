@@ -13,6 +13,7 @@
 
 import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
+import { normalizeTokenCount } from '@openAwork/agent-core';
 
 export interface TeamUsagePersistInput {
   userId: string;
@@ -140,14 +141,21 @@ function normalizeKey(value: string | null | undefined): string {
  * 全 0 token 的轮次跳过，避免写入空记录。
  */
 export function persistTeamUsageRecord(input: TeamUsagePersistInput): void {
-  const inputTokens = Math.max(0, Math.trunc(input.inputTokens));
-  const outputTokens = Math.max(0, Math.trunc(input.outputTokens));
-  const reasoningTokens = Math.max(0, Math.trunc(input.reasoningTokens ?? 0));
-  const cacheReadTokens = Math.max(0, Math.trunc(input.cacheReadTokens ?? 0));
-  const cacheWriteTokens = Math.max(0, Math.trunc(input.cacheWriteTokens ?? 0));
-  const costUsd = Number.isFinite(input.costUsd) ? Math.max(0, input.costUsd as number) : 0;
+  const inputTokens = normalizeTokenCount(input.inputTokens);
+  const outputTokens = normalizeTokenCount(input.outputTokens);
+  const reasoningTokens = normalizeTokenCount(input.reasoningTokens);
+  const cacheReadTokens = normalizeTokenCount(input.cacheReadTokens);
+  const cacheWriteTokens = normalizeTokenCount(input.cacheWriteTokens);
+  const costUsd =
+    Number.isFinite(input.costUsd) && (input.costUsd ?? 0) >= 0 ? (input.costUsd ?? 0) : 0;
 
-  if (inputTokens === 0 && outputTokens === 0 && costUsd === 0) {
+  if (
+    inputTokens === 0 &&
+    outputTokens === 0 &&
+    cacheReadTokens === 0 &&
+    cacheWriteTokens === 0 &&
+    costUsd === 0
+  ) {
     return;
   }
 

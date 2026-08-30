@@ -8,6 +8,8 @@ interface UsageRecordRow {
   month: string;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   cost_usd: number;
 }
 
@@ -16,6 +18,8 @@ interface UsageRecord {
   totalCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
   byProvider: Record<string, number>;
 }
 
@@ -40,7 +44,7 @@ export async function usageRoutes(app: FastifyInstance): Promise<void> {
 
       const recordsStep = child('query');
       const rows = sqliteAll<UsageRecordRow>(
-        `SELECT month, input_tokens, output_tokens, cost_usd
+        `SELECT month, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd
          FROM usage_records
          WHERE user_id = ?
          ORDER BY month DESC
@@ -52,6 +56,8 @@ export async function usageRoutes(app: FastifyInstance): Promise<void> {
         totalCostUsd: row.cost_usd,
         totalInputTokens: row.input_tokens,
         totalOutputTokens: row.output_tokens,
+        totalCacheReadTokens: row.cache_read_tokens,
+        totalCacheWriteTokens: row.cache_write_tokens,
         byProvider: {},
       }));
       recordsStep.succeed(undefined, { months: records.length });
@@ -79,7 +85,7 @@ export async function usageRoutes(app: FastifyInstance): Promise<void> {
 
       const lookupStep = child('lookup', undefined, { month: currentMonth });
       const row = sqliteGet<UsageRecordRow>(
-        `SELECT month, input_tokens, output_tokens, cost_usd
+        `SELECT month, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd
          FROM usage_records
          WHERE user_id = ? AND month = ?`,
         [user.sub, currentMonth],

@@ -34,4 +34,20 @@ describe('stream usage accounting', () => {
     ).toBe(true);
     expect(isContextNearOverflow({ inputTokens: 60 }, 100, 10)).toBe(false);
   });
+
+  it('将非有限 usage 字段归零后再发出实时事件', () => {
+    expect(
+      buildStreamUsageChunk({
+        eventSequence: { value: 0 },
+        round: 1,
+        runId: 'run-invalid',
+        usage: {
+          inputTokens: Number.NaN,
+          outputTokens: Number.POSITIVE_INFINITY,
+          totalTokens: Number.MAX_SAFE_INTEGER,
+          cacheReadTokens: -1,
+        },
+      }),
+    ).toMatchObject({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 });
+  });
 });

@@ -81,6 +81,8 @@ export interface AIModelConfig {
   supportsThinking?: boolean;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
+  cacheReadPricePerMillion?: number;
+  cacheWritePricePerMillion?: number;
   thinking?: ThinkingConfig;
   requestOverrides?: RequestOverrides;
 }

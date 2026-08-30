@@ -12,7 +12,11 @@ import type {
   ProviderManager,
   ProviderType,
 } from './types.js';
-import { mergeBuiltinModels, normalizeProviderBaseUrl } from './utils.js';
+import {
+  mergeBuiltinModels,
+  normalizeOptionalTokenPrice,
+  normalizeProviderBaseUrl,
+} from './utils.js';
 import * as ModelsDev from './models-dev.js';
 
 const cloneModel = (model: AIModelConfig): AIModelConfig => ({
@@ -382,8 +386,14 @@ export class ProviderManagerImpl implements ProviderManager {
       supportsVision: live.modalities?.input
         ? live.modalities.input.includes('image')
         : model.supportsVision,
-      inputPricePerMillion: live.cost?.input ?? model.inputPricePerMillion,
-      outputPricePerMillion: live.cost?.output ?? model.outputPricePerMillion,
+      inputPricePerMillion:
+        normalizeOptionalTokenPrice(live.cost?.input) ?? model.inputPricePerMillion,
+      outputPricePerMillion:
+        normalizeOptionalTokenPrice(live.cost?.output) ?? model.outputPricePerMillion,
+      cacheReadPricePerMillion:
+        normalizeOptionalTokenPrice(live.cost?.cache_read) ?? model.cacheReadPricePerMillion,
+      cacheWritePricePerMillion:
+        normalizeOptionalTokenPrice(live.cost?.cache_write) ?? model.cacheWritePricePerMillion,
     };
   }
 
@@ -405,8 +415,10 @@ export class ProviderManagerImpl implements ProviderManager {
       supportsTools: live.tool_call ?? false,
       supportsVision: live.modalities?.input?.includes('image') ?? false,
       supportsThinking: live.reasoning ?? false,
-      inputPricePerMillion: live.cost?.input,
-      outputPricePerMillion: live.cost?.output,
+      inputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.input),
+      outputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.output),
+      cacheReadPricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_read),
+      cacheWritePricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_write),
     };
   }
 

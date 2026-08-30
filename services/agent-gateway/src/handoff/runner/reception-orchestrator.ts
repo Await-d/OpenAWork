@@ -350,6 +350,12 @@ async function runReceptionOrchestrationBody(
             ...(typeof llmConfig.outputPricePerMillion === 'number'
               ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
               : {}),
+            ...(typeof llmConfig.cacheReadPricePerMillion === 'number'
+              ? { cacheReadPricePerMillion: llmConfig.cacheReadPricePerMillion }
+              : {}),
+            ...(typeof llmConfig.cacheWritePricePerMillion === 'number'
+              ? { cacheWritePricePerMillion: llmConfig.cacheWritePricePerMillion }
+              : {}),
           },
         });
       },
@@ -563,6 +569,12 @@ async function runReceptionOrchestrationBody(
           : {}),
         ...(typeof llmConfig.outputPricePerMillion === 'number'
           ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+          : {}),
+        ...(typeof llmConfig.cacheReadPricePerMillion === 'number'
+          ? { cacheReadPricePerMillion: llmConfig.cacheReadPricePerMillion }
+          : {}),
+        ...(typeof llmConfig.cacheWritePricePerMillion === 'number'
+          ? { cacheWritePricePerMillion: llmConfig.cacheWritePricePerMillion }
           : {}),
       },
     });

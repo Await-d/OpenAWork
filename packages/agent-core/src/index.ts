@@ -241,7 +241,13 @@ export {
   mergeBuiltinModels,
   buildRequestOverrides,
   calculateTokenCost,
+  calculateTokenUsageCost,
+  MAX_PRICE_PER_MILLION,
+  MAX_USAGE_TOKENS,
+  normalizeOptionalTokenPrice,
+  normalizeTokenCount,
 } from './provider/utils.js';
+export type { TokenUsageCostInput } from './provider/utils.js';
 export * from './oauth/index.js';
 
 export type { StreamCheckpoint, StreamRecoveryManager } from './stream/recovery.js';

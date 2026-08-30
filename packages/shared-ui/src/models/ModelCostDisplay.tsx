@@ -5,6 +5,9 @@ export interface ModelCostDisplayProps {
   modelName: string;
   inputPer1m: number;
   outputPer1m: number;
+  contextWindow?: number;
+  cacheReadPer1m?: number;
+  cacheWritePer1m?: number;
   cachedPer1m?: number;
   style?: CSSProperties;
 }
@@ -39,6 +42,9 @@ export function ModelCostDisplay({
   modelName,
   inputPer1m,
   outputPer1m,
+  contextWindow,
+  cacheReadPer1m,
+  cacheWritePer1m,
   cachedPer1m,
   style,
 }: ModelCostDisplayProps) {
@@ -74,19 +80,57 @@ export function ModelCostDisplay({
         <span style={valueStyle}>{formatCost(outputPer1m)} /M</span>
       </div>
 
-      {cachedPer1m !== undefined && (
+      {contextWindow !== undefined && (
+        <div style={{ ...rowStyle }}>
+          <span style={labelStyle}>上下文窗口</span>
+          <span style={valueStyle}>
+            {new Intl.NumberFormat('zh-CN', {
+              notation: 'compact',
+              maximumFractionDigits: 1,
+            }).format(contextWindow)}{' '}
+            tokens
+          </span>
+        </div>
+      )}
+
+      {cacheReadPer1m !== undefined && (
         <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>缓存</span>
+          <span style={labelStyle}>缓存读取</span>
           <span
             style={{
               ...valueStyle,
               color: color.success,
             }}
           >
-            {formatCost(cachedPer1m)} cached
+            {formatCost(cacheReadPer1m)} cached
           </span>
         </div>
       )}
+
+      {cacheWritePer1m !== undefined && (
+        <div style={{ ...rowStyle, borderBottom: 'none' }}>
+          <span style={labelStyle}>缓存写入</span>
+          <span
+            style={{
+              ...valueStyle,
+              color: color.success,
+            }}
+          >
+            {formatCost(cacheWritePer1m)} cached
+          </span>
+        </div>
+      )}
+
+      {cacheReadPer1m === undefined &&
+        cacheWritePer1m === undefined &&
+        cachedPer1m !== undefined && (
+          <div style={{ ...rowStyle, borderBottom: 'none' }}>
+            <span style={labelStyle}>缓存</span>
+            <span style={{ ...valueStyle, color: color.success }}>
+              {formatCost(cachedPer1m)} cached
+            </span>
+          </div>
+        )}
     </div>
   );
 }

@@ -119,7 +119,14 @@ export interface TeamWorkflowUsageEventInput {
 export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput): void {
   if (!input.layer) return;
   // 没有任何 token 的调用（例如纯缓存命中或异常返回）不发，避免噪声。
-  if (input.inputTokens <= 0 && input.outputTokens <= 0) return;
+  if (
+    input.inputTokens <= 0 &&
+    input.outputTokens <= 0 &&
+    (input.cacheReadTokens ?? 0) <= 0 &&
+    (input.cacheWriteTokens ?? 0) <= 0
+  ) {
+    return;
+  }
   // 与 stream 路径一致地落库，让 reception / pm1 / pm2 的用量也能跨刷新 / 重连存活。
   // 落库失败（如极端 DB 错误）不应吞掉实时事件——分开 try/catch，保证「至少实时
   // 面板能看到」与「尽量落库」互不拖累。

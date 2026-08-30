@@ -1483,6 +1483,43 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'settings.model-prices.get');
+      const user = request.user as JwtPayload;
+      const providerRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      const selectionRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [user.sub],
+      );
+      const materialized = await materializeProviderConfig(
+        parseStoredJson(providerRow?.value),
+        parseStoredJson(selectionRow?.value),
+      );
+      const modelPrices = materialized.providers.flatMap((provider) =>
+        provider.defaultModels
+          .filter(
+            (model) =>
+              model.inputPricePerMillion !== undefined ||
+              model.outputPricePerMillion !== undefined ||
+              model.cacheReadPricePerMillion !== undefined ||
+              model.cacheWritePricePerMillion !== undefined ||
+              model.contextWindow !== undefined,
+          )
+          .map((model) => ({
+            providerId: provider.id,
+            modelName: model.id,
+            inputPer1m: model.inputPricePerMillion ?? 0,
+            outputPer1m: model.outputPricePerMillion ?? 0,
+            ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+            ...(model.cacheReadPricePerMillion !== undefined
+              ? { cacheReadPer1m: model.cacheReadPricePerMillion }
+              : {}),
+            ...(model.cacheWritePricePerMillion !== undefined
+              ? { cacheWritePer1m: model.cacheWritePricePerMillion }
+              : {}),
+          })),
+      );
       const builtinPrices = [
         { modelName: 'claude-opus-4-5', inputPer1m: 15.0, outputPer1m: 75.0 },
         { modelName: 'claude-3-5-sonnet-20241022', inputPer1m: 3.0, outputPer1m: 15.0 },
@@ -1493,8 +1530,15 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         { modelName: 'deepseek-reasoner', inputPer1m: 0.55, outputPer1m: 2.19 },
         { modelName: 'qwen-max', inputPer1m: 0.4, outputPer1m: 1.2 },
       ];
-      step.succeed(undefined, { models: builtinPrices.length });
-      return reply.send({ models: builtinPrices });
+      const mergedPrices = new Map(
+        builtinPrices.map((model) => [`${model.modelName}`, model] as const),
+      );
+      for (const model of modelPrices) {
+        mergedPrices.set(`${model.providerId ?? 'custom'}:${model.modelName}`, model);
+      }
+      const models = modelPrices.length > 0 ? [...mergedPrices.values()] : builtinPrices;
+      step.succeed(undefined, { models: models.length });
+      return reply.send({ models });
     },
   );
 
