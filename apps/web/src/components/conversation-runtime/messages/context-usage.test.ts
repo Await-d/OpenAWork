@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatContextUsageSnapshot } from './context-usage.js';
+import { buildChatContextUsageSnapshot, resolveEffectiveContextWindow } from './context-usage.js';
+
+describe('resolveEffectiveContextWindow', () => {
+  it('挡位低于模型上限时使用挡位值', () => {
+    expect(resolveEffectiveContextWindow(1_000_000, 400_000)).toBe(400_000);
+  });
+
+  it('仅配置挡位时仍能提供有效窗口', () => {
+    expect(resolveEffectiveContextWindow(undefined, 272_000)).toBe(272_000);
+  });
+
+  it('没有正数窗口时返回 undefined', () => {
+    expect(resolveEffectiveContextWindow(0, Number.NaN)).toBeUndefined();
+  });
+});
 
 describe('buildChatContextUsageSnapshot', () => {
   it('压缩完成后可强制使用有效历史估算，避免沿用压缩前 usage', () => {

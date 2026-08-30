@@ -126,6 +126,7 @@ export const aiModelConfigSchema = z.object({
   label: z.string().min(1),
   enabled: z.boolean(),
   contextWindow: nonNegativeIntegerMetadataSchema,
+  contextWindowOverride: nonNegativeIntegerMetadataSchema,
   maxOutputTokens: nonNegativeIntegerMetadataSchema,
   autoCompactThresholdRatio: compactionRatioMetadataSchema,
   autoCompactTargetRatio: compactionRatioMetadataSchema,

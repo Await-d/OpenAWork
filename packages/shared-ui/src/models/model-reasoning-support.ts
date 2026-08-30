@@ -12,15 +12,14 @@ interface OpenAIReasoningSupportRule {
   matches: (modelId: string) => boolean;
 }
 
-// `gpt-5-pro` and its versioned siblings (`gpt-5.4-pro`, ...) run their own
-// internal reasoning and reject any effort knob upstream — mirroring opencode
-// (`if (id === "gpt-5-pro") return {}`), we expose zero variants and also flip
-// `canConfigureThinkingForModel` to false so the UI surfaces a "模型自带思考"
-// pill and disables the toggle, instead of pretending `high` is selectable.
-const OPENAI_PRO_MODEL_PATTERN = /^gpt-5(?:\.\d+)?-pro/;
+// `gpt-5-pro` has fixed high reasoning and rejects an effort knob upstream.
+// Versioned Pro models (`gpt-5.4-pro`, `gpt-5.5-pro`, ...) are configurable and
+// use the separate medium/high/xhigh subset below.
+const OPENAI_FIXED_PRO_MODEL_PATTERN = /^gpt-5-pro(?:[.-]|$)/;
+const OPENAI_VERSIONED_PRO_MODEL_PATTERN = /^gpt-5[.-]\d+-pro(?:[.-]|$)/;
 
 function isOpenAIProModel(modelId: string): boolean {
-  return OPENAI_PRO_MODEL_PATTERN.test(modelId);
+  return OPENAI_FIXED_PRO_MODEL_PATTERN.test(modelId);
 }
 
 // Moonshot 思考模型匹配——与后端 catalog.ts 的 isMoonshotThinkingModel 完全对齐。
@@ -265,14 +264,18 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
   },
   {
     efforts: ['medium', 'high', 'xhigh'],
+    matches: (modelId) => OPENAI_VERSIONED_PRO_MODEL_PATTERN.test(modelId),
+  },
+  {
+    efforts: ['medium', 'high', 'xhigh'],
     matches: (modelId) => modelId.includes('codex-max'),
   },
-  // GPT-5.6 系列（Sol/Terra/Luna）及以上未来次版本：支持 none/low/medium/high/max。
+  // GPT-5.6 系列（Sol/Terra/Luna）及以上未来次版本：支持 none/low/medium/high/xhigh/max。
   // 未知的更高次版本（5.7、5.8...）继承已知最高档位，而不是掉回更窄的默认集合。
   {
-    efforts: ['none', 'low', 'medium', 'high', 'max'],
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     matches: (modelId) => {
-      const match = /^gpt-5\.(\d+)(?=$|[^\d])/.exec(modelId);
+      const match = /^gpt-5[.-](\d+)(?=$|[^\d])/.exec(modelId);
       const minorRaw = match?.[1];
       if (!minorRaw) return false;
       const minor = Number.parseInt(minorRaw, 10);
@@ -282,14 +285,14 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
   // GPT-5.5：支持 none/low/medium/high/xhigh。
   {
     efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
-    matches: (modelId) => /^gpt-5\.5\b/.test(modelId),
+    matches: (modelId) => /^gpt-5[.-]5\b/.test(modelId),
   },
   // GPT-5.2 及以上（含未来 5.7、5.8...）：规则数组按顺序匹配，5.5/5.6 已被上面
   // 更具体的规则先行捕获，这里作为开区间兜底，未来次版本不会掉回默认三档。
   {
-    efforts: ['low', 'medium', 'high', 'xhigh'],
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
     matches: (modelId) => {
-      const match = /^gpt-5\.(\d+)(?=$|[^\d])/.exec(modelId);
+      const match = /^gpt-5[.-](\d+)(?=$|[^\d])/.exec(modelId);
       const minorRaw = match?.[1];
       if (!minorRaw) return false;
       const minor = Number.parseInt(minorRaw, 10);
@@ -297,8 +300,8 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
     },
   },
   {
-    efforts: ['low', 'medium', 'high'],
-    matches: (modelId) => modelId.startsWith('gpt-5.1'),
+    efforts: ['none', 'low', 'medium', 'high'],
+    matches: (modelId) => /^gpt-5[.-]1\b/.test(modelId),
   },
   {
     efforts: ['minimal', 'low', 'medium', 'high'],
@@ -311,26 +314,13 @@ export function canConfigureThinkingForModel(
   modelId: string | undefined,
   declaredSupportsThinking = false,
 ): boolean {
-  // 调试日志
-  console.log('[DEBUG] canConfigureThinkingForModel 调用:', {
-    providerType,
-    modelId,
-    declaredSupportsThinking,
-  });
-
   if (!providerType || !modelId) {
-    console.log('[DEBUG] canConfigureThinkingForModel 返回 false: providerType 或 modelId 为空');
     return false;
   }
 
   // 当用户通过 OpenAI 兼容代理使用非 OpenAI 模型时，通过 modelId 推断真实厂商。
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
   const actualModelId = leafModelId(modelId);
-
-  console.log('[DEBUG] canConfigureThinkingForModel 推断结果:', {
-    effectiveType,
-    actualModelId,
-  });
 
   // 自定义渠道 / Azure 部署名 / OpenAI 兼容代理：用户显式勾选 supportsThinking 后
   // 必须可配置。否则「思考」勾选只是假控件——聊天侧会因 canConfigure=false 强制关闭。
@@ -354,64 +344,53 @@ export function canConfigureThinkingForModel(
   // 会跳过（不额外下发），前端也应跳过配置。
   if (effectiveType === 'deepseek') {
     const result = !actualModelId.includes('reasoner');
-    console.log('[DEBUG] DeepSeek 判断:', { actualModelId, result });
     return result;
   }
 
   // Moonshot：与后端 catalog 的 isMoonshotThinkingMatcher 对齐。
   if (effectiveType === 'moonshot') {
     const result = isMoonshotThinkingModel(actualModelId);
-    console.log('[DEBUG] Moonshot 判断:', { actualModelId, result });
     return result;
   }
 
   if (effectiveType === 'mimo') {
-    console.log('[DEBUG] MiMo 判断: true');
     return true;
   }
 
   if (effectiveType === 'anthropic' || effectiveType === 'claude') {
     const result = isAnthropicThinkingModel(actualModelId);
-    console.log('[DEBUG] Anthropic 判断:', { actualModelId, result });
     return result;
   }
 
   if (effectiveType === 'gemini') {
     const result = isGeminiThinkingModel(actualModelId);
-    console.log('[DEBUG] Gemini 判断:', { actualModelId, result });
     return result;
   }
   if (effectiveType === 'qwen') {
     const result = isQwenThinkingModel(actualModelId);
-    console.log('[DEBUG] Qwen 判断:', { actualModelId, result });
     return result;
   }
 
   if (effectiveType === 'openrouter') {
     const result = isOpenRouterReasoningModel(modelId);
-    console.log('[DEBUG] OpenRouter 判断:', { modelId, result });
     return result;
   }
 
   if (effectiveType === 'xai') {
     const result = isXaiThinkingModel(actualModelId);
-    console.log('[DEBUG] xAI (Grok) 判断:', { actualModelId, result });
     return result;
   }
 
   if (effectiveType === 'zhipu') {
     const result = isZhipuThinkingModel(actualModelId);
-    console.log('[DEBUG] 智谱 判断:', { actualModelId, result });
     return result;
   }
 
   if (effectiveType === 'doubao') {
     const result = isDoubaoThinkingModel(actualModelId);
-    console.log('[DEBUG] 豆包 判断:', { actualModelId, result });
     return result;
   }
 
-  console.log('[DEBUG] 所有平台都不匹配，返回 false');
   return false;
 }
 
@@ -543,6 +522,6 @@ export function describeReasoningEffort(level: SupportedReasoningEffort): string
     case 'xhigh':
       return '最高推理强度';
     case 'max':
-      return '最高推理强度（GPT-5.6 Sol 独占）';
+      return '最高推理强度（GPT-5.6 系列）';
   }
 }

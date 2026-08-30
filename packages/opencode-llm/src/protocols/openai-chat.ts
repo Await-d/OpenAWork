@@ -376,7 +376,9 @@ const lowerOptions = Effect.fn('OpenAIChat.lowerOptions')(function* (request: LL
   const serviceTier = OpenAIOptions.serviceTier(request);
   const reasoningEffort = OpenAIOptions.reasoningEffort(request);
   if (reasoningEffort && !OpenAIOptions.isReasoningEffort(reasoningEffort))
-    return yield* invalid(`OpenAI Chat does not support reasoning effort ${reasoningEffort}`);
+    return yield* invalid(
+      `OpenAI Chat does not support reasoning effort ${String(reasoningEffort)}`,
+    );
   return {
     ...(store !== undefined ? { store } : {}),
     ...(serviceTier ? { service_tier: serviceTier } : {}),

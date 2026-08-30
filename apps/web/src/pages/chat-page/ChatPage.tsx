@@ -403,7 +403,6 @@ export default function ChatPage() {
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const currentUserDisplayName = useCurrentUserDisplayName();
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
-  const [fastEnabled, setFastEnabled] = useState(false);
   const [input, setInput] = useState('');
   const [companionComposerActivity, setCompanionComposerActivity] =
     useState<UnifiedComposerActivity>({
@@ -1123,7 +1122,6 @@ export default function ChatPage() {
       defaults,
       imageDefaults,
       providers: loadedProviders,
-      fastSelection: loadedFastSelection,
     } = await loadSavedChatSessionDefaults(gatewayUrl, token);
     savedChatDefaultsRef.current = defaults;
 
@@ -1131,30 +1129,38 @@ export default function ChatPage() {
       defaults,
       imageDefaults,
       providers: loadedProviders,
-      fastSelection: loadedFastSelection,
     };
   }, [gatewayUrl, token]);
 
-  const syncFastSelectionWithModel = useCallback(
-    async (providerId: string, modelId: string): Promise<void> => {
-      if (!fastEnabled || !token) {
-        return;
+  const handleContextWindowOverrideChange = useCallback(
+    async (value: number | undefined) => {
+      if (!token || !activeProviderId || !activeModelId) {
+        throw new Error('当前模型尚未准备好，无法保存上下文挡位。');
       }
 
-      try {
-        const { createSettingsClient } = await import('@openAwork/web-client');
-        await createSettingsClient(gatewayUrl).putActiveSelection(token, {
-          fast: { providerId, modelId },
-        });
-      } catch (error) {
-        logger.warn('failed to sync fast model selection', {
-          error: error instanceof Error ? error.message : String(error),
-          modelId,
-          providerId,
-        });
-      }
+      const result = await createSettingsClient(gatewayUrl).putModelContext(token, {
+        providerId: activeProviderId,
+        modelId: activeModelId,
+        contextWindowOverride: value ?? null,
+      });
+      setProviders((previous) =>
+        previous.map((provider) => {
+          if (provider.id !== result.providerId) return provider;
+          return {
+            ...provider,
+            defaultModels: provider.defaultModels.map((model) => {
+              if (model.id !== result.modelId) return model;
+              if (result.contextWindowOverride === null) {
+                const { contextWindowOverride: _removed, ...rest } = model;
+                return rest;
+              }
+              return { ...model, contextWindowOverride: result.contextWindowOverride };
+            }),
+          };
+        }),
+      );
     },
-    [fastEnabled, gatewayUrl, token],
+    [activeModelId, activeProviderId, gatewayUrl, token],
   );
 
   useEffect(() => {
@@ -1227,17 +1233,7 @@ export default function ChatPage() {
           return;
         }
 
-        const {
-          defaults,
-          imageDefaults,
-          providers: loadedProviders,
-          fastSelection: loadedFastSelection,
-        } = loaded;
-        setFastEnabled(
-          Boolean(
-            loadedFastSelection && loadedFastSelection.providerId && loadedFastSelection.modelId,
-          ),
-        );
+        const { defaults, imageDefaults, providers: loadedProviders } = loaded;
 
         setActiveProviderId((prev) => {
           const normalizedPrev = prev.trim();
@@ -4768,6 +4764,27 @@ export default function ChatPage() {
     setActiveModelId,
   });
 
+  const handleFastModeToggle = useCallback(
+    async (enabled: boolean): Promise<void> => {
+      if (!token || !effectiveProviderId || activeProvider?.type !== 'openai') {
+        throw new Error('当前没有可配置的 OpenAI Provider。');
+      }
+
+      await createSettingsClient(gatewayUrl).putProviderFastMode(token, {
+        providerId: effectiveProviderId,
+        enabled,
+      });
+      setProviders((current) =>
+        current.map((provider) =>
+          provider.id === effectiveProviderId
+            ? { ...provider, openaiFastMode: enabled ? true : undefined }
+            : provider,
+        ),
+      );
+    },
+    [activeProvider?.type, effectiveProviderId, gatewayUrl, token],
+  );
+
   useEffect(() => {
     const normalizedThinkingState = normalizeChatThinkingState({
       providerType: activeProvider?.type,
@@ -5895,8 +5912,7 @@ export default function ChatPage() {
                 chatSearch={chatSearch}
                 composerVariant={composerVariant}
                 providers={providers}
-                fastEnabled={fastEnabled}
-                onFastEnabledChange={setFastEnabled}
+                fastEnabled={activeProvider?.openaiFastMode === true}
                 activeProvider={activeProvider}
                 activeModelOption={activeModelOption}
                 activeModelCanConfigureThinking={activeModelCanConfigureThinking}
@@ -5953,8 +5969,9 @@ export default function ChatPage() {
                   setReasoningEffort(normalizedThinkingState.reasoningEffort);
                   sessionModelSelectionSourceRef.current = 'manual';
                   markSessionMetadataDirty();
-                  await syncFastSelectionWithModel(pid, mid);
                 }}
+                onFastModeToggle={handleFastModeToggle}
+                onContextWindowOverrideChange={handleContextWindowOverrideChange}
                 onToggleWebSearch={handleToggleWebSearch}
                 onThinkingEnabledChange={(enabled) => {
                   setThinkingEnabled(enabled);
@@ -6370,8 +6387,7 @@ export default function ChatPage() {
                   chatSearch={chatSearch}
                   composerVariant={composerVariant}
                   providers={providers}
-                  fastEnabled={fastEnabled}
-                  onFastEnabledChange={setFastEnabled}
+                  fastEnabled={activeProvider?.openaiFastMode === true}
                   activeProvider={activeProvider}
                   activeModelOption={activeModelOption}
                   activeModelCanConfigureThinking={activeModelCanConfigureThinking}
@@ -6428,8 +6444,9 @@ export default function ChatPage() {
                     setReasoningEffort(normalizedThinkingState.reasoningEffort);
                     sessionModelSelectionSourceRef.current = 'manual';
                     markSessionMetadataDirty();
-                    await syncFastSelectionWithModel(pid, mid);
                   }}
+                  onFastModeToggle={handleFastModeToggle}
+                  onContextWindowOverrideChange={handleContextWindowOverrideChange}
                   onToggleWebSearch={handleToggleWebSearch}
                   onThinkingEnabledChange={(enabled) => {
                     setThinkingEnabled(enabled);

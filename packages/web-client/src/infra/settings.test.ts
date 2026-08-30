@@ -134,6 +134,30 @@ describe('createSettingsClient.getProvidersResult', () => {
   });
 });
 
+describe('createSettingsClient.putProviderFastMode', () => {
+  it('通过 Fast mode endpoint 只更新指定 OpenAI Provider', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ ok: true, providerId: 'openai', openaiFastMode: true }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.putProviderFastMode('token-1', {
+      providerId: 'openai',
+      enabled: true,
+    });
+
+    expect(result).toEqual({ ok: true, providerId: 'openai', openaiFastMode: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/providers/fast-mode',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ providerId: 'openai', enabled: true }),
+      }),
+    );
+  });
+});
+
 describe('createSettingsClient mutation error handling', () => {
   it('listMcpServers 通过 settings MCP endpoint 读取同源配置', async () => {
     const fetchMock = vi.fn(async () => {

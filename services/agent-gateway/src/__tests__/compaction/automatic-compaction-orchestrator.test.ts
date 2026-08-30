@@ -35,6 +35,12 @@ vi.mock('../../compaction/reactive-compact.js', () => ({
   reactiveCompactByTokenGap: mocks.reactiveCompactByTokenGap,
 }));
 vi.mock('../../compaction/context-window-resolver.js', () => ({
+  AGGRESSIVE_TRUNCATION_CONFIG: {
+    targetTokenRatio: 0.5,
+    charsPerToken: 4,
+    minOutputSizeToTruncate: 500,
+    maxTruncateAttempts: 20,
+  },
   aggressiveTruncateToolOutputs: mocks.aggressiveTruncateToolOutputs,
   parseContextLimitError: mocks.parseContextLimitError,
   resolveEffectiveContextWindow: mocks.resolveEffectiveContextWindow,
@@ -127,6 +133,22 @@ describe('provider 无关自动压缩统一编排', () => {
 
     expect(result).toEqual({ triggered: true, metadataJson: '{"ok":1}' });
     expect(order).toEqual(['started', 'persisted', 'completed']);
+  });
+
+  it('使用模型目标比例计算自动保留预算', async () => {
+    await orchestrateAutomaticCompaction({
+      kind: 'proactive',
+      input: {
+        ...context(),
+        route: { ...route, autoCompactTargetRatio: 0.2 },
+        round: 1,
+        lastRoundUsage: { inputTokens: 80_000 },
+      },
+    });
+
+    expect(mocks.executeSessionCompaction).toHaveBeenCalledWith(
+      expect.objectContaining({ preserveRecentTokens: 20_000 }),
+    );
   });
 
   it('overflow 使用 reactive → aggressive → session-memory → full 的固定顺序', async () => {

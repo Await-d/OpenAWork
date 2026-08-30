@@ -24,6 +24,9 @@ describe('OpenAIProvider', () => {
       expect(metadata.supportedModels).toBeDefined();
       expect(metadata.supportedModels).toContain('gpt-4');
       expect(metadata.supportedModels).toContain('gpt-4o');
+      expect(metadata.supportedModels).toEqual(
+        expect.arrayContaining(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']),
+      );
     });
   });
 

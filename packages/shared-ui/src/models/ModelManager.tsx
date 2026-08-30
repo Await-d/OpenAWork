@@ -10,6 +10,7 @@ export interface AIModelConfigItem {
   autoCompactTargetRatio?: number;
   autoCompactThresholdRatio?: number;
   contextWindow?: number;
+  contextWindowOverride?: number;
   inputPricePerMillion?: number;
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
@@ -64,6 +65,15 @@ export interface ModelManagerProps {
 
 const DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO = 0.95;
 const DEFAULT_AUTO_COMPACT_TARGET_RATIO = 0.6;
+const DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS = 13_000;
+const MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS = 10_000;
+const MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS = 40_000;
+const CONTEXT_WINDOW_PRESETS = [
+  { value: '', label: '自动（模型上限）' },
+  { value: '272000', label: '272K' },
+  { value: '400000', label: '400K' },
+  { value: '1000000', label: '1M' },
+] as const;
 
 const cellStyle: CSSProperties = {
   padding: '0.6rem 0.75rem',
@@ -82,6 +92,13 @@ function formatContext(count: number | undefined): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(0)}K`;
   return String(count);
+}
+
+function resolveEffectiveContextWindow(model: AIModelConfigItem): number | undefined {
+  if (model.contextWindow === undefined || model.contextWindowOverride === undefined) {
+    return model.contextWindowOverride ?? model.contextWindow;
+  }
+  return Math.min(model.contextWindow, model.contextWindowOverride);
 }
 
 function formatPrice(price: number | undefined): string {
@@ -110,16 +127,39 @@ function formatWindowEstimate(contextWindow: number | undefined, ratio: number):
   return formatContext(Math.round(contextWindow * ratio));
 }
 
+function resolveTargetWindow(
+  contextWindow: number | undefined,
+  ratio: number | undefined,
+): number | undefined {
+  if (
+    !contextWindow ||
+    ratio === undefined ||
+    !Number.isFinite(ratio) ||
+    ratio <= 0 ||
+    ratio >= 1
+  ) {
+    return contextWindow ? DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS : undefined;
+  }
+  return Math.max(
+    MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS,
+    Math.min(MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS, Math.floor(contextWindow * ratio)),
+  );
+}
+
 function buildAutoCompactSummary(model: AIModelConfigItem): string {
   const thresholdRatio = resolveThresholdRatio(model.autoCompactThresholdRatio);
   const targetRatio = resolveTargetRatio(model.autoCompactTargetRatio);
+  const contextWindow = resolveEffectiveContextWindow(model);
   const thresholdText = formatRatio(thresholdRatio, '');
-  const targetText = formatRatio(targetRatio, '');
-  const thresholdWindow = formatWindowEstimate(model.contextWindow, thresholdRatio);
-  const targetWindow = formatWindowEstimate(model.contextWindow, targetRatio);
+  const targetWindowTokens = resolveTargetWindow(contextWindow, model.autoCompactTargetRatio);
+  const targetText = targetWindowTokens
+    ? formatContext(targetWindowTokens)
+    : formatRatio(targetRatio, '');
+  const thresholdWindow = formatWindowEstimate(contextWindow, thresholdRatio);
+  const targetWindow = targetWindowTokens ? formatContext(targetWindowTokens) : null;
 
   if (thresholdWindow && targetWindow) {
-    return `按当前 ${formatContext(model.contextWindow)} 上下文，约在 ${thresholdWindow} 时触发，压缩后回到约 ${targetWindow}。`;
+    return `按当前 ${formatContext(contextWindow)} 上下文，约在 ${thresholdWindow} 时触发，压缩后回到约 ${targetWindow}。`;
   }
 
   return `预计使用达到 ${thresholdText} 时触发，压缩后回到约 ${targetText}。`;
@@ -152,6 +192,97 @@ function parseRatioInput(raw: string): number | undefined | null {
   }
 
   return parsed;
+}
+
+function ContextWindowOverrideControl({
+  model,
+  onCommit,
+}: {
+  model: AIModelConfigItem;
+  onCommit?: (value: number | undefined) => void;
+}) {
+  const override = model.contextWindowOverride;
+  const presetValue = CONTEXT_WINDOW_PRESETS.some(
+    ({ value }) => value !== '' && Number(value) === override,
+  )
+    ? String(override)
+    : override === undefined
+      ? ''
+      : 'custom';
+  const [customMode, setCustomMode] = useState(presetValue === 'custom');
+  const [customDraft, setCustomDraft] = useState(override === undefined ? '' : String(override));
+
+  useEffect(() => {
+    setCustomMode(presetValue === 'custom');
+    setCustomDraft(override === undefined ? '' : String(override));
+  }, [override, presetValue]);
+
+  return (
+    <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+      <label style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+        快捷挡位
+        <select
+          aria-label={`${model.label} 上下文挡位`}
+          value={customMode ? 'custom' : presetValue}
+          disabled={!onCommit}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === 'custom') {
+              setCustomMode(true);
+              return;
+            }
+            setCustomMode(false);
+            onCommit?.(value === '' ? undefined : Number(value));
+          }}
+          style={{
+            display: 'block',
+            marginTop: 4,
+            width: '100%',
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            borderRadius: 6,
+            color: 'var(--fg-default)',
+            fontSize: 11,
+            padding: '0.3rem 0.4rem',
+          }}
+        >
+          {CONTEXT_WINDOW_PRESETS.map((preset) => (
+            <option key={preset.value || 'auto'} value={preset.value}>
+              {preset.label}
+            </option>
+          ))}
+          <option value="custom">自定义</option>
+        </select>
+      </label>
+      {customMode ? (
+        <input
+          aria-label={`${model.label} 自定义上下文 token`}
+          type="number"
+          min={1024}
+          step={1024}
+          value={customDraft}
+          onChange={(event) => setCustomDraft(event.target.value)}
+          onBlur={() => {
+            const value = Number(customDraft);
+            if (Number.isFinite(value) && value >= 1024) {
+              onCommit?.(Math.round(value));
+            }
+          }}
+          placeholder="token 数"
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            borderRadius: 6,
+            color: 'var(--fg-default)',
+            fontSize: 11,
+            padding: '0.3rem 0.4rem',
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function CapabilityDot({ label }: { label: string }) {
@@ -521,8 +652,8 @@ export function ModelManager({
             自动压缩会按模型上下文预算判断，而不是按固定消息条数触发。
           </div>
           <div style={{ fontSize: 11, color: tokens.color.muted, lineHeight: 1.5 }}>
-            阈值表示预计使用达到多少时开始压缩；目标表示压缩后希望回落到多少。留空会跟随后端默认值（阈值
-            95%，目标 60%）。
+            阈值表示预计使用达到多少时开始压缩；目标预算用于控制保留的近期上下文。留空会跟随后端默认值（阈值
+            95%，近期上下文约 13K tokens）。
           </div>
         </div>
       </div>
@@ -758,7 +889,27 @@ export function ModelManager({
                             )}
                           </div>
                         </td>
-                        <td style={mutedStyle}>{formatContext(model.contextWindow)}</td>
+                        <td style={cellStyle}>
+                          <div style={mutedStyle}>
+                            {formatContext(resolveEffectiveContextWindow(model))}
+                          </div>
+                          {model.contextWindowOverride !== undefined ? (
+                            <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>
+                              模型上限 {formatContext(model.contextWindow)}
+                            </div>
+                          ) : null}
+                          <ContextWindowOverrideControl
+                            model={model}
+                            onCommit={
+                              onUpdateModel
+                                ? (value) =>
+                                    onUpdateModel(provider.id, model.id, {
+                                      contextWindowOverride: value,
+                                    })
+                                : undefined
+                            }
+                          />
+                        </td>
                         <td style={mutedStyle}>{formatContext(model.maxOutputTokens)}</td>
                         <td style={mutedStyle}>{formatPrice(model.inputPricePerMillion)}</td>
                         <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
@@ -786,20 +937,6 @@ export function ModelManager({
                                         ? (nextValue) => {
                                             onUpdateModel(provider.id, model.id, {
                                               autoCompactThresholdRatio: nextValue,
-                                            });
-                                          }
-                                        : undefined
-                                    }
-                                  />
-                                  <ModelRatioInput
-                                    ariaLabel={`${model.label} 压缩目标比例`}
-                                    fallbackLabel="目标"
-                                    value={model.autoCompactTargetRatio}
-                                    onCommit={
-                                      onUpdateModel
-                                        ? (nextValue) => {
-                                            onUpdateModel(provider.id, model.id, {
-                                              autoCompactTargetRatio: nextValue,
                                             });
                                           }
                                         : undefined

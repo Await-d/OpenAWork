@@ -73,7 +73,6 @@ export interface UnifiedComposerProps {
   editorMode?: boolean;
   providers: ChatSettingsProvider[];
   fastEnabled?: boolean;
-  onFastEnabledChange?: (enabled: boolean) => void;
   activeProviderId: string;
   activeModelId: string;
   activeProvider?: { name?: string; type?: string } | null;
@@ -84,6 +83,7 @@ export interface UnifiedComposerProps {
     supportsTools?: boolean;
     supportsVision?: boolean;
     contextWindow?: number;
+    contextWindowOverride?: number;
   } | null;
   activeModelCanConfigureThinking?: boolean;
   activeModelTooltip?: string;
@@ -105,6 +105,8 @@ export interface UnifiedComposerProps {
   onSubmit: (payload: UnifiedComposerSubmitPayload) => boolean | void | Promise<boolean | void>;
   onStop: () => void | Promise<void>;
   onModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  onFastModeToggle?: (enabled: boolean) => Promise<void>;
+  onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
   onThinkingEnabledChange: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -187,7 +189,6 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     editorMode = false,
     providers,
     fastEnabled,
-    onFastEnabledChange,
     activeProviderId,
     activeModelId,
     activeProvider,
@@ -207,6 +208,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     onSubmit,
     onStop,
     onModelSelect,
+    onFastModeToggle,
+    onContextWindowOverrideChange,
     onToggleWebSearch,
     onThinkingEnabledChange,
     onReasoningEffortChange,
@@ -615,6 +618,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           )}
           canConfigureThinking={activeModelCanConfigureThinking ?? false}
           contextWindow={activeModelOption?.contextWindow}
+          contextWindowOverride={activeModelOption?.contextWindowOverride}
+          onChangeContextWindowOverride={onContextWindowOverrideChange}
           supportsTools={activeModelOption?.supportsTools}
           supportsVision={activeModelOption?.supportsVision}
           thinkingEnabled={thinkingEnabled}
@@ -622,16 +627,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           onChangeThinkingEnabled={onThinkingEnabledChange}
           onChangeReasoningEffort={onReasoningEffortChange}
           fastEnabled={fastEnabled ?? false}
-          onFastToggle={async (enabled) => {
-            if (!token) return;
-            const { createSettingsClient } = await import('@openAwork/web-client');
-            await createSettingsClient(gatewayUrl).putActiveSelection(token, {
-              fast: enabled
-                ? { providerId: activeProviderId, modelId: activeModelId }
-                : { providerId: '', modelId: '' },
-            });
-            onFastEnabledChange?.(enabled);
-          }}
+          onFastToggle={onFastModeToggle}
         />
       )}
     </>

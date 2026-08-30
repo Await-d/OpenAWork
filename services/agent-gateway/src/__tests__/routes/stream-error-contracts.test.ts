@@ -244,7 +244,7 @@ describe('stream error contracts', () => {
     );
   });
 
-  it('仅依赖 session metadata 选型时仍允许 Fast 覆盖主对话流', async () => {
+  it('仅依赖 session metadata 选型时不会被辅助 Fast 选型覆盖主对话流', async () => {
     providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
       provider: fastProvider,
       modelId: 'gpt-5.4-nano',
@@ -268,11 +268,18 @@ describe('stream error contracts', () => {
       userId: USER_ID,
     });
 
-    expect(route.model).toBe('gpt-5.4-nano');
+    expect(route.model).toBe('gpt-4o');
     expect(route.providerType).toBe('openai');
     expect(route.upstreamProtocol).toBe('responses');
-    expect(providerCatalogMocks.getFastProvider).toHaveBeenCalledWith(USER_ID);
-    expect(providerCatalogMocks.getProviderForSelection).not.toHaveBeenCalled();
+    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
+    expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+      },
+      { fallbackToChat: true },
+    );
   });
 
   it('请求显式指定 provider/model 时不会再被 Fast 覆盖', async () => {

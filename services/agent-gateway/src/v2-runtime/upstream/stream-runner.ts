@@ -18,6 +18,10 @@ import {
 } from './provider-options.js';
 import type { UpstreamProtocolKind } from './native-model.js';
 import { applyProviderMessageTransforms, sanitizeSurrogates } from './message-transforms.js';
+import {
+  normalizeUpstreamStreamMaxRetries,
+  withUpstreamStreamRetry,
+} from './stream-retry-policy.js';
 
 type NativeToolSet = Record<string, ToolDefinition>;
 
@@ -624,7 +628,11 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
       }),
     ),
   );
-  let translated: NativeUpstreamStream = source.pipe(
+  const retriedSource = withUpstreamStreamRetry(
+    source,
+    normalizeUpstreamStreamMaxRetries(input.maxRetries),
+  );
+  let translated: NativeUpstreamStream = retriedSource.pipe(
     Stream.flatMap((event) => Stream.fromIterable(mapper(event))),
     Stream.catch((error) => {
       diagnostics.sawError = true;

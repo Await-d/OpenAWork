@@ -9,6 +9,7 @@ export interface ChatSettingsModel {
   label: string;
   enabled: boolean;
   contextWindow?: number;
+  contextWindowOverride?: number;
   maxOutputTokens?: number;
   supportsImageGeneration?: boolean;
   supportsImageGeneration4K?: boolean;
@@ -32,6 +33,7 @@ export interface ChatSettingsProvider {
   name: string;
   type: string;
   enabled: boolean;
+  openaiFastMode?: boolean;
   defaultModels: ChatSettingsModel[];
 }
 
@@ -56,11 +58,13 @@ interface SettingsProvidersResponse {
 }
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
-  return value === 'minimal' ||
+  return value === 'none' ||
+    value === 'minimal' ||
     value === 'low' ||
     value === 'medium' ||
     value === 'high' ||
-    value === 'xhigh'
+    value === 'xhigh' ||
+    value === 'max'
     ? value
     : 'medium';
 }

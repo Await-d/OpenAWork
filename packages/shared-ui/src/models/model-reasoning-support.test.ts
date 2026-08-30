@@ -55,19 +55,63 @@ describe('model reasoning support', () => {
     ]);
   });
 
-  it('exposes 5 effort levels for GPT-5.6 (none/low/medium/high/max)', () => {
+  it('exposes all official effort levels for GPT-5.6 variants', () => {
     expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.6')).toEqual([
       'none',
       'low',
       'medium',
       'high',
+      'xhigh',
+      'max',
+    ]);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.6-sol')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
       'max',
     ]);
   });
 
-  it('exposes 4 effort levels for GPT-5.2~5.4 (low/medium/high/xhigh)', () => {
-    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.4')).toEqual([
+  it('exposes none plus tunable effort levels for GPT-5.1 through GPT-5.5', () => {
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.1')).toEqual([
+      'none',
       'low',
+      'medium',
+      'high',
+    ]);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5-1')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+    ]);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.2')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.4')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+  });
+
+  it('keeps gpt-5 fixed while exposing versioned Pro effort controls', () => {
+    expect(canConfigureThinkingForModel('openai', 'gpt-5-pro')).toBe(false);
+    expect(canConfigureThinkingForModel('openai', 'gpt-5.4-pro')).toBe(true);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.4-pro')).toEqual([
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+    expect(getSupportedReasoningEffortsForModel('openai', 'gpt-5.5-pro')).toEqual([
       'medium',
       'high',
       'xhigh',
@@ -173,6 +217,7 @@ describe('model reasoning support', () => {
       'low',
       'medium',
       'high',
+      'xhigh',
       'max',
     ]);
   });

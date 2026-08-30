@@ -20,6 +20,7 @@ import {
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
 import {
   buildChatContextUsageSnapshot,
+  resolveEffectiveContextWindow,
   type ChatContextUsageSnapshot,
 } from '../../../../components/conversation-runtime/messages/context-usage.js';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
@@ -52,7 +53,9 @@ export interface ChatRenderDataInput {
   modelPrices: ModelPriceEntry[];
   activeProviderId: string;
   activeModelId: string;
-  activeModelOption: { id: string; label: string; contextWindow?: number } | undefined;
+  activeModelOption:
+    | { id: string; label: string; contextWindow?: number; contextWindowOverride?: number }
+    | undefined;
   visibleStreaming: boolean;
   visibleStreamBuffer: string;
   visibleStreamThinkingBuffer: string;
@@ -329,7 +332,10 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   const contextUsageSnapshot = useMemo(
     () =>
       buildChatContextUsageSnapshot({
-        contextWindow: activeModelOption?.contextWindow,
+        contextWindow: resolveEffectiveContextWindow(
+          activeModelOption?.contextWindow,
+          activeModelOption?.contextWindowOverride,
+        ),
         historicalTokens: messageInputTokens,
         preferHistoricalEstimate: shouldPreferHistoricalContextEstimate,
         reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
@@ -337,6 +343,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       }),
     [
       activeModelOption?.contextWindow,
+      activeModelOption?.contextWindowOverride,
       effectiveReportedStreamUsage?.totalTokens,
       messageInputTokens,
       shouldPreferHistoricalContextEstimate,

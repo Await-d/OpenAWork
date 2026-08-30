@@ -220,17 +220,17 @@ function googleSmallThinkingBudget(apiId: string): number {
 //   gpt-5-pro                         → ['high']  (no tunable knob)
 //   gpt-5-{2+}-pro                    → ['medium', 'high', 'xhigh']
 //   gpt-5-{x}-chat                    → ['medium']
-//   gpt-5.1 / gpt-5-1                 → ['low', 'medium', 'high']
-//   gpt-5.{2+} (incl. nano/mini)      → ['low', 'medium', 'high', 'xhigh']
+//   gpt-5                              → ['minimal', 'low', 'medium', 'high']
+//   gpt-5.1 / gpt-5-1                 → ['none', 'low', 'medium', 'high']
+//   gpt-5.{2+} (incl. nano/mini)      → ['none', 'low', 'medium', 'high', 'xhigh']
 //   gpt-5-{x}-codex (v ≥ 3)           → ['low', 'medium', 'high', 'xhigh']
 //   gpt-5-{x}-codex-max / v ≥ 2       → ['low', 'medium', 'high', 'xhigh']
 //   gpt-5-{x}-codex (default)         → ['low', 'medium', 'high']
-//   any other GPT-5 (e.g. plain 'gpt-5') → full ['low', 'medium', 'high', 'xhigh']
+//   any other GPT-5 (e.g. plain 'gpt-5') → ['minimal', 'low', 'medium', 'high']
 //
-// OpenAWork's `ReasoningEffort` does not include `'none'`, so the lower bound
-// is `'low'`. The clamp picks the largest supported effort ≤ the requested
-// effort, falling back to the smallest supported effort when the request is
-// below the model's floor.
+// The clamp picks the largest supported effort ≤ the requested effort, falling
+// back to the smallest supported effort when the request is below the model's
+// floor.
 // ---------------------------------------------------------------------------
 
 const EFFORT_RANK: Record<ReasoningEffort, number> = {
@@ -258,14 +258,21 @@ const GPT5_VERSIONED_PRO_RE = /(?:^|\/)gpt-5[.-]\d+[.-]pro(?:[.-]|$)/;
 const GPT5_PRO_EFFORTS: readonly ReasoningEffort[] = ['high'];
 const GPT5_VERSIONED_PRO_EFFORTS: readonly ReasoningEffort[] = ['medium', 'high', 'xhigh'];
 const GPT5_CHAT_EFFORTS: readonly ReasoningEffort[] = ['medium'];
-const GPT5_1_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
-const GPT5_2_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_1_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high'];
+const GPT5_2_PLUS_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
 const GPT5_5_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
-const GPT5_6_EFFORTS: readonly ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'max'];
+const GPT5_6_EFFORTS: readonly ReasoningEffort[] = [
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
 const GPT5_CODEX_3_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const GPT5_CODEX_XHIGH_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const GPT5_CODEX_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
-const GPT5_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high'];
 
 function gpt5Version(apiId: string): number | undefined {
   const match = GPT5_VERSION_RE.exec(apiId);

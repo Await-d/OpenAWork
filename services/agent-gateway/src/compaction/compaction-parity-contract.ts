@@ -17,6 +17,7 @@ export interface CompactionThresholdInput {
   readonly contextWindowOverride?: number;
   readonly modelMaxOutputTokens?: number;
   readonly autoCompactPercentOverride?: number;
+  readonly autoCompactThresholdRatio?: number;
 }
 
 export interface CompactionThresholdContract {
@@ -84,11 +85,18 @@ export function resolveCompactionThreshold(
     percentOverride <= 100
       ? Math.floor(effectiveContextWindow * (percentOverride / 100))
       : referenceThreshold;
+  const ratioThreshold =
+    input.autoCompactThresholdRatio !== undefined &&
+    Number.isFinite(input.autoCompactThresholdRatio) &&
+    input.autoCompactThresholdRatio > 0 &&
+    input.autoCompactThresholdRatio < 1
+      ? Math.floor(effectiveContextWindow * input.autoCompactThresholdRatio)
+      : referenceThreshold;
 
   return {
     contextWindow,
     effectiveContextWindow,
-    autoCompactThreshold: Math.min(referenceThreshold, percentageThreshold),
+    autoCompactThreshold: Math.min(referenceThreshold, percentageThreshold, ratioThreshold),
   };
 }
 

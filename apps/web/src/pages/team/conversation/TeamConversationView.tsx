@@ -49,7 +49,7 @@ import {
   normalizeChatMessages,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
-import { createSessionsClient } from '@openAwork/web-client';
+import { createSessionsClient, createSettingsClient } from '@openAwork/web-client';
 import type { PendingPermissionRequest, PermissionDecision } from '@openAwork/web-client';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import type { InputImageContent } from '@openAwork/shared';
@@ -763,6 +763,36 @@ export function TeamConversationView({
       state.setActiveModelId(modelId);
     },
     [state],
+  );
+
+  const handleContextWindowOverrideChange = useCallback(
+    async (value: number | undefined) => {
+      if (!token || !state.activeProviderId || !state.activeModelId) {
+        throw new Error('当前模型尚未准备好，无法保存上下文挡位。');
+      }
+      const result = await createSettingsClient(gatewayUrl).putModelContext(token, {
+        providerId: state.activeProviderId,
+        modelId: state.activeModelId,
+        contextWindowOverride: value ?? null,
+      });
+      state.setProviders((previous) =>
+        previous.map((provider) => {
+          if (provider.id !== result.providerId) return provider;
+          return {
+            ...provider,
+            defaultModels: provider.defaultModels.map((model) => {
+              if (model.id !== result.modelId) return model;
+              if (result.contextWindowOverride === null) {
+                const { contextWindowOverride: _removed, ...rest } = model;
+                return rest;
+              }
+              return { ...model, contextWindowOverride: result.contextWindowOverride };
+            }),
+          };
+        }),
+      );
+    },
+    [gatewayUrl, state, token],
   );
 
   // 找某条消息对应的「重试源」：assistant 消息 → 向上回溯到最近 user 消息。
@@ -1516,6 +1546,7 @@ export function TeamConversationView({
               }
               onStopComposer={composerEnabled ? handleStopStream : disabledComposerAsyncAction}
               onComposerModelSelect={handleComposerModelSelect}
+              onContextWindowOverrideChange={handleContextWindowOverrideChange}
               onToggleWebSearch={disabledComposerAction}
               onThinkingEnabledChange={state.setThinkingEnabled}
               onReasoningEffortChange={state.setReasoningEffort}

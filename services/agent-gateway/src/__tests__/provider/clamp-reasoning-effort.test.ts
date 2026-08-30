@@ -56,6 +56,13 @@ describe('clampReasoningEffortForModel', () => {
     });
   });
 
+  describe('plain gpt-5 (minimal / low / medium / high)', () => {
+    it('clamps xhigh to the official high ceiling', () => {
+      expect(clampReasoningEffortForModel('gpt-5', 'minimal')).toBe('minimal');
+      expect(clampReasoningEffortForModel('gpt-5', 'xhigh')).toBe('high');
+    });
+  });
+
   describe('versioned gpt-5-{n}-pro (medium / high / xhigh)', () => {
     it('clamps below-floor requests up to medium', () => {
       expect(clampReasoningEffortForModel('gpt-5-2-pro', 'minimal')).toBe('medium');
@@ -89,8 +96,8 @@ describe('clampReasoningEffortForModel', () => {
       expect(clampReasoningEffortForModel('gpt-5-1', 'xhigh')).toBe('high');
     });
 
-    it('upgrades minimal to low (no `none` available in OpenAWork)', () => {
-      expect(clampReasoningEffortForModel('gpt-5.1', 'minimal')).toBe('low');
+    it('downgrades minimal to none because none is the official floor', () => {
+      expect(clampReasoningEffortForModel('gpt-5.1', 'minimal')).toBe('none');
     });
 
     it('passes through low / medium / high unchanged', () => {
@@ -100,13 +107,22 @@ describe('clampReasoningEffortForModel', () => {
     });
   });
 
-  describe('gpt-5.{2+} family (full set)', () => {
-    it('passes every effort tier through unchanged', () => {
-      expect(clampReasoningEffortForModel('gpt-5.2', 'minimal')).toBe('low');
+  describe('gpt-5.{2+} family (none through xhigh)', () => {
+    it('passes official effort tiers through and clamps only minimal', () => {
+      expect(clampReasoningEffortForModel('gpt-5.2', 'minimal')).toBe('none');
+      expect(clampReasoningEffortForModel('gpt-5.2', 'none')).toBe('none');
       expect(clampReasoningEffortForModel('gpt-5.2', 'low')).toBe('low');
       expect(clampReasoningEffortForModel('gpt-5.2', 'high')).toBe('high');
       expect(clampReasoningEffortForModel('gpt-5.2', 'xhigh')).toBe('xhigh');
       expect(clampReasoningEffortForModel('gpt-5-3-mini', 'xhigh')).toBe('xhigh');
+    });
+  });
+
+  describe('gpt-5.6 family (none through max)', () => {
+    it('preserves xhigh and max', () => {
+      expect(clampReasoningEffortForModel('gpt-5.6', 'none')).toBe('none');
+      expect(clampReasoningEffortForModel('gpt-5.6', 'xhigh')).toBe('xhigh');
+      expect(clampReasoningEffortForModel('gpt-5.6-sol', 'max')).toBe('max');
     });
   });
 
@@ -131,7 +147,7 @@ describe('clampReasoningEffortForModel', () => {
   describe('future gpt-5.x minor versions inherit the highest known tier', () => {
     it('gpt-5.7 (未来次版本) behaves like gpt-5.6, not the default tier', () => {
       expect(clampReasoningEffortForModel('gpt-5.7', 'minimal')).toBe('none');
-      expect(clampReasoningEffortForModel('gpt-5.7', 'xhigh')).toBe('high');
+      expect(clampReasoningEffortForModel('gpt-5.7', 'xhigh')).toBe('xhigh');
       expect(clampReasoningEffortForModel('gpt-5.7', 'max')).toBe('max');
       expect(clampReasoningEffortForModel('gpt-5.7', 'high')).toBe('high');
     });

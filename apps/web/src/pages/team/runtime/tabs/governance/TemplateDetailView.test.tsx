@@ -68,7 +68,9 @@ describe('TemplateDetailView', () => {
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ name: '新的模板名' });
     });
-    expect(screen.getByRole('alert').textContent).toContain('保存失败，请重试。');
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('保存失败，请重试。');
+    });
     expect(screen.getByDisplayValue('新的模板名')).toBeTruthy();
   });
 

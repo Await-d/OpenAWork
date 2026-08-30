@@ -19,6 +19,7 @@ const OPTION_BUTTON: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
   transition: 'all 150ms ease',
 };
 
@@ -35,7 +36,9 @@ export function UpstreamRetrySection({
     <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 200, flex: '1 1 240px' }}>
-          <h3 style={ST}>上游失败自动重试</h3>
+          <h3 style={ST}>
+            <span style={{ whiteSpace: 'nowrap' }}>上游失败自动重试</span>
+          </h3>
           <p
             style={{
               margin: '2px 0 0',
@@ -44,7 +47,9 @@ export function UpstreamRetrySection({
               lineHeight: 1.5,
             }}
           >
-            当模型上游出现短暂性错误时，网关会在停止前自动重试。该策略也会同步应用到后台子代理。
+            当模型上游出现<span style={{ whiteSpace: 'nowrap' }}>短暂性错误</span>时，网关会在停止前
+            <span style={{ whiteSpace: 'nowrap' }}>自动重试</span>。该策略也会同步应用到
+            <span style={{ whiteSpace: 'nowrap' }}>后台子代理</span>。
           </p>
         </div>
         <div
@@ -86,7 +91,7 @@ export function UpstreamRetrySection({
                   : 'none',
               }}
             >
-              {value} 次
+              <span style={{ whiteSpace: 'nowrap' }}>{value} 次</span>
             </button>
           );
         })}
@@ -102,7 +107,9 @@ export function UpstreamRetrySection({
         }}
       >
         <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.4 }}>
-          0 次表示遇到上游错误后立即停止；3 次表示首次失败后最多再尝试 3 次。
+          <span style={{ whiteSpace: 'nowrap' }}>0 次</span>表示遇到上游错误后立即停止；
+          <span style={{ whiteSpace: 'nowrap' }}>3 次</span>表示首次失败后最多再尝试
+          <span style={{ whiteSpace: 'nowrap' }}>3 次</span>。
         </span>
         <button
           type="button"

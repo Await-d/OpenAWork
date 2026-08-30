@@ -105,6 +105,17 @@ describe('auto compaction reference threshold', () => {
     expect(atThresholdTriggers).toBe(true);
   });
 
+  it('honors model threshold ratio and context window override', () => {
+    const threshold = resolveCompactionThreshold({
+      modelContextWindow: 1_000_000,
+      contextWindowOverride: 400_000,
+      modelMaxOutputTokens: 20_000,
+      autoCompactThresholdRatio: 0.8,
+    });
+    expect(threshold.contextWindow).toBe(400_000);
+    expect(threshold.autoCompactThreshold).toBe(304_000);
+  });
+
   it('does not let the legacy reserved setting rewrite the automatic threshold', () => {
     // Given
     const input = {

@@ -119,6 +119,7 @@ import {
   recoverThinkingBlockOrder,
   type RecoveryResult,
 } from '../session/session-recovery.js';
+import { waitForSessionRecoveryRetry } from '../session/session-retry-policy.js';
 import { detectDelegateTaskError, buildRetryGuidance } from '../task/delegate-task-retry.js';
 import { truncateToolOutputUniversal } from '../tools/tool-output-truncator.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
@@ -757,20 +758,6 @@ function hasTeamDefinition(metadataJson: string): boolean {
   return typeof teamDefinition === 'object' && teamDefinition !== null;
 }
 
-function hasProviderlessModelSelection(input: {
-  agentSelection: StreamAgentSelection;
-  echoedSessionModelId: string | undefined;
-  echoedSessionProviderId: string | undefined;
-  requestedModelId: string | undefined;
-  requestedProviderId: string | undefined;
-}): boolean {
-  return (
-    (input.requestedModelId !== undefined && input.requestedProviderId === undefined) ||
-    (input.echoedSessionModelId !== undefined && input.echoedSessionProviderId === undefined) ||
-    (input.agentSelection.modelId !== undefined && input.agentSelection.providerId === undefined)
-  );
-}
-
 interface StreamAccumulationState {
   toolCalls: Map<string, { toolName: string; inputText: string }>;
 }
@@ -1403,10 +1390,6 @@ export async function resolveStreamModelRoute(input: {
   });
   const requestedProviderId = normalizeRequestedProviderId(input.requestData.providerId);
   const requestedModelId = normalizeRequestedModelId(input.requestData.model);
-  const echoedSessionProviderId = normalizeRequestedProviderId(sessionSelection.providerId);
-  const echoedSessionModelId = normalizeRequestedModelId(sessionSelection.modelId);
-  const hasExplicitProviderOverride = requestedProviderId !== undefined;
-  const hasExplicitModelOverride = requestedModelId !== undefined;
   const hasAuthoritativeTeamModel =
     (isTeamRoleLayer(input.roleLayer) || hasTeamDefinition(input.metadataJson)) &&
     Boolean(sessionSelection.providerId && sessionSelection.modelId);
@@ -1443,38 +1426,6 @@ export async function resolveStreamModelRoute(input: {
         ? (sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'])
         : input.requestData.reasoningEffort,
   };
-  const providerlessModelSelection = hasProviderlessModelSelection({
-    agentSelection,
-    echoedSessionModelId,
-    echoedSessionProviderId,
-    requestedModelId,
-    requestedProviderId,
-  });
-  // When Fast is enabled (user toggled it on in the model settings popover),
-  // use the fast provider+model for the main conversation stream too — not
-  // just title generation. This only applies when the request doesn't
-  // explicitly specify a provider/model and there's no team template binding.
-  const useFastForChat =
-    !hasAuthoritativeTeamModel &&
-    !hasExplicitProviderOverride &&
-    !hasExplicitModelOverride &&
-    !agentSelection.providerId &&
-    !providerlessModelSelection;
-
-  if (useFastForChat) {
-    const fastConfig = await getFastProvider(input.userId);
-    if (fastConfig) {
-      return {
-        ...agentSelection,
-        ...resolveModelRouteFromProvider(
-          fastConfig.provider,
-          fastConfig.modelId,
-          resolvedRequestData,
-        ),
-      };
-    }
-  }
-
   const providerConfig = await getProviderForSelection(
     input.userId,
     {
@@ -2660,6 +2611,7 @@ export async function handleStreamRequest(input: {
         parseStoredJson(compactionSettingsRow?.value),
       );
       let syntheticContinuationPrompt: string | undefined;
+      let sessionRecoveryRetryCount = 0;
       let lastRoundUsage:
         | {
             inputTokens: number;
@@ -2804,6 +2756,7 @@ export async function handleStreamRequest(input: {
           writeChunk: emitChunk,
         });
         syntheticContinuationPrompt = undefined;
+        if (result.stopReason !== 'error') sessionRecoveryRetryCount = 0;
 
         if (result.usage) {
           lastRoundUsage = result.usage;
@@ -3012,6 +2965,11 @@ export async function handleStreamRequest(input: {
               if (recoveryResult?.recovered) {
                 console.log(
                   `[SESSION_RECOVERY] Recovered from ${errorType}: ${recoveryResult.action}, sessionId=${input.sessionId}`,
+                );
+                sessionRecoveryRetryCount += 1;
+                await waitForSessionRecoveryRetry(
+                  sessionRecoveryRetryCount,
+                  abortController.signal,
                 );
                 syntheticContinuationPrompt = `[Session Recovery] Fixed ${errorType} error. Continuing from where we left off.`;
                 continue;

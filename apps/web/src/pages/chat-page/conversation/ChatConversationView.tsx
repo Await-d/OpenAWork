@@ -266,7 +266,7 @@ export interface ChatConversationViewProps {
   // ─── composer ──────────────────────────────────────────────────────
   composerVariant: 'home' | 'session';
   providers: ChatSettingsProvider[];
-  activeProvider?: { name?: string; type?: string } | null;
+  activeProvider?: { name?: string; type?: string; openaiFastMode?: boolean } | null;
   activeModelOption?: {
     id?: string;
     label?: string;
@@ -274,6 +274,7 @@ export interface ChatConversationViewProps {
     supportsTools?: boolean;
     supportsVision?: boolean;
     contextWindow?: number;
+    contextWindowOverride?: number;
   } | null;
   activeModelCanConfigureThinking?: boolean;
   activeModelTooltip?: string;
@@ -315,7 +316,8 @@ export interface ChatConversationViewProps {
   ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
-  onFastEnabledChange?: (enabled: boolean) => void;
+  onFastModeToggle?: (enabled: boolean) => Promise<void>;
+  onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
   onThinkingEnabledChange: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -530,7 +532,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
-    onFastEnabledChange,
+    onFastModeToggle,
+    onContextWindowOverrideChange,
     onToggleWebSearch,
     onThinkingEnabledChange,
     onReasoningEffortChange,
@@ -862,7 +865,6 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           manualAgentId={manualAgentId}
           yoloMode={yoloMode}
           fastEnabled={fastEnabled}
-          onFastEnabledChange={onFastEnabledChange}
           webSearchEnabled={webSearchEnabled}
           thinkingEnabled={thinkingEnabled}
           reasoningEffort={reasoningEffort}
@@ -890,6 +892,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}
           onModelSelect={onComposerModelSelect}
+          onFastModeToggle={onFastModeToggle}
+          onContextWindowOverrideChange={onContextWindowOverrideChange}
           onToggleWebSearch={onToggleWebSearch}
           onThinkingEnabledChange={onThinkingEnabledChange}
           onReasoningEffortChange={onReasoningEffortChange}

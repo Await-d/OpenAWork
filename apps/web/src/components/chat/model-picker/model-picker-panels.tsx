@@ -17,6 +17,17 @@ function formatContextWindow(value: number | undefined): string | null {
   return String(value);
 }
 
+const CONTEXT_WINDOW_PRESETS = [
+  { value: undefined, label: '自动', detail: '使用模型上限' },
+  { value: 272_000, label: '272K', detail: '适合常规长上下文' },
+  { value: 400_000, label: '400K', detail: '适合中大型上下文' },
+  { value: 1_000_000, label: '1M', detail: '适合超长上下文' },
+] as const;
+
+function sameContextWindow(left: number | undefined, right: number | undefined): boolean {
+  return left === right || (left === undefined && right === undefined);
+}
+
 function CapabilityTag({
   label,
   tone = 'default',
@@ -296,6 +307,7 @@ export function ModelPicker({
     >
       <button
         type="button"
+        className="chat-model-settings-close"
         aria-label="关闭"
         onClick={onClose}
         style={{
@@ -734,6 +746,8 @@ export function ModelSettingsPopover({
   supportsThinking,
   canConfigureThinking,
   contextWindow,
+  contextWindowOverride,
+  onChangeContextWindowOverride,
   supportsTools,
   supportsVision,
   thinkingEnabled,
@@ -752,6 +766,8 @@ export function ModelSettingsPopover({
   supportsThinking: boolean;
   canConfigureThinking: boolean;
   contextWindow?: number;
+  contextWindowOverride?: number;
+  onChangeContextWindowOverride?: (value: number | undefined) => Promise<void> | void;
   supportsTools?: boolean;
   supportsVision?: boolean;
   thinkingEnabled: boolean;
@@ -770,8 +786,11 @@ export function ModelSettingsPopover({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const titleId = React.useId();
-  const [localFastEnabled, setLocalFastEnabled] = React.useState(fastEnabled);
-  const effectiveFastEnabled = localFastEnabled;
+  const [customContextWindow, setCustomContextWindow] = React.useState('');
+  const [contextWindowSaving, setContextWindowSaving] = React.useState(false);
+  const [contextWindowError, setContextWindowError] = React.useState<string | null>(null);
+  const [fastSaving, setFastSaving] = React.useState(false);
+  const [fastError, setFastError] = React.useState<string | null>(null);
 
   React.useLayoutEffect(() => {
     if (!open) return;
@@ -811,7 +830,7 @@ export function ModelSettingsPopover({
       if (event.key === 'Tab') {
         const focusables = Array.from(
           panelRef.current?.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), [tabindex="0"]',
+            'button:not([disabled]), input:not([disabled]), [tabindex="0"]',
           ) ?? [],
         );
         if (focusables.length === 0) {
@@ -843,14 +862,56 @@ export function ModelSettingsPopover({
     };
   }, [onClose, open]);
 
-  React.useEffect(() => {
-    setLocalFastEnabled(fastEnabled);
-  }, [fastEnabled]);
-
   if (!open) return null;
 
   const supportedEfforts = getSupportedReasoningEffortsForModel(providerType, modelId);
   const showFastSettings = providerType === 'openai';
+  const hasContextWindow = typeof contextWindow === 'number' && contextWindow > 0;
+  const effectiveContextWindow =
+    contextWindowOverride !== undefined && contextWindow !== undefined
+      ? Math.min(contextWindow, contextWindowOverride)
+      : (contextWindowOverride ?? contextWindow);
+  const selectedContextPreset = CONTEXT_WINDOW_PRESETS.find((preset) =>
+    sameContextWindow(preset.value, contextWindowOverride),
+  );
+  const contextWindowLabel = formatContextWindow(effectiveContextWindow);
+  const modelContextWindowLabel = formatContextWindow(contextWindow);
+
+  const handleContextWindowChange = async (value: number | undefined) => {
+    if (!onChangeContextWindowOverride || contextWindowSaving) return;
+    setContextWindowError(null);
+    setContextWindowSaving(true);
+    try {
+      await onChangeContextWindowOverride(value);
+    } catch (error) {
+      setContextWindowError(error instanceof Error ? error.message : '保存上下文挡位失败。');
+    } finally {
+      setContextWindowSaving(false);
+    }
+  };
+
+  const handleCustomContextWindowSave = async () => {
+    const rawValue = customContextWindow.trim();
+    const parsed = Number(rawValue);
+    if (!/^\d+$/.test(rawValue) || !Number.isInteger(parsed) || parsed < 1 || parsed > 10_000_000) {
+      setContextWindowError('请输入 1–10,000,000 之间的整数 Token 数。');
+      return;
+    }
+    await handleContextWindowChange(parsed);
+  };
+
+  const handleFastToggle = async () => {
+    if (!onFastToggle || fastSaving) return;
+    setFastError(null);
+    setFastSaving(true);
+    try {
+      await onFastToggle(!fastEnabled);
+    } catch (error) {
+      setFastError(error instanceof Error ? error.message : '保存 OpenAI Fast 模式失败。');
+    } finally {
+      setFastSaving(false);
+    }
+  };
 
   return (
     <div
@@ -861,6 +922,7 @@ export function ModelSettingsPopover({
     >
       <button
         type="button"
+        className="chat-model-settings-close"
         aria-label="关闭"
         onClick={onClose}
         style={{
@@ -903,6 +965,23 @@ export function ModelSettingsPopover({
           }
           .chat-model-settings-option:hover:not([disabled]):not(.is-active) {
             background: color-mix(in oklch, var(--accent) 6%, transparent) !important;
+          }
+          .chat-model-settings-option:focus-visible,
+          .chat-model-settings-custom-input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px var(--accent-subtle);
+          }
+          .chat-model-settings-fast-toggle:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px var(--accent-subtle);
+          }
+          .chat-model-settings-close:focus-visible,
+          .chat-model-settings-apply:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px var(--accent-subtle);
           }
           .chat-model-settings-scroll::-webkit-scrollbar { width: 5px; }
           .chat-model-settings-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -984,12 +1063,9 @@ export function ModelSettingsPopover({
               {supportsVision && <CapabilityTag label="视觉" tone="emerald" />}
               {supportsTools && <CapabilityTag label="工具" tone="accent" />}
               {supportsThinking && <CapabilityTag label="思考" tone="violet" />}
-              {contextWindow ? (
-                <CapabilityTag label={formatContextWindow(contextWindow) ?? ''} />
-              ) : null}
+              {effectiveContextWindow ? <CapabilityTag label={contextWindowLabel ?? ''} /> : null}
             </div>
           </div>
-          {/* Fast settings — use current chat model as fast model */}
           {showFastSettings && (
             <div
               style={{
@@ -1014,53 +1090,230 @@ export function ModelSettingsPopover({
                     fontSize: 9.5,
                     color: 'var(--fg-muted)',
                     lineHeight: 1.4,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  OpenAI Fast 模式（service_tier=priority）
+                </span>
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="chat-model-settings-fast-toggle"
+                  role="switch"
+                  aria-checked={fastEnabled}
+                  aria-label="切换 OpenAI Fast 模式"
+                  aria-busy={fastSaving}
+                  onClick={() => void handleFastToggle()}
+                  disabled={!onFastToggle || fastSaving}
+                  style={{
+                    position: 'relative',
+                    width: 36,
+                    height: 20,
+                    padding: 0,
+                    borderRadius: 10,
+                    border: '1px solid',
+                    borderColor: fastEnabled ? 'var(--accent-border)' : 'var(--border-default)',
+                    background: fastEnabled ? 'var(--accent-muted)' : 'var(--bg-elevated)',
+                    cursor: onFastToggle && !fastSaving ? 'pointer' : 'not-allowed',
+                    opacity: fastSaving ? 0.7 : 1,
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      left: fastEnabled ? 18 : 2,
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      background: fastEnabled ? 'var(--accent)' : 'var(--fg-muted)',
+                      transition: 'left 100ms cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                  />
+                </button>
+                <span
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    minWidth: 52,
+                    padding: '3px 7px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border-subtle)',
+                    background: fastEnabled ? 'var(--accent-muted)' : 'var(--bg-base)',
+                    color: fastEnabled ? 'var(--accent)' : 'var(--fg-muted)',
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    textAlign: 'center',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {effectiveFastEnabled
-                    ? `用当前模型（${modelLabel}）处理标题/辅助任务`
-                    : '关闭 — 标题/辅助任务走默认路径'}
+                  {fastSaving ? '保存中…' : fastEnabled ? '已开启' : '未开启'}
                 </span>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={effectiveFastEnabled}
-                onClick={() => {
-                  const next = !effectiveFastEnabled;
-                  setLocalFastEnabled(next);
-                  void onFastToggle?.(next);
-                }}
-                disabled={!onFastToggle}
+            </div>
+          )}
+          {hasContextWindow && onChangeContextWindowOverride && (
+            <div
+              style={{
+                padding: '10px 14px 8px',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div
                 style={{
-                  position: 'relative',
-                  width: 32,
-                  height: 18,
-                  borderRadius: 999,
-                  border: 'none',
-                  background: effectiveFastEnabled ? 'var(--accent)' : 'var(--border-default)',
-                  cursor: onFastToggle ? 'pointer' : 'default',
-                  flexShrink: 0,
-                  transition: 'background 120ms ease',
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  marginBottom: 6,
                 }}
               >
                 <span
                   style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: effectiveFastEnabled ? 16 : 2,
-                    width: 14,
-                    height: 14,
-                    borderRadius: '50%',
-                    background: 'var(--fg-on-accent)',
-                    transition: 'left 120ms ease',
+                    color: 'var(--fg-muted)',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  自动压缩上下文
+                </span>
+                <span style={{ color: 'var(--fg-subtle)', fontSize: 9 }}>
+                  模型上限 {modelContextWindowLabel}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: 4,
+                }}
+              >
+                {CONTEXT_WINDOW_PRESETS.map((preset) => {
+                  const active = sameContextWindow(preset.value, contextWindowOverride);
+                  return (
+                    <button
+                      key={preset.label}
+                      className={`chat-model-settings-option${active ? ' is-active' : ''}`}
+                      type="button"
+                      disabled={!onChangeContextWindowOverride || contextWindowSaving}
+                      aria-pressed={active}
+                      title={preset.detail}
+                      onClick={() => void handleContextWindowChange(preset.value)}
+                      style={{
+                        minWidth: 0,
+                        minHeight: 28,
+                        padding: '4px 3px',
+                        border: active
+                          ? '1px solid var(--accent-border)'
+                          : '1px solid var(--border-subtle)',
+                        borderRadius: 6,
+                        background: active ? 'var(--accent-muted)' : 'var(--bg-base)',
+                        color: active ? 'var(--accent)' : 'var(--fg-default)',
+                        cursor: 'pointer',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        opacity: contextWindowSaving ? 0.6 : 1,
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
+                <input
+                  className="chat-model-settings-custom-input"
+                  value={customContextWindow}
+                  onChange={(event) => {
+                    setCustomContextWindow(event.target.value);
+                    setContextWindowError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleCustomContextWindowSave();
+                    }
+                  }}
+                  inputMode="numeric"
+                  aria-label="自定义上下文 Token 数"
+                  placeholder="自定义 Token"
+                  disabled={!onChangeContextWindowOverride || contextWindowSaving}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: 28,
+                    padding: '0 8px',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 6,
+                    background: 'var(--bg-base)',
+                    color: 'var(--fg-strong)',
+                    fontSize: 10,
+                    outline: 'none',
                   }}
                 />
-              </button>
+                <button
+                  type="button"
+                  className="chat-model-settings-apply"
+                  onClick={() => void handleCustomContextWindowSave()}
+                  disabled={
+                    !onChangeContextWindowOverride ||
+                    contextWindowSaving ||
+                    !customContextWindow.trim()
+                  }
+                  style={{
+                    minWidth: 42,
+                    padding: '0 8px',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 6,
+                    background: 'var(--bg-surface)',
+                    color: 'var(--fg-default)',
+                    cursor: 'pointer',
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  {contextWindowSaving ? '保存中' : '应用'}
+                </button>
+              </div>
+              <div style={{ minHeight: 14, marginTop: 3, color: 'var(--fg-subtle)', fontSize: 9 }}>
+                {contextWindowError ??
+                  (selectedContextPreset
+                    ? `当前：${selectedContextPreset.label}，统计与自动压缩会立即使用有效窗口。`
+                    : contextWindowOverride
+                      ? `当前：${formatContextWindow(contextWindowOverride)}`
+                      : '挡位只会降低模型上限，不会超过模型能力。')}
+              </div>
             </div>
           )}
+          {showFastSettings && (
+            <div
+              style={{
+                margin: '0 14px 8px',
+                color: 'var(--fg-muted)',
+                fontSize: 9.5,
+                lineHeight: 1.45,
+              }}
+            >
+              当前开关会同步保存到设置 / 连接中的 OpenAI Provider，并立即影响后续请求。
+            </div>
+          )}
+          {showFastSettings && fastError ? (
+            <div
+              role="alert"
+              style={{
+                margin: '0 14px 8px',
+                color: 'var(--complement)',
+                fontSize: 9.5,
+                lineHeight: 1.45,
+              }}
+            >
+              {fastError}
+            </div>
+          ) : null}
           {/* Thinking section */}
           {supportsThinking ? (
             <div style={{ padding: '4px 14px 10px' }}>

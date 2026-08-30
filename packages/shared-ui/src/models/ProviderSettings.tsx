@@ -1,6 +1,6 @@
 import { color } from '../tokens.js';
 import { useMemo, useState } from 'react';
-import type { CSSProperties, SyntheticEvent } from 'react';
+import type { CSSProperties, ReactNode, SyntheticEvent } from 'react';
 import {
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
@@ -19,6 +19,7 @@ import {
 } from './provider-catalog-ui.js';
 import type { ProviderUpstreamVariantUi } from './provider-catalog-ui.js';
 import { ModelManager } from './ModelManager.js';
+import { StatusPill } from '../primitives/index.js';
 import type { ProviderModelTestResult } from './ModelManager.js';
 import type { SupportedReasoningEffort } from './model-reasoning-support.js';
 import { buildFilteredModelGroups, compareModelsByName } from './model-picker-search.js';
@@ -76,6 +77,7 @@ export interface AIModelConfigRef {
   autoCompactTargetRatio?: number;
   autoCompactThresholdRatio?: number;
   contextWindow?: number;
+  contextWindowOverride?: number;
   inputPricePerMillion?: number;
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
@@ -219,42 +221,6 @@ function formatContextWindow(value: number | undefined): string | null {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 1)}M`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
   return String(value);
-}
-
-function CapabilityPill({
-  label,
-  tone = 'default',
-}: {
-  label: string;
-  tone?: 'default' | 'accent' | 'violet' | 'emerald';
-}) {
-  const palette =
-    tone === 'accent'
-      ? { bg: 'rgba(59, 130, 246, 0.10)', color: 'var(--fg-default)' }
-      : tone === 'violet'
-        ? { bg: 'rgba(139, 92, 246, 0.12)', color: 'var(--fg-default)' }
-        : tone === 'emerald'
-          ? { bg: 'rgba(16, 185, 129, 0.12)', color: 'var(--fg-default)' }
-          : { bg: 'var(--bg-raised)', color: 'var(--fg-muted)' };
-
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 18,
-        padding: '0 6px',
-        borderRadius: 999,
-        background: palette.bg,
-        color: palette.color,
-        border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-        fontSize: 10,
-        fontWeight: 600,
-      }}
-    >
-      {label}
-    </span>
-  );
 }
 
 interface InlineFormProps {
@@ -721,7 +687,7 @@ export function ProviderSettings({
     selectedProviderType: string | undefined,
     selectedModel?: AIModelConfigRef,
     title = '默认思考',
-    description = '新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。',
+    description: ReactNode = '新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。',
   ) {
     if (!defaultThinking || !onSetThinkingMode) {
       return null;
@@ -747,12 +713,11 @@ export function ProviderSettings({
     return (
       <div
         style={{
-          borderTop:
-            '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
-          paddingTop: 12,
+          borderTop: `1px solid ${color.borderSubtle}`,
+          paddingTop: 'var(--spacing-3, 12px)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 'var(--spacing-2, 8px)',
         }}
       >
         <div
@@ -760,22 +725,25 @@ export function ProviderSettings({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 12,
+            gap: 'var(--spacing-3, 12px)',
           }}
         >
           <div>
             <div style={{ fontSize: 11, fontWeight: 600 }}>{title}</div>
-            <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--fg-muted)',
+                marginTop: 'var(--spacing-1, 4px)',
+              }}
+            >
               {description}
             </div>
           </div>
           {supportsThinking ? (
-            <CapabilityPill
-              label={canConfigureThinking ? '可切换思考' : '模型自带思考'}
-              tone="violet"
-            />
+            <StatusPill label={canConfigureThinking ? '可切换思考' : '模型自带思考'} color="info" />
           ) : (
-            <CapabilityPill label="当前模型不支持" />
+            <StatusPill label="当前模型不支持" color="muted" />
           )}
         </div>
         {!supportsThinking ? (
@@ -785,18 +753,19 @@ export function ProviderSettings({
         ) : null}
         {supportsThinking && !canConfigureThinking ? (
           <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
-            这个模型的思考能力由模型本身决定，当前网关不会单独下发开关或力度参数。
+            这个模型的思考能力由模型本身决定，当前网关不会单独下发开关或
+            <span style={{ whiteSpace: 'nowrap' }}>力度参数</span>。
           </div>
         ) : null}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-2, 8px)' }}>
           <button
             type="button"
             disabled={!controlEnabled}
             onClick={() => onSetThinkingMode(mode, { enabled: false, effort: current.effort })}
             style={{
-              border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-              borderRadius: 999,
-              padding: '0.35rem 0.7rem',
+              border: `1px solid ${color.borderDefault}`,
+              borderRadius: 'var(--radius-pill, 9999px)',
+              padding: 'var(--spacing-1, 4px) var(--spacing-2, 8px)',
               fontSize: 11,
               fontWeight: 600,
               cursor: controlEnabled ? 'pointer' : 'not-allowed',
@@ -817,9 +786,9 @@ export function ProviderSettings({
                 disabled={!controlEnabled}
                 onClick={() => onSetThinkingMode(mode, { enabled: true, effort: level })}
                 style={{
-                  border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                  borderRadius: 999,
-                  padding: '0.35rem 0.7rem',
+                  border: `1px solid ${color.borderDefault}`,
+                  borderRadius: 'var(--radius-pill, 9999px)',
+                  padding: 'var(--spacing-1, 4px) var(--spacing-2, 8px)',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: controlEnabled ? 'pointer' : 'not-allowed',
@@ -867,13 +836,26 @@ export function ProviderSettings({
     const visibleModels = showingSearchResults
       ? []
       : [...(visibleProvider?.defaultModels ?? [])].sort(compareModelsByName);
-    const contextLabel = formatContextWindow(selectedModel?.contextWindow);
+    const contextLabel = formatContextWindow(
+      selectedModel?.contextWindow !== undefined &&
+        selectedModel.contextWindowOverride !== undefined
+        ? Math.min(selectedModel.contextWindow, selectedModel.contextWindowOverride)
+        : (selectedModel?.contextWindowOverride ?? selectedModel?.contextWindow),
+    );
     const thinkingMode: keyof ThinkingDefaultsRef | null = mode === 'image' ? null : mode;
     const thinkingTitle = mode === 'fast' ? 'Fast 默认思考' : '默认思考';
     const thinkingDescription =
-      mode === 'fast'
-        ? 'Fast 快速模型会用于标题、内联、辅助与子任务等轻量路径。'
-        : '新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。';
+      mode === 'fast' ? (
+        <>
+          Fast 快速模型会用于标题、内联、辅助与子任务等
+          <span style={{ whiteSpace: 'nowrap' }}>轻量路径</span>。
+        </>
+      ) : (
+        <>
+          新会话会继承这里的默认值；若模型本身固定带思考，
+          <span style={{ whiteSpace: 'nowrap' }}>请求时</span>会自动安全降级。
+        </>
+      );
 
     const applySelection = (providerId: string, modelId: string) => {
       onChange(providerId, modelId);
@@ -889,6 +871,7 @@ export function ProviderSettings({
         AIModelConfigRef,
         | 'id'
         | 'contextWindow'
+        | 'contextWindowOverride'
         | 'supportsTools'
         | 'supportsVision'
         | 'supportsImageGeneration'
@@ -900,7 +883,11 @@ export function ProviderSettings({
       total: number,
     ) => {
       const isActive = provider.id === selected.providerId && model.id === selected.modelId;
-      const modelContext = formatContextWindow(model.contextWindow);
+      const modelContext = formatContextWindow(
+        model.contextWindow !== undefined && model.contextWindowOverride !== undefined
+          ? Math.min(model.contextWindow, model.contextWindowOverride)
+          : (model.contextWindowOverride ?? model.contextWindow),
+      );
       const capabilitySummary = [
         model.supportsVision ? '视觉' : null,
         model.supportsImageGeneration ? '生图' : null,
@@ -922,14 +909,11 @@ export function ProviderSettings({
           style={{
             width: '100%',
             border: 'none',
-            borderBottom:
-              index < total - 1
-                ? '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))'
-                : 'none',
-            padding: '0.58rem 0.15rem',
+            borderBottom: index < total - 1 ? `1px solid ${color.borderSubtle}` : 'none',
+            padding: 'var(--spacing-2, 8px) var(--spacing-1, 4px)',
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: 'var(--spacing-2, 8px)',
             textAlign: 'left',
             cursor: 'pointer',
             background: isActive ? 'var(--bg-raised)' : 'transparent',
@@ -939,7 +923,7 @@ export function ProviderSettings({
         >
           <span
             style={{
-              width: 16,
+              width: 'var(--spacing-4, 16px)',
               display: 'flex',
               justifyContent: 'center',
               color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
@@ -987,7 +971,7 @@ export function ProviderSettings({
         return (
           <div
             style={{
-              padding: '0.8rem 0',
+              padding: 'var(--spacing-3, 12px) 0',
               color: 'var(--fg-muted)',
               fontSize: 12,
             }}
@@ -1003,20 +987,18 @@ export function ProviderSettings({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '5px 0 3px',
-              borderTop:
-                '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+              gap: 'var(--spacing-1, 4px)',
+              padding: 'var(--spacing-1, 4px) 0',
+              borderTop: `1px solid ${color.borderSubtle}`,
             }}
           >
             <div
               style={{
                 width: 15,
                 height: 15,
-                borderRadius: 4,
+                borderRadius: 'var(--radius-xs, 4px)',
                 background: 'var(--bg-overlay)',
-                border:
-                  '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+                border: `1px solid ${color.borderSubtle}`,
                 overflow: 'hidden',
                 display: 'flex',
                 alignItems: 'center',
@@ -1068,11 +1050,11 @@ export function ProviderSettings({
           minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
+          gap: 'var(--spacing-2, 8px)',
           background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          borderRadius: 12,
-          padding: '0.85rem 1rem',
+          border: `1px solid ${color.borderDefault}`,
+          borderRadius: 'var(--radius-lg, 12px)',
+          padding: 'var(--spacing-3, 12px) var(--spacing-4, 16px)',
         }}
       >
         <div
@@ -1080,7 +1062,7 @@ export function ProviderSettings({
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
-            gap: 12,
+            gap: 'var(--spacing-3, 12px)',
           }}
         >
           <div style={{ minWidth: 0 }}>
@@ -1115,19 +1097,17 @@ export function ProviderSettings({
                 : '将用于新会话的默认起点'}
             </div>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {selectedModel?.supportsVision && <CapabilityPill label="视觉" tone="emerald" />}
-            {selectedModel?.supportsImageGeneration && (
-              <CapabilityPill label="生图" tone="accent" />
-            )}
-            {selectedModel?.supportsTools && <CapabilityPill label="工具" tone="accent" />}
-            {selectedModel?.supportsThinking && <CapabilityPill label="思考" tone="violet" />}
-            {contextLabel && <CapabilityPill label={contextLabel} />}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-1, 4px)' }}>
+            {selectedModel?.supportsVision && <StatusPill label="视觉" color="success" />}
+            {selectedModel?.supportsImageGeneration && <StatusPill label="生图" color="accent" />}
+            {selectedModel?.supportsTools && <StatusPill label="工具" color="accent" />}
+            {selectedModel?.supportsThinking && <StatusPill label="思考" color="info" />}
+            {contextLabel && <StatusPill label={contextLabel} color="muted" />}
           </div>
         </div>
 
         {candidateProviders.length > 1 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-2, 8px)' }}>
             {candidateProviders.map((provider) => {
               const isActiveProvider = provider.id === visibleProvider?.id;
               return (
@@ -1145,13 +1125,13 @@ export function ProviderSettings({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
-                    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                    borderRadius: 999,
+                    gap: 'var(--spacing-1, 4px)',
+                    border: `1px solid ${color.borderDefault}`,
+                    borderRadius: 'var(--radius-pill, 9999px)',
                     background: isActiveProvider ? 'var(--bg-raised)' : 'transparent',
                     boxShadow: isActiveProvider ? 'var(--shadow-sm)' : 'none',
                     color: isActiveProvider ? 'var(--fg-strong)' : 'var(--fg-default)',
-                    padding: '0.28rem 0.65rem',
+                    padding: 'var(--spacing-1, 4px) var(--spacing-2, 8px)',
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -1169,18 +1149,17 @@ export function ProviderSettings({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
-            height: 30,
-            borderRadius: 8,
-            border:
-              '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            gap: 'var(--spacing-2, 8px)',
+            height: 'var(--spacing-8, 32px)',
+            borderRadius: 'var(--radius-md, 8px)',
+            border: `1px solid ${color.borderSubtle}`,
             background: 'var(--bg-raised)',
-            padding: '0 9px',
+            padding: '0 var(--spacing-2, 8px)',
           }}
         >
           <svg
-            width="12"
-            height="12"
+            width="var(--spacing-3, 12px)"
+            height="var(--spacing-3, 12px)"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -1222,8 +1201,7 @@ export function ProviderSettings({
             flexDirection: 'column',
             gap: 0,
             paddingRight: 2,
-            borderTop:
-              '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            borderTop: `1px solid ${color.borderSubtle}`,
           }}
         >
           {showingSearchResults ? (
@@ -1231,7 +1209,7 @@ export function ProviderSettings({
           ) : visibleModels.length === 0 ? (
             <div
               style={{
-                padding: '0.8rem 0',
+                padding: 'var(--spacing-3, 12px) 0',
                 color: 'var(--fg-muted)',
                 fontSize: 12,
               }}

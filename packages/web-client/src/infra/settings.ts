@@ -73,6 +73,19 @@ export interface SettingsClient {
     options?: { signal?: AbortSignal },
   ): Promise<unknown>;
   putProviders(token: string, payload: unknown): Promise<unknown>;
+  putProviderFastMode(
+    token: string,
+    payload: { providerId: string; enabled: boolean },
+  ): Promise<{ ok: boolean; providerId: string; openaiFastMode: boolean }>;
+  putModelContext(
+    token: string,
+    payload: { providerId: string; modelId: string; contextWindowOverride: number | null },
+  ): Promise<{
+    ok: boolean;
+    providerId: string;
+    modelId: string;
+    contextWindowOverride: number | null;
+  }>;
   /** 单独更新 active-selection（chat / fast / image / compaction 的 provider+model 绑定）。 */
   putActiveSelection(token: string, payload: unknown): Promise<unknown>;
   // MCP servers
@@ -347,6 +360,30 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         actionLabel: '保存 Provider 配置',
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/providers`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async putProviderFastMode(token, payload) {
+      return performSettingsRequest({
+        actionLabel: payload.enabled ? '开启 OpenAI Fast 模式' : '关闭 OpenAI Fast 模式',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/providers/fast-mode`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async putModelContext(token, payload) {
+      return performSettingsRequest({
+        actionLabel: '保存模型上下文挡位',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/providers/model-context`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(payload),

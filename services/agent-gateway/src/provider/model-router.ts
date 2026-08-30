@@ -36,6 +36,9 @@ export interface ModelRouteConfig {
   apiKey: string;
   openaiFastMode?: boolean;
   contextWindow?: number;
+  contextWindowOverride?: number;
+  autoCompactThresholdRatio?: number;
+  autoCompactTargetRatio?: number;
   /** Model's maximum output token limit (from preset). Used by the
    *  compaction overflow formula to calculate usable input space.
    *  Mirrors opencode's `model.limit.output`. */
@@ -224,6 +227,9 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     upstreamProtocol,
     requestOverrides,
     contextWindow: builtinModel?.contextWindow,
+    contextWindowOverride: builtinModel?.contextWindowOverride,
+    autoCompactThresholdRatio: builtinModel?.autoCompactThresholdRatio,
+    autoCompactTargetRatio: builtinModel?.autoCompactTargetRatio,
     maxOutputTokens: builtinModel?.maxOutputTokens,
     providerType,
     inputPricePerMillion: builtinModel?.inputPricePerMillion,
@@ -301,6 +307,9 @@ export function resolveModelRouteFromProvider(
     upstreamProtocol,
     requestOverrides: mergedOverrides,
     contextWindow: modelConfig?.contextWindow,
+    contextWindowOverride: modelConfig?.contextWindowOverride,
+    autoCompactThresholdRatio: modelConfig?.autoCompactThresholdRatio,
+    autoCompactTargetRatio: modelConfig?.autoCompactTargetRatio,
     maxOutputTokens: modelConfig?.maxOutputTokens,
     providerType: provider.type,
     inputPricePerMillion: modelConfig?.inputPricePerMillion,
@@ -376,6 +385,9 @@ export function resolveCompactionRoute(
     upstreamProtocol,
     requestOverrides: mergedOverrides,
     contextWindow: modelConfig?.contextWindow,
+    contextWindowOverride: modelConfig?.contextWindowOverride,
+    autoCompactThresholdRatio: modelConfig?.autoCompactThresholdRatio,
+    autoCompactTargetRatio: modelConfig?.autoCompactTargetRatio,
     maxOutputTokens: modelConfig?.maxOutputTokens,
     providerType: provider.type,
     supportsThinking: false,

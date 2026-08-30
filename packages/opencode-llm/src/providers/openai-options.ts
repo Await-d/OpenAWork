@@ -31,6 +31,15 @@ export type OpenAIProviderOptionsInput = ProviderOptions & {
 const definedEntries = (input: Record<string, unknown>) =>
   Object.entries(input).filter((entry) => entry[1] !== undefined);
 
+const gpt5DefaultReasoningEffort = (id: string): ReasoningEffort => {
+  if (/^gpt-5[.-]5-pro(?:[.-]|$)/.test(id)) return 'high';
+  if (/^gpt-5[.-]\d+-pro(?:[.-]|$)/.test(id)) return 'medium';
+  const match = /^gpt-5[.-](\d+)(?:[.-]|$)/.exec(id);
+  if (!match) return 'medium';
+  const version = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(version) && version >= 1 && version <= 4 ? 'none' : 'medium';
+};
+
 const openAIProviderOptions = (
   options: OpenAIOptionsInput | undefined,
 ): ProviderOptions | undefined => {
@@ -56,8 +65,9 @@ export const gpt5DefaultOptions = (
   const id = modelID.toLowerCase();
   if (!id.includes('gpt-5') || id.includes('gpt-5-chat') || id.includes('gpt-5-pro'))
     return undefined;
+  const model = id.slice(id.lastIndexOf('/') + 1);
   return openAIProviderOptions({
-    reasoningEffort: 'medium',
+    reasoningEffort: gpt5DefaultReasoningEffort(model),
     reasoningSummary: 'auto',
     // GPT-5 reasoning models are configured stateless (`store: false`) by
     // `openAIDefaultOptions` below, so the only way a follow-up turn can

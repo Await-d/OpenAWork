@@ -52,6 +52,49 @@ describe('loadSavedChatSessionDefaultsResult', () => {
       },
     });
   });
+
+  it.each(['none', 'max'] as const)('保留 OpenAI 思考等级 %s', async (effort) => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          activeSelection: {
+            chat: { providerId: 'openai', modelId: effort === 'none' ? 'gpt-5.1' : 'gpt-5.6-sol' },
+          },
+          defaultThinking: {
+            chat: { enabled: true, effort },
+          },
+          providers: [
+            {
+              id: 'openai',
+              name: 'OpenAI',
+              type: 'cloud',
+              enabled: true,
+              defaultModels: [
+                {
+                  id: effort === 'none' ? 'gpt-5.1' : 'gpt-5.6-sol',
+                  label: effort === 'none' ? 'GPT-5.1' : 'GPT-5.6 Sol',
+                  enabled: true,
+                },
+              ],
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const result = await loadSavedChatSessionDefaultsResult('https://gw.test', 'token-1');
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        defaults: {
+          thinkingEnabled: true,
+          reasoningEffort: effort,
+        },
+      },
+    });
+  });
 });
 
 describe('buildSavedChatSessionMetadata', () => {

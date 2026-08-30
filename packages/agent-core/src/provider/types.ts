@@ -60,6 +60,7 @@ export interface AIModelConfig {
   label: string;
   enabled: boolean;
   contextWindow?: number;
+  contextWindowOverride?: number;
   maxOutputTokens?: number;
   autoCompactThresholdRatio?: number;
   autoCompactTargetRatio?: number;

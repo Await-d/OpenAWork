@@ -1292,7 +1292,7 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
     expect(payload.model).toBe('gpt-5.4');
     expect(payload.providerId).toBe('openai');
     expect(payload.thinkingEnabled).toBe(true);
-    expect(payload.reasoningEffort).toBe('high');
+    expect(payload.reasoningEffort).toBe('xhigh');
   });
 
   it('startStream 会为 custom 代理下的其他平台模型下发思考请求', async () => {
@@ -1390,7 +1390,7 @@ describe('useTeamConversationState — submitInbound (v0.2)', () => {
         expect(body.payload.providerId).toBe('openai');
         expect(body.payload.modelId).toBe('gpt-5.4');
         expect(body.payload.thinkingEnabled).toBe(true);
-        expect(body.payload.reasoningEffort).toBe('high');
+        expect(body.payload.reasoningEffort).toBe('xhigh');
         return new Response(
           JSON.stringify({ messageId: 'imsg-001', createdAt: '2026-05-16T15:00:00Z' }),
           { status: 200, headers: { 'content-type': 'application/json' } },

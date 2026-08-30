@@ -903,6 +903,144 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.put(
+    '/settings/providers/fast-mode',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.providers.fast-mode.put');
+      const user = request.user as JwtPayload;
+      const body = parseBody(
+        z.object({
+          providerId: z.string().min(1),
+          enabled: z.boolean(),
+        }),
+        request.body,
+      );
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      let stored = parseStoredJson(row?.value);
+      if (!Array.isArray(stored)) {
+        // 新用户首次进入聊天时，GET /settings/providers 会从内置 catalog
+        // 物化默认 Provider，但不会为了只读请求写回数据库。Fast 开关仍需
+        // 以同一份默认 catalog 为基线保存，避免强制用户先去设置页点一次保存。
+        stored = (await materializeProviderConfig(stored, null)).providers;
+      }
+      if (!Array.isArray(stored)) {
+        step.fail('providers not configured');
+        return reply.status(404).send({ error: 'Provider 配置不存在。' });
+      }
+
+      let providerFound = false;
+      let openaiProvider = false;
+      const providers = stored.map((provider) => {
+        if (!provider || typeof provider !== 'object') return provider;
+        const record = provider as Record<string, unknown>;
+        if (record['id'] !== body.providerId) return provider;
+        providerFound = true;
+        openaiProvider = record['type'] === 'openai';
+        if (!openaiProvider) return provider;
+        if (body.enabled) return { ...record, openaiFastMode: true };
+        const next = { ...record };
+        delete next['openaiFastMode'];
+        return next;
+      });
+
+      if (!providerFound) {
+        step.fail('provider not found');
+        return reply.status(404).send({ error: '指定 Provider 不存在。' });
+      }
+      if (!openaiProvider) {
+        step.fail('provider does not support fast mode');
+        return reply.status(400).send({ error: '仅 OpenAI Provider 支持 Fast 模式。' });
+      }
+
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(providers)],
+      );
+      invalidateCatalog(user.sub);
+      step.succeed(undefined, { providerId: body.providerId, enabled: body.enabled });
+      return reply.send({ ok: true, providerId: body.providerId, openaiFastMode: body.enabled });
+    },
+  );
+
+  app.put(
+    '/settings/providers/model-context',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.providers.model-context.put');
+      const user = request.user as JwtPayload;
+      const body = parseBody(
+        z.object({
+          providerId: z.string().min(1),
+          modelId: z.string().min(1),
+          contextWindowOverride: z.union([z.number().int().positive().max(10_000_000), z.null()]),
+        }),
+        request.body,
+      );
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      const stored = parseStoredJson(row?.value);
+      if (!Array.isArray(stored)) {
+        step.fail('providers not configured');
+        return reply.status(404).send({ error: 'Provider 配置不存在。' });
+      }
+      const providers = stored.map((provider) => {
+        if (!provider || typeof provider !== 'object') return provider;
+        const record = provider as Record<string, unknown>;
+        if (record['id'] !== body.providerId) return provider;
+        const models = Array.isArray(record['defaultModels']) ? record['defaultModels'] : [];
+        const nextModels = models.map((model) => {
+          if (!model || typeof model !== 'object') return model;
+          const modelRecord = model as Record<string, unknown>;
+          if (modelRecord['id'] !== body.modelId) return model;
+          const next = { ...modelRecord };
+          if (body.contextWindowOverride === null) delete next['contextWindowOverride'];
+          else next['contextWindowOverride'] = body.contextWindowOverride;
+          return next;
+        });
+        return { ...record, defaultModels: nextModels };
+      });
+      const provider = providers.find(
+        (entry) =>
+          entry &&
+          typeof entry === 'object' &&
+          (entry as Record<string, unknown>)['id'] === body.providerId,
+      );
+      const modelFound =
+        provider &&
+        typeof provider === 'object' &&
+        Array.isArray((provider as Record<string, unknown>)['defaultModels']) &&
+        ((provider as Record<string, unknown>)['defaultModels'] as unknown[]).some(
+          (model) =>
+            model &&
+            typeof model === 'object' &&
+            (model as Record<string, unknown>)['id'] === body.modelId,
+        );
+      if (!modelFound) {
+        step.fail('model not found');
+        return reply.status(404).send({ error: '指定模型不存在。' });
+      }
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(providers)],
+      );
+      step.succeed(undefined, { providerId: body.providerId, modelId: body.modelId });
+      return reply.send({
+        ok: true,
+        providerId: body.providerId,
+        modelId: body.modelId,
+        contextWindowOverride: body.contextWindowOverride,
+      });
+    },
+  );
+
   app.post(
     '/settings/providers/test',
     { onRequest: [requireAuth] },

@@ -66,6 +66,107 @@ describe('native Effect contract', () => {
     expect(prepared.body).toMatchObject({ service_tier: 'priority' });
   });
 
+  it('serializes the official GPT-5.6 max reasoning effort for Responses', async () => {
+    const model = OpenAI.configure({
+      auth: Auth.none,
+      providerOptions: { openai: { reasoningEffort: 'max' } },
+    }).responses('gpt-5.6-sol');
+    const request = new LLMRequest({
+      model,
+      system: [],
+      messages: [Message.user('hello')],
+      tools: [],
+    });
+
+    const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+    expect(prepared.body).toMatchObject({ reasoning: { effort: 'max' } });
+  });
+
+  it('serializes the official GPT-5.6 max reasoning effort for Chat Completions', async () => {
+    const model = OpenAI.configure({
+      auth: Auth.none,
+      providerOptions: { openai: { reasoningEffort: 'max' } },
+    }).chat('gpt-5.6-sol');
+    const request = new LLMRequest({
+      model,
+      system: [],
+      messages: [Message.user('hello')],
+      tools: [],
+    });
+
+    const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+    expect(prepared.body).toMatchObject({ reasoning_effort: 'max' });
+  });
+
+  it('uses the official none default for GPT-5.4 Responses', async () => {
+    const model = OpenAI.configure({ auth: Auth.none }).responses('gpt-5.4');
+    const request = new LLMRequest({
+      model,
+      system: [],
+      messages: [Message.user('hello')],
+      tools: [],
+    });
+
+    const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+    expect(prepared.body).toMatchObject({ reasoning: { effort: 'none' } });
+  });
+
+  it('uses the official none default across GPT-5.1 and GPT-5.2 Responses', async () => {
+    for (const modelId of ['gpt-5.1', 'gpt-5.2']) {
+      const model = OpenAI.configure({ auth: Auth.none }).responses(modelId);
+      const request = new LLMRequest({
+        model,
+        system: [],
+        messages: [Message.user('hello')],
+        tools: [],
+      });
+
+      const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+      expect(prepared.body).toMatchObject({ reasoning: { effort: 'none' } });
+    }
+  });
+
+  it('keeps the medium default for GPT-5.5 and GPT-5.6 Responses', async () => {
+    for (const modelId of ['gpt-5.5', 'gpt-5.6-sol']) {
+      const model = OpenAI.configure({ auth: Auth.none }).responses(modelId);
+      const request = new LLMRequest({
+        model,
+        system: [],
+        messages: [Message.user('hello')],
+        tools: [],
+      });
+
+      const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+      expect(prepared.body).toMatchObject({ reasoning: { effort: 'medium' } });
+    }
+  });
+
+  it('uses the official defaults for versioned GPT-5 Pro models', async () => {
+    const cases = [
+      ['gpt-5.4-pro', 'medium'],
+      ['gpt-5.5-pro', 'high'],
+    ] as const;
+
+    for (const [modelId, effort] of cases) {
+      const model = OpenAI.configure({ auth: Auth.none }).responses(modelId);
+      const request = new LLMRequest({
+        model,
+        system: [],
+        messages: [Message.user('hello')],
+        tools: [],
+      });
+
+      const prepared = await Effect.runPromise(LLMClient.prepare(request));
+
+      expect(prepared.body).toMatchObject({ reasoning: { effort } });
+    }
+  });
+
   it('composes LLMClient.layer with RequestExecutor.fetchLayer', async () => {
     const methods = await Effect.runPromise(
       Effect.gen(function* () {

@@ -346,6 +346,7 @@ export function resolveEffectiveContextWindow(
   userId: string,
   modelId: string,
   presetContextWindow: number | undefined,
+  contextWindowOverride?: number,
 ): number {
   const key = cacheKey(userId, modelId);
   const cached = effectiveContextWindowCache.get(key);
@@ -359,10 +360,15 @@ export function resolveEffectiveContextWindow(
     }
   }
 
+  const environmentOverride = getEnvContextOverride(modelId);
+  const combinedOverride =
+    contextWindowOverride !== undefined && environmentOverride !== undefined
+      ? Math.min(contextWindowOverride, environmentOverride)
+      : (contextWindowOverride ?? environmentOverride);
   return resolveCompactionThreshold({
     modelContextWindow: presetContextWindow,
     discoveredContextWindow,
-    contextWindowOverride: getEnvContextOverride(modelId),
+    contextWindowOverride: combinedOverride,
   }).contextWindow;
 }
 
@@ -434,6 +440,13 @@ export const AGGRESSIVE_TRUNCATION_CONFIG = {
   maxTruncateAttempts: 20,
 } as const;
 
+export interface AggressiveTruncationConfig {
+  readonly targetTokenRatio: number;
+  readonly charsPerToken: number;
+  readonly minOutputSizeToTruncate: number;
+  readonly maxTruncateAttempts: number;
+}
+
 const AGGRESSIVE_TRUNCATION_PLACEHOLDER =
   '[TOOL RESULT TRUNCATED — 上下文超限，原始输出已被截断以恢复会话。如需完整输出请重新执行该工具。]';
 
@@ -487,7 +500,7 @@ export function aggressiveTruncateToolOutputs<T extends AggressiveTruncationMess
   messages: T[],
   currentTokens: number,
   maxTokens: number,
-  config = AGGRESSIVE_TRUNCATION_CONFIG,
+  config: AggressiveTruncationConfig = AGGRESSIVE_TRUNCATION_CONFIG,
 ): AggressiveTruncationResult & { messages: typeof messages } {
   const targetTokens = Math.floor(maxTokens * config.targetTokenRatio);
   const tokensToReduce = currentTokens - targetTokens;

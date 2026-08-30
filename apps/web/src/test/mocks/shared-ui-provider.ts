@@ -73,7 +73,9 @@ export function inferProviderLabelFromModelId(_modelId: string): string | undefi
 export type SupportedReasoningEffort =
   'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o[134](?:[.-]|$))/;
+const OPENAI_FIXED_PRO_MODEL_PATTERN = /^gpt-5-pro(?:[.-]|$)/;
+const OPENAI_VERSIONED_PRO_MODEL_PATTERN = /^gpt-5[.-]\d+-pro(?:[.-]|$)/;
+const OPENAI_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5(?:[.-]|$)|o\d+(?:[.-]|$))/;
 
 function isOpenAIReasoningModel(modelId: string): boolean {
   return OPENAI_REASONING_MODEL_RE.test(modelId.toLowerCase());
@@ -115,7 +117,7 @@ function inferVendorFromModelId(modelId: string): string | undefined {
 }
 
 function resolveEffectiveProviderType(providerType: string, modelId: string): string {
-  return providerType === 'openai' || providerType === 'custom'
+  return providerType === 'openai' || providerType === 'custom' || providerType === 'siliconflow'
     ? (inferVendorFromModelId(modelId) ?? providerType)
     : providerType;
 }
@@ -128,16 +130,17 @@ export function inferSupportsThinking(
   if (declaredSupportsThinking) return true;
   if (!providerType || !modelId) return false;
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
-  if (providerType === 'openai' || providerType === 'custom') {
+  if (providerType === 'openai' || providerType === 'custom' || providerType === 'siliconflow') {
     const inferredVendor = inferVendorFromModelId(modelId);
     if (!inferredVendor) return false;
     if (inferredVendor === 'openai') return isOpenAIReasoningModel(modelId);
     if (inferredVendor === 'anthropic') return isAnthropicThinkingModel(modelId);
     return true;
   }
+  if (providerType === 'azure') return isOpenAIReasoningModel(modelId);
   if (effectiveType === 'openrouter') {
     const id = modelId.toLowerCase();
-    return id.includes('gpt') || id.includes('claude') || id.includes('gemini-3');
+    return isOpenAIReasoningModel(id) || id.includes('claude') || id.includes('gemini-3');
   }
   return false;
 }
@@ -158,12 +161,12 @@ export function canConfigureThinkingForModel(
       providerType === 'openai' ||
       providerType === 'siliconflow')
   ) {
-    return !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId);
+    return !OPENAI_FIXED_PRO_MODEL_PATTERN.test(actualModelId);
   }
   if (effectiveType === 'openai' || effectiveType === 'azure') {
     return (
       inferSupportsThinking(providerType, modelId, false) &&
-      !/^gpt-5(?:\.\d+)?-pro/.test(actualModelId)
+      !OPENAI_FIXED_PRO_MODEL_PATTERN.test(actualModelId)
     );
   }
   if (effectiveType === 'deepseek') return !actualModelId.includes('reasoner');
@@ -177,7 +180,7 @@ export function canConfigureThinkingForModel(
   }
   if (effectiveType === 'openrouter') {
     return (
-      id.includes('gpt-5') ||
+      isOpenAIReasoningModel(id) ||
       id.includes('claude') ||
       id.includes('gemini-3') ||
       id.includes('thinking')
@@ -193,11 +196,24 @@ export function getSupportedReasoningEffortsForModel(
   if (!providerType || !modelId) return ['low', 'medium', 'high'];
   const id = leafModelId(modelId);
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
-  if (effectiveType === 'openai') {
-    if (/^gpt-5(?:\.\d+)?-pro/.test(id)) return [];
-    if (/^gpt-5\.6\b/.test(id)) return ['none', 'low', 'medium', 'high', 'max'];
-    if (/^gpt-5\.5\b/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh'];
+  if (effectiveType === 'openai' || effectiveType === 'azure') {
+    if (OPENAI_FIXED_PRO_MODEL_PATTERN.test(id)) return [];
+    if (OPENAI_VERSIONED_PRO_MODEL_PATTERN.test(id)) return ['medium', 'high', 'xhigh'];
     if (id.includes('codex-max')) return ['medium', 'high', 'xhigh'];
+    const versionMatch = /^gpt-5[.-](\d+)(?=$|[^\d])/.exec(id);
+    const minorRaw = versionMatch?.[1];
+    if (minorRaw) {
+      const minor = Number.parseInt(minorRaw, 10);
+      if (Number.isFinite(minor) && minor >= 6) {
+        return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+      }
+      if (Number.isFinite(minor) && minor >= 2) {
+        return ['none', 'low', 'medium', 'high', 'xhigh'];
+      }
+      if (Number.isFinite(minor) && minor === 1) {
+        return ['none', 'low', 'medium', 'high'];
+      }
+    }
     if (id === 'gpt-5' || id.startsWith('gpt-5-')) return ['minimal', 'low', 'medium', 'high'];
     return ['low', 'medium', 'high'];
   }

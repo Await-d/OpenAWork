@@ -91,6 +91,22 @@ describe('provider catalog (single source of truth)', () => {
     }
   });
 
+  it('OpenAI 内置模型目录包含 GPT-5.6 三个官方变体', () => {
+    const openai = getCatalogEntry('openai');
+    const expectedModels = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+
+    for (const modelId of expectedModels) {
+      const model = openai?.defaultModels.find((item) => item.id === modelId);
+      expect(model).toMatchObject({
+        id: modelId,
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+      });
+    }
+  });
+
   it('moonshot 仅 kimi-k2.5 系列支持下发 thinking；mimo 全系支持', () => {
     expect(catalogModelSupportsThinking('moonshot', 'kimi-k2.5')).toBe(true);
     expect(catalogModelSupportsThinking('moonshot', 'moonshot-v1-32k')).toBe(false);

@@ -282,6 +282,30 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     thinkingStyle: 'openai_effort',
     defaultModels: [
       {
+        id: 'gpt-5.6-sol',
+        label: 'GPT-5.6 Sol',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+      },
+      {
+        id: 'gpt-5.6-terra',
+        label: 'GPT-5.6 Terra',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+      },
+      {
+        id: 'gpt-5.6-luna',
+        label: 'GPT-5.6 Luna',
+        enabled: true,
+        supportsTools: true,
+        supportsVision: true,
+        supportsThinking: true,
+      },
+      {
         id: 'gpt-5.5',
         label: 'GPT-5.5',
         enabled: true,

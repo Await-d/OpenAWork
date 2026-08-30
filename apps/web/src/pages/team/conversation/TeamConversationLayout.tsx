@@ -269,6 +269,7 @@ export interface TeamConversationLayoutProps {
     supportsTools?: boolean;
     supportsVision?: boolean;
     contextWindow?: number;
+    contextWindowOverride?: number;
   } | null;
   activeModelCanConfigureThinking?: boolean;
   activeModelTooltip?: string;
@@ -308,6 +309,7 @@ export interface TeamConversationLayoutProps {
   ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
   onThinkingEnabledChange: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -532,6 +534,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
+    onContextWindowOverrideChange,
     onToggleWebSearch,
     onThinkingEnabledChange,
     onReasoningEffortChange,
@@ -876,6 +879,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}
           onModelSelect={onComposerModelSelect}
+          onContextWindowOverrideChange={onContextWindowOverrideChange}
           onToggleWebSearch={onToggleWebSearch}
           onThinkingEnabledChange={onThinkingEnabledChange}
           onReasoningEffortChange={onReasoningEffortChange}

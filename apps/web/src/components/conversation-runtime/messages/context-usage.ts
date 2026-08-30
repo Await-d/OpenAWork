@@ -4,6 +4,16 @@ export interface ChatContextUsageSnapshot {
   usedTokens: number;
 }
 
+export function resolveEffectiveContextWindow(
+  contextWindow?: number,
+  contextWindowOverride?: number,
+): number | undefined {
+  const candidates = [contextWindow, contextWindowOverride].filter(
+    (value): value is number => value !== undefined && Number.isFinite(value) && value > 0,
+  );
+  return candidates.length > 0 ? Math.min(...candidates) : undefined;
+}
+
 export function buildChatContextUsageSnapshot({
   contextWindow,
   historicalTokens,

@@ -6,6 +6,7 @@ import {
   isAutoCompactCircuitBreakerTripped,
 } from '../session/session-compaction.js';
 import {
+  AGGRESSIVE_TRUNCATION_CONFIG,
   aggressiveTruncateToolOutputs,
   parseContextLimitError,
   recordDiscoveredContextWindow,
@@ -26,6 +27,7 @@ import {
 import {
   DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS,
   DEFAULT_AUTOMATIC_TAIL_TURNS,
+  boundPreserveTokens,
 } from './compaction-tail-budget.js';
 import { persistCompactionProjection } from './compaction-projection.js';
 
@@ -107,6 +109,7 @@ function shouldAutomaticallyCompact(input: {
   readonly usage: CompactionTokenUsage;
   readonly contextWindow: number;
   readonly modelMaxOutputTokens: number | undefined;
+  readonly autoCompactThresholdRatio?: number;
 }): boolean {
   return isCompactionThresholdReached(input.usage, {
     modelContextWindow: input.contextWindow,
@@ -114,7 +117,24 @@ function shouldAutomaticallyCompact(input: {
     autoCompactPercentOverride: parsePercentageOverride(
       process.env['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'],
     ),
+    autoCompactThresholdRatio: input.autoCompactThresholdRatio,
   });
+}
+
+function resolveAutomaticPreserveRecentTokens(
+  route: ModelRouteConfig,
+  contextWindow: number,
+): number {
+  const targetRatio = route.autoCompactTargetRatio;
+  if (
+    targetRatio === undefined ||
+    !Number.isFinite(targetRatio) ||
+    targetRatio <= 0 ||
+    targetRatio >= 1
+  ) {
+    return DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS;
+  }
+  return boundPreserveTokens(Math.floor(contextWindow * targetRatio));
 }
 
 async function resolveCompactionRouteForUser(
@@ -221,6 +241,7 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
     input.userId,
     input.route.model,
     input.route.contextWindow,
+    input.route.contextWindowOverride,
   );
   if (
     isCompactionSubrequest(input) ||
@@ -231,6 +252,7 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
       usage: input.lastRoundUsage,
       contextWindow: effectiveContextWindow,
       modelMaxOutputTokens: input.route.maxOutputTokens,
+      autoCompactThresholdRatio: input.route.autoCompactThresholdRatio,
     })
   ) {
     return { triggered: false, metadataJson: input.metadataJson };
@@ -250,7 +272,10 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
       messages: allMessages,
       prune: input.compactionSettings.prune,
       recentMessagesKept: input.compactionSettings.recentMessagesKept,
-      preserveRecentTokens: DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS,
+      preserveRecentTokens: resolveAutomaticPreserveRecentTokens(
+        input.route,
+        effectiveContextWindow,
+      ),
       round: input.round,
       route: compactionRoute,
       sessionId: input.sessionId,
@@ -294,6 +319,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
     input.userId,
     input.route.model,
     input.route.contextWindow,
+    input.route.contextWindowOverride,
   );
   let discoveredLimit: { currentTokens: number; maxTokens: number } | undefined;
   if (roundResult.stopReason === 'error' && roundResult.upstreamError) {
@@ -319,6 +345,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
         usage: roundResult.usage,
         contextWindow: effectiveContextWindow,
         modelMaxOutputTokens: input.route.maxOutputTokens,
+        autoCompactThresholdRatio: input.route.autoCompactThresholdRatio,
       })) ||
       (!roundResult.usage && roundResult.stopReason === 'error'));
   if (!shouldAutoCompact) {
@@ -370,10 +397,21 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
   }
 
   if (discoveredLimit && discoveredLimit.currentTokens > 0) {
+    const truncationConfig =
+      input.route.autoCompactTargetRatio !== undefined &&
+      Number.isFinite(input.route.autoCompactTargetRatio) &&
+      input.route.autoCompactTargetRatio > 0 &&
+      input.route.autoCompactTargetRatio < 1
+        ? {
+            ...AGGRESSIVE_TRUNCATION_CONFIG,
+            targetTokenRatio: input.route.autoCompactTargetRatio,
+          }
+        : AGGRESSIVE_TRUNCATION_CONFIG;
     const truncationResult = aggressiveTruncateToolOutputs(
       allMessages,
       discoveredLimit.currentTokens,
       discoveredLimit.maxTokens,
+      truncationConfig,
     );
     if (truncationResult.success && truncationResult.sufficient) {
       try {
@@ -460,7 +498,10 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
       messages: messagesForCompaction,
       prune: input.compactionSettings.prune,
       recentMessagesKept: input.compactionSettings.recentMessagesKept,
-      preserveRecentTokens: DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS,
+      preserveRecentTokens: resolveAutomaticPreserveRecentTokens(
+        input.route,
+        effectiveContextWindow,
+      ),
       round: input.round,
       route: compactionRoute,
       sessionId: input.sessionId,

@@ -11,6 +11,8 @@ interface ScheduleStreamAttachRetryInput {
   progressLabel?: string;
 }
 
+const MAX_ATTACH_RETRY_DELAY_MS = 30_000;
+
 export interface StreamAttachRetryReturn {
   attachRetryNonce: number;
   /**
@@ -30,10 +32,11 @@ function defaultProgressLabel(delayMs: number): string {
 
 export function useStreamAttachRetry(): StreamAttachRetryReturn {
   const timeoutRef = useRef<number | null>(null);
+  const retryAttemptRef = useRef(0);
   const [attachRetryNonce, setAttachRetryNonce] = useState(0);
   const [attachRetryProgress, setAttachRetryProgress] = useState<string | null>(null);
 
-  const cancelAttachRetry = useCallback(() => {
+  const clearPendingRetry = useCallback(() => {
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -41,20 +44,31 @@ export function useStreamAttachRetry(): StreamAttachRetryReturn {
     setAttachRetryProgress(null);
   }, []);
 
+  const cancelAttachRetry = useCallback(() => {
+    clearPendingRetry();
+    retryAttemptRef.current = 0;
+  }, [clearPendingRetry]);
+
   const scheduleAttachRetry = useCallback(
     (input: ScheduleStreamAttachRetryInput) => {
-      cancelAttachRetry();
-      setAttachRetryProgress(input.progressLabel ?? defaultProgressLabel(input.delayMs));
+      clearPendingRetry();
+      const delayMs = Math.min(
+        MAX_ATTACH_RETRY_DELAY_MS,
+        Math.max(0, input.delayMs) * 2 ** retryAttemptRef.current,
+      );
+      retryAttemptRef.current += 1;
+      setAttachRetryProgress(input.progressLabel ?? defaultProgressLabel(delayMs));
       timeoutRef.current = window.setTimeout(() => {
         timeoutRef.current = null;
         setAttachRetryProgress(null);
         if (input.beforeRetry?.() === false) {
+          retryAttemptRef.current = 0;
           return;
         }
         setAttachRetryNonce((current) => current + 1);
-      }, input.delayMs);
+      }, delayMs);
     },
-    [cancelAttachRetry],
+    [clearPendingRetry],
   );
 
   useEffect(() => {

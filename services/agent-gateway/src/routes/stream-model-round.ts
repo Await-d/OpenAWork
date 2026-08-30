@@ -55,6 +55,7 @@ export function resolveModelRoundOverflow(input: {
   readonly effectiveContextWindow?: number;
   readonly modelMaxOutputTokens?: number;
   readonly autoCompactPercentOverride?: number;
+  readonly autoCompactThresholdRatio?: number;
   readonly contextLimitError: ReturnType<typeof parseContextLimitError>;
   readonly compactionReservedTokens?: number;
 }): boolean {
@@ -71,6 +72,9 @@ export function resolveModelRoundOverflow(input: {
       : {}),
     ...(input.autoCompactPercentOverride !== undefined
       ? { autoCompactPercentOverride: input.autoCompactPercentOverride }
+      : {}),
+    ...(input.autoCompactThresholdRatio !== undefined
+      ? { autoCompactThresholdRatio: input.autoCompactThresholdRatio }
       : {}),
   });
 }
@@ -1833,6 +1837,7 @@ export async function runModelRound(input: {
       input.userId,
       input.route.model,
       input.route.contextWindow,
+      input.route.contextWindowOverride,
     );
     const overflow = resolveModelRoundOverflow({
       usage: v2Usage,
@@ -1841,6 +1846,7 @@ export async function runModelRound(input: {
       autoCompactPercentOverride: parsePercentageOverride(
         process.env['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'],
       ),
+      autoCompactThresholdRatio: input.route.autoCompactThresholdRatio,
       contextLimitError: streamedContextLimitError,
       compactionReservedTokens: input.compactionReservedTokens,
     });
