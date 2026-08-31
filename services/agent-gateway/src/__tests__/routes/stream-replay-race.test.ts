@@ -254,6 +254,11 @@ describe('stream replay race', () => {
         },
       });
       executionDeferred.resolve({ statusCode: 200 });
+      clearInFlightStreamRequest({
+        clientRequestId: CLIENT_REQUEST_ID,
+        execution: executionDeferred.promise,
+        sessionId: SESSION_ID,
+      });
 
       const response = await responsePromise;
       const events = parseSseChunks(response.body);

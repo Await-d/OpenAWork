@@ -258,7 +258,7 @@ describe('任务5权限/问题恢复真实 stream seam', () => {
       upstream.requests.filter(
         (body) => (JSON.parse(body) as { stream?: boolean }).stream === true,
       ),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(result.stopReason).toBe('error');
     expect(result.statusCode).toBe(200);
   });

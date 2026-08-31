@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../compaction/context-window-resolver.js', () => ({
+  AGGRESSIVE_TRUNCATION_CONFIG: {
+    targetTokenRatio: 0.8,
+  },
   aggressiveTruncateToolOutputs: mocks.aggressiveTruncateToolOutputs,
   parseContextLimitError: mocks.parseContextLimitError,
   recordDiscoveredContextWindow: mocks.recordDiscoveredContextWindow,
