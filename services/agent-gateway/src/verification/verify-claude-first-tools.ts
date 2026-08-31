@@ -11,7 +11,7 @@ import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import {
   assert,
-  createChatCompletionsStream,
+  createProtocolAwareStream,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async () => createChatCompletionsStream('Claude-first Agent 子代理已完成。'),
+        async (url) => createProtocolAwareStream(url, 'Claude-first Agent 子代理已完成。'),
         async () => {
           await connectDb();
           await migrate();
