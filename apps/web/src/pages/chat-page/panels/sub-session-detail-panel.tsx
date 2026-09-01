@@ -19,6 +19,7 @@ import {
   type ChatMessage,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { useSubSessionDetail } from '../hooks/use-sub-session-detail.js';
+import { mergeOptimisticUserMessage } from './sub-session-message-state.js';
 import type { TaskToolRuntimeLookup } from '../conversation/render/task-tool-runtime.js';
 import { requestCurrentSessionRefresh } from '../../../utils/session/session-list-events.js';
 
@@ -217,10 +218,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   }, [childSessionId]);
 
   const renderedMessages = useMemo(() => {
-    const baseMessages = [...messages];
-    if (optimisticUserMessage) {
-      baseMessages.push(optimisticUserMessage);
-    }
+    const baseMessages = mergeOptimisticUserMessage(messages, optimisticUserMessage);
     if (streaming && (streamBuffer.length > 0 || liveToolCalls.length > 0)) {
       baseMessages.push({
         id: '__child_streaming__',

@@ -49,6 +49,7 @@ import { reconcileTaskActivities } from './chat-task-activities';
 import {
   buildChatScreenSessionResetState,
   buildChatScreenStaleSendAbortState,
+  reconcileMobileChatMessages,
 } from './chat-screen-state';
 import { createChatScreenGuardedStreamHandlers } from './chat-screen-stream-handlers';
 import ExpoPersistenceAdapter, {
@@ -554,7 +555,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           return;
         }
         const msgs: Message[] = normalizeMobileChatMessages(session.messages ?? []);
-        setMessages(msgs);
+        setMessages((previous) => reconcileMobileChatMessages(previous, msgs));
       } catch (error) {
         if (handleAuthError(error)) return;
         console.warn('Failed to load mobile chat history', error);

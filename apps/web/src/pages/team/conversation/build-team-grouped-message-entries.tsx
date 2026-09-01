@@ -18,6 +18,8 @@ import {
 } from '../runtime/data/role-layer-identity.js';
 import type { ResolveInlinePermissionActionsFn } from '../../../components/chat/session/ChatPageSections.js';
 
+const TEAM_STREAMING_MESSAGE_ID = 'team-streaming-assistant';
+
 export function buildTeamGroupedMessageEntries(input: {
   buildEntryActions: (message: ChatMessage) => ChatRenderAction[];
   messages: ChatMessage[];
@@ -27,7 +29,18 @@ export function buildTeamGroupedMessageEntries(input: {
   streamingSegments: ChatMessagePart[];
   visibleStreaming: boolean;
 }): ChatRenderGroup[] {
-  const entries: ChatRenderEntry[] = input.messages.map((message) => {
+  const seenMessageIds = new Set<string>();
+  const messages = input.messages.filter((message) => {
+    if (seenMessageIds.has(message.id)) {
+      return false;
+    }
+    if (input.visibleStreaming && message.id === TEAM_STREAMING_MESSAGE_ID) {
+      return false;
+    }
+    seenMessageIds.add(message.id);
+    return true;
+  });
+  const entries: ChatRenderEntry[] = messages.map((message) => {
     const messageIdentity =
       message.role === 'assistant'
         ? message.agentId
@@ -66,7 +79,7 @@ export function buildTeamGroupedMessageEntries(input: {
 
   if (input.visibleStreaming) {
     const streamingMessage: ChatMessage = {
-      id: 'team-streaming-assistant',
+      id: TEAM_STREAMING_MESSAGE_ID,
       role: 'assistant',
       content: input.streamBuffer.trim().length > 0 ? input.streamBuffer : '团队正在处理中…',
       ...(input.streamingSegments.length > 0 ? { parts: input.streamingSegments } : {}),

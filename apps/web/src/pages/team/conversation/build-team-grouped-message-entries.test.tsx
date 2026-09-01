@@ -7,6 +7,44 @@ import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-ent
 import type { ResolveInlinePermissionActionsFn } from '../../../components/chat/session/ChatPageSections.js';
 
 describe('buildTeamGroupedMessageEntries', () => {
+  it('对重复 message id 只生成一个渲染 entry，并避免覆盖流式占位 id', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'same-id',
+        role: 'user',
+        content: '重复消息',
+      },
+      {
+        id: 'same-id',
+        role: 'user',
+        content: '重复消息',
+      },
+      {
+        id: 'team-streaming-assistant',
+        role: 'assistant',
+        content: '旧的流式快照',
+      },
+    ];
+
+    const groups = buildTeamGroupedMessageEntries({
+      messages,
+      roleLayer: 'executor',
+      visibleStreaming: true,
+      streamBuffer: '当前流式内容',
+      streamingSegments: [],
+      buildEntryActions: () => [],
+    });
+
+    const entries = groups.flatMap((group) => group.entries);
+    expect(entries.map((entry) => entry.message.id)).toEqual([
+      'same-id',
+      'team-streaming-assistant',
+    ]);
+    expect(
+      entries.find((entry) => entry.message.id === 'team-streaming-assistant')?.message.content,
+    ).toBe('当前流式内容');
+  });
+
   it('在流式期间追加 team 风格的虚拟 assistant 消息，并按层级身份单独分组', () => {
     const messages: ChatMessage[] = [
       {

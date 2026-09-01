@@ -18,9 +18,14 @@ export function normalizeMobileChatMessages(rawMessages: unknown): MobileChatMes
     return [];
   }
 
+  const seenIds = new Set<string>();
   return rawMessages.flatMap((rawMessage) => {
     const normalized = normalizeMobileChatMessage(rawMessage);
-    return normalized ? [normalized] : [];
+    if (!normalized || seenIds.has(normalized.id)) {
+      return [];
+    }
+    seenIds.add(normalized.id);
+    return [normalized];
   });
 }
 

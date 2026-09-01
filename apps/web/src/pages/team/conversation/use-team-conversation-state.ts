@@ -49,7 +49,10 @@ import type {
   ChatMessagePart,
   ReasoningEffort,
 } from '../../../components/conversation-runtime/messages/support.js';
-import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
+import {
+  normalizeChatMessages,
+  reconcileSnapshotChatMessages,
+} from '../../../components/conversation-runtime/messages/support.js';
 import type {
   SessionStateStatus,
   SessionTodoItem,
@@ -686,7 +689,9 @@ export function useTeamConversationState(
       const recovery = result.recovery;
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
-      setMessages(normalized);
+      if (!streamingRef.current) {
+        setMessages((previous) => reconcileSnapshotChatMessages(previous, normalized));
+      }
 
       setChildSessions(
         recovery.children.map((child) => {
