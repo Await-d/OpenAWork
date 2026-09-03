@@ -1,6 +1,7 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Schema, Stream } from 'effect';
 import { describe, expect, it } from 'vitest';
 import * as OpenAIResponses from '../openai-responses.js';
+import { sseFraming } from '../shared.js';
 import { LLMEvent, LLMRequest, Message } from '../../schema/index.js';
 
 const reasoningEvents = [
@@ -74,5 +75,49 @@ describe('OpenAI Responses reasoning replay', () => {
       summary: [{ type: 'summary_text', text: 'summary-1' }],
       encrypted_content: 'encrypted-1',
     });
+  });
+
+  it('decodes an event when an SSE relay provides the type only in the event name', async () => {
+    const frames = await Effect.runPromise(
+      sseFraming(
+        Stream.fromIterable([
+          new TextEncoder().encode(
+            'event: response.output_text.delta\ndata: {"item_id":"msg_1","delta":"你好"}\n\n',
+          ),
+        ]),
+      ).pipe(
+        Stream.runFold(
+          () => [],
+          (items, frame) => [...items, frame],
+        ),
+      ),
+    );
+
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+
+    expect(decode(frames[0])).toMatchObject({
+      type: 'response.output_text.delta',
+      item_id: 'msg_1',
+      delta: '你好',
+    });
+  });
+
+  it('preserves an event type already present in the SSE data payload', async () => {
+    const frames = await Effect.runPromise(
+      sseFraming(
+        Stream.fromIterable([
+          new TextEncoder().encode(
+            'event: response.output_text.delta\ndata: {"type":"response.completed"}\n\n',
+          ),
+        ]),
+      ).pipe(
+        Stream.runFold(
+          () => [],
+          (items, frame) => [...items, frame],
+        ),
+      ),
+    );
+
+    expect(frames).toEqual(['{"type":"response.completed"}']);
   });
 });

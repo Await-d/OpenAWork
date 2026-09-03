@@ -226,7 +226,17 @@ export const sseFraming = (bytes) =>
     Stream.pipeThroughChannel(Sse.decode()),
     Stream.catchTag('Retry', () => Stream.empty),
     Stream.filter((event) => event.data.length > 0 && event.data !== '[DONE]'),
-    Stream.map((event) => event.data),
+    Stream.map((event) => {
+      if (event.event === 'message') return event.data;
+      let payload;
+      try {
+        payload = decodeJson(event.data);
+      } catch {
+        return event.data;
+      }
+      if (!isRecord(payload) || 'type' in payload) return event.data;
+      return encodeJson({ ...payload, type: event.event });
+    }),
   );
 /**
  * Canonical invalid-request constructor. Lift one-line `const invalid =
