@@ -2,7 +2,7 @@ export type AttachStreamDisconnectResult = 'continue' | 'handled';
 
 export interface AttachStreamReconnectWiringOptions {
   attachSessionViewEpoch: number;
-  handleAttachReconnect: () => void;
+  handleAttachReconnect: (technicalDetail?: string) => void;
   isCurrentSessionRequest: (sessionId: string, expectedEpoch: number) => boolean;
   requestSessionListRefresh: () => void;
   sessionId: string;
@@ -10,7 +10,7 @@ export interface AttachStreamReconnectWiringOptions {
 
 export interface AttachStreamReconnectWiring {
   handleAttachDisconnectError: (code: string) => AttachStreamDisconnectResult;
-  handleReconnectRequired: () => void;
+  handleReconnectRequired: (technicalDetail?: string) => void;
 }
 
 export function createAttachStreamReconnectWiring(
@@ -38,8 +38,8 @@ export function createAttachStreamReconnectWiring(
 
       return 'continue';
     },
-    handleReconnectRequired: () => {
-      handleAttachReconnect();
+    handleReconnectRequired: (technicalDetail) => {
+      handleAttachReconnect(technicalDetail);
     },
   };
 }

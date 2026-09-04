@@ -1319,11 +1319,11 @@ export function useTeamConversationState(
           }
           // Trigger reload (also called inside the consumer's onStreamDone).
         },
-        onError: (code, message) => {
+        onError: (code, message, technicalDetail) => {
           streamingRef.current = false;
           setStreaming(false);
           setStoppingStream(false);
-          setStreamError(formatGatewayStreamErrorMessage(code, message));
+          setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
           // Re-enable multi-attach on error too, if still connected.
           if (sessionId) {
             const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
@@ -1458,7 +1458,7 @@ export function useTeamConversationState(
           // reload 已由 useConversationStream 的 onStreamDone 回调触发，
           // 这里不重复调用，避免冗余请求。
         },
-        onError: (code, message) => {
+        onError: (code, message, technicalDetail) => {
           streamingRef.current = false;
           setStreaming(false);
           setStoppingStream(false);
@@ -1466,7 +1466,7 @@ export function useTeamConversationState(
           // Attach 失败不一定是错误——可能后端 direct 路径已完成或走了
           // orchestrate 路径（无活跃流）。仅在非"无活跃流"错误时提示。
           if (code !== 'NO_ACTIVE_STREAM' && code !== 'ATTACH_NO_ACTIVE_STREAM') {
-            setStreamError(formatGatewayStreamErrorMessage(code, message));
+            setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
           }
           // Re-enable multi-attach on error too, if still connected.
           if (sessionId) {

@@ -706,11 +706,11 @@ export function useChatConversationState(
           setActiveStreamStartedAt(null);
           // Trigger reload (also called inside the consumer's onStreamDone).
         },
-        onError: (code, message) => {
+        onError: (code, message, technicalDetail) => {
           streamingRef.current = false;
           setStreaming(false);
           setStoppingStream(false);
-          setStreamError(formatGatewayStreamErrorMessage(code, message));
+          setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
         },
       });
     },

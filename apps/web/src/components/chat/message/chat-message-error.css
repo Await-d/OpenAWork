@@ -117,6 +117,39 @@
   box-shadow: 0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent);
 }
 
+/* 原始技术详情：与友好摘要并列，便于直接定位连接或上游失败。 */
+.chat-message-error-technical-detail {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chat-message-error-technical-detail summary {
+  cursor: pointer;
+  color: var(--aux);
+  font-weight: 600;
+}
+
+.chat-message-error-technical-detail summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.chat-message-error-technical-detail pre {
+  margin: 8px 0 0;
+  max-block-size: 200px;
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg-default);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* 建议信息 */
 .chat-message-error-suggestion {
   display: flex;

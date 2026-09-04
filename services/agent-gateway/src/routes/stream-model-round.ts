@@ -905,8 +905,17 @@ function buildOrderedAssistantContent(
   return content.length > 0 ? content : [{ type: 'text', text: '' }];
 }
 
-function buildErrorContent(code: string, message: string): MessageContent[] {
-  return [{ type: 'text', text: `[错误: ${code}] ${message}`.trim() }];
+function buildErrorContent(
+  code: string,
+  message: string,
+  technicalDetail?: string,
+): MessageContent[] {
+  const normalizedTechnicalDetail = technicalDetail?.trim();
+  const detailSuffix =
+    normalizedTechnicalDetail && normalizedTechnicalDetail !== message
+      ? `\n\n技术详情：${normalizedTechnicalDetail}`
+      : '';
+  return [{ type: 'text', text: `[错误: ${code}] ${message}${detailSuffix}`.trim() }];
 }
 
 export function buildUserFacingStreamErrorMessage(input: {
@@ -1660,6 +1669,13 @@ export async function runModelRound(input: {
               requestId: input.clientRequestId,
               ...meta,
             } as StreamChunk;
+            const clientChunk: StreamChunk =
+              chunkWithMeta.type === 'error'
+                ? {
+                    ...chunkWithMeta,
+                    technicalDetail: chunkWithMeta.technicalDetail ?? chunkWithMeta.message,
+                  }
+                : chunkWithMeta;
 
             if (chunkWithMeta.type === 'done') {
               doneEmitted = true;
@@ -1691,14 +1707,14 @@ export async function runModelRound(input: {
               markFailedRequestScopeMessages();
             }
 
-            accumulateChunk(state, chunkWithMeta);
-            input.writeChunk(chunkWithMeta);
+            accumulateChunk(state, clientChunk);
+            input.writeChunk(clientChunk);
             ensureStepStarted();
             persistStreamChunkAsSessionEvents({
               sessionId: input.sessionId,
               userId: input.userId,
               clientRequestId: input.clientRequestId,
-              chunk: chunkWithMeta,
+              chunk: clientChunk,
               state: streamSessionEventState,
             });
           }),
@@ -1746,7 +1762,7 @@ export async function runModelRound(input: {
         sessionId: input.sessionId,
         userId: input.userId,
         role: 'assistant',
-        content: buildErrorContent('V2_UPSTREAM_ERROR', userFacingMessage),
+        content: buildErrorContent('V2_UPSTREAM_ERROR', userFacingMessage, message),
         clientRequestId: input.clientRequestId,
         status: 'error',
         replaceExisting: true,
@@ -1761,6 +1777,7 @@ export async function runModelRound(input: {
           input.runId,
           toUpstreamStreamSummary('error', streamDiagnostics, input.route),
           input.clientRequestId,
+          message,
         ),
       );
       input.wl.flush(input.ctx, 502);
@@ -1941,7 +1958,7 @@ export async function runModelRound(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
-      content: buildErrorContent('STREAM_ERROR', userFacingMessage),
+      content: buildErrorContent('STREAM_ERROR', userFacingMessage, message),
       clientRequestId: input.clientRequestId,
       status: 'error',
       replaceExisting: true,
@@ -1956,6 +1973,7 @@ export async function runModelRound(input: {
         input.runId,
         toUpstreamStreamSummary('error', streamDiagnostics, input.route),
         input.clientRequestId,
+        message,
       ),
     );
     input.wl.flush(input.ctx, 500);

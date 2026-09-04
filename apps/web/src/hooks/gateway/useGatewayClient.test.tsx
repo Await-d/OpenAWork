@@ -112,6 +112,16 @@ describe('formatGatewayStreamErrorMessage', () => {
     );
   });
 
+  it('无用户文案时仍把 SSE 技术详情追加到兜底提示', () => {
+    expect(
+      formatGatewayStreamErrorMessage(
+        'SSE_STREAM_ERROR',
+        undefined,
+        'gateway upstream reset by peer',
+      ),
+    ).toBe('SSE 流式响应处理中断，请稍后重试。\n\n技术详情：gateway upstream reset by peer');
+  });
+
   it('能把常见机器码转换为用户文案', () => {
     expect(formatGatewayStreamErrorMessage('REQUEST_REPLAY_FAILED')).toBe('请求重放失败。');
     expect(formatGatewayStreamErrorMessage('SESSION_ALREADY_RUNNING')).toBe(
@@ -196,6 +206,60 @@ describe('connectAttachEventSource', () => {
       '实时流数据解析失败。',
     );
     expect(eventSource.closed).toBe(true);
+  });
+
+  it('attach SSE 传输中断并进入自动重连时保留连接诊断详情', async () => {
+    let currentEventSource: MockEventSource | null = null;
+    let currentActiveRequest: TestActiveStreamSnapshot | null = {
+      clientRequestId: 'req-attach-disconnect',
+      lastSeq: 3,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse',
+    };
+    const onReconnectRequired = vi.fn();
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-attach-disconnect',
+        lastSeq: 3,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks: {
+        onDelta: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        onReconnectRequired,
+      },
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 3,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: (next) => {
+        currentActiveRequest = next;
+      },
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+
+    act(() => {
+      eventSource.onopen?.();
+      eventSource.onerror?.();
+    });
+
+    await expect(connectPromise).resolves.toBe(true);
+    expect(onReconnectRequired).toHaveBeenCalledWith(
+      'attach_stream_disconnected',
+      '连接在流式传输过程中中断。Gateway：https://gw.test；会话：session-1。浏览器没有提供底层失败原因。',
+    );
   });
 
   it('attach SSE 收到 run envelope 时会推进 lastSeq，重复 eventId 不重复分发', async () => {
@@ -454,5 +518,47 @@ describe('useGatewayClient', () => {
     expect(onDelta).toHaveBeenCalledWith('hello');
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('SSE 回退连接失败时向界面提供可复制的连接详情', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onError = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-sse-error', 'hello', {
+        onDelta: vi.fn(),
+        onDone: vi.fn(),
+        onError,
+      });
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]?.onclose?.();
+      MockEventSource.instances[0]?.onerror?.();
+    });
+
+    expect(onError).toHaveBeenCalledWith(
+      'SSE_ERROR',
+      'SSE 连接异常。',
+      '连接在收到 SSE 响应前中断。Gateway：https://gw.test；会话：session-sse-error。浏览器没有提供底层失败原因。',
+    );
   });
 });

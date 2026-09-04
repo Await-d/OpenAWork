@@ -1269,6 +1269,11 @@ export interface StreamErrorChunk {
   type: 'error';
   code: string;
   message: string;
+  /**
+   * 原始错误的技术上下文。`message` 保持可读的用户提示，前端按需展开此字段，
+   * 以免网络/上游失败被泛化文案覆盖而无法诊断。
+   */
+  technicalDetail?: string;
   requestId?: string;
   eventId?: string;
   runId?: string;

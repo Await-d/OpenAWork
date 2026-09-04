@@ -150,12 +150,17 @@ describe('stream error contracts', () => {
       'REQUEST_REPLAY_FAILED',
       STREAM_ERROR_MESSAGES.requestReplayFailed,
       'run-1',
+      undefined,
+      'req-1',
+      '上游返回 503 Service Unavailable',
     );
 
     expect(chunk).toMatchObject({
       type: 'error',
       code: 'REQUEST_REPLAY_FAILED',
       message: '请求重放失败。',
+      requestId: 'req-1',
+      technicalDetail: '上游返回 503 Service Unavailable',
       runId: 'run-1',
     });
   });

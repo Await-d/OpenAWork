@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getFriendlyErrorMessage } from '../../../utils/errors/friendly-error-messages.js';
+import '../message/chat-message-error.css';
 
 export function looksLikeAssistantErrorContent(content: string): boolean {
   return /^\[错误:\s*[A-Za-z0-9_]+\]/.test(content.trim());
@@ -10,21 +11,32 @@ function parseAssistantErrorContent(content: string): {
   detail?: string;
   headline: string;
   suggestion?: string;
+  technicalDetail?: string;
   canRetry: boolean;
 } {
   const normalized = content.trim();
   const bracketMatch = normalized.match(/^\[错误:\s*([A-Za-z0-9_]+)\]\s*(.*)$/s);
   const baseMessage = bracketMatch?.[2]?.trim() || normalized;
   const code = bracketMatch?.[1]?.trim() || undefined;
+  const technicalDetailMarker = '\n\n技术详情：';
+  const technicalDetailIndex = baseMessage.indexOf(technicalDetailMarker);
+  const primaryMessage =
+    technicalDetailIndex === -1 ? baseMessage : baseMessage.slice(0, technicalDetailIndex).trim();
+  const explicitTechnicalDetail =
+    technicalDetailIndex === -1
+      ? undefined
+      : baseMessage.slice(technicalDetailIndex + technicalDetailMarker.length).trim() || undefined;
 
-  // 使用友好错误消息系统
-  const friendlyError = getFriendlyErrorMessage(baseMessage);
+  // 保留友好摘要，同时不再让错误映射吞掉上游/连接的原始上下文。
+  const friendlyError = getFriendlyErrorMessage(primaryMessage);
+  const technicalDetail = explicitTechnicalDetail;
 
   return {
     code,
     headline: friendlyError.title,
     detail: friendlyError.message,
     suggestion: friendlyError.suggestion,
+    ...(technicalDetail ? { technicalDetail } : {}),
     canRetry: friendlyError.canRetry,
   };
 }
@@ -103,6 +115,13 @@ export function AssistantErrorContent({
               </button>
             )}
           </div>
+        )}
+
+        {parsed.technicalDetail && (
+          <details className="chat-message-error-technical-detail" open>
+            <summary>技术详情</summary>
+            <pre data-testid="chat-message-error-technical-detail">{parsed.technicalDetail}</pre>
+          </details>
         )}
 
         {/* 建议信息 */}

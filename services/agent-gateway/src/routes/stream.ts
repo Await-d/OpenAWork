@@ -3196,11 +3196,14 @@ export function createStreamErrorChunk(
   runId: string,
   upstreamSummary?: UpstreamStreamSummary,
   requestId?: string,
+  technicalDetail?: string,
 ) {
+  const normalizedTechnicalDetail = technicalDetail?.trim();
   return {
     type: 'error' as const,
     code,
     message,
+    ...(normalizedTechnicalDetail ? { technicalDetail: normalizedTechnicalDetail } : {}),
     ...(requestId ? { requestId } : {}),
     runId,
     ...(upstreamSummary ? { upstreamSummary } : {}),

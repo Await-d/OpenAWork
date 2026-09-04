@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
+import './stream-error-bar-v2.css';
 
 export interface ChatStreamErrorBarProps {
   streamError: string | null;
@@ -81,6 +82,7 @@ export function ChatStreamErrorBarV2({
       >
         {/* 主要内容行 */}
         <div
+          className="chat-stream-error-main-row"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -120,6 +122,7 @@ export function ChatStreamErrorBarV2({
 
           {/* 错误文本 */}
           <div
+            className="chat-stream-error-content"
             style={{
               minWidth: 0,
               flex: 1,
@@ -187,6 +190,7 @@ export function ChatStreamErrorBarV2({
 
           {/* 操作按钮组 */}
           <div
+            className="chat-stream-error-actions"
             style={{
               display: 'flex',
               alignItems: 'center',

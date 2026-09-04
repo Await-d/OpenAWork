@@ -520,10 +520,10 @@ describe('message-v2 compatibility regressions', () => {
     // single message identifier so a future rename does not silently drop
     // the idempotency assertion.
     expect(streamModelRoundSource).toMatch(
-      /buildErrorContent\('V2_UPSTREAM_ERROR', \w+\)[\s\S]*?replaceExisting: true/,
+      /buildErrorContent\('V2_UPSTREAM_ERROR', \w+(?:, \w+)?\)[\s\S]*?replaceExisting: true/,
     );
     expect(streamModelRoundSource).toMatch(
-      /buildErrorContent\('STREAM_ERROR', \w+\)[\s\S]*?replaceExisting: true/,
+      /buildErrorContent\('STREAM_ERROR', \w+(?:, \w+)?\)[\s\S]*?replaceExisting: true/,
     );
   });
 

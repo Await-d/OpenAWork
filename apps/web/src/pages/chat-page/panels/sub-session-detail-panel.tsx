@@ -6,7 +6,10 @@ import {
   type ChatRenderEntry,
   type ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
-import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
+import {
+  formatGatewayStreamErrorMessage,
+  useGatewayClient,
+} from '../../../hooks/gateway/useGatewayClient.js';
 import {
   renderChatMessageContentWithOptions,
   renderStreamingChatMessageContentWithOptions,
@@ -502,10 +505,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           setLiveToolCalls([]);
         });
       },
-      onError: (code, message) => {
+      onError: (code, message, technicalDetail) => {
         setStreaming(false);
         setOptimisticUserMessage(null);
-        setSendError(message ? `${code}: ${message}` : code);
+        setSendError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
       },
       onEvent: (event) => {
         if (event.type !== 'tool_call_delta' && event.type !== 'tool_result') {

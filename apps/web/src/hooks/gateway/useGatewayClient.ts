@@ -34,8 +34,8 @@ interface StreamCallbacks {
     cancellation?: StreamCancellationSummary,
     upstreamSummary?: UpstreamStreamSummary,
   ) => void;
-  onError: (code: string, message?: string) => void;
-  onReconnectRequired?: (reason: 'attach_stream_disconnected') => void;
+  onError: (code: string, message?: string, technicalDetail?: string) => void;
+  onReconnectRequired?: (reason: 'attach_stream_disconnected', technicalDetail?: string) => void;
   model?: string;
   thinkingEnabled?: boolean;
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -66,41 +66,68 @@ export const STREAM_CLIENT_ERROR_MESSAGES = {
   wsInvalidPayload: 'WebSocket 数据解析失败。',
 } as const;
 
-export function formatGatewayStreamErrorMessage(code: string, message?: string): string {
-  if (message && message.trim().length > 0) {
-    return message;
+export function formatGatewayStreamErrorMessage(
+  code: string,
+  message?: string,
+  technicalDetail?: string,
+): string {
+  const normalizedMessage = message?.trim();
+  const normalizedTechnicalDetail = technicalDetail?.trim();
+  const appendTechnicalDetail = (baseMessage: string): string =>
+    normalizedTechnicalDetail && normalizedTechnicalDetail !== baseMessage
+      ? `${baseMessage}\n\n技术详情：${normalizedTechnicalDetail}`
+      : baseMessage;
+
+  if (normalizedMessage) {
+    return appendTechnicalDetail(normalizedMessage);
   }
 
-  switch (code) {
-    case 'REQUEST_REPLAY_FAILED':
-      return '请求重放失败。';
-    case 'SESSION_ALREADY_RUNNING':
-      return '当前会话已有请求正在运行。';
-    case 'MODEL_ERROR':
-      return '模型响应失败，请稍后重试。';
-    case 'STREAM_ERROR':
-      return '流式响应处理中断，请稍后重试。';
-    case 'V2_UPSTREAM_ERROR':
-      return '上游模型服务暂时不可用，请稍后重试。';
-    case 'WS_STREAM_ERROR':
-      return 'WebSocket 流式响应处理中断，请稍后重试。';
-    case 'SSE_STREAM_ERROR':
-      return 'SSE 流式响应处理中断，请稍后重试。';
-    case 'ATTACH_STREAM_DISCONNECTED':
-      return '实时流连接已断开。';
-    case 'ATTACH_STREAM_INVALID_PAYLOAD':
-      return STREAM_CLIENT_ERROR_MESSAGES.attachInvalidPayload;
-    case 'SSE_INVALID_PAYLOAD':
-      return STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload;
-    case 'WS_INVALID_PAYLOAD':
-      return STREAM_CLIENT_ERROR_MESSAGES.wsInvalidPayload;
-    case 'SSE_ERROR':
-      return 'SSE 连接异常。';
-    case 'WS_ERROR':
-      return 'WebSocket 连接异常。';
-    default:
-      return code;
+  const fallbackMessage = (() => {
+    switch (code) {
+      case 'REQUEST_REPLAY_FAILED':
+        return '请求重放失败。';
+      case 'SESSION_ALREADY_RUNNING':
+        return '当前会话已有请求正在运行。';
+      case 'MODEL_ERROR':
+        return '模型响应失败，请稍后重试。';
+      case 'STREAM_ERROR':
+        return '流式响应处理中断，请稍后重试。';
+      case 'V2_UPSTREAM_ERROR':
+        return '上游模型服务暂时不可用，请稍后重试。';
+      case 'WS_STREAM_ERROR':
+        return 'WebSocket 流式响应处理中断，请稍后重试。';
+      case 'SSE_STREAM_ERROR':
+        return 'SSE 流式响应处理中断，请稍后重试。';
+      case 'ATTACH_STREAM_DISCONNECTED':
+        return '实时流连接已断开。';
+      case 'ATTACH_STREAM_INVALID_PAYLOAD':
+        return STREAM_CLIENT_ERROR_MESSAGES.attachInvalidPayload;
+      case 'SSE_INVALID_PAYLOAD':
+        return STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload;
+      case 'WS_INVALID_PAYLOAD':
+        return STREAM_CLIENT_ERROR_MESSAGES.wsInvalidPayload;
+      case 'SSE_ERROR':
+        return 'SSE 连接异常。';
+      case 'WS_ERROR':
+        return 'WebSocket 连接异常。';
+      default:
+        return code;
+    }
+  })();
+  return appendTechnicalDetail(fallbackMessage);
+}
+
+export function describeSseConnectionFailure(input: {
+  gatewayUrl: string;
+  sessionId: string;
+}): string {
+  let gateway = input.gatewayUrl;
+  try {
+    gateway = new URL(input.gatewayUrl).origin;
+  } catch {
+    // 配置页会自行校验地址；这里保留输入值使连接错误仍可定位。
   }
+  return `连接在收到 SSE 响应前中断。Gateway：${gateway}；会话：${input.sessionId}。浏览器没有提供底层失败原因。`;
 }
 
 interface ActiveStreamSnapshot {
@@ -302,7 +329,7 @@ export function connectAttachEventSource(
         settled = true;
         cleanup(true, eventSource);
         callbacks.onEvent?.(chunk);
-        callbacks.onError(chunk.code, chunk.message);
+        callbacks.onError(chunk.code, chunk.message, chunk.technicalDetail);
       },
     });
 
@@ -364,11 +391,12 @@ export function connectAttachEventSource(
 
       settled = true;
       cleanup(false, eventSource);
+      const detail = `连接在${opened ? '流式传输过程中' : '收到 SSE 响应前'}中断。Gateway：${gatewayUrl}；会话：${sessionId}。浏览器没有提供底层失败原因。`;
       if (callbacks.onReconnectRequired) {
-        callbacks.onReconnectRequired('attach_stream_disconnected');
+        callbacks.onReconnectRequired('attach_stream_disconnected', detail);
         return;
       }
-      callbacks.onError('ATTACH_STREAM_DISCONNECTED', '实时流连接已断开');
+      callbacks.onError('ATTACH_STREAM_DISCONNECTED', '实时流连接已断开。', detail);
     };
   });
 }
@@ -840,7 +868,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           settled = true;
           cleanup();
           callbacks.onEvent?.(chunk);
-          callbacks.onError(chunk.code, chunk.message);
+          callbacks.onError(chunk.code, chunk.message, chunk.technicalDetail);
         },
       });
 
@@ -924,7 +952,11 @@ export function useGatewayClient(token: string | null): GatewayClient {
               callbacks.onDone('cancelled');
               return;
             }
-            callbacks.onError('SSE_ERROR', 'SSE 连接异常。');
+            callbacks.onError(
+              'SSE_ERROR',
+              'SSE 连接异常。',
+              describeSseConnectionFailure({ gatewayUrl, sessionId }),
+            );
           }
         };
       };

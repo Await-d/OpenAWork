@@ -3541,7 +3541,7 @@ export default function ChatPage() {
         }, 800);
         requestSessionListRefresh();
       },
-      onError: (code: string, message?: string) => {
+      onError: (code: string, message?: string, technicalDetail?: string) => {
         if (activeSessionRef.current !== sid) {
           requestSessionListRefresh();
           return;
@@ -3551,7 +3551,7 @@ export default function ChatPage() {
           return;
         }
         const finishedAt = Date.now();
-        const resolvedMessage = formatGatewayStreamErrorMessage(code, message);
+        const resolvedMessage = formatGatewayStreamErrorMessage(code, message, technicalDetail);
         const errorContent = `[错误: ${code}] ${resolvedMessage}`;
         logger.error('stream error', `${code}: ${resolvedMessage}`);
         const errorMsgId = makeOrderedMessageId();
@@ -3980,7 +3980,16 @@ export default function ChatPage() {
       currentRoundStartedAt = committed.currentRoundStartedAt;
     };
 
-    const handleAttachReconnect = () => {
+    const handleAttachReconnect = (technicalDetail?: string) => {
+      if (technicalDetail) {
+        setStreamError(
+          formatGatewayStreamErrorMessage(
+            'ATTACH_STREAM_DISCONNECTED',
+            '实时流连接已断开。',
+            technicalDetail,
+          ),
+        );
+      }
       handleInterruptedAttachStream({
         actions: {
           cancelPendingRevealAnimation: () => {
@@ -4634,7 +4643,7 @@ export default function ChatPage() {
           }, 800);
           requestSessionListRefresh();
         },
-        onError: (code, message) => {
+        onError: (code, message, technicalDetail) => {
           if (attachReconnectWiring.handleAttachDisconnectError(code) === 'handled') {
             return;
           }
@@ -4644,7 +4653,7 @@ export default function ChatPage() {
             return;
           }
           const finishedAt = Date.now();
-          const resolvedMessage = formatGatewayStreamErrorMessage(code, message);
+          const resolvedMessage = formatGatewayStreamErrorMessage(code, message, technicalDetail);
           const errorContent = `[错误: ${code}] ${resolvedMessage}`;
           logger.error('attach stream error', `${code}: ${resolvedMessage}`);
           const attachErrorMsgId =
@@ -4685,8 +4694,8 @@ export default function ChatPage() {
           }, 500);
           requestSessionListRefresh();
         },
-        onReconnectRequired: () => {
-          attachReconnectWiring.handleReconnectRequired();
+        onReconnectRequired: (_reason, technicalDetail) => {
+          attachReconnectWiring.handleReconnectRequired(technicalDetail);
         },
       })
       .then((attached) => {
@@ -4695,6 +4704,7 @@ export default function ChatPage() {
         }
         if (attached) {
           cancelAttachRetry();
+          setStreamError(null);
           // 标记这个会话的 attach 已成功完成，防止后续重复触发
           console.log('[ATTACH_ELIGIBILITY] attach succeeded for', sid);
           return;
@@ -4737,6 +4747,7 @@ export default function ChatPage() {
     scheduleAttachRetry,
     sessionStateStatus,
     sessionModesHydrated,
+    setStreamError,
     streaming,
   ]);
 

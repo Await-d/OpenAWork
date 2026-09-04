@@ -52,10 +52,19 @@ export class GatewaySSEClient {
     };
 
     this.es.onerror = () => {
+      let gateway = this.gatewayUrl;
+      try {
+        gateway = new URL(this.gatewayUrl).origin;
+      } catch {
+        // 连接配置无效时保留原始值，便于用户修正网关地址。
+      }
       const errChunk: GatewayStreamEvent = {
         type: 'error',
         code: 'SSE_ERROR',
         message: 'SSE 连接异常。',
+        technicalDetail:
+          `连接在收到 SSE 响应前中断。Gateway：${gateway}；会话：${sessionId}。` +
+          '浏览器没有提供底层失败原因。',
       };
       dispatchStreamEvent(this.handlers, errChunk);
       this.es?.close();

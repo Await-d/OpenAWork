@@ -508,6 +508,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
                 'WS_STREAM_ERROR',
                 STREAM_PLUGIN_ERROR_MESSAGES.wsStreamError,
                 requestRunId,
+                undefined,
+                body.data.clientRequestId,
+                message,
               ),
             );
             wl.flush(ctx, 500);
@@ -661,6 +664,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           'SSE_STREAM_ERROR',
           STREAM_PLUGIN_ERROR_MESSAGES.sseStreamError,
           randomUUID(),
+          undefined,
+          query.data.clientRequestId,
+          message,
         ),
       );
       wl.flush(ctx, 500);
