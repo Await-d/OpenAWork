@@ -935,6 +935,11 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description:
               '可选的明确 toolCallId，来自当前会话中之前的 tool_result 引用；有时优先使用它',
           },
+          toolCallRef: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            description: '超长 toolCallId 的稳定 SHA-256 引用，来自 tool_output_reference',
+          },
           useLatestReferenced: {
             type: 'boolean',
             description:
@@ -954,6 +959,19 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             minimum: 1,
             maximum: 400,
             description: '读多少行文本',
+          },
+          charStart: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              '当前 jsonPath/行/项选择内的 UTF-16 字符偏移（0 基）。续读时保留原选择参数。',
+          },
+          charCount: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 8000,
+            description:
+              '字符分页长度上限；实际返回同时受序列化字节预算限制，使用 nextCharStart 续读。',
           },
           itemStart: {
             type: 'integer',

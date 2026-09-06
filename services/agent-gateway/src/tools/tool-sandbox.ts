@@ -137,6 +137,7 @@ import {
   deleteSessionMessagesByRequestScope,
   getLatestReferencedToolResult,
   getSessionToolResultByCallId,
+  getSessionToolResultByReference,
   listSessionMessagesV2 as listSessionMessages,
   listSessionMessagesByRequestScope,
 } from '../message/message-v2-adapter.js';
@@ -2792,6 +2793,7 @@ async function executeGatewayManagedToolImpl(
       const probeStartAt = Date.now();
       const probeResult = await executeExtractMediaInfoTool({
         signal,
+        sessionId,
         userId,
         toolInput: parsed.data,
       });
@@ -3016,6 +3018,16 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
+      if (executionContext?.userId && executionContext.userId !== userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'Current user does not own this session',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
       const parsed = readToolOutputToolDefinition.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
@@ -3033,9 +3045,15 @@ async function executeGatewayManagedToolImpl(
             userId,
             toolCallId: parsed.data.toolCallId,
           })
-        : parsed.data.useLatestReferenced
-          ? getLatestReferencedToolResult({ sessionId, userId })
-          : null;
+        : parsed.data.toolCallRef
+          ? getSessionToolResultByReference({
+              sessionId,
+              userId,
+              toolCallRef: parsed.data.toolCallRef,
+            })
+          : parsed.data.useLatestReferenced
+            ? getLatestReferencedToolResult({ sessionId, userId })
+            : null;
       if (!resolvedStored) {
         return {
           toolCallId: request.toolCallId,
@@ -6476,7 +6494,7 @@ export class ToolSandbox {
         requestId: request.toolCallId,
         input: effectiveRequest.rawInput,
         output: result.output,
-        isError: result.isError ?? false,
+        isError: false,
         durationMs: result.durationMs ?? null,
       });
       return result;

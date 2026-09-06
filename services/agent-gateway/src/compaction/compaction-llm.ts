@@ -1,5 +1,6 @@
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
+import { projectToolOutput } from '../message/tool-output-model-view.js';
 import { Effect } from 'effect';
 import {
   runUpstreamGenerate,
@@ -11,6 +12,7 @@ import {
   buildCompactionUserPrompt,
   stripAnalysisBlock,
 } from './compaction-prompt.js';
+import { microcompactMessages } from './microcompact.js';
 
 /**
  * Filter out system messages from the conversation history before sending
@@ -20,6 +22,17 @@ import {
  */
 function filterSystemMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
   return messages.filter((msg) => msg.role !== 'system');
+}
+
+function projectToolMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
+  return messages.map((message) =>
+    message.role === 'tool'
+      ? {
+          ...message,
+          content: projectToolOutput(message.toolCallId, message.content),
+        }
+      : message,
+  );
 }
 
 export interface CompactionLlmInput {
@@ -91,8 +104,18 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
   const userPrompt = buildCompactionUserPrompt({
     ...(input.previousSummary ? { previousSummary: input.previousSummary } : {}),
   });
+  const compactedMessages = microcompactMessages(
+    projectToolMessages(filterSystemMessages(input.conversationMessages)),
+    undefined,
+    {
+      ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
+      ...(input.route.contextWindowOverride
+        ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
+        : {}),
+    },
+  );
   const conversation: UnifiedMessage[] = [
-    ...filterSystemMessages(input.conversationMessages),
+    ...compactedMessages.messages,
     { role: 'user', content: userPrompt },
   ];
   const messages = unifiedConversationToNativeMessages(conversation);
@@ -129,6 +152,10 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
         system: COMPACTION_SYSTEM_PROMPT,
         messages,
         maxOutputTokens: input.route.maxTokens,
+        ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
+        ...(input.route.contextWindowOverride
+          ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
+          : {}),
         temperature: 0,
         requestOverrides: input.route.requestOverrides,
         signal,

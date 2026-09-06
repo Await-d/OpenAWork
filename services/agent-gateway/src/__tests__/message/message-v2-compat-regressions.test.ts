@@ -887,6 +887,8 @@ describe('message-v2 compatibility regressions', () => {
       {
         role: 'user',
         content: '[Tool returned the following attachments]',
+        syntheticKind: 'tool-attachments',
+        sourceToolCallId: 'call_desktop_image',
         images: [
           {
             artifactId: 'artifact-screen-1',

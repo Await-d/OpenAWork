@@ -198,6 +198,19 @@ export function getFusionSidebarMocks(): typeof fusionSidebarMocks {
   return fusionSidebarMocks;
 }
 
+export function setFusionSidebarChatGroups(
+  groupedSessions: WorkspaceSessionGroup<Session>[],
+  groupedSessionTrees: WorkspaceSessionTreeGroup<Session>[],
+): FusionSidebarSessionsResult {
+  const result = createSessionsResult();
+  fusionSidebarMocks.useSessions.mockReturnValue({
+    ...result,
+    groupedSessions,
+    groupedSessionTrees,
+  });
+  return result;
+}
+
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;

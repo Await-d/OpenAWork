@@ -165,4 +165,23 @@ describe('assertSessionWorkingDirectory unbound fallback', () => {
     });
     expect(safePath).toBe('/gateway/data/agent-gateway');
   });
+
+  it('已绑定会话将相对路径解析到会话工作区', async () => {
+    mocks.sqliteGet.mockReturnValue({
+      metadata_json: JSON.stringify({ workingDirectory: '/workspace/project' }),
+      user_id: 'user-1',
+      role_layer: null,
+      team_parent_session_id: null,
+    });
+    mocks.resolveSessionWorkspacePath.mockReturnValue('/workspace/project');
+
+    const { assertSessionWorkspacePath } = await import('../../workspace/workspace-safety.js');
+
+    expect(
+      assertSessionWorkspacePath({
+        path: 'temp/render-status-health.mjs',
+        sessionId: 'bound-session',
+      }),
+    ).toBe('/workspace/project/temp/render-status-health.mjs');
+  });
 });

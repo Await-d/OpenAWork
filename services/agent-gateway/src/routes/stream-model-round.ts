@@ -1181,11 +1181,23 @@ export async function runModelRound(input: {
   // Clear stale tool_result outputs before sending to upstream.
   // Zero LLM cost, delays full compaction trigger, keeps context lean.
   // Operates on the rendered UnifiedMessage[] so DB data stays intact.
-  const microcompactResult = microcompactMessages(
-    unifiedMessagesRaw,
-    undefined,
-    getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
-  );
+  const microcompactResult = microcompactMessages(unifiedMessagesRaw, undefined, {
+    ...getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
+    ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
+    ...(input.route.contextWindowOverride
+      ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
+      : {}),
+  });
+  const contextBudgetStep = input.wl.start('context.tool-budget');
+  input.wl.succeed(contextBudgetStep, undefined, {
+    toolContextCharsBefore: microcompactResult.metrics.beforeChars,
+    toolContextCharsAfter: microcompactResult.metrics.afterChars,
+    toolContextEstimatedTokens: microcompactResult.metrics.estimatedAfterTokens,
+    toolResultsCompacted: microcompactResult.clearedCount,
+    toolImagesOmitted: microcompactResult.metrics.imagesOmitted,
+    largestToolResultChars: microcompactResult.metrics.largestResultChars,
+    microcompactTrigger: microcompactResult.trigger,
+  });
   const unifiedMessages = microcompactResult.messages;
 
   // Apply thinking language hint to conversation
@@ -1602,6 +1614,10 @@ export async function runModelRound(input: {
         ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
         temperature: input.route.temperature,
         maxOutputTokens: input.route.maxTokens,
+        ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
+        ...(input.route.contextWindowOverride
+          ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
+          : {}),
         requestOverrides: input.route.requestOverrides,
         ...(v2Tools ? { tools: v2Tools } : {}),
         ...(typeof input.requestData.upstreamRetryMaxRetries === 'number'

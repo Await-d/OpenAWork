@@ -18,6 +18,8 @@ import {
 } from './provider-options.js';
 import type { UpstreamProtocolKind } from './native-model.js';
 import { applyProviderMessageTransforms, sanitizeSurrogates } from './message-transforms.js';
+import { guardNativeToolContext } from './tool-context-guard.js';
+import { resolveToolContextPolicy } from '../../compaction/tool-context-policy.js';
 import {
   normalizeUpstreamStreamMaxRetries,
   withUpstreamStreamRetry,
@@ -38,6 +40,8 @@ export interface RunUpstreamStreamInput {
   readonly system?: string | SystemPart | SystemPart[];
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
+  readonly contextWindowTokens?: number;
+  readonly contextWindowOverrideTokens?: number;
   readonly topP?: number;
   readonly frequencyPenalty?: number;
   readonly presencePenalty?: number;
@@ -528,10 +532,20 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
     stalled: false,
   };
   const modelId = input.modelId ?? input.model.id;
-  const transformedMessages = applyProviderMessageTransforms(input.messages, {
-    providerType: input.providerType,
-    model: modelId,
-  });
+  const transformedMessages = applyProviderMessageTransforms(
+    guardNativeToolContext(input.messages, {
+      maxTotalToolCostChars: resolveToolContextPolicy({
+        ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+        ...(input.contextWindowOverrideTokens
+          ? { contextWindowOverrideTokens: input.contextWindowOverrideTokens }
+          : {}),
+      }).maxTotalToolCostChars,
+    }),
+    {
+      providerType: input.providerType,
+      model: modelId,
+    },
+  );
   const system =
     input.system === undefined || typeof input.system === 'string'
       ? input.system === undefined

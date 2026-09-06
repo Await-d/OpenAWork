@@ -5,6 +5,7 @@ import type * as MessageV2Adapter from '../../message/message-v2-adapter.js';
 const mocks = vi.hoisted(() => ({
   getLatestReferencedToolResultMock: vi.fn((): StoredToolResult | null => null),
   getSessionToolResultByCallIdMock: vi.fn((): StoredToolResult | null => null),
+  getSessionToolResultByReferenceMock: vi.fn((): StoredToolResult | null => null),
   sqliteAllMock: vi.fn(() => []),
   sqliteGetMock: vi.fn((query: string) => {
     if (query.includes('SELECT user_id FROM sessions')) {
@@ -35,12 +36,29 @@ vi.mock('../../message/message-v2-adapter.js', async () => {
     ...actual,
     getLatestReferencedToolResult: mocks.getLatestReferencedToolResultMock,
     getSessionToolResultByCallId: mocks.getSessionToolResultByCallIdMock,
+    getSessionToolResultByReference: mocks.getSessionToolResultByReferenceMock,
   };
 });
 
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 
 describe('tool-sandbox read_tool_output', () => {
+  it('拒绝读取不属于当前执行用户的会话工具结果', async () => {
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-cross-user',
+        toolName: 'read_tool_output',
+        rawInput: { toolCallId: 'call-secret' },
+      },
+      new AbortController().signal,
+      'session-1',
+      { userId: 'other-user' },
+    );
+    expect(result.isError).toBe(true);
+    expect(mocks.getSessionToolResultByCallIdMock).not.toHaveBeenCalled();
+  });
+
   it('prefers an explicit toolCallId lookup over latest-reference fallback', async () => {
     mocks.getSessionToolResultByCallIdMock.mockReturnValueOnce({
       toolCallId: 'call-explicit-1',
@@ -107,5 +125,38 @@ describe('tool-sandbox read_tool_output', () => {
     expect(result.output).toBe(
       'No large referenced tool result was found in the current session. If the current session history already contains a toolCallId, call read_tool_output with that toolCallId instead of useLatestReferenced=true.',
     );
+  });
+
+  it('通过稳定 toolCallRef 精确读取超长调用 ID 的结果', async () => {
+    const toolCallRef = 'a'.repeat(64);
+    mocks.getSessionToolResultByReferenceMock.mockReturnValueOnce({
+      toolCallId: 'x'.repeat(10_000),
+      toolName: 'mcp_call',
+      output: '精确结果',
+      isError: false,
+    });
+    const sandbox = createDefaultSandbox();
+
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-ref',
+        toolName: 'read_tool_output',
+        rawInput: { toolCallRef },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(mocks.getSessionToolResultByReferenceMock).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      toolCallRef,
+    });
+    expect(result.isError).toBe(false);
+    expect(result.output).toMatchObject({
+      output: '精确结果',
+      toolCallId: toolCallRef,
+      toolCallRef,
+    });
   });
 });

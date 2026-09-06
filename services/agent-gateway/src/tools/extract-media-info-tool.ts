@@ -1,15 +1,21 @@
+import { readFile } from 'node:fs/promises';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { getArtifactById } from '../session/artifact-content-store.js';
 import { probeMediaBuffer, probeMediaUrl, isFFprobeAvailable } from '../media/ffprobe-bridge.js';
 import { extractBufferFromDataUrl, fetchMediaFromUrl } from '../media/media-artifact.js';
+import { inferMimeTypeFromExtension } from '../media/media-codec.js';
+import { assertSessionWorkspacePath } from '../workspace/workspace-safety.js';
 
 function isHlsUrl(url: string): boolean {
   return url.toLowerCase().includes('.m3u8');
 }
 
 const extractMediaInfoInputSchema = z.object({
-  source: z.string().min(1).describe('媒体来源：artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
+  source: z
+    .string()
+    .min(1)
+    .describe('媒体来源：工作区文件路径、artifactId、data:URL 或 HTTP/HTTPS 远程 URL'),
 });
 
 const extractMediaInfoOutputSchema = z.string();
@@ -25,7 +31,7 @@ export const extractMediaInfoToolDefinition: ToolDefinition<
     '提取音频、视频或图片文件的详细元信息。' +
     '包括媒体类型、时长、分辨率、编码格式、比特率、采样率、声道数、帧率等。' +
     '在需要了解媒体文件详细参数时使用此工具（例如判断视频分辨率、音频时长、编码格式等）。' +
-    'source 可以是 artifactId、data:URL 或 HTTP/HTTPS URL。',
+    'source 可以是当前会话工作区文件路径、artifactId、data:URL 或 HTTP/HTTPS URL。',
   inputSchema: extractMediaInfoInputSchema,
   outputSchema: extractMediaInfoOutputSchema,
   execute: async () => {
@@ -35,10 +41,11 @@ export const extractMediaInfoToolDefinition: ToolDefinition<
 
 export async function executeExtractMediaInfoTool(input: {
   signal?: AbortSignal;
+  sessionId: string;
   userId: string;
   toolInput: ExtractMediaInfoToolInput;
 }): Promise<{ output: string; isError: boolean }> {
-  const { signal, userId, toolInput } = input;
+  const { signal, sessionId, userId, toolInput } = input;
 
   if (!(await isFFprobeAvailable())) {
     return {
@@ -88,8 +95,15 @@ export async function executeExtractMediaInfoTool(input: {
       const extracted = extractBufferFromDataUrl(toolInput.source);
       buffer = extracted.buffer;
       mimeType = extracted.mimeType;
+    } else if (
+      toolInput.source.includes('/') ||
+      toolInput.source.includes('\\') ||
+      inferMimeTypeFromExtension(toolInput.source) !== undefined
+    ) {
+      const filePath = assertSessionWorkspacePath({ path: toolInput.source, sessionId });
+      buffer = await readFile(filePath);
+      mimeType = inferMimeTypeFromExtension(filePath) ?? 'application/octet-stream';
     } else {
-      // artifactId
       const artifact = getArtifactById(userId, toolInput.source);
       if (!artifact) {
         return { output: `找不到 artifact: ${toolInput.source}`, isError: true };

@@ -6,6 +6,7 @@ import type {
   ToolCallObservabilityAnnotation,
   ToolResultContent,
 } from '@openAwork/shared';
+import { matchesToolOutputReference } from '../message/tool-output-reference.js';
 
 export interface StoredToolResult {
   attachments?: InputImageContent[];
@@ -18,6 +19,8 @@ export interface StoredToolResult {
   resumedAfterApproval?: boolean;
   toolCallId: string;
   toolName?: string;
+  outputKind?: ToolResultContent['outputKind'];
+  outputSummary?: string;
 }
 
 export interface ToolResultPayloadInput {
@@ -32,6 +35,8 @@ export interface ToolResultPayloadInput {
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
+  outputKind?: ToolResultContent['outputKind'];
+  outputSummary?: string;
 }
 
 const MAX_STORED_TOOL_OUTPUT_CHARS = 200_000;
@@ -113,6 +118,8 @@ export function buildToolResultContent(input: ToolResultPayloadInput): ToolResul
       : {}),
     ...(fileDiffs ? { fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
+    ...(input.outputKind ? { outputKind: input.outputKind } : {}),
+    ...(input.outputSummary ? { outputSummary: input.outputSummary } : {}),
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
@@ -140,6 +147,8 @@ export function buildToolResultRunEvent(
       : {}),
     ...(fileDiffs ? { fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
+    ...(input.outputKind ? { outputKind: input.outputKind } : {}),
+    ...(input.outputSummary ? { outputSummary: input.outputSummary } : {}),
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
@@ -172,6 +181,8 @@ export function toStoredToolResult(content: ToolResultContent): StoredToolResult
     pendingPermissionRequestId: content.pendingPermissionRequestId,
     resumedAfterApproval: content.resumedAfterApproval,
     observability: content.observability,
+    outputKind: content.outputKind,
+    outputSummary: content.outputSummary,
   };
 }
 
@@ -201,6 +212,16 @@ export function findStoredToolResultByCallId(
   toolCallId: string,
 ): StoredToolResult | null {
   const result = listStoredToolResults(messages).find((item) => item.toolCallId === toolCallId);
+  return result ?? null;
+}
+
+export function findStoredToolResultByReference(
+  messages: Message[],
+  toolCallRef: string,
+): StoredToolResult | null {
+  const result = listStoredToolResults(messages).find((item) =>
+    matchesToolOutputReference(item.toolCallId, toolCallRef),
+  );
   return result ?? null;
 }
 

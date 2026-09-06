@@ -44,6 +44,8 @@ import {
 } from './provider-options.js';
 import { applyProviderMessageTransforms } from './message-transforms.js';
 import { sanitizeSurrogates } from './message-transforms.js';
+import { guardNativeToolContext } from './tool-context-guard.js';
+import { resolveToolContextPolicy } from '../../compaction/tool-context-policy.js';
 
 export interface RunUpstreamGenerateInput {
   /** OpenAWork-side provider type (`openai`, `anthropic`, `gemini`, ...). */
@@ -111,6 +113,8 @@ export interface RunUpstreamGenerateInput {
    * tighter deadline can leave this unset — whichever signal fires first wins.
    */
   timeoutMs?: number;
+  contextWindowTokens?: number;
+  contextWindowOverrideTokens?: number;
 }
 
 export interface RunUpstreamGenerateResult {
@@ -255,10 +259,20 @@ export function runUpstreamGenerate(
   return Effect.gen(function* () {
     const omit = input.requestOverrides?.omitBodyKeys;
 
-    const transformedMessages = applyProviderMessageTransforms(normalizeMessages(input.messages), {
-      providerType: input.providerType,
-      model: input.model,
-    });
+    const transformedMessages = applyProviderMessageTransforms(
+      guardNativeToolContext(normalizeMessages(input.messages), {
+        maxTotalToolCostChars: resolveToolContextPolicy({
+          ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+          ...(input.contextWindowOverrideTokens
+            ? { contextWindowOverrideTokens: input.contextWindowOverrideTokens }
+            : {}),
+        }).maxTotalToolCostChars,
+      }),
+      {
+        providerType: input.providerType,
+        model: input.model,
+      },
+    );
 
     const systemMessages: SystemPart[] =
       input.system === undefined

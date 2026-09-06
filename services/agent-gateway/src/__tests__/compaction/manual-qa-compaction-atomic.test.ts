@@ -1,3 +1,5 @@
+const COMPACTED_REFERENCE_MARKER = '"microcompacted":true';
+
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -129,7 +131,7 @@ describe('manual QA compaction atomicity', () => {
     });
 
     expect(compacted.trigger).toBe('count');
-    expect(compacted.messages[0]?.content).toBe('[Old tool result content cleared]');
+    expect(compacted.messages[0]?.content).toContain(COMPACTED_REFERENCE_MARKER);
 
     await db.closeDb();
     await db.connectDb();

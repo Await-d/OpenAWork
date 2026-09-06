@@ -20,6 +20,7 @@
  */
 
 const LEGACY_TOOL_NAME_TO_CANONICAL: Readonly<Record<string, string>> = {
+  execute_shell: 'bash',
   web_search: 'websearch',
   workspace_tree: 'list',
   workspace_read_file: 'read',

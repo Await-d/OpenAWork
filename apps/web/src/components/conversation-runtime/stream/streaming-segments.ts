@@ -63,8 +63,9 @@ export function appendStreamingTextDelta(
     next[next.length - 1] = { ...last, text: last.text + delta };
     return next;
   }
+  const textIndex = countByType(next, 'text');
   next.push({
-    id: `${messageId}:text:${countByType(next, 'text')}`,
+    id: textIndex === 0 ? `${messageId}:text` : `${messageId}:text:${textIndex}`,
     type: 'text',
     text: delta,
   });

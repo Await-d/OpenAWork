@@ -15,7 +15,7 @@ function toolResult(id: string, content: string): UnifiedMessage {
 }
 
 describe('microcompact parity baseline', () => {
-  it('保留计数触发的最近工具结果且不修改渲染前消息', () => {
+  it('计数触发不会用更长引用扩大短工具结果', () => {
     // Given
     const messages = [
       toolResult('tool-1', 'old result one '.repeat(10)),
@@ -32,14 +32,13 @@ describe('microcompact parity baseline', () => {
     });
 
     // Then
-    expect(result).toMatchObject({ applied: true, clearedCount: 2, trigger: 'count' });
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'count' });
     expect(messages.map((message) => message.content)).toEqual([
       'old result one '.repeat(10),
       'old result two '.repeat(10),
       'recent result '.repeat(10),
     ]);
-    expect(result.messages[0]?.content).toBe('[Old tool result content cleared]');
-    expect(result.messages[1]?.content).toBe('[Old tool result content cleared]');
+    expect(result.messages).toEqual(messages);
     expect(result.messages[2]?.content).toBe('recent result '.repeat(10));
   });
 });
@@ -64,7 +63,7 @@ describe('microcompact reference time policy', () => {
     expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
   });
 
-  it('启用后依据持久化 assistant 时间在 60 分钟间隔时保留最近 5 个结果', () => {
+  it('启用后到达 60 分钟但短结果不因引用更长而膨胀', () => {
     // Given
     const messages = Array.from({ length: 8 }, (_, index) =>
       toolResult(`tool-${index}`, `tool result ${index} `.repeat(10)),
@@ -84,13 +83,11 @@ describe('microcompact reference time policy', () => {
     );
 
     // Then
-    expect(result).toMatchObject({ applied: true, clearedCount: 3, trigger: 'time' });
-    expect(result.messages.slice(-5).map((message) => message.content)).toEqual(
-      messages.slice(-5).map((message) => message.content),
-    );
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'time' });
+    expect(result.messages).toEqual(messages);
   });
 
-  it('将时间压缩后的渲染输入交给确定性上游 stub，且不改持久化源消息', () => {
+  it('将不膨胀的时间压缩结果交给确定性上游且不改持久化源消息', () => {
     // Given
     const persistedMessages = Array.from({ length: 8 }, (_, index) =>
       toolResult(`tool-${index}`, `persisted output ${index} `.repeat(10)),
@@ -113,14 +110,7 @@ describe('microcompact reference time policy', () => {
     const capturedUpstreamInput = deterministicUpstream(compacted.messages);
 
     // Then
-    expect(capturedUpstreamInput.slice(0, 3).map((message) => message.content)).toEqual([
-      '[Old tool result content cleared]',
-      '[Old tool result content cleared]',
-      '[Old tool result content cleared]',
-    ]);
-    expect(capturedUpstreamInput.slice(-5).map((message) => message.content)).toEqual(
-      persistedContents.slice(-5),
-    );
+    expect(capturedUpstreamInput.map((message) => message.content)).toEqual(persistedContents);
     expect(persistedMessages.map((message) => message.content)).toEqual(persistedContents);
   });
 });

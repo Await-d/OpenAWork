@@ -157,4 +157,21 @@ describe('TeamConversationLayout', () => {
     expect(beforeMessages.parentElement).toBe(scrollRegion.parentElement);
     expect(beforeMessages.nextElementSibling).toBe(scrollRegion);
   });
+
+  it('仅在输入框上方展示远端会话状态', () => {
+    render(
+      <TeamConversationLayout
+        {...createLayoutProps({
+          remoteSessionBusyState: 'paused',
+          pendingQuestionsCount: 1,
+        })}
+      />,
+    );
+
+    const status = screen.getByTestId('chat-session-runtime-status');
+    const composer = screen.getByRole('textbox');
+
+    expect(status.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('chat-remote-stream-placeholder')).toBeNull();
+  });
 });

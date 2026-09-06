@@ -110,17 +110,20 @@ export function extractFailedItemIds(resultJson: unknown): string[] {
   if (!isRecord(resultJson)) return [];
   const checklist = resultJson['checklist'];
   const items = resultJson['items'];
-  const source = Array.isArray(checklist) ? checklist : Array.isArray(items) ? items : [];
-  const failed: string[] = [];
+  const source = [
+    ...(Array.isArray(checklist) ? checklist : []),
+    ...(Array.isArray(items) ? items : []),
+  ];
+  const failed = new Set<string>();
   for (const row of source) {
     if (!isRecord(row)) continue;
     const id = typeof row['id'] === 'string' ? row['id'] : '';
     const status = typeof row['status'] === 'string' ? row['status'] : '';
     if (id && (status === 'fail' || status === 'blocked')) {
-      failed.push(id);
+      failed.add(id);
     }
   }
-  return failed;
+  return Array.from(failed);
 }
 
 const REVIEW_PASS_PHRASES = [
@@ -135,12 +138,23 @@ const REVIEW_PASS_PHRASES = [
   /审核通过/,
   /检查通过/,
   /未发现问题/,
-  /没有问题/,
   /没有明显问题/,
   /无问题/,
   /无明显问题/,
   /暂无问题/,
   /无异常/,
+  /无需修改/,
+  /不需要修改/,
+  /未发现风险/,
+  /暂无风险/,
+  /不存在风险/,
+  /没有风险/,
+  /没风险/,
+  /无风险/,
+  /未发现漏洞/,
+  /不存在漏洞/,
+  /没有漏洞/,
+  /无安全漏洞/,
   /符合预期/,
   /可接受/,
 ] as const;
@@ -162,16 +176,28 @@ const REVIEW_FAIL_PHRASES = [
   /风险/,
   /不符合/,
   /不能接受/,
+  /缺少/,
+  /未覆盖/,
+  /没有覆盖/,
+  /未满足/,
+  /尚未满足/,
+  /漏洞/,
+  /错误/,
+  /缺陷/,
   /request_retry/i,
   /escalate/i,
 ] as const;
+
+const REVIEW_NEGATED_FAILURE_PHRASES =
+  /未发现问题|没有问题|没问题|没啥问题|没有明显问题|无问题|无明显问题|暂无问题|无异常|无需修改|不需要修改|未发现风险|暂无风险|不存在风险|没有风险|没风险|无风险|未发现漏洞|不存在漏洞|没有漏洞|无安全漏洞/g;
 
 export function inferReviewVerdictFromText(text: string): 'pass' | 'fail' | null {
   const normalized = text.trim();
   if (normalized.length === 0) {
     return null;
   }
-  if (REVIEW_FAIL_PHRASES.some((pattern) => pattern.test(normalized))) {
+  const failureCandidate = normalized.replace(REVIEW_NEGATED_FAILURE_PHRASES, '');
+  if (REVIEW_FAIL_PHRASES.some((pattern) => pattern.test(failureCandidate))) {
     return 'fail';
   }
   if (REVIEW_PASS_PHRASES.some((pattern) => pattern.test(normalized))) {
@@ -209,19 +235,27 @@ export function findOutOfScopePaths(input: {
 export function normalizeReviewVerdict(
   args: SubmitReviewReportArgs,
 ): 'pass' | 'fail' | 'needs_revision' {
-  if (args.verdict === 'pass' || args.verdict === 'fail') {
-    return args.verdict;
-  }
-  if (args.decision) return args.decision;
   if (args.items && args.items.some((item) => item.status === 'fail')) {
     return 'fail';
+  }
+  if (args.verdict === 'fail') {
+    return 'fail';
+  }
+  if (args.decision === 'fail' || args.decision === 'needs_revision') {
+    return args.decision;
   }
   const summaryText = [args.overallReason, args.content]
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .join('\n');
   const inferredVerdict = inferReviewVerdictFromText(summaryText);
-  if (inferredVerdict) {
-    return inferredVerdict;
+  if (inferredVerdict === 'fail') {
+    return 'fail';
+  }
+  if (args.verdict === 'pass' || args.decision === 'pass') {
+    return 'pass';
+  }
+  if (inferredVerdict === 'pass') {
+    return 'pass';
   }
   return 'pass';
 }

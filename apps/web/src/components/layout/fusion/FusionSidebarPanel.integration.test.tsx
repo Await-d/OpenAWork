@@ -7,6 +7,7 @@ import {
   prepareFusionSidebarMocks,
   renderFusionSidebar,
   resetFusionSidebarUiState,
+  setFusionSidebarChatGroups,
 } from './FusionSidebar.test-utils.js';
 
 function installMatchMedia(width: number): () => void {
@@ -62,6 +63,32 @@ describe('FusionSidebar 展开 Panel', () => {
       expect(screen.getByTestId('location-probe').textContent).toBe('/chat');
     });
     expect(getFusionSidebarMocks().preloadRouteModuleByPath).toHaveBeenCalledWith('/chat');
+  });
+
+  it('未绑定工作区提供快捷新建会话入口', () => {
+    const sessionsResult = setFusionSidebarChatGroups(
+      [
+        {
+          sessions: [],
+          workspaceLabel: '未绑定工作区',
+          workspacePath: null,
+        },
+      ],
+      [
+        {
+          roots: [],
+          sessions: [],
+          workspaceLabel: '未绑定工作区',
+          workspacePath: null,
+        },
+      ],
+    );
+
+    renderFusionSidebar('/chat/open-session');
+
+    fireEvent.click(screen.getByRole('button', { name: '在 未绑定工作区 中新建会话' }));
+
+    expect(sessionsResult.newSession).toHaveBeenCalledWith(null);
   });
 
   it('选择团队会话时保留 Team 工作台上下文', async () => {

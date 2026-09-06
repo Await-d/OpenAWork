@@ -1,6 +1,9 @@
 type ReviewVerdict = 'pass' | 'fail' | null;
 type ReviewVerdictInference = (text: string) => ReviewVerdict;
 
+const REVIEW_ACKNOWLEDGEMENT =
+  /^(?:(?:已)?(?:查看|审阅|检查|复核|确认)(?:完成|完毕|过)?|收到|好的?|知悉|明白)[。.!！]?$/;
+
 export function normalizeReviewOutput(
   result: string,
   inferVerdict: ReviewVerdictInference,
@@ -26,5 +29,7 @@ export function normalizeReviewOutput(
   if (verdict === 'pass') {
     return { passed: true, issues: [] };
   }
-  return { passed: false, issues: ['评审未给出明确结论：' + result.trim()] };
+  return REVIEW_ACKNOWLEDGEMENT.test(result.trim())
+    ? { passed: true, issues: [] }
+    : { passed: false, issues: ['评审未给出明确结论：' + result.trim()] };
 }

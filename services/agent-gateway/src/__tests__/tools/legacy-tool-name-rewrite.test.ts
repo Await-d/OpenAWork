@@ -75,6 +75,21 @@ describe('rewriteLegacyToolRequest', () => {
     expect(out.rawInput).toEqual({ query: 'foo' });
   });
 
+  it('rewrites the advertised execute_shell alias to the canonical bash tool', () => {
+    const out = rewriteLegacyToolRequest('execute_shell', {
+      command: 'node --version',
+      workdir: '/abs',
+      timeout: 120000,
+    });
+    expect(out.rewritten).toBe(true);
+    expect(out.toolName).toBe('bash');
+    expect(out.rawInput).toEqual({
+      command: 'node --version',
+      workdir: '/abs',
+      timeout: 120000,
+    });
+  });
+
   it('keeps non-object inputs untouched (e.g. null) for non-search legacy names', () => {
     const out = rewriteLegacyToolRequest('workspace_read_file', null);
     expect(out.rewritten).toBe(true);
@@ -92,6 +107,7 @@ describe('isLegacyToolName', () => {
       'workspace_search',
       'workspace_write_file',
       'workspace_create_file',
+      'execute_shell',
     ]) {
       expect(isLegacyToolName(name)).toBe(true);
     }

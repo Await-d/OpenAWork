@@ -22,7 +22,9 @@ import type {
   FilePart,
 } from './message-v2-schema.js';
 import { parseCompactionMarkerText } from '../compaction/compaction-marker.js';
-import { truncateToolOutput } from '../tools/tool-output-truncator.js';
+import { projectToolOutput } from './tool-output-model-view.js';
+import { DEFAULT_TOOL_CONTEXT_POLICY } from '../compaction/tool-context-policy.js';
+import { readStoredToolResultContent } from '../tools/tool-result-contract.js';
 
 // ─── Unified Message Type ───
 // Single intermediate representation for all native upstream model messages.
@@ -36,6 +38,8 @@ export interface SystemMessage {
 export interface UserMessageUnified {
   role: 'user';
   content: string;
+  syntheticKind?: 'tool-attachments';
+  sourceToolCallId?: string;
   images?: Array<{
     artifactId?: string;
     detail?: 'auto' | 'high' | 'low' | 'original';
@@ -202,16 +206,8 @@ function isModelContextArtifactMessage(message: MessageWithParts): boolean {
   );
 }
 
-/**
- * Hard cap on tool output characters sent to LLM.
- * Prevents stored oversized outputs from overflowing the context window.
- * ~50k tokens ≈ ~200k chars.
- */
-const MAX_TOOL_OUTPUT_CHARS = 200_000;
 const MAX_TOOL_ARGUMENT_CHARS = 50_000;
 
-const TOOL_OUTPUT_TRUNCATION_NOTICE =
-  '\n\n[工具输出已截断 — 完整内容已保留，可使用 read_tool_output 查看。]';
 const TOOL_ARGUMENT_TRUNCATION_NOTICE = '\n\n[工具调用参数已截断 — 参数过大，已省略后续内容。]';
 
 /**
@@ -449,6 +445,8 @@ export function toModelMessages(
       result.push({
         role: 'user',
         content: '[Tool returned the following attachments]',
+        syntheticKind: 'tool-attachments',
+        sourceToolCallId: toolCallId,
         images,
       });
     }
@@ -613,6 +611,14 @@ function collectAttachmentImages(attachments: FilePart[] | undefined): UnifiedIm
     // Anthropic-side attachments may omit `inputType` and rely on mime;
     // accept image/* mime types as image attachments.
     if (!att.inputType && !(att.mime && att.mime.startsWith('image/'))) continue;
+    if (
+      att.url &&
+      att.url.length > DEFAULT_TOOL_CONTEXT_POLICY.maxInlineImageUrlChars &&
+      URL.canParse(att.url) &&
+      new URL(att.url).protocol === 'data:'
+    )
+      continue;
+    if (images.length >= DEFAULT_TOOL_CONTEXT_POLICY.maxImagesPerToolResult) break;
     images.push({
       ...(att.artifactId ? { artifactId: att.artifactId } : {}),
       ...(att.detail ? { detail: att.detail } : {}),
@@ -848,11 +854,12 @@ function resolveToolOutput(
     return COMPACTED_TOOL_RESULT_PLACEHOLDER;
   }
 
+  const stored = readStoredToolResultContent(part.state.metadata);
+  if (stored?.outputSummary && stored.outputSummary.trim().length > 0) {
+    return projectToolOutput(part.callID, `${stored.outputSummary.trim()}\n\n${part.state.output}`);
+  }
   const output = part.state.output;
-  return truncateToolOutput(
-    part.tool,
-    capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
-  );
+  return projectToolOutput(part.callID, output);
 }
 
 function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } }): string | null {
@@ -861,17 +868,9 @@ function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } })
   if (interrupted) {
     const output = part.state.metadata?.output;
     if (typeof output === 'string') {
-      return truncateToolOutput(
-        part.tool,
-        capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
-      );
+      return projectToolOutput(part.callID, output);
     }
   }
   // Otherwise, return the error text as the tool result
-  return part.state.error
-    ? truncateToolOutput(
-        part.tool,
-        capModelString(part.state.error, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE),
-      )
-    : null;
+  return part.state.error ? projectToolOutput(part.callID, part.state.error) : null;
 }

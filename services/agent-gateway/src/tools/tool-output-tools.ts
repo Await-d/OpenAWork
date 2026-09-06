@@ -1,58 +1,19 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { z } from 'zod';
+import { DEFAULT_TOOL_CONTEXT_POLICY } from '../compaction/tool-context-policy.js';
+import {
+  readToolOutputInputSchema,
+  readToolOutputOutputSchema,
+  type ReadToolOutputInput,
+  type ReadToolOutputOutput,
+} from './tool-output-schemas.js';
+import { selectTextLines } from './tool-output-text-selection.js';
 
-export const readToolOutputInputSchema = z
-  .object({
-    toolCallId: z.string().min(1).optional(),
-    useLatestReferenced: z.boolean().optional(),
-    jsonPath: z.string().min(1).optional(),
-    lineStart: z.number().int().min(1).optional(),
-    lineCount: z.number().int().min(1).max(400).optional(),
-    itemStart: z.number().int().min(0).optional(),
-    itemCount: z.number().int().min(1).max(200).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.toolCallId || value.useLatestReferenced === true) {
-      return;
-    }
-
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'toolCallId 和 useLatestReferenced 至少提供一个。',
-      path: ['toolCallId'],
-    });
-  });
-
-export const readToolOutputSelectionSchema = z
-  .object({
-    mode: z.enum(['full', 'items', 'keys', 'lines']),
-    jsonPath: z.string().optional(),
-    lineStart: z.number().int().min(1).optional(),
-    lineCount: z.number().int().min(0).optional(),
-    itemStart: z.number().int().min(0).optional(),
-    itemCount: z.number().int().min(0).optional(),
-  })
-  .strict();
-
-export const readToolOutputOutputSchema = z
-  .object({
-    toolCallId: z.string(),
-    fullOutputPreserved: z.literal(true),
-    outputType: z.string(),
-    isError: z.boolean(),
-    sizeBytes: z.number().int().min(0),
-    selection: readToolOutputSelectionSchema,
-    note: z.string().optional(),
-    output: z.unknown().optional(),
-    totalItems: z.number().int().min(0).optional(),
-    totalLines: z.number().int().min(0).optional(),
-    topLevelKeys: z.array(z.string()).optional(),
-  })
-  .strict();
-
-export type ReadToolOutputInput = z.infer<typeof readToolOutputInputSchema>;
-export type ReadToolOutputOutput = z.infer<typeof readToolOutputOutputSchema>;
+export {
+  readToolOutputInputSchema,
+  readToolOutputOutputSchema,
+  readToolOutputSelectionSchema,
+} from './tool-output-schemas.js';
+export type { ReadToolOutputInput, ReadToolOutputOutput } from './tool-output-schemas.js';
 
 export const readToolOutputToolDefinition: ToolDefinition<
   typeof readToolOutputInputSchema,
@@ -60,7 +21,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 > = {
   name: 'read_tool_output',
   description:
-    '从当前会话中读取此前产生的工具调用结果。当历史中能拿到 toolCallId 时，使用它。仅当历史中含有 [tool_output_reference] 但拿不到 toolCallId 时，才使用 useLatestReferenced=true 兜底；粘贴的 UI 文本或复制的命令不足以替代。支持按行读取文本，以及对结构化数据按 jsonPath / item 分页，让你只取下一步推理所需的细节。',
+    '从当前会话中读取此前产生的工具调用结果。优先使用历史中的 toolCallId；超长 ID 引用使用 toolCallRef。仅当两者都拿不到时，才使用 useLatestReferenced=true 兜底。支持 charStart/charCount 分页读取超长内容。',
   inputSchema: readToolOutputInputSchema,
   outputSchema: readToolOutputOutputSchema,
   timeout: 30000,
@@ -70,7 +31,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 };
 
 export function buildReadToolOutputHint(toolCallId: string): string {
-  return `如需继续查看完整细节，请优先调用 read_tool_output 并传入 toolCallId="${toolCallId}"；只有在当前会话历史里出现了 [tool_output_reference] 且拿不到 toolCallId 时，才使用 useLatestReferenced=true。文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
+  return `如需继续查看完整细节，请优先调用 read_tool_output 并传入 toolCallId="${toolCallId}"；只有在当前会话历史里出现了 [tool_output_reference] 且拿不到 toolCallId 时，才使用 useLatestReferenced=true。超长单行可配合 charStart/charCount 续读（偏移相对当前行/项选择，续读时保留选择参数）；文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
 }
 
 export function buildReadToolOutputResponse(input: {
@@ -80,6 +41,13 @@ export function buildReadToolOutputResponse(input: {
   sizeBytes: number;
   toolCallId: string;
 }): ReadToolOutputOutput {
+  const responseToolCallId =
+    input.request.toolCallRef && input.toolCallId.length > 256
+      ? input.request.toolCallRef
+      : input.toolCallId;
+  const responseReference = input.request.toolCallRef
+    ? { toolCallRef: input.request.toolCallRef }
+    : {};
   const selectionPath = input.request.jsonPath?.trim();
   const selectionTarget =
     selectionPath && selectionPath.length > 0
@@ -88,7 +56,8 @@ export function buildReadToolOutputResponse(input: {
 
   if (!selectionTarget.ok) {
     return {
-      toolCallId: input.toolCallId,
+      toolCallId: responseToolCallId,
+      ...responseReference,
       fullOutputPreserved: true,
       outputType: describeOutputType(input.output),
       isError: input.isError,
@@ -105,14 +74,76 @@ export function buildReadToolOutputResponse(input: {
     };
   }
 
-  return buildSelectionResponse({
+  const response = buildSelectionResponse({
     isError: input.isError,
     output: selectionTarget.value,
     selectionPath,
     sizeBytes: input.sizeBytes,
-    toolCallId: input.toolCallId,
+    toolCallId: responseToolCallId,
     request: input.request,
   });
+  const boundedResponse: ReadToolOutputOutput = { ...response, ...responseReference };
+  const explicitChars =
+    input.request.charStart !== undefined || input.request.charCount !== undefined;
+  const selected =
+    boundedResponse.selection.mode === 'keys' ? selectionTarget.value : boundedResponse.output;
+  if (!explicitChars && Buffer.byteLength(safeJson(boundedResponse), 'utf8') <= 10_000) {
+    return boundedResponse;
+  }
+  const text = typeof selected === 'string' ? selected : safeJson(selected);
+  const requestedCharStart = Math.min(input.request.charStart ?? 0, text.length);
+  const charStart = isLowSurrogate(text.charCodeAt(requestedCharStart))
+    ? requestedCharStart - 1
+    : requestedCharStart;
+  let low = 0;
+  let high = Math.min(
+    input.request.charCount ?? DEFAULT_TOOL_CONTEXT_POLICY.maxReadPageBytes,
+    text.length - charStart,
+  );
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const bytes = Buffer.byteLength(
+      JSON.stringify(text.slice(charStart, charStart + middle)),
+      'utf8',
+    );
+    if (bytes <= DEFAULT_TOOL_CONTEXT_POLICY.maxReadPageBytes) low = middle;
+    else high = middle - 1;
+  }
+  const tentativeCharEnd = charStart + low;
+  let charEnd =
+    tentativeCharEnd > charStart && isLowSurrogate(text.charCodeAt(tentativeCharEnd))
+      ? tentativeCharEnd - 1
+      : tentativeCharEnd;
+  if (charEnd === charStart && charStart < text.length) {
+    charEnd = isHighSurrogate(text.charCodeAt(charStart))
+      ? Math.min(text.length, charStart + 2)
+      : charStart + 1;
+  }
+  return {
+    ...boundedResponse,
+    topLevelKeys: undefined,
+    totalChars: text.length,
+    selection: {
+      ...boundedResponse.selection,
+      mode: 'chars',
+      charStart,
+      charCount: charEnd - charStart,
+      ...(charEnd < text.length ? { nextCharStart: charEnd } : {}),
+    },
+    output: text.slice(charStart, charEnd),
+    note:
+      charEnd < text.length
+        ? `仅返回当前选择的字符片段；保留 jsonPath/行/项参数并使用 charStart=${charEnd} 续读。结构化片段为 JSON 文本。`
+        : '当前选择的字符分页已结束；结构化片段为 JSON 文本。',
+  };
+}
+
+function isLowSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
 }
 
 function buildSelectionResponse(input: {
@@ -124,28 +155,26 @@ function buildSelectionResponse(input: {
   toolCallId: string;
 }): ReadToolOutputOutput {
   if (typeof input.output === 'string') {
-    const lines = input.output.split(/\r?\n/);
     const lineStart = input.request.lineStart ?? 1;
     const lineCount = input.request.lineCount ?? 200;
-    const sliceStart = Math.max(0, lineStart - 1);
-    const sliceEnd = Math.min(lines.length, sliceStart + lineCount);
+    const selection = selectTextLines(input.output, lineStart, lineCount);
     return {
       toolCallId: input.toolCallId,
       fullOutputPreserved: true,
       outputType: 'string',
       isError: input.isError,
       sizeBytes: input.sizeBytes,
-      totalLines: lines.length,
+      totalLines: selection.totalLines,
       selection: {
-        mode: lineStart === 1 && sliceEnd >= lines.length ? 'full' : 'lines',
+        mode: lineStart === 1 && selection.sliceEnd >= selection.totalLines ? 'full' : 'lines',
         ...(input.selectionPath ? { jsonPath: input.selectionPath } : {}),
         lineStart,
-        lineCount: sliceEnd - sliceStart,
+        lineCount: selection.lineCount,
       },
-      output: lines.slice(sliceStart, sliceEnd).join('\n'),
+      output: selection.output,
       note:
-        sliceEnd < lines.length
-          ? `仅返回第 ${lineStart}-${sliceEnd} 行；完整输出仍已保留，可继续增加 lineStart 查看后续内容。`
+        selection.sliceEnd < selection.totalLines
+          ? `仅返回第 ${lineStart}-${selection.sliceEnd} 行；完整输出仍已保留，可继续增加 lineStart 查看后续内容。`
           : undefined,
     };
   }
@@ -230,7 +259,7 @@ function describeOutputType(value: unknown): string {
 
 function safeJson(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? String(value);
   } catch {
     return String(value);
   }

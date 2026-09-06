@@ -21,6 +21,7 @@ import {
   stringifyToolResultOutput,
 } from '../tools/tool-result-contract.js';
 import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
+import { buildToolOutputReferenceIdentity } from '../message/tool-output-reference.js';
 
 interface SqliteStatement {
   all(...params: unknown[]): unknown[];
@@ -1159,6 +1160,15 @@ export async function migrate(): Promise<void> {
   `);
   db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_message ON part_v2(message_id, id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_session ON part_v2(session_id)');
+  ensureColumn('part_v2', 'tool_call_id', 'TEXT');
+  ensureColumn('part_v2', 'tool_call_ref', 'TEXT');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_part_v2_tool_call ON part_v2(session_id, user_id, tool_call_id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_part_v2_tool_ref ON part_v2(session_id, user_id, tool_call_ref)',
+  );
+  backfillToolResultIndex();
 
   // ─── Event Sourcing (SyncEvent) ───
 
@@ -1848,6 +1858,38 @@ function ensureColumn(table: string, column: string, definition: string): void {
   if (!exists) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+export function backfillToolResultIndex(): void {
+  const rows = sqliteAll<{ readonly data: string; readonly id: string }>(
+    `SELECT id, data FROM part_v2
+     WHERE tool_call_id IS NULL AND json_extract(data, '$.type') = 'tool'`,
+  );
+  sqliteTransaction(() => {
+    for (const row of rows) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(row.data);
+      } catch (error) {
+        if (error instanceof SyntaxError) continue;
+        throw error;
+      }
+      if (
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        !('callID' in parsed) ||
+        typeof parsed.callID !== 'string'
+      ) {
+        continue;
+      }
+      const identity = buildToolOutputReferenceIdentity(parsed.callID);
+      sqliteRun('UPDATE part_v2 SET tool_call_id = ?, tool_call_ref = ? WHERE id = ?', [
+        parsed.callID,
+        'toolCallRef' in identity ? identity.toolCallRef : null,
+        row.id,
+      ]);
+    }
+  });
 }
 
 function hasTeamRoleSessionInstancesParentScopedUniqueKey(): boolean {

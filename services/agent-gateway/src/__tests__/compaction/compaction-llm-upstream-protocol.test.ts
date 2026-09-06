@@ -99,4 +99,30 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
       { upstreamProtocol?: string } | undefined;
     expect(callArgs?.upstreamProtocol).toBe('responses');
   });
+
+  it('在公开入口压缩未经治理的大工具结果后再发送给上游', async () => {
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'summary',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
+    const conversationMessages = Array.from({ length: 8 }, (_, index) => ({
+      role: 'tool' as const,
+      toolCallId: `call-${index}`,
+      toolName: 'web_fetch',
+      content: '网页内容'.repeat(4_000),
+    }));
+
+    await callCompactionLlm({ route: createRoute(), conversationMessages });
+
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      { messages?: readonly { content?: unknown }[] } | undefined;
+    const serializedMessages = JSON.stringify(callArgs?.messages);
+    expect(serializedMessages.length).toBeLessThan(50_000);
+    expect(serializedMessages).not.toContain('网页内容'.repeat(4_000));
+    expect(serializedMessages).toContain('read_tool_output');
+  });
 });

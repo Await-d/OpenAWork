@@ -22,6 +22,7 @@ import {
   messageInfoToRowData,
   partToRowData,
 } from './message-v2-schema.js';
+import { buildToolOutputReferenceIdentity } from './tool-output-reference.js';
 
 // ─── FK Constraint Tolerance ───
 // opencode pattern: ignore SQLITE_CONSTRAINT_FOREIGNKEY errors
@@ -115,14 +116,35 @@ const partUpsertProjector = (event: { data: unknown }) => {
     data.sessionID,
   ]);
   const userId = sessionRow?.user_id ?? '';
+  const toolCallId = part.type === 'tool' ? part.callID : null;
+  const referenceIdentity =
+    toolCallId === null ? null : buildToolOutputReferenceIdentity(toolCallId);
+  const toolCallRef =
+    referenceIdentity !== null && 'toolCallRef' in referenceIdentity
+      ? referenceIdentity.toolCallRef
+      : null;
 
   safeUpsert(
     () =>
       sqliteRun(
-        `INSERT INTO part_v2 (id, message_id, session_id, user_id, time_created, data)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-        [part.id, part.messageID, data.sessionID, userId, timeCreated, dataJson],
+        `INSERT INTO part_v2
+           (id, message_id, session_id, user_id, time_created, data, tool_call_id, tool_call_ref)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           data = excluded.data,
+           tool_call_id = excluded.tool_call_id,
+           tool_call_ref = excluded.tool_call_ref,
+           updated_at = datetime('now')`,
+        [
+          part.id,
+          part.messageID,
+          data.sessionID,
+          userId,
+          timeCreated,
+          dataJson,
+          toolCallId,
+          toolCallRef,
+        ],
       ),
     'part update',
     { partID: part.id, messageID: part.messageID, sessionID: data.sessionID },

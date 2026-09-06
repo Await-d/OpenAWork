@@ -432,6 +432,8 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
       }
 
       const protocol = getResultProtocol(resultObj);
+      const childFailedItems = extractFailedItemIds(resultObj);
+      structuredFailedItems.push(...childFailedItems);
       const expectedProtocol =
         h.toRoleLayer === 'reviewer'
           ? SUBMIT_REVIEW_REPORT_PROTOCOL
@@ -439,19 +441,15 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
             ? SUBMIT_EXECUTION_RESULT_PROTOCOL
             : null;
       if (expectedProtocol) {
-        if (protocol === expectedProtocol) {
-          const failed = extractFailedItemIds(resultObj);
-          structuredFailedItems.push(...failed);
-        } else if (mode === 'hard') {
+        if (protocol !== expectedProtocol && mode === 'hard') {
           issues.push(
             `${h.id} 缺少 ${expectedProtocol} 硬契约（OPENAWORK_TEAM_REQUIRE_SUBMIT_PROTOCOL=hard）`,
           );
-        } else {
+        } else if (protocol !== expectedProtocol) {
           protocolDegraded = true;
         }
       }
 
-      const childFailedItems = extractFailedItemIds(resultObj);
       const resultSummary =
         resultObj &&
         typeof resultObj['summary'] === 'string' &&

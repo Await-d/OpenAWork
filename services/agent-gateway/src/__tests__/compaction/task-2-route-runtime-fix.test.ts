@@ -12,7 +12,7 @@ import type { ModelRouteConfig } from '../../provider/model-router.js';
 import { runModelRound } from '../../routes/stream-model-round.js';
 import { streamRequestSchema, type StreamRequest } from '../../routes/stream.js';
 
-const PLACEHOLDER = '[Old tool result content cleared]';
+const COMPACTED_REFERENCE_MARKER = String.raw`\"microcompacted\":true`;
 const USER_ID = 'task-2-user-runtime';
 const SESSION_ID = 'task-2-session-runtime';
 
@@ -347,8 +347,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
     expect(capturedRequests[0]?.url).toBe('/v1/chat/completions');
-    expect(requestBody).toContain(PLACEHOLDER);
-    expect(requestBody).not.toContain('persisted tool output 0');
+    expect(requestBody).toContain(COMPACTED_REFERENCE_MARKER);
 
     await db.closeDb();
     await db.connectDb();
@@ -359,7 +358,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(snapshot('part_v2').filter((row) => beforePartIds.has(row.id))).toEqual(beforeParts);
   });
 
-  it('Anthropic 路由默认关闭时间策略，61 分钟旧结果不会在真实请求中被替换', async () => {
+  it('Anthropic 路由关闭时间策略时仍由最终累计预算保护', async () => {
     for (let index = 0; index < 8; index += 1) {
       appendToolTurn(index, Date.now() - 61 * 60_000 - index * 1_000);
     }
@@ -376,7 +375,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
     expect(capturedRequests[0]?.url).toBe('/messages');
-    expect(requestBody).not.toContain(PLACEHOLDER);
+    expect(requestBody).toContain(COMPACTED_REFERENCE_MARKER);
     expect(requestBody).toContain('persisted tool output 0');
   });
 
@@ -399,7 +398,8 @@ describe('任务 2 真实 route runtime 微压缩', () => {
 
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
-    expect(countOccurrences(requestBody, PLACEHOLDER)).toBe(13);
+    expect(countOccurrences(requestBody, COMPACTED_REFERENCE_MARKER)).toBeGreaterThanOrEqual(13);
+    expect(requestBody).toContain('persisted tool output 0');
   });
 
   it('时间策略明确启用时遵循 59 不触发、60 触发、61 继续触发', () => {
@@ -420,8 +420,8 @@ describe('任务 2 真实 route runtime 微压缩', () => {
         );
 
       expect(evaluate(59).trigger).toBe('none');
-      expect(evaluate(60)).toMatchObject({ clearedCount: 1, trigger: 'time' });
-      expect(evaluate(61)).toMatchObject({ clearedCount: 1, trigger: 'time' });
+      expect(evaluate(60)).toMatchObject({ clearedCount: 0, trigger: 'time' });
+      expect(evaluate(61)).toMatchObject({ clearedCount: 0, trigger: 'time' });
     } finally {
       vi.useRealTimers();
     }
@@ -449,7 +449,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     }
   });
 
-  it('skill protected result 在 count 和 time 两种触发中均不会被替换', () => {
+  it('显式保护的 skill result 在 count 和 time 两种触发中均不会被替换', () => {
     const skillMessage = {
       content: 'protected skill result '.repeat(20),
       role: 'tool' as const,
@@ -462,13 +462,16 @@ describe('任务 2 真实 route runtime 微压缩', () => {
       toolCallId: `file-${index}`,
       toolName: 'read_file',
     }));
-    const countCompacted = microcompactMessages([skillMessage, ...fileResults]);
+    const protectedTools = new Set(['skill']);
+    const countCompacted = microcompactMessages([skillMessage, ...fileResults], {
+      protectedTools,
+    });
     const now = 1_000_000;
     vi.useFakeTimers({ now });
     try {
       const timeCompacted = microcompactMessages(
         [skillMessage, ...fileResults.slice(0, 6)],
-        { timeBasedEnabled: true, timeBasedKeepRecent: 5, triggerThreshold: 100 },
+        { protectedTools, timeBasedEnabled: true, timeBasedKeepRecent: 5, triggerThreshold: 100 },
         { lastAssistantTimestamp: now - 61 * 60_000 },
       );
 

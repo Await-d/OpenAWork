@@ -24,11 +24,13 @@ import {
   type TextPart,
   type ReasoningPart,
   type ToolPart,
+  type PartV2Row,
   type ModifiedFilesSummaryPart,
   type ToolStatePending,
   type ToolStateRunning,
   makeMessageId,
   makePartId,
+  tryPartFromRow,
 } from './message-v2-schema.js';
 import {
   updatePart,
@@ -53,8 +55,6 @@ import { listSessionSnapshots } from '../session/session-snapshot-store.js';
 import { listSessionFileDiffs } from '../session/session-file-diff-store.js';
 import {
   buildToolResultContent,
-  findLatestReferencedStoredToolResult,
-  findStoredToolResultByCallId,
   normalizeToolArgumentsForStorage,
   readStoredToolResultContent,
   stringifyToolResultOutput,
@@ -65,6 +65,36 @@ import { buildCompactionMarkerContent } from '../compaction/compaction-marker.js
 import { upsertSessionMessageSearchDocument } from '../session/session-search-store.js';
 import { buildFallbackToolResultContentFromToolPart } from '../tools/tool-state-read-model.js';
 export type { StoredToolResult } from '../tools/tool-result-contract.js';
+
+function storedToolResultFromPart(part: ToolPart): StoredToolResult | null {
+  const content =
+    'metadata' in part.state ? readStoredToolResultContent(part.state.metadata) : null;
+  return content
+    ? {
+        toolCallId: content.toolCallId,
+        toolName: content.toolName,
+        output: content.output,
+        isError: content.isError,
+        attachments: content.attachments,
+        fileDiffs: content.fileDiffs,
+        pendingPermissionRequestId: content.pendingPermissionRequestId,
+        resumedAfterApproval: content.resumedAfterApproval,
+        observability: content.observability,
+        outputKind: content.outputKind,
+        outputSummary: content.outputSummary,
+      }
+    : (() => {
+        const fallback = buildFallbackToolResultContentFromToolPart(part);
+        return fallback
+          ? {
+              toolCallId: fallback.toolCallId,
+              toolName: fallback.toolName,
+              output: fallback.output,
+              isError: fallback.isError,
+            }
+          : null;
+      })();
+}
 
 // Ensure projectors are registered
 import './message-v2-projectors.js';
@@ -687,6 +717,8 @@ export function appendSessionMessageV2(input: {
           : {}),
         ...(c.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
         ...(c.observability ? { observability: c.observability } : {}),
+        ...(c.outputKind ? { outputKind: c.outputKind } : {}),
+        ...(c.outputSummary ? { outputSummary: c.outputSummary } : {}),
       });
       const serializedOutput =
         toolResultContent.rawOutput ?? stringifyToolResultOutput(toolResultContent.output);
@@ -1563,20 +1595,46 @@ export function getSessionToolResultByCallId(input: {
   toolCallId: string;
   userId: string;
 }): StoredToolResult | null {
-  const messages = listSessionMessagesV2({
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  return findStoredToolResultByCallId(messages, input.toolCallId);
+  const row = sqliteGet<PartV2Row>(
+    `SELECT * FROM part_v2
+     WHERE session_id = ? AND user_id = ? AND tool_call_id = ?
+     ORDER BY time_created DESC LIMIT 1`,
+    [input.sessionId, input.userId, input.toolCallId],
+  );
+  const part = row ? tryPartFromRow(row) : null;
+  return part?.type === 'tool' ? storedToolResultFromPart(part) : null;
+}
+
+export function getSessionToolResultByReference(input: {
+  sessionId: string;
+  toolCallRef: string;
+  userId: string;
+}): StoredToolResult | null {
+  const row = sqliteGet<PartV2Row>(
+    `SELECT * FROM part_v2
+     WHERE session_id = ? AND user_id = ? AND tool_call_ref = ?
+     ORDER BY time_created DESC LIMIT 1`,
+    [input.sessionId, input.userId, input.toolCallRef],
+  );
+  const part = row ? tryPartFromRow(row) : null;
+  return part?.type === 'tool' ? storedToolResultFromPart(part) : null;
 }
 
 export function getLatestReferencedToolResult(input: {
   sessionId: string;
   userId: string;
 }): StoredToolResult | null {
-  const messages = listSessionMessagesV2({
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  return findLatestReferencedStoredToolResult(messages, shouldReferenceToolOutput);
+  const rows = sqliteAll<PartV2Row>(
+    `SELECT * FROM part_v2
+     WHERE session_id = ? AND user_id = ? AND tool_call_id IS NOT NULL
+     ORDER BY time_created DESC`,
+    [input.sessionId, input.userId],
+  );
+  for (const row of rows) {
+    const part = tryPartFromRow(row);
+    if (part?.type !== 'tool') continue;
+    const result = storedToolResultFromPart(part);
+    if (result && shouldReferenceToolOutput(result.output)) return result;
+  }
+  return null;
 }

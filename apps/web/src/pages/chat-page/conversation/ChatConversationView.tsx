@@ -38,7 +38,6 @@ import type {
   ChatRenderEntry,
   ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
-import { ChatRemoteStreamPlaceholder } from '../../../components/chat/session/chat-remote-stream-placeholder.js';
 import { ChatSearchOverlay } from '../../../components/chat/search/chat-search-overlay.js';
 import type { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
 import { ChatSessionSkeleton } from '../../../components/chat/session/chat-session-skeleton.js';
@@ -739,11 +738,6 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     providerCatalog={providerCatalog}
                     resolveInlinePermissionActions={resolveInlinePermissionActions}
                     scrollRegionRef={scrollRegionRef}
-                    trailingContent={
-                      !visibleStreaming && remoteSessionBusyState ? (
-                        <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
-                      ) : null
-                    }
                   />
                 </>
               ) : (

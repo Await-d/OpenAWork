@@ -18,6 +18,8 @@ apps/desktop/src-tauri/sidecars/
 apps/desktop/src-tauri/target/debug
 apps/desktop/src-tauri/target/
 
+.verification/
+.artifacts/
 # Agent/AI tooling (not for version control)
 .sisyphus/
 .omo/

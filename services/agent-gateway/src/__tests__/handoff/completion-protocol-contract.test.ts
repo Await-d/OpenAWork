@@ -373,6 +373,32 @@ describe('review aggregation + structured checklist', () => {
 });
 
 describe('submit_review', () => {
+  it('显式否决不会被通过摘要覆盖', () => {
+    expect(
+      contract.normalizeReviewVerdict({
+        taskId: 'T-FAIL',
+        verdict: 'fail',
+        overallReason: '未发现问题，无需修改。',
+      }),
+    ).toBe('fail');
+    expect(
+      contract.normalizeReviewVerdict({
+        taskId: 'T-REVISION',
+        decision: 'needs_revision',
+        overallReason: '未发现问题，无需修改。',
+      }),
+    ).toBe('needs_revision');
+  });
+
+  it('同时存在 checklist 与 items 时合并识别失败项', () => {
+    expect(
+      contract.extractFailedItemIds({
+        checklist: [{ id: 'AC-PASS', status: 'pass' }],
+        items: [{ id: 'AC-FAIL', status: 'fail' }],
+      }),
+    ).toEqual(['AC-FAIL']);
+  });
+
   it('未显式传 teamWorkspaceId 时，artifact 继承 handoff payload 的 teamWorkspaceId', async () => {
     const reviewerSessionId = 's-protocol-reviewer';
     seedSession(reviewerSessionId, 'reviewer');
@@ -404,6 +430,42 @@ describe('submit_review', () => {
       [reviewerSessionId],
     );
     expect(artifactRow?.team_workspace_id).toBe('tw-review');
+  });
+
+  it('显式 pass 与失败摘要冲突时按失败结果提交', async () => {
+    const reviewerSessionId = 's-protocol-reviewer-conflict';
+    seedSession(reviewerSessionId, 'reviewer');
+    seedRunningHandoff({
+      id: 'h-review-conflict',
+      toSessionId: reviewerSessionId,
+      toRoleLayer: 'reviewer',
+      payload: {
+        goal: '评审鉴权实现',
+        taskMarkers: { taskId: 'T-CONFLICT' },
+      },
+    });
+
+    const result = await builtin.invokeInstruction({
+      ctx: { callerLayer: 'reviewer', sessionId: reviewerSessionId, userId: USER_ID },
+      instructionName: 'submit_review',
+      rawArgs: {
+        taskId: 'T-CONFLICT',
+        verdict: 'pass',
+        overallReason: '需要修改，缺少鉴权证据并存在 SQL 注入漏洞。',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const row = dbModule.sqliteGet<{ result_json: string }>(
+      `SELECT result_json FROM handoff_records WHERE id = ?`,
+      ['h-review-conflict'],
+    );
+    const parsed = JSON.parse(row?.result_json ?? '{}') as {
+      verdict?: unknown;
+      items?: Array<{ status?: unknown }>;
+    };
+    expect(parsed.verdict).toBe('fail');
+    expect(parsed.items?.[0]?.status).toBe('fail');
   });
 });
 

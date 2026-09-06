@@ -339,4 +339,36 @@ describe('review readiness classification', () => {
     expect(report.specIssues).toContain('检查发现问题：AC-2 未覆盖。');
     expect(report.qualityReviewPassed).toBe(true);
   });
+
+  it('soft 模式缺少 protocol 时仍优先拦截结构化失败项', async () => {
+    const childId = 'h-child-soft-structured-failure';
+    seedChildHandoff({
+      id: childId,
+      state: 'completed',
+      resultJson: JSON.stringify({
+        role: 'executor',
+        status: 'completed',
+        summary: '执行结果使用兼容格式提交。',
+        checklist: [{ id: 'AC-SOFT', status: 'fail', evidence: '验收仍然失败' }],
+      }),
+    });
+    let llmCallCount = 0;
+
+    const report = await reviewAggregator.runReviewAggregation({
+      userId: USER_ID,
+      pm2HandoffId: 'pm2-handoff-soft-structured-failure',
+      pm2SessionId: PM2_SESSION_ID,
+      childHandoffs: [getHandoffAsRecord(childId)],
+      specContent: '# 规格\n- AC-SOFT: 完成验收',
+      constitutionBody: '# 宪法',
+      callLlm: async () => {
+        llmCallCount += 1;
+        return '已查看。';
+      },
+    });
+
+    expect(report.overallVerdict).toBe('implementation-failure');
+    expect(report.qualityIssues).toContain('结构化 checklist 未通过：AC-SOFT');
+    expect(llmCallCount).toBe(0);
+  });
 });

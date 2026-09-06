@@ -1,4 +1,0 @@
-
-> @openAwork/opencode-llm@0.1.0 typecheck E:\01.Projects\OpenAWork\packages\opencode-llm
-> tsc --noEmit
-

@@ -108,6 +108,8 @@ export interface ToolResultContent {
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
+  outputKind?: 'binary-reference' | 'html' | 'image-reference' | 'json' | 'log' | 'table' | 'text';
+  outputSummary?: string;
 }
 
 export interface ModifiedFilesSummaryContent {

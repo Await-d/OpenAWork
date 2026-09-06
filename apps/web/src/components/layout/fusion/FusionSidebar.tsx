@@ -1418,44 +1418,42 @@ export function FusionSidebar({
                           {actualSessionCount}
                         </span>
                       </button>
-                      {group.workspacePath && (
-                        <button
-                          type="button"
-                          title={`在 ${group.workspaceLabel} 中新建会话`}
-                          aria-label={`在 ${group.workspaceLabel} 中新建会话`}
-                          onClick={() => void newSession(group.workspacePath)}
-                          style={{
-                            flexShrink: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 20,
-                            height: 20,
-                            borderRadius: 5,
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--fg-muted)',
-                            cursor: 'pointer',
-                            padding: 0,
-                            marginRight: 4,
-                          }}
+                      <button
+                        type="button"
+                        title={`在 ${group.workspaceLabel} 中新建会话`}
+                        aria-label={`在 ${group.workspaceLabel} 中新建会话`}
+                        onClick={() => void newSession(group.workspacePath)}
+                        style={{
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 20,
+                          height: 20,
+                          borderRadius: 5,
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--fg-muted)',
+                          cursor: 'pointer',
+                          padding: 0,
+                          marginRight: 4,
+                        }}
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
                         >
-                          <svg
-                            width="12"
-                            height="12"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <line x1="12" y1="5" x2="12" y2="19" />
-                            <line x1="5" y1="12" x2="19" y2="12" />
-                          </svg>
-                        </button>
-                      )}
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                      </button>
                     </div>
                     {/* 工作区下的会话列表 */}
                     {!isCollapsed &&

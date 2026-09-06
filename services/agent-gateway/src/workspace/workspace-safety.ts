@@ -247,7 +247,13 @@ export function assertSessionWorkspacePath(input: { path: string; sessionId: str
   }
 
   // 仅未绑定：盘符根 / 占位路径改写为桌面默认目录。已绑定绝不改写。
-  const effectivePath = rewriteUnboundPlaceholderPath(input.sessionId, input.path);
+  const rewrittenPath = rewriteUnboundPlaceholderPath(input.sessionId, input.path);
+  const effectivePath = isWorkspaceAbsolutePath(rewrittenPath)
+    ? rewrittenPath
+    : resolveWorkspaceEntryPath(rewrittenPath, workingDirectory);
+  if (!effectivePath) {
+    throw new Error(`Forbidden workspace path: ${rewrittenPath}`);
+  }
   assertWorkspacePathSupportedByCurrentHost(effectivePath);
 
   const result = validateSessionWorkspacePath({ path: effectivePath, sessionId: input.sessionId });
