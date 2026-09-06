@@ -44,6 +44,8 @@ export {
   refreshOrThrow as refreshModelsDevDataOrThrow,
   startPeriodicRefresh as startModelsDevRefresh,
   stopPeriodicRefresh as stopModelsDevRefresh,
+  mapModelsDevModel,
+  resolveModelsDevProvider,
 } from './models-dev.js';
 export type { ModelsDevData, ModelsDevProvider, ModelsDevModel } from './models-dev.js';
 

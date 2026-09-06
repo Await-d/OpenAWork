@@ -43,23 +43,20 @@ function fixture(
   };
 }
 
-describe('工具结果模型入口预算', () => {
+describe('工具结果正常模型投影', () => {
   it.each(['batch', 'webfetch', 'mcp_call', 'desktop_control', 'custom_tool', 'read_tool_output'])(
-    '%s 大输出提供有界预览和可读取引用且不修改存储',
+    '%s 大输出在正常请求中保持完整且不修改存储',
     (tool) => {
       const output = '关键结果\n' + '正文'.repeat(100_000);
       const message = fixture(tool, output);
       const projected = toModelMessages([message]);
       const result = projected.find((entry) => entry.role === 'tool');
-      expect(result?.content.length).toBeLessThanOrEqual(8_192);
-      expect(result?.content).toContain('call-1');
-      expect(result?.content).toContain('read_tool_output');
-      expect(result?.content).toContain('关键结果');
+      expect(result?.content).toBe(output);
       expect(JSON.stringify(message)).toContain(output.replaceAll('\n', '\\n'));
     },
   );
 
-  it('超长调用ID、敏感尾部和参数化URL安全Base64不会突破或泄露', () => {
+  it('参数化 Data URI 会被移除，但普通文本不因调用 ID 或长度被截断', () => {
     const secret = 'SECRET_TOKEN_AT_END';
     const output =
       'data:image/png;charset=utf-8;base64,AA-_ \tAA== | '.repeat(400) +
@@ -69,11 +66,8 @@ describe('工具结果模型入口预算', () => {
       fixture('custom_tool', output, 'completed', 'x'.repeat(10_000)),
     ]);
     const content = projected.find((entry) => entry.role === 'tool')?.content ?? '';
-    expect(content.length).toBeLessThanOrEqual(8_192);
-    expect(content).not.toContain(secret);
+    expect(content).toContain(secret);
     expect(content).not.toContain('AA-_');
-    expect(content).toContain('read_tool_output');
-    expect(content).toContain('toolCallRef');
     expect(content).not.toContain('x'.repeat(256));
   });
 
@@ -125,10 +119,11 @@ describe('工具结果模型入口预算', () => {
     expect(tool.state.attachments[0]?.url).toBe(oversizedUrl);
   });
 
-  it('错误结果同样受预算保护并保留错误状态', () => {
-    const projected = toModelMessages([fixture('batch', '失败信息'.repeat(50_000), 'error')]);
+  it('错误结果同样完整投影并保留错误状态', () => {
+    const output = '失败信息'.repeat(50_000);
+    const projected = toModelMessages([fixture('batch', output, 'error')]);
     const result = projected.find((entry) => entry.role === 'tool');
-    expect(result?.content.length).toBeLessThanOrEqual(8_192);
+    expect(result?.content).toBe(output);
     expect(result?.isError).toBe(true);
   });
   it('小结果保持逐字不变', () => {

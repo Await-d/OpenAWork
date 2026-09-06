@@ -31,6 +31,7 @@ import {
   partsFromOrderedAssistantContent,
   parseAssistantTraceContent,
   reconcileSnapshotChatMessages,
+  replaceOrAppendStreamedAssistantMessage,
   type ChatMessage,
   type ChatMessagePart,
   type ChatToolPart,
@@ -318,6 +319,84 @@ describe('partsFromOrderedAssistantContent', () => {
 });
 
 describe('reconcileSnapshotChatMessages', () => {
+  it('重复刷新同一逻辑消息时保持幂等，不产生第二条 assistant 消息', () => {
+    const live: ChatMessage = {
+      id: 'local-live',
+      role: 'assistant',
+      content: '正在检查格式问题',
+      createdAt: 1_000,
+      status: 'streaming',
+      parts: [
+        {
+          id: 'tool-format',
+          type: 'tool',
+          toolCallId: 'tool-format',
+          toolName: 'format',
+          input: {},
+          status: 'running',
+        },
+      ],
+    };
+    const snapshot: ChatMessage = {
+      id: 'server-copy',
+      role: 'assistant',
+      content: '正在检查格式问题',
+      createdAt: 1_001,
+      status: 'completed',
+      parts: [
+        {
+          id: 'tool-format',
+          type: 'tool',
+          toolCallId: 'tool-format',
+          toolName: 'format',
+          input: {},
+          status: 'completed',
+          output: 'ok',
+        },
+      ],
+    };
+    const first = reconcileSnapshotChatMessages([live], [snapshot]);
+    const second = reconcileSnapshotChatMessages(first, [snapshot]);
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0]?.parts?.[0]).toMatchObject({ status: 'completed', output: 'ok' });
+  });
+
+  it('不同消息 ID 但共享 part 时保留实时 parts 的交错顺序', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'text-a', type: 'text', text: 'A' },
+      {
+        id: 'tool-a',
+        type: 'tool',
+        toolCallId: 'tool-a',
+        toolName: 'read',
+        input: {},
+        status: 'running',
+      },
+      { id: 'text-b', type: 'text', text: 'B' },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'text-a', type: 'text', text: 'A' },
+      { id: 'text-b', type: 'text', text: 'B' },
+      {
+        id: 'tool-a',
+        type: 'tool',
+        toolCallId: 'tool-a',
+        toolName: 'read',
+        input: {},
+        status: 'completed',
+        output: 'ok',
+      },
+    ];
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+    expect(result[0]?.id).toBe('server');
+    expect(result[0]?.parts?.map((part) => part.id)).toEqual(['text-a', 'tool-a', 'text-b']);
+    expect(result[0]?.parts?.[1]).toMatchObject({ status: 'completed', output: 'ok' });
+  });
+
   it('把权限审批后的软刷新视为同位 user 消息，不重复保留本地 optimistic 文本', () => {
     const previousMessages: ChatMessage[] = [
       {
@@ -346,6 +425,28 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(reconciled).toHaveLength(1);
     expect(reconciled[0]?.id).toBe('server-user-1');
     expect(reconciled[0]?.content).toBe('帮我执行 npm run build');
+  });
+});
+
+describe('replaceOrAppendStreamedAssistantMessage', () => {
+  it('相同消息 ID 的最终消息替换旧占位消息', () => {
+    const previous: ChatMessage = {
+      id: 'same-stream-id',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    };
+    const completed: ChatMessage = {
+      id: 'same-stream-id',
+      role: 'assistant',
+      content: '完成',
+      status: 'completed',
+      parts: [{ id: 'same-stream-id:text', type: 'text', text: '完成' }],
+    };
+
+    expect(replaceOrAppendStreamedAssistantMessage([previous], completed, new Set())).toEqual([
+      completed,
+    ]);
   });
 });
 

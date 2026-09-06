@@ -331,7 +331,7 @@ afterAll(async () => {
 });
 
 describe('任务 2 真实 route runtime 微压缩', () => {
-  it('真实 runModelRound 经 AI SDK 与本地 SSE 完成 count 微压缩，并在 SQLite 重载后保留既有原始字节', async () => {
+  it('真实 runModelRound 不按工具数量微压缩，并在 SQLite 重载后保留既有原始字节', async () => {
     appendUser('run with persisted history', Date.now() - 61 * 60_000);
     for (let index = 0; index < 21; index += 1) {
       appendToolTurn(index, Date.now() - (21 - index) * 1_000);
@@ -347,7 +347,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
     expect(capturedRequests[0]?.url).toBe('/v1/chat/completions');
-    expect(requestBody).toContain(COMPACTED_REFERENCE_MARKER);
+    expect(requestBody).not.toContain(COMPACTED_REFERENCE_MARKER);
 
     await db.closeDb();
     await db.connectDb();
@@ -358,7 +358,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(snapshot('part_v2').filter((row) => beforePartIds.has(row.id))).toEqual(beforeParts);
   });
 
-  it('Anthropic 路由关闭时间策略时仍由最终累计预算保护', async () => {
+  it('Anthropic 路由关闭时间策略时不施加固定累计预算', async () => {
     for (let index = 0; index < 8; index += 1) {
       appendToolTurn(index, Date.now() - 61 * 60_000 - index * 1_000);
     }
@@ -375,11 +375,11 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
     expect(capturedRequests[0]?.url).toBe('/messages');
-    expect(requestBody).toContain(COMPACTED_REFERENCE_MARKER);
+    expect(requestBody).not.toContain(COMPACTED_REFERENCE_MARKER);
     expect(requestBody).toContain('persisted tool output 0');
   });
 
-  it('teamTaskThreadId 跳过时间策略但仍在真实 Anthropic 请求中执行 count 微压缩', async () => {
+  it('teamTaskThreadId 跳过废弃的时间和 count 微压缩', async () => {
     const threadId = 'task-2-thread';
     appendUser('thread history', Date.now() - 61 * 60_000, threadId);
     for (let index = 0; index < 21; index += 1) {
@@ -398,11 +398,11 @@ describe('任务 2 真实 route runtime 微压缩', () => {
 
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
-    expect(countOccurrences(requestBody, COMPACTED_REFERENCE_MARKER)).toBeGreaterThanOrEqual(13);
+    expect(countOccurrences(requestBody, COMPACTED_REFERENCE_MARKER)).toBe(0);
     expect(requestBody).toContain('persisted tool output 0');
   });
 
-  it('时间策略明确启用时遵循 59 不触发、60 触发、61 继续触发', () => {
+  it('废弃时间策略不再改变 token 级剪枝判断', () => {
     const messages = Array.from({ length: 6 }, (_, index) => ({
       content: `boundary output ${index} `.repeat(10),
       role: 'tool' as const,
@@ -420,8 +420,8 @@ describe('任务 2 真实 route runtime 微压缩', () => {
         );
 
       expect(evaluate(59).trigger).toBe('none');
-      expect(evaluate(60)).toMatchObject({ clearedCount: 0, trigger: 'time' });
-      expect(evaluate(61)).toMatchObject({ clearedCount: 0, trigger: 'time' });
+      expect(evaluate(60)).toMatchObject({ clearedCount: 0, trigger: 'none' });
+      expect(evaluate(61)).toMatchObject({ clearedCount: 0, trigger: 'none' });
     } finally {
       vi.useRealTimers();
     }
@@ -449,7 +449,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
     }
   });
 
-  it('显式保护的 skill result 在 count 和 time 两种触发中均不会被替换', () => {
+  it('显式保护的 skill result 不会被废弃的 count 和 time 配置替换', () => {
     const skillMessage = {
       content: 'protected skill result '.repeat(20),
       role: 'tool' as const,
@@ -475,8 +475,8 @@ describe('任务 2 真实 route runtime 微压缩', () => {
         { lastAssistantTimestamp: now - 61 * 60_000 },
       );
 
-      expect(countCompacted.trigger).toBe('count');
-      expect(timeCompacted.trigger).toBe('time');
+      expect(countCompacted.trigger).toBe('none');
+      expect(timeCompacted.trigger).toBe('none');
       expect(countCompacted.messages[0]?.content).toBe(skillMessage.content);
       expect(timeCompacted.messages[0]?.content).toBe(skillMessage.content);
     } finally {

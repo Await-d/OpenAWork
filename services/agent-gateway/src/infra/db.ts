@@ -22,6 +22,7 @@ import {
 } from '../tools/tool-result-contract.js';
 import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
 import { buildToolOutputReferenceIdentity } from '../message/tool-output-reference.js';
+import { makeOrderedPartId } from './ordered-id.js';
 
 interface SqliteStatement {
   all(...params: unknown[]): unknown[];
@@ -1220,6 +1221,7 @@ export async function migrate(): Promise<void> {
 
   // ─── V1 → V2 Data Migration ───
   migrateV1MessagesToV2();
+  repairLegacyMigratedPartOrder();
 
   // ─── V2 Session Columns (event-sourcing projectors) ───
   ensureColumn('sessions', 'parent_id', 'TEXT DEFAULT NULL');
@@ -2171,7 +2173,9 @@ function migrateV1MessagesToV2(): void {
 
     for (const item of content) {
       const part = item as Record<string, unknown>;
-      const partId = randomUUID();
+      // V2 readers use part IDs as the stable ordering key. A random UUID here
+      // silently shuffled legacy text/tool/text content after migration.
+      const partId = makeOrderedPartId(row.created_at_ms);
       let partData: Record<string, unknown>;
 
       if (part['type'] === 'text') {
@@ -2256,6 +2260,114 @@ function migrateV1MessagesToV2(): void {
   console.log(
     `[V2_MIGRATION] Complete: ${migratedMessages} messages, ${migratedParts} parts migrated`,
   );
+}
+
+const LEGACY_RANDOM_PART_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function repairLegacyMigratedPartOrder(): void {
+  const candidates = db
+    .prepare(
+      `SELECT sm.id, sm.created_at_ms, sm.content_json
+       FROM session_messages sm
+       WHERE EXISTS (
+         SELECT 1 FROM part_v2 p WHERE p.message_id = sm.id AND p.id NOT LIKE 'prt_%'
+       )`,
+    )
+    .all() as Array<{ content_json: string; created_at_ms: number; id: string }>;
+
+  for (const candidate of candidates) {
+    const rows = db
+      .prepare('SELECT id, data FROM part_v2 WHERE message_id = ? ORDER BY id ASC')
+      .all(candidate.id) as Array<{ data: string; id: string }>;
+    if (rows.length === 0 || !rows.every((row) => LEGACY_RANDOM_PART_ID_PATTERN.test(row.id))) {
+      continue;
+    }
+
+    let content: unknown;
+    try {
+      content = JSON.parse(candidate.content_json) as unknown;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+
+    const parsedRows = rows.map((row) => {
+      try {
+        return { ...row, value: JSON.parse(row.data) as Record<string, unknown> };
+      } catch {
+        return null;
+      }
+    });
+    if (parsedRows.some((row) => row === null)) continue;
+
+    const unused = parsedRows.filter(
+      (row): row is { data: string; id: string; value: Record<string, unknown> } => row !== null,
+    );
+    const orderedRows: typeof unused = [];
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const source = item as Record<string, unknown>;
+      if (source['type'] === 'tool_result') continue;
+
+      const matchIndex = unused.findIndex(({ value }) => {
+        if (source['type'] === 'text') {
+          return value['type'] === 'text' && value['text'] === (source['text'] ?? '');
+        }
+        if (source['type'] === 'tool_call') {
+          return value['type'] === 'tool' && value['callID'] === (source['toolCallId'] ?? '');
+        }
+        if (source['type'] === 'modified_files_summary') {
+          return (
+            value['type'] === 'modified_files_summary' &&
+            value['title'] === (source['title'] ?? '') &&
+            value['summary'] === (source['summary'] ?? '')
+          );
+        }
+        return false;
+      });
+      if (matchIndex >= 0) {
+        orderedRows.push(unused.splice(matchIndex, 1)[0]!);
+      }
+    }
+
+    if (unused.length > 0 || orderedRows.length !== rows.length) continue;
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS part_v2_order_repair_backup (
+        original_id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        repaired_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        repaired_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    const replacements = orderedRows.map((row) => ({
+      data: row.data,
+      finalId: makeOrderedPartId(candidate.created_at_ms),
+      oldId: row.id,
+      temporaryId: `repair_${randomUUID()}`,
+    }));
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const update = db.prepare('UPDATE part_v2 SET id = ? WHERE id = ? AND message_id = ?');
+      for (const replacement of replacements) {
+        update.run(replacement.temporaryId, replacement.oldId, candidate.id);
+      }
+      for (const replacement of replacements) {
+        db.prepare(
+          `INSERT OR IGNORE INTO part_v2_order_repair_backup
+            (original_id, message_id, repaired_id, data)
+           VALUES (?, ?, ?, ?)`,
+        ).run(replacement.oldId, candidate.id, replacement.finalId, replacement.data);
+        update.run(replacement.finalId, replacement.temporaryId, candidate.id);
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      console.warn(`[V2_MIGRATION] Failed to repair legacy part order for ${candidate.id}`, error);
+    }
+  }
 }
 
 export function sqliteRun(query: string, params: readonly SqliteBindableValue[] = []): void {

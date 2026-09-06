@@ -28,6 +28,7 @@ import { useAuthStore } from '../../../stores/auth/auth.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { getPathBasename } from '../../../utils/workspace-path.js';
 import WorkspacePickerModal from '../../common/modal/WorkspacePickerModal.js';
+import { buildTeamSessionRoute } from '../../../utils/session/team-session-route.js';
 import { buildWorkspacePickerDataSource } from '../../common/modal/workspace-picker-data-source.js';
 import { SidebarRailV2 } from './SidebarRailV2.js';
 import { FusionSidebarPeek } from './FusionSidebarPeek.js';
@@ -421,7 +422,7 @@ function TeamWorkspaceGroupItem({
                   preloadRoute('/team');
                   if (ts.teamWorkspaceId) {
                     onSelectSession(ts.teamWorkspaceId, ts.id);
-                    void navigate(`/team/${ts.teamWorkspaceId}`);
+                    void navigate(buildTeamSessionRoute(ts.teamWorkspaceId, ts.id));
                   } else {
                     void navigate('/team');
                   }
@@ -1286,7 +1287,7 @@ export function FusionSidebar({
                   onSelectSession={(wsId, sessionId) => {
                     preloadRoute('/team');
                     triggerTeamSelectSession(wsId, sessionId);
-                    void navigate(`/team/${wsId}`);
+                    void navigate(buildTeamSessionRoute(wsId, sessionId));
                   }}
                   onSessionContextMenu={handleTeamSessionContextMenu}
                   renamingSessionId={teamRenamingSessionId}

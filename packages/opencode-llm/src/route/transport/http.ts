@@ -9,6 +9,7 @@ import { render as renderEndpoint } from '../endpoint.js';
 import { Framing, type Framing as FramingDef } from '../framing.js';
 import type { Transport, TransportPrepareInput } from './index.js';
 import * as ProviderShared from '../../protocols/shared.js';
+import { httpStreamError } from './stream-error.js';
 import { mergeJsonRecords, type LLMRequest } from '../../schema/index.js';
 
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>;
@@ -228,11 +229,7 @@ export const httpJson = <Body, Frame>(
             prepared.framing.frame(
               response.stream.pipe(
                 Stream.mapError((error) =>
-                  ProviderShared.eventError(
-                    `${request.model.provider}/${request.model.route.id}`,
-                    `Failed to read ${request.model.provider}/${request.model.route.id} stream`,
-                    ProviderShared.errorText(error),
-                  ),
+                  httpStreamError(`${request.model.provider}/${request.model.route.id}`, error),
                 ),
               ),
             ),

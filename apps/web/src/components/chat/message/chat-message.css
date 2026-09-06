@@ -152,7 +152,9 @@
   height: 18px;
   padding: 0 7px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--accent) 16%, var(--border-default) 84%);
+  border-width: 1px;
+  border-style: solid;
+  border-color: color-mix(in oklch, var(--accent) 16%, var(--border-default) 84%);
   background: linear-gradient(
     135deg,
     color-mix(in oklch, var(--accent) 18%, var(--bg-overlay) 82%),

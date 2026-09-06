@@ -971,7 +971,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             minimum: 1,
             maximum: 8000,
             description:
-              '字符分页长度上限；实际返回同时受序列化字节预算限制，使用 nextCharStart 续读。',
+              '每页最多 8000 字符；超额请求自动缩至 8000。实际返回同时受序列化字节预算限制，必须使用 nextCharStart 续读。',
           },
           itemStart: {
             type: 'integer',

@@ -11,6 +11,10 @@
 
 import type { HandoffTaskRunner } from './watcher.js';
 import { runArtifactChain } from './artifact-chain.js';
+import { requestPlanningCompletion } from './planning-completion.js';
+import { collectPlanningProjectContext } from './planning-project-context.js';
+import { investigatePlanningProject } from './planning-investigation.js';
+import { PlanningFailure } from '../capability/planning-failure.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import {
   buildAuxiliaryTeamInstructionPrefix,
@@ -663,8 +667,8 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
   const escalationRound =
     typeof payload?.['escalationRound'] === 'number' ? payload['escalationRound'] : 0;
 
-  // 防止无限退回循环：如果已退回 ≥4 轮仍不通过，停止重新规划并通知用户
-  if (isQualityFeedback && escalationRound >= 4) {
+  // 最多执行两次自动返工；无进展指纹可提前触发此终止入口。
+  if (isQualityFeedback && escalationRound > 2) {
     try {
       const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
       // 找到 reception session 写消息
@@ -706,7 +710,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     } catch {
       /* best-effort */
     }
-    return;
+    throw new PlanningFailure('已达到自动规划返工上限');
   }
 
   // 如果是质量评审退回的重新规划，在 PM1 session 和 reception session 各写一条消息，
@@ -803,7 +807,6 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     );
   }
 
-  const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
   // 动态注入「团队编制清单」：PM1 规划时也让它感知当前实时花名册（含自定义角色），
   // 据此把任务拆给真实存在的角色。reception/pm1/pm2 走辅助 LLM 路径，这里手动前置。
   const rosterManifest = buildTeamRosterManifest({
@@ -900,15 +903,17 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       instructionPrefix,
       prompt: systemWithExtras,
     });
-    return requestWorkflowLlmCompletion({
+    return requestPlanningCompletion({
       apiBaseUrl: llmConfig.apiBaseUrl,
       apiKey: llmConfig.apiKey,
       model: llmConfig.model,
       ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
       ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
       ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
-      prompt: `${systemWithKnowledge}\n\n---\n\n${userMessage}`,
+      system: systemWithKnowledge,
+      prompt: userMessage,
       temperature: 0.3,
+      signal: input.signal,
       usageContext: {
         userId: input.handoff.userId,
         sessionId: input.toSessionId,
@@ -929,9 +934,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     });
   };
 
-  // 构建项目上下文摘要：从 session metadata 解析 workingDirectory，
-  // 尝试读取 AGENTS.md 的前 2000 字符作为项目结构/技术栈摘要。
-  // 让 PM1 在生成 spec/plan/tasks 时能感知实际项目架构。
+  // 从实际工作目录收集有界只读证据，覆盖目录、项目约定与构建测试脚本。
   let projectContext: string | null = null;
   try {
     const sessionMetaRow = sqliteGet<{ metadata_json: string | null }>(
@@ -943,18 +946,18 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       const workingDir =
         typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
       if (workingDir) {
-        const { readFileSync, existsSync } = await import('node:fs');
-        // eslint-disable-next-line @typescript-eslint/unbound-method -- node:path 方法安全解构
-        const { join } = await import('node:path');
-        const agentsPath = join(workingDir, 'AGENTS.md');
-        if (existsSync(agentsPath)) {
-          const content = readFileSync(agentsPath, 'utf-8');
-          // 截取前 2000 字符，避免 prompt 过长
-          projectContext = content.slice(0, 2000);
-        }
+        projectContext = await collectPlanningProjectContext(workingDir);
+        projectContext = await investigatePlanningProject({
+          directory: workingDir,
+          intent: sourceIntent,
+          initialContext: projectContext,
+          signal: input.signal,
+          callLlm,
+        });
       }
     }
   } catch (ctxErr) {
+    if (ctxErr instanceof PlanningFailure || input.signal.aborted) throw ctxErr;
     console.warn(
       `[pm1-runner] 构建项目上下文失败：${ctxErr instanceof Error ? ctxErr.message : String(ctxErr)}`,
     );

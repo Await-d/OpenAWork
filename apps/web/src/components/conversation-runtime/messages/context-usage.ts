@@ -41,6 +41,7 @@ export function buildChatContextUsageSnapshot({
   if (
     !preferHistoricalEstimate &&
     safeReportedTotalTokens !== undefined &&
+    safeReportedTotalTokens >= estimatedUsedTokens &&
     (safeReportedTotalTokens > 0 || estimatedUsedTokens === 0)
   ) {
     return {

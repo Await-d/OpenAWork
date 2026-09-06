@@ -26,6 +26,17 @@ import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 
+export class WorkflowOutputError extends Error {
+  constructor(
+    readonly code: 'empty-output' | 'output-truncated',
+    readonly finishReason: string,
+    readonly outputTokens: number,
+  ) {
+    super(`workflow ${code}: finishReason=${finishReason}, outputTokens=${outputTokens}`);
+    this.name = 'WorkflowOutputError';
+  }
+}
+
 /**
  * 粗略 token 估算（~4 字符/token，与 compaction 的 estimateMessageTokens 同口径）。
  * 仅在 provider 不回 usage 时作为团队用量统计的兜底，保证度量面板有近似值可看，
@@ -64,6 +75,9 @@ export interface WorkflowLlmRequestConfig {
   apiKey: string;
   model: string;
   prompt: string;
+  system?: string;
+  /** Planning callers must not accept empty or truncated documents. */
+  requireCompleteOutput?: boolean;
   temperature: number;
   /**
    * OpenAWork provider type (`openai`, `anthropic`, ...) — when the
@@ -191,6 +205,7 @@ export async function requestWorkflowLlmCompletion(
         baseURL: input.apiBaseUrl,
         model: input.model,
         messages: [{ role: 'user', content: input.prompt }],
+        ...(input.system ? { system: input.system } : {}),
         temperature: input.temperature,
         maxOutputTokens:
           typeof input.maxOutputTokens === 'number' && input.maxOutputTokens > 0
@@ -271,6 +286,16 @@ export async function requestWorkflowLlmCompletion(
       }
     }
 
+    if (input.requireCompleteOutput) {
+      if (
+        ['length', 'max_tokens', 'max_output_tokens', 'incomplete'].includes(result.finishReason)
+      ) {
+        throw new WorkflowOutputError('output-truncated', result.finishReason, result.outputTokens);
+      }
+      if (!result.text.trim()) {
+        throw new WorkflowOutputError('empty-output', result.finishReason, result.outputTokens);
+      }
+    }
     return result.text;
   } catch (err) {
     if (timedOut) {

@@ -136,6 +136,10 @@ import {
 import { resolveMatchedSharedSessionDetail } from '../runtime/data/team-runtime-shared-context.js';
 import { TeamPageV2RuntimeNotices } from './TeamPageV2RuntimeNotices.js';
 import { TeamFusionSuperbarSummary } from './TeamFusionSuperbarSummary.js';
+import {
+  buildTeamSessionRoute,
+  resolveTeamSessionFromRoute,
+} from '../../../utils/session/team-session-route.js';
 
 // ───── 尺寸常量 ─────
 
@@ -341,8 +345,8 @@ export default function TeamPageV2() {
     onWorkspacesChanged: workspaceState.refresh,
   });
 
-  // 不在初次加载时自动选中会话——让用户先看到欢迎页面，
-  // 从侧边栏主动选择会话后再进入会话视图。
+  // `/team` 仍保留欢迎页；`/team/:workspaceId` 则恢复 URL 指定的会话，
+  // 旧链接没有 sessionId 时回退到当前工作区默认根会话。
   // 跨工作区切换会话后，等新工作区数据加载完成（workspaceGroups 包含
   // pending 会话）时恢复选中。避免在新数据加载前用旧 sessionId 加载内容。
   useEffect(() => {
@@ -359,6 +363,37 @@ export default function TeamPageV2() {
       data.selectTeam(pendingId);
     }
   }, [data.workspaceGroups]);
+
+  useEffect(() => {
+    if (!teamWorkspaceId || selectedTeamId || !data.workspaceGroups.length) {
+      return;
+    }
+    const requestedSessionId = searchParams.get('sessionId');
+    const routeSessionId = resolveTeamSessionFromRoute({
+      defaultSessionId: data.defaultSelectedTeamId,
+      groups: data.workspaceGroups,
+      requestedSessionId,
+    });
+    if (!routeSessionId) {
+      return;
+    }
+    userSelectedTeamRef.current = true;
+    setSelectedTeamId(routeSessionId);
+    data.selectTeam(routeSessionId);
+    if (requestedSessionId !== routeSessionId) {
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.set('sessionId', routeSessionId);
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [
+    data.defaultSelectedTeamId,
+    data.selectTeam,
+    data.workspaceGroups,
+    searchParams,
+    selectedTeamId,
+    setSearchParams,
+    teamWorkspaceId,
+  ]);
 
   useEffect(() => {
     if (!selectedAgentId && data.defaultSelectedAgentId) {
@@ -621,7 +656,7 @@ export default function TeamPageV2() {
             ws.defaultWorkingRoot != null && isPathWithinRoot(sessionPath, ws.defaultWorkingRoot),
         );
         if (targetWorkspace && targetWorkspace.id !== resolvedTeamWorkspaceId) {
-          navigate(`/team/${targetWorkspace.id}`);
+          navigate(buildTeamSessionRoute(targetWorkspace.id, teamId));
           isCrossWorkspaceNavigation = true;
           // 先记住用户想选的会话，等新工作区数据加载后再恢复
           pendingSelectedTeamIdRef.current = teamId;
@@ -633,9 +668,22 @@ export default function TeamPageV2() {
       if (!isCrossWorkspaceNavigation) {
         setSelectedTeamId(teamId);
         data.selectTeam(teamId);
+        if (resolvedTeamWorkspaceId) {
+          const nextSearchParams = new URLSearchParams(searchParams);
+          nextSearchParams.set('sessionId', teamId);
+          setSearchParams(nextSearchParams, { replace: true });
+        }
       }
     },
-    [data, isMobile, navigate, resolvedTeamWorkspaceId, workspaceState.workspaces],
+    [
+      data,
+      isMobile,
+      navigate,
+      resolvedTeamWorkspaceId,
+      searchParams,
+      setSearchParams,
+      workspaceState.workspaces,
+    ],
   );
 
   const handleSelectTeam = useCallback(
@@ -818,7 +866,8 @@ export default function TeamPageV2() {
     setSelectedTeamId('');
     setEditorOverlayOpen(false);
     consumeResetToWelcomeSignal();
-  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]);
+    navigate('/team', { replace: true });
+  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal, navigate]);
 
   useEffect(() => {
     if (!teamNewSessionSignal) {

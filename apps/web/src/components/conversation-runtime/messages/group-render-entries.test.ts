@@ -15,6 +15,16 @@ function assistantEntry(id: string, groupIdentityKey?: string): ChatRenderEntry 
   };
 }
 
+function assistantRequestEntry(id: string, clientRequestId: string): ChatRenderEntry {
+  return {
+    ...assistantEntry(id),
+    message: {
+      ...assistantEntry(id).message,
+      clientRequestId,
+    },
+  };
+}
+
 describe('groupChatRenderEntries', () => {
   it('相邻 assistant 且来源身份相同时合并到同一组', () => {
     const groups = groupChatRenderEntries([
@@ -36,5 +46,25 @@ describe('groupChatRenderEntries', () => {
     expect(groups).toHaveLength(2);
     expect(groups[0]?.entries).toHaveLength(1);
     expect(groups[1]?.entries).toHaveLength(2);
+  });
+
+  it('渲染入口再次收到同一 assistant 请求时只保留一份', () => {
+    const groups = groupChatRenderEntries([
+      assistantRequestEntry('server-copy', 'request-1'),
+      assistantRequestEntry('stream-copy', 'request-1'),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.entries).toHaveLength(1);
+    expect(groups[0]?.entries[0]?.message.id).toBe('server-copy');
+  });
+
+  it('工具轮派生请求与最终请求仍分别展示', () => {
+    const groups = groupChatRenderEntries([
+      assistantRequestEntry('tool-round', 'request-1:assistant:1'),
+      assistantRequestEntry('final-round', 'request-1'),
+    ]);
+
+    expect(groups[0]?.entries).toHaveLength(2);
   });
 });

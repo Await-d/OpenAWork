@@ -59,6 +59,16 @@ export interface AIModelConfig {
   id: string;
   label: string;
   enabled: boolean;
+  description?: string;
+  family?: string;
+  releaseDate?: string;
+  lastUpdated?: string;
+  openWeights?: boolean;
+  knowledgeCutoff?: string;
+  providerNpm?: string;
+  providerApi?: string;
+  experimental?: Record<string, unknown>;
+  modelsDevOptions?: Record<string, unknown>;
   contextWindow?: number;
   contextWindowOverride?: number;
   maxOutputTokens?: number;
@@ -79,7 +89,18 @@ export interface AIModelConfig {
   supportsVideoInput?: boolean;
   supportsAudioOutput?: boolean;
   supportsVideoGeneration?: boolean;
+  supportsAttachments?: boolean;
+  supportsStructuredOutput?: boolean;
+  supportsTemperature?: boolean;
+  supportsInterleavedReasoning?: boolean;
+  reasoningContentField?: string;
   supportsThinking?: boolean;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  reasoningOptions?: Array<{
+    type: string;
+    values?: string[];
+  }>;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
   cacheReadPricePerMillion?: number;

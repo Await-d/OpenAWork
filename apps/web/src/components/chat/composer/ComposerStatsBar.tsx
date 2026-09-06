@@ -1,8 +1,8 @@
 /**
  * ComposerStatsBar — 输入框下方统计信息栏
  *
- * 数值按语义分色：费用=琥珀(contrast)、输入=靛蓝(aux)、输出=accent、
- * 推理=珊瑚(complement)、缓存=success、上下文=动态阈值色。
+ * 数值按语义分色：输入=靛蓝(aux)、输出=accent、推理=珊瑚(complement)、
+ * 缓存读=success、缓存写=琥珀(contrast)、上下文=动态阈值色。
  */
 
 import React, { useMemo } from 'react';
@@ -13,13 +13,6 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-function formatCost(usd: number): string {
-  if (usd >= 1) return `$${usd.toFixed(2)}`;
-  if (usd >= 0.01) return `$${usd.toFixed(3)}`;
-  if (usd > 0) return `$${usd.toFixed(4)}`;
-  return '$0';
 }
 
 function formatDuration(ms: number): string {
@@ -42,7 +35,6 @@ function formatDurationLong(ms: number): string {
 
 // ─── 语义色彩常量 ────────────────────────────────────────────────────────────
 
-const COLOR_COST = 'var(--contrast)';
 const COLOR_INPUT = 'var(--aux)';
 const COLOR_OUTPUT = 'var(--accent)';
 const COLOR_REASONING = 'var(--complement)';
@@ -56,7 +48,9 @@ const COLOR_COMPACTION = 'var(--warning)';
 // ─── 类型定义 ──────────────────────────────────────────────────────────────
 
 export interface ComposerStatsData {
+  /** 累计估算费用（美元）。 */
   totalCostUsd: number;
+  /** 当前/最近一轮估算费用（美元）。 */
   currentRoundCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -192,13 +186,6 @@ const ip = {
   strokeLinejoin: 'round' as const,
 };
 
-const CoinIcon = (
-  <svg {...ip}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M14.5 9.5a2.5 2.5 0 0 0-2.5-1.5h-1A2 2 0 0 0 9 10c0 1.1.9 2 2 2h2a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-1a2.5 2.5 0 0 1-2.5-1.5" />
-    <path d="M12 6.5v1M12 16.5v1" />
-  </svg>
-);
 const TokenIcon = (
   <svg {...ip}>
     <path d="M4 7h16M4 12h16M4 17h10" />
@@ -371,20 +358,6 @@ export const CompactComposerStatsSummary: React.FC<ComposerStatsBarProps> = Reac
       });
     }
 
-    if (data.currentRoundCostUsd > 0) {
-      summaryItems.push({
-        label: '本轮',
-        value: formatCost(data.currentRoundCostUsd),
-        valueColor: COLOR_COST,
-      });
-    } else if (data.totalCostUsd > 0) {
-      summaryItems.push({
-        label: '总消费',
-        value: formatCost(data.totalCostUsd),
-        valueColor: COLOR_COST,
-      });
-    }
-
     if (summaryItems.length === 0) {
       summaryItems.push({
         label: '轮数',
@@ -456,7 +429,6 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
     const showReasoning = data.reasoningTokens != null && data.reasoningTokens > 0;
     const showCacheRead = data.cacheReadTokens != null && data.cacheReadTokens > 0;
     const showCacheWrite = data.cacheWriteTokens != null && data.cacheWriteTokens > 0;
-    const showCurrentRoundCost = data.currentRoundCostUsd > 0;
     const showHiddenMessages = data.hiddenMessageCount > 0;
     const showServerTurns =
       data.serverTotalTurnCount != null && data.serverTotalTurnCount > data.messageTurns;
@@ -475,27 +447,6 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
           rowGap: 2,
         }}
       >
-        <StatItem
-          icon={CoinIcon}
-          label="总消费"
-          value={formatCost(data.totalCostUsd)}
-          valueColor={COLOR_COST}
-          title={`本会话预估总消费：${formatCost(data.totalCostUsd)}`}
-        />
-        <Separator />
-        {showCurrentRoundCost && (
-          <>
-            <StatItem
-              icon={CoinIcon}
-              label="本轮"
-              value={formatCost(data.currentRoundCostUsd)}
-              valueColor={COLOR_COST}
-              highlight={data.streaming}
-              title={`本轮预估消费：${formatCost(data.currentRoundCostUsd)}`}
-            />
-            <Separator />
-          </>
-        )}
         <StatItem
           icon={TokenIcon}
           label="Token"
@@ -542,7 +493,7 @@ export const ComposerStatsBar: React.FC<ComposerStatsBarProps> = React.memo(
             icon={CacheIcon}
             label="缓存写"
             value={formatTokenCount(data.cacheWriteTokens!)}
-            valueColor={COLOR_COST}
+            valueColor="var(--contrast)"
             highlight={data.streaming}
             title={`缓存写入 Token：${data.cacheWriteTokens!.toLocaleString()}`}
           />

@@ -44,4 +44,18 @@ describe('buildChatContextUsageSnapshot', () => {
       usedTokens: 48_000,
     });
   });
+
+  it('后端 usage 小于当前消息估算时不让仪表回退', () => {
+    expect(
+      buildChatContextUsageSnapshot({
+        contextWindow: 100_000,
+        historicalTokens: 48_000,
+        reportedTotalTokens: 35_000,
+      }),
+    ).toEqual({
+      estimated: true,
+      maxTokens: 100_000,
+      usedTokens: 48_000,
+    });
+  });
 });

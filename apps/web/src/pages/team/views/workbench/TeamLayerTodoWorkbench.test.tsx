@@ -183,4 +183,49 @@ describe('TeamLayerTodoWorkbench', () => {
 
     expect(screen.getByText('自定义度量内容')).toBeTruthy();
   });
+
+  it('切换选中项时不混用边框简写与长写样式', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { rerender } = render(
+      <TeamLayerTodoWorkbench
+        tab="tasks"
+        onTabChange={vi.fn()}
+        layers={stubLayers}
+        activeLayerId="L1"
+        onSelectLayer={vi.fn()}
+        roles={stubRoles}
+        activeRoleId="all"
+        onSelectRole={vi.fn()}
+        todos={stubTodos}
+        activeTodoId="T1"
+        todoFilter="all"
+        onTodoFilterChange={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <TeamLayerTodoWorkbench
+        tab="tasks"
+        onTabChange={vi.fn()}
+        layers={stubLayers}
+        activeLayerId="L2"
+        onSelectLayer={vi.fn()}
+        roles={stubRoles}
+        activeRoleId="R1"
+        onSelectRole={vi.fn()}
+        todos={stubTodos}
+        activeTodoId="T2"
+        todoFilter="done"
+        onTodoFilterChange={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+
+    const styleWarnings = consoleError.mock.calls.filter(
+      ([message]) => typeof message === 'string' && message.includes('conflicting property'),
+    );
+    expect(styleWarnings).toEqual([]);
+    consoleError.mockRestore();
+  });
 });

@@ -52,7 +52,7 @@ describe('auto compaction parity contract baseline', () => {
 });
 
 describe('auto compaction reference threshold', () => {
-  it('让 V2 stream gate 在 95K 进入 overflow recovery，而 94,999 保持当前 round', () => {
+  it('让 V2 stream gate 在 108K 进入 overflow recovery，而 107,999 保持当前 round', () => {
     // Given
     const input = {
       modelContextWindow: 128_000,
@@ -60,17 +60,17 @@ describe('auto compaction reference threshold', () => {
     };
 
     // When
-    const belowThreshold = isCompactionThresholdReached({ inputTokens: 94_999 }, input);
-    const atThreshold = isCompactionThresholdReached({ inputTokens: 95_000 }, input);
+    const belowThreshold = isCompactionThresholdReached({ inputTokens: 107_999 }, input);
+    const atThreshold = isCompactionThresholdReached({ inputTokens: 108_000 }, input);
 
     // Then
     expect(belowThreshold).toBe(false);
     expect(atThreshold).toBe(true);
   });
 
-  it('V2 stream gate 不让 legacy reserved 设置改写 95K 阈值', () => {
+  it('V2 stream gate 不让 legacy reserved 设置改写 108K 阈值', () => {
     // Given
-    const usage = { inputTokens: 95_000 };
+    const usage = { inputTokens: 108_000 };
 
     // When
     const reached = isCompactionThresholdReached(usage, {
@@ -82,14 +82,14 @@ describe('auto compaction reference threshold', () => {
     expect(reached).toBe(true);
   });
 
-  it('triggers at exactly 95K for a 128K context and 32K model output limit', () => {
+  it('triggers at exactly 108K for a 128K context with the 20K buffer cap', () => {
     // Given
     const threshold = resolveCompactionThreshold({
       modelContextWindow: 128_000,
       modelMaxOutputTokens: 32_000,
     });
-    const belowThreshold = { inputTokens: 94_999 };
-    const atThreshold = { inputTokens: 95_000 };
+    const belowThreshold = { inputTokens: 107_999 };
+    const atThreshold = { inputTokens: 108_000 };
 
     // When
     const belowTriggers = hasReachedAutoCompactionThreshold(belowThreshold, threshold);
@@ -99,7 +99,7 @@ describe('auto compaction reference threshold', () => {
     expect(threshold).toEqual({
       contextWindow: 128_000,
       effectiveContextWindow: 108_000,
-      autoCompactThreshold: 95_000,
+      autoCompactThreshold: 108_000,
     });
     expect(belowTriggers).toBe(false);
     expect(atThresholdTriggers).toBe(true);
@@ -128,7 +128,7 @@ describe('auto compaction reference threshold', () => {
     const threshold = resolveCompactionThreshold(input);
 
     // Then
-    expect(threshold.autoCompactThreshold).toBe(95_000);
+    expect(threshold.autoCompactThreshold).toBe(108_000);
   });
 
   it('only lets window and percentage overrides lower the reference values', () => {
@@ -156,7 +156,7 @@ describe('auto compaction reference threshold', () => {
     expect(higher).toEqual({
       contextWindow: 128_000,
       effectiveContextWindow: 108_000,
-      autoCompactThreshold: 95_000,
+      autoCompactThreshold: 106_920,
     });
     expect(lower).toEqual({
       contextWindow: 150_000,
@@ -182,7 +182,7 @@ describe('auto compaction reference threshold', () => {
     expect(threshold).toEqual({
       contextWindow: 128_000,
       effectiveContextWindow: 108_000,
-      autoCompactThreshold: 95_000,
+      autoCompactThreshold: 108_000,
     });
     expect(parsePositiveOverride('invalid')).toBeUndefined();
     expect(parsePercentageOverride('-10')).toBeUndefined();
@@ -194,7 +194,7 @@ describe('provider usage normalization parity', () => {
     [
       'anthropic',
       {
-        inputTokens: 85_000,
+        inputTokens: 98_000,
         outputTokens: 10_000,
         cacheReadTokens: 20_000,
         cacheWriteTokens: 5_000,
@@ -204,17 +204,17 @@ describe('provider usage normalization parity', () => {
     [
       'openai',
       {
-        inputTokens: 60_000,
+        inputTokens: 73_000,
         outputTokens: 10_000,
         cacheReadTokens: 20_000,
         cacheWriteTokens: 5_000,
       },
     ],
-    ['gemini', { inputTokens: 60_000, outputTokens: 10_000, cacheReadTokens: 25_000 }],
+    ['gemini', { inputTokens: 73_000, outputTokens: 10_000, cacheReadTokens: 25_000 }],
     [
       'bedrock',
       {
-        inputTokens: 85_000,
+        inputTokens: 98_000,
         outputTokens: 10_000,
         cacheReadTokens: 20_000,
         cacheWriteTokens: 5_000,
@@ -234,7 +234,7 @@ describe('provider usage normalization parity', () => {
       const normalized = normalizeCompactionUsage(usage);
 
       // Then
-      expect(normalized.totalTokens).toBe(95_000);
+      expect(normalized.totalTokens).toBe(108_000);
       expect(hasReachedAutoCompactionThreshold(usage, threshold)).toBe(true);
     },
   );

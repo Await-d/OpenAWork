@@ -1031,7 +1031,7 @@ export class HandoffWatcher {
           //   pm1 完成 → 创建 pm1→pm2（d 层接管 dispatch）
           //   pm2 的 dispatch 由 pm2-runner 自己创建（d→e/f/g）
           //   executor/reviewer 完成 → 不再链式（终端层）
-          if (input.handoff.toRoleLayer === 'pm1') {
+          if (didComplete && input.handoff.toRoleLayer === 'pm1') {
             try {
               const { createHandoff } = await import('../store/handoff-store.js');
               const { sqliteGet } = await import('../../infra/db.js');
@@ -1270,7 +1270,11 @@ export class HandoffWatcher {
           // 落库但 handoff 被标 failed → auto-chain 不会触发 → PM2 永远不执行。
           // 降级策略：检查 PM1 session 是否已有 spec/plan/tasks 产物，如果有
           // 至少 spec+plan，就仍然创建 pm1→pm2 handoff 让 PM2 尝试接管。
-          if (didFail && input.handoff.toRoleLayer === 'pm1') {
+          if (
+            didFail &&
+            input.handoff.toRoleLayer === 'pm1' &&
+            !reason.startsWith('planning-generation-failed:')
+          ) {
             try {
               const { sqliteGet } = await import('../../infra/db.js');
               const artifactRow = sqliteGet<{ c: number }>(
@@ -1404,6 +1408,28 @@ export class HandoffWatcher {
           }
 
           if (didFail) {
+            if (
+              input.handoff.toRoleLayer === 'pm1' &&
+              reason.startsWith('planning-generation-failed:')
+            ) {
+              const { setSubstate } = await import('../store/substate-store.js');
+              const { appendSessionMessageV2 } =
+                await import('../../message/message-v2-adapter.js');
+              setSubstate({
+                sessionId: input.handoff.fromSessionId,
+                substate: 'idle',
+                userId: input.handoff.userId,
+                roleLayer: 'reception',
+              });
+              appendSessionMessageV2({
+                sessionId: input.handoff.fromSessionId,
+                userId: input.handoff.userId,
+                role: 'assistant',
+                agentId: 'interaction-agent',
+                content: [{ type: 'text', text: `规划已停止自动重试：${reason}` }],
+                clientRequestId: `handoff:${input.handoff.id}:planning-stopped`,
+              });
+            }
             recordTeamRuntimeIncident({
               category: 'handoff_failure',
               code: 'handoff-runner-failed',

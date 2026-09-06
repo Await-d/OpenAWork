@@ -41,7 +41,9 @@ function layerButtonStyle(isActive: boolean, layerColor: string): CSSProperties 
     minHeight: 28,
     padding: '0 10px',
     borderRadius: 0,
-    border: 'none',
+    borderTop: 'none',
+    borderBottom: 'none',
+    borderLeft: 'none',
     borderRight: '1px solid var(--border-default)',
     background: isActive
       ? `color-mix(in srgb, ${layerColor} 12%, var(--bg-base))`
@@ -100,7 +102,7 @@ export function TeamLayerRail({ layers, activeLayerId, onSelect }: TeamLayerRail
             aria-pressed={isActive}
             style={{
               ...layerButtonStyle(isActive, borderColor),
-              borderColor,
+              borderRightColor: borderColor,
               color: isActive ? borderColor : 'var(--fg-muted)',
             }}
             onClick={() => onSelect(layer.id)}

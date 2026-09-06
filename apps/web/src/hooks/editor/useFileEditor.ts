@@ -5,6 +5,7 @@ import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { resolveBareFilename } from '../../components/chat/file-preview/resolve-bare-filename.js';
 import { getFilePreviewKind, isBinaryPreviewKind } from '../../utils/file/file-preview.js';
 import { loadPreviewContent } from '../../utils/file/load-preview-content.js';
+import { isPathWithinRoot } from '../../utils/workspace-path.js';
 
 export interface OpenFile {
   path: string;
@@ -108,6 +109,15 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
   );
   const activeFilePath = activeFilePathByWorkspace[wsKey] ?? null;
 
+  // `uiWorkspaceScope` 只用于隔离 UI 持久化，并不代表文件系统工作区。
+  // 因此在恢复标签前必须仍以真实 workspacePath 过滤，避免历史状态中的其他
+  // 项目文件被带到当前工作区并触发网关的跨工作区 403。
+  const restorablePaths = useMemo(() => {
+    if (!workspacePath?.trim()) return persistedPaths;
+    return persistedPaths.filter((path) => isPathWithinRoot(path, workspacePath));
+  }, [persistedPaths, workspacePath]);
+  const hasInvalidPersistedPaths = restorablePaths.length !== persistedPaths.length;
+
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -137,6 +147,23 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
       }
     };
   }, []);
+
+  // 清除过期或串入当前 UI 桶的路径，避免每次挂载都重复请求一个必然被服务端
+  // 拒绝的文件；激活文件同时失效时也一并移除。
+  useEffect(() => {
+    if (restorablePaths.length === persistedPaths.length) return;
+    setOpenFilePathsForWorkspace(persistenceWorkspaceScope, restorablePaths);
+    if (activeFilePath && !restorablePaths.includes(activeFilePath)) {
+      setActiveFilePathForWorkspace(persistenceWorkspaceScope, null);
+    }
+  }, [
+    activeFilePath,
+    persistedPaths.length,
+    persistenceWorkspaceScope,
+    restorablePaths,
+    setActiveFilePathForWorkspace,
+    setOpenFilePathsForWorkspace,
+  ]);
 
   // 把内存 openFiles 同步到当前 workspace 桶。
   // 注意:绝不在 openFiles 为空时回写 store(否则会在 workspace 切换瞬间把刚恢复的
@@ -253,12 +280,14 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
 
   // workspace 切换或 persistedPaths 变化时,把 persisted 路径加载成 openFiles。
   useEffect(() => {
-    if (persistedPaths.length === 0 || openFiles.length > 0) return;
+    // 先等待上一个 effect 将失效路径从持久化桶中移除。否则初次挂载时会同时
+    // 启动一次加载、清理后又重新加载，导致有效文件被重复读取。
+    if (hasInvalidPersistedPaths || restorablePaths.length === 0 || openFiles.length > 0) return;
     let cancelled = false;
     void (async () => {
       setLoading(true);
       const loaded: OpenFile[] = [];
-      for (const path of persistedPaths) {
+      for (const path of restorablePaths) {
         try {
           const previewKind = getFilePreviewKind(path);
           if (isBinaryPreviewKind(previewKind)) {
@@ -297,7 +326,14 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
     return () => {
       cancelled = true;
     };
-  }, [persistedPaths, persistedPaths.length, openFiles.length, token, workspaceClient]);
+  }, [
+    hasInvalidPersistedPaths,
+    restorablePaths,
+    openFiles.length,
+    token,
+    workspaceClient,
+    workspacePath,
+  ]);
 
   const closeFile = useCallback(
     (path: string) => {

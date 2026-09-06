@@ -82,7 +82,7 @@ const ACTION_BTN_STYLE: CSSProperties = {
 
 const PRIMARY_ACTION_BTN_STYLE: CSSProperties = {
   ...ACTION_BTN_STYLE,
-  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
   color: 'var(--accent)',
 };

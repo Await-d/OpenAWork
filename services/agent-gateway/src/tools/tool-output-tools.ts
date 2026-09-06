@@ -98,6 +98,7 @@ export function buildReadToolOutputResponse(input: {
   let low = 0;
   let high = Math.min(
     input.request.charCount ?? DEFAULT_TOOL_CONTEXT_POLICY.maxReadPageBytes,
+    8000,
     text.length - charStart,
   );
   while (low < high) {

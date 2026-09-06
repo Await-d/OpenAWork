@@ -422,18 +422,22 @@ export function reconcilePartsById(
   existingParts: ChatMessagePart[],
   incomingParts: ChatMessagePart[],
 ): ChatMessagePart[] {
-  const result = [...existingParts];
-
-  for (const incoming of incomingParts) {
-    const index = result.findIndex((p) => p.id === incoming.id);
-    if (index > -1) {
-      result[index] = incoming;
-    } else {
-      result.push(incoming);
-    }
+  const incomingById = new Map(incomingParts.map((part) => [part.id, part]));
+  const existingIds = new Set(existingParts.map((part) => part.id));
+  const incomingIds = new Set(incomingParts.map((part) => part.id));
+  const hasSnapshotOnlyPart = incomingParts.some((part) => !existingIds.has(part.id));
+  if (hasSnapshotOnlyPart) {
+    // A newly supplied part can be an earlier text segment that reused the
+    // provisional `${messageId}:text` identity during attach. In that case
+    // the snapshot is the only source capable of restoring the missing
+    // prefix, so retain its canonical order and append only optimistic tails.
+    return [...incomingParts, ...existingParts.filter((part) => !incomingIds.has(part.id))];
   }
-
-  return result;
+  // The live accumulator is the only source that knows where an event was
+  // actually rendered. Keep that relative order for parts already present;
+  // snapshots may be assembled from independently persisted rows and can
+  // therefore arrive with a different ordering.
+  return existingParts.map((part) => incomingById.get(part.id) ?? part);
 }
 
 export function createAssistantEventCardContent(payload: AssistantEventPayload): string {
@@ -2086,10 +2090,23 @@ export function reconcileSnapshotChatMessages(
         // Snapshot has a finalized version (e.g. completed/error), prefer it.
         // Still keep a locally known cancelled/error terminal if the snapshot
         // only brought a generic completed payload.
+        const mergedParts =
+          previousMessage.parts && snapshotMessage.parts
+            ? reconcilePartsById(previousMessage.parts, snapshotMessage.parts)
+            : snapshotMessage.parts;
         reconciledSnapshotEntries.push({
           matchedPreviousIndex: previousEntry.index,
           message: {
             ...snapshotMessage,
+            ...(mergedParts
+              ? {
+                  parts: mergedParts,
+                  content: contentFromParts(
+                    mergedParts,
+                    snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
+                  ),
+                }
+              : {}),
             ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
           },
         });
@@ -2149,10 +2166,40 @@ export function reconcileSnapshotChatMessages(
             areSnapshotMessagesEquivalent(candidate, snapshotMessage)
           ) {
             matchedPreviousIndices.add(candidateIndex);
+            const mergedParts =
+              candidate.parts && snapshotMessage.parts
+                ? reconcilePartsById(candidate.parts, snapshotMessage.parts)
+                : undefined;
+            const mergedMessage =
+              mergedParts !== undefined
+                ? {
+                    ...snapshotMessage,
+                    parts: mergedParts,
+                    content: contentFromParts(
+                      mergedParts,
+                      snapshotMessage.modifiedFilesSummary ?? candidate.modifiedFilesSummary,
+                    ),
+                  }
+                : candidate.parts && !snapshotMessage.parts
+                  ? {
+                      ...snapshotMessage,
+                      parts: candidate.parts,
+                      content: contentFromParts(
+                        candidate.parts,
+                        snapshotMessage.modifiedFilesSummary ?? candidate.modifiedFilesSummary,
+                      ),
+                    }
+                  : snapshotMessage;
             reconciledSnapshotEntries.push({
               matchedPreviousIndex: candidateIndex,
-              // Part-ID match → use snapshot (authoritative); content-equivalence → preserve local.
-              message: matchedByParts || matchedByNearbyUserMessage ? snapshotMessage : candidate,
+              // Keep the server identity/terminal metadata, but retain the
+              // live part order whenever both sides describe the same trace.
+              message:
+                mergedParts !== undefined
+                  ? mergedMessage
+                  : matchedByParts || matchedByNearbyUserMessage
+                    ? mergedMessage
+                    : candidate,
             });
             foundEquivalent = true;
           }
@@ -2225,17 +2272,69 @@ export function reconcileSnapshotChatMessages(
     }
   }
 
-  // 最终去重：确保没有重复的 message.id（防御性编程）
-  const seen = new Set<string>();
+  // 最终去重：实时提交、快照刷新和恢复投影可能给同一回合分配不同
+  // message id。仅按 id 去重会把这些逻辑副本一起交给渲染层。
   const deduplicated: ChatMessage[] = [];
   for (const message of reconciled) {
-    if (!seen.has(message.id)) {
-      seen.add(message.id);
+    const duplicateIndex = deduplicated.findIndex((existing) =>
+      areLogicalMessageDuplicates(existing, message),
+    );
+    if (duplicateIndex < 0) {
       deduplicated.push(message);
+      continue;
     }
+
+    // Keep the first entry's position, but let the later snapshot contribute
+    // terminal status/output and the newer ordered parts.
+    const existing = deduplicated[duplicateIndex]!;
+    deduplicated[duplicateIndex] = chooseMoreCompleteMessage(existing, message);
   }
 
   return deduplicated;
+}
+
+function areLogicalMessageDuplicates(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.id === right.id) return true;
+  if (left.role !== right.role) return false;
+  if (
+    left.clientRequestId &&
+    right.clientRequestId &&
+    left.clientRequestId === right.clientRequestId
+  ) {
+    return true;
+  }
+  if (left.role !== 'assistant') {
+    return areSnapshotMessagesEquivalent(left, right);
+  }
+
+  const leftParts = left.parts ?? [];
+  const rightParts = right.parts ?? [];
+  const rightPartIds = new Set(rightParts.map((part) => part.id));
+  if (leftParts.some((part) => rightPartIds.has(part.id))) return true;
+
+  const leftToolIds = new Set(
+    leftParts.filter((part) => part.type === 'tool').map((part) => part.toolCallId),
+  );
+  const rightToolIds = new Set(
+    rightParts.filter((part) => part.type === 'tool').map((part) => part.toolCallId),
+  );
+  if (
+    leftToolIds.size > 0 &&
+    rightToolIds.size > 0 &&
+    [...leftToolIds].some((toolCallId) => rightToolIds.has(toolCallId))
+  ) {
+    return true;
+  }
+
+  return areSnapshotMessagesEquivalent(left, right);
+}
+
+function chooseMoreCompleteMessage(left: ChatMessage, right: ChatMessage): ChatMessage {
+  const leftParts = left.parts?.length ?? 0;
+  const rightParts = right.parts?.length ?? 0;
+  if (rightParts > leftParts) return right;
+  if (right.status !== 'streaming' && left.status === 'streaming') return right;
+  return left;
 }
 
 /**
@@ -2251,6 +2350,15 @@ export function replaceOrAppendStreamedAssistantMessage(
   onDoneMessage: ChatMessage,
   streamToolCallIds: ReadonlySet<string>,
 ): ChatMessage[] {
+  const exactIndex = previousMessages.findIndex((message) => message.id === onDoneMessage.id);
+  if (exactIndex >= 0) {
+    return [
+      ...previousMessages.slice(0, exactIndex),
+      onDoneMessage,
+      ...previousMessages.slice(exactIndex + 1),
+    ];
+  }
+
   // Scan the most recent assistant messages (not just the very last one)
   // to handle cases where interleaved event cards (permission events,
   // compaction cards, etc.) sit between the streaming placeholder and

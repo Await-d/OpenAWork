@@ -52,6 +52,50 @@ describe('ModelSettingsPopover', () => {
     ).toBeTruthy();
   });
 
+  it('Fast 状态重渲染时始终使用独立边框属性', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = renderPopover(true);
+    let toggle = screen.getByRole('switch', { name: '切换 OpenAI Fast 模式' });
+
+    expect(toggle.style.border).toBe('');
+    expect(toggle.style.borderWidth).toBe('1px');
+    expect(toggle.style.borderStyle).toBe('solid');
+    expect(toggle.style.borderColor).toBe('var(--accent-border)');
+
+    view.rerender(
+      <ModelSettingsPopover
+        anchorRef={createRef<HTMLButtonElement>()}
+        open
+        onClose={vi.fn()}
+        modelLabel="GPT-5.6"
+        providerType="openai"
+        modelId="gpt-5.6"
+        supportsThinking={false}
+        canConfigureThinking={false}
+        thinkingEnabled={false}
+        reasoningEffort="medium"
+        onChangeThinkingEnabled={vi.fn()}
+        onChangeReasoningEffort={vi.fn()}
+        fastEnabled={false}
+        onFastToggle={vi.fn()}
+      />,
+    );
+    toggle = screen.getByRole('switch', { name: '切换 OpenAI Fast 模式' });
+
+    expect(toggle.style.border).toBe('');
+    expect(toggle.style.borderColor).toBe('var(--border-default)');
+    expect(
+      consoleError.mock.calls.some((call) =>
+        call.some(
+          (value) =>
+            typeof value === 'string' &&
+            value.includes('Removing a style property during rerender (borderColor)'),
+        ),
+      ),
+    ).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it('支持在聊天弹层直接切换上下文挡位', async () => {
     const onChange = vi.fn().mockResolvedValue(undefined);
     render(

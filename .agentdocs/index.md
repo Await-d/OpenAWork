@@ -2,6 +2,29 @@
 
 ## 已完成的任务
 
+### ✅ 260906-opencode-context-pruning-parity - OpenCode 上下文剪枝语义对齐
+**状态**: 已完成
+**完成日期**: 2026-09-06
+**归档位置**: [workflow/done/260906-opencode-context-pruning-parity.md](workflow/done/260906-opencode-context-pruning-parity.md)
+**最终报告**: [runtime/260906-opencode-context-pruning-parity/final_output.md](runtime/260906-opencode-context-pruning-parity/final_output.md)
+
+**成果总结**:
+- ✅ 移除正常请求固定 48K 字符工具预算和统一 8,192 字符结果截断。
+- ✅ 按最近 40K 工具 token 保护区、旧结果 20K 回收门槛持久化剪枝。
+- ✅ 完整压缩按最终 `system + messages + tools` 估算，128K 默认阈值对齐为 108K。
+- ✅ 27 个测试文件 196 个测试、Gateway typecheck/build、格式和 diff 检查全部通过。
+
+### ✅ 260906-chat-tool-ordering - Chat 工具消息顺序修复
+**状态**: 已完成
+**完成日期**: 2026-09-06
+**归档位置**: [workflow/done/260906-chat-tool-ordering.md](workflow/done/260906-chat-tool-ordering.md)
+
+**成果总结**:
+- ✅ 修复实时 parts 与完整/终态快照对账时的文本、工具顺序错位。
+- ✅ 取消会隐藏或上移后续工具的跨消息合并，保持原消息位置。
+- ✅ 修复旧 V1→V2 迁移随机 UUID 排序，并对可完整匹配的既有数据安全重排且留存备份。
+- ✅ Web 全量 1741 测试、类型检查、构建及真实浏览器顺序验证通过。
+
 ### ✅ 260830-auto-compaction-presets - 自动压缩上下文挡位与聊天统计刷新
 **状态**: 已完成
 **完成日期**: 2026-08-30
@@ -90,6 +113,9 @@
 
 ## 项目记忆
 
+### 已知陷阱补充
+- [2026-09-06] 实时聊天重复/Thinking 错位 → 标准 WS/SSE 只保存 `lastSeq:0`，重挂载 attach 从头 replay → Gateway 在持久化事件后附加 `clientRequestId + seq`，Web 分发前推进并持久化游标；文本内容指纹不应替代协议游标。
+
 ### 架构决策
 - [2026-08-30] 上下文挡位使用独立 `contextWindowOverride`，有效窗口取模型能力、用户覆盖、运行时发现值与环境覆盖的最小值；保留原始模型能力，避免设置值超过供应商上限。
 - [2026-08-30] 压缩后目标值作为近期上下文保留预算与工具输出截断目标，不承诺摘要严格精确 Token 数；真实分段价格留待独立价格阶梯字段实现。
@@ -112,6 +138,8 @@
 - 遵循统一的导出规范，便于维护和扩展
 
 ### 已知陷阱
+- [2026-09-06] 不要给正常 Provider 请求设置固定工具字符总预算或统一单结果截断；这会把稳定前缀加工具预算压成约 50K 天花板。工具结果应按最近 40K token 保护区和旧结果 20K 回收门槛持久化剪枝，完整压缩按最终 `system + messages + tools` 请求估算。
+- [2026-09-06] Chat parts 顺序不能通过“本地位置按 ID 替换”或随机 UUID + `ORDER BY id` 合并；完整快照负责补齐缺失顺序，终态快照只更新已知 part 数据，跨消息工具不得通过隐藏消息改变时间位置。
 - `effect@4.0.0-beta.83` 下 `Stream.async`、旧 `Runtime.runPromise/defaultRuntime` 等 API 漂移会使 gateway 启动/类型检查失败；必须按实际 beta API 逐项迁移，不可仅凭包级测试宣称全局通过。
 - Responses `store:false` 回放失败时，先检查真实第二轮 wire body 是否包含 `type=reasoning`、`id`、`encrypted_content`；单元测试中的手工 native message 不能替代完整 gateway verifier。
 - 全包测试 353/393 通过仍不代表迁移完成；需同时验证 gateway typecheck/build、完整 verification matrix、真实 `/health`/`/metrics` 和部署回滚。

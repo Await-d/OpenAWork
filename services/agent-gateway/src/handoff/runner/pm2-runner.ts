@@ -12,7 +12,8 @@
  *   6. 动态编制（D46：e 数量根据 [P] 标记动态决定，最少 2）
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { nextPlanningRound } from '../capability/planning-failure.js';
 import type { HandoffTaskRunner } from './watcher.js';
 import {
   computeAutoRetryAvailableAtMs,
@@ -197,11 +198,14 @@ async function createReturnToPm1Handoff(input: {
   try {
     const { createHandoff } = await import('../store/handoff-store.js');
     // 从 DB 读取 PM2 handoff 的 retry_count，用于递增 escalationRound
-    const pm2Row = sqliteGet<{ retry_count: number }>(
-      `SELECT retry_count FROM handoff_records WHERE id = ? LIMIT 1`,
+    const pm2Row = sqliteGet<{ retry_count: number; payload_json: string }>(
+      `SELECT retry_count, payload_json FROM handoff_records WHERE id = ? LIMIT 1`,
       [input.pm2HandoffId],
     );
-    const effectiveRetryCount = input.pm2RetryCount ?? pm2Row?.retry_count ?? 0;
+    const round = nextPlanningRound(
+      JSON.parse(pm2Row?.payload_json ?? '{}') as unknown,
+      input.pm2RetryCount ?? pm2Row?.retry_count ?? 0,
+    );
     // 查找 reception→PM1 handoff 获取原始 sourceIntent 和 reception session
     const receptionHandoffRow = sqliteGet<{ from_session_id: string; payload_json: string }>(
       `SELECT from_session_id, payload_json FROM handoff_records
@@ -215,6 +219,25 @@ async function createReturnToPm1Handoff(input: {
     }
     const receptionSessionId = receptionHandoffRow.from_session_id;
     const originalPayload = JSON.parse(receptionHandoffRow.payload_json) as Record<string, unknown>;
+    const pm2Payload = JSON.parse(pm2Row?.payload_json ?? '{}') as Record<string, unknown>;
+    const refs = pm2Payload['resultJson'];
+    const fingerprintParts = [input.step, input.feedback];
+    if (typeof refs === 'object' && refs !== null) {
+      for (const key of ['specArtifactId', 'planArtifactId', 'tasksArtifactId']) {
+        const id = (refs as Record<string, unknown>)[key];
+        if (typeof id === 'string') {
+          const artifact = sqliteGet<{ content: string }>(
+            'SELECT content FROM artifacts WHERE id = ?',
+            [id],
+          );
+          fingerprintParts.push(artifact?.content ?? '');
+        }
+      }
+    }
+    const planningFingerprint = createHash('sha256')
+      .update(JSON.stringify(fingerprintParts))
+      .digest('hex');
+    const unchanged = originalPayload['planningFingerprint'] === planningFingerprint;
     const sourceIntent =
       input.sourceIntent ||
       (typeof originalPayload['sourceIntent'] === 'string'
@@ -232,7 +255,7 @@ async function createReturnToPm1Handoff(input: {
       fromRoleLayer: 'reception',
       toRoleLayer: 'pm1',
       idempotencyKey: `pm2-return:${input.step}:${input.pm2HandoffId}`,
-      notBeforeMs: computeAutoRetryAvailableAtMs(effectiveRetryCount + 1),
+      notBeforeMs: computeAutoRetryAvailableAtMs(round),
       payload: {
         sourceIntent,
         rewrittenIntent: `【${input.step} 退回重新规划】${sourceIntent}\n\n---\n\n## 质量反馈\n${input.feedback}\n\n请根据以上反馈修正 spec/plan/tasks。`,
@@ -242,7 +265,8 @@ async function createReturnToPm1Handoff(input: {
         isQualityFeedback: true,
         qualityFeedback: input.feedback,
         previousPm2HandoffId: input.pm2HandoffId,
-        escalationRound: effectiveRetryCount + 1,
+        escalationRound: unchanged ? Math.max(3, round) : round,
+        planningFingerprint,
       },
     });
 

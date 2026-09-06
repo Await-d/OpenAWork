@@ -712,6 +712,17 @@ function isStructuredTaskTitle(title: string): boolean {
 
 export function validateParsedTasks(tasks: ParsedTaskLine[]): string[] {
   const issues: string[] = [];
+  const owners = new Map<string, string>();
+  for (const task of tasks) {
+    const profile =
+      task.explicitProfile ?? inferTaskProfile({ title: task.title, story: task.story });
+    if (profile.kind === 'review') continue;
+    for (const path of new Set(task.ownedPaths)) {
+      const previous = owners.get(path);
+      if (previous) issues.push(`${path}：${previous}, ${task.taskId} 应合并为一个任务`);
+      owners.set(path, task.taskId);
+    }
+  }
   if (tasks.length === 0) {
     issues.push('tasks.md 中未找到任何任务');
     return issues;

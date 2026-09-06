@@ -44,7 +44,9 @@ export function startSequentialPolling(
     try {
       await options.run(controller.signal);
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      const pollingRunWasCancelled = controller.signal.aborted;
+      const receivedAbortError = error instanceof DOMException && error.name === 'AbortError';
+      if (!pollingRunWasCancelled && !receivedAbortError) {
         throw error;
       }
     } finally {

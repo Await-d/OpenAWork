@@ -28,6 +28,98 @@ const SESSION_ID = 's-artifact';
 const FROM_SESSION_ID = 's-from-artifact';
 const TEAM_WORKSPACE_ID = 'tw-artifact';
 
+function validPlanningLlm(mock: (system: string, user: string) => Promise<string>) {
+  return async (system: string, user: string): Promise<string> => {
+    const original = await mock(system, user);
+    if (system.includes('实施计划'))
+      return `# 实施计划
+
+## 技术上下文
+
+TypeScript
+
+## 宪法对齐检查
+
+| 宪法条目 | 本计划是否符合 | 备注 |
+|---|---|---|
+| 禁止空 catch | ✅ | ok |
+
+## 项目结构
+
+\`\`\`text
+src/
+\`\`\`
+
+## 复杂度评估
+
+| 维度 | 评估 |
+|---|---|
+| 影响文件数 | 1 |
+
+## 风险与缓解
+
+| 风险 | 缓解措施 |
+|---|---|
+| 网络失败 | 重试 |
+
+## 验收场景实施映射
+
+| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |
+|---|---|---|---|---|
+| AC-1 | src/core.ts | App -> Service | 测试 | 断言 |
+
+## 架构守卫
+
+- 数据访问只能通过 store/repository 层`;
+    if (system.includes('任务清单'))
+      return `# 任务清单
+
+## Phase 1
+
+- [ ] T001 [US1] [KIND:build] [SURFACE:backend] [src/core.ts] 实现核心功能 - 返回成功结果
+**文件**：
+- Modify: \`src/core.ts\`
+- Test: \`src/core.test.ts\`
+
+**检查点**：完成`;
+    const marker = original.match(/\[NEEDS CLARIFICATION:[^\]]+\]/)?.[0] ?? '支持核心请求';
+    return `# 功能规格：测试功能
+
+## 用户场景与验收（必填）
+
+### 用户故事 1 — 主流程（优先级：P1）
+
+描述
+
+**为什么是这个优先级**：核心路径
+
+**独立可测**：可单独验证
+
+**验收场景**：
+
+1. **给定** 系统已初始化，**当** 用户提交请求，**则** 返回成功结果
+
+### 边界情况
+
+- 当输入为空时返回提示
+- 当网络失败时降级处理
+
+## 验收场景覆盖矩阵（必填）
+
+| 用户故事 | 场景编号 | 场景摘要 | 对应需求 | 预期验证方式 | 预期证据 |
+|----------|----------|----------|----------|--------------|----------|
+| US1 | AC-1 | 主流程验证 | FR-001 | API | 响应 |
+
+## 需求
+
+- **FR-001**: 系统必须 ${marker}
+
+## 成功标准
+
+- **SC-001**: 可用`;
+  };
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -134,6 +226,36 @@ describe('parseConstitutionCheck', () => {
 });
 
 describe('runArtifactChain', () => {
+  it('持续无效输出有界失败，不生成占位 artifact 或成功结果', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    let calls = 0;
+    await expect(
+      artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '实现项目',
+        rewrittenIntent: '实现项目',
+        teamWorkspaceId: null,
+        callLlm: async () => {
+          calls += 1;
+          return '';
+        },
+      }),
+    ).rejects.toThrow('planning-generation-failed:');
+    expect(calls).toBe(4);
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        'SELECT COUNT(*) AS count FROM artifacts WHERE session_id = ?',
+        [SESSION_ID],
+      )?.count,
+    ).toBe(0);
+  });
   it('完整流程：生成 3 个 artifact + 写入 handoff result', async () => {
     const handoff = store.createHandoff({
       userId: USER_ID,
@@ -242,7 +364,7 @@ src/
       sourceIntent: '原始意图',
       rewrittenIntent: '改写后意图',
       teamWorkspaceId: TEAM_WORKSPACE_ID,
-      callLlm: mockLlm,
+      callLlm: validPlanningLlm(mockLlm),
     });
 
     expect(callCount).toBeGreaterThanOrEqual(3);
@@ -309,7 +431,7 @@ src/
       sourceIntent: '意图',
       rewrittenIntent: '改写',
       teamWorkspaceId: null,
-      callLlm: mockLlm,
+      callLlm: validPlanningLlm(mockLlm),
     });
 
     // plan 的 user message 不应包含 <constitution> 块
@@ -344,7 +466,7 @@ src/
       sourceIntent: '原始',
       rewrittenIntent: '改写',
       teamWorkspaceId: null,
-      callLlm: mockLlm,
+      callLlm: validPlanningLlm(mockLlm),
     });
 
     // 阻塞超时 fallback：plan 输入里应该包含"用户未在超时前回答"提示
@@ -393,7 +515,7 @@ src/
         sourceIntent: '原始',
         rewrittenIntent: '改写',
         teamWorkspaceId: null,
-        callLlm: mockLlm,
+        callLlm: validPlanningLlm(mockLlm),
       });
     } finally {
       clearTimeout(injectionTimer);
@@ -460,7 +582,7 @@ TypeScript
       sourceIntent: '原始',
       rewrittenIntent: '改写',
       teamWorkspaceId: null,
-      callLlm: mockLlm,
+      callLlm: validPlanningLlm(mockLlm),
     });
 
     await wait(80);
@@ -552,7 +674,7 @@ TypeScript
         sourceIntent: '原始',
         rewrittenIntent: '改写',
         teamWorkspaceId: null,
-        callLlm: mockLlm,
+        callLlm: validPlanningLlm(mockLlm),
       }),
     ).rejects.toThrow('cancelled-by-inbound');
 

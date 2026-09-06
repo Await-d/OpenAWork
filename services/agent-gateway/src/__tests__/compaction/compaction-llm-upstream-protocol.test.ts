@@ -123,6 +123,6 @@ describe('callCompactionLlm — upstreamProtocol forwarding', () => {
     const serializedMessages = JSON.stringify(callArgs?.messages);
     expect(serializedMessages.length).toBeLessThan(50_000);
     expect(serializedMessages).not.toContain('网页内容'.repeat(4_000));
-    expect(serializedMessages).toContain('read_tool_output');
+    expect(serializedMessages).toContain('[truncated for compaction summary]');
   });
 });

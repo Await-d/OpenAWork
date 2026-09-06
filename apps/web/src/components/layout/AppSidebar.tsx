@@ -24,6 +24,7 @@ import { getWorkspaceGroupKey } from '../../utils/session/session-grouping.js';
 import { requestSessionListRefresh } from '../../utils/session/session-list-events.js';
 import WorkspacePickerModal from '../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../common/modal/workspace-picker-data-source.js';
+import { buildTeamSessionRoute } from '../../utils/session/team-session-route.js';
 
 const SIDEBAR_WIDTH = 260;
 const COLLAPSED_WIDTH = 56;
@@ -354,7 +355,7 @@ function TeamWorkspaceGroupItem({
                   preloadRoute('/team');
                   if (ts.teamWorkspaceId) {
                     onSelectSession(ts.teamWorkspaceId, ts.id);
-                    void navigate(`/team/${ts.teamWorkspaceId}`);
+                    void navigate(buildTeamSessionRoute(ts.teamWorkspaceId, ts.id));
                   } else {
                     void navigate('/team');
                   }
@@ -1596,7 +1597,7 @@ export default function AppSidebar({
                     onSelectSession={(wsId, sessionId) => {
                       preloadRoute('/team');
                       triggerTeamSelectSession(wsId, sessionId);
-                      void navigate(`/team/${wsId}`);
+                      void navigate(buildTeamSessionRoute(wsId, sessionId));
                     }}
                     onSessionContextMenu={handleTeamSessionContextMenu}
                     renamingSessionId={teamRenamingSessionId}

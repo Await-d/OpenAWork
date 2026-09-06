@@ -230,6 +230,7 @@ describe('stream error contracts', () => {
           modelId: 'fixed-model',
         }),
         requestData: {
+          afterSeq: 0,
           clientRequestId: 'req-fixed-model',
           maxTokens: 2048,
           message: 'hello',
@@ -265,6 +266,7 @@ describe('stream error contracts', () => {
         modelId: 'gpt-4o',
       }),
       requestData: {
+        afterSeq: 0,
         clientRequestId: 'req-fast-echo',
         maxTokens: 2048,
         message: 'hello',
@@ -303,6 +305,7 @@ describe('stream error contracts', () => {
         modelId: 'gpt-4o',
       }),
       requestData: {
+        afterSeq: 0,
         clientRequestId: 'req-explicit-chat-model',
         maxTokens: 2048,
         message: 'hello',
@@ -342,6 +345,7 @@ describe('stream error contracts', () => {
         modelId: 'grok-code-fast-1',
       }),
       requestData: {
+        afterSeq: 0,
         agentId: 'explore',
         clientRequestId: 'req-delegated-model-only',
         maxTokens: 2048,

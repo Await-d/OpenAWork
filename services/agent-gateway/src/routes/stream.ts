@@ -53,6 +53,7 @@ import { calculateTokenUsageCost, KeywordDetectorImpl, redactText } from '@openA
 import {
   deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
+  listSessionRunEventsByRequestAfterSeq,
   listSessionRunEventsByRequest,
   publishSessionRunEvent,
   subscribeSessionRunEvents,
@@ -558,6 +559,7 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
   model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
+  afterSeq: z.coerce.number().int().min(0).default(0),
   teamTaskThreadId: z.string().trim().min(1).max(128).optional(),
   // 新版 thinking 参数（对齐参考实现）
   thinking: z
@@ -992,11 +994,19 @@ export function replayPersistedAssistantResponse(input: {
   sessionId: string;
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
+  afterSeq?: number;
 }): boolean {
-  const durableEvents = listSessionRunEventsByRequest({
-    sessionId: input.sessionId,
-    clientRequestId: input.clientRequestId,
-  });
+  const durableEvents =
+    typeof input.afterSeq === 'number' && input.afterSeq > 0
+      ? listSessionRunEventsByRequestAfterSeq({
+          sessionId: input.sessionId,
+          clientRequestId: input.clientRequestId,
+          afterSeq: input.afterSeq,
+        }).map(({ event }) => event)
+      : listSessionRunEventsByRequest({
+          sessionId: input.sessionId,
+          clientRequestId: input.clientRequestId,
+        });
   if (durableEvents.length > 0) {
     const latestBookend = deriveRunEventBookend(durableEvents.at(-1)!);
     if (latestBookend?.kind === 'run_failed') {
@@ -1978,6 +1988,7 @@ export async function handleStreamRequest(input: {
         sessionId: input.sessionId,
         userId: input.user.sub,
         writeChunk: input.writeChunk,
+        afterSeq: requestData.afterSeq,
       })
     ) {
       return {
@@ -2191,6 +2202,7 @@ export async function handleStreamRequest(input: {
       sessionId: input.sessionId,
       userId: input.user.sub,
       writeChunk: input.writeChunk,
+      afterSeq: requestData.afterSeq,
     })
   ) {
     wl.flush(ctx, 200);
@@ -2246,10 +2258,20 @@ export async function handleStreamRequest(input: {
     // events to reconnected clients. Previously this used the persist-only
     // helper, so attach-mode SSE replayed historical events but never
     // received the live ones — clients fell back to polling /recovery.
-    publishSessionRunEvent(input.sessionId, chunk, {
+    const persisted = publishSessionRunEvent(input.sessionId, chunk, {
       clientRequestId: requestData.clientRequestId,
     });
-    input.writeChunk(chunk);
+    input.writeChunk({
+      ...chunk,
+      ...(persisted.seq === null
+        ? {}
+        : {
+            cursor: {
+              clientRequestId: requestData.clientRequestId,
+              seq: persisted.seq,
+            },
+          }),
+    });
   };
   emitChunk(
     createStreamUpstreamRouteChunk(route, runId, eventSequence, requestData.clientRequestId),
@@ -2285,7 +2307,7 @@ export async function handleStreamRequest(input: {
         );
       }
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
-    const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
+    const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event, meta) => {
       // Skip events this stream's emitChunk already wrote — those reach the
       // primary WS/SSE client through input.writeChunk() inside emitChunk and
       // are broadcast on this same channel only so the attach endpoint can
@@ -2311,7 +2333,17 @@ export async function handleStreamRequest(input: {
       }
 
       if (hasPersistedRunEvent(event)) {
-        input.writeChunk(event);
+        input.writeChunk({
+          ...event,
+          ...(meta?.seq === undefined
+            ? {}
+            : {
+                cursor: {
+                  clientRequestId: requestData.clientRequestId,
+                  seq: meta.seq,
+                },
+              }),
+        });
         return;
       }
       emitChunk(event);
@@ -2612,15 +2644,7 @@ export async function handleStreamRequest(input: {
       );
       let syntheticContinuationPrompt: string | undefined;
       let sessionRecoveryRetryCount = 0;
-      let lastRoundUsage:
-        | {
-            inputTokens: number;
-            outputTokens?: number;
-            cacheReadTokens?: number;
-            cacheWriteTokens?: number;
-          }
-        | undefined;
-
+      let previousRoundUsedTools = false;
       for (let round = 1; ; round += 1) {
         const roundStartedAt = Date.now();
         // ─── 团队层「带内」取消/暂停响应（跨层反向控制信道）──────────────────
@@ -2674,26 +2698,6 @@ export async function handleStreamRequest(input: {
             throw createAbortError();
           }
         }
-        // P0: Proactive compaction — compact before overflow if token usage is near threshold.
-        if (round > 1 && lastRoundUsage) {
-          const proactiveResult = await triggerProactiveCompaction({
-            userId: input.user.sub,
-            sessionId: input.sessionId,
-            metadataJson: input.sessionContext.metadataJson,
-            clientRequestId: requestData.clientRequestId,
-            runId,
-            route,
-            compactionSettings,
-            signal: abortController.signal,
-            round,
-            lastRoundUsage,
-            requestKind: 'conversation',
-          });
-          if (proactiveResult.triggered) {
-            input.sessionContext.metadataJson = proactiveResult.metadataJson;
-          }
-        }
-
         const result = await runModelRound({
           clientRequestId: requestData.clientRequestId,
           enabledTools,
@@ -2730,7 +2734,7 @@ export async function handleStreamRequest(input: {
           syntheticContinuationPrompt,
           memoryBlock,
           agentId: route.effectiveAgentId ?? requestData.agentId,
-          ...(round === 1
+          ...(round === 1 || previousRoundUsedTools
             ? {
                 beforeUpstreamCall: async (renderedMessageTokens: number) => {
                   const proactiveResult = await triggerProactiveCompaction({
@@ -2756,10 +2760,10 @@ export async function handleStreamRequest(input: {
           writeChunk: emitChunk,
         });
         syntheticContinuationPrompt = undefined;
+        previousRoundUsedTools = result.stopReason === 'tool_use';
         if (result.stopReason !== 'error') sessionRecoveryRetryCount = 0;
 
         if (result.usage) {
-          lastRoundUsage = result.usage;
           emitChunk(
             buildStreamUsageChunk({
               eventSequence,

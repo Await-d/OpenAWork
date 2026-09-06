@@ -25,6 +25,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { PlanningFailure } from '../capability/planning-failure.js';
 import { sqliteRun } from '../../infra/db.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import type { HandoffRecord, HandoffRoleLayer } from '../store/handoff-store.js';
@@ -460,31 +461,15 @@ function validateOutput(
   rules: ValidationRule[],
 ): { ok: boolean; failed: string[] } {
   const failed = rules.filter((r) => !r.check(content)).map((r) => r.name);
+  if (/\[待补充(?:[^\]]*)\]|程序化兜底占位/.test(content)) failed.push('规划包含兜底占位内容');
   return { ok: failed.length === 0, failed };
 }
 
 /**
- * 程序化兜底修补：对未通过的校验规则，直接在内容末尾注入符合正则的占位章节。
- * 这是"95% 过不了 PM2"问题的终极防线——不依赖 LLM，程序化确保格式合规。
+ * 修正预算耗尽后停止本轮规划，禁止使用占位内容冒充成功产物。
  */
 function applyPatches(content: string, rules: ValidationRule[]): string {
-  const patchableRules = rules.filter((r) => !r.check(content) && r.patch);
-  if (patchableRules.length === 0) return content;
-
-  let patched = content;
-  for (const rule of patchableRules) {
-    patched = rule.patch!(patched);
-  }
-
-  const postPatch = validateOutput(patched, rules);
-  if (postPatch.ok) {
-    console.warn(`[artifact-chain] 程序化兜底修补成功，所有校验规则已通过。`);
-  } else {
-    console.warn(
-      `[artifact-chain] 程序化兜底后仍有未通过项：${postPatch.failed.join('、')}（这些规则无 patch 函数）。`,
-    );
-  }
-  return patched;
+  throw new PlanningFailure(`规划校验失败：${validateOutput(content, rules).failed.join('、')}`);
 }
 
 /**
@@ -492,7 +477,7 @@ function applyPatches(content: string, rules: ValidationRule[]): string {
  *   1. 可重试错误（429/503/502/overloaded/unavailable/network/invalid json）→ 指数退避重试（5s/10s/20s/30s）
  *   2. 不可重试错误 → 直接抛出
  *   3. 格式校验不通过 → 最多 3 轮 LLM 修正
- *   4. 3 轮后仍不通过 → 程序化兜底 patch（确保格式合规，不依赖 LLM）
+ *   4. 3 轮后仍不通过 → PlanningFailure，等待用户介入
  */
 async function callLlmWithRetry(
   callLlm: ArtifactChainInput['callLlm'],
@@ -600,23 +585,19 @@ async function callLlmWithRetry(
     try {
       currentContent = await retryWithBackoff(() => callLlm(systemPrompt, userMessage + retryHint));
     } catch (networkErr) {
-      // 网络失败 → 用当前结果 + 程序化兜底 patch
+      // 修正失败后停止，不伪造可验收内容。
       console.warn(
-        `[artifact-chain] 格式重试 ${formatAttempt + 1} 时 LLM 网络失败：${networkErr instanceof Error ? networkErr.message : String(networkErr)}，使用当前结果 + patch 兜底。`,
+        `[artifact-chain] 格式重试 ${formatAttempt + 1} 失败：${networkErr instanceof Error ? networkErr.message : String(networkErr)}，停止自动规划。`,
       );
       return applyPatches(currentContent, rules);
     }
   }
 
-  // 3 轮 LLM 修正后仍不通过 → 程序化兜底：直接注入缺失章节的占位内容
-  // 这是从"95% 过不了 PM2"到"基本能过"的关键防线：
-  // LLM 可能反复修正都不按正则格式输出，与其继续浪费 LLM 调用，
-  // 不如程序化地补上符合正则的占位章节，确保 PM2 校验通过。
-  // 占位内容会在后续 PM2 审查或执行阶段被发现并细化。
+  // 修正预算耗尽后明确失败，watcher 不得使用历史产物继续派发。
   const finalValidation = validateOutput(currentContent, rules);
   if (!finalValidation.ok) {
     console.warn(
-      `[artifact-chain] LLM 经 ${MAX_FORMAT_RETRIES} 轮格式修正后仍不通过校验（缺失：${finalValidation.failed.join('、')}），启动程序化兜底修补。`,
+      `[artifact-chain] LLM 经 ${MAX_FORMAT_RETRIES} 轮格式修正后仍不通过校验（缺失：${finalValidation.failed.join('、')}），停止自动规划。`,
     );
     return applyPatches(currentContent, rules);
   }
@@ -1065,6 +1046,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       }
     }
   } catch (specReviewErr) {
+    if (specReviewErr instanceof PlanningFailure) throw specReviewErr;
     console.warn(
       `[artifact-chain] PM1 spec 自审失败：${specReviewErr instanceof Error ? specReviewErr.message : String(specReviewErr)}`,
     );
@@ -1130,6 +1112,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       }
     }
   } catch (planReviewErr) {
+    if (planReviewErr instanceof PlanningFailure) throw planReviewErr;
     console.warn(
       `[artifact-chain] PM1 plan 自审失败：${planReviewErr instanceof Error ? planReviewErr.message : String(planReviewErr)}`,
     );
@@ -1189,12 +1172,19 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       }
     }
   } catch (reviewErr) {
+    if (reviewErr instanceof PlanningFailure) throw reviewErr;
     // 自我复查失败不阻塞流程——PM2 会再做校验
     console.warn(
       `[artifact-chain] PM1 自我复查失败：${reviewErr instanceof Error ? reviewErr.message : String(reviewErr)}`,
     );
   }
 
+  const finalValidation = validateTasksOutput(finalTasksContent);
+  const { validateParsedTasks } = await import('../capability/dispatch-package.js');
+  const finalIssues = validateParsedTasks(parseAllTasks(finalTasksContent));
+  if (!finalValidation.ok || finalIssues.length > 0) {
+    throw new PlanningFailure([...finalValidation.failed, ...finalIssues].join('；'));
+  }
   const tasksArtifactId = createArtifact({
     userId: input.userId,
     sessionId: input.sessionId,

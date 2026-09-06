@@ -236,6 +236,54 @@ afterAll(async () => {
 });
 
 describe('createPm2Runner', () => {
+  it('相同规划拒绝跨新 handoff 递增并触发无进展上限', async () => {
+    seedReceptionToPm1Handoff('实现订单');
+    for (const phase of ['spec', 'plan', 'tasks']) {
+      seedArtifact({
+        artifactId: `invalid-${phase}`,
+        sessionId: PM1_SESSION_ID,
+        userId: USER_ID,
+        title: phase,
+        content: '# 不合格规划',
+        phase,
+      });
+    }
+    const runner = pm2RunnerModule.createPm2Runner();
+    let round = 0;
+    for (let index = 0; index < 2; index += 1) {
+      const handoff = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+        payload: {
+          globalEscalationRound: round,
+          resultJson: {
+            specArtifactId: 'invalid-spec',
+            planArtifactId: 'invalid-plan',
+            tasksArtifactId: 'invalid-tasks',
+          },
+        },
+      });
+      await runner({ handoff, toSessionId: PM2_SESSION_ID, signal: new AbortController().signal });
+      const row = dbModule.sqliteGet<{ id: string; payload_json: string }>(
+        "SELECT id, payload_json FROM handoff_records WHERE json_extract(payload_json, '$.previousPm2HandoffId') = ?",
+        [handoff.id],
+      );
+      expect(row).toBeTruthy();
+      const payload = JSON.parse(row!.payload_json) as {
+        escalationRound: number;
+        planningFingerprint: string;
+      };
+      round = payload.escalationRound;
+      expect(payload.planningFingerprint).toHaveLength(64);
+      expect(round).toBe(index === 0 ? 1 : 3);
+      dbModule.sqliteRun(
+        "UPDATE handoff_records SET to_session_id = ?, created_at = datetime('now', '+1 second') WHERE id = ?",
+        [PM1_SESSION_ID, row!.id],
+      );
+    }
+  });
   it('constitution check 辅助 LLM prompt 注入 PM2 可读工作区知识', async () => {
     dbModule.sqliteRun(
       `INSERT INTO team_workspaces (

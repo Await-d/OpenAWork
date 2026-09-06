@@ -171,7 +171,9 @@ describe('TeamConversationLayout', () => {
     const status = screen.getByTestId('chat-session-runtime-status');
     const composer = screen.getByRole('textbox');
 
-    expect(status.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      status.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.queryByTestId('chat-remote-stream-placeholder')).toBeNull();
   });
 });

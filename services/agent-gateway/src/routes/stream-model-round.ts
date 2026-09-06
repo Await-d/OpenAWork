@@ -27,6 +27,7 @@ import {
 } from '../message/message-to-model-messages.js';
 import {
   appendSessionMessageV2,
+  markToolPartsCompactedV2,
   updateSessionMessagesStatusByRequestScope,
 } from '../message/message-v2-adapter.js';
 import { streamMessagesWithParts } from '../message/message-store-v2.js';
@@ -306,6 +307,19 @@ export function estimateModelMessagesTokens(messages: readonly unknown[]): numbe
     }
   }
   return Math.ceil(chars / 4);
+}
+
+/** Estimate the complete provider request, including system prompts and tool schemas. */
+export function estimateProviderRequestTokens(input: {
+  readonly system: readonly unknown[];
+  readonly messages: readonly unknown[];
+  readonly tools: unknown;
+}): number {
+  try {
+    return Math.ceil(JSON.stringify(input).length / 4);
+  } catch {
+    return estimateModelMessagesTokens([...input.system, ...input.messages]);
+  }
 }
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
@@ -1188,6 +1202,13 @@ export async function runModelRound(input: {
       ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
       : {}),
   });
+  if (microcompactResult.prunedToolCallIds.length > 0) {
+    markToolPartsCompactedV2({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      toolCallIds: microcompactResult.prunedToolCallIds,
+    });
+  }
   const contextBudgetStep = input.wl.start('context.tool-budget');
   input.wl.succeed(contextBudgetStep, undefined, {
     toolContextCharsBefore: microcompactResult.metrics.beforeChars,
@@ -1277,15 +1298,6 @@ export async function runModelRound(input: {
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt } as UnifiedMessage]
       : []),
   ];
-
-  if (input.beforeUpstreamCall) {
-    const compacted = await input.beforeUpstreamCall(
-      estimateModelMessagesTokens(allUnifiedMessages),
-    );
-    if (compacted) {
-      return runModelRound({ ...input, beforeUpstreamCall: undefined });
-    }
-  }
 
   // Thinking block validator (oh-my-opencode thinking-block-validator pattern):
   // Proactively validate and fix message structure BEFORE sending to Anthropic API.
@@ -1573,6 +1585,19 @@ export async function runModelRound(input: {
       input.enabledTools.length > 0
         ? wrapGatewayToolsForNativeDeclarationsOnly(input.enabledTools)
         : undefined;
+
+    if (input.beforeUpstreamCall) {
+      const compacted = await input.beforeUpstreamCall(
+        estimateProviderRequestTokens({
+          system: systemMessages,
+          messages: modelMessages,
+          tools: v2Tools ?? [],
+        }),
+      );
+      if (compacted) {
+        return runModelRound({ ...input, beforeUpstreamCall: undefined });
+      }
+    }
 
     input.wl.succeed(stepUpstream, undefined, {
       toolCount: input.enabledTools.length,

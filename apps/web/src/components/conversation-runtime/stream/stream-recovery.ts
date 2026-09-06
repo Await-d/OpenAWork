@@ -6,9 +6,12 @@ import type {
 } from '@openAwork/shared';
 import type { SessionStateStatus } from '../session/session-runtime.js';
 import {
+  hasActivePendingPermissionRequest,
+  parseToolCallInputText,
   readAssistantTracePayload,
   type AssistantTraceToolCall,
   type ChatMessage,
+  type ChatMessagePart,
 } from '../messages/support.js';
 import { mergeChatBackendUsageSnapshot, type ChatBackendUsageSnapshot } from './stream-usage.js';
 import {
@@ -16,10 +19,18 @@ import {
   markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
 } from './streaming-thinking.js';
+import {
+  appendStreamingTextDelta,
+  appendStreamingThinkingDelta,
+  applyToolResultToStreamingSegment,
+  markStreamingReasoningSegmentEnded,
+  upsertStreamingToolSegment,
+} from './streaming-segments.js';
 
 export interface RecoveredActiveAssistantStream {
   messageId: string | null;
   modifiedFilesSummary?: ModifiedFilesSummaryContent;
+  parts: ChatMessagePart[];
   startedAt: number | null;
   text: string;
   thinkingBlocks: StreamingThinkingBlock[];
@@ -173,6 +184,10 @@ export function recoverActiveAssistantStream(
   let startedAt: number | null = null;
   let hasRenderableContent = false;
   const activeToolCallIds = new Set<string>();
+  const toolInputTextByCallId = new Map<string, string>();
+  const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
+  let parts: ChatMessagePart[] = [];
+  const recoveryMessageId = '__recovery__';
 
   for (const event of activeRunEvents) {
     if (startedAt === null && typeof event.occurredAt === 'number') {
@@ -181,18 +196,21 @@ export function recoverActiveAssistantStream(
 
     if (event.type === 'text_delta') {
       text += event.delta;
+      parts = appendStreamingTextDelta(parts, event.delta, recoveryMessageId);
       hasRenderableContent = true;
       continue;
     }
 
     if (event.type === 'thinking_delta') {
       thinkingBlocks = appendStreamingThinkingChunk(thinkingBlocks, event);
+      parts = appendStreamingThinkingDelta(parts, reasoningSegmentMeta, event, recoveryMessageId);
       hasRenderableContent = true;
       continue;
     }
 
     if (event.type === 'thinking_end') {
       thinkingBlocks = markStreamingThinkingChunkEnded(thinkingBlocks, event);
+      parts = markStreamingReasoningSegmentEnded(parts, reasoningSegmentMeta, event);
       continue;
     }
 
@@ -214,8 +232,33 @@ export function recoverActiveAssistantStream(
       continue;
     }
 
-    if (event.type === 'tool_call_delta' || event.type === 'tool_result') {
+    if (event.type === 'tool_call_delta') {
       activeToolCallIds.add(event.toolCallId);
+      const inputText = `${toolInputTextByCallId.get(event.toolCallId) ?? ''}${event.inputDelta}`;
+      toolInputTextByCallId.set(event.toolCallId, inputText);
+      parts = upsertStreamingToolSegment(parts, {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        input: parseToolCallInputText(inputText),
+        status: 'running',
+      });
+      hasRenderableContent = true;
+      continue;
+    }
+
+    if (event.type === 'tool_result') {
+      activeToolCallIds.add(event.toolCallId);
+      const hasPendingPermission = hasActivePendingPermissionRequest(event);
+      parts = applyToolResultToStreamingSegment(parts, {
+        toolCallId: event.toolCallId,
+        output: event.output,
+        isError: hasPendingPermission ? false : event.isError,
+        status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+        ...(hasPendingPermission && event.pendingPermissionRequestId
+          ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
+          : {}),
+        ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+      });
       hasRenderableContent = true;
     }
   }
@@ -230,6 +273,32 @@ export function recoverActiveAssistantStream(
     text,
     thinkingBlocks,
   });
+  const anchoredToolCallsById = new Map(
+    (recoveredAssistantAnchor?.toolCalls ?? []).flatMap((toolCall) =>
+      toolCall.toolCallId ? [[toolCall.toolCallId, toolCall] as const] : [],
+    ),
+  );
+  const recoveredToolCalls = parts.flatMap((part): AssistantTraceToolCall[] => {
+    if (part.type !== 'tool') {
+      return [];
+    }
+    const anchored = anchoredToolCallsById.get(part.toolCallId);
+    return [
+      {
+        ...anchored,
+        toolCallId: part.toolCallId,
+        toolName: part.toolName || anchored?.toolName || 'tool',
+        input: part.input,
+        ...(part.output !== undefined ? { output: part.output } : {}),
+        ...(part.isError !== undefined ? { isError: part.isError } : {}),
+        ...(part.pendingPermissionRequestId
+          ? { pendingPermissionRequestId: part.pendingPermissionRequestId }
+          : {}),
+        ...(part.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+        ...(part.status ? { status: part.status } : {}),
+      },
+    ];
+  });
 
   return {
     messageId: recoveredAssistantAnchor?.messageId ?? null,
@@ -237,9 +306,13 @@ export function recoverActiveAssistantStream(
       ? { modifiedFilesSummary: recoveredAssistantAnchor.modifiedFilesSummary }
       : {}),
     startedAt,
+    parts,
     text,
     thinkingBlocks,
-    toolCalls: recoveredAssistantAnchor?.toolCalls ?? [],
+    toolCalls:
+      recoveredToolCalls.length > 0
+        ? recoveredToolCalls
+        : (recoveredAssistantAnchor?.toolCalls ?? []),
     ...(upstreamRoute ? { upstreamRoute } : {}),
     usage,
     ...(upstreamSummary ? { upstreamSummary } : {}),

@@ -1,10 +1,11 @@
-import { useRef, useCallback, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import type {
   DialogueMode,
   InputImageContent,
   RunEvent,
+  RunEventCursor,
   RunEventEnvelope,
   StreamCancellationSummary,
   StreamChunk,
@@ -354,6 +355,12 @@ export function connectAttachEventSource(
       }
       if (isRunEventEnvelope(parsed)) {
         const cursorSeq = parsed.payload.cursor?.seq ?? parsed.seq;
+        // `afterSeq` is an exclusive cursor. A reconnect can still deliver
+        // the boundary row when the SSE subscription is established; do not
+        // feed that row into the thinking/text accumulator a second time.
+        if (cursorSeq <= requestedAfterSeq) {
+          return;
+        }
         const currentActiveRequest = getCurrentActiveRequest();
         if (currentActiveRequest?.clientRequestId === activeStream.clientRequestId) {
           syncActiveRequest({
@@ -362,7 +369,21 @@ export function connectAttachEventSource(
             transport: 'attach-sse',
           });
         }
-        handleChunk(parsed.payload.event);
+        // The envelope sequence is the stable identity for replayed events.
+        // The nested event often has no eventId, so forwarding it unchanged
+        // makes attach/reconnect deliver the same thinking/tool delta twice.
+        const event = parsed.payload.event;
+        handleChunk(
+          typeof event === 'object' && event !== null
+            ? {
+                ...event,
+                eventId:
+                  typeof (event as { eventId?: unknown }).eventId === 'string'
+                    ? (event as { eventId: string }).eventId
+                    : `run-seq:${cursorSeq}`,
+              }
+            : event,
+        );
         return;
       }
       handleChunk(parsed);
@@ -519,6 +540,31 @@ function readGatewayEventId(value: unknown): string | null {
 
   const eventId = (value as { eventId?: unknown }).eventId;
   return typeof eventId === 'string' && eventId.length > 0 ? eventId : null;
+}
+
+function readGatewayCursor(value: unknown): RunEventCursor | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const cursor = (value as { cursor?: unknown }).cursor;
+  if (!cursor || typeof cursor !== 'object') {
+    return null;
+  }
+
+  const clientRequestId = (cursor as { clientRequestId?: unknown }).clientRequestId;
+  const seq = (cursor as { seq?: unknown }).seq;
+  if (
+    typeof clientRequestId !== 'string' ||
+    clientRequestId.length === 0 ||
+    typeof seq !== 'number' ||
+    !Number.isSafeInteger(seq) ||
+    seq < 1
+  ) {
+    return null;
+  }
+
+  return { clientRequestId, seq };
 }
 
 function isThinkingDeltaChunk(value: unknown): value is StreamThinkingChunk {
@@ -849,7 +895,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         stopRequestedRef.current = false;
       };
 
-      const handleChunk = createGatewayChunkDispatcher({
+      const dispatchChunk = createGatewayChunkDispatcher({
         callbacks,
         deliveredEventIds,
         isSettled: () => settled,
@@ -871,6 +917,23 @@ export function useGatewayClient(token: string | null): GatewayClient {
           callbacks.onError(chunk.code, chunk.message, chunk.technicalDetail);
         },
       });
+      const handleChunk = (chunk: StreamChunk | RunEvent) => {
+        const cursor = readGatewayCursor(chunk);
+        const activeRequest = activeRequestRef.current;
+        if (
+          cursor &&
+          activeRequest?.clientRequestId === cursor.clientRequestId &&
+          cursor.seq > activeRequest.lastSeq
+        ) {
+          // 在事件分发前推进游标。分发会触发 React 更新甚至页面重挂载，
+          // 若此时仍保存 0，新的 attach 会从头重放已展示的 thinking/tool/text。
+          syncActiveRequest({
+            ...activeRequest,
+            lastSeq: cursor.seq,
+          });
+        }
+        dispatchChunk(chunk);
+      };
 
       const startSse = () => {
         if (fallbackStarted || settled || streamGenerationRef.current !== streamGeneration) {
@@ -888,6 +951,10 @@ export function useGatewayClient(token: string | null): GatewayClient {
         }
         console.log('[STREAM] startSse fallback initiated for session', sessionId);
         fallbackStarted = true;
+        const requestedAfterSeq =
+          activeRequestRef.current?.clientRequestId === clientRequestId
+            ? activeRequestRef.current.lastSeq
+            : 0;
         if (activeRequestRef.current) {
           syncActiveRequest({
             ...activeRequestRef.current,
@@ -903,6 +970,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           model,
           ...(providerId ? { providerId } : {}),
           clientRequestId,
+          afterSeq: String(requestedAfterSeq),
           token: token ?? '',
           webSearchEnabled: webSearchEnabled ? '1' : '0',
           yoloMode: yoloMode ? '1' : '0',
@@ -1089,13 +1157,22 @@ export function useGatewayClient(token: string | null): GatewayClient {
     [syncActiveRequest, token],
   );
 
-  return {
-    attachToActiveStream,
-    getActiveStreamClientRequestId,
-    getActiveStreamSessionId,
-    stream,
-    stopStream,
-  };
+  return useMemo(
+    () => ({
+      attachToActiveStream,
+      getActiveStreamClientRequestId,
+      getActiveStreamSessionId,
+      stream,
+      stopStream,
+    }),
+    [
+      attachToActiveStream,
+      getActiveStreamClientRequestId,
+      getActiveStreamSessionId,
+      stream,
+      stopStream,
+    ],
+  );
 }
 
 export { classifyAttachStreamError };

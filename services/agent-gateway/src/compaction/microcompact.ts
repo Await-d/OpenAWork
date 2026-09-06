@@ -52,7 +52,10 @@ export interface MicrocompactConfig {
 
 export const DEFAULT_COMPACTABLE_TOOLS: ReadonlySet<string> = new Set();
 
-export const DEFAULT_PROTECTED_TOOLS: ReadonlySet<string> = new Set();
+export const DEFAULT_PROTECTED_TOOLS: ReadonlySet<string> = new Set(['skill']);
+
+export const MICROCOMPACT_PRUNE_MINIMUM_TOKENS = 20_000;
+export const MICROCOMPACT_PRUNE_PROTECT_TOKENS = 40_000;
 
 export const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
   enabled: true,
@@ -75,9 +78,11 @@ export interface MicrocompactResult {
   clearedCount: number;
   /** Estimated tokens saved. */
   tokensSaved: number;
-  /** Trigger reason. */
-  trigger: 'count' | 'time' | 'budget' | 'none';
+  /** Trigger reason. Legacy values remain for explicit compatibility overrides. */
+  trigger: 'count' | 'time' | 'budget' | 'prune' | 'none';
   readonly metrics: ToolContextMetrics;
+  /** Tool calls whose persisted parts should be marked as compacted. */
+  readonly prunedToolCallIds: readonly string[];
 }
 
 export interface ToolContextMetrics {
@@ -114,6 +119,7 @@ const TOOL_ATTACHMENT_MESSAGE = '[Tool returned the following attachments]';
 interface ToolResultCandidate {
   /** Index in the messages array. */
   messageIndex: number;
+  toolCallId: string;
   /** Tool name (from the preceding tool_call or the tool message itself). */
   toolName: string;
   /** Tool text plus the model-token-equivalent image cost. */
@@ -182,6 +188,7 @@ function collectCompactableToolResults(
     })}`;
     candidates.push({
       messageIndex: i,
+      toolCallId: msg.toolCallId,
       toolName,
       outputLength,
       imageCostChars,
@@ -191,25 +198,6 @@ function collectCompactableToolResults(
   }
 
   return candidates;
-}
-
-/**
- * The caller provides the persisted timestamp of the last assistant message.
- */
-function shouldTimeBasedTrigger(
-  config: MicrocompactConfig,
-  lastAssistantTimestamp: number | undefined,
-): boolean {
-  if (
-    !config.timeBasedEnabled ||
-    lastAssistantTimestamp === undefined ||
-    !Number.isFinite(lastAssistantTimestamp)
-  ) {
-    return false;
-  }
-  const gapMs = Date.now() - lastAssistantTimestamp;
-  const gapMinutes = gapMs / 60_000;
-  return gapMinutes >= config.timeGapThresholdMinutes;
 }
 
 /**
@@ -249,6 +237,7 @@ export function microcompactMessages(
       trigger: 'none',
       messages,
       metrics: unchangedMetrics,
+      prunedToolCallIds: [],
     };
   }
 
@@ -260,35 +249,41 @@ export function microcompactMessages(
       trigger: 'none',
       messages,
       metrics: unchangedMetrics,
+      prunedToolCallIds: [],
     };
   }
 
-  // ── Determine trigger mode ──
-
-  let trigger: MicrocompactResult['trigger'] = 'none';
-  let keepCount = candidates.length;
-
-  if (shouldTimeBasedTrigger(config, context?.lastAssistantTimestamp)) {
-    trigger = 'time';
-    keepCount = config.timeBasedKeepRecent;
-  } else if (candidates.length > config.triggerThreshold) {
-    trigger = 'count';
-    keepCount = config.keepRecent;
-  }
-
-  // ── Determine which candidates to clear ──
-
-  const keepSet = new Set(candidates.slice(-Math.max(1, keepCount)).map((c) => c.messageIndex));
-  const clearIndices = new Set(
-    candidates
-      .filter(
-        (candidate) =>
-          !keepSet.has(candidate.messageIndex) &&
-          candidate.reference.length < candidate.outputLength,
-      )
-      .map((candidate) => candidate.messageIndex),
+  // Match OpenCode's delayed pruning semantics. The current user turn is never
+  // considered, then the newest 40K tool tokens from older turns are protected.
+  const candidateByIndex = new Map(
+    candidates.map((candidate) => [candidate.messageIndex, candidate]),
   );
-  let retainedChars = candidates.reduce(
+  const proposedIndices: number[] = [];
+  let protectedAndReclaimableTokens = 0;
+  let reclaimableTokens = 0;
+  let userTurnsSeen = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!message) continue;
+    if (message.role === 'user' && message.syntheticKind !== 'tool-attachments') {
+      userTurnsSeen++;
+    }
+    if (userTurnsSeen < 2) continue;
+    if (message.role === 'tool' && message.content === MICROCOMPACT_CLEARED_PLACEHOLDER) break;
+    const candidate = candidateByIndex.get(index);
+    if (!candidate) continue;
+    const tokens = Math.ceil(candidate.outputLength / DEFAULT_TOOL_CONTEXT_POLICY.charsPerToken);
+    protectedAndReclaimableTokens += tokens;
+    if (protectedAndReclaimableTokens <= MICROCOMPACT_PRUNE_PROTECT_TOKENS) continue;
+    if (candidate.reference.length >= candidate.outputLength) continue;
+    reclaimableTokens += tokens;
+    proposedIndices.push(index);
+  }
+  const clearIndices = new Set(
+    reclaimableTokens > MICROCOMPACT_PRUNE_MINIMUM_TOKENS ? proposedIndices : [],
+  );
+  const trigger: MicrocompactResult['trigger'] = clearIndices.size > 0 ? 'prune' : 'none';
+  const retainedChars = candidates.reduce(
     (sum, candidate) =>
       sum +
       (clearIndices.has(candidate.messageIndex)
@@ -297,28 +292,9 @@ export function microcompactMessages(
     0,
   );
   const omitAttachmentAfter = new Set<number>();
-  for (const candidate of candidates) {
-    if (retainedChars <= config.maxOutputChars) break;
-    const isLatest = candidate === candidates.at(-1);
-    if (isLatest && candidate.imageCostChars > 0) {
-      omitAttachmentAfter.add(candidate.messageIndex);
-      retainedChars -= candidate.imageCostChars;
-      if (trigger === 'none') trigger = 'budget';
-      continue;
-    }
-    if (
-      isLatest ||
-      clearIndices.has(candidate.messageIndex) ||
-      candidate.reference.length >= candidate.outputLength
-    )
-      continue;
-    clearIndices.add(candidate.messageIndex);
-    retainedChars -= candidate.outputLength - candidate.reference.length;
-    if (trigger === 'none') trigger = 'budget';
-  }
   const toClear = candidates.filter((candidate) => clearIndices.has(candidate.messageIndex));
 
-  if (toClear.length === 0 && omitAttachmentAfter.size === 0) {
+  if (toClear.length === 0) {
     return {
       applied: false,
       clearedCount: 0,
@@ -326,6 +302,7 @@ export function microcompactMessages(
       trigger,
       messages,
       metrics: unchangedMetrics,
+      prunedToolCallIds: [],
     };
   }
 
@@ -376,5 +353,6 @@ export function microcompactMessages(
       imagesOmitted: attachmentIndicesToRemove.size,
       largestResultChars,
     }),
+    prunedToolCallIds: toClear.map((candidate) => candidate.toolCallId),
   };
 }

@@ -1177,6 +1177,34 @@ export function updatePartV2(input: { sessionId: string; part: MessagePart; time
   });
 }
 
+/** Persist OpenCode-style delayed pruning without deleting the stored output. */
+export function markToolPartsCompactedV2(input: {
+  sessionId: string;
+  userId: string;
+  toolCallIds: readonly string[];
+  compactedAt?: number;
+}): number {
+  const compactedAt = input.compactedAt ?? Date.now();
+  let updatedCount = 0;
+  for (const callID of new Set(input.toolCallIds)) {
+    const part = findToolPartByCallID({ sessionId: input.sessionId, callID });
+    if (!part || part.state.status !== 'completed' || part.state.time.compacted) continue;
+    updatePart({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      part: {
+        ...part,
+        state: {
+          ...part.state,
+          time: { ...part.state.time, compacted: compactedAt },
+        },
+      },
+    });
+    updatedCount++;
+  }
+  return updatedCount;
+}
+
 // ─── Event-sourced updatePartDelta (opencode pattern) ───
 
 export function updatePartDeltaV2(input: {

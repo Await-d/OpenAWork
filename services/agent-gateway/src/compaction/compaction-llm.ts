@@ -1,6 +1,5 @@
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
-import { projectToolOutput } from '../message/tool-output-model-view.js';
 import { Effect } from 'effect';
 import {
   runUpstreamGenerate,
@@ -25,11 +24,15 @@ function filterSystemMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
 }
 
 function projectToolMessages(messages: UnifiedMessage[]): UnifiedMessage[] {
+  const maxChars = 2_000;
   return messages.map((message) =>
     message.role === 'tool'
       ? {
           ...message,
-          content: projectToolOutput(message.toolCallId, message.content),
+          content:
+            message.content.length <= maxChars
+              ? message.content
+              : `${message.content.slice(0, maxChars)}\n[truncated for compaction summary]`,
         }
       : message,
   );

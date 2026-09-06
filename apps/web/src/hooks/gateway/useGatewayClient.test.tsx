@@ -352,6 +352,59 @@ describe('connectAttachEventSource', () => {
     expect(callbacks.onDelta).toHaveBeenCalledWith('hello');
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
+
+  it('attach SSE 的同一 seq 即使嵌套事件没有 eventId 也不会重复分发思考增量', async () => {
+    let currentEventSource: MockEventSource | null = null;
+    const currentActiveRequest: TestActiveStreamSnapshot = {
+      clientRequestId: 'req-thinking',
+      lastSeq: 0,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse',
+    };
+    const callbacks = {
+      onDelta: vi.fn(),
+      onThinkingDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    };
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-thinking',
+        lastSeq: 0,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks,
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 0,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: vi.fn(),
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+    act(() => eventSource.onopen?.());
+    await expect(connectPromise).resolves.toBe(true);
+    const envelope = JSON.stringify({
+      aggregateType: 'run',
+      seq: 7,
+      payload: { cursor: { seq: 7 }, event: { type: 'thinking_delta', delta: '检查中' } },
+    });
+    act(() => {
+      eventSource.onmessage?.({ data: envelope } as MessageEvent);
+      eventSource.onmessage?.({ data: envelope } as MessageEvent);
+    });
+    expect(callbacks.onThinkingDelta).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('attachActiveStreamSession', () => {
@@ -447,6 +500,18 @@ describe('resolveChatWsLivenessAction (§0.153 半开探活)', () => {
 });
 
 describe('useGatewayClient', () => {
+  it('父组件重渲染但 token 未变化时保持客户端对象引用稳定', () => {
+    const { result, rerender } = renderHook(
+      ({ token }: { token: string | null }) => useGatewayClient(token),
+      { initialProps: { token: 'token-test' } },
+    );
+    const initialClient = result.current;
+
+    rerender({ token: 'token-test' });
+
+    expect(result.current).toBe(initialClient);
+  });
+
   it('WS 断开后切到 SSE replay 时，不会重复分发已经收到过的 eventId', () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('EventSource', MockEventSource);
@@ -518,6 +583,112 @@ describe('useGatewayClient', () => {
     expect(onDelta).toHaveBeenCalledWith('hello');
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('WS 已消费部分事件后回退 SSE 会携带当前 afterSeq 游标', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+    act(() => {
+      result.current.stream('session-after-seq', 'hello', {
+        onDelta: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      });
+      MockWebSocket.instances[0]?.onopen?.();
+    });
+    const request = JSON.parse(MockWebSocket.instances[0]?.sentPayloads[0] ?? '{}') as {
+      clientRequestId?: string;
+    };
+    act(() => {
+      MockWebSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'text_delta',
+          delta: '部分',
+          eventId: 'evt-4',
+          cursor: {
+            clientRequestId: request.clientRequestId,
+            seq: 4,
+          },
+        }),
+      } as MessageEvent);
+      MockWebSocket.instances[0]?.onclose?.();
+    });
+    expect(MockEventSource.instances[0]?.url).toContain('afterSeq=4');
+  });
+
+  it('标准 WS 收到持久游标后会先保存 lastSeq，供页面重挂载后的 attach 续传', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDelta = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+    act(() => {
+      result.current.stream('session-cursor', 'hello', {
+        onDelta,
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      });
+      MockWebSocket.instances[0]?.onopen?.();
+    });
+    const sentRequest = JSON.parse(MockWebSocket.instances[0]?.sentPayloads[0] ?? '{}') as {
+      clientRequestId?: string;
+    };
+    act(() => {
+      MockWebSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'text_delta',
+          delta: '已展示',
+          eventId: 'run-1:evt:4',
+          cursor: { clientRequestId: sentRequest.clientRequestId, seq: 4 },
+        }),
+      } as MessageEvent);
+    });
+
+    const snapshots = [...Array(sessionStorage.length).keys()]
+      .map((index) => sessionStorage.key(index))
+      .filter((key): key is string => key !== null)
+      .map((key) => sessionStorage.getItem(key))
+      .filter((value): value is string => value !== null)
+      .map((value) => JSON.parse(value) as TestActiveStreamSnapshot);
+
+    expect(onDelta).toHaveBeenCalledWith('已展示');
+    expect(snapshots).toContainEqual(
+      expect.objectContaining({
+        lastSeq: 4,
+        sessionId: 'session-cursor',
+      }),
+    );
   });
 
   it('SSE 回退连接失败时向界面提供可复制的连接详情', () => {

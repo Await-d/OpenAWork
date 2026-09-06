@@ -71,6 +71,7 @@ export interface ProviderCatalogEntry {
   /** 该平台官方端点 host(用于从 baseUrl 反推 providerType)。 */
   hostnames?: string[];
   ui: ProviderUiMeta;
+  modelsDevIds?: string[];
   /** 上游入口变体；至少一个，第一个或 isDefault 的作为默认。 */
   upstreams: ProviderUpstreamVariant[];
   thinkingStyle: ProviderThinkingStyle;
@@ -473,6 +474,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       aliases: ['google', 'googlegemini'],
       modelIdPrefixes: ['gemini'],
     },
+    modelsDevIds: ['google'],
     upstreams: [
       {
         label: 'Gemini (OpenAI 兼容)',
@@ -634,6 +636,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       fallbackGlyph: 'Q',
       modelIdPrefixes: ['qwen', 'qwq'],
     },
+    modelsDevIds: ['alibaba-cn', 'alibaba'],
     upstreams: [
       {
         label: 'DashScope (OpenAI 兼容)',
@@ -704,6 +707,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       aliases: ['moonshotai', 'moonshotai-cn', 'kimi'],
       modelIdPrefixes: ['moonshot', 'kimi'],
     },
+    modelsDevIds: ['moonshotai-cn', 'moonshotai'],
     upstreams: [{ label: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', isDefault: true }],
     thinkingStyle: 'body_thinking_type',
     thinkingModelMatcher: isMoonshotThinkingModel,
@@ -749,6 +753,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       aliases: ['xiaomi', 'xiaomimimo'],
       modelIdPrefixes: ['mimo'],
     },
+    modelsDevIds: ['xiaomi'],
     upstreams: [
       {
         label: 'OpenAI 兼容',
@@ -843,9 +848,10 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     hostnames: ['open.bigmodel.cn'],
     ui: {
       fallbackGlyph: '智',
-      aliases: ['glm', 'bigmodel'],
+      aliases: ['zhipuai', 'glm', 'bigmodel'],
       modelIdPrefixes: ['glm'],
     },
+    modelsDevIds: ['zhipuai'],
     upstreams: [
       {
         label: '智谱 OpenAI 兼容',
@@ -882,6 +888,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       aliases: ['volcengine', 'ark', 'volces'],
       modelIdPrefixes: ['doubao', 'ep-'],
     },
+    modelsDevIds: ['volcengine'],
     upstreams: [
       {
         label: '火山方舟',

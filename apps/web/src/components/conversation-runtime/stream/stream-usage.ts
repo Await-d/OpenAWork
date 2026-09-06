@@ -4,6 +4,7 @@ export interface ChatBackendUsageSnapshot {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  peakTotalTokens?: number;
   reasoningTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
@@ -36,6 +37,7 @@ export function toChatBackendUsageSnapshot(event: StreamUsageChunk): ChatBackend
     inputTokens: normalizeTokenCount(event.inputTokens),
     outputTokens: normalizeTokenCount(event.outputTokens),
     totalTokens: normalizeTokenCount(event.totalTokens),
+    peakTotalTokens: normalizeTokenCount(event.totalTokens),
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
@@ -53,7 +55,13 @@ export function mergeChatBackendUsageSnapshot(
   }
 
   if (next.round !== previous.round) {
-    return next.round > previous.round ? next : previous;
+    if (next.round < previous.round) {
+      return previous;
+    }
+    return {
+      ...next,
+      peakTotalTokens: Math.max(previous.peakTotalTokens ?? previous.totalTokens, next.totalTokens),
+    };
   }
 
   const primary = next.totalTokens >= previous.totalTokens ? next : previous;
@@ -63,6 +71,10 @@ export function mergeChatBackendUsageSnapshot(
   const cacheWriteTokens = primary.cacheWriteTokens ?? fallback.cacheWriteTokens;
   return {
     ...primary,
+    peakTotalTokens: Math.max(
+      previous.peakTotalTokens ?? previous.totalTokens,
+      next.peakTotalTokens ?? next.totalTokens,
+    ),
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),

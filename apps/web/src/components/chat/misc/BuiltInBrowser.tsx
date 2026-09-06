@@ -9,7 +9,10 @@ import React, {
 
 const isTauriEnv = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-const DEFAULT_URL = 'http://localhost:3000';
+// 网关只提供 API，不承载根页面。以它作为浏览器首页会稳定产生 404；空白页
+// 既不依赖网络，也把开发服务器的 URL 留给实际的 previewUrl 注入。
+const DEFAULT_URL = 'about:blank';
+const LEGACY_DEFAULT_URL = 'http://localhost:3000';
 
 const STORAGE_KEY_PREFIX = 'openawork:builtin-browser:tabs:v1';
 const HISTORY_LIMIT = 50;
@@ -74,7 +77,19 @@ function loadPersistedState(workspacePath: string | null | undefined): Persisted
     if (parsed.version !== 1 || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
       return null;
     }
-    return parsed;
+    // 迁移旧版本自动保存的网关根地址，避免升级后仍因历史 tab 重复请求一个
+    // 不存在的页面。用户后来手动输入的其他 localhost 地址不会受影响。
+    const tabs = parsed.tabs.map((tab) => {
+      if (tab.url !== LEGACY_DEFAULT_URL) return tab;
+      return {
+        ...tab,
+        url: DEFAULT_URL,
+        title: deriveTabTitle(DEFAULT_URL),
+        faviconUrl: undefined,
+        history: tab.history.map((entry) => (entry === LEGACY_DEFAULT_URL ? DEFAULT_URL : entry)),
+      };
+    });
+    return { ...parsed, tabs };
   } catch {
     return null;
   }
@@ -105,6 +120,7 @@ function persistState(
 }
 
 function deriveTabTitle(url: string): string {
+  if (url === DEFAULT_URL) return '新标签页';
   try {
     const u = new URL(url);
     if (isLocalhostUrl(url)) {

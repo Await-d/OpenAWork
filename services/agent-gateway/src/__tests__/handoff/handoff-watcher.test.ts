@@ -575,6 +575,42 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(final?.failureReason).toBe('runner-fail');
   });
 
+  it('规划失败即使已有历史产物也不降级派发，根会话退出等待', async () => {
+    const { PlanningFailure } = await import('../../handoff/capability/planning-failure.js');
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      taskRunner: async ({ toSessionId }) => {
+        dbModule.sqliteRun(
+          `INSERT INTO artifacts (id, session_id, user_id, type, title, content, version, phase)
+           VALUES ('stale-spec', ?, ?, 'markdown', 'spec', '旧规划', 1, 'spec')`,
+          [toSessionId, USER_ID],
+        );
+        throw new PlanningFailure('规划无进展');
+      },
+    });
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    await watcher.tickOnce();
+    await vi.waitFor(() => {
+      expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+      expect(
+        dbModule.sqliteGet<{ substate: string }>('SELECT substate FROM sessions WHERE id = ?', [
+          FROM_SESSION_ID,
+        ])?.substate,
+      ).toBe('idle');
+    });
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM handoff_records WHERE to_role_layer = 'pm2'",
+        [],
+      )?.count,
+    ).toBe(0);
+  });
+
   it('pm2 handoff 在 dispatch 后保持 running，等待后续 review 收口', async () => {
     const { createPm2Runner } = await import('../../handoff/runner/pm2-runner.js');
     const watcher = new watcherModule.HandoffWatcher({

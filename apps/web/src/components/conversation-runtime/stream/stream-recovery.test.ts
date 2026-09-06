@@ -67,4 +67,60 @@ describe('recoverActiveAssistantStream', () => {
       providerId: 'openai-fast',
     });
   });
+
+  it('按事件到达顺序恢复文本和工具，并把工具结果合并到原位置', () => {
+    const recovered = recoverActiveAssistantStream({
+      hasActiveStream: true,
+      activeStreamStartedAt: 100,
+      sessionStateStatus: 'running',
+      messages: [],
+      runEvents: [
+        {
+          type: 'text_delta',
+          delta: '先检查配置。',
+          runId: 'run-ordered',
+          occurredAt: 110,
+        },
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'tool-read',
+          toolName: 'read_file',
+          inputDelta: '{"path":"config.json"}',
+          runId: 'run-ordered',
+          occurredAt: 120,
+        },
+        {
+          type: 'tool_result',
+          toolCallId: 'tool-read',
+          toolName: 'read_file',
+          output: { exists: true },
+          isError: false,
+          runId: 'run-ordered',
+          occurredAt: 130,
+        },
+        {
+          type: 'text_delta',
+          delta: '配置正常，再检查入口。',
+          runId: 'run-ordered',
+          occurredAt: 140,
+        },
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'tool-entry',
+          toolName: 'read_file',
+          inputDelta: '{"path":"index.ts"}',
+          runId: 'run-ordered',
+          occurredAt: 150,
+        },
+      ],
+    });
+
+    expect(recovered?.parts.map((part) => part.type)).toEqual(['text', 'tool', 'text', 'tool']);
+    expect(recovered?.parts[1]).toMatchObject({
+      type: 'tool',
+      toolCallId: 'tool-read',
+      output: { exists: true },
+      status: 'completed',
+    });
+  });
 });

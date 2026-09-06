@@ -248,6 +248,11 @@ const streamError = (route: string, message: string, cause: Cause.Cause<unknown>
   return ProviderShared.eventError(route, message, Cause.pretty(cause));
 };
 
+const isTransportFailure = (cause: Cause.Cause<unknown>) => {
+  const failed = cause.reasons.find(Cause.isFailReason)?.error;
+  return failed instanceof LLMErrorClass && failed.reason._tag === 'Transport';
+};
+
 function makeFromTransport<Body, Prepared, Frame, Event, State>(
   input: MakeTransportInput<Body, Prepared, Frame, Event, State>,
 ): Route<Body, Prepared> {
@@ -309,14 +314,26 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
         const route = `${request.model.provider}/${request.model.route.id}`;
-        const events = routeInput.transport
+        // A few HTTP/2 providers reset the stream while the client is
+        // closing the response after a terminal Responses event. Remember
+        // whether the protocol has already reached a clean terminal state so
+        // that this transport-level close does not turn a completed answer
+        // into a visible provider error.
+        const terminalSeen = { value: false };
+        let events = routeInput.transport
           .frames(prepared, request, runtime)
-          .pipe(
-            Stream.mapEffect(decodeEvent(route)),
-            protocol.stream.terminal
-              ? Stream.takeUntil(protocol.stream.terminal)
-              : (stream) => stream,
+          .pipe(Stream.mapEffect(decodeEvent(route)));
+        if (protocol.stream.terminal) {
+          const terminal = protocol.stream.terminal;
+          events = events.pipe(
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                if (terminal(event)) terminalSeen.value = true;
+              }),
+            ),
+            Stream.takeUntil(terminal),
           );
+        }
         return events.pipe(
           Stream.mapAccumEffect(
             () => protocol.stream.initial(request),
@@ -324,7 +341,9 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
             protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
           ),
           Stream.catchCause((cause) =>
-            Stream.fail(streamError(route, `Failed to read ${route} stream`, cause)),
+            terminalSeen.value && isTransportFailure(cause)
+              ? Stream.empty
+              : Stream.fail(streamError(route, `Failed to read ${route} stream`, cause)),
           ),
         );
       },

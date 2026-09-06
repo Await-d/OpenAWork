@@ -460,35 +460,8 @@ async function continueFromApprovedToolResult(input: {
 
     try {
       let syntheticContinuationPrompt: string | undefined;
-      let lastRoundUsage:
-        | {
-            inputTokens: number;
-            outputTokens?: number;
-            cacheReadTokens?: number;
-            cacheWriteTokens?: number;
-          }
-        | undefined;
-
+      let previousRoundUsedTools = false;
       for (let round = input.payload.nextRound; ; round += 1) {
-        if (round > input.payload.nextRound && lastRoundUsage) {
-          const proactiveResult = await triggerProactiveCompaction({
-            userId: input.userId,
-            sessionId: input.sessionId,
-            metadataJson: sessionContext.metadataJson,
-            clientRequestId: input.payload.clientRequestId,
-            runId,
-            route,
-            compactionSettings,
-            signal: abortController.signal,
-            round,
-            lastRoundUsage,
-            requestKind: 'conversation',
-          });
-          if (proactiveResult.triggered) {
-            sessionContext.metadataJson = proactiveResult.metadataJson;
-          }
-        }
-
         const result = await runModelRound({
           clientRequestId: input.payload.clientRequestId,
           enabledTools,
@@ -519,7 +492,7 @@ async function continueFromApprovedToolResult(input: {
           teamInstructionStack,
           teamResumePrompt,
           teamStatusPrompt,
-          ...(round === input.payload.nextRound
+          ...(round === input.payload.nextRound || previousRoundUsedTools
             ? {
                 beforeUpstreamCall: async (renderedMessageTokens: number) => {
                   const proactiveResult = await triggerProactiveCompaction({
@@ -546,9 +519,9 @@ async function continueFromApprovedToolResult(input: {
           writeChunk,
         });
         syntheticContinuationPrompt = undefined;
+        previousRoundUsedTools = result.stopReason === 'tool_use';
 
         if (result.usage) {
-          lastRoundUsage = result.usage;
           writeChunk(
             buildStreamUsageChunk({
               eventSequence,

@@ -1041,6 +1041,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
 
     async getRecovery(token, sessionId, options) {
       const result = await getRecoveryResult(token, sessionId, options);
+      options?.signal?.throwIfAborted();
       if (!result.ok || !result.recovery) {
         throw new HttpError(result.errorMessage ?? '加载会话快照失败', result.status ?? 500);
       }

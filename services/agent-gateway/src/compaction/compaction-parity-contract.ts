@@ -1,6 +1,5 @@
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 const MAX_SUMMARY_OUTPUT_TOKENS = 20_000;
-const AUTO_COMPACTION_BUFFER_TOKENS = 13_000;
 
 export interface CompactionTokenUsage {
   readonly inputTokens: number;
@@ -76,7 +75,10 @@ export function resolveCompactionThreshold(
     MAX_SUMMARY_OUTPUT_TOKENS,
   );
   const effectiveContextWindow = Math.max(0, contextWindow - summaryOutputTokens);
-  const referenceThreshold = Math.max(0, effectiveContextWindow - AUTO_COMPACTION_BUFFER_TOKENS);
+  // OpenCode parity: compact when the complete request exceeds
+  // contextWindow - max(output allowance, 20K buffer). effectiveContextWindow
+  // already represents that usable request budget.
+  const referenceThreshold = effectiveContextWindow;
   const percentOverride = input.autoCompactPercentOverride;
   const percentageThreshold =
     percentOverride !== undefined &&

@@ -9,6 +9,12 @@ import { executeGrepTool, executeReadTool, readTool } from '../../tools/workspac
 const testOnNonWindows = process.platform === 'win32' ? it.skip : it;
 
 describe('workspace file tools on non-Windows hosts', () => {
+  it('resolves a relative file path for direct callers', async () => {
+    const result = await executeReadTool({ path: 'package.json', limit: 5 });
+    expect(result.path.endsWith('package.json')).toBe(true);
+    expect(result.content).toContain('openAwork');
+  });
+
   it('ignores an empty filePath when a valid path is provided', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'openawork-read-'));
     const filePath = join(directory, 'document.md');

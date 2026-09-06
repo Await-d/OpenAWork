@@ -43,7 +43,7 @@ const FOCUS_BANNER_ACTION_STYLE: CSSProperties = {
 
 const FOCUS_BANNER_PRIMARY_ACTION_STYLE: CSSProperties = {
   ...FOCUS_BANNER_ACTION_STYLE,
-  borderColor: 'color-mix(in srgb, var(--accent) 45%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
   color: 'var(--accent)',
 };
@@ -108,7 +108,7 @@ const SHARED_ACTION_STYLE: CSSProperties = {
 
 const SHARED_PRIMARY_ACTION_STYLE: CSSProperties = {
   ...SHARED_ACTION_STYLE,
-  borderColor: 'color-mix(in srgb, var(--accent) 46%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 46%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
   color: 'var(--accent)',
 };

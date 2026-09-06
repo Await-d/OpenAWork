@@ -21,6 +21,14 @@ import * as ModelsDev from './models-dev.js';
 
 const cloneModel = (model: AIModelConfig): AIModelConfig => ({
   ...model,
+  inputModalities: model.inputModalities ? [...model.inputModalities] : undefined,
+  outputModalities: model.outputModalities ? [...model.outputModalities] : undefined,
+  reasoningOptions: model.reasoningOptions?.map((option) => ({
+    ...option,
+    values: option.values ? [...option.values] : undefined,
+  })),
+  experimental: model.experimental ? { ...model.experimental } : undefined,
+  modelsDevOptions: model.modelsDevOptions ? { ...model.modelsDevOptions } : undefined,
   thinking: model.thinking ? { ...model.thinking } : undefined,
   requestOverrides: model.requestOverrides
     ? {
@@ -305,7 +313,7 @@ export class ProviderManagerImpl implements ProviderManager {
   private syncProviderCatalog(data?: ModelsDev.ModelsDevData): AIProvider[] {
     for (const type of BUILTIN_PROVIDER_TYPES) {
       const builtin = getBuiltinProviderPreset(type);
-      const liveProvider = data?.[type] ?? data?.[builtin.id];
+      const liveProvider = ModelsDev.resolveModelsDevProvider(data, type, builtin.id);
       const builtinModels = this.buildBuiltinModelsFromCatalog(builtin, liveProvider);
       const existing = Array.from(this.providerMap.values()).find(
         (provider) => provider.type === type,
@@ -376,9 +384,12 @@ export class ProviderManagerImpl implements ProviderManager {
       return model;
     }
 
+    const liveModel = ModelsDev.mapModelsDevModel(model.id, live);
     return {
       ...model,
+      ...liveModel,
       label: model.label || live.name || model.id,
+      enabled: model.enabled,
       contextWindow: live.limit?.context ?? model.contextWindow,
       maxOutputTokens: live.limit?.output ?? model.maxOutputTokens,
       supportsTools: live.tool_call ?? model.supportsTools,
@@ -406,20 +417,7 @@ export class ProviderManagerImpl implements ProviderManager {
   }
 
   private createModelFromCatalog(modelId: string, live: ModelsDev.ModelsDevModel): AIModelConfig {
-    return {
-      id: modelId,
-      label: live.name || modelId,
-      enabled: live.status !== 'deprecated',
-      contextWindow: live.limit?.context,
-      maxOutputTokens: live.limit?.output,
-      supportsTools: live.tool_call ?? false,
-      supportsVision: live.modalities?.input?.includes('image') ?? false,
-      supportsThinking: live.reasoning ?? false,
-      inputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.input),
-      outputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.output),
-      cacheReadPricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_read),
-      cacheWritePricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_write),
-    };
+    return ModelsDev.mapModelsDevModel(modelId, live);
   }
 
   public getConfig(): ProviderConfig {

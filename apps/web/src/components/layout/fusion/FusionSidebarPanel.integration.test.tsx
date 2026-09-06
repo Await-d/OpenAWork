@@ -100,7 +100,9 @@ describe('FusionSidebar 展开 Panel', () => {
     expect(signal?.teamWorkspaceId).toBe('workspace-alpha');
     expect(signal?.sessionId).toBe('team-session-1');
     await waitFor(() => {
-      expect(screen.getByTestId('location-probe').textContent).toBe('/team/workspace-alpha');
+      expect(screen.getByTestId('location-probe').textContent).toBe(
+        '/team/workspace-alpha?sessionId=team-session-1',
+      );
     });
     expect(getFusionSidebarMocks().preloadRouteModuleByPath).toHaveBeenCalledWith('/team');
   });

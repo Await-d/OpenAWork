@@ -11,10 +11,10 @@ function usage(inputTokens: number): StreamUsageSummary {
 }
 
 describe('生产 V2 overflow gate parity seam', () => {
-  it('128K context / 32K output 在 94,999 不触发、95,000 触发', () => {
+  it('128K context 在 107,999 不触发、108,000 触发', () => {
     expect(
       resolveModelRoundOverflow({
-        usage: usage(94_999),
+        usage: usage(107_999),
         effectiveContextWindow: 128_000,
         modelMaxOutputTokens: 32_000,
         contextLimitError: null,
@@ -23,7 +23,7 @@ describe('生产 V2 overflow gate parity seam', () => {
 
     expect(
       resolveModelRoundOverflow({
-        usage: usage(95_000),
+        usage: usage(108_000),
         effectiveContextWindow: 128_000,
         modelMaxOutputTokens: 32_000,
         contextLimitError: null,
@@ -33,13 +33,13 @@ describe('生产 V2 overflow gate parity seam', () => {
 
   it('旧 compactionReservedTokens 只保留兼容输入，不改变新阈值', () => {
     const withoutLegacySetting = resolveModelRoundOverflow({
-      usage: usage(95_000),
+      usage: usage(108_000),
       effectiveContextWindow: 128_000,
       modelMaxOutputTokens: 32_000,
       contextLimitError: null,
     });
     const withLegacySetting = resolveModelRoundOverflow({
-      usage: usage(95_000),
+      usage: usage(108_000),
       effectiveContextWindow: 128_000,
       modelMaxOutputTokens: 32_000,
       compactionReservedTokens: 50_000,

@@ -274,6 +274,14 @@ describe('stream replay race', () => {
       expect(
         events.some((event) => event['type'] === 'done' && event['stopReason'] === 'end_turn'),
       ).toBe(true);
+      const liveTextEvent = events.find(
+        (event) => event['type'] === 'text_delta' && event['delta'] === 'continued after in-flight',
+      );
+      const liveCursor = liveTextEvent?.['cursor'] as Record<string, unknown> | undefined;
+      expect(liveCursor).toEqual({
+        clientRequestId: CLIENT_REQUEST_ID,
+        seq: expect.any(Number),
+      });
 
       const replayResponse = await app.inject({
         method: 'GET',

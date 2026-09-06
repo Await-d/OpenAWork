@@ -7,6 +7,16 @@ import {
 import { parseAllTasks, validateParsedTasks } from '../../handoff/capability/dispatch-package.js';
 
 describe('planning contract validators', () => {
+  it('共享校验拒绝同一文件的两个执行任务', () => {
+    const tasks =
+      parseAllTasks(`- [ ] T001 [KIND:build] [SURFACE:backend] [src/index.ts] 实现入口 - 服务启动
+**文件**：
+- Modify: \`src/index.ts\`
+- [ ] T099 [KIND:build] [SURFACE:backend] [src/index.ts] 实现入口 - 服务启动
+**文件**：
+- Modify: \`src/index.ts\``);
+    expect(validateParsedTasks(tasks).join(';')).toContain('应合并为一个任务');
+  });
   it('会拒绝缺少验收覆盖矩阵的 spec', () => {
     const result = validateSpecOutput(
       `# 功能规格：点餐\n\n### 用户故事 1\n\n**验收场景**：\n1. **给定** A，**当** B，**则** C\n\n### 边界情况\n- 网络错误\n\n## 需求\n- **FR-001**：系统必须下单\n\n## 成功标准\n- **SC-001**：成功`,

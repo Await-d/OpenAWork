@@ -31,10 +31,12 @@ describe('review output normalization', () => {
   });
 
   it('Given 明确失败语义但未使用 ISSUE 格式 When normalizeReviewOutput Then 仍然拒绝', () => {
-    expect(normalizeReviewOutput('检查未通过，存在功能错误。', inferReviewVerdictFromText)).toEqual({
-      passed: false,
-      issues: ['检查未通过，存在功能错误。'],
-    });
+    expect(normalizeReviewOutput('检查未通过，存在功能错误。', inferReviewVerdictFromText)).toEqual(
+      {
+        passed: false,
+        issues: ['检查未通过，存在功能错误。'],
+      },
+    );
   });
 
   it('Given 含具体发现但结论词未命中 When normalizeReviewOutput Then 不把未知结论当作通过', () => {

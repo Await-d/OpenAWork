@@ -21,6 +21,8 @@ import {
 import {
   assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
+  isWorkspaceAbsolutePath,
+  resolveWorkspaceEntryPath,
   validateWorkspacePath,
   validateWorkspaceRelativePath,
 } from '../workspace/workspace-paths.js';
@@ -226,10 +228,7 @@ function assertAccessibleWorkspacePath(
   // 禁止在改写前对原始 path 做主机校验，否则 Windows 上 `/` 会在改写前直接炸掉。
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : (() => {
-        assertWorkspacePathSupportedByCurrentHost(path);
-        return validateWorkspacePath(path);
-      })();
+    : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -248,10 +247,7 @@ function assertWritableWorkspacePath(
 ): string {
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : (() => {
-        assertWorkspacePathSupportedByCurrentHost(path);
-        return validateWorkspacePath(path);
-      })();
+    : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
@@ -266,15 +262,30 @@ function assertWritableWorkspacePath(
 function assertSearchablePath(path: string, sessionId?: string): string {
   const safePath = sessionId
     ? assertSessionWorkspacePath({ path, sessionId })
-    : (() => {
-        assertWorkspacePathSupportedByCurrentHost(path);
-        return validateWorkspacePath(path);
-      })();
+    : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
   }
 
   return safePath;
+}
+
+/**
+ * Direct tool callers may omit sessionId, but a relative path is still a
+ * valid path in the process workspace. Resolve it against the configured
+ * gateway workspace root before applying host and access checks. Absolute
+ * paths retain the existing platform and allowlist validation behavior.
+ */
+function resolveUnscopedWorkspacePath(path: string): string | null {
+  const effectivePath = isWorkspaceAbsolutePath(path)
+    ? path
+    : resolveWorkspaceEntryPath(path, WORKSPACE_ROOT);
+  if (!effectivePath) {
+    return null;
+  }
+
+  assertWorkspacePathSupportedByCurrentHost(effectivePath);
+  return validateWorkspacePath(effectivePath);
 }
 
 function pickPathInput(input: { path?: string; filePath?: string }): string {

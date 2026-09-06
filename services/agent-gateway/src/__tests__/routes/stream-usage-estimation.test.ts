@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   estimateTokensFromText,
   estimateModelMessagesTokens,
+  estimateProviderRequestTokens,
 } from '../../routes/stream-model-round.js';
 
 describe('estimateTokensFromText', () => {
@@ -41,5 +42,18 @@ describe('estimateModelMessagesTokens', () => {
 
   it('空数组返回 0', () => {
     expect(estimateModelMessagesTokens([])).toBe(0);
+  });
+});
+
+describe('estimateProviderRequestTokens', () => {
+  it('估算完整 system + messages + tools 请求且可正常超过 50K', () => {
+    const input = {
+      system: [{ role: 'system', content: 's'.repeat(80_000) }],
+      messages: [{ role: 'user', content: 'm'.repeat(120_000) }],
+      tools: [{ name: 'tool', schema: { description: 't'.repeat(40_000) } }],
+    };
+
+    expect(estimateProviderRequestTokens(input)).toBe(Math.ceil(JSON.stringify(input).length / 4));
+    expect(estimateProviderRequestTokens(input)).toBeGreaterThan(50_000);
   });
 });

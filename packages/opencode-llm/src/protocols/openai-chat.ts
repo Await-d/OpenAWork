@@ -154,7 +154,12 @@ const OpenAIChatToolCallDelta = Schema.Struct({
 type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta>;
 
 const OpenAIChatDelta = Schema.Struct({
-  content: optionalNull(Schema.String),
+  content: optionalNull(
+    Schema.Union([
+      Schema.String,
+      Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
+    ]),
+  ),
   reasoning_content: optionalNull(Schema.String),
   tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
 });
@@ -487,7 +492,11 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     if (delta?.content) {
       lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
-      lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', delta.content);
+      const text =
+        typeof delta.content === 'string'
+          ? delta.content
+          : delta.content.map((part) => part.text).join('');
+      lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', text);
     }
 
     if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');

@@ -128,6 +128,28 @@ describe('createSessionsClient.getRecoveryResult', () => {
       status: 503,
     });
   });
+
+  it('getRecovery 保留调用方取消请求的 AbortError 语义', async () => {
+    globalThis.fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('signal is aborted without reason')),
+            { once: true },
+          );
+        }),
+    ) as typeof fetch;
+    const controller = new AbortController();
+    const client = createSessionsClient('http://localhost:3000');
+
+    const recoveryPromise = client.getRecovery('token-1', 'session-1', {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(recoveryPromise).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });
 
 describe('createSessionsClient mutation error handling', () => {

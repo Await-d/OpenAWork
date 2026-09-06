@@ -7,7 +7,7 @@
 import {
   PROVIDER_CATALOG,
   normalizeProviderAlias,
-  normalizeOptionalTokenPrice,
+  mapModelsDevModel,
   type AIModelConfig,
   type AIProvider,
   type ModelsDevData,
@@ -74,20 +74,7 @@ export function listDiscoverableProviders(
 }
 
 function mapLiveModel(modelId: string, live: ModelsDevModel): AIModelConfig {
-  return {
-    id: modelId,
-    label: live.name || modelId,
-    enabled: live.status !== 'deprecated',
-    contextWindow: live.limit?.context,
-    maxOutputTokens: live.limit?.output,
-    supportsTools: live.tool_call ?? false,
-    supportsVision: live.modalities?.input?.includes('image') ?? false,
-    supportsThinking: live.reasoning ?? false,
-    inputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.input),
-    outputPricePerMillion: normalizeOptionalTokenPrice(live.cost?.output),
-    cacheReadPricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_read),
-    cacheWritePricePerMillion: normalizeOptionalTokenPrice(live.cost?.cache_write),
-  };
+  return mapModelsDevModel(modelId, live);
 }
 
 export function buildCustomProviderFromModelsDev(

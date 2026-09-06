@@ -31,6 +31,11 @@ export interface PublishRunEventMeta {
   observability?: ToolCallObservabilityAnnotation;
 }
 
+export interface PersistedRunEventMeta {
+  seq: number | null;
+  rowId: number | null;
+}
+
 /**
  * Per-session retention for the durable run-event replay log.
  *
@@ -338,10 +343,10 @@ export function publishSessionRunEvent(
   sessionId: string,
   event: RunEvent,
   meta?: PublishRunEventMeta,
-): void {
+): PersistedRunEventMeta {
   const persisted = persistRunEventRow(sessionId, event, meta);
   const handlers = sessionHandlers.get(sessionId);
-  if (!handlers) return;
+  if (!handlers) return persisted;
   // Forward the DB-assigned seq and rowId into the broadcast meta so subscribers
   // (notably the /stream/attach and /stream/multi-attach endpoints) can filter
   // and order live events even when the caller didn't provide a seq.
@@ -362,6 +367,7 @@ export function publishSessionRunEvent(
       sessionId,
     });
   }
+  return persisted;
 }
 
 export function broadcastPersistedSessionRunEvent(

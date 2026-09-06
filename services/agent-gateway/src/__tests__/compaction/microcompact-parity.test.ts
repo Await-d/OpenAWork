@@ -14,6 +14,10 @@ function toolResult(id: string, content: string): UnifiedMessage {
   };
 }
 
+function user(content: string): UnifiedMessage {
+  return { role: 'user', content };
+}
+
 describe('microcompact parity baseline', () => {
   it('计数触发不会用更长引用扩大短工具结果', () => {
     // Given
@@ -32,7 +36,7 @@ describe('microcompact parity baseline', () => {
     });
 
     // Then
-    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'count' });
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
     expect(messages.map((message) => message.content)).toEqual([
       'old result one '.repeat(10),
       'old result two '.repeat(10),
@@ -40,6 +44,74 @@ describe('microcompact parity baseline', () => {
     ]);
     expect(result.messages).toEqual(messages);
     expect(result.messages[2]?.content).toBe('recent result '.repeat(10));
+  });
+});
+
+describe('OpenCode token 级延迟剪枝语义', () => {
+  it('最近 40K 工具 token 全部受保护时不剪枝', () => {
+    const messages = [
+      user('第一轮'),
+      toolResult('old-1', 'a'.repeat(80_000)),
+      user('第二轮'),
+      toolResult('old-2', 'b'.repeat(80_000)),
+      user('第三轮'),
+      toolResult('recent-1', 'c'.repeat(80_000)),
+      user('当前轮'),
+      toolResult('recent-2', 'd'.repeat(80_000)),
+    ];
+
+    const result = microcompactMessages(messages);
+
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
+    expect(result.messages).toEqual(messages);
+  });
+
+  it('保护区外可回收结果不超过 20K token 时不剪枝', () => {
+    const messages = [
+      user('第一轮'),
+      toolResult('reclaimable', 'a'.repeat(80_000)),
+      user('第二轮'),
+      toolResult('protected-1', 'b'.repeat(160_000)),
+      user('第三轮'),
+      toolResult('recent-1', 'c'.repeat(8_000)),
+      user('当前轮'),
+      toolResult('recent-2', 'd'.repeat(8_000)),
+    ];
+
+    const result = microcompactMessages(messages);
+
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
+    expect(result.messages).toEqual(messages);
+  });
+
+  it('保护区外可回收结果超过 20K token 时只剪旧结果', () => {
+    const messages = [
+      user('第一轮'),
+      toolResult('reclaimable', 'a'.repeat(84_000)),
+      user('第二轮'),
+      toolResult('protected-1', 'b'.repeat(160_000)),
+      user('第三轮'),
+      toolResult('recent-1', 'c'.repeat(8_000)),
+      user('当前轮'),
+      toolResult('recent-2', 'd'.repeat(8_000)),
+    ];
+
+    const result = microcompactMessages(messages);
+
+    expect(result).toMatchObject({ applied: true, clearedCount: 1, trigger: 'prune' });
+    expect(result.messages[1]?.content).toContain('read_tool_output');
+    expect(result.messages[3]).toEqual(messages[3]);
+    expect(result.messages[5]).toEqual(messages[5]);
+    expect(result.messages[7]).toEqual(messages[7]);
+  });
+
+  it('不剪当前用户轮次中的超长工具结果', () => {
+    const messages = [user('当前轮'), toolResult('current', 'x'.repeat(400_000))];
+
+    const result = microcompactMessages(messages);
+
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
+    expect(result.messages).toEqual(messages);
   });
 });
 
@@ -83,7 +155,7 @@ describe('microcompact reference time policy', () => {
     );
 
     // Then
-    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'time' });
+    expect(result).toMatchObject({ applied: false, clearedCount: 0, trigger: 'none' });
     expect(result.messages).toEqual(messages);
   });
 

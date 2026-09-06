@@ -11,6 +11,7 @@ describe('useSessionViewCache', () => {
     result.current.save('session-1', [], null, {
       recoveredStream: {
         messageId: 'm-1',
+        parts: [],
         startedAt: 100,
         text: 'hello',
         thinkingBlocks: [],

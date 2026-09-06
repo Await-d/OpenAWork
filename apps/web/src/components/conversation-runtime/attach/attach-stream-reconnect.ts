@@ -4,7 +4,10 @@ import type { SessionStateStatus } from '../../conversation-runtime/session/sess
 import type { RecoveredActiveAssistantStream } from '../../conversation-runtime/stream/stream-recovery.js';
 import type { ChatBackendUsageSnapshot } from '../../conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../conversation-runtime/stream/streaming-thinking.js';
-import type { AssistantTraceToolCall } from '../../conversation-runtime/messages/support.js';
+import type {
+  AssistantTraceToolCall,
+  ChatMessagePart,
+} from '../../conversation-runtime/messages/support.js';
 
 export interface InterruptedAttachStreamState {
   accumulatedText: string;
@@ -12,6 +15,7 @@ export interface InterruptedAttachStreamState {
   accumulatedUsage: ChatBackendUsageSnapshot | null;
   attachStateInitialized: boolean;
   currentAssistantStreamMessageId: string | null;
+  parts: ChatMessagePart[];
   recoveredModifiedFilesSummary?: ModifiedFilesSummaryContent;
   requestStartedAt: number;
   toolCalls: AssistantTraceToolCall[];
@@ -60,6 +64,7 @@ export function handleInterruptedAttachStream(input: InterruptedAttachStreamInpu
     actions.resetRevealState();
     actions.setRecoveredStreamSnapshot({
       messageId: state.currentAssistantStreamMessageId,
+      parts: state.parts,
       ...(state.recoveredModifiedFilesSummary
         ? { modifiedFilesSummary: state.recoveredModifiedFilesSummary }
         : {}),

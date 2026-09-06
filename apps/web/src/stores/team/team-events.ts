@@ -1098,6 +1098,7 @@ export function connectTeamEvents(gatewayUrl: string, token: string): void {
   const ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    if (wsInstance !== ws) return;
     lastProtocolErrorCode = null;
     const openedAt = Date.now();
     lastServerActivityAt = openedAt;
@@ -1115,6 +1116,7 @@ export function connectTeamEvents(gatewayUrl: string, token: string): void {
   };
 
   ws.onmessage = (msg) => {
+    if (wsInstance !== ws) return;
     // Any frame (team event, the initial `connected`, or a `pong` answer to
     // our liveness ping) proves the server is alive — refresh the watchdog.
     lastServerActivityAt = Date.now();
@@ -1141,6 +1143,7 @@ export function connectTeamEvents(gatewayUrl: string, token: string): void {
   };
 
   ws.onclose = (event) => {
+    if (wsInstance !== ws) return;
     wsInstance = null;
     stopTeamEventsLivenessProbe();
     const strategy = resolveTeamEventsCloseStrategy({
@@ -1183,6 +1186,7 @@ export function connectTeamEvents(gatewayUrl: string, token: string): void {
   };
 
   ws.onerror = () => {
+    if (wsInstance !== ws) return;
     useTeamEventsConnectionStore.getState().setSnapshot({
       lastError: 'team-events 连接异常，准备重连。',
     });
@@ -1224,8 +1228,9 @@ export function disconnectTeamEvents(): void {
     reconnectTimer = null;
   }
   if (wsInstance) {
-    wsInstance.close();
+    const previous = wsInstance;
     wsInstance = null;
+    previous.close();
   }
   useTeamEventsConnectionStore.getState().setSnapshot({
     lastCloseCode: null,

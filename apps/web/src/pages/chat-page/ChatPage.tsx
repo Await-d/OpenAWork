@@ -170,7 +170,6 @@ import {
   appendStreamingThinkingDelta,
   applyToolResultToStreamingSegment,
   markStreamingReasoningSegmentEnded,
-  segmentsFromRecoverySnapshot,
   upsertStreamingToolSegment,
 } from '../../components/conversation-runtime/stream/streaming-segments.js';
 import {
@@ -1452,11 +1451,7 @@ export default function ChatPage() {
   const visibleStreamingSegments = streaming
     ? streamingSegments
     : recoveredStreamSnapshot
-      ? segmentsFromRecoverySnapshot(
-          recoveredStreamSnapshot.messageId ?? '__recovery__',
-          recoveredStreamSnapshot.thinkingBlocks ?? [],
-          recoveredStreamSnapshot.text ?? '',
-        )
+      ? recoveredStreamSnapshot.parts
       : [];
   const activeStreamMessageId =
     currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
@@ -1693,6 +1688,7 @@ export default function ChatPage() {
         streamingSnapshot = {
           recoveredStream: {
             messageId: currentAssistantStreamMessageIdRef.current,
+            parts: streamingSegmentsRef.current,
             startedAt: activeStreamStartedAtRef.current,
             text: streamBufferRef.current,
             thinkingBlocks: streamThinkingBlocksRef.current,
@@ -2899,6 +2895,7 @@ export default function ChatPage() {
     });
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
+    let streamTerminalized = false;
     const requestProviderId = effectiveProviderId || undefined;
     const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
     const shouldSendExplicitSelection = shouldSendExplicitStreamModelSelection(
@@ -2968,6 +2965,7 @@ export default function ChatPage() {
       }
     };
     let firstTokenObservedAt: number | null = null;
+    const deliveredThinkingChunkKeys = new Set<string>();
     let toolPanelRevealed = false;
     let pausedForPermission = false;
     let pausedForQuestion = false;
@@ -3350,6 +3348,16 @@ export default function ChatPage() {
           setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
         }
 
+        const thinkingChunkKey = [
+          chunk.itemId ?? '',
+          chunk.outputIndex ?? '',
+          chunk.summaryIndex ?? '',
+          chunk.occurredAt ?? '',
+          chunk.delta,
+        ].join('|');
+        if (deliveredThinkingChunkKeys.has(thinkingChunkKey)) return;
+        deliveredThinkingChunkKeys.add(thinkingChunkKey);
+
         if (liveToolCalls.size > 0) {
           closeCurrentStreamingRoundIntoMessage(Date.now());
         }
@@ -3404,6 +3412,10 @@ export default function ChatPage() {
         }
       },
       onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
+        if (streamTerminalized) {
+          return;
+        }
+        streamTerminalized = true;
         if (activeSessionRef.current !== sid) {
           requestSessionListRefresh();
           return;
@@ -3785,7 +3797,6 @@ export default function ChatPage() {
     }
 
     if (attachAttemptedSessionRef.current === currentSessionId) {
-      console.log('[ATTACH_ELIGIBILITY] 已经尝试过 attach，跳过', currentSessionId);
       return;
     }
 
@@ -3863,6 +3874,7 @@ export default function ChatPage() {
       }
     };
     let firstTokenObservedAt: number | null = null;
+    const deliveredAttachThinkingChunkKeys = new Set<string>();
     let pausedForPermission = false;
     let pausedForQuestion = false;
     let latestUpstreamRoute: UpstreamRouteDescriptor | null =
@@ -3876,6 +3888,7 @@ export default function ChatPage() {
       summary?.providerId ?? latestUpstreamRoute?.providerId ?? requestProviderId;
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
+    let attachStreamTerminalized = false;
     const buildAttachToolCalls = (): AssistantTraceToolCall[] => {
       return Array.from(liveToolCalls.values()).map((toolCallState) => {
         const hasPendingPermission = hasActivePendingPermissionRequest({
@@ -4038,6 +4051,7 @@ export default function ChatPage() {
           accumulatedUsage,
           attachStateInitialized,
           currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
+          parts: accumulatedSegments,
           ...(visibleLatestUpstreamSummary
             ? { latestUpstreamSummary: visibleLatestUpstreamSummary }
             : {}),
@@ -4099,72 +4113,27 @@ export default function ChatPage() {
           toolName: recoveredToolCall.toolName,
         });
       }
-      // Seed accumulatedSegments from the recovery snapshot. The snapshot
-      // schema (text / thinkingBlocks / toolCalls) does not preserve true
-      // event order, so we reconstruct using the legacy reasoning → text →
-      // tool ordering. New stream events arriving after this point will
-      // append in true wire order. After the attach round eventually closes,
-      // `loadCurrentSessionSnapshot` reloads from DB which uses
-      // `partsFromOrderedAssistantContent` and thus shows the gateway's
-      // authoritative ordering.
-      const seededMessageId = currentAssistantStreamMessageIdRef.current ?? 'recovered-stream';
-      const seededSegments: ChatMessagePart[] = [];
-      for (const [index, block] of initialThinkingBlocks.entries()) {
-        if (block.text.trim().length === 0) continue;
-        const partId = `${seededMessageId}:reasoning:${index}`;
-        reasoningSegmentMeta.set(partId, { blockKey: block.key });
-        seededSegments.push({
-          id: partId,
-          type: 'reasoning',
-          text: block.text,
-          ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
-          ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
-        });
-      }
-      if (initialText.trim().length > 0) {
-        seededSegments.push({
-          id: `${seededMessageId}:text`,
-          type: 'text',
-          text: initialText,
-        });
-      }
-      for (const [, toolCallState] of liveToolCalls.entries()) {
-        const inputText = toolCallState.inputText.trim();
-        let parsedInput: Record<string, unknown> = {};
-        if (inputText.length > 0) {
-          try {
-            parsedInput = JSON.parse(inputText) as Record<string, unknown>;
-          } catch {
-            parsedInput = {};
-          }
+      // Recovery already replays runEvents into wire-ordered parts. Reuse
+      // those parts directly so tools remain between the text/reasoning
+      // segments that surrounded them before a refresh or session switch.
+      const seededSegments = (recoveredStreamSnapshot?.parts ?? []).map((part) => {
+        if (part.type === 'reasoning') {
+          const recoveredBlock = initialThinkingBlocks.find(
+            (block) => block.text === part.text && block.startedAt === part.startedAt,
+          );
+          reasoningSegmentMeta.set(part.id, {
+            blockKey: recoveredBlock?.key ?? `recovered:${part.id}`,
+          });
         }
-        const status: 'running' | 'paused' | 'completed' | 'failed' =
-          toolCallState.status === 'error'
-            ? 'failed'
-            : toolCallState.status === 'paused'
-              ? 'paused'
-              : toolCallState.status === 'completed'
-                ? 'completed'
-                : 'running';
-        seededSegments.push({
-          id: toolCallState.toolCallId,
-          type: 'tool',
-          toolCallId: toolCallState.toolCallId,
-          toolName: toolCallState.toolName,
-          input: parsedInput,
-          status,
-          ...(toolCallState.output !== undefined ? { output: toolCallState.output } : {}),
-          ...(toolCallState.isError !== undefined ? { isError: toolCallState.isError } : {}),
-          ...(toolCallState.pendingPermissionRequestId
-            ? {
-                pendingPermissionRequestId: toolCallState.pendingPermissionRequestId,
-              }
-            : {}),
-          ...(toolCallState.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-          kind: resolveAssistantCapabilityKind(toolCallState.toolName) as
-            'agent' | 'mcp' | 'skill' | 'tool' | undefined,
-        });
-      }
+        if (part.type === 'tool') {
+          return {
+            ...part,
+            kind: resolveAssistantCapabilityKind(part.toolName) as
+              'agent' | 'mcp' | 'skill' | 'tool' | undefined,
+          };
+        }
+        return part;
+      });
       accumulatedSegments = seededSegments;
       stoppingStreamRef.current = false;
       streamingRef.current = true;
@@ -4495,6 +4464,15 @@ export default function ChatPage() {
             firstTokenObservedAt = Date.now();
             setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
           }
+          const thinkingChunkKey = [
+            chunk.itemId ?? '',
+            chunk.outputIndex ?? '',
+            chunk.summaryIndex ?? '',
+            chunk.occurredAt ?? '',
+            chunk.delta,
+          ].join('|');
+          if (deliveredAttachThinkingChunkKeys.has(thinkingChunkKey)) return;
+          deliveredAttachThinkingChunkKeys.add(thinkingChunkKey);
           if (liveToolCalls.size > 0) {
             closeCurrentAttachRoundIntoMessage(Date.now());
           }
@@ -4542,6 +4520,10 @@ export default function ChatPage() {
           }
         },
         onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
+          if (attachStreamTerminalized) {
+            return;
+          }
+          attachStreamTerminalized = true;
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;

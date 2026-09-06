@@ -46,6 +46,48 @@ const BASE_INPUT = {
 } as const;
 
 describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
+  it('规划请求拒绝空正文和达到长度上限的正文', async () => {
+    for (const result of [
+      { text: '', finishReason: 'stop' },
+      { text: '# 半份计划', finishReason: 'length' },
+    ]) {
+      mocks.runUpstreamGenerate.mockReturnValue(
+        Effect.succeed({ ...result, inputTokens: 100, outputTokens: 2048 }),
+      );
+      await expect(
+        requestWorkflowLlmCompletion({ ...BASE_INPUT, requireCompleteOutput: true }),
+      ).rejects.toThrow('workflow ');
+    }
+  });
+
+  it('规划保留 system 角色并按预算重试截断正文', async () => {
+    const { requestPlanningCompletion } =
+      await import('../../handoff/runner/planning-completion.js');
+    mocks.runUpstreamGenerate
+      .mockReturnValueOnce(Effect.succeed({ text: '', finishReason: 'length', outputTokens: 8192 }))
+      .mockReturnValueOnce(
+        Effect.succeed({ text: '完整规划', finishReason: 'stop', outputTokens: 100 }),
+      );
+    await expect(requestPlanningCompletion({ ...BASE_INPUT, system: '规划职责' })).resolves.toBe(
+      '完整规划',
+    );
+    expect(mocks.runUpstreamGenerate.mock.calls.map(([arg]) => arg.maxOutputTokens)).toEqual([
+      8192, 16384,
+    ]);
+    expect(mocks.runUpstreamGenerate.mock.calls[0]?.[0].system).toBe('规划职责');
+  });
+
+  it('预算提升后仍无正文则终止，不无限重试', async () => {
+    const { requestPlanningCompletion } =
+      await import('../../handoff/runner/planning-completion.js');
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({ text: '', finishReason: 'stop', outputTokens: 0 }),
+    );
+    await expect(requestPlanningCompletion(BASE_INPUT)).rejects.toThrow(
+      'planning-generation-failed:',
+    );
+    expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(2);
+  });
   beforeEach(() => {
     mocks.runUpstreamGenerate.mockReset();
   });

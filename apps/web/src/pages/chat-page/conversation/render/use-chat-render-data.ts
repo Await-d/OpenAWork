@@ -47,6 +47,26 @@ import {
   shouldShowMessageInTranscript,
 } from '../../../../components/conversation-runtime/messages/transcript-visibility.js';
 
+function areSameHistoricalAssistantMessage(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.id === right.id) return true;
+  if (left.role !== 'assistant' || right.role !== 'assistant') return false;
+  if (
+    left.clientRequestId &&
+    right.clientRequestId &&
+    left.clientRequestId === right.clientRequestId
+  ) {
+    return true;
+  }
+  const rightPartIds = new Set((right.parts ?? []).map((part) => part.id));
+  if ((left.parts ?? []).some((part) => rightPartIds.has(part.id))) return true;
+  const rightToolIds = new Set(
+    (right.parts ?? []).filter((part) => part.type === 'tool').map((part) => part.toolCallId),
+  );
+  return (left.parts ?? []).some(
+    (part) => part.type === 'tool' && rightToolIds.has(part.toolCallId),
+  );
+}
+
 export interface ChatRenderDataInput {
   messages: ChatMessage[];
   pendingPermissions: PendingPermissionRequest[];
@@ -226,6 +246,16 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     }, 0);
   }, [effectiveContextMessages]);
 
+  const latestHistoricalReportedTotalTokens = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === 'assistant' && message.providerUsage?.totalTokens) {
+        return message.providerUsage.totalTokens;
+      }
+    }
+    return 0;
+  }, [messages]);
+
   const streamingOutputTokens = useMemo(() => {
     return visibleStreamBuffer.length > 0 ? estimateTokenCount(visibleStreamBuffer) : 0;
   }, [visibleStreamBuffer]);
@@ -336,15 +366,21 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
           activeModelOption?.contextWindow,
           activeModelOption?.contextWindowOverride,
         ),
-        historicalTokens: messageInputTokens,
+        historicalTokens: shouldPreferHistoricalContextEstimate
+          ? messageInputTokens
+          : Math.max(messageInputTokens, latestHistoricalReportedTotalTokens),
         preferHistoricalEstimate: shouldPreferHistoricalContextEstimate,
-        reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
+        reportedTotalTokens:
+          effectiveReportedStreamUsage?.peakTotalTokens ??
+          effectiveReportedStreamUsage?.totalTokens,
         streamingTotalTokens: streamingUsageDetails?.totalTokens,
       }),
     [
       activeModelOption?.contextWindow,
       activeModelOption?.contextWindowOverride,
       effectiveReportedStreamUsage?.totalTokens,
+      effectiveReportedStreamUsage?.peakTotalTokens,
+      latestHistoricalReportedTotalTokens,
       messageInputTokens,
       shouldPreferHistoricalContextEstimate,
       streamingUsageDetails?.totalTokens,
@@ -389,7 +425,26 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
 
       return [nextMessage];
     });
-    return deduplicateCompactionMessages(visible);
+    const deduplicated = deduplicateCompactionMessages(visible);
+    const output: ChatMessage[] = [];
+    for (const message of deduplicated) {
+      const duplicateIndex = output.findIndex((existing) =>
+        areSameHistoricalAssistantMessage(existing, message),
+      );
+      if (duplicateIndex < 0) {
+        output.push(message);
+        continue;
+      }
+      const existing = output[duplicateIndex]!;
+      // Preserve transcript position while accepting the more complete
+      // snapshot (final status, longer parts, tool output).
+      if (message.status !== 'streaming' && existing.status === 'streaming') {
+        output[duplicateIndex] = message;
+      } else if ((message.parts?.length ?? 0) > (existing.parts?.length ?? 0)) {
+        output[duplicateIndex] = message;
+      }
+    }
+    return output;
   }, [messages, pendingPermissions]);
 
   const visibleMessages = useMemo(() => {

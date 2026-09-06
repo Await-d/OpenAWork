@@ -366,7 +366,7 @@ describe('自动压缩续跑', () => {
     expect(mocks.executeSessionCompaction).not.toHaveBeenCalled();
   });
 
-  it('V2 round 的 95K 用量会进入 triggerOverflowCompaction seam', async () => {
+  it('V2 round 的 108K 用量会进入 triggerOverflowCompaction seam', async () => {
     // Given
     mocks.resolveEffectiveContextWindow.mockReturnValue(128_000);
     mocks.listSessionMessagesV2.mockReturnValue([
@@ -384,7 +384,7 @@ describe('自动压缩续跑', () => {
         overflow: true,
         stopReason: 'end_turn',
         usage: {
-          inputTokens: 95_000,
+          inputTokens: 108_000,
           outputTokens: 0,
           totalTokens: 95_000,
         },

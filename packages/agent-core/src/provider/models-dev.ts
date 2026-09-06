@@ -2,6 +2,14 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { createPlatformAdapter } from '@openAwork/platform-adapter';
+import {
+  getCatalogEntry,
+  inferProviderTypeFromHostname,
+  normalizeProviderAlias,
+} from './catalog.js';
+import type { BuiltinProviderType } from './presets.js';
+import type { AIModelConfig } from './types.js';
+import { normalizeOptionalTokenPrice } from './utils.js';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -14,6 +22,7 @@ function getCacheFilePath(): string {
 export interface ModelsDevModel {
   id: string;
   name: string;
+  description?: string;
   cost?: {
     input: number;
     output: number;
@@ -27,7 +36,14 @@ export interface ModelsDevModel {
   };
   tool_call?: boolean;
   reasoning?: boolean;
+  reasoning_options?: Array<{
+    type: string;
+    values?: string[];
+  }>;
   attachment?: boolean;
+  knowledge?: string;
+  interleaved?: boolean | { field: string };
+  structured_output?: boolean;
   temperature?: boolean;
   modalities?: {
     input?: string[];
@@ -36,6 +52,13 @@ export interface ModelsDevModel {
   status?: 'alpha' | 'beta' | 'deprecated';
   family?: string;
   release_date?: string;
+  last_updated?: string;
+  open_weights?: boolean;
+  provider?: {
+    npm?: string;
+    api?: string;
+  };
+  experimental?: Record<string, unknown>;
   options?: Record<string, unknown>;
 }
 
@@ -49,6 +72,90 @@ export interface ModelsDevProvider {
 }
 
 export type ModelsDevData = Record<string, ModelsDevProvider>;
+
+export function resolveModelsDevProvider(
+  data: ModelsDevData | undefined,
+  type: BuiltinProviderType,
+  builtinId: string,
+): ModelsDevProvider | undefined {
+  if (!data) {
+    return undefined;
+  }
+
+  const direct = data[type] ?? data[builtinId];
+  if (direct) {
+    return direct;
+  }
+
+  const configuredId = getCatalogEntry(type)?.modelsDevIds?.find((id) => data[id]);
+  if (configuredId) {
+    return data[configuredId];
+  }
+
+  return Object.entries(data).find(([key, provider]) => {
+    if (
+      normalizeProviderAlias(key) === type ||
+      normalizeProviderAlias(provider.id || key) === type
+    ) {
+      return true;
+    }
+
+    if (!provider.api) {
+      return false;
+    }
+
+    try {
+      return inferProviderTypeFromHostname(new URL(provider.api).hostname) === type;
+    } catch {
+      return false;
+    }
+  })?.[1];
+}
+
+export function mapModelsDevModel(modelId: string, model: ModelsDevModel): AIModelConfig {
+  const inputModalities = model.modalities?.input;
+  const outputModalities = model.modalities?.output;
+  return {
+    id: modelId,
+    label: model.name || modelId,
+    enabled: model.status !== 'deprecated',
+    description: model.description,
+    family: model.family,
+    releaseDate: model.release_date,
+    lastUpdated: model.last_updated,
+    openWeights: model.open_weights,
+    knowledgeCutoff: model.knowledge,
+    supportsInterleavedReasoning: model.interleaved !== undefined && model.interleaved !== false,
+    reasoningContentField:
+      typeof model.interleaved === 'object' ? model.interleaved.field : undefined,
+    providerNpm: model.provider?.npm,
+    providerApi: model.provider?.api,
+    experimental: model.experimental ? { ...model.experimental } : undefined,
+    modelsDevOptions: model.options ? { ...model.options } : undefined,
+    supportsAttachments: model.attachment,
+    supportsTools: model.tool_call ?? false,
+    supportsVision: inputModalities?.includes('image') ?? false,
+    supportsAudioInput: inputModalities?.includes('audio') ?? false,
+    supportsVideoInput: inputModalities?.includes('video') ?? false,
+    supportsAudioOutput: outputModalities?.includes('audio') ?? false,
+    supportsVideoGeneration: outputModalities?.includes('video') ?? false,
+    supportsStructuredOutput: model.structured_output,
+    supportsTemperature: model.temperature,
+    supportsThinking: model.reasoning ?? false,
+    inputModalities: inputModalities ? [...inputModalities] : undefined,
+    outputModalities: outputModalities ? [...outputModalities] : undefined,
+    reasoningOptions: model.reasoning_options?.map((option) => ({
+      type: option.type,
+      values: option.values ? [...option.values] : undefined,
+    })),
+    contextWindow: model.limit?.context,
+    maxOutputTokens: model.limit?.output,
+    inputPricePerMillion: normalizeOptionalTokenPrice(model.cost?.input),
+    outputPricePerMillion: normalizeOptionalTokenPrice(model.cost?.output),
+    cacheReadPricePerMillion: normalizeOptionalTokenPrice(model.cost?.cache_read),
+    cacheWritePricePerMillion: normalizeOptionalTokenPrice(model.cost?.cache_write),
+  };
+}
 
 let _cache: ModelsDevData | null = null;
 let _timer: ReturnType<typeof setInterval> | null = null;

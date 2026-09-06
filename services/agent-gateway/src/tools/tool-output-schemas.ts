@@ -12,7 +12,13 @@ export const readToolOutputInputSchema = z
     lineStart: z.number().int().min(1).optional(),
     lineCount: z.number().int().min(1).max(400).optional(),
     charStart: z.number().int().min(0).optional(),
-    charCount: z.number().int().min(1).max(8000).optional(),
+    charCount: z
+      .number()
+      .int()
+      .min(1)
+      .safe()
+      .transform((count) => Math.min(count, 8000))
+      .optional(),
     itemStart: z.number().int().min(0).optional(),
     itemCount: z.number().int().min(1).max(200).optional(),
   })

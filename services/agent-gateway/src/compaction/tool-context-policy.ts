@@ -14,8 +14,7 @@ export interface ToolContextPolicyInput {
 }
 
 const DEFAULT_CHARS_PER_TOKEN = 4;
-const DEFAULT_MAX_TOTAL_TOOL_COST_CHARS = 48_000;
-const TOOL_CONTEXT_WINDOW_RATIO = 0.25;
+const UNBOUNDED_TOOL_CONTEXT_CHARS = Number.POSITIVE_INFINITY;
 
 export const DEFAULT_TOOL_CONTEXT_POLICY: ToolContextPolicy = {
   charsPerToken: DEFAULT_CHARS_PER_TOKEN,
@@ -24,22 +23,9 @@ export const DEFAULT_TOOL_CONTEXT_POLICY: ToolContextPolicy = {
   maxInlineImageUrlChars: 500_000,
   maxReadPageBytes: 8_000,
   maxSingleToolTextChars: 8_192,
-  maxTotalToolCostChars: DEFAULT_MAX_TOTAL_TOOL_COST_CHARS,
+  maxTotalToolCostChars: UNBOUNDED_TOOL_CONTEXT_CHARS,
 };
 
-function usableContextWindow(input: ToolContextPolicyInput): number | undefined {
-  const value = input.contextWindowOverrideTokens ?? input.contextWindowTokens;
-  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
-}
-
-export function resolveToolContextPolicy(input: ToolContextPolicyInput = {}): ToolContextPolicy {
-  const contextWindow = usableContextWindow(input);
-  const dynamicBudget =
-    contextWindow === undefined
-      ? DEFAULT_MAX_TOTAL_TOOL_COST_CHARS
-      : Math.floor(contextWindow * TOOL_CONTEXT_WINDOW_RATIO * DEFAULT_CHARS_PER_TOKEN);
-  return {
-    ...DEFAULT_TOOL_CONTEXT_POLICY,
-    maxTotalToolCostChars: Math.min(DEFAULT_MAX_TOTAL_TOOL_COST_CHARS, dynamicBudget),
-  };
+export function resolveToolContextPolicy(_input: ToolContextPolicyInput = {}): ToolContextPolicy {
+  return DEFAULT_TOOL_CONTEXT_POLICY;
 }

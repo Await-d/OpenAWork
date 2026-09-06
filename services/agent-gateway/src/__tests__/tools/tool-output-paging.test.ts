@@ -85,13 +85,34 @@ describe('read_tool_output 字符预算分页', () => {
     expect(readToolOutputOutputSchema.safeParse(page).success).toBe(true);
   });
 
-  it('拒绝负偏移和超额字符请求', () => {
+  it('拒绝负偏移和无效长度', () => {
     expect(
       readToolOutputInputSchema.safeParse({ toolCallId: 'call-1', charStart: -1 }).success,
     ).toBe(false);
+    for (const charCount of [0, -1, 1.5, Infinity, NaN, '8500']) {
+      expect(readToolOutputInputSchema.safeParse({ toolCallId: 'call-1', charCount }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it('超额字符请求自动限流且通过返回游标无损续读', () => {
+    const source = 'x'.repeat(20000);
     expect(
-      readToolOutputInputSchema.safeParse({ toolCallId: 'call-1', charCount: 8001 }).success,
-    ).toBe(false);
+      readToolOutputInputSchema.parse({ toolCallId: 'call-1', charCount: 8500 }).charCount,
+    ).toBe(8000);
+    let charStart = 5600;
+    let restored = '';
+    while (charStart < source.length) {
+      const page = read(source, { charStart, charCount: 8500 });
+      expect(page.selection.charCount).toBeLessThanOrEqual(8000);
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(12000);
+      restored += String(page.output);
+      const next = page.selection.nextCharStart ?? source.length;
+      expect(next).toBeGreaterThan(charStart);
+      charStart = next;
+    }
+    expect(restored).toBe(source.slice(5600));
   });
 
   it('字符分页不会在代理对中间切断 emoji', () => {
