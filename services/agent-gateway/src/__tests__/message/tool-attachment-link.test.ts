@@ -5,8 +5,8 @@ import type { UnifiedMessage } from '../../message/message-to-model-messages.js'
 describe('工具附件结构化关联', () => {
   it('不依赖展示文案或紧邻位置清除来源工具的附件', () => {
     const messages: UnifiedMessage[] = [
-      { role: 'tool', toolCallId: 'old', toolName: 'desktop', content: 'x'.repeat(30_000) },
-      { role: 'assistant', content: '中间消息' },
+      { role: 'user', content: '最旧轮次' },
+      { role: 'tool', toolCallId: 'old', toolName: 'desktop_control', content: 'x'.repeat(84_000) },
       {
         role: 'user',
         content: '可本地化的附件提示',
@@ -14,7 +14,22 @@ describe('工具附件结构化关联', () => {
         sourceToolCallId: 'old',
         images: [{ imageUrl: 'https://example.com/a.png' }],
       },
-      { role: 'tool', toolCallId: 'new', toolName: 'desktop', content: 'y'.repeat(30_000) },
+      { role: 'user', content: '较新轮次' },
+      {
+        role: 'tool',
+        toolCallId: 'new',
+        toolName: 'desktop_control',
+        content: 'y'.repeat(160_000),
+      },
+      { role: 'user', content: '上一轮' },
+      { role: 'tool', toolCallId: 'keep', toolName: 'desktop_control', content: 'z'.repeat(8_000) },
+      { role: 'user', content: '当前轮次' },
+      {
+        role: 'tool',
+        toolCallId: 'current',
+        toolName: 'desktop_control',
+        content: 'q'.repeat(8_000),
+      },
     ];
 
     const result = microcompactMessages(messages);

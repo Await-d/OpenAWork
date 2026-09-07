@@ -1,3 +1,5 @@
+import { truncateToolOutput } from '../tools/tool-output-truncator.js';
+
 function normalizeEmbeddedMedia(value: string): string {
   return value.replace(
     /data:([^,;\s]+)[^,\s]*;base64,\s*[A-Za-z0-9+/_=-]+(?:[ \t\r\n]+[A-Za-z0-9+/_=-]+)*/gi,
@@ -10,6 +12,6 @@ function normalizeEmbeddedMedia(value: string): string {
  * Binary data URIs remain excluded because attachments are projected through
  * the dedicated image path; old text results are reclaimed by microcompact.
  */
-export function projectToolOutput(_toolCallId: string, output: string): string {
-  return normalizeEmbeddedMedia(output);
+export function projectToolOutput(toolName: string, output: string): string {
+  return truncateToolOutput(toolName, normalizeEmbeddedMedia(output));
 }

@@ -5,8 +5,8 @@ import type * as Pm1RunnerModule from '../../handoff/runner/pm1-runner.js';
 
 const mocks = vi.hoisted(() => ({
   requestPrompts: [] as string[],
-  requestWorkflowLlmCompletion: vi.fn(async (input: { prompt: string }) => {
-    mocks.requestPrompts.push(input.prompt);
+  requestWorkflowLlmCompletion: vi.fn(async (input: { prompt: string; system?: string }) => {
+    mocks.requestPrompts.push(input.system ?? input.prompt);
     return 'LLM OK';
   }),
   resolveAuxiliaryLlmConfig: vi.fn(),

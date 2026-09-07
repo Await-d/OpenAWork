@@ -856,10 +856,10 @@ function resolveToolOutput(
 
   const stored = readStoredToolResultContent(part.state.metadata);
   if (stored?.outputSummary && stored.outputSummary.trim().length > 0) {
-    return projectToolOutput(part.callID, `${stored.outputSummary.trim()}\n\n${part.state.output}`);
+    return projectToolOutput(part.tool, `${stored.outputSummary.trim()}\n\n${part.state.output}`);
   }
   const output = part.state.output;
-  return projectToolOutput(part.callID, output);
+  return projectToolOutput(part.tool, output);
 }
 
 function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } }): string | null {
@@ -868,9 +868,9 @@ function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } })
   if (interrupted) {
     const output = part.state.metadata?.output;
     if (typeof output === 'string') {
-      return projectToolOutput(part.callID, output);
+      return projectToolOutput(part.tool, output);
     }
   }
   // Otherwise, return the error text as the tool result
-  return part.state.error ? projectToolOutput(part.callID, part.state.error) : null;
+  return part.state.error ? projectToolOutput(part.tool, part.state.error) : null;
 }
