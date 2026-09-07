@@ -196,6 +196,7 @@ function VirtualizedChatGroupViewport({
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredVersion, setMeasuredVersion] = useState(0);
   const groupHeightsRef = useRef(new Map<string, number>());
+  const groupSignaturesRef = useRef(new Map<string, string>());
   const nodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const nodeRefCallbackMapRef = useRef(new Map<string, (element: HTMLDivElement | null) => void>());
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -264,13 +265,27 @@ function VirtualizedChatGroupViewport({
 
   useEffect(() => {
     const validKeys = new Set(groups.map((group) => group.key));
+    let changed = false;
+    for (const group of groups) {
+      const signature = getGroupLayoutSignature(group);
+      const previousSignature = groupSignaturesRef.current.get(group.key);
+      if (previousSignature !== undefined && previousSignature !== signature) {
+        groupHeightsRef.current.delete(group.key);
+        changed = true;
+      }
+      groupSignaturesRef.current.set(group.key, signature);
+    }
     for (const [key, element] of Array.from(nodeMapRef.current.entries())) {
       if (!validKeys.has(key)) {
         resizeObserverRef.current?.unobserve(element);
         nodeMapRef.current.delete(key);
         nodeRefCallbackMapRef.current.delete(key);
         groupHeightsRef.current.delete(key);
+        groupSignaturesRef.current.delete(key);
       }
+    }
+    if (changed) {
+      setMeasuredVersion((value) => value + 1);
     }
   }, [groups]);
 
@@ -284,10 +299,12 @@ function VirtualizedChatGroupViewport({
     groups.forEach((group, i) => {
       offsets.push(totalHeight);
       const dividerExtra = dividerLabels[i] ? TIME_DIVIDER_HEIGHT_PX : 0;
-      totalHeight +=
-        (groupHeightsRef.current.get(group.key) ?? estimateGroupHeight(group)) +
-        dividerExtra +
-        GROUP_GAP_PX;
+      const signature = getGroupLayoutSignature(group);
+      const measuredHeight =
+        groupSignaturesRef.current.get(group.key) === signature
+          ? groupHeightsRef.current.get(group.key)
+          : undefined;
+      totalHeight += (measuredHeight ?? estimateGroupHeight(group)) + dividerExtra + GROUP_GAP_PX;
     });
 
     return {
@@ -303,9 +320,13 @@ function VirtualizedChatGroupViewport({
     let startIndex = 0;
     while (startIndex < groups.length) {
       const key = groups[startIndex]?.key;
-      const height = key
-        ? (groupHeightsRef.current.get(key) ?? estimateGroupHeight(groups[startIndex]!))
-        : 0;
+      const group = groups[startIndex];
+      const signature = group ? getGroupLayoutSignature(group) : '';
+      const measuredHeight =
+        key && groupSignaturesRef.current.get(key) === signature
+          ? groupHeightsRef.current.get(key)
+          : undefined;
+      const height = group ? (measuredHeight ?? estimateGroupHeight(group)) : 0;
       if ((layout.offsets[startIndex] ?? 0) + height >= startBoundary) {
         break;
       }
@@ -481,6 +502,21 @@ function TimeDividerRow({ label }: { label: string }) {
       <span className="chat-time-divider-line" />
     </div>
   );
+}
+
+function getGroupLayoutSignature(group: ChatRenderGroup): string {
+  return group.entries
+    .map((entry) => {
+      const message = entry.message;
+      return [
+        message.id,
+        message.status ?? '',
+        message.content.length,
+        message.parts?.length ?? 0,
+        message.modifiedFilesSummary?.files.length ?? 0,
+      ].join(':');
+    })
+    .join('|');
 }
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
