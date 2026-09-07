@@ -37,4 +37,44 @@ describe('兼容接口文本块增量', () => {
     );
     expect(JSON.stringify(events)).toContain('正文');
   });
+
+  it('忽略工具调用开始前无身份且无参数的占位增量', async () => {
+    const request = new LLMRequest({
+      model: Chat.route.model({ id: 'gpt-4.1' }),
+      system: [],
+      messages: [],
+      tools: [],
+    });
+    const decode = Schema.decodeUnknownSync(Chat.protocol.stream.event);
+    const placeholder = decode(
+      JSON.stringify({
+        id: 'compat-placeholder',
+        choices: [{ index: 0, delta: { tool_calls: [{ index: 0 }] }, finish_reason: null }],
+      }),
+    );
+    const [state, events] = await Effect.runPromise(
+      Chat.protocol.stream.step(Chat.protocol.stream.initial(request), placeholder),
+    );
+
+    expect(events).toEqual([]);
+    const startedTool = decode(
+      JSON.stringify({
+        id: 'compat-tool-start',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_1', function: { name: 'read_file', arguments: '{"path":' } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+    );
+    const [, toolEvents] = await Effect.runPromise(Chat.protocol.stream.step(state, startedTool));
+
+    expect(JSON.stringify(toolEvents)).toContain('read_file');
+  });
 });

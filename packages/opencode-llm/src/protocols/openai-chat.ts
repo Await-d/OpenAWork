@@ -502,14 +502,18 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
 
     for (const tool of toolDeltas) {
+      const current = tools[tool.index];
+      const toolName = tool.function?.name;
+      const toolArguments = tool.function?.arguments ?? '';
+      if (!current && !tool.id && !toolName && toolArguments.length === 0) continue;
       const result = ToolStream.appendOrStart(
         ADAPTER,
         tools,
         tool.index,
         {
           id: tool.id ?? undefined,
-          name: tool.function?.name ?? undefined,
-          text: tool.function?.arguments ?? '',
+          name: toolName ?? undefined,
+          text: toolArguments,
         },
         'OpenAI Chat tool call delta is missing id or name',
       );
