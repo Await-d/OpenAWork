@@ -468,14 +468,7 @@ function validateOutput(
  * 修正预算耗尽后停止本轮规划，禁止使用占位内容冒充成功产物。
  */
 function applyPatches(content: string, rules: ValidationRule[]): string {
-  const patchableRules = rules.filter((rule) => !rule.check(content) && rule.patch);
-  if (patchableRules.length === 0) return content;
-
-  let patched = content;
-  for (const rule of patchableRules) {
-    patched = rule.patch?.(patched) ?? patched;
-  }
-  return patched;
+  throw new PlanningFailure(`规划校验失败：${validateOutput(content, rules).failed.join('、')}`);
 }
 
 /**
@@ -1183,6 +1176,13 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     console.warn(
       `[artifact-chain] PM1 自我复查失败：${reviewErr instanceof Error ? reviewErr.message : String(reviewErr)}`,
     );
+  }
+
+  const finalValidation = validateTasksOutput(finalTasksContent);
+  const { validateParsedTasks } = await import('../capability/dispatch-package.js');
+  const finalIssues = validateParsedTasks(parseAllTasks(finalTasksContent));
+  if (!finalValidation.ok || finalIssues.length > 0) {
+    throw new PlanningFailure([...finalValidation.failed, ...finalIssues].join('；'));
   }
 
   const tasksArtifactId = createArtifact({
