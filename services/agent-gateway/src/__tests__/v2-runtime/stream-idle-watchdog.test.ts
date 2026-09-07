@@ -2,7 +2,10 @@ import { Effect, Stream } from 'effect';
 import * as OpenCodeLLM from '@openAwork/opencode-llm';
 import * as OpenAI from '@openAwork/opencode-llm/providers/openai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runUpstreamStream } from '../../v2-runtime/upstream/stream-runner.js';
+import {
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  runUpstreamStream,
+} from '../../v2-runtime/upstream/stream-runner.js';
 
 const model = OpenAI.chat('test-model');
 
@@ -14,6 +17,10 @@ const collect = async <A>(stream: Stream.Stream<A, never>): Promise<readonly A[]
 afterEach(() => vi.restoreAllMocks());
 
 describe('native stream idle timeout', () => {
+  it('uses a 30-minute default idle deadline for long reasoning turns', () => {
+    expect(DEFAULT_STREAM_IDLE_TIMEOUT_MS).toBe(1_800_000);
+  });
+
   it('resets the deadline after each native event', async () => {
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockReturnValue(
       Stream.fromIterable([

@@ -68,7 +68,7 @@ function hasUsagePricing(input: {
  * would leave reception / pm1 / pm2 / quality-review calls pending
  * forever (and, via the in-flight dedup sets, wedge the whole runtime).
  */
-const DEFAULT_WORKFLOW_LLM_TIMEOUT_MS = 300_000;
+export const DEFAULT_WORKFLOW_LLM_TIMEOUT_MS = 1_800_000;
 
 export interface WorkflowLlmRequestConfig {
   apiBaseUrl: string;

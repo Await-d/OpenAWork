@@ -1,0 +1,11 @@
+--- /tmp/stream-runner.baseline.ts	2026-09-07 10:16:44.689895077 +0800
++++ MODIFIED_FILE	2026-09-07 10:31:42.679064273 +0800
+@@ -513,7 +513,7 @@
+   return Object.keys(generation).length === 0 ? undefined : generation;
+ }
+
+-export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
++export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000;
+
+ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstreamStream {
+   const state: RunnerState = {

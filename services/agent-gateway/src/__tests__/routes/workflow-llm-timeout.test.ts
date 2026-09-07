@@ -34,7 +34,10 @@ vi.mock('../../v2-runtime/upstream/index.js', async (orig) => {
   };
 });
 
-import { requestWorkflowLlmCompletion } from '../../routes/workflow-llm.js';
+import {
+  DEFAULT_WORKFLOW_LLM_TIMEOUT_MS,
+  requestWorkflowLlmCompletion,
+} from '../../routes/workflow-llm.js';
 import type * as UpstreamActual from '../../v2-runtime/upstream/index.js';
 
 const BASE_INPUT = {
@@ -46,6 +49,10 @@ const BASE_INPUT = {
 } as const;
 
 describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
+  it('默认工作流 LLM 截止时间覆盖长时上游响应', () => {
+    expect(DEFAULT_WORKFLOW_LLM_TIMEOUT_MS).toBe(1_800_000);
+  });
+
   it('规划请求拒绝空正文和达到长度上限的正文', async () => {
     for (const result of [
       { text: '', finishReason: 'stop' },
