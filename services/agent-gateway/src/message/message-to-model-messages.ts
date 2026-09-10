@@ -25,6 +25,7 @@ import { parseCompactionMarkerText } from '../compaction/compaction-marker.js';
 import { projectToolOutput } from './tool-output-model-view.js';
 import { DEFAULT_TOOL_CONTEXT_POLICY } from '../compaction/tool-context-policy.js';
 import { readStoredToolResultContent } from '../tools/tool-result-contract.js';
+import { truncateToolOutput } from '../tools/tool-output-truncator.js';
 
 // ─── Unified Message Type ───
 // Single intermediate representation for all native upstream model messages.
@@ -856,10 +857,13 @@ function resolveToolOutput(
 
   const stored = readStoredToolResultContent(part.state.metadata);
   if (stored?.outputSummary && stored.outputSummary.trim().length > 0) {
-    return projectToolOutput(part.callID, `${stored.outputSummary.trim()}\n\n${part.state.output}`);
+    return projectToolOutput(
+      part.callID,
+      truncateToolOutput(part.tool, `${stored.outputSummary.trim()}\n\n${part.state.output}`),
+    );
   }
   const output = part.state.output;
-  return projectToolOutput(part.callID, output);
+  return projectToolOutput(part.callID, truncateToolOutput(part.tool, output));
 }
 
 function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } }): string | null {
