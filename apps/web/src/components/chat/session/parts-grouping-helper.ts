@@ -40,6 +40,14 @@ export function groupMessageParts(parts: readonly ChatMessagePart[]): GroupedPar
       result.push({ type: 'reasoning', part });
       i++;
     } else if (part.type === 'text') {
+      const previous = result[result.length - 1];
+      if (
+        previous?.type === 'text' &&
+        normalizeTextPart(previous.part.text) === normalizeTextPart(part.text)
+      ) {
+        i++;
+        continue;
+      }
       result.push({ type: 'text', part });
       i++;
     } else if (part.type === 'event') {
@@ -93,4 +101,8 @@ export function groupMessageParts(parts: readonly ChatMessagePart[]): GroupedPar
   }
 
   return result;
+}
+
+function normalizeTextPart(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }

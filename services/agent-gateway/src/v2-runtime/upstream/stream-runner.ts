@@ -461,6 +461,7 @@ function makeMapper(
             code: 'MODEL_ERROR',
             status: 502,
             message: event.message,
+            technicalDetail: event.message,
             ...meta({}),
           },
         ];
@@ -657,6 +658,7 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
         code: 'MODEL_ERROR',
         status: 502,
         message: errorMessage(error),
+        technicalDetail: errorMessage(error),
         ...(input.runId === undefined ? {} : { runId: input.runId }),
         ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
         occurredAt: Date.now(),

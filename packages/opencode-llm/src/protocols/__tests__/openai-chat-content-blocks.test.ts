@@ -77,4 +77,82 @@ describe('兼容接口文本块增量', () => {
 
     expect(JSON.stringify(toolEvents)).toContain('read_file');
   });
+
+  it('接受网关在后续工具增量中用空字符串表示省略身份字段', async () => {
+    const request = new LLMRequest({
+      model: Chat.route.model({ id: 'gpt-4.1' }),
+      system: [],
+      messages: [],
+      tools: [],
+    });
+    const decode = Schema.decodeUnknownSync(Chat.protocol.stream.event);
+    const start = decode(
+      JSON.stringify({
+        id: 'start',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_1', function: { name: 'read_file', arguments: '' } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+    );
+    const [state] = await Effect.runPromise(
+      Chat.protocol.stream.step(Chat.protocol.stream.initial(request), start),
+    );
+    const continuation = decode(
+      JSON.stringify({
+        id: 'continuation',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: '',
+                  function: { name: '', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+    );
+    const [nextState] = await Effect.runPromise(
+      Chat.protocol.stream.step(state, continuation),
+    );
+    expect(nextState.tools[0]).toMatchObject({
+      id: 'call_1',
+      name: 'read_file',
+      input: '{"path":"README.md"}',
+    });
+  });
+
+  it('暂存工具身份之前到达的参数增量', async () => {
+    const request = new LLMRequest({
+      model: Chat.route.model({ id: 'gpt-4.1' }),
+      system: [],
+      messages: [],
+      tools: [],
+    });
+    const decode = Schema.decodeUnknownSync(Chat.protocol.stream.event);
+    const anonymous = decode(JSON.stringify({
+      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] }, finish_reason: null }],
+    }));
+    const [state, events] = await Effect.runPromise(Chat.protocol.stream.step(Chat.protocol.stream.initial(request), anonymous));
+    expect(events).toEqual([]);
+    const identified = decode(JSON.stringify({
+      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '"README.md"}' } }] }, finish_reason: null }],
+    }));
+    const [nextState, nextEvents] = await Effect.runPromise(Chat.protocol.stream.step(state, identified));
+    expect(JSON.stringify(nextEvents)).toContain('read_file');
+    expect(nextState.tools[0]?.input).toBe('{"path":"README.md"}');
+  });
 });

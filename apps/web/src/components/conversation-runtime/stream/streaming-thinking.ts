@@ -28,7 +28,7 @@ function buildStreamingThinkingBlockKey(
 export function appendStreamingThinkingChunk(
   previousBlocks: StreamingThinkingBlock[],
   chunk: Pick<StreamThinkingChunk, 'delta' | 'itemId' | 'outputIndex' | 'summaryIndex'>,
-  options?: { now?: () => number },
+  options?: { forceNewBlock?: boolean; now?: () => number },
 ): StreamingThinkingBlock[] {
   if (chunk.delta.length === 0) {
     return previousBlocks;
@@ -36,14 +36,19 @@ export function appendStreamingThinkingChunk(
 
   const now = options?.now ?? Date.now;
   const blockKey = buildStreamingThinkingBlockKey(chunk);
-  const existingIndex = previousBlocks.findIndex((block) => block.key === blockKey);
-  if (existingIndex === -1) {
-    return [...previousBlocks, { key: blockKey, text: chunk.delta, startedAt: now() }];
+  const lastIndex = previousBlocks.length - 1;
+  const lastBlock = previousBlocks[lastIndex];
+  if (!options?.forceNewBlock && lastBlock?.key === blockKey && lastBlock.endedAt === undefined) {
+    return previousBlocks.map((block, index) =>
+      index === lastIndex ? { ...block, text: `${block.text}${chunk.delta}` } : block,
+    );
   }
 
-  return previousBlocks.map((block, index) =>
-    index === existingIndex ? { ...block, text: `${block.text}${chunk.delta}` } : block,
+  const matchingBlocks = previousBlocks.filter(
+    (block) => block.key === blockKey || block.key.startsWith(`${blockKey}#`),
   );
+  const nextKey = matchingBlocks.length === 0 ? blockKey : `${blockKey}#${matchingBlocks.length}`;
+  return [...previousBlocks, { key: nextKey, text: chunk.delta, startedAt: now() }];
 }
 
 /**
@@ -68,8 +73,17 @@ export function markStreamingThinkingChunkEnded(
   }
 
   const targetKey = buildStreamingThinkingBlockKey(chunk);
-  return previousBlocks.map((block) =>
-    block.key === targetKey && !block.endedAt ? { ...block, endedAt } : block,
+  let targetIndex = -1;
+  for (let index = previousBlocks.length - 1; index >= 0; index -= 1) {
+    const block = previousBlocks[index]!;
+    if ((block.key === targetKey || block.key.startsWith(`${targetKey}#`)) && !block.endedAt) {
+      targetIndex = index;
+      break;
+    }
+  }
+  if (targetIndex < 0) return previousBlocks;
+  return previousBlocks.map((block, index) =>
+    index === targetIndex ? { ...block, endedAt } : block,
   );
 }
 

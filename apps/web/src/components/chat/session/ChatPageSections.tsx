@@ -590,6 +590,8 @@ function AssistantPartsContent({
   const totalReasoning = reasoningParts.length;
   const reasoningEndedFlags = message.reasoningBlocksEndedFlags;
   const reasoningDurations = message.reasoningBlocksDurationsMs;
+  const reasoningFlagsMatchParts = reasoningEndedFlags?.length === totalReasoning;
+  const reasoningDurationsMatchParts = reasoningDurations?.length === totalReasoning;
   const hasActiveToolCall = parts.some(
     (part): part is ChatToolPart =>
       part.type === 'tool' && (part.status === 'running' || part.status === 'paused'),
@@ -644,10 +646,12 @@ function AssistantPartsContent({
           // (i.e. message is finalized / loaded from history). While
           // streaming, prefer the per-block flag, then fall back to
           // segment-level endedAt set by `markStreamingReasoningSegmentEnded`.
-          const ended = reasoningEndedFlags
+          const ended = reasoningFlagsMatchParts
             ? reasoningEndedFlags[myIndex] === true
             : !streaming || part.endedAt !== undefined;
-          const rawDuration = reasoningDurations?.[myIndex];
+          const rawDuration = reasoningDurationsMatchParts
+            ? reasoningDurations?.[myIndex]
+            : undefined;
           const persistedDuration =
             typeof part.startedAt === 'number' &&
             typeof part.endedAt === 'number' &&

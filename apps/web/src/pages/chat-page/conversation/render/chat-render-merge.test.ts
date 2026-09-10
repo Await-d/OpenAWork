@@ -288,4 +288,74 @@ describe('mergeStreamingEntryIntoHistoricalEntries', () => {
       ),
     ).toEqual([toolRoundEntry, streamingEntry, laterEventEntry]);
   });
+
+  it('无请求 ID 的短文本完全相同时仅替换尾部消息', () => {
+    const earlierEntry = createEntry({ id: 'old', role: 'assistant', content: '好' });
+    const middleEntry = createEntry({ id: 'middle', role: 'assistant', content: '另一条回复' });
+    const tailEntry = createEntry({ id: 'tail', role: 'assistant', content: '好' });
+    const streamingEntry = createEntry({ id: 'live', role: 'assistant', content: '好' });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [earlierEntry, middleEntry, tailEntry],
+        streamingEntry,
+        'live',
+        null,
+      ),
+    ).toEqual([earlierEntry, middleEntry, streamingEntry]);
+  });
+
+  it('无请求 ID 且尾部有事件卡片时仍替换最近助手消息', () => {
+    const persistedEntry = createEntry({
+      id: 'persisted',
+      role: 'assistant',
+      content: '最终回答内容',
+      status: 'completed',
+    });
+    const eventEntry = createEntry({
+      id: 'event',
+      role: 'assistant',
+      content: JSON.stringify({
+        source: 'openawork_internal',
+        type: 'assistant_event',
+        payload: {
+          kind: 'permission',
+          status: 'success',
+          title: '权限已响应',
+          message: '已处理',
+          requestId: 'permission-1',
+        },
+      }),
+      status: 'completed',
+    });
+    const streamingEntry = createEntry({
+      id: 'live',
+      role: 'assistant',
+      content: '最终回答内容',
+      status: 'streaming',
+    });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [persistedEntry, eventEntry],
+        streamingEntry,
+        'live',
+        null,
+      ),
+    ).toEqual([streamingEntry, eventEntry]);
+  });
+
+  it('空文本历史消息不会吞掉实时消息', () => {
+    const historicalEntry = createEntry({ id: 'empty', role: 'assistant', content: '   ' });
+    const streamingEntry = createEntry({ id: 'live', role: 'assistant', content: '' });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [historicalEntry],
+        streamingEntry,
+        'live',
+        null,
+      ),
+    ).toEqual([historicalEntry, streamingEntry]);
+  });
 });

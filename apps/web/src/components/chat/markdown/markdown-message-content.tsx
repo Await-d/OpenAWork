@@ -11,9 +11,13 @@ import {
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import 'katex/dist/katex.min.css';
 import { MarkdownPathRef } from './markdown-path-ref.js';
 import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
+import { normalizeMathMarkdown } from './normalize-math-markdown.js';
 import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
@@ -44,12 +48,32 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content: string;
   streaming?: boolean;
 }) {
-  const normalizedContent = useMemo(() => transformInlineReasoningTags(content), [content]);
+  const normalizedContent = useMemo(
+    () => normalizeMathMarkdown(transformInlineReasoningTags(content)),
+    [content],
+  );
+  const isBareHtmlDocument = useMemo(
+    () => isFullHtmlDocument(normalizedContent),
+    [normalizedContent],
+  );
+  if (isBareHtmlDocument) {
+    return (
+      <div className="chat-markdown">
+        <StaticPreviewCodeBlock
+          codeContent={normalizedContent}
+          codeProps={{}}
+          language="HTML"
+          previewKind="html"
+          initiallyOpen
+        />
+      </div>
+    );
+  }
   return (
     <div className="chat-markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={streaming ? [] : [rehypeHighlight]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={streaming ? [rehypeKatex] : [rehypeKatex, rehypeHighlight]}
         components={markdownComponents}
       >
         {normalizedContent}
@@ -837,15 +861,18 @@ function StaticPreviewCodeBlock({
   className,
   language,
   previewKind,
+  initiallyOpen = false,
 }: {
   codeContent: ReactNode;
   codeProps: Record<string, unknown>;
   className?: string;
   language?: string;
   previewKind: StaticPreviewKind;
+  initiallyOpen?: boolean;
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(initiallyOpen);
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
+  const externalUrls = useMemo(() => extractExternalUrls(copyableCode), [copyableCode]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameHeight, setFrameHeight] = useState(CHAT_PREVIEW_MIN_HEIGHT);
 
@@ -863,7 +890,7 @@ function StaticPreviewCodeBlock({
       return;
     }
 
-    const maxPx = window.innerHeight * 3;
+    const maxPx = Math.min(window.innerHeight * 1.35, 760);
     const clamped = Math.max(CHAT_PREVIEW_MIN_HEIGHT, Math.min(height, maxPx));
     setFrameHeight(clamped);
   }, []);
@@ -916,6 +943,16 @@ function StaticPreviewCodeBlock({
       {previewOpen ? (
         <div className="chat-markdown-preview-panel">
           <div className="chat-markdown-preview-note">{getPreviewNote(previewKind)}</div>
+          {externalUrls.length > 0 && (
+            <div className="chat-markdown-preview-links">
+              <span>外联地址</span>
+              {externalUrls.map((url) => (
+                <a key={url} href={url} target="_blank" rel="noreferrer" title={url}>
+                  {url}
+                </a>
+              ))}
+            </div>
+          )}
           <iframe
             ref={iframeRef}
             data-testid="chat-markdown-html-preview"
@@ -940,6 +977,20 @@ function StaticPreviewCodeBlock({
       )}
     </div>
   );
+}
+
+function extractExternalUrls(code: string): string[] {
+  const urls = new Set<string>();
+  for (const match of code.matchAll(/\bhttps?:\/\/[^\s"'<>]+/gi)) {
+    const candidate = match[0].replace(/[),.;]+$/g, '');
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === 'http:' || url.protocol === 'https:') urls.add(url.href);
+    } catch {
+      continue;
+    }
+  }
+  return [...urls];
 }
 
 function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {

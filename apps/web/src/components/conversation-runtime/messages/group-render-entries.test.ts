@@ -48,15 +48,14 @@ describe('groupChatRenderEntries', () => {
     expect(groups[1]?.entries).toHaveLength(2);
   });
 
-  it('渲染入口再次收到同一 assistant 请求时只保留一份', () => {
+  it('同一请求的不同 assistant 轮次不在分组层被吞掉', () => {
     const groups = groupChatRenderEntries([
       assistantRequestEntry('server-copy', 'request-1'),
       assistantRequestEntry('stream-copy', 'request-1'),
     ]);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.entries).toHaveLength(1);
-    expect(groups[0]?.entries[0]?.message.id).toBe('server-copy');
+    expect(groups[0]?.entries).toHaveLength(2);
   });
 
   it('工具轮派生请求与最终请求仍分别展示', () => {

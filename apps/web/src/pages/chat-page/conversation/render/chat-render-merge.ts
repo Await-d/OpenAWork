@@ -1,5 +1,6 @@
 import type { ChatRenderEntry } from '../../../../components/chat/message/chat-message-group-list.js';
 import {
+  parseAssistantEventContent,
   readAssistantTracePayload,
   type ChatMessagePart,
 } from '../../../../components/conversation-runtime/messages/support.js';
@@ -50,8 +51,10 @@ function hasSameVisibleText(left: string, right: string): boolean {
   const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
   const a = normalize(left);
   const b = normalize(right);
+  if (a.length === 0 || b.length === 0) return false;
+  if (a === b) return true;
   if (a.length < 8 || b.length < 8) return false;
-  return a === b || (a.length < b.length ? b.startsWith(a) : a.startsWith(b));
+  return a.length < b.length ? b.startsWith(a) : a.startsWith(b);
 }
 
 function visibleAssistantText(message: ChatRenderEntry['message']): string {
@@ -124,28 +127,19 @@ export function mergeStreamingEntryIntoHistoricalEntries(
     for (let index = historicalRenderedMessageEntries.length - 1; index >= 0; index -= 1) {
       const existing = historicalRenderedMessageEntries[index]!.message;
       if (existing.role !== 'assistant') continue;
-      assistantCandidates += 1;
+      const isEventCard = parseAssistantEventContent(existing.content) !== null;
+      if (!isEventCard) assistantCandidates += 1;
       if (
         hasSameVisibleText(
           visibleAssistantText(existing),
           visibleAssistantText(streamingMessage),
         ) &&
         (!existing.clientRequestId || existing.clientRequestId === activeStreamClientRequestId) &&
-        (activeStreamClientRequestId !== null || assistantCandidates === 1)
+        (activeStreamClientRequestId !== null || (!isEventCard && assistantCandidates === 1))
       ) {
-        return historicalRenderedMessageEntries.flatMap((entry, entryIndex) => {
-          if (entryIndex === index) return [streamingRenderedMessageEntry];
-          const candidate = entry.message;
-          const isDuplicate =
-            candidate.role === 'assistant' &&
-            hasSameVisibleText(
-              visibleAssistantText(candidate),
-              visibleAssistantText(streamingMessage),
-            ) &&
-            (!candidate.clientRequestId ||
-              candidate.clientRequestId === activeStreamClientRequestId);
-          return isDuplicate ? [] : [entry];
-        });
+        return historicalRenderedMessageEntries.map((entry, entryIndex) =>
+          entryIndex === index ? streamingRenderedMessageEntry : entry,
+        );
       }
       if (assistantCandidates >= 3) break;
     }

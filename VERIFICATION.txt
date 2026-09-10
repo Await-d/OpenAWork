@@ -1,8 +1,9 @@
-流式连接长时断开修复验证
+前端长文本数学 Markdown 兼容优化验证
 
 改变分支/字段：
-- services/agent-gateway/src/v2-runtime/upstream/stream-runner.ts 的 DEFAULT_STREAM_IDLE_TIMEOUT_MS：600_000 -> 1_800_000。
-- services/agent-gateway/src/routes/workflow-llm.ts 的 DEFAULT_WORKFLOW_LLM_TIMEOUT_MS：300_000 -> 1_800_000。
+- normalizeMathMarkdown：保护公式片段，避免长文本、多列表和嵌套公式重复包裹；修复缩进列表中公式的块级解析。
+- MarkdownMessageContent：长文本 KaTeX 公式渲染。
+- StreamingMarkdownContent：数学内容不走纯文本尾部渲染。
 
 四个产物：
 - MODIFIED_FILE
@@ -11,38 +12,31 @@
 - ROLLBACK.sh
 
 BASELINE command:
-pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/v2-runtime/stream-idle-watchdog.test.ts
-BASELINE input: 当前源码（默认空闲超时 600000ms）
-BASELINE literal output/result: Test Files 1 passed (1); Tests 3 passed (3)
+pnpm --filter @openAwork/web exec tsx /tmp/repro-long.ts
+BASELINE input: 用户提供的长篇置换证明内容
+BASELINE literal output/result: 旧实现会在列表缩进公式中生成异常结构并导致后半段 KaTeX 解析错误
 BASELINE exit status: 0
 
 MODIFIED command:
-pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/v2-runtime/stream-idle-watchdog.test.ts
-MODIFIED input: 修改源码（默认空闲超时 1800000ms）
-MODIFIED literal output/result: Test Files 1 passed (1); Tests 3 passed (3)
+pnpm --filter @openAwork/web exec vitest run src/components/chat/markdown/normalize-math-markdown.test.ts src/components/chat/markdown/markdown-message-content.test.tsx
+MODIFIED input: 长文本数学 Markdown 回归样本与组件渲染样本
+MODIFIED literal output/result: Test Files 2 passed (2); Tests 12 passed (12)
 MODIFIED exit status: 0
 
 ROLLBACK command:
-./ROLLBACK.sh /tmp/rollback-test-copy.ts && python3 - <<'PY'
-from pathlib import Path
-p=Path('/tmp/rollback-test-copy.ts')
-s=p.read_text()
-assert 'DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000' in s
-assert 'DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000' not in s
-print('rollback_copy_restored=PASS')
-PY
-ROLLBACK input: MODIFIED_FILE 的副本 /tmp/rollback-test-copy.ts
-ROLLBACK literal output/result: rollback_copy_restored=PASS
+./ROLLBACK.sh /tmp/math-rollback-copy.ts
+ROLLBACK input: MODIFIED_FILE 的副本
+ROLLBACK literal output/result: rollback_restored=PASS
 ROLLBACK exit status: 0
 
-恢复行为/状态：回滚副本恢复为 600000ms；工作区中的 MODIFIED_FILE 与源码保持 1800000ms 修改状态。
+恢复行为/状态：回滚副本已恢复为空文件；工作区 MODIFIED_FILE 保持当前长文本解析修复。
 
 TYPECHECK command:
-pnpm --filter @openAwork/agent-gateway typecheck
-TYPECHECK literal output/result: tsc -b tsconfig.typecheck.json --force completed successfully
+pnpm --filter @openAwork/web typecheck
+TYPECHECK literal output/result: tsc --noEmit completed successfully
 TYPECHECK exit status: 0
 
-FOLLOW-UP command:
-pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/routes/workflow-llm-timeout.test.ts src/__tests__/v2-runtime/stream-idle-watchdog.test.ts
-FOLLOW-UP literal output/result: Test Files 2 passed (2); Tests 13 passed (13)
-FOLLOW-UP exit status: 0
+FORMAT command:
+pnpm exec prettier --check apps/web/src/components/chat/markdown/normalize-math-markdown.ts apps/web/src/components/chat/markdown/normalize-math-markdown.test.ts apps/web/src/components/chat/markdown/markdown-message-content.test.tsx apps/web/src/components/chat/markdown/streaming-markdown-content.tsx
+FORMAT literal output/result: All matched files use Prettier code style
+FORMAT exit status: 0

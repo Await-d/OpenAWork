@@ -2078,7 +2078,7 @@ export function reconcileSnapshotChatMessages(
   }> = [];
 
   // Walk through snapshot messages in server order (canonical order).
-  for (const snapshotMessage of snapshotMessages) {
+  for (const [snapshotIndex, snapshotMessage] of snapshotMessages.entries()) {
     const previousEntry = previousById.get(snapshotMessage.id);
 
     if (previousEntry) {
@@ -2152,7 +2152,8 @@ export function reconcileSnapshotChatMessages(
         if (
           candidateIndex >= 0 &&
           candidateIndex < previousMessages.length &&
-          !matchedPreviousIndices.has(candidateIndex)
+          !matchedPreviousIndices.has(candidateIndex) &&
+          !hasUserMessageBetween(previousMessages, candidateIndex, snapshotIndex)
         ) {
           const candidate = previousMessages[candidateIndex]!;
           const matchedByParts = hasOverlappingPartIds(candidate.parts, snapshotMessage.parts);
@@ -2160,14 +2161,19 @@ export function reconcileSnapshotChatMessages(
             candidate,
             snapshotMessage,
           );
+          const matchedByAssistantContent = areSameAssistantMessageContent(
+            candidate,
+            snapshotMessage,
+          );
           if (
             matchedByParts ||
             matchedByNearbyUserMessage ||
+            matchedByAssistantContent ||
             areSnapshotMessagesEquivalent(candidate, snapshotMessage)
           ) {
             matchedPreviousIndices.add(candidateIndex);
             const mergedParts =
-              candidate.parts && snapshotMessage.parts
+              matchedByParts && candidate.parts && snapshotMessage.parts
                 ? reconcilePartsById(candidate.parts, snapshotMessage.parts)
                 : undefined;
             const mergedMessage =
@@ -2197,7 +2203,7 @@ export function reconcileSnapshotChatMessages(
               message:
                 mergedParts !== undefined
                   ? mergedMessage
-                  : matchedByParts || matchedByNearbyUserMessage
+                  : matchedByParts || matchedByNearbyUserMessage || matchedByAssistantContent
                     ? mergedMessage
                     : candidate,
             });
@@ -2262,7 +2268,8 @@ export function reconcileSnapshotChatMessages(
       const alreadyPresent = reconciled.some(
         (existing) =>
           existing.id !== previousMessage.id &&
-          areSnapshotMessagesEquivalent(existing, previousMessage),
+          areSnapshotMessagesEquivalent(existing, previousMessage) &&
+          !areMessagesSeparatedByUserTurn(existing, previousMessage, previousMessages),
       );
       if (alreadyPresent) {
         continue;
@@ -2279,7 +2286,10 @@ export function reconcileSnapshotChatMessages(
     const duplicateIndex = deduplicated.findIndex((existing) =>
       areLogicalMessageDuplicates(existing, message),
     );
-    if (duplicateIndex < 0) {
+    const hasUserTurnBetween =
+      duplicateIndex >= 0 &&
+      areMessagesSeparatedByUserTurn(deduplicated[duplicateIndex]!, message, reconciled);
+    if (duplicateIndex < 0 || hasUserTurnBetween) {
       deduplicated.push(message);
       continue;
     }
@@ -2291,6 +2301,37 @@ export function reconcileSnapshotChatMessages(
   }
 
   return deduplicated;
+}
+
+function hasUserMessageBetween(
+  messages: ChatMessage[],
+  candidateIndex: number,
+  snapshotIndex: number,
+): boolean {
+  if (candidateIndex >= snapshotIndex) {
+    return false;
+  }
+  return messages
+    .slice(candidateIndex + 1, snapshotIndex + 1)
+    .some((message) => message.role === 'user');
+}
+
+function areMessagesSeparatedByUserTurn(
+  left: ChatMessage,
+  right: ChatMessage,
+  messages: ChatMessage[],
+): boolean {
+  const leftCreatedAt = getComparableCreatedAt(left.createdAt);
+  const rightCreatedAt = getComparableCreatedAt(right.createdAt);
+  if (leftCreatedAt === null || rightCreatedAt === null || leftCreatedAt === rightCreatedAt) {
+    return false;
+  }
+  const lower = Math.min(leftCreatedAt, rightCreatedAt);
+  const upper = Math.max(leftCreatedAt, rightCreatedAt);
+  return messages.some((entry) => {
+    const createdAt = getComparableCreatedAt(entry.createdAt);
+    return entry.role === 'user' && createdAt !== null && createdAt > lower && createdAt < upper;
+  });
 }
 
 function areLogicalMessageDuplicates(left: ChatMessage, right: ChatMessage): boolean {
@@ -2369,6 +2410,7 @@ export function replaceOrAppendStreamedAssistantMessage(
 
   for (let i = previousMessages.length - 1; i >= 0; i--) {
     const msg = previousMessages[i]!;
+    if (msg.role === 'user') break;
     if (msg.role !== 'assistant') continue;
 
     // Primary: check for overlapping part IDs (deterministic, no heuristics).
@@ -2379,6 +2421,9 @@ export function replaceOrAppendStreamedAssistantMessage(
     // Fallback: heuristic checks for messages without parts.
     const existingTrace = readAssistantTracePayload(msg);
     if (!existingTrace) {
+      if (msg.content.trim() === onDoneMessage.content.trim() && onDoneMessage.content.trim()) {
+        return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
+      }
       continue;
     }
 
@@ -3214,6 +3259,26 @@ function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): b
   }
 
   return false;
+}
+
+function areSameAssistantMessageContent(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.role !== 'assistant' || right.role !== 'assistant') return false;
+  if (
+    left.clientRequestId &&
+    right.clientRequestId &&
+    left.clientRequestId !== right.clientRequestId
+  ) {
+    return false;
+  }
+  if (parseAssistantEventContent(left.content) || parseAssistantEventContent(right.content)) {
+    return false;
+  }
+
+  const leftTrace = readAssistantTracePayload(left);
+  const rightTrace = readAssistantTracePayload(right);
+  const leftText = (leftTrace?.text ?? left.content).replace(/\s+/g, ' ').trim();
+  const rightText = (rightTrace?.text ?? right.content).replace(/\s+/g, ' ').trim();
+  return leftText.length > 0 && leftText === rightText;
 }
 
 function areLikelySameNearbyUserMessage(left: ChatMessage, right: ChatMessage): boolean {

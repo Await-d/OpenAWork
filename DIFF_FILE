@@ -1,11 +1,30 @@
---- /tmp/stream-runner.baseline.ts	2026-09-07 10:16:44.689895077 +0800
-+++ MODIFIED_FILE	2026-09-07 10:31:42.679064273 +0800
-@@ -513,7 +513,7 @@
-   return Object.keys(generation).length === 0 ? undefined : generation;
- }
-
--export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
-+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000;
-
- export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstreamStream {
-   const state: RunnerState = {
+--- source copy ---
+branch=normalizeMathMarkdown
+original_modified_file_sha256=ff1769a16ecfe82ed17dead016b29380597f4b8f0efa0760bc801859437dda3b
+changed_field=standalone bracket math blocks and boxed display expressions
+--- /dev/null	2026-09-09 05:30:18.559999880 +0800
++++ MODIFIED_FILE	2026-09-09 10:59:19.121383453 +0800
+@@ -0,0 +1,23 @@
++const MATH_SIGNAL = /(?:\\[a-zA-Z]+|(?:\\le|\\ge|\\neq|\\times|\\cdot)|[=<>^_])/u;
++
++export function normalizeMathMarkdown(markdown: string): string {
++  if (!markdown || !MATH_SIGNAL.test(markdown)) {
++    return markdown;
++  }
++
++  const normalizedBlocks = markdown.replace(
++    /(^|\n)[ \t]*\[[ \t]*\n([\s\S]*?)\n[ \t]*\](?=\n|$)/gu,
++    (match, prefix: string, body: string) => {
++      if (!MATH_SIGNAL.test(body)) {
++        return match;
++      }
++      return `${prefix}\n$$\n${body.trim()}\n$$`;
++    },
++  );
++
++  return normalizedBlocks.replace(
++    /(^|\n)([ \t]*)(\\(?:boxed|frac|sqrt|sum|int|lim)\s*\{[^\n]+\})([.,。；;！!]?)?(?=\n|$)/gu,
++    (_match, prefix: string, indentation: string, expression: string, punctuation = '') =>
++      `${prefix}${indentation}$$\n${expression}\n$$${punctuation ? `\n${punctuation}` : ''}`,
++  );
++}

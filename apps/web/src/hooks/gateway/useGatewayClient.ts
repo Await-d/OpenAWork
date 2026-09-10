@@ -465,6 +465,16 @@ export async function attachActiveStreamSession(
     return false;
   }
 
+  const currentAfterGet = getCurrentActiveRequest();
+  if (
+    currentAfterGet &&
+    (currentAfterGet.sessionId !== sessionId ||
+      currentAfterGet.clientRequestId !== activeStream.clientRequestId)
+  ) {
+    clearCallbacks();
+    return false;
+  }
+
   const requestedAfterSeq =
     existingSnapshot?.sessionId === sessionId &&
     existingSnapshot.clientRequestId === activeStream.clientRequestId

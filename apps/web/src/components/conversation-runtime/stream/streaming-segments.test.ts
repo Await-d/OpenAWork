@@ -229,14 +229,10 @@ describe('markStreamingReasoningSegmentEnded', () => {
       { delta: 'B', itemId: 'r2' },
       MESSAGE_ID,
     );
-    // No itemId / outputIndex / summaryIndex → "legacy" key matches both.
     segments = markStreamingReasoningSegmentEnded(segments, meta, { occurredAt: 100 });
-    // Neither matches the legacy key, so segments stay untouched. (The legacy
-    // chunk path applies only when both the existing segments and the chunk
-    // have no identity hint — confirming we do not blindly close everything.)
     const [first, second] = segments as ChatReasoningPart[];
-    expect(first?.endedAt).toBeUndefined();
-    expect(second?.endedAt).toBeUndefined();
+    expect(first?.endedAt).toBe(100);
+    expect(second?.endedAt).toBe(100);
   });
 
   it('returns the same array when nothing changes', () => {

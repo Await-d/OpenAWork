@@ -202,7 +202,9 @@ export function recoverActiveAssistantStream(
     }
 
     if (event.type === 'thinking_delta') {
-      thinkingBlocks = appendStreamingThinkingChunk(thinkingBlocks, event);
+      thinkingBlocks = appendStreamingThinkingChunk(thinkingBlocks, event, {
+        forceNewBlock: parts[parts.length - 1]?.type !== 'reasoning',
+      });
       parts = appendStreamingThinkingDelta(parts, reasoningSegmentMeta, event, recoveryMessageId);
       hasRenderableContent = true;
       continue;

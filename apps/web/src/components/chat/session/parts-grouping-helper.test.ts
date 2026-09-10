@@ -25,4 +25,14 @@ describe('groupMessageParts', () => {
       'text',
     ]);
   });
+
+  it('折叠协调阶段产生的相邻重复文本分片', () => {
+    const grouped = groupMessageParts([
+      { id: 'text-1', type: 'text', text: '重复文本' },
+      { id: 'text-2', type: 'text', text: '  重复文本  ' },
+    ]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({ type: 'text', part: { id: 'text-1', text: '重复文本' } });
+  });
 });

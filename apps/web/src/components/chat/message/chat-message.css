@@ -1613,6 +1613,19 @@
   color: var(--fg-default);
 }
 
+.chat-markdown .katex-display {
+  margin: 8px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.chat-markdown .katex {
+  color: var(--fg-strong);
+  font-size: 1.05em;
+}
+
 .chat-markdown-streaming {
   color: var(--fg-default);
   font-size: 13px;
@@ -2079,10 +2092,32 @@
 
 .chat-markdown-preview-frame {
   width: 100%;
+  max-height: min(76vh, 760px);
+  overflow: auto;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: var(--bg-raised);
   display: block;
+}
+
+.chat-markdown-preview-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-overlay);
+  font-size: 11px;
+}
+
+.chat-markdown-preview-links a {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-markdown-pre code {

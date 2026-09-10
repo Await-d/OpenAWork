@@ -365,7 +365,9 @@ export function useConversationStream(
       if (event.type === 'thinking_delta') {
         observeFirstToken(event.occurredAt);
         const chunk = event as StreamThinkingChunk;
-        acc.thinkingBlocks = appendStreamingThinkingChunk(acc.thinkingBlocks, chunk);
+        acc.thinkingBlocks = appendStreamingThinkingChunk(acc.thinkingBlocks, chunk, {
+          forceNewBlock: acc.segments[acc.segments.length - 1]?.type !== 'reasoning',
+        });
         acc.segments = appendStreamingThinkingDelta(
           acc.segments,
           acc.reasoningMeta,

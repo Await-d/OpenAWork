@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@openAwork/shared';
 import {
   applyToolResultToLocalAssistantMessages,
+  contentFromParts,
   deduplicateCompactionMessages,
   normalizeChatMessages,
   partsFromOrderedAssistantContent,
@@ -362,6 +363,25 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(second[0]?.parts?.[0]).toMatchObject({ status: 'completed', output: 'ok' });
   });
 
+  it('不同 ID 且时间差较大的相同纯文本 assistant 快照只保留一条', () => {
+    const previous: ChatMessage = {
+      id: 'local-assistant',
+      role: 'assistant',
+      content: '最终回答',
+      createdAt: 1_000,
+      status: 'completed',
+    };
+    const snapshot: ChatMessage = {
+      id: 'server-assistant',
+      role: 'assistant',
+      content: '最终回答',
+      createdAt: 61_000,
+      status: 'completed',
+    };
+
+    expect(reconcileSnapshotChatMessages([previous], [snapshot])).toEqual([snapshot]);
+  });
+
   it('不同消息 ID 但共享 part 时保留实时 parts 的交错顺序', () => {
     const localParts: ChatMessagePart[] = [
       { id: 'text-a', type: 'text', text: 'A' },
@@ -395,6 +415,125 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(result[0]?.id).toBe('server');
     expect(result[0]?.parts?.map((part) => part.id)).toEqual(['text-a', 'tool-a', 'text-b']);
     expect(result[0]?.parts?.[1]).toMatchObject({ status: 'completed', output: 'ok' });
+  });
+
+  it('不同消息 ID 且分片 ID 不同的同文结构化回复不拼接两份 parts', () => {
+    const localParts = partsFromOrderedAssistantContent('local', [
+      { type: 'reasoning', text: '检查输入' },
+      { type: 'text', text: '这是最终回答' },
+    ]);
+    const snapshotParts = partsFromOrderedAssistantContent('server', [
+      { type: 'reasoning', text: '检查输入' },
+      { type: 'text', text: '这是最终回答' },
+    ]);
+
+    const result = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'local',
+          role: 'assistant',
+          content: contentFromParts(localParts),
+          parts: localParts,
+        },
+      ],
+      [
+        {
+          id: 'server',
+          role: 'assistant',
+          content: contentFromParts(snapshotParts),
+          parts: snapshotParts,
+        },
+      ],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('server');
+    expect(result[0]?.parts).toEqual(snapshotParts);
+  });
+
+  it('快照协调时按 reasoning parts 同步结束标记和时长，避免思考状态错位', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'm1:reasoning:0', type: 'reasoning', text: '第一段' },
+      { id: 'm1:text', type: 'text', text: '中间' },
+      { id: 'm1:reasoning:1', type: 'reasoning', text: '第二段' },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      {
+        id: 'm1:reasoning:0',
+        type: 'reasoning',
+        text: '第一段',
+        startedAt: 100,
+        endedAt: 250,
+      },
+      { id: 'm1:text', type: 'text', text: '中间' },
+      {
+        id: 'm1:reasoning:1',
+        type: 'reasoning',
+        text: '第二段',
+        startedAt: 300,
+        endedAt: 500,
+      },
+    ];
+    const result = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'm1',
+          role: 'assistant',
+          content: contentFromParts(localParts),
+          parts: localParts,
+          reasoningBlocksEndedFlags: [true],
+          reasoningBlocksDurationsMs: [150],
+          status: 'streaming',
+        },
+      ],
+      [
+        {
+          id: 'm1',
+          role: 'assistant',
+          content: contentFromParts(snapshotParts),
+          parts: snapshotParts,
+          reasoningBlocksEndedFlags: [true, true],
+          reasoningBlocksDurationsMs: [150, 200],
+          status: 'completed',
+        },
+      ],
+    );
+
+    expect(result[0]?.parts?.filter((part) => part.type === 'reasoning')).toHaveLength(2);
+    expect(result[0]?.reasoningBlocksEndedFlags).toEqual([true, true]);
+    expect(result[0]?.reasoningBlocksDurationsMs).toEqual([150, 200]);
+  });
+
+  it('显式不同请求 ID 的同文结构化回复不会被合并', () => {
+    const localParts = partsFromOrderedAssistantContent('local', [{ type: 'text', text: '好' }]);
+    const snapshotParts = partsFromOrderedAssistantContent('server', [
+      { type: 'text', text: '好' },
+    ]);
+
+    const result = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'local',
+          role: 'assistant',
+          content: contentFromParts(localParts),
+          parts: localParts,
+          clientRequestId: 'request-old',
+          createdAt: 1_000,
+        },
+      ],
+      [
+        {
+          id: 'server',
+          role: 'assistant',
+          content: contentFromParts(snapshotParts),
+          parts: snapshotParts,
+          clientRequestId: 'request-new',
+          createdAt: 61_000,
+        },
+      ],
+    );
+
+    expect(result.map((message) => message.id)).toEqual(['server', 'local']);
   });
 
   it('把权限审批后的软刷新视为同位 user 消息，不重复保留本地 optimistic 文本', () => {
@@ -442,6 +581,27 @@ describe('replaceOrAppendStreamedAssistantMessage', () => {
       content: '完成',
       status: 'completed',
       parts: [{ id: 'same-stream-id:text', type: 'text', text: '完成' }],
+    };
+
+    expect(replaceOrAppendStreamedAssistantMessage([previous], completed, new Set())).toEqual([
+      completed,
+    ]);
+  });
+
+  it('纯文本助手消息 ID 不同且时间差较大时替换最近消息', () => {
+    const previous: ChatMessage = {
+      id: 'server-copy',
+      role: 'assistant',
+      content: '这是最终回答',
+      createdAt: 61_000,
+      status: 'completed',
+    };
+    const completed: ChatMessage = {
+      id: 'local-final',
+      role: 'assistant',
+      content: '这是最终回答',
+      createdAt: 1_000,
+      status: 'completed',
     };
 
     expect(replaceOrAppendStreamedAssistantMessage([previous], completed, new Set())).toEqual([

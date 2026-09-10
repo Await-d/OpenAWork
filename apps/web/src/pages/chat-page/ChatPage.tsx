@@ -3751,7 +3751,7 @@ export default function ChatPage() {
       recoveryActiveStreamPresent: recoveryActiveStream !== null,
       sessionModesHydrated,
       sessionStateStatus,
-      streaming,
+      streaming: streaming || streamingRef.current,
     };
     const shouldAttemptAttach = shouldAttemptAttachToSession(attachEligibility);
     // The effect re-runs on every token delta because `streaming` /
@@ -3781,6 +3781,11 @@ export default function ChatPage() {
       ) {
         attachAttemptedSessionRef.current = null;
       }
+      return;
+    }
+
+    if (streamingRef.current) {
+      cancelAttachRetry();
       return;
     }
 

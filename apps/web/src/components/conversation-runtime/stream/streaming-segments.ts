@@ -137,13 +137,16 @@ export function markStreamingReasoningSegmentEnded(
   metaByPartId: Map<string, ReasoningSegmentMeta>,
   chunk: { itemId?: string; outputIndex?: number; summaryIndex?: number; occurredAt?: number },
 ): ChatMessagePart[] {
-  const blockKey = streamingThinkingBlockKey(chunk);
   const endedAt = chunk.occurredAt ?? Date.now();
+  const hasIdentity =
+    (typeof chunk.itemId === 'string' && chunk.itemId.trim().length > 0) ||
+    typeof chunk.outputIndex === 'number' ||
+    typeof chunk.summaryIndex === 'number';
   let mutated = false;
   const next = segments.map((segment) => {
     if (!segment || segment.type !== 'reasoning') return segment;
     const meta = metaByPartId.get(segment.id);
-    if (meta?.blockKey !== blockKey) return segment;
+    if (hasIdentity && meta?.blockKey !== streamingThinkingBlockKey(chunk)) return segment;
     if (segment.endedAt !== undefined) return segment;
     mutated = true;
     return { ...segment, endedAt };

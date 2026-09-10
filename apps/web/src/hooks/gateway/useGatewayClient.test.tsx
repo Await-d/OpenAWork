@@ -40,6 +40,13 @@ interface TestActiveStreamSnapshot {
   transport: 'attach-sse' | 'sse' | 'ws';
 }
 
+interface TestActiveStream {
+  clientRequestId: string;
+  lastSeq: number;
+  sessionId: string;
+  startedAtMs: number;
+}
+
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   static readonly OPEN = 1;
@@ -408,6 +415,65 @@ describe('connectAttachEventSource', () => {
 });
 
 describe('attachActiveStreamSession', () => {
+  it('获取活动流期间已有新请求时不会关闭新请求连接', async () => {
+    const connectEventSource = vi.fn(async () => true);
+    const closeExistingTransports = vi.fn();
+    const clearCallbacks = vi.fn();
+    let resolveActiveStream: (value: TestActiveStream | null) => void = () => undefined;
+    let currentActiveRequest: TestActiveStreamSnapshot | null = {
+      clientRequestId: 'old-request',
+      lastSeq: 2,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'ws',
+    };
+
+    const resultPromise = attachActiveStreamSession({
+      callbacks: { onDelta: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+      clearCallbacks,
+      closeExistingTransports,
+      connectEventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => null,
+      hasOpenTransports: () => true,
+      isStopRequested: () => false,
+      resetStopRequested: vi.fn(),
+      sessionId: 'session-1',
+      sessionsClient: {
+        getActiveStream: vi.fn(
+          () =>
+            new Promise<TestActiveStream | null>((resolve) => {
+              resolveActiveStream = resolve;
+            }),
+        ),
+      },
+      setCallbacks: vi.fn(),
+      setCurrentEventSource: vi.fn(),
+      syncActiveRequest: vi.fn(),
+      token: 'token-test',
+    });
+
+    currentActiveRequest = {
+      clientRequestId: 'new-request',
+      lastSeq: 0,
+      sessionId: 'session-1',
+      startedAt: 3,
+      transport: 'ws',
+    };
+    resolveActiveStream({
+      clientRequestId: 'old-request',
+      lastSeq: 4,
+      sessionId: 'session-1',
+      startedAtMs: 2,
+    });
+
+    await expect(resultPromise).resolves.toBe(false);
+    expect(closeExistingTransports).not.toHaveBeenCalled();
+    expect(connectEventSource).not.toHaveBeenCalled();
+    expect(clearCallbacks).toHaveBeenCalledTimes(1);
+  });
+
   it('续挂同一 clientRequestId 时会用客户端已见 lastSeq 作为 afterSeq', async () => {
     const connectEventSource = vi.fn(async () => true);
     const clearCallbacks = vi.fn();

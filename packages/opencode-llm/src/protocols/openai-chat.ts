@@ -179,6 +179,7 @@ type OpenAIChatRequestMessage = LLMRequest['messages'][number];
 
 export interface ParserState {
   readonly tools: ToolStream.State<number>;
+  readonly pendingToolArguments: Partial<Record<number, string>>;
   readonly toolCallEvents: ReadonlyArray<LLMEvent>;
   readonly usage?: Usage;
   readonly finishReason?: FinishReason;
@@ -479,6 +480,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     const delta = choice?.delta;
     const toolDeltas = delta?.tool_calls ?? [];
     let tools = state.tools;
+    const pendingToolArguments = { ...state.pendingToolArguments };
 
     let lifecycle = state.lifecycle;
 
@@ -506,6 +508,12 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       const toolName = tool.function?.name;
       const toolArguments = tool.function?.arguments ?? '';
       if (!current && !tool.id && !toolName && toolArguments.length === 0) continue;
+      if (!current && !tool.id?.trim() && !toolName?.trim() && toolArguments.length > 0) {
+        pendingToolArguments[tool.index] = `${pendingToolArguments[tool.index] ?? ''}${toolArguments}`;
+        continue;
+      }
+      const bufferedArguments = pendingToolArguments[tool.index] ?? '';
+      delete pendingToolArguments[tool.index];
       const result = ToolStream.appendOrStart(
         ADAPTER,
         tools,
@@ -513,9 +521,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         {
           id: tool.id ?? undefined,
           name: toolName ?? undefined,
-          text: toolArguments,
+          text: `${bufferedArguments}${toolArguments}`,
         },
-        'OpenAI Chat tool call delta is missing id or name',
+        `OpenAI Chat tool call delta is missing id or name (index=${tool.index}, hasCurrent=${String(current !== undefined)}, hasId=${String(Boolean(tool.id?.trim()))}, hasName=${String(Boolean(toolName?.trim()))}, argumentLength=${String(toolArguments.length)}, bufferedArgumentLength=${String(bufferedArguments.length)})`,
       );
       if (ToolStream.isError(result)) return yield* result;
       tools = result.tools;
@@ -525,6 +533,10 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     // Finalize accumulated tool inputs eagerly when finish_reason arrives so
     // JSON parse failures fail the stream at the boundary rather than at halt.
+    if (finishReason !== undefined && Object.keys(pendingToolArguments).length > 0)
+      return yield* invalid(
+        `OpenAI Chat tool call delta is missing id or name (unresolvedIndexes=${Object.keys(pendingToolArguments).join(',')})`,
+      );
     const finished =
       finishReason !== undefined &&
       state.finishReason === undefined &&
@@ -535,6 +547,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     return [
       {
         tools: finished?.tools ?? tools,
+        pendingToolArguments,
         toolCallEvents: finished?.events ?? state.toolCallEvents,
         usage,
         finishReason,
@@ -584,6 +597,7 @@ export const protocol = Protocol.make({
     event: Protocol.jsonEvent(OpenAIChatEvent),
     initial: () => ({
       tools: ToolStream.empty<number>(),
+      pendingToolArguments: {},
       toolCallEvents: [],
       lifecycle: Lifecycle.initial(),
     }),

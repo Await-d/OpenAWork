@@ -22,7 +22,6 @@ import type {
 export function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGroup[] {
   const groups: ChatRenderGroup[] = [];
   const seenMessageIds = new Set<string>();
-  const seenAssistantRequestIds = new Set<string>();
   for (const entry of entries) {
     const messageId = entry.message.id.trim();
     if (messageId.length > 0 && seenMessageIds.has(messageId)) {
@@ -30,13 +29,6 @@ export function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGr
     }
     if (messageId.length > 0) {
       seenMessageIds.add(messageId);
-    }
-    const requestId = entry.message.clientRequestId?.trim();
-    if (entry.message.role === 'assistant' && requestId && seenAssistantRequestIds.has(requestId)) {
-      continue;
-    }
-    if (entry.message.role === 'assistant' && requestId) {
-      seenAssistantRequestIds.add(requestId);
     }
     const lastGroup = groups[groups.length - 1];
     const lastEntry = lastGroup?.entries[lastGroup.entries.length - 1];

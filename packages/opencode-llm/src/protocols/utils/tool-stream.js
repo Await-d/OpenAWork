@@ -62,8 +62,8 @@ export const start = (tools, key, tool) =>
  */
 export const appendOrStart = (route, tools, key, delta, missingToolMessage) => {
   const current = tools[key];
-  const id = delta.id ?? current?.id;
-  const name = delta.name ?? current?.name;
+  const id = delta.id?.trim() || current?.id;
+  const name = delta.name?.trim() || current?.name;
   if (!id || !name) return eventError(route, missingToolMessage);
   const tool = {
     id,

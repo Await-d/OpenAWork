@@ -103,6 +103,11 @@ export function commitStreamingRound(
     reasoningBlocksDurationsMs,
   } = buildTraceMessage(closingMessageId, accumulated);
   const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+  const alignedReasoningMetadata = alignReasoningMetadata(
+    parts,
+    reasoningBlocksEndedFlags,
+    reasoningBlocksDurationsMs,
+  );
   const roundToolCallIds = new Set(liveToolCalls.keys());
   const shouldAttachFirstTokenLatency = firstTokenObservedAt !== null && !firstTokenLatencyAttached;
 
@@ -114,8 +119,12 @@ export function commitStreamingRound(
         role: 'assistant',
         content,
         parts,
-        ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
-        ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
+        ...(alignedReasoningMetadata.endedFlags
+          ? { reasoningBlocksEndedFlags: alignedReasoningMetadata.endedFlags }
+          : {}),
+        ...(alignedReasoningMetadata.durationsMs
+          ? { reasoningBlocksDurationsMs: alignedReasoningMetadata.durationsMs }
+          : {}),
         createdAt: timestamp,
         durationMs: timestamp - currentRoundStartedAt,
         tokenEstimate: estimateTokenCount(
@@ -152,5 +161,34 @@ export function commitStreamingRound(
     accumulatedThinkingBlocks: [],
     currentRoundStartedAt: timestamp,
     firstTokenLatencyAttached: shouldAttachFirstTokenLatency ? true : firstTokenLatencyAttached,
+  };
+}
+
+function alignReasoningMetadata(
+  parts: ChatMessagePart[],
+  endedFlags: boolean[] | undefined,
+  durationsMs: number[] | undefined,
+): { endedFlags?: boolean[]; durationsMs?: number[] } {
+  const reasoningParts = parts.filter((part) => part.type === 'reasoning');
+  if (reasoningParts.length === 0) return {};
+  if (
+    reasoningParts.length === (endedFlags?.length ?? 0) &&
+    reasoningParts.length === (durationsMs?.length ?? 0)
+  ) {
+    return { endedFlags, durationsMs };
+  }
+  const hasPartTiming = reasoningParts.some(
+    (part) => typeof part.startedAt === 'number' || typeof part.endedAt === 'number',
+  );
+  if (!hasPartTiming) return {};
+  return {
+    endedFlags: reasoningParts.map((part) => part.endedAt !== undefined),
+    durationsMs: reasoningParts.map((part) =>
+      typeof part.startedAt === 'number' &&
+      typeof part.endedAt === 'number' &&
+      part.endedAt >= part.startedAt
+        ? part.endedAt - part.startedAt
+        : -1,
+    ),
   };
 }
