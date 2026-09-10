@@ -350,12 +350,7 @@ describe('mergeStreamingEntryIntoHistoricalEntries', () => {
     const streamingEntry = createEntry({ id: 'live', role: 'assistant', content: '' });
 
     expect(
-      mergeStreamingEntryIntoHistoricalEntries(
-        [historicalEntry],
-        streamingEntry,
-        'live',
-        null,
-      ),
+      mergeStreamingEntryIntoHistoricalEntries([historicalEntry], streamingEntry, 'live', null),
     ).toEqual([historicalEntry, streamingEntry]);
   });
 });

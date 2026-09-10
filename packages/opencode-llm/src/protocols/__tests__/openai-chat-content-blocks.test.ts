@@ -125,9 +125,7 @@ describe('兼容接口文本块增量', () => {
         ],
       }),
     );
-    const [nextState] = await Effect.runPromise(
-      Chat.protocol.stream.step(state, continuation),
-    );
+    const [nextState] = await Effect.runPromise(Chat.protocol.stream.step(state, continuation));
     expect(nextState.tools[0]).toMatchObject({
       id: 'call_1',
       name: 'read_file',
@@ -143,15 +141,43 @@ describe('兼容接口文本块增量', () => {
       tools: [],
     });
     const decode = Schema.decodeUnknownSync(Chat.protocol.stream.event);
-    const anonymous = decode(JSON.stringify({
-      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] }, finish_reason: null }],
-    }));
-    const [state, events] = await Effect.runPromise(Chat.protocol.stream.step(Chat.protocol.stream.initial(request), anonymous));
+    const anonymous = decode(
+      JSON.stringify({
+        choices: [
+          {
+            index: 0,
+            delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] },
+            finish_reason: null,
+          },
+        ],
+      }),
+    );
+    const [state, events] = await Effect.runPromise(
+      Chat.protocol.stream.step(Chat.protocol.stream.initial(request), anonymous),
+    );
     expect(events).toEqual([]);
-    const identified = decode(JSON.stringify({
-      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '"README.md"}' } }] }, finish_reason: null }],
-    }));
-    const [nextState, nextEvents] = await Effect.runPromise(Chat.protocol.stream.step(state, identified));
+    const identified = decode(
+      JSON.stringify({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_1',
+                  function: { name: 'read_file', arguments: '"README.md"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+    );
+    const [nextState, nextEvents] = await Effect.runPromise(
+      Chat.protocol.stream.step(state, identified),
+    );
     expect(JSON.stringify(nextEvents)).toContain('read_file');
     expect(nextState.tools[0]?.input).toBe('{"path":"README.md"}');
   });

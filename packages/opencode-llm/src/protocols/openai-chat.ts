@@ -509,7 +509,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       const toolArguments = tool.function?.arguments ?? '';
       if (!current && !tool.id && !toolName && toolArguments.length === 0) continue;
       if (!current && !tool.id?.trim() && !toolName?.trim() && toolArguments.length > 0) {
-        pendingToolArguments[tool.index] = `${pendingToolArguments[tool.index] ?? ''}${toolArguments}`;
+        pendingToolArguments[tool.index] =
+          `${pendingToolArguments[tool.index] ?? ''}${toolArguments}`;
         continue;
       }
       const bufferedArguments = pendingToolArguments[tool.index] ?? '';
