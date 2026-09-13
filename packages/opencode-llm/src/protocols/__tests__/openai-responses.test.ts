@@ -33,6 +33,142 @@ const makeRequest = () =>
   });
 
 describe('OpenAI Responses reasoning replay', () => {
+  it('keeps a summary delta on the active summary part when the relay omits its index', async () => {
+    const request = makeRequest();
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+    let state = OpenAIResponses.protocol.stream.initial(request);
+    const emitted: LLMEvent[] = [];
+    for (const rawEvent of [
+      { type: 'response.output_item.added', item: { type: 'reasoning', id: 'rs-order' } },
+      { type: 'response.reasoning_summary_part.added', item_id: 'rs-order', summary_index: 1 },
+      { type: 'response.reasoning_summary_text.delta', item_id: 'rs-order', delta: '第二段' },
+    ]) {
+      const [nextState, events] = await Effect.runPromise(
+        OpenAIResponses.protocol.stream.step(state, decode(JSON.stringify(rawEvent))),
+      );
+      state = nextState;
+      emitted.push(...events);
+    }
+
+    expect(emitted.filter(LLMEvent.is.reasoningDelta).map((event) => event.id)).toEqual([
+      'rs-order:1',
+    ]);
+  });
+
+  it('accepts protocol extension fields emitted by Responses streams', () => {
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'response.output_text.delta',
+          item_id: 'msg_1',
+          output_index: 0,
+          content_index: 0,
+          sequence_number: 3,
+          delta: '你好',
+        }),
+      ),
+    ).toMatchObject({ type: 'response.output_text.delta', delta: '你好' });
+  });
+
+  it('accepts extension fields on output items and error payloads', () => {
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'response.output_item.added',
+          sequence_number: 4,
+          output_index: 0,
+          item: {
+            type: 'message',
+            id: 'msg_1',
+            role: 'assistant',
+            content: [],
+            status: 'in_progress',
+          },
+        }),
+      ),
+    ).toMatchObject({ item: { type: 'message', id: 'msg_1' } });
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'error',
+          code: 'provider_error',
+          message: 'temporary failure',
+          request_id: 'req_1',
+          retry_after: 1,
+        }),
+      ),
+    ).toMatchObject({ type: 'error', code: 'provider_error' });
+  });
+
+  it('accepts null-valued optional fields from compatible Responses relays', () => {
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'response.output_text.delta',
+          delta: null,
+          item_id: null,
+          summary_index: null,
+          item: null,
+          response: null,
+          code: null,
+          message: null,
+          param: null,
+        }),
+      ),
+    ).toMatchObject({ type: 'response.output_text.delta' });
+  });
+
+  it('accepts null-valued nested usage, incomplete details, and output item fields', () => {
+    const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'response.incomplete',
+          response: {
+            id: null,
+            service_tier: null,
+            incomplete_details: { reason: null },
+            usage: {
+              input_tokens: null,
+              input_tokens_details: { cached_tokens: null },
+              output_tokens: null,
+              output_tokens_details: { reasoning_tokens: null },
+              total_tokens: null,
+            },
+            error: null,
+          },
+        }),
+      ),
+    ).toMatchObject({ type: 'response.incomplete' });
+
+    expect(
+      decode(
+        JSON.stringify({
+          type: 'response.output_item.done',
+          item: {
+            type: 'function_call',
+            id: null,
+            call_id: null,
+            name: null,
+            arguments: null,
+            status: null,
+            action: null,
+            output: null,
+            encrypted_content: null,
+          },
+        }),
+      ),
+    ).toMatchObject({ item: { type: 'function_call', arguments: null } });
+  });
+
   it('keeps encrypted content and summary when output_item.done omits encrypted_content', async () => {
     const request = makeRequest();
     const decode = Schema.decodeUnknownSync(OpenAIResponses.protocol.stream.event);

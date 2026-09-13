@@ -177,40 +177,41 @@ const encodeWebSocketMessage = Schema.encodeSync(
 );
 
 const OpenAIResponsesUsage = Schema.Struct({
-  input_tokens: Schema.optional(Schema.Number),
-  input_tokens_details: optionalNull(
-    Schema.Struct({ cached_tokens: Schema.optional(Schema.Number) }),
-  ),
-  output_tokens: Schema.optional(Schema.Number),
+  input_tokens: optionalNull(Schema.Number),
+  input_tokens_details: optionalNull(Schema.Struct({ cached_tokens: optionalNull(Schema.Number) })),
+  output_tokens: optionalNull(Schema.Number),
   output_tokens_details: optionalNull(
-    Schema.Struct({ reasoning_tokens: Schema.optional(Schema.Number) }),
+    Schema.Struct({ reasoning_tokens: optionalNull(Schema.Number) }),
   ),
-  total_tokens: Schema.optional(Schema.Number),
+  total_tokens: optionalNull(Schema.Number),
 });
 type OpenAIResponsesUsage = Schema.Schema.Type<typeof OpenAIResponsesUsage>;
 
-const OpenAIResponsesStreamItem = Schema.Struct({
-  type: Schema.String,
-  id: Schema.optional(Schema.String),
-  call_id: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  arguments: Schema.optional(Schema.String),
-  // Hosted (provider-executed) tool fields. Each hosted tool item carries its
-  // own subset of these — we capture them generically so we can surface the
-  // call's typed input portion and round-trip the full result payload without
-  // hand-rolling a per-tool schema.
-  status: Schema.optional(Schema.String),
-  action: Schema.optional(Schema.Unknown),
-  queries: Schema.optional(Schema.Unknown),
-  results: Schema.optional(Schema.Unknown),
-  code: Schema.optional(Schema.String),
-  container_id: Schema.optional(Schema.String),
-  outputs: Schema.optional(Schema.Unknown),
-  server_label: Schema.optional(Schema.String),
-  output: Schema.optional(Schema.Unknown),
-  error: Schema.optional(Schema.Unknown),
-  encrypted_content: optionalNull(Schema.String),
-});
+const OpenAIResponsesStreamItem = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    id: optionalNull(Schema.String),
+    call_id: optionalNull(Schema.String),
+    name: optionalNull(Schema.String),
+    arguments: optionalNull(Schema.String),
+    // Hosted (provider-executed) tool fields. Each hosted tool item carries its
+    // own subset of these — we capture them generically so we can surface the
+    // call's typed input portion and round-trip the full result payload without
+    // hand-rolling a per-tool schema.
+    status: optionalNull(Schema.String),
+    action: optionalNull(Schema.Unknown),
+    queries: optionalNull(Schema.Unknown),
+    results: optionalNull(Schema.Unknown),
+    code: optionalNull(Schema.String),
+    container_id: optionalNull(Schema.String),
+    outputs: optionalNull(Schema.Unknown),
+    server_label: optionalNull(Schema.String),
+    output: optionalNull(Schema.Unknown),
+    error: optionalNull(Schema.Unknown),
+    encrypted_content: optionalNull(Schema.String),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 type OpenAIResponsesStreamItem = Schema.Schema.Type<typeof OpenAIResponsesStreamItem>;
 
 // OpenAI Responses surfaces provider failures in two related shapes. The
@@ -218,34 +219,40 @@ type OpenAIResponsesStreamItem = Schema.Schema.Type<typeof OpenAIResponsesStream
 // (`{ type: "error", code, message, param, sequence_number }`), while
 // `response.failed` carries them under `response.error`. We capture both so
 // the parser can surface a useful provider-error message in either path.
-const OpenAIResponsesErrorPayload = Schema.Struct({
-  code: optionalNull(Schema.String),
-  message: optionalNull(Schema.String),
-  param: optionalNull(Schema.String),
-});
+const OpenAIResponsesErrorPayload = Schema.StructWithRest(
+  Schema.Struct({
+    code: optionalNull(Schema.String),
+    message: optionalNull(Schema.String),
+    param: optionalNull(Schema.String),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 
-const OpenAIResponsesEvent = Schema.Struct({
-  type: Schema.String,
-  delta: Schema.optional(Schema.String),
-  item_id: Schema.optional(Schema.String),
-  summary_index: Schema.optional(Schema.Number),
-  item: Schema.optional(OpenAIResponsesStreamItem),
-  response: Schema.optional(
-    Schema.StructWithRest(
-      Schema.Struct({
-        id: Schema.optional(Schema.String),
-        service_tier: optionalNull(Schema.String),
-        incomplete_details: optionalNull(Schema.Struct({ reason: Schema.String })),
-        usage: optionalNull(OpenAIResponsesUsage),
-        error: optionalNull(OpenAIResponsesErrorPayload),
-      }),
-      [Schema.Record(Schema.String, Schema.Unknown)],
+const OpenAIResponsesEvent = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    delta: optionalNull(Schema.String),
+    item_id: optionalNull(Schema.String),
+    summary_index: optionalNull(Schema.Number),
+    item: optionalNull(OpenAIResponsesStreamItem),
+    response: optionalNull(
+      Schema.StructWithRest(
+        Schema.Struct({
+          id: optionalNull(Schema.String),
+          service_tier: optionalNull(Schema.String),
+          incomplete_details: optionalNull(Schema.Struct({ reason: optionalNull(Schema.String) })),
+          usage: optionalNull(OpenAIResponsesUsage),
+          error: optionalNull(OpenAIResponsesErrorPayload),
+        }),
+        [Schema.Record(Schema.String, Schema.Unknown)],
+      ),
     ),
-  ),
-  code: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.String),
-  param: Schema.optional(Schema.String),
-});
+    code: optionalNull(Schema.String),
+    message: optionalNull(Schema.String),
+    param: optionalNull(Schema.String),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>;
 
 interface ParserState {
@@ -260,6 +267,7 @@ type ReasoningSummaryStatus = 'active' | 'can-conclude' | 'concluded';
 
 interface ReasoningStreamItem {
   readonly encryptedContent: string | null | undefined;
+  readonly activeSummaryIndex?: number;
   // Keyed by OpenAI's numeric `summary_index`. JS object keys coerce to
   // strings, but typing the map as `Record<number, ...>` documents intent
   // and matches the wire field.
@@ -549,20 +557,19 @@ const fromRequest = Effect.fn('OpenAIResponses.fromRequest')(function* (request:
 // non-cached breakdown.
 const mapUsage = (usage: OpenAIResponsesUsage | null | undefined) => {
   if (!usage) return undefined;
-  const cached = usage.input_tokens_details?.cached_tokens;
-  const reasoning = usage.output_tokens_details?.reasoning_tokens;
-  const nonCached = ProviderShared.subtractTokens(usage.input_tokens, cached);
+  const inputTokens = usage.input_tokens ?? undefined;
+  const outputTokens = usage.output_tokens ?? undefined;
+  const cached = usage.input_tokens_details?.cached_tokens ?? undefined;
+  const reasoning = usage.output_tokens_details?.reasoning_tokens ?? undefined;
+  const totalTokens = usage.total_tokens ?? undefined;
+  const nonCached = ProviderShared.subtractTokens(inputTokens, cached);
   return new Usage({
-    inputTokens: usage.input_tokens,
-    outputTokens: usage.output_tokens,
+    inputTokens,
+    outputTokens,
     nonCachedInputTokens: nonCached,
     cacheReadInputTokens: cached,
     reasoningTokens: reasoning,
-    totalTokens: ProviderShared.totalTokens(
-      usage.input_tokens,
-      usage.output_tokens,
-      usage.total_tokens,
-    ),
+    totalTokens: ProviderShared.totalTokens(inputTokens, outputTokens, totalTokens),
     providerMetadata: { openai: usage },
   });
 };
@@ -688,14 +695,25 @@ const onReasoningDelta = (state: ParserState, event: OpenAIResponsesEvent): Step
   if (!event.delta) return [state, NO_EVENTS];
   const events: LLMEvent[] = [];
   const itemID = event.item_id ?? 'reasoning-0';
+  const activeSummaryIndex =
+    event.summary_index ?? state.reasoningItems[itemID]?.activeSummaryIndex;
   const id =
-    event.summary_index !== undefined || state.reasoningItems[itemID]
-      ? `${itemID}:${event.summary_index ?? 0}`
+    activeSummaryIndex !== undefined || state.reasoningItems[itemID]
+      ? `${itemID}:${activeSummaryIndex ?? 0}`
       : itemID;
+  const reasoningItem = state.reasoningItems[itemID];
   return [
     {
       ...state,
       lifecycle: Lifecycle.reasoningDelta(state.lifecycle, events, id, event.delta),
+      ...(reasoningItem && activeSummaryIndex !== undefined
+        ? {
+            reasoningItems: {
+              ...state.reasoningItems,
+              [itemID]: { ...reasoningItem, activeSummaryIndex },
+            },
+          }
+        : {}),
     },
     events,
   ];
@@ -782,7 +800,8 @@ const onReasoningSummaryPartAdded = (
   state: ParserState,
   event: OpenAIResponsesEvent,
 ): StepResult => {
-  if (!event.item_id || event.summary_index === undefined) return [state, NO_EVENTS];
+  if (!event.item_id || event.summary_index === undefined || event.summary_index === null)
+    return [state, NO_EVENTS];
   const item = state.reasoningItems[event.item_id] ?? {
     encryptedContent: undefined,
     summaryParts: {},
@@ -801,7 +820,7 @@ const onReasoningSummaryPartAdded = (
         ),
         reasoningItems: {
           ...state.reasoningItems,
-          [event.item_id]: { ...item, summaryParts: { 0: 'active' } },
+          [event.item_id]: { ...item, activeSummaryIndex: 0, summaryParts: { 0: 'active' } },
         },
       },
       events,
@@ -837,6 +856,7 @@ const onReasoningSummaryPartAdded = (
         ...state.reasoningItems,
         [event.item_id]: {
           ...item,
+          activeSummaryIndex: event.summary_index,
           summaryParts: {
             ...Object.fromEntries(
               Object.entries(item.summaryParts).map((entry) =>
@@ -856,7 +876,8 @@ const onReasoningSummaryPartDone = (
   state: ParserState,
   event: OpenAIResponsesEvent,
 ): StepResult => {
-  if (!event.item_id || event.summary_index === undefined) return [state, NO_EVENTS];
+  if (!event.item_id || event.summary_index === undefined || event.summary_index === null)
+    return [state, NO_EVENTS];
   const item = state.reasoningItems[event.item_id];
   if (!item) return [state, NO_EVENTS];
   const events: LLMEvent[] = [];
@@ -876,6 +897,7 @@ const onReasoningSummaryPartDone = (
         ...state.reasoningItems,
         [event.item_id]: {
           ...item,
+          activeSummaryIndex: event.summary_index,
           summaryParts: {
             ...item.summaryParts,
             [event.summary_index]: state.store !== false ? 'concluded' : 'can-conclude',
@@ -920,7 +942,7 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
       ? state.tools
       : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name });
     const result =
-      item.arguments === undefined
+      item.arguments === undefined || item.arguments === null
         ? yield* ToolStream.finish(ADAPTER, tools, item.id)
         : yield* ToolStream.finishWithInput(ADAPTER, tools, item.id, item.arguments);
     const events: LLMEvent[] = [];
