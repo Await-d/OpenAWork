@@ -43,6 +43,7 @@ import type { useChatSearch } from '../../../components/chat/search/chat-search-
 import { ChatSessionSkeleton } from '../../../components/chat/session/chat-session-skeleton.js';
 import { InlineQuestionPanel } from '../../../components/chat/misc/InlineQuestionPanel.js';
 import { UnifiedComposer } from '../../../components/chat/composer/UnifiedComposer.js';
+import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type {
   UnifiedComposerActivity,
   UnifiedComposerFeatures,
@@ -342,6 +343,8 @@ export interface ChatConversationViewProps {
    * UnifiedComposer.composerRightSlot.
    */
   composerRightSlot?: ReactNode;
+  /** 已索引的工作区文件，供 @ 菜单引用。不传时 @ 菜单会一直显示空状态。 */
+  workspaceFileItems?: WorkspaceFileMentionItem[];
 }
 
 // ─── 内部样式常量（提到顶层避免每次渲染创建新对象）────────────────────────
@@ -528,6 +531,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     input,
     setInput,
     textareaRef,
+    workspaceFileItems,
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
@@ -882,6 +886,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           input={input}
           setInput={setInput}
           textareaRef={textareaRef}
+          workspaceFileItems={workspaceFileItems}
           features={composerFeatures}
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}

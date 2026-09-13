@@ -72,6 +72,10 @@ export function startStandardChatStream(
     text,
   } = options;
 
+  // 先分配用户消息 ID，再分配实时助手占位 ID：有序 ID 的词序即创建序，而渲染层
+  // 依赖"助手轮次晚于对应的用户消息"。若顺序反了，实时气泡会被判定为比用户消息
+  // 更旧，从而被插到用户消息之前（发送后"正在对话"显示在提问上方）。
+  const userMessageId = makeOrderedMessageId();
   currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
   streamingRef.current = true;
   stoppingStreamRef.current = false;
@@ -109,7 +113,7 @@ export function startStandardChatStream(
   setMessages((prev) => [
     ...prev,
     {
-      id: makeOrderedMessageId(),
+      id: userMessageId,
       role: 'user',
       content: text,
       rawContent: userRawContent,

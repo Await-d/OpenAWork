@@ -33,6 +33,13 @@ export interface UseChatStreamingReturn {
   >;
   activeStreamStartedAt: number | null;
   setActiveStreamStartedAt: React.Dispatch<React.SetStateAction<number | null>>;
+  /**
+   * 当前**轮次**的开始时刻（与 `activeStreamStartedAt` 的"请求开始时刻"区分）：
+   * 网关按轮持久化助手消息，实时气泡的 `createdAt` 必须落在本轮，否则同请求内已
+   * 提交的轮次时间戳会更晚，排序判定会把实时气泡顶到最上面。
+   */
+  activeStreamRoundStartedAt: number | null;
+  setActiveStreamRoundStartedAt: React.Dispatch<React.SetStateAction<number | null>>;
   activeStreamFirstTokenLatencyMs: number | null;
   setActiveStreamFirstTokenLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
   streamError: string | null;
@@ -85,6 +92,7 @@ export function useChatStreaming(): UseChatStreamingReturn {
   const [recoveredStreamSnapshot, setRecoveredStreamSnapshot] =
     useState<RecoveredActiveAssistantStream | null>(null);
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
+  const [activeStreamRoundStartedAt, setActiveStreamRoundStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
   >(null);
@@ -125,6 +133,7 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setStreaming(false);
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
+    setActiveStreamRoundStartedAt(null);
     setActiveStreamFirstTokenLatencyMs(null);
     setStreamError(null);
     setLatestUpstreamSummary(null);
@@ -197,6 +206,8 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setRecoveredStreamSnapshot,
     activeStreamStartedAt,
     setActiveStreamStartedAt,
+    activeStreamRoundStartedAt,
+    setActiveStreamRoundStartedAt,
     activeStreamFirstTokenLatencyMs,
     setActiveStreamFirstTokenLatencyMs,
     streamError,

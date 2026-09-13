@@ -64,6 +64,25 @@ describe('useComposerCallbacks', () => {
     };
   }
 
+  it('输入法组合态按 Enter 不会发送消息', () => {
+    const { sendMessage, textarea } = renderHarness('nihao');
+
+    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('输入法组合态按 Enter 也不会触发排队', () => {
+    const { enqueueComposerMessage, sendMessage, textarea } = renderHarness('继续跟进这个问题', {
+      remoteSessionBusyState: 'running',
+    });
+
+    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+
+    expect(enqueueComposerMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('忙碌态按 Enter 会排队，而不是直接发送', () => {
     const { enqueueComposerMessage, sendMessage, textarea } = renderHarness('继续跟进这个问题', {
       remoteSessionBusyState: 'running',

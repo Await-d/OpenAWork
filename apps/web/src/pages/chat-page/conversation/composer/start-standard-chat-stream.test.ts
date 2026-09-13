@@ -36,6 +36,47 @@ describe('startStandardChatStream', () => {
     expect(setMessages).toHaveBeenCalled();
   });
 
+  it('用户消息的有序 ID 早于实时助手占位 ID，保证气泡排在提问之后', () => {
+    const currentAssistantStreamMessageIdRef = { current: null as string | null };
+    let appended: Array<{ id: string; role: string }> = [];
+    startStandardChatStream({
+      currentAssistantStreamMessageIdRef,
+      isNearBottomRef: { current: false },
+      onQueuedMessageConsumed: vi.fn(),
+      setActiveStreamFirstTokenLatencyMs: vi.fn(),
+      setActiveStreamStartedAt: vi.fn(),
+      setHasPendingFollowContent: vi.fn(),
+      setMessages: vi.fn((updater) => {
+        appended = updater([]).map((message: { id: string; role: string }) => ({
+          id: message.id,
+          role: message.role,
+        }));
+        return appended;
+      }),
+      setReportedStreamUsage: vi.fn(),
+      setSessionStateStatus: vi.fn(),
+      setShowScrollToBottom: vi.fn(),
+      setStoppingStream: vi.fn(),
+      setStreamBuffer: vi.fn(),
+      setStreamThinkingBlocks: vi.fn(),
+      setStreamThinkingBuffer: vi.fn(),
+      setStreaming: vi.fn(),
+      stoppingStreamRef: { current: false },
+      streamRevealNextAllowedAtRef: { current: 0 },
+      streamRevealTargetCodePointsRef: { current: [] },
+      streamRevealTargetRef: { current: '' },
+      streamRevealVisibleCodePointCountRef: { current: 0 },
+      streamRevealVisibleRef: { current: '' },
+      streamingRef: { current: false },
+      text: '没有很多人吐槽这个问题吗',
+    });
+
+    const userMessageId = appended.find((message) => message.role === 'user')?.id;
+    expect(userMessageId).toBeDefined();
+    // 有序 ID 的词序即创建序：用户消息必须先于实时助手占位被铸造。
+    expect(userMessageId! < currentAssistantStreamMessageIdRef.current!).toBe(true);
+  });
+
   it('空文本但有图片时会生成上传提示文案', () => {
     const result = startStandardChatStream({
       currentAssistantStreamMessageIdRef: { current: null },

@@ -81,6 +81,15 @@ export interface ChatRenderDataInput {
   visibleStreamThinkingBuffer: string;
   visibleStreamThinkingBlocks: string[];
   visibleStreamStartedAt: number | null;
+  /**
+   * Start of the round currently being streamed. The virtual streaming message
+   * uses this as its `createdAt` instead of the *request* start: the gateway
+   * persists one assistant message per round, so a request-level timestamp makes
+   * the live bubble look older than the rounds of the same request that were
+   * already committed and it would be ordered above them. Elapsed-time displays
+   * keep using `visibleStreamStartedAt`.
+   */
+  activeStreamRoundStartedAt?: number | null;
   visibleReportedStreamUsage: ChatBackendUsageSnapshot | null;
   activeStreamClientRequestId: string | null;
   activeStreamFirstTokenLatencyMs: number | null;
@@ -158,6 +167,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleStreamThinkingBuffer,
     visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
+    activeStreamRoundStartedAt,
     visibleReportedStreamUsage,
     activeStreamClientRequestId,
     activeStreamFirstTokenLatencyMs,
@@ -542,7 +552,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
             : visibleStreamBuffer,
         model: (activeModelOption?.label ?? activeModelId) || undefined,
         providerId: activeProviderId || undefined,
-        createdAt: visibleStreamStartedAt ?? Date.now(),
+        createdAt: activeStreamRoundStartedAt ?? visibleStreamStartedAt ?? Date.now(),
         tokenEstimate: estimateTokenCount(
           [visibleStreamThinkingBuffer, visibleStreamBuffer]
             .filter((item) => item.trim().length > 0)

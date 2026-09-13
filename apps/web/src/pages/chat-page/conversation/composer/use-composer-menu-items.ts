@@ -100,10 +100,16 @@ export function useComposerMenuItems(deps: ComposerMenuItemsDeps): ComposerMenuI
         id: file.path,
         kind: 'mention',
         label: file.label,
-        description: file.relativePath,
+        description: getMentionDirectoryHint(file.relativePath),
         insertText: `@${file.relativePath} `,
       }));
   }, [composerMenu, workspaceFileItems]);
 
   return { slashCommandItems, mentionItems };
+}
+
+/** 提取所在目录作为菜单里的路径提示；根目录文件返回空串。 */
+function getMentionDirectoryHint(relativePath: string): string {
+  const lastSlash = relativePath.lastIndexOf('/');
+  return lastSlash === -1 ? '' : relativePath.slice(0, lastSlash);
 }

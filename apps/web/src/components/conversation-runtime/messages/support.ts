@@ -415,8 +415,135 @@ export function readAssistantTracePayload(
 }
 
 /**
+ * Merge a live part with its snapshot counterpart (same part ID).
+ *
+ * The live accumulator and a mid-stream snapshot legitimately disagree on the
+ * text of a `text` / `reasoning` part: the snapshot may be taken before the
+ * latest deltas landed (snapshot text is a prefix of the live text), or the
+ * live part may have been seeded during attach and the snapshot already holds
+ * the full segment. Rewinding to the shorter version makes the bubble visibly
+ * lose content the user already saw, and — because later deltas then extend
+ * whichever part sits at the end of the list — splits one segment into two.
+ *
+ * Text-bearing parts therefore keep the version that is a prefix-extension of
+ * the other, while still inheriting the snapshot's timing metadata so finished
+ * reasoning blocks stay marked as ended. Every other part prefers the
+ * snapshot, which carries the persisted status / output.
+ */
+function mergePartWithSnapshot(
+  existingPart: ChatMessagePart,
+  snapshotPart: ChatMessagePart | undefined,
+): ChatMessagePart {
+  if (!snapshotPart || snapshotPart.type !== existingPart.type) {
+    return snapshotPart ?? existingPart;
+  }
+  if (existingPart.type === 'text' && snapshotPart.type === 'text') {
+    return existingPart.text.startsWith(snapshotPart.text) ? existingPart : snapshotPart;
+  }
+  if (existingPart.type === 'reasoning' && snapshotPart.type === 'reasoning') {
+    const text = existingPart.text.startsWith(snapshotPart.text)
+      ? existingPart.text
+      : snapshotPart.text;
+    return {
+      ...existingPart,
+      text,
+      ...(snapshotPart.startedAt !== undefined ? { startedAt: snapshotPart.startedAt } : {}),
+      ...(snapshotPart.endedAt !== undefined ? { endedAt: snapshotPart.endedAt } : {}),
+    };
+  }
+  return snapshotPart;
+}
+
+/**
+ * Detect whether the snapshot disagrees with the live accumulator on a
+ * `text` / `reasoning` part in a way that proves the *local* slice is stale
+ * rather than fresher.
+ *
+ * `appendStreamingTextDelta` / `appendStreamingThinkingDelta` hand the first
+ * `text` slot to whichever segment arrives first, so an attach that starts
+ * mid-stream can park a *later* segment under the earliest ID (e.g. live
+ * `[tool, "工具之后"]` where `工具之后` holds `${id}:text`, while the snapshot
+ * knows `["工具之前", tool, "工具之后"]`). In that shape the snapshot's order
+ * is the only correct one and the local order must be discarded.
+ *
+ * The test is deliberately narrow: the local view is only considered stale when
+ * its own text does *not* extend the snapshot's text for the same ID. When it
+ * does extend it (`local.startsWith(snapshot)`, i.e. the snapshot was captured
+ * before the latest deltas landed), the local order is fresher and must win.
+ */
+function hasDivergedTextIdentity(
+  existingParts: ChatMessagePart[],
+  incomingById: Map<string, ChatMessagePart>,
+): boolean {
+  return existingParts.some((existingPart) => {
+    if (existingPart.type !== 'text' && existingPart.type !== 'reasoning') return false;
+    const incomingPart = incomingById.get(existingPart.id);
+    if (!incomingPart || incomingPart.type !== existingPart.type) return false;
+    if (incomingPart.text === existingPart.text) return false;
+    return !existingPart.text.startsWith(incomingPart.text);
+  });
+}
+
+/**
+ * Find where `source[index]` belongs inside `target` by scanning outwards in
+ * `source` order: right after the nearest part they have in common, otherwise
+ * right before it, otherwise appended at the end.
+ *
+ * This is what keeps a part the two sides disagree about from being dropped or
+ * hoisted to the front — it stays anchored to its neighbours.
+ */
+function resolveInsertionIndex(
+  source: ChatMessagePart[],
+  target: ChatMessagePart[],
+  index: number,
+): number {
+  for (let probe = index - 1; probe >= 0; probe -= 1) {
+    const candidate = source[probe];
+    if (!candidate) continue;
+    const targetIndex = target.findIndex((entry) => entry.id === candidate.id);
+    if (targetIndex >= 0) return targetIndex + 1;
+  }
+  for (let probe = index + 1; probe < source.length; probe += 1) {
+    const candidate = source[probe];
+    if (!candidate) continue;
+    const targetIndex = target.findIndex((entry) => entry.id === candidate.id);
+    if (targetIndex >= 0) return targetIndex;
+  }
+  return target.length;
+}
+
+/**
+ * Splice the parts that only the live accumulator knows about (a tool call that
+ * just started streaming, an inline event card, …) back into a snapshot-ordered
+ * list, using their nearest known local neighbours as anchors.
+ *
+ * Used when the snapshot proves the local ordering stale: dropping those parts
+ * outright would make a freshly started tool card vanish on a soft refresh.
+ */
+function spliceLocalOnlyParts(
+  snapshotOrder: ChatMessagePart[],
+  existingParts: ChatMessagePart[],
+  incomingIds: ReadonlySet<string>,
+): ChatMessagePart[] {
+  const merged = snapshotOrder.slice();
+  for (let partIndex = 0; partIndex < existingParts.length; partIndex += 1) {
+    const part = existingParts[partIndex];
+    if (!part || incomingIds.has(part.id)) continue;
+    merged.splice(resolveInsertionIndex(existingParts, merged, partIndex), 0, part);
+  }
+  return merged;
+}
+
+/**
  * Reconcile two `parts` arrays using the opencode pattern:
  * find by part ID → replace if exists, push if new.
+ *
+ * The live accumulator is the only source that knows where a part was actually
+ * rendered, so it supplies the skeleton order whenever it is at least as
+ * complete as the snapshot. Snapshot-only parts are spliced in between their
+ * nearest known neighbours instead of being prepended wholesale — otherwise a
+ * segment the gateway persisted late would jump ahead of the text/reasoning the
+ * user is already reading.
  */
 export function reconcilePartsById(
   existingParts: ChatMessagePart[],
@@ -424,20 +551,37 @@ export function reconcilePartsById(
 ): ChatMessagePart[] {
   const incomingById = new Map(incomingParts.map((part) => [part.id, part]));
   const existingIds = new Set(existingParts.map((part) => part.id));
-  const incomingIds = new Set(incomingParts.map((part) => part.id));
+  const incomingIds = new Set(incomingById.keys());
   const hasSnapshotOnlyPart = incomingParts.some((part) => !existingIds.has(part.id));
   if (hasSnapshotOnlyPart) {
-    // A newly supplied part can be an earlier text segment that reused the
-    // provisional `${messageId}:text` identity during attach. In that case
-    // the snapshot is the only source capable of restoring the missing
-    // prefix, so retain its canonical order and append only optimistic tails.
-    return [...incomingParts, ...existingParts.filter((part) => !incomingIds.has(part.id))];
+    // A snapshot sharing *no* part ID with the live accumulator is a different
+    // identity namespace (the gateway persisted the round under its own IDs and
+    // the local placeholders were never adopted), so its order is the only
+    // trustworthy one.
+    const hasKnownIncomingPart = incomingParts.some((part) => existingIds.has(part.id));
+    if (!hasKnownIncomingPart) {
+      return incomingParts;
+    }
+    // The snapshot brings parts the live slice never saw, so it may also know
+    // that the local ID assignment is provisional. Defer to its order then,
+    // but keep local-only parts anchored where the live view had them.
+    if (hasDivergedTextIdentity(existingParts, incomingById)) {
+      return spliceLocalOnlyParts(incomingParts, existingParts, incomingIds);
+    }
+    const merged = existingParts.map((part) =>
+      mergePartWithSnapshot(part, incomingById.get(part.id)),
+    );
+    for (let incomingIndex = 0; incomingIndex < incomingParts.length; incomingIndex += 1) {
+      const incomingPart = incomingParts[incomingIndex];
+      if (!incomingPart || existingIds.has(incomingPart.id)) continue;
+      merged.splice(resolveInsertionIndex(incomingParts, merged, incomingIndex), 0, incomingPart);
+    }
+    return merged;
   }
-  // The live accumulator is the only source that knows where an event was
-  // actually rendered. Keep that relative order for parts already present;
-  // snapshots may be assembled from independently persisted rows and can
-  // therefore arrive with a different ordering.
-  return existingParts.map((part) => incomingById.get(part.id) ?? part);
+  // Same ID set on both sides: keep the live relative order (snapshots may be
+  // assembled from independently persisted rows and arrive with a different
+  // one) and only adopt the snapshot's content per part.
+  return existingParts.map((part) => mergePartWithSnapshot(part, incomingById.get(part.id)));
 }
 
 export function createAssistantEventCardContent(payload: AssistantEventPayload): string {
@@ -2275,7 +2419,34 @@ export function reconcileSnapshotChatMessages(
         continue;
       }
 
-      reconciled.push(previousMessage);
+      const previousCreatedAt = getComparableCreatedAt(previousMessage.createdAt);
+      const snapshotHasDifferentRequest = snapshotMessages.some(
+        (snapshotMessage) =>
+          previousMessage.clientRequestId !== undefined &&
+          snapshotMessage.clientRequestId !== undefined &&
+          previousMessage.clientRequestId !== snapshotMessage.clientRequestId,
+      );
+      // A *trailing* local message is either the newest turn the snapshot has
+      // not persisted yet, or — when the snapshot re-issued that turn under a
+      // new id (recovery re-projection) — a stale copy of it. In both shapes the
+      // snapshot's tail order stays authoritative, so append it. Only interior
+      // unmatched messages (an earlier round the snapshot omitted entirely) are
+      // positioned by `createdAt`, otherwise they would render after turns that
+      // came later.
+      const isTrailingLocalMessage = index === previousMessages.length - 1;
+      if (previousCreatedAt === null || snapshotHasDifferentRequest || isTrailingLocalMessage) {
+        reconciled.push(previousMessage);
+        continue;
+      }
+      const insertionIndex = reconciled.findIndex((candidate) => {
+        const candidateCreatedAt = getComparableCreatedAt(candidate.createdAt);
+        return candidateCreatedAt !== null && candidateCreatedAt > previousCreatedAt;
+      });
+      if (insertionIndex === -1) {
+        reconciled.push(previousMessage);
+      } else {
+        reconciled.splice(insertionIndex, 0, previousMessage);
+      }
     }
   }
 

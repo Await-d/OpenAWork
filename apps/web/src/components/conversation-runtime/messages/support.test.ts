@@ -451,6 +451,172 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(result[0]?.parts).toEqual(snapshotParts);
   });
 
+  it('服务端新增中间分片时不把它插到实时前缀之前', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'reasoning-1', type: 'reasoning', text: '先想' },
+      { id: 'text-1', type: 'text', text: '回答' },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'reasoning-1', type: 'reasoning', text: '先想' },
+      {
+        id: 'tool-1',
+        type: 'tool',
+        toolCallId: 'tool-1',
+        toolName: 'read',
+        input: {},
+        status: 'completed',
+      },
+      { id: 'text-1', type: 'text', text: '回答' },
+    ];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+
+    expect(result[0]?.parts?.map((part) => part.id)).toEqual(['reasoning-1', 'tool-1', 'text-1']);
+  });
+
+  it('快照正文比实时正文短时不回退已渲染内容', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'reasoning-1', type: 'reasoning', text: '先想' },
+      { id: 'text-1', type: 'text', text: '这是已经渲染出来的完整回答' },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'reasoning-1', type: 'reasoning', text: '先想' },
+      {
+        id: 'tool-1',
+        type: 'tool',
+        toolCallId: 'tool-1',
+        toolName: 'read',
+        input: {},
+        status: 'completed',
+      },
+      { id: 'text-1', type: 'text', text: '这是已经渲染' },
+    ];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+
+    expect(result[0]?.parts?.map((part) => part.id)).toEqual(['reasoning-1', 'tool-1', 'text-1']);
+    expect(result[0]?.parts?.[2]).toMatchObject({
+      type: 'text',
+      text: '这是已经渲染出来的完整回答',
+    });
+  });
+
+  it('快照补齐实时缺失的前缀正文时以快照为准', () => {
+    const localParts: ChatMessagePart[] = [{ id: 'text-1', type: 'text', text: '回答的后半段' }];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'text-1', type: 'text', text: '问题背景与回答的后半段' },
+    ];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+
+    expect(result[0]?.parts).toEqual(snapshotParts);
+  });
+
+  it('同 ID 正文完全不同时以快照为准', () => {
+    const localParts: ChatMessagePart[] = [{ id: 'text-1', type: 'text', text: '本地乐观文本' }];
+    const snapshotParts: ChatMessagePart[] = [{ id: 'text-1', type: 'text', text: '服务端文本' }];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+
+    expect(result[0]?.parts?.[0]).toMatchObject({ type: 'text', text: '服务端文本' });
+  });
+
+  it('快照顺序权威时仍保留实时新增、快照尚未包含的工具分片', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'text-1', type: 'text', text: '工具之后' },
+      {
+        id: 'tool-new',
+        type: 'tool',
+        toolCallId: 'tool-new',
+        toolName: 'write',
+        input: {},
+        status: 'running',
+      },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'text-1', type: 'text', text: '工具之前' },
+      {
+        id: 'tool-old',
+        type: 'tool',
+        toolCallId: 'tool-old',
+        toolName: 'read',
+        input: {},
+        status: 'completed',
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'local', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'server', role: 'assistant', content: '', parts: snapshotParts, status: 'streaming' }],
+    );
+
+    expect(result[0]?.parts?.map((part) => part.id)).toEqual(['text-1', 'tool-new', 'tool-old']);
+  });
+
+  it('思考分片正文冲突时保留更完整正文并继承快照结束标记', () => {
+    const localParts: ChatMessagePart[] = [
+      { id: 'm1:reasoning:0', type: 'reasoning', text: '先分析完' },
+    ];
+    const snapshotParts: ChatMessagePart[] = [
+      { id: 'm1:reasoning:0', type: 'reasoning', text: '先分析', startedAt: 100, endedAt: 400 },
+    ];
+
+    const result = reconcileSnapshotChatMessages(
+      [{ id: 'm1', role: 'assistant', content: '', parts: localParts, status: 'streaming' }],
+      [{ id: 'm1', role: 'assistant', content: '', parts: snapshotParts, status: 'completed' }],
+    );
+
+    expect(result[0]?.parts?.[0]).toMatchObject({
+      type: 'reasoning',
+      text: '先分析完',
+      startedAt: 100,
+      endedAt: 400,
+    });
+  });
+
+  it('快照缺少较早多轮消息时保留本地消息在后续轮次之前', () => {
+    const localFirstRound: ChatMessage = {
+      id: 'local-round-1',
+      role: 'assistant',
+      content: '第一轮工具结果',
+      createdAt: 1_100,
+      status: 'completed',
+    };
+    const localSecondRound: ChatMessage = {
+      id: 'local-round-2',
+      role: 'assistant',
+      content: '第二轮回答',
+      createdAt: 1_200,
+      status: 'streaming',
+    };
+    const persistedSecondRound: ChatMessage = {
+      id: 'server-round-2',
+      role: 'assistant',
+      content: '第二轮回答已完成',
+      createdAt: 1_201,
+      status: 'completed',
+    };
+
+    const result = reconcileSnapshotChatMessages(
+      [localFirstRound, localSecondRound],
+      [persistedSecondRound],
+    );
+
+    expect(result.map((message) => message.id)).toEqual(['local-round-1', 'server-round-2']);
+  });
+
   it('快照协调时按 reasoning parts 同步结束标记和时长，避免思考状态错位', () => {
     const localParts: ChatMessagePart[] = [
       { id: 'm1:reasoning:0', type: 'reasoning', text: '第一段' },

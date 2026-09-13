@@ -5,6 +5,7 @@ import {
 } from '../../../../components/conversation-runtime/messages/support.js';
 import { describe, expect, it } from 'vitest';
 
+import { makeOrderedMessageId } from '../../../../components/conversation-runtime/messages/ordered-id.js';
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
 
 function createEntry(message: ChatMessage): ChatRenderEntry {
@@ -287,6 +288,146 @@ describe('mergeStreamingEntryIntoHistoricalEntries', () => {
         'request-1',
       ),
     ).toEqual([toolRoundEntry, streamingEntry, laterEventEntry]);
+  });
+
+  it('同一请求内更早提交的轮次不会把实时轮次顶到最上面', () => {
+    const userEntry = createEntry({
+      id: makeOrderedMessageId(1_000),
+      role: 'user',
+      content: '开始吧',
+      createdAt: 1_000,
+    });
+    const firstRoundEntry = createEntry({
+      id: makeOrderedMessageId(2_000),
+      role: 'assistant',
+      content: '第一轮：工具执行完成',
+      createdAt: 2_000,
+      status: 'completed',
+    });
+    // 实时条目的 createdAt 是「请求开始时间」（客户端与网关都没有逐轮记录开始时刻），
+    // 因此它必然早于同请求内已经提交的历史轮次——不能被当成"更旧的轮次"插到最前面。
+    const streamingEntry = createEntry({
+      id: makeOrderedMessageId(2_500),
+      role: 'assistant',
+      content: '第二轮回答',
+      createdAt: 500,
+      status: 'streaming',
+    });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [userEntry, firstRoundEntry],
+        streamingEntry,
+        streamingEntry.message.id,
+        null,
+      ),
+    ).toEqual([userEntry, firstRoundEntry, streamingEntry]);
+  });
+
+  it('实时占位 ID 早于用户消息时也必须排在该提问之后', () => {
+    const previousAssistantEntry = createEntry({
+      id: makeOrderedMessageId(1_000),
+      role: 'assistant',
+      content: '上一轮回答',
+      createdAt: 1_000,
+      status: 'completed',
+    });
+    // 占位 ID 先铸、用户消息 ID 后铸（历史缺陷顺序）：实时气泡不能因此被判为更旧。
+    const streamingEntry = createEntry({
+      id: makeOrderedMessageId(1_100),
+      role: 'assistant',
+      content: '',
+      createdAt: 1_100,
+      status: 'streaming',
+    });
+    const userEntry = createEntry({
+      id: makeOrderedMessageId(1_101),
+      role: 'user',
+      content: '没有很多人吐槽这个问题吗',
+      createdAt: 1_101,
+    });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [previousAssistantEntry, userEntry],
+        streamingEntry,
+        streamingEntry.message.id,
+        null,
+      ),
+    ).toEqual([previousAssistantEntry, userEntry, streamingEntry]);
+  });
+
+  it('非有序 ID 的历史消息在实时条目带本轮起点时按时间戳正确归位', () => {
+    const userEntry = createEntry({
+      id: 'legacy-user-1',
+      role: 'user',
+      content: '开始吧',
+      createdAt: 1_000,
+    });
+    const firstRoundEntry = createEntry({
+      id: 'legacy-round-1',
+      role: 'assistant',
+      content: '第一轮完成',
+      createdAt: 2_000,
+      status: 'completed',
+    });
+    const laterEntry = createEntry({
+      id: 'legacy-event-1',
+      role: 'assistant',
+      content: '之后追加的事件卡片',
+      createdAt: 2_600,
+      status: 'completed',
+    });
+    // createdAt 用的是「本轮起点」而不是请求起点时，时间戳兜底也能正确归位。
+    const streamingEntry = createEntry({
+      id: 'legacy-live-round-2',
+      role: 'assistant',
+      content: '第二轮回答',
+      createdAt: 2_500,
+      status: 'streaming',
+    });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [userEntry, firstRoundEntry, laterEntry],
+        streamingEntry,
+        streamingEntry.message.id,
+        null,
+      ),
+    ).toEqual([userEntry, firstRoundEntry, streamingEntry, laterEntry]);
+  });
+
+  it('实时轮次仍会插到有序 ID 更晚的消息之前', () => {
+    const firstRoundEntry = createEntry({
+      id: makeOrderedMessageId(2_000),
+      role: 'assistant',
+      content: '第一轮完成',
+      createdAt: 2_000,
+      status: 'completed',
+    });
+    const laterPersistedEntry = createEntry({
+      id: makeOrderedMessageId(3_000),
+      role: 'assistant',
+      content: '第三轮已持久化',
+      createdAt: 3_000,
+      status: 'completed',
+    });
+    const streamingEntry = createEntry({
+      id: makeOrderedMessageId(2_500),
+      role: 'assistant',
+      content: '第二轮回答',
+      createdAt: 500,
+      status: 'streaming',
+    });
+
+    expect(
+      mergeStreamingEntryIntoHistoricalEntries(
+        [firstRoundEntry, laterPersistedEntry],
+        streamingEntry,
+        streamingEntry.message.id,
+        null,
+      ),
+    ).toEqual([firstRoundEntry, streamingEntry, laterPersistedEntry]);
   });
 
   it('无请求 ID 的短文本完全相同时仅替换尾部消息', () => {

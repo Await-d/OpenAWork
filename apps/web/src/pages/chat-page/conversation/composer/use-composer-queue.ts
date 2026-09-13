@@ -9,6 +9,28 @@ import {
   deleteQueuedComposerFiles,
 } from './queued-composer-file-store.js';
 
+/**
+ * 把附件条目按 id 关联到对应的 File。
+ *
+ * `attachmentItems` 与 `attachedFiles` 是两个并行数组，靠本文件中的
+ * `appendFiles` / `removeAttachment`，以及 `restoreQueuedComposerMessage`
+ * 保证同序同长——这是一条隐式契约。此处把它收敛成唯一一处显式转换，
+ * 消费方（如输入框的图片预览）只按 id 取文件，不再各自复制索引假设。
+ */
+export function buildAttachmentFileMap(
+  attachmentItems: readonly AttachmentItem[],
+  attachedFiles: readonly File[],
+): Map<string, File> {
+  const filesById = new Map<string, File>();
+  attachmentItems.forEach((item, index) => {
+    const file = attachedFiles[index];
+    if (file !== undefined) {
+      filesById.set(item.id, file);
+    }
+  });
+  return filesById;
+}
+
 export interface ComposerQueueOptions {
   input: string;
   setInput: (value: string | ((prev: string) => string)) => void;
@@ -38,7 +60,11 @@ export interface ComposerQueueReturn {
   removeFile: (index: number) => void;
   removeAttachment: (id: string) => void;
   clearComposerDraft: () => void;
-  enqueueComposerMessage: () => Promise<boolean>;
+  /**
+   * 入队一条待发消息。传入 overrideText 时以该文本为准，供输入框把折叠的
+   * 粘贴内容直接并入本次入队，无需先写回受控 input 再等待其变化。
+   */
+  enqueueComposerMessage: (overrideText?: string) => Promise<boolean>;
   removeQueuedComposerMessage: (messageId: string) => void;
   restoreQueuedComposerMessage: (messageId: string) => void;
 }
@@ -108,44 +134,47 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
     });
   }, [setInput, setAttachedFiles, setAttachmentItems, setComposerMenu, textareaRef]);
 
-  const enqueueComposerMessage = useCallback(async () => {
-    const nextText = sanitizeComposerPlainText(input).trim();
-    if (nextText.length === 0 && attachedFiles.length === 0) return false;
+  const enqueueComposerMessage = useCallback(
+    async (overrideText?: string) => {
+      const nextText = sanitizeComposerPlainText(overrideText ?? input).trim();
+      if (nextText.length === 0 && attachedFiles.length === 0) return false;
 
-    const queueItem: QueuedComposerMessage = {
-      attachmentItems: attachmentItems.map((item) => ({ ...item })),
-      files: [...attachedFiles],
-      id: crypto.randomUUID(),
-      requiresAttachmentRebind: attachedFiles.length > 0 && !queuedComposerScope,
-      text: nextText,
-    };
-    setQueuedComposerMessages((previous) => [...previous, queueItem]);
-    clearComposerDraft();
+      const queueItem: QueuedComposerMessage = {
+        attachmentItems: attachmentItems.map((item) => ({ ...item })),
+        files: [...attachedFiles],
+        id: crypto.randomUUID(),
+        requiresAttachmentRebind: attachedFiles.length > 0 && !queuedComposerScope,
+        text: nextText,
+      };
+      setQueuedComposerMessages((previous) => [...previous, queueItem]);
+      clearComposerDraft();
 
-    if (attachedFiles.length > 0 && queuedComposerScope) {
-      const persisted = await persistQueuedComposerFiles({
-        attachmentItems: queueItem.attachmentItems,
-        files: queueItem.files,
-        queueId: queueItem.id,
-        scope: queuedComposerScope,
-      });
-      if (!persisted) {
-        setQueuedComposerMessages((previous) =>
-          previous.map((item) =>
-            item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
-          ),
-        );
+      if (attachedFiles.length > 0 && queuedComposerScope) {
+        const persisted = await persistQueuedComposerFiles({
+          attachmentItems: queueItem.attachmentItems,
+          files: queueItem.files,
+          queueId: queueItem.id,
+          scope: queuedComposerScope,
+        });
+        if (!persisted) {
+          setQueuedComposerMessages((previous) =>
+            previous.map((item) =>
+              item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
+            ),
+          );
+        }
       }
-    }
-    return true;
-  }, [
-    attachedFiles,
-    attachmentItems,
-    clearComposerDraft,
-    input,
-    queuedComposerScope,
-    setQueuedComposerMessages,
-  ]);
+      return true;
+    },
+    [
+      attachedFiles,
+      attachmentItems,
+      clearComposerDraft,
+      input,
+      queuedComposerScope,
+      setQueuedComposerMessages,
+    ],
+  );
 
   const removeQueuedComposerMessage = useCallback(
     (messageId: string) => {

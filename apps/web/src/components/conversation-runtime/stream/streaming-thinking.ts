@@ -9,6 +9,25 @@ export interface StreamingThinkingBlock {
   endedAt?: number;
 }
 
+export function buildStreamingThinkingChunkDeliveryKey(
+  chunk: Pick<
+    StreamThinkingChunk,
+    'eventId' | 'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt' | 'delta'
+  >,
+): string {
+  if (typeof chunk.eventId === 'string' && chunk.eventId.trim().length > 0) {
+    return `event:${chunk.eventId}`;
+  }
+
+  return [
+    chunk.itemId ?? '',
+    chunk.outputIndex ?? '',
+    chunk.summaryIndex ?? '',
+    chunk.occurredAt ?? '',
+    chunk.delta,
+  ].join('|');
+}
+
 const LEGACY_THINKING_BLOCK_KEY = 'legacy:0';
 
 function buildStreamingThinkingBlockKey(

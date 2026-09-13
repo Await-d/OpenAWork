@@ -47,6 +47,11 @@ import {
 } from './streaming-thinking.js';
 import { mergeChatBackendUsageSnapshot, type ChatBackendUsageSnapshot } from './stream-usage.js';
 import {
+  hasGatewayAdvancedRound,
+  resolveNextRoundIndex,
+  shouldStartNewRound,
+} from './stream-round-boundary.js';
+import {
   applyPermissionDecisionToLocalAssistantMessages,
   applyToolResultToLocalAssistantMessages,
   type ChatMessage,
@@ -54,6 +59,7 @@ import {
   createAssistantTraceContent,
   dismissPermissionEventMessage,
   estimateTokenCount,
+  hasActivePendingPermissionRequest,
   parseToolCallInputText,
   partsFromAssistantTrace,
   replaceOrAppendStreamedAssistantMessage,
@@ -160,6 +166,10 @@ interface RoundAccumulator {
     }
   >;
   toolCallIds: Set<string>;
+  /** Round currently being accumulated (1-based); see `stream-round-boundary`. */
+  currentRoundIndex: number;
+  /** Highest round the gateway reported as finished via `usage.round`. */
+  lastCompletedRound: number | null;
   startedAt: number;
   firstTokenObservedAt: number | null;
   firstTokenLatencyAttached: boolean;
@@ -174,6 +184,8 @@ function makeAccumulator(startedAt: number): RoundAccumulator {
     reasoningMeta: new Map(),
     liveToolCalls: new Map(),
     toolCallIds: new Set(),
+    currentRoundIndex: 1,
+    lastCompletedRound: null,
     startedAt,
     firstTokenObservedAt: null,
     firstTokenLatencyAttached: false,
@@ -204,6 +216,8 @@ export function useConversationStream(
     acc.reasoningMeta.clear();
     acc.liveToolCalls.clear();
     acc.toolCallIds.clear();
+    acc.currentRoundIndex = 1;
+    acc.lastCompletedRound = null;
     acc.startedAt = Date.now();
     setters.setStreamBuffer('');
     setters.setStreamThinkingBuffer('');
@@ -325,6 +339,37 @@ export function useConversationStream(
     [setters],
   );
 
+  /**
+   * Close the round that is currently accumulating when the gateway has moved
+   * on (see `stream-round-boundary`). Must run *before* the next round's content
+   * is appended, and never on the `usage` chunk itself — the tool results of the
+   * round that just ended still arrive after that chunk.
+   */
+  const closeRoundIfGatewayAdvanced = useCallback(
+    (options?: { gatewayOnly?: boolean }) => {
+      const acc = accumulatorRef.current;
+      const boundary = options?.gatewayOnly
+        ? hasGatewayAdvancedRound({
+            currentRoundIndex: acc.currentRoundIndex,
+            lastCompletedRound: acc.lastCompletedRound,
+          })
+        : shouldStartNewRound({
+            currentRoundIndex: acc.currentRoundIndex,
+            lastCompletedRound: acc.lastCompletedRound,
+            toolCalls: acc.liveToolCalls.values(),
+          });
+      if (!boundary) {
+        return;
+      }
+      commitCurrentRound(Date.now());
+      acc.currentRoundIndex = resolveNextRoundIndex({
+        currentRoundIndex: acc.currentRoundIndex,
+        lastCompletedRound: acc.lastCompletedRound,
+      });
+    },
+    [commitCurrentRound],
+  );
+
   const handleEvent = useCallback(
     (event: RunEvent) => {
       const acc = accumulatorRef.current;
@@ -334,17 +379,14 @@ export function useConversationStream(
       // ─── text_delta ───────────────────────────────────────────────
       if (event.type === 'text_delta') {
         observeFirstToken(event.occurredAt);
-        // If we got new text after a tool round already started, finalize the
-        // current round into a message and start a new one — mirrors the
-        // gateway's per-round persistence model.
-        if (acc.liveToolCalls.size > 0 && acc.text.length === 0) {
-          // Note: ChatPage commits the round on a fresh thinking_start *after*
-          // any tool. For simplicity we mirror the same boundary on text
-          // arriving after tools by deferring commit to the round's done
-          // event (gateway also fires done at the end of each round).
-        }
+        // Text arriving after the gateway finished the previous round belongs to
+        // the next model round (one persisted assistant message per round).
+        // Without this the live view renders a `tool → text` bubble that the
+        // persisted transcript later splits in two.
+        closeRoundIfGatewayAdvanced();
+        const textMessageId = refs.currentAssistantStreamMessageIdRef.current ?? closingMessageId;
         acc.text += event.delta;
-        acc.segments = appendStreamingTextDelta(acc.segments, event.delta, closingMessageId);
+        acc.segments = appendStreamingTextDelta(acc.segments, event.delta, textMessageId);
         setters.setStreamBuffer(acc.text);
         setters.setStreamingSegments(acc.segments);
         return;
@@ -353,17 +395,19 @@ export function useConversationStream(
       // ─── thinking_start ───────────────────────────────────────────
       if (event.type === 'thinking_start') {
         observeFirstToken(event.occurredAt);
-        // If a fresh thinking block arrives after a tool call, commit the
-        // current round and roll the message id forward.
-        if (acc.liveToolCalls.size > 0) {
-          commitCurrentRound(Date.now());
-        }
+        closeRoundIfGatewayAdvanced();
         return;
       }
 
       // ─── thinking_delta ───────────────────────────────────────────
       if (event.type === 'thinking_delta') {
         observeFirstToken(event.occurredAt);
+        // Mirror the `text_delta` boundary so streams that never emit an
+        // explicit `thinking_start` (or attach replays) still split rounds the
+        // same way the gateway does.
+        closeRoundIfGatewayAdvanced();
+        const thinkingMessageId =
+          refs.currentAssistantStreamMessageIdRef.current ?? closingMessageId;
         const chunk = event as StreamThinkingChunk;
         acc.thinkingBlocks = appendStreamingThinkingChunk(acc.thinkingBlocks, chunk, {
           forceNewBlock: acc.segments[acc.segments.length - 1]?.type !== 'reasoning',
@@ -372,7 +416,7 @@ export function useConversationStream(
           acc.segments,
           acc.reasoningMeta,
           chunk,
-          closingMessageId,
+          thinkingMessageId,
         );
         acc.thinkingText = joinStreamingThinkingTexts(acc.thinkingBlocks);
         setters.setStreamThinkingBuffer(acc.thinkingText);
@@ -396,6 +440,11 @@ export function useConversationStream(
       // ─── tool_call_delta ──────────────────────────────────────────
       if (event.type === 'tool_call_delta') {
         observeFirstToken(event.occurredAt);
+        // A round may start with a bare tool call (chained tool use without text
+        // or reasoning). Only the gateway signal is trusted here — parallel tool
+        // calls of one round all stream before that round's `usage` chunk, while
+        // the tool-result fallback would split a resumed round.
+        closeRoundIfGatewayAdvanced({ gatewayOnly: true });
         acc.toolCallIds.add(event.toolCallId);
         const previous = acc.liveToolCalls.get(event.toolCallId);
         const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
@@ -421,18 +470,31 @@ export function useConversationStream(
 
       // ─── tool_result ──────────────────────────────────────────────
       if (event.type === 'tool_result') {
+        // A `tool_result` that is still waiting for approval keeps the card in
+        // the paused state; otherwise the part must leave `running`, so the live
+        // team view does not show a spinner for a finished tool until refresh.
+        const hasPendingPermission = hasActivePendingPermissionRequest(event);
         const previous = acc.liveToolCalls.get(event.toolCallId);
         acc.liveToolCalls.set(event.toolCallId, {
           createdAt: previous?.createdAt ?? Date.now(),
           inputText: previous?.inputText ?? '',
           output: event.output,
-          isError: event.isError,
+          isError: hasPendingPermission ? false : event.isError,
           resumedAfterApproval: event.resumedAfterApproval,
           toolCallId: event.toolCallId,
           status: 'completed',
           toolName: event.toolName,
         });
-        acc.segments = applyToolResultToStreamingSegment(acc.segments, event);
+        acc.segments = applyToolResultToStreamingSegment(acc.segments, {
+          toolCallId: event.toolCallId,
+          output: event.output,
+          isError: hasPendingPermission ? false : event.isError,
+          status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+          ...(hasPendingPermission && event.pendingPermissionRequestId
+            ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
+            : {}),
+          ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+        });
         setters.setStreamingSegments(acc.segments);
         // Also reflect the tool result in any already-committed assistant
         // message (multi-round streams).
@@ -442,6 +504,10 @@ export function useConversationStream(
 
       // ─── usage ────────────────────────────────────────────────────
       if (event.type === 'usage') {
+        // The gateway reports a round's index as soon as that round is over.
+        // Record it only; the boundary itself is applied when the next round's
+        // content arrives (this round's tool results still follow this chunk).
+        acc.lastCompletedRound = Math.max(acc.lastCompletedRound ?? 0, event.round);
         setters.setReportedStreamUsage((prev) => mergeChatBackendUsageSnapshot(prev, event));
         return;
       }
@@ -526,7 +592,7 @@ export function useConversationStream(
       // ─── chat-only events (terminal / dev / sub-agent / etc.) ────
       configRef.current.onChatOnlyEvent?.(event);
     },
-    [refs, setters, observeFirstToken, commitCurrentRound],
+    [refs, setters, observeFirstToken, commitCurrentRound, closeRoundIfGatewayAdvanced],
   );
 
   const getCurrentSegments = useCallback(() => accumulatorRef.current.segments, []);

@@ -21,6 +21,7 @@ describe('useChatStreaming', () => {
     expect(result.current.recoveryActiveStream).toBeNull();
     expect(result.current.recoveredStreamSnapshot).toBeNull();
     expect(result.current.activeStreamStartedAt).toBeNull();
+    expect(result.current.activeStreamRoundStartedAt).toBeNull();
     expect(result.current.activeStreamFirstTokenLatencyMs).toBeNull();
     expect(result.current.streamError).toBeNull();
 
@@ -38,6 +39,7 @@ describe('useChatStreaming', () => {
         round: 1,
       });
       result.current.setActiveStreamStartedAt(123);
+      result.current.setActiveStreamRoundStartedAt(234);
       result.current.setActiveStreamFirstTokenLatencyMs(456);
       result.current.setStreamError('boom');
     });
@@ -54,6 +56,7 @@ describe('useChatStreaming', () => {
     expect(result.current.streamingSegments).toEqual([]);
     expect(result.current.reportedStreamUsage).toBeNull();
     expect(result.current.activeStreamStartedAt).toBeNull();
+    expect(result.current.activeStreamRoundStartedAt).toBeNull();
     expect(result.current.activeStreamFirstTokenLatencyMs).toBeNull();
     expect(result.current.streamError).toBeNull();
   });

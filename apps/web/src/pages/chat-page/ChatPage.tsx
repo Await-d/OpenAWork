@@ -53,6 +53,7 @@ import {
   type UnifiedComposerActivity,
 } from '../../components/chat/composer/UnifiedComposer.js';
 import { ChatTopBar } from '../../components/chat/session/ChatTopBar.js';
+import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
 import { QuickTerminalToggle } from '../../components/chat/terminal/QuickTerminalToggle.js';
 import { SessionTerminalsChip } from '../../components/chat/terminal/SessionTerminalsChip.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
@@ -100,6 +101,8 @@ import {
 } from '../../utils/session/session-list-events.js';
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
+import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
+import { getPathBasename } from '../../utils/workspace-path.js';
 import {
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
@@ -173,7 +176,13 @@ import {
   upsertStreamingToolSegment,
 } from '../../components/conversation-runtime/stream/streaming-segments.js';
 import {
+  hasGatewayAdvancedRound,
+  resolveNextRoundIndex,
+  shouldStartNewRound,
+} from '../../components/conversation-runtime/stream/stream-round-boundary.js';
+import {
   appendStreamingThinkingChunk,
+  buildStreamingThinkingChunkDeliveryKey,
   extractStreamingThinkingDurations,
   extractStreamingThinkingEndedFlags,
   extractStreamingThinkingTexts,
@@ -452,6 +461,8 @@ export default function ChatPage() {
     setRecoveredStreamSnapshot,
     activeStreamStartedAt,
     setActiveStreamStartedAt,
+    activeStreamRoundStartedAt,
+    setActiveStreamRoundStartedAt,
     activeStreamFirstTokenLatencyMs,
     setActiveStreamFirstTokenLatencyMs,
     latestUpstreamSummary,
@@ -1438,6 +1449,12 @@ export default function ChatPage() {
   const visibleStreamStartedAt = streaming
     ? activeStreamStartedAt
     : (recoveredStreamSnapshot?.startedAt ?? null);
+  // 实时气泡的 createdAt 必须落在**本轮**（网关按轮持久化），否则同请求内已提交的
+  // 轮次时间戳更晚，排序会把实时气泡顶到最上面。恢复快照的 startedAt 就是本轮起点。
+  const activeStreamRoundStart =
+    streaming && activeStreamRoundStartedAt !== null
+      ? activeStreamRoundStartedAt
+      : visibleStreamStartedAt;
   const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
   const visibleLatestUpstreamSummary =
     latestUpstreamSummary ?? recoveredStreamSnapshot?.upstreamSummary ?? null;
@@ -2399,6 +2416,19 @@ export default function ChatPage() {
     });
   }, []);
 
+  /**
+   * 欢迎页「新建会话」：只把当前视图复位为空白草稿并聚焦输入框，
+   * 不立即在服务端创建空会话——真正的会话在首条消息发出时才落库，
+   * 因此连续点击不会堆积空对话。
+   */
+  const handleStartNewSession = useCallback(() => {
+    setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
+    focusComposerWithText('');
+    if (currentSessionId) {
+      void navigate('/chat');
+    }
+  }, [currentSessionId, focusComposerWithText, navigate]);
+
   const appendTextToComposer = useCallback((text: string) => {
     setInput((previous) => {
       const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
@@ -2610,6 +2640,8 @@ export default function ChatPage() {
     clearSessionMetadataDirty();
     setSessionModesHydrated(true);
     requestSessionListRefresh();
+    // 草稿「转正」：会话已落库，移除草稿标签，由真实会话标签接替。
+    useUIStateStore.getState().closeDraftTabs();
     void navigate(`/chat/${session.id}`, { replace: true });
     return session.id;
   }
@@ -2893,6 +2925,8 @@ export default function ChatPage() {
       streamingRef,
       text,
     });
+    // 第 1 轮的起点 = 请求起点；后续轮次由 `closeRoundIfGatewayAdvanced` 推进。
+    setActiveStreamRoundStartedAt(requestStartedAt);
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
     let streamTerminalized = false;
@@ -2973,6 +3007,10 @@ export default function ChatPage() {
     let latestRoundUpstreamSummary: UpstreamStreamSummary | null = null;
     let currentRoundStartedAt = requestStartedAt;
     let firstTokenLatencyAttached = false;
+    // 轮次边界状态（见 `stream-round-boundary`）：网关在每轮结束时回报
+    // `usage.round`，客户端在下一轮内容到达时据此提交上一轮。
+    let currentRoundIndex = 1;
+    let lastCompletedRoundIndex: number | null = null;
     const resolveRoundModelLabel = (summary?: UpstreamStreamSummary | null): string | undefined =>
       summary?.modelId ?? latestUpstreamRoute?.modelId ?? requestModelLabel;
     const resolveRoundProviderId = (summary?: UpstreamStreamSummary | null): string | undefined =>
@@ -2982,9 +3020,7 @@ export default function ChatPage() {
     // The gateway persists one assistant message per agent round (see
     // `routes/stream-model-round.ts`); the live UI must mirror that structure
     // so reasoning/tool/text parts render in the true wire order both during
-    // streaming and after refresh. When a fresh wave of thinking arrives after
-    // any tool_call has been issued in this round, commit the current round
-    // as a finalized assistant message and roll the message id forward.
+    // streaming and after refresh.
     const closeCurrentStreamingRoundIntoMessage = (timestamp: number) => {
       // Cancel any pending RAF so the upcoming setStreamThinkingBlocks([])
       // / setStreamThinkingBuffer('') reset is not overwritten by a late flush.
@@ -3027,6 +3063,35 @@ export default function ChatPage() {
       liveToolCalls.clear();
       firstTokenLatencyAttached = committed.firstTokenLatencyAttached;
       currentRoundStartedAt = committed.currentRoundStartedAt;
+    };
+
+    /**
+     * 网关切到下一轮时提交当前轮。必须在追加新内容之前调用（轮次边界只有在新一轮
+     * 内容到达时才能观察到），且不能在 `usage` 事件上调用——本轮的工具结果在这之后
+     * 才会到达，必须仍落在本轮消息里。
+     */
+    const closeRoundIfGatewayAdvanced = (options?: { gatewayOnly?: boolean }) => {
+      const boundary = options?.gatewayOnly
+        ? hasGatewayAdvancedRound({
+            currentRoundIndex,
+            lastCompletedRound: lastCompletedRoundIndex,
+          })
+        : shouldStartNewRound({
+            currentRoundIndex,
+            lastCompletedRound: lastCompletedRoundIndex,
+            toolCalls: liveToolCalls.values(),
+          });
+      if (!boundary) {
+        return;
+      }
+      const boundaryAt = Date.now();
+      closeCurrentStreamingRoundIntoMessage(boundaryAt);
+      // 新一轮从这一刻开始，实时气泡的 createdAt 必须跟着轮次走。
+      setActiveStreamRoundStartedAt(boundaryAt);
+      currentRoundIndex = resolveNextRoundIndex({
+        currentRoundIndex,
+        lastCompletedRound: lastCompletedRoundIndex,
+      });
     };
 
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
@@ -3089,6 +3154,9 @@ export default function ChatPage() {
             firstTokenObservedAt = event.occurredAt ?? Date.now();
             setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
           }
+          // 新一轮可能以裸工具调用开头（链式工具调用，没有文本/思考），此处只用
+          // 网关轮次信号判断，见 `closeRoundIfGatewayAdvanced`。
+          closeRoundIfGatewayAdvanced({ gatewayOnly: true });
           toolCallIds.add(event.toolCallId);
           const previous = liveToolCalls.get(event.toolCallId);
           const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
@@ -3117,6 +3185,8 @@ export default function ChatPage() {
         }
 
         if (event.type === 'usage') {
+          // 网关在该轮结束时回报轮次序号；仅记录，边界在下一轮内容到达时应用。
+          lastCompletedRoundIndex = Math.max(lastCompletedRoundIndex ?? 0, event.round);
           setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
         }
 
@@ -3307,6 +3377,9 @@ export default function ChatPage() {
           firstTokenObservedAt = Date.now();
           setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
         }
+        // 网关已结束上一轮时，到来的正文属于下一轮，先提交当前轮，否则实时视图会
+        // 渲染出 `tool → text` 单条气泡，刷新后被拆成两条。
+        closeRoundIfGatewayAdvanced();
         accumulated += delta;
         // Mirror the delta into the ordered segment list so the live render
         // reflects the true wire-arrival order. Coalesces consecutive text
@@ -3348,21 +3421,17 @@ export default function ChatPage() {
           setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
         }
 
-        const thinkingChunkKey = [
-          chunk.itemId ?? '',
-          chunk.outputIndex ?? '',
-          chunk.summaryIndex ?? '',
-          chunk.occurredAt ?? '',
-          chunk.delta,
-        ].join('|');
+        const thinkingChunkKey = buildStreamingThinkingChunkDeliveryKey(chunk);
         if (deliveredThinkingChunkKeys.has(thinkingChunkKey)) return;
         deliveredThinkingChunkKeys.add(thinkingChunkKey);
 
-        if (liveToolCalls.size > 0) {
-          closeCurrentStreamingRoundIntoMessage(Date.now());
-        }
+        // 轮次边界判定见 `closeRoundIfGatewayAdvanced`（此前用 `liveToolCalls.size > 0`
+        // 会把同一轮内 `tool_call → reasoning` 的交错错误拆成两条消息）。
+        closeRoundIfGatewayAdvanced();
 
-        accumulatedThinkingBlocks = appendStreamingThinkingChunk(accumulatedThinkingBlocks, chunk);
+        accumulatedThinkingBlocks = appendStreamingThinkingChunk(accumulatedThinkingBlocks, chunk, {
+          forceNewBlock: accumulatedSegments[accumulatedSegments.length - 1]?.type !== 'reasoning',
+        });
         accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
         // Mirror reasoning chunks into the ordered segment list. Each
         // reasoning block has a stable identity (itemId/outputIndex/...) so
@@ -3838,6 +3907,10 @@ export default function ChatPage() {
     // the recovery snapshot's reasoning/text/toolCalls are reconstructed via
     // ensureAttachStateInitialized below.
     let accumulatedSegments: ChatMessagePart[] = [];
+    // 轮次边界状态：恢复快照里的 usage.round 属于「已完成的轮次」，因此当前正在
+    // 累积的是它的下一轮。
+    let lastCompletedRoundIndex: number | null = initialUsage?.round ?? null;
+    let currentRoundIndex = (lastCompletedRoundIndex ?? 0) + 1;
     const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
     let pendingThinkingFlushFrame: number | null = null;
     let pendingSegmentsFlushFrame: number | null = null;
@@ -3998,6 +4071,30 @@ export default function ChatPage() {
       currentRoundStartedAt = committed.currentRoundStartedAt;
     };
 
+    /** attach 链路上与主链路等价的网关驱动轮次边界（见 `closeRoundIfGatewayAdvanced`）。 */
+    const closeRoundIfGatewayAdvanced = (options?: { gatewayOnly?: boolean }) => {
+      const boundary = options?.gatewayOnly
+        ? hasGatewayAdvancedRound({
+            currentRoundIndex,
+            lastCompletedRound: lastCompletedRoundIndex,
+          })
+        : shouldStartNewRound({
+            currentRoundIndex,
+            lastCompletedRound: lastCompletedRoundIndex,
+            toolCalls: liveToolCalls.values(),
+          });
+      if (!boundary) {
+        return;
+      }
+      const boundaryAt = Date.now();
+      closeCurrentAttachRoundIntoMessage(boundaryAt);
+      setActiveStreamRoundStartedAt(boundaryAt);
+      currentRoundIndex = resolveNextRoundIndex({
+        currentRoundIndex,
+        lastCompletedRound: lastCompletedRoundIndex,
+      });
+    };
+
     const handleAttachReconnect = (technicalDetail?: string) => {
       if (technicalDetail) {
         setStreamError(
@@ -4147,6 +4244,8 @@ export default function ChatPage() {
       setSessionStateStatus('running');
       setReportedStreamUsage(initialUsage);
       setActiveStreamStartedAt(requestStartedAt);
+      // 恢复快照代表的就是当前这一轮的已完成片段，因此本轮起点沿用它。
+      setActiveStreamRoundStartedAt(requestStartedAt);
       setActiveStreamFirstTokenLatencyMs(null);
       setStreamBuffer(initialText);
       setStreamThinkingBuffer(initialThinking);
@@ -4206,6 +4305,8 @@ export default function ChatPage() {
               firstTokenObservedAt = event.occurredAt ?? Date.now();
               setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
             }
+            // 与主链路一致：新一轮可能以裸工具调用开头，只用网关轮次信号切轮。
+            closeRoundIfGatewayAdvanced({ gatewayOnly: true });
             const previous = liveToolCalls.get(event.toolCallId);
             const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
             liveToolCalls.set(event.toolCallId, {
@@ -4269,6 +4370,8 @@ export default function ChatPage() {
           }
 
           if (event.type === 'usage') {
+            // 与主链路一致：记录网关回报的已完成轮次，边界在下一轮内容到达时应用。
+            lastCompletedRoundIndex = Math.max(lastCompletedRoundIndex ?? 0, event.round);
             accumulatedUsage = mergeChatBackendUsageSnapshot(accumulatedUsage, event);
             setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
           }
@@ -4431,6 +4534,9 @@ export default function ChatPage() {
             firstTokenObservedAt = Date.now();
             setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
           }
+          // Mirror the main stream handler: the next round's content closes the
+          // round the gateway already finished.
+          closeRoundIfGatewayAdvanced();
           accumulated += delta;
           // Mirror into the ordered attach segment list so live re-attach
           // renders preserve wire-arrival order. Coalesces consecutive text
@@ -4469,21 +4575,17 @@ export default function ChatPage() {
             firstTokenObservedAt = Date.now();
             setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
           }
-          const thinkingChunkKey = [
-            chunk.itemId ?? '',
-            chunk.outputIndex ?? '',
-            chunk.summaryIndex ?? '',
-            chunk.occurredAt ?? '',
-            chunk.delta,
-          ].join('|');
+          const thinkingChunkKey = buildStreamingThinkingChunkDeliveryKey(chunk);
           if (deliveredAttachThinkingChunkKeys.has(thinkingChunkKey)) return;
           deliveredAttachThinkingChunkKeys.add(thinkingChunkKey);
-          if (liveToolCalls.size > 0) {
-            closeCurrentAttachRoundIntoMessage(Date.now());
-          }
+          closeRoundIfGatewayAdvanced();
           accumulatedThinkingBlocks = appendStreamingThinkingChunk(
             accumulatedThinkingBlocks,
             chunk,
+            {
+              forceNewBlock:
+                accumulatedSegments[accumulatedSegments.length - 1]?.type !== 'reasoning',
+            },
           );
           accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
           const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
@@ -4745,6 +4847,38 @@ export default function ChatPage() {
     !remoteSessionBusyState
       ? 'home'
       : 'session';
+  // 工作区绑定锁：会话一旦产生消息（或正在流式 / 远端运行 / 历史仍在加载）即锁定绑定。
+  // 只有「尚未开始对话」的新会话允许快速调整绑定，避免对话开始后误改上下文目录。
+  const workspaceBindingLocked =
+    messages.length > 0 ||
+    streaming ||
+    remoteSessionBusyState !== null ||
+    (currentSessionId !== null && (isSessionLoading || !isSessionSnapshotReady));
+  const canAdjustWorkspaceBinding = !workspaceBindingLocked;
+
+  /**
+   * 「调整绑定工作区」所有入口的统一收口：可调整时打开选择器；已锁定则提示并忽略，
+   * 让文件树 / 侧栏里的切换入口在对话开始后自然失效。
+   */
+  const requestWorkspaceBindingChange = useCallback(() => {
+    if (workspaceBindingLocked) {
+      toast('会话已开始对话，工作区绑定已锁定', 'warning');
+      return;
+    }
+
+    setShowWorkspaceSelector(true);
+  }, [workspaceBindingLocked]);
+
+  const workspaceBindingChip = useMemo<WorkspaceBindingChipState>(
+    () => ({
+      label: effectiveWorkingDirectory
+        ? getPathBasename(effectiveWorkingDirectory, effectiveWorkingDirectory)
+        : UNBOUND_WORKSPACE_LABEL,
+      fullPath: effectiveWorkingDirectory,
+      ...(canAdjustWorkspaceBinding ? { onSelect: requestWorkspaceBindingChange } : {}),
+    }),
+    [canAdjustWorkspaceBinding, effectiveWorkingDirectory, requestWorkspaceBindingChange],
+  );
   const {
     activeProvider,
     providerCatalog,
@@ -4834,6 +4968,7 @@ export default function ChatPage() {
     visibleStreamThinkingBuffer,
     visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
+    activeStreamRoundStartedAt: activeStreamRoundStart,
     visibleReportedStreamUsage,
     activeStreamClientRequestId: activeGatewayStreamClientRequestId,
     activeStreamFirstTokenLatencyMs,
@@ -5455,7 +5590,9 @@ export default function ChatPage() {
                   fetchTree={workspace.fetchTree}
                   active={editorMode}
                   variant="embedded"
-                  onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
+                  onSwitchWorkspace={
+                    canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined
+                  }
                   style={{
                     flex: 1,
                     minHeight: 0,
@@ -5490,7 +5627,7 @@ export default function ChatPage() {
                 }}
                 onCompactSession={() => void handleCompactCurrentSession()}
                 onOpenFileInEditor={handleOpenFusionEditorFile}
-                onOpenWorkspace={() => setShowWorkspaceSelector(true)}
+                onOpenWorkspace={requestWorkspaceBindingChange}
                 onShowEditor={handleShowFusionEditor}
                 onTabChange={setSidePanelActiveTab}
                 overview={fusionContextOverview}
@@ -5517,7 +5654,7 @@ export default function ChatPage() {
               handleSaveFile={handleSaveFile}
               onCompactSession={() => void handleCompactCurrentSession()}
               onOpenFileInEditor={handleOpenFusionEditorFile}
-              onOpenWorkspace={() => setShowWorkspaceSelector(true)}
+              onOpenWorkspace={requestWorkspaceBindingChange}
               onShowEditor={handleShowFusionEditor}
               onTabChange={setSidePanelActiveTab}
               overview={fusionContextOverview}
@@ -5549,7 +5686,8 @@ export default function ChatPage() {
               isOpen={showWorkspaceSelector}
               onClose={() => setShowWorkspaceSelector(false)}
               onSelect={async (path) => {
-                if (currentSessionId) {
+                // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
+                if (currentSessionId && canAdjustWorkspaceBinding) {
                   await workspace.setWorkspace(path);
                 }
                 addSavedWorkspacePath(path);
@@ -5570,6 +5708,7 @@ export default function ChatPage() {
                 sessionId={currentSessionId}
                 sessionSource="chat"
                 compact
+                workspaceFileItems={workspaceFileItems}
                 centerContent={conversationLayoutState.centerContent}
                 contentMaxWidth={conversationLayoutState.contentMaxWidth}
                 currentUserEmail={currentUserEmail}
@@ -5685,10 +5824,10 @@ export default function ChatPage() {
                               title: `会话 ${currentSessionId.slice(0, 8)}`,
                               modelLabel: activeModelOption?.label ?? effectiveModelId,
                               modeLabel: dialogueModeLabel,
-                              workspacePath: effectiveWorkingDirectory,
                             }
                           : undefined
                       }
+                      workspaceBinding={workspaceBindingChip}
                       reviewPanelOpened={reviewPanelOpened}
                       onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
                       terminalPanelOpened={terminalPanelOpened}
@@ -5833,8 +5972,8 @@ export default function ChatPage() {
                 welcomeScreen={{
                   hasWorkspace: !!effectiveWorkingDirectory,
                   dialogueMode,
-                  onNewSession: () => void ensureSession(),
-                  onOpenWorkspace: () => setShowWorkspaceSelector(true),
+                  onNewSession: handleStartNewSession,
+                  onOpenWorkspace: requestWorkspaceBindingChange,
                   onSelectMode: handleDialogueModeChange,
                 }}
                 streaming={streaming}
@@ -6001,7 +6140,8 @@ export default function ChatPage() {
             isOpen={showWorkspaceSelector}
             onClose={() => setShowWorkspaceSelector(false)}
             onSelect={async (path) => {
-              if (currentSessionId) {
+              // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
+              if (currentSessionId && canAdjustWorkspaceBinding) {
                 await workspace.setWorkspace(path);
               }
               addSavedWorkspacePath(path);
@@ -6049,6 +6189,7 @@ export default function ChatPage() {
                   sessionId={currentSessionId}
                   sessionSource="chat"
                   compact={false}
+                  workspaceFileItems={workspaceFileItems}
                   centerContent={conversationLayoutState.centerContent}
                   contentMaxWidth={conversationLayoutState.contentMaxWidth}
                   currentUserEmail={currentUserEmail}
@@ -6168,6 +6309,7 @@ export default function ChatPage() {
                         }}
                         todoController={todoController}
                         todoDetailsId={todoDetailsId}
+                        workspaceBinding={workspaceBindingChip}
                       />
                       {multiSelect.multiSelect.enabled && (
                         <MultiSelectToolbar
@@ -6308,8 +6450,8 @@ export default function ChatPage() {
                   welcomeScreen={{
                     hasWorkspace: !!effectiveWorkingDirectory,
                     dialogueMode,
-                    onNewSession: () => void ensureSession(),
-                    onOpenWorkspace: () => setShowWorkspaceSelector(true),
+                    onNewSession: handleStartNewSession,
+                    onOpenWorkspace: requestWorkspaceBindingChange,
                     onSelectMode: handleDialogueModeChange,
                   }}
                   streaming={streaming}
@@ -6517,7 +6659,9 @@ export default function ChatPage() {
                     fetchTree={workspace.fetchTree}
                     active={editorMode}
                     variant="embedded"
-                    onSwitchWorkspace={() => setShowWorkspaceSelector(true)}
+                    onSwitchWorkspace={
+                      canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined
+                    }
                     style={{
                       flex: 1,
                       minHeight: 0,

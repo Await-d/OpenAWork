@@ -7,6 +7,7 @@ import {
   sanitizeComposerPlainText,
   detectComposerTrigger,
 } from '../../../../components/conversation-runtime/messages/support.js';
+import { isImeComposingKeyboardEvent } from '../../../../components/chat/composer/ime-composition.js';
 
 export interface ComposerCallbacksOptions {
   composerMenu: ComposerMenuState | null;
@@ -121,6 +122,11 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // 输入法组合态下不做任何按键拦截，交还给浏览器/输入法处理。
+    // 否则中文用户按回车确认候选词会被当成「发送消息」。
+    if (isImeComposingKeyboardEvent(e)) {
+      return;
+    }
     if (composerMenu) {
       const currentItems = composerMenu.type === 'slash' ? slashCommandItems : mentionItems;
       if (e.key === 'ArrowDown') {
@@ -194,16 +200,18 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
       void stopActiveMessage();
       return;
     }
+    // 带修饰键的 Enter（如 Cmd/Ctrl+Enter）由输入框层处理为「追加排队」，
+    // 这里不拦截，避免被降级成普通发送。
+    const isPlainEnter = e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
     if (
       (streaming || canStopCurrentSessionStream || remoteSessionBusyState !== null) &&
-      e.key === 'Enter' &&
-      !e.shiftKey
+      isPlainEnter
     ) {
       e.preventDefault();
       void enqueueComposerMessage();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isPlainEnter) {
       e.preventDefault();
       void sendMessage();
     }
