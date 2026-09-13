@@ -76,6 +76,32 @@ x\le 7.
     expect(output).not.toContain('(x\\ge7)');
   });
 
+  it('keeps Chinese parenthetical prose out of math mode', () => {
+    const input = '- 计费月起（2026-01 及之后），较上月 > 100 元的部分计入。';
+    expect(normalizeMathMarkdown(input)).toBe(input);
+
+    const halfWidth = '- 计费月起, 较上月 > 100（元）的部分计入。';
+    expect(normalizeMathMarkdown(halfWidth)).toBe(halfWidth);
+  });
+
+  it('does not convert markdown link targets that contain math symbols', () => {
+    const input = '参考 [文档](https://example.com/a_b?x=1) 一节。';
+    expect(normalizeMathMarkdown(input)).toBe(input);
+  });
+
+  it('demotes math delimiters that wrap Chinese prose', () => {
+    const input = '总计 $计费月起，较上月 > 100$ 元。';
+    const output = normalizeMathMarkdown(input);
+
+    expect(output).toBe('总计 \\$计费月起，较上月 > 100\\$ 元。');
+    expect(output).not.toMatch(/(?<!\\)\$/u);
+  });
+
+  it('keeps real formulas and LaTeX text commands untouched', () => {
+    expect(normalizeMathMarkdown('当 $x\\ge7$ 时成立。')).toContain('$x\\ge7$');
+    expect(normalizeMathMarkdown('$\\text{合计} > 100$')).toContain('$\\text{合计} > 100$');
+  });
+
   it('does not carry Markdown list indentation into display math', () => {
     const input = '- 分类结果：\n  [\n  x\\in S_4\n  ]';
     const output = normalizeMathMarkdown(input);

@@ -234,14 +234,17 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   useLayoutEffect(() => {
     composerDraftRevisionRef.current += 1;
   }, [attachmentItems, attachedFiles, input]);
-  const enqueueComposerMessage = useCallback(async (): Promise<boolean> => {
-    const queuedText = sanitizeComposerPlainText(input).trim();
-    const queued = await enqueueComposerMessageDirect();
-    if (queued) {
-      recordSubmittedInputHistory(queuedText);
-    }
-    return queued;
-  }, [enqueueComposerMessageDirect, input, recordSubmittedInputHistory]);
+  const enqueueComposerMessage = useCallback(
+    async (overrideText?: string): Promise<boolean> => {
+      const queuedText = sanitizeComposerPlainText(overrideText ?? input).trim();
+      const queued = await enqueueComposerMessageDirect(overrideText);
+      if (queued) {
+        recordSubmittedInputHistory(queuedText);
+      }
+      return queued;
+    },
+    [enqueueComposerMessageDirect, input, recordSubmittedInputHistory],
+  );
 
   useEffect(() => {
     if (
@@ -263,50 +266,59 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   ]);
 
   // ─── Send handler (constructs payload and delegates to parent) ────────────
-  const sendMessage = useCallback(async (): Promise<boolean> => {
-    const submittedText = input;
-    const submittedDraftRevision = composerDraftRevisionRef.current;
-    const payload: UnifiedComposerSubmitPayload = {
-      text: input,
-      files: attachedFiles,
+  const sendMessage = useCallback(
+    async (overrideText?: string): Promise<boolean> => {
+      const submittedText = overrideText ?? input;
+      const submittedDraftRevision = composerDraftRevisionRef.current;
+      const payload: UnifiedComposerSubmitPayload = {
+        text: submittedText,
+        files: attachedFiles,
+        attachmentItems,
+        imageGenerationMode,
+        imageGenerationDefaults,
+        hasConfiguredImageModel,
+        selectedImageReferenceArtifactId,
+        selectedImageReferenceArtifact: selectedImageReferenceArtifactId
+          ? (imageReferenceArtifacts.find(
+              (a) => a.artifactId === selectedImageReferenceArtifactId,
+            ) ?? null)
+          : null,
+        composerCommandDescriptors,
+        effectiveAgentId: effectiveAgentId ?? '',
+        imageModelLabel,
+      };
+      const submitResult = await onSubmit(payload);
+      if (submitResult === false) {
+        return false;
+      }
+      // 显式传入的文本（粘贴卡片合并）不经受控 input 往返：调用方的写回会先让
+      // draftRevision 变化，若沿用同一判据就会漏掉清空。这条路径直接清空。
+      if (
+        overrideText !== undefined ||
+        composerDraftRevisionRef.current === submittedDraftRevision
+      ) {
+        clearComposerDraft();
+      }
+      recordSubmittedInputHistory(submittedText);
+      return true;
+    },
+    [
+      input,
+      attachedFiles,
       attachmentItems,
       imageGenerationMode,
       imageGenerationDefaults,
       hasConfiguredImageModel,
       selectedImageReferenceArtifactId,
-      selectedImageReferenceArtifact: selectedImageReferenceArtifactId
-        ? (imageReferenceArtifacts.find((a) => a.artifactId === selectedImageReferenceArtifactId) ??
-          null)
-        : null,
+      imageReferenceArtifacts,
       composerCommandDescriptors,
-      effectiveAgentId: effectiveAgentId ?? '',
+      effectiveAgentId,
       imageModelLabel,
-    };
-    const submitResult = await onSubmit(payload);
-    if (submitResult === false) {
-      return false;
-    }
-    if (composerDraftRevisionRef.current === submittedDraftRevision) {
-      clearComposerDraft();
-    }
-    recordSubmittedInputHistory(submittedText);
-    return true;
-  }, [
-    input,
-    attachedFiles,
-    attachmentItems,
-    imageGenerationMode,
-    imageGenerationDefaults,
-    hasConfiguredImageModel,
-    selectedImageReferenceArtifactId,
-    imageReferenceArtifacts,
-    composerCommandDescriptors,
-    effectiveAgentId,
-    imageModelLabel,
-    clearComposerDraft,
-    onSubmit,
-    recordSubmittedInputHistory,
-  ]);
+      clearComposerDraft,
+      onSubmit,
+      recordSubmittedInputHistory,
+    ],
+  );
 
   // ─── Menu items hook ──────────────────────────────────────────────────────
   const { slashCommandItems, mentionItems } = useComposerMenuItems({

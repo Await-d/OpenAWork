@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   AssistantReasoningBlock,
@@ -154,7 +154,42 @@ describe('AssistantReasoningBlock - 响应显示设置变化', () => {
     expect(within(container).queryByText('展开')).toBeNull();
   });
 
-  it('流式生成中的内容应该始终展开', () => {
+  it('非流式且已结束时按设置折叠，Thinking 标签固定在内容区外', () => {
+    vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
+      selector({ reasoningExpandedByDefault: false }),
+    );
+
+    const multiLineContent = `这是一段
+多行
+推理内容`;
+
+    const { container } = render(
+      <AssistantReasoningBlock
+        content={multiLineContent}
+        index={0}
+        total={1}
+        ended={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+
+    const section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-collapsed')).toBe('true');
+    expect(within(container).getByText('Thinking:')).toBeTruthy();
+  });
+});
+
+describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () => {
+  const mockRenderBody = vi.fn((content: string) => <div>{content}</div>);
+
+  beforeEach(() => {
+    resetReasoningOpenStateCacheForTests();
+    vi.clearAllMocks();
+  });
+
+  const longContent = Array.from({ length: 20 }, (_, i) => `思考行 ${i + 1}`).join('\n');
+
+  it('流式生成中的短内容仍完整展示（不触发预览折叠）', () => {
     vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
       selector({ reasoningExpandedByDefault: false }),
     );
@@ -173,8 +208,79 @@ describe('AssistantReasoningBlock - 响应显示设置变化', () => {
       />,
     );
 
-    // 流式生成中不可折叠
+    // 未超过实时预览高度：不折叠、不出展开按钮，仅进入预览模式
     const section = container.querySelector('.assistant-reasoning-block');
     expect(section?.getAttribute('data-collapsed')).toBeNull();
+    expect(section?.getAttribute('data-live-preview')).toBe('true');
+    expect(within(container).queryByText('展开')).toBeNull();
+  });
+
+  it('流式生成中的超长内容应限高预览并提供展开按钮', () => {
+    vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
+      selector({ reasoningExpandedByDefault: false }),
+    );
+
+    const { container } = render(
+      <AssistantReasoningBlock
+        content={longContent}
+        index={0}
+        total={1}
+        streaming={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+
+    // 流式中不再无限堆高：进入实时预览模式并允许展开
+    const section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-live-preview')).toBe('true');
+    expect(within(container).getByText('展开')).toBeTruthy();
+  });
+
+  it('流式预览中点击展开后展示全部内容，可再收起回到预览', () => {
+    vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
+      selector({ reasoningExpandedByDefault: false }),
+    );
+
+    const { container } = render(
+      <AssistantReasoningBlock
+        content={longContent}
+        index={0}
+        total={1}
+        streaming={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+
+    fireEvent.click(within(container).getByText('展开'));
+
+    let section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-live-preview')).toBeNull();
+    expect(within(container).getByText('收起')).toBeTruthy();
+
+    fireEvent.click(within(container).getByText('收起'));
+
+    section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-live-preview')).toBe('true');
+    expect(within(container).getByText('展开')).toBeTruthy();
+  });
+
+  it('开启"推理默认展开"时流式内容完整展示', () => {
+    vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
+      selector({ reasoningExpandedByDefault: true }),
+    );
+
+    const { container } = render(
+      <AssistantReasoningBlock
+        content={longContent}
+        index={0}
+        total={1}
+        streaming={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+
+    const section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-live-preview')).toBeNull();
+    expect(within(container).queryByText('展开')).toBeNull();
   });
 });

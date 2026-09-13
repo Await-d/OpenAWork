@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import {
   buildLocalReasoningBlockKey,
   getLocalReasoningLabel,
@@ -14,6 +14,12 @@ export function resetReasoningOpenStateCacheForTests() {
 }
 
 const REASONING_COLLAPSED_MAX_LINES = 3;
+/** 流式进行中的实时预览窗口高度（行）：超出后裁剪并自动跟随最新内容 */
+const REASONING_LIVE_PREVIEW_MAX_LINES = 6;
+
+function computeClampedBodyMaxHeight(lines: number): string {
+  return `${lines * 1.6 * 13 + 4}px`;
+}
 
 function formatReasoningEndedBadge(durationMs?: number): string {
   if (typeof durationMs !== 'number' || durationMs < 0) {
@@ -76,13 +82,48 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
       setExpanded(reasoningExpandedByDefaultPref);
     }
   }, [reasoningExpandedByDefaultPref, userInteracted]);
+
   const label = getLocalReasoningLabel({ index, streaming, total });
-  const labeledContent = `*${label}* ${content}`;
   const lineCount = content.split('\n').length;
   const isLive = streaming || messageStreaming;
   const isCollapsible = !isLive && lineCount > 1;
+
+  // 流式进行中同样遵循"推理折叠"偏好：超长内容进入实时预览模式——
+  // 限高裁剪并自动跟随最新内容，避免思考输出无限堆高占满屏幕。
+  const livePreview = isLive && !expanded;
+  const livePreviewOverflow = livePreview && lineCount > REASONING_LIVE_PREVIEW_MAX_LINES;
   const shouldCollapse = isCollapsible && !expanded;
   const showLiveEndedBadge = isLive && ended;
+  const showExpandButton = !expanded && (shouldCollapse || livePreviewOverflow);
+  const showCollapseButton =
+    expanded && (isCollapsible || (isLive && lineCount > REASONING_LIVE_PREVIEW_MAX_LINES));
+
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // 实时预览跟随最新内容：每次流式更新后将窗口滚动到底部，
+  // 保证"正在思考的最新一步"始终可见。
+  useEffect(() => {
+    if (!livePreview) {
+      return;
+    }
+    const el = bodyRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+
+  const bodyStyle: React.CSSProperties | undefined = shouldCollapse
+    ? {
+        maxHeight: computeClampedBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
+        overflow: 'clip',
+        position: 'relative',
+      }
+    : livePreview
+      ? {
+          maxHeight: computeClampedBodyMaxHeight(REASONING_LIVE_PREVIEW_MAX_LINES),
+          overflow: 'hidden',
+        }
+      : undefined;
 
   return (
     <section
@@ -90,23 +131,14 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
       data-streaming={streaming ? 'true' : 'false'}
       data-ended={ended ? 'true' : undefined}
       data-collapsed={shouldCollapse ? 'true' : undefined}
+      data-live-preview={livePreview ? 'true' : undefined}
       data-duration-ms={typeof durationMs === 'number' ? String(durationMs) : undefined}
     >
-      <div
-        className="assistant-reasoning-body"
-        style={
-          shouldCollapse
-            ? {
-                maxHeight: `${REASONING_COLLAPSED_MAX_LINES * 1.6 * 13 + 4}px`,
-                overflow: 'clip',
-                position: 'relative',
-              }
-            : undefined
-        }
-      >
-        {renderBody(labeledContent, streaming)}
+      <span className="assistant-reasoning-label">{label}</span>
+      <div ref={bodyRef} className="assistant-reasoning-body" style={bodyStyle}>
+        {renderBody(content, streaming)}
       </div>
-      {shouldCollapse && (
+      {showExpandButton && (
         <button
           type="button"
           onClick={() => {
@@ -119,7 +151,7 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
           展开
         </button>
       )}
-      {isCollapsible && expanded && (
+      {showCollapseButton && (
         <button
           type="button"
           onClick={() => {

@@ -1,5 +1,6 @@
 import {
   Children,
+  Fragment,
   memo,
   type ReactNode,
   useCallback,
@@ -19,6 +20,7 @@ import { MarkdownPathRef } from './markdown-path-ref.js';
 import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
 import { normalizeMathMarkdown } from './normalize-math-markdown.js';
 import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
+import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -33,6 +35,16 @@ const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 const CODE_BLOCK_FOLD_THRESHOLD = 100;
 // How long the copy button stays in its "✓ 已复制" confirmation state.
 const COPY_FEEDBACK_MS = 1500;
+
+/**
+ * KaTeX 的严格模式会对每个"不该出现在数学模式里的字符"逐字符 console.warn。
+ * 模型输出不可控，中文/全角标点混进公式是常态，一条长回复能把控制台刷满
+ * `unicodeTextInMathMode`。只对这一类降级为忽略，其余（未知符号、单位混用
+ * 等）仍保留默认告警，便于发现真正的公式问题。
+ */
+const REHYPE_KATEX_OPTIONS = {
+  strict: (errorCode: string) => (errorCode === 'unicodeTextInMathMode' ? 'ignore' : 'warn'),
+} as const;
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
 
@@ -49,7 +61,7 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
   streaming?: boolean;
 }) {
   const normalizedContent = useMemo(
-    () => normalizeMathMarkdown(transformInlineReasoningTags(content)),
+    () => stripStandaloneBreakLines(normalizeMathMarkdown(transformInlineReasoningTags(content))),
     [content],
   );
   const isBareHtmlDocument = useMemo(
@@ -73,7 +85,11 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
     <div className="chat-markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={streaming ? [rehypeKatex] : [rehypeKatex, rehypeHighlight]}
+        rehypePlugins={
+          streaming
+            ? [[rehypeKatex, REHYPE_KATEX_OPTIONS]]
+            : [[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]
+        }
         components={markdownComponents}
       >
         {normalizedContent}
@@ -83,6 +99,52 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
 });
 
 export default MarkdownMessageContent;
+
+/**
+ * Matches a raw `<br>` (any casing / self-closing form) together with the
+ * whitespace and soft line breaks hugging it. Newlines around a `<br>`
+ * must be consumed too: they survive markdown parsing as soft breaks, and
+ * `.chat-markdown-p[white-space: pre-wrap]` would render them on top of
+ * our element, producing a blank line.
+ */
+const HARD_BREAK_TAG = /[ \t]*(?:\r?\n[ \t]*)?<br\s*\/?>[ \t]*(?:\r?\n[ \t]*)?/giu;
+
+/**
+ * A `<br>` that sits alone on its own line is parsed as *block-level* HTML
+ * instead of inline HTML, so it never reaches the inline components that
+ * `renderTextWithPaths` walks — it would keep rendering as a literal
+ * `<br>` in the message body. Such a tag is only asking for a blank line,
+ * which markdown already provides, so drop the tag and let the surrounding
+ * blank lines handle the spacing.
+ */
+const STANDALONE_BREAK_LINE = /^[ \t]*<br\s*\/?>[ \t]*\r?$/gimu;
+
+function stripStandaloneBreakLines(markdown: string): string {
+  return markdown.replace(STANDALONE_BREAK_LINE, '');
+}
+
+interface TextRenderOptions {
+  allowBareFilename?: boolean;
+  /**
+   * Re-interpret raw `<br>` found inside text children as a real line
+   * break element.
+   *
+   * Model output uses `<br>` heavily — most importantly inside GFM table
+   * cells, which have no line-break syntax of their own. react-markdown
+   * does not parse raw HTML: without `rehype-raw` it rewrites HTML nodes
+   * into literal text, so `<br>` reaches the DOM as the four visible
+   * characters `<br>`. Enabling `rehype-raw` would fix that but would
+   * also require a full sanitize schema to stay safe against untrusted
+   * model output. Splitting the tag out of the text nodes we already
+   * walk is both narrower and safer.
+   *
+   * Keep this off for inline code — there the author explicitly wants the
+   * literal `<br>` text.
+   */
+  allowHardBreaks?: boolean;
+}
+
+const TEXT_WITH_HARD_BREAKS: TextRenderOptions = { allowHardBreaks: true };
 
 /**
  * Wrap detected file-path tokens inside markdown text children with
@@ -102,11 +164,11 @@ export default MarkdownMessageContent;
 function renderTextWithPaths(
   children: ReactNode,
   keyBase: string,
-  options?: { allowBareFilename?: boolean },
+  options: TextRenderOptions = {},
 ): ReactNode {
   let nextIndex = 0;
   const tokenizeOne = (text: string): ReactNode => {
-    const tokens = tokenizePathsInText(text, options);
+    const tokens = tokenizePathsInText(text, { allowBareFilename: options.allowBareFilename });
     if (tokens.length === 0) return text;
     if (tokens.length === 1 && tokens[0]?.type === 'text') {
       return text;
@@ -118,31 +180,86 @@ function renderTextWithPaths(
     });
   };
 
+  const renderOne = (text: string): ReactNode => {
+    if (!options.allowHardBreaks) return tokenizeOne(text);
+
+    const segments = text.split(HARD_BREAK_TAG);
+    if (segments.length === 1) return tokenizeOne(text);
+
+    return segments.map((segment, index) => (
+      <Fragment key={`${keyBase}-br-${nextIndex++}`}>
+        {index > 0 ? <br /> : null}
+        {segment === '' ? null : tokenizeOne(segment)}
+      </Fragment>
+    ));
+  };
+
   // `Children.map` flattens, applies keys, and walks single nodes
-  // and arrays uniformly so we don't need to special-case either.
-  const mapped = Children.map(children, (child) => {
-    if (typeof child === 'string') return tokenizeOne(child);
-    return child;
-  });
-  return mapped ?? children;
+  // and arrays uniformly so we don't need to special-case either. Text
+  // nodes are buffered instead of mapped one by one: react-markdown
+  // emits a raw `<br>` and the soft break that follows it as *separate*
+  // children (`['第一行', '<br>', '\n第二行']`), so the trailing newline
+  // can only be collapsed once adjacent text has been merged back
+  // together. Non-text elements flush the buffer first, which keeps
+  // inline markup (`<strong>`, `<code>`, …) in its original position.
+  const output: ReactNode[] = [];
+  let buffer = '';
+
+  const flushBuffer = (): void => {
+    if (buffer === '') return;
+    output.push(renderOne(buffer));
+    buffer = '';
+  };
+
+  for (const child of Children.toArray(children)) {
+    if (typeof child === 'string') {
+      buffer += child;
+      continue;
+    }
+    flushBuffer();
+    output.push(child);
+  }
+  flushBuffer();
+
+  return output.length === 0 ? children : output;
 }
 
 const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="chat-markdown-h1">{renderTextWithPaths(children, 'h1')}</h1>,
-  h2: ({ children }) => <h2 className="chat-markdown-h2">{renderTextWithPaths(children, 'h2')}</h2>,
-  h3: ({ children }) => <h3 className="chat-markdown-h3">{renderTextWithPaths(children, 'h3')}</h3>,
-  p: ({ children }) => <p className="chat-markdown-p">{renderTextWithPaths(children, 'p')}</p>,
+  h1: ({ children }) => (
+    <h1 className="chat-markdown-h1">
+      {renderTextWithPaths(children, 'h1', TEXT_WITH_HARD_BREAKS)}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="chat-markdown-h2">
+      {renderTextWithPaths(children, 'h2', TEXT_WITH_HARD_BREAKS)}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="chat-markdown-h3">
+      {renderTextWithPaths(children, 'h3', TEXT_WITH_HARD_BREAKS)}
+    </h3>
+  ),
+  p: ({ children }) => (
+    <p className="chat-markdown-p">{renderTextWithPaths(children, 'p', TEXT_WITH_HARD_BREAKS)}</p>
+  ),
   ul: ({ children }) => <ul className="chat-markdown-ul">{children}</ul>,
   ol: ({ children }) => <ol className="chat-markdown-ol">{children}</ol>,
-  li: ({ children }) => <li className="chat-markdown-li">{renderTextWithPaths(children, 'li')}</li>,
+  li: ({ children }) => (
+    <li className="chat-markdown-li">
+      {renderTextWithPaths(children, 'li', TEXT_WITH_HARD_BREAKS)}
+    </li>
+  ),
   // Inline emphasis variants that frequently wrap path-style strings —
   // typical assistant output looks like "查看 **apps/web/src/foo.ts**"
   // or "the *src/utils.ts:42* function". Tokenize their text children
   // too so those references stay clickable. Bolds are recursed shallowly
   // (string-only walk) so deeper nested elements still pass through.
-  strong: ({ children }) => <strong>{renderTextWithPaths(children, 'strong')}</strong>,
-  em: ({ children }) => <em>{renderTextWithPaths(children, 'em')}</em>,
-  del: ({ children }) => <del>{renderTextWithPaths(children, 'del')}</del>,
+  strong: ({ children }) => (
+    <strong>{renderTextWithPaths(children, 'strong', TEXT_WITH_HARD_BREAKS)}</strong>
+  ),
+  em: ({ children }) => <em>{renderTextWithPaths(children, 'em', TEXT_WITH_HARD_BREAKS)}</em>,
+  del: ({ children }) => <del>{renderTextWithPaths(children, 'del', TEXT_WITH_HARD_BREAKS)}</del>,
   blockquote: ({ children }) => (
     <blockquote className="chat-markdown-blockquote">
       {renderTextWithPaths(children, 'bq')}
@@ -153,8 +270,16 @@ const markdownComponents: Components = {
       <table className="chat-markdown-table">{children}</table>
     </div>
   ),
-  th: ({ children }) => <th className="chat-markdown-th">{renderTextWithPaths(children, 'th')}</th>,
-  td: ({ children }) => <td className="chat-markdown-td">{renderTextWithPaths(children, 'td')}</td>,
+  th: ({ children }) => (
+    <th className="chat-markdown-th">
+      {renderTextWithPaths(children, 'th', TEXT_WITH_HARD_BREAKS)}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="chat-markdown-td">
+      {renderTextWithPaths(children, 'td', TEXT_WITH_HARD_BREAKS)}
+    </td>
+  ),
   a: ({ children, href }) => (
     <a className="chat-markdown-link" href={href} target="_blank" rel="noreferrer">
       {children}
@@ -189,6 +314,17 @@ const markdownComponents: Components = {
       return (
         <MarkdownPreviewCodeBlock
           codeContent={codeContent}
+          codeProps={props}
+          className={className}
+          language={language}
+        />
+      );
+    }
+
+    if (isMermaidLanguage(rawLanguage)) {
+      return (
+        <MermaidPreviewCodeBlock
+          code={getCopyableCodeText(codeContent).replace(/\n$/, '')}
           codeProps={props}
           className={className}
           language={language}
@@ -241,6 +377,17 @@ const noMarkdownPreviewComponents: Components = {
 
     if (isThinkingLanguage(rawLanguage)) {
       return <ThinkingCodeBlock codeContent={codeContent} />;
+    }
+
+    if (isMermaidLanguage(rawLanguage)) {
+      return (
+        <MermaidPreviewCodeBlock
+          code={getCopyableCodeText(codeContent).replace(/\n$/, '')}
+          codeProps={props}
+          className={className}
+          language={language}
+        />
+      );
     }
 
     const previewKind = getStaticPreviewKind(rawLanguage);
@@ -426,6 +573,10 @@ function getCopyableCodeText(content: ReactNode): string {
 
 function isMarkdownLanguage(language: string | undefined): boolean {
   return language === 'markdown' || language === 'md';
+}
+
+function isMermaidLanguage(language: string | undefined): boolean {
+  return language === 'mermaid' || language === 'mmd';
 }
 
 function isThinkingLanguage(language: string | undefined): boolean {

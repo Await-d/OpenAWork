@@ -1,5 +1,6 @@
 import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.js';
 import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
+import { formatReasoningEffortLabel } from './reasoning-effort-label.js';
 
 export interface PromptOptimizationContextInput {
   readonly dialogueMode: DialogueMode;
@@ -28,16 +29,6 @@ const DIALOGUE_MODE_LABELS: Record<DialogueMode, string> = {
   programmer: '工程实现',
 };
 
-const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
-  none: '关闭',
-  minimal: '极低',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '超高',
-  max: '最大',
-};
-
 function hasComposerSlashCommand(text: string): boolean {
   return /(^|[\s\n])\/[^\s/]/u.test(text);
 }
@@ -51,7 +42,7 @@ export function buildPromptOptimizationContext(input: PromptOptimizationContextI
   const modelLabel = input.modelId.trim() || '未命名模型';
   const modeLabel = input.imageGenerationMode ? '图片生成提示词' : '标准聊天提示词';
   const thinkingLabel = input.thinkingEnabled
-    ? `开启（${REASONING_EFFORT_LABELS[input.reasoningEffort]}）`
+    ? `开启（${formatReasoningEffortLabel(input.reasoningEffort)}）`
     : '关闭';
   const availableAssist: string[] = [];
   const usedAssist: string[] = [];

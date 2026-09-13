@@ -7,8 +7,24 @@ import {
   type ChatTodoController,
 } from '../../conversation-runtime/views/todo-bar.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import './ChatTopBar.css';
 
-interface ChatTopBarProps {
+/**
+ * 工作区绑定 chip 的可控状态。
+ *
+ * - 提供 `onSelect`：会话尚未产生消息（新建态），chip 可点击直接调整绑定。
+ * - 省略 `onSelect`：会话已开始对话，绑定锁定，chip 只读展示。
+ */
+export interface WorkspaceBindingChipState {
+  /** 展示名：工作区路径末段，或「未指定工作区」。 */
+  label: string;
+  /** 完整路径，用于 tooltip；未绑定时为 null。 */
+  fullPath?: string | null;
+  /** 可调整时的点击回调（打开工作区选择器）。 */
+  onSelect?: () => void;
+}
+
+export interface ChatTopBarProps {
   dialogueMode: DialogueMode;
   onChangeDialogueMode: (mode: DialogueMode) => void;
   yoloMode: boolean;
@@ -38,13 +54,17 @@ interface ChatTopBarProps {
   hideDialogueModeToggle?: boolean;
   hideYoloToggle?: boolean;
   hideRightPanelToggle?: boolean;
-  /** 会话信息 slot：标题 + 模型 + 模式 + 工作区，合并展示在左侧 */
+  /** 会话信息 slot：标题 + 模型 + 模式，合并展示在左侧 */
   sessionInfo?: {
     title: string;
     modelLabel?: string | null;
     modeLabel?: string | null;
-    workspacePath?: string | null;
   };
+  /**
+   * 工作区绑定 chip：新建（尚未产生消息）的会话可点击快速调整绑定，
+   * 一旦产生消息则只读展示、不再允许调整。
+   */
+  workspaceBinding?: WorkspaceBindingChipState;
   /** 审查面板切换（从 SessionHeaderBar 迁移） */
   reviewPanelOpened?: boolean;
   onToggleReviewPanel?: () => void;
@@ -87,6 +107,7 @@ export function ChatTopBar({
   hideYoloToggle = false,
   hideRightPanelToggle = false,
   sessionInfo,
+  workspaceBinding,
   reviewPanelOpened = false,
   onToggleReviewPanel,
   terminalPanelOpened = false,
@@ -189,7 +210,7 @@ export function ChatTopBar({
           </button>
         )}
 
-        {/* 会话信息：标题 + 模型/模式/工作区（来自 SessionHeaderBar 合并） */}
+        {/* 会话信息：标题 + 模型/模式（来自 SessionHeaderBar 合并）；工作区由绑定 chip 单独渲染 */}
         {sessionInfo && (
           <>
             <span
@@ -241,15 +262,14 @@ export function ChatTopBar({
                   </span>
                 </>
               )}
-              {sessionInfo.workspacePath && (
-                <>
-                  <span>·</span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {sessionInfo.workspacePath.split(/[\\/]/).pop()}
-                  </span>
-                </>
-              )}
             </span>
+          </>
+        )}
+
+        {workspaceBinding && <WorkspaceBindingChip binding={workspaceBinding} />}
+
+        {(sessionInfo || workspaceBinding) && (
+          <>
             {/* 分隔线 */}
             <span
               style={{
@@ -694,5 +714,89 @@ export function ChatTopBar({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 工作区绑定 chip。
+ *
+ * 新建（未产生消息）的会话渲染为可点击按钮，一键调整绑定的工作区；
+ * 已开始对话后渲染为只读态（无 `onSelect`），并把锁定原因放进 tooltip。
+ */
+function WorkspaceBindingChip({ binding }: { binding: WorkspaceBindingChipState }) {
+  const fullPath = binding.fullPath ?? null;
+  const content = (
+    <>
+      <svg
+        aria-hidden="true"
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </svg>
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          maxWidth: 160,
+        }}
+      >
+        {binding.label}
+      </span>
+      {binding.onSelect ? (
+        <svg
+          aria-hidden="true"
+          width="9"
+          height="9"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      ) : null}
+    </>
+  );
+
+  if (!binding.onSelect) {
+    return (
+      <span
+        className="chat-top-bar__workspace-chip"
+        data-interactive="false"
+        data-testid="chat-top-bar-workspace-binding"
+        title={
+          fullPath
+            ? `工作区：${fullPath}（已开始对话，绑定已锁定）`
+            : '未指定工作区（已开始对话，绑定已锁定）'
+        }
+      >
+        {content}
+      </span>
+    );
+  }
+
+  const actionLabel = fullPath ? `调整绑定工作区：${fullPath}` : '选择要绑定的工作区';
+  return (
+    <button
+      type="button"
+      className="chat-top-bar__workspace-chip"
+      data-interactive="true"
+      data-testid="chat-top-bar-workspace-binding"
+      onClick={binding.onSelect}
+      title={actionLabel}
+      aria-label={actionLabel}
+    >
+      {content}
+    </button>
   );
 }

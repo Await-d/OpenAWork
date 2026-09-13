@@ -1,13 +1,18 @@
 import type React from 'react';
+import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
 import { ProviderMark } from '../model-picker/chat-provider-display.js';
+import { formatReasoningEffortLabel } from './reasoning-effort-label.js';
 
 export interface ChatComposerModelControlsProps {
   readonly activeProviderId: string;
   readonly activeProviderName?: string;
   readonly activeProviderType?: string;
   readonly activeModelTooltip?: string;
+  /** 当前模型的显示名，直接呈现在按钮上（如 "GPT-5"）。 */
+  readonly activeModelLabel?: string;
   readonly activeModelSupportsThinking: boolean;
   readonly thinkingEnabled: boolean;
+  readonly reasoningEffort?: ReasoningEffort;
   readonly modelPickerRef: React.RefObject<HTMLButtonElement | null>;
   readonly modelSettingsRef: React.RefObject<HTMLButtonElement | null>;
   readonly showModelPicker: boolean;
@@ -18,6 +23,13 @@ export interface ChatComposerModelControlsProps {
   readonly onToggleModelSettings: () => void;
 }
 
+/**
+ * 输入框工具条上的模型与思考等级控件。
+ *
+ * 两者都以「图标 + 当前值 + 下拉箭头」呈现：模型按钮显示模型名，设置按钮显示
+ * 思考等级。此前它们只是图标，用户必须 hover 才能知道当前用的是哪个模型、
+ * 思考处于什么等级。
+ */
 export function ChatComposerModelControls(props: ChatComposerModelControlsProps) {
   const showGroup = props.showModelPickerButton || props.showModelSettingsButton;
   if (!showGroup) return null;
@@ -46,6 +58,10 @@ export function ChatComposerModelControls(props: ChatComposerModelControlsProps)
           ) : (
             <PlusIcon />
           )}
+          <span className="composer-model-button__label">
+            {props.activeModelLabel?.trim() || '选择模型'}
+          </span>
+          <ChevronDownIcon className="composer-model-button__chevron" />
         </button>
       )}
       {props.showModelSettingsButton && (
@@ -53,21 +69,67 @@ export function ChatComposerModelControls(props: ChatComposerModelControlsProps)
           ref={props.modelSettingsRef}
           type="button"
           onClick={props.onToggleModelSettings}
-          title={props.activeModelSupportsThinking ? '思考等级与模型设置' : '模型能力设置'}
+          title={describeSettingsTooltip(props)}
           aria-label={
             props.activeModelSupportsThinking ? '打开模型设置与思考等级' : '打开模型能力设置'
           }
           aria-haspopup="dialog"
           aria-expanded={props.showModelSettings}
           aria-controls="chat-model-settings-dialog"
-          className={`composer-model-button${props.thinkingEnabled ? ' active' : ''}${
-            props.showModelPickerButton ? ' with-divider' : ''
-          }`}
+          className={`composer-model-button${props.thinkingEnabled ? ' active' : ''}`}
         >
           {props.activeModelSupportsThinking ? <ThinkingIcon /> : <SettingsIcon />}
+          <span className="composer-model-button__label">{describeSettingsLabel(props)}</span>
+          <ChevronDownIcon className="composer-model-button__chevron" />
         </button>
       )}
     </div>
+  );
+}
+
+/** 按钮上的可见标签：直接呈现当前思考状态，避免"图标看不出等级"。 */
+function describeSettingsLabel(props: ChatComposerModelControlsProps): string {
+  if (!props.activeModelSupportsThinking) {
+    return '模型设置';
+  }
+  if (!props.thinkingEnabled) {
+    return '思考关闭';
+  }
+  if (props.reasoningEffort === undefined || props.reasoningEffort === 'none') {
+    return '思考已开启';
+  }
+  return `思考 · ${formatReasoningEffortLabel(props.reasoningEffort)}`;
+}
+
+function describeSettingsTooltip(props: ChatComposerModelControlsProps): string {
+  if (!props.activeModelSupportsThinking) {
+    return '模型能力设置';
+  }
+  if (!props.thinkingEnabled) {
+    return '思考已关闭 · 点击开启或调整等级';
+  }
+  if (props.reasoningEffort === undefined || props.reasoningEffort === 'none') {
+    return '思考已开启 · 点击调整等级';
+  }
+  return `思考等级：${formatReasoningEffortLabel(props.reasoningEffort)} · 点击调整`;
+}
+
+function ChevronDownIcon({ className }: { readonly className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }
 

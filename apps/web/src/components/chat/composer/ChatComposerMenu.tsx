@@ -25,6 +25,8 @@ export interface ChatComposerMenuProps {
   composerItemRefs: RefObject<Array<HTMLButtonElement | null>>;
   onComposerHover: (index: number) => void;
   onApplyComposerSelection: (item: SlashCommandItem | MentionItem) => void | Promise<void>;
+  /** 工作区是否已索引出文件；用于区分「无文件」与「无匹配」两种空状态。 */
+  hasWorkspaceFiles: boolean;
 }
 
 export function ChatComposerMenu({
@@ -35,6 +37,7 @@ export function ChatComposerMenu({
   composerItemRefs,
   onComposerHover,
   onApplyComposerSelection,
+  hasWorkspaceFiles,
 }: ChatComposerMenuProps) {
   return (
     <div
@@ -106,12 +109,12 @@ export function ChatComposerMenu({
                   ? slashIncludesWorkspaceCatalog
                     ? '按 Enter 或 Tab 插入；仅 / 命令会在发送时直接执行'
                     : '按 Enter 或 Tab 插入 / 执行'
-                  : '输入 @ 引用文件到当前消息'}
+                  : '按 Enter 或 Tab 插入文件引用'}
               </div>
             </div>
           </div>
           <ComposerHintChip
-            label={`${composerMenu.type === 'slash' ? '/' : '@'}${composerMenu.query || '...'}`}
+            label={`${composerMenu.type === 'slash' ? '/' : '@'}${composerMenu.query}`}
             tone="accent"
           />
         </div>
@@ -120,8 +123,8 @@ export function ChatComposerMenu({
           style={{
             display: 'flex',
             flexDirection: 'column',
-            padding: '8px 6px',
-            gap: 4,
+            padding: '6px 5px',
+            gap: 2,
             maxHeight: 'min(320px, 45vh)',
             overflowY: 'auto',
           }}
@@ -138,10 +141,21 @@ export function ChatComposerMenu({
                 gap: 6,
               }}
             >
-              <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>
-                暂无可引用的工作区文件
-              </span>
-              <span>请先在左上角「打开工作目录」选择一个目录，索引完成后再用 @ 引用文件。</span>
+              {hasWorkspaceFiles ? (
+                <>
+                  <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>
+                    未找到匹配「{composerMenu.query}」的文件
+                  </span>
+                  <span>试试更短的关键词，或用更靠前的目录名。</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>
+                    暂无可引用的文件
+                  </span>
+                  <span>先打开工作区，索引完成后文件会出现在这里。</span>
+                </>
+              )}
             </div>
           )}
           {currentItems.map((item, index) => {
@@ -167,7 +181,7 @@ export function ChatComposerMenu({
                   borderRadius: 10,
                   background: selected ? 'var(--accent-muted)' : 'transparent',
                   color: 'var(--fg-strong)',
-                  padding: '8px 10px',
+                  padding: '5px 8px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -181,9 +195,10 @@ export function ChatComposerMenu({
                     flex: 1,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: 5,
                   }}
                 >
+                  {!slashItem && <FileIcon />}
                   <span
                     style={{
                       ...composerListPrimaryTextStyle,
@@ -216,13 +231,23 @@ export function ChatComposerMenu({
                           fontSize: 10,
                           lineHeight: 1.45,
                           color: 'var(--fg-muted)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
                           overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
                         }}
                         title={item.description}
                       >
-                        {item.description}
+                        <FolderIcon />
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {item.description}
+                        </span>
                       </span>
                     </>
                   )}
@@ -262,5 +287,44 @@ export function ChatComposerMenu({
         </div>
       </div>
     </div>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0, color: 'var(--fg-subtle)' }}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0, color: 'var(--fg-subtle)' }}
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
   );
 }

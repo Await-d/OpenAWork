@@ -1,5 +1,258 @@
-.chat-composer__right-slot {
+/* ── 外壳与布局 ─────────────────────────────────────────────── */
+
+.chat-composer {
+  padding: 0 var(--spacing-4) var(--spacing-3);
+  transition: padding 220ms ease;
+}
+
+.chat-composer__inner {
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  padding-top: var(--spacing-3);
+  transform: translateY(0);
+  transition:
+    max-width 240ms ease,
+    transform 240ms ease;
+}
+
+/* 编辑器模式（内嵌侧栏）收窄输入区。 */
+.chat-composer__inner--editor {
+  max-width: 680px;
+}
+
+.chat-composer__body {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-2);
+  position: relative;
+}
+
+.composer-shell {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+/* 文件拖入时的高亮态，与 ComposerDragOverlay 配合。 */
+.composer-shell--drop {
+  border-style: dashed;
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+}
+
+/* 内层输入区：承载折叠卡片、textarea、优化弹层与工具条。 */
+.composer-input-area {
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 6px var(--spacing-2);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: transparent;
+  transition:
+    border-color 220ms ease,
+    border-radius 220ms ease,
+    padding 220ms ease,
+    background 220ms ease,
+    gap 220ms ease;
+}
+
+.composer-input-area--home {
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay));
+}
+
+.composer-voice-panel {
+  padding: 6px var(--spacing-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+.composer-attachment-row {
+  padding: 0 1px;
+}
+
+.chat-composer__right-slot {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* ── textarea ───────────────────────────────────────────────── */
+
+.chat-composer__textarea {
+  width: 100%;
+  min-height: 96px;
+  /* 与 use-composer-textarea-autosize.ts 的 TEXTAREA_MAX_HEIGHT_PX 保持一致。 */
+  max-height: 280px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-strong);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  overflow-y: hidden;
+  transition:
+    min-height 220ms ease,
+    font-size 220ms ease,
+    max-height 220ms ease;
+}
+
+/* ── 拖拽提示遮罩 ───────────────────────────────────────────── */
+
+.composer-drag-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.composer-drag-overlay__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ── 图片附件预览条 ─────────────────────────────────────────── */
+
+.composer-image-previews {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 1px 0;
+}
+
+/* ── 代理切换胶囊 ─────────────────────────────────────────────
+   位于工具栏内（与模型 / 思考控件成组），不再悬浮在 textarea 上——
+   悬浮版会遮挡输入内容，且预留 padding 无法跟随代理名长度。 */
+.composer-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  max-width: 150px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  appearance: none;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.composer-agent-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-agent-chip:hover {
+  color: var(--fg-default);
+  border-color: var(--border-emphasis);
+}
+
+.composer-agent-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 显式指定了代理（覆盖会话默认值）时的强调态。 */
+.composer-agent-chip--overridden {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-subtle));
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-overlay));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── 思考关键词提示 ─────────────────────────────────────────── */
+
+.composer-think-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 2px var(--spacing-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  color: color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+/* ── 撤销 / Esc 提示条 ──────────────────────────────────────── */
+
+.composer-undo-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: 3px var(--spacing-2);
+  margin-top: var(--spacing-1);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 20%, var(--border-subtle));
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.composer-undo-toast__action,
+.composer-undo-toast__dismiss {
+  border: none;
+  background: transparent;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.composer-undo-toast__action {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.composer-undo-toast__action:hover {
+  text-decoration: underline;
+}
+
+.composer-undo-toast__dismiss {
+  color: var(--fg-subtle);
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.composer-undo-toast__dismiss:hover {
+  color: var(--fg-default);
+}
+
+.composer-undo-toast__action:focus-visible,
+.composer-undo-toast__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 @media (max-width: 520px) {
@@ -21,12 +274,25 @@
   }
 
   .chat-composer__textarea {
-    font-size: 11px !important;
-    line-height: 1.45 !important;
+    font-size: 12px !important;
+    line-height: 1.5 !important;
     min-height: 74px !important;
   }
 
   .chat-composer__right-slot {
     display: none !important;
+  }
+
+  /* 窄屏没有横向空间承载模型名与等级文字，退回纯图标按钮。 */
+  .composer-model-button {
+    width: 26px;
+    max-width: none;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .composer-model-button__label,
+  .composer-model-button__chevron {
+    display: none;
   }
 }

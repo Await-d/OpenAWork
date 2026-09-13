@@ -1,0 +1,60 @@
+/**
+ * ChatTopBar 工作区绑定 chip。
+ *
+ * 交互态（hover / active / focus-visible）统一下沉到 CSS，避免内联样式覆盖伪类。
+ * `data-interactive="true"`：新建会话，可点击调整绑定；`false`：对话已开始，只读锁定。
+ */
+
+.chat-top-bar__workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.chat-top-bar__workspace-chip[data-interactive='true'] {
+  border-color: color-mix(in oklch, var(--accent) 34%, var(--border-default) 66%);
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  color: var(--fg-strong);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-top-bar__workspace-chip[data-interactive='true']:hover {
+  border-color: color-mix(in oklch, var(--accent) 55%, var(--border-default) 45%);
+  background: color-mix(in oklch, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+
+.chat-top-bar__workspace-chip[data-interactive='true']:active {
+  transform: translateY(1px);
+}
+
+.chat-top-bar__workspace-chip[data-interactive='true']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-top-bar__workspace-chip {
+    transition: none;
+  }
+
+  .chat-top-bar__workspace-chip[data-interactive='true']:active {
+    transform: none;
+  }
+}

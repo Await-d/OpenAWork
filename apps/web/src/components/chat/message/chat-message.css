@@ -1854,6 +1854,16 @@
   border-left-color: color-mix(in oklch, var(--accent) 50%, var(--border-default) 50%);
 }
 
+/* Thinking 标签头：固定在内容区之外，实时预览跟随滚动最新内容时始终可见 */
+.assistant-reasoning-label {
+  display: block;
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-default);
+  margin-bottom: 1px;
+}
+
 .assistant-reasoning-body .assistant-rich-content-body {
   position: relative;
   gap: 0;
@@ -2100,6 +2110,46 @@
   display: block;
 }
 
+/* Mermaid 图表预览 */
+.chat-markdown-mermaid-figure {
+  display: flex;
+  justify-content: center;
+  padding: 16px 14px;
+  background: var(--bg-raised);
+  border-radius: 10px;
+  overflow: auto;
+}
+
+.chat-markdown-mermaid-figure svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.chat-markdown-mermaid-status {
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+  border-radius: 10px;
+}
+
+.chat-markdown-mermaid-status[data-load-failed='true'] {
+  color: color-mix(in oklch, var(--accent) 70%, var(--fg-muted) 30%);
+}
+
+.chat-markdown-mermaid-error {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border-subtle);
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 96px;
+}
+
 .chat-markdown-preview-links {
   display: flex;
   flex-wrap: wrap;
@@ -2138,7 +2188,7 @@
 
 .chat-markdown-table {
   width: 100%;
-  min-width: 520px;
+  min-width: min(520px, 100%);
   border-collapse: collapse;
   font-size: 12.5px;
 }
@@ -2149,6 +2199,7 @@
   border-bottom: 1px solid var(--border-subtle);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: break-word;
 }
 .chat-markdown-th + .chat-markdown-th,
 .chat-markdown-td + .chat-markdown-td {

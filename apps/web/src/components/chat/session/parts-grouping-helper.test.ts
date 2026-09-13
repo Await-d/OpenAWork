@@ -26,13 +26,42 @@ describe('groupMessageParts', () => {
     ]);
   });
 
-  it('折叠协调阶段产生的相邻重复文本分片', () => {
+  it('保留流中合法的相邻重复文本分片', () => {
     const grouped = groupMessageParts([
       { id: 'text-1', type: 'text', text: '重复文本' },
       { id: 'text-2', type: 'text', text: '  重复文本  ' },
     ]);
 
-    expect(grouped).toHaveLength(1);
-    expect(grouped[0]).toMatchObject({ type: 'text', part: { id: 'text-1', text: '重复文本' } });
+    expect(grouped).toHaveLength(2);
+    expect(grouped.map((part) => part.type)).toEqual(['text', 'text']);
+    expect(grouped.map((part) => (part.type === 'text' ? part.part.id : ''))).toEqual([
+      'text-1',
+      'text-2',
+    ]);
+  });
+
+  it('保留思考、正文、工具和重复正文的原始顺序', () => {
+    const grouped = groupMessageParts([
+      { id: 'reasoning-1', type: 'reasoning', text: '先分析' },
+      { id: 'text-1', type: 'text', text: '继续' },
+      {
+        id: 'tool-1',
+        type: 'tool',
+        toolCallId: 'tool-1',
+        toolName: 'read',
+        input: { path: 'a.ts' },
+        status: 'completed',
+      },
+      { id: 'text-2', type: 'text', text: '继续' },
+      { id: 'reasoning-2', type: 'reasoning', text: '再检查' },
+    ]);
+
+    expect(grouped.map((part) => part.type)).toEqual([
+      'reasoning',
+      'text',
+      'tool-single',
+      'text',
+      'reasoning',
+    ]);
   });
 });

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
+import { AttachmentBar, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
   ComposerMenuState,
   MentionItem,
+  ReasoningEffort,
   SlashCommandItem,
 } from '../../conversation-runtime/messages/support.js';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
@@ -13,6 +14,11 @@ import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGen
 import { ChatComposerMenu } from './ChatComposerMenu.js';
 import { ChatComposerOptimize } from './ChatComposerOptimize.js';
 import { PasteSnippetCard } from './PasteSnippetCard.js';
+import { ComposerDragOverlay } from './ComposerDragOverlay.js';
+import { ComposerImagePreviews } from './ComposerImagePreviews.js';
+import { ComposerThinkHint } from './ComposerThinkHint.js';
+import { ComposerUndoToast } from './ComposerUndoToast.js';
+import { useComposerUndoToast } from './use-composer-undo-toast.js';
 import { ChatComposerImagePanel } from './ChatComposerFeatureToggles.js';
 import { ChatComposerQueue } from './ChatComposerQueue.js';
 import { ChatComposerToolbar } from './ChatComposerToolbar.js';
@@ -20,10 +26,24 @@ import { CompactComposerStatsSummary, ComposerStatsBar } from './ComposerStatsBa
 import type { ComposerStatsData } from './ComposerStatsBar.js';
 import type { ComposerOptimizeError } from './composer-optimize-error.js';
 import { getComposerCharacterCount } from './composer-character-count.js';
+import { COMPOSER_FILE_ACCEPT } from './composer-file-accept.js';
+import {
+  useComposerPasteCollapse,
+  PASTE_COLLAPSE_THRESHOLD,
+} from './use-composer-paste-collapse.js';
 import { useComposerPlaceholder } from './use-composer-placeholder.js';
+import { useComposerTextareaAutosize } from './use-composer-textarea-autosize.js';
+import { isImeComposingKeyboardEvent } from './ime-composition.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { getUserVisibleErrorDescriptor } from '../../../utils/errors/user-visible-error.js';
 import './ChatComposer.css';
+
+/** 连按两次 Escape 才触发破坏性操作（清空输入 / 编辑上一条）的时间窗。 */
+const DOUBLE_ESCAPE_WINDOW_MS = 700;
+/** 把折叠的粘贴文本与当前输入合并成最终发送内容。 */
+function combinePastedText(pastedText: string, input: string): string {
+  return `${pastedText}\n\n${input}`;
+}
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -38,6 +58,10 @@ interface ChatComposerProps {
   activeProviderName?: string;
   activeProviderType?: string;
   activeModelTooltip?: string;
+  /** 当前模型的显示名，用于工具条上的模型按钮。 */
+  activeModelLabel?: string;
+  /** 当前思考等级，用于工具条上的思考按钮。 */
+  reasoningEffort?: ReasoningEffort;
   modelPickerRef: React.RefObject<HTMLButtonElement | null>;
   modelSettingsRef: React.RefObject<HTMLButtonElement | null>;
   showModelPicker: boolean;
@@ -60,6 +84,12 @@ interface ChatComposerProps {
   sessionBusyState?: 'running' | 'paused' | null;
   stoppingStream?: boolean;
   attachedFiles: File[];
+  /**
+   * 附件条目 id 到源文件的映射，由 UnifiedComposer 统一构建。
+   * 图片预览必须按 id 取文件：`attachedFiles` 与 `attachmentItems` 的索引
+   * 对应是上游的内部契约，不应在这里被第二次假设。
+   */
+  attachmentFilesById?: ReadonlyMap<string, File>;
   attachmentItems: AttachmentItem[];
   queuedMessages?: Array<{
     id: string;
@@ -71,6 +101,8 @@ interface ChatComposerProps {
   composerMenu: ComposerMenuState;
   slashCommandItems: SlashCommandItem[];
   mentionItems: MentionItem[];
+  /** 工作区是否已索引出文件；用于 @ 菜单区分「无文件」与「无匹配」。 */
+  hasWorkspaceFiles?: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   agentOptions: Array<{ id: string; label: string }>;
@@ -86,10 +118,12 @@ interface ChatComposerProps {
   onComposerHover: (index: number) => void;
   onToggleVoice: () => void;
   onVoiceTranscript: (text: string) => void;
-  onQueueMessage?: () => void | Promise<void>;
+  /** 传入 overrideText 时以该文本入队，用于合并折叠的粘贴内容。 */
+  onQueueMessage?: (overrideText?: string) => void | Promise<void>;
   onRemoveQueuedMessage: (id: string) => void;
   onRestoreQueuedMessage?: (id: string) => void;
-  onSend: () => void | Promise<void>;
+  /** 传入 overrideText 时以该文本发送，用于合并折叠的粘贴内容。 */
+  onSend: (overrideText?: string) => void | Promise<void>;
   onStop: () => void | Promise<void>;
   onRequestFiles: () => void;
   onToggleModelPicker: () => void;
@@ -142,6 +176,8 @@ export function ChatComposer({
   activeProviderName,
   activeProviderType,
   activeModelTooltip,
+  activeModelLabel,
+  reasoningEffort,
   modelPickerRef,
   modelSettingsRef,
   showModelPicker,
@@ -164,12 +200,14 @@ export function ChatComposer({
   sessionBusyState = null,
   stoppingStream = false,
   attachedFiles,
+  attachmentFilesById,
   attachmentItems,
   queuedMessages = [],
   showVoice,
   composerMenu,
   slashCommandItems,
   mentionItems,
+  hasWorkspaceFiles = false,
   textareaRef,
   fileInputRef,
   agentOptions,
@@ -220,49 +258,29 @@ export function ChatComposer({
   const [optimizeError, setOptimizeError] = useState<ComposerOptimizeError | null>(null);
   const optimizePopoverRef = useRef<HTMLDivElement | null>(null);
   const isHomeVariant = variant === 'home';
-  const [undoText, setUndoText] = useState<string | null>(null);
-  const [pasteCollapsed, setPasteCollapsed] = useState<{ text: string; lineCount: number } | null>(
-    null,
-  );
-  const [pastePreviewExpanded, setPastePreviewExpanded] = useState(false);
+  const {
+    collapsed: pasteCollapsed,
+    previewExpanded: pastePreviewExpanded,
+    collapse: collapsePaste,
+    clear: clearPaste,
+    togglePreview: togglePastePreview,
+    updateText: updatePasteText,
+  } = useComposerPasteCollapse();
+  const { undoText, escapeHint, showUndo, showEscapeHint, hideEscapeHint, dismiss } =
+    useComposerUndoToast();
   const composerPlaceholder = useComposerPlaceholder(input, placeholder);
   const characterCount = useMemo(
     () => getComposerCharacterCount(input, statsData?.contextMaxTokens),
     [input, statsData?.contextMaxTokens],
   );
 
-  useEffect(() => {
-    if (undoText === null) return;
-    const id = window.setTimeout(() => setUndoText(null), 3000);
-    return () => window.clearTimeout(id);
-  }, [undoText]);
+  useComposerTextareaAutosize(textareaRef, input);
 
   const composerListRef = useRef<HTMLDivElement | null>(null);
   const composerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const imagePreviews = useMemo(() => {
-    return attachmentItems
-      .map((item, index) => ({ item, file: attachedFiles[index] ?? null }))
-      .filter(
-        (entry): entry is { item: AttachmentItem; file: File } =>
-          entry.item.type === 'image' && entry.file !== null,
-      )
-      .map((entry) => ({
-        id: entry.item.id,
-        name: entry.item.name,
-        url: URL.createObjectURL(entry.file),
-      }));
-  }, [attachmentItems, attachedFiles]);
-
-  useEffect(() => {
-    return () => {
-      imagePreviews.forEach((item) => {
-        URL.revokeObjectURL(item.url);
-      });
-    };
-  }, [imagePreviews]);
 
   const currentItems = composerMenu?.type === 'slash' ? slashCommandItems : mentionItems;
-  const lastEmptyEscapeAtRef = useRef(0);
+  const lastEscapeKeyAtRef = useRef(0);
 
   const agentCycleList = useMemo(
     () => ['__default__', ...agentOptions.map((a) => a.id)],
@@ -291,11 +309,11 @@ export function ChatComposer({
     Boolean(onQueueMessage) &&
     (showStopAction || hasRemoteSessionBusyState) &&
     canSubmit;
-  const composerKeyboardShortcuts = showQueueAction
-    ? 'Tab Enter'
-    : showStopAction
-      ? 'Escape'
-      : undefined;
+  const composerKeyboardShortcuts =
+    [
+      ...(showQueueAction ? ['Control+Enter', 'Meta+Enter'] : []),
+      ...(showStopAction ? ['Escape'] : []),
+    ].join(' ') || undefined;
 
   const advanceAgentSelection = useCallback(
     (direction: 'next' | 'previous' = 'next') => {
@@ -319,11 +337,9 @@ export function ChatComposer({
   const wrappedOnPaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const pastedText = e.clipboardData.getData('text/plain');
-      if (pastedText.length > 500) {
+      if (pastedText.length > PASTE_COLLAPSE_THRESHOLD) {
         e.preventDefault();
-        const lineCount = pastedText.split('\n').length;
-        setPasteCollapsed({ text: pastedText, lineCount });
-        setPastePreviewExpanded(false);
+        collapsePaste(pastedText);
         // 同时处理可能存在的图片
         const imageFiles = Array.from(e.clipboardData.items)
           .filter((item) => item.type.startsWith('image/'))
@@ -336,52 +352,57 @@ export function ChatComposer({
       }
       onInputPaste(e);
     },
-    [onInputPaste, onDropFiles, textareaRef],
+    [collapsePaste, onDropFiles, onInputPaste, textareaRef],
   );
-
-  // 发送/排队前将粘贴的完整文本拼接到用户输入前面
-  const pendingActionRef = useRef<'send' | 'queue' | null>(null);
 
   const wrappedOnSend = useCallback(() => {
     if (pasteCollapsed) {
-      pendingActionRef.current = 'send';
-      const combined = `${pasteCollapsed.text}\n\n${input}`;
+      const combined = combinePastedText(pasteCollapsed.text, input);
+      clearPaste();
+      // 写回受控 input 是为了发送失败时内容仍留在输入框；真正发送的文本则直接
+      // 作为参数交给发送链路，不再依赖「input 变化后再补发」的两阶段往返。
       onReplaceInput?.(combined);
-      setPasteCollapsed(null);
-      setPastePreviewExpanded(false);
+      void onSend(combined);
       return;
     }
     void onSend();
-  }, [input, onSend, onReplaceInput, pasteCollapsed]);
+  }, [clearPaste, input, onSend, onReplaceInput, pasteCollapsed]);
 
-  // 队列消息也需要合并粘贴文本
   const wrappedOnQueueMessage = useCallback(() => {
     if (pasteCollapsed) {
-      pendingActionRef.current = 'queue';
-      const combined = `${pasteCollapsed.text}\n\n${input}`;
+      const combined = combinePastedText(pasteCollapsed.text, input);
+      clearPaste();
       onReplaceInput?.(combined);
-      setPasteCollapsed(null);
-      setPastePreviewExpanded(false);
+      void onQueueMessage?.(combined);
       return;
     }
     void onQueueMessage?.();
-  }, [input, onQueueMessage, onReplaceInput, pasteCollapsed]);
-
-  // 当 input 更新后检测到 pending action，触发实际发送/排队
-  useEffect(() => {
-    if (pendingActionRef.current === 'send') {
-      pendingActionRef.current = null;
-      void onSend();
-    } else if (pendingActionRef.current === 'queue') {
-      pendingActionRef.current = null;
-      void onQueueMessage?.();
-    }
-  }, [input, onSend, onQueueMessage]);
+  }, [clearPaste, input, onQueueMessage, onReplaceInput, pasteCollapsed]);
 
   const wrappedOnKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // 输入法组合态下不做任何拦截：此时 Enter 是「确认候选词」、
+      // Escape 是「取消候选词」，都应原样交还浏览器/输入法处理。
+      if (isImeComposingKeyboardEvent(e)) {
+        return;
+      }
       if (e.key !== 'Escape') {
-        lastEmptyEscapeAtRef.current = 0;
+        lastEscapeKeyAtRef.current = 0;
+      }
+      // 追加排队用 Cmd/Ctrl+Enter，刻意不占用 Tab——Tab 必须留给键盘用户
+      // 跳出输入框，否则在生成期间会构成键盘陷阱（WCAG 2.1.2）。
+      // 需排在粘贴卡片分支之前：wrappedOnQueueMessage 自身会合并粘贴内容。
+      if (
+        e.key === 'Enter' &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !composerMenu &&
+        showQueueAction
+      ) {
+        e.preventDefault();
+        void wrappedOnQueueMessage();
+        return;
       }
       // 粘贴卡片存在时，Enter 发送或排队前先合并文本
       if (pasteCollapsed && e.key === 'Enter' && !e.shiftKey) {
@@ -393,14 +414,10 @@ export function ChatComposer({
         }
         return;
       }
-      if (e.key === 'Tab' && !composerMenu && showQueueAction && !e.shiftKey) {
-        e.preventDefault();
-        void wrappedOnQueueMessage();
-        return;
-      }
       if (e.key === 'Escape' && isBrowsingInputHistory && onRestoreInputFromHistory) {
         e.preventDefault();
-        lastEmptyEscapeAtRef.current = 0;
+        lastEscapeKeyAtRef.current = 0;
+        hideEscapeHint();
         onRestoreInputFromHistory();
         return;
       }
@@ -413,12 +430,12 @@ export function ChatComposer({
       ) {
         e.preventDefault();
         const now = Date.now();
-        if (now - lastEmptyEscapeAtRef.current <= 700) {
-          lastEmptyEscapeAtRef.current = 0;
+        if (now - lastEscapeKeyAtRef.current <= DOUBLE_ESCAPE_WINDOW_MS) {
+          lastEscapeKeyAtRef.current = 0;
           onEditPreviousUserMessage();
           return;
         }
-        lastEmptyEscapeAtRef.current = now;
+        lastEscapeKeyAtRef.current = now;
         return;
       }
       if (
@@ -429,9 +446,16 @@ export function ChatComposer({
         !streaming
       ) {
         e.preventDefault();
-        lastEmptyEscapeAtRef.current = 0;
-        setUndoText(input);
-        onReplaceInput?.('');
+        const now = Date.now();
+        // 单击 Escape 只给提示，连按两次才真正清空，避免误触丢掉草稿。
+        if (now - lastEscapeKeyAtRef.current <= DOUBLE_ESCAPE_WINDOW_MS) {
+          lastEscapeKeyAtRef.current = 0;
+          showUndo(input);
+          onReplaceInput?.('');
+          return;
+        }
+        lastEscapeKeyAtRef.current = now;
+        showEscapeHint();
         return;
       }
       // Escape 清空粘贴卡片（无输入文本时）
@@ -443,25 +467,28 @@ export function ChatComposer({
         input.trim().length === 0
       ) {
         e.preventDefault();
-        setPasteCollapsed(null);
-        setPastePreviewExpanded(false);
+        clearPaste();
         return;
       }
       onKeyDown(e);
     },
     [
+      clearPaste,
       composerMenu,
       hasRemoteSessionBusyState,
+      hideEscapeHint,
       input,
+      isBrowsingInputHistory,
       onEditPreviousUserMessage,
       onKeyDown,
       onReplaceInput,
       onRestoreInputFromHistory,
       pasteCollapsed,
+      showEscapeHint,
       showQueueAction,
       showStopAction,
+      showUndo,
       streaming,
-      isBrowsingInputHistory,
       wrappedOnQueueMessage,
       wrappedOnSend,
     ],
@@ -507,32 +534,15 @@ export function ChatComposer({
   }, [composerMenu, currentItems.length]);
 
   return (
-    <div
-      className="chat-composer"
-      style={{
-        padding: '0 16px 12px',
-        transition: 'padding 220ms ease',
-      }}
-    >
-      <div
-        className="chat-composer__inner"
-        style={{
-          maxWidth: editorMode ? 680 : 860,
-          margin: '0 auto',
-          width: '100%',
-          position: 'relative',
-          paddingTop: 12,
-          transform: 'translateY(0)',
-          transition: 'max-width 240ms ease, transform 240ms ease',
-        }}
-      >
+    <div className="chat-composer">
+      <div className={`chat-composer__inner${editorMode ? ' chat-composer__inner--editor' : ''}`}>
         <input
           ref={fileInputRef}
           type="file"
           multiple
           onChange={onFileChange}
           style={{ display: 'none' }}
-          accept="image/*,text/*,.md,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.cpp,.c,.h,.yaml,.yml,.toml,.csv"
+          accept={COMPOSER_FILE_ACCEPT}
         />
         {composerMenu && (currentItems.length > 0 || composerMenu.type === 'mention') && (
           <ChatComposerMenu
@@ -543,22 +553,14 @@ export function ChatComposer({
             composerItemRefs={composerItemRefs}
             onComposerHover={onComposerHover}
             onApplyComposerSelection={onApplyComposerSelection}
+            hasWorkspaceFiles={hasWorkspaceFiles}
           />
         )}
 
-        <div
-          className="chat-composer__body"
-          style={{
-            display: 'flex',
-            alignItems: 'stretch',
-            gap: 8,
-            // 输入框（composer-shell）与 buddy chip 在同一行；chip 不参与
-            // textarea / 工具条布局,只是视觉上紧贴输入框右边。
-            position: 'relative',
-          }}
-        >
+        {/* 输入框与 buddy chip 同行；chip 不参与 textarea / 工具条布局，仅视觉上紧贴右侧。 */}
+        <div className="chat-composer__body">
           <div
-            className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}${streaming ? ' composer-streaming' : ''}${isHomeVariant ? ' composer-home-variant' : ''}`}
+            className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}${streaming ? ' composer-streaming' : ''}${isHomeVariant ? ' composer-home-variant' : ''}${composerDragging ? ' composer-shell--drop' : ''}`}
             onDragEnter={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -586,75 +588,16 @@ export function ChatComposer({
               const files = Array.from(e.dataTransfer.files);
               if (files.length > 0 && onDropFiles) onDropFiles(files);
             }}
-            style={{
-              padding: 6,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 7,
-              borderRadius: 'var(--radius-xl)',
-              flex: 1,
-              minWidth: 0,
-              transition:
-                'padding 220ms ease, border-radius 220ms ease, gap 220ms ease, border-color 150ms ease, background 150ms ease',
-              position: 'relative',
-              ...(composerDragging
-                ? {
-                    borderColor: 'var(--accent-border)',
-                    borderStyle: 'dashed',
-                    background: 'var(--accent-subtle)',
-                  }
-                : {}),
-            }}
           >
-            {composerDragging && (
-              <div
-                className="composer-drag-overlay"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  borderRadius: 'var(--radius-xl)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'color-mix(in oklch, var(--accent) 6%, transparent)',
-                  zIndex: 10,
-                  pointerEvents: 'none',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--accent)',
-                  }}
-                >
-                  释放以添加附件
-                </span>
-              </div>
-            )}
-            {imagePreviews.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '1px 1px 0' }}>
-                {imagePreviews.map((item) => (
-                  <ImagePreview
-                    key={item.id}
-                    src={item.url}
-                    alt={item.name}
-                    onRemove={() => onRemoveAttachment(item.id)}
-                    style={{ marginBottom: 0 }}
-                  />
-                ))}
-              </div>
-            )}
+            <ComposerDragOverlay visible={composerDragging} />
+            <ComposerImagePreviews
+              attachmentItems={attachmentItems}
+              attachmentFilesById={attachmentFilesById}
+              onRemoveAttachment={onRemoveAttachment}
+            />
 
             {showVoice && (
-              <div
-                style={{
-                  padding: '6px 8px',
-                  borderRadius: 10,
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-overlay)',
-                }}
-              >
+              <div className="composer-voice-panel">
                 <VoiceRecorder
                   onTranscript={onVoiceTranscript}
                   autoConfirm
@@ -679,7 +622,7 @@ export function ChatComposer({
             />
 
             {attachmentItems.length > 0 && (
-              <div style={{ padding: '0 1px' }}>
+              <div className="composer-attachment-row">
                 <AttachmentBar
                   attachments={attachmentItems}
                   onRemove={onRemoveAttachment}
@@ -695,20 +638,7 @@ export function ChatComposer({
             />
 
             <div
-              style={{
-                border: 'none',
-                background: isHomeVariant
-                  ? 'linear-gradient(180deg, var(--bg-raised), var(--bg-overlay)'
-                  : 'transparent',
-                borderRadius: 'var(--radius-lg)',
-                padding: '6px 8px 6px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 7,
-                boxShadow: 'none',
-                transition:
-                  'border-color 220ms ease, border-radius 220ms ease, padding 220ms ease, background 220ms ease, gap 220ms ease',
-              }}
+              className={`composer-input-area${isHomeVariant ? ' composer-input-area--home' : ''}`}
             >
               <div style={{ position: 'relative' }}>
                 {pasteCollapsed && (
@@ -716,14 +646,9 @@ export function ChatComposer({
                     text={pasteCollapsed.text}
                     lineCount={pasteCollapsed.lineCount}
                     expanded={pastePreviewExpanded}
-                    onToggleExpand={() => setPastePreviewExpanded((v) => !v)}
-                    onUpdateText={(updatedText) => {
-                      setPasteCollapsed((prev) => (prev ? { ...prev, text: updatedText } : prev));
-                    }}
-                    onDiscard={() => {
-                      setPasteCollapsed(null);
-                      setPastePreviewExpanded(false);
-                    }}
+                    onToggleExpand={togglePastePreview}
+                    onUpdateText={updatePasteText}
+                    onDiscard={clearPaste}
                   />
                 )}
                 <textarea
@@ -737,121 +662,26 @@ export function ChatComposer({
                   onFocus={composerPlaceholder.onFocus}
                   onBlur={composerPlaceholder.onBlur}
                   placeholder={composerPlaceholder.placeholder}
+                  aria-label="消息输入框"
                   aria-keyshortcuts={composerKeyboardShortcuts}
                   rows={3}
-                  style={{
-                    width: '100%',
-                    minHeight: 96,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: agentOptions.length > 1 ? '0 64px 0 0' : 0,
-                    color: 'var(--fg-strong)',
-                    fontSize: 11.5,
-                    resize: 'none',
-                    outline: 'none',
-                    fontFamily: 'inherit',
-                    lineHeight: 1.6,
-                    maxHeight: 280,
-                    overflowY: 'auto',
-                    transition:
-                      'min-height 220ms ease, font-size 220ms ease, max-height 220ms ease',
-                  }}
                 />
-                {input.length > 0 && (
+                {/* 仅在接近上下文上限时提示，避免常驻噪音。 */}
+                {input.length > 0 && characterCount.tone !== 'normal' && (
                   <span className={`composer-char-counter composer-char-${characterCount.tone}`}>
                     {characterCount.label}
                   </span>
                 )}
-                {agentOptions.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => advanceAgentSelection()}
-                    style={{
-                      position: 'absolute',
-                      top: 6,
-                      right: 2,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      height: 20,
-                      padding: '0 7px',
-                      borderRadius: 999,
-                      border: hasAgentOverride
-                        ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle))'
-                        : '1px solid var(--border-subtle)',
-                      background: hasAgentOverride
-                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))'
-                        : 'var(--bg-overlay)',
-                      color: hasAgentOverride ? 'var(--accent)' : 'var(--fg-muted)',
-                      fontSize: 10,
-                      fontWeight: hasAgentOverride ? 600 : 500,
-                      whiteSpace: 'nowrap',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                      userSelect: 'none',
-                      appearance: 'none',
-                      transition:
-                        'color 150ms ease, background 150ms ease, border-color 150ms ease',
-                    }}
-                    title="点击切换代理"
-                    aria-label={`当前代理：${currentAgentLabel}，点击切换代理`}
-                  >
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8Z" />
-                      <path d="M9 22h6" />
-                    </svg>
-                    {currentAgentLabel}
-                  </button>
-                )}
               </div>
 
-              {thinkingEnabled &&
-                activeModelSupportsThinking &&
-                input.trim().length > 0 &&
-                detectThinkKeyword(input) && (
-                  <div
-                    title="仅作提示，不会覆盖当前思考等级设置"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      padding: '2px 8px',
-                      borderRadius: 6,
-                      background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-                      color: 'color-mix(in oklch, var(--accent) 70%, var(--fg-on-accent) 30%)',
-                      fontSize: 10,
-                      letterSpacing: 0.3,
-                      lineHeight: 1.5,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8Z" />
-                      <path d="M10 22h4" />
-                    </svg>
-                    检测到思考提示词
-                  </div>
-                )}
+              <ComposerThinkHint
+                visible={
+                  thinkingEnabled &&
+                  activeModelSupportsThinking &&
+                  input.trim().length > 0 &&
+                  detectThinkKeyword(input)
+                }
+              />
 
               <ChatComposerOptimize
                 optimizeError={optimizeError}
@@ -879,12 +709,23 @@ export function ChatComposer({
               />
 
               <ChatComposerToolbar
+                agentChip={
+                  agentOptions.length > 1
+                    ? {
+                        label: currentAgentLabel,
+                        overridden: hasAgentOverride,
+                        onCycle: () => advanceAgentSelection(),
+                      }
+                    : undefined
+                }
                 activeProviderId={activeProviderId}
                 activeProviderName={activeProviderName}
                 activeProviderType={activeProviderType}
                 activeModelTooltip={activeModelTooltip}
+                activeModelLabel={activeModelLabel}
                 activeModelSupportsThinking={activeModelSupportsThinking}
                 thinkingEnabled={thinkingEnabled}
+                reasoningEffort={reasoningEffort}
                 modelPickerRef={modelPickerRef}
                 modelSettingsRef={modelSettingsRef}
                 showModelPicker={showModelPicker}
@@ -935,72 +776,18 @@ export function ChatComposer({
             </div>
           </div>
           {composerRightSlot && (
-            <div
-              className="chat-composer__right-slot"
-              style={{
-                display: 'flex',
-                alignItems: 'stretch',
-                flexShrink: 0,
-              }}
-            >
-              {composerRightSlot}
-            </div>
+            <div className="chat-composer__right-slot">{composerRightSlot}</div>
           )}
         </div>
-        {undoText !== null && (
-          <div
-            className="composer-undo-toast"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '3px 8px',
-              marginTop: 4,
-              borderRadius: 8,
-              background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-              border: '1px solid color-mix(in oklch, var(--accent) 20%, var(--border-subtle))',
-              fontSize: 10,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>已清空输入</span>
-            <button
-              type="button"
-              onClick={() => {
-                onReplaceInput?.(undoText);
-                setUndoText(null);
-              }}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--accent)',
-                cursor: 'pointer',
-                padding: 0,
-                fontSize: 10,
-                fontWeight: 600,
-                lineHeight: 1,
-              }}
-            >
-              恢复
-            </button>
-            <button
-              type="button"
-              onClick={() => setUndoText(null)}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--fg-subtle)',
-                cursor: 'pointer',
-                padding: 0,
-                fontSize: 11,
-                lineHeight: 1,
-                marginLeft: 'auto',
-              }}
-            >
-              ×
-            </button>
-          </div>
-        )}
+        <ComposerUndoToast
+          undoText={undoText}
+          escapeHint={escapeHint}
+          onRestore={(text) => {
+            onReplaceInput?.(text);
+            dismiss();
+          }}
+          onDismiss={dismiss}
+        />
         {statsData &&
           (showComposerStatsBar ? (
             <ComposerStatsBar data={statsData} variant={variant} />

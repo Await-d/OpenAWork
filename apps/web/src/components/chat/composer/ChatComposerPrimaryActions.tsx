@@ -41,15 +41,20 @@ export function ChatComposerPrimaryActions(props: ChatComposerPrimaryActionsProp
             void props.onQueueMessage?.();
           }}
           className="btn-accent composer-secondary-action"
+          title={getQueueActionTooltip(props)}
         >
           <span>追加</span>
           <PlusIcon />
         </button>
       )}
-      <span className="composer-status-copy">{getComposerStatusLabel(props)}</span>
       <SendStopButton {...props} />
     </div>
   );
+}
+
+function getQueueActionTooltip(props: ChatComposerPrimaryActionsProps): string {
+  const base = '把这轮输入排到当前运行之后（Cmd / Ctrl + Enter）';
+  return props.queuedMessageCount > 0 ? `${base} · 已排队 ${props.queuedMessageCount} 条` : base;
 }
 
 function OptimizeButton(props: ChatComposerPrimaryActionsProps) {
@@ -98,6 +103,7 @@ function SendStopButton(props: ChatComposerPrimaryActionsProps) {
       disabled={disabled}
       className={`btn-accent composer-send-button${sendPulse ? ' composer-pulse' : ''}`}
       data-tone={getPrimaryButtonTone(props)}
+      title={getComposerStatusLabel(props)}
     >
       <span>{getPrimaryButtonLabel(props)}</span>
       <SendStopIcon
@@ -147,7 +153,7 @@ function getComposerStatusLabel(props: ChatComposerPrimaryActionsProps): string 
       : '当前运行流仍受此页控制 · 可直接停止';
   }
   if (props.showQueueAction) {
-    return `Tab / Enter 可排队${props.queuedMessageCount > 0 ? ` · 已排队 ${props.queuedMessageCount} 条` : ''}`;
+    return `Cmd / Ctrl + Enter 可排队${props.queuedMessageCount > 0 ? ` · 已排队 ${props.queuedMessageCount} 条` : ''}`;
   }
   if (props.imageGenerationBusy) return '图片生成中 · 请等待结果返回';
   if (props.sessionBusyState === 'running') return '会话持续运行中 · 正在同步最新结果';

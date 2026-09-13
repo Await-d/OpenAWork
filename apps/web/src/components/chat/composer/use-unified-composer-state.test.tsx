@@ -100,6 +100,16 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
       <button type="button" onClick={() => void state.enqueueComposerMessage()}>
         queue
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          const combined = '折叠的粘贴文本\n\n用户追加的输入';
+          setInput(combined);
+          void state.sendMessage(combined);
+        }}
+      >
+        send-override
+      </button>
     </div>
   );
 }
@@ -247,6 +257,35 @@ describe('useUnifiedComposerState', () => {
 
     fireEvent.keyDown(getComposer(view), { key: 'ArrowUp' });
     expect(getComposer(view).value).toBe('需要排队的消息');
+  });
+
+  it('折叠粘贴合并后的文本会直接作为提交内容，且不因草稿写回而漏掉清空', async () => {
+    const deferredSubmit = createDeferred<boolean>();
+    const onSubmit = vi.fn(() => deferredSubmit.promise);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="用户追加的输入"
+        sessionId="session-1"
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('send-override'));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '折叠的粘贴文本\n\n用户追加的输入' }),
+    );
+    // 发送前的写回会让草稿修订号变化，此时输入框里仍是完整文本
+    expect(getComposer(view).value).toBe('折叠的粘贴文本\n\n用户追加的输入');
+
+    deferredSubmit.resolve(true);
+
+    await waitFor(() => {
+      expect(getComposer(view).value).toBe('');
+    });
   });
 
   it('上层明确返回 false 时会保留输入且不会把输入写入历史', async () => {

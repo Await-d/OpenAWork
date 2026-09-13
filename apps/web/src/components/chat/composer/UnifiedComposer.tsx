@@ -23,6 +23,7 @@ import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGen
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
 import { buildPromptOptimizationContext } from './prompt-optimization-context.js';
+import { buildAttachmentFileMap } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
 
 export interface UnifiedComposerFeatures {
   attachments?: boolean;
@@ -456,6 +457,15 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
 
   const composerVariant = props.variant;
 
+  // 图片预览按 id 取文件，避免把「两个数组同序同长」的隐式契约复制到 ChatComposer。
+  const attachmentFilesById = useMemo(
+    () => buildAttachmentFileMap(attachmentItems, attachedFiles),
+    [attachmentItems, attachedFiles],
+  );
+
+  // 供 @ 菜单区分「工作区没有文件」与「查询无匹配文件」两种空状态。
+  const hasWorkspaceFiles = resolvedWorkspaceFileItems.length > 0;
+
   useEffect(() => {
     onCompanionActivityChange?.({
       attachedCount: attachmentItems.length,
@@ -488,6 +498,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         showVoiceButton={features.voice}
         showAttachmentButton={features.attachments}
         activeModelTooltip={activeModelTooltip}
+        activeModelLabel={(activeModelOption?.label ?? activeModelId) || undefined}
+        reasoningEffort={reasoningEffort}
         modelPickerRef={modelPickerBtnRef}
         modelSettingsRef={modelSettingsBtnRef}
         showModelPicker={showModelPicker}
@@ -513,12 +525,14 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         streaming={streaming}
         stoppingStream={stoppingStream}
         attachedFiles={attachedFiles}
+        attachmentFilesById={attachmentFilesById}
         attachmentItems={attachmentItems}
         queuedMessages={features.queuedMessages ? queuedComposerPreviews : undefined}
         showVoice={showVoice}
         composerMenu={composerMenu}
         slashCommandItems={features.slashCommands ? slashCommandItems : []}
         mentionItems={features.mentions ? mentionItems : []}
+        hasWorkspaceFiles={hasWorkspaceFiles}
         textareaRef={textareaRef}
         fileInputRef={fileInputRef}
         onFileChange={handleFileChange}
@@ -536,10 +550,14 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
           setShowVoice(false);
         }}
-        onQueueMessage={features.queuedMessages ? () => void enqueueComposerMessage() : undefined}
+        onQueueMessage={
+          features.queuedMessages
+            ? (overrideText) => void enqueueComposerMessage(overrideText)
+            : undefined
+        }
         onRemoveQueuedMessage={removeQueuedComposerMessage}
         onRestoreQueuedMessage={restoreQueuedComposerMessage}
-        onSend={() => void sendMessage()}
+        onSend={(overrideText) => void sendMessage(overrideText)}
         onStop={() => void onStop()}
         onRequestFiles={() => fileInputRef.current?.click()}
         onToggleModelPicker={() => setShowModelPicker((v) => !v)}

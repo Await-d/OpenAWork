@@ -1,9 +1,10 @@
 import type React from 'react';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
+import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import type { ComposerOptimizeError } from './composer-optimize-error.js';
 import { PromptSnippetsTrigger } from '../prompt-snippets/PromptSnippetsTrigger.js';
-import { ComposerHintChip } from './chat-composer-primitives.js';
+import { ComposerAgentChip, type ComposerAgentChipDescriptor } from './ComposerAgentChip.js';
 import { ChatComposerFeatureToggles } from './ChatComposerFeatureToggles.js';
 import { ChatComposerModelControls } from './ChatComposerModelControls.js';
 import {
@@ -17,8 +18,13 @@ export interface ChatComposerToolbarProps {
   readonly activeProviderName?: string;
   readonly activeProviderType?: string;
   readonly activeModelTooltip?: string;
+  /** 当前模型显示名，用于模型按钮上的可读标签。 */
+  readonly activeModelLabel?: string;
+  /** 代理切换入口；仅当存在多个可选代理时由上层提供。 */
+  readonly agentChip?: ComposerAgentChipDescriptor;
   readonly activeModelSupportsThinking: boolean;
   readonly thinkingEnabled: boolean;
+  readonly reasoningEffort?: ReasoningEffort;
   readonly modelPickerRef: React.RefObject<HTMLButtonElement | null>;
   readonly modelSettingsRef: React.RefObject<HTMLButtonElement | null>;
   readonly showModelPicker: boolean;
@@ -71,22 +77,6 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
   return (
     <div className="composer-toolbar">
       <div className="composer-toolbar-left">
-        <ChatComposerModelControls
-          activeProviderId={props.activeProviderId}
-          activeProviderName={props.activeProviderName}
-          activeProviderType={props.activeProviderType}
-          activeModelTooltip={props.activeModelTooltip}
-          activeModelSupportsThinking={props.activeModelSupportsThinking}
-          thinkingEnabled={props.thinkingEnabled}
-          modelPickerRef={props.modelPickerRef}
-          modelSettingsRef={props.modelSettingsRef}
-          showModelPicker={props.showModelPicker}
-          showModelSettings={props.showModelSettings}
-          showModelPickerButton={props.showModelPickerButton}
-          showModelSettingsButton={props.showModelSettingsButton}
-          onToggleModelPicker={props.onToggleModelPicker}
-          onToggleModelSettings={props.onToggleModelSettings}
-        />
         <ChatComposerFeatureToggles
           showWebSearchButton={props.showWebSearchButton}
           showImageGenerationButton={props.showImageGenerationButton}
@@ -115,10 +105,33 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
             onInject={props.onInsertAtCursor}
           />
         )}
-        <span className="composer-toolbar-divider" />
-        <ComposerHintChip label="/ 命令" />
-        <ComposerHintChip label="@ 文件" />
       </div>
+      {props.agentChip && (
+        <ComposerAgentChip
+          label={props.agentChip.label}
+          overridden={props.agentChip.overridden}
+          onCycle={props.agentChip.onCycle}
+        />
+      )}
+      {/* 模型与思考等级紧邻发送按钮，与主流桌面端输入框的布局一致。 */}
+      <ChatComposerModelControls
+        activeProviderId={props.activeProviderId}
+        activeProviderName={props.activeProviderName}
+        activeProviderType={props.activeProviderType}
+        activeModelTooltip={props.activeModelTooltip}
+        activeModelLabel={props.activeModelLabel}
+        activeModelSupportsThinking={props.activeModelSupportsThinking}
+        thinkingEnabled={props.thinkingEnabled}
+        reasoningEffort={props.reasoningEffort}
+        modelPickerRef={props.modelPickerRef}
+        modelSettingsRef={props.modelSettingsRef}
+        showModelPicker={props.showModelPicker}
+        showModelSettings={props.showModelSettings}
+        showModelPickerButton={props.showModelPickerButton}
+        showModelSettingsButton={props.showModelSettingsButton}
+        onToggleModelPicker={props.onToggleModelPicker}
+        onToggleModelSettings={props.onToggleModelSettings}
+      />
       <ChatComposerPrimaryActions
         input={props.input}
         streaming={props.streaming}
