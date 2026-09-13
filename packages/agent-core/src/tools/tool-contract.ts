@@ -134,14 +134,23 @@ export class ToolRegistry {
     const startAt = Date.now();
 
     const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        timeoutController.abort();
+        reject(new ToolTimeoutError(request.toolName, timeoutMs));
+      }, timeoutMs);
+    });
 
     const combinedSignal = AbortSignal.any
       ? AbortSignal.any([signal, timeoutController.signal])
       : timeoutController.signal;
 
     try {
-      const output: unknown = await tool.execute(parsed.data, combinedSignal);
+      const output: unknown = await Promise.race([
+        tool.execute(parsed.data, combinedSignal),
+        timeoutPromise,
+      ]);
 
       const outputParsed = tool.outputSchema.safeParse(output);
       if (!outputParsed.success) {
@@ -167,7 +176,7 @@ export class ToolRegistry {
         durationMs: Date.now() - startAt,
       };
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     }
   }
 }
