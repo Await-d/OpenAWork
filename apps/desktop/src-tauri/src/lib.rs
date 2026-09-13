@@ -39,6 +39,12 @@ const DESKTOP_SETTINGS_FILE: &str = "desktop-settings.json";
 /// 一次性标记：历史版本把 VitePWA Service Worker 打进了桌面端 WebView，
 /// 旧 SW 会拦截导航返回旧 precache。升级后在窗口可用时清理一次 WebView 浏览数据。
 const WEBVIEW_SW_CACHE_CLEARED_MARKER: &str = ".webview-sw-cache-cleared-v1";
+/// 与 `tauri.conf.json` 的 `identifier` 保持一致：Tauri 在 Windows / Linux 上会把
+/// webview 的 data directory 强制为 `LocalData/{identifier}`，缓存清理需要在窗口
+/// 创建前靠它定位 WebView 用户数据目录。
+const DESKTOP_BUNDLE_IDENTIFIER: &str = "com.openAwork.desktop";
+/// WebView 缓存清理标记：文件内容是"最后一次清理时的应用版本"。
+const WEBVIEW_CACHE_PURGE_MARKER: &str = ".webview-cache-purge";
 /// gateway 子目录名（在 effective data_root 下）。与 storage-paths.ts 中的
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。
 const GATEWAY_SUBDIR: &str = "agent-gateway";
@@ -352,6 +358,103 @@ struct TrayMenuHandles {
 fn settings_file(app: &tauri::AppHandle) -> PathBuf {
     desktop_home_dir(app).join(DESKTOP_SETTINGS_FILE)
 }
+
+/// WebView 用户数据目录（与 Tauri 的 data_directory 解析保持一致：`LocalData/{identifier}`）。
+#[cfg(target_os = "windows")]
+fn webview_user_data_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join(DESKTOP_BUNDLE_IDENTIFIER))
+}
+
+/// WebView2 档案目录（`EBWebView/Default`）里与「跨版本陈旧内容」相关的子目录。
+#[cfg(target_os = "windows")]
+const WEBVIEW_CACHE_SUBDIRS: &[&str] = &[
+    // Service Worker：注册信息与 precache 都在这里，是「刷新页面永远是旧版」的元凶。
+    "Service Worker",
+    // HTTP / 代码缓存：Tauri 内嵌资源的响应没有 Cache-Control，入口 HTML 可能被缓存。
+    "Cache",
+    "Code Cache",
+    "GPUCache",
+    "DawnGraphiteCache",
+    "DawnWebGPUCache",
+    "ScriptCache",
+    "Shared Dictionary",
+];
+
+/// 在创建 WebView 之前清理残留的 Service Worker 与 HTTP / 代码缓存。
+///
+/// 为什么必须在窗口创建前做：WebView 一旦创建，`EBWebView/...` 下的文件就会被
+/// WebView2 进程占用，删除会失败甚至损坏档案，所以放在 `run()` 最开始执行。
+///
+/// 分层策略：
+/// - `Service Worker` 每次启动都清（代价极小、收益最大）：历史版本把 VitePWA 的 SW
+///   打进了 exe，SW 注册与 precache 跨版本存活在用户数据目录里，普通刷新会被旧 SW
+///   拦截返回旧页面（「强刷是新版、普通刷新回到旧版」）；
+/// - 其余 HTTP / 代码缓存按应用版本清一次（版本记在
+///   `~/.openAwork/.webview-cache-purge` 里），避免每次启动都丢代码缓存拖慢冷启动。
+///
+/// 只删缓存目录，保留 `Local Storage` / `IndexedDB`，登录态与设置不丢；
+/// 目录不存在（全新安装）或删除失败（例如另一个实例正在运行）都静默跳过，
+/// 失败时不写标记，下次启动重试。
+#[cfg(target_os = "windows")]
+fn purge_stale_webview_caches_before_start() {
+    let (Some(user_data_dir), Some(home)) = (webview_user_data_dir(), dirs::home_dir()) else {
+        return;
+    };
+
+    let home_dir = home.join(DESKTOP_HOME_FOLDER);
+    let marker = home_dir.join(WEBVIEW_CACHE_PURGE_MARKER);
+    let last_purged_version = fs::read_to_string(&marker).ok();
+    let purge_all_caches = last_purged_version.as_deref() != Some(env!("CARGO_PKG_VERSION"));
+
+    let profile_dir = user_data_dir.join("EBWebView").join("Default");
+    let mut removed_any = false;
+    let mut failed = false;
+
+    for sub_dir in WEBVIEW_CACHE_SUBDIRS {
+        // 非版本变化时只清 Service Worker，避免每次启动都丢代码缓存。
+        if !purge_all_caches && *sub_dir != "Service Worker" {
+            continue;
+        }
+
+        let target = profile_dir.join(sub_dir);
+        if !target.exists() {
+            continue;
+        }
+
+        match fs::remove_dir_all(&target) {
+            Ok(()) => removed_any = true,
+            Err(err) => {
+                failed = true;
+                eprintln!("[desktop] 清理 WebView 缓存目录失败 {target:?}: {err}");
+            }
+        }
+    }
+
+    if removed_any {
+        eprintln!(
+            "[desktop] 已清理 WebView 陈旧缓存（Service Worker{}）",
+            if purge_all_caches {
+                " + HTTP/代码缓存"
+            } else {
+                ""
+            }
+        );
+    }
+
+    // 删除失败说明文件被占用（多数是另一个实例仍在运行），不写标记，下次启动重试。
+    if purge_all_caches && !failed {
+        let write_result = fs::create_dir_all(&home_dir)
+            .and_then(|_| fs::write(&marker, env!("CARGO_PKG_VERSION")));
+        if let Err(err) = write_result {
+            eprintln!("[desktop] 写入 WebView 缓存清理标记失败: {err}");
+        }
+    }
+}
+
+/// 非 Windows：WebKit 的档案布局与 WebView2 不同，这里不做定向清理，
+/// 由前端的 SW unregister + CacheStorage 清理兜底（见 apps/web/src/main.tsx）。
+#[cfg(not(target_os = "windows"))]
+fn purge_stale_webview_caches_before_start() {}
 
 /// 清理历史 VitePWA Service Worker 在 Tauri WebView 中残留的浏览数据。
 ///
@@ -1888,6 +1991,10 @@ fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequest
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 必须在窗口创建前执行：窗口创建后 WebView2 会占用这些文件，删不掉的旧
+    // Service Worker 与旧入口 HTML 就会把页面一直拦截在旧版本。
+    purge_stale_webview_caches_before_start();
+
     let gateway_process_for_updater = Arc::new(Mutex::new(GatewayState {
         child: None,
         port: None,
@@ -1981,6 +2088,13 @@ pub fn run() {
                 ..Default::default()
             }))));
             setup_tray(&handle)?;
+
+            // identifier 漂移会让 WebView 缓存清理定位不到数据目录，直接提示出来。
+            if app.config().identifier != DESKTOP_BUNDLE_IDENTIFIER {
+                eprintln!(
+                    "[desktop] identifier 与 DESKTOP_BUNDLE_IDENTIFIER 不一致，WebView 缓存清理定位不到目录"
+                );
+            }
 
             // 一次性清掉历史 VitePWA 残留在 WebView 的 SW/缓存，避免升级后仍显示旧 UI。
             // 必须在窗口已创建后调用；tauri.conf 默认 main 窗口在 setup 时已存在。

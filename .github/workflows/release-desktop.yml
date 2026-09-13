@@ -101,6 +101,8 @@ jobs:
     env:
       TAURI_SCRIPT: pnpm --filter @openAwork/desktop exec tauri
       TAURI_LINUX_AYATANA_APPINDICATOR: '0'
+      # 桌面端打包必须禁用 PWA：显式声明，不再只依赖 Tauri CLI 注入的 TAURI_ENV_PLATFORM。
+      OPENAWORK_DESKTOP_BUILD: '1'
       MACOS_CODESIGN_READY: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
       MACOS_NOTARIZATION_READY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
@@ -385,6 +387,10 @@ jobs:
             echo 'Missing Linux updater signature (*.AppImage.sig).' >&2
             exit 1
           }
+
+      - name: Assert no Service Worker in web dist
+        shell: bash
+        run: node scripts/build/assert-no-service-worker-dist.mjs
 
       - name: Summarize Linux Tauri build failure
         if: failure() && startsWith(matrix.runner, 'ubuntu-')

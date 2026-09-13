@@ -1,9 +1,38 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import versionPlugin from '../../scripts/build/vite-plugin-version.mjs';
+import { assertNoServiceWorkerInDist } from '../../scripts/build/assert-no-service-worker-dist.mjs';
+
+/**
+ * 桌面端（Tauri）构建标记。
+ * - Tauri CLI 会为 beforeBuildCommand 注入 `TAURI_ENV_PLATFORM`；
+ * - `OPENAWORK_DESKTOP_BUILD` 是我们自己的显式开关（CI / 本地打包注入），
+ *   避免打包链路里 CLI 注入值丢失时，PWA 又被悄悄带进 exe。
+ */
+const isDesktopBuild =
+  Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.OPENAWORK_DESKTOP_BUILD === '1';
+
+/**
+ * 桌面端打包防呆：vite build 写盘结束后立刻断言 dist 里没有 SW 产物，
+ * 命中直接让 tauri build 失败，避免带 SW 的安装包流到用户机器上。
+ * 浏览器（Web 端）构建仍然保留 PWA，不受影响。
+ */
+function desktopNoServiceWorkerGuard(): Plugin {
+  return {
+    name: 'openawork:desktop-no-service-worker-guard',
+    apply: 'build',
+    closeBundle() {
+      if (!isDesktopBuild) {
+        return;
+      }
+      assertNoServiceWorkerInDist(fileURLToPath(new URL('./dist', import.meta.url)));
+    },
+  };
+}
 
 export default defineConfig({
   resolve: {
@@ -38,11 +67,12 @@ export default defineConfig({
       },
     }),
     tailwindcss(),
+    desktopNoServiceWorkerGuard(),
     VitePWA({
       // 桌面端（Tauri）构建时禁用 PWA Service Worker：
       // Tauri WebView 跨版本持久化 SW 缓存，导致新版本更新后旧 precache 仍被使用，
       // 出现"强制刷新是新版、普通刷新回到旧版"的问题。桌面端有独立的 updater 机制，无需 PWA。
-      disable: !!process.env.TAURI_ENV_PLATFORM,
+      disable: isDesktopBuild,
       registerType: 'autoUpdate',
       devOptions: { enabled: false },
       includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
