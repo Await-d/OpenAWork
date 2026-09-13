@@ -1,4 +1,5 @@
 import type { HomeProjectSummary } from './utils/session-grouping.js';
+import { UNBOUND_WORKSPACE_PATH_LABEL } from '../../utils/session/session-grouping.js';
 
 interface HomeProjectColumnProps {
   readonly projects: readonly HomeProjectSummary[];
@@ -23,10 +24,10 @@ export function HomeProjectColumn({
     <aside className="home-project-column" aria-label="项目列表">
       <header className="home-project-column-header">
         <div>
-          <span className="home-eyebrow">工作区</span>
-          <h2>按项目筛选</h2>
+          <span className="home-eyebrow">项目</span>
+          <h2>工作区</h2>
           <p className="home-project-column-description">
-            先切上下文，右侧欢迎区和会话列表会同步切换。
+            选一个工作区，中间和会话列表会同步切换。
           </p>
         </div>
         <button
@@ -78,10 +79,11 @@ export function HomeProjectColumn({
           >
             <span className="home-project-avatar" aria-hidden="true">
               {project.label.slice(0, 1).toUpperCase()}
+              {project.runningCount > 0 ? <span className="home-project-running" /> : null}
             </span>
             <span className="home-project-copy">
               <strong>{project.label}</strong>
-              <small>{project.path ?? '未绑定路径'}</small>
+              <small title={project.path ?? undefined}>{compactWorkspacePath(project.path)}</small>
             </span>
             <span className="home-project-badge">
               {project.runningCount || project.sessionCount}
@@ -100,4 +102,13 @@ export function HomeProjectColumn({
       </footer>
     </aside>
   );
+}
+
+function compactWorkspacePath(path: string | null): string {
+  if (!path) {
+    return UNBOUND_WORKSPACE_PATH_LABEL;
+  }
+
+  const segments = path.split('/').filter(Boolean);
+  return segments.length <= 2 ? path : `…/${segments.slice(-2).join('/')}`;
 }

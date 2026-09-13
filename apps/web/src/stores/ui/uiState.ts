@@ -138,7 +138,23 @@ export interface UIStateStore {
   activeTabId: string | null;
   addSessionTab: (sessionId: string, title: string, workspacePath?: string) => string;
   addDraftTab: (workspacePath?: string) => string;
+  /**
+   * 草稿「转正」后移除草稿标签：会话在用户发出首条消息时才真正创建，
+   * 创建成功后草稿标签由真实会话标签接替，标签栏不残留空对话入口。
+   */
+  closeDraftTabs: () => void;
   closeTab: (tabId: string) => SessionTab | null;
+  /** 关闭一组标签页（顶部标签栏「关闭其他 / 关闭全部」），返回关闭后应激活的标签页。 */
+  closeTabs: (tabIds: readonly string[]) => SessionTab | null;
+  /** 关闭指定会话对应的标签页（会话列表删除会话时联动调用），返回关闭后应激活的标签页。 */
+  closeSessionTabs: (sessionIds: readonly string[]) => SessionTab | null;
+  /**
+   * 最近被关闭（含会话被删除）但路由可能仍停留在其上的会话 id。
+   * 顶部标签栏的路由同步 effect 会跳过它们，避免在路由切走前把已关闭的标签页重建回来。
+   * 纯瞬态字段，不持久化。
+   */
+  closedSessionTabIds: string[];
+  clearClosedSessionTabIds: () => void;
   selectTab: (tabId: string) => SessionTab | null;
   selectAdjacentTab: (direction: 'previous' | 'next') => SessionTab | null;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
@@ -168,6 +184,10 @@ export interface UIStateStore {
   pinnedSessions: string[];
   togglePinSession: (id: string) => void;
   isPinned: (id: string) => boolean;
+
+  /** 会话侧栏中被折叠的工作区分组键（持久化，跨会话保留折叠状态）。 */
+  collapsedSessionGroups: string[];
+  toggleSessionGroupCollapsed: (groupKey: string) => void;
 
   // File tree
   expandedDirs: string[];
@@ -444,6 +464,56 @@ function normalizePersistedTabs(value: unknown): SessionTab[] {
   return value.filter(isSessionTab).slice(0, 12);
 }
 
+interface TabClosure {
+  readonly tabs: SessionTab[];
+  readonly activeTabId: string | null;
+  readonly nextActiveTab: SessionTab | null;
+  readonly closedSessionIds: readonly string[];
+}
+
+/**
+ * 批量关闭标签页的公共计算：命中不到任何标签时返回 null，让调用方保持原有语义
+ * （不做任何状态变更、返回当前激活标签）。
+ *
+ * 激活标签的落点优先保持原激活标签；若它也在关闭集合里，则退到最靠左被关闭位置
+ * 的幸存标签，再退到列表末位。
+ */
+function computeTabClosure(
+  tabs: readonly SessionTab[],
+  activeTabId: string | null,
+  shouldClose: (tab: SessionTab) => boolean,
+): TabClosure | null {
+  const closingTabs = tabs.filter(shouldClose);
+  if (closingTabs.length === 0) {
+    return null;
+  }
+
+  const nextTabs = tabs.filter((tab) => !shouldClose(tab));
+  const firstClosingIndex = tabs.findIndex(shouldClose);
+  const activeTabStillOpen = nextTabs.find((tab) => tab.id === activeTabId) ?? null;
+  const nextActiveTab =
+    activeTabStillOpen ?? nextTabs[Math.min(firstClosingIndex, nextTabs.length - 1)] ?? null;
+
+  return {
+    tabs: nextTabs,
+    activeTabId: nextActiveTab?.id ?? null,
+    nextActiveTab,
+    closedSessionIds: closingTabs
+      .map((tab) => tab.sessionId)
+      .filter(
+        (sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0,
+      ),
+  };
+}
+
+function mergeClosedSessionTabIds(previous: string[], next: readonly string[]): string[] {
+  if (next.length === 0) {
+    return previous;
+  }
+
+  return Array.from(new Set([...previous, ...next]));
+}
+
 export function clampSessionsListPaneWidth(width: number): number {
   if (!Number.isFinite(width)) {
     return SESSIONS_LIST_PANE_DEFAULT_WIDTH;
@@ -588,12 +658,49 @@ export const useUIStateStore = create<UIStateStore>()(
         return tabId;
       },
       addDraftTab: (workspacePath) => {
+        const state = get();
+        // 草稿标签代表「尚未发出首条消息的新会话」：同一时刻只保留一个。
+        // 重复点击「新建会话」只会复用并激活它，不会无限堆积空对话标签。
+        const existingDraftTab = state.tabs.find((tab) => tab.type === 'draft');
+        if (existingDraftTab) {
+          const nextWorkspacePath = workspacePath ?? existingDraftTab.workspacePath;
+          const nextTab: SessionTab =
+            nextWorkspacePath && nextWorkspacePath !== existingDraftTab.workspacePath
+              ? { ...existingDraftTab, workspacePath: nextWorkspacePath }
+              : existingDraftTab;
+
+          if (nextTab !== existingDraftTab || state.activeTabId !== existingDraftTab.id) {
+            set({
+              tabs:
+                nextTab === existingDraftTab
+                  ? state.tabs
+                  : state.tabs.map((tab) => (tab.id === existingDraftTab.id ? nextTab : tab)),
+              activeTabId: existingDraftTab.id,
+            });
+          }
+
+          return existingDraftTab.id;
+        }
+
         const tabId = createTabId('draft');
-        set((state) => ({
-          tabs: [...state.tabs, createDraftTab(tabId, workspacePath)],
+        set((currentState) => ({
+          tabs: [...currentState.tabs, createDraftTab(tabId, workspacePath)],
           activeTabId: tabId,
         }));
         return tabId;
+      },
+      closeDraftTabs: () => {
+        const state = get();
+        const closure = computeTabClosure(
+          state.tabs,
+          state.activeTabId,
+          (tab) => tab.type === 'draft',
+        );
+        if (!closure) {
+          return;
+        }
+
+        set({ tabs: closure.tabs, activeTabId: closure.activeTabId });
       },
       closeTab: (tabId) => {
         const state = get();
@@ -613,6 +720,56 @@ export const useUIStateStore = create<UIStateStore>()(
         });
         return nextActiveTab;
       },
+      closeTabs: (tabIds) => {
+        const state = get();
+        const tabIdSet = new Set(tabIds);
+        const closure = computeTabClosure(state.tabs, state.activeTabId, (tab) =>
+          tabIdSet.has(tab.id),
+        );
+        if (!closure) {
+          return state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+        }
+
+        set({
+          tabs: closure.tabs,
+          activeTabId: closure.activeTabId,
+          closedSessionTabIds: mergeClosedSessionTabIds(
+            state.closedSessionTabIds,
+            closure.closedSessionIds,
+          ),
+        });
+        return closure.nextActiveTab;
+      },
+      closeSessionTabs: (sessionIds) => {
+        const state = get();
+        const sessionIdSet = new Set(sessionIds);
+        const closure = computeTabClosure(
+          state.tabs,
+          state.activeTabId,
+          (tab) =>
+            tab.type === 'session' &&
+            tab.sessionId !== undefined &&
+            sessionIdSet.has(tab.sessionId),
+        );
+        if (!closure) {
+          return state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+        }
+
+        set({
+          tabs: closure.tabs,
+          activeTabId: closure.activeTabId,
+          closedSessionTabIds: mergeClosedSessionTabIds(
+            state.closedSessionTabIds,
+            closure.closedSessionIds,
+          ),
+        });
+        return closure.nextActiveTab;
+      },
+      closedSessionTabIds: [],
+      clearClosedSessionTabIds: () =>
+        set((state) =>
+          state.closedSessionTabIds.length === 0 ? state : { closedSessionTabIds: [] },
+        ),
       selectTab: (tabId) => {
         const tab = get().tabs.find((entry) => entry.id === tabId) ?? null;
         if (tab) {
@@ -726,6 +883,15 @@ export const useUIStateStore = create<UIStateStore>()(
             : [...s.pinnedSessions, id],
         })),
       isPinned: (id) => get().pinnedSessions.includes(id),
+
+      // 会话列表折叠分组
+      collapsedSessionGroups: [],
+      toggleSessionGroupCollapsed: (groupKey) =>
+        set((s) => ({
+          collapsedSessionGroups: s.collapsedSessionGroups.includes(groupKey)
+            ? s.collapsedSessionGroups.filter((key) => key !== groupKey)
+            : [...s.collapsedSessionGroups, groupKey],
+        })),
 
       // File tree
       expandedDirs: [],
@@ -979,16 +1145,23 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 21,
+      version: 22,
       // reviewPanelOpened / editorMode 不持久化——每次启动默认关闭。
+      // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
       partialize: (state) => {
-        const { reviewPanelOpened: _rp, editorMode: _em, ...rest } = state;
+        const {
+          reviewPanelOpened: _rp,
+          editorMode: _em,
+          closedSessionTabIds: _cs,
+          ...rest
+        } = state;
         return rest as typeof state;
       },
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as object) };
         merged.reviewPanelOpened = false;
         merged.editorMode = false;
+        merged.closedSessionTabIds = [];
         return merged as typeof currentState;
       },
       // Throttle storage writes to avoid JSON.stringify+setItem on
@@ -1127,6 +1300,15 @@ export const useUIStateStore = create<UIStateStore>()(
         // 面板宽度独占剩余空间的旧机制。
         if (version < 21) {
           nextState.fusionDockSplitPos = FUSION_DOCK_SPLIT_BOUNDS.default;
+        }
+
+        // v22:会话侧栏折叠的工作区分组改为持久化状态。
+        if (version < 22) {
+          nextState.collapsedSessionGroups = [];
+        }
+
+        if (!isStringArray(nextState.collapsedSessionGroups)) {
+          nextState.collapsedSessionGroups = [];
         }
 
         if (!isStringArray(nextState.savedWorkspacePaths)) {

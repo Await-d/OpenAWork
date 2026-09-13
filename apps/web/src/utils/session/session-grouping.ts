@@ -34,6 +34,17 @@ export interface WorkspaceSessionCollections<TSession extends SessionWithWorkspa
 
 export const UNBOUND_WORKSPACE_GROUP_KEY = '__unbound__';
 
+/**
+ * 会话的会话组标题。
+ *
+ * 会话列表分组标题、/sessions 分组标题、首页项目名与相关删除确认文案统一取此值，
+ * 避免各处出现「未绑定工作区」等不一致措辞。
+ */
+export const UNBOUND_WORKSPACE_LABEL = '会话';
+
+/** 会话的路径占位文案（分组副标题 / 项目路径行）。 */
+export const UNBOUND_WORKSPACE_PATH_LABEL = '未指定路径';
+
 export function getWorkspaceGroupKey(workspacePath: string | null): string {
   return workspacePath ?? UNBOUND_WORKSPACE_GROUP_KEY;
 }
@@ -103,7 +114,7 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
 
     const nextGroup: WorkspaceSessionGroup<TSession> = {
       workspacePath,
-      workspaceLabel: workspacePath ? basename(workspacePath) : '未绑定工作区',
+      workspaceLabel: workspacePath ? basename(workspacePath) : UNBOUND_WORKSPACE_LABEL,
       sessions: [session],
     };
     groups.set(groupKey, nextGroup);
@@ -186,9 +197,22 @@ export function filterSessionTreeGroupsByQuery<TSession extends SessionWithWorks
     return groups;
   }
 
+  return filterSessionTreeGroupsByMatcher(groups, (session) =>
+    matchesSessionQuery(session, normalizedQuery),
+  );
+}
+
+/**
+ * 按自定义匹配函数过滤会话树：保留命中的节点及其祖先链，
+ * 供「标题命中 ∪ 消息内容命中」等组合条件复用。
+ */
+export function filterSessionTreeGroupsByMatcher<TSession extends SessionWithWorkspaceLike>(
+  groups: WorkspaceSessionTreeGroup<TSession>[],
+  matches: (session: TSession) => boolean,
+): WorkspaceSessionTreeGroup<TSession>[] {
   return groups.map((group) => {
     const roots = group.roots
-      .map((node) => filterSessionTreeNode(node, normalizedQuery))
+      .map((node) => filterSessionTreeNode(node, matches))
       .filter((node): node is WorkspaceSessionTreeNode<TSession> => node !== null);
 
     return {
@@ -239,13 +263,13 @@ function buildWorkspaceSessionTree<TSession extends SessionWithWorkspaceLike>(
 
 function filterSessionTreeNode<TSession extends SessionWithWorkspaceLike>(
   node: WorkspaceSessionTreeNode<TSession>,
-  query: string,
+  matches: (session: TSession) => boolean,
 ): WorkspaceSessionTreeNode<TSession> | null {
   const filteredChildren = node.children
-    .map((child) => filterSessionTreeNode(child, query))
+    .map((child) => filterSessionTreeNode(child, matches))
     .filter((child): child is WorkspaceSessionTreeNode<TSession> => child !== null);
 
-  if (!matchesSessionQuery(node.session, query) && filteredChildren.length === 0) {
+  if (!matches(node.session) && filteredChildren.length === 0) {
     return null;
   }
 
@@ -288,6 +312,7 @@ function sortWorkspaceGroups<TSession extends SessionWithWorkspaceLike>(
   const orderedGroups = [...groups];
 
   orderedGroups.sort((a, b) => {
+    // 会话的会话组永远沉底：无论组内会话多新、其他组是否为空。
     if (a.workspacePath === null && b.workspacePath !== null) return 1;
     if (a.workspacePath !== null && b.workspacePath === null) return -1;
 

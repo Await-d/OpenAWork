@@ -1,3 +1,5 @@
+import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
+
 export type HomeSessionTimeGroupKey = 'today' | 'yesterday' | 'earlier';
 
 export interface HomeSessionLike {
@@ -41,7 +43,7 @@ export function getSessionTitle(session: Pick<HomeSessionLike, 'id' | 'title'>):
 
 export function getWorkspaceName(path: string | null): string {
   if (!path) {
-    return '未绑定工作区';
+    return UNBOUND_WORKSPACE_LABEL;
   }
 
   return path.split('/').filter(Boolean).at(-1) ?? path;
@@ -120,6 +122,13 @@ export function buildHomeProjects<TSession extends HomeSessionLike>(
   }
 
   return Array.from(projectsByKey.values()).sort((left, right) => {
+    // 会话的会话永远排在已绑定工作区的项目之后。
+    const leftUnbound = left.path === null;
+    const rightUnbound = right.path === null;
+    if (leftUnbound !== rightUnbound) {
+      return leftUnbound ? 1 : -1;
+    }
+
     if (right.runningCount !== left.runningCount) {
       return right.runningCount - left.runningCount;
     }

@@ -2745,35 +2745,95 @@ textarea {
 .composer-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: var(--spacing-2);
   flex-wrap: wrap;
 }
-.composer-toolbar-left,
-.composer-primary-actions {
+/* 左侧功能组吸收剩余宽度，使模型控件与发送按钮始终贴近右端。 */
+.composer-toolbar-left {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.composer-toolbar-left {
+  flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   padding-bottom: 2px;
   scrollbar-width: none;
 }
 .composer-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
+
+/* ── 模型 / 思考等级控件 ────────────────────────────────────────
+   以「图标 + 当前值 + 箭头」呈现，用户无需 hover 即可知道当前模型与
+   思考等级；透明底色 + hover 淡底，与发送按钮并列在工具条右端。 */
 .composer-model-group {
   display: flex;
-  align-items: stretch;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-overlay);
-  overflow: hidden;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
 }
-.composer-model-button,
+.composer-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  max-width: 168px;
+  padding: 0 7px;
+  /* 透明边框占位，避免 hover 时尺寸跳动。 */
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+.composer-model-button > * {
+  flex-shrink: 0;
+}
+.composer-model-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+.composer-model-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.composer-model-button__label {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-model-button__chevron {
+  opacity: 0.55;
+  transition:
+    transform 180ms ease,
+    opacity 150ms ease;
+}
+.composer-model-button:hover .composer-model-button__chevron {
+  opacity: 0.85;
+}
+/* 激活态（思考已开启）与展开态共用强调色。 */
+.composer-model-button.active,
+.composer-model-button[aria-expanded='true'] {
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  color: color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%);
+}
+.composer-model-button[aria-expanded='true'] .composer-model-button__chevron {
+  opacity: 1;
+  transform: rotate(180deg);
+}
+
 .composer-toolbar-icon,
 .composer-optimize-button {
   width: 26px;
@@ -2788,17 +2848,6 @@ textarea {
   cursor: pointer;
   flex-shrink: 0;
 }
-.composer-model-button {
-  width: 28px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg-default);
-}
-.composer-model-button.with-divider {
-  border-left: 1px solid var(--border-subtle);
-}
-.composer-model-button.active,
 .composer-toolbar-icon.active,
 .composer-optimize-button.active {
   background: color-mix(in oklch, var(--accent) 10%, transparent);
@@ -2808,19 +2857,6 @@ textarea {
 .composer-optimize-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-.composer-toolbar-divider {
-  width: 1px;
-  height: 16px;
-  background: var(--border-subtle);
-  flex-shrink: 0;
-  margin: 0 2px;
-}
-.composer-status-copy {
-  font-size: 10px;
-  color: var(--fg-muted);
-  white-space: nowrap;
-  letter-spacing: 0.01em;
 }
 .composer-spinner {
   width: 12px;
@@ -2863,7 +2899,7 @@ textarea {
   position: absolute;
   bottom: 3px;
   right: 6px;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
   pointer-events: none;

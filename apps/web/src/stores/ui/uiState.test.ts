@@ -12,6 +12,7 @@ import {
 function resetLayoutState(): void {
   useUIStateStore.setState({
     activeTabId: null,
+    closedSessionTabIds: [],
     reviewPanelOpened: false,
     reviewPanelWidth: REVIEW_PANEL_WIDTH_BOUNDS.default,
     sidebarPanelOpened: true,
@@ -69,6 +70,98 @@ describe('useUIStateStore tabs', () => {
     useUIStateStore.getState().reorderTabs(0, 1);
 
     expect(useUIStateStore.getState().tabs.map((tab) => tab.id)).toEqual([secondTabId, firstTabId]);
+  });
+
+  it('closeTabs 批量关闭并落到最靠左被关闭位置的幸存标签', () => {
+    const firstTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');
+    const secondTabId = useUIStateStore.getState().addSessionTab('s-2', '会话二');
+    const thirdTabId = useUIStateStore.getState().addDraftTab();
+    useUIStateStore.getState().selectTab(secondTabId);
+
+    const nextTab = useUIStateStore.getState().closeTabs([firstTabId, secondTabId]);
+
+    expect(nextTab?.id).toBe(thirdTabId);
+    expect(useUIStateStore.getState().activeTabId).toBe(thirdTabId);
+    expect(useUIStateStore.getState().tabs.map((tab) => tab.id)).toEqual([thirdTabId]);
+  });
+
+  it('closeTabs 未命中任何标签时保持状态不变', () => {
+    const firstTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');
+    const tabsBefore = useUIStateStore.getState().tabs;
+
+    const nextTab = useUIStateStore.getState().closeTabs(['not-exist']);
+
+    expect(nextTab?.id).toBe(firstTabId);
+    expect(useUIStateStore.getState().tabs).toBe(tabsBefore);
+  });
+
+  it('closeSessionTabs 按会话 id 关闭标签并记录待放行的会话', () => {
+    const firstTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');
+    const secondTabId = useUIStateStore.getState().addSessionTab('s-2', '会话二');
+    useUIStateStore.getState().selectTab(firstTabId);
+
+    const nextTab = useUIStateStore.getState().closeSessionTabs(['s-1']);
+
+    expect(nextTab?.id).toBe(secondTabId);
+    expect(useUIStateStore.getState().tabs.map((tab) => tab.id)).toEqual([secondTabId]);
+    // 已删除会话在路由切走前需要被标记，避免顶部标签栏重新建回标签。
+    expect(useUIStateStore.getState().closedSessionTabIds).toEqual(['s-1']);
+
+    useUIStateStore.getState().clearClosedSessionTabIds();
+    expect(useUIStateStore.getState().closedSessionTabIds).toEqual([]);
+  });
+
+  it('关闭草稿标签不会写入已删除会话标记', () => {
+    const draftTabId = useUIStateStore.getState().addDraftTab();
+
+    useUIStateStore.getState().closeTabs([draftTabId]);
+
+    expect(useUIStateStore.getState().tabs).toEqual([]);
+    expect(useUIStateStore.getState().closedSessionTabIds).toEqual([]);
+  });
+
+  it('重复「新建会话」只复用同一个草稿标签', () => {
+    const firstDraftTabId = useUIStateStore.getState().addDraftTab('/ws/a');
+    const secondDraftTabId = useUIStateStore.getState().addDraftTab('/ws/a');
+
+    const state = useUIStateStore.getState();
+    expect(secondDraftTabId).toBe(firstDraftTabId);
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]?.type).toBe('draft');
+    expect(state.activeTabId).toBe(firstDraftTabId);
+  });
+
+  it('复用草稿标签时按最新工作区更新绑定路径', () => {
+    const draftTabId = useUIStateStore.getState().addDraftTab('/ws/a');
+
+    const nextDraftTabId = useUIStateStore.getState().addDraftTab('/ws/b');
+
+    expect(nextDraftTabId).toBe(draftTabId);
+    expect(useUIStateStore.getState().tabs).toHaveLength(1);
+    expect(useUIStateStore.getState().tabs[0]?.workspacePath).toBe('/ws/b');
+  });
+
+  it('closeDraftTabs 在草稿转正后移除草稿标签并落到幸存标签', () => {
+    const draftTabId = useUIStateStore.getState().addDraftTab();
+    const sessionTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');
+
+    useUIStateStore.getState().closeDraftTabs();
+
+    const state = useUIStateStore.getState();
+    expect(draftTabId).not.toBe(sessionTabId);
+    expect(state.tabs.map((tab) => tab.id)).toEqual([sessionTabId]);
+    expect(state.activeTabId).toBe(sessionTabId);
+    expect(state.closedSessionTabIds).toEqual([]);
+  });
+
+  it('closeDraftTabs 无草稿标签时保持状态不变', () => {
+    const sessionTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');
+    const tabsBefore = useUIStateStore.getState().tabs;
+
+    useUIStateStore.getState().closeDraftTabs();
+
+    expect(useUIStateStore.getState().tabs).toBe(tabsBefore);
+    expect(useUIStateStore.getState().activeTabId).toBe(sessionTabId);
   });
 });
 

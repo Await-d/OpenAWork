@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import type { SessionTab } from '../../stores/ui/uiState.js';
 import { readPersistedActiveStreamSessionId } from '../gateway/useGatewayClient.js';
 import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
 import type { TokenStore, SessionsListOptions } from '@openAwork/web-client';
@@ -21,10 +22,6 @@ import {
   getSessionDeleteErrorMessage,
   isSessionAlreadyDeletedError,
 } from '../../utils/session/session-delete.js';
-import {
-  buildSavedChatSessionMetadata,
-  loadSavedChatSessionDefaults,
-} from '../../utils/chat/chat-session-defaults.js';
 import { extractParentSessionId, hasTeamWorkspace } from '../../utils/session/session-metadata.js';
 import { logger } from '../../utils/log/logger.js';
 
@@ -51,6 +48,22 @@ function resolveDeletedSessionIds(
   return [fallbackSessionId];
 }
 
+/**
+ * 会话被删除后决定路由落点：优先跟随「关闭后应激活」的标签页，
+ * 无可用标签页则回到首页——与顶部标签栏关闭标签的落点保持一致。
+ */
+function navigateToClosedSessionTarget(
+  nextActiveTab: SessionTab | null,
+  navigate: (path: string) => void,
+): void {
+  if (nextActiveTab?.type === 'session' && nextActiveTab.sessionId) {
+    navigate(`/chat/${nextActiveTab.sessionId}`);
+    return;
+  }
+
+  navigate('/chat');
+}
+
 const MISSING_PARENT_SESSION_CACHE_TTL_MS = 60_000;
 
 export function useSessions() {
@@ -62,11 +75,16 @@ export function useSessions() {
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
+  const addDraftTab = useUIStateStore((s) => s.addDraftTab);
+  const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
+  const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const sessionListPathFilterEnabled = useUIStateStore((s) => s.sessionListPathFilterEnabled);
   const sessionListPathFilterFeatureEnabled = useUIStateStore(
     (s) => s.sessionListPathFilterFeatureEnabled,
   );
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+  const collapsedSessionGroups = useUIStateStore((s) => s.collapsedSessionGroups);
+  const toggleGroupCollapsed = useUIStateStore((s) => s.toggleSessionGroupCollapsed);
   const tokenStore: TokenStore = useMemo(
     () => ({
       getAccessToken: () => useAuthStore.getState().accessToken,
@@ -79,11 +97,13 @@ export function useSessions() {
   );
 
   const [sessions, setSessions] = useState<Session[]>([]);
+  // 初始即为加载中：首帧就渲染骨架，避免先闪一帧空态再切到骨架。
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [deletingSessionIds, setDeletingSessionIds] = useState<Set<string>>(() => new Set());
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [sessionSearch, setSessionSearch] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
   const fetchRequestIdRef = useRef(0);
@@ -104,9 +124,13 @@ export function useSessions() {
   }
 
   const fetchSessions = useCallback(async () => {
-    if (!accessToken) return;
+    if (!accessToken) {
+      setIsLoadingSessions(false);
+      return;
+    }
     const requestId = fetchRequestIdRef.current + 1;
     fetchRequestIdRef.current = requestId;
+    setIsLoadingSessions(true);
     try {
       const data = await withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
         const activeStreamSessionId = readPersistedActiveStreamSessionId();
@@ -169,10 +193,21 @@ export function useSessions() {
       const nextSessions = data as unknown as Session[];
       mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
       setSessions(nextSessions);
+      setSessionsError(null);
     } catch (err) {
+      if (fetchRequestIdRef.current !== requestId) {
+        return;
+      }
       if (err instanceof HttpError && err.status === 401) {
         clearAuth();
         void navigate('/');
+        return;
+      }
+      logger.error('Failed to fetch sessions:', err);
+      setSessionsError('会话列表加载失败');
+    } finally {
+      if (fetchRequestIdRef.current === requestId) {
+        setIsLoadingSessions(false);
       }
     }
   }, [
@@ -187,37 +222,34 @@ export function useSessions() {
     selectedWorkspacePath,
   ]);
 
+  /**
+   * 进入「草稿会话」：只切到 /chat 空白态，不在服务端落库空会话。
+   *
+   * 真正的会话由 ChatPage 在用户发出首条消息时惰性创建（`ensureSession`），
+   * 因此连续点击「新建会话」不会堆积空对话；已处于草稿态时只会复用同一个草稿
+   * （草稿标签由 uiState 去重），不会无限新建。
+   */
   const newSession = useCallback(
-    async (workspacePath?: string | null, parentSessionId?: string | null) => {
+    async (workspacePath?: string | null, _parentSessionId?: string | null) => {
       if (!accessToken) return;
-      try {
-        let metadata: Record<string, unknown> = {};
-        try {
-          const { defaults } = await loadSavedChatSessionDefaults(gatewayUrl, accessToken);
-          metadata = buildSavedChatSessionMetadata(defaults, {
-            parentSessionId,
-            workingDirectory: workspacePath,
-          });
-        } catch {
-          if (workspacePath) {
-            metadata['workingDirectory'] = workspacePath;
-          }
-          if (parentSessionId) {
-            metadata['parentSessionId'] = parentSessionId;
-          }
-        }
 
-        if (workspacePath) {
-          addSavedWorkspacePath(workspacePath);
-        }
-        const session = await createSessionsClient(gatewayUrl).create(accessToken, { metadata });
-        void fetchSessions();
-        void navigate(`/chat/${session.id}`);
-      } catch (err) {
-        logger.error('Failed to create session:', err);
+      if (workspacePath) {
+        setSelectedWorkspacePath(workspacePath);
+        addSavedWorkspacePath(workspacePath);
       }
+
+      addDraftTab(workspacePath ?? undefined);
+      navigateToHome();
+      void navigate('/chat');
     },
-    [accessToken, addSavedWorkspacePath, gatewayUrl, fetchSessions, navigate],
+    [
+      accessToken,
+      addDraftTab,
+      addSavedWorkspacePath,
+      navigateToHome,
+      setSelectedWorkspacePath,
+      navigate,
+    ],
   );
 
   const startRename = useCallback((session: Session) => {
@@ -290,8 +322,13 @@ export function useSessions() {
           );
         }
         setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+        // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页，
+        // 若被删会话正是当前路由，则改跳到关闭后应激活的标签页。
+        const nextActiveTab = useUIStateStore
+          .getState()
+          .closeSessionTabs(Array.from(deletedSessionIds));
         if (sessionId && deletedSessionIds.has(sessionId)) {
-          void navigate('/chat');
+          navigateToClosedSessionTarget(nextActiveTab, navigate);
         }
         // 从服务器刷新完整列表——删除可能触发关联会话的级联删除
         // （如 team session 的子会话），本地过滤可能遗漏。
@@ -306,7 +343,10 @@ export function useSessions() {
             Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
           );
           setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
-          if (sessionId === sessionIdToDelete) void navigate('/chat');
+          const nextActiveTab = useUIStateStore.getState().closeSessionTabs([sessionIdToDelete]);
+          if (sessionId === sessionIdToDelete) {
+            navigateToClosedSessionTarget(nextActiveTab, navigate);
+          }
           void fetchSessions();
           return true;
         }
@@ -393,15 +433,6 @@ export function useSessions() {
     [accessToken, gatewayUrl, tokenStore],
   );
 
-  const toggleGroupCollapsed = useCallback((key: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
   useEffect(() => {
     void fetchSessions();
   }, [fetchSessions]);
@@ -433,6 +464,7 @@ export function useSessions() {
   const deferredSessionSearch = useDeferredValue(sessionSearch);
   const normalizedSessionSearch = deferredSessionSearch.trim().toLowerCase();
   const pinnedSessions = useUIStateStore((s) => s.pinnedSessions);
+  const collapsedGroups = useMemo(() => new Set(collapsedSessionGroups), [collapsedSessionGroups]);
   const workspaceCollections = useMemo(
     () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths, pinnedSessions),
     [savedWorkspacePaths, sessions, pinnedSessions],
@@ -452,8 +484,11 @@ export function useSessions() {
     filteredSessions: sessions,
     groupedSessions: workspaceCollections.groups,
     groupedSessionTrees,
+    sessionTreeGroups: workspaceCollections.treeGroups,
     sessionCountByWorkspace: workspaceCollections.sessionCountByWorkspace,
     workspaceSessionIdsByGroupKey: workspaceCollections.sessionIdsByGroupKey,
+    isLoadingSessions,
+    sessionsError,
     renamingSessionId,
     renameValue,
     setRenameValue,

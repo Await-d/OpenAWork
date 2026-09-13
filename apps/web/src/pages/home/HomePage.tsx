@@ -20,7 +20,6 @@ export default function HomePage() {
   const navigate = useNavigate();
   const { sessions, newSession } = useSessions();
   const selectedWorkspacePath = useUIStateStore((state) => state.selectedWorkspacePath);
-  const addDraftTab = useUIStateStore((state) => state.addDraftTab);
   const addSessionTab = useUIStateStore((state) => state.addSessionTab);
   const [selectedProjectKey, setSelectedProjectKey] = useState('all');
   const [statusFilter, setStatusFilter] = useState<HomeSessionStatusFilter>('all');
@@ -54,10 +53,13 @@ export default function HomePage() {
 
   const createSession = (workspacePath?: string | null) => {
     const path = workspacePath ?? selectedWorkspacePath;
-    addDraftTab(path ?? undefined);
+    // 只进入草稿态：newSession 会复用/创建唯一的草稿标签，
+    // 真正的会话在首条消息发出后才落库。
     void preloadRouteModuleByPath('/chat');
     void newSession(path);
   };
+
+  const createSessionInScope = () => createSession(selectedContextPath);
 
   const openSession = (sessionId: string, title: string | null | undefined) => {
     addSessionTab(sessionId, title ?? `会话 ${sessionId.slice(0, 8)}`);
@@ -83,52 +85,42 @@ export default function HomePage() {
           onSelectProject={setSelectedProjectKey}
         />
 
-        <div className="home-main-column">
-          <HomeDashboardPanel
-            activeProjectCount={activeProjectCount}
-            attentionSessions={attentionSessions}
-            pausedCount={pausedCount}
-            projectCount={projects.length}
-            runningCount={runningCount}
-            selectedContextPath={selectedContextPath}
-            selectedProjectLabel={selectedProjectLabel}
-            totalSessionCount={projectSessions.length}
-            onCreateSession={() =>
-              createSession(
-                selectedProjectKey === 'all' ? selectedWorkspacePath : selectedProject?.path,
-              )
-            }
-            onOpenRoute={openRoute}
-            onOpenSession={openSession}
-          />
+        <HomeDashboardPanel
+          activeProjectCount={activeProjectCount}
+          attentionSessions={attentionSessions}
+          pausedCount={pausedCount}
+          projectCount={projects.length}
+          runningCount={runningCount}
+          selectedContextPath={selectedContextPath}
+          selectedProjectLabel={selectedProjectLabel}
+          totalSessionCount={projectSessions.length}
+          onCreateSession={createSessionInScope}
+          onOpenRoute={openRoute}
+          onOpenSession={openSession}
+        />
 
-          <HomeSessionList
-            emptyDescription={
-              statusFilter !== 'all'
-                ? '当前筛选条件下没有会话，可以切回全部或新建会话。'
-                : selectedProjectKey === 'all'
-                  ? '新建会话后，这里会按更新时间展示最近任务。'
-                  : '这个项目下还没有会话，点击新建会话即可开始。'
-            }
-            sessions={visibleSessions}
-            title={
-              selectedProjectKey === 'all' ? '最近会话' : `${selectedProject?.label ?? '项目'} 会话`
-            }
-            onCreateSession={() =>
-              createSession(
-                selectedProjectKey === 'all' ? selectedWorkspacePath : selectedProject?.path,
-              )
-            }
-            onOpenSession={openSession}
-          >
-            <HomeSessionSearch sessions={projectSessions} onSelectSession={openSession} />
-            <HomeSessionStatusFilterBar
-              counts={statusCounts}
-              value={statusFilter}
-              onChange={setStatusFilter}
-            />
-          </HomeSessionList>
-        </div>
+        <HomeSessionList
+          emptyDescription={
+            statusFilter !== 'all'
+              ? '当前筛选条件下没有会话，可以切回全部或新建会话。'
+              : selectedProjectKey === 'all'
+                ? '新建会话后，这里会按更新时间展示最近任务。'
+                : '这个项目下还没有会话，点击新建会话即可开始。'
+          }
+          sessions={visibleSessions}
+          title={
+            selectedProjectKey === 'all' ? '最近会话' : `${selectedProject?.label ?? '项目'} 会话`
+          }
+          onCreateSession={createSessionInScope}
+          onOpenSession={openSession}
+        >
+          <HomeSessionSearch sessions={projectSessions} onSelectSession={openSession} />
+          <HomeSessionStatusFilterBar
+            counts={statusCounts}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </HomeSessionList>
       </div>
     </main>
   );

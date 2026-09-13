@@ -1,6 +1,7 @@
 import { memo, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
 import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './session-card.js';
 import type { SessionRow } from '../state/session-page-types.js';
+import { UNBOUND_WORKSPACE_PATH_LABEL } from '../../../utils/session/session-grouping.js';
 
 const SECTION_STYLE: CSSProperties = {
   display: 'flex',
@@ -232,9 +233,9 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
-              title={workspacePath ?? '未绑定工作区'}
+              title={workspacePath ?? UNBOUND_WORKSPACE_PATH_LABEL}
             >
-              {workspacePath ?? '未绑定工作区'}
+              {workspacePath ?? UNBOUND_WORKSPACE_PATH_LABEL}
             </span>
           </span>
           <span

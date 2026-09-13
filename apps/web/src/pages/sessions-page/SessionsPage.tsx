@@ -17,16 +17,13 @@ import {
   getWorkspaceGroupKey,
   listWorkspacePathsFromSessions,
   UNBOUND_WORKSPACE_GROUP_KEY,
+  UNBOUND_WORKSPACE_LABEL,
 } from '../../utils/session/session-grouping.js';
 import { subscribeSessionListRefresh } from '../../utils/session/session-list-events.js';
 import {
   getSessionDeleteErrorMessage,
   isSessionAlreadyDeletedError,
 } from '../../utils/session/session-delete.js';
-import {
-  buildSavedChatSessionMetadata,
-  loadSavedChatSessionDefaults,
-} from '../../utils/chat/chat-session-defaults.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../../components/common/modal/workspace-picker-data-source.js';
 import WorkspaceGroupMenu from '../../components/layout/workspace/WorkspaceGroupMenu.js';
@@ -251,29 +248,22 @@ export default function SessionsPage() {
     };
   }, [hoveredId, restoreHoveredSessionFromPointer, sessions]);
 
+  /**
+   * 进入「草稿会话」：不在服务端落库空会话，真正的会话由 ChatPage 在首条消息
+   * 发出时惰性创建，因此连续点击「新建」不会堆积空对话。
+   */
   async function createSession(inheritWorkspacePath?: string | null) {
     if (!token) return;
-    let metadata: Record<string, unknown> = {};
-    try {
-      const { defaults } = await loadSavedChatSessionDefaults(gatewayUrl, token);
-      metadata = buildSavedChatSessionMetadata(defaults, {
-        workingDirectory: inheritWorkspacePath,
-      });
-    } catch {
-      if (inheritWorkspacePath) {
-        metadata['workingDirectory'] = inheritWorkspacePath;
-      }
-    }
 
+    const uiState = useUIStateStore.getState();
     if (inheritWorkspacePath) {
+      uiState.setSelectedWorkspacePath(inheritWorkspacePath);
       addSavedWorkspacePath(inheritWorkspacePath);
     }
-    const session = await createSessionsClient(gatewayUrl).create(token, { metadata });
-    logger.info('session created', session.id);
-    if (session.id) {
-      preloadChatRoute(session.id);
-      void navigate(`/chat/${session.id}`);
-    }
+    uiState.addDraftTab(inheritWorkspacePath ?? undefined);
+    uiState.navigateToHome();
+    preloadChatRoute(null);
+    void navigate('/chat');
   }
 
   const deleteSession = useCallback(
@@ -296,6 +286,8 @@ export default function SessionsPage() {
         );
         const deletedSessionIds = new Set(resolveDeletedSessionIds(result, id));
         logger.info('session deleted', id);
+        // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页。
+        useUIStateStore.getState().closeSessionTabs(Array.from(deletedSessionIds));
         setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
         if (selectedId && deletedSessionIds.has(selectedId)) {
           setSelectedId(null);
@@ -306,6 +298,7 @@ export default function SessionsPage() {
         return true;
       } catch (err) {
         if (isSessionAlreadyDeletedError(err)) {
+          useUIStateStore.getState().closeSessionTabs([id]);
           setSessions((prev) => prev.filter((s) => s.id !== id));
           if (selectedId === id) setSelectedId(null);
           void loadSessions(true);
@@ -379,7 +372,7 @@ export default function SessionsPage() {
           toast(
             sessionCount > 0
               ? workspacePath === null
-                ? `已删除未绑定工作区中的 ${successCount} 个会话`
+                ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
                 : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
               : `已移除工作区「${workspaceLabel}」`,
             'success',
@@ -389,7 +382,7 @@ export default function SessionsPage() {
 
         toast(
           workspacePath === null
-            ? `未绑定工作区删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
+            ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
             : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
           'warning',
           4200,

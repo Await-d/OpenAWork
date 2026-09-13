@@ -36,7 +36,6 @@ export function HomeSessionList<TSession extends HomeSessionLike>({
     <section className="home-session-panel" aria-label="最近会话">
       <header className="home-session-panel-header">
         <div>
-          <span className="home-eyebrow">最近会话</span>
           <h2>{title}</h2>
           <p className="home-session-panel-summary">
             {sessions.length === 0
@@ -44,7 +43,11 @@ export function HomeSessionList<TSession extends HomeSessionLike>({
               : `共 ${sessions.length} 个会话，按最近更新时间排序`}
           </p>
         </div>
-        <button type="button" className="home-primary-action" onClick={onCreateSession}>
+        <button
+          type="button"
+          className="home-primary-action home-primary-action-compact"
+          onClick={onCreateSession}
+        >
           新建会话
         </button>
       </header>
