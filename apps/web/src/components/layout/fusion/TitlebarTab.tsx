@@ -3,13 +3,20 @@
  *
  * 功能：
  *  - 标题截断（max-width + ellipsis）
- *  - 关闭按钮（hover 时显示）
+ *  - 快捷关闭按钮（标签 hover / 激活 / 键盘聚焦时显示）
+ *  - 右键菜单（由父级 TitlebarTabContextMenu 承载）
+ *  - 中键快捷关闭（浏览器习惯）
  *  - 拖拽手柄（HTML5 drag/drop，用于标签排序）
  *  - 活跃高亮
  *  - draft 状态指示（未关联 session 的草稿标签）
  *  - 会话图标（固定/自定义 emoji/对话模式）
+ *
+ * 交互态（hover / active / focus-visible）统一下沉到
+ * `TitlebarTabStrip.css` 的 `.titlebar-tab-strip__tab*` 规则，避免内联样式
+ * 覆盖伪类样式导致 hover 失效。
  */
 
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { SessionTab } from '../../../stores/ui/uiState.js';
 import type { SessionDialogueMode } from '../../../utils/session/session-metadata.js';
 
@@ -21,8 +28,11 @@ export interface TitlebarTabProps {
   sessionDialogueMode?: SessionDialogueMode;
   sessionStateStatus?: 'idle' | 'running' | 'paused';
   isPinned?: boolean;
+  /** 该标签的右键菜单是否正在展示（用于高亮当前操作的标签）。 */
+  menuOpen?: boolean;
   onClick: () => void;
   onClose: () => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onDragStart: (index: number) => void;
   onDragOver: (index: number) => void;
   onDrop: () => void;
@@ -36,8 +46,10 @@ export function TitlebarTab({
   sessionDialogueMode,
   sessionStateStatus,
   isPinned = false,
+  menuOpen = false,
   onClick,
   onClose,
+  onContextMenu,
   onDragStart,
   onDragOver,
   onDrop,
@@ -52,6 +64,9 @@ export function TitlebarTab({
       role="tab"
       aria-selected={active}
       draggable
+      data-active={active ? 'true' : 'false'}
+      data-menu-open={menuOpen ? 'true' : 'false'}
+      className="titlebar-tab-strip__tab"
       onDragStart={() => onDragStart(index)}
       onDragOver={(e) => {
         e.preventDefault();
@@ -62,6 +77,20 @@ export function TitlebarTab({
         onDrop();
       }}
       onClick={onClick}
+      onContextMenu={onContextMenu}
+      onMouseDown={(event) => {
+        // 中键按下会触发浏览器自动滚动，这里拦截；关闭动作交给 onAuxClick。
+        if (event.button === 1) {
+          event.preventDefault();
+        }
+      }}
+      onAuxClick={(event) => {
+        if (event.button !== 1) {
+          return;
+        }
+        event.preventDefault();
+        onClose();
+      }}
       title={tab.title}
       style={{
         display: 'flex',
@@ -71,37 +100,21 @@ export function TitlebarTab({
         height: 28,
         minHeight: 28,
         borderRadius: 6,
-        background: active
-          ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))'
-          : 'transparent',
-        border: active
-          ? '1px solid color-mix(in oklch, var(--accent) 30%, transparent)'
-          : '1px solid transparent',
-        color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
         fontSize: 12,
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         flexShrink: 0,
         maxWidth: 280,
-        transition: 'background 120ms ease, border-color 120ms ease',
         userSelect: 'none',
         whiteSpace: 'nowrap',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) {
-          e.currentTarget.style.background =
-            'color-mix(in oklch, var(--fg-default) 6%, var(--bg-overlay))';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!active) {
-          e.currentTarget.style.background = 'transparent';
-        }
       }}
     >
       {/* Session icon (pinned/custom emoji/dialogue mode) */}
       {!isDraft && tab.type === 'session' && (
         <span
+          className="titlebar-tab-strip__tab-icon"
+          data-active={active ? 'true' : 'false'}
+          data-pinned={isPinned ? 'true' : 'false'}
           aria-label={isPinned ? '已固定' : isRunning ? '运行中' : isPaused ? '已暂停' : '空闲'}
           title={isPinned ? '已固定' : isRunning ? '运行中' : isPaused ? '已暂停' : '空闲'}
           style={{
@@ -113,11 +126,6 @@ export function TitlebarTab({
             width: 16,
             height: 16,
             borderRadius: 4,
-            background: active
-              ? 'color-mix(in oklch, var(--accent) 8%, transparent)'
-              : 'transparent',
-            color: active ? 'var(--accent)' : isPinned ? 'var(--accent)' : 'var(--fg-muted)',
-            transition: 'background 120ms ease, color 120ms ease',
           }}
         >
           {isPinned ? (
@@ -284,44 +292,37 @@ export function TitlebarTab({
           />
         </span>
       )}
-      {/* Close button — always visible on active tab, hover on others */}
+      {/* 快捷关闭：标签 hover / 激活 / 键盘聚焦时显示（见 TitlebarTabStrip.css） */}
       <button
         type="button"
         aria-label="关闭标签"
+        title="关闭标签"
+        className="titlebar-tab-strip__tab-close"
         onClick={(e) => {
           e.stopPropagation();
           onClose();
         }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 16,
-          height: 16,
-          borderRadius: 4,
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--fg-muted)',
-          cursor: 'pointer',
-          fontSize: 14,
-          lineHeight: 1,
-          padding: 0,
-          flexShrink: 0,
-          opacity: active ? 0.7 : 0,
-          transition: 'opacity 120ms ease',
+        onMouseDown={(e) => {
+          e.stopPropagation();
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.background = 'color-mix(in oklch, var(--danger) 12%, transparent)';
-          e.currentTarget.style.color = 'var(--danger)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.opacity = active ? '0.7' : '0';
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = 'var(--fg-muted)';
+        onContextMenu={(e) => {
+          e.stopPropagation();
         }}
       >
-        ×
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="6" y1="6" x2="18" y2="18" />
+          <line x1="18" y1="6" x2="6" y2="18" />
+        </svg>
       </button>
     </div>
   );

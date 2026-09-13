@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
 
 export interface WorkspaceDeleteConfirmDialogProps {
   deleting?: boolean;
@@ -156,14 +157,14 @@ export function WorkspaceDeleteConfirmDialog({
           <h3 style={styles.title}>
             {isBulkDelete
               ? isUnboundGroup
-                ? '确认删除未绑定工作区中的全部会话？'
+                ? `确认删除${UNBOUND_WORKSPACE_LABEL}中的全部会话？`
                 : '确认删除该工作区及其全部会话？'
               : '确认移除这个工作区？'}
           </h3>
           <p style={styles.description}>
             {isBulkDelete
               ? isUnboundGroup
-                ? '这会删除未绑定工作区下的全部会话。'
+                ? `这会删除${UNBOUND_WORKSPACE_LABEL}下的全部会话。`
                 : '这会删除该工作区下的全部会话，并把工作区从左侧列表中移除。'
               : '这只会把工作区从左侧列表中移除，不会删除任何会话内容。'}
           </p>
@@ -183,7 +184,7 @@ export function WorkspaceDeleteConfirmDialog({
         <div style={styles.warning}>
           {isBulkDelete
             ? isUnboundGroup
-              ? '此操作不可撤销。若部分会话删除失败，未绑定工作区分组会保留，并展示失败汇总。'
+              ? `此操作不可撤销。若部分会话删除失败，${UNBOUND_WORKSPACE_LABEL}分组会保留，并展示失败汇总。`
               : '此操作不可撤销。若部分会话删除失败，工作区会保留在侧栏中，并展示失败汇总。'
             : '移除后你仍可通过重新选择工作区或打开相关会话重新恢复它。'}
         </div>

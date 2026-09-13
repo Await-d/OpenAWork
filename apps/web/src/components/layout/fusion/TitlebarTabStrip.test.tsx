@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
@@ -35,7 +35,7 @@ vi.mock('../../../hooks/workspace/useSessions.js', () => ({
     setRenameValue: vi.fn(),
     hoveredSessionId: null,
     setHoveredSessionId: vi.fn(),
-    isDeletingSession: false,
+    isDeletingSession: () => false,
     sessionSearch: '',
     setSessionSearch: vi.fn(),
     startRename: vi.fn(),
@@ -48,6 +48,7 @@ vi.mock('../../../hooks/workspace/useSessions.js', () => ({
 function resetUiState(): void {
   useUIStateStore.setState({
     activeTabId: null,
+    closedSessionTabIds: [],
     lastChatPath: null,
     tabs: [],
     workbenchLayoutMode: 'fusion',
@@ -251,6 +252,52 @@ describe('TitlebarTabStrip', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: /经典/ }));
 
     expect(useUIStateStore.getState().workbenchLayoutMode).toBe('classic');
+  });
+
+  it('右键会话标签打开快捷菜单并支持关闭其他标签', async () => {
+    const firstTabId = useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
+    useUIStateStore.getState().addSessionTab('chat-session-2', 'Chat 会话二');
+    useUIStateStore.getState().selectTab(firstTabId);
+
+    renderTitlebar('/chat/chat-session-1');
+
+    fireEvent.contextMenu(screen.getByText('Chat 会话一'));
+
+    expect(screen.getByRole('menu', { name: '标签操作菜单' })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '关闭其他标签' }));
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().tabs).toHaveLength(1);
+    });
+    expect(useUIStateStore.getState().tabs[0]?.sessionId).toBe('chat-session-1');
+    expect(screen.queryByRole('menu', { name: '标签操作菜单' })).toBeNull();
+  });
+
+  it('会话被删除联动关闭顶部标签，且路由未切走时不会重建', async () => {
+    useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
+
+    renderTitlebar('/chat/chat-session-1');
+    expect(screen.getByText('Chat 会话一')).not.toBeNull();
+
+    // 会话列表删除会话时通过 store 联动关闭顶部标签。
+    act(() => {
+      useUIStateStore.getState().closeSessionTabs(['chat-session-1']);
+    });
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().tabs).toHaveLength(0);
+    });
+    expect(screen.queryByText('Chat 会话一')).toBeNull();
+    expect(useUIStateStore.getState().closedSessionTabIds).toEqual(['chat-session-1']);
+
+    // 路由离开被删除会话（回到首页）后放行标记，避免长期压制同名会话。
+    fireEvent.click(screen.getByRole('tab', { name: '首页' }));
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().closedSessionTabIds).toEqual([]);
+    });
+    expect(useUIStateStore.getState().tabs).toHaveLength(0);
   });
 
   it('仅在 macOS Tauri 环境下展示交通灯并触发窗口控制', async () => {

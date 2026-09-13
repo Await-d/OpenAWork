@@ -7,7 +7,12 @@ import {
   hasParentSession,
 } from '../../../utils/session/session-metadata.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
+import {
+  formatSessionTime,
+  formatSessionTimeTitle,
+} from '../../../utils/session/format-session-time.js';
 import { InlineEditor } from '@openAwork/shared-ui';
+import { highlightMatch } from './highlight-match.js';
 import {
   BaseSessionRow,
   RenameIcon,
@@ -19,6 +24,8 @@ import {
 export interface SessionSidebarSessionRowProps {
   activeSessionId?: string;
   commitRename: (sessionId: string) => Promise<void>;
+  /** 该会话命中消息内容搜索：在 meta 行标记「内容命中」 */
+  contentMatched?: boolean;
   depth?: number;
   hoveredSessionId: string | null;
   isDeletingSession: (sessionId: string) => boolean;
@@ -33,6 +40,8 @@ export interface SessionSidebarSessionRowProps {
   quickExportSession: (sessionId: string) => Promise<void>;
   renameValue: string;
   renamingSessionId: string | null;
+  /** 当前搜索词：非空时标题渲染为高亮文本（此时不挂载可编辑标题） */
+  searchQuery?: string;
   setRenameValue: (value: string) => void;
   startRename: (session: Session) => void;
 }
@@ -40,6 +49,7 @@ export interface SessionSidebarSessionRowProps {
 export function SessionSidebarSessionRow({
   activeSessionId,
   commitRename,
+  contentMatched = false,
   depth = 0,
   hoveredSessionId,
   isDeletingSession,
@@ -54,6 +64,7 @@ export function SessionSidebarSessionRow({
   quickExportSession,
   renameValue,
   renamingSessionId,
+  searchQuery = '',
   setRenameValue,
   startRename,
 }: SessionSidebarSessionRowProps) {
@@ -269,6 +280,14 @@ export function SessionSidebarSessionRow({
           </span>
         </React.Fragment>
       ))}
+      {contentMatched && (
+        <>
+          {(showChildBadge || modeLabels.length > 0) && (
+            <span style={{ color: 'var(--fg-muted)', margin: '0 3px' }}>·</span>
+          )}
+          <span style={{ color: 'var(--aux)', fontWeight: 600 }}>内容命中</span>
+        </>
+      )}
     </span>
   );
 
@@ -278,10 +297,8 @@ export function SessionSidebarSessionRow({
         sessionId={session.id}
         title={session.title ?? '未命名'}
         density="compact"
-        timeLabel={new Date(session.updated_at).toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric',
-        })}
+        timeLabel={formatSessionTime(session.updated_at)}
+        timeTitle={formatSessionTimeTitle(session.updated_at)}
         active={isActive}
         hovered={isHovered}
         icon={iconNode}
@@ -291,6 +308,9 @@ export function SessionSidebarSessionRow({
         onSelect={openChatSession}
         onContextMenu={(event, id) => {
           onOpenContextMenu(id, event.clientX, event.clientY);
+        }}
+        onLongPress={(position) => {
+          onOpenContextMenu(session.id, position.x, position.y);
         }}
         onHoverChange={onHoveredSessionChange}
         onPreload={preloadChatRoute}
@@ -303,27 +323,45 @@ export function SessionSidebarSessionRow({
         onRenameCommit={(id) => void commitRename(id)}
         titleSlot={
           !isRenaming ? (
-            <InlineEditor
-              value={session.title ?? '未命名'}
-              label="会话标题"
-              onSave={async (newTitle) => {
-                setRenameValue(newTitle);
-                await commitRename(session.id);
-              }}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontSize: 12,
-                lineHeight: '1.25',
-                fontWeight: isActive ? 600 : 400,
-              }}
-              buttonStyle={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
-              }}
-            />
+            searchQuery ? (
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 12,
+                  lineHeight: '1.25',
+                  fontWeight: isActive ? 600 : 400,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
+                }}
+              >
+                {highlightMatch(session.title ?? '未命名', searchQuery)}
+              </span>
+            ) : (
+              <InlineEditor
+                value={session.title ?? '未命名'}
+                label="会话标题"
+                onSave={async (newTitle) => {
+                  setRenameValue(newTitle);
+                  await commitRename(session.id);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 12,
+                  lineHeight: '1.25',
+                  fontWeight: isActive ? 600 : 400,
+                }}
+                buttonStyle={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: isActive ? 'var(--fg-strong)' : 'var(--fg-default)',
+                }}
+              />
+            )
           ) : undefined
         }
       />
@@ -331,11 +369,15 @@ export function SessionSidebarSessionRow({
         <div
           style={{
             marginLeft: `${18 + depth * 12}px`,
+            // 与父行 / 相邻子行之间留出空隙，让树形层级更清晰
+            marginTop: 3,
             paddingLeft: 8,
+            paddingTop: 2,
+            paddingBottom: 2,
             borderLeft: '1px solid var(--border-subtle)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 1,
+            gap: 2,
           }}
         >
           {node.children.map((childNode) => (

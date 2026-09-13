@@ -19,11 +19,20 @@
  */
 
 import React, {
+  useCallback,
+  useEffect,
+  useRef,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import './BaseSessionRow.css';
+
+/** 触屏长按判定：按住 500ms 且位移不超过 8px 视为长按。 */
+const LONG_PRESS_DELAY_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 
 // ─── Density presets ─────────────────────────────────────────────────────────
 
@@ -88,7 +97,6 @@ const ACTION_BTN_STYLE: CSSProperties = {
   width: 22,
   height: 22,
   borderRadius: 5,
-  background: 'transparent',
   border: 'none',
   color: 'var(--fg-muted)',
   cursor: 'pointer',
@@ -134,6 +142,11 @@ export interface BaseSessionRowProps {
   onSelect?: (sessionId: string) => void;
   /** 右键菜单 */
   onContextMenu?: (event: MouseEvent, sessionId: string) => void;
+  /**
+   * 长按（触屏 / 触摸板）回调，参数为触发位置。
+   * 用于在没有 hover 能力的设备上打开与右键等价的菜单。
+   */
+  onLongPress?: (position: { x: number; y: number }) => void;
   /** hover 状态变化 */
   onHoverChange?: (sessionId: string | null) => void;
   /** 鼠标进入时的预加载回调 */
@@ -173,6 +186,42 @@ function isNestedInteractiveTarget(target: EventTarget | null): target is Elemen
   return target instanceof Element && target.closest('button, input, textarea, select, a') !== null;
 }
 
+// ─── Action button ───────────────────────────────────────────────────────────
+
+interface SessionActionButtonProps {
+  action: BaseSessionRowAction;
+  /** compact 模式下按钮更小，贴合浮层高度 */
+  compact?: boolean;
+  /** 操作区是否可见；不可见时移出 tab 序列 */
+  visible: boolean;
+}
+
+function SessionActionButton({ action, compact = false, visible }: SessionActionButtonProps) {
+  return (
+    <button
+      type="button"
+      className="base-session-action-btn"
+      data-danger={action.danger ? 'true' : undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        action.onClick();
+      }}
+      tabIndex={visible ? 0 : -1}
+      disabled={action.disabled}
+      title={action.title}
+      style={{
+        ...ACTION_BTN_STYLE,
+        ...(compact ? { width: 18, height: 16, borderRadius: 4 } : {}),
+        color: action.danger ? 'var(--danger)' : ACTION_BTN_STYLE.color,
+        opacity: action.disabled ? 0.45 : 1,
+        cursor: action.disabled ? 'wait' : 'pointer',
+      }}
+    >
+      {action.icon}
+    </button>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function BaseSessionRow({
@@ -189,6 +238,7 @@ export function BaseSessionRow({
   hideMetaOnHover = true,
   onSelect,
   onContextMenu,
+  onLongPress,
   onHoverChange,
   onPreload,
   onPointerPositionChange,
@@ -203,7 +253,26 @@ export function BaseSessionRow({
   density = 'cozy',
 }: BaseSessionRowProps) {
   const tokens = DENSITY[density];
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
+  }, []);
+
+  useEffect(() => cancelLongPress, [cancelLongPress]);
+
   const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (longPressTriggeredRef.current) {
+      // 长按已打开菜单：抑制随后的 click，避免误触打开会话。
+      longPressTriggeredRef.current = false;
+      return;
+    }
     if (isNestedInteractiveTarget(event.target)) return;
     onSelect?.(sessionId);
   };
@@ -216,7 +285,35 @@ export function BaseSessionRow({
     }
   };
 
-  const showActions = hovered && !renaming && actions && actions.length > 0;
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!onLongPress || event.button !== 0) return;
+    if (isNestedInteractiveTarget(event.target)) return;
+
+    const { clientX, clientY } = event;
+    longPressTriggeredRef.current = false;
+    longPressStartRef.current = { x: clientX, y: clientY };
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressTriggeredRef.current = true;
+      onLongPress({ x: clientX, y: clientY });
+    }, LONG_PRESS_DELAY_MS);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = longPressStartRef.current;
+    if (!start) return;
+    if (
+      Math.abs(event.clientX - start.x) > LONG_PRESS_MOVE_TOLERANCE_PX ||
+      Math.abs(event.clientY - start.y) > LONG_PRESS_MOVE_TOLERANCE_PX
+    ) {
+      cancelLongPress();
+    }
+  };
+
+  const showActions = hovered && !renaming && !!actions && actions.length > 0;
   const hasActions = !!actions && actions.length > 0;
   // 紧凑模式：meta 与标题视觉上紧贴，嵌入到标题所在的列里
   const inlineMeta = density === 'compact';
@@ -227,6 +324,7 @@ export function BaseSessionRow({
     <div
       role="button"
       tabIndex={0}
+      className="base-session-row"
       data-session-id={sessionId}
       data-session-state={dataState}
       onClick={handleClick}
@@ -235,6 +333,11 @@ export function BaseSessionRow({
         event.preventDefault();
         onContextMenu?.(event, sessionId);
       }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={cancelLongPress}
+      onPointerLeave={cancelLongPress}
+      onPointerCancel={cancelLongPress}
       onMouseEnter={(event) => {
         onPreload?.(sessionId);
         onPointerPositionChange?.({ x: event.clientX, y: event.clientY });
@@ -269,7 +372,6 @@ export function BaseSessionRow({
         cursor: 'pointer',
         transition:
           'background 160ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
-        outline: 'none',
         position: 'relative',
         background: active
           ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
@@ -301,7 +403,8 @@ export function BaseSessionRow({
           <span
             aria-hidden="true"
             style={{
-              width: 12,
+              width: 14,
+              marginRight: 3,
               flexShrink: 0,
               display: 'inline-flex',
               alignItems: 'center',
@@ -425,28 +528,7 @@ export function BaseSessionRow({
           }}
         >
           {actions!.map((action) => (
-            <button
-              key={action.key}
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                action.onClick();
-              }}
-              tabIndex={showActions ? 0 : -1}
-              disabled={action.disabled}
-              title={action.title}
-              style={{
-                ...ACTION_BTN_STYLE,
-                width: 18,
-                height: 16,
-                borderRadius: 4,
-                color: action.danger ? 'var(--danger)' : ACTION_BTN_STYLE.color,
-                opacity: action.disabled ? 0.45 : 1,
-                cursor: action.disabled ? 'wait' : 'pointer',
-              }}
-            >
-              {action.icon}
-            </button>
+            <SessionActionButton key={action.key} action={action} compact visible={showActions} />
           ))}
         </div>
       )}
@@ -488,25 +570,7 @@ export function BaseSessionRow({
               }}
             >
               {actions!.map((action) => (
-                <button
-                  key={action.key}
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    action.onClick();
-                  }}
-                  tabIndex={showActions ? 0 : -1}
-                  disabled={action.disabled}
-                  title={action.title}
-                  style={{
-                    ...ACTION_BTN_STYLE,
-                    color: action.danger ? 'var(--danger)' : ACTION_BTN_STYLE.color,
-                    opacity: action.disabled ? 0.45 : 1,
-                    cursor: action.disabled ? 'wait' : 'pointer',
-                  }}
-                >
-                  {action.icon}
-                </button>
+                <SessionActionButton key={action.key} action={action} visible={showActions} />
               ))}
             </div>
           )}

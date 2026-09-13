@@ -8,30 +8,50 @@
  * Panel: 项目名 + 搜索 + 会话列表 + 新建按钮
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
-import { createWorkspaceClient, createTeamClient } from '@openAwork/web-client';
+import { createWorkspaceClient } from '@openAwork/web-client';
 import { InlineEditor } from '@openAwork/shared-ui';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import {
+  SIDEBAR_PANEL_WIDTH_BOUNDS,
+  clampSidebarPanelWidth,
+  useUIStateStore,
+} from '../../../stores/ui/uiState.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import { useTeamSidebarSessions } from '../../../hooks/workspace/useTeamSidebarSessions.js';
-import type { TeamWorkspaceGroup } from '../../../hooks/workspace/useTeamSidebarSessions.js';
-import { SessionSidebarSessionRow } from '../sidebar/SessionSidebarSessionRow.js';
-import { BaseSessionRow } from '../sidebar/BaseSessionRow.js';
 import SessionContextMenu from '../sidebar/SessionContextMenu.js';
 import TeamSessionContextMenu from '../sidebar/TeamSessionContextMenu.js';
 import TeamWorkspaceContextMenu from '../sidebar/TeamWorkspaceContextMenu.js';
-import { getWorkspaceGroupKey } from '../../../utils/session/session-grouping.js';
-import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
-import { useAuthStore } from '../../../stores/auth/auth.js';
+import {
+  filterSessionTreeGroupsByMatcher,
+  getWorkspaceGroupKey,
+} from '../../../utils/session/session-grouping.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { getPathBasename } from '../../../utils/workspace-path.js';
-import WorkspacePickerModal from '../../common/modal/WorkspacePickerModal.js';
 import { buildTeamSessionRoute } from '../../../utils/session/team-session-route.js';
+import WorkspacePickerModal from '../../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../../common/modal/workspace-picker-data-source.js';
 import { SidebarRailV2 } from './SidebarRailV2.js';
 import { FusionSidebarPeek } from './FusionSidebarPeek.js';
+import { ResizeHandle } from '../shared/resize-handle.js';
+import { FusionSidebarChatGroupSection } from './FusionSidebarChatGroupSection.js';
+import type { FusionChatSessionRowHandlers } from './FusionSidebarChatGroupSection.js';
+import { FusionSidebarListState, FusionSidebarSkeleton } from './FusionSidebarListStates.js';
+import { FusionSidebarTeamGroupSection } from './FusionSidebarTeamGroupSection.js';
+import { useScrollActiveSessionIntoView } from '../sidebar/use-scroll-active-session.js';
+import { useSessionContentSearch } from '../sidebar/use-session-content-search.js';
+import { buildFusionChatGroups } from './fusion-sidebar-session-groups.js';
+import { useSidebarTeamActions } from '../sidebar/use-sidebar-team-actions.js';
+import '../sidebar/sidebar-interactions.css';
 
 export interface FusionSidebarProps {
   readonly accessToken: string | null;
@@ -42,7 +62,8 @@ export interface FusionSidebarProps {
   readonly pendingPermissionIndicator?: boolean;
 }
 
-const SIDEBAR_WIDTH = 244;
+/** Rail 固定宽度（Peek 定位与手柄偏移都依赖它） */
+const RAIL_WIDTH = 64;
 const PEEK_CLOSE_DELAY_MS = 300;
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -55,7 +76,6 @@ const CONTAINER_STYLE: CSSProperties = {
 };
 
 const PANEL_STYLE: CSSProperties = {
-  width: SIDEBAR_WIDTH,
   flexShrink: 0,
   overflow: 'hidden',
   transition: 'width 240ms cubic-bezier(0.4, 0, 0.2, 1)',
@@ -98,7 +118,7 @@ const SEARCH_STYLE: CSSProperties = {
   background: 'var(--bg-overlay)',
   border: '1px solid var(--border-subtle)',
   borderRadius: 6,
-  padding: '5px 8px',
+  padding: '5px 22px 5px 8px',
   fontSize: 11,
   color: 'var(--fg-strong)',
   outline: 'none',
@@ -112,12 +132,8 @@ const NEW_SESSION_BTN_STYLE: CSSProperties = {
   justifyContent: 'center',
   gap: 6,
   padding: '8px 12px',
-  background: 'var(--accent-subtle)',
-  color: 'var(--accent)',
   fontSize: 12,
   fontWeight: 700,
-  cursor: 'pointer',
-  border: 'none',
   borderTop: '1px solid var(--border-subtle)',
 };
 
@@ -184,382 +200,6 @@ function isCompactFusionSidebarViewport(): boolean {
   return window.matchMedia('(max-width: 640px)').matches;
 }
 
-function TeamWorkspaceGroupItem({
-  group,
-  activeTeamSessionId,
-  preloadRoute,
-  navigate,
-  onSelectSession,
-  onSessionContextMenu,
-  renamingSessionId,
-  renameValue,
-  onRenameChange,
-  onRenameCommit,
-  onStartRename,
-  onWorkspaceContextMenu,
-  workspaceRenamingId,
-  workspaceRenameValue,
-  onWorkspaceRenameChange,
-  onWorkspaceRenameCommit,
-  onNewSession,
-  onTogglePause,
-  onDelete,
-}: {
-  group: TeamWorkspaceGroup;
-  activeTeamSessionId: string | null;
-  preloadRoute: (path: string) => void;
-  navigate: (path: string) => void | Promise<void>;
-  onSelectSession: (workspaceId: string, sessionId: string) => void;
-  onSessionContextMenu: (
-    session: {
-      id: string;
-      title: string;
-      stateStatus: string;
-      teamWorkspaceId: string | null;
-    },
-    x: number,
-    y: number,
-  ) => void;
-  renamingSessionId: string | null;
-  renameValue: string;
-  onRenameChange: (value: string) => void;
-  onRenameCommit: (sessionId: string) => void;
-  onStartRename: (session: { id: string; title: string }) => void;
-  onWorkspaceContextMenu: (workspace: { id: string; name: string }, x: number, y: number) => void;
-  workspaceRenamingId: string | null;
-  workspaceRenameValue: string;
-  onWorkspaceRenameChange: (value: string) => void;
-  onWorkspaceRenameCommit: (workspaceId: string) => void;
-  onNewSession: (workspaceId: string) => void;
-  onTogglePause: (sessionId: string, stateStatus: string) => void;
-  onDelete: (sessionId: string) => void;
-}) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  const formatRelativeTime = (dateStr: string): string => {
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    if (Number.isNaN(then)) return '';
-    const diffMin = Math.floor((now - then) / 60000);
-    if (diffMin < 1) return '刚刚';
-    if (diffMin < 60) return `${diffMin}分钟前`;
-    const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `${diffHour}小时前`;
-    return `${Math.floor(diffHour / 24)}天前`;
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 2 }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onWorkspaceContextMenu({ id: group.id, name: group.label }, e.clientX, e.clientY);
-          }}
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            minWidth: 0,
-            padding: '6px 6px 6px 8px',
-            borderRadius: 6,
-            border: 'none',
-            background: 'color-mix(in srgb, var(--fg-muted) 4%, transparent)',
-            cursor: 'pointer',
-            color: 'var(--fg-default)',
-            textAlign: 'left',
-          }}
-        >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{
-              flexShrink: 0,
-              transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-              transition: 'transform 150ms ease',
-            }}
-          >
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ flexShrink: 0, color: 'var(--accent)' }}
-          >
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: 13.5,
-              fontWeight: 700,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.015em',
-              color: 'var(--fg-strong)',
-            }}
-          >
-            {workspaceRenamingId === group.id ? (
-              <input
-                className="session-rename-input"
-                ref={(element) => element?.focus()}
-                value={workspaceRenameValue}
-                onChange={(event) => onWorkspaceRenameChange(event.target.value)}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === 'Enter' || event.key === 'Escape') {
-                    onWorkspaceRenameCommit(group.id);
-                  }
-                }}
-                onBlur={() => onWorkspaceRenameCommit(group.id)}
-                onClick={(event) => event.stopPropagation()}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-overlay)',
-                  border: '1px solid var(--accent)',
-                  borderRadius: 4,
-                  padding: '1px 4px',
-                  color: 'var(--fg-strong)',
-                  fontSize: 11,
-                  fontWeight: 700,
-                }}
-              />
-            ) : (
-              group.label
-            )}
-          </span>
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)', flexShrink: 0, marginRight: 2 }}>
-            {group.sessions.length}
-          </span>
-        </button>
-        {group.id !== '__unbound__' && (
-          <button
-            type="button"
-            title={`在 ${group.label} 中新建会话`}
-            aria-label={`在 ${group.label} 中新建会话`}
-            onClick={() => onNewSession(group.id)}
-            style={{
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 20,
-              height: 20,
-              borderRadius: 5,
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--fg-muted)',
-              cursor: 'pointer',
-              padding: 0,
-              marginRight: 4,
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      {!collapsed && (
-        <div
-          style={{
-            marginLeft: 16,
-            borderLeft: '1px solid var(--border-subtle)',
-            paddingLeft: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 1,
-          }}
-        >
-          {group.sessions.map((ts) => {
-            const isActive = activeTeamSessionId === ts.id;
-            const isRunning = ts.stateStatus === 'running';
-            const statusColor = isRunning ? 'var(--accent)' : 'var(--border-default)';
-            const isRenaming = renamingSessionId === ts.id;
-
-            return (
-              <BaseSessionRow
-                key={ts.id}
-                sessionId={ts.id}
-                title={ts.title}
-                timeLabel={formatRelativeTime(ts.updatedAt)}
-                timeTitle={ts.updatedAt}
-                active={isActive}
-                density="compact"
-                onSelect={() => {
-                  preloadRoute('/team');
-                  if (ts.teamWorkspaceId) {
-                    onSelectSession(ts.teamWorkspaceId, ts.id);
-                    void navigate(buildTeamSessionRoute(ts.teamWorkspaceId, ts.id));
-                  } else {
-                    void navigate('/team');
-                  }
-                }}
-                onContextMenu={(_event, id) => {
-                  onSessionContextMenu(
-                    {
-                      id,
-                      title: ts.title,
-                      stateStatus: ts.stateStatus,
-                      teamWorkspaceId: ts.teamWorkspaceId,
-                    },
-                    _event.clientX,
-                    _event.clientY,
-                  );
-                }}
-                onPreload={() => preloadRoute('/team')}
-                renaming={isRenaming}
-                renameValue={renameValue}
-                onRenameChange={onRenameChange}
-                onRenameCommit={onRenameCommit}
-                actions={[
-                  {
-                    key: 'rename',
-                    title: '重命名',
-                    icon: (
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M12 20h9" />
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                      </svg>
-                    ),
-                    onClick: () => onStartRename({ id: ts.id, title: ts.title }),
-                    disabled: isRenaming,
-                  },
-                  {
-                    key: 'toggle-pause',
-                    title: isRunning ? '暂停' : '恢复',
-                    icon: isRunning ? (
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <rect x="6" y="4" width="4" height="16" />
-                        <rect x="14" y="4" width="4" height="16" />
-                      </svg>
-                    ) : (
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                    ),
-                    onClick: () => onTogglePause(ts.id, ts.stateStatus),
-                  },
-                  {
-                    key: 'delete',
-                    title: '删除',
-                    icon: (
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    ),
-                    onClick: () => onDelete(ts.id),
-                    danger: true,
-                  },
-                ]}
-                icon={
-                  <span
-                    style={{
-                      position: 'relative',
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 20,
-                      height: 20,
-                      borderRadius: 5,
-                      background: isActive
-                        ? 'color-mix(in oklch, var(--accent) 15%, transparent)'
-                        : 'transparent',
-                    }}
-                  >
-                    <span
-                      style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor }}
-                    />
-                  </span>
-                }
-                meta={
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-                    {isRunning ? '运行中' : '空闲'}
-                  </span>
-                }
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function FusionSidebar({
   accessToken,
   gatewayUrl,
@@ -589,8 +229,15 @@ export function FusionSidebar({
   const [teamSearch, setTeamSearch] = useState('');
   const [peekWorkspacePath, setPeekWorkspacePath] = useState<string | null>(null);
   const [compactViewport, setCompactViewport] = useState(isCompactFusionSidebarViewport);
+  const sidebarPanelWidth = useUIStateStore((s) => s.sidebarPanelWidth);
+  const setSidebarPanelWidth = useUIStateStore((s) => s.setSidebarPanelWidth);
+  // 拖拽中的宽度只存在本地 state：拖拽实时生效，松手才写回 store 持久化。
+  const [resizingPanelWidth, setResizingPanelWidth] = useState<number | null>(null);
+  const panelWidth = resizingPanelWidth ?? sidebarPanelWidth;
+  const isResizingPanel = resizingPanelWidth !== null;
   const peekCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
+  const sessionListRef = useRef<HTMLDivElement>(null);
 
   // 工作区显示别名：localStorage 持久化，key = 'ws-alias:' + path
   const [workspaceAlias, setWorkspaceAlias] = useState<string>(() => {
@@ -670,7 +317,11 @@ export function FusionSidebar({
     sessions,
     groupedSessions,
     groupedSessionTrees,
+    sessionTreeGroups,
     sessionCountByWorkspace,
+    isLoadingSessions,
+    sessionsError,
+    fetchSessions,
     collapsedGroups,
     toggleGroupCollapsed,
     renamingSessionId,
@@ -694,31 +345,84 @@ export function FusionSidebar({
     workspaceGroups: teamWorkspaceGroups,
     loading: teamLoading,
     error: teamError,
+    refresh: refreshTeamSessions,
   } = useTeamSidebarSessions();
+
+  const {
+    sessionMenu: teamContextMenu,
+    workspaceMenu: teamWorkspaceContextMenu,
+    renamingSessionId: teamRenamingSessionId,
+    renameValue: teamRenameValue,
+    setRenameValue: setTeamRenameValue,
+    deletingSessionId: teamDeletingSessionId,
+    workspaceRenamingId: teamWorkspaceRenamingId,
+    workspaceRenameValue: teamWorkspaceRenameValue,
+    setWorkspaceRenameValue: setTeamWorkspaceRenameValue,
+    workspaceDeletingId: teamWorkspaceDeletingId,
+    openSessionMenu: handleTeamSessionContextMenu,
+    closeSessionMenu: closeTeamSessionMenu,
+    startSessionRename: handleTeamRename,
+    commitSessionRename: handleTeamRenameCommit,
+    toggleSessionPause: handleTeamTogglePause,
+    copySessionId: handleTeamCopyId,
+    deleteSession: handleTeamDelete,
+    openWorkspaceMenu: handleTeamWorkspaceContextMenu,
+    closeWorkspaceMenu: closeTeamWorkspaceMenu,
+    startWorkspaceRename: handleTeamWorkspaceRename,
+    commitWorkspaceRename: handleTeamWorkspaceRenameCommit,
+    copyWorkspaceId: handleTeamWorkspaceCopyId,
+    deleteWorkspace: handleTeamWorkspaceDelete,
+  } = useSidebarTeamActions();
 
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
   const storedActiveTeamSessionId = useUIStateStore((s) => s.activeTeamSessionId);
   const activeTeamSessionId = isTeamRoute ? storedActiveTeamSessionId : null;
+  const activeSessionId = currentSessionId ?? activeTeamSessionId;
+  useScrollActiveSessionIntoView(sessionListRef, activeSessionId);
   const expanded = leftSidebarOpen && !compactViewport;
-  const chatSessionNodes = useMemo(
+  const isSearchingSessions = sessionSearch.trim().length > 0;
+  const contentSearch = useSessionContentSearch(isTeamRoute ? '' : sessionSearch);
+  const contentMatchedSessionIds = contentSearch.matchedSessionIds;
+  // 搜索态：标题命中 ∪ 消息内容命中；非搜索态直接使用全量会话树。
+  const searchedSessionTreeGroups = useMemo(() => {
+    if (!isSearchingSessions) {
+      return sessionTreeGroups;
+    }
+
+    const normalizedQuery = sessionSearch.trim().toLowerCase();
+    return filterSessionTreeGroupsByMatcher(
+      sessionTreeGroups,
+      (session) =>
+        (session.title ?? session.id).toLowerCase().includes(normalizedQuery) ||
+        contentMatchedSessionIds.has(session.id),
+    ).filter((group) => group.sessions.length > 0);
+  }, [contentMatchedSessionIds, isSearchingSessions, sessionSearch, sessionTreeGroups]);
+  const chatGroups = useMemo(
     () =>
-      groupedSessions.flatMap((group) => {
-        const groupKey = getWorkspaceGroupKey(group.workspacePath);
-        const treeGroup = groupedSessionTrees.find(
-          (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
-        );
-        return treeGroup?.roots ?? [];
+      buildFusionChatGroups({
+        groupedSessions,
+        groupedSessionTrees: searchedSessionTreeGroups,
+        sessionCountByWorkspace,
+        isSearching: isSearchingSessions,
+        isPinned,
       }),
-    [groupedSessionTrees, groupedSessions],
+    [
+      groupedSessions,
+      isPinned,
+      isSearchingSessions,
+      searchedSessionTreeGroups,
+      sessionCountByWorkspace,
+    ],
   );
+  const chatSessionNodes = useMemo(() => chatGroups.flatMap((group) => group.roots), [chatGroups]);
   const peekSessionNodes = useMemo(() => {
     const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
-    const treeGroup = groupedSessionTrees.find(
+    const treeGroup = searchedSessionTreeGroups.find(
       (group) => getWorkspaceGroupKey(group.workspacePath) === peekGroupKey,
     );
     return treeGroup?.roots ?? chatSessionNodes;
-  }, [chatSessionNodes, groupedSessionTrees, peekWorkspacePath]);
+  }, [chatSessionNodes, searchedSessionTreeGroups, peekWorkspacePath]);
 
   const filteredTeamGroups = useMemo(() => {
     if (!teamSearch.trim()) return teamWorkspaceGroups;
@@ -796,107 +500,6 @@ export function FusionSidebar({
     setChatContextMenu({ sessionId, x, y });
   }, []);
 
-  // ─── 团队会话右键菜单状态 ───
-  const [teamContextMenu, setTeamContextMenu] = useState<{
-    session: {
-      id: string;
-      title: string;
-      stateStatus: string;
-      teamWorkspaceId: string | null;
-    };
-    x: number;
-    y: number;
-  } | null>(null);
-
-  // ─── 团队会话重命名状态 ───
-  const [teamRenamingSessionId, setTeamRenamingSessionId] = useState<string | null>(null);
-  const [teamRenameValue, setTeamRenameValue] = useState('');
-  const [teamDeletingSessionId, setTeamDeletingSessionId] = useState<string | null>(null);
-
-  const teamAccessToken = useAuthStore((s) => s.accessToken);
-  const teamGatewayUrl = useAuthStore((s) => s.gatewayUrl);
-
-  const handleTeamSessionContextMenu = useCallback(
-    (
-      session: {
-        id: string;
-        title: string;
-        stateStatus: string;
-        teamWorkspaceId: string | null;
-      },
-      x: number,
-      y: number,
-    ) => {
-      setTeamContextMenu({ session, x, y });
-    },
-    [],
-  );
-
-  const handleTeamRename = useCallback((session: { id: string; title: string }) => {
-    setTeamRenamingSessionId(session.id);
-    setTeamRenameValue(session.title);
-  }, []);
-
-  const handleTeamRenameCommit = useCallback(
-    async (sessionId: string) => {
-      if (!teamAccessToken || !teamGatewayUrl) {
-        setTeamRenamingSessionId(null);
-        return;
-      }
-      const trimmed = teamRenameValue.trim();
-      if (!trimmed) {
-        setTeamRenamingSessionId(null);
-        return;
-      }
-      try {
-        await createTeamClient(teamGatewayUrl).updateSessionState(teamAccessToken, sessionId, {
-          title: trimmed,
-        });
-        requestSessionListRefresh();
-      } catch (err) {
-        console.error('[TeamSession] 重命名失败:', err);
-      }
-      setTeamRenamingSessionId(null);
-    },
-    [teamAccessToken, teamGatewayUrl, teamRenameValue],
-  );
-
-  const handleTeamTogglePause = useCallback(
-    async (sessionId: string, stateStatus: string) => {
-      if (!teamAccessToken || !teamGatewayUrl) return;
-      const nextState = stateStatus === 'running' ? 'paused' : 'running';
-      try {
-        await createTeamClient(teamGatewayUrl).updateSessionState(teamAccessToken, sessionId, {
-          stateStatus: nextState,
-        });
-        requestSessionListRefresh();
-      } catch (err) {
-        console.error('[TeamSession] 切换暂停/恢复失败:', err);
-      }
-    },
-    [teamAccessToken, teamGatewayUrl],
-  );
-
-  const handleTeamCopyId = useCallback((sessionId: string) => {
-    void navigator.clipboard?.writeText(sessionId);
-  }, []);
-
-  const handleTeamDelete = useCallback(
-    async (sessionId: string) => {
-      if (!teamAccessToken || !teamGatewayUrl) return;
-      if (teamDeletingSessionId === sessionId) return;
-      setTeamDeletingSessionId(sessionId);
-      try {
-        await createTeamClient(teamGatewayUrl).deleteSession(teamAccessToken, sessionId);
-        requestSessionListRefresh();
-      } catch (err) {
-        console.error('[TeamSession] 删除失败:', err);
-      }
-      setTeamDeletingSessionId(null);
-    },
-    [teamAccessToken, teamDeletingSessionId, teamGatewayUrl],
-  );
-
   const handleNewTeamSession = useCallback(
     (workspaceId: string) => {
       preloadRoute('/team');
@@ -906,77 +509,110 @@ export function FusionSidebar({
     [navigate, preloadRoute, triggerTeamNewSession],
   );
 
-  // ─── 团队工作区右键菜单状态 ───
-  const [teamWorkspaceContextMenu, setTeamWorkspaceContextMenu] = useState<{
-    workspace: { id: string; name: string };
-    x: number;
-    y: number;
-  } | null>(null);
-
-  // ─── 团队工作区重命名状态 ───
-  const [teamWorkspaceRenamingId, setTeamWorkspaceRenamingId] = useState<string | null>(null);
-  const [teamWorkspaceRenameValue, setTeamWorkspaceRenameValue] = useState('');
-  const [teamWorkspaceDeletingId, setTeamWorkspaceDeletingId] = useState<string | null>(null);
-
-  const handleTeamWorkspaceContextMenu = useCallback(
-    (workspace: { id: string; name: string }, x: number, y: number) => {
-      setTeamWorkspaceContextMenu({ workspace, x, y });
+  const handleTeamSelectSession = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      preloadRoute('/team');
+      triggerTeamSelectSession(workspaceId, sessionId);
+      void navigate(buildTeamSessionRoute(workspaceId, sessionId));
     },
-    [],
-  );
-
-  const handleTeamWorkspaceRename = useCallback((workspace: { id: string; name: string }) => {
-    setTeamWorkspaceRenamingId(workspace.id);
-    setTeamWorkspaceRenameValue(workspace.name);
-  }, []);
-
-  const handleTeamWorkspaceRenameCommit = useCallback(
-    async (workspaceId: string) => {
-      if (!teamAccessToken || !teamGatewayUrl) {
-        setTeamWorkspaceRenamingId(null);
-        return;
-      }
-      const trimmed = teamWorkspaceRenameValue.trim();
-      if (!trimmed) {
-        setTeamWorkspaceRenamingId(null);
-        return;
-      }
-      try {
-        await createTeamClient(teamGatewayUrl).updateWorkspace(teamAccessToken, workspaceId, {
-          name: trimmed,
-        });
-        requestSessionListRefresh();
-      } catch (err) {
-        console.error('[TeamWorkspace] 重命名失败:', err);
-      }
-      setTeamWorkspaceRenamingId(null);
-    },
-    [teamAccessToken, teamGatewayUrl, teamWorkspaceRenameValue],
-  );
-
-  const handleTeamWorkspaceCopyId = useCallback((workspaceId: string) => {
-    void navigator.clipboard?.writeText(workspaceId);
-  }, []);
-
-  const handleTeamWorkspaceDelete = useCallback(
-    async (workspaceId: string) => {
-      if (!teamAccessToken || !teamGatewayUrl) return;
-      if (teamWorkspaceDeletingId === workspaceId) return;
-      setTeamWorkspaceDeletingId(workspaceId);
-      try {
-        await createTeamClient(teamGatewayUrl).deleteWorkspace(teamAccessToken, workspaceId);
-        requestSessionListRefresh();
-      } catch (err) {
-        console.error('[TeamWorkspace] 删除失败:', err);
-      }
-      setTeamWorkspaceDeletingId(null);
-    },
-    [teamAccessToken, teamGatewayUrl, teamWorkspaceDeletingId],
+    [navigate, preloadRoute, triggerTeamSelectSession],
   );
 
   const handlePointerPositionChange = useCallback(
     (_position: { x: number; y: number } | null) => undefined,
     [],
+  );
+
+  const handlePanelWidthChange = useCallback((width: number) => {
+    setResizingPanelWidth(width);
+  }, []);
+
+  const handlePanelWidthCommit = useCallback(
+    (width: number) => {
+      setResizingPanelWidth(null);
+      setSidebarPanelWidth(width);
+    },
+    [setSidebarPanelWidth],
+  );
+
+  // 会话列表键盘导航：↑ / ↓ 在会话行之间移动焦点，Enter 由行自身处理打开。
+  const handleSessionListKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && activeElement.closest('input, textarea')) {
+      return;
+    }
+
+    const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-session-id]'));
+    if (rows.length === 0) {
+      return;
+    }
+
+    const currentIndex = rows.findIndex(
+      (row) => row === activeElement || row.contains(activeElement),
+    );
+    const nextIndex =
+      event.key === 'ArrowDown'
+        ? currentIndex < 0
+          ? 0
+          : Math.min(currentIndex + 1, rows.length - 1)
+        : currentIndex < 0
+          ? rows.length - 1
+          : Math.max(currentIndex - 1, 0);
+    const nextRow = rows[nextIndex];
+    if (!nextRow) {
+      return;
+    }
+
+    event.preventDefault();
+    nextRow.focus();
+  }, []);
+
+  const chatRowHandlers = useMemo<FusionChatSessionRowHandlers>(
+    () => ({
+      activeSessionId: currentSessionId,
+      commitRename,
+      contentMatchedSessionIds,
+      hoveredSessionId,
+      isDeletingSession,
+      isPinned,
+      onHoveredSessionChange: setHoveredSessionId,
+      onOpenContextMenu: handleSessionContextMenu,
+      onPointerPositionChange: handlePointerPositionChange,
+      openChatSession,
+      preloadChatRoute,
+      quickDeleteSession,
+      quickExportSession,
+      renameValue,
+      renamingSessionId,
+      searchQuery: isSearchingSessions ? sessionSearch : '',
+      setRenameValue,
+      startRename,
+    }),
+    [
+      commitRename,
+      contentMatchedSessionIds,
+      currentSessionId,
+      handlePointerPositionChange,
+      handleSessionContextMenu,
+      hoveredSessionId,
+      isDeletingSession,
+      isPinned,
+      isSearchingSessions,
+      openChatSession,
+      preloadChatRoute,
+      quickDeleteSession,
+      quickExportSession,
+      renameValue,
+      renamingSessionId,
+      sessionSearch,
+      setHoveredSessionId,
+      setRenameValue,
+      startRename,
+    ],
   );
 
   useEffect(() => clearPeekCloseTimer, [clearPeekCloseTimer]);
@@ -1044,6 +680,7 @@ export function FusionSidebar({
             <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
               <button
                 type="button"
+                className="sidebar-icon-button"
                 title="新建工作空间"
                 aria-label="新建工作空间"
                 onClick={handleNewTeamWorkspace}
@@ -1054,10 +691,6 @@ export function FusionSidebar({
                   width: 26,
                   height: 26,
                   borderRadius: 6,
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
                   flexShrink: 0,
                 }}
               >
@@ -1079,6 +712,7 @@ export function FusionSidebar({
               {!compactViewport && (
                 <button
                   type="button"
+                  className="sidebar-icon-button"
                   title="收起面板"
                   aria-label="收起面板"
                   onClick={() => setLeftSidebarOpen(false)}
@@ -1131,6 +765,7 @@ export function FusionSidebar({
             <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
               <button
                 type="button"
+                className="sidebar-icon-button"
                 title="更多"
                 aria-label="更多"
                 onClick={() => setShowWorkspacePicker(true)}
@@ -1141,10 +776,6 @@ export function FusionSidebar({
                   width: 26,
                   height: 26,
                   borderRadius: 6,
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
                   flexShrink: 0,
                 }}
               >
@@ -1166,6 +797,7 @@ export function FusionSidebar({
               {!compactViewport && (
                 <button
                   type="button"
+                  className="sidebar-icon-button"
                   title="收起面板"
                   aria-label="收起面板"
                   onClick={() => setLeftSidebarOpen(false)}
@@ -1214,7 +846,7 @@ export function FusionSidebar({
           flexDirection: 'column',
         }}
       >
-        <div style={{ padding: '6px 8px', flexShrink: 0 }}>
+        <div style={{ padding: '6px 8px', flexShrink: 0, position: 'relative' }}>
           <input
             type="text"
             placeholder={isTeamRoute ? '搜索工作空间…' : '搜索会话…'}
@@ -1224,9 +856,35 @@ export function FusionSidebar({
             }
             style={SEARCH_STYLE}
           />
+          {(isTeamRoute ? teamSearch : sessionSearch).length > 0 ? (
+            <button
+              type="button"
+              className="sidebar-search-clear"
+              aria-label="清除搜索"
+              title="清除搜索"
+              onClick={() => (isTeamRoute ? setTeamSearch('') : setSessionSearch(''))}
+            >
+              <svg
+                aria-hidden="true"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          ) : null}
         </div>
 
         <div
+          ref={sessionListRef}
+          onKeyDown={handleSessionListKeyDown}
           style={{
             flexGrow: 1,
             flexShrink: 1,
@@ -1243,52 +901,37 @@ export function FusionSidebar({
           {/* Team 路由：只显示团队会话 */}
           {isTeamRoute ? (
             <>
-              {teamError && (
-                <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-muted)' }}>
-                  {teamError}
-                </div>
-              )}
-              {!teamLoading && !teamError && teamWorkspaceGroups.length === 0 && (
-                <div
-                  style={{
-                    padding: '16px 10px',
-                    textAlign: 'center',
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: 'var(--fg-muted)',
-                  }}
-                >
-                  暂无团队工作空间
-                </div>
-              )}
+              {teamError ? (
+                <FusionSidebarListState
+                  title={teamError}
+                  hint="网络恢复后可以重试"
+                  actionLabel="重试"
+                  onAction={refreshTeamSessions}
+                />
+              ) : null}
+              {teamLoading && !teamError && teamWorkspaceGroups.length === 0 ? (
+                <FusionSidebarSkeleton />
+              ) : null}
+              {!teamLoading && !teamError && teamWorkspaceGroups.length === 0 ? (
+                <FusionSidebarListState
+                  title="暂无团队工作空间"
+                  hint="新建工作空间后即可开始协作"
+                />
+              ) : null}
               {!teamLoading &&
-                !teamError &&
-                teamWorkspaceGroups.length > 0 &&
-                filteredTeamGroups.length === 0 && (
-                  <div
-                    style={{
-                      padding: '16px 10px',
-                      textAlign: 'center',
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      color: 'var(--fg-muted)',
-                    }}
-                  >
-                    无匹配结果
-                  </div>
-                )}
+              !teamError &&
+              teamWorkspaceGroups.length > 0 &&
+              filteredTeamGroups.length === 0 ? (
+                <FusionSidebarListState title="无匹配结果" hint="换个关键词试试" />
+              ) : null}
               {filteredTeamGroups.map((wg) => (
-                <TeamWorkspaceGroupItem
+                <FusionSidebarTeamGroupSection
                   key={wg.id}
                   group={wg}
                   activeTeamSessionId={activeTeamSessionId}
                   preloadRoute={preloadRoute}
                   navigate={navigate}
-                  onSelectSession={(wsId, sessionId) => {
-                    preloadRoute('/team');
-                    triggerTeamSelectSession(wsId, sessionId);
-                    void navigate(buildTeamSessionRoute(wsId, sessionId));
-                  }}
+                  onSelectSession={handleTeamSelectSession}
                   onSessionContextMenu={handleTeamSessionContextMenu}
                   renamingSessionId={teamRenamingSessionId}
                   renameValue={teamRenameValue}
@@ -1309,180 +952,37 @@ export function FusionSidebar({
           ) : (
             <>
               {/* Chat 路由：按工作区分组显示 Chat 会话 */}
-              {groupedSessions.length === 0 && (
-                <p
-                  style={{
-                    padding: '24px 8px',
-                    textAlign: 'center',
-                    fontSize: 12,
-                    color: 'var(--fg-muted)',
-                  }}
-                >
-                  暂无工作区
-                </p>
-              )}
-              {groupedSessions.map((group) => {
-                const groupKey = getWorkspaceGroupKey(group.workspacePath);
-                const isCollapsed = collapsedGroups.has(groupKey);
-                const actualSessionCount =
-                  sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
-                const treeGroup = groupedSessionTrees.find(
-                  (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
-                );
-                const roots = treeGroup?.roots ?? [];
-                return (
-                  <div
-                    key={groupKey}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 0,
-                      marginBottom: 2,
-                    }}
-                  >
-                    {/* 工作区标题 */}
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleGroupCollapsed(groupKey)}
-                        style={{
-                          flex: 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          padding: '6px 6px 6px 8px',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: 'var(--fg-default)',
-                          background: 'color-mix(in srgb, var(--fg-muted) 4%, transparent)',
-                          border: 'none',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          minWidth: 0,
-                        }}
-                      >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                          style={{
-                            flexShrink: 0,
-                            transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                            transition: 'transform 150ms ease',
-                          }}
-                        >
-                          <polyline points="9 18 15 12 9 6" />
-                        </svg>
-                        <svg
-                          width="15"
-                          height="15"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                          style={{ flexShrink: 0, color: 'var(--accent)' }}
-                        >
-                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                        </svg>
-                        <span
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            fontSize: 12.5,
-                            fontWeight: 700,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            letterSpacing: '0.015em',
-                            color: 'var(--fg-strong)',
-                          }}
-                        >
-                          {group.workspaceLabel}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: 'var(--fg-muted)',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {actualSessionCount}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        title={`在 ${group.workspaceLabel} 中新建会话`}
-                        aria-label={`在 ${group.workspaceLabel} 中新建会话`}
-                        onClick={() => void newSession(group.workspacePath)}
-                        style={{
-                          flexShrink: 0,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 20,
-                          height: 20,
-                          borderRadius: 5,
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--fg-muted)',
-                          cursor: 'pointer',
-                          padding: 0,
-                          marginRight: 4,
-                        }}
-                      >
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <line x1="12" y1="5" x2="12" y2="19" />
-                          <line x1="5" y1="12" x2="19" y2="12" />
-                        </svg>
-                      </button>
-                    </div>
-                    {/* 工作区下的会话列表 */}
-                    {!isCollapsed &&
-                      roots.map((node) => (
-                        <SessionSidebarSessionRow
-                          key={node.session.id}
-                          activeSessionId={currentSessionId ?? undefined}
-                          commitRename={commitRename}
-                          hoveredSessionId={hoveredSessionId}
-                          isDeletingSession={isDeletingSession}
-                          isPinned={isPinned}
-                          node={node}
-                          onHoveredSessionChange={setHoveredSessionId}
-                          onOpenContextMenu={handleSessionContextMenu}
-                          onPointerPositionChange={handlePointerPositionChange}
-                          openChatSession={openChatSession}
-                          preloadChatRoute={preloadChatRoute}
-                          quickDeleteSession={quickDeleteSession}
-                          quickExportSession={quickExportSession}
-                          renameValue={renameValue}
-                          renamingSessionId={renamingSessionId}
-                          setRenameValue={setRenameValue}
-                          startRename={startRename}
-                        />
-                      ))}
-                  </div>
-                );
-              })}
+              {sessionsError ? (
+                <FusionSidebarListState
+                  title={sessionsError}
+                  hint="网络恢复后可以重试"
+                  actionLabel="重试"
+                  onAction={() => void fetchSessions()}
+                />
+              ) : null}
+              {isLoadingSessions && !sessionsError && chatGroups.length === 0 ? (
+                <FusionSidebarSkeleton />
+              ) : null}
+              {!isLoadingSessions && !sessionsError && chatGroups.length === 0 ? (
+                isSearchingSessions ? (
+                  <FusionSidebarListState title="无匹配会话" hint="换个关键词试试" />
+                ) : (
+                  <FusionSidebarListState
+                    title="暂无会话"
+                    hint="新建一个会话开始工作"
+                    actionLabel="立即新建"
+                    onAction={handleNewTask}
+                  />
+                )
+              ) : null}
+              <FusionSidebarChatGroupSection
+                groups={chatGroups}
+                collapsedGroups={collapsedGroups}
+                isSearching={isSearchingSessions}
+                toggleGroupCollapsed={toggleGroupCollapsed}
+                onCreateSession={(workspacePath) => void newSession(workspacePath)}
+                rowHandlers={chatRowHandlers}
+              />
             </>
           )}
         </div>
@@ -1491,6 +991,7 @@ export function FusionSidebar({
       {/* 新建会话 / 新建工作空间 */}
       <button
         type="button"
+        className="sidebar-primary-action"
         onClick={isTeamRoute ? handleNewTeamWorkspace : handleNewTask}
         style={NEW_SESSION_BTN_STYLE}
       >
@@ -1564,23 +1065,49 @@ export function FusionSidebar({
           onMouseEnter={clearPeekCloseTimer}
           onMouseLeave={scheduleCloseProjectPeek}
           onSelectSession={handlePeekSelectSession}
+          width={panelWidth}
           workspacePath={peekWorkspacePath}
         />
       ) : null}
 
       {/* Panel */}
       {!compactViewport ? (
-        <div
-          ref={panelContainerRef}
-          data-fusion-sidebar-panel="true"
-          style={{
-            ...PANEL_STYLE,
-            width: expanded ? SIDEBAR_WIDTH : 0,
-          }}
-          aria-hidden={expanded ? undefined : true}
-        >
-          {panelContent}
-        </div>
+        <>
+          <div
+            ref={panelContainerRef}
+            data-fusion-sidebar-panel="true"
+            style={{
+              ...PANEL_STYLE,
+              width: expanded ? panelWidth : 0,
+              // 拖拽期间禁用宽度过渡，保证跟手
+              transition: isResizingPanel ? 'none' : PANEL_STYLE.transition,
+            }}
+            aria-hidden={expanded ? undefined : true}
+          >
+            {panelContent}
+          </div>
+          {expanded ? (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: RAIL_WIDTH + panelWidth,
+                width: 0,
+                zIndex: 5,
+              }}
+            >
+              <ResizeHandle
+                width={panelWidth}
+                bounds={SIDEBAR_PANEL_WIDTH_BOUNDS}
+                clamp={clampSidebarPanelWidth}
+                ariaLabel="调整会话侧栏宽度"
+                onWidthChange={handlePanelWidthChange}
+                onWidthCommit={handlePanelWidthCommit}
+              />
+            </div>
+          ) : null}
+        </>
       ) : mobileDrawerOpen ? (
         <div role="dialog" aria-modal="true" aria-label="会话侧栏" style={MOBILE_BACKDROP_STYLE}>
           <button
@@ -1651,7 +1178,7 @@ export function FusionSidebar({
             stateStatus={teamContextMenu.session.stateStatus}
             isRenaming={teamRenamingSessionId === teamContextMenu.session.id}
             isDeleting={teamDeletingSessionId === teamContextMenu.session.id}
-            onClose={() => setTeamContextMenu(null)}
+            onClose={closeTeamSessionMenu}
             onRename={() => handleTeamRename(teamContextMenu.session)}
             onTogglePause={() =>
               void handleTeamTogglePause(
@@ -1676,7 +1203,7 @@ export function FusionSidebar({
             isRenaming={teamWorkspaceRenamingId === teamWorkspaceContextMenu.workspace.id}
             isDeleting={teamWorkspaceDeletingId === teamWorkspaceContextMenu.workspace.id}
             isUnbound={teamWorkspaceContextMenu.workspace.id === '__unbound__'}
-            onClose={() => setTeamWorkspaceContextMenu(null)}
+            onClose={closeTeamWorkspaceMenu}
             onRename={() => handleTeamWorkspaceRename(teamWorkspaceContextMenu.workspace)}
             onCopyId={() => handleTeamWorkspaceCopyId(teamWorkspaceContextMenu.workspace.id)}
             onDelete={() => void handleTeamWorkspaceDelete(teamWorkspaceContextMenu.workspace.id)}

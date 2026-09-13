@@ -15,6 +15,8 @@ import {
   joinFileTreePath,
 } from '../file-tree/file-tree-actions.js';
 import { SessionSidebarSessionRow } from './SessionSidebarSessionRow.js';
+import { useScrollActiveSessionIntoView } from './use-scroll-active-session.js';
+import { useSessionContentSearch } from './use-session-content-search.js';
 import { WorkspaceFileTreePanel } from './WorkspaceFileTreePanel.js';
 import WorkspaceGroupMenu from '../workspace/WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from '../workspace/WorkspaceDeleteConfirmDialog.js';
@@ -25,6 +27,8 @@ import { toast } from '../../common/feedback/ToastNotification.js';
 import { dispatchComposerReference } from '../../../utils/chat/composer-reference-events.js';
 import {
   UNBOUND_WORKSPACE_GROUP_KEY,
+  UNBOUND_WORKSPACE_LABEL,
+  filterSessionTreeGroupsByMatcher,
   getWorkspaceGroupKey,
 } from '../../../utils/session/session-grouping.js';
 
@@ -102,6 +106,7 @@ export function SessionSidebar({
   const {
     sessions,
     groupedSessionTrees,
+    sessionTreeGroups,
     sessionCountByWorkspace,
     workspaceSessionIdsByGroupKey,
     renamingSessionId,
@@ -268,7 +273,7 @@ export function SessionSidebar({
           toast(
             sessionCount > 0
               ? workspacePath === null
-                ? `已删除未绑定工作区中的 ${successCount} 个会话`
+                ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
                 : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
               : `已移除工作区「${workspaceLabel}」`,
             'success',
@@ -278,7 +283,7 @@ export function SessionSidebar({
 
         toast(
           workspacePath === null
-            ? `未绑定工作区删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
+            ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
             : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
           'warning',
           4200,
@@ -481,6 +486,23 @@ export function SessionSidebar({
   );
 
   const { sessionId } = { sessionId: window.location.pathname.split('/chat/')[1]?.split('/')[0] };
+  const sessionListRef = useRef<HTMLDivElement>(null);
+  useScrollActiveSessionIntoView(sessionListRef, sessionId ?? null);
+  const contentSearch = useSessionContentSearch(sessionSearch);
+  const contentMatchedSessionIds = contentSearch.matchedSessionIds;
+  const searchedSessionTreeGroups = useMemo(() => {
+    const normalizedQuery = sessionSearch.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return groupedSessionTrees;
+    }
+
+    return filterSessionTreeGroupsByMatcher(
+      sessionTreeGroups,
+      (session) =>
+        (session.title ?? session.id).toLowerCase().includes(normalizedQuery) ||
+        contentMatchedSessionIds.has(session.id),
+    ).filter((group) => group.sessions.length > 0);
+  }, [contentMatchedSessionIds, groupedSessionTrees, sessionSearch, sessionTreeGroups]);
 
   return (
     <>
@@ -668,6 +690,7 @@ export function SessionSidebar({
       )}
 
       <div
+        ref={sessionListRef}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -677,18 +700,20 @@ export function SessionSidebar({
           gap: 0,
         }}
       >
-        {sidebarTab === 'sessions' && sessions.length === 0 && groupedSessionTrees.length === 0 && (
-          <p
-            style={{
-              padding: '24px 8px',
-              textAlign: 'center',
-              fontSize: 12,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            暂无会话
-          </p>
-        )}
+        {sidebarTab === 'sessions' &&
+          sessions.length === 0 &&
+          searchedSessionTreeGroups.length === 0 && (
+            <p
+              style={{
+                padding: '24px 8px',
+                textAlign: 'center',
+                fontSize: 12,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              暂无会话
+            </p>
+          )}
         {sidebarTab === 'files' && (
           <WorkspaceFileTreePanel
             onOpenFile={onOpenFile}
@@ -700,9 +725,10 @@ export function SessionSidebar({
           />
         )}
         {sidebarTab === 'sessions' &&
-          groupedSessionTrees.map((group) => {
+          searchedSessionTreeGroups.map((group) => {
             const groupKey = getWorkspaceGroupKey(group.workspacePath);
             const isCollapsed = collapsedGroups.has(groupKey);
+            const groupBodyId = `session-group-${encodeURIComponent(groupKey)}`;
             const actualSessionCount =
               sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
             return (
@@ -713,6 +739,9 @@ export function SessionSidebar({
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <button
                     type="button"
+                    className="sidebar-group-toggle"
+                    aria-expanded={!isCollapsed}
+                    aria-controls={groupBodyId}
                     onClick={() => toggleGroupCollapsed(groupKey)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -735,9 +764,6 @@ export function SessionSidebar({
                       minWidth: 0,
                       padding: '8px 6px 8px 10px',
                       borderRadius: 6,
-                      border: 'none',
-                      background: 'color-mix(in srgb, var(--fg-muted) 4%, transparent)',
-                      cursor: 'pointer',
                       color: 'var(--fg-default)',
                       textAlign: 'left',
                     }}
@@ -846,60 +872,63 @@ export function SessionSidebar({
                   )}
                 </div>
 
-                {!isCollapsed && (
-                  <div
-                    style={{
-                      marginLeft: 16,
-                      borderLeft: '1px solid var(--border-subtle)',
-                      paddingLeft: 4,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                    }}
-                  >
-                    {group.roots.map((node) => (
-                      <SessionSidebarSessionRow
-                        key={node.session.id}
-                        activeSessionId={sessionId}
-                        commitRename={commitRename}
-                        hoveredSessionId={hoveredSessionId}
-                        isDeletingSession={isDeletingSession}
-                        isPinned={isPinned}
-                        node={node}
-                        onHoveredSessionChange={setHoveredSessionId}
-                        onOpenContextMenu={(sessionIdToOpen, x, y) => {
-                          setContextMenu({ sessionId: sessionIdToOpen, x, y });
-                        }}
-                        onPointerPositionChange={(position) => {
-                          lastPointerPositionRef.current = position;
-                        }}
-                        openChatSession={openChatSession}
-                        preloadChatRoute={preloadChatRoute}
-                        quickDeleteSession={quickDeleteSession}
-                        quickExportSession={quickExportSession}
-                        renameValue={renameValue}
-                        renamingSessionId={renamingSessionId}
-                        setRenameValue={setRenameValue}
-                        startRename={startRename}
-                      />
-                    ))}
-                    {group.sessions.length === 0 && (
-                      <div
-                        style={{
-                          padding: '8px 10px 8px 8px',
-                          borderRadius: 6,
-                          color: 'var(--fg-muted)',
-                          fontSize: 11,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {actualSessionCount === 0
-                          ? '暂无会话，可在此工作区中新建一个会话。'
-                          : '当前筛选条件下暂无匹配会话。'}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div
+                  id={groupBodyId}
+                  style={{
+                    display: isCollapsed ? 'none' : 'flex',
+                    marginLeft: 16,
+                    marginTop: 2,
+                    borderLeft: '1px solid var(--border-subtle)',
+                    paddingLeft: 4,
+                    paddingTop: 2,
+                    paddingBottom: 2,
+                    flexDirection: 'column',
+                    gap: 1,
+                  }}
+                >
+                  {group.roots.map((node) => (
+                    <SessionSidebarSessionRow
+                      key={node.session.id}
+                      activeSessionId={sessionId}
+                      commitRename={commitRename}
+                      contentMatched={contentMatchedSessionIds.has(node.session.id)}
+                      hoveredSessionId={hoveredSessionId}
+                      isDeletingSession={isDeletingSession}
+                      isPinned={isPinned}
+                      node={node}
+                      onHoveredSessionChange={setHoveredSessionId}
+                      onOpenContextMenu={(sessionIdToOpen, x, y) => {
+                        setContextMenu({ sessionId: sessionIdToOpen, x, y });
+                      }}
+                      onPointerPositionChange={(position) => {
+                        lastPointerPositionRef.current = position;
+                      }}
+                      openChatSession={openChatSession}
+                      preloadChatRoute={preloadChatRoute}
+                      quickDeleteSession={quickDeleteSession}
+                      quickExportSession={quickExportSession}
+                      renameValue={renameValue}
+                      renamingSessionId={renamingSessionId}
+                      setRenameValue={setRenameValue}
+                      startRename={startRename}
+                    />
+                  ))}
+                  {group.sessions.length === 0 && (
+                    <div
+                      style={{
+                        padding: '8px 10px 8px 8px',
+                        borderRadius: 6,
+                        color: 'var(--fg-muted)',
+                        fontSize: 11,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {actualSessionCount === 0
+                        ? '暂无会话，可在此工作区中新建一个会话。'
+                        : '当前筛选条件下暂无匹配会话。'}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

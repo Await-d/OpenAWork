@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import type { SessionTab } from '../../../stores/ui/uiState.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import {
   extractSessionIcon,
   extractDialogueMode,
 } from '../../../utils/session/session-metadata.js';
+import { toast } from '../../common/feedback/ToastNotification.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
 import { TeamTitlebarSummary } from '../shared/TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
+import { TitlebarTabContextMenu } from './TitlebarTabContextMenu.js';
 import { TitlebarToolsMenu } from './TitlebarToolsMenu.js';
 import { isTauriRuntime } from '../../../utils/gateway/desktop-gateway.js';
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
@@ -44,15 +53,20 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const activeTabId = useUIStateStore((s) => s.activeTabId);
   const selectTab = useUIStateStore((s) => s.selectTab);
   const closeTab = useUIStateStore((s) => s.closeTab);
+  const closeTabs = useUIStateStore((s) => s.closeTabs);
   const reorderTabs = useUIStateStore((s) => s.reorderTabs);
   const addSessionTab = useUIStateStore((s) => s.addSessionTab);
   const addDraftTab = useUIStateStore((s) => s.addDraftTab);
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const updateTabTitle = useUIStateStore((s) => s.updateTabTitle);
   const isPinned = useUIStateStore((s) => s.isPinned);
+  const togglePinSession = useUIStateStore((s) => s.togglePinSession);
+  const closedSessionTabIds = useUIStateStore((s) => s.closedSessionTabIds);
+  const clearClosedSessionTabIds = useUIStateStore((s) => s.clearClosedSessionTabIds);
 
-  const { sessions } = useSessions();
+  const { sessions, quickDeleteSession, isDeletingSession } = useSessions();
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const { stackedTeamTitlebar } = useTitlebarResponsiveState();
 
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
@@ -79,6 +93,13 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
       return;
     }
 
+    // 会话被外部删除（会话列表删除、批量删除）后标签页已同步关闭，
+    // 但路由可能还停留在该会话上——这一轮不要把它重建回来，
+    // 等路由真正切走后由下面的 effect 放行。
+    if (closedSessionTabIds.includes(currentSessionId)) {
+      return;
+    }
+
     const session = sessions.find((s) => s.id === currentSessionId);
     const title = session?.title?.trim() || `会话 ${currentSessionId.slice(0, 8)}`;
 
@@ -97,18 +118,71 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
     }
     // 创建新 tab
     addSessionTab(currentSessionId, title);
-  }, [activeTabId, addSessionTab, currentSessionId, selectTab, sessions, tabs, updateTabTitle]);
+  }, [
+    activeTabId,
+    addSessionTab,
+    closedSessionTabIds,
+    currentSessionId,
+    selectTab,
+    sessions,
+    tabs,
+    updateTabTitle,
+  ]);
+
+  // 路由已离开被外部关闭的会话后放行，避免标记长期压制同名会话的标签重建。
+  useEffect(() => {
+    if (closedSessionTabIds.length === 0) {
+      return;
+    }
+
+    if (currentSessionId !== null && closedSessionTabIds.includes(currentSessionId)) {
+      return;
+    }
+
+    clearClosedSessionTabIds();
+  }, [clearClosedSessionTabIds, closedSessionTabIds, currentSessionId]);
+
+  // 标签被移除（关闭/删除）后收起悬浮的右键菜单，避免菜单指向不存在的标签。
+  useEffect(() => {
+    if (tabMenu === null) {
+      return;
+    }
+
+    if (!tabs.some((tab) => tab.id === tabMenu.tabId)) {
+      setTabMenu(null);
+    }
+  }, [tabMenu, tabs]);
+
+  // 标签切换/关闭后的统一路由落点：会话标签跳到对应会话，草稿标签回新建页，
+  // 没有可用标签时回首页。
+  const navigateToTab = useCallback(
+    (tab: SessionTab | null) => {
+      if (tab?.type === 'session' && tab.sessionId) {
+        void navigate(`/chat/${tab.sessionId}`);
+        return;
+      }
+
+      if (tab?.type === 'draft') {
+        void navigate('/chat');
+        return;
+      }
+
+      navigateToHome();
+      void navigate('/chat');
+    },
+    [navigate, navigateToHome],
+  );
 
   const handleClickTab = useCallback(
     (tabId: string) => {
       const tab = selectTab(tabId);
-      if (tab?.type === 'session' && tab.sessionId) {
-        void navigate(`/chat/${tab.sessionId}`);
-      } else if (tab?.type === 'draft') {
-        void navigate('/chat');
+      if (!tab) {
+        return;
       }
+
+      navigateToTab(tab);
     },
-    [navigate, selectTab],
+    [navigateToTab, selectTab],
   );
 
   const handleCloseTab = useCallback(
@@ -118,17 +192,56 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
         pendingCloseSessionIdRef.current = closingTab.sessionId;
       }
 
-      const nextTab = closeTab(tabId);
-      if (nextTab?.type === 'session' && nextTab.sessionId) {
-        void navigate(`/chat/${nextTab.sessionId}`);
-      } else if (nextTab?.type === 'draft') {
-        void navigate('/chat');
-      } else {
-        navigateToHome();
-        void navigate('/chat');
-      }
+      navigateToTab(closeTab(tabId));
     },
-    [closeTab, currentSessionId, navigate, navigateToHome, tabs],
+    [closeTab, currentSessionId, navigateToTab, tabs],
+  );
+
+  const handleOpenTabMenu = useCallback((tabId: string, event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setTabMenu({ tabId, x: event.clientX, y: event.clientY });
+  }, []);
+
+  const handleCloseOtherTabs = useCallback(
+    (tabId: string) => {
+      const keptTab = tabs.find((tab) => tab.id === tabId) ?? null;
+      if (!keptTab) {
+        return;
+      }
+
+      const closingTabIds = tabs.filter((tab) => tab.id !== tabId).map((tab) => tab.id);
+      if (closingTabIds.length > 0) {
+        closeTabs(closingTabIds);
+      }
+      selectTab(tabId);
+      navigateToTab(keptTab);
+    },
+    [closeTabs, navigateToTab, selectTab, tabs],
+  );
+
+  const handleCloseAllTabs = useCallback(() => {
+    const closingTabIds = tabs.map((tab) => tab.id);
+    navigateToTab(closingTabIds.length > 0 ? closeTabs(closingTabIds) : null);
+  }, [closeTabs, navigateToTab, tabs]);
+
+  const handleCopySessionId = useCallback((sessionIdToCopy: string) => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) {
+      toast('当前环境不支持复制到剪贴板', 'warning');
+      return;
+    }
+
+    void clipboard
+      .writeText(sessionIdToCopy)
+      .then(() => toast('已复制会话 ID', 'success'))
+      .catch(() => toast('复制会话 ID 失败', 'error'));
+  }, []);
+
+  const handleDeleteSessionFromTab = useCallback(
+    (sessionIdToDelete: string) => {
+      void quickDeleteSession(sessionIdToDelete);
+    },
+    [quickDeleteSession],
   );
 
   const handleNewTab = useCallback(() => {
@@ -284,8 +397,10 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
                     sessionDialogueMode={sessionDialogueMode}
                     sessionStateStatus={session?.state_status}
                     isPinned={sessionPinned}
+                    menuOpen={tabMenu?.tabId === tab.id}
                     onClick={() => handleClickTab(tab.id)}
                     onClose={() => handleCloseTab(tab.id)}
+                    onContextMenu={(event) => handleOpenTabMenu(tab.id, event)}
                     onDragStart={handleDragStart}
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
@@ -299,6 +414,90 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
           {layoutControls}
         </>
       )}
+      <TitlebarTabMenuLayer
+        tabMenu={tabMenu}
+        tabs={tabs}
+        isPinned={isPinned}
+        isDeletingSession={isDeletingSession}
+        onClose={() => setTabMenu(null)}
+        onCloseTab={handleCloseTab}
+        onCloseOtherTabs={handleCloseOtherTabs}
+        onCloseAllTabs={handleCloseAllTabs}
+        onTogglePin={togglePinSession}
+        onCopySessionId={handleCopySessionId}
+        onDeleteSession={handleDeleteSessionFromTab}
+      />
     </div>
+  );
+}
+
+interface TitlebarTabMenuLayerProps {
+  readonly tabMenu: { tabId: string; x: number; y: number } | null;
+  readonly tabs: readonly SessionTab[];
+  readonly isPinned: (sessionId: string) => boolean;
+  readonly isDeletingSession: (sessionId: string) => boolean;
+  readonly onClose: () => void;
+  readonly onCloseTab: (tabId: string) => void;
+  readonly onCloseOtherTabs: (tabId: string) => void;
+  readonly onCloseAllTabs: () => void;
+  readonly onTogglePin: (sessionId: string) => void;
+  readonly onCopySessionId: (sessionId: string) => void;
+  readonly onDeleteSession: (sessionId: string) => void;
+}
+
+/**
+ * 顶部标签右键菜单的挂载层：只负责把菜单项与会话/草稿标签的差异收敛在一处，
+ * 菜单本体由 `TitlebarTabContextMenu` 通过 portal 渲染到 body。
+ */
+function TitlebarTabMenuLayer({
+  tabMenu,
+  tabs,
+  isPinned,
+  isDeletingSession,
+  onClose,
+  onCloseTab,
+  onCloseOtherTabs,
+  onCloseAllTabs,
+  onTogglePin,
+  onCopySessionId,
+  onDeleteSession,
+}: TitlebarTabMenuLayerProps) {
+  const menuTab = tabMenu ? (tabs.find((tab) => tab.id === tabMenu.tabId) ?? null) : null;
+  if (!tabMenu || !menuTab) {
+    return null;
+  }
+
+  const menuSessionId = menuTab.type === 'session' ? menuTab.sessionId : undefined;
+
+  return (
+    <TitlebarTabContextMenu
+      key={menuTab.id}
+      x={tabMenu.x}
+      y={tabMenu.y}
+      tabTitle={menuTab.title}
+      tabCount={tabs.length}
+      isSessionTab={menuSessionId !== undefined}
+      isPinned={menuSessionId !== undefined && isPinned(menuSessionId)}
+      deleting={menuSessionId !== undefined && isDeletingSession(menuSessionId)}
+      onClose={onClose}
+      onCloseTab={() => onCloseTab(menuTab.id)}
+      onCloseOtherTabs={() => onCloseOtherTabs(menuTab.id)}
+      onCloseAllTabs={onCloseAllTabs}
+      onTogglePin={() => {
+        if (menuSessionId !== undefined) {
+          onTogglePin(menuSessionId);
+        }
+      }}
+      onCopySessionId={() => {
+        if (menuSessionId !== undefined) {
+          onCopySessionId(menuSessionId);
+        }
+      }}
+      onDeleteSession={() => {
+        if (menuSessionId !== undefined) {
+          onDeleteSession(menuSessionId);
+        }
+      }}
+    />
   );
 }

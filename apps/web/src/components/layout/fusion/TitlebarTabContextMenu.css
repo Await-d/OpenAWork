@@ -1,0 +1,100 @@
+.titlebar-tab-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  max-width: 280px;
+  padding: var(--spacing-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.titlebar-tab-menu__title {
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-tab-menu__separator {
+  height: 1px;
+  margin: 2px var(--spacing-2);
+  border: 0;
+  background: var(--border-subtle);
+}
+
+.titlebar-tab-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: 6px var(--spacing-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-default);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.titlebar-tab-menu__item:hover:not(:disabled) {
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+
+.titlebar-tab-menu__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+
+.titlebar-tab-menu__item:disabled {
+  color: var(--fg-subtle);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.titlebar-tab-menu__item[data-tone='danger'] {
+  color: var(--danger);
+}
+
+.titlebar-tab-menu__item[data-tone='danger']:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--danger) 35%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.titlebar-tab-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.titlebar-tab-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

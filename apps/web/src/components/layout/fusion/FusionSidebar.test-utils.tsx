@@ -22,10 +22,14 @@ interface FusionSidebarSessionsResult {
   readonly commitRename: (sessionId: string) => Promise<void>;
   readonly exportSessionAsJson: (sessionId: string) => Promise<void>;
   readonly exportSessionAsMarkdown: (sessionId: string) => Promise<void>;
+  readonly fetchSessions: () => Promise<void>;
   readonly groupedSessionTrees: WorkspaceSessionTreeGroup<Session>[];
   readonly groupedSessions: WorkspaceSessionGroup<Session>[];
+  readonly sessionTreeGroups: WorkspaceSessionTreeGroup<Session>[];
   readonly hoveredSessionId: string | null;
   readonly isDeletingSession: (sessionId: string) => boolean;
+  readonly isLoadingSessions: boolean;
+  readonly sessionsError: string | null;
   readonly newSession: (
     workspacePath?: string | null,
     parentSessionId?: string | null,
@@ -139,10 +143,14 @@ function createSessionsResult(): FusionSidebarSessionsResult {
     commitRename: vi.fn(async () => undefined),
     exportSessionAsJson: vi.fn(async () => undefined),
     exportSessionAsMarkdown: vi.fn(async () => undefined),
+    fetchSessions: vi.fn(async () => undefined),
     groupedSessionTrees: chatTreeGroups,
     groupedSessions: chatGroups,
+    sessionTreeGroups: chatTreeGroups,
     hoveredSessionId: null,
     isDeletingSession: vi.fn(() => false),
+    isLoadingSessions: false,
+    sessionsError: null,
     newSession: vi.fn(async () => undefined),
     quickDeleteSession: vi.fn(async () => true),
     quickExportSession: vi.fn(async () => undefined),
@@ -201,12 +209,15 @@ export function getFusionSidebarMocks(): typeof fusionSidebarMocks {
 export function setFusionSidebarChatGroups(
   groupedSessions: WorkspaceSessionGroup<Session>[],
   groupedSessionTrees: WorkspaceSessionTreeGroup<Session>[],
+  overrides: Partial<FusionSidebarSessionsResult> = {},
 ): FusionSidebarSessionsResult {
   const result = createSessionsResult();
   fusionSidebarMocks.useSessions.mockReturnValue({
     ...result,
     groupedSessions,
     groupedSessionTrees,
+    sessionTreeGroups: groupedSessionTrees,
+    ...overrides,
   });
   return result;
 }

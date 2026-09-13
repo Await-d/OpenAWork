@@ -11,7 +11,14 @@ export interface FusionSidebarPeekProps {
   readonly onMouseLeave: () => void;
   readonly onSelectSession: (sessionId: string) => void;
   readonly workspacePath: string | null;
+  /** 预览宽度（与展开态的会话侧栏一致） */
+  readonly width?: number;
 }
+
+const DEFAULT_PEEK_WIDTH = 244;
+
+/** 折叠态预览最多展示的会话条数，其余以「还有 N 条」提示。 */
+const MAX_VISIBLE_SESSIONS = 8;
 
 const PEEK_STYLE: CSSProperties = {
   background: 'var(--bg-surface)',
@@ -25,7 +32,6 @@ const PEEK_STYLE: CSSProperties = {
   overflow: 'hidden',
   position: 'absolute',
   top: 'var(--spacing-2)',
-  width: 244,
   zIndex: 40,
 };
 
@@ -57,6 +63,13 @@ const SUBTITLE_STYLE: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
+const COUNT_STYLE: CSSProperties = {
+  color: 'var(--fg-subtle)',
+  flexShrink: 0,
+  fontSize: 10,
+  fontVariantNumeric: 'tabular-nums',
+};
+
 const LIST_STYLE: CSSProperties = {
   display: 'flex',
   flex: 1,
@@ -82,6 +95,13 @@ const ITEM_STYLE: CSSProperties = {
   textAlign: 'left',
 };
 
+const MORE_STYLE: CSSProperties = {
+  color: 'var(--fg-subtle)',
+  fontSize: 10,
+  padding: '6px var(--spacing-2)',
+  textAlign: 'center',
+};
+
 const FOOTER_BUTTON_STYLE: CSSProperties = {
   alignItems: 'center',
   background: 'var(--accent-subtle)',
@@ -101,10 +121,26 @@ function basename(path: string | null): string {
   return getPathBasename(path, 'OpenAWork');
 }
 
+interface FlattenedPeekNode {
+  node: WorkspaceSessionTreeNode<Session>;
+  depth: number;
+}
+
 function flattenNodes(
   nodes: readonly WorkspaceSessionTreeNode<Session>[],
-): readonly WorkspaceSessionTreeNode<Session>[] {
-  return nodes.flatMap((node) => [node, ...flattenNodes(node.children)]);
+  depth = 0,
+): readonly FlattenedPeekNode[] {
+  return nodes.flatMap((node) => [{ node, depth }, ...flattenNodes(node.children, depth + 1)]);
+}
+
+function resolveStatusColor(stateStatus: string | undefined): string {
+  if (stateStatus === 'running') {
+    return 'var(--accent)';
+  }
+  if (stateStatus === 'paused') {
+    return 'var(--warning)';
+  }
+  return 'var(--border-default)';
 }
 
 export function FusionSidebarPeek({
@@ -115,30 +151,33 @@ export function FusionSidebarPeek({
   onMouseLeave,
   onSelectSession,
   workspacePath,
+  width = DEFAULT_PEEK_WIDTH,
 }: FusionSidebarPeekProps) {
-  const visibleNodes = flattenNodes(nodes).slice(0, 8);
+  const flattenedNodes = flattenNodes(nodes);
+  const visibleNodes = flattenedNodes.slice(0, MAX_VISIBLE_SESSIONS);
+  const remainingCount = flattenedNodes.length - visibleNodes.length;
 
   return (
     <aside
       aria-label="工作区会话预览"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      style={PEEK_STYLE}
+      style={{ ...PEEK_STYLE, width }}
     >
       <div style={HEADER_STYLE}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
           <span style={TITLE_STYLE}>{basename(workspacePath)}</span>
           <span style={SUBTITLE_STYLE}>{workspacePath ?? '未选择工作区'}</span>
         </div>
-        <span aria-hidden="true" style={{ color: 'var(--fg-subtle)', flexShrink: 0 }}>
-          ⋯
-        </span>
+        <span style={COUNT_STYLE}>{flattenedNodes.length} 条</span>
       </div>
 
       <div style={LIST_STYLE}>
         {visibleNodes.length > 0 ? (
-          visibleNodes.map((node) => {
+          visibleNodes.map(({ node, depth }) => {
             const active = activeSessionId === node.session.id;
+            const statusColor = resolveStatusColor(node.session.state_status);
+
             return (
               <button
                 key={node.session.id}
@@ -153,11 +192,19 @@ export function FusionSidebarPeek({
                   boxShadow: active ? 'var(--shadow-md)' : 'none',
                   color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   fontWeight: active ? 600 : 500,
+                  paddingLeft: 8 + depth * 10,
                 }}
               >
-                <span aria-hidden="true" style={{ flexShrink: 0 }}>
-                  ·
-                </span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    background: statusColor,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    height: 6,
+                    width: 6,
+                  }}
+                />
                 <span
                   style={{
                     flex: 1,
@@ -170,16 +217,9 @@ export function FusionSidebarPeek({
                   {node.session.title ?? '未命名会话'}
                 </span>
                 {node.session.state_status === 'running' ? (
-                  <span
-                    aria-label="运行中"
-                    style={{
-                      background: 'var(--accent)',
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      height: 6,
-                      width: 6,
-                    }}
-                  />
+                  <span aria-label="运行中" style={{ color: 'var(--accent)', flexShrink: 0 }}>
+                    运行中
+                  </span>
                 ) : null}
               </button>
             );
@@ -189,6 +229,7 @@ export function FusionSidebarPeek({
             暂无会话
           </p>
         )}
+        {remainingCount > 0 ? <div style={MORE_STYLE}>还有 {remainingCount} 条会话</div> : null}
       </div>
 
       <button type="button" onClick={onCreateSession} style={FOOTER_BUTTON_STYLE}>

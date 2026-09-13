@@ -1,0 +1,52 @@
+/**
+ * BaseSessionRow — 会话行共享交互样式。
+ *
+ * 组件的内联样式只负责布局与静态外观；hover / active / focus-visible
+ * 等动态反馈必须放在 CSS 类中，避免内联样式覆盖伪类状态。
+ */
+
+.base-session-row {
+  outline: none;
+}
+
+.base-session-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 搜索命中高亮片段 */
+.session-title-match {
+  background: var(--accent-muted);
+  border-radius: 3px;
+  color: var(--fg-strong);
+  padding: 0 1px;
+}
+
+.base-session-action-btn {
+  background: transparent;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.base-session-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg-muted) 14%, transparent);
+  color: var(--fg-strong);
+}
+
+.base-session-action-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--fg-muted) 20%, transparent);
+  transform: translateY(0.5px);
+}
+
+.base-session-action-btn[data-danger='true']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.base-session-action-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}

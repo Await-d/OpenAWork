@@ -1,0 +1,207 @@
+/**
+ * FusionSidebar — 融合侧栏交互样式。
+ *
+ * 组件内联样式负责布局与静态外观；hover / active / focus-visible
+ * 等动态反馈集中在此，避免内联样式覆盖伪类状态。
+ */
+
+/* ─── 图标按钮（面板头部 / 分组行内的 ＋） ─────────────────────────────── */
+
+.sidebar-icon-button {
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.sidebar-icon-button:hover {
+  background: color-mix(in srgb, var(--fg-muted) 14%, transparent);
+  color: var(--fg-strong);
+}
+
+.sidebar-icon-button:active {
+  background: color-mix(in srgb, var(--fg-muted) 20%, transparent);
+}
+
+.sidebar-icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}
+
+/* ─── 分组标题按钮（工作区 / 团队工作空间） ────────────────────────────── */
+
+.sidebar-group-toggle {
+  border: none;
+  background: color-mix(in srgb, var(--fg-muted) 4%, transparent);
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+
+.sidebar-group-toggle:hover {
+  background: color-mix(in srgb, var(--fg-muted) 9%, transparent);
+}
+
+.sidebar-group-toggle:active {
+  background: color-mix(in srgb, var(--fg-muted) 13%, transparent);
+}
+
+.sidebar-group-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ─── 搜索框清除按钮 ─────────────────────────────────────────────────── */
+
+.sidebar-search-clear {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.sidebar-search-clear:hover {
+  background: color-mix(in srgb, var(--fg-muted) 14%, transparent);
+  color: var(--fg-strong);
+}
+
+.sidebar-search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}
+
+/* ─── 主操作按钮（面板底部「新建会话 / 新建工作空间」） ──────────────────── */
+
+.sidebar-primary-action {
+  border: none;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.sidebar-primary-action:hover {
+  background: var(--accent-muted);
+}
+
+.sidebar-primary-action:active {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.sidebar-primary-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ─── 列表三态：加载骨架 / 空态 / 错误态 ──────────────────────────────── */
+
+.sidebar-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 4px;
+}
+
+.sidebar-skeleton-row {
+  display: block;
+  height: 26px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg-muted) 10%, transparent);
+  animation: sidebar-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.sidebar-skeleton-row:nth-child(2n) {
+  width: 86%;
+}
+
+.sidebar-skeleton-row:nth-child(3n) {
+  width: 92%;
+}
+
+@keyframes sidebar-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.sidebar-list-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 12px;
+  text-align: center;
+}
+
+.sidebar-list-state-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+.sidebar-list-state-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.sidebar-retry-button {
+  margin-top: 4px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.sidebar-retry-button:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.sidebar-retry-button:active {
+  background: var(--accent-muted);
+}
+
+.sidebar-retry-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-skeleton-row {
+    animation: none;
+  }
+}

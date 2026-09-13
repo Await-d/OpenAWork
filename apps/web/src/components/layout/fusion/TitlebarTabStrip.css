@@ -220,6 +220,106 @@
   height: 100%;
 }
 
+/* 单个会话标签：hover / active / 右键菜单展开 的视觉状态统一下沉到 CSS，
+   避免内联 background 覆盖伪类样式。 */
+.titlebar-tab-strip__tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.titlebar-tab-strip__tab[data-active='true'] {
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg-overlay));
+  color: var(--fg-strong);
+}
+
+.titlebar-tab-strip__tab[data-active='false']:hover {
+  border-color: var(--border-subtle);
+  background: color-mix(in oklch, var(--fg-default) 6%, var(--bg-overlay));
+  color: var(--fg-default);
+}
+
+/* 右键菜单展开：只加强描边与光晕，不覆盖背景，避免激活态标签闪一下底色。 */
+.titlebar-tab-strip__tab[data-menu-open='true'] {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
+}
+
+.titlebar-tab-strip__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.titlebar-tab-strip__tab-icon {
+  background: transparent;
+  color: var(--fg-muted);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.titlebar-tab-strip__tab-icon[data-active='true'] {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  color: var(--accent);
+}
+
+.titlebar-tab-strip__tab-icon[data-pinned='true'] {
+  color: var(--accent);
+}
+
+/* 快捷关闭按钮：标签 hover / 激活 / 键盘聚焦时可见。 */
+.titlebar-tab-strip__tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.titlebar-tab-strip__tab[data-active='true'] .titlebar-tab-strip__tab-close {
+  opacity: 0.72;
+}
+
+.titlebar-tab-strip__tab:hover .titlebar-tab-strip__tab-close,
+.titlebar-tab-strip__tab-close:focus-visible {
+  opacity: 1;
+}
+
+.titlebar-tab-strip__tab-close:hover {
+  background: color-mix(in oklch, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.titlebar-tab-strip__tab-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 触屏没有 hover，常驻展示快捷关闭入口，避免用户无法关闭标签。 */
+@media (hover: none) {
+  .titlebar-tab-strip__tab-close {
+    opacity: 0.8;
+  }
+}
+
 @media (max-width: 520px) {
   .titlebar-tab-strip {
     gap: var(--spacing-1);

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
 
 const PlusIcon = () => (
   <svg
@@ -186,7 +187,7 @@ export default function WorkspaceGroupMenu({
   const deleteLabel =
     sessionCount > 0
       ? workspacePath === null
-        ? `删除未绑定会话（${sessionCount} 个）`
+        ? `删除${UNBOUND_WORKSPACE_LABEL}会话（${sessionCount} 个）`
         : `删除工作区及 ${sessionCount} 个会话`
       : `移除工作区 ${workspaceLabel}`;
 
