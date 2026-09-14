@@ -385,3 +385,96 @@ describe('InlineQuestionPanel', () => {
     expect(screen.queryByLabelText('已选项预览')).toBeNull();
   });
 });
+
+function makeGrillRequest(): PendingQuestionRequest {
+  return {
+    requestId: 'q-grill',
+    sessionId: 'sess-1',
+    toolName: 'AskUserQuestion',
+    title: '澄清',
+    status: 'pending',
+    createdAt: '2026-09-14T00:00:00.000Z',
+    questions: [
+      {
+        header: '目标',
+        question: '目标是什么？',
+        nodeId: 'goal',
+        round: 0,
+        options: [
+          { label: '改单文件', description: '范围清晰', recommended: true },
+          { label: '跨模块', description: '涉及多模块' },
+        ],
+      },
+    ],
+  };
+}
+
+function makePlainRequest(): PendingQuestionRequest {
+  return {
+    requestId: 'q-plain',
+    sessionId: 'sess-1',
+    toolName: 'AskUserQuestion',
+    title: '澄清',
+    status: 'pending',
+    createdAt: '2026-09-14T00:00:00.000Z',
+    questions: [
+      {
+        header: '目标',
+        question: '目标是什么？',
+        options: [
+          { label: '改单文件', description: '范围清晰' },
+          { label: '跨模块', description: '涉及多模块' },
+        ],
+      },
+    ],
+  };
+}
+
+function renderPanel(request: PendingQuestionRequest) {
+  return render(
+    <InlineQuestionPanel
+      answers={[[]]}
+      customInputs={['']}
+      request={request}
+      onDismiss={vi.fn()}
+      onSubmit={vi.fn()}
+      onToggleOption={vi.fn()}
+      onCustomInputChange={vi.fn()}
+    />,
+  );
+}
+
+describe('InlineQuestionPanel — 推荐答案徽标', () => {
+  it('推荐选项渲染「推荐」徽标', () => {
+    renderPanel(makeGrillRequest());
+    expect(screen.getByText('推荐')).toBeTruthy();
+  });
+
+  it('无推荐选项时不渲染徽标', () => {
+    renderPanel(makePlainRequest());
+    expect(screen.queryByText('推荐')).toBeNull();
+  });
+
+  it('推荐选项的无障碍名前置「推荐：」，便于读屏识别', () => {
+    renderPanel(makeGrillRequest());
+    expect(screen.getByLabelText(/^推荐：改单文件/)).toBeTruthy();
+  });
+
+  it('非推荐选项的无障碍名不含「推荐」前缀', () => {
+    renderPanel(makeGrillRequest());
+    expect(screen.getByLabelText(/^跨模块/)).toBeTruthy();
+  });
+});
+
+describe('InlineQuestionPanel — 轮次上下文', () => {
+  it('round 存在时显示「第 N 轮」（0 基 → 第 1 轮）', () => {
+    renderPanel(makeGrillRequest());
+    expect(screen.getByText('第 1 轮')).toBeTruthy();
+  });
+
+  it('round 缺失时不显示轮次 chip', () => {
+    renderPanel(makePlainRequest());
+    expect(screen.queryByText(/第 \d+ 轮/)).toBeNull();
+  });
+});
+

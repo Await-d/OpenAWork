@@ -17,7 +17,7 @@
  *     这里只渲染 UI，由父组件决定是否拦截
  */
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   useClarificationStore,
   type ClarificationItem,
@@ -52,6 +52,19 @@ const TITLE_STYLE: CSSProperties = {
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
   color: 'var(--fg-muted)',
+};
+
+const ROUND_CHIP_STYLE: CSSProperties = {
+  alignSelf: 'flex-start',
+  margin: '2px 0 0',
+  padding: '2px 8px',
+  borderRadius: 999,
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-surface)',
+  color: 'var(--fg-muted)',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.04em',
 };
 
 const CARD_STYLE: CSSProperties = {
@@ -174,6 +187,26 @@ export function ClarificationsPanel({
   const pending = filtered.filter((item) => item.status === 'pending');
   const answered = filtered.filter((item) => item.status === 'answered');
 
+  const pendingGroupMap = new Map<
+    string,
+    { key: string; label: string | null; items: ClarificationItem[] }
+  >();
+  for (const item of pending) {
+    const round = item.round;
+    const key = typeof round === 'number' ? `round-${round}` : 'round-none';
+    const existing = pendingGroupMap.get(key);
+    if (existing) {
+      existing.items.push(item);
+      continue;
+    }
+    pendingGroupMap.set(key, {
+      key,
+      label: typeof round === 'number' ? `第 ${round + 1} 轮澄清` : null,
+      items: [item],
+    });
+  }
+  const pendingGroups = [...pendingGroupMap.values()];
+
   if (filtered.length === 0) return null;
 
   const handleAnswer = async (item: ClarificationItem, answer: string): Promise<string | null> => {
@@ -238,13 +271,18 @@ export function ClarificationsPanel({
         {headerExtra}
       </div>
 
-      {pending.map((item) => (
-        <PendingCard
-          key={item.id}
-          item={item}
-          onSubmit={(answer) => handleAnswer(item, answer)}
-          onDismiss={() => handleDismiss(item)}
-        />
+      {pendingGroups.map((group) => (
+        <Fragment key={group.key}>
+          {group.label ? <div style={ROUND_CHIP_STYLE}>{group.label}</div> : null}
+          {group.items.map((item) => (
+            <PendingCard
+              key={item.id}
+              item={item}
+              onSubmit={(answer) => handleAnswer(item, answer)}
+              onDismiss={() => handleDismiss(item)}
+            />
+          ))}
+        </Fragment>
       ))}
 
       {answered.length > 0 ? (

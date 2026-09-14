@@ -501,6 +501,8 @@ export interface ClarificationItem {
   status: ClarificationStatus;
   answer?: string;
   answeredAt?: number;
+  /** 澄清轮次（多轮 grill 时由 PM1 的 artifact.needs-clarification 载荷携带；0 基） */
+  round?: number;
 }
 
 interface ClarificationStoreState {
@@ -522,6 +524,8 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       const raw = event.payload['clarifications'];
       if (!Array.isArray(raw)) return state;
       const fromSessionId = (event.payload['fromSessionId'] as string) ?? event.sessionId ?? '';
+      const rawRound = event.payload['round'];
+      const round = typeof rawRound === 'number' ? rawRound : undefined;
       const newItems: ClarificationItem[] = [];
       for (const entry of raw) {
         if (!entry || typeof entry !== 'object') continue;
@@ -537,6 +541,7 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
           context: item.context ?? '',
           createdAt: event.timestamp,
           status: 'pending',
+          ...(round !== undefined ? { round } : {}),
         });
       }
       if (newItems.length === 0) return state;

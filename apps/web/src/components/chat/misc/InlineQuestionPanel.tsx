@@ -42,6 +42,7 @@ export function InlineQuestionPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const progressPercentage = totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
+  const round = request.questions[0]?.round;
 
   useEffect(() => {
     setCollapsed(false);
@@ -124,6 +125,11 @@ export function InlineQuestionPanel({
             <span className="iqp-title">{request.title}</span>
           </div>
           <div className="iqp-header-right">
+            {typeof round === 'number' && (
+              <span className="iqp-round" title={`澄清轮次：第 ${round + 1} 轮`}>
+                第 {round + 1} 轮
+              </span>
+            )}
             {totalQuestions > 1 && (
               <span
                 className="iqp-progress"
@@ -471,12 +477,12 @@ function QuestionBlock({
                   optionRefs.current[index] = el;
                 }}
                 type="button"
-                className={`iqp-option ${selected ? 'iqp-option-selected' : ''}`}
+                className={`iqp-option ${selected ? 'iqp-option-selected' : ''} ${option.recommended === true ? 'iqp-option-recommended' : ''}`}
                 disabled={isSubmitting}
                 onClick={() => onToggleOption(questionIndex, option.label, multiple)}
                 onFocus={() => setFocusedIndex(index)}
                 aria-pressed={selected}
-                aria-label={`${showSearch && index < 9 ? `按 ${index + 1} 键或` : ''}${option.label}${option.description ? `: ${option.description}` : ''}`}
+                aria-label={`${option.recommended === true ? '推荐：' : ''}${showSearch && index < 9 ? `按 ${index + 1} 键或` : ''}${option.label}${option.description ? `: ${option.description}` : ''}`}
               >
                 <span className="iqp-option-check">
                   <OptionSelectIndicator selected={selected} multiple={multiple} />
@@ -485,6 +491,9 @@ function QuestionBlock({
                   <span className="iqp-option-label">
                     {showSearch && index < 9 && <kbd className="iqp-option-kbd">{index + 1}</kbd>}
                     {option.label}
+                    {option.recommended === true && (
+                      <span className="iqp-recommended-badge">推荐</span>
+                    )}
                   </span>
                   {option.description && (
                     <span className="iqp-option-desc">{option.description}</span>
@@ -726,6 +735,18 @@ const panelStyles = `
   border-radius: 4px;
 }
 
+.iqp-round {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .iqp-progress {
   font-size: 10px;
   font-weight: 700;
@@ -853,6 +874,23 @@ const panelStyles = `
   white-space: nowrap;
 }
 
+.iqp-recommended-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--contrast);
+  background: var(--contrast-muted);
+  border: 1px solid var(--contrast-border);
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .iqp-question-text {
   font-size: 13px;
   line-height: 1.5;
@@ -890,6 +928,10 @@ const panelStyles = `
 .iqp-option-selected {
   border-color: var(--accent) !important;
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-overlay)) !important;
+}
+
+.iqp-option-recommended:not(.iqp-option-selected) {
+  border-color: var(--contrast-border);
 }
 
 .iqp-option-check {

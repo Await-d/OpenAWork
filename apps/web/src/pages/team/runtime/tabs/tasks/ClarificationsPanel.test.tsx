@@ -94,3 +94,47 @@ describe('ClarificationsPanel', () => {
     expect(storeState.dismiss).not.toHaveBeenCalled();
   });
 });
+
+type StoreItem = (typeof storeState.items)[number];
+
+function makeItem(id: string, round?: number): StoreItem & { round?: number } {
+  return {
+    id,
+    sessionId: 'session-pm1',
+    fromSessionId: 'session-pm1',
+    question: `问题 ${id}`,
+    context: '',
+    createdAt: Date.now(),
+    status: 'pending' as const,
+    ...(round !== undefined ? { round } : {}),
+  };
+}
+
+describe('ClarificationsPanel — 轮次分组', () => {
+  const originalItems = [...storeState.items];
+
+  afterEach(() => {
+    storeState.items.length = 0;
+    storeState.items.push(...originalItems);
+  });
+
+  it('按 round 渲染轮次 chip（0 基 → 第 1 轮）', () => {
+    storeState.items.length = 0;
+    storeState.items.push(makeItem('r1-a', 0), makeItem('r2-a', 1));
+
+    render(<ClarificationsPanel filterSessionId="session-pm1" />);
+
+    expect(screen.getByText('第 1 轮澄清')).toBeTruthy();
+    expect(screen.getByText('第 2 轮澄清')).toBeTruthy();
+  });
+
+  it('无 round 的条目不渲染轮次 chip，但卡片照常显示', () => {
+    storeState.items.length = 0;
+    storeState.items.push(makeItem('no-round'));
+
+    render(<ClarificationsPanel filterSessionId="session-pm1" />);
+
+    expect(screen.queryByText(/第 \d+ 轮澄清/)).toBeNull();
+    expect(screen.getByText('问题 no-round')).toBeTruthy();
+  });
+});
