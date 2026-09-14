@@ -16,7 +16,7 @@ import {
   TransportReason,
   UnknownProviderReason,
 } from '../schema/index.js';
-import { isContextOverflow } from '../provider-error.js';
+import { isContextOverflow, providerErrorText } from '../provider-error.js';
 import { redactTransportText, redactTransportUrl } from './transport/redaction.js';
 
 export interface Interface {
@@ -197,8 +197,9 @@ const responseBody = (body: string | void, request: HttpClientRequest.HttpClient
 };
 
 const providerMessage = (status: number, body: { readonly body?: string }) => {
-  if (body.body && body.body.length <= 500)
-    return `Provider request failed with HTTP ${status}: ${body.body}`;
+  const detail = body.body === undefined ? '' : providerErrorText(body.body);
+  if (detail.length > 0 && detail.length <= 500)
+    return `Provider request failed with HTTP ${status}: ${detail}`;
   return `Provider request failed with HTTP ${status}`;
 };
 
