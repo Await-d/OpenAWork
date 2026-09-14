@@ -39,6 +39,31 @@ import {
 } from '../previews/task-session-preview.js';
 import { extractTodosFromOutput, TodoListPreview } from '../previews/todo-list-preview.js';
 import { extractTreeNodesFromOutput, TreeNodesPreview } from '../previews/tree-nodes-preview.js';
+import { extractMcpResult, McpResultPreview } from '../previews/mcp-result-preview.js';
+import { extractMcpToolList, McpToolListPreview } from '../previews/mcp-tool-list-preview.js';
+import {
+  BackgroundTerminalPreview,
+  extractBackgroundTerminal,
+} from '../previews/background-terminal-preview.js';
+import {
+  extractToolOutputRead,
+  ToolOutputReadPreview,
+} from '../previews/tool-output-read-preview.js';
+import { ArrayOutputPreview } from '../previews/array-output-preview.js';
+import {
+  BackgroundOutputPreview,
+  extractBackgroundOutput,
+} from '../previews/background-output-preview.js';
+import {
+  CodegraphResultPreview,
+  extractCodegraphResult,
+} from '../previews/codegraph-result-preview.js';
+import {
+  extractQuestionAnswers,
+  QuestionAnswerPreview,
+} from '../previews/question-answer-preview.js';
+import { extractSkillContent, SkillContentPreview } from '../previews/skill-content-preview.js';
+import { StructuredOutputPreview } from '../previews/structured-output-preview.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { extractTextFromOutput } from '../shared/extract-text.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
@@ -53,12 +78,20 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
  *   6. workspace_tree / list → TreeNodesPreview
  *   7. workspace_review_status → ReviewStatusPreview
  *   8. workspace_create_directory / workspace_review_revert → SuccessConfirmPreview
- *   9. envelope `{output|content|text|message|result: string}` → text
+ *   9. mcp_list_tools → McpToolListPreview
+ *  10. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
+ *  11. read_tool_output → ToolOutputReadPreview
+ *  12. background_output → BackgroundOutputPreview
+ *  13. codegraph_* → CodegraphResultPreview
+ *  14. skill → SkillContentPreview (unwraps `<skill_content>`)
+ *  15. question / askuserquestion → QuestionAnswerPreview
+ *  16. MCP/shape-matched envelope → McpResultPreview
+ *  17. envelope `{output|content|text|message|result: string}` → text
  *      + DiagnosticsPreview if `diagnostics` array is present
- *  10. fallback → pretty-printed JSON
+ *  18. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
  *
- * Replaces the previous "always JSON.stringify(output, null, 2)" code path
- * which is what produced the raw-format output the user flagged.
+ * Order matters: the shape-matched MCP and skill/question branches must run
+ * before the generic text/JSON fallbacks or those envelopes get dumped raw.
  */
 export function ToolOutputPreview({ toolName, output }: { toolName: string; output: unknown }) {
   const normalized = toolName.trim().toLowerCase();
@@ -151,6 +184,49 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     }
   }
 
+  if (normalized === 'mcp_list_tools') {
+    const servers = extractMcpToolList(output);
+    if (servers) return <McpToolListPreview servers={servers} />;
+  }
+
+  if (
+    normalized === 'run_bash_in_background' ||
+    normalized === 'bash_output' ||
+    normalized === 'bash_kill'
+  ) {
+    const terminal = extractBackgroundTerminal(output);
+    if (terminal) return <BackgroundTerminalPreview view={terminal} />;
+  }
+
+  if (normalized === 'read_tool_output') {
+    const readView = extractToolOutputRead(output);
+    if (readView) return <ToolOutputReadPreview view={readView} />;
+  }
+
+  if (normalized === 'background_output') {
+    const task = extractBackgroundOutput(output);
+    if (task) return <BackgroundOutputPreview view={task} />;
+  }
+
+  if (normalized.startsWith('codegraph_')) {
+    const graph = extractCodegraphResult(output);
+    if (graph) return <CodegraphResultPreview view={graph} />;
+  }
+
+  if (normalized === 'skill') {
+    const skillContent = extractSkillContent(output);
+    if (skillContent) return <SkillContentPreview data={skillContent} />;
+  }
+
+  if (normalized === 'question' || normalized === 'askuserquestion') {
+    const answers = extractQuestionAnswers(output);
+    if (answers) return <QuestionAnswerPreview items={answers} />;
+  }
+
+  // MCP envelope — `skill_mcp` returns this same shape JSON-stringified.
+  const mcpResult = extractMcpResult(output);
+  if (mcpResult) return <McpResultPreview result={mcpResult} />;
+
   // Text-envelope path. Even when this matches, we still want to surface a
   // trailing diagnostics list (lsp_rename, post-write tooling) because that
   // lives outside the .output/.result string field.
@@ -171,10 +247,11 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     );
   }
 
-  // True last resort: structured object we don't have a renderer for.
-  // Use JsonPreview for objects/arrays to get syntax highlighting.
   if (typeof output !== 'string' && output !== null && typeof output === 'object') {
-    return <JsonPreview data={output} defaultExpanded={shouldExpandByDefault} />;
+    if (Array.isArray(output)) {
+      return <ArrayOutputPreview data={output} />;
+    }
+    return <StructuredOutputPreview data={output as Record<string, unknown>} />;
   }
 
   // Plain string fallback
@@ -182,13 +259,18 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
 
-  // If the string looks like JSON, parse and use JsonPreview
   if (
     typeof output === 'string' &&
     (output.trim().startsWith('{') || output.trim().startsWith('['))
   ) {
     try {
-      const parsed = JSON.parse(output);
+      const parsed = JSON.parse(output) as unknown;
+      if (Array.isArray(parsed)) {
+        return <ArrayOutputPreview data={parsed} />;
+      }
+      if (parsed && typeof parsed === 'object') {
+        return <StructuredOutputPreview data={parsed as Record<string, unknown>} />;
+      }
       return <JsonPreview data={parsed} defaultExpanded={shouldExpandByDefault} />;
     } catch {
       // Not valid JSON, fall through to text output

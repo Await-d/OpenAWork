@@ -1,5 +1,14 @@
 @import 'tailwindcss';
 
+:root {
+  --tc-path: var(--fg-default);
+  --tc-cmd: var(--fg-default);
+  --tc-string: var(--fg-muted);
+  --tc-num: var(--fg-muted);
+  --tc-url: var(--fg-default);
+  --tc-keyword: var(--fg-subtle);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    多主题系统 — 主题风格 × 明暗模式
    data-theme: nebula | aurora | linear | forest | sakura | carbon | sunset | ocean
@@ -91,29 +100,6 @@
   --hl-number: #ff6f9c;
   --hl-comment: #5a6088;
 
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
-
   --provider-logo-filter: invert(1) brightness(2);
 
   color-scheme: dark;
@@ -201,29 +187,6 @@
   --hl-string: #16a37a;
   --hl-number: #e0497a;
   --hl-comment: #7a82a8;
-
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
 
   --provider-logo-filter: none;
 
@@ -313,29 +276,6 @@
   --hl-number: #fda4af;
   --hl-comment: #4a5168;
 
-  --tc-path: var(--accent);
-  --tc-cmd: var(--success);
-  --tc-string: var(--accent);
-  --tc-num: var(--chart-8);
-  --tc-url: var(--accent);
-  --tc-keyword: var(--success);
-  --tc-cat-read: var(--accent);
-  --tc-cat-edit: var(--accent);
-  --tc-cat-shell: var(--success);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--accent);
-  --tc-cat-state: var(--accent);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--success);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--accent);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--success);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
-
   --provider-logo-filter: invert(1) brightness(2);
 
   color-scheme: dark;
@@ -424,29 +364,6 @@
   --hl-number: #d83b3b;
   --hl-comment: #9ca3b4;
 
-  --tc-path: var(--accent);
-  --tc-cmd: var(--success);
-  --tc-string: var(--accent);
-  --tc-num: var(--complement);
-  --tc-url: var(--accent);
-  --tc-keyword: var(--success);
-  --tc-cat-read: var(--accent);
-  --tc-cat-edit: var(--accent);
-  --tc-cat-shell: var(--success);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--accent);
-  --tc-cat-state: var(--accent);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--success);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--accent);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--success);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
-
   --provider-logo-filter: none;
 
   color-scheme: light;
@@ -524,28 +441,6 @@
   --hl-string: #a3e635;
   --hl-number: #f87171;
   --hl-comment: #4a5a4e;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: invert(1) brightness(2);
   color-scheme: dark;
 }
@@ -620,28 +515,6 @@
   --hl-string: #84cc16;
   --hl-number: #dc2626;
   --hl-comment: #8a9a8e;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: none;
   color-scheme: light;
 }
@@ -718,28 +591,6 @@
   --hl-string: #a7f3d0;
   --hl-number: #fb7185;
   --hl-comment: #5a4a58;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: invert(1) brightness(2);
   color-scheme: dark;
 }
@@ -814,28 +665,6 @@
   --hl-string: #059669;
   --hl-number: #e11d48;
   --hl-comment: #9a7a8e;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: none;
   color-scheme: light;
 }
@@ -912,28 +741,6 @@
   --hl-string: #00e676;
   --hl-number: #ff3355;
   --hl-comment: #444a54;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: invert(1) brightness(2);
   color-scheme: dark;
 }
@@ -1008,28 +815,6 @@
   --hl-string: #059669;
   --hl-number: #d63552;
   --hl-comment: #8a909a;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: none;
   color-scheme: light;
 }
@@ -1106,28 +891,6 @@
   --hl-string: #84cc16;
   --hl-number: #06b6d4;
   --hl-comment: #564538;
-  --tc-path: var(--complement);
-  --tc-cmd: var(--success);
-  --tc-string: var(--aux);
-  --tc-num: var(--contrast);
-  --tc-url: var(--complement);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--complement);
-  --tc-cat-edit: var(--aux);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--complement);
-  --tc-cat-state: var(--aux);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--aux);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--contrast);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: invert(1) brightness(2);
   color-scheme: dark;
 }
@@ -1202,28 +965,6 @@
   --hl-string: #65a30d;
   --hl-number: #0891b2;
   --hl-comment: #9a7a68;
-  --tc-path: var(--complement);
-  --tc-cmd: var(--success);
-  --tc-string: var(--aux);
-  --tc-num: var(--contrast);
-  --tc-url: var(--complement);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--complement);
-  --tc-cat-edit: var(--aux);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--complement);
-  --tc-cat-state: var(--aux);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--aux);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--contrast);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: none;
   color-scheme: light;
 }
@@ -1300,28 +1041,6 @@
   --hl-string: #2dd4bf;
   --hl-number: #f43f5e;
   --hl-comment: #3e5868;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: invert(1) brightness(2);
   color-scheme: dark;
 }
@@ -1396,28 +1115,6 @@
   --hl-string: #0d9488;
   --hl-number: #e11d48;
   --hl-comment: #7a98a8;
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
   --provider-logo-filter: none;
   color-scheme: light;
 }
@@ -1531,28 +1228,6 @@
   --hl-comment: #4d5b6e;
 
   /* Tool-call 语义色 */
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--chart-8);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--success);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--aux);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--contrast);
-  --tc-ext-css: var(--chart-5);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--accent);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
 
   /* 杂项 */
   --provider-logo-filter: invert(1) brightness(2);
@@ -1657,28 +1332,6 @@
   --hl-comment: #a8aec8;
 
   /* Tool-call 语义色(亮色) */
-  --tc-path: var(--aux);
-  --tc-cmd: var(--success);
-  --tc-string: var(--contrast);
-  --tc-num: var(--complement);
-  --tc-url: var(--aux);
-  --tc-keyword: var(--accent);
-  --tc-cat-read: var(--aux);
-  --tc-cat-edit: var(--contrast);
-  --tc-cat-shell: var(--accent);
-  --tc-cat-think: var(--chart-5);
-  --tc-cat-net: var(--aux);
-  --tc-cat-state: var(--contrast);
-  --tc-ext-ts: var(--accent);
-  --tc-ext-py: var(--contrast);
-  --tc-ext-md: var(--fg-muted);
-  --tc-ext-json: var(--complement);
-  --tc-ext-css: var(--contrast);
-  --tc-ext-html: var(--complement);
-  --tc-ext-go: var(--aux);
-  --tc-ext-rs: var(--complement);
-  --tc-ext-rb: var(--complement);
-  --tc-ext-sh: var(--success);
 
   color-scheme: light;
 }

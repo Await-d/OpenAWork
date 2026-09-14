@@ -120,8 +120,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px; /* 增加间距 */
-  font-size: 11px; /* 增大字体 */
+  margin-bottom: 2px;
+  font-size: 11px;
 }
 
 .tool-output-label {
@@ -152,9 +152,9 @@
 
 .tool-output-content {
   margin: 0;
-  padding: 10px 12px; /* 增加内边距 */
+  padding: 6px 10px;
   font-size: 12px; /* 增大字体 */
-  line-height: 1.6; /* 增加行高 */
+  line-height: 1.4;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fg-default);
   background: var(--bg-surface);
@@ -167,9 +167,9 @@
 
 .tool-output-pre {
   margin: 0;
-  padding: 10px 12px; /* 增加内边距 */
+  padding: 6px 10px;
   font-size: 12px; /* 增大字体 */
-  line-height: 1.6; /* 增加行高 */
+  line-height: 1.4;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fg-default);
   background: var(--bg-surface);
@@ -183,9 +183,9 @@
 
 .tool-output-pre-compact {
   margin: 0;
-  padding: 6px 8px; /* 增加内边距 */
+  padding: 4px 8px;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.4;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--fg-default);
   background: var(--bg-surface);
@@ -319,12 +319,12 @@
 .tool-call-block-search-results {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 2px 0;
+  gap: 3px;
+  padding: 1px 0;
 }
 
 .tool-call-block-search-item {
-  padding: 3px 6px;
+  padding: 2px 6px;
   border-radius: 4px;
   border: 1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent);
   background: transparent;
@@ -373,7 +373,7 @@
 .tool-call-block-search-snippet {
   font-size: 11px;
   color: var(--fg-muted);
-  line-height: 1.45;
+  line-height: 1.35;
   margin-top: 1px;
   display: -webkit-box;
   -webkit-line-clamp: 1;
@@ -403,9 +403,9 @@
 }
 
 .tool-call-block-web-markdown {
-  padding: 6px 8px;
+  padding: 4px 8px;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.45;
   color: var(--fg-default);
   background: var(--bg-surface);
   border-radius: 4px;
@@ -414,24 +414,24 @@
 }
 
 .tool-call-block-web-markdown p {
-  margin: 4px 0;
+  margin: 3px 0;
 }
 
 .tool-call-block-web-markdown h1,
 .tool-call-block-web-markdown h2,
 .tool-call-block-web-markdown h3 {
-  margin: 8px 0 4px;
+  margin: 6px 0 3px;
   font-size: 13px;
 }
 
 .tool-call-block-web-markdown ul,
 .tool-call-block-web-markdown ol {
-  margin: 4px 0;
+  margin: 3px 0;
   padding-left: 18px;
 }
 
 .tool-call-block-web-markdown li {
-  margin: 2px 0;
+  margin: 1px 0;
 }
 
 .tool-call-block-web-markdown a {
@@ -451,8 +451,8 @@
 }
 
 .tool-call-block-web-markdown pre {
-  margin: 4px 0;
-  padding: 6px 8px;
+  margin: 3px 0;
+  padding: 4px 8px;
   border-radius: 4px;
   background: var(--bg-surface);
   font-size: 11px;
@@ -461,9 +461,9 @@
 
 .tool-call-block-web-output {
   margin: 0;
-  padding: 6px 8px;
+  padding: 4px 8px;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.45;
   color: var(--fg-default);
   background: var(--bg-surface);
   border-radius: 4px;

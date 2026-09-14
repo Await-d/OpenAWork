@@ -276,7 +276,7 @@ export function TaskToolInline(props: TaskToolInlineProps) {
             <TaskToolKindBadge />
             {typeof props.input['subagent_type'] === 'string' &&
             props.input['subagent_type'].trim() ? (
-              <TaskInlineMetaLabel label={props.input['subagent_type'].trim()} tone="info" />
+              <TaskInlineMetaLabel label={props.input['subagent_type'].trim()} tone="muted" />
             ) : null}
           </div>
           <div className="chat-task-inline-title" title={fallbackTitle}>
@@ -347,9 +347,9 @@ export function TaskToolInline(props: TaskToolInlineProps) {
         <div className="chat-task-inline-meta">
           <TaskToolKindBadge />
           {displayData.taskMeta.agentType && (
-            <TaskInlineMetaLabel label={displayData.taskMeta.agentType} tone="info" />
+            <TaskInlineMetaLabel label={displayData.taskMeta.agentType} tone="muted" />
           )}
-          {displayData.taskMeta.readonly && <TaskInlineMetaLabel label="只读" tone="success" />}
+          {displayData.taskMeta.readonly && <TaskInlineMetaLabel label="只读" tone="muted" />}
           {toolStatusBadge && (
             <TaskInlineMetaLabel label={toolStatusBadge.label} tone={toolStatusBadge.color} />
           )}
