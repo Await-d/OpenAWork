@@ -23,6 +23,7 @@ export type ProviderType =
   | 'baichuan'
   | 'hunyuan'
   | 'qianfan'
+  | 'opencode-go'
   | 'custom';
 
 export interface ThinkingConfig {

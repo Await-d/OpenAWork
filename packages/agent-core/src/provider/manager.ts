@@ -397,6 +397,10 @@ export class ProviderManagerImpl implements ProviderManager {
       supportsVision: live.modalities?.input
         ? live.modalities.input.includes('image')
         : model.supportsVision,
+      // 两处取或：models.dev 未声明输出模态时会给出 false，直接赋值会抹掉内置生图标记。
+      supportsImageGeneration:
+        model.supportsImageGeneration === true ||
+        (live.modalities?.output?.includes('image') ?? false),
       inputPricePerMillion:
         normalizeOptionalTokenPrice(live.cost?.input) ?? model.inputPricePerMillion,
       outputPricePerMillion:

@@ -116,4 +116,59 @@ describe('ProviderManagerImpl models.dev 同步', () => {
     const provider = manager.listProviders().find((item) => item.type === type);
     expect(provider?.defaultModels.some((item) => item.id === modelId)).toBe(true);
   });
+
+  it('按 models.dev 输出模态回填生图能力，不误标纯文本模型', async () => {
+    getModelsDevData.mockResolvedValue({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: {
+          'image-only-test': {
+            id: 'image-only-test',
+            name: 'Image Only',
+            modalities: { input: ['text'], output: ['image'] },
+          },
+          'text-only-test': {
+            id: 'text-only-test',
+            name: 'Text Only',
+            modalities: { input: ['text'], output: ['text'] },
+          },
+        },
+      },
+    });
+
+    const { ProviderManagerImpl } = await import('./manager.js');
+    const manager = new ProviderManagerImpl();
+
+    await manager.syncFromModelsDev();
+
+    const openai = manager.listProviders().find((provider) => provider.type === 'openai');
+    const imageModel = openai?.defaultModels.find((item) => item.id === 'image-only-test');
+    const textModel = openai?.defaultModels.find((item) => item.id === 'text-only-test');
+
+    expect(imageModel?.supportsImageGeneration).toBe(true);
+    expect(textModel?.supportsImageGeneration).toBe(false);
+  });
+
+  it('models.dev 未声明输出模态时不覆盖内置生图标记', async () => {
+    getModelsDevData.mockResolvedValue({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: {
+          'gpt-image-2': { id: 'gpt-image-2', name: 'GPT Image 2' },
+        },
+      },
+    });
+
+    const { ProviderManagerImpl } = await import('./manager.js');
+    const manager = new ProviderManagerImpl();
+
+    await manager.syncFromModelsDev();
+
+    const openai = manager.listProviders().find((provider) => provider.type === 'openai');
+    const imageModel = openai?.defaultModels.find((item) => item.id === 'gpt-image-2');
+
+    expect(imageModel?.supportsImageGeneration).toBe(true);
+  });
 });

@@ -139,6 +139,7 @@ export function mapModelsDevModel(modelId: string, model: ModelsDevModel): AIMod
     supportsVideoInput: inputModalities?.includes('video') ?? false,
     supportsAudioOutput: outputModalities?.includes('audio') ?? false,
     supportsVideoGeneration: outputModalities?.includes('video') ?? false,
+    supportsImageGeneration: outputModalities?.includes('image') ?? false,
     supportsStructuredOutput: model.structured_output,
     supportsTemperature: model.temperature,
     supportsThinking: model.reasoning ?? false,

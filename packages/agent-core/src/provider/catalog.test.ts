@@ -256,3 +256,38 @@ describe('provider catalog expansion (2026-07-23)', () => {
     expect(resolveThinkingStyle('siliconflow', 'totally-unknown-model')).toBe('none');
   });
 });
+
+describe('opencode-go 思考（按官方 models.dev 元数据下发 reasoning_effort）', () => {
+  it('有 effort 变体的 chat 模型走 openai_effort（wire 字段 reasoning_effort）', () => {
+    expect(resolveThinkingStyle('opencode-go', 'deepseek-v4.1-flash')).toBe('openai_effort');
+    expect(resolveThinkingStyle('opencode-go', 'glm-5.3')).toBe('openai_effort');
+    expect(resolveThinkingStyle('opencode-go', 'glm-5.2')).toBe('openai_effort');
+    expect(resolveThinkingStyle('opencode-go', 'kimi-k3')).toBe('openai_effort');
+    expect(resolveThinkingStyle('opencode-go', 'hy3')).toBe('openai_effort');
+    expect(resolveThinkingStyle('opencode-go', 'hy4-preview')).toBe('openai_effort');
+  });
+
+  it('没有 effort 变体的模型不下发 reasoning 参数（与官方 opencode 行为一致）', () => {
+    expect(resolveThinkingStyle('opencode-go', 'glm-5.1')).toBe('none');
+    expect(resolveThinkingStyle('opencode-go', 'kimi-k2.6')).toBe('none');
+    expect(resolveThinkingStyle('opencode-go', 'mimo-v2.5')).toBe('none');
+    expect(resolveThinkingStyle('opencode-go', 'longcat-2.0')).toBe('none');
+    expect(resolveThinkingStyle('opencode-go')).toBe('none');
+  });
+
+  it('可推理模型判定为支持思考（含厂商反推与显式声明的模型）', () => {
+    expect(catalogModelSupportsThinking('opencode-go', 'deepseek-v4.1-flash')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'glm-5.3')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'kimi-k2.6')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'qwen3.8-max')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'minimax-m3')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'mimo-v2.5-pro')).toBe(true);
+  });
+
+  it('官方 models.dev 标记为 reasoning 的模型全部声明支持（含 longcat/hy/muse-spark）', () => {
+    expect(catalogModelSupportsThinking('opencode-go', 'longcat-2.0')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'hy3')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'muse-spark-1.3-contributor')).toBe(true);
+    expect(catalogModelSupportsThinking('opencode-go', 'totally-unknown-model')).toBe(false);
+  });
+});

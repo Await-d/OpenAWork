@@ -16,6 +16,7 @@
  */
 
 import type { AIModelConfig, ProviderType } from './types.js';
+import { CATALOG_DEFAULT_MODELS } from './catalog-models.js';
 
 /**
  * thinking / reasoning 在请求里的下发「风格」。每个风格对应网关
@@ -217,56 +218,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'anthropic_budget',
-    defaultModels: [
-      {
-        id: 'claude-opus-4-0',
-        label: 'Claude Opus 4',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 15,
-        outputPricePerMillion: 75,
-      },
-      {
-        id: 'claude-sonnet-4-0',
-        label: 'Claude Sonnet 4',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 3,
-        outputPricePerMillion: 15,
-      },
-      {
-        id: 'claude-haiku-4-5',
-        label: 'Claude Haiku 4.5',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 1,
-        outputPricePerMillion: 5,
-      },
-      {
-        id: 'claude-3-7-sonnet-20250219',
-        label: 'Claude Sonnet 3.7',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 3,
-        outputPricePerMillion: 15,
-      },
-      {
-        id: 'claude-3-5-haiku-20241022',
-        label: 'Claude Haiku 3.5',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.8,
-        outputPricePerMillion: 4,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['anthropic'],
   },
   {
     type: 'openai',
@@ -281,152 +233,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', isDefault: true }],
     thinkingStyle: 'openai_effort',
-    defaultModels: [
-      {
-        id: 'gpt-5.6-sol',
-        label: 'GPT-5.6 Sol',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-      },
-      {
-        id: 'gpt-5.6-terra',
-        label: 'GPT-5.6 Terra',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-      },
-      {
-        id: 'gpt-5.6-luna',
-        label: 'GPT-5.6 Luna',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-      },
-      {
-        id: 'gpt-5.5',
-        label: 'GPT-5.5',
-        enabled: true,
-        contextWindow: 1_050_000,
-        maxOutputTokens: 128_000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 5,
-        outputPricePerMillion: 30,
-      },
-      {
-        id: 'gpt-5.4',
-        label: 'GPT-5.4',
-        enabled: true,
-        contextWindow: 1_050_000,
-        maxOutputTokens: 128_000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 2.5,
-        outputPricePerMillion: 15,
-      },
-      {
-        id: 'gpt-5.4-mini',
-        label: 'GPT-5.4 mini',
-        enabled: true,
-        contextWindow: 400_000,
-        maxOutputTokens: 128_000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.75,
-        outputPricePerMillion: 4.5,
-      },
-      {
-        id: 'gpt-5.4-nano',
-        label: 'GPT-5.4 nano',
-        enabled: true,
-        contextWindow: 400_000,
-        maxOutputTokens: 128_000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.2,
-        outputPricePerMillion: 1.25,
-      },
-      {
-        id: 'gpt-4.1',
-        label: 'GPT-4.1',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 2,
-        outputPricePerMillion: 8,
-      },
-      {
-        id: 'gpt-4.1-mini',
-        label: 'GPT-4.1 mini',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.4,
-        outputPricePerMillion: 1.6,
-      },
-      {
-        id: 'gpt-4.1-nano',
-        label: 'GPT-4.1 nano',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.1,
-        outputPricePerMillion: 0.4,
-      },
-      {
-        id: 'o3',
-        label: 'o3',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 2,
-        outputPricePerMillion: 8,
-      },
-      {
-        id: 'o4-mini',
-        label: 'o4-mini',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 1.1,
-        outputPricePerMillion: 4.4,
-      },
-      {
-        id: 'gpt-4o',
-        label: 'GPT-4o',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 2.5,
-        outputPricePerMillion: 10,
-      },
-      {
-        id: 'gpt-4o-mini',
-        label: 'GPT-4o mini',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.15,
-        outputPricePerMillion: 0.6,
-      },
-      {
-        id: 'gpt-image-2',
-        label: 'GPT Image 2',
-        enabled: true,
-        supportsImageGeneration: true,
-        supportsImageGeneration4K: false,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['openai'],
   },
   {
     type: 'deepseek',
@@ -441,26 +248,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', isDefault: true }],
     thinkingStyle: 'deepseek_thinking',
-    defaultModels: [
-      {
-        id: 'deepseek-chat',
-        label: 'DeepSeek Chat (V3)',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.28,
-        outputPricePerMillion: 0.42,
-      },
-      {
-        id: 'deepseek-reasoner',
-        label: 'DeepSeek Reasoner (R1)',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.28,
-        outputPricePerMillion: 0.42,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['deepseek'],
   },
   {
     type: 'gemini',
@@ -483,46 +271,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'gemini_thinking',
-    defaultModels: [
-      {
-        id: 'gemini-2.5-pro',
-        label: 'Gemini 2.5 Pro',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 1.25,
-        outputPricePerMillion: 10,
-      },
-      {
-        id: 'gemini-2.5-flash',
-        label: 'Gemini 2.5 Flash',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.3,
-        outputPricePerMillion: 2.5,
-      },
-      {
-        id: 'gemini-2.5-flash-lite',
-        label: 'Gemini 2.5 Flash Lite',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.1,
-        outputPricePerMillion: 0.4,
-      },
-      {
-        id: 'gemini-2.0-flash',
-        label: 'Gemini 2.0 Flash',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.1,
-        outputPricePerMillion: 0.4,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['gemini'],
   },
   {
     type: 'ollama',
@@ -534,24 +283,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1', isDefault: true }],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'qwen3:8b',
-        label: 'Qwen3 8B (local)',
-        enabled: true,
-        supportsTools: false,
-        inputPricePerMillion: 0,
-        outputPricePerMillion: 0,
-      },
-      {
-        id: 'llama3.1:8b',
-        label: 'Llama 3.1 8B (local)',
-        enabled: true,
-        supportsTools: false,
-        inputPricePerMillion: 0,
-        outputPricePerMillion: 0,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['ollama'],
   },
   {
     type: 'openrouter',
@@ -566,64 +298,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     upstreams: [{ label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', isDefault: true }],
     thinkingStyle: 'openrouter_reasoning',
     thinkingModelMatcher: isOpenRouterReasoningModel,
-    defaultModels: [
-      {
-        id: 'anthropic/claude-sonnet-4-0',
-        label: 'Claude Sonnet 4 (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 3,
-        outputPricePerMillion: 15,
-      },
-      {
-        id: 'openai/gpt-4.1',
-        label: 'GPT-4.1 (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 2,
-        outputPricePerMillion: 8,
-      },
-      {
-        id: 'openai/gpt-5',
-        label: 'GPT-5 (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 1.25,
-        outputPricePerMillion: 10,
-      },
-      {
-        id: 'google/gemini-2.5-pro',
-        label: 'Gemini 2.5 Pro (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 1.25,
-        outputPricePerMillion: 10,
-      },
-      {
-        id: 'deepseek/deepseek-chat-v3-0324',
-        label: 'DeepSeek V3 (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        inputPricePerMillion: 0.28,
-        outputPricePerMillion: 0.88,
-      },
-      {
-        id: 'openai/gpt-4o-mini',
-        label: 'GPT-4o mini (OpenRouter)',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 0.15,
-        outputPricePerMillion: 0.6,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['openrouter'],
   },
   {
     type: 'qwen',
@@ -646,54 +321,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     ],
     thinkingStyle: 'qwen_enable_thinking',
     thinkingModelMatcher: isQwenThinkingModel,
-    defaultModels: [
-      {
-        id: 'qwen3-235b-a22b',
-        label: 'Qwen3 235B-A22B',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: false,
-        supportsThinking: true,
-        inputPricePerMillion: 0.7,
-        outputPricePerMillion: 2.8,
-      },
-      {
-        id: 'qwen-max',
-        label: 'Qwen Max',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        inputPricePerMillion: 1.6,
-        outputPricePerMillion: 6.4,
-      },
-      {
-        id: 'qwen-plus',
-        label: 'Qwen Plus',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: false,
-        inputPricePerMillion: 0.4,
-        outputPricePerMillion: 1.2,
-      },
-      {
-        id: 'qwen-turbo',
-        label: 'Qwen Turbo',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: false,
-        inputPricePerMillion: 0.05,
-        outputPricePerMillion: 0.2,
-      },
-      {
-        id: 'qwq-plus',
-        label: 'QwQ Plus',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.8,
-        outputPricePerMillion: 2.4,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['qwen'],
   },
   {
     type: 'moonshot',
@@ -711,35 +339,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     upstreams: [{ label: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', isDefault: true }],
     thinkingStyle: 'body_thinking_type',
     thinkingModelMatcher: isMoonshotThinkingModel,
-    defaultModels: [
-      {
-        id: 'kimi-k2.5',
-        label: 'Kimi K2.5',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: false,
-        supportsThinking: true,
-        inputPricePerMillion: 0.6,
-        outputPricePerMillion: 3,
-      },
-      {
-        id: 'kimi-k2-thinking',
-        label: 'Kimi K2 Thinking',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.6,
-        outputPricePerMillion: 2.5,
-      },
-      {
-        id: 'kimi-k2-turbo-preview',
-        label: 'Kimi K2 Turbo',
-        enabled: true,
-        supportsTools: true,
-        inputPricePerMillion: 2.4,
-        outputPricePerMillion: 10,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['moonshot'],
   },
   {
     type: 'mimo',
@@ -768,42 +368,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'body_thinking_type',
-    defaultModels: [
-      {
-        id: 'mimo-v2.5-pro',
-        label: 'MiMo V2.5 Pro',
-        enabled: true,
-        contextWindow: 1_000_000,
-        maxOutputTokens: 131072,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 1,
-        outputPricePerMillion: 3,
-      },
-      {
-        id: 'mimo-v2.5',
-        label: 'MiMo V2.5',
-        enabled: true,
-        contextWindow: 1_000_000,
-        maxOutputTokens: 131072,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.4,
-        outputPricePerMillion: 2,
-      },
-      {
-        id: 'mimo-v2-flash',
-        label: 'MiMo V2 Flash',
-        enabled: true,
-        contextWindow: 256_000,
-        maxOutputTokens: 65536,
-        supportsTools: true,
-        supportsThinking: true,
-        inputPricePerMillion: 0.1,
-        outputPricePerMillion: 0.3,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['mimo'],
   },
   {
     type: 'mistral',
@@ -819,26 +384,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     },
     upstreams: [{ label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', isDefault: true }],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'mistral-large-latest',
-        label: 'Mistral Large',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'mistral-small-latest',
-        label: 'Mistral Small',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'codestral-latest',
-        label: 'Codestral',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['mistral'],
   },
   {
     type: 'zhipu',
@@ -861,21 +407,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     ],
     thinkingStyle: 'body_thinking_type',
     thinkingModelMatcher: isZhipuThinkingModel,
-    defaultModels: [
-      {
-        id: 'glm-4.5',
-        label: 'GLM-4.5',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-      },
-      {
-        id: 'glm-4-flash',
-        label: 'GLM-4 Flash',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['zhipu'],
   },
   {
     type: 'doubao',
@@ -899,21 +431,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     // 方舟 OpenAI 兼容：thinking 模型走 body.thinking.type 开关。
     thinkingStyle: 'body_thinking_type',
     thinkingModelMatcher: isDoubaoThinkingModel,
-    defaultModels: [
-      {
-        id: 'ep-your-endpoint-id',
-        label: '（请替换为方舟接入点 ID）',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'doubao-seed-1.6',
-        label: 'Doubao Seed 1.6',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['doubao'],
   },
   {
     type: 'groq',
@@ -933,20 +451,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'llama-3.3-70b-versatile',
-        label: 'Llama 3.3 70B Versatile',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'llama-3.1-8b-instant',
-        label: 'Llama 3.1 8B Instant',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['groq'],
   },
   {
     type: 'siliconflow',
@@ -966,20 +471,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'deepseek-ai/DeepSeek-V3',
-        label: 'DeepSeek V3',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'Qwen/Qwen2.5-7B-Instruct',
-        label: 'Qwen2.5 7B Instruct',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['siliconflow'],
   },
   {
     type: 'azure',
@@ -1000,23 +492,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     thinkingStyle: 'openai_effort',
     // Azure 部署名各异；仅对 GPT-5 / o 系列等 reasoning 模型下发 effort。
     thinkingModelMatcher: isOpenAIReasoningModel,
-    defaultModels: [
-      {
-        id: 'gpt-4o',
-        label: '（部署名请改成你的 deployment）',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-      },
-      {
-        id: 'gpt-5',
-        label: 'GPT-5（部署名请改成你的 deployment）',
-        enabled: true,
-        supportsTools: true,
-        supportsVision: true,
-        supportsThinking: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['azure'],
   },
   {
     type: 'xai',
@@ -1032,22 +508,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     upstreams: [{ label: 'xAI', baseUrl: 'https://api.x.ai/v1', isDefault: true }],
     thinkingStyle: 'openai_effort',
     thinkingModelMatcher: isXaiThinkingModel,
-    defaultModels: [
-      {
-        id: 'grok-3',
-        label: 'Grok 3',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-      },
-      {
-        id: 'grok-3-mini',
-        label: 'Grok 3 Mini',
-        enabled: true,
-        supportsTools: true,
-        supportsThinking: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['xai'],
   },
   {
     type: 'minimax',
@@ -1067,20 +528,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'MiniMax-Text-01',
-        label: 'MiniMax Text 01',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'abab6.5s-chat',
-        label: 'ABAB 6.5s Chat',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['minimax'],
   },
   {
     type: 'baichuan',
@@ -1100,20 +548,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'Baichuan4',
-        label: 'Baichuan 4',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'Baichuan3-Turbo',
-        label: 'Baichuan 3 Turbo',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['baichuan'],
   },
   {
     type: 'hunyuan',
@@ -1134,20 +569,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
-      {
-        id: 'hunyuan-turbos-latest',
-        label: 'Hunyuan TurboS',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'hunyuan-lite',
-        label: 'Hunyuan Lite',
-        enabled: true,
-        supportsTools: true,
-      },
-    ],
+    defaultModels: CATALOG_DEFAULT_MODELS['hunyuan'],
   },
   {
     type: 'qianfan',
@@ -1168,20 +590,36 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       },
     ],
     thinkingStyle: 'none',
-    defaultModels: [
+    defaultModels: CATALOG_DEFAULT_MODELS['qianfan'],
+  },
+  {
+    type: 'opencode-go',
+    displayName: 'OpenCode Go',
+    enabledByDefault: false,
+    apiKeyEnv: 'OPENCODE_API_KEY',
+    hostnames: ['opencode.ai'],
+    ui: {
+      fallbackGlyph: 'Go',
+      aliases: ['opencode', 'opencode-go', 'zen-go'],
+      // 刻意不填 modelIdPrefixes：这些模型 id 是裸名(如 deepseek-v4-flash)，
+      // 填了会把用量页的厂商反推与第三方代理的模型归属错误地劫持到本平台。
+    },
+    upstreams: [
       {
-        id: 'ernie-4.0-8k',
-        label: 'ERNIE 4.0 8K',
-        enabled: true,
-        supportsTools: true,
-      },
-      {
-        id: 'ernie-speed-8k',
-        label: 'ERNIE Speed 8K',
-        enabled: true,
-        supportsTools: true,
+        // 同一个 baseUrl 下按模型混用三种协议(responses / chat_completions /
+        // anthropic_messages)，因此这里刻意不写死 protocol——交由
+        // 网关 `plugins/opencode-go.ts` 的 `resolve.protocol` hook 按模型路由。
+        label: 'OpenCode Go',
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        isDefault: true,
       },
     ],
+    // 各模型中思维控制语义不一致(GLM/Kimi/DeepSeek/Qwen/MiniMax 各不相同)，
+    // 统一不下发 thinking 选项，避免误开。
+    thinkingStyle: 'none',
+    // 模型清单与协议归属来自官方端点表：https://opencode.ai/docs/go/#endpoints
+    // 该列表会随上游测试进度变动，用户亦可在设置里手动增删模型。
+    defaultModels: CATALOG_DEFAULT_MODELS['opencode-go'],
   },
 ];
 
@@ -1274,6 +712,20 @@ function inferModelThinkingSupport(entry: ProviderCatalogEntry, modelId: string)
  * 兼容的代理来访问 MiMo 模型，modelId 是 'mimo-v2.5-pro'，此时应使用
  * 'body_thinking_type' 风格而非 'openai_effort'。
  */
+/**
+ * OpenCode Go 的思考形态由官方 models.dev `reasoning_options` 决定：
+ * 官方 opencode 对 OpenAI 兼容端点统一下发 `reasoning_effort`（见其
+ * `ProviderTransform` 的 OpenAI-compatible 分支），而对没有 effort 变体的模型
+ * 完全不发 reasoning 参数。这里据此返回 `openai_effort` 或 `none`，不做厂商猜测。
+ * 数据在 `catalog-models.ts` 静态镜像，并由 models.dev 同步刷新。
+ */
+const inferOpencodeGoStyleFromOptions = (modelId?: string): ProviderThinkingStyle => {
+  const entry = getCatalogEntry('opencode-go');
+  const model = entry && modelId ? findCatalogModelConfig(entry, modelId) : undefined;
+  const hasEffort = (model?.reasoningOptions ?? []).some((option) => option.type === 'effort');
+  return hasEffort ? 'openai_effort' : 'none';
+};
+
 export const resolveThinkingStyle = (
   providerType: string,
   modelId?: string,
@@ -1281,6 +733,14 @@ export const resolveThinkingStyle = (
   const normalized = providerType.toLowerCase();
   if (normalized === 'claude') {
     return 'anthropic_budget';
+  }
+
+  // OpenCode Go 在同一个 baseUrl 下按模型混用三种协议：协议为 anthropic_messages /
+  // responses 的模型，网关已把 providerType 改写为 anthropic / openai，走不到这里；
+  // 能走到这里的必然跑 chat_completions。故按 modelId 反推真实厂商风格，推不出来
+  // 就保持 none——不对未知模型乱发参数。
+  if (normalized === 'opencode-go') {
+    return inferOpencodeGoStyleFromOptions(modelId);
   }
 
   // 对 'openai' / 'custom' / 聚合平台，先尝试通过 modelId 前缀推断真实厂商——
@@ -1313,6 +773,21 @@ export const resolveThinkingStyle = (
 /** 该平台下某模型是否真正支持下发 thinking(用于 moonshot 这种部分模型场景)。 */
 export const catalogModelSupportsThinking = (providerType: string, modelId: string): boolean => {
   const normalized = providerType.toLowerCase();
+
+  // OpenCode Go：先读本平台条目里为该模型显式声明的 supportsThinking（Qwen/MiniMax
+  // 等走 anthropic 协议、MiMo 目录无 matcher，厂商反推判不出来，只能靠显式声明），
+  // 未声明时再按 modelId 反推真实厂商。
+  if (normalized === 'opencode-go') {
+    const entry = getCatalogEntry(normalized);
+    const explicitModel = entry ? findCatalogModelConfig(entry, modelId) : undefined;
+    if (typeof explicitModel?.supportsThinking === 'boolean') {
+      return explicitModel.supportsThinking;
+    }
+    const vendorEntry = modelId
+      ? findCatalogEntryByModelId(modelId, { includeOpenAI: true })
+      : undefined;
+    return vendorEntry ? inferModelThinkingSupport(vendorEntry, modelId) : false;
+  }
 
   // 对 'openai' / 'custom' / siliconflow，先尝试通过 modelId 前缀推断真实厂商
   // （与 resolveThinkingStyle 对齐）。
