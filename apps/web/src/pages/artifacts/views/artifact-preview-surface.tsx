@@ -1,6 +1,18 @@
+import { useCallback, useMemo, useState } from 'react';
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import MarkdownMessageContent from '../../../components/chat/markdown/markdown-message-content.js';
+import {
+  ContextMenu,
+  type ContextMenuItem,
+} from '../../../components/common/display/ContextMenu.js';
+import {
+  ContentContextMenuHost,
+  type ContentContextMenuTrigger,
+} from '../../../components/common/display/ContentContextMenuHost.js';
+import { buildContentContextMenuItems } from '../../../components/common/display/content-context-menu-items.js';
+import { toast } from '../../../components/common/feedback/ToastNotification.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import { FilePreviewPane } from '../../../components/file-editor/preview/FilePreviewPane.js';
 import { tryFormatJson } from '../../../utils/format-json.js';
 import {
@@ -15,7 +27,56 @@ interface ArtifactPreviewSurfaceProps {
   content: string;
 }
 
+/**
+ * 产物预览面。
+ *
+ * 右键 / 键盘呼出的菜单只提供复制类动作：产物不是磁盘文件，没有路径语义
+ * （虚拟文件名就是标题派生的，工作台顶部已经在展示），所在页面也没有聊天
+ * composer 可以接收引用——因此 `path` 与 `referenceToChat` 都不传，
+ * 菜单自然收敛成「复制全部内容 / 复制选中内容」，不留点了没反应的项。
+ */
 export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSurfaceProps) {
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+
+  const handleOpenMenu = useCallback((trigger: ContentContextMenuTrigger) => {
+    setMenu({ x: trigger.x, y: trigger.y, selection: trigger.selection });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const handleCopy = useCallback((text: string) => {
+    void copyTextToClipboard(text).catch((copyError: unknown) => {
+      toast(copyError instanceof Error ? copyError.message : '复制失败', 'error');
+    });
+  }, []);
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menu) return [];
+    return buildContentContextMenuItems({
+      variant: 'preview',
+      target: {
+        content,
+        selection: menu.selection,
+        isActive: false,
+        // 产物内容始终是可复制的文本（图片产物是 base64），不存在乱码问题。
+        isBinary: false,
+      },
+      workspacePath: null,
+      actions: { copyText: handleCopy },
+    });
+  }, [menu, content, handleCopy]);
+
+  return (
+    <>
+      <ContentContextMenuHost testId="artifact-preview-host" onOpen={handleOpenMenu}>
+        <ArtifactPreviewBody artifact={artifact} content={content} />
+      </ContentContextMenuHost>
+      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} /> : null}
+    </>
+  );
+}
+
+function ArtifactPreviewBody({ artifact, content }: ArtifactPreviewSurfaceProps) {
   if (!canPreviewArtifact(artifact.type)) {
     return (
       <PreviewShell
