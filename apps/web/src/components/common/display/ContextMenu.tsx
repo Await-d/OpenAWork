@@ -24,8 +24,17 @@ export interface ContextMenuItem {
   danger?: boolean;
   /** Click handler. Menu auto-closes after invocation. */
   onSelect?: () => void;
-  /** Render as a divider line. `label` is ignored. */
-  type?: 'item' | 'separator';
+  /**
+   * Rendering mode:
+   * - `item` (default): clickable action row.
+   * - `separator`: divider line, `label` ignored.
+   * - `header`: non-clickable info row used to show context such as the
+   *   target's full path. `hint` renders as a small caption above `label`,
+   *   and the label text stays selectable so it can be copied by hand.
+   */
+  type?: 'item' | 'separator' | 'header';
+  /** Small caption rendered above `label` when `type='header'`. */
+  hint?: string;
 }
 
 export interface ContextMenuProps {
@@ -96,7 +105,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
 
   const handleSelect = useCallback(
     (item: ContextMenuItem) => {
-      if (item.disabled || item.type === 'separator') return;
+      if (item.disabled || item.type === 'separator' || item.type === 'header') return;
       onClose();
       // Defer to the next microtask so the close transition can settle
       // before the action runs (helps with focus-restore).
@@ -120,6 +129,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       {items.map((item) => {
         if (item.type === 'separator') {
           return <div key={item.id} role="separator" style={SEPARATOR_STYLE} />;
+        }
+        if (item.type === 'header') {
+          const plainText = typeof item.label === 'string' ? item.label : undefined;
+          return (
+            <div key={item.id} role="presentation" style={HEADER_STYLE} title={plainText}>
+              {item.hint ? <span style={HEADER_HINT_STYLE}>{item.hint}</span> : null}
+              <span style={HEADER_TEXT_STYLE}>{item.label}</span>
+            </div>
+          );
         }
         return (
           <button
@@ -199,4 +217,30 @@ const SEPARATOR_STYLE: CSSProperties = {
   height: 1,
   margin: '4px 6px',
   background: 'var(--border-subtle)',
+};
+
+const HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '6px 8px 7px',
+  maxWidth: 360,
+  // The surrounding menu disables text selection; re-enable it here so the
+  // user can still highlight the path by hand (and so the row itself does
+  // not look like a clickable action).
+  userSelect: 'text',
+  cursor: 'default',
+};
+
+const HEADER_HINT_STYLE: CSSProperties = {
+  fontSize: 10,
+  color: 'var(--fg-muted)',
+  userSelect: 'none',
+};
+
+const HEADER_TEXT_STYLE: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--fg-default)',
+  lineHeight: 1.5,
+  overflowWrap: 'anywhere',
 };
