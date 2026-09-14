@@ -20,6 +20,8 @@ export function useFileEditorContext() {
 }
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { UnlockOverlay } from './components/common/modal/UnlockOverlay.js';
+import { CloseConfirmDialog } from './components/common/modal/CloseConfirmDialog.js';
+import { AboutDialog } from './components/common/modal/AboutDialog.js';
 import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth/auth.js';
 import {
@@ -56,26 +58,7 @@ import {
   waitForGatewayHealth,
 } from './utils/gateway/desktop-gateway.js';
 import { migrateDesktopWorkbenchLayout } from './stores/ui/desktop-workbench-layout-migration.js';
-
-type UnlistenFn = () => void;
-
-interface TauriEvent<T> {
-  payload: T;
-}
-
-interface TauriEventApi {
-  listen<T>(event: string, handler: (event: TauriEvent<T>) => void): Promise<UnlistenFn>;
-}
-
-const TAURI_EVENT_MODULE = ['@tauri-apps', 'api', 'event'].join('/');
-
-async function listenTauriEvent<T>(
-  event: string,
-  handler: (event: TauriEvent<T>) => void,
-): Promise<UnlistenFn> {
-  const api = (await import(/* @vite-ignore */ TAURI_EVENT_MODULE)) as TauriEventApi;
-  return api.listen(event, handler);
-}
+import { listenTauriEvent, type UnlistenFn } from './utils/tauri/tauri-events.js';
 
 type Theme = 'dark' | 'light';
 
@@ -444,6 +427,39 @@ export default function App() {
     };
   }, [desktopRuntime, navigate]);
 
+  // 监听托盘菜单「检查更新」（Rust 端 emit 'tray:check-updates'，payload = { autoStart }）。
+  //
+  // 桌面端历史上这个事件没有任何监听者，所以托盘点击是空操作。现在把它收敛到
+  // 「设置 → 关于」——那里是唯一跑通完整更新流程（检查 / 下载 / 安装 / 重启）的页面。
+  // autoStart 为真时带 check=1，AboutPage 进入后会自动发起一次桌面端检查。
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let unlistenFn: UnlistenFn | null = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fn = await listenTauriEvent<{ autoStart?: boolean }>(
+          'tray:check-updates',
+          (event) => {
+            const autoStart = event.payload?.autoStart !== false;
+            void navigate(autoStart ? '/settings/about?check=1' : '/settings/about');
+          },
+        );
+        if (cancelled) {
+          fn();
+        } else {
+          unlistenFn = fn;
+        }
+      } catch (_err) {
+        // listen 失败不致命，用户仍可手动进入「设置 → 关于」检查更新。
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlistenFn?.();
+    };
+  }, [desktopRuntime, navigate]);
+
   // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 2s/5s/10s
   // 退避调用 start_gateway 重启 3 次。3 次失败则保留 Failed 健康状态供托盘显示。
   // 用户可在「设置 → 连接与模型」手动触发或在「设置 → 桌面端」查看状态。
@@ -571,12 +587,21 @@ export default function App() {
 
   // 锁定时全屏遮罩，阻断主界面交互。解锁后 Rust 端会 emit
   // 'lock-state-changed'（locked=false），desktopLocked 随之变 false 自动隐藏 overlay。
+  // 关闭确认弹窗必须一起渲染：锁定状态下点 X 同样需要给出应用内确认。
   if (desktopLocked) {
-    return <UnlockOverlay onUnlocked={() => setDesktopLocked(false)} />;
+    return (
+      <>
+        <CloseConfirmDialog />
+        <AboutDialog />
+        <UnlockOverlay onUnlocked={() => setDesktopLocked(false)} />
+      </>
+    );
   }
 
   return (
     <>
+      <CloseConfirmDialog />
+      <AboutDialog />
       {showOnboarding && (
         <OnboardingModal
           onComplete={() => {

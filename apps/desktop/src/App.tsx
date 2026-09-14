@@ -17,6 +17,8 @@ import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
 import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
+import { CloseConfirmDialog } from '../../web/src/components/common/modal/CloseConfirmDialog.js';
+import { AboutDialog } from '../../web/src/components/common/modal/AboutDialog.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -377,6 +379,8 @@ export default function App() {
   if (!onboarded) {
     return (
       <>
+        <CloseConfirmDialog />
+        <AboutDialog />
         <Routes>
           <Route path="*" element={<OnboardingWizard onComplete={() => setOnboarded(true)} />} />
         </Routes>
@@ -387,6 +391,8 @@ export default function App() {
   if (!accessToken) {
     return (
       <>
+        <CloseConfirmDialog />
+        <AboutDialog />
         <DesktopBootstrapScreen
           error={bootstrapError}
           onRetry={() => setBootstrapRetry((value) => value + 1)}
@@ -412,6 +418,8 @@ export default function App() {
 
   return (
     <>
+      <CloseConfirmDialog />
+      <AboutDialog />
       <NotificationListener />
       <Layout>
         <Routes>

@@ -20,6 +20,7 @@
   "include": [
     "src",
     "../web/src/tauri-event.d.ts",
+    "../web/src/build-info.d.ts",
     "../../packages/shared/src/version.d.ts",
     "../../packages/shared/src/react-css-vars.d.ts",
     "../../packages/shared-ui/src/types/hls-js.d.ts"

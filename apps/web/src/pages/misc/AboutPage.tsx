@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { createSettingsClient } from '@openAwork/web-client';
 import { BrandLogo } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth/auth.js';
@@ -139,6 +140,11 @@ interface UpdateSectionProps {
   versionInfo: SettingsVersionInfo;
   onCheckVersion: () => void;
   isTauriEnv: boolean;
+  /**
+   * 由托盘菜单「检查更新」带着 `?check=1` 跳进来时为 true，
+   * 进入后自动发起一次桌面端检查，省掉用户再点一次按钮。
+   */
+  autoStartCheck?: boolean;
 }
 
 type DesktopUpdateState =
@@ -224,7 +230,12 @@ function InlineUpdateStat({
   );
 }
 
-function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectionProps) {
+function UpdateSection({
+  versionInfo,
+  onCheckVersion,
+  isTauriEnv,
+  autoStartCheck = false,
+}: UpdateSectionProps) {
   const [desktopState, setDesktopState] = useState<DesktopUpdateState>('idle');
   const [desktopProgress, setDesktopProgress] = useState(0);
   const [desktopDownloaded, setDesktopDownloaded] = useState(0);
@@ -266,6 +277,15 @@ function UpdateSection({ versionInfo, onCheckVersion, isTauriEnv }: UpdateSectio
       setDesktopState('idle');
     }
   }, [isTauriEnv]);
+
+  // 托盘「检查更新」跳进来时自动跑一次。用 ref 保证只触发一次：父组件消费掉
+  // ?check=1 后会把 autoStartCheck 置回 false，不能因此重复触发或打断进行中的检查。
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!isTauriEnv || !autoStartCheck || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    void runInlineDesktopCheck();
+  }, [autoStartCheck, isTauriEnv, runInlineDesktopCheck]);
 
   const handleDesktopDownload = useCallback(async () => {
     if (!desktopResult) return;
@@ -1080,7 +1100,6 @@ export default function AboutPage() {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const token = useAuthStore((s) => s.accessToken);
   const tauriEnv = isTauri;
-
   const version = __APP_VERSION__;
   const buildVersion = __APP_BUILD_VERSION__;
   const buildTime = __APP_BUILD_TIME__;
@@ -1131,6 +1150,19 @@ export default function AboutPage() {
       void checkVersionUpdate();
     }
   }, [checkVersionUpdate, token]);
+
+  /* ── 托盘「检查更新」入口：App.tsx 接事件后 navigate '/settings/about?check=1' ──
+     这里读出参数传给 UpdateSection 触发一次自动检查，随后清掉参数，
+     避免用户手动刷新 / 前进后退时重复触发。与 DesktopTabContent 处理
+     `?show=pairing` 的写法保持一致。 */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoCheckRequested = searchParams.get('check') === '1';
+  useEffect(() => {
+    if (!autoCheckRequested) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('check');
+    setSearchParams(next, { replace: true });
+  }, [autoCheckRequested, searchParams, setSearchParams]);
 
   /* ── 构建信息行 ── */
   const infoRows = useMemo<InfoRow[]>(() => {
@@ -1271,6 +1303,7 @@ export default function AboutPage() {
           versionInfo={versionInfo}
           onCheckVersion={checkVersionUpdate}
           isTauriEnv={tauriEnv}
+          autoStartCheck={autoCheckRequested}
         />
 
         {/* Info card */}

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authState = {
@@ -68,6 +69,16 @@ vi.mock('../../../../desktop/src/utils/tauri-gateway.js', () => ({
 
 import AboutPage from './AboutPage.js';
 
+/* AboutPage 现在用 useSearchParams 消费托盘入口带来的 ?check=1，
+   必须在 Router 上下文里渲染，否则 useLocation 直接抛 invariant。 */
+function renderAboutPage() {
+  return render(
+    <MemoryRouter>
+      <AboutPage />
+    </MemoryRouter>,
+  );
+}
+
 describe('AboutPage 桌面端更新入口', () => {
   beforeEach(() => {
     vi.stubGlobal('__APP_VERSION__', '0.8.6');
@@ -122,7 +133,7 @@ describe('AboutPage 桌面端更新入口', () => {
   });
 
   it('点击检查更新时在关于页内显示桌面更新详情并刷新版本状态', async () => {
-    render(<AboutPage />);
+    renderAboutPage();
 
     await waitFor(() => {
       expect(mocks.createSettingsClient).toHaveBeenCalledWith('https://gateway.test');
@@ -145,7 +156,7 @@ describe('AboutPage 桌面端更新入口', () => {
       message: 'desktop bridge failed',
     });
 
-    render(<AboutPage />);
+    renderAboutPage();
 
     await waitFor(() => {
       expect(mocks.getVersion).toHaveBeenCalledTimes(1);
@@ -169,7 +180,7 @@ describe('AboutPage 桌面端更新入口', () => {
         }),
     );
 
-    render(<AboutPage />);
+    renderAboutPage();
 
     await waitFor(() => {
       expect(mocks.getVersion).toHaveBeenCalledTimes(1);
