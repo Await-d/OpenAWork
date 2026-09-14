@@ -45,6 +45,7 @@ import {
 import { applyProviderMessageTransforms } from './message-transforms.js';
 import { sanitizeSurrogates } from './message-transforms.js';
 import { guardNativeToolContext } from './tool-context-guard.js';
+import { withOpencodeSessionHeader } from './session-affinity.js';
 import { resolveToolContextPolicy } from '../../compaction/tool-context-policy.js';
 
 export interface RunUpstreamGenerateInput {
@@ -305,7 +306,11 @@ export function runUpstreamGenerate(
     const timeoutMs = input.timeoutMs ?? resolveUpstreamGenerateTimeoutMs();
     const generation = buildGenerationOptions(input, omit);
     const body = input.requestOverrides?.body;
-    const headers = input.requestOverrides?.headers;
+    const headers = withOpencodeSessionHeader(input.requestOverrides?.headers, {
+      providerType: input.providerType,
+      baseUrl: input.baseURL,
+      sessionId: input.sessionId,
+    });
     const http =
       body === undefined && headers === undefined
         ? undefined

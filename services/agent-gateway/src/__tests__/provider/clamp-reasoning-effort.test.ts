@@ -19,6 +19,21 @@ import { describe, expect, it } from 'vitest';
 import { clampReasoningEffortForModel } from '../../v2-runtime/upstream/provider-options.js';
 
 describe('clampReasoningEffortForModel', () => {
+  describe('catalog-declared effort subsets', () => {
+    it('clamps opencode-go Kimi K3 to its max-only subset', () => {
+      expect(clampReasoningEffortForModel('kimi-k3', 'medium')).toBe('max');
+      expect(clampReasoningEffortForModel('kimi-k3', 'max')).toBe('max');
+    });
+
+    it('uses an explicit subset even when the upstream protocol changes provider type', () => {
+      expect(
+        clampReasoningEffortForModel('glm-5.2', 'low', [
+          { type: 'effort', values: ['high', 'max'] },
+        ]),
+      ).toBe('high');
+    });
+  });
+
   describe('non-GPT-5 models', () => {
     it('leaves Claude unchanged', () => {
       expect(clampReasoningEffortForModel('claude-sonnet-4-5', 'minimal')).toBe('minimal');

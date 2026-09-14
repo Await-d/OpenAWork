@@ -24,6 +24,7 @@ import {
   normalizeUpstreamStreamMaxRetries,
   withUpstreamStreamRetry,
 } from './stream-retry-policy.js';
+import { withOpencodeSessionHeader } from './session-affinity.js';
 
 type NativeToolSet = Record<string, ToolDefinition>;
 
@@ -47,6 +48,7 @@ export interface RunUpstreamStreamInput {
   readonly presencePenalty?: number;
   readonly requestOverrides?: RequestOverrides;
   readonly providerType?: string;
+  readonly baseURL?: string;
   readonly openaiFastMode?: boolean;
   readonly upstreamProtocol?: UpstreamProtocolKind;
   readonly thinking?: ThinkingConfig | ExtendedThinkingConfig;
@@ -620,7 +622,11 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
             : {}),
         };
         const body = input.requestOverrides?.body;
-        const headers = input.requestOverrides?.headers;
+        const headers = withOpencodeSessionHeader(input.requestOverrides?.headers, {
+          providerType: input.providerType,
+          baseUrl: input.baseURL,
+          sessionId: input.sessionId,
+        });
         const http =
           body === undefined && headers === undefined
             ? undefined

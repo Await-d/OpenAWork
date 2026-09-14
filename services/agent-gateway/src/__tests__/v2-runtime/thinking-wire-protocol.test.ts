@@ -122,6 +122,63 @@ describe('thinking wire protocol mapping', () => {
 
     expect(prepared.route).toBe('openai-responses');
     expect(prepared.body).toMatchObject({ reasoning: { effort: 'high' } });
+    expect(
+      buildProviderOptions({
+        thinking: {
+          config: { type: 'enabled', budgetTokens: 16_384 },
+          effort: 'high',
+          providerType: 'anthropic',
+          supportsThinking: true,
+        },
+        model: 'gpt-5.4',
+        upstreamProtocol: 'responses',
+      }),
+    ).toMatchObject({
+      openai: {
+        reasoningEffort: 'high',
+        reasoningSummary: 'auto',
+        include: ['reasoning.encrypted_content'],
+      },
+    });
+  });
+
+  it('uses adaptive thinking only for MiniMax M3 on Anthropic Messages', async () => {
+    const thinking = {
+      config: { type: 'adaptive' },
+      providerType: 'opencode-go',
+      supportsThinking: true,
+    } satisfies ExtendedThinkingConfig;
+    const model = buildNativeModel({
+      providerType: 'opencode-go',
+      upstreamProtocol: 'anthropic_messages',
+      model: 'minimax-m3',
+      apiKey: 'local-test-key',
+    });
+    const request = OpenCodeLLM.LLM.request({
+      model,
+      prompt: 'ping',
+      providerOptions: buildProviderOptions({
+        thinking,
+        model: 'minimax-m3',
+        upstreamProtocol: 'anthropic_messages',
+      }),
+    });
+
+    expect(request.providerOptions).toMatchObject({
+      anthropic: { thinking: { type: 'adaptive' } },
+    });
+  });
+
+  it('clamps opencode-go model effort through the real Responses request path', async () => {
+    const prepared = await prepareWithUiThinking({
+      providerType: 'opencode-go',
+      upstreamProtocol: 'responses',
+      model: 'kimi-k3',
+    });
+
+    expect(prepared.body).toMatchObject({
+      reasoning: { effort: 'max' },
+    });
   });
 
   it('forwards the OpenAI Fast mode setting to Chat Completions', async () => {

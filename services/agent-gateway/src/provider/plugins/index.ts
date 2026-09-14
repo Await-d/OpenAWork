@@ -10,4 +10,5 @@ import './deepseek.js';
 import './gemini.js';
 import './openrouter.js';
 import './nvidia.js';
+import './opencode-go.js';
 import './custom.js';

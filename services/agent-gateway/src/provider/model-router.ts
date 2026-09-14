@@ -67,11 +67,18 @@ const BUILTIN_MODEL_INDEX = new Map<
     model: AIModelConfig;
     provider: AIProvider;
   }
->(
-  BUILTIN_PRESETS.flatMap((provider) =>
-    provider.defaultModels.map((model) => [model.id, { model, provider }] as const),
-  ),
-);
+>();
+
+// 首个登记的优先(声明顺序 = catalog 顺序，而非"最后一条胜出")：跨平台存在同 id
+// 模型(中转平台如 opencode-go 会转售一手平台的 gpt-5.6-luna / mimo-v2.5)，裸
+// modelId 的回退解析必须稳定落在先声明的一手平台，避免被中转平台改写语义。
+for (const provider of Object.values(BUILTIN_PRESETS)) {
+  for (const model of provider.defaultModels) {
+    if (!BUILTIN_MODEL_INDEX.has(model.id)) {
+      BUILTIN_MODEL_INDEX.set(model.id, { model, provider });
+    }
+  }
+}
 
 const BUILTIN_PROVIDER_INDEX = new Map<AIProvider['type'], AIProvider>(
   BUILTIN_PRESETS.map((provider) => [provider.type, provider] as const),

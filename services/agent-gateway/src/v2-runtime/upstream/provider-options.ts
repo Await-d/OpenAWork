@@ -31,11 +31,21 @@
  */
 
 import type { ProviderOptions as NativeProviderOptions } from '@openAwork/opencode-llm';
-import { resolveThinkingStyle, catalogModelSupportsThinking } from '@openAwork/agent-core';
+import {
+  getAllBuiltinPresets,
+  PROVIDER_CATALOG,
+  resolveThinkingStyle,
+  catalogModelSupportsThinking,
+} from '@openAwork/agent-core';
 import type { UpstreamProtocolKind } from './native-model.js';
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ProviderReasoningEffort = ReasoningEffort;
+
+export interface ModelReasoningOption {
+  readonly type: string;
+  readonly values?: readonly string[];
+}
 
 /**
  * 思考等级配置 — 对齐参考实现（claude-code）的设计
@@ -322,10 +332,15 @@ function gpt5SupportedEfforts(apiId: string): readonly ReasoningEffort[] | undef
 export function clampReasoningEffortForModel(
   modelId: string,
   requested: ProviderReasoningEffort,
+  reasoningOptions?: readonly ModelReasoningOption[],
 ): ReasoningEffort {
   const id = modelId.toLowerCase();
   const normalized = normalizeProviderReasoningEffort(requested);
-  const supported = gpt5SupportedEfforts(id);
+  const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
+  const supported =
+    declaredEfforts?.filter(isReasoningEffort) ??
+    (reasoningOptions === undefined ? resolveCatalogReasoningEfforts(id) : undefined) ??
+    gpt5SupportedEfforts(id);
   if (!supported || supported.length === 0) return normalized;
   if (supported.includes(normalized)) return normalized;
   const targetRank = EFFORT_RANK[normalized];
@@ -335,6 +350,33 @@ export function clampReasoningEffortForModel(
   }
   // Requested is below every supported tier — return the smallest supported.
   return sortedDesc[sortedDesc.length - 1] as ReasoningEffort;
+}
+
+function isReasoningEffort(value: string): value is ReasoningEffort {
+  switch (value) {
+    case 'none':
+    case 'minimal':
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+    case 'max':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function resolveCatalogReasoningEfforts(modelId: string): ReasoningEffort[] | undefined {
+  for (const provider of Object.values(getAllBuiltinPresets())) {
+    const model = provider.defaultModels.find(
+      (candidate) => candidate.id.toLowerCase() === modelId,
+    );
+    const values = model?.reasoningOptions?.find((option) => option.type === 'effort')?.values;
+    const efforts = values?.filter(isReasoningEffort);
+    if (efforts && efforts.length > 0) return efforts;
+  }
+  return undefined;
 }
 
 // Anthropic opus/sonnet major >= 4 视为思考模型；3.7 是数值区间之外的显式例外。
@@ -550,6 +592,8 @@ export function providerOptions(
 export function modelSupportsAdaptiveThinking(modelId: string, providerType: string): boolean {
   const canonical = modelId.toLowerCase();
 
+  if (canonical.includes('minimax-m3')) return true;
+
   // Claude 4.6+ 系列
   if (canonical.includes('opus-4-6') || canonical.includes('sonnet-4-6')) {
     return true;
@@ -570,11 +614,26 @@ export function modelSupportsAdaptiveThinking(modelId: string, providerType: str
  * config + model. Returns `undefined` when no provider-specific tuning
  * is required (most callers will then omit the field entirely).
  */
+/**
+ * OpenCode Go 是否为该模型声明了 reasoning 控制面（官方 models.dev 的
+ * `reasoning_options`）。官方对没声明的模型（minimax-m2.7/m2.5、mimo-v2.5 等）
+ * 完全不发 reasoning 参数，而 /messages 与 anthropic 共用 providerType，
+ * 光靠 providerType 无法区分，故这里显式查 opencode-go 目录条目。
+ */
+function opencodeGoDeclaresReasoningOptions(modelId: string): boolean {
+  const entry = PROVIDER_CATALOG.find((catalogEntry) => catalogEntry.type === 'opencode-go');
+  const model = entry?.defaultModels.find(
+    (candidate) => candidate.id.toLowerCase() === modelId.toLowerCase(),
+  );
+  return (model?.reasoningOptions?.length ?? 0) > 0;
+}
+
 export function buildProviderOptions(input: {
   thinking?: ThinkingConfig | ExtendedThinkingConfig;
   model: string;
   providerType?: string;
   upstreamProtocol?: UpstreamProtocolKind;
+  reasoningOptions?: readonly ModelReasoningOption[];
 }): NativeProviderOptions | undefined {
   const { thinking } = input;
   if (!thinking) {
@@ -605,13 +664,25 @@ export function buildProviderOptions(input: {
   });
 
   // 对于新版 ThinkingConfig，通过 catalog 推断支持情况
-  const inferredStyle = resolveThinkingStyle(providerType, input.model);
-  const catalogSupports = catalogModelSupportsThinking(providerType, input.model);
+  const styleProviderType =
+    configuredProviderType === 'opencode-go' && input.upstreamProtocol === 'responses'
+      ? configuredProviderType
+      : providerType;
+  const inferredStyle = resolveThinkingStyle(styleProviderType, input.model);
+  const catalogSupports = catalogModelSupportsThinking(styleProviderType, input.model);
 
   const effectiveSupportsThinking =
     supportsThinking === true || (inferredStyle !== 'none' && catalogSupports);
 
   if (!effectiveSupportsThinking) {
+    return undefined;
+  }
+
+  if (
+    configuredProviderType === 'opencode-go' &&
+    input.upstreamProtocol === 'anthropic_messages' &&
+    !opencodeGoDeclaresReasoningOptions(input.model)
+  ) {
     return undefined;
   }
 
@@ -634,6 +705,12 @@ export function buildProviderOptions(input: {
         // legacy renderer's behaviour for Anthropic/Claude routes).
         sendReasoning: true,
       };
+
+      // 官方对 MiniMax M3 无条件下发 adaptive（不随 enabled / effort 变化）；
+      // 关闭思考时仍落到下面的 disabled 分支。
+      if (model.includes('minimax-m3') && thinkingConfig.type !== 'disabled') {
+        return providerOptions(modelInfo, { ...anthropic, thinking: { type: 'adaptive' } });
+      }
 
       // 处理三种思考模式
       if (thinkingConfig.type === 'adaptive') {
@@ -695,7 +772,11 @@ export function buildProviderOptions(input: {
       // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
       // GPT-5.5/5.6 use `none`/`max` as native effort values.
 
-      const clampedEffort = clampReasoningEffortForModel(input.model, effort);
+      const clampedEffort = clampReasoningEffortForModel(
+        input.model,
+        effort,
+        input.reasoningOptions,
+      );
 
       // Chat Completions API 和 Responses API 需要不同的参数传递方式：
       //
@@ -705,7 +786,11 @@ export function buildProviderOptions(input: {
       //
       // 2. Responses API uses the native OpenAI provider key.
       if (modelInfo.api.npm === 'openai') {
-        return providerOptions(modelInfo, { reasoningEffort: clampedEffort });
+        return providerOptions(modelInfo, {
+          reasoningEffort: clampedEffort,
+          reasoningSummary: 'auto',
+          include: ['reasoning.encrypted_content'],
+        });
       }
 
       // Chat Completions API: pass the native reasoning field directly.
@@ -731,7 +816,11 @@ export function buildProviderOptions(input: {
           : isExtendedConfig && thinking.effort
             ? thinking.effort
             : 'medium';
-      const openRouterEffort = clampReasoningEffortForModel(input.model, effort);
+      const openRouterEffort = clampReasoningEffortForModel(
+        input.model,
+        effort,
+        input.reasoningOptions,
+      );
       return providerOptions(modelInfo, {
         body: {
           reasoning: { effort: openRouterEffort },
