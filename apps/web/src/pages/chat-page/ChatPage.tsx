@@ -5758,6 +5758,8 @@ export default function ChatPage() {
                             gatewayUrl={gatewayUrl}
                             token={token}
                             sessionId={currentSessionId}
+                            syncing={sessionTerminals.syncing}
+                            lastSyncedAtMs={sessionTerminals.lastSyncedAtMs}
                           />
                         ) : null
                       }
@@ -6239,6 +6241,8 @@ export default function ChatPage() {
                               gatewayUrl={gatewayUrl}
                               token={token}
                               sessionId={currentSessionId}
+                              syncing={sessionTerminals.syncing}
+                              lastSyncedAtMs={sessionTerminals.lastSyncedAtMs}
                             />
                           ) : null
                         }

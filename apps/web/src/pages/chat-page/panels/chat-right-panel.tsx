@@ -31,6 +31,12 @@ import {
 import { SnapshotTimelinePanel } from '../../../components/chat/snapshot/SnapshotTimelinePanel.js';
 import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
 import { deleteSessionTerminal } from '../../../components/conversation-runtime/terminals/terminals-api.js';
+import {
+  TerminalListNoMatch,
+  TerminalListToolbar,
+  filterSessionTerminals,
+  useSessionTerminalFilter,
+} from '../../../components/chat/terminal/TerminalListToolbar.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { BookmarksPanel } from '../../../components/chat/misc/bookmarks-panel.js';
@@ -758,9 +764,40 @@ function RightPanelTerminalsContent({
   sessionId: string | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const filter = useSessionTerminalFilter();
   const active = terminals.filter((t) => ACTIVE_TERMINAL_STATUSES.has(t.status));
   const closed = terminals.filter((t) => !ACTIVE_TERMINAL_STATUSES.has(t.status));
-  const sorted = [...active, ...closed];
+  const visible = filterSessionTerminals([...active, ...closed], filter);
+  const visibleActive = visible.filter((t) => ACTIVE_TERMINAL_STATUSES.has(t.status));
+  const visibleClosed = visible.filter((t) => !ACTIVE_TERMINAL_STATUSES.has(t.status));
+
+  const handleKillAllActive = async (): Promise<void> => {
+    if (!onKill) return;
+    setBatchBusy(true);
+    try {
+      await Promise.all(visibleActive.map((t) => onKill(t.terminalId)));
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const handleDeleteAllClosed = async (): Promise<void> => {
+    if (!sessionId || !token) return;
+    setBatchBusy(true);
+    try {
+      await Promise.all(
+        visibleClosed.map((t) =>
+          deleteSessionTerminal({ gatewayUrl, sessionId, terminalId: t.terminalId, token }).catch(
+            () => undefined,
+          ),
+        ),
+      );
+    } finally {
+      setBatchBusy(false);
+      onReload?.();
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -788,15 +825,33 @@ function RightPanelTerminalsContent({
         )}
         {loading && <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>加载中…</span>}
       </div>
+      {terminals.length > 0 && (
+        <TerminalListToolbar
+          compact
+          totalCount={terminals.length}
+          activeCount={active.length}
+          closedCount={closed.length}
+          batchActiveCount={visibleActive.length}
+          batchCleanupCount={visibleClosed.length}
+          filter={filter}
+          busy={batchBusy}
+          onKillAllActive={onKill ? handleKillAllActive : undefined}
+          onCleanupAllClosed={handleDeleteAllClosed}
+        />
+      )}
       {error && (
         <div style={{ fontSize: 11, color: 'var(--danger)', padding: '4px 0' }}>{error}</div>
       )}
-      {sorted.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: '6px 2px' }}>
-          当前会话还没有跑过终端命令。
-        </div>
+      {visible.length === 0 ? (
+        terminals.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: '6px 2px' }}>
+            当前会话还没有跑过终端命令。
+          </div>
+        ) : (
+          <TerminalListNoMatch onReset={filter.reset} />
+        )
       ) : (
-        sorted.map((terminal) => {
+        visible.map((terminal) => {
           const isActive = ACTIVE_TERMINAL_STATUSES.has(terminal.status);
           const isExpanded = expandedId === terminal.terminalId;
           const isPendingKill = pendingKillIds.has(terminal.terminalId);
