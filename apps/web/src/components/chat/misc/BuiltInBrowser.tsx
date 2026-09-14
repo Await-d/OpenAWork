@@ -6,167 +6,52 @@ import React, {
   useState,
   type CSSProperties,
 } from 'react';
+import { BrowserReadinessBar } from './browser/BrowserReadinessBar.js';
+import { usePageReadiness } from './browser/use-page-readiness.js';
+import { BrowserConsolePanel } from './browser/BrowserConsolePanel.js';
+import { injectConsoleProxy } from './browser/console-proxy.js';
+import { insertTextIntoComposer } from './browser/browser-clipboard.js';
+import {
+  formatNetworkEntryMessage,
+  isPendingNetworkPayload,
+  mergeNetworkIntoEntry,
+  parseNetworkPayload,
+} from './browser/browser-console-format.js';
+import type {
+  ConsoleEntry,
+  NetworkExchange,
+  NetworkMessagePayload,
+} from './browser/browser-console-types.js';
+import {
+  DEFAULT_URL,
+  TAB_LIMIT,
+  deriveFaviconUrl,
+  deriveTabTitle,
+  isLocalhostUrl,
+  loadBookmarks,
+  loadPersistedState,
+  makeTabId,
+  persistState,
+  saveBookmarks,
+  type Bookmark,
+  type BrowserTab,
+} from './browser/browser-storage.js';
+import { BrowserBookmarksDropdown, BrowserTabBar, NavButton } from './browser/browser-chrome.js';
 
 const isTauriEnv = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-// 网关只提供 API，不承载根页面。以它作为浏览器首页会稳定产生 404；空白页
-// 既不依赖网络，也把开发服务器的 URL 留给实际的 previewUrl 注入。
-const DEFAULT_URL = 'about:blank';
-const LEGACY_DEFAULT_URL = 'http://localhost:3000';
-
-const STORAGE_KEY_PREFIX = 'openawork:builtin-browser:tabs:v1';
 const HISTORY_LIMIT = 50;
-const TAB_LIMIT = 12;
-
-function getStorageKey(workspacePath: string | null | undefined): string {
-  // 按 workspace 区分持久化的 tabs;无 workspace 时用 __default__,避免互相污染。
-  const key = workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
-  return `${STORAGE_KEY_PREFIX}:${key}`;
-}
-
-interface BrowserTab {
-  id: string;
-  url: string;
-  title?: string;
-  faviconUrl?: string;
-  history: string[]; // navigation stack, newest at end
-  historyIndex: number; // pointer into history (current entry)
-}
-
-interface PersistedState {
-  version: 1;
-  tabs: Array<Pick<BrowserTab, 'id' | 'url' | 'title' | 'faviconUrl' | 'history' | 'historyIndex'>>;
-  activeTabId: string;
-}
-
-interface Bookmark {
-  id: string;
-  url: string;
-  title: string;
-  faviconUrl?: string;
-  createdAt: number;
-}
-
-const BOOKMARKS_KEY = 'openawork:builtin-browser:bookmarks:v1';
 const OPEN_URL_EVENT = 'openawork:browser:open-url';
+/** 每个 tab 控制台保留的最大条目数，超出丢弃最旧的。 */
+const CONSOLE_ENTRY_LIMIT = 200;
 
-function isLocalhostUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.hostname === 'localhost' ||
-      parsed.hostname === '127.0.0.1' ||
-      parsed.hostname === '0.0.0.0' ||
-      parsed.hostname === '[::1]'
-    );
-  } catch {
-    return false;
-  }
-}
-
-function makeTabId(): string {
-  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function loadPersistedState(workspacePath: string | null | undefined): PersistedState | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(getStorageKey(workspacePath));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedState;
-    if (parsed.version !== 1 || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
-      return null;
-    }
-    // 迁移旧版本自动保存的网关根地址，避免升级后仍因历史 tab 重复请求一个
-    // 不存在的页面。用户后来手动输入的其他 localhost 地址不会受影响。
-    const tabs = parsed.tabs.map((tab) => {
-      if (tab.url !== LEGACY_DEFAULT_URL) return tab;
-      return {
-        ...tab,
-        url: DEFAULT_URL,
-        title: deriveTabTitle(DEFAULT_URL),
-        faviconUrl: undefined,
-        history: tab.history.map((entry) => (entry === LEGACY_DEFAULT_URL ? DEFAULT_URL : entry)),
-      };
-    });
-    return { ...parsed, tabs };
-  } catch {
-    return null;
-  }
-}
-
-function persistState(
-  workspacePath: string | null | undefined,
-  tabs: BrowserTab[],
-  activeTabId: string,
-): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const data: PersistedState = {
-      version: 1,
-      tabs: tabs.map((t) => ({
-        id: t.id,
-        url: t.url,
-        title: t.title,
-        history: t.history,
-        historyIndex: t.historyIndex,
-      })),
-      activeTabId,
-    };
-    window.localStorage.setItem(getStorageKey(workspacePath), JSON.stringify(data));
-  } catch {
-    // quota exceeded or sandboxed — silently ignore
-  }
-}
-
-function deriveTabTitle(url: string): string {
-  if (url === DEFAULT_URL) return '新标签页';
-  try {
-    const u = new URL(url);
-    if (isLocalhostUrl(url)) {
-      return u.port ? `localhost:${u.port}` : 'localhost';
-    }
-    return u.hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-function deriveFaviconUrl(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    if (isLocalhostUrl(url)) {
-      // 本地 dev server 直接拿 /favicon.ico,失败的话浏览器自然 fallback
-      return `${u.origin}/favicon.ico`;
-    }
-    // 远程站点用 Google s2 服务,跨域 OK 且无需鉴权
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(u.hostname)}&sz=32`;
-  } catch {
-    return undefined;
-  }
-}
-
-function loadBookmarks(): Bookmark[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(BOOKMARKS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Bookmark[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((b) => typeof b?.url === 'string');
-  } catch {
-    return [];
-  }
-}
-
-function saveBookmarks(bookmarks: Bookmark[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(bookmarks));
-  } catch {
-    /* noop */
-  }
-}
+/**
+ * 控制台待处理操作。网络请求分三段到达，需要 `upsertNetwork` 把后到的
+ * 响应/响应体并进同一行；普通日志与错误则是纯追加。
+ */
+type PendingConsoleOp =
+  | { kind: 'append'; tabId: string; entry: ConsoleEntry }
+  | { kind: 'upsertNetwork'; tabId: string; exchange: NetworkExchange };
 
 interface BuiltInBrowserProps {
   className?: string;
@@ -472,6 +357,12 @@ export function BuiltInBrowser({
   const [consoleLogsByTab, setConsoleLogsByTab] = useState<Record<string, ConsoleEntry[]>>({});
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /**
+   * 记录"iframe 已经成功加载过哪个 URL"。页面就绪探测成功后据此判断
+   * 是否需要重新加载：只有当当前 URL 从没加载成功过（典型的"服务还没
+   * 起来就先加载了"）才刷新，正常情况不会多打一次请求。
+   */
+  const iframeLoadedUrlRef = useRef<string | null>(null);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
   // 标记"上一次 url 更新来自 iframe 内部 navigate",webview lifecycle 据此跳过重建。
@@ -482,21 +373,45 @@ export function BuiltInBrowser({
   // 缓冲 + 节流:iframe 内的 console proxy 短时间内会发出大量 message 事件
   // (dev server 启动、SPA 路由切换、多次 fetch 等)。直接每条都 setState 会让
   // React 同步重渲染上百次,触发 "[Violation] 'message' handler took 157ms"。
-  // 这里用 ref 缓存待处理 entries,每 80ms flush 一次到 state。
-  const pendingLogEntriesRef = useRef<Array<{ tabId: string; entry: ConsoleEntry }>>([]);
+  // 这里用 ref 缓存待处理操作,每 80ms flush 一次到 state。
+  //
+  // 网络请求是**分三段**上报的（request → response → body），队列里除 append
+  // 外还有 upsert：按 networkId 把新字段并进已有那一行，而不是一个请求占三行。
+  const pendingConsoleOpsRef = useRef<PendingConsoleOp[]>([]);
   const pendingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleLogFlush = useCallback(() => {
     if (pendingFlushTimerRef.current !== null) return;
     pendingFlushTimerRef.current = setTimeout(() => {
       pendingFlushTimerRef.current = null;
-      const queued = pendingLogEntriesRef.current;
+      const queued = pendingConsoleOpsRef.current;
       if (queued.length === 0) return;
-      pendingLogEntriesRef.current = [];
+      pendingConsoleOpsRef.current = [];
       setConsoleLogsByTab((prev) => {
         const next: Record<string, ConsoleEntry[]> = { ...prev };
-        for (const { tabId, entry } of queued) {
-          const list = next[tabId] ?? [];
-          next[tabId] = [...list.slice(-200), entry];
+        for (const op of queued) {
+          const list = next[op.tabId] ?? [];
+          if (op.kind === 'append') {
+            next[op.tabId] = [...list.slice(-CONSOLE_ENTRY_LIMIT), op.entry];
+            continue;
+          }
+          const index = list.findIndex(
+            (entry) => entry.network?.networkId === op.exchange.networkId,
+          );
+          next[op.tabId] =
+            index >= 0
+              ? list.map((entry, i) =>
+                  i === index ? mergeNetworkIntoEntry(entry, op.exchange) : entry,
+                )
+              : [
+                  ...list.slice(-CONSOLE_ENTRY_LIMIT),
+                  {
+                    id: `net-${op.exchange.networkId}`,
+                    level: 'network',
+                    message: formatNetworkEntryMessage(op.exchange),
+                    timestamp: Date.now(),
+                    network: op.exchange,
+                  },
+                ];
         }
         return next;
       });
@@ -505,7 +420,24 @@ export function BuiltInBrowser({
 
   const appendLogToActiveTab = useCallback(
     (entry: ConsoleEntry) => {
-      pendingLogEntriesRef.current.push({ tabId: activeTabIdRef.current, entry });
+      pendingConsoleOpsRef.current.push({
+        kind: 'append',
+        tabId: activeTabIdRef.current,
+        entry,
+      });
+      scheduleLogFlush();
+    },
+    [scheduleLogFlush],
+  );
+
+  /** 归并一段网络上报：同一个 networkId 始终落在同一行。 */
+  const upsertNetworkExchange = useCallback(
+    (exchange: NetworkExchange) => {
+      pendingConsoleOpsRef.current.push({
+        kind: 'upsertNetwork',
+        tabId: activeTabIdRef.current,
+        exchange,
+      });
       scheduleLogFlush();
     },
     [scheduleLogFlush],
@@ -540,6 +472,17 @@ export function BuiltInBrowser({
           timestamp: Date.now(),
           source: event.data.filename,
         });
+      }
+      // 结构化网络上报：request / response / body 三段，按 networkId 归并。
+      if (event.data && event.data.type === 'oaw-network') {
+        const payload = event.data as NetworkMessagePayload;
+        const exchange = parseNetworkPayload(payload);
+        if (exchange) {
+          if (isPendingNetworkPayload(payload)) {
+            exchange.pending = true;
+          }
+          upsertNetworkExchange(exchange);
+        }
       }
       if (event.data && event.data.type === 'oaw-navigate') {
         const nextUrl = typeof event.data.url === 'string' ? event.data.url : '';
@@ -589,12 +532,13 @@ export function BuiltInBrowser({
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [appendLogToActiveTab]);
+  }, [appendLogToActiveTab, upsertNetworkExchange]);
 
   useEffect(() => {
-    if (consoleOpen && consoleEndRef.current) {
-      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!consoleOpen) return;
+    // scrollIntoView 并非所有环境都实现（部分内嵌 webview / 测试环境），
+    // 缺失时静默跳过即可，不该让自动滚动把控制台搞崩。
+    consoleEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
   }, [consoleLogs.length, consoleOpen]);
 
   // 关闭某个 tab 时,顺便清掉它的日志缓存(避免内存泄露)。
@@ -619,6 +563,25 @@ export function BuiltInBrowser({
   const [webviewError, setWebviewError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── 页面就绪探测 ────────────────────────────────────────────────────
+  // dev server 从启动到开始监听端口有几秒空窗，这段时间加载必然是错误页。
+  // 这里主动探活，就绪后如果当前 URL 还没加载成功过就自动重载一次，
+  // 用户不必再手动刷新；探测期间顶部状态条给出明确反馈。
+  // Tauri 原生 webview 由宿主管理加载，不参与探测。
+  const pageReadiness = usePageReadiness({
+    url: activeUrl,
+    enabled: !isTauri,
+    onReady: () => {
+      if (iframeLoadedUrlRef.current === activeUrl) return;
+      setRefreshKey((key) => key + 1);
+    },
+  });
+
+  // URL 变化时重置"已加载"标记，让新地址重新走一次就绪判断。
+  useEffect(() => {
+    iframeLoadedUrlRef.current = null;
+  }, [activeUrl]);
 
   const generationRef = useRef(0);
   const activeWebviewRef = useRef<any>(null);
@@ -667,12 +630,7 @@ export function BuiltInBrowser({
     if (!activeTab) return;
     const title = activeTab.title || deriveTabTitle(activeTab.url);
     // 用 markdown 链接格式塞进 composer,便于 LLM 直接读懂"参考此页"。
-    const snippet = `[${title}](${activeTab.url})`;
-    window.dispatchEvent(
-      new CustomEvent('openawork:composer:insert', {
-        detail: { text: snippet, mode: 'append' },
-      }),
-    );
+    insertTextIntoComposer(`[${title}](${activeTab.url})`);
   }, [activeTab]);
 
   // ── Tauri native webview lifecycle ──────────────────────────────────
@@ -1184,6 +1142,13 @@ export function BuiltInBrowser({
           </>
         ) : (
           <>
+            <BrowserReadinessBar
+              state={pageReadiness.state}
+              attempt={pageReadiness.attempt}
+              nextRetryInMs={pageReadiness.nextRetryInMs}
+              url={activeUrl}
+              onRetry={pageReadiness.retry}
+            />
             <iframe
               ref={iframeRef}
               key={`${activeTabId}-${refreshKey}`}
@@ -1201,6 +1166,7 @@ export function BuiltInBrowser({
                 display: hidden ? 'none' : undefined,
               }}
               onLoad={() => {
+                iframeLoadedUrlRef.current = activeUrl;
                 try {
                   const iframeWindow = iframeRef.current?.contentWindow;
                   if (iframeWindow) {
@@ -1261,912 +1227,4 @@ export function BuiltInBrowser({
       )}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Tab Bar
-// ---------------------------------------------------------------------------
-
-function BrowserTabBar(props: {
-  tabs: BrowserTab[];
-  activeTabId: string;
-  onSelectTab: (id: string) => void;
-  onCloseTab: (id: string) => void;
-  onAddTab: () => void;
-  canAddTab: boolean;
-}) {
-  const { tabs, activeTabId, onSelectTab, onCloseTab, onAddTab, canAddTab } = props;
-  return (
-    <div
-      data-testid="browser-tab-bar"
-      style={{
-        display: 'flex',
-        alignItems: 'stretch',
-        gap: 2,
-        padding: '4px 6px 0',
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'var(--bg-base)',
-        flexShrink: 0,
-        overflowX: 'auto',
-        scrollbarWidth: 'thin',
-      }}
-    >
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTabId;
-        return (
-          <div
-            key={tab.id}
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onSelectTab(tab.id)}
-            onAuxClick={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                onCloseTab(tab.id);
-              }
-            }}
-            title={tab.url}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              minWidth: 0,
-              maxWidth: 180,
-              padding: '0 4px 0 9px',
-              height: 24,
-              borderRadius: '6px 6px 0 0',
-              border: '1px solid var(--border-subtle)',
-              borderBottom: isActive ? 'none' : '1px solid var(--border-subtle)',
-              marginBottom: -1,
-              background: isActive ? 'var(--bg-overlay)' : 'transparent',
-              color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
-              fontSize: 10.5,
-              fontWeight: isActive ? 600 : 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              userSelect: 'none',
-              flexShrink: 0,
-            }}
-          >
-            {tab.faviconUrl ? (
-              <img
-                src={tab.faviconUrl}
-                alt=""
-                width={14}
-                height={14}
-                style={{
-                  flexShrink: 0,
-                  borderRadius: 2,
-                  objectFit: 'contain',
-                }}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            ) : null}
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-                maxWidth: 140,
-              }}
-            >
-              {tab.title || deriveTabTitle(tab.url)}
-            </span>
-            <button
-              type="button"
-              aria-label="关闭标签"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseTab(tab.id);
-              }}
-              className="ui-hover-icon-pop"
-              style={{
-                width: 16,
-                height: 16,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: 'none',
-                borderRadius: 4,
-                background: 'transparent',
-                color: 'var(--fg-muted)',
-                fontSize: 11,
-                lineHeight: 1,
-                cursor: 'pointer',
-                opacity: 0.7,
-                flexShrink: 0,
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        );
-      })}
-      <button
-        type="button"
-        onClick={onAddTab}
-        title={canAddTab ? '新建标签页' : `已达上限 (${TAB_LIMIT})`}
-        disabled={!canAddTab}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 4,
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--fg-muted)',
-          fontSize: 13,
-          lineHeight: 1,
-          cursor: canAddTab ? 'pointer' : 'not-allowed',
-          opacity: canAddTab ? 1 : 0.4,
-          marginBottom: -1,
-          flexShrink: 0,
-        }}
-      >
-        +
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 通用 nav 按钮
-// ---------------------------------------------------------------------------
-
-function NavButton(props: {
-  title: string;
-  onClick: () => void;
-  disabled?: boolean;
-  icon: React.ReactNode;
-}) {
-  const { title, onClick, disabled, icon } = props;
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        width: 26,
-        height: 26,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 6,
-        background: 'transparent',
-        color: disabled ? 'var(--text-4)' : 'var(--fg-default)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        flexShrink: 0,
-        fontSize: 0,
-      }}
-      className="ui-hover-icon-pop"
-    >
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {icon}
-      </svg>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Bookmarks Dropdown
-// ---------------------------------------------------------------------------
-
-function BrowserBookmarksDropdown(props: {
-  bookmarks: Bookmark[];
-  open: boolean;
-  onToggle: () => void;
-  onClose: () => void;
-  onSelect: (url: string) => void;
-  onRemove: (id: string) => void;
-}) {
-  const { bookmarks, open, onToggle, onClose, onSelect, onRemove } = props;
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (wrapRef.current && wrapRef.current.contains(target)) return;
-      onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('mousedown', onPointer, true);
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('mousedown', onPointer, true);
-      window.removeEventListener('keydown', onKey, true);
-    };
-  }, [open, onClose]);
-
-  return (
-    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        title="书签"
-        onClick={onToggle}
-        aria-expanded={open}
-        style={{
-          width: 26,
-          height: 26,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: open ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-          borderRadius: 6,
-          background: open ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
-          color: open ? 'var(--accent)' : 'var(--fg-default)',
-          cursor: 'pointer',
-          fontSize: 0,
-        }}
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="18" x2="14" y2="18" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            right: 0,
-            zIndex: 30,
-            minWidth: 280,
-            maxWidth: 360,
-            maxHeight: 320,
-            overflowY: 'auto',
-            padding: '4px 0',
-            border: '1px solid var(--border-default)',
-            borderRadius: 8,
-            background: 'var(--bg-overlay)',
-            boxShadow: 'var(--shadow-lg)',
-          }}
-        >
-          {bookmarks.length === 0 ? (
-            <div
-              style={{
-                padding: '14px 16px',
-                color: 'var(--fg-muted)',
-                fontSize: 11,
-                textAlign: 'center',
-              }}
-            >
-              暂无书签 · 点击地址栏星形图标收藏
-            </div>
-          ) : (
-            bookmarks
-              .slice()
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map((bm) => (
-                <div
-                  key={bm.id}
-                  role="menuitem"
-                  onClick={() => onSelect(bm.url)}
-                  className="ui-hover-icon-pop"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '6px 10px',
-                    cursor: 'pointer',
-                    minWidth: 0,
-                  }}
-                >
-                  {bm.faviconUrl ? (
-                    <img
-                      src={bm.faviconUrl}
-                      alt=""
-                      width={14}
-                      height={14}
-                      style={{ flexShrink: 0, borderRadius: 2 }}
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <span style={{ width: 14, flexShrink: 0 }} />
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: 'var(--fg-strong)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {bm.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 9.5,
-                        color: 'var(--fg-muted)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontFamily: 'var(--font-mono, monospace)',
-                      }}
-                    >
-                      {bm.url}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="删除书签"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(bm.id);
-                    }}
-                    style={{
-                      width: 18,
-                      height: 18,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      border: 'none',
-                      borderRadius: 4,
-                      background: 'transparent',
-                      color: 'var(--fg-muted)',
-                      fontSize: 11,
-                      lineHeight: 1,
-                      cursor: 'pointer',
-                      opacity: 0.7,
-                      flexShrink: 0,
-                    }}
-                    className="ui-hover-icon-pop"
-                    data-tone="danger"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Console Panel Types & Components
-// ---------------------------------------------------------------------------
-
-interface ConsoleEntry {
-  id: string;
-  level: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'network';
-  message: string;
-  timestamp: number;
-  source?: string;
-}
-
-const LEVEL_COLORS: Record<ConsoleEntry['level'], string> = {
-  log: 'var(--fg-default)',
-  info: 'var(--accent)',
-  warn: 'var(--warning)',
-  error: 'var(--danger)',
-  debug: 'var(--chart-5)',
-  network: 'var(--aux)',
-};
-
-const LEVEL_BG: Record<ConsoleEntry['level'], string> = {
-  log: 'transparent',
-  info: 'transparent',
-  warn: 'color-mix(in oklch, var(--warning) 6%, transparent)',
-  error: 'color-mix(in oklch, var(--danger) 6%, transparent)',
-  debug: 'transparent',
-  network: 'color-mix(in oklch, var(--aux) 4%, transparent)',
-};
-
-function BrowserConsolePanel({
-  logs,
-  endRef,
-  onClear,
-  onClose,
-  tauriMode,
-}: {
-  logs: ConsoleEntry[];
-  endRef: React.RefObject<HTMLDivElement | null>;
-  onClear: () => void;
-  onClose: () => void;
-  tauriMode?: boolean;
-}) {
-  const [filter, setFilter] = useState<ConsoleEntry['level'] | 'all'>('all');
-
-  const filteredLogs = filter === 'all' ? logs : logs.filter((l) => l.level === filter);
-  const errorCount = logs.filter((l) => l.level === 'error').length;
-  const warnCount = logs.filter((l) => l.level === 'warn').length;
-
-  return (
-    <div
-      data-testid="browser-console-panel"
-      style={{
-        flexShrink: 0,
-        height: 'clamp(120px, 28vh, 220px)',
-        display: 'flex',
-        flexDirection: 'column',
-        borderTop: '1px solid var(--border-default)',
-        background: 'var(--bg-base)',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: '4px 8px',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-default)', marginRight: 4 }}>
-          控制台
-        </span>
-
-        <FilterPill
-          label="全部"
-          count={logs.length}
-          active={filter === 'all'}
-          onClick={() => setFilter('all')}
-        />
-        <FilterPill
-          label="错误"
-          count={errorCount}
-          active={filter === 'error'}
-          onClick={() => setFilter('error')}
-          color="var(--danger)"
-        />
-        <FilterPill
-          label="警告"
-          count={warnCount}
-          active={filter === 'warn'}
-          onClick={() => setFilter('warn')}
-          color="var(--warning)"
-        />
-        <FilterPill
-          label="日志"
-          count={logs.filter((l) => l.level === 'log').length}
-          active={filter === 'log'}
-          onClick={() => setFilter('log')}
-        />
-        <FilterPill
-          label="网络"
-          count={logs.filter((l) => l.level === 'network').length}
-          active={filter === 'network'}
-          onClick={() => setFilter('network')}
-          color="var(--aux)"
-        />
-
-        <div style={{ flex: 1 }} />
-
-        <button
-          type="button"
-          onClick={onClear}
-          title="清空控制台"
-          style={{
-            height: 20,
-            padding: '0 6px',
-            borderRadius: 4,
-            border: '1px solid var(--border-subtle)',
-            background: 'transparent',
-            color: 'var(--fg-muted)',
-            fontSize: 9,
-            cursor: 'pointer',
-          }}
-        >
-          清空
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          title="关闭控制台"
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--fg-muted)',
-            fontSize: 11,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          ✕
-        </button>
-      </div>
-
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          padding: '2px 0',
-          fontFamily: 'var(--font-mono, monospace)',
-          fontSize: 11,
-          lineHeight: 1.5,
-        }}
-      >
-        {filteredLogs.length === 0 ? (
-          <div
-            style={{
-              padding: '16px',
-              textAlign: 'center',
-              color: 'var(--text-4)',
-              fontSize: 11,
-              lineHeight: 1.6,
-            }}
-          >
-            {tauriMode ? (
-              <>
-                Tauri 原生窗口模式下无法监听页面控制台与网络
-                <br />
-                <span style={{ opacity: 0.7 }}>
-                  建议在浏览器(Web)模式下使用控制台,或在 dev tools 中查看
-                </span>
-              </>
-            ) : logs.length === 0 ? (
-              '暂无控制台输出 · 跨域页面(非 localhost)无法注入,只能展示同源页面的日志'
-            ) : (
-              '当前过滤条件下无匹配'
-            )}
-          </div>
-        ) : (
-          filteredLogs.map((entry) => (
-            <div
-              key={entry.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 6,
-                padding: '2px 8px',
-                borderBottom:
-                  '1px solid color-mix(in oklch, var(--border-subtle) 50%, transparent)',
-                background: LEVEL_BG[entry.level],
-                minHeight: 20,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 600,
-                  color: LEVEL_COLORS[entry.level],
-                  textTransform: 'uppercase',
-                  width: 32,
-                  flexShrink: 0,
-                  paddingTop: 2,
-                }}
-              >
-                {entry.level === 'error'
-                  ? '❌'
-                  : entry.level === 'warn'
-                    ? '⚠️'
-                    : entry.level === 'info'
-                      ? 'ℹ️'
-                      : entry.level === 'network'
-                        ? '🌐'
-                        : '›'}
-              </span>
-              <span
-                style={{
-                  flex: 1,
-                  color: LEVEL_COLORS[entry.level],
-                  wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {entry.message}
-              </span>
-              <span
-                style={{
-                  fontSize: 9,
-                  color: 'var(--text-4)',
-                  flexShrink: 0,
-                  paddingTop: 2,
-                }}
-              >
-                {formatTime(entry.timestamp)}
-              </span>
-            </div>
-          ))
-        )}
-        <div ref={endRef} />
-      </div>
-    </div>
-  );
-}
-
-function FilterPill({
-  label,
-  count,
-  active,
-  onClick,
-  color,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-  color?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        height: 18,
-        padding: '0 5px',
-        borderRadius: 9,
-        border: active ? `1px solid ${color || 'var(--accent)'}` : '1px solid var(--border-subtle)',
-        background: active
-          ? `color-mix(in oklch, ${color || 'var(--accent)'} 12%, transparent)`
-          : 'transparent',
-        color: active ? color || 'var(--accent)' : 'var(--fg-muted)',
-        fontSize: 9,
-        fontWeight: 500,
-        cursor: 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 3,
-      }}
-    >
-      {label}
-      {count > 0 && <span style={{ fontWeight: 700 }}>{count}</span>}
-    </button>
-  );
-}
-
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-}
-
-/**
- * Inject a console proxy into the iframe window that forwards
- * console.log/warn/error/info to the parent via postMessage.
- */
-function injectConsoleProxy(iframeWindow: Window): void {
-  try {
-    const script = iframeWindow.document.createElement('script');
-    script.textContent = `
-      (function() {
-        // 防御策略:每段独立 try-catch,任何一段失败都不影响其他;
-        // 不覆盖 history.pushState/replaceState(很多 userscript 也猴补丁这俩,
-        // 重复 wrap 会破坏链式调用),改用 location 轮询。
-        var marker = '__OAW_PROXY_INSTALLED__';
-        if (window[marker]) return;
-        try { Object.defineProperty(window, marker, { value: true, configurable: false }); }
-        catch(e) { window[marker] = true; }
-
-        // ── console 代理 ────────────────────────────────────────────
-        try {
-          var origConsole = {
-            log: console.log,
-            info: console.info,
-            warn: console.warn,
-            error: console.error,
-            debug: console.debug
-          };
-          function stringify(args) {
-            return Array.from(args).map(function(a) {
-              if (a === null) return 'null';
-              if (a === undefined) return 'undefined';
-              if (typeof a === 'object') {
-                try { return JSON.stringify(a, null, 2); } catch(e) { return String(a); }
-              }
-              return String(a);
-            }).join(' ');
-          }
-          ['log','info','warn','error','debug'].forEach(function(level) {
-            var orig = origConsole[level];
-            console[level] = function() {
-              try { orig.apply(console, arguments); } catch(e) {}
-              try {
-                parent.postMessage({ type: 'oaw-console', level: level, message: stringify(arguments) }, '*');
-              } catch(e) {}
-            };
-          });
-        } catch(e) {}
-
-        // ── 错误捕获(addEventListener 而非 onerror,避免覆盖现有 handler)──
-        try {
-          window.addEventListener('error', function(e) {
-            try {
-              parent.postMessage({
-                type: 'oaw-error',
-                message: String(e && e.message || 'Error'),
-                filename: (e && e.filename) || '',
-                lineno: (e && e.lineno) || 0
-              }, '*');
-            } catch(_) {}
-          });
-          window.addEventListener('unhandledrejection', function(e) {
-            try {
-              parent.postMessage({
-                type: 'oaw-error',
-                message: 'Unhandled Promise Rejection: ' + (e && e.reason ? String(e.reason.message || e.reason) : 'unknown'),
-                filename: '',
-                lineno: 0
-              }, '*');
-            } catch(_) {}
-          });
-        } catch(e) {}
-
-        // ── 导航监听(轮询 location,避免动 history.pushState 的猴补丁)──
-        try {
-          var lastHref = location.href;
-          var lastTitle = document.title;
-          function notify(reason) {
-            try {
-              parent.postMessage({
-                type: 'oaw-navigate',
-                url: location.href,
-                title: document.title || '',
-                reason: reason || 'change'
-              }, '*');
-            } catch(e) {}
-          }
-          setInterval(function() {
-            if (location.href !== lastHref) {
-              lastHref = location.href;
-              lastTitle = document.title;
-              notify('poll');
-            } else if (document.title !== lastTitle) {
-              lastTitle = document.title;
-              notify('title');
-            }
-          }, 500);
-          window.addEventListener('popstate', function() {
-            if (location.href !== lastHref) {
-              lastHref = location.href;
-              notify('popstate');
-            }
-          });
-          window.addEventListener('hashchange', function() {
-            if (location.href !== lastHref) {
-              lastHref = location.href;
-              notify('hashchange');
-            }
-          });
-          // 初次:发送一次让 parent 知道真正的 location
-          setTimeout(function() {
-            try {
-              parent.postMessage({
-                type: 'oaw-navigate',
-                url: location.href,
-                title: document.title || '',
-                reason: 'load'
-              }, '*');
-              lastHref = location.href;
-              lastTitle = document.title;
-            } catch(e) {}
-          }, 0);
-        } catch(e) {}
-
-        // ── fetch 钩子(检测是否已被其他扩展 wrap) ──────────────────
-        try {
-          var origFetch = window.fetch;
-          if (typeof origFetch === 'function' && !origFetch.__oawWrapped) {
-            var newFetch = function() {
-              var args = Array.prototype.slice.call(arguments);
-              var input = args[0];
-              var init = args[1] || {};
-              var method = (init.method || (input && input.method) || 'GET').toUpperCase();
-              var url = typeof input === 'string' ? input : (input && input.url) || String(input);
-              var startedAt = Date.now();
-              var pre = method + ' ' + url;
-              try {
-                parent.postMessage({ type: 'oaw-console', level: 'network', message: '⟶ ' + pre }, '*');
-              } catch(e) {}
-              return origFetch.apply(this, args).then(function(res) {
-                var dt = Date.now() - startedAt;
-                try {
-                  parent.postMessage({
-                    type: 'oaw-console',
-                    level: 'network',
-                    message: '⟵ ' + res.status + ' ' + pre + ' · ' + dt + 'ms'
-                  }, '*');
-                } catch(e) {}
-                return res;
-              }, function(err) {
-                var dt = Date.now() - startedAt;
-                try {
-                  parent.postMessage({
-                    type: 'oaw-console',
-                    level: 'network',
-                    message: '✗ ' + pre + ' · ' + dt + 'ms · ' + (err && err.message || err)
-                  }, '*');
-                } catch(e) {}
-                throw err;
-              });
-            };
-            try { newFetch.__oawWrapped = true; } catch(e) {}
-            window.fetch = newFetch;
-          }
-        } catch(e) {}
-
-        // ── XHR 钩子 ────────────────────────────────────────────────
-        try {
-          if (typeof window.XMLHttpRequest === 'function') {
-            var OrigXHR = window.XMLHttpRequest;
-            var origOpen = OrigXHR.prototype.open;
-            var origSend = OrigXHR.prototype.send;
-            if (typeof origOpen === 'function' && !origOpen.__oawWrapped) {
-              var newOpen = function(method, url) {
-                this.__oawMethod = method;
-                this.__oawUrl = url;
-                return origOpen.apply(this, arguments);
-              };
-              try { newOpen.__oawWrapped = true; } catch(e) {}
-              OrigXHR.prototype.open = newOpen;
-            }
-            if (typeof origSend === 'function' && !origSend.__oawWrapped) {
-              var newSend = function() {
-                var self = this;
-                var startedAt = Date.now();
-                var pre = (self.__oawMethod || 'GET') + ' ' + (self.__oawUrl || '');
-                try {
-                  parent.postMessage({ type: 'oaw-console', level: 'network', message: '⟶ ' + pre + ' (XHR)' }, '*');
-                } catch(e) {}
-                try {
-                  self.addEventListener('loadend', function() {
-                    var dt = Date.now() - startedAt;
-                    try {
-                      parent.postMessage({
-                        type: 'oaw-console',
-                        level: 'network',
-                        message: '⟵ ' + (self.status || 0) + ' ' + pre + ' · ' + dt + 'ms (XHR)'
-                      }, '*');
-                    } catch(e) {}
-                  });
-                } catch(e) {}
-                return origSend.apply(this, arguments);
-              };
-              try { newSend.__oawWrapped = true; } catch(e) {}
-              OrigXHR.prototype.send = newSend;
-            }
-          }
-        } catch(e) {}
-      })();
-    `;
-    iframeWindow.document.head.appendChild(script);
-  } catch {
-    // Cross-origin — can't inject
-  }
 }
