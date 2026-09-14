@@ -12,10 +12,7 @@ describe('normalizeRecommendedOptions', () => {
   });
 
   it('已有唯一推荐项时保持不变', () => {
-    const options: ClarificationNodeOption[] = [
-      { label: 'a' },
-      { label: 'b', recommended: true },
-    ];
+    const options: ClarificationNodeOption[] = [{ label: 'a' }, { label: 'b', recommended: true }];
     expect(normalizeRecommendedOptions(options).map((o) => o.recommended)).toEqual([
       undefined,
       true,
@@ -50,10 +47,7 @@ describe('normalizeRecommendedOptions', () => {
 
 describe('findRecommendedOption', () => {
   it('返回推荐项', () => {
-    const options: ClarificationNodeOption[] = [
-      { label: 'a' },
-      { label: 'b', recommended: true },
-    ];
+    const options: ClarificationNodeOption[] = [{ label: 'a' }, { label: 'b', recommended: true }];
     expect(findRecommendedOption(options)?.label).toBe('b');
   });
 

@@ -84,7 +84,9 @@ describe('routing.evaluate — reason 说明串', () => {
   });
 
   it('架构级 reason 含 architectural scope', () => {
-    expect(evaluate(R3_ARCH_INPUT, createSessionContext('s')).reason).toContain('architectural scope');
+    expect(evaluate(R3_ARCH_INPUT, createSessionContext('s')).reason).toContain(
+      'architectural scope',
+    );
   });
 
   it('高风险 reason 含 high-risk operation detected', () => {

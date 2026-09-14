@@ -19,11 +19,7 @@ import {
 import type { ClarificationQuestion } from './routing.js';
 import { buildClarificationQuestions } from './routing.js';
 
-function node(
-  id: string,
-  dependsOn: readonly string[] = [],
-  answer?: string,
-): ClarificationNode {
+function node(id: string, dependsOn: readonly string[] = [], answer?: string): ClarificationNode {
   return {
     id,
     dimension: 'goal',
@@ -123,8 +119,7 @@ describe('applyAnswer', () => {
 });
 
 describe('needsConfirmation / confirmGrill', () => {
-  const withConfirm = () =>
-    createGrillState([node('a'), buildConfirmNode(['a'])]);
+  const withConfirm = () => createGrillState([node('a'), buildConfirmNode(['a'])]);
 
   it('frontier 仍含常规问题时为 false', () => {
     expect(needsConfirmation(withConfirm())).toBe(false);
@@ -275,9 +270,7 @@ describe('serializeGrillState / parseGrillState', () => {
 
   it('结构不符（缺 nodes / round 类型错）返回 null', () => {
     expect(parseGrillState(JSON.stringify({ round: 0, history: [] }))).toBeNull();
-    expect(
-      parseGrillState(JSON.stringify({ nodes: [], round: 'zero', history: [] })),
-    ).toBeNull();
+    expect(parseGrillState(JSON.stringify({ nodes: [], round: 'zero', history: [] }))).toBeNull();
     expect(
       parseGrillState(JSON.stringify({ nodes: [{ id: 1 }], round: 0, history: [] })),
     ).toBeNull();

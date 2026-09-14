@@ -489,9 +489,7 @@ export function getSupportedReasoningEffortsForModel(
 
   const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
   if (declaredEfforts && declaredEfforts.length > 0) {
-    const supported = declaredEfforts.filter(
-      isSupportedReasoningEffort,
-    );
+    const supported = declaredEfforts.filter(isSupportedReasoningEffort);
     if (supported.length > 0) return supported;
   }
 

@@ -11,7 +11,10 @@ const preferTypeScriptSource = {
   enforce: 'pre' as const,
   resolveId(source: string, importer: string | undefined) {
     if (importer === undefined || !source.startsWith('.') || !source.endsWith('.js')) return null;
-    const target = resolve(dirname(importer.split('?')[0] ?? importer), `${source.slice(0, -3)}.ts`);
+    const target = resolve(
+      dirname(importer.split('?')[0] ?? importer),
+      `${source.slice(0, -3)}.ts`,
+    );
     return existsSync(target) ? target : null;
   },
 };
