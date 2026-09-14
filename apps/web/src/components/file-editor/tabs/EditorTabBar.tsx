@@ -1,5 +1,6 @@
 import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenFile } from '../../../hooks/editor/useFileEditor.js';
+import { isContextMenuKey } from '../../common/display/context-menu-keyboard.js';
 import { FileIcon } from '../preview/FileIcon.js';
 
 export function EditorTabBar({
@@ -202,6 +203,15 @@ export function EditorTabBar({
               if (!onContextMenu) return;
               e.preventDefault();
               onContextMenu(file.path, e.clientX, e.clientY);
+            }}
+            // 键盘等价路径（菜单键 / Shift+F10）：焦点在标签内时按这两个键应当
+            // 弹出同一份菜单，而不是浏览器原生菜单。锚在标签行的左下角。
+            onKeyDownCapture={(e) => {
+              if (!onContextMenu || !isContextMenuKey(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              onContextMenu(file.path, rect.left, rect.top + rect.height);
             }}
             style={{
               position: 'relative',

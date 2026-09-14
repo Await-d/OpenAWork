@@ -360,6 +360,7 @@ export function EditorBrowserWorkspace({
             onReorder={fileEditor.reorderFiles}
             revealTarget={fileEditor.revealTarget ?? null}
             onRevealConsumed={fileEditor.clearRevealTarget}
+            workspacePath={workspacePath ?? null}
           />
         </div>
       </div>

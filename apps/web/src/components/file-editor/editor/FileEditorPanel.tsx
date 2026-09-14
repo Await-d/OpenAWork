@@ -1,12 +1,24 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import type { OpenFile, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
-import {
-  getFilePreviewKind,
-  isBinaryPreviewKind,
-  isNonTextPreviewKind,
-} from '../../../utils/file/file-preview.js';
+import { getFilePreviewKind, isNonTextPreviewKind } from '../../../utils/file/file-preview.js';
 import { ContextMenu, type ContextMenuItem } from '../../common/display/ContextMenu.js';
+import {
+  ContentContextMenuHost,
+  type ContentContextMenuTrigger,
+} from '../../common/display/ContentContextMenuHost.js';
+import {
+  buildContentContextMenuItems,
+  type ContentClipboardAction,
+  type ContentContextMenuActions,
+} from '../../common/display/content-context-menu-items.js';
+import {
+  contextMenuAnchorFromRect,
+  isContextMenuKey,
+} from '../../common/display/context-menu-keyboard.js';
+import { toast } from '../../common/feedback/ToastNotification.js';
+import { dispatchComposerReference } from '../../../utils/chat/composer-reference-events.js';
+import { canOpenPathInSystem, openPathInSystem } from '../../../utils/tauri/open-in-system.js';
 import { EditorTabBar } from '../tabs/EditorTabBar.js';
 import { FileBreadcrumb } from '../tabs/FileBreadcrumb.js';
 import { FilePreviewPane } from '../preview/FilePreviewPane.js';
@@ -22,6 +34,73 @@ const PANEL_MODE_STORAGE_KEY = 'openAwork:fileEditor:panelMode';
 const PANEL_MODE_STORAGE_LIMIT = 200;
 
 type PanelMode = 'code' | 'preview';
+
+/** Monaco 内置剪贴板 / 选区动作的命令 id。 */
+const MONACO_CLIPBOARD_ACTION_IDS: Record<ContentClipboardAction, string> = {
+  cut: 'editor.action.clipboardCutAction',
+  copy: 'editor.action.clipboardCopyAction',
+  paste: 'editor.action.clipboardPasteAction',
+  selectAll: 'editor.action.selectAll',
+};
+
+/** 读取 Monaco 当前选区文本；无选区或模型缺失时返回空串。 */
+function readEditorSelection(editor: MonacoEditorNs.IStandaloneCodeEditor): string {
+  const selection = editor.getSelection();
+  const model = editor.getModel();
+  if (!selection || !model || selection.isEmpty()) {
+    return '';
+  }
+  return model.getValueInRange(selection).trim();
+}
+
+/**
+ * 键盘呼出菜单时的锚点：当前光标（或选区末尾）在**视口**坐标系中的位置。
+ *
+ * Monaco 的 `getScrolledVisiblePosition` 给的是相对编辑器内容区左上角的偏移，
+ * 补上编辑器容器的 `getBoundingClientRect()` 即得视口坐标 —— 与鼠标右键的
+ * `clientX/clientY` 同一参照系（`ContextMenu` 用 `position: fixed`）。
+ *
+ * 光标滚出可视区时该 API 返回 null，这种情况下退回编辑器容器矩形，
+ * 至少保证菜单出现在正确的位置附近。
+ */
+function readEditorMenuAnchor(
+  editor: MonacoEditorNs.IStandaloneCodeEditor,
+): { x: number; y: number } | null {
+  const domNode = editor.getDomNode();
+  if (!domNode) {
+    return null;
+  }
+  const domRect = domNode.getBoundingClientRect();
+  const cursor = editor.getSelection()?.getEndPosition() ?? editor.getPosition();
+  const visible = cursor ? editor.getScrolledVisiblePosition(cursor) : null;
+  if (!visible) {
+    return contextMenuAnchorFromRect(domRect);
+  }
+  return { x: domRect.left + visible.left, y: domRect.top + visible.top + visible.height };
+}
+
+/**
+ * 右键是否落在需要**浏览器原生菜单**的输入类控件上。
+ *
+ * Monaco 有意为 overlay 控件保留原生菜单（见 monaco 的
+ * `contrib/contextmenu/browser/contextmenu.js`：
+ * "allow native menu on widgets to support right click on input field for example in find"）。
+ * 它自己关掉右键菜单后仍走那条分支，所以这层豁免必须由我们补上——否则用户
+ * 在「查找」输入框里右键点「粘贴」，会粘到编辑器正文而不是输入框。
+ *
+ * Monaco 的隐藏 `textarea.inputarea` 铺满编辑器、承载全部编辑交互，必须排除，
+ * 否则整个编辑器都会退回原生菜单。
+ */
+function prefersNativeContextMenu(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+    return false;
+  }
+  return !target.classList.contains('inputarea');
+}
 
 function readPanelModeMap(): Record<string, PanelMode> {
   if (typeof window === 'undefined') return {};
@@ -77,6 +156,7 @@ export function FileEditorPanel({
   onReorder,
   revealTarget,
   onRevealConsumed,
+  workspacePath = null,
 }: {
   files: OpenFile[];
   activeFile: OpenFile | null;
@@ -99,6 +179,12 @@ export function FileEditorPanel({
   revealTarget?: RevealTarget | null;
   /** Called after a `revealTarget` has been applied so it can be cleared. */
   onRevealConsumed?: () => void;
+  /**
+   * Workspace root the editor is bound to. Used to derive a relative path for
+   * 「引用到对话」/「复制相对路径」; when omitted (or the file sits outside the
+   * root) those actions fall back to the absolute path.
+   */
+  workspacePath?: string | null;
 }) {
   const [panelMode, setPanelMode] = useState<'code' | 'preview'>('code');
 
@@ -274,9 +360,19 @@ export function FileEditorPanel({
   // <ContextMenu> mount point.
   type MenuState =
     | { kind: 'tab'; targetPath: string; x: number; y: number }
-    | { kind: 'preview'; targetPath: string; x: number; y: number }
+    | {
+        kind: 'code' | 'preview';
+        targetPath: string;
+        x: number;
+        y: number;
+        /** Text selected at right-click time ('' = no selection). */
+        selection: string;
+      }
     | null;
   const [contextMenu, setContextMenu] = useState<MenuState>(null);
+
+  // Probed once: desktop capability doesn't change for the lifetime of the page.
+  const [canOpenInSystem] = useState(canOpenPathInSystem);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -284,13 +380,93 @@ export function FileEditorPanel({
     setContextMenu({ kind: 'tab', targetPath: path, x, y });
   }, []);
 
+  // 预览视图：右键与键盘两种触发由 ContentContextMenuHost 归一成一个回调，
+  // 这里只负责把它落到菜单状态上。
   const handlePreviewContextMenu = useCallback(
-    (x: number, y: number) => {
+    (trigger: ContentContextMenuTrigger) => {
       if (!activeFile) return;
-      setContextMenu({ kind: 'preview', targetPath: activeFile.path, x, y });
+      setContextMenu({
+        kind: 'preview',
+        targetPath: activeFile.path,
+        x: trigger.x,
+        y: trigger.y,
+        selection: trigger.selection,
+      });
     },
     [activeFile],
   );
+
+  /**
+   * Monaco's built-in context menu is disabled (`contextmenu: false`) so the
+   * editor shows ours instead; the clipboard actions it used to contribute are
+   * rebuilt into the menu itself (see `buildContentContextMenuItems`).
+   *
+   * While the lazy-loaded Monaco chunk is still resolving there is no editor
+   * instance yet — bail out without preventDefault so the browser's native menu
+   * covers that brief window instead of right-click doing nothing at all.
+   */
+  const handleCodeContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const editor = editorRef.current;
+      if (!activeFile || !editor) return;
+      // Overlay 控件的输入框（查找 / 重命名…）保留浏览器原生菜单，
+      // 这样右键粘贴才落回输入框本身。详见 prefersNativeContextMenu。
+      if (prefersNativeContextMenu(event.target)) return;
+      event.preventDefault();
+      setContextMenu({
+        kind: 'code',
+        targetPath: activeFile.path,
+        x: event.clientX,
+        y: event.clientY,
+        selection: readEditorSelection(editor),
+      });
+    },
+    [activeFile],
+  );
+
+  /**
+   * 代码视图的**键盘**呼出（Windows 菜单键 / Shift+F10）。
+   *
+   * 必须走捕获阶段：Monaco 把 Shift+F10 绑到了 `editor.action.showContextMenu`，
+   * 它的 keydown 监听挂在编辑器容器 DOM 上（冒泡阶段）。React 的捕获监听在根容器，
+   * 在这里 `stopPropagation()` 就能让事件永远到不了 Monaco —— 否则按键会被它吃掉，
+   * 而那条命令在我们关掉自带菜单（`contextmenu: false`）后只会直接 return，
+   * 结果就是「按 Shift+F10 什么都没发生」。
+   */
+  const handleCodeMenuKey = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!activeFile || !isContextMenuKey(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const editor = editorRef.current;
+      const anchor =
+        (editor ? readEditorMenuAnchor(editor) : null) ??
+        contextMenuAnchorFromRect(event.currentTarget.getBoundingClientRect());
+      setContextMenu({
+        kind: 'code',
+        targetPath: activeFile.path,
+        x: anchor.x,
+        y: anchor.y,
+        selection: editor ? readEditorSelection(editor) : '',
+      });
+    },
+    [activeFile],
+  );
+
+  const runEditorAction = useCallback((action: ContentClipboardAction) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Re-focus first: clicking the menu button moved focus out of the editor,
+    // and cut/copy/paste act on whatever holds focus.
+    editor.focus();
+    editor.trigger('openAwork-context-menu', MONACO_CLIPBOARD_ACTION_IDS[action], null);
+  }, []);
+
+  const handleOpenInSystem = useCallback((path: string) => {
+    void openPathInSystem(path).catch((error: unknown) => {
+      toast(error instanceof Error ? error.message : '用系统默认程序打开失败', 'error');
+    });
+  }, []);
 
   const copyToClipboard = useCallback(async (text: string) => {
     try {
@@ -415,50 +591,59 @@ export function FileEditorPanel({
       return items;
     }
 
-    // Preview body context menu.
-    const items: ContextMenuItem[] = [
-      {
-        id: 'switch-code',
-        label: '切换到代码视图',
-        disabled: isBinary,
-        onSelect: () => setPanelMode('code'),
+    // Code / preview body context menu. The item list lives in a pure builder
+    // so its branching (has selection / binary file / derivable relative path /
+    // view switchability) stays unit-testable without mounting this component.
+    //
+    // 能力用「传不传回调」表达：构建器只渲染有对应 handler 的项，这里按当前视图
+    // 逐个装配，而不是先渲染再置灰。
+    const actions: ContentContextMenuActions = {
+      copyText: (text) => void copyToClipboard(text),
+      referenceToChat: dispatchComposerReference,
+      close: () => onClose(targetPath),
+    };
+    if (contextMenu.kind === 'code') {
+      actions.runEditorAction = runEditorAction;
+      // 文件本身不支持预览（binary / 未识别）时没有可切换的目标。
+      if (!isPreviewOnly && activePreviewKind !== null) {
+        actions.switchToPreview = () => setPanelMode('preview');
+      }
+    } else {
+      // 「在编辑器中打开」由构建器按 isBinary 置灰（二进制进去只会看到乱码）。
+      actions.switchToCode = () => setPanelMode('code');
+    }
+    if (canOpenInSystem) {
+      actions.openInSystem = () => handleOpenInSystem(targetPath);
+    }
+
+    return buildContentContextMenuItems({
+      variant: contextMenu.kind,
+      target: {
+        path: targetPath,
+        content: target.content,
+        selection: contextMenu.selection,
+        isActive,
+        isBinary,
       },
-      { id: 'sep-1', type: 'separator' },
-      {
-        id: 'copy-content',
-        label: '复制全部内容',
-        disabled: isBinary,
-        onSelect: () => void copyToClipboard(target.content),
-      },
-      {
-        id: 'copy-path',
-        label: '复制完整路径',
-        onSelect: () => void copyToClipboard(targetPath),
-      },
-      {
-        id: 'copy-name',
-        label: '复制文件名',
-        onSelect: () => void copyToClipboard(fileName),
-      },
-      { id: 'sep-2', type: 'separator' },
-      {
-        id: 'close',
-        label: '关闭',
-        shortcut: isActive ? '⌘W' : undefined,
-        onSelect: () => onClose(targetPath),
-      },
-    ];
-    return items;
+      workspacePath,
+      actions,
+    });
   }, [
     contextMenu,
     files,
     activeFilePath,
+    isPreviewOnly,
+    activePreviewKind,
     closeAll,
     closeOthers,
     closeRight,
     copyToClipboard,
     onActivate,
     onClose,
+    workspacePath,
+    canOpenInSystem,
+    handleOpenInSystem,
+    runEditorAction,
   ]);
 
   return (
@@ -588,57 +773,75 @@ export function FileEditorPanel({
           </div>
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {effectivePanelMode === 'preview' && activePreviewKind ? (
-              <FilePreviewPane
-                path={activeFile.path}
-                content={activeFile.content}
-                onContextMenu={handlePreviewContextMenu}
-              />
+              <ContentContextMenuHost
+                testId="file-editor-preview-host"
+                onOpen={handlePreviewContextMenu}
+              >
+                <FilePreviewPane path={activeFile.path} content={activeFile.content} />
+              </ContentContextMenuHost>
             ) : (
-              <MonacoErrorBoundary>
-                {(mountKey) => (
-                  <Suspense
-                    fallback={
-                      <div style={{ padding: 24, fontSize: 12, color: 'var(--fg-muted)' }}>
-                        加载编辑器…
-                      </div>
-                    }
-                  >
-                    <MonacoEditor
-                      key={`${activeFile.path}::${mountKey}`}
-                      height="100%"
-                      language={activeFile.language}
-                      value={activeFile.content}
-                      theme={theme === 'light' ? 'vs' : 'vs-dark'}
-                      onMount={(editor) => {
-                        editorRef.current = editor;
-                        // If a reveal was queued before the editor mounted
-                        // (the common case for a fresh open), apply it now
-                        // that the instance exists.
-                        if (revealTarget && revealTarget.path === activeFile.path) {
-                          requestAnimationFrame(() => {
-                            if (applyReveal(revealTarget)) onRevealConsumed?.();
-                          });
-                        }
-                      }}
-                      onChange={(val) => {
-                        if (val !== undefined) onChange(activeFile.path, val);
-                      }}
-                      options={{
-                        fontSize: 12,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'on',
-                        tabSize: 2,
-                        renderWhitespace: 'none',
-                        lineNumbers: 'on',
-                        folding: true,
-                        automaticLayout: true,
-                        fixedOverflowWidgets: true,
-                      }}
-                    />
-                  </Suspense>
-                )}
-              </MonacoErrorBoundary>
+              <div
+                onContextMenu={handleCodeContextMenu}
+                // 捕获阶段接键盘菜单键 —— 详见 handleCodeMenuKey。
+                onKeyDownCapture={handleCodeMenuKey}
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <MonacoErrorBoundary>
+                  {(mountKey) => (
+                    <Suspense
+                      fallback={
+                        <div style={{ padding: 24, fontSize: 12, color: 'var(--fg-muted)' }}>
+                          加载编辑器…
+                        </div>
+                      }
+                    >
+                      <MonacoEditor
+                        key={`${activeFile.path}::${mountKey}`}
+                        height="100%"
+                        language={activeFile.language}
+                        value={activeFile.content}
+                        theme={theme === 'light' ? 'vs' : 'vs-dark'}
+                        onMount={(editor) => {
+                          editorRef.current = editor;
+                          // If a reveal was queued before the editor mounted
+                          // (the common case for a fresh open), apply it now
+                          // that the instance exists.
+                          if (revealTarget && revealTarget.path === activeFile.path) {
+                            requestAnimationFrame(() => {
+                              if (applyReveal(revealTarget)) onRevealConsumed?.();
+                            });
+                          }
+                        }}
+                        onChange={(val) => {
+                          if (val !== undefined) onChange(activeFile.path, val);
+                        }}
+                        options={{
+                          fontSize: 12,
+                          minimap: { enabled: false },
+                          scrollBeyondLastLine: false,
+                          wordWrap: 'on',
+                          tabSize: 2,
+                          renderWhitespace: 'none',
+                          lineNumbers: 'on',
+                          folding: true,
+                          automaticLayout: true,
+                          fixedOverflowWidgets: true,
+                          // Hand right-click over to our own menu (rendered by
+                          // this component). Monaco's built-in menu is replaced,
+                          // not supplemented — its clipboard actions are rebuilt
+                          // into ours via `runEditorAction`.
+                          contextmenu: false,
+                        }}
+                      />
+                    </Suspense>
+                  )}
+                </MonacoErrorBoundary>
+              </div>
             )}
           </div>
         </>

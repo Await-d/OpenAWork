@@ -1,4 +1,4 @@
-import { lazy, type MouseEvent, Suspense, useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import {
   buildPreviewDocument,
   getFilePreviewKind,
@@ -11,32 +11,20 @@ import {
 import { OfficePreview } from '../../office-preview/OfficePreview.js';
 import '../../office-preview/office-preview.css';
 
-export function FilePreviewPane({
-  content,
-  path,
-  onContextMenu,
-}: {
-  content: string;
-  path: string;
-  onContextMenu?: (x: number, y: number) => void;
-}) {
+/**
+ * 文件内容预览：按类型分发到具体渲染器（Markdown / SVG / 图片 / JSON /
+ * Office / 二进制提示 / iframe 沙箱）。
+ *
+ * 这里**不**处理右键菜单 —— 调用方用 `ContentContextMenuHost` 包住本组件，
+ * 即可同时获得右键与键盘（菜单键 / Shift+F10）呼出的菜单，菜单项与锚点计算
+ * 都收敛在那个宿主里，避免每个预览面各写一份。
+ */
+export function FilePreviewPane({ content, path }: { content: string; path: string }) {
   const previewKind = getFilePreviewKind(path);
-
-  const handleContextMenu = onContextMenu
-    ? (e: MouseEvent<HTMLDivElement>) => {
-        // Don't intercept right-click on the iframe / image / svg areas
-        // where the browser's native context menu is more useful (image
-        // save, link open, etc). We only attach the custom menu via the
-        // outer wrapper so iframe content keeps its own.
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }
-    : undefined;
 
   if (!previewKind) {
     return (
       <div
-        onContextMenu={handleContextMenu}
         style={{
           flex: 1,
           display: 'flex',
@@ -58,20 +46,14 @@ export function FilePreviewPane({
   // renderers (mammoth / SheetJS); archives keep the friendly notice.
   if (previewKind === 'binary-office' || previewKind === 'binary-pdf') {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <OfficePreview path={path} />
       </div>
     );
   }
   if (isBinaryPreviewKind(previewKind)) {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <BinaryFileNotice path={path} kind={previewKind} />
       </div>
     );
@@ -80,10 +62,7 @@ export function FilePreviewPane({
   // Markdown preview
   if (previewKind === 'markdown') {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <MarkdownPreview content={content} />
       </div>
     );
@@ -92,10 +71,7 @@ export function FilePreviewPane({
   // SVG preview
   if (previewKind === 'svg') {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <SvgPreview content={content} />
       </div>
     );
@@ -104,10 +80,7 @@ export function FilePreviewPane({
   // Image preview (content is base64 or path-based — for file editor it's raw content)
   if (previewKind === 'image') {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ImagePreviewPane path={path} content={content} />
       </div>
     );
@@ -116,10 +89,7 @@ export function FilePreviewPane({
   // JSON preview
   if (previewKind === 'json') {
     return (
-      <div
-        onContextMenu={handleContextMenu}
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <JsonPreview content={content} />
       </div>
     );
@@ -128,7 +98,6 @@ export function FilePreviewPane({
   // HTML / CSS / JS — iframe-based preview
   return (
     <div
-      onContextMenu={handleContextMenu}
       style={{
         flex: 1,
         minHeight: 0,
