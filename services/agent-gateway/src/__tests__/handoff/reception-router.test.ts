@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   routeByRules,
   routeByLlm,
+  shouldGrillIntent,
   type RouteLlmContext,
 } from '../../handoff/runner/reception-router.js';
 
@@ -391,5 +392,41 @@ describe('reception-router', () => {
         reason: '新需求与上次任务无关',
       });
     });
+  });
+});
+
+describe('reception-router — grill（高影响意图先拷问）', () => {
+  it('shouldGrillIntent 对架构级/高风险意图为 true', () => {
+    expect(shouldGrillIntent('refactor the entire system architecture')).toBe(true);
+    expect(shouldGrillIntent('delete the production database')).toBe(true);
+  });
+
+  it('shouldGrillIntent 对常规或过短输入为 false', () => {
+    expect(shouldGrillIntent('update the parser')).toBe(false);
+    expect(shouldGrillIntent('what does the parser do')).toBe(false);
+    expect(shouldGrillIntent('你好')).toBe(false);
+  });
+
+  it('shouldGrillIntent 对中文高影响意图为 true', () => {
+    expect(shouldGrillIntent('重构整个架构')).toBe(true);
+    expect(shouldGrillIntent('把数据迁移到 Postgres')).toBe(true);
+    expect(shouldGrillIntent('删除生产环境的所有数据')).toBe(true);
+  });
+
+  it('shouldGrillIntent 对中文只读提问为 false（不误伤 light 路径）', () => {
+    expect(shouldGrillIntent('了解一下这个模块的架构')).toBe(false);
+    expect(shouldGrillIntent('解释一下这个函数')).toBe(false);
+  });
+
+  it('routeByRules 对高影响意图返回 grill 决策（规则来源）', () => {
+    expect(routeByRules('refactor the entire system architecture')).toMatchObject({
+      decision: 'grill',
+      decisionSource: 'rule',
+    });
+  });
+
+  it('grill 判定先于显式 orchestrate 模式', () => {
+    const result = routeByRules('implement and refactor the entire system architecture');
+    expect(result?.decision).toBe('grill');
   });
 });

@@ -6,6 +6,7 @@ const questionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().min(1),
   preview: z.string().min(1).optional(),
+  recommended: z.boolean().optional(),
 });
 
 const questionItemSchema = z.object({
@@ -13,6 +14,8 @@ const questionItemSchema = z.object({
   header: z.string().min(1),
   multiSelect: z.boolean().optional(),
   options: z.array(questionOptionSchema).min(1),
+  nodeId: z.string().min(1).optional(),
+  round: z.number().int().nonnegative().optional(),
 });
 
 const questionToolInputSchema = z.object({
@@ -29,7 +32,7 @@ export const questionToolDefinition: ToolDefinition<
 > = {
   name: 'question',
   description:
-    '向用户提出一个或多个结构化问题，等待回答后再继续。**仅当**缺失的选择真的阻塞推进时使用。',
+    '向用户提出一个或多个结构化问题，等待回答后再继续。选项可用 recommended:true 标记推荐答案，题目可用 nodeId/round 关联澄清轮次；提问密度与是否成组提问由当前对话模式决定。',
   inputSchema: questionToolInputSchema,
   outputSchema: questionToolOutputSchema,
   timeout: 30000,

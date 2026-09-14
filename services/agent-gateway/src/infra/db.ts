@@ -695,6 +695,7 @@ export async function migrate(): Promise<void> {
     )
   `);
   ensureColumn('question_requests', 'expires_at', 'INTEGER');
+  ensureColumn('question_requests', 'round_number', 'INTEGER');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_parent_auto_resume_contexts (

@@ -21,7 +21,9 @@
  *   - decision_source: 'rule' | 'llm'
  */
 
-export type RouteDecision = 'direct' | 'light' | 'orchestrate' | 'clarify' | 'resume';
+import { createSessionContext, evaluate } from '@openAwork/agent-core';
+
+export type RouteDecision = 'direct' | 'light' | 'orchestrate' | 'clarify' | 'resume' | 'grill';
 
 export interface RouteResult {
   decision: RouteDecision;
@@ -113,6 +115,19 @@ const MIN_ORCHESTRATE_LENGTH = 8;
  */
 const MIN_LLM_FALLBACK_LENGTH = 2;
 
+const GRILL_PROBE_SESSION_ID = 'reception-router:grill-probe';
+
+const GRILL_HIGH_IMPACT_PATTERN =
+  /(重构|重写|架构级|跨系统|整体改造|全量迁移|迁移到|数据迁移|删库|清空数据|删除生产|删除线上|不可逆|破坏性|生产环境|线上环境)/;
+
+export function shouldGrillIntent(userIntent: string): boolean {
+  const trimmed = userIntent.trim();
+  if (trimmed.length === 0) return false;
+  if (GRILL_HIGH_IMPACT_PATTERN.test(trimmed)) return true;
+  if (trimmed.length < MIN_ORCHESTRATE_LENGTH) return false;
+  return evaluate(trimmed, createSessionContext(GRILL_PROBE_SESSION_ID)).level === 'R3';
+}
+
 /**
  * 规则引擎路由判断（快速预筛）。
  * 返回 null 表示规则无法确定，需要 LLM 做上下文感知判断。
@@ -159,6 +174,15 @@ export function routeByRules(userIntent: string): RouteResult | null {
     // 2~7 字符且不匹配直答模式 → 返回 null 交给 LLM 兜底判断
     // 短输入可能承载延续/确认/指代等隐含意图，LLM 结合上下文能做更准确判断
     return null;
+  }
+
+  if (shouldGrillIntent(trimmed)) {
+    return {
+      decision: 'grill',
+      decisionSource: 'rule',
+      reason: '架构级/跨系统/高风险意图，需先澄清拷问',
+      clarifyKind: 'ambiguous',
+    };
   }
 
   const explicit = matchRoutePattern(EXPLICIT_ORCHESTRATE_PATTERNS, trimmed, 'orchestrate');

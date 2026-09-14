@@ -25,6 +25,7 @@ export const SUBSTATES_C = {
   DRAFTING_SPEC: 'drafting_spec',
   SPEC_READY: 'spec_ready',
   CLARIFYING: 'clarifying',
+  AWAITING_CONFIRMATION: 'awaiting_confirmation',
   DRAFTING_PLAN: 'drafting_plan',
   PLAN_READY: 'plan_ready',
   DRAFTING_TASKS: 'drafting_tasks',
@@ -53,6 +54,8 @@ export const SUBSTATES_RECEPTION = {
   ROUTING: 'routing',
   DISPATCHING: 'dispatching',
   AWAITING_DOWNSTREAM: 'awaiting_downstream',
+  GRILLING: 'grilling',
+  AWAITING_CONFIRMATION: 'awaiting_confirmation',
 } as const;
 
 export type SubstateValue = string;

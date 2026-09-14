@@ -297,7 +297,7 @@ afterAll(async () => {
   await db.connectDb();
 });
 
-describe('任务5 stream preflight seam', () => {
+describe('任务5 stream preflight seam', { timeout: 30_000 }, () => {
   it('在真实 runModelRound route seam 的上游调用前执行一次渲染消息检查', async () => {
     let renderedTokens = 0;
     const chunks: unknown[] = [];

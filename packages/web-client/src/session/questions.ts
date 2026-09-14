@@ -10,6 +10,7 @@ export interface PendingQuestionOption {
   label: string;
   description: string;
   preview?: string;
+  recommended?: boolean;
 }
 
 export interface PendingQuestionItem {
@@ -17,6 +18,8 @@ export interface PendingQuestionItem {
   multiple?: boolean;
   options: PendingQuestionOption[];
   question: string;
+  nodeId?: string;
+  round?: number;
 }
 
 export interface PendingQuestionRequest {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseGrillState } from '@openAwork/agent-core';
 import { TEAM_RUNTIME_LAYER_ORDER, DEFAULT_FIXED_TEAM_MEMBER_SLOTS } from '@openAwork/shared';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { upstreamRetryMaxRetriesSchema } from '../provider/upstream-retry-policy.js';
@@ -131,6 +132,13 @@ const teamRoleInstanceSchema = z.object({
 const sessionMetadataPatchSchema = z
   .object({
     agentId: z.string().min(1).max(120).optional(),
+    clarificationState: z
+      .string()
+      .max(200000)
+      .refine((value) => parseGrillState(value) !== null, {
+        message: 'clarificationState 必须是合法的 GrillState 序列化 JSON',
+      })
+      .optional(),
     dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
     editSourceMessageId: z.string().min(1).max(200).optional(),
     imageWorkbench: z.boolean().optional(),

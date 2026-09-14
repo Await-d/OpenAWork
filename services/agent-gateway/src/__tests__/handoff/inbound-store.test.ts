@@ -418,3 +418,78 @@ describe('resolveClarificationEscalationRequest', () => {
     expect(row?.state).toBe('consumed');
   });
 });
+
+describe('parseGrillClarificationAnswerPayload', () => {
+  it('解析含 roundNumber 的合法载荷', () => {
+    expect(
+      store.parseGrillClarificationAnswerPayload({
+        questionId: 'goal',
+        answer: '改单文件',
+        roundNumber: 0,
+      }),
+    ).toEqual({ questionId: 'goal', answer: '改单文件', roundNumber: 0 });
+  });
+
+  it('roundNumber 可选：缺失时仍解析成功', () => {
+    expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: 'ok' })).toEqual({
+      questionId: 'goal',
+      answer: 'ok',
+    });
+  });
+
+  it('确认门控载荷（保留节点 id）可解析', () => {
+    expect(
+      store.parseGrillClarificationAnswerPayload({
+        questionId: '__grill_confirm__',
+        answer: 'confirmed',
+        roundNumber: 3,
+      }),
+    ).toEqual({ questionId: '__grill_confirm__', answer: 'confirmed', roundNumber: 3 });
+  });
+
+  it('忽略额外字段', () => {
+    expect(
+      store.parseGrillClarificationAnswerPayload({
+        questionId: 'goal',
+        answer: 'ok',
+        extra: 'ignored',
+      }),
+    ).toEqual({ questionId: 'goal', answer: 'ok' });
+  });
+
+  it('非对象 / 数组 / null 返回 null', () => {
+    expect(store.parseGrillClarificationAnswerPayload(null)).toBeNull();
+    expect(store.parseGrillClarificationAnswerPayload('text')).toBeNull();
+    expect(store.parseGrillClarificationAnswerPayload([])).toBeNull();
+  });
+
+  it('questionId 缺失或为空字符串返回 null', () => {
+    expect(store.parseGrillClarificationAnswerPayload({ answer: 'ok' })).toBeNull();
+    expect(store.parseGrillClarificationAnswerPayload({ questionId: '', answer: 'ok' })).toBeNull();
+  });
+
+  it('answer 缺失或为空字符串返回 null', () => {
+    expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal' })).toBeNull();
+    expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: '' })).toBeNull();
+  });
+
+  it('roundNumber 非法（负数 / 非整数 / 非数字）返回 null', () => {
+    expect(
+      store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: 'ok', roundNumber: -1 }),
+    ).toBeNull();
+    expect(
+      store.parseGrillClarificationAnswerPayload({
+        questionId: 'goal',
+        answer: 'ok',
+        roundNumber: 1.5,
+      }),
+    ).toBeNull();
+    expect(
+      store.parseGrillClarificationAnswerPayload({
+        questionId: 'goal',
+        answer: 'ok',
+        roundNumber: '0',
+      }),
+    ).toBeNull();
+  });
+});

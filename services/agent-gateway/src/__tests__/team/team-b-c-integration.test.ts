@@ -213,6 +213,30 @@ describe('b 层（reception）', () => {
   });
 });
 
+const PLANNING_REPLY_BY_STAGE = [
+  {
+    marker: '功能规格文档',
+    content:
+      '# 规格\n\n### 用户故事 1 — OAuth 登录\n\n作为用户我想登录\n\n**验收场景**：给定登录页，当输入有效凭据，则完成登录\n\n### 边界情况\n\n- 网络异常时显示错误\n\n## 验收场景覆盖矩阵\n\n| 用户故事 | 场景编号 | 场景摘要 | 对应需求 | 预期验证方式 | 预期证据 |\n|---|---|---|---|---|---|\n| US1 | AC-1 | 登录 | FR-001 | API 测试 | 响应 |\n\n## 需求\n\n- **FR-001**: 系统必须支持 OAuth\n\n## 成功标准\n\n- **SC-001**: 登录成功率达标',
+  },
+  {
+    marker: '实施计划',
+    content:
+      '# 实施计划\n\n## 技术上下文\n\nTypeScript + React\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | 所有 catch 有日志 |\n\n## 项目结构\n\n```text\nsrc/index.ts\n```\n\n## 复杂度评估\n\n| 维度 | 评估 |\n|---|---|\n| 影响文件数 | 1 |\n\n## 风险与缓解\n\n| 风险 | 缓解措施 |\n|---|---|\n| 网络失败 | 重试 |\n\n## 验收场景实施映射\n\n| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |\n|---|---|---|---|---|\n| AC-1 | src/index.ts | API | 测试 | 响应 |\n\n## 架构守卫\n\n- 保持分层',
+  },
+  {
+    marker: '任务清单',
+    content:
+      '# 任务清单\n\n## Phase 1\n\n- [ ] T001 [KIND:feat] [SURFACE:gateway] [src/index.ts] 实现 OAuth 回调 - 登录成功\n\n**文件**：\n- Modify: `src/index.ts`\n\n**检查点**：\n- [ ] 测试通过',
+  },
+];
+
+function planningReply(system: string): string {
+  return (
+    PLANNING_REPLY_BY_STAGE.find((stage) => system.includes(stage.marker))?.content ?? '# 默认输出'
+  );
+}
+
 describe('c 层（pm1 / artifact-chain）', () => {
   it('handoff(reception→pm1) 被 watcher 正确 claim', async () => {
     const handoff = handoffStore.createHandoff({
@@ -260,19 +284,7 @@ describe('c 层（pm1 / artifact-chain）', () => {
       payload: {},
     });
 
-    // Mock LLM：按 system prompt 内容区分阶段
-    const mockLlm = async (system: string, _user: string): Promise<string> => {
-      if (system.includes('功能规格文档') || system.includes('规格')) {
-        return '# 规格\n\n### 用户故事 1 — OAuth 登录\n\n作为用户我想登录\n\n**验收场景**：给定登录页，当输入有效凭据，则完成登录\n\n### 边界情况\n\n- 网络异常时显示错误\n\n## 验收场景覆盖矩阵\n\n| 用户故事 | 场景编号 | 场景摘要 | 对应需求 | 预期验证方式 | 预期证据 |\n|---|---|---|---|---|---|\n| US1 | AC-1 | 登录 | FR-001 | API 测试 | 响应 |\n\n## 需求\n\n- **FR-001**: 系统必须支持 OAuth\n\n## 成功标准\n\n- **SC-001**: 登录成功率达标';
-      }
-      if (system.includes('实施计划')) {
-        return '# 实施计划\n\n## 技术上下文\n\nTypeScript + React\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | 所有 catch 有日志 |\n\n## 项目结构\n\n```text\nsrc/index.ts\n```\n\n## 复杂度评估\n\n| 维度 | 评估 |\n|---|---|\n| 影响文件数 | 1 |\n\n## 风险与缓解\n\n| 风险 | 缓解措施 |\n|---|---|\n| 网络失败 | 重试 |\n\n## 验收场景实施映射\n\n| 场景编号 | 实现模块/文件 | 分层路径 | 验证方式 | 交付证据 |\n|---|---|---|---|---|\n| AC-1 | src/index.ts | API | 测试 | 响应 |\n\n## 架构守卫\n\n- 保持分层';
-      }
-      if (system.includes('任务清单')) {
-        return '# 任务清单\n\n## Phase 1\n\n- [ ] T001 [KIND:feat] [SURFACE:gateway] [src/index.ts] 实现 OAuth 回调 - 登录成功\n\n**文件**：\n- Modify: `src/index.ts`\n\n**检查点**：\n- [ ] 测试通过';
-      }
-      return '# 默认输出';
-    };
+    const mockLlm = async (system: string, _user: string): Promise<string> => planningReply(system);
 
     // 创建一个 session 作为 c 层 session
     db.sqliteRun(
@@ -333,13 +345,7 @@ describe('c 层（pm1 / artifact-chain）', () => {
       [USER_ID],
     );
 
-    const mockLlm = async (system: string): Promise<string> => {
-      if (system.includes('功能规格文档'))
-        return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
-      if (system.includes('实施计划'))
-        return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
-      return '# 任务\n\n## Phase 1\n- [ ] T001 [US1] 做事';
-    };
+    const mockLlm = async (system: string): Promise<string> => planningReply(system);
 
     await runArtifactChain({
       userId: USER_ID,
@@ -389,13 +395,7 @@ describe('c 层（pm1 / artifact-chain）', () => {
       return originalSetSubstate(input);
     });
 
-    const mockLlm = async (system: string): Promise<string> => {
-      if (system.includes('功能规格文档'))
-        return '# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: x';
-      if (system.includes('实施计划'))
-        return '# 计划\n\n## 技术上下文\n\nTS\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| x | ✅ | ok |';
-      return '# 任务\n\n## Phase 1\n- [ ] T001 [US1] 做事';
-    };
+    const mockLlm = async (system: string): Promise<string> => planningReply(system);
 
     await runArtifactChain({
       userId: USER_ID,

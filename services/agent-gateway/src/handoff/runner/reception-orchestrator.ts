@@ -33,6 +33,14 @@ import {
   type RouteLlmContext,
 } from './reception-router.js';
 import {
+  advanceReceptionGrill,
+  clearReceptionGrill,
+  formatFrontierPrompt,
+  persistReceptionGrill,
+  readReceptionGrill,
+  startReceptionGrill,
+} from './reception-grill-runner.js';
+import {
   buildTeamResumeContext,
   resolveTeamRootSessionId,
   type TeamResumeContext,
@@ -143,6 +151,11 @@ export interface OrchestrateReceptionInput {
    * 路径（真任务）生效；direct / clarify（闲聊问候）不触发，避免无谓等待。
    */
   autoRunInit?: boolean;
+  /**
+   * 内部使用：grill 确认后按已锁定意图重新进入编排时置 true，跳过 grill 预检与 grill 决策，
+   * 避免对同一高影响意图再次进入拷问（否则会无限循环）。外部调用方不应设置。
+   */
+  __skipGrill?: boolean;
 }
 
 export interface OrchestrateReceptionResult {
@@ -272,6 +285,41 @@ async function runReceptionOrchestrationBody(
   persistAck: boolean,
   streamClientRequestId: string,
 ): Promise<OrchestrateReceptionResult> {
+  const activeGrill = input.__skipGrill ? null : readReceptionGrill(input.receptionSessionId);
+  if (
+    activeGrill &&
+    activeGrill.intent.length > 0 &&
+    activeGrill.state.confirmedAt === undefined &&
+    input.userIntent.trim().length > 0
+  ) {
+    setSubstate({
+      sessionId: input.receptionSessionId,
+      substate: SUBSTATES_RECEPTION.GRILLING,
+      userId: input.userId,
+      roleLayer: 'reception',
+    });
+    const advanced = advanceReceptionGrill({ state: activeGrill.state, reply: input.userIntent });
+
+    if (advanced.kind === 'confirmed') {
+      const confirmedIntent = activeGrill.intent || input.userIntent;
+      clearReceptionGrill(input.receptionSessionId);
+      if (persistAck) {
+        writeAck(input.userId, input.receptionSessionId, '共识已确认，开始按此派发任务。');
+      }
+      return await runReceptionOrchestrationBody(
+        { ...input, userIntent: confirmedIntent, __skipGrill: true },
+        persistAck,
+        streamClientRequestId,
+      );
+    }
+
+    persistReceptionGrill(input.receptionSessionId, advanced.state, activeGrill.intent);
+    if (persistAck && advanced.text) {
+      writeAck(input.userId, input.receptionSessionId, advanced.text);
+    }
+    return { triggered: false, reason: `grill-${advanced.kind}` };
+  }
+
   const receptionMemberModel = resolveMemberModelForSessionLayer({
     sessionId: input.receptionSessionId,
     layer: 'reception',
@@ -434,6 +482,22 @@ async function runReceptionOrchestrationBody(
       writeAck(input.userId, input.receptionSessionId, clarifyText);
     }
     return { triggered: false, reason: 'clarify-needed' };
+  }
+
+  // ─── 路径 B2：grill → 高影响意图先做多轮澄清拷问（frontier）─────────────
+  if (routeResult.decision === 'grill' && !input.__skipGrill) {
+    setSubstate({
+      sessionId: input.receptionSessionId,
+      substate: SUBSTATES_RECEPTION.GRILLING,
+      userId: input.userId,
+      roleLayer: 'reception',
+    });
+    const state = startReceptionGrill(input.userIntent);
+    persistReceptionGrill(input.receptionSessionId, state, input.userIntent);
+    if (persistAck) {
+      writeAck(input.userId, input.receptionSessionId, formatFrontierPrompt(state));
+    }
+    return { triggered: false, reason: 'grill-started' };
   }
 
   // ─── 路径 D：resume → 续接上次未完成任务，跳过 LLM 意图改写 ─────────────

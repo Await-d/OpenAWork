@@ -7,6 +7,14 @@ import { parseBody } from '../infra/parse-request.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
+import {
+  applyAnswer,
+  buildConfirmNode,
+  CONFIRM_NODE_ID,
+  createGrillState,
+  parseGrillState,
+  serializeGrillState,
+} from '@openAwork/agent-core';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
@@ -239,12 +247,17 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
             sessionId,
           });
         }
+        const answeredQuestions = JSON.parse(
+          questionRequest.questions_json,
+        ) as QuestionToolInput['questions'];
+        updateSessionClarificationState({
+          answers: body.answers,
+          questions: answeredQuestions,
+          sessionId,
+        });
         if (resumePayload) {
-          const questions = JSON.parse(
-            questionRequest.questions_json,
-          ) as QuestionToolInput['questions'];
           const answerOutput = formatAnsweredQuestionOutput({
-            questions,
+            questions: answeredQuestions,
             answers: body.answers,
           });
           void resumeAnsweredQuestionRequest({
@@ -287,6 +300,80 @@ function updateSessionPlanModeForExitDecision(input: {
   const nextMetadata = { ...metadata, planMode: !shouldExit };
   sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
     JSON.stringify(nextMetadata),
+    input.sessionId,
+  ]);
+}
+
+function updateSessionClarificationState(input: {
+  answers: string[][];
+  questions: QuestionToolInput['questions'];
+  sessionId: string;
+}): void {
+  const grillNodes = input.questions.flatMap((question) => {
+    const nodeId = question.nodeId;
+    if (typeof nodeId !== 'string' || nodeId.length === 0) return [];
+    return [
+      {
+        id: nodeId,
+        question: question.question,
+        options: question.options.map((option) => ({
+          label: option.label,
+          ...(option.description !== undefined ? { description: option.description } : {}),
+          ...(option.recommended === true ? { recommended: true } : {}),
+        })),
+        dependsOn: [],
+      },
+    ];
+  });
+  if (grillNodes.length === 0) return;
+
+  const session = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+    [input.sessionId],
+  );
+  if (!session) return;
+
+  const metadata = parseSessionMetadataJson(session.metadata_json);
+  const persisted =
+    typeof metadata['clarificationState'] === 'string'
+      ? parseGrillState(metadata['clarificationState'])
+      : null;
+
+  let state =
+    persisted ??
+    createGrillState([...grillNodes, buildConfirmNode(grillNodes.map((node) => node.id))]);
+
+  const knownIds = new Set(state.nodes.map((node) => node.id));
+  const addedNodes = grillNodes.filter((node) => !knownIds.has(node.id));
+  if (addedNodes.length > 0) {
+    const previousConfirm = state.nodes.find((node) => node.id === CONFIRM_NODE_ID);
+    const questionIds = [
+      ...state.nodes.filter((node) => node.id !== CONFIRM_NODE_ID).map((node) => node.id),
+      ...addedNodes.map((node) => node.id),
+    ];
+    const confirmNode = buildConfirmNode(questionIds);
+    state = {
+      ...state,
+      nodes: [
+        ...state.nodes.filter((node) => node.id !== CONFIRM_NODE_ID),
+        ...addedNodes,
+        previousConfirm?.answer !== undefined
+          ? { ...confirmNode, answer: previousConfirm.answer }
+          : confirmNode,
+      ],
+    };
+  }
+
+  input.questions.forEach((question, index) => {
+    const nodeId = question.nodeId;
+    if (typeof nodeId !== 'string' || nodeId.length === 0) return;
+    const answer = (input.answers[index] ?? []).join(', ');
+    if (answer.length === 0) return;
+    state = applyAnswer(state, nodeId, answer);
+  });
+
+  sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
+    JSON.stringify({ ...metadata, clarificationState: serializeGrillState(state) }),
     input.sessionId,
   ]);
 }

@@ -268,4 +268,140 @@ describe('questions reply route', () => {
 
     await app.close();
   });
+
+  it('answered 回复把答案写入 sessions.metadata_json.clarificationState（grill 路径）', async () => {
+    const grillQuestionsJson = JSON.stringify([
+      {
+        header: '目标',
+        question: '目标是什么？',
+        nodeId: 'goal',
+        round: 0,
+        options: [
+          { label: '改单文件', description: '范围清晰', recommended: true },
+          { label: '跨模块', description: '涉及多模块' },
+        ],
+      },
+    ]);
+
+    mocks.sqliteGet
+      .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
+      .mockReturnValueOnce(buildPendingQuestionRow({ questions_json: grillQuestionsJson }))
+      .mockReturnValueOnce({ metadata_json: '{}' });
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['改单文件']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const metadataUpdate = mocks.sqliteRun.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('UPDATE sessions SET metadata_json'),
+    );
+    expect(metadataUpdate).toBeDefined();
+
+    const params = (metadataUpdate as [string, unknown[]])[1];
+    expect(params[1]).toBe(SESSION_ID);
+    const metadata = JSON.parse(params[0] as string) as { clarificationState?: string };
+    expect(typeof metadata.clarificationState).toBe('string');
+
+    const state = JSON.parse(metadata.clarificationState as string) as {
+      history: Array<{ nodeId: string; answer: string }>;
+      nodes: Array<{ id: string; answer?: string }>;
+    };
+    expect(state.nodes.find((node) => node.id === 'goal')?.answer).toBe('改单文件');
+    expect(state.nodes.some((node) => node.id === '__grill_confirm__')).toBe(true);
+    expect(state.history).toContainEqual(
+      expect.objectContaining({ nodeId: 'goal', answer: '改单文件' }),
+    );
+
+    await app.close();
+  });
+
+  it('payload 缺 nodeId（非 grill 提问）时不动 clarificationState', async () => {
+    mocks.sqliteGet
+      .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
+      .mockReturnValueOnce(buildPendingQuestionRow());
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['a']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const metadataUpdate = mocks.sqliteRun.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('UPDATE sessions SET metadata_json'),
+    );
+    expect(metadataUpdate).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('后续轮次新增的节点会被合并进 clarificationState（答案不丢失）', async () => {
+    const round0Json = JSON.stringify([
+      { header: '目标', question: '目标？', nodeId: 'goal', options: [{ label: 'A', description: 'a' }] },
+    ]);
+    const round1Json = JSON.stringify([
+      { header: '风险', question: '风险？', nodeId: 'risk', options: [{ label: 'B', description: 'b' }] },
+    ]);
+
+    mocks.sqliteGet
+      .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
+      .mockReturnValueOnce(buildPendingQuestionRow({ questions_json: round0Json }))
+      .mockReturnValueOnce({ metadata_json: '{}' });
+
+    const app = await createApp();
+    await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['A']] },
+    });
+
+    const round0Update = mocks.sqliteRun.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('UPDATE sessions SET metadata_json'),
+    );
+    const round0Metadata = JSON.parse((round0Update as [string, unknown[]])[1][0] as string) as {
+      clarificationState: string;
+    };
+
+    mocks.sqliteRun.mockReset();
+    mocks.parseSessionMetadataJson.mockReturnValueOnce({
+      clarificationState: round0Metadata.clarificationState,
+    });
+    mocks.sqliteGet
+      .mockReturnValueOnce({ id: SESSION_ID, user_id: USER_ID })
+      .mockReturnValueOnce(buildPendingQuestionRow({ questions_json: round1Json }))
+      .mockReturnValueOnce({ metadata_json: JSON.stringify(round0Metadata) });
+
+    await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['B']] },
+    });
+
+    const round1Update = mocks.sqliteRun.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('UPDATE sessions SET metadata_json'),
+    );
+    const round1Metadata = JSON.parse((round1Update as [string, unknown[]])[1][0] as string) as {
+      clarificationState: string;
+    };
+    const state = JSON.parse(round1Metadata.clarificationState) as {
+      nodes: { id: string; answer?: string; dependsOn: string[] }[];
+    };
+
+    expect(state.nodes.find((node) => node.id === 'goal')?.answer).toBe('A');
+    expect(state.nodes.find((node) => node.id === 'risk')?.answer).toBe('B');
+    expect(
+      [...(state.nodes.find((node) => node.id === '__grill_confirm__')?.dependsOn ?? [])].sort(),
+    ).toEqual(['goal', 'risk']);
+
+    await app.close();
+  });
 });

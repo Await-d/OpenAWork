@@ -468,17 +468,7 @@ function validateOutput(
  * 修正预算耗尽后停止本轮规划，禁止使用占位内容冒充成功产物。
  */
 function applyPatches(content: string, rules: ValidationRule[]): string {
-  let patched = content;
-  for (const rule of rules) {
-    if (!rule.check(patched) && rule.patch) {
-      patched = rule.patch(patched);
-    }
-  }
-  const validation = validateOutput(patched, rules);
-  if (!validation.ok) {
-    throw new PlanningFailure(`规划校验失败：${validation.failed.join('、')}`);
-  }
-  return patched;
+  throw new PlanningFailure(`规划校验失败：${validateOutput(content, rules).failed.join('、')}`);
 }
 
 function sanitizeTasksForDispatch(content: string): string {
@@ -843,70 +833,90 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
   });
   setC(SUBSTATES_C.SPEC_READY);
 
-  // ─── Step 2: 解析 [NEEDS CLARIFICATION]，阻塞等待回答（L1.3 改造 3） ──────
-  const clarifications = parseClarifications(specContent);
-  let clarificationAnswers: CollectedClarificationAnswer[] = [];
-  if (clarifications.length > 0) {
-    publishTeamEvent({
-      type: 'artifact.needs-clarification',
-      taskId: input.handoff.id,
-      sessionId: input.sessionId,
-      layer: 'pm1',
-      timestamp: Date.now(),
-      payload: {
-        clarifications,
-        specArtifactId,
-      },
-      userId: input.userId,
-    });
+  // ─── Step 2: 解析 [NEEDS CLARIFICATION]，多轮阻塞等待回答（L1.3 + grill 多轮） ──
+  const allClarifications = parseClarifications(specContent);
+  const clarificationAnswers: CollectedClarificationAnswer[] = [];
+  if (allClarifications.length > 0) {
+    const answeredIds = new Set<string>();
+    const MAX_CLARIFICATION_ROUNDS = 3;
 
-    // 反向写一条 escalation_request 到 reception inbox（让 b 在 UI 渲染问题）。
-    // 失败不阻塞主流程（只是少了 UI 推送）。
-    try {
-      submitInboundMessage({
-        userId: input.userId,
-        toSessionId: input.handoff.fromSessionId,
-        fromRoleLayer: 'pm1',
-        messageType: 'escalation_request',
-        payload: {
-          fromLayer: 'pm1',
-          fromSessionId: input.sessionId,
-          reason: 'needs_clarification',
-          escalationRound: 0,
-          context: `c 层在生成 spec 时遇到 ${clarifications.length} 个待澄清问题`,
-          questions: clarifications.map((c) => ({
-            id: c.id,
-            question: c.question,
-            context: c.context,
-          })),
-          suggestedActions: [{ label: '回答澄清问题', action: 'answer' }],
-        },
-      });
-    } catch (err) {
-      console.warn(
-        `[artifact-chain] escalation_request inbox 写入失败：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    for (let round = 0; round < MAX_CLARIFICATION_ROUNDS; round += 1) {
+      const pending = allClarifications.filter((item) => !answeredIds.has(item.id));
+      if (pending.length === 0) break;
 
-    // 进入 clarifying 子状态，阻塞等待 inbound clarification_answer
-    setC(SUBSTATES_C.CLARIFYING);
-    try {
-      clarificationAnswers = await waitForClarificationAnswers({
+      publishTeamEvent({
+        type: 'artifact.needs-clarification',
+        taskId: input.handoff.id,
         sessionId: input.sessionId,
-        expectedCount: clarifications.length,
-        signal: input.signal ?? new AbortController().signal,
+        layer: 'pm1',
+        timestamp: Date.now(),
+        payload: {
+          clarifications: pending,
+          specArtifactId,
+          round,
+        },
+        userId: input.userId,
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === 'cancelled-by-inbound' || message === 'aborted') {
-        setC(SUBSTATES_C.CANCELLED);
-        throw err;
+
+      // 反向写一条 escalation_request 到 reception inbox（让 b 在 UI 渲染问题）。
+      // 失败不阻塞主流程（只是少了 UI 推送）。
+      try {
+        submitInboundMessage({
+          userId: input.userId,
+          toSessionId: input.handoff.fromSessionId,
+          fromRoleLayer: 'pm1',
+          messageType: 'escalation_request',
+          payload: {
+            fromLayer: 'pm1',
+            fromSessionId: input.sessionId,
+            reason: 'needs_clarification',
+            escalationRound: round,
+            context: `c 层在生成 spec 时遇到 ${pending.length} 个待澄清问题（第 ${round + 1} 轮）`,
+            questions: pending.map((c) => ({
+              id: c.id,
+              question: c.question,
+              context: c.context,
+            })),
+            suggestedActions: [{ label: '回答澄清问题', action: 'answer' }],
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[artifact-chain] escalation_request inbox 写入失败：${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-      // 其他异常 → 视为收不到答案，继续走默认假设
-      console.warn(`[artifact-chain] clarification 等待异常：${message}`);
+
+      setC(SUBSTATES_C.CLARIFYING);
+      let roundAnswers: CollectedClarificationAnswer[] = [];
+      try {
+        roundAnswers = await waitForClarificationAnswers({
+          sessionId: input.sessionId,
+          expectedCount: pending.length,
+          signal: input.signal ?? new AbortController().signal,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === 'cancelled-by-inbound' || message === 'aborted') {
+          setC(SUBSTATES_C.CANCELLED);
+          throw err;
+        }
+        console.warn(`[artifact-chain] clarification 等待异常：${message}`);
+      }
+      setC(SUBSTATES_C.SPEC_READY);
+
+      if (roundAnswers.length === 0) break;
+
+      for (const answer of roundAnswers) {
+        clarificationAnswers.push(answer);
+        if (answer.questionId) {
+          answeredIds.add(answer.questionId);
+          continue;
+        }
+        // 未携带 questionId（如纯文本 user_input）→ 按顺序认领尚未回答的问题
+        const next = pending.find((item) => !answeredIds.has(item.id));
+        if (next) answeredIds.add(next.id);
+      }
     }
-    // 回到 spec_ready（澄清结束，准备进入 plan）
-    setC(SUBSTATES_C.SPEC_READY);
   }
 
   // ─── Step 3: 生成 plan（注入 constitution + 用户答案） ────────────────────
@@ -932,14 +942,14 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
   if (clarificationAnswers.length > 0) {
     const lines = clarificationAnswers
       .map((ans, idx) => {
-        const qIdx = idx < clarifications.length ? idx : -1;
-        const qText = qIdx >= 0 ? clarifications[qIdx]?.question : '（用户中途追加输入）';
+        const qIdx = idx < allClarifications.length ? idx : -1;
+        const qText = qIdx >= 0 ? allClarifications[qIdx]?.question : '（用户中途追加输入）';
         return `${idx + 1}. 问：${qText ?? '（未知问题）'}\n   答：${ans.answer}`;
       })
       .join('\n');
     clarificationBlock = `\n\n<clarifications>\n以下是用户对 [NEEDS CLARIFICATION] 的回答，请在 plan 中按这些答案细化设计：\n${lines}\n</clarifications>`;
-  } else if (clarifications.length > 0) {
-    clarificationBlock = `\n\n<clarifications>\n用户未在超时前回答 ${clarifications.length} 个澄清问题。请使用最稳妥的默认假设（保守选择）继续生成 plan。\n</clarifications>`;
+  } else if (allClarifications.length > 0) {
+    clarificationBlock = `\n\n<clarifications>\n用户未在超时前回答 ${allClarifications.length} 个澄清问题。请使用最稳妥的默认假设（保守选择）继续生成 plan。\n</clarifications>`;
   }
 
   const planUserMessage = `基于以下 spec 生成实施计划：\n\n${specContent}${constitutionBlock}${clarificationBlock}${projectContextBlock}`;
@@ -1245,7 +1255,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     specArtifactId,
     planArtifactId,
     tasksArtifactId,
-    clarifications,
+    clarifications: allClarifications,
     clarificationAnswers,
     constitutionWarnings,
   });
@@ -1256,7 +1266,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     specArtifactId,
     planArtifactId,
     tasksArtifactId,
-    clarifications,
+    clarifications: allClarifications,
     constitutionWarnings,
   };
 }

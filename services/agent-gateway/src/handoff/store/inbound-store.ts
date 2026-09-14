@@ -639,6 +639,43 @@ export function resolveClarificationEscalationRequest(input: {
   return null;
 }
 
+export interface GrillClarificationAnswerPayload {
+  questionId: string;
+  answer: string;
+  roundNumber?: number;
+}
+
+/**
+ * 解析 `clarification_answer` 的 grill 载荷。复用既有 `questionId` 字段作为决策树节点 id，
+ * 仅新增 `roundNumber`，避免引入第二套 id。结构非法时返回 null（调用方据此忽略该消息）。
+ */
+export function parseGrillClarificationAnswerPayload(
+  payload: unknown,
+): GrillClarificationAnswerPayload | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const questionId = record['questionId'];
+  const answer = record['answer'];
+  if (typeof questionId !== 'string' || questionId.length === 0) return null;
+  if (typeof answer !== 'string' || answer.length === 0) return null;
+
+  const roundNumber = record['roundNumber'];
+  if (
+    roundNumber !== undefined &&
+    (typeof roundNumber !== 'number' || !Number.isInteger(roundNumber) || roundNumber < 0)
+  ) {
+    return null;
+  }
+
+  return {
+    questionId,
+    answer,
+    ...(typeof roundNumber === 'number' ? { roundNumber } : {}),
+  };
+}
+
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
 /**

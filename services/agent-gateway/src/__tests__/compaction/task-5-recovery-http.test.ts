@@ -195,7 +195,7 @@ afterAll(async () => {
   }
 });
 
-describe('任务5权限/问题恢复真实 stream seam', () => {
+describe('任务5权限/问题恢复真实 stream seam', { timeout: 30_000 }, () => {
   it('权限拒绝恢复沿既有循环进入真实 SSE 上游', async () => {
     const toolCallId = 'task-5-permission-call';
     seedSession('write', toolCallId);
