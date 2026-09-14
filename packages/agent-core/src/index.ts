@@ -169,6 +169,7 @@ export {
 } from './context/compact.js';
 
 export {
+  buildClarificationQuestions,
   evaluate,
   recordClarification,
   canProceedWithoutClarification,
@@ -185,6 +186,36 @@ export type {
   ClarificationDimension,
   SessionContext,
 } from './context/routing.js';
+
+export {
+  applyAnswer,
+  buildConfirmNode,
+  computeFrontier,
+  computeNodeStatus,
+  confirmGrill,
+  CONFIRM_ANSWER,
+  CONFIRM_NODE_ID,
+  createGrillState,
+  isFrontierEmpty,
+  needsConfirmation,
+  parseGrillState,
+  REJECT_ANSWER,
+  seedGrillState,
+  serializeGrillState,
+} from './context/clarification-tree.js';
+export type {
+  ClarificationNode,
+  ClarificationNodeOption,
+  ClarificationNodeStatus,
+  GrillHistoryEntry,
+  GrillSeedOptions,
+  GrillState,
+} from './context/clarification-tree.js';
+
+export {
+  findRecommendedOption,
+  normalizeRecommendedOptions,
+} from './context/clarification-recommendation.js';
 
 export type {
   ProviderType,

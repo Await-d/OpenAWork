@@ -186,6 +186,11 @@ export function evaluate(input: string, context: SessionContext): RoutingDecisio
   };
 }
 
+export function buildClarificationQuestions(input: string): ClarificationQuestion[] {
+  return CLARIFICATION_ORDER.map((dimension) => CLARIFICATION_TEMPLATES[dimension](input));
+}
+
+/** @deprecated 改用 clarification-tree 的 createGrillState/applyAnswer/confirmGrill（frontier 语义）；保留仅为兼容，行为不变。 */
 export function recordClarification(
   context: SessionContext,
   dimension: ClarificationDimension,
