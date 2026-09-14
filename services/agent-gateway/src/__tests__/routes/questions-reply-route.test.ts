@@ -344,10 +344,20 @@ describe('questions reply route', () => {
 
   it('后续轮次新增的节点会被合并进 clarificationState（答案不丢失）', async () => {
     const round0Json = JSON.stringify([
-      { header: '目标', question: '目标？', nodeId: 'goal', options: [{ label: 'A', description: 'a' }] },
+      {
+        header: '目标',
+        question: '目标？',
+        nodeId: 'goal',
+        options: [{ label: 'A', description: 'a' }],
+      },
     ]);
     const round1Json = JSON.stringify([
-      { header: '风险', question: '风险？', nodeId: 'risk', options: [{ label: 'B', description: 'b' }] },
+      {
+        header: '风险',
+        question: '风险？',
+        nodeId: 'risk',
+        options: [{ label: 'B', description: 'b' }],
+      },
     ]);
 
     mocks.sqliteGet

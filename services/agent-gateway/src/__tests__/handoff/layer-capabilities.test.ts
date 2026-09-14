@@ -34,18 +34,16 @@ describe('layer-capabilities substate 白名单（grill 增强）', () => {
     expect(() =>
       assertSubstateAllowed({ roleLayer: 'reception', substate: 'awaiting_confirmation' }),
     ).not.toThrow();
-    expect(() =>
-      assertSubstateAllowed({ roleLayer: 'pm1', substate: 'clarifying' }),
-    ).not.toThrow();
+    expect(() => assertSubstateAllowed({ roleLayer: 'pm1', substate: 'clarifying' })).not.toThrow();
     expect(() =>
       assertSubstateAllowed({ roleLayer: 'pm1', substate: 'awaiting_confirmation' }),
     ).not.toThrow();
   });
 
   it('拒绝层内未声明的 substate', () => {
-    expect(() =>
-      assertSubstateAllowed({ roleLayer: 'reception', substate: 'reviewing' }),
-    ).toThrow(LayerCapabilityViolationError);
+    expect(() => assertSubstateAllowed({ roleLayer: 'reception', substate: 'reviewing' })).toThrow(
+      LayerCapabilityViolationError,
+    );
   });
 
   it('拒绝把 paused 当作 substate（paused 是 session 级列，非 substate）', () => {
@@ -57,14 +55,14 @@ describe('layer-capabilities substate 白名单（grill 增强）', () => {
   });
 
   it('substate 为 null（清空）时不校验、不抛错', () => {
-    expect(() =>
-      assertSubstateAllowed({ roleLayer: 'reception', substate: null }),
-    ).not.toThrow();
+    expect(() => assertSubstateAllowed({ roleLayer: 'reception', substate: null })).not.toThrow();
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
   });
 
   it('roleLayer 缺省时跳过校验（向后兼容）', () => {
-    expect(() => assertSubstateAllowed({ roleLayer: undefined, substate: 'whatever' })).not.toThrow();
+    expect(() =>
+      assertSubstateAllowed({ roleLayer: undefined, substate: 'whatever' }),
+    ).not.toThrow();
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
   });
 });

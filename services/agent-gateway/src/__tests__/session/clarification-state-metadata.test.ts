@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildConfirmNode,
-  createGrillState,
-  serializeGrillState,
-} from '@openAwork/agent-core';
+import { buildConfirmNode, createGrillState, serializeGrillState } from '@openAwork/agent-core';
 import { validateSessionMetadataPatch } from '../../session/session-workspace-metadata.js';
 
 function validClarificationState(): string {
@@ -45,8 +41,9 @@ describe('session metadata: clarificationState', () => {
 
   it('拒绝结构不符的 JSON（缺 nodes）', () => {
     expect(
-      validateSessionMetadataPatch({ clarificationState: JSON.stringify({ round: 0, history: [] }) })
-        .success,
+      validateSessionMetadataPatch({
+        clarificationState: JSON.stringify({ round: 0, history: [] }),
+      }).success,
     ).toBe(false);
   });
 

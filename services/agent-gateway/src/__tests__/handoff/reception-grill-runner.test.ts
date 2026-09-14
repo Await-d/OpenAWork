@@ -73,7 +73,11 @@ describe('advanceReceptionGrill', () => {
       lastKind = advanced.kind;
     }
     expect(lastKind).toBe('awaiting-confirmation');
-    expect(state.nodes.filter((node) => node.id !== '__grill_confirm__').every((n) => n.answer !== undefined)).toBe(true);
+    expect(
+      state.nodes
+        .filter((node) => node.id !== '__grill_confirm__')
+        .every((n) => n.answer !== undefined),
+    ).toBe(true);
   });
 
   it('空回复不推进，保持在当前问题', () => {
@@ -111,7 +115,9 @@ describe('持久化', () => {
 
     const restored = grill.readReceptionGrill(SESSION_ID);
     expect(restored?.intent).toBe(INTENT);
-    expect(restored?.state.nodes.map((node) => node.id)).toEqual(state.nodes.map((node) => node.id));
+    expect(restored?.state.nodes.map((node) => node.id)).toEqual(
+      state.nodes.map((node) => node.id),
+    );
   });
 
   it('无状态时 read 返回 null', () => {

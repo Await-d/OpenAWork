@@ -60,7 +60,10 @@ export function persistReceptionGrill(sessionId: string, state: GrillState, inte
 }
 
 export function clearReceptionGrill(sessionId: string): void {
-  writeReceptionMetadata(sessionId, { clarificationState: undefined, clarificationIntent: undefined });
+  writeReceptionMetadata(sessionId, {
+    clarificationState: undefined,
+    clarificationIntent: undefined,
+  });
 }
 
 export function startReceptionGrill(intent: string): GrillState {

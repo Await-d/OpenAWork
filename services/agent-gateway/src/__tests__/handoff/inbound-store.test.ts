@@ -431,7 +431,9 @@ describe('parseGrillClarificationAnswerPayload', () => {
   });
 
   it('roundNumber 可选：缺失时仍解析成功', () => {
-    expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: 'ok' })).toEqual({
+    expect(
+      store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: 'ok' }),
+    ).toEqual({
       questionId: 'goal',
       answer: 'ok',
     });
@@ -470,12 +472,18 @@ describe('parseGrillClarificationAnswerPayload', () => {
 
   it('answer 缺失或为空字符串返回 null', () => {
     expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal' })).toBeNull();
-    expect(store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: '' })).toBeNull();
+    expect(
+      store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: '' }),
+    ).toBeNull();
   });
 
   it('roundNumber 非法（负数 / 非整数 / 非数字）返回 null', () => {
     expect(
-      store.parseGrillClarificationAnswerPayload({ questionId: 'goal', answer: 'ok', roundNumber: -1 }),
+      store.parseGrillClarificationAnswerPayload({
+        questionId: 'goal',
+        answer: 'ok',
+        roundNumber: -1,
+      }),
     ).toBeNull();
     expect(
       store.parseGrillClarificationAnswerPayload({

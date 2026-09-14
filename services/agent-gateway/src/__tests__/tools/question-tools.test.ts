@@ -116,7 +116,9 @@ describe('questionToolDefinition 元数据', () => {
   it('execute 必须走网关沙箱路径（直接调用即抛错）', async () => {
     await expect(
       questionToolDefinition.execute(
-        { questions: [{ question: 'q', header: 'h', options: [{ label: 'A', description: 'a' }] }] },
+        {
+          questions: [{ question: 'q', header: 'h', options: [{ label: 'A', description: 'a' }] }],
+        },
         new AbortController().signal,
       ),
     ).rejects.toThrow(/gateway-managed sandbox path/);
@@ -127,7 +129,9 @@ describe('buildQuestionRequestTitle', () => {
   it('取第一条 header 并去除首尾空白', () => {
     expect(
       buildQuestionRequestTitle({
-        questions: [{ question: 'q', header: '  目标  ', options: [{ label: 'A', description: 'a' }] }],
+        questions: [
+          { question: 'q', header: '  目标  ', options: [{ label: 'A', description: 'a' }] },
+        ],
       }),
     ).toBe('目标');
   });
@@ -152,15 +156,13 @@ describe('formatAnsweredQuestionOutput', () => {
   ];
 
   it('按 问题="答案" 逐行输出，多选用逗号连接', () => {
-    expect(
-      formatAnsweredQuestionOutput({ questions, answers: [['A', 'C'], ['B']] }),
-    ).toBe('目标？="A, C"\n约束？="B"');
+    expect(formatAnsweredQuestionOutput({ questions, answers: [['A', 'C'], ['B']] })).toBe(
+      '目标？="A, C"\n约束？="B"',
+    );
   });
 
   it('缺失答案的题输出空答案', () => {
-    expect(formatAnsweredQuestionOutput({ questions, answers: [[]] })).toBe(
-      '目标？=""\n约束？=""',
-    );
+    expect(formatAnsweredQuestionOutput({ questions, answers: [[]] })).toBe('目标？=""\n约束？=""');
   });
 });
 

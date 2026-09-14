@@ -112,10 +112,10 @@ async function main(): Promise<void> {
       email,
       'hash',
     ]);
-    sqliteRun(`INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`, [
-      sessionId,
-      userId,
-    ]);
+    sqliteRun(
+      `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+      [sessionId, userId],
+    );
 
     const app = Fastify();
     await app.register(requestWorkflowPlugin);
@@ -163,15 +163,15 @@ async function main(): Promise<void> {
       assert(rejectRes.statusCode === 200, 'rejection reply should succeed');
 
       const afterReject = readClarificationState(sessionId);
-      assert(
-        afterReject.confirmedAt === undefined,
-        'rejection must not set confirmedAt',
-      );
+      assert(afterReject.confirmedAt === undefined, 'rejection must not set confirmedAt');
       assert(
         afterReject.nodes.find((node) => node.id === CONFIRM_NODE_ID)?.answer === undefined,
         'rejection must not settle the confirm node',
       );
-      assert(needsConfirmation(afterReject), 'confirmation should still be required after rejection');
+      assert(
+        needsConfirmation(afterReject),
+        'confirmation should still be required after rejection',
+      );
 
       const confirmRequest = insertPendingRequest({
         sessionId,
