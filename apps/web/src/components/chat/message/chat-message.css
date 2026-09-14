@@ -1641,7 +1641,7 @@
 .chat-markdown-blockquote,
 .chat-markdown-ul,
 .chat-markdown-ol,
-.chat-markdown-table-wrap,
+.chat-markdown-table-shell,
 .chat-markdown-code-block {
   margin: 0;
 }
@@ -2110,19 +2110,85 @@
   display: block;
 }
 
-/* Mermaid 图表预览 */
+/* ── Mermaid 图表预览 ──
+   两段式容器：外层负责滚动 / 视口高度，内层按图形固有尺寸 × 缩放比例布局，
+   这样「适应宽度」「放大」都能得到正确比例，滚动条也由容器原生提供。 */
 .chat-markdown-mermaid-figure {
-  display: flex;
-  justify-content: center;
-  padding: 16px 14px;
+  position: relative;
+  overflow: auto;
+  max-height: min(72vh, 640px);
+  padding: 12px;
   background: var(--bg-raised);
   border-radius: 10px;
-  overflow: auto;
+  overscroll-behavior: contain;
 }
 
-.chat-markdown-mermaid-figure svg {
+.chat-markdown-mermaid-canvas {
+  margin-inline: auto;
+}
+
+.chat-markdown-mermaid-scaled {
+  transform-origin: 0 0;
+}
+
+/* mermaid 会在 svg 上内联写死 max-width，缩放时必须覆盖，否则放大被截住 */
+.chat-markdown-mermaid-scaled svg {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+}
+
+/* 拿不到 viewBox 时的退化形态：按容器宽度自适应 */
+.chat-markdown-mermaid-figure--fluid {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.chat-markdown-mermaid-figure--fluid svg {
   max-width: 100%;
   height: auto;
+}
+
+.chat-markdown-mermaid-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+.chat-markdown-mermaid-zoom .chat-markdown-code-copy {
+  min-width: 22px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-markdown-mermaid-zoom .chat-markdown-code-copy:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-markdown-mermaid-zoom .chat-markdown-code-copy:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-default);
+}
+
+.chat-markdown-mermaid-zoom-value {
+  min-width: 44px;
+}
+
+/* 图表 / 表格工具栏按钮更多，允许换行避免窄栏下挤压 */
+.chat-markdown-code-block[data-diagram-kind] > .chat-markdown-code-toolbar,
+.chat-markdown-table-toolbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .chat-markdown-mermaid-status {
@@ -2178,53 +2244,156 @@
   font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.chat-markdown-table-wrap {
-  overflow-x: auto;
+/* ── 表格卡片 ──
+   结构：shell（边框 / 圆角 / 底色） > toolbar（统计 + 导出） > viewport（滚动 + 渐隐） > table */
+.chat-markdown-table-shell {
+  position: relative;
   margin: 2px 0;
-  border-radius: 6px;
   border: 1px solid var(--border-default);
-  background: var(--bg-overlay);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* 顶部高光线，与代码块保持同一套视觉语言 */
+.chat-markdown-table-shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
+}
+
+.chat-markdown-table-meta {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-markdown-table-viewport {
+  position: relative;
+}
+
+.chat-markdown-table-wrap {
+  overflow: auto;
+  max-height: min(64vh, 560px);
+  overscroll-behavior-x: contain;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* 只有真的溢出、且还没滚到最右时才出现，提示「右边还有列」 */
+.chat-markdown-table-fade {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30px;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in oklch, var(--bg-surface) 72%, transparent)
+  );
 }
 
 .chat-markdown-table {
   width: 100%;
   min-width: min(520px, 100%);
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12.5px;
 }
 
 .chat-markdown-th,
 .chat-markdown-td {
-  padding: 6px 10px;
+  min-width: 76px;
+  padding: 7px 11px;
   border-bottom: 1px solid var(--border-subtle);
   text-align: left;
   vertical-align: top;
   overflow-wrap: break-word;
 }
+
+/* 列数多时自动收紧，保证宽表在一屏内尽量多地露出信息 */
+.chat-markdown-table-shell[data-density='compact'] .chat-markdown-th,
+.chat-markdown-table-shell[data-density='compact'] .chat-markdown-td {
+  min-width: 64px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .chat-markdown-th + .chat-markdown-th,
 .chat-markdown-td + .chat-markdown-td {
   border-left: 1px solid var(--border-subtle);
 }
 
 .chat-markdown-th {
-  color: var(--fg-muted);
-  font-weight: 600;
-  background: var(--bg-surface);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--accent);
+  font-weight: 650;
+  background: color-mix(in oklch, var(--bg-surface) 90%, var(--accent) 10%);
+  border-bottom: 1px solid var(--border-default);
   font-size: 11px;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .chat-markdown-td {
   color: var(--fg-default);
   white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 斑马纹：长表横向扫描时不容易串行 */
+.chat-markdown-table tbody tr:nth-child(even) .chat-markdown-td {
+  background: color-mix(in oklch, var(--bg-overlay) 76%, var(--bg-surface) 24%);
 }
 
 .chat-markdown-table tr:last-child .chat-markdown-td {
   border-bottom: none;
 }
+
 .chat-markdown-table tr:hover .chat-markdown-td {
-  background: var(--bg-surface);
+  background: color-mix(in oklch, var(--bg-surface) 74%, var(--accent) 26%);
+}
+
+/* GFM 列对齐（`:---:` / `---:` / `:---`） */
+.chat-markdown-th[data-align='center'],
+.chat-markdown-td[data-align='center'] {
+  text-align: center;
+}
+
+.chat-markdown-th[data-align='right'],
+.chat-markdown-td[data-align='right'] {
+  text-align: right;
+}
+
+.chat-markdown-th[data-align='justify'],
+.chat-markdown-td[data-align='justify'] {
+  text-align: justify;
 }
 
 .chat-markdown-link {

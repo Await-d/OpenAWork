@@ -106,17 +106,17 @@ textarea::placeholder {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border-default));
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.4);
+  background: var(--scrollbar-thumb-hover);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border-default)) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .cursor-blink {

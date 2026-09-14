@@ -66,3 +66,6 @@ services/agent-gateway/data/
 # 临时文件
 file.txt
 .claude/
+
+# 生成的富内容主题预览页（由 scripts/markdown-theme-demo.mjs 重新生成）
+demo/markdown-theme-matrix.html

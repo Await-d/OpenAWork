@@ -227,8 +227,8 @@ OpenAWork 更像“代理控制台 + 工作台”，而不是品牌秀场。
 ### Cards / Panels
 
 - 默认使用 8px 卡片圆角、12px 面板圆角。
-- 卡片背景与页面背景应存在轻微亮度差。
-- 卡片边框始终偏轻，避免高对比描边造成噪声。
+- 卡片背景与页面背景应存在轻微亮度差——**优先靠这个亮度差成立，而不是靠 1px 描边**。
+- 卡片默认不加边框；确需边界时用 `border-subtle` / `border-default`，避免高对比描边造成噪声。
 - 大面板可使用更柔和的内层级，不要叠加过度阴影。
 
 ### Inputs / Forms
@@ -285,11 +285,11 @@ accent: #5cd4c0           contrast: #f0b429
 complement: #f06b7e       aux: #8b9cf5
 success: #3dd49a
 
-border-invisible: hsla(215,20%,50%,0.03)
-border-subtle: hsla(215,20%,50%,0.07)
-border-default: hsla(215,18%,50%,0.12)
-border-emphasis: hsla(215,16%,55%,0.20)
-border-strong: hsla(215,14%,60%,0.30)
+border-invisible: hsl(215 20% 50% / 0)      已废弃，恒全透明
+border-subtle: hsl(215 20% 50% / 0.03)
+border-default: hsl(215 18% 50% / 0.06)
+border-emphasis: hsl(215 16% 55% / 0.13)
+border-strong: hsl(215 14% 60% / 0.20)
 ```
 
 ### 亮色主题
@@ -304,9 +304,29 @@ fg-muted: #7c83a9         fg-subtle: #a8aec8
 accent: #6471f0           contrast: #a06bff
 complement: #e0497a       aux: #3aa0ff
 
-border-default: rgba(15,23,60,0.08)
-border-emphasis: rgba(15,23,60,0.14)
+border-invisible: rgb(15 23 60 / 0)         已废弃，恒全透明
+border-subtle: rgb(15 23 60 / 0.034)
+border-default: rgb(15 23 60 / 0.065)
+border-emphasis: rgb(15 23 60 / 0.14)
+border-strong: rgb(15 23 60 / 0.22)
 ```
+
+### 边框政策（260914）
+
+**线是例外，不是默认。** 结构优先用 背景层级 + 间距 表达，不靠 1px 描边；描边只保留在
+「必须靠线才能被识别」的位置。
+
+- 8 个主题共用同一组值（颜色与 alpha 都统一）：暗色统一冷灰 `hsl(215 …)`，
+  亮色统一深蓝灰 `rgb(15 23 60 …)`。只统一 alpha 不够——同一 alpha 下白色描边与
+  冷灰描边的感知亮度差能差一倍（实测 dL\* 6.6 vs 2.8），换个主题线的重量就会突变。
+  主题个性由 `--bg-*` / `--accent-*` 承担，描边不再掺主题色。
+- 装饰性描边（卡片、面板、列表行、分组、分区）用 `subtle` / `default`；
+  只有「不加线就认不出这是可交互控件」时才用 `emphasis` / `strong`。
+- **不跟随描边刻度、走独立 token**：`--scrollbar-thumb`（滚动条拇指）、
+  `--switch-track-off`（开关关闭态轨道）、拖拽柄（用 `emphasis`，默认透明、hover 才显形）。
+  这几类不是装饰，淡到看不见就等于坏掉。
+- 全站 1700+ 处描边都挂在 5 个 `--border-*` 变量上，**改 `default` 与 `subtle` 两个数
+  即可整体增/减界面的线量**，其余不用动。定义集中在 `apps/web/src/index.css`。
 
 ### 图表配色（8 色）
 

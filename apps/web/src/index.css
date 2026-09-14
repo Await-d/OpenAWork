@@ -10,6 +10,45 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   描边政策（260914 定稿）— 「线是例外，不是默认」
+
+   界面靠 背景层级 + 间距 划分结构，不靠 1px 描边。全站 1700+ 处描边都挂在
+   下面 5 个 --border-* 变量上，所以「界面看上去有多少条线」由这 5 档决定。
+   8 个主题共用同一组值（颜色 + alpha 都统一），暗色统一冷灰 hsl(215 …)、
+   亮色统一深蓝灰 rgb(15 23 60 …)：
+
+     档位        暗色                     亮色                     用途
+     invisible   hsl(215 20% 50% / 0)      rgb(15 23 60 / 0)        已废弃，恒全透明
+     subtle      hsl(215 20% 50% / 0.03)   rgb(15 23 60 / 0.034)    相邻块的极轻边界
+     default     hsl(215 18% 50% / 0.06)   rgb(15 23 60 / 0.065)    容器 / 卡片 / 行的主边界
+     emphasis    hsl(215 16% 55% / 0.13)   rgb(15 23 60 / 0.14)     控件边界、拖拽柄、hover
+     strong      hsl(215 14% 60% / 0.2)    rgb(15 23 60 / 0.22)     选中 / 焦点 / 可点控件
+
+   为什么颜色也要统一：同一 alpha 下白色描边和冷灰描边的感知亮度差能差一倍
+   （实测默认主题下 dL* 6.6 vs 2.8），只统一 alpha 的话换个主题线的重量就突变。
+   主题个性由 --bg-* / --accent-* 承担，描边不再掺主题色。
+
+   两条硬规则：
+   1. 装饰性描边（卡片、面板、列表行、分组）优先用 subtle / default；
+      只有「不加线就认不出这是个可交互控件」时才用 emphasis / strong。
+   2. 以下三类**不要**跟着描边刻度一起调轻，它们不是装饰，淡到看不见等于坏掉，
+      一律走独立 token：
+        --scrollbar-thumb / --scrollbar-thumb-hover  滚动条拇指
+        --switch-track-off                            开关关闭态轨道
+      拖拽柄用 --border-emphasis（默认 opacity:0，hover 才显形，本就是按需出现）。
+
+   想整体再轻/再重：改 default 与 subtle 两个数即可（16 个主题块同值改一遍），
+   其余不用动。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 不跟随描边刻度的功能线（值随主题自动变化，只在这里定义一次） */
+:root {
+  --scrollbar-thumb: color-mix(in srgb, var(--fg-muted) 40%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-muted) 70%, transparent);
+  --switch-track-off: var(--border-strong);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    多主题系统 — 主题风格 × 明暗模式
    data-theme: nebula | aurora | linear | forest | sakura | carbon | sunset | ocean
    data-mode:  dark | light
@@ -73,11 +112,11 @@
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
 
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-emphasis: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
 
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.5);
@@ -161,11 +200,11 @@
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
 
-  --border-invisible: rgba(15, 23, 60, 0.04);
-  --border-subtle: rgba(15, 23, 60, 0.06);
-  --border-default: rgba(15, 23, 60, 0.1);
-  --border-emphasis: rgba(15, 23, 60, 0.16);
-  --border-strong: rgba(15, 23, 60, 0.24);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
 
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
   --shadow-md: 0 4px 16px -4px rgba(60, 75, 180, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5);
@@ -249,11 +288,11 @@
   --info-muted: var(--accent-muted);
   --info-border: var(--accent-border);
 
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-emphasis: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
 
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -16px rgba(0, 0, 0, 0.6);
@@ -337,11 +376,11 @@
   --info-muted: var(--accent-muted);
   --info-border: var(--accent-border);
 
-  --border-invisible: rgba(15, 18, 30, 0.02);
-  --border-subtle: rgba(15, 18, 30, 0.04);
-  --border-default: rgba(15, 18, 30, 0.06);
-  --border-emphasis: rgba(15, 18, 30, 0.1);
-  --border-strong: rgba(15, 18, 30, 0.16);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
 
   --shadow-sm: none;
   --shadow-md: 0 1px 2px rgba(15, 18, 30, 0.04);
@@ -418,11 +457,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-emphasis: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 24px 56px -16px rgba(0, 0, 0, 0.6);
@@ -492,11 +531,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(15, 26, 20, 0.02);
-  --border-subtle: rgba(15, 26, 20, 0.04);
-  --border-default: rgba(15, 26, 20, 0.06);
-  --border-emphasis: rgba(15, 26, 20, 0.1);
-  --border-strong: rgba(15, 26, 20, 0.16);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
   --shadow-sm: none;
   --shadow-md: 0 1px 3px rgba(0, 30, 10, 0.04);
   --shadow-lg: 0 8px 24px -8px rgba(0, 30, 10, 0.08);
@@ -568,11 +607,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-emphasis: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 24px 56px -16px rgba(0, 0, 0, 0.6);
@@ -642,11 +681,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(26, 10, 20, 0.02);
-  --border-subtle: rgba(26, 10, 20, 0.04);
-  --border-default: rgba(26, 10, 20, 0.06);
-  --border-emphasis: rgba(26, 10, 20, 0.1);
-  --border-strong: rgba(26, 10, 20, 0.16);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
   --shadow-sm: none;
   --shadow-md: 0 1px 3px rgba(120, 20, 60, 0.04);
   --shadow-lg: 0 8px 24px -8px rgba(120, 20, 60, 0.08);
@@ -718,11 +757,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.03);
-  --border-default: rgba(255, 255, 255, 0.05);
-  --border-emphasis: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 24px 56px -16px rgba(0, 0, 0, 0.7);
@@ -792,11 +831,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(10, 11, 12, 0.02);
-  --border-subtle: rgba(10, 11, 12, 0.03);
-  --border-default: rgba(10, 11, 12, 0.05);
-  --border-emphasis: rgba(10, 11, 12, 0.08);
-  --border-strong: rgba(10, 11, 12, 0.14);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
   --shadow-sm: none;
   --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-lg: 0 8px 24px -8px rgba(0, 0, 0, 0.08);
@@ -868,11 +907,11 @@
   --info: var(--contrast);
   --info-muted: var(--contrast-muted);
   --info-border: var(--contrast-border);
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-emphasis: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 24px 56px -16px rgba(0, 0, 0, 0.6);
@@ -942,11 +981,11 @@
   --info: var(--contrast);
   --info-muted: var(--contrast-muted);
   --info-border: var(--contrast-border);
-  --border-invisible: rgba(26, 10, 5, 0.02);
-  --border-subtle: rgba(26, 10, 5, 0.04);
-  --border-default: rgba(26, 10, 5, 0.06);
-  --border-emphasis: rgba(26, 10, 5, 0.1);
-  --border-strong: rgba(26, 10, 5, 0.16);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
   --shadow-sm: none;
   --shadow-md: 0 1px 3px rgba(120, 40, 0, 0.04);
   --shadow-lg: 0 8px 24px -8px rgba(120, 40, 0, 0.08);
@@ -1018,11 +1057,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(255, 255, 255, 0.02);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-emphasis: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 24px 56px -16px rgba(0, 0, 0, 0.6);
@@ -1092,11 +1131,11 @@
   --info: var(--aux);
   --info-muted: var(--aux-muted);
   --info-border: var(--aux-border);
-  --border-invisible: rgba(5, 26, 32, 0.02);
-  --border-subtle: rgba(5, 26, 32, 0.04);
-  --border-default: rgba(5, 26, 32, 0.06);
-  --border-emphasis: rgba(5, 26, 32, 0.1);
-  --border-strong: rgba(5, 26, 32, 0.16);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
   --shadow-sm: none;
   --shadow-md: 0 1px 3px rgba(0, 40, 60, 0.04);
   --shadow-lg: 0 8px 24px -8px rgba(0, 40, 60, 0.08);
@@ -1187,11 +1226,11 @@
   --info-border: var(--aux-border);
 
   /* 线条层级 */
-  --border-invisible: hsla(215, 20%, 50%, 0.03);
-  --border-subtle: hsla(215, 20%, 50%, 0.07);
-  --border-default: hsla(215, 18%, 50%, 0.12);
-  --border-emphasis: hsla(215, 16%, 55%, 0.2);
-  --border-strong: hsla(215, 14%, 60%, 0.3);
+  --border-invisible: hsl(215 20% 50% / 0);
+  --border-subtle: hsl(215 20% 50% / 0.03);
+  --border-default: hsl(215 18% 50% / 0.06);
+  --border-emphasis: hsl(215 16% 55% / 0.13);
+  --border-strong: hsl(215 14% 60% / 0.2);
 
   /* 阴影 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -1301,11 +1340,11 @@
   --info-border: var(--aux-border);
 
   /* 线条层级 — 偏冷的蓝紫调 */
-  --border-invisible: rgba(15, 23, 60, 0.04);
-  --border-subtle: rgba(15, 23, 60, 0.08);
-  --border-default: rgba(15, 23, 60, 0.12);
-  --border-emphasis: rgba(15, 23, 60, 0.2);
-  --border-strong: rgba(15, 23, 60, 0.3);
+  --border-invisible: rgb(15 23 60 / 0);
+  --border-subtle: rgb(15 23 60 / 0.034);
+  --border-default: rgb(15 23 60 / 0.065);
+  --border-emphasis: rgb(15 23 60 / 0.14);
+  --border-strong: rgb(15 23 60 / 0.22);
 
   /* 阴影 — 带蓝紫调 */
   --shadow-sm: 0 1px 3px rgba(60, 75, 180, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
@@ -1396,11 +1435,11 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-default);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--fg-muted);
+  background: var(--scrollbar-thumb-hover);
 }
 
 @keyframes pulse {
@@ -1855,7 +1894,7 @@ textarea {
 
 .nav-rail-scroll {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--border-default) 60%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .nav-rail-scroll::-webkit-scrollbar {
   width: 4px;
@@ -1864,11 +1903,11 @@ textarea {
   background: transparent;
 }
 .nav-rail-scroll::-webkit-scrollbar-thumb {
-  background: color-mix(in oklch, var(--border-default) 60%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
 }
 .nav-rail-scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--border-default) 90%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .nav-rail-label {

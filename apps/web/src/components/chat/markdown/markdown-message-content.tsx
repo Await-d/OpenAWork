@@ -21,6 +21,8 @@ import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
 import { normalizeMathMarkdown } from './normalize-math-markdown.js';
 import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
+import { ChatMarkdownTable } from './chat-markdown-table.js';
+import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -265,18 +267,20 @@ const markdownComponents: Components = {
       {renderTextWithPaths(children, 'bq')}
     </blockquote>
   ),
-  table: ({ children }) => (
-    <div className="chat-markdown-table-wrap">
-      <table className="chat-markdown-table">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="chat-markdown-th">
+  table: ({ children, node }) => <ChatMarkdownTable node={node}>{children}</ChatMarkdownTable>,
+  // react-markdown 会把 GFM 的 `align` 转成 `style.textAlign`（hast-util-to-jsx-runtime
+  // 的 tableCellAlignToStyle 默认开启），这里再落到 `data-align`，避免内联样式散落。
+  th: ({ children, style }) => (
+    <th
+      className="chat-markdown-th"
+      data-align={normalizeTableCellAlign(style?.textAlign)}
+      scope="col"
+    >
       {renderTextWithPaths(children, 'th', TEXT_WITH_HARD_BREAKS)}
     </th>
   ),
-  td: ({ children }) => (
-    <td className="chat-markdown-td">
+  td: ({ children, style }) => (
+    <td className="chat-markdown-td" data-align={normalizeTableCellAlign(style?.textAlign)}>
       {renderTextWithPaths(children, 'td', TEXT_WITH_HARD_BREAKS)}
     </td>
   ),
@@ -575,8 +579,12 @@ function isMarkdownLanguage(language: string | undefined): boolean {
   return language === 'markdown' || language === 'md';
 }
 
+/**
+ * 图表围栏识别。除 `mermaid` / `mmd` 外也接受 `mindmap`、`flowchart`
+ * 等「直接写图表类型当语言名」的写法，见 `mermaid-diagram-meta.ts`。
+ */
 function isMermaidLanguage(language: string | undefined): boolean {
-  return language === 'mermaid' || language === 'mmd';
+  return isMermaidFenceLanguage(language);
 }
 
 function isThinkingLanguage(language: string | undefined): boolean {
@@ -607,6 +615,29 @@ function getStaticPreviewKind(language: string | undefined): StaticPreviewKind |
   }
 
   return null;
+}
+
+type TableCellAlign = 'left' | 'center' | 'right' | 'justify';
+
+/**
+ * GFM 表格的列对齐（`:---` / `:---:` / `---:`）会被 react-markdown 放进
+ * 单元格的 `style.textAlign`。这里归一化为 `data-align`，交给 CSS 统一处理，
+ * 顺带避开已废弃的 `align` 属性。
+ */
+function normalizeTableCellAlign(textAlign: string | undefined): TableCellAlign {
+  if (textAlign === 'center') {
+    return 'center';
+  }
+
+  if (textAlign === 'right' || textAlign === 'end') {
+    return 'right';
+  }
+
+  if (textAlign === 'justify') {
+    return 'justify';
+  }
+
+  return 'left';
 }
 
 const RESIZE_SCRIPT = `<script>

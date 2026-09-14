@@ -1,5 +1,14 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: vi.fn(async () => true),
+    render: vi.fn(async () => ({ svg: '<svg viewBox="0 0 320 180"><text>d</text></svg>' })),
+  },
+}));
+
 import MarkdownMessageContent from './markdown-message-content.js';
 
 afterEach(cleanup);
@@ -95,5 +104,69 @@ describe('MarkdownMessageContent hard breaks', () => {
 
     expect(container.textContent).not.toContain('<br>');
     expect(container.querySelectorAll('.chat-markdown-p')).toHaveLength(2);
+  });
+});
+
+describe('MarkdownMessageContent tables', () => {
+  const TABLE = ['| 项目 | 金额 | 备注 |', '| :--- | ---: | --- |', '| 合计 | 1200 | ok |'].join(
+    '\n',
+  );
+
+  it('渲染为卡片结构：工具栏 + 独立滚动区', () => {
+    const { container } = render(<MarkdownMessageContent content={TABLE} />);
+
+    expect(container.querySelector('.chat-markdown-table-shell')).toBeTruthy();
+    expect(container.querySelector('.chat-markdown-table-viewport')).toBeTruthy();
+    expect(container.querySelector('.chat-markdown-table-wrap .chat-markdown-table')).toBeTruthy();
+    expect(screen.getByTestId('chat-markdown-table-copy')).toBeTruthy();
+    expect(screen.getByText('1 行 × 3 列')).toBeTruthy();
+  });
+
+  it('把 GFM 列对齐落到 data-align，交给样式处理', () => {
+    const { container } = render(<MarkdownMessageContent content={TABLE} />);
+
+    const headerCells = container.querySelectorAll('.chat-markdown-th');
+    const bodyCells = container.querySelectorAll('.chat-markdown-td');
+
+    expect(headerCells[0]?.getAttribute('data-align')).toBe('left');
+    expect(headerCells[1]?.getAttribute('data-align')).toBe('right');
+    // 未标注对齐的列默认左对齐
+    expect(headerCells[2]?.getAttribute('data-align')).toBe('left');
+    expect(bodyCells[1]?.getAttribute('data-align')).toBe('right');
+    expect(headerCells[0]?.getAttribute('scope')).toBe('col');
+  });
+
+  it('列数多时切到紧凑密度', () => {
+    const wide = [
+      '| a | b | c | d | e | f | g |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+      '| 1 | 2 | 3 | 4 | 5 | 6 | 7 |',
+    ].join('\n');
+    const { container } = render(<MarkdownMessageContent content={wide} />);
+
+    expect(
+      container.querySelector('.chat-markdown-table-shell')?.getAttribute('data-density'),
+    ).toBe('compact');
+  });
+});
+
+describe('MarkdownMessageContent mermaid fences', () => {
+  it('把 ```mindmap 直接当图表渲染并标注类型', () => {
+    const content = ['```mindmap', 'mindmap', '  root((主题))', '    分支', '```'].join('\n');
+    const { container } = render(<MarkdownMessageContent content={content} />);
+
+    expect(
+      container.querySelector('.chat-markdown-code-block')?.getAttribute('data-diagram-kind'),
+    ).toBe('mindmap');
+    expect(screen.getByText('思维导图')).toBeTruthy();
+  });
+
+  it('普通代码围栏不受影响，不带上图表标记', () => {
+    const content = ['```ts', 'const a = 1;', '```'].join('\n');
+    const { container } = render(<MarkdownMessageContent content={content} />);
+
+    const block = container.querySelector('.chat-markdown-code-block');
+    expect(block).toBeTruthy();
+    expect(block?.hasAttribute('data-diagram-kind')).toBe(false);
   });
 });
