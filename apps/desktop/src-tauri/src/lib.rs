@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
@@ -52,6 +53,12 @@ const GATEWAY_SUBDIR: &str = "agent-gateway";
 struct GatewayState {
     child: Option<CommandChild>,
     port: Option<u16>,
+    /// 当前 sidecar 的 bind host（`127.0.0.1` / `0.0.0.0`）。
+    ///
+    /// 用途：让 `spawn_gateway_sidecar` 判断「已持有的 sidecar 是否就是本次请求想要的那一个」。
+    /// 只有 port 与 host 都一致、且 `/health` 仍然健康时才可以短路复用；host 不一致
+    /// （用户在「桌面端 → Web 端访问」里切换局域网共享）仍必须重启，否则 bind 模式切换失效。
+    bind_host: Option<&'static str>,
     generation: u64,
     desktop_auth_token: String,
 }
@@ -73,6 +80,7 @@ fn shutdown_gateway_child_from_state(gateway_state: &Arc<Mutex<GatewayState>>) {
             let _ = child.kill();
         }
         guard.port = None;
+        guard.bind_host = None;
     }
 }
 
@@ -138,6 +146,7 @@ fn clear_gateway_child(gateway_state: &Arc<Mutex<GatewayState>>, generation: u64
         if guard.generation == generation {
             guard.child = None;
             guard.port = None;
+            guard.bind_host = None;
         }
     }
 }
@@ -156,6 +165,68 @@ enum CloseBehavior {
 ///
 /// payload = `LockStateView`。
 const EVT_LOCK_STATE_CHANGED: &str = "lock-state-changed";
+
+/// Tauri 事件名：用户点击主窗口关闭按钮且关闭行为为「每次询问」时 emit。
+///
+/// 前端 `CloseConfirmDialog` 监听此事件后弹出应用内自定义确认弹窗，用户做出
+/// 选择后通过 `resolve_close_request` 命令回执。相比系统原生对话框，自定义
+/// 弹窗可以跟随应用主题、承载更清晰的动作说明，并与整体视觉保持一致。
+const EVT_CLOSE_REQUESTED: &str = "desktop:close-requested";
+
+/// Tauri 事件名：托盘菜单「关于 OpenAWork」被点击时 emit。
+///
+/// 前端 `AboutDialog` 监听此事件后弹出应用内关于弹窗（原来的实现是系统原生
+/// `MessageDialog`，不跟随主题、也无法承载构建信息）。
+const EVT_ABOUT_REQUESTED: &str = "tray:about";
+
+/// 「托盘 → 应用内弹窗」的通道。
+///
+/// 每个通道在前端独立注册监听，因此就绪状态必须**按通道分开记录**：若共用一个
+/// 布尔量，只要挂了其中一个弹窗就会把另一个通道也判为就绪，而那个通道实际上没有
+/// 监听者，emit 出去无人接收 —— 用户就会遇到「点了菜单没有任何反应」。
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DialogChannel {
+    /// 关闭确认弹窗（`EVT_CLOSE_REQUESTED`）。
+    Close,
+    /// 关于弹窗（`EVT_ABOUT_REQUESTED`）。
+    About,
+}
+
+/// 应用内弹窗宿主的就绪状态（managed by Tauri）。
+///
+/// 前端各弹窗在**监听注册成功后**调用 `mark_dialog_host_ready` 置位对应通道；
+/// Rust 端只在对应通道就绪时才把托盘动作交给应用内弹窗，否则回落到系统原生
+/// 对话框，避免出现「点了没有任何反应」的死角。
+#[derive(Default)]
+struct DialogHostReady {
+    close: AtomicBool,
+    about: AtomicBool,
+}
+
+impl DialogHostReady {
+    fn slot(&self, channel: DialogChannel) -> &AtomicBool {
+        match channel {
+            DialogChannel::Close => &self.close,
+            DialogChannel::About => &self.about,
+        }
+    }
+
+    fn ready(&self, channel: DialogChannel) -> bool {
+        self.slot(channel).load(Ordering::Relaxed)
+    }
+
+    fn mark_ready(&self, channel: DialogChannel) {
+        self.slot(channel).store(true, Ordering::Relaxed);
+    }
+}
+
+/// 读取某个弹窗通道是否已就绪（未初始化时视为未就绪 → 走原生兜底）。
+fn is_dialog_host_ready(app: &tauri::AppHandle, channel: DialogChannel) -> bool {
+    app.try_state::<DialogHostReady>()
+        .map(|state| state.ready(channel))
+        .unwrap_or(false)
+}
 
 /// gateway sidecar 健康状态——驱动托盘 tooltip emoji 与前端状态显示。
 ///
@@ -917,10 +988,15 @@ fn resolve_packaged_windows_media_paths(app: &tauri::AppHandle) -> Option<(Strin
 
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
+/// 幂等语义（重要）：本函数对「本实例已持有、且健康、且 bind host 未变」的 sidecar
+/// **不做任何事**，直接返回 Ok。见下方 `already_owned` 短路分支。
+///
 /// 端口抢占语义：目标端口已有健康 sidecar 时 **不会** 静默 adopt（历史实现的 bug：
 /// adopt 只登记 port 不登记 child，后续 stop_gateway 就没有 child 可以 kill，用户
 /// 关闭「Web 端访问」后浏览器仍能访问）。改为先通过 `/__internal/shutdown` 请占用方
 /// 优雅退出，再 spawn 自己持有的 child，保证 GatewayState.child 与真实运行的进程一一对应。
+/// 注意这条「先关再起」路径只适用于**孤儿**（`guard.child` 为 None 的残留进程）；
+/// 自己持有的健康 sidecar 由上面的短路分支保护，不会被重复重启。
 ///
 /// `host` 参数由前端「桌面端 → Web 端访问」section 控制：
 /// - `Some("0.0.0.0")` → 局域网共享模式，sidecar bind 全网卡；
@@ -930,6 +1006,30 @@ async fn spawn_gateway_sidecar(
     port: u16,
     host: &'static str,
 ) -> Result<(), String> {
+    // 幂等短路：本实例已经持有该端口上的存活 sidecar，且 bind host 与本次请求一致，
+    // 且它仍然健康 —— 直接复用，绝不重启。
+    //
+    // 为什么必须有这条分支：桌面端前端在**每次页面加载**都会走 bootstrap
+    // （`apps/web/src/App.tsx::useDesktopGatewayBootstrap`）→ `start_gateway`。
+    // 若此时对「正在服务的健康网关」执行下面的「请对方退出 → 重新 spawn」流程，
+    // 端口会关闭约 1-3s（sidecar 是 134MB 的 Bun 单文件二进制，冷启动不便宜），
+    // 而本次页面加载立刻发出的请求（`useSessions` 的 `/sessions`）正好落在窗口里，
+    // 收到 ECONNREFUSED → Chromium/WebView2 抛 `TypeError: Failed to fetch`
+    // → 前端归一成「网络异常，读取会话列表失败。」。连续刷新会叠加多次重启窗口，
+    // 因此必现；再刷一次（窗口之外）即恢复。
+    //
+    // host 必须参与比较：用户在「桌面端 → Web 端访问」里切换局域网共享时，
+    // 同一个 port 需要重新 bind 到 0.0.0.0 / 127.0.0.1，不能短路。
+    let already_owned = {
+        let state = app.state::<GatewayProcess>();
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        guard.child.is_some() && guard.port == Some(port) && guard.bind_host == Some(host)
+    };
+    if already_owned && is_local_gateway_healthy(port).await {
+        update_gateway_health(&app, GatewayHealth::Healthy);
+        return Ok(());
+    }
+
     update_gateway_health(&app, GatewayHealth::Starting);
 
     // 端口已经被占用时，**不能**直接 adopt：adopt 只写 `guard.port`、不写 `guard.child`，
@@ -1049,11 +1149,12 @@ async fn spawn_gateway_sidecar(
 
     let (mut rx, child) = command.spawn().map_err(|e| e.to_string())?;
 
-    // spawn 成功后短暂加锁写回 child 和 port。
+    // spawn 成功后短暂加锁写回 child / port / bind_host。
     {
         let mut guard = gateway_state.lock().map_err(|e| e.to_string())?;
         guard.child = Some(child);
         guard.port = Some(port);
+        guard.bind_host = Some(host);
     }
 
     // 等待网关变为健康后再返回，让前端的 waitForGatewayHealth 能快速通过。
@@ -1239,6 +1340,9 @@ async fn stop_gateway(
         guard.generation = guard.generation.wrapping_add(1);
         let child = guard.child.take();
         let port = guard.port.take();
+        // bind_host 必须一起清掉，否则下次 start_gateway 会误判「已持有同一 port+host
+        // 的健康 sidecar」而短路复用，实际进程已经被停掉。
+        guard.bind_host = None;
         let token = guard.desktop_auth_token.clone();
         (child, port, token)
     };
@@ -1879,7 +1983,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "check_updates" => trigger_update_check(app),
             "view_logs" => open_gateway_logs_directory(app),
             "open_config" => open_config_directory(app),
-            "about" => show_about_dialog(app),
+            "about" => request_about_dialog(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -1929,15 +2033,21 @@ fn open_gateway_logs_directory(app: &tauri::AppHandle) {
         .open_path(data_dir.to_string_lossy().to_string(), None::<&str>);
 }
 
-/// 手动检查更新。调用 tauri-plugin-updater 拉取 endpoints 中的 latest.json，
-/// 根据结果弹对话框提示。有更新版本时询问是否下载安装。
+/// 托盘菜单「检查更新」：把主窗口拉回前台，并通知前端跳到「设置 → 关于」页
+/// 自动开始检查更新。
+///
+/// payload = `{ autoStart: boolean }`，与 `open_update_panel` 命令保持一致，
+/// 前端 `App.tsx` 监听后按 `autoStart` 决定是否立即触发一次检查。
+///
+/// 这里不做「宿主未就绪」判断：桌面端历史上这个事件根本没有前端监听者，
+/// 所以 emit 失败/无人接收并不构成回归，`restore_main_window` 已保证窗口可见。
 fn trigger_update_check(app: &tauri::AppHandle) {
     restore_main_window(app);
-    let _ = app.emit("tray:check-updates", ());
+    let _ = app.emit("tray:check-updates", serde_json::json!({ "autoStart": true }));
 }
 
-/// 显示"关于 OpenAWork"对话框（含版本号）。
-fn show_about_dialog(app: &tauri::AppHandle) {
+/// 「关于 OpenAWork」的系统原生兜底对话框（含版本号）。
+fn show_native_about_dialog(app: &tauri::AppHandle) {
     let info = app.package_info();
     let body = format!(
         "{name} v{version}\n\n跨平台 AI Agent 工作台",
@@ -1949,6 +2059,87 @@ fn show_about_dialog(app: &tauri::AppHandle) {
         .title("关于 OpenAWork")
         .kind(MessageDialogKind::Info)
         .show(|_| {});
+}
+
+/// 托盘菜单「关于 OpenAWork」：优先走应用内关于弹窗，未就绪时回落原生对话框。
+///
+/// 应用内弹窗跟随主题、还能承载构建信息，是用户可见面的主路径；原生对话框只是
+/// 保证「WebView 首帧加载中 / 前端异常」时仍然点了有反馈。
+fn request_about_dialog(app: &tauri::AppHandle) {
+    restore_main_window(app);
+    if is_dialog_host_ready(app, DialogChannel::About)
+        && app.emit(EVT_ABOUT_REQUESTED, ()).is_ok()
+    {
+        return;
+    }
+    show_native_about_dialog(app);
+}
+
+/// `CloseBehavior::Ask` 的系统原生兜底对话框。
+///
+/// 仅在自定义弹窗宿主未就绪（首帧加载中 / 前端异常）时使用，保证点击 X
+/// 永远有确定结果，不会卡在「问了但没人回答」。
+fn show_native_close_dialog(app: &tauri::AppHandle) {
+    let app_handle = app.clone();
+    app.dialog()
+        .message("选择「确定」将退出程序并停止本地 gateway；选择「取消」将最小化到托盘继续运行。")
+        .title("关闭 OpenAWork")
+        .kind(MessageDialogKind::Info)
+        .show(move |yes| {
+            if yes {
+                app_handle.exit(0);
+            } else if let Some(win) = app_handle.get_webview_window("main") {
+                hide_to_tray(&app_handle, &win);
+            }
+        });
+}
+
+/// 关闭确认弹窗的回执：前端弹窗收集到用户选择后调用。
+///
+/// - `action = "exit"`：退出程序并停止本地 gateway；
+/// - `action = "minimize"`：最小化到托盘，gateway 继续运行；
+/// - `remember = true`：把本次选择写回 `close_behavior`，下次点击 X 直接执行
+///   不再询问（用户可在「设置 → 桌面端 → 关闭行为」随时改回「每次询问」）。
+#[tauri::command]
+async fn resolve_close_request(
+    app: tauri::AppHandle,
+    action: String,
+    remember: Option<bool>,
+) -> Result<(), String> {
+    let behavior = match action.as_str() {
+        "exit" => CloseBehavior::Exit,
+        "minimize" => CloseBehavior::Minimize,
+        other => return Err(format!("未知的关闭动作：{other}")),
+    };
+
+    if remember.unwrap_or(false) {
+        apply_close_behavior(&app, behavior);
+    }
+
+    if behavior == CloseBehavior::Minimize {
+        if let Some(window) = app.get_webview_window("main") {
+            hide_to_tray(&app, &window);
+        }
+    } else {
+        app.exit(0);
+    }
+    Ok(())
+}
+
+/// 前端某个应用内弹窗在**监听注册成功后**调用，置位对应通道。
+///
+/// 之所以要求「注册成功后再置位」：Rust 端一旦看到就绪就把托盘动作交给应用内
+/// 弹窗，若此时监听还没挂上，emit 出去无人接收，用户会认为功能坏了。
+#[tauri::command]
+fn mark_dialog_host_ready(
+    app: tauri::AppHandle,
+    channel: DialogChannel,
+) -> Result<(), String> {
+    let Some(state) = app.try_state::<DialogHostReady>() else {
+        return Err("弹窗宿主状态未初始化".to_string());
+    };
+    state.mark_ready(channel);
+    Ok(())
 }
 
 fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequestApi) {
@@ -1971,20 +2162,21 @@ fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequest
         }
         CloseBehavior::Ask => {
             api.prevent_close();
-            if app.get_webview_window("main").is_some() {
-                let app_handle = app.clone();
-                app.dialog()
-                    .message("选择「确定」将退出程序并停止本地 gateway；选择「取消」将最小化到托盘继续运行。")
-                    .title("关闭 OpenAWork")
-                    .kind(MessageDialogKind::Info)
-                    .show(move |yes| {
-                        if yes {
-                            app_handle.exit(0);
-                        } else if let Some(win) = app_handle.get_webview_window("main") {
-                            hide_to_tray(&app_handle, &win);
-                        }
-                    });
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
+            // 弹窗由前端渲染，主窗口可能正被收在托盘里，先拉回前台再发事件，
+            // 否则用户看到的现象是「点了 X 没有任何反应」。
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            if is_dialog_host_ready(app, DialogChannel::Close)
+                && app.emit(EVT_CLOSE_REQUESTED, ()).is_ok()
+            {
+                return;
             }
+            show_native_close_dialog(app);
         }
     }
 }
@@ -1998,6 +2190,7 @@ pub fn run() {
     let gateway_process_for_updater = Arc::new(Mutex::new(GatewayState {
         child: None,
         port: None,
+        bind_host: None,
         generation: 0,
         desktop_auth_token: load_or_create_desktop_auth_token(),
     }));
@@ -2044,6 +2237,7 @@ pub fn run() {
         )
         .manage(GatewayProcess(gateway_process_for_updater))
         .manage(DesktopControlBridgeProcess::default())
+        .manage(DialogHostReady::default())
         .manage(GatewayHealthState(Arc::new(Mutex::new(
             GatewayHealth::Stopped,
         ))))
@@ -2074,6 +2268,8 @@ pub fn run() {
             verify_desktop_pin,
             get_lock_state,
             lock_desktop_now,
+            resolve_close_request,
+            mark_dialog_host_ready,
         ])
         .setup(|app| {
             // 先加载持久化设置并 manage 全局 state，setup_tray 会读取它来初始化菜单
@@ -2127,8 +2323,8 @@ pub fn run() {
         .expect("error while building tauri application");
 
     // 用 RunEvent::Exit 做清理：
-    // - 单个窗口关闭被对话框拦截，不会触发清理；
-    // - "退出 OpenAWork"（窗口对话框选择 / 托盘菜单 / app.exit）才触发 Exit；
+    // - 单个窗口关闭被应用内确认弹窗拦截，不会触发清理；
+    // - "退出 OpenAWork"（弹窗选择退出 / 托盘菜单 / app.exit）才触发 Exit；
     // - shutdown_gateway_child 只 kill 本桌面端实例自己 spawn 的 child，
     //   复用别的网关时不会误杀，符合"跨会话复用"语义。
     app.run(|app_handle, event| {
