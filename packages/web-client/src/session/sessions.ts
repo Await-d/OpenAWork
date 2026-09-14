@@ -10,7 +10,7 @@ import type {
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PermissionDecision } from './permissions.js';
 import type { PendingQuestionRequest } from './questions.js';
-import { fetchWithTimeout } from '../gateway/http.js';
+import { fetchWithTimeout, isGenericFetchErrorMessage } from '../gateway/http.js';
 
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
 
@@ -737,14 +737,16 @@ function buildSessionActionErrorMessage(
   return `${actionLabel}失败（HTTP ${status}）。`;
 }
 
+/**
+ * 复用中心 helper，而不是本地再抄一份浏览器原生文案表。
+ *
+ * 本地旧表只认 'Failed to fetch' 等少数几条原生文案，认不出 `fetchWithTimeout`
+ * 墙钟超时抛出的 `AbortError`（'The operation was aborted' /
+ * 'signal is aborted without reason'），于是超时的英文原文会直接泄漏到 UI。
+ * 统一走 `isGenericFetchErrorMessage` 后与其余资源客户端保持一致。
+ */
 function isGenericSessionNetworkErrorMessage(message: string): boolean {
-  return (
-    message === 'Failed to fetch' ||
-    message === 'Load failed' ||
-    message === 'fetch failed' ||
-    message === 'Network request failed' ||
-    message === 'NetworkError when attempting to fetch resource.'
-  );
+  return isGenericFetchErrorMessage(message);
 }
 
 function normalizeSessionActionError(actionLabel: string, error: unknown): Error {

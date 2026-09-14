@@ -66,6 +66,33 @@ function navigateToClosedSessionTarget(
 
 const MISSING_PARENT_SESSION_CACHE_TTL_MS = 60_000;
 
+/**
+ * 会话列表加载遇到「瞬时传输失败」时的重试退避（ms），共 3 次、累计约 4.2s。
+ *
+ * 为什么需要：桌面端**每次页面加载**都会由原生侧执行 `start_gateway`
+ * （`apps/web/src/App.tsx` 的 useDesktopGatewayBootstrap → Tauri start_gateway）。
+ * 一旦该调用落在「本实例已持有的健康网关」上，原生侧会先请它优雅退出再重新 spawn，
+ * 端口会关闭约 1-3s（sidecar 是 134MB 的 Bun 单文件二进制，冷启动不便宜）。
+ * 而本页首帧就会发出 `/sessions`，正好撞进这个窗口 —— 收到 ECONNREFUSED，
+ * Chromium / WebView2 抛 `TypeError: Failed to fetch`，经 web-client 归一成
+ * 非 HttpError 的中文网络文案「网络异常，读取会话列表失败。」。
+ *
+ * 原生侧已修成幂等（`spawn_gateway_sidecar` 对「已持有 + 健康 + host 未变」的
+ * sidecar 直接短路），这里的重试是第二道防线：任何瞬时抖动都不应把侧边栏
+ * 永久按在「会话列表加载失败」的错误态上。
+ */
+const SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS = [400, 1200, 2600];
+
+/**
+ * 只有「快速失败」的传输错误才值得重试（阈值 ms）。
+ *
+ * 连接被拒 / 被重置（网关正在重启）是毫秒级返回的，重试能立刻自愈；
+ * 而 `fetchWithTimeout` 的 20s 墙钟超时代表「网关接受了连接却卡住」，
+ * 重试 3 次会把骨架屏拖到 80s 以上 —— 那种情况应当尽快把错误暴露给用户，
+ * 而不是默默重试。
+ */
+const SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS = 5_000;
+
 export function useSessions() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
@@ -132,65 +159,95 @@ export function useSessions() {
     fetchRequestIdRef.current = requestId;
     setIsLoadingSessions(true);
     try {
-      const data = await withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
-        const activeStreamSessionId = readPersistedActiveStreamSessionId();
-        // P3-PATH: when the user opted into "scope sidebar to current
-        // workspace", thread the selected path through the list call.
-        // We only forward it when both (a) the toggle is on AND (b) the
-        // user has actually picked a workspace, otherwise we keep the
-        // legacy global list behaviour.
-        // T-PATH-04: the feature flag in settings short-circuits the
-        // toggle entirely so an admin can pin the legacy global
-        // listing for the whole user without forcing them to clear
-        // the per-tab toggle they may have already enabled.
-        const listOptions: SessionsListOptions = { excludeTeam: true };
-        if (
-          sessionListPathFilterFeatureEnabled &&
-          sessionListPathFilterEnabled &&
-          selectedWorkspacePath
-        ) {
-          listOptions.path = selectedWorkspacePath;
-        }
-        const listedSessions = (await createSessionsClient(gatewayUrl).list(
-          token,
-          listOptions,
-        )) as unknown as Session[];
-        const hydratedSessions = await hydrateMissingParentSessions(
-          listedSessions,
-          gatewayUrl,
-          tokenStore,
-          parentSessionCacheRef.current,
-          parentSessionInFlightRef.current,
-          missingParentSessionExpiryRef.current,
-        );
-
-        for (const session of hydratedSessions) {
-          const overrideState = runStateOverridesRef.current.get(session.id);
-          if (!overrideState) {
-            continue;
-          }
-
-          if (session.state_status === overrideState) {
-            runStateOverridesRef.current.delete(session.id);
-            continue;
-          }
-
+      const loadSessionList = async (): Promise<Session[]> =>
+        withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
+          const activeStreamSessionId = readPersistedActiveStreamSessionId();
+          // P3-PATH: when the user opted into "scope sidebar to current
+          // workspace", thread the selected path through the list call.
+          // We only forward it when both (a) the toggle is on AND (b) the
+          // user has actually picked a workspace, otherwise we keep the
+          // legacy global list behaviour.
+          // T-PATH-04: the feature flag in settings short-circuits the
+          // toggle entirely so an admin can pin the legacy global
+          // listing for the whole user without forcing them to clear
+          // the per-tab toggle they may have already enabled.
+          const listOptions: SessionsListOptions = { excludeTeam: true };
           if (
-            session.state_status === 'idle' &&
-            overrideState !== 'idle' &&
-            session.id !== activeStreamSessionId
+            sessionListPathFilterFeatureEnabled &&
+            sessionListPathFilterEnabled &&
+            selectedWorkspacePath
           ) {
-            runStateOverridesRef.current.delete(session.id);
+            listOptions.path = selectedWorkspacePath;
           }
-        }
+          const listedSessions = (await createSessionsClient(gatewayUrl).list(
+            token,
+            listOptions,
+          )) as unknown as Session[];
+          const hydratedSessions = await hydrateMissingParentSessions(
+            listedSessions,
+            gatewayUrl,
+            tokenStore,
+            parentSessionCacheRef.current,
+            parentSessionInFlightRef.current,
+            missingParentSessionExpiryRef.current,
+          );
 
-        const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
-        return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
-      });
+          for (const session of hydratedSessions) {
+            const overrideState = runStateOverridesRef.current.get(session.id);
+            if (!overrideState) {
+              continue;
+            }
+
+            if (session.state_status === overrideState) {
+              runStateOverridesRef.current.delete(session.id);
+              continue;
+            }
+
+            if (
+              session.state_status === 'idle' &&
+              overrideState !== 'idle' &&
+              session.id !== activeStreamSessionId
+            ) {
+              runStateOverridesRef.current.delete(session.id);
+            }
+          }
+
+          const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
+          return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
+        });
+
+      // 瞬时传输失败重试：见 SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS 的常量注释。
+      // 只对「非 HttpError」（即 fetch 直接被拒、被归一成中文网络文案的传输层失败）
+      // 且「快速失败」的尝试重试；HttpError 是服务端给出的确定性结果，慢失败
+      // （墙钟超时）见 SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS 的说明。
+      let data: Session[] = [];
+      for (let attempt = 0; ; attempt += 1) {
+        const attemptStartedAt = Date.now();
+        try {
+          data = await loadSessionList();
+          break;
+        } catch (error) {
+          const retryDelayMs = SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS[attempt];
+          if (
+            retryDelayMs === undefined ||
+            error instanceof HttpError ||
+            Date.now() - attemptStartedAt > SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS
+          ) {
+            throw error;
+          }
+          if (fetchRequestIdRef.current !== requestId) {
+            throw error;
+          }
+          logger.warn(`Failed to fetch sessions, retrying in ${retryDelayMs}ms`, error);
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, retryDelayMs);
+          });
+        }
+      }
       if (fetchRequestIdRef.current !== requestId) {
         return;
       }
-      const nextSessions = data as unknown as Session[];
+      const nextSessions = data;
       mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
       setSessions(nextSessions);
       setSessionsError(null);
