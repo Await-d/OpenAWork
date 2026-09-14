@@ -25,6 +25,7 @@ import {
 import { normalizeSettingsModelPrices } from './usage/usage-data.js';
 import {
   addProviderModel,
+  removeProvider,
   removeProviderModel,
   toggleProviderModel,
   updateProviderModel,
@@ -48,7 +49,7 @@ import type {
   ArtifactItem,
   ProviderCatalogUiEntry,
 } from '@openAwork/shared-ui';
-import { hydrateProviderCatalogUi } from '@openAwork/shared-ui';
+import { canRemoveProvider, hydrateProviderCatalogUi } from '@openAwork/shared-ui';
 import { ConnectionTabContent } from './connection/connection-tab-content.js';
 import { DisplayTabContent } from './display/display-tab-content.js';
 import { ChannelsTabContent } from './channels/channels-tab-content.js';
@@ -1239,6 +1240,29 @@ export default function SettingsPage() {
       return next;
     });
   }
+  function handleRemoveProvider(id: string) {
+    setProviders((prev) => {
+      if (!canRemoveProvider(prev, id)) {
+        return prev;
+      }
+      const next = removeProvider(prev, id);
+      providersRef.current = next;
+      const { savedSelection } = syncSelectionForProviders(next);
+      void saveProviders(
+        next,
+        savedSelection,
+        savedDefaultThinkingRef.current,
+        savedImageGenerationDefaultsRef.current,
+        {
+          syncDraft: false,
+          syncSaved: true,
+        },
+      ).catch((error: unknown) => {
+        logger.error('failed to save removed provider', error);
+      });
+      return next;
+    });
+  }
   function persistModelMutation(
     mutate: (providers: AIProviderRef[]) => AIProviderRef[],
     errorMessage: string,
@@ -1546,6 +1570,7 @@ export default function SettingsPage() {
                     handleToggleProvider={handleToggleProvider}
                     handleEditProvider={handleEditProvider}
                     handleAddProvider={handleAddProvider}
+                    handleRemoveProvider={handleRemoveProvider}
                     onTestModel={handleTestModel}
                     onSyncCatalog={handleSyncCatalog}
                     onDiscoverProviders={handleDiscoverProviders}

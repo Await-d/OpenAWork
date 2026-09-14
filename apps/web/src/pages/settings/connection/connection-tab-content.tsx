@@ -78,6 +78,7 @@ interface ConnectionTabContentProps {
   handleToggleProvider: (id: string) => void;
   handleEditProvider: (id: string, data: ProviderEditData) => void;
   handleAddProvider: (data: ProviderEditData) => void;
+  handleRemoveProvider: (id: string) => void;
   onTestModel?: (
     providerId: string,
     modelId: string,
@@ -145,6 +146,7 @@ export function ConnectionTabContent({
   handleToggleProvider,
   handleEditProvider,
   handleAddProvider,
+  handleRemoveProvider,
   onTestModel,
   onSyncCatalog,
   onDiscoverProviders,
@@ -397,6 +399,7 @@ export function ConnectionTabContent({
             onToggleProvider={handleToggleProvider}
             onEditProvider={handleEditProvider}
             onAddProvider={handleAddProvider}
+            onRemoveProvider={handleRemoveProvider}
             onToggleModel={handleToggleModel}
             onAddModel={handleAddModel}
             onRemoveModel={handleRemoveModel}

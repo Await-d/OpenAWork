@@ -63,3 +63,8 @@ export function removeProviderModel(
       : provider,
   );
 }
+
+/** 仅 custom 可移除:内置平台保存时会被后端 syncProviderCatalog 重新播种。 */
+export function removeProvider(providers: AIProviderRef[], providerId: string): AIProviderRef[] {
+  return providers.filter((provider) => provider.id !== providerId);
+}
