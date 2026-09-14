@@ -671,7 +671,7 @@ function ToggleRow({
           width: 44,
           height: 24,
           borderRadius: 999,
-          background: checked ? 'var(--accent)' : 'var(--border-strong)',
+          background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
           display: 'inline-flex',
           alignItems: 'center',
           padding: 3,

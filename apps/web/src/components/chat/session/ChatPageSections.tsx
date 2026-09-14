@@ -1264,11 +1264,17 @@ export interface InlinePermissionQuickBarProps {
     previewAction?: string;
   }>;
   resolveActions: ResolveInlinePermissionActionsFn;
+  /**
+   * 紧凑模式：去掉为「对话气泡左侧头像列」预留的 40px 缩进。
+   * 卡片墙等窄容器（<280px）里必须开 —— 否则可用宽度被白白吃掉六分之一。
+   */
+  dense?: boolean;
 }
 
 export function InlinePermissionQuickBar({
   permissions,
   resolveActions,
+  dense = false,
 }: InlinePermissionQuickBarProps) {
   if (permissions.length === 0) return null;
 
@@ -1279,7 +1285,7 @@ export function InlinePermissionQuickBar({
         display: 'flex',
         flexDirection: 'column',
         gap: 5,
-        paddingLeft: 40,
+        paddingLeft: dense ? 0 : 40,
       }}
     >
       {permissions.map((permission) => {

@@ -477,4 +477,3 @@ describe('InlineQuestionPanel — 轮次上下文', () => {
     expect(screen.queryByText(/第 \d+ 轮/)).toBeNull();
   });
 });
-

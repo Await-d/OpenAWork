@@ -52,7 +52,7 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
           border: 'none',
           padding: 0,
           cursor: 'pointer',
-          background: checked ? 'var(--accent)' : 'var(--border-default)',
+          background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
           flexShrink: 0,
         }}
       >

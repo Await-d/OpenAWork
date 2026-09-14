@@ -368,11 +368,11 @@ function NotificationPanelImpl({
           background: transparent;
         }
         .nc-scroll-area::-webkit-scrollbar-thumb {
-          background: var(--border-emphasis);
+          background: var(--scrollbar-thumb);
           border-radius: 999;
         }
         .nc-scroll-area::-webkit-scrollbar-thumb:hover {
-          background: var(--border-strong);
+          background: var(--scrollbar-thumb-hover);
         }
       `}</style>
     </div>

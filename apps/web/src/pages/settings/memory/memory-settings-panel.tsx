@@ -59,7 +59,7 @@ function ToggleRow({
         aria-label={ariaLabel}
         style={{
           ...TOGGLE_TRACK,
-          background: checked ? 'var(--accent)' : 'var(--border-default)',
+          background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
         }}
         onClick={onToggle}
       >

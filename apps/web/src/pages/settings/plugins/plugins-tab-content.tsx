@@ -138,7 +138,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
         border: 'none',
         padding: 0,
         cursor: 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border-default)',
+        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
         flexShrink: 0,
         transition: 'background 180ms ease',
       }}

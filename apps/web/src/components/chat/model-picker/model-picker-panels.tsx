@@ -362,11 +362,11 @@ export function ModelPicker({
           .chat-model-picker-scroll::-webkit-scrollbar { width: 5px; }
           .chat-model-picker-scroll::-webkit-scrollbar-track { background: transparent; }
           .chat-model-picker-scroll::-webkit-scrollbar-thumb {
-            background: var(--border-default);
+            background: var(--scrollbar-thumb);
             border-radius: 999px;
           }
           .chat-model-picker-scroll::-webkit-scrollbar-thumb:hover {
-            background: var(--border-emphasis);
+            background: var(--scrollbar-thumb-hover);
           }
         `}</style>
         {/* Header */}
@@ -986,11 +986,11 @@ export function ModelSettingsPopover({
           .chat-model-settings-scroll::-webkit-scrollbar { width: 5px; }
           .chat-model-settings-scroll::-webkit-scrollbar-track { background: transparent; }
           .chat-model-settings-scroll::-webkit-scrollbar-thumb {
-            background: var(--border-default);
+            background: var(--scrollbar-thumb);
             border-radius: 999px;
           }
           .chat-model-settings-scroll::-webkit-scrollbar-thumb:hover {
-            background: var(--border-emphasis);
+            background: var(--scrollbar-thumb-hover);
           }
         `}</style>
         {/* Header */}

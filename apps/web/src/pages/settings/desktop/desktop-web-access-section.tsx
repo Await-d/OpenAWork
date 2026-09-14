@@ -97,7 +97,7 @@ function ToggleSwitch({
         border: 'none',
         padding: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border-default)',
+        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
         flexShrink: 0,
         opacity: disabled ? 0.5 : 1,
       }}

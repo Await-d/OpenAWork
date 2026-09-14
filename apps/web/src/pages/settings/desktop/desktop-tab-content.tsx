@@ -140,7 +140,7 @@ function ToggleSwitch({
         border: 'none',
         padding: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border-default)',
+        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
         flexShrink: 0,
         opacity: disabled ? 0.5 : 1,
       }}
@@ -657,7 +657,7 @@ export function DesktopTabContent() {
                   }}
                 >
                   {opt.value === 'ask'
-                    ? '每次关闭时弹出确认对话框，可选择退出或最小化。'
+                    ? '每次关闭时弹出应用内确认弹窗，可选择退出或最小化到托盘。'
                     : opt.value === 'minimize'
                       ? '关闭窗口时最小化到系统托盘，后台继续运行。'
                       : '关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。'}
