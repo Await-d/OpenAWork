@@ -44,15 +44,33 @@ function fixture(
 }
 
 describe('工具结果正常模型投影', () => {
-  it.each(['batch', 'webfetch', 'mcp_call', 'desktop_control', 'custom_tool', 'read_tool_output'])(
-    '%s 大输出在正常请求中保持完整且不修改存储',
-    (tool) => {
-      const output = '关键结果\n' + '正文'.repeat(100_000);
-      const message = fixture(tool, output);
-      const projected = toModelMessages([message]);
-      const result = projected.find((entry) => entry.role === 'tool');
-      expect(result?.content).toBe(output);
-      expect(JSON.stringify(message)).toContain(output.replaceAll('\n', '\\n'));
+  /** 各工具在模型投影阶段的上限：工具专属上限优先，其余落到通用上限。 */
+  const TOOL_OUTPUT_CAPS: Record<string, number> = {
+    batch: 200_000,
+    custom_tool: 200_000,
+    read_tool_output: 200_000,
+    webfetch: 40_000,
+    mcp_call: 80_000,
+    desktop_control: 8_000,
+  };
+
+  it.each(Object.entries(TOOL_OUTPUT_CAPS))(
+    '%s 输出在上限内逐字保留、超上限按上限截断，且均不修改存储',
+    (tool, cap) => {
+      const withinCap = '关键结果\n' + '正'.repeat(cap - 5);
+      const withinMessage = fixture(tool, withinCap);
+      expect(toModelMessages([withinMessage]).find((entry) => entry.role === 'tool')?.content).toBe(
+        withinCap,
+      );
+      expect(JSON.stringify(withinMessage)).toContain(withinCap.replaceAll('\n', '\\n'));
+
+      const overCap = '关键结果\n' + '正'.repeat(cap - 5 + 1_000);
+      const overMessage = fixture(tool, overCap);
+      const content =
+        toModelMessages([overMessage]).find((entry) => entry.role === 'tool')?.content ?? '';
+      expect(content.startsWith(overCap.slice(0, cap))).toBe(true);
+      expect(content).toContain('[输出已截断');
+      expect(JSON.stringify(overMessage)).toContain(overCap.replaceAll('\n', '\\n'));
     },
   );
 
