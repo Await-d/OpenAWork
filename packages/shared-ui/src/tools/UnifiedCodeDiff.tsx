@@ -346,7 +346,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
     return (
       <div
         style={{
-          padding: '6px 10px',
+          padding: '4px 10px',
           fontSize: 11,
           color: tokens.color.info,
           background: `color-mix(in srgb, ${tokens.color.info} 10%, transparent)`,
@@ -374,7 +374,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
     >
       <div
         style={{
-          padding: '4px 6px',
+          padding: '2px 6px',
           textAlign: 'right',
           fontSize: 11,
           color: tokens.color.muted,
@@ -387,7 +387,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
       </div>
       <div
         style={{
-          padding: '4px 6px',
+          padding: '2px 6px',
           textAlign: 'right',
           fontSize: 11,
           color: tokens.color.muted,
@@ -400,7 +400,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
       </div>
       <div
         style={{
-          padding: '4px 0',
+          padding: '2px 0',
           textAlign: 'center',
           fontSize: 11,
           color:
@@ -418,10 +418,10 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
       <pre
         style={{
           margin: 0,
-          padding: '4px 10px',
-          minHeight: 26,
+          padding: '2px 10px',
+          minHeight: 21,
           fontSize: 12,
-          lineHeight: 1.5,
+          lineHeight: 1.4,
           whiteSpace: 'pre',
           color: row.kind === 'empty' ? 'transparent' : tokens.color.text,
           fontFamily:
@@ -448,7 +448,7 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
     >
       <div
         style={{
-          padding: '4px 6px',
+          padding: '2px 6px',
           textAlign: 'right',
           fontSize: 11,
           color: tokens.color.muted,
@@ -461,7 +461,7 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
       </div>
       <div
         style={{
-          padding: '4px 0',
+          padding: '2px 0',
           textAlign: 'center',
           fontSize: 11,
           color:
@@ -479,10 +479,10 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
       <pre
         style={{
           margin: 0,
-          padding: '4px 10px',
-          minHeight: 26,
+          padding: '2px 10px',
+          minHeight: 21,
           fontSize: 12,
-          lineHeight: 1.5,
+          lineHeight: 1.4,
           whiteSpace: 'pre',
           color: side.kind === 'empty' ? 'transparent' : tokens.color.text,
           fontFamily:
@@ -524,7 +524,7 @@ export function UnifiedCodeDiff({
           background: isMinimalChrome
             ? 'transparent'
             : `color-mix(in srgb, ${tokens.color.surface} 86%, transparent)`,
-          padding: isMinimalChrome ? '6px 0' : '10px 12px',
+          padding: isMinimalChrome ? '4px 0' : '6px 10px',
           fontSize: 12,
           color: tokens.color.muted,
         }}
@@ -556,7 +556,7 @@ export function UnifiedCodeDiff({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
-            padding: isMinimalChrome ? '4px 0 8px' : '8px 12px',
+            padding: isMinimalChrome ? '3px 0 6px' : '6px 10px',
             borderBottom: `1px solid ${tokens.color.borderSubtle}`,
             background: isMinimalChrome
               ? 'transparent'
@@ -628,10 +628,10 @@ export function UnifiedCodeDiff({
               : `color-mix(in srgb, ${tokens.color.surface} 8%, transparent)`,
           }}
         >
-          <div style={{ padding: '6px', textAlign: 'right' }}>旧</div>
-          <div style={{ padding: '6px', textAlign: 'right' }}>新</div>
-          <div style={{ padding: '6px 0', textAlign: 'center' }}>±</div>
-          <div style={{ padding: '6px 8px' }}>内容</div>
+          <div style={{ padding: '4px', textAlign: 'right' }}>旧</div>
+          <div style={{ padding: '4px', textAlign: 'right' }}>新</div>
+          <div style={{ padding: '4px 0', textAlign: 'center' }}>±</div>
+          <div style={{ padding: '4px 8px' }}>内容</div>
         </div>
       )}
 
@@ -649,7 +649,7 @@ export function UnifiedCodeDiff({
                     <div
                       key={row.key}
                       style={{
-                        padding: '6px 10px',
+                        padding: '4px 10px',
                         fontSize: 11,
                         color: tokens.color.info,
                         background: `color-mix(in srgb, ${tokens.color.info} 10%, transparent)`,
