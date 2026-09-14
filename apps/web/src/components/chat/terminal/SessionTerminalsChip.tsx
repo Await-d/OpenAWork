@@ -22,6 +22,10 @@ interface SessionTerminalsChipProps {
   gatewayUrl: string;
   token: string | null;
   sessionId: string | null;
+  /** Forwarded to the panel: background reconcile in flight. */
+  syncing?: boolean;
+  /** Forwarded to the panel: last successful sync timestamp (ms). */
+  lastSyncedAtMs?: number | null;
 }
 
 export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
@@ -123,6 +127,8 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
         gatewayUrl={props.gatewayUrl}
         token={props.token}
         sessionId={props.sessionId}
+        syncing={props.syncing}
+        lastSyncedAtMs={props.lastSyncedAtMs}
       />
     </>
   );

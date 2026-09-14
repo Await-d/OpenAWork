@@ -179,6 +179,14 @@ export async function closeTerminal(params: CloseTerminalParams): Promise<{ ok: 
   );
 }
 
+/**
+ * Lifecycle of the per-terminal SSE connection. `reconnecting` is
+ * surfaced by the native EventSource retry path (server restart, network
+ * blip, tunnel hiccup) — previously invisible to the UI, which made a
+ * dropped terminal stream look like a hung terminal.
+ */
+export type TerminalStreamStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
+
 export interface OpenTerminalStreamParams {
   gatewayUrl: string;
   sessionId: string;
@@ -193,6 +201,8 @@ export interface OpenTerminalStreamParams {
   onOutput?: (chunk: { outputTail: string; outputBytesTotal: number }) => void;
   onExited?: (chunk: { status: string; exitCode?: number }) => void;
   onError?: (error: Error) => void;
+  /** Optional connection-state observer; see `TerminalStreamStatus`. */
+  onStatus?: (status: TerminalStreamStatus) => void;
 }
 
 /**
@@ -204,7 +214,12 @@ export function openTerminalStream(params: OpenTerminalStreamParams): EventSourc
     `${params.gatewayUrl}/sessions/${params.sessionId}/terminals/${params.terminalId}/stream`,
   );
   url.searchParams.set('token', params.token);
+  params.onStatus?.('connecting');
   const source = new EventSource(url.toString());
+
+  source.addEventListener('open', () => {
+    params.onStatus?.('open');
+  });
 
   source.addEventListener('snapshot', (event) => {
     try {
@@ -244,7 +259,14 @@ export function openTerminalStream(params: OpenTerminalStreamParams): EventSourc
   source.addEventListener('error', () => {
     // EventSource auto-reconnects; surface only persistent failures.
     if (source.readyState === EventSource.CLOSED) {
+      params.onStatus?.('closed');
       params.onError?.(new Error('terminal stream closed'));
+      return;
+    }
+    // CONNECTING means the browser is going to retry on its own timer.
+    // Report it so callers can show "重连中" instead of a frozen pane.
+    if (source.readyState === EventSource.CONNECTING) {
+      params.onStatus?.('reconnecting');
     }
   });
   return source;

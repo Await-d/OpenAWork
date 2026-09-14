@@ -20,6 +20,12 @@ import {
   deleteSessionTerminal,
 } from '../../conversation-runtime/terminals/terminals-api.js';
 import { InteractiveTerminalView } from './InteractiveTerminalView.js';
+import {
+  TerminalListNoMatch,
+  TerminalListToolbar,
+  filterSessionTerminals,
+  useSessionTerminalFilter,
+} from './TerminalListToolbar.js';
 
 interface SessionTerminalsPanelProps {
   open: boolean;
@@ -40,6 +46,14 @@ interface SessionTerminalsPanelProps {
   gatewayUrl: string;
   token: string | null;
   sessionId: string | null;
+  /** True while the background reconcile round-trip is in flight. */
+  syncing?: boolean;
+  /**
+   * Timestamp (ms) of the last successful server sync. 面板用它渲染
+   * "同步于 Xs 前"，让用户能判断列表是否可信（断线时不再显示一个
+   * 静默过期的列表）。
+   */
+  lastSyncedAtMs?: number | null;
 }
 
 const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
@@ -114,6 +128,19 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+/** 相对时间文案："刚刚" / "12 秒前" / "3 分钟前"。 */
+function formatRelativeSync(lastSyncedAtMs: number | null | undefined, now: number): string {
+  if (typeof lastSyncedAtMs !== 'number') return '尚未同步';
+  const deltaMs = Math.max(0, now - lastSyncedAtMs);
+  if (deltaMs < 1_000) return '刚刚同步';
+  const seconds = Math.floor(deltaMs / 1_000);
+  if (seconds < 60) return `${seconds} 秒前同步`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前同步`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时前同步`;
 }
 
 function formatDuration(startedAtMs: number, endedAtMs?: number): string {
@@ -381,7 +408,22 @@ export function SessionTerminalsPanel({
   gatewayUrl,
   token,
   sessionId,
+  syncing = false,
+  lastSyncedAtMs = null,
 }: SessionTerminalsPanelProps) {
+  // ── 能力：状态筛选 + 关键字过滤 + 批量处置 ─────────────────────────
+  const filter = useSessionTerminalFilter();
+  const [batchBusy, setBatchBusy] = useState(false);
+  // 同步时间需要随时间推移刷新（否则"12 秒前"会一直停在打开那一刻）。
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!open) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, [open, lastSyncedAtMs]);
+
   // Compute popover position from the anchor's viewport rect on every
   // open / window resize / scroll. Fixed positioning means parent
   // `overflow: hidden` and flex-wrap shenanigans no longer matter.
@@ -411,6 +453,40 @@ export function SessionTerminalsPanel({
   if (!open) return null;
   const active = terminals.filter((t) => ACTIVE_STATUSES.has(t.status));
   const closed = terminals.filter((t) => !ACTIVE_STATUSES.has(t.status));
+
+  const visible = filterSessionTerminals(terminals, filter);
+  const visibleActive = visible.filter((t) => ACTIVE_STATUSES.has(t.status));
+  const visibleClosed = visible.filter((t) => !ACTIVE_STATUSES.has(t.status));
+
+  // 批量终止：对每个 id 走同一套乐观 + 服务端确认路径，让 pendingKillIds
+  // 能逐个点亮，用户能看到进度而不是一个假死的"全部终止中"。
+  const handleKillAllActive = async (ids: readonly string[]): Promise<void> => {
+    setBatchBusy(true);
+    try {
+      await Promise.all(ids.map((id) => onKillTerminal(id)));
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  // 批量清理：删除已完成的历史记录，避免几十条 void 行长期占位。
+  const handleDeleteAllClosed = async (ids: readonly string[]): Promise<void> => {
+    if (!sessionId || !token) return;
+    setBatchBusy(true);
+    try {
+      await Promise.all(
+        ids.map((terminalId) =>
+          deleteSessionTerminal({ gatewayUrl, sessionId, terminalId, token }).catch(
+            () => undefined,
+          ),
+        ),
+      );
+    } finally {
+      setBatchBusy(false);
+      onReload();
+    }
+  };
+
   return (
     <>
       <button
@@ -459,10 +535,32 @@ export function SessionTerminalsPanel({
             background: 'var(--bg-overlay)',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>会话终端</span>
             <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               {active.length} 个运行中 / 共 {terminals.length} 条记录
+            </span>
+            <span
+              title="面板会自动与服务端对齐；页面切回前台时立即同步一次"
+              style={{
+                fontSize: 10,
+                color: syncing ? 'var(--accent)' : 'var(--fg-muted)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: syncing ? 'var(--accent)' : 'var(--success)',
+                  opacity: syncing ? 1 : 0.6,
+                }}
+              />
+              {syncing ? '同步中…' : formatRelativeSync(lastSyncedAtMs, nowMs)}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -512,6 +610,25 @@ export function SessionTerminalsPanel({
             {error}
           </div>
         ) : null}
+        <div
+          style={{
+            padding: '8px 12px',
+            borderBottom: '1px solid var(--border-subtle)',
+            background: 'var(--bg-overlay)',
+          }}
+        >
+          <TerminalListToolbar
+            totalCount={terminals.length}
+            activeCount={active.length}
+            closedCount={closed.length}
+            batchActiveCount={visibleActive.length}
+            batchCleanupCount={visibleClosed.length}
+            filter={filter}
+            busy={batchBusy}
+            onKillAllActive={() => handleKillAllActive(visibleActive.map((t) => t.terminalId))}
+            onCleanupAllClosed={() => handleDeleteAllClosed(visibleClosed.map((t) => t.terminalId))}
+          />
+        </div>
         <ul
           style={{
             margin: 0,
@@ -543,9 +660,13 @@ export function SessionTerminalsPanel({
             >
               当前会话还没有跑过终端命令。
             </li>
+          ) : visible.length === 0 ? (
+            <li style={{ listStyle: 'none' }}>
+              <TerminalListNoMatch onReset={filter.reset} />
+            </li>
           ) : (
             <>
-              {active.map((terminal) => (
+              {visibleActive.map((terminal) => (
                 <TerminalRow
                   key={terminal.terminalId}
                   terminal={terminal}
@@ -573,7 +694,7 @@ export function SessionTerminalsPanel({
                   }}
                 />
               ))}
-              {closed.map((terminal) => (
+              {visibleClosed.map((terminal) => (
                 <TerminalRow
                   key={terminal.terminalId}
                   terminal={terminal}

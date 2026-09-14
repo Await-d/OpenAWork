@@ -15,7 +15,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import { SessionTerminalsPanel } from './SessionTerminalsPanel.js';
 
@@ -145,5 +145,130 @@ describe('SessionTerminalsPanel', () => {
       />,
     );
     expect(screen.getByText(/还没有跑过终端命令/)).toBeTruthy();
+  });
+});
+
+/**
+ * 筛选 / 批量处置覆盖。
+ *
+ * 会话终端多起来之后（一个长会话几十条记录），逐行点终止或清理是不现实
+ * 的。这里锁定两件事：筛选能收敛列表，批量按钮能一次命中所有目标。
+ */
+const twoRunningAndOneClosed = [
+  makeTerminal({ terminalId: 'term_dev', status: 'running', command: 'npm run dev' }),
+  makeTerminal({ terminalId: 'term_test', status: 'running', command: 'vitest run' }),
+  makeTerminal({
+    terminalId: 'term_done',
+    status: 'exited',
+    command: 'pnpm build',
+    exitCode: 0,
+  }),
+];
+
+describe('SessionTerminalsPanel 筛选与批量', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('按状态筛选后只保留对应行', () => {
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        onKillTerminal={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(screen.queryAllByRole('button', { name: '终止' }).length).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: '运行中 2' }));
+
+    expect(screen.queryAllByRole('button', { name: '终止' }).length).toBe(2);
+    expect(screen.queryByRole('button', { name: '清理' })).toBeNull();
+  });
+
+  it('按命令关键字过滤', () => {
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        onKillTerminal={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('按命令或目录过滤终端'), {
+      target: { value: 'vitest' },
+    });
+
+    expect(screen.getByText('vitest run')).toBeTruthy();
+    expect(screen.queryByText('npm run dev')).toBeNull();
+    expect(screen.queryAllByRole('button', { name: '终止' }).length).toBe(1);
+  });
+
+  it('无匹配时给出清除筛选入口', () => {
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        onKillTerminal={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('按命令或目录过滤终端'), {
+      target: { value: 'no-such-command' },
+    });
+    expect(screen.getByText('没有符合当前筛选条件的终端。')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(screen.getByText('npm run dev')).toBeTruthy();
+  });
+
+  it('批量终止会对每个运行中终端各调用一次', async () => {
+    const onKill = vi.fn(async () => {});
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        onKillTerminal={onKill}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /终止全部运行中/ }));
+
+    await waitFor(() => expect(onKill).toHaveBeenCalledTimes(2));
+    expect(onKill).toHaveBeenCalledWith('term_dev');
+    expect(onKill).toHaveBeenCalledWith('term_test');
+  });
+
+  it('筛选后批量按钮只作用于可见行', async () => {
+    const onKill = vi.fn(async () => {});
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        onKillTerminal={onKill}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('按命令或目录过滤终端'), {
+      target: { value: 'npm run dev' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /终止全部运行中/ }));
+
+    await waitFor(() => expect(onKill).toHaveBeenCalledTimes(1));
+    expect(onKill).toHaveBeenCalledWith('term_dev');
+  });
+
+  it('展示同步状态文案', () => {
+    render(
+      <SessionTerminalsPanel
+        {...baseProps}
+        terminals={twoRunningAndOneClosed}
+        lastSyncedAtMs={Date.now()}
+        onKillTerminal={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(screen.getByText('刚刚同步')).toBeTruthy();
   });
 });
