@@ -20,8 +20,27 @@ team/conversation/
 └── extras/                               team-only 装饰组件
     ├── TeamSessionEmptyState.tsx
     ├── TeamSessionHeader.tsx
-    └── TeamSubstateProgressBar.tsx
+    ├── TeamSubstateProgressBar.tsx
+    ├── TeamMultiLayerCardWall.tsx        「角色窗口墙」：一个角色实例一张卡的层级泳道
+    ├── team-layer-messages.ts            LayerMessages 契约 + 生命周期装配纯函数
+    ├── card-wall-expanded-state.ts       卡片展开态的 localStorage 持久化（按会话分键）
+    └── TeamMultiLayerFeed.tsx            与卡片墙并列的合并消息流视图
 ```
+
+## 角色窗口墙（TeamMultiLayerCardWall）的几个硬约束
+
+- **终态展示**：实例结束/关闭后卡片**不消失**，切终态展示态（已完成/已失败/已取消 + 结束时间）。
+  判定「结束」只能走 handoff 记录（`sessions.state_status` 表达不了结束），且：
+  - 归属只能用 `handoff.toSessionId` —— 回落 `sessionId` 会把上游接待层根会话误标成已取消；
+  - 一个实例可能有多条 handoff（回收重试），只有最近一条是终态才算结束。
+    两条规则都在 `team-layer-messages.ts` 的纯函数里，改动前先看它的注释。
+- **权限条放在消息区之外**：折叠态消息区只有约 3 行高且 `overflow: hidden`，权限条塞进消息流
+  会被直接裁掉；权限请求是必须被看见、必须被处置的。
+- **权限按 `sessionId` 归位**：网关恢复接口返回整棵子树的待处理权限，不过滤就会在每张卡片上
+  重复渲染同一个请求。
+- **`onOpenSession` 由外壳注入**：卡片墙不猜「打开完整会话」意味着什么。外壳（TeamPageV2）
+  实现为打开底部 `LayerConversationDrawer` 并聚焦该实例，刻意**不**切 `selectedTeamId` ——
+  角色实例是子会话，通常不在 `workspaceGroups` 里，切过去会破坏整页 runtime 的作用域不变式。
 
 ## 依赖约束（关键）
 

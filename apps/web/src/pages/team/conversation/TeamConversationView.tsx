@@ -80,7 +80,11 @@ import {
   type ViewMode,
   type MultiLayerViewMode,
 } from './extras/TeamViewModeToggle.js';
-import { type LayerMessages } from './extras/TeamMultiLayerPanel.js';
+import {
+  buildLatestHandoffBySession,
+  resolveInstanceLifecycle,
+  type LayerMessages,
+} from './extras/team-layer-messages.js';
 import { TeamConversationLayerSidePanel } from './TeamConversationLayerSidePanel.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
 import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
@@ -94,7 +98,7 @@ import {
   getPermissionReplySuccessMessage,
 } from '../../../utils/permission/permission-reply.js';
 import { useTeamRuntimeReferenceViewData } from '../runtime/data/team-runtime-reference-data.js';
-import { useLayerStore } from '../../../stores/team/team-events.js';
+import { useHandoffStore, useLayerStore } from '../../../stores/team/team-events.js';
 import { extractInputImageParts } from './team-conversation-input-parts.js';
 
 export interface TeamConversationViewProps {
@@ -148,6 +152,14 @@ export interface TeamConversationViewProps {
    * ops chrome / inline cards。
    */
   classicWorkbench?: boolean;
+  /**
+   * 打开某个角色实例的完整会话。
+   *
+   * 由外壳注入 —— 只有外壳知道「打开」意味着什么（打开底部层级对话抽屉 /
+   * 切 middle tab / 改 URL），以及该不该在当前布局下给出这个入口。
+   * 视图层不猜：拿不到就不渲染入口。
+   */
+  onOpenSession?: (sessionId: string) => void;
 }
 
 const TEAM_CONVERSATION_LAYER_ORDER = [
@@ -205,6 +217,7 @@ export function TeamConversationView({
   readOnly = false,
   soloMode = false,
   classicWorkbench = false,
+  onOpenSession,
 }: TeamConversationViewProps) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -212,9 +225,10 @@ export function TeamConversationView({
   const currentUserDisplayName = useCurrentUserDisplayName();
   const { diagnostics } = useTeamRuntimeReferenceViewData();
   const layerNodes = useLayerStore((s) => s.nodes);
+  const handoffs = useHandoffStore((s) => s.handoffs);
 
   const [viewMode, setViewMode] = useState<ViewMode>('single');
-  const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('feed');
+  const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('cards');
   const [selectedLayer, setSelectedLayer] = useState<string | null>(focusedLayer);
   const [isNarrowLayout, setIsNarrowLayout] = useState(() =>
     typeof window === 'undefined' ? false : window.innerWidth < 900,
@@ -264,7 +278,7 @@ export function TeamConversationView({
     }
     previousSessionIdRef.current = sessionId;
     setViewMode('single');
-    setMultiLayerMode('feed');
+    setMultiLayerMode('cards');
     setSelectedLayer(focusedLayer);
     setShowTemplatePanel(false);
     hasAutoOpenedMultiLayerRef.current = false;
@@ -1188,6 +1202,17 @@ export function TeamConversationView({
     // 用户可以在群聊汇总面板中分别看到每个角色的完整对话。
     const entries: LayerMessages[] = [];
 
+    // ─── 实例生命周期（用于「已结束 / 已失败 / 已取消」展示）─────────────
+    // 判定规则与两个坑的成因都写在 team-layer-messages.ts 的纯函数里（可单测）：
+    //   - 权威来源是 handoff 记录，不是 sessions.state_status（后者表达不了「结束」）；
+    //   - 归属只能用 toSessionId，不能回落 sessionId（否则排队中取消的 handoff
+    //     会把上游接待层根会话误标成已取消）；
+    //   - 一个实例可能有多条 handoff（回收重试），只有最近一条是终态才算结束。
+    const latestHandoffBySession = buildLatestHandoffBySession(handoffs.values());
+
+    const readLifecycle = (ownerSessionId: string) =>
+      resolveInstanceLifecycle({ ownerSessionId, latestHandoffBySession, layerNodes });
+
     // 当前 session 自身作为一个条目
     const currentLayer = state.roleLayer?.trim() || 'reception';
     const currentNode = layerNodes.get(sessionId);
@@ -1249,6 +1274,7 @@ export function TeamConversationView({
   }, [
     sessionId,
     layerNodes,
+    handoffs,
     soloMode,
     state.childSessions,
     state.messages,
@@ -1572,6 +1598,11 @@ export function TeamConversationView({
             currentUserDisplayName={currentUserDisplayName}
             scrollRegionRef={state.scrollRegionRef}
             resolveInlinePermissionActions={resolveInlinePermissionActions}
+            // 权限与「打开完整会话」都要下沉到卡片墙：权限请求是**实例级**的
+            // （网关恢复接口把整棵子树的待处理请求一并返回），只有卡片知道
+            // 自己对应哪个 session。不传下去，用户就必须切回 feed 视图才能处置。
+            pendingPermissions={state.pendingPermissions}
+            onOpenSession={onOpenSession}
             onLayerSelect={handlePanelLayerSelect}
           />
         )}

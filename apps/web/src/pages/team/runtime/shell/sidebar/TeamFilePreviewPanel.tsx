@@ -6,11 +6,35 @@
  *
  * 与"打开到编辑器"并存：单击预览（轻量、不进 tab），用户可在面板内点
  * "在编辑器中打开" 走 onOpenInEditor 进完整编辑器。
+ *
+ * 预览体带右键菜单（与文件编辑器同源，见内容面共用的 ContentContextMenuHost
+ * 与 buildContentContextMenuItems）；这里的能力集比编辑器窄——没有 Monaco 编辑
+ * 动作、也没有「切换到预览视图」（本来就只在预览），因此只装配对应的回调。
  */
 
-import { type CSSProperties } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  ContextMenu,
+  type ContextMenuItem,
+} from '../../../../../components/common/display/ContextMenu.js';
+import {
+  ContentContextMenuHost,
+  type ContentContextMenuTrigger,
+} from '../../../../../components/common/display/ContentContextMenuHost.js';
+import { buildContentContextMenuItems } from '../../../../../components/common/display/content-context-menu-items.js';
 import { FilePreviewPane } from '../../../../../components/file-editor/preview/FilePreviewPane.js';
+import { copyTextToClipboard } from '../../../../../components/layout/file-tree/file-tree-actions.js';
+import { dispatchComposerReference } from '../../../../../utils/chat/composer-reference-events.js';
+import {
+  getFilePreviewKind,
+  isNonTextPreviewKind,
+} from '../../../../../utils/file/file-preview.js';
+import {
+  canOpenPathInSystem,
+  openPathInSystem,
+} from '../../../../../utils/tauri/open-in-system.js';
+import { toast } from '../../../../../components/common/feedback/ToastNotification.js';
 import { EmptyState } from '../../shared/content-kit/index.js';
 
 const OVERLAY_STYLE: CSSProperties = {
@@ -54,8 +78,10 @@ export interface TeamFilePreviewPanelProps {
   loading: boolean;
   error: string | null;
   onClose: () => void;
-  /** "在编辑器中打开" 回调；不传则不显示该按钮。 */
+  /** "在编辑器中打开" 回调；不传则不显示该按钮，菜单里也不出现该项。 */
   onOpenInEditor?: (path: string) => void;
+  /** 工作区根路径，用于菜单里的相对路径 / 引用到对话；缺失时退回绝对路径。 */
+  workspacePath?: string | null;
 }
 
 export function TeamFilePreviewPanel({
@@ -65,7 +91,65 @@ export function TeamFilePreviewPanel({
   error,
   onClose,
   onOpenInEditor,
+  workspacePath = null,
 }: TeamFilePreviewPanelProps) {
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+
+  // 与文件编辑器同款：能力在页面生命周期内不变，探测一次即可。
+  const [canOpenInSystem] = useState(canOpenPathInSystem);
+
+  const handleOpenMenu = useCallback((trigger: ContentContextMenuTrigger) => {
+    setMenu({ x: trigger.x, y: trigger.y, selection: trigger.selection });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const handleCopy = useCallback((text: string) => {
+    void copyTextToClipboard(text).catch((copyError: unknown) => {
+      toast(copyError instanceof Error ? copyError.message : '复制失败', 'error');
+    });
+  }, []);
+
+  const handleOpenInSystem = useCallback((targetPath: string) => {
+    void openPathInSystem(targetPath).catch((openError: unknown) => {
+      toast(openError instanceof Error ? openError.message : '用系统默认程序打开失败', 'error');
+    });
+  }, []);
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menu || !path) return [];
+    const previewKind = getFilePreviewKind(path);
+    return buildContentContextMenuItems({
+      variant: 'preview',
+      target: {
+        path,
+        content,
+        selection: menu.selection,
+        // 浮层没有"活跃标签"概念，不展示 ⌘W 提示。
+        isActive: false,
+        isBinary: isNonTextPreviewKind(previewKind),
+      },
+      workspacePath,
+      actions: {
+        copyText: handleCopy,
+        referenceToChat: dispatchComposerReference,
+        close: onClose,
+        ...(onOpenInEditor ? { switchToCode: () => onOpenInEditor(path) } : {}),
+        ...(canOpenInSystem ? { openInSystem: () => handleOpenInSystem(path) } : {}),
+      },
+    });
+  }, [
+    menu,
+    path,
+    content,
+    workspacePath,
+    handleCopy,
+    onClose,
+    onOpenInEditor,
+    canOpenInSystem,
+    handleOpenInSystem,
+  ]);
+
   if (!path) return null;
 
   const filename = path.split('/').pop() ?? path;
@@ -134,16 +218,22 @@ export function TeamFilePreviewPanel({
         >
           加载文件内容…
         </div>
-      ) : error && !content ? (
-        <EmptyState
-          emoji="⚠️"
-          title="无法预览"
-          description={error}
-          style={{ flex: 1, margin: 12 }}
-        />
       ) : (
-        <FilePreviewPane path={path} content={content} />
+        <ContentContextMenuHost testId="team-file-preview-host" onOpen={handleOpenMenu}>
+          {error && !content ? (
+            <EmptyState
+              emoji="⚠️"
+              title="无法预览"
+              description={error}
+              style={{ flex: 1, margin: 12 }}
+            />
+          ) : (
+            <FilePreviewPane path={path} content={content} />
+          )}
+        </ContentContextMenuHost>
       )}
+
+      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} /> : null}
     </div>
   );
 

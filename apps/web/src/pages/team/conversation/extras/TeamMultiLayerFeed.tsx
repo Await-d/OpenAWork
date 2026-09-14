@@ -33,7 +33,7 @@ import {
   getRoleLayerIdentity,
   getRoleLayerIdentityFromAgentId,
 } from '../../runtime/data/role-layer-identity.js';
-import type { LayerMessages } from './TeamMultiLayerPanel.js';
+import type { LayerMessages } from './team-layer-messages.js';
 
 export interface TeamMultiLayerFeedProps {
   /** 当前活跃层级（高亮标识）。 */

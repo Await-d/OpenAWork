@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   useLayerStore,
   type LayerNode,
@@ -103,6 +103,13 @@ function getLayerNodeLabel(node: LayerNode): string {
 export interface LayerConversationDrawerProps {
   visible?: boolean;
   onClose?: () => void;
+  /**
+   * 指定要展开查看的角色实例 —— 卡片墙「完整会话」入口的落点。
+   *
+   * 每次请求都带一个新的 nonce：只传 sessionId 的话，「收起抽屉后再点同一张卡片」
+   * 时 props 没有任何变化，effect 不会触发，用户会觉得按钮点了没反应。
+   */
+  target?: { sessionId: string; nonce: number } | null;
   reviewData?: {
     reportMarkdown: string | null;
     overallVerdict: ReviewVerdict;
@@ -114,17 +121,30 @@ export interface LayerConversationDrawerProps {
 export function LayerConversationDrawer({
   visible = false,
   onClose,
+  target,
   reviewData,
 }: LayerConversationDrawerProps) {
   const nodes = useLayerStore((s) => s.nodes);
   const [collapsed, setCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState<string | null>(null);
 
+  // 外部点名了角色实例：展开抽屉并切到该 tab。
+  // 注意这个 effect 必须在下面的早退之前声明 —— 目标可能在抽屉还不可见时就被设置，
+  // 等 visible 变真时展开态已经就位，不会闪一帧收起态。
+  useEffect(() => {
+    if (!target) return;
+    setCollapsed(false);
+    setActiveTab(target.sessionId);
+  }, [target]);
+
   const nodeList = Array.from(nodes.values());
 
-  if (!visible || nodeList.length === 0) return null;
+  // 有明确目标时即便 layer store 还没有对应节点也照常渲染 ——
+  // 卡片墙的实例数据来自会话恢复接口，可能早于 layer store 落库。
+  if (!visible || (nodeList.length === 0 && !target)) return null;
 
-  const selectedNode = activeTab ? nodes.get(activeTab) : nodeList[0];
+  const selectedSessionId = activeTab ?? nodeList[0]?.sessionId ?? null;
+  const selectedNode = selectedSessionId ? (nodes.get(selectedSessionId) ?? null) : null;
 
   return (
     <div
@@ -156,7 +176,7 @@ export function LayerConversationDrawer({
         <>
           <div style={TAB_BAR_STYLE}>
             {nodeList.map((node) => {
-              const isActive = (activeTab ?? nodeList[0]?.sessionId) === node.sessionId;
+              const isActive = selectedSessionId === node.sessionId;
               return (
                 <button
                   key={node.sessionId}
@@ -176,8 +196,8 @@ export function LayerConversationDrawer({
             })}
           </div>
           <div style={CONTENT_STYLE}>
-            {selectedNode ? (
-              selectedNode.roleLayer === 'reviewer' && reviewData ? (
+            {selectedSessionId ? (
+              selectedNode?.roleLayer === 'reviewer' && reviewData ? (
                 <div style={REVIEW_CONTENT_STYLE}>
                   <ReviewReportView
                     reportMarkdown={reviewData.reportMarkdown}
@@ -186,7 +206,7 @@ export function LayerConversationDrawer({
                     qualityReviewPassed={reviewData.qualityReviewPassed}
                   />
                 </div>
-              ) : selectedNode.roleLayer === 'reviewer' ? (
+              ) : selectedNode?.roleLayer === 'reviewer' ? (
                 <div
                   style={{
                     ...REVIEW_CONTENT_STYLE,
@@ -197,9 +217,11 @@ export function LayerConversationDrawer({
                   等待审查结果...
                 </div>
               ) : (
+                // 没有 layer 节点时也渲染完整会话：卡片墙的实例来自会话恢复接口，
+                // 可能早于 layer store 落库，不该因此变成「点了没反应」。
                 <TeamConversationView
-                  key={selectedNode.sessionId}
-                  sessionId={selectedNode.sessionId}
+                  key={selectedSessionId}
+                  sessionId={selectedSessionId}
                   compact
                 />
               )

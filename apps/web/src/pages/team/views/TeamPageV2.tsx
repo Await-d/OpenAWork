@@ -256,6 +256,13 @@ export default function TeamPageV2() {
    */
   const pendingSelectedTeamIdRef = useRef<string | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  /**
+   * 底部「层级对话」抽屉要聚焦的角色实例。nonce 用于让「收起抽屉后再点同一张卡片」
+   * 也能重新展开（只比 sessionId 的话 props 不变、effect 不触发）。
+   */
+  const [drawerTarget, setDrawerTarget] = useState<{ sessionId: string; nonce: number } | null>(
+    null,
+  );
   const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [initialTemplateId, setInitialTemplateId] = useState<string | null>(null);
@@ -986,6 +993,25 @@ export default function TeamPageV2() {
   );
 
   /**
+   * 打开某个角色实例的完整会话 —— 卡片墙「完整会话」入口的落点。
+   *
+   * 刻意**不**把 `selectedTeamId` 切到这个子会话，而是打开底部「层级对话」抽屉：
+   * 角色实例是子会话，正常情况下不在 workspaceGroups 里，而整页的 runtime 控件、
+   * 文件树根、ops chrome 都建立在「selectedTeamId 一定在 workspaceGroups 中」这条
+   * 不变式上（见 selectedTeam / effectiveWorkspaceGroups / 纠偏 effect）。为一个
+   * 卡片按钮去破坏这条不变式，会让暂停/恢复、任务清单等一起偏离语义；而且刷新后
+   * URL 里的 sessionId 会被 resolveTeamSessionFromRoute 判为无效又跳回默认会话。
+   * 抽屉是自带会话上下文的自足面板，既不扰动页面作用域，又真的能看到完整对话。
+   */
+  const handleOpenRoleSession = useCallback((sessionId: string) => {
+    // classic 工作台弃用底部「层级对话」抽屉（该布局下卡片墙本身也不可达）
+    if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
+    if (!sessionId) return;
+    setDrawerTarget({ sessionId, nonce: Date.now() });
+    setDrawerVisible(true);
+  }, []);
+
+  /**
    * 当前激活的主 tab：从叶子 key 反向查表得到。
    * 'office' 不属于任何主 tab（沉浸视图），此时 activePrimary 为 null，
    * UI 上让主 tab 栏全部置非激活态即可。
@@ -1423,6 +1449,7 @@ export default function TeamPageV2() {
         classicWorkbench={isClassicWorkbench}
         beforeMessages={classicOpsChrome}
         afterMessages={classicInlineCards}
+        onOpenSession={handleOpenRoleSession}
       />
     </div>
   ) : undefined;
@@ -1619,6 +1646,7 @@ export default function TeamPageV2() {
                   receptionSessionId={selectedTeamId ? conversationReceptionSessionId : null}
                   receptionComposerEnabled={true}
                   classicWorkbench={isClassicWorkbench}
+                  onOpenSession={handleOpenRoleSession}
                   conversationBeforeMessages={
                     // reception 内嵌路径也挂 classic 运营条；子 session 覆盖路径在 messagesOverride 内已注入
                     classicOpsChrome &&
@@ -1816,6 +1844,7 @@ export default function TeamPageV2() {
           <LayerConversationDrawer
             visible={drawerVisible}
             onClose={() => setDrawerVisible(false)}
+            target={drawerTarget}
           />
         ) : null}
         <PauseConfirmDialog

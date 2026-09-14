@@ -142,7 +142,7 @@ const listStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   scrollbarWidth: 'thin',
-  scrollbarColor: 'var(--border-default) transparent',
+  scrollbarColor: 'var(--scrollbar-thumb) transparent',
 };
 
 const itemStyle = (isActive: boolean): CSSProperties => ({

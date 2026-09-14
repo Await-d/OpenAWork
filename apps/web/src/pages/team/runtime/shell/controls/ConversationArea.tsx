@@ -103,6 +103,11 @@ export interface ConversationAreaProps {
    */
   conversationBeforeMessages?: ReactNode;
   /**
+   * 打开某个角色实例的完整会话 —— 由外层（TeamPageV2）提供，透传给内嵌的
+   * `<TeamConversationView/>`。卡片墙用它做「完整会话」入口；不传则卡片上不出这个按钮。
+   */
+  onOpenSession?: (sessionId: string) => void;
+  /**
    * 注入到内嵌 TeamConversationView 的 afterMessages 槽位（与团队动态条并存）。
    * classic 用它挂 InlineOpsCard（失败/澄清/进度）。
    */
@@ -137,6 +142,7 @@ export function ConversationArea({
   receptionComposerEnabled = false,
   conversationBeforeMessages,
   conversationAfterMessages,
+  onOpenSession,
   classicWorkbench = false,
   workspaceLabel,
 }: ConversationAreaProps) {
@@ -168,6 +174,7 @@ export function ConversationArea({
             composerEnabled={receptionComposerEnabled}
             classicWorkbench={classicWorkbench}
             beforeMessages={conversationBeforeMessages}
+            onOpenSession={onOpenSession}
             afterMessages={
               <>
                 {conversationAfterMessages}

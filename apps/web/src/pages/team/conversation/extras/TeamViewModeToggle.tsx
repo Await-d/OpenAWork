@@ -1,7 +1,15 @@
 import { type CSSProperties } from 'react';
 
 export type ViewMode = 'single' | 'dual';
-export type MultiLayerViewMode = 'feed' | 'tab' | 'waterfall' | 'timeline';
+/**
+ * 右侧面板的多层级展示模式。
+ * - `cards`：角色窗口墙 —— 一个窗口 = 一个角色实例，按层级泳道排列（默认）
+ * - `feed`：汇总流 —— 把各层级消息合并成一条时间线（兜底视图）
+ *
+ * 旧的 `tab` / `waterfall` / `timeline` 三视图已下线：它们都是「先拆散再打标」的
+ * 合并式展示，与角色窗口墙的信息结构重复，且无人维护。
+ */
+export type MultiLayerViewMode = 'cards' | 'feed';
 
 export interface TeamViewModeToggleProps {
   viewMode: ViewMode;
@@ -61,15 +69,13 @@ const MODE_DIVIDER_STYLE: CSSProperties = {
 };
 
 const MODE_OPTIONS: Array<{ label: string; mode: MultiLayerViewMode; title: string }> = [
-  { label: '新版', mode: 'feed', title: '新版群聊汇总流' },
-  { label: '旧分层', mode: 'tab', title: '旧版分层标签视图' },
-  { label: '瀑布', mode: 'waterfall', title: '旧版瀑布视图' },
-  { label: '时间线', mode: 'timeline', title: '旧版时间线视图' },
+  { label: '卡片', mode: 'cards', title: '角色窗口墙：一个窗口一个角色，按层级泳道排列' },
+  { label: '汇总流', mode: 'feed', title: '汇总流：全部层级消息合并为一条时间线' },
 ];
 
 export function TeamViewModeToggle({
   viewMode,
-  multiLayerMode = 'feed',
+  multiLayerMode = 'cards',
   dualDisabled = false,
   onViewModeChange,
   onMultiLayerModeChange,

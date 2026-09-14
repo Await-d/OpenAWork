@@ -829,6 +829,7 @@ export function TeamSidebarWithFileTree({
           error={filePreview.error}
           onClose={filePreview.close}
           onOpenInEditor={onOpenFile ? () => onOpenFile(filePreview.path ?? '') : undefined}
+          workspacePath={workspacePath}
         />
       )}
     </div>
