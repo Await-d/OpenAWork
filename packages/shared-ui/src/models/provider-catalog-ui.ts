@@ -186,6 +186,16 @@ const STATIC_FALLBACK: readonly ProviderCatalogUiEntry[] = [
     modelIdPrefixes: ['ernie'],
   },
   {
+    type: 'opencode-go',
+    displayName: 'OpenCode Go',
+    fallbackGlyph: 'Go',
+    aliases: ['opencode', 'opencode-go', 'zen-go'],
+    upstreams: [
+      { label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', isDefault: true },
+    ],
+    apiKeyEnv: 'OPENCODE_API_KEY',
+  },
+  {
     type: 'custom',
     displayName: '自定义渠道',
     fallbackGlyph: '✦',

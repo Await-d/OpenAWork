@@ -809,7 +809,6 @@ export function ModelManager({
                             {model.id}
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                            {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
                             {model.supportsImageGeneration &&
                             model.supportsImageGeneration4K === true ? (
                               <CapabilityDot label="4K" />
@@ -879,9 +878,36 @@ export function ModelManager({
                                   />
                                   思考
                                 </label>
+                                <label
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 10,
+                                    color: 'var(--fg-muted)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={model.supportsImageGeneration === true}
+                                    onChange={(event) => {
+                                      const enabled = event.target.checked;
+                                      onUpdateModel(provider.id, model.id, {
+                                        supportsImageGeneration: enabled,
+                                        // 关闭生图时一并清掉 4K 子能力，避免残留无效状态。
+                                        ...(enabled ? {} : { supportsImageGeneration4K: false }),
+                                      });
+                                    }}
+                                  />
+                                  生图
+                                </label>
                               </>
                             ) : (
                               <>
+                                {model.supportsImageGeneration ? (
+                                  <CapabilityDot label="生图" />
+                                ) : null}
                                 {model.supportsTools ? <CapabilityDot label="工具" /> : null}
                                 {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
                                 {model.supportsThinking ? <CapabilityDot label="思考" /> : null}

@@ -19,6 +19,7 @@ import {
 } from './provider-catalog-ui.js';
 import type { ProviderUpstreamVariantUi } from './provider-catalog-ui.js';
 import { ModelManager } from './ModelManager.js';
+import { canRemoveProvider } from './provider-removal.js';
 import { StatusPill } from '../primitives/index.js';
 import type { ProviderModelTestResult } from './ModelManager.js';
 import type { SupportedReasoningEffort } from './model-reasoning-support.js';
@@ -86,6 +87,7 @@ export interface AIModelConfigRef {
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
+  reasoningOptions?: { type: string; values?: string[] }[];
 }
 
 export interface AIProviderRef {
@@ -157,6 +159,8 @@ export interface ProviderSettingsProps {
   onToggleProvider?: (id: string) => void;
   onEditProvider: (id: string, data: ProviderEditData) => void;
   onAddProvider: (data: ProviderEditData) => void;
+  /** 移除自定义提供商（内置平台仅支持禁用，后端会重新播种）。 */
+  onRemoveProvider?: (id: string) => void;
   onToggleModel?: (providerId: string, modelId: string) => void;
   onAddModel?: (providerId: string, model: AIModelConfigRef) => void;
   onRemoveModel?: (providerId: string, modelId: string) => void;
@@ -603,6 +607,7 @@ export function ProviderSettings({
   onToggleProvider,
   onEditProvider,
   onAddProvider,
+  onRemoveProvider,
   onToggleModel,
   onAddModel,
   onRemoveModel,
@@ -708,6 +713,7 @@ export function ProviderSettings({
     const supportedEfforts = getSupportedReasoningEffortsForModel(
       selectedProviderType,
       selectedModel?.id,
+      selectedModel?.reasoningOptions,
     );
 
     return (
@@ -1842,6 +1848,36 @@ export function ProviderSettings({
                     >
                       编辑
                     </button>
+
+                    {onRemoveProvider && canRemoveProvider(providers, provider.id) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            !globalThis.window.confirm(
+                              `确定移除「${provider.name}」？该提供商的模型与密钥配置会一并移除。`,
+                            )
+                          ) {
+                            return;
+                          }
+                          if (editingId === provider.id) {
+                            setEditingId(null);
+                          }
+                          onRemoveProvider(provider.id);
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--fg-subtle)',
+                          borderRadius: 6,
+                          color: color.danger,
+                          padding: '0.25rem 0.65rem',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        移除
+                      </button>
+                    ) : null}
 
                     <button
                       type="button"

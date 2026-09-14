@@ -222,3 +222,46 @@ describe('model reasoning support', () => {
     ]);
   });
 });
+
+describe('opencode-go 思考可配置性', () => {
+  it('优先使用 models.dev 声明的 effort 子集', () => {
+    expect(
+      getSupportedReasoningEffortsForModel('opencode-go', 'kimi-k3', [
+        { type: 'effort', values: ['max'] },
+      ]),
+    ).toEqual(['max']);
+    expect(
+      getSupportedReasoningEffortsForModel('opencode-go', 'qwen3.8-max', [
+        { type: 'toggle' },
+        { type: 'effort', values: ['low', 'medium', 'xhigh'] },
+      ]),
+    ).toEqual(['low', 'medium', 'xhigh']);
+  });
+
+  it('按 modelId 反推真实厂商后可配置思考', () => {
+    expect(canConfigureThinkingForModel('opencode-go', 'deepseek-v4.1-flash')).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'glm-5.3')).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'kimi-k3')).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'qwen3.8-max')).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'grok-4.6')).toBe(true);
+  });
+
+  it('显式声明 supportsThinking 的模型可配置（mimo / minimax）', () => {
+    expect(canConfigureThinkingForModel('opencode-go', 'mimo-v2.5', true)).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'minimax-m3', true)).toBe(true);
+  });
+
+  it('官方声明支持但无厂商前缀可比的模型，靠显式声明可配置', () => {
+    expect(canConfigureThinkingForModel('opencode-go', 'longcat-2.0', true)).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'hy3', true)).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', 'hy4-preview', true)).toBe(true);
+    expect(canConfigureThinkingForModel('opencode-go', undefined)).toBe(false);
+  });
+
+  it('inferSupportsThinking 跟随同一套反推逻辑', () => {
+    expect(inferSupportsThinking('opencode-go', 'deepseek-v4.1-flash', false)).toBe(true);
+    expect(inferSupportsThinking('opencode-go', 'qwen3.8-max', true)).toBe(true);
+    expect(inferSupportsThinking('opencode-go', 'longcat-2.0', false)).toBe(false);
+    expect(inferSupportsThinking('opencode-go', 'longcat-2.0', true)).toBe(true);
+  });
+});

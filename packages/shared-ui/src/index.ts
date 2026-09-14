@@ -52,6 +52,7 @@ export type { UnifiedCodeDiffProps, UnifiedCodeDiffSummary } from './tools/Unifi
 export { FileSearch } from './file/FileSearch.js';
 export type { FileSearchProps, FileSearchResult, FileSearchMode } from './file/FileSearch.js';
 export { ProviderSettings } from './models/ProviderSettings.js';
+export { canRemoveProvider } from './models/provider-removal.js';
 export {
   canConfigureThinkingForModel,
   describeReasoningEffort,

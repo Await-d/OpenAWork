@@ -1,6 +1,26 @@
 export type SupportedReasoningEffort =
   'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export interface ModelReasoningOption {
+  readonly type: string;
+  readonly values?: readonly string[];
+}
+
+function isSupportedReasoningEffort(value: string): value is SupportedReasoningEffort {
+  switch (value) {
+    case 'none':
+    case 'minimal':
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+    case 'max':
+      return true;
+    default:
+      return false;
+  }
+}
+
 const DEFAULT_REASONING_EFFORTS = [
   'low',
   'medium',
@@ -166,7 +186,12 @@ function inferVendorFromModelId(modelId: string): string | undefined {
 
 // 归一化 providerType：当是 openai/custom/siliconflow 时尝试通过 modelId 推断真实厂商。
 function resolveEffectiveProviderType(providerType: string, modelId: string): string {
-  if (providerType === 'openai' || providerType === 'custom' || providerType === 'siliconflow') {
+  if (
+    providerType === 'openai' ||
+    providerType === 'custom' ||
+    providerType === 'siliconflow' ||
+    providerType === 'opencode-go'
+  ) {
     return inferVendorFromModelId(modelId) ?? providerType;
   }
   return providerType;
@@ -189,8 +214,13 @@ export function inferSupportsThinking(
   if (!providerType || !modelId) return false;
   const actualModelId = leafModelId(modelId);
 
-  // OpenAI/custom/siliconflow 兼容代理场景：通过 modelId 推断真实厂商。
-  if (providerType === 'openai' || providerType === 'custom' || providerType === 'siliconflow') {
+  // OpenAI/custom/siliconflow/opencode-go 兼容代理场景：通过 modelId 推断真实厂商。
+  if (
+    providerType === 'openai' ||
+    providerType === 'custom' ||
+    providerType === 'siliconflow' ||
+    providerType === 'opencode-go'
+  ) {
     const inferredVendor = inferVendorFromModelId(modelId);
     if (!inferredVendor) {
       return false;
@@ -330,7 +360,8 @@ export function canConfigureThinkingForModel(
     (providerType === 'custom' ||
       providerType === 'azure' ||
       providerType === 'openai' ||
-      providerType === 'siliconflow')
+      providerType === 'siliconflow' ||
+      providerType === 'opencode-go')
   ) {
     return !isOpenAIProModel(actualModelId);
   }
@@ -450,9 +481,18 @@ const BINARY_TOGGLE_EFFORTS = ['medium'] as const satisfies readonly SupportedRe
 export function getSupportedReasoningEffortsForModel(
   providerType: string | undefined,
   modelId: string | undefined,
+  reasoningOptions?: readonly ModelReasoningOption[],
 ): readonly SupportedReasoningEffort[] {
   if (!providerType || !modelId) {
     return DEFAULT_REASONING_EFFORTS;
+  }
+
+  const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
+  if (declaredEfforts && declaredEfforts.length > 0) {
+    const supported = declaredEfforts.filter(
+      isSupportedReasoningEffort,
+    );
+    if (supported.length > 0) return supported;
   }
 
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
