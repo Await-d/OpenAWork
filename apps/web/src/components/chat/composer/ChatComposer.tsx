@@ -103,6 +103,8 @@ interface ChatComposerProps {
   mentionItems: MentionItem[];
   /** 工作区是否已索引出文件；用于 @ 菜单区分「无文件」与「无匹配」。 */
   hasWorkspaceFiles?: boolean;
+  mentionLoading?: boolean;
+  mentionError?: string | null;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   agentOptions: Array<{ id: string; label: string }>;
@@ -208,6 +210,8 @@ export function ChatComposer({
   slashCommandItems,
   mentionItems,
   hasWorkspaceFiles = false,
+  mentionLoading = false,
+  mentionError = null,
   textareaRef,
   fileInputRef,
   agentOptions,
@@ -554,6 +558,8 @@ export function ChatComposer({
             onComposerHover={onComposerHover}
             onApplyComposerSelection={onApplyComposerSelection}
             hasWorkspaceFiles={hasWorkspaceFiles}
+            mentionLoading={mentionLoading}
+            mentionError={mentionError}
           />
         )}
 

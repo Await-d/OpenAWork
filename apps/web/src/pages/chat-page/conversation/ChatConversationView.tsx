@@ -49,6 +49,8 @@ import type {
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
+import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
+import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type { ComposerStatsData } from '../../../components/chat/composer/ComposerStatsBar.js';
 import { WelcomeScreen } from '../../../components/chat/session/ChatPageSections.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
@@ -345,6 +347,7 @@ export interface ChatConversationViewProps {
   composerRightSlot?: ReactNode;
   /** 已索引的工作区文件，供 @ 菜单引用。不传时 @ 菜单会一直显示空状态。 */
   workspaceFileItems?: WorkspaceFileMentionItem[];
+  searchMentionFiles?: MentionFileSearchFn;
 }
 
 // ─── 内部样式常量（提到顶层避免每次渲染创建新对象）────────────────────────
@@ -532,6 +535,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     setInput,
     textareaRef,
     workspaceFileItems,
+    searchMentionFiles,
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
@@ -887,6 +891,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           setInput={setInput}
           textareaRef={textareaRef}
           workspaceFileItems={workspaceFileItems}
+          searchMentionFiles={searchMentionFiles}
           features={composerFeatures}
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}

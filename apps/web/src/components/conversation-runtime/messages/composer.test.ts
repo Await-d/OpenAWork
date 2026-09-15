@@ -7,8 +7,10 @@ import type { CommandDescriptor } from '@openAwork/shared';
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceTreeNode } from './composer.js';
 import {
+  buildMentionItemsFromSearch,
   detectComposerTrigger,
   flattenWorkspaceFiles,
+  getMentionDirectoryHint,
   matchClientSlashCommand,
   matchServerSlashCommand,
   sanitizeComposerPlainText,
@@ -142,6 +144,75 @@ describe('flattenWorkspaceFiles', () => {
     expect(
       flattenWorkspaceFiles([{ path: 'C:\\ws\\a.ts', name: 'a.ts', type: 'file' }], 'C:\\ws'),
     ).toEqual([{ path: 'C:\\ws\\a.ts', label: 'a.ts', relativePath: 'a.ts' }]);
+  });
+});
+
+describe('buildMentionItemsFromSearch', () => {
+  it('呈现契约：目录行全部排在文件行之前，各自保持服务端返回顺序', () => {
+    const items = buildMentionItemsFromSearch({
+      directories: ['apps/web', 'src'],
+      files: ['README.md', 'src/main.ts'],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'dir:apps/web',
+      'dir:src',
+      'README.md',
+      'src/main.ts',
+    ]);
+    expect(items.slice(0, 2).every((item) => item.isDirectory === true)).toBe(true);
+    expect(items.slice(2).every((item) => item.isDirectory === undefined)).toBe(true);
+  });
+
+  it('目录条目：dir: id、label 与 insertText 以 / 结尾、description 为父路径', () => {
+    const [directoryItem] = buildMentionItemsFromSearch({
+      directories: ['apps/web/src'],
+      files: [],
+    });
+
+    expect(directoryItem).toEqual({
+      id: 'dir:apps/web/src',
+      kind: 'mention',
+      label: 'src/',
+      description: 'apps/web',
+      insertText: '@apps/web/src/',
+      isDirectory: true,
+    });
+  });
+
+  it('文件条目：id 为相对路径、label 为 basename、insertText 带尾随空格', () => {
+    const [fileItem] = buildMentionItemsFromSearch({
+      directories: [],
+      files: ['apps/web/src/pages/ChatPage.tsx'],
+    });
+
+    expect(fileItem).toEqual({
+      id: 'apps/web/src/pages/ChatPage.tsx',
+      kind: 'mention',
+      label: 'ChatPage.tsx',
+      description: 'apps/web/src/pages',
+      insertText: '@apps/web/src/pages/ChatPage.tsx ',
+    });
+    expect(fileItem?.isDirectory).toBeUndefined();
+  });
+
+  it('根级条目 description 为空串', () => {
+    const items = buildMentionItemsFromSearch({ directories: ['src'], files: ['README.md'] });
+
+    expect(items.map((item) => item.description)).toEqual(['', '']);
+  });
+
+  it('null / undefined 返回空数组且不抛错', () => {
+    expect(buildMentionItemsFromSearch(null)).toEqual([]);
+    expect(buildMentionItemsFromSearch(undefined)).toEqual([]);
+  });
+});
+
+describe('getMentionDirectoryHint', () => {
+  it('返回父目录路径，根级条目返回空串', () => {
+    expect(getMentionDirectoryHint('README.md')).toBe('');
+    expect(getMentionDirectoryHint('apps/web/src/a.ts')).toBe('apps/web/src');
+    expect(getMentionDirectoryHint('apps/web/')).toBe('apps');
   });
 });
 

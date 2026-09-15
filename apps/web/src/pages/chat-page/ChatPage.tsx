@@ -52,6 +52,7 @@ import {
   UnifiedComposer,
   type UnifiedComposerActivity,
 } from '../../components/chat/composer/UnifiedComposer.js';
+import type { MentionFileSearchFn } from '../../components/chat/composer/use-mention-file-search.js';
 import { ChatTopBar } from '../../components/chat/session/ChatTopBar.js';
 import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
 import { QuickTerminalToggle } from '../../components/chat/terminal/QuickTerminalToggle.js';
@@ -210,6 +211,7 @@ import {
   dismissPermissionEventMessage,
   estimateTokenCount,
   hasActivePendingPermissionRequest,
+  MENTION_SEARCH_LIMIT,
   matchClientSlashCommand,
   matchServerSlashCommand,
   normalizeChatMessages,
@@ -623,6 +625,17 @@ export default function ChatPage() {
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  const searchMentionFiles = useMemo<MentionFileSearchFn>(
+    () => (query, signal) =>
+      effectiveWorkingDirectory
+        ? workspace.searchFileIndex(effectiveWorkingDirectory, {
+            query,
+            limit: MENTION_SEARCH_LIMIT,
+            signal,
+          })
+        : Promise.resolve({ files: [], directories: [] }),
+    [effectiveWorkingDirectory, workspace.searchFileIndex],
+  );
   const uiWorkspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
   // useFileEditor 按 workspace 隔离打开的文件:跨 workspace 切换时自动加载对应 workspace
   // 上次留下的文件,而不是共享一个全局文件列表。
@@ -5730,6 +5743,7 @@ export default function ChatPage() {
                 sessionSource="chat"
                 compact
                 workspaceFileItems={workspaceFileItems}
+                searchMentionFiles={searchMentionFiles}
                 centerContent={conversationLayoutState.centerContent}
                 contentMaxWidth={conversationLayoutState.contentMaxWidth}
                 currentUserEmail={currentUserEmail}
@@ -6213,6 +6227,7 @@ export default function ChatPage() {
                   sessionSource="chat"
                   compact={false}
                   workspaceFileItems={workspaceFileItems}
+                  searchMentionFiles={searchMentionFiles}
                   centerContent={conversationLayoutState.centerContent}
                   contentMaxWidth={conversationLayoutState.contentMaxWidth}
                   currentUserEmail={currentUserEmail}

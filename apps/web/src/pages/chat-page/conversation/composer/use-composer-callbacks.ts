@@ -38,7 +38,12 @@ export interface ComposerCallbacksReturn {
   handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   handleInputSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
   handlePaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
-  replaceComposerToken: (start: number, end: number, replacement: string) => void;
+  replaceComposerToken: (
+    start: number,
+    end: number,
+    replacement: string,
+    options?: { keepMenuOpen?: boolean },
+  ) => void;
   applyComposerSelection: (item: SlashCommandItem | MentionItem) => Promise<void>;
   updateComposerMenu: (value: string, caret: number) => void;
 }
@@ -78,16 +83,25 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
     return slashCommandItems.some((item) => item.label.toLowerCase() === trimmedInput);
   }
 
-  function replaceComposerToken(start: number, end: number, replacement: string) {
+  function replaceComposerToken(
+    start: number,
+    end: number,
+    replacement: string,
+    options?: { keepMenuOpen?: boolean },
+  ) {
     const before = input.slice(0, start);
     const after = input.slice(end);
     const nextValue = `${before}${replacement}${after}`;
+    const nextCaret = before.length + replacement.length;
     exitInputHistoryBrowsing();
     setInput(nextValue);
-    setComposerMenu(null);
+    if (options?.keepMenuOpen) {
+      updateComposerMenu(nextValue, nextCaret);
+    } else {
+      setComposerMenu(null);
+    }
     requestAnimationFrame(() => {
       if (!textareaRef.current) return;
-      const nextCaret = before.length + replacement.length;
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(nextCaret, nextCaret);
     });
@@ -102,6 +116,12 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
       }
       setComposerMenu(null);
       await item.onSelect();
+      return;
+    }
+    if (item.isDirectory === true) {
+      replaceComposerToken(composerMenu.start, composerMenu.end, item.insertText, {
+        keepMenuOpen: true,
+      });
       return;
     }
     replaceComposerToken(composerMenu.start, composerMenu.end, item.insertText);

@@ -168,6 +168,7 @@ beforeEach(() => {
         insertText: '@README.md ',
       },
     ],
+    mentionSearchState: { result: null, loading: false, hasAnyEntries: false },
     attachedFiles: [],
   });
 });

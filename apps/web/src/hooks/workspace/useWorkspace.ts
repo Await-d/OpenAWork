@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createSessionsClient, createWorkspaceClient, type Session } from '@openAwork/web-client';
+import {
+  createSessionsClient,
+  createSshClient,
+  createWorkspaceClient,
+  type Session,
+} from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 
@@ -302,6 +307,20 @@ export function useWorkspace(sessionId: string | null) {
     [accessToken, workspaceClient],
   );
 
+  const searchFileIndex = useCallback(
+    async (
+      path: string,
+      options: { query: string; limit?: number; signal?: AbortSignal },
+    ): Promise<{ files: string[]; directories: string[] }> => {
+      const result = await workspaceClient.searchFileIndexResult(accessToken ?? '', path, options);
+      if (!result.ok) {
+        throw new Error(result.errorMessage ?? '检索工作区文件索引失败。');
+      }
+      return { files: result.files, directories: result.directories };
+    },
+    [accessToken, workspaceClient],
+  );
+
   const createDirectory = useCallback(
     async (path: string): Promise<void> => {
       await workspaceClient.createDirectory(accessToken ?? '', path);
@@ -335,6 +354,35 @@ export function useWorkspace(sessionId: string | null) {
     [accessToken, workspaceClient],
   );
 
+  /**
+   * SSH 远端目录浏览：复用 `/ssh/files`（单层 readdir）并映射为文件树节点结构，
+   * 供 SSH 工作区选择弹窗使用（不经过本地 /workspace/* 端点）。
+   */
+  const fetchSshTree = useCallback(
+    async (connectionId: string, path: string): Promise<FileTreeNode[]> => {
+      if (!accessToken) {
+        throw new Error('未登录，无法读取远端目录。');
+      }
+      const entries = await createSshClient(gatewayUrl).listFiles(accessToken, connectionId, path);
+      return entries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        type: entry.kind,
+      }));
+    },
+    [accessToken, gatewayUrl],
+  );
+
+  const createSshDirectory = useCallback(
+    async (connectionId: string, path: string): Promise<void> => {
+      if (!accessToken) {
+        throw new Error('未登录，无法创建远端目录。');
+      }
+      await createSshClient(gatewayUrl).mkdir(accessToken, { connectionId, path });
+    },
+    [accessToken, gatewayUrl],
+  );
+
   return {
     workingDirectory: resolvedWorkingDirectory,
     loading,
@@ -345,6 +393,9 @@ export function useWorkspace(sessionId: string | null) {
     fetchRootPath,
     fetchWorkspaceRoots,
     fetchTree,
+    fetchSshTree,
+    createSshDirectory,
+    searchFileIndex,
     createDirectory,
     fetchFile,
     searchFiles,

@@ -22,6 +22,7 @@ import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/conver
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
+import type { MentionFileSearchFn } from './use-mention-file-search.js';
 import { buildPromptOptimizationContext } from './prompt-optimization-context.js';
 import { buildAttachmentFileMap } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
 
@@ -157,6 +158,7 @@ export interface UnifiedComposerProps {
   setAttachmentItems?: React.Dispatch<React.SetStateAction<AttachmentItem[]>>;
   workspaceFileItems?: WorkspaceFileMentionItem[];
   setWorkspaceFileItems?: React.Dispatch<React.SetStateAction<WorkspaceFileMentionItem[]>>;
+  searchMentionFiles?: MentionFileSearchFn;
   composerMenu?: ComposerMenuState;
   setComposerMenu?: React.Dispatch<React.SetStateAction<ComposerMenuState>>;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
@@ -248,6 +250,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     setAttachmentItems: setAttachmentItemsProp,
     workspaceFileItems: workspaceFileItemsProp,
     setWorkspaceFileItems: setWorkspaceFileItemsProp,
+    searchMentionFiles: searchMentionFilesProp,
     composerMenu: composerMenuProp,
     setComposerMenu: setComposerMenuProp,
     textareaRef: textareaRefProp,
@@ -351,6 +354,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     setAttachmentItems: resolvedSetAttachmentItems,
     workspaceFileItems: resolvedWorkspaceFileItems,
     setWorkspaceFileItems: resolvedSetWorkspaceFileItems,
+    searchMentionFiles: searchMentionFilesProp,
     composerMenu: resolvedComposerMenu,
     setComposerMenu: resolvedSetComposerMenu,
     textareaRef: resolvedTextareaRef,
@@ -399,6 +403,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     restoreInputFromHistory,
     slashCommandItems,
     mentionItems,
+    mentionSearchState,
     attachedFiles,
   } = composerState;
 
@@ -464,7 +469,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
   );
 
   // 供 @ 菜单区分「工作区没有文件」与「查询无匹配文件」两种空状态。
-  const hasWorkspaceFiles = resolvedWorkspaceFileItems.length > 0;
+  const hasWorkspaceFiles =
+    mentionSearchState.hasAnyEntries || resolvedWorkspaceFileItems.length > 0;
 
   useEffect(() => {
     onCompanionActivityChange?.({
@@ -533,6 +539,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         slashCommandItems={features.slashCommands ? slashCommandItems : []}
         mentionItems={features.mentions ? mentionItems : []}
         hasWorkspaceFiles={hasWorkspaceFiles}
+        mentionLoading={mentionSearchState.loading}
+        mentionError={mentionSearchState.error}
         textareaRef={textareaRef}
         fileInputRef={fileInputRef}
         onFileChange={handleFileChange}

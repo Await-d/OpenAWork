@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
 import type { ComposerWorkspaceCatalog } from '../../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import {
+  buildMentionItemsFromSearch,
   type ComposerMenuState,
+  type MentionSearchResult,
   type SlashCommandItem,
   type MentionItem,
-  type WorkspaceFileMentionItem,
 } from '../../../../components/conversation-runtime/messages/support.js';
 import { buildComposerSlashItems } from './composer-slash-items.js';
 
@@ -13,7 +14,7 @@ export interface ComposerMenuItemsDeps {
   composerMenu: ComposerMenuState;
   composerCommandDescriptors: CommandDescriptor[];
   composerWorkspaceCatalog: ComposerWorkspaceCatalog;
-  workspaceFileItems: WorkspaceFileMentionItem[];
+  mentionSearch: MentionSearchResult | null | undefined;
 }
 
 export interface ComposerMenuItemsReturn {
@@ -22,7 +23,7 @@ export interface ComposerMenuItemsReturn {
 }
 
 export function useComposerMenuItems(deps: ComposerMenuItemsDeps): ComposerMenuItemsReturn {
-  const { composerMenu, composerCommandDescriptors, composerWorkspaceCatalog, workspaceFileItems } =
+  const { composerMenu, composerCommandDescriptors, composerWorkspaceCatalog, mentionSearch } =
     deps;
 
   const slashCommandItems = useMemo<SlashCommandItem[]>(() => {
@@ -92,24 +93,8 @@ export function useComposerMenuItems(deps: ComposerMenuItemsDeps): ComposerMenuI
     if (!composerMenu || composerMenu.type !== 'mention') {
       return [];
     }
-    const query = composerMenu.query.toLowerCase();
-    return workspaceFileItems
-      .filter((file) => `${file.label} ${file.relativePath}`.toLowerCase().includes(query))
-      .slice(0, 8)
-      .map((file) => ({
-        id: file.path,
-        kind: 'mention',
-        label: file.label,
-        description: getMentionDirectoryHint(file.relativePath),
-        insertText: `@${file.relativePath} `,
-      }));
-  }, [composerMenu, workspaceFileItems]);
+    return buildMentionItemsFromSearch(mentionSearch);
+  }, [composerMenu, mentionSearch]);
 
   return { slashCommandItems, mentionItems };
-}
-
-/** 提取所在目录作为菜单里的路径提示；根目录文件返回空串。 */
-function getMentionDirectoryHint(relativePath: string): string {
-  const lastSlash = relativePath.lastIndexOf('/');
-  return lastSlash === -1 ? '' : relativePath.slice(0, lastSlash);
 }

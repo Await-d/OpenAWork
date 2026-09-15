@@ -20,6 +20,8 @@ import type {
   WorkspaceFileMentionItem,
 } from '../../conversation-runtime/messages/support.js';
 import { sanitizeComposerPlainText } from '../../conversation-runtime/messages/support.js';
+import { useMentionFileSearch } from './use-mention-file-search.js';
+import type { MentionFileSearchFn } from './use-mention-file-search.js';
 import { useChatQueueStore } from '../../../stores/chat/chat-queue.js';
 import type { ChatSettingsProvider } from '../../../utils/chat/chat-session-defaults.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
@@ -74,6 +76,7 @@ export interface UseUnifiedComposerStateOptions {
   setAttachmentItems: React.Dispatch<React.SetStateAction<AttachmentItem[]>>;
   workspaceFileItems: WorkspaceFileMentionItem[];
   setWorkspaceFileItems: React.Dispatch<React.SetStateAction<WorkspaceFileMentionItem[]>>;
+  searchMentionFiles?: MentionFileSearchFn;
   composerMenu: ComposerMenuState;
   setComposerMenu: React.Dispatch<React.SetStateAction<ComposerMenuState>>;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -137,6 +140,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     setAttachmentItems,
     workspaceFileItems,
     setWorkspaceFileItems,
+    searchMentionFiles,
     composerMenu,
     setComposerMenu,
     textareaRef,
@@ -321,11 +325,16 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   );
 
   // ─── Menu items hook ──────────────────────────────────────────────────────
+  const mentionSearchState = useMentionFileSearch({
+    enabled: composerMenu?.type === 'mention',
+    query: composerMenu?.type === 'mention' ? composerMenu.query : null,
+    search: searchMentionFiles,
+  });
   const { slashCommandItems, mentionItems } = useComposerMenuItems({
     composerMenu,
     composerCommandDescriptors,
     composerWorkspaceCatalog,
-    workspaceFileItems,
+    mentionSearch: mentionSearchState.result,
   });
 
   // ─── Composer callbacks hook ──────────────────────────────────────────────
@@ -594,5 +603,6 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     // Menu items
     slashCommandItems,
     mentionItems,
+    mentionSearchState,
   };
 }

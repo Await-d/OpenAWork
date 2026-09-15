@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import React, { useRef, useState } from 'react';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ComposerMenuState,
+  MentionItem,
+} from '../../../../components/conversation-runtime/messages/support.js';
+import { detectComposerTrigger } from '../../../../components/conversation-runtime/messages/support.js';
 import { useComposerCallbacks } from './use-composer-callbacks.js';
 
 afterEach(() => {
@@ -162,5 +167,124 @@ describe('useComposerCallbacks', () => {
     fireEvent.keyDown(textarea, { key: 'ArrowUp', altKey: true });
 
     expect(navigateInputHistory).not.toHaveBeenCalled();
+  });
+});
+
+describe('useComposerCallbacks @ 提及选择', () => {
+  const DIRECTORY_ITEM: MentionItem = {
+    id: 'dir:apps',
+    kind: 'mention',
+    label: 'apps/',
+    description: '',
+    insertText: '@apps/',
+    isDirectory: true,
+  };
+
+  const FILE_ITEM: MentionItem = {
+    id: 'src/a.ts',
+    kind: 'mention',
+    label: 'a.ts',
+    description: 'src',
+    insertText: '@src/a.ts ',
+  };
+
+  function renderSelectionHarness(options: {
+    initialInput: string;
+    initialMenu: NonNullable<ComposerMenuState>;
+    item: MentionItem;
+  }) {
+    let applySelection: ((item: MentionItem) => Promise<void>) | null = null;
+    let latestMenu: ComposerMenuState = options.initialMenu;
+
+    function Harness() {
+      const [value, setValue] = useState(options.initialInput);
+      const [menu, setMenu] = useState<ComposerMenuState>(options.initialMenu);
+      const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+      latestMenu = menu;
+
+      const callbacks = useComposerCallbacks({
+        composerMenu: menu,
+        setComposerMenu: (next) => {
+          setMenu((prev) => (typeof next === 'function' ? next(prev) : next));
+        },
+        input: value,
+        setInput: setValue,
+        textareaRef,
+        slashCommandItems: [],
+        mentionItems: [options.item],
+        stopCapability: 'none',
+        streaming: false,
+        canStopCurrentSessionStream: false,
+        remoteSessionBusyState: null,
+        stopActiveMessage: () => undefined,
+        enqueueComposerMessage: async () => true,
+        sendMessage: async () => true,
+        appendFiles: () => undefined,
+        navigateInputHistory: () => false,
+        isBrowsingInputHistory: false,
+        exitInputHistoryBrowsing: () => undefined,
+      });
+      applySelection = callbacks.applyComposerSelection;
+
+      return (
+        <div>
+          <textarea ref={textareaRef} value={value} readOnly />
+          <span data-testid="composer-input">{value}</span>
+        </div>
+      );
+    }
+
+    const view = render(<Harness />);
+
+    return {
+      getInput: () => view.getByTestId('composer-input').textContent ?? '',
+      getMenu: () => latestMenu,
+      applySelection: async () => {
+        const selection = applySelection;
+        if (!selection) {
+          throw new Error('applyComposerSelection 未初始化');
+        }
+        await act(async () => {
+          await selection(options.item);
+        });
+      },
+    };
+  }
+
+  it('选中目录后菜单保持打开并写入 @apps/ 前缀', async () => {
+    const harness = renderSelectionHarness({
+      initialInput: '@app',
+      initialMenu: { type: 'mention', query: 'app', start: 0, end: 4, selectedIndex: 0 },
+      item: DIRECTORY_ITEM,
+    });
+
+    await harness.applySelection();
+
+    expect(harness.getInput()).toBe('@apps/');
+    expect(harness.getMenu()).toMatchObject({
+      type: 'mention',
+      query: 'apps/',
+      start: 0,
+      end: 6,
+    });
+    expect(detectComposerTrigger('@apps/', 6)).toEqual({
+      type: 'mention',
+      query: 'apps/',
+      start: 0,
+      end: 6,
+    });
+  });
+
+  it('选中文件后关闭菜单并写入带尾随空格的 @path', async () => {
+    const harness = renderSelectionHarness({
+      initialInput: '@src/a',
+      initialMenu: { type: 'mention', query: 'src/a', start: 0, end: 6, selectedIndex: 0 },
+      item: FILE_ITEM,
+    });
+
+    await harness.applySelection();
+
+    expect(harness.getInput()).toBe('@src/a.ts ');
+    expect(harness.getMenu()).toBeNull();
   });
 });

@@ -27,6 +27,10 @@ export interface ChatComposerMenuProps {
   onApplyComposerSelection: (item: SlashCommandItem | MentionItem) => void | Promise<void>;
   /** 工作区是否已索引出文件；用于区分「无文件」与「无匹配」两种空状态。 */
   hasWorkspaceFiles: boolean;
+  /** @ 菜单检索是否进行中；空列表时优先展示检索提示。 */
+  mentionLoading?: boolean;
+  /** @ 菜单检索失败文案；非空时优先于 loading / 空状态展示。 */
+  mentionError?: string | null;
 }
 
 export function ChatComposerMenu({
@@ -38,6 +42,8 @@ export function ChatComposerMenu({
   onComposerHover,
   onApplyComposerSelection,
   hasWorkspaceFiles,
+  mentionLoading = false,
+  mentionError = null,
 }: ChatComposerMenuProps) {
   return (
     <div
@@ -141,7 +147,22 @@ export function ChatComposerMenu({
                 gap: 6,
               }}
             >
-              {hasWorkspaceFiles ? (
+              {mentionError ? (
+                <span
+                  style={{
+                    color: 'var(--danger)',
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={mentionError}
+                >
+                  {mentionError}
+                </span>
+              ) : mentionLoading ? (
+                <span>正在检索工作区文件…</span>
+              ) : hasWorkspaceFiles ? (
                 <>
                   <span style={{ color: 'var(--fg-default)', fontWeight: 600 }}>
                     未找到匹配「{composerMenu.query}」的文件
@@ -161,6 +182,7 @@ export function ChatComposerMenu({
           {currentItems.map((item, index) => {
             const selected = index === composerMenu.selectedIndex;
             const slashItem = composerMenu.type === 'slash' && item.kind === 'slash' ? item : null;
+            const mentionItem = item.kind === 'mention' ? item : null;
             return (
               <button
                 ref={(node) => {
@@ -198,7 +220,7 @@ export function ChatComposerMenu({
                     gap: 5,
                   }}
                 >
-                  {!slashItem && <FileIcon />}
+                  {mentionItem && (mentionItem.isDirectory ? <FolderIcon /> : <FileIcon />)}
                   <span
                     style={{
                       ...composerListPrimaryTextStyle,
@@ -277,6 +299,8 @@ export function ChatComposerMenu({
                     >
                       {slashItem.badgeLabel ?? '命令'}
                     </span>
+                  ) : mentionItem?.isDirectory ? (
+                    '›'
                   ) : (
                     '@'
                   )}

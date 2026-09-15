@@ -44,8 +44,11 @@ export {
 export { formatDurationLabel, formatShortTime, formatStopReasonLabel } from './message-format.js';
 export { parseSessionModeMetadata } from './session-mode-metadata.js';
 export {
+  buildMentionItemsFromSearch,
   detectComposerTrigger,
   flattenWorkspaceFiles,
+  getMentionDirectoryHint,
+  MENTION_SEARCH_LIMIT,
   matchClientSlashCommand,
   matchServerSlashCommand,
   sanitizeComposerPlainText,
@@ -56,6 +59,7 @@ export type {
   ComposerMenuState,
   InstalledComposerSkill,
   MentionItem,
+  MentionSearchResult,
   SlashCommandItem,
   WorkspaceFileMentionItem,
   WorkspaceTreeNode,
