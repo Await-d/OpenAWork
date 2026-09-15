@@ -27,6 +27,7 @@ import {
   validateWorkspaceRelativePath,
 } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
+import { WORKSPACE_CORE_IGNORED_DIRS } from '../workspace/workspace-ignored-dirs.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { pickToolPathInput, readToolPathInput } from './tool-path-aliases.js';
 
@@ -37,28 +38,9 @@ interface WorkspaceTreeNode {
   children?: WorkspaceTreeNode[];
 }
 
-// Traversal denylist for build/editor artifacts. Only names that are never
-// committed source in any ecosystem: `.vs`/`.idea` (editor state), `.omo`
-// (agent workflow scratch), `.venv` (Python virtualenv), `target` (Rust/Cargo
-// output), `coverage` (test reports).
-// Deliberately NOT included: `bin` and `obj`. CLI/JS packages legitimately
-// commit a `bin/` directory, and `obj` is not universally build output — the
-// walker must never hide committed source. Repo-specific `bin/`/`obj/` cases
-// are handled by the compiled .gitignore rules instead.
-const IGNORED_NAMES = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  '.next',
-  '__pycache__',
-  '.DS_Store',
-  '.vs',
-  '.idea',
-  '.omo',
-  '.venv',
-  'target',
-  'coverage',
-]);
+// Must stay the CORE set (see workspace-ignored-dirs.ts): the file index's larger
+// build-artifact set would hide `build/`, `out/`, `temp/` from the agent.
+export const IGNORED_NAMES = WORKSPACE_CORE_IGNORED_DIRS;
 const MAX_TREE_ENTRIES = 500;
 const MAX_TREE_DEPTH = 4;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;

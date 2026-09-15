@@ -27,8 +27,20 @@ import {
   resolveWorkspaceEntryPathForRequest,
   ensureIgnoreRulesLoadedForPath,
   getSessionWorkingDirectoryForUser,
+  resolveWorkspaceRootForPath,
 } from '../workspace/workspace-safety.js';
+import {
+  getWorkspaceFileIndex,
+  getWorkspaceIgnoreManager,
+  invalidateWorkspaceFileIndex,
+} from '../workspace/workspace-file-index.js';
+import {
+  searchWorkspaceFileIndex,
+  WORKSPACE_FILE_SEARCH_DEFAULT_LIMIT,
+  WORKSPACE_FILE_SEARCH_MAX_LIMIT,
+} from '../workspace/workspace-file-search.js';
 import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
+import { createWorkspaceRequestThrottle } from '../workspace/workspace-request-throttle.js';
 import {
   getWorkspaceReviewDiff,
   listWorkspaceReviewChanges,
@@ -98,6 +110,7 @@ const WORKSPACE_ERROR_MESSAGES = {
   renameFailed: '重命名/移动文件失败。',
   deleteFailed: '删除文件或目录失败。',
   invalidReviewFilePath: '目标文件路径无效。',
+  searchRateLimited: '文件搜索请求过于频繁，请稍后再试。',
 } as const;
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.DS_Store']);
@@ -106,6 +119,28 @@ const MAX_DEPTH = 4;
 const MAX_FILE_BYTES = 100 * 1024;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
+
+/**
+ * Sliding-window budget for `GET /workspace/files/search`, keyed per
+ * authenticated user + resolved workspace root. The web client debounces
+ * mention lookups by 120ms (`apps/web/.../use-mention-file-search.ts`), so a
+ * full minute of continuous typing tops out around 240 requests; the cap is
+ * deliberately above realistic interaction (bursts of 10–30 keystrokes
+ * followed by idle reading time) while still bounding an authenticated flood
+ * that would otherwise force one full workspace `readdir` walk per request.
+ */
+export const WORKSPACE_FILE_SEARCH_RATE_LIMIT = 240;
+export const WORKSPACE_FILE_SEARCH_RATE_WINDOW_MS = 60_000;
+
+/**
+ * Shared in-process throttle for the file-search endpoint. Exported so tests
+ * can reset the state (`workspaceFileSearchThrottle.reset()`) instead of
+ * leaking budget between suites.
+ */
+export const workspaceFileSearchThrottle = createWorkspaceRequestThrottle({
+  limit: WORKSPACE_FILE_SEARCH_RATE_LIMIT,
+  windowMs: WORKSPACE_FILE_SEARCH_RATE_WINDOW_MS,
+});
 
 function assertWorkspacePathSupportedByRequestHost(path: string): void {
   if (!isWorkspaceAbsolutePath(path)) {
@@ -364,6 +399,124 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  /**
+   * GET /workspace/files/search?path=&q=&limit=
+   *
+   * 在缓存索引上做服务端检索，服务端分开返回 `files` 与 `directories`：
+   * 浏览模式（`q` 为空或带 `/`）目录在前、再按片段排序；搜索模式按相关性
+   * 排序（精确 > 前缀 > 子串 > 路径子串），同分时文件优先、浅层优先。
+   * UI 负责先渲染目录行再渲染文件行。只返回相对路径。
+   */
+  app.get(
+    '/workspace/files/search',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'workspace.files.search');
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string(),
+        q: z.string().max(200).optional(),
+        limit: z.coerce.number().int().min(1).max(WORKSPACE_FILE_SEARCH_MAX_LIMIT).optional(),
+      });
+
+      const parseStep = child('parse-query');
+      const parsed = parseQuery(schema, request.query);
+      const query = parsed.q ?? '';
+      const limit = parsed.limit ?? WORKSPACE_FILE_SEARCH_DEFAULT_LIMIT;
+      parseStep.succeed(undefined, { query, limit });
+
+      const pathStep = child('path-safety');
+      const safePath = validateWorkspacePathForRequest(parsed.path);
+      if (!safePath) {
+        pathStep.fail('forbidden path');
+        step.fail('forbidden path');
+        return reply.status(403).send({
+          files: [],
+          directories: [],
+          truncated: false,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+        });
+      }
+      pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const ignoreRoot = resolveWorkspaceRootForPath(safePath);
+      const ignoreRules = await getWorkspaceIgnoreManager(ignoreRoot);
+      if (ignoreRules.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({
+          files: [],
+          directories: [],
+          truncated: false,
+          error: WORKSPACE_ERROR_MESSAGES.forbiddenByIgnoreRules,
+        });
+      }
+
+      // Rate guard must run BEFORE `getWorkspaceFileIndex`: a cache miss walks
+      // the whole workspace, so a rejected request must never start one.
+      const throttleKey = `${user.sub}::${ignoreRoot}`;
+      const decision = workspaceFileSearchThrottle.tryConsume(throttleKey);
+      if (!decision.allowed) {
+        step.fail('rate limited');
+        return reply
+          .status(429)
+          .header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)))
+          .send({
+            files: [],
+            directories: [],
+            truncated: false,
+            error: WORKSPACE_ERROR_MESSAGES.searchRateLimited,
+          });
+      }
+
+      const statStep = child('stat');
+      try {
+        const stat = await fsp.stat(safePath);
+        if (!stat.isDirectory()) {
+          statStep.fail('not a directory');
+          step.fail('not a directory');
+          return reply.status(400).send({
+            files: [],
+            directories: [],
+            truncated: false,
+            error: WORKSPACE_ERROR_MESSAGES.pathNotDirectory,
+          });
+        }
+        statStep.succeed(undefined, { isDirectory: true });
+      } catch {
+        statStep.fail('path not found');
+        step.fail('path not found');
+        return reply.status(404).send({
+          files: [],
+          directories: [],
+          truncated: false,
+          error: WORKSPACE_ERROR_MESSAGES.pathDoesNotExist,
+        });
+      }
+
+      const searchStep = child('search-files', undefined, { limit });
+      const index = await getWorkspaceFileIndex({ rootPath: safePath, ignoreRoot });
+      const { files, directories } = searchWorkspaceFileIndex({ index, query, limit });
+      searchStep.succeed(undefined, {
+        returnedFiles: files.length,
+        returnedDirectories: directories.length,
+        indexedFiles: index.files.length,
+      });
+      step.succeed(undefined, {
+        returnedFiles: files.length,
+        returnedDirectories: directories.length,
+      });
+
+      return reply.send({
+        root: safePath,
+        query,
+        files,
+        directories,
+        truncated: index.truncated,
+        count: files.length + directories.length,
+      });
+    },
+  );
+
   app.get(
     '/workspace/file',
     { preHandler: requireAuth },
@@ -568,6 +721,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const writeStep = child('write');
       try {
         await fsp.writeFile(safePath, parsed.content, 'utf8');
+        invalidateWorkspaceFileIndex(safePath);
         writeStep.succeed(undefined, { bytes: parsed.content.length });
         step.succeed(undefined, { bytes: parsed.content.length });
         return reply.send({ success: true, path: safePath });
@@ -624,6 +778,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         } finally {
           await handle.close();
         }
+        invalidateWorkspaceFileIndex(safePath);
         writeStep.succeed(undefined, { bytes: parsed.content.length });
         step.succeed(undefined, { bytes: parsed.content.length });
         return reply.send({ success: true, path: safePath });
@@ -676,6 +831,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const mkdirStep = child('mkdir');
       try {
         await fsp.mkdir(safePath);
+        invalidateWorkspaceFileIndex(safePath);
         mkdirStep.succeed();
         step.succeed();
         return reply.send({ success: true, path: safePath });
@@ -768,6 +924,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const deleteStep = child('delete');
       try {
         await fsp.rm(safePath, { recursive: true, force: false });
+        invalidateWorkspaceFileIndex(safePath);
         deleteStep.succeed();
         step.succeed(undefined, { path: safePath });
         return reply.send({ ok: true, path: safePath });
@@ -870,6 +1027,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const renameStep = child('rename');
       try {
         await fsp.rename(safeOldPath, safeNewPath);
+        invalidateWorkspaceFileIndex(safeOldPath);
+        invalidateWorkspaceFileIndex(safeNewPath);
         renameStep.succeed(undefined, { oldPath: safeOldPath, newPath: safeNewPath });
         step.succeed(undefined, { oldPath: safeOldPath, newPath: safeNewPath });
         return reply.send({ ok: true, oldPath: safeOldPath, newPath: safeNewPath });
@@ -1010,6 +1169,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
 
       const revertStep = child('revert');
       await revertWorkspaceReviewPath(safePath, relativeFilePath);
+      invalidateWorkspaceFileIndex(join(safePath, relativeFilePath));
       revertStep.succeed(undefined, { filePath: relativeFilePath });
       step.succeed(undefined, { filePath: relativeFilePath });
       return reply.send({ ok: true });

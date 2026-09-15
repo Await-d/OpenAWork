@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
@@ -9,6 +9,7 @@ import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as WorkspaceRoutesModule from '../../routes/workspace.js';
 import type * as UserWorkspaceAllowlistModule from '../../workspace/user-workspace-allowlist.js';
+import type * as WorkspaceFileIndexModule from '../../workspace/workspace-file-index.js';
 
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'openawork-workspace-routes-'));
 const outsideRoot = mkdtempSync(join(tmpdir(), 'openawork-workspace-outside-'));
@@ -24,7 +25,11 @@ let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let resetUserWorkspaceAllowlistCache: typeof UserWorkspaceAllowlistModule.__resetUserWorkspaceAllowlistCacheForTest;
+let resetWorkspaceFileIndexCache: typeof WorkspaceFileIndexModule.__resetWorkspaceFileIndexCacheForTest;
+let invalidateWorkspaceFileIndex: typeof WorkspaceFileIndexModule.invalidateWorkspaceFileIndex;
 let workspaceRoutes: typeof WorkspaceRoutesModule.workspaceRoutes;
+let workspaceFileSearchThrottle: typeof WorkspaceRoutesModule.workspaceFileSearchThrottle;
+let workspaceFileSearchRateLimit: typeof WorkspaceRoutesModule.WORKSPACE_FILE_SEARCH_RATE_LIMIT;
 
 const USER_ID = 'u-workspace-routes';
 const SESSION_ID = 's-workspace-routes';
@@ -65,9 +70,15 @@ beforeAll(async () => {
   await dbModule.migrate();
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
-  workspaceRoutes = (await import('../../routes/workspace.js')).workspaceRoutes;
+  const workspaceRoutesModule = await import('../../routes/workspace.js');
+  workspaceRoutes = workspaceRoutesModule.workspaceRoutes;
+  workspaceFileSearchThrottle = workspaceRoutesModule.workspaceFileSearchThrottle;
+  workspaceFileSearchRateLimit = workspaceRoutesModule.WORKSPACE_FILE_SEARCH_RATE_LIMIT;
   resetUserWorkspaceAllowlistCache = (await import('../../workspace/user-workspace-allowlist.js'))
     .__resetUserWorkspaceAllowlistCacheForTest;
+  const workspaceFileIndexModule = await import('../../workspace/workspace-file-index.js');
+  resetWorkspaceFileIndexCache = workspaceFileIndexModule.__resetWorkspaceFileIndexCacheForTest;
+  invalidateWorkspaceFileIndex = workspaceFileIndexModule.invalidateWorkspaceFileIndex;
 });
 
 beforeEach(() => {
@@ -76,6 +87,7 @@ beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   resetUserWorkspaceAllowlistCache();
+  resetWorkspaceFileIndexCache();
   seedUser(USER_ID);
   seedWorkspaceSession(projectRoot);
 });
@@ -347,6 +359,223 @@ describe('workspace routes', () => {
       expect(readFileSync(sourcePath, 'utf8')).toBe('source\n');
       expect(readFileSync(targetPath, 'utf8')).toBe('target\n');
     } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 全局搜索命中深层文件', async () => {
+    const deepFile = join(projectRoot, 'apps', 'web', 'src', 'pages', 'chat-page', 'ChatPage.tsx');
+    mkdirSync(dirname(deepFile), { recursive: true });
+    writeFileSync(deepFile, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/search?path=${encodeURIComponent(projectRoot)}&q=ChatPage`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        root: projectRoot,
+        query: 'ChatPage',
+        files: ['apps/web/src/pages/chat-page/ChatPage.tsx'],
+        directories: [],
+        truncated: false,
+        count: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 的 apps/ 下钻只返回直接子级', async () => {
+    const directFile = join(projectRoot, 'apps', 'desktop.config.ts');
+    const deepFile = join(projectRoot, 'apps', 'web', 'src', 'App.tsx');
+    mkdirSync(dirname(directFile), { recursive: true });
+    mkdirSync(dirname(deepFile), { recursive: true });
+    writeFileSync(directFile, 'export {};\n', 'utf8');
+    writeFileSync(deepFile, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` +
+          `&q=${encodeURIComponent('apps/')}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        files: ['apps/desktop.config.ts'],
+        directories: ['apps/web'],
+        count: 2,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 对文件路径返回中文 400', async () => {
+    const filePath = join(projectRoot, 'notes.txt');
+    writeFileSync(filePath, 'hello', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/search?path=${encodeURIComponent(filePath)}&q=note`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        files: [],
+        directories: [],
+        truncated: false,
+        error: '目标路径不是文件夹。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 对用户未注册的工作区路径返回中文 403', async () => {
+    const otherProject = join(workspaceRoot, 'other-project');
+    mkdirSync(otherProject, { recursive: true });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/search?path=${encodeURIComponent(otherProject)}&q=app`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        error: '当前账号无权访问该工作区路径。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 对 limit=51 返回中文 400', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` + '&q=app&limit=51',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '查询参数无效。' },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 对超过 200 字符的 q 返回中文 400', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` +
+          `&q=${'a'.repeat(201)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '查询参数无效。' },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 缓存命中时不感知新建文件，失效后可见', async () => {
+    const firstFile = join(projectRoot, 'src', 'alpha.ts');
+    mkdirSync(dirname(firstFile), { recursive: true });
+    writeFileSync(firstFile, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const searchUrl =
+        `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` + '&q=alpha';
+
+      const first = await app.inject({
+        method: 'GET',
+        url: searchUrl,
+        headers: { authorization: bearer(app) },
+      });
+      expect(first.statusCode).toBe(200);
+      expect(first.json().files).toEqual(['src/alpha.ts']);
+
+      writeFileSync(join(projectRoot, 'src', 'alpha-extra.ts'), 'export {};\n', 'utf8');
+
+      const second = await app.inject({
+        method: 'GET',
+        url: searchUrl,
+        headers: { authorization: bearer(app) },
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json().files).not.toContain('src/alpha-extra.ts');
+
+      invalidateWorkspaceFileIndex(projectRoot);
+
+      const third = await app.inject({
+        method: 'GET',
+        url: searchUrl,
+        headers: { authorization: bearer(app) },
+      });
+      expect(third.statusCode).toBe(200);
+      expect(third.json().files).toContain('src/alpha-extra.ts');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 超出限流预算后返回中文 429 与 Retry-After', async () => {
+    const filePath = join(projectRoot, 'src', 'index.ts');
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      // 单例 throttle 跨 app 实例共享，先重置以隔离本用例。
+      workspaceFileSearchThrottle.reset();
+      const url = `/workspace/files/search?path=${encodeURIComponent(projectRoot)}&q=index`;
+      const headers = { authorization: bearer(app) };
+
+      for (let attempt = 0; attempt < workspaceFileSearchRateLimit; attempt += 1) {
+        const response = await app.inject({ method: 'GET', url, headers });
+        expect(response.statusCode).toBe(200);
+      }
+
+      const throttled = await app.inject({ method: 'GET', url, headers });
+      expect(throttled.statusCode).toBe(429);
+      const retryAfter = throttled.headers['retry-after'];
+      expect(retryAfter).toBeDefined();
+      expect(Number(retryAfter)).toBeGreaterThanOrEqual(1);
+      expect(throttled.json()).toMatchObject({
+        files: [],
+        directories: [],
+        truncated: false,
+        error: '文件搜索请求过于频繁，请稍后再试。',
+      });
+    } finally {
+      workspaceFileSearchThrottle.reset();
       await app.close();
     }
   });
