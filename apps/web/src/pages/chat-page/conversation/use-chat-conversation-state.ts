@@ -587,6 +587,9 @@ export function useChatConversationState(
   const requestModelLabelRef = useRef<string | undefined>(undefined);
   const requestProviderIdRef = useRef<string | undefined>(undefined);
   const requestAgentIdRef = useRef<string | undefined>(undefined);
+  // Rid the gateway persists against for the current stream; stamped on each
+  // locally committed round so snapshot reconciliation can match by identity.
+  const streamClientRequestIdRef = useRef<string | null>(null);
 
   const stream = useConversationStream(
     {
@@ -613,6 +616,9 @@ export function useChatConversationState(
     {
       sessionId,
       requestStartedAt: streamRequestStartedAtRef.current,
+      get clientRequestId() {
+        return streamClientRequestIdRef.current;
+      },
       get requestProviderId() {
         return requestProviderIdRef.current;
       },
@@ -713,6 +719,9 @@ export function useChatConversationState(
           setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
         },
       });
+      // `stream()` mints the rid synchronously; capture it before any event
+      // arrives so both the intermediate and final commits carry it.
+      streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
     },
     [
       enableWriters,

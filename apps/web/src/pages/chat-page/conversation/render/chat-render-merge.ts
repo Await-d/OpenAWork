@@ -1,4 +1,5 @@
 import type { ChatRenderEntry } from '../../../../components/chat/message/chat-message-group-list.js';
+import { compareOrderedIds } from '../../../../components/conversation-runtime/messages/ordered-id.js';
 import {
   parseAssistantEventContent,
   readAssistantTracePayload,
@@ -37,8 +38,7 @@ function compareOrderedMessageIds(left: string, right: string): number | null {
   if (!ORDERED_MESSAGE_ID_PATTERN.test(left) || !ORDERED_MESSAGE_ID_PATTERN.test(right)) {
     return null;
   }
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
+  return compareOrderedIds(left, right);
 }
 
 function toComparableTimestamp(value: number | string | undefined): number | null {
@@ -111,6 +111,7 @@ export function mergeStreamingEntryIntoHistoricalEntries(
     return historicalRenderedMessageEntries;
   }
 
+  const lastUserEntryIndex = findLastUserEntryIndex(historicalRenderedMessageEntries);
   const streamingMessage = streamingRenderedMessageEntry.message;
   const exactMatchIndices = historicalRenderedMessageEntries.flatMap((entry, index) => {
     const existingMessage = entry.message;
@@ -160,6 +161,12 @@ export function mergeStreamingEntryIntoHistoricalEntries(
   // an exact/prefix visible-text match on the most recent assistant entries
   // is the remaining identity signal. Limit it to the tail so two separate
   // historical turns with similar wording are never collapsed.
+  //
+  // Invariant: the live overlay answers the latest user turn, so this fallback
+  // may only adopt an entry that sits AFTER the last user entry. Older entries
+  // (e.g. a previous round whose reply happens to prefix the live text) must
+  // never be replaced — otherwise the streaming bubble is hoisted above the
+  // user message that triggered it and that older round is destroyed.
   if (streamingMessage.role === 'assistant') {
     let assistantCandidates = 0;
     for (let index = historicalRenderedMessageEntries.length - 1; index >= 0; index -= 1) {
@@ -168,6 +175,7 @@ export function mergeStreamingEntryIntoHistoricalEntries(
       const isEventCard = parseAssistantEventContent(existing.content) !== null;
       if (!isEventCard) assistantCandidates += 1;
       if (
+        index > lastUserEntryIndex &&
         hasSameVisibleText(
           visibleAssistantText(existing),
           visibleAssistantText(streamingMessage),
@@ -226,7 +234,6 @@ export function mergeStreamingEntryIntoHistoricalEntries(
   // before the user message id (see `startStandardChatStream`) or when the
   // timestamps tie — otherwise "正在对话" would render above the question that
   // triggered it.
-  const lastUserEntryIndex = findLastUserEntryIndex(historicalRenderedMessageEntries);
   const safeInsertionIndex = Math.max(insertionIndex, lastUserEntryIndex + 1);
   if (safeInsertionIndex < historicalRenderedMessageEntries.length) {
     return [

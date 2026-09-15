@@ -126,4 +126,42 @@ describe('commitStreamingRound', () => {
       firstTokenLatencyAttached: true,
     });
   });
+
+  it('把传入的 clientRequestId 落到提交的消息上', () => {
+    const messages: ChatMessage[] = [];
+    const setMessages: Dispatch<SetStateAction<ChatMessage[]>> = (update) => {
+      messages.push(...(typeof update === 'function' ? update([]) : update));
+    };
+
+    commitStreamingRound({
+      accumulated: 'hello',
+      accumulatedSegments: [],
+      accumulatedThinking: '',
+      accumulatedThinkingBlocks: [],
+      buildTraceMessage: vi.fn(() => ({
+        content: 'hello',
+        parts: [{ id: 'p1', type: 'text' as const, text: 'hello' }],
+      })),
+      clientRequestId: 'req-1:assistant:2',
+      currentAssistantStreamMessageIdRef: { current: 'm1' },
+      currentRoundStartedAt: 1,
+      firstTokenLatencyAttached: false,
+      firstTokenObservedAt: null,
+      liveToolCalls: new Map(),
+      requestStartedAt: 1,
+      setMessages,
+      setStreamBuffer: vi.fn(),
+      setStreamThinkingBlocks: vi.fn(),
+      setStreamThinkingBuffer: vi.fn(),
+      setStreamingSegments: vi.fn(),
+      streamRevealNextAllowedAtRef: { current: 0 },
+      streamRevealTargetCodePointsRef: { current: [] },
+      streamRevealTargetRef: { current: '' },
+      streamRevealVisibleCodePointCountRef: { current: 0 },
+      streamRevealVisibleRef: { current: '' },
+      timestamp: 5,
+    });
+
+    expect(messages[0]?.clientRequestId).toBe('req-1:assistant:2');
+  });
 });

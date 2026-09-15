@@ -92,3 +92,57 @@ export function extractTimestampFromOrderedId(id: string): number | null {
   const encoded = BigInt(`0x${hex}`);
   return Number(encoded / BigInt(0x1000));
 }
+
+/** Low bits of the encoded 48-bit timestamp field reserved for the same-millisecond counter. */
+const COUNTER_BITS = 12n;
+const COUNTER_MASK = (1n << COUNTER_BITS) - 1n;
+const ENCODED_TIMESTAMP_MASK = (1n << 48n) - 1n;
+/** The encoder keeps `timestamp mod 2^36`, so ids wrap roughly every 795 days. */
+const ORDERED_ID_TIME_PERIOD_MS = Number(1n << 36n);
+
+interface DecodedOrderedIdTime {
+  counter: number;
+  /** `timestamp mod 2^36` — the absolute millisecond value is ambiguous. */
+  truncatedTimeMs: number;
+}
+
+function decodeOrderedIdTime(id: string): DecodedOrderedIdTime | null {
+  const hex = /^[a-z]+_([0-9a-f]{12})/.exec(id)?.[1];
+  if (!hex) return null;
+  const encoded = BigInt(`0x${hex}`);
+  return {
+    counter: Number(encoded & COUNTER_MASK),
+    truncatedTimeMs: Number((encoded & ENCODED_TIMESTAMP_MASK) >> COUNTER_BITS),
+  };
+}
+
+/**
+ * Compare two ordered ids by their embedded creation time, tolerating the
+ * ~795-day wrap of the 48-bit encoded timestamp. Re-anchoring each decoded time
+ * to the period nearest `referenceMs` restores the true order for ids less than
+ * one period apart. Falls back to lexicographic comparison for ids that do not
+ * carry the ordered-id shape.
+ */
+export function compareOrderedIds(
+  left: string,
+  right: string,
+  referenceMs: number = Date.now(),
+): number {
+  if (left === right) return 0;
+  const leftDecoded = decodeOrderedIdTime(left);
+  const rightDecoded = decodeOrderedIdTime(right);
+  if (!leftDecoded || !rightDecoded) return left.localeCompare(right);
+
+  const anchor = (truncatedTimeMs: number): number =>
+    truncatedTimeMs +
+    ORDERED_ID_TIME_PERIOD_MS *
+      Math.round((referenceMs - truncatedTimeMs) / ORDERED_ID_TIME_PERIOD_MS);
+
+  const leftTime = anchor(leftDecoded.truncatedTimeMs);
+  const rightTime = anchor(rightDecoded.truncatedTimeMs);
+  if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;
+  if (leftDecoded.counter !== rightDecoded.counter) {
+    return leftDecoded.counter < rightDecoded.counter ? -1 : 1;
+  }
+  return left.localeCompare(right);
+}

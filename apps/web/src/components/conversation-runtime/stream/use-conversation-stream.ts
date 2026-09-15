@@ -51,6 +51,7 @@ import {
   resolveNextRoundIndex,
   shouldStartNewRound,
 } from './stream-round-boundary.js';
+import { createRoundAssistantRequestId } from './round-request-id.js';
 import {
   applyPermissionDecisionToLocalAssistantMessages,
   applyToolResultToLocalAssistantMessages,
@@ -116,6 +117,14 @@ export interface ConversationStreamConfig {
   requestModelLabel?: string;
   /** Agent id attached to the round. */
   requestAgentId?: string;
+  /**
+   * Client request id that started this stream (the rid the gateway persists
+   * against). When present, every committed round is stamped with the request
+   * id the gateway stored for that same round: the raw rid for the final
+   * (`end_turn`) round, `${rid}:assistant:${round}` for intermediate rounds
+   * (see `round-request-id`). Omit / pass null when the consumer has no rid.
+   */
+  clientRequestId?: string | null;
   /** When the request originated (Date.now()) — used to compute latency. */
   requestStartedAt: number;
   /** When set, the consumer wants to receive every event (chat-only included). */
@@ -138,8 +147,14 @@ export interface ConversationStreamHandlers {
   handleEvent: (event: RunEvent) => void;
   /** Reset all streaming buffers and refs. Call between rounds. */
   resetRoundAccumulators: () => void;
-  /** Commit the current round into a finalized assistant message. */
-  commitCurrentRound: (timestamp: number) => void;
+  /**
+   * Commit the current round into a finalized assistant message.
+   *
+   * `roundKind` selects the request id the gateway persisted for that round:
+   * `'intermediate'` stamps `${clientRequestId}:assistant:${round}` (the round
+   * ended with `tool_use`), `'final'` stamps the raw `clientRequestId`.
+   */
+  commitCurrentRound: (timestamp: number, roundKind: 'intermediate' | 'final') => void;
   /** Snapshot of the current segments (read-only, for the caller). */
   getCurrentSegments: () => ChatMessagePart[];
   /** Snapshot of the current accumulated text. */
@@ -226,7 +241,7 @@ export function useConversationStream(
   }, [setters]);
 
   const commitCurrentRound = useCallback(
-    (timestamp: number) => {
+    (timestamp: number, roundKind: 'intermediate' | 'final') => {
       const acc = accumulatorRef.current;
       const closingMessageId = refs.currentAssistantStreamMessageIdRef.current;
       if (!closingMessageId) return;
@@ -237,6 +252,13 @@ export function useConversationStream(
       ) {
         return;
       }
+
+      const rawClientRequestId = configRef.current.clientRequestId?.trim();
+      const committedClientRequestId = rawClientRequestId
+        ? roundKind === 'intermediate'
+          ? createRoundAssistantRequestId(rawClientRequestId, acc.currentRoundIndex)
+          : rawClientRequestId
+        : undefined;
 
       const reasoningBlocks = acc.thinkingBlocks.map((b) => b.text);
       const reasoningBlocksTimings = acc.thinkingBlocks.map((b) => ({
@@ -284,6 +306,7 @@ export function useConversationStream(
             role: 'assistant',
             content,
             parts,
+            ...(committedClientRequestId ? { clientRequestId: committedClientRequestId } : {}),
             createdAt: timestamp,
             durationMs: timestamp - acc.startedAt,
             tokenEstimate: estimateTokenCount(
@@ -314,6 +337,7 @@ export function useConversationStream(
       acc.segments = [];
       acc.reasoningMeta.clear();
       acc.liveToolCalls.clear();
+      acc.toolCallIds.clear();
       acc.startedAt = timestamp;
       // Roll the streaming message id forward so the next round occupies its
       // own slot in the message list (mirrors gateway persistence ordering).
@@ -361,7 +385,7 @@ export function useConversationStream(
       if (!boundary) {
         return;
       }
-      commitCurrentRound(Date.now());
+      commitCurrentRound(Date.now(), 'intermediate');
       acc.currentRoundIndex = resolveNextRoundIndex({
         currentRoundIndex: acc.currentRoundIndex,
         lastCompletedRound: acc.lastCompletedRound,
@@ -568,7 +592,7 @@ export function useConversationStream(
           setters.setLatestUpstreamSummary(event.upstreamSummary);
           configRef.current.onUpstreamSummary?.(event.upstreamSummary);
         }
-        commitCurrentRound(Date.now());
+        commitCurrentRound(Date.now(), 'final');
         configRef.current.onStreamDone?.(event.stopReason, event.cancellation, event.agentId);
         return;
       }

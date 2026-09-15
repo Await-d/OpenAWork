@@ -1,4 +1,5 @@
 import type { Message } from '@openAwork/shared';
+import { compareOrderedIds } from '../infra/ordered-id.js';
 import { extractToolResultContentsFromMessage } from '../tools/tool-result-contract.js';
 
 export function collectDelegatedSessionText(messages: Message[]): string {
@@ -250,7 +251,7 @@ function buildResumeTemplate(input: {
 }
 
 function getSortedMessages(messages: Message[]): Message[] {
-  return [...messages].sort((left, right) => left.id.localeCompare(right.id));
+  return [...messages].sort((left, right) => compareOrderedIds(left.id, right.id));
 }
 
 function extractMessageTexts(message: Message): string[] {

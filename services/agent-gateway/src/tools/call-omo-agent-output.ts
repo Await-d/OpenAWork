@@ -1,4 +1,5 @@
 import type { Message } from '@openAwork/shared';
+import { compareOrderedIds } from '../infra/ordered-id.js';
 import { buildTaskToolTerminalMessage } from '../task/delegated-task-display.js';
 import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
@@ -62,7 +63,7 @@ function buildFallbackText(input: { fallbackText?: string; isError?: boolean }):
 
 function collectRelevantMessageText(messages: Message[]): string {
   return [...messages]
-    .sort((left, right) => left.id.localeCompare(right.id))
+    .sort((left, right) => compareOrderedIds(left.id, right.id))
     .flatMap((message) => {
       const toolResultTexts = extractToolResultContentsFromMessage(message)
         .map((part) => stringifyToolOutput(part.output))

@@ -494,4 +494,44 @@ describe('mergeStreamingEntryIntoHistoricalEntries', () => {
       mergeStreamingEntryIntoHistoricalEntries([historicalEntry], streamingEntry, 'live', null),
     ).toEqual([historicalEntry, streamingEntry]);
   });
+
+  it('回归（hoist）：可见文本兜底不得把实时气泡提升到最后一条用户消息之前', () => {
+    const firstUserEntry = createEntry({
+      id: 'user-1',
+      role: 'user',
+      content: '第一个问题',
+    });
+    const olderAssistantEntry = createEntry({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '让我先看看代码。',
+      status: 'completed',
+    });
+    const secondUserEntry = createEntry({
+      id: 'user-2',
+      role: 'user',
+      content: '第二个问题',
+    });
+    const streamingEntry = createEntry({
+      id: 'local-stream-1',
+      role: 'assistant',
+      content: '让我先看看代码。现在运行测试。',
+      clientRequestId: 'req-1',
+      status: 'streaming',
+    });
+
+    const result = mergeStreamingEntryIntoHistoricalEntries(
+      [firstUserEntry, olderAssistantEntry, secondUserEntry],
+      streamingEntry,
+      null,
+      'req-1',
+    );
+
+    expect(result).toEqual([firstUserEntry, olderAssistantEntry, secondUserEntry, streamingEntry]);
+    expect(result).toHaveLength(4);
+    const streamingIndex = result.indexOf(streamingEntry);
+    const lastUserIndex = result.map((entry) => entry.message.role).lastIndexOf('user');
+    expect(streamingIndex).toBeGreaterThan(lastUserIndex);
+    expect(result).toContain(olderAssistantEntry);
+  });
 });

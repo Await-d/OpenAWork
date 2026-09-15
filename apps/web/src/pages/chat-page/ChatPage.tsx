@@ -180,6 +180,7 @@ import {
   resolveNextRoundIndex,
   shouldStartNewRound,
 } from '../../components/conversation-runtime/stream/stream-round-boundary.js';
+import { createRoundAssistantRequestId } from '../../components/conversation-runtime/stream/round-request-id.js';
 import {
   appendStreamingThinkingChunk,
   buildStreamingThinkingChunkDeliveryKey,
@@ -3011,6 +3012,9 @@ export default function ChatPage() {
     // `usage.round`，客户端在下一轮内容到达时据此提交上一轮。
     let currentRoundIndex = 1;
     let lastCompletedRoundIndex: number | null = null;
+    // rid 由 `client.stream()` 内部生成，调用返回后同步可读；提交闭包在事件
+    // 到达时才执行，因此这里先声明、stream() 之后立即赋值。
+    let streamClientRequestId: string | null = null;
     const resolveRoundModelLabel = (summary?: UpstreamStreamSummary | null): string | undefined =>
       summary?.modelId ?? latestUpstreamRoute?.modelId ?? requestModelLabel;
     const resolveRoundProviderId = (summary?: UpstreamStreamSummary | null): string | undefined =>
@@ -3033,6 +3037,9 @@ export default function ChatPage() {
         accumulatedThinkingBlocks,
         buildTraceMessage: (messageId, textContent) =>
           buildAssistantTraceMessage(messageId, textContent, 'completed'),
+        clientRequestId: streamClientRequestId
+          ? createRoundAssistantRequestId(streamClientRequestId, currentRoundIndex)
+          : undefined,
         currentAssistantStreamMessageIdRef,
         currentRoundStartedAt,
         firstTokenLatencyAttached,
@@ -3570,6 +3577,7 @@ export default function ChatPage() {
             agentId: streamAgentId || requestAgentId,
             buildTraceMessage: (messageId, textContent) =>
               buildAssistantTraceMessage(messageId, textContent, traceFinalStatus),
+            clientRequestId: streamClientRequestId ?? undefined,
             contentText: finalAccumulatedText,
             createdAt: finishedAt,
             currentRoundStartedAt,
@@ -3594,6 +3602,7 @@ export default function ChatPage() {
             agentId: streamAgentId || requestAgentId,
             buildTraceMessage: (messageId, textContent) =>
               buildAssistantTraceMessage(messageId, textContent, traceFinalStatus),
+            clientRequestId: streamClientRequestId ?? undefined,
             contentText: '已停止',
             createdAt: finishedAt,
             currentRoundStartedAt,
@@ -3644,6 +3653,7 @@ export default function ChatPage() {
           agentId: requestAgentId,
           buildTraceMessage: (messageId, textContent) =>
             buildAssistantTraceMessage(messageId, textContent, 'error'),
+          clientRequestId: streamClientRequestId ?? undefined,
           contentText: errorContent,
           createdAt: finishedAt,
           currentRoundStartedAt,
@@ -3665,6 +3675,7 @@ export default function ChatPage() {
         requestSessionListRefresh();
       },
     });
+    streamClientRequestId = client.getActiveStreamClientRequestId();
     return true;
   }
 
@@ -3894,6 +3905,9 @@ export default function ChatPage() {
     const requestProviderId = effectiveProviderId || undefined;
     const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
     const requestAgentId = effectiveAgentId || undefined;
+    // attach 连接建立后从 gatewayClient 读取本次活跃流的 rid；提交闭包在事件
+    // 到达时才执行，因此先声明、attach resolve 后赋值。
+    let attachStreamClientRequestId: string | null = null;
     const recoveredModifiedFilesSummary = recoveredStreamSnapshot?.modifiedFilesSummary;
     const requestTextCodePoints = Array.from(initialText);
     let attachStateInitialized = false;
@@ -4039,6 +4053,9 @@ export default function ChatPage() {
         accumulatedThinkingBlocks,
         buildTraceMessage: (messageId, textContent) =>
           buildAttachTraceMessage(messageId, textContent, 'completed'),
+        clientRequestId: attachStreamClientRequestId
+          ? createRoundAssistantRequestId(attachStreamClientRequestId, currentRoundIndex)
+          : undefined,
         currentAssistantStreamMessageIdRef,
         currentRoundStartedAt,
         firstTokenLatencyAttached,
@@ -4679,6 +4696,7 @@ export default function ChatPage() {
               agentId: streamAgentId || requestAgentId,
               buildTraceMessage: (messageId, textContent) =>
                 buildAttachTraceMessage(messageId, textContent, traceFinalStatus),
+              clientRequestId: attachStreamClientRequestId ?? undefined,
               contentText: finalAccumulatedText,
               createdAt: finishedAt,
               currentRoundStartedAt,
@@ -4704,6 +4722,7 @@ export default function ChatPage() {
               agentId: streamAgentId || requestAgentId,
               buildTraceMessage: (messageId, textContent) =>
                 buildAttachTraceMessage(messageId, textContent, traceFinalStatus),
+              clientRequestId: attachStreamClientRequestId ?? undefined,
               contentText: '已停止',
               createdAt: finishedAt,
               currentRoundStartedAt,
@@ -4755,6 +4774,7 @@ export default function ChatPage() {
             agentId: requestAgentId,
             buildTraceMessage: (messageId, textContent) =>
               buildAttachTraceMessage(messageId, textContent, 'error'),
+            clientRequestId: attachStreamClientRequestId ?? undefined,
             contentText: errorContent,
             createdAt: finishedAt,
             currentRoundStartedAt,
@@ -4792,6 +4812,7 @@ export default function ChatPage() {
           return;
         }
         if (attached) {
+          attachStreamClientRequestId = client.getActiveStreamClientRequestId();
           cancelAttachRetry();
           setStreamError(null);
           // 标记这个会话的 attach 已成功完成，防止后续重复触发

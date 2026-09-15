@@ -24,6 +24,7 @@ export interface CommitStreamingRoundOptions {
     reasoningBlocksEndedFlags?: boolean[];
     reasoningBlocksDurationsMs?: number[];
   };
+  clientRequestId?: string;
   currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
   currentRoundStartedAt: number;
   firstTokenLatencyAttached: boolean;
@@ -64,6 +65,7 @@ export function commitStreamingRound(
     accumulatedThinking,
     accumulatedThinkingBlocks,
     buildTraceMessage,
+    clientRequestId,
     currentAssistantStreamMessageIdRef,
     currentRoundStartedAt,
     firstTokenLatencyAttached,
@@ -118,6 +120,7 @@ export function commitStreamingRound(
         id: closingMessageId,
         role: 'assistant',
         content,
+        ...(clientRequestId ? { clientRequestId } : {}),
         parts,
         ...(alignedReasoningMetadata.endedFlags
           ? { reasoningBlocksEndedFlags: alignedReasoningMetadata.endedFlags }

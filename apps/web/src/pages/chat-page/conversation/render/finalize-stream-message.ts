@@ -20,6 +20,7 @@ export interface FinalizeStreamMessageOptions {
     reasoningBlocksEndedFlags?: boolean[];
     reasoningBlocksDurationsMs?: number[];
   };
+  clientRequestId?: string;
   contentText: string;
   createdAt: number;
   currentRoundStartedAt: number;
@@ -48,6 +49,7 @@ export function finalizeStreamMessage(
     accumulatedThinking,
     agentId,
     buildTraceMessage,
+    clientRequestId,
     contentText,
     createdAt,
     currentRoundStartedAt,
@@ -85,6 +87,7 @@ export function finalizeStreamMessage(
         id: messageId,
         role: 'assistant',
         content,
+        ...(clientRequestId ? { clientRequestId } : {}),
         parts,
         ...(alignedReasoningMetadata.endedFlags
           ? { reasoningBlocksEndedFlags: alignedReasoningMetadata.endedFlags }

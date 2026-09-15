@@ -1168,6 +1168,9 @@ export function useTeamConversationState(
   const requestModelLabelRef = useRef<string | undefined>(undefined);
   const requestProviderIdRef = useRef<string | undefined>(undefined);
   const requestAgentIdRef = useRef<string | undefined>(undefined);
+  // Rid the gateway persists against for the current stream; stamped on each
+  // locally committed round so snapshot reconciliation can match by identity.
+  const streamClientRequestIdRef = useRef<string | null>(null);
 
   const stream = useConversationStream(
     {
@@ -1194,6 +1197,9 @@ export function useTeamConversationState(
     {
       sessionId,
       requestStartedAt: streamRequestStartedAtRef.current,
+      get clientRequestId() {
+        return streamClientRequestIdRef.current;
+      },
       get requestProviderId() {
         return requestProviderIdRef.current;
       },
@@ -1340,6 +1346,9 @@ export function useTeamConversationState(
           }
         },
       });
+      // `stream()` mints the rid synchronously; capture it before any event
+      // arrives so both the intermediate and final commits carry it.
+      streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
     },
     [
       enableWriters,
@@ -1487,6 +1496,7 @@ export function useTeamConversationState(
       // attach 成功：重置重试计数。
       if (attached) {
         attachRetryCountRef.current = 0;
+        streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
       }
       // attach 未成功（无活跃流等）：回滚 streaming 状态，避免 UI 卡在
       // "streaming" 模式。onError 回调已处理错误场景的清理。
@@ -1600,11 +1610,15 @@ export function useTeamConversationState(
     // Register handleEvent callback
     const handleMultiAttachEvent = (
       event: RunEvent,
-      _meta: { rowId: number; clientRequestId?: string },
+      meta: { rowId: number; clientRequestId?: string },
     ) => {
       // Skip if we're locally streaming via startStream (user-initiated)
       // but NOT if we're streaming via multi-attach itself.
       if (streamingRef.current && !multiAttachActiveRef.current) return;
+      const multiAttachRid = meta.clientRequestId?.trim();
+      if (multiAttachRid) {
+        streamClientRequestIdRef.current = multiAttachRid;
+      }
       stream.handleEvent(event);
     };
 

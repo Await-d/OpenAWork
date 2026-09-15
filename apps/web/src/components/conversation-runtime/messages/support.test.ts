@@ -702,6 +702,57 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(result.map((message) => message.id)).toEqual(['server', 'local']);
   });
 
+  it('同一回合内两轮文本相同的快照消息不会被误判为重复而丢失', () => {
+    const previousMessages: ChatMessage[] = [
+      { id: 'msg_cccc00000001', role: 'assistant', content: '旧的本地气泡' },
+      { id: 'msg_cccc00000002', role: 'user', content: '一个问题' },
+    ];
+    const snapshotMessages: ChatMessage[] = [
+      { id: 'msg_cccc00000002', role: 'user', content: '一个问题' },
+      {
+        id: 'msg_dddd00000001',
+        role: 'assistant',
+        content: '好的',
+        createdAt: 10_000_000,
+      },
+      {
+        id: 'msg_dddd00000002',
+        role: 'assistant',
+        content: '好的',
+        createdAt: 10_012_000,
+      },
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    const ids = reconciled.map((message) => message.id);
+
+    expect(ids).toContain('msg_dddd00000001');
+    expect(ids).toContain('msg_dddd00000002');
+  });
+
+  it('本地乐观副本仍会与其快照孪生合并为一条', () => {
+    const localOptimistic: ChatMessage = {
+      id: 'local-optimistic',
+      role: 'assistant',
+      content: '好的',
+      createdAt: 10_000_000,
+      status: 'streaming',
+    };
+    const snapshotTwin: ChatMessage = {
+      id: 'server-persisted',
+      role: 'assistant',
+      content: '好的',
+      createdAt: 10_000_500,
+      status: 'completed',
+    };
+
+    const reconciled = reconcileSnapshotChatMessages([localOptimistic], [snapshotTwin]);
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]?.id).toBe('server-persisted');
+    expect(reconciled[0]?.status).toBe('completed');
+  });
+
   it('把权限审批后的软刷新视为同位 user 消息，不重复保留本地 optimistic 文本', () => {
     const previousMessages: ChatMessage[] = [
       {
@@ -730,6 +781,145 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(reconciled).toHaveLength(1);
     expect(reconciled[0]?.id).toBe('server-user-1');
     expect(reconciled[0]?.content).toBe('帮我执行 npm run build');
+  });
+
+  it('本地中间轮与其快照孪生带相同派生请求 ID 时按强身份合并为一条', () => {
+    const reconciled = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'local-round-2',
+          role: 'assistant',
+          content: '本地第二轮文本',
+          clientRequestId: 'req-1:assistant:2',
+          createdAt: 10_000,
+          status: 'completed',
+        },
+      ],
+      [
+        {
+          id: 'server-round-2',
+          role: 'assistant',
+          content: '服务端第二轮文本',
+          clientRequestId: 'req-1:assistant:2',
+          createdAt: 12_000,
+          status: 'completed',
+        },
+      ],
+    );
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]?.id).toBe('server-round-2');
+  });
+
+  it('派生请求 ID 不同的相邻轮次不会被合并成一条', () => {
+    const reconciled = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'local-round-1',
+          role: 'assistant',
+          content: '第一轮本地文本',
+          clientRequestId: 'req-1:assistant:1',
+          createdAt: 10_000,
+          status: 'completed',
+        },
+      ],
+      [
+        {
+          id: 'server-round-2',
+          role: 'assistant',
+          content: '第二轮服务端文本',
+          clientRequestId: 'req-1:assistant:2',
+          createdAt: 12_000,
+          status: 'completed',
+        },
+      ],
+    );
+
+    expect(reconciled.map((message) => message.id)).toEqual(['server-round-2', 'local-round-1']);
+  });
+
+  it('同文同时间但请求 ID 不同的两轮 assistant 不会被折叠', () => {
+    const previousMessages: ChatMessage[] = [
+      { id: 'msg_user_1', role: 'user', content: '同一个问题', createdAt: 1_000 },
+      {
+        id: 'msg_local',
+        role: 'assistant',
+        content: '好的',
+        createdAt: 2_000,
+        clientRequestId: 'req-1:assistant:1',
+        status: 'completed',
+      },
+    ];
+    const snapshotMessages: ChatMessage[] = [
+      { id: 'msg_user_1', role: 'user', content: '同一个问题', createdAt: 1_000 },
+      {
+        id: 'msg_server',
+        role: 'assistant',
+        content: '好的',
+        createdAt: 2_000,
+        clientRequestId: 'req-1:assistant:2',
+        status: 'completed',
+      },
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+
+    expect(reconciled.filter((message) => message.role === 'assistant')).toHaveLength(2);
+  });
+
+  it('请求 ID 相同但文本不同的 assistant 轮次仍会折叠为一条', () => {
+    const reconciled = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'msg_local',
+          role: 'assistant',
+          content: '本地第二轮文本',
+          createdAt: 2_000,
+          clientRequestId: 'req-1:assistant:2',
+          status: 'completed',
+        },
+      ],
+      [
+        {
+          id: 'msg_server',
+          role: 'assistant',
+          content: '服务端第二轮文本',
+          createdAt: 2_000,
+          clientRequestId: 'req-1:assistant:2',
+          status: 'completed',
+        },
+      ],
+    );
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]?.role).toBe('assistant');
+  });
+
+  it('本地缺少请求 ID 的同文副本仍会与其带请求 ID 的快照孪生合并为一条', () => {
+    const reconciled = reconcileSnapshotChatMessages(
+      [
+        {
+          id: 'msg_local',
+          role: 'assistant',
+          content: '好的',
+          createdAt: 2_000,
+          status: 'completed',
+        },
+      ],
+      [
+        {
+          id: 'msg_server',
+          role: 'assistant',
+          content: '好的',
+          createdAt: 2_000,
+          clientRequestId: 'req-1:assistant:2',
+          status: 'completed',
+        },
+      ],
+    );
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]?.id).toBe('msg_server');
   });
 });
 

@@ -9,6 +9,7 @@ import {
 } from '../messages/support.js';
 import {
   useConversationStream,
+  type ConversationStreamConfig,
   type ConversationStreamRefs,
   type ConversationStreamSetters,
 } from './use-conversation-stream.js';
@@ -56,12 +57,13 @@ function createHarness() {
   return { messages, refs, segments, setters };
 }
 
-function renderStream() {
+function renderStream(config?: Partial<ConversationStreamConfig>) {
   const harness = createHarness();
   const rendered = renderHook(() =>
     useConversationStream(harness.refs, harness.setters, {
       sessionId: 'session-1',
       requestStartedAt: 1_000,
+      ...config,
     }),
   );
   return { ...harness, ...rendered };
@@ -251,5 +253,148 @@ describe('useConversationStream 轮次边界', () => {
         .filter((part) => part.type === 'tool')
         .map((part) => (part.type === 'tool' ? part.toolCallId : '')),
     ).toEqual(['tool-1', 'tool-2']);
+  });
+
+  it('每轮都带工具调用时两轮各自提交一条消息，后一轮不覆盖前一轮', () => {
+    const { messages, result } = renderStream();
+
+    act(() => {
+      // 第一轮：正文 + 工具调用（tool-1），随后网关回报 usage.round=1。
+      result.current.handleEvent({ type: 'text_delta', delta: '第一轮结论' });
+      result.current.handleEvent(toolCallDelta);
+      result.current.handleEvent(toolResult);
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        round: 1,
+      });
+    });
+    expect(messages.current).toHaveLength(0);
+
+    act(() => {
+      // 第二轮以裸工具调用（tool-2）开头：轮边界在此应用，第一轮被提交。
+      result.current.handleEvent({
+        type: 'tool_call_delta',
+        toolCallId: 'tool-2',
+        toolName: 'grep',
+        inputDelta: '{}',
+      });
+      result.current.handleEvent({
+        type: 'tool_result',
+        toolCallId: 'tool-2',
+        toolName: 'grep',
+        output: 'ok',
+        isError: false,
+      });
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 8,
+        outputTokens: 4,
+        totalTokens: 12,
+        round: 2,
+      });
+    });
+    expect(messages.current).toHaveLength(1);
+
+    act(() => {
+      result.current.handleEvent({ type: 'done', stopReason: 'end_turn' });
+    });
+
+    // 两轮各自提交一条消息：第二轮的提交不能因累计的工具 ID 覆盖第一轮。
+    expect(messages.current).toHaveLength(2);
+    expect(messages.current[0]?.id).not.toBe(messages.current[1]?.id);
+    expect(readAssistantTracePayload(messages.current[0]!)?.text).toBe('第一轮结论');
+    expect(
+      readAssistantTracePayload(messages.current[0]!)?.toolCalls.map((tool) => tool.toolCallId),
+    ).toEqual(['tool-1']);
+    expect(
+      readAssistantTracePayload(messages.current[1]!)?.toolCalls.map((tool) => tool.toolCallId),
+    ).toEqual(['tool-2']);
+    // toolCallCount 取本轮 ID 数，而不是跨轮累计值。
+    expect(messages.current[0]?.toolCallCount).toBe(1);
+    expect(messages.current[1]?.toolCallCount).toBe(1);
+  });
+});
+
+describe('useConversationStream 提交消息的请求 ID', () => {
+  it('配置 clientRequestId 时中间轮盖派生 ID、done 提交盖原始 ID', () => {
+    const { messages, result } = renderStream({ clientRequestId: 'req-1' });
+
+    act(() => {
+      result.current.handleEvent({ type: 'text_delta', delta: '第一轮' });
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        round: 1,
+      });
+    });
+
+    expect(messages.current).toHaveLength(0);
+
+    act(() => {
+      // 新一轮正文到达才应用边界：提交第一轮并累计第二轮。
+      result.current.handleEvent({ type: 'text_delta', delta: '第二轮' });
+    });
+
+    expect(messages.current).toHaveLength(1);
+    expect(messages.current[0]?.clientRequestId).toBe('req-1:assistant:1');
+
+    act(() => {
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        round: 2,
+      });
+      result.current.handleEvent({ type: 'text_delta', delta: '第三轮' });
+    });
+
+    expect(messages.current).toHaveLength(2);
+    expect(messages.current[1]?.clientRequestId).toBe('req-1:assistant:2');
+
+    act(() => {
+      result.current.handleEvent({ type: 'done', stopReason: 'end_turn' });
+    });
+
+    expect(messages.current).toHaveLength(3);
+    expect(messages.current[2]?.clientRequestId).toBe('req-1');
+  });
+
+  it('未配置 clientRequestId 时提交不写入该字段', () => {
+    const { messages, result } = renderStream();
+
+    act(() => {
+      result.current.handleEvent({ type: 'text_delta', delta: '第一轮' });
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        round: 1,
+      });
+      result.current.handleEvent({ type: 'text_delta', delta: '第二轮' });
+      result.current.handleEvent({
+        type: 'usage',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        round: 2,
+      });
+      result.current.handleEvent({ type: 'text_delta', delta: '第三轮' });
+      result.current.handleEvent({ type: 'done', stopReason: 'end_turn' });
+    });
+
+    expect(messages.current).toHaveLength(3);
+    expect(messages.current[0]?.clientRequestId).toBeUndefined();
+    expect(messages.current[1]?.clientRequestId).toBeUndefined();
+    expect(messages.current[2]?.clientRequestId).toBeUndefined();
+    expect('clientRequestId' in messages.current[0]!).toBe(false);
+    expect('clientRequestId' in messages.current[1]!).toBe(false);
+    expect('clientRequestId' in messages.current[2]!).toBe(false);
   });
 });

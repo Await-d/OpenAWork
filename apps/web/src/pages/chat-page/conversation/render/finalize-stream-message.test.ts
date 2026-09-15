@@ -68,4 +68,33 @@ describe('finalizeStreamMessage', () => {
     expect(setMessages).toHaveBeenCalled();
     expect(result.firstTokenLatencyAttached).toBe(true);
   });
+
+  it('把传入的 clientRequestId 落到提交的消息上', () => {
+    const messages: ChatMessage[] = [];
+    const setMessages: Dispatch<SetStateAction<ChatMessage[]>> = (update) => {
+      messages.push(...(typeof update === 'function' ? update([]) : update));
+    };
+
+    finalizeStreamMessage({
+      accumulatedSegments: [],
+      accumulatedThinking: '',
+      buildTraceMessage: () => ({
+        content: 'hello',
+        parts: [{ id: 'p1', type: 'text', text: 'hello' }],
+      }),
+      clientRequestId: 'req-1',
+      contentText: 'hello',
+      createdAt: 10,
+      currentRoundStartedAt: 1,
+      firstTokenLatencyAttached: false,
+      firstTokenObservedAt: null,
+      messageId: 'm1',
+      requestStartedAt: 1,
+      setMessages,
+      status: 'completed',
+      toolCallIds: new Set(),
+    });
+
+    expect(messages[0]?.clientRequestId).toBe('req-1');
+  });
 });
