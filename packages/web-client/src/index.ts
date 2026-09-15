@@ -244,6 +244,8 @@ export type {
   FileTreeNode,
   WorkspaceClient,
   WorkspaceFileContent,
+  WorkspaceFileSearch,
+  WorkspaceFileSearchLoadResult,
   WorkspaceRootsLoadResult,
   WorkspaceReviewChange,
   WorkspaceReviewDiffResponse,

@@ -6,6 +6,7 @@
  * - `/workspace/directory` 新建文件夹；
  * - `/workspace/validate` 校验路径是否可用；
  * - `/workspace/search` 工作区内全文搜索；
+ * - `/workspace/files/search` 索引检索，`@` 文件提及唯一的清单来源；
  * - `/workspace/review/*` Git 审阅（status / diff / revert）；
  * - `/sessions/:id/workspace` 绑定 / 解绑会话工作区。
  *
@@ -107,6 +108,25 @@ export interface WorkspaceFileLoadResult {
   status?: number;
 }
 
+export interface WorkspaceFileSearch {
+  /** 命中的文件（相对工作区根、`/` 分隔），保持服务端返回顺序；前端呈现时目录行在文件行之前。 */
+  files: string[];
+  /** 命中的目录（相对工作区根、`/` 分隔），用于逐级进入，保持服务端返回顺序。 */
+  directories: string[];
+  /** 后端索引是否因条目上限被截断。 */
+  truncated: boolean;
+}
+
+export interface WorkspaceFileSearchLoadResult {
+  directories: string[];
+  errorMessage?: string;
+  files: string[];
+  ok: boolean;
+  retryable: boolean;
+  status?: number;
+  truncated: boolean;
+}
+
 export interface WorkspaceClient {
   /** GET `/workspace/root`，返回所有工作区根目录的 `roots` 数组（旧版本只回 `root` 字段也兼容）。 */
   listRoots(token: string, options?: { signal?: AbortSignal }): Promise<string[]>;
@@ -114,6 +134,16 @@ export interface WorkspaceClient {
     token: string,
     options?: { signal?: AbortSignal },
   ): Promise<WorkspaceRootsLoadResult>;
+  /**
+   * GET `/workspace/files/search?path=&q=&limit=`，在网关侧索引上检索工作区文件。
+   * 这是唯一的索引端点（返回 `{ root, query, files, directories, truncated, count }`），
+   * `@` 文件提及与全量列表都走它，不再有单独的清单下载接口。
+   */
+  searchFileIndexResult(
+    token: string,
+    path: string,
+    options: { query: string; limit?: number; signal?: AbortSignal },
+  ): Promise<WorkspaceFileSearchLoadResult>;
   /** GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。 */
   fetchTree(
     token: string,
@@ -270,6 +300,26 @@ function buildWorkspaceTreeErrorMessage(status: number, data: JsonErrorData | un
     return '目标目录不存在或当前工作区已失效。';
   }
   return `加载文件树失败（HTTP ${status}）。`;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+    : [];
+}
+
+function buildWorkspaceFilesErrorMessage(status: number, data: JsonErrorData | undefined): string {
+  const extracted = extractJsonErrorMessage(data);
+  if (extracted) {
+    return extracted;
+  }
+  if (status === 401 || status === 403) {
+    return '认证失效或当前账号无权读取工作区文件索引。';
+  }
+  if (status === 404) {
+    return '目标目录不存在或当前工作区已失效。';
+  }
+  return `加载工作区文件索引失败（HTTP ${status}）。`;
 }
 
 function buildWorkspaceReviewStatusErrorMessage(
@@ -450,6 +500,58 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     }
   };
 
+  const searchFileIndexResult = async (
+    token: string,
+    path: string,
+    options: { query: string; limit?: number; signal?: AbortSignal },
+  ): Promise<WorkspaceFileSearchLoadResult> => {
+    const params = buildPathParams(path, { q: options.query, limit: options.limit });
+    try {
+      const response = await fetchWithTimeout(
+        withQuery(`${baseUrl}/workspace/files/search`, params),
+        {
+          headers: authHeader(token),
+          signal: options.signal,
+        },
+      );
+      if (!response.ok) {
+        return {
+          ok: false,
+          retryable: isRetryableWorkspaceStatus(response.status),
+          errorMessage: buildWorkspaceFilesErrorMessage(
+            response.status,
+            await readJsonErrorData<JsonErrorData>(response),
+          ),
+          status: response.status,
+          files: [],
+          directories: [],
+          truncated: false,
+        };
+      }
+      const data = (await response.json()) as {
+        files?: unknown;
+        directories?: unknown;
+        truncated?: unknown;
+      };
+      return {
+        ok: true,
+        retryable: false,
+        files: readStringArray(data.files),
+        directories: readStringArray(data.directories),
+        truncated: data.truncated === true,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        retryable: true,
+        errorMessage: normalizeWorkspaceActionError('检索工作区文件索引', error).message,
+        files: [],
+        directories: [],
+        truncated: false,
+      };
+    }
+  };
+
   const reviewStatusResult = async (
     token: string,
     path: string,
@@ -551,6 +653,8 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     },
 
     fetchTreeResult,
+
+    searchFileIndexResult,
 
     async readFile(token, path, options) {
       const result = await readFileResult(token, path, options);

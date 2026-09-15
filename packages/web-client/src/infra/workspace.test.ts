@@ -73,6 +73,86 @@ describe('createWorkspaceClient recoverable readers', () => {
     });
   });
 
+  it('searchFileIndexResult 返回命中的文件与目录并附带 q/limit', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          files: ['apps/web/src/pages/chat-page/ChatPage.tsx'],
+          directories: ['apps/web/src/pages/chat-page'],
+          truncated: false,
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.searchFileIndexResult('token-1', '/workspace/demo', {
+      query: 'ChatPage',
+      limit: 10,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      retryable: false,
+      files: ['apps/web/src/pages/chat-page/ChatPage.tsx'],
+      directories: ['apps/web/src/pages/chat-page'],
+      truncated: false,
+    });
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const requestUrl = String(firstCall[0]);
+    expect(requestUrl).toContain('/workspace/files/search?');
+    expect(requestUrl).toContain('q=ChatPage');
+    expect(requestUrl).toContain('limit=10');
+  });
+
+  it('searchFileIndexResult 会过滤非字符串条目', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ files: ['a.ts', '', 7], directories: [null, 'src'], truncated: true }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.searchFileIndexResult('token-1', '/workspace/demo', { query: '' });
+
+    expect(result.files).toEqual(['a.ts']);
+    expect(result.directories).toEqual(['src']);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('searchFileIndexResult 在 q 超出上限被网关以 400 拒绝时返回结构化错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          name: 'BadRequest',
+          data: { message: '查询参数无效。', kind: 'Query' },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.searchFileIndexResult('token-1', '/workspace/demo', {
+      query: 'x'.repeat(5000),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      retryable: false,
+      errorMessage: '查询参数无效。',
+      status: 400,
+      files: [],
+      directories: [],
+      truncated: false,
+    });
+  });
+
   it('reviewStatusResult 失败时返回结构化错误', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {
