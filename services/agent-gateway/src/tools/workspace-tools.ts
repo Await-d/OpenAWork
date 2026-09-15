@@ -37,6 +37,14 @@ interface WorkspaceTreeNode {
   children?: WorkspaceTreeNode[];
 }
 
+// Traversal denylist for build/editor artifacts. Only names that are never
+// committed source in any ecosystem: `.vs`/`.idea` (editor state), `.omo`
+// (agent workflow scratch), `.venv` (Python virtualenv), `target` (Rust/Cargo
+// output), `coverage` (test reports).
+// Deliberately NOT included: `bin` and `obj`. CLI/JS packages legitimately
+// commit a `bin/` directory, and `obj` is not universally build output — the
+// walker must never hide committed source. Repo-specific `bin/`/`obj/` cases
+// are handled by the compiled .gitignore rules instead.
 const IGNORED_NAMES = new Set([
   'node_modules',
   '.git',
@@ -44,6 +52,12 @@ const IGNORED_NAMES = new Set([
   '.next',
   '__pycache__',
   '.DS_Store',
+  '.vs',
+  '.idea',
+  '.omo',
+  '.venv',
+  'target',
+  'coverage',
 ]);
 const MAX_TREE_ENTRIES = 500;
 const MAX_TREE_DEPTH = 4;
@@ -54,6 +68,15 @@ const MAX_READ_LINE_CHARS = 2000;
 const READ_LINE_TRUNCATION_NOTICE = '...[line truncated]';
 const MAX_GLOB_MATCHES = 100;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
+
+// Internal time budgets kept below the externally enforced `ToolDefinition.timeout`
+// (glob = 10000ms, grep = 15000ms; keep in sync). When exceeded, the walk stops
+// gracefully and returns the matches collected so far plus a truncation notice.
+// Without this, the registry/sandbox kills the walk with `ToolTimeoutError` and
+// the model receives empty output. Exported so tests can pin `budget < timeout`.
+export const GLOB_TIME_BUDGET_MS = 8000;
+export const GREP_TIME_BUDGET_MS = 12000;
+const TIME_BUDGET_TRUNCATION_NOTICE = '...[truncated: 已达时间预算，结果可能不完整]';
 
 const optionalWorkspacePathSchema = z.preprocess(
   (value) => (typeof value === 'string' && value.trim().length === 0 ? undefined : value),
@@ -497,9 +520,11 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
   await assertDirectory(safePath);
   const patternRegex = globPatternToRegex(input.pattern);
   const matches: string[] = [];
+  const deadline = Date.now() + GLOB_TIME_BUDGET_MS;
+  let budgetExceeded = false;
 
   async function walk(dirPath: string): Promise<void> {
-    if (matches.length >= MAX_GLOB_MATCHES) {
+    if (budgetExceeded || matches.length >= MAX_GLOB_MATCHES) {
       return;
     }
 
@@ -513,7 +538,7 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
     entries.sort((left, right) => left.name.localeCompare(right.name));
 
     for (const entry of entries) {
-      if (matches.length >= MAX_GLOB_MATCHES) {
+      if (budgetExceeded || matches.length >= MAX_GLOB_MATCHES) {
         return;
       }
 
@@ -528,28 +553,32 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
 
       if (entry.isDirectory()) {
         await walk(fullPath);
-        continue;
+      } else if (entry.isFile()) {
+        const relativePath = fullPath
+          .slice(safePath.length)
+          .replace(/^\//u, '')
+          .replace(/\\/g, '/');
+        if (patternRegex.test(relativePath)) {
+          matches.push(fullPath);
+        }
       }
 
-      if (!entry.isFile()) {
-        continue;
+      // Checked after each processed entry (never before the first one) so the
+      // walk always keeps the partial matches it already collected.
+      if (Date.now() >= deadline) {
+        budgetExceeded = true;
+        return;
       }
-
-      const relativePath = fullPath.slice(safePath.length).replace(/^\//u, '').replace(/\\/g, '/');
-      if (!patternRegex.test(relativePath)) {
-        continue;
-      }
-
-      matches.push(fullPath);
     }
   }
 
   await walk(safePath);
 
   if (matches.length === 0) {
-    return 'No files found';
+    return budgetExceeded ? `No files found\n${TIME_BUDGET_TRUNCATION_NOTICE}` : 'No files found';
   }
-  return matches.join('\n');
+  const result = matches.join('\n');
+  return budgetExceeded ? `${result}\n${TIME_BUDGET_TRUNCATION_NOTICE}` : result;
 }
 
 function createGrepMatcher(pattern: string): RegExp {
@@ -569,6 +598,8 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
   const includeRegex = input.include ? globPatternToRegex(input.include) : null;
   const matches: Array<{ path: string; line: number; text: string }> = [];
   const counts = new Map<string, number>();
+  const deadline = Date.now() + GREP_TIME_BUDGET_MS;
+  let budgetExceeded = false;
 
   const searchRoot = targetStat.isDirectory() ? safePath : dirname(safePath);
 
@@ -610,6 +641,10 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
   }
 
   async function searchDirectory(dirPath: string): Promise<void> {
+    if (budgetExceeded) {
+      return;
+    }
+
     let entries: Dirent[];
     try {
       entries = await fsp.readdir(dirPath, { withFileTypes: true });
@@ -618,6 +653,9 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
     }
 
     for (const entry of entries) {
+      if (budgetExceeded) {
+        return;
+      }
       if (
         input.head_limit > 0 &&
         input.output_mode !== 'count' &&
@@ -634,17 +672,20 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
       }
       if (entry.isDirectory()) {
         await searchDirectory(fullPath);
-        continue;
+      } else if (entry.isFile()) {
+        await searchFile(fullPath);
+        if (
+          input.head_limit > 0 &&
+          input.output_mode !== 'count' &&
+          matches.length >= input.head_limit
+        ) {
+          return;
+        }
       }
-      if (!entry.isFile()) {
-        continue;
-      }
-      await searchFile(fullPath);
-      if (
-        input.head_limit > 0 &&
-        input.output_mode !== 'count' &&
-        matches.length >= input.head_limit
-      ) {
+      // Checked after each processed entry (never before the first one) so the
+      // walk always keeps the partial matches it already collected.
+      if (Date.now() >= deadline) {
+        budgetExceeded = true;
         return;
       }
     }
@@ -657,19 +698,25 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
   } else {
     throw new Error(`Path is neither a file nor a directory: ${safePath}`);
   }
+  const withTimeBudgetNotice = (output: string): string =>
+    budgetExceeded ? `${output}\n${TIME_BUDGET_TRUNCATION_NOTICE}` : output;
   if (input.output_mode === 'count') {
     if (counts.size === 0) {
-      return 'No files found';
+      return withTimeBudgetNotice('No files found');
     }
-    return [...counts.entries()].map(([filePath, count]) => `${filePath}: ${count}`).join('\n');
+    return withTimeBudgetNotice(
+      [...counts.entries()].map(([filePath, count]) => `${filePath}: ${count}`).join('\n'),
+    );
   }
   if (input.output_mode === 'files_with_matches') {
     const files = [...new Set(matches.map((match) => match.path))];
-    return files.length > 0 ? files.join('\n') : 'No files found';
+    return withTimeBudgetNotice(files.length > 0 ? files.join('\n') : 'No files found');
   }
-  return matches.length > 0
-    ? matches.map((match) => `${match.path}:${match.line}: ${match.text}`).join('\n')
-    : 'No files found';
+  return withTimeBudgetNotice(
+    matches.length > 0
+      ? matches.map((match) => `${match.path}:${match.line}: ${match.text}`).join('\n')
+      : 'No files found',
+  );
 }
 
 function resolveSearchRoot(path: string | undefined, sessionId?: string): string {
