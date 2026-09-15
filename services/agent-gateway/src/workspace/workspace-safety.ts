@@ -30,8 +30,14 @@ interface SessionWorkspacePolicyRow extends SessionMetadataRow {
 }
 
 const ignoreLoadCache = new Map<string, Promise<void>>();
+/**
+ * `defaultIgnoreManager` 是进程级单例，同一时刻只持有一个 `projectRoot`。
+ * 记录它当前装载的根，供 `ensureIgnoreRulesLoadedForPath` 判断是否需要重载：
+ * 换根后旧的锚定 `.gitignore` 规则不再生效，按根缓存的 Promise 不能单独作数。
+ */
+let globalIgnoreLoadedRoot: string | null = null;
 
-function resolveWorkspaceRootForPath(path: string | null | undefined): string {
+export function resolveWorkspaceRootForPath(path: string | null | undefined): string {
   if (!path) {
     return WORKSPACE_ROOT;
   }
@@ -307,12 +313,15 @@ export function resolveWorkspaceEntryPathForRequest(input: {
 export async function ensureIgnoreRulesLoadedForPath(path?: string | null): Promise<void> {
   const workspaceRoot = resolveWorkspaceRootForPath(path);
   const cached = ignoreLoadCache.get(workspaceRoot);
-  if (cached) {
+  if (cached && globalIgnoreLoadedRoot === workspaceRoot) {
     await cached;
     return;
   }
   const loadPromise = defaultIgnoreManager.loadRules(workspaceRoot).then(() => undefined);
   ignoreLoadCache.set(workspaceRoot, loadPromise);
+  // `loadRules` 在首个 await 之前同步写入 `projectRoot`，因此调用返回即代表
+  // 全局管理器已装载该根；这里同步标记，避免并发同根请求重复加载。
+  globalIgnoreLoadedRoot = workspaceRoot;
   await loadPromise;
 }
 
