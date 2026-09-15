@@ -249,6 +249,7 @@ import {
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
 } from '../provider/upstream-retry-policy.js';
 import { webfetchTool } from './web-tools.js';
+import { invalidateWorkspaceFileIndexForToolCall } from '../workspace/workspace-file-index-invalidation.js';
 import {
   assertSessionWorkspacePath,
   assertSessionWorkingDirectory,
@@ -6235,6 +6236,25 @@ export class ToolSandbox {
   }
 
   async execute(
+    request: ToolCallRequest,
+    signal: AbortSignal,
+    sessionId: string,
+    executionContext?: SandboxExecutionContext,
+  ): Promise<ToolCallResult> {
+    try {
+      return await this.executeToolCall(request, signal, sessionId, executionContext);
+    } finally {
+      // 唯一的工具执行入口：agent 工具直接写盘，不经过 HTTP 路由，需在此按
+      // 工具名补一次索引失效（含报错 / 取消路径）；只对可写工具生效，避免只读
+      // 工具在长任务里强制下一次 `@` 查询全量重扫。
+      invalidateWorkspaceFileIndexForToolCall(
+        sessionId,
+        rewriteLegacyToolRequest(request.toolName, request.rawInput).toolName,
+      );
+    }
+  }
+
+  private async executeToolCall(
     request: ToolCallRequest,
     signal: AbortSignal,
     sessionId: string,
