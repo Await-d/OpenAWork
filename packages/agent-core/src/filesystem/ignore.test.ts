@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,6 +48,13 @@ async function createManager(fixtures: RuleFixtures = {}): Promise<AgentIgnoreMa
   const manager = createAgentIgnoreManager();
   await manager.loadRules(root);
   return manager;
+}
+
+function expectPaths(manager: AgentIgnoreManager, paths: string[][], expected: boolean): void {
+  for (const segments of paths) {
+    const target = join(root, ...segments);
+    expect(manager.shouldIgnore(target), segments.join('/')).toBe(expected);
+  }
 }
 
 describe('AgentIgnoreManager 安全模板与否定规则', () => {
@@ -175,7 +182,185 @@ describe('AgentIgnoreManager 安全模板与否定规则', () => {
       agentignore: ['!node_modules', '!package-lock.lock', '!.git'],
     });
     expect(manager.shouldIgnore(join(root, 'node_modules', 'pkg', 'index.js'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'node_modules', 'a', 'b.js'))).toBe(true);
     expect(manager.shouldIgnore(join(root, 'sub', 'package-lock.lock'))).toBe(true);
+    // `**/` 前缀现在同时覆盖根级路径（本轮修复的有意行为变化）；嵌套用例保留。
+    expect(manager.shouldIgnore(join(root, 'foo.lock'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'package-lock.lock'))).toBe(true);
     expect(manager.shouldIgnore(join(root, 'sub', '.git', 'config'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, '.git', 'config'))).toBe(true);
+  });
+});
+
+describe('忽略模式编译：尾部斜杠、globstar 与字符类', () => {
+  it('尾部斜杠目录模式忽略目录本身、子文件与嵌套目录', async () => {
+    const manager = await createManager({ gitignore: ['bin/', 'obj/', '.vs/'] });
+    expectPaths(
+      manager,
+      [
+        ['bin'],
+        ['bin', 'x.dll'],
+        ['obj'],
+        ['obj', 'x.o'],
+        ['.vs'],
+        ['.vs', 'sln.suo'],
+        ['src', 'bin', 'x.dll'],
+      ],
+      true,
+    );
+    expectPaths(
+      manager,
+      [['binary.txt'], ['binx', 'y.txt'], ['object.js'], ['.vsx'], ['src', 'object.js']],
+      false,
+    );
+  });
+
+  it('字符类目录模式 [Bb]in/、[Oo]bj/ 同时覆盖两种大小写', async () => {
+    const manager = await createManager({ gitignore: ['[Bb]in/', '[Oo]bj/'] });
+    expectPaths(
+      manager,
+      [
+        ['bin'],
+        ['bin', 'x.dll'],
+        ['Bin'],
+        ['Bin', 'x.dll'],
+        ['obj'],
+        ['obj', 'x.o'],
+        ['Obj'],
+        ['Obj', 'x.o'],
+        ['src', 'Bin', 'x.dll'],
+      ],
+      true,
+    );
+    expectPaths(manager, [['zin', 'x.dll'], ['objx', 'y.o'], ['binx', 'y.dll'], ['OBJ']], false);
+  });
+
+  it('**/bin/ 忽略根级与任意深度目录（含目录本身）', async () => {
+    const manager = await createManager({ gitignore: ['**/bin/'] });
+    expectPaths(
+      manager,
+      [
+        ['bin'],
+        ['bin', 'x.dll'],
+        ['src', 'bin'],
+        ['src', 'bin', 'x.dll'],
+        ['src', 'a', 'bin', 'x.dll'],
+      ],
+      true,
+    );
+    expectPaths(manager, [['binx', 'y.txt'], ['src', 'abin', 'x.dll'], ['combine']], false);
+  });
+
+  it('**/ 前缀内置规则覆盖根级私钥、凭据与数据库文件（嵌套形式保持忽略）', async () => {
+    const manager = await createManager();
+    expectPaths(
+      manager,
+      [
+        ['cert.pem'],
+        ['server.key'],
+        ['id_rsa'],
+        ['id_ed25519'],
+        ['.aws', 'credentials'],
+        ['app.sqlite'],
+        ['app.sqlite3'],
+        ['app.db'],
+        ['.git', 'config'],
+        ['sub', 'cert.pem'],
+        ['sub', 'server.key'],
+        ['sub', 'id_rsa'],
+        ['sub', '.aws', 'credentials'],
+        ['sub', 'app.sqlite'],
+        ['sub', '.git', 'config'],
+      ],
+      true,
+    );
+    expectPaths(
+      manager,
+      [['cert.pem.bak'], ['id_rsa.pub'], ['app.sqlite.journal'], ['server.key.txt']],
+      false,
+    );
+  });
+
+  it('字符类支持 [!...] 否定写法，未闭合的 [ 按字面量处理', async () => {
+    const manager = await createManager({ gitignore: ['[!a]x', 'foo[bar'] });
+    expectPaths(manager, [['zx'], ['!x'], ['foo[bar']], true);
+    expectPaths(manager, [['ax'], ['x'], ['foobar'], ['foo']], false);
+  });
+
+  it('listIgnored 与 shouldIgnore 对尾部斜杠目录规则一致，且忽略目录不再下钻', async () => {
+    const manager = await createManager({ gitignore: ['bin/'] });
+    await mkdir(join(root, 'bin'), { recursive: true });
+    await writeFile(join(root, 'bin', 'x.dll'), 'x', 'utf8');
+    await writeFile(join(root, 'keep.txt'), 'x', 'utf8');
+
+    const ignored = await manager.listIgnored(root);
+    expect(ignored).toContain(join(root, 'bin'));
+    expect(ignored).not.toContain(join(root, 'bin', 'x.dll'));
+    expect(ignored).not.toContain(join(root, 'keep.txt'));
+    expect(manager.shouldIgnore(join(root, 'bin'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'bin', 'x.dll'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'keep.txt'))).toBe(false);
+  });
+});
+
+describe('非法与边界字符类不得抛错（用户可控 ignore 文件）', () => {
+  it('非法范围 [z-a] 不抛错，同文件后续规则仍然生效', async () => {
+    const manager = await createManager({ gitignore: ['[z-a]', 'secret.txt'] });
+    expect(() => manager.shouldIgnore(join(root, 'secret.txt'))).not.toThrow();
+    expect(manager.shouldIgnore(join(root, 'secret.txt'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'safe.txt'))).toBe(false);
+  });
+
+  it('非法否定模式 ![z-a] 不改变 last-match-wins 顺序', async () => {
+    const noReinclude = await createManager({ gitignore: ['secret.txt', '![z-a]'] });
+    expect(() => noReinclude.shouldIgnore(join(root, 'secret.txt'))).not.toThrow();
+    expect(noReinclude.shouldIgnore(join(root, 'secret.txt'))).toBe(true);
+
+    const reinclude = await createManager({ gitignore: ['[z-a]', '!secret.txt'] });
+    expect(reinclude.shouldIgnore(join(root, 'secret.txt'))).toBe(false);
+  });
+
+  it('[]] 匹配文件名为 ] 的字面量且不抛错', async () => {
+    const manager = await createManager({ gitignore: ['[]]'] });
+    expect(() => manager.shouldIgnore(join(root, ']'))).not.toThrow();
+    expect(manager.shouldIgnore(join(root, ']'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, 'x]'))).toBe(false);
+  });
+
+  it('[!] 不会退化成匹配一切的 [^] 且不抛错', async () => {
+    const manager = await createManager({ gitignore: ['[!]'] });
+    expect(() => manager.shouldIgnore(join(root, 'anything'))).not.toThrow();
+    expect(manager.shouldIgnore(join(root, 'anything'))).toBe(false);
+    expect(manager.shouldIgnore(join(root, '[!]'))).toBe(true);
+  });
+
+  it('[!]] 是“除 ] 外任一字符”的否定类且不抛错', async () => {
+    const manager = await createManager({ gitignore: ['[!]]'] });
+    expect(() => manager.shouldIgnore(join(root, 'a'))).not.toThrow();
+    expect(manager.shouldIgnore(join(root, 'a'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, ']'))).toBe(false);
+  });
+
+  it('非法模式放入 .agentignore 与用户全局文件同样不抛错且后续规则生效', async () => {
+    const agentManager = await createManager({ agentignore: ['[z-a]', 'agent-secret.txt'] });
+    expect(() => agentManager.shouldIgnore(join(root, 'agent-secret.txt'))).not.toThrow();
+    expect(agentManager.shouldIgnore(join(root, 'agent-secret.txt'))).toBe(true);
+
+    const globalManager = await createManager({ userGlobal: ['[z-a]', 'global-secret.txt'] });
+    expect(() => globalManager.shouldIgnore(join(root, 'global-secret.txt'))).not.toThrow();
+    expect(globalManager.shouldIgnore(join(root, 'global-secret.txt'))).toBe(true);
+  });
+
+  it('合法字符类与含 ? 字面量保持既有匹配边界', async () => {
+    const manager = await createManager({ gitignore: ['[*]', '[?]', '[ab?', '[!a]x'] });
+    expectPaths(manager, [['*'], ['?'], ['[abX'], ['zx'], ['?x']], true);
+    expectPaths(manager, [['a'], ['b'], ['x'], ['ax'], ['[ab'], ['[abXY']], false);
+  });
+
+  it('空模式 /、//、! 不匹配任何路径且不抛错', async () => {
+    const manager = await createManager({ gitignore: ['/', '//', '!'] });
+    expect(() => manager.shouldIgnore(join(root, 'x'))).not.toThrow();
+    expect(manager.shouldIgnore(root)).toBe(false);
+    expectPaths(manager, [['x'], ['a', 'b']], false);
   });
 });
