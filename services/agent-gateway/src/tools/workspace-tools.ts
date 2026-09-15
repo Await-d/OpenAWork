@@ -28,6 +28,7 @@ import {
 } from '../workspace/workspace-paths.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
+import { pickToolPathInput, readToolPathInput } from './tool-path-aliases.js';
 
 interface WorkspaceTreeNode {
   path: string;
@@ -59,10 +60,22 @@ const optionalWorkspacePathSchema = z.preprocess(
   z.string().min(1).optional(),
 );
 
-const workspaceTreeInputSchema = z.object({
-  path: z.string().min(1),
-  depth: z.number().int().min(1).max(MAX_TREE_DEPTH).default(2),
-});
+const workspaceTreeInputSchema = z
+  .object({
+    path: optionalWorkspacePathSchema,
+    filePath: optionalWorkspacePathSchema,
+    file_path: optionalWorkspacePathSchema,
+    depth: z.number().int().min(1).max(MAX_TREE_DEPTH).default(2),
+  })
+  .superRefine((value, context) => {
+    if (!readToolPathInput(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either path or filePath is required',
+        path: ['path'],
+      });
+    }
+  });
 
 const workspaceTreeOutputSchema = z.object({
   path: z.string(),
@@ -75,11 +88,12 @@ const workspaceReadFileInputSchema = z
   .object({
     path: optionalWorkspacePathSchema,
     filePath: optionalWorkspacePathSchema,
+    file_path: optionalWorkspacePathSchema,
     offset: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(MAX_READ_LINE_LIMIT).optional(),
   })
   .superRefine((value, context) => {
-    if (!value.path && !value.filePath) {
+    if (!readToolPathInput(value)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Either path or filePath is required',
@@ -226,8 +240,10 @@ function assertAccessibleWorkspacePath(
 ): string {
   // 有 sessionId 时：先经 assertSessionWorkspacePath（含未绑定盘符根改写 + 主机校验）。
   // 禁止在改写前对原始 path 做主机校验，否则 Windows 上 `/` 会在改写前直接炸掉。
+  // 安全不变量：生产 read 路径不传 sessionId，故此处 allowSkillResourceRead 不生效；
+  // 技能资源放行只由 tool-sandbox 的 READ_ONLY_WORKSPACE_TOOLS 承担，勿删该白名单。
   const safePath = sessionId
-    ? assertSessionWorkspacePath({ path, sessionId })
+    ? assertSessionWorkspacePath({ path, sessionId, allowSkillResourceRead: true })
     : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
@@ -259,9 +275,22 @@ function assertWritableWorkspacePath(
   return safePath;
 }
 
-function assertSearchablePath(path: string, sessionId?: string): string {
+function assertSearchablePath(
+  path: string,
+  sessionId?: string,
+  options?: { allowSkillResourceRead?: boolean },
+): string {
+  // The skill-resource relaxation is caller-scoped: only the read-only search
+  // callers (`list`/`glob`/`grep`) opt in via `options`. The mutation tools
+  // that share this guard (`workspace_review_status`/`workspace_review_diff`/
+  // `workspace_review_revert`) stay strict, matching layer 1 in
+  // `tool-sandbox.ts`, which only relaxes READ_ONLY_WORKSPACE_TOOLS.
   const safePath = sessionId
-    ? assertSessionWorkspacePath({ path, sessionId })
+    ? assertSessionWorkspacePath({
+        path,
+        sessionId,
+        ...(options?.allowSkillResourceRead === true ? { allowSkillResourceRead: true } : {}),
+      })
     : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
@@ -288,12 +317,8 @@ function resolveUnscopedWorkspacePath(path: string): string | null {
   return validateWorkspacePath(effectivePath);
 }
 
-function pickPathInput(input: { path?: string; filePath?: string }): string {
-  const value = input.path ?? input.filePath;
-  if (!value) {
-    throw new Error('Either path or filePath is required');
-  }
-  return value;
+function pickPathInput(input: { path?: string; filePath?: string; file_path?: string }): string {
+  return pickToolPathInput(input);
 }
 
 async function assertDirectory(path: string): Promise<void> {
@@ -465,7 +490,9 @@ export function resolveWorkspaceReviewFilePath(rootPath: string, filePath: strin
 }
 
 async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
-  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
+  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT, undefined, {
+    allowSkillResourceRead: true,
+  });
   await ensureIgnoreRulesLoadedForPath(safePath);
   await assertDirectory(safePath);
   const patternRegex = globPatternToRegex(input.pattern);
@@ -533,7 +560,9 @@ function createGrepMatcher(pattern: string): RegExp {
 }
 
 async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
-  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
+  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT, undefined, {
+    allowSkillResourceRead: true,
+  });
   await ensureIgnoreRulesLoadedForPath(safePath);
   const targetStat = await fsp.stat(safePath);
   const matcher = createGrepMatcher(input.pattern);
@@ -645,14 +674,16 @@ async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
 
 function resolveSearchRoot(path: string | undefined, sessionId?: string): string {
   if (path) {
-    return assertSearchablePath(path, sessionId);
+    return assertSearchablePath(path, sessionId, { allowSkillResourceRead: true });
   }
   if (sessionId) {
     // 有会话时：已绑定用会话路径；未绑定由 assertSessionWorkingDirectory
     // 回退到桌面端默认目录。禁止落到盘符根。
-    return assertSearchablePath(assertSessionWorkingDirectory(sessionId), sessionId);
+    return assertSearchablePath(assertSessionWorkingDirectory(sessionId), sessionId, {
+      allowSkillResourceRead: true,
+    });
   }
-  return assertSearchablePath(WORKSPACE_ROOT);
+  return assertSearchablePath(WORKSPACE_ROOT, undefined, { allowSkillResourceRead: true });
 }
 
 function sanitizeReviewChanges(changes: WorkspaceReviewChange[]) {
@@ -670,7 +701,9 @@ export const listTool: ToolDefinition<
   outputSchema: workspaceTreeOutputSchema,
   timeout: 10000,
   execute: async (input) => {
-    const safePath = assertSearchablePath(input.path);
+    const safePath = assertSearchablePath(pickToolPathInput(input), undefined, {
+      allowSkillResourceRead: true,
+    });
     await assertDirectory(safePath);
     const counter = { count: 0 };
     const nodes = await readTree(safePath, input.depth, counter);
@@ -687,7 +720,9 @@ export async function executeListTool(
   input: z.infer<typeof workspaceTreeInputSchema>,
   sessionId?: string,
 ): Promise<z.infer<typeof workspaceTreeOutputSchema>> {
-  const safePath = assertSearchablePath(input.path, sessionId);
+  const safePath = assertSearchablePath(pickToolPathInput(input), sessionId, {
+    allowSkillResourceRead: true,
+  });
   await assertDirectory(safePath);
   const counter = { count: 0 };
   const nodes = await readTree(safePath, input.depth, counter);

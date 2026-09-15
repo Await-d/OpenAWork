@@ -240,6 +240,7 @@ import {
 } from './todo-tools.js';
 import { createWebsearchTool, websearchTool } from './tool-aliases.js';
 import { readWebsearchPolicy, WEBSEARCH_POLICY_KEY } from '../provider/websearch-policy.js';
+import { readToolPathInput } from './tool-path-aliases.js';
 import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
 import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
 import {
@@ -301,11 +302,15 @@ function normalizeWorkspaceManagedRawInput(
     if (!parsed.success) {
       return null;
     }
+    const path = readToolPathInput(parsed.data);
+    if (!path) {
+      return null;
+    }
     return {
       ...request,
       rawInput: {
         ...parsed.data,
-        path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }),
+        path: assertSessionWorkspacePath({ path, sessionId, allowSkillResourceRead: true }),
       },
     };
   }
@@ -315,11 +320,15 @@ function normalizeWorkspaceManagedRawInput(
     if (!parsed.success) {
       return null;
     }
-    const path = parsed.data.path ?? parsed.data.filePath;
+    const path = readToolPathInput(parsed.data);
     if (!path) {
       return null;
     }
-    const normalizedPath = assertSessionWorkspacePath({ path, sessionId });
+    const normalizedPath = assertSessionWorkspacePath({
+      path,
+      sessionId,
+      allowSkillResourceRead: true,
+    });
     return {
       ...request,
       rawInput: {
@@ -340,7 +349,13 @@ function normalizeWorkspaceManagedRawInput(
       rawInput: {
         ...parsed.data,
         ...(parsed.data.path
-          ? { path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }) }
+          ? {
+              path: assertSessionWorkspacePath({
+                path: parsed.data.path,
+                sessionId,
+                allowSkillResourceRead: true,
+              }),
+            }
           : { path: assertSessionWorkingDirectory(sessionId) }),
       },
     };
@@ -356,7 +371,13 @@ function normalizeWorkspaceManagedRawInput(
       rawInput: {
         ...parsed.data,
         ...(parsed.data.path
-          ? { path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId }) }
+          ? {
+              path: assertSessionWorkspacePath({
+                path: parsed.data.path,
+                sessionId,
+                allowSkillResourceRead: true,
+              }),
+            }
           : { path: assertSessionWorkingDirectory(sessionId) }),
       },
     };
@@ -379,6 +400,13 @@ const FILE_TOOLS = new Set([
   'workspace_review_status',
   'workspace_review_revert',
 ]);
+
+/**
+ * Workspace tools that only read: these may reach app-owned skill resource
+ * roots outside the session workspace. Every other FILE_TOOLS entry keeps the
+ * strict session-workspace containment check for both reads and writes.
+ */
+const READ_ONLY_WORKSPACE_TOOLS = new Set(['read', 'list', 'glob', 'grep']);
 
 const SESSION_WORKSPACE_REQUIRED_TOOLS = new Set([
   'apply_patch',
@@ -1540,6 +1568,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
   switch (request.toolName) {
     case 'read':
     case 'list':
+      return readToolPathInput(rawInput) !== undefined;
     case 'workspace_review_status':
     case 'workspace_review_diff':
     case 'write':
@@ -1646,12 +1675,7 @@ function buildPermissionRequestContext(
   request: ToolCallRequest,
 ): PermissionRequestContext | null {
   const rawInput = request.rawInput as Record<string, unknown>;
-  const pathValue =
-    typeof rawInput.path === 'string'
-      ? rawInput.path
-      : typeof rawInput.filePath === 'string'
-        ? rawInput.filePath
-        : null;
+  const pathValue = readToolPathInput(rawInput);
 
   // Flat MCP tools (PR-C): `mcp__<serverId>__<toolName>` is dynamic and
   // cannot be matched by the static `switch` below, so we intercept it
@@ -6391,14 +6415,16 @@ export class ToolSandbox {
 
     if (FILE_TOOLS.has(effectiveRequest.toolName)) {
       const rawInput = effectiveRequest.rawInput as Record<string, unknown>;
-      const filePath =
-        (typeof rawInput.path === 'string' ? rawInput.path : undefined) ??
-        (typeof rawInput.filePath === 'string' ? rawInput.filePath : undefined);
+      const filePath = readToolPathInput(rawInput);
       let safeFilePath: string | undefined;
       if (filePath) {
         // 仅未绑定：盘符根/占位路径先改写，再做会话范围校验。已绑定绝不改写。
         const effectiveFilePath = rewriteUnboundPlaceholderPath(sessionId, filePath);
-        const validation = validateSessionWorkspacePath({ path: effectiveFilePath, sessionId });
+        const validation = validateSessionWorkspacePath({
+          path: effectiveFilePath,
+          sessionId,
+          allowSkillResourceRead: READ_ONLY_WORKSPACE_TOOLS.has(effectiveRequest.toolName),
+        });
         if (!validation.ok) {
           const result: ToolCallResult = {
             toolCallId: request.toolCallId,

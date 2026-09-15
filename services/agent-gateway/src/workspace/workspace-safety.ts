@@ -10,6 +10,7 @@ import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { isPathWithinSkillResources } from './skill-resource-roots.js';
 import {
   assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
@@ -212,6 +213,7 @@ export type SessionWorkspacePathValidationResult =
 export function validateSessionWorkspacePath(input: {
   path: string;
   sessionId: string;
+  allowSkillResourceRead?: boolean;
 }): SessionWorkspacePathValidationResult {
   const safePath = validateWorkspacePath(input.path);
   if (!safePath) {
@@ -225,6 +227,15 @@ export function validateSessionWorkspacePath(input: {
 
   const workingDirectory = getSessionWorkingDirectory(input.sessionId);
   if (workingDirectory && !isPathWithinRoot(safePath, workingDirectory)) {
+    // Read-only tools may reach app-owned skill assets; the forbidden-path
+    // (host/global-root) failure above is never bypassed by this allowance.
+    if (input.allowSkillResourceRead === true && isPathWithinSkillResources(safePath)) {
+      return {
+        ok: true,
+        safePath,
+        workingDirectory,
+      };
+    }
     return {
       ok: false,
       reason: 'outside-session-workspace',
@@ -240,7 +251,11 @@ export function validateSessionWorkspacePath(input: {
   };
 }
 
-export function assertSessionWorkspacePath(input: { path: string; sessionId: string }): string {
+export function assertSessionWorkspacePath(input: {
+  path: string;
+  sessionId: string;
+  allowSkillResourceRead?: boolean;
+}): string {
   const workingDirectory = getSessionWorkingDirectory(input.sessionId);
   if (!workingDirectory && requiresBoundSessionWorkspace(input.sessionId)) {
     throw new Error(`当前会话未绑定工作区，禁止访问路径：${input.path}`);
@@ -256,7 +271,11 @@ export function assertSessionWorkspacePath(input: { path: string; sessionId: str
   }
   assertWorkspacePathSupportedByCurrentHost(effectivePath);
 
-  const result = validateSessionWorkspacePath({ path: effectivePath, sessionId: input.sessionId });
+  const result = validateSessionWorkspacePath({
+    path: effectivePath,
+    sessionId: input.sessionId,
+    ...(input.allowSkillResourceRead === true ? { allowSkillResourceRead: true } : {}),
+  });
   if (!result.ok) {
     if (result.reason === 'forbidden-path') {
       throw new Error(`Forbidden workspace path: ${effectivePath}`);
