@@ -122,14 +122,12 @@ const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 /**
  * Sliding-window budget for `GET /workspace/files/search`, keyed per
- * authenticated user + resolved workspace root. The web client debounces
- * mention lookups by 120ms (`apps/web/.../use-mention-file-search.ts`), so a
- * full minute of continuous typing tops out around 240 requests; the cap is
- * deliberately above realistic interaction (bursts of 10–30 keystrokes
- * followed by idle reading time) while still bounding an authenticated flood
- * that would otherwise force one full workspace `readdir` walk per request.
+ * authenticated user + resolved workspace root. The web client debounces mention
+ * lookups by 120ms, so a fast typist can reach ~300 requests/min; the budget is
+ * set well above that to avoid throttling normal typing, while still bounding an
+ * authenticated flood (each request can force one full workspace walk).
  */
-export const WORKSPACE_FILE_SEARCH_RATE_LIMIT = 240;
+export const WORKSPACE_FILE_SEARCH_RATE_LIMIT = 600;
 export const WORKSPACE_FILE_SEARCH_RATE_WINDOW_MS = 60_000;
 
 /**
