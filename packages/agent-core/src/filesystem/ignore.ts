@@ -28,6 +28,22 @@ const BUILTIN_IGNORE_PATTERNS = [
   '**/*.db',
 ];
 
+/**
+ * Exact, case-sensitive basenames of committed env templates that the builtin
+ * `.env.*` pattern must NOT hard-deny — the repo itself ships `.env.example`
+ * (README: `cp .env.example .env`). Exact match only: no globs, no prefix
+ * matching, so `.env.example.bak` stays denied.
+ */
+const SAFE_ENV_TEMPLATE_BASENAMES = new Set([
+  '.env.example',
+  '.env.sample',
+  '.env.template',
+  '.env.dist',
+  '.env.defaults',
+]);
+
+const BUILTIN_ENV_TEMPLATE_PATTERN = '.env.*';
+
 export interface IgnoreRuleSet {
   gitignorePatterns: string[];
   agentignorePatterns: string[];
@@ -42,12 +58,23 @@ export interface AgentIgnoreManager {
   addRuntimeRule(pattern: string): void;
 }
 
-function patternToRegex(pattern: string): RegExp {
-  let p = pattern.trim();
-  if (!p || p.startsWith('#')) return /(?!)/;
+interface ParsedIgnorePattern {
+  regex: RegExp | null;
+  negate: boolean;
+}
 
-  const negate = p.startsWith('!');
-  if (negate) p = p.slice(1);
+function parseIgnorePattern(pattern: string): ParsedIgnorePattern {
+  let p = pattern.trim();
+  if (!p || p.startsWith('#')) return { regex: null, negate: false };
+
+  let negate = false;
+  if (p.startsWith('!')) {
+    negate = true;
+    p = p.slice(1);
+  } else if (p.startsWith('\\!')) {
+    p = p.slice(1);
+  }
+  if (!p) return { regex: null, negate: false };
 
   const anchored = p.startsWith('/');
   if (anchored) p = p.slice(1);
@@ -60,7 +87,11 @@ function patternToRegex(pattern: string): RegExp {
     .replace(/<<GLOBSTAR>>/g, '.*');
 
   const src = anchored ? `^${p}` : `(^|/)${p}`;
-  return new RegExp(`${src}($|/)`);
+  return { regex: new RegExp(`${src}($|/)`), negate };
+}
+
+function matchesIgnorePattern(regex: RegExp, rel: string, base: string): boolean {
+  return regex.test(rel) || regex.test(base);
 }
 
 async function readIgnoreFile(filePath: string): Promise<string[]> {
@@ -85,13 +116,48 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
   let runtimePatterns: string[] = [];
   let projectRoot = '';
 
-  const allPatterns = (): string[] => [
-    ...rules.builtinPatterns,
-    ...rules.gitignorePatterns,
-    ...rules.agentignorePatterns,
-    ...rules.userGlobalPatterns,
-    ...runtimePatterns,
-  ];
+  const evaluateIgnore = (filePath: string): boolean => {
+    const normalized = filePath.replace(/\\/g, '/');
+    const rel = projectRoot ? relative(projectRoot, filePath).replace(/\\/g, '/') : normalized;
+    const base = normalized.split('/').pop() ?? '';
+
+    // Security invariant: every builtin except `.env.*` hard-denies on match
+    // and can never be re-included by any user rule. `.env.*` is only a
+    // baseline deny (exact safe templates exempt) and may be lifted by explicit
+    // agent policy (.agentignore / user-global / runtime) — never by .gitignore.
+    let envStarBaseline = false;
+    for (const pattern of rules.builtinPatterns) {
+      const { regex } = parseIgnorePattern(pattern);
+      if (!regex || !matchesIgnorePattern(regex, rel, base)) continue;
+      if (pattern === BUILTIN_ENV_TEMPLATE_PATTERN) {
+        envStarBaseline = !SAFE_ENV_TEMPLATE_BASENAMES.has(base);
+        continue;
+      }
+      return true;
+    }
+
+    let decision = envStarBaseline;
+
+    // While the `.env.*` baseline holds, `.gitignore` matches — positive or
+    // negated — must not change the decision, so this layer is skipped whole.
+    if (!envStarBaseline) {
+      for (const pattern of rules.gitignorePatterns) {
+        const { regex, negate } = parseIgnorePattern(pattern);
+        if (regex && matchesIgnorePattern(regex, rel, base)) decision = !negate;
+      }
+    }
+
+    const agentPolicyPatterns = [
+      ...rules.agentignorePatterns,
+      ...rules.userGlobalPatterns,
+      ...runtimePatterns,
+    ];
+    for (const pattern of agentPolicyPatterns) {
+      const { regex, negate } = parseIgnorePattern(pattern);
+      if (regex && matchesIgnorePattern(regex, rel, base)) decision = !negate;
+    }
+    return decision;
+  };
 
   return {
     async loadRules(root: string): Promise<IgnoreRuleSet> {
@@ -114,35 +180,11 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
     },
 
     shouldIgnore(filePath: string): boolean {
-      const rel = projectRoot
-        ? relative(projectRoot, filePath).replace(/\\/g, '/')
-        : filePath.replace(/\\/g, '/');
-
-      const patterns = allPatterns();
-      for (const pattern of patterns) {
-        const rx = patternToRegex(pattern);
-        if (rx.test(rel)) return true;
-        const base = filePath.split('/').pop() ?? '';
-        if (rx.test(base)) return true;
-      }
-      return false;
+      return evaluateIgnore(filePath);
     },
 
     async listIgnored(dir: string): Promise<string[]> {
       const ignored: string[] = [];
-      const shouldIgnoreFn = (fp: string) => {
-        const rel = projectRoot
-          ? relative(projectRoot, fp).replace(/\\/g, '/')
-          : fp.replace(/\\/g, '/');
-        const patterns = allPatterns();
-        for (const pattern of patterns) {
-          const rx = patternToRegex(pattern);
-          if (rx.test(rel)) return true;
-          const base = fp.split('/').pop() ?? '';
-          if (rx.test(base)) return true;
-        }
-        return false;
-      };
       async function walk(d: string) {
         let entries: { name: string; isDirectory(): boolean }[];
         try {
@@ -152,7 +194,7 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
         }
         for (const entry of entries) {
           const full = join(d, entry.name);
-          if (shouldIgnoreFn(full)) {
+          if (evaluateIgnore(full)) {
             ignored.push(full);
           } else if (entry.isDirectory()) {
             await walk(full);
