@@ -56,7 +56,8 @@ function findNode(nodes: FileTreeNode[], targetPath: string): FileTreeNode | nul
 
 interface UseSessionSidebarFileTreeStateOptions {
   active: boolean;
-  expandedDirsArr: string[];
+  expandedDirsArr: readonly string[];
+  expandedDirsSessionKey: string;
   fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>;
   fileTreeRootPath: string | null;
   setExpandedDirs: (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
@@ -156,6 +157,7 @@ export function useSessionSidebarFileTreeState(
   const fileTreeRef = useRef<FileTreeNode[]>([]);
   const latestFileTreeRootPathRef = useRef<string | null>(options.fileTreeRootPath);
   const previousFileTreeRootPathRef = useRef<string | null>(options.fileTreeRootPath);
+  const previousExpandedDirsSessionKeyRef = useRef(options.expandedDirsSessionKey);
   const fileTreeRequestIdRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAttemptRef = useRef(0);
@@ -219,6 +221,44 @@ export function useSessionSidebarFileTreeState(
       );
     },
     [collectLoadedExpandedDirectories],
+  );
+
+  const restoreExpandedDirectoryChildren = useCallback(
+    async (
+      requestId: number,
+      requestedRootPath: string | null,
+      rootNodes: FileTreeNode[],
+    ): Promise<FileTreeNode[] | null> => {
+      const wanted = new Set(optionsRef.current.expandedDirsArr);
+      if (wanted.size === 0) {
+        return rootNodes;
+      }
+      // 由浅到深恢复，保证外层目录先加载出内层节点，内层才能被 findNode 命中。
+      const ordered = [...wanted].sort(
+        (left, right) => left.split('/').length - right.split('/').length,
+      );
+      let tree = rootNodes;
+      let failedCount = 0;
+      for (const directoryPath of ordered) {
+        if (!findNode(tree, directoryPath)) {
+          continue;
+        }
+        try {
+          const children = await optionsRef.current.fetchTree(directoryPath, 1);
+          if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            return null;
+          }
+          tree = patchTreeChildren(tree, directoryPath, children);
+        } catch {
+          failedCount += 1;
+        }
+      }
+      if (failedCount > 0) {
+        setFileTreeError(`已有 ${failedCount} 个已展开目录未能恢复`);
+      }
+      return tree;
+    },
+    [isActiveFileTreeRequest],
   );
 
   const clearRetry = useCallback(() => {
@@ -302,7 +342,15 @@ export function useSessionSidebarFileTreeState(
         }
 
         if (!preserveExpandedDirectories || fileTreeRef.current.length === 0) {
-          setFileTree(rootNodes);
+          const restoredTree = await restoreExpandedDirectoryChildren(
+            requestId,
+            requestedRootPath,
+            rootNodes,
+          );
+          if (restoredTree === null) {
+            return false;
+          }
+          setFileTree(restoredTree);
           clearRetry();
           return true;
         }
@@ -354,6 +402,7 @@ export function useSessionSidebarFileTreeState(
       collectLoadedExpandedDirectories,
       isActiveFileTreeRequest,
       nextFileTreeRequest,
+      restoreExpandedDirectoryChildren,
       scheduleRetry,
     ],
   );
@@ -497,7 +546,9 @@ export function useSessionSidebarFileTreeState(
 
   useEffect(() => {
     const previousRootPath = previousFileTreeRootPathRef.current;
+    const previousSessionKey = previousExpandedDirsSessionKeyRef.current;
     const nextRootPath = options.fileTreeRootPath;
+    const nextSessionKey = options.expandedDirsSessionKey;
     latestFileTreeRootPathRef.current = nextRootPath;
 
     // Only reset internal state when the workspace root actually changes.
@@ -505,21 +556,27 @@ export function useSessionSidebarFileTreeState(
     // newly-constructed `setExpandedDirs` callback, which would clear the
     // tree, write `[]` back to the store, change the callback identity
     // again, and trigger an infinite update loop.
-    if (previousRootPath === nextRootPath) {
+    const sessionChanged = previousSessionKey !== nextSessionKey;
+    if (previousRootPath === nextRootPath && !sessionChanged) {
       return;
     }
     previousFileTreeRootPathRef.current = nextRootPath;
+    previousExpandedDirsSessionKeyRef.current = nextSessionKey;
 
     fileTreeRequestIdRef.current += 1;
     clearRetry();
     setFileTree([]);
     setFileTreeError(null);
-    optionsRef.current.setExpandedDirs(new Set());
+    // 仅同一会话内、且从非 null 根路径切换到新根路径时才清空展开目录。
+    // 从 null 异步解析出根路径是会话切换的正常过程，此时清空会抹掉目标会话自己的桶。
+    if (!sessionChanged && previousRootPath !== null) {
+      optionsRef.current.setExpandedDirs(new Set());
+    }
 
     if (!nextRootPath) {
       setFileTreeLoading(false);
     }
-  }, [clearRetry, options.fileTreeRootPath]);
+  }, [clearRetry, options.expandedDirsSessionKey, options.fileTreeRootPath]);
 
   useEffect(() => {
     if (options.active && options.fileTreeRootPath && fileTree.length === 0) {

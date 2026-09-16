@@ -41,10 +41,10 @@ const authState = vi.hoisted(() => ({
 const uiState = vi.hoisted(() => ({
   activeFilePathByWorkspace: {} as Record<string, string | null>,
   bumpWorkspaceTreeVersion: vi.fn(),
-  expandedDirs: [] as string[],
+  expandedDirsBySession: {} as Record<string, string[]>,
   fileTreeRootPath: '/workspace/demo',
   removeSavedWorkspacePath: vi.fn(),
-  setExpandedDirs: vi.fn(),
+  setExpandedDirsForSession: vi.fn(),
 }));
 
 const sidebarState: MockSidebarState = vi.hoisted(() => ({
@@ -82,6 +82,13 @@ const workspaceClientMocks = vi.hoisted(() => ({
   renameEntry: vi.fn(async () => undefined),
 }));
 
+const sidebarHookCalls = vi.hoisted(() => ({
+  lastOptions: null as {
+    readonly expandedDirsArr: readonly string[];
+    readonly expandedDirsSessionKey: string;
+  } | null,
+}));
+
 vi.mock('@openAwork/web-client', () => ({
   createWorkspaceClient: () => workspaceClientMocks,
 }));
@@ -95,14 +102,22 @@ vi.mock('../../../stores/auth/auth.js', () => ({
 }));
 
 vi.mock('../../../stores/ui/uiState.js', () => ({
+  EMPTY_EXPANDED_DIRS: [] as string[],
+  normalizeExpandedDirsSessionKey: (sessionKey: string | null | undefined) => {
+    const trimmed = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+    return trimmed.length > 0 ? trimmed : '__default__';
+  },
   useUIStateStore: (
     selector?: (state: {
       activeFilePathByWorkspace: Record<string, string | null>;
       bumpWorkspaceTreeVersion: () => void;
-      expandedDirs: string[];
+      expandedDirsBySession: Record<string, string[]>;
       fileTreeRootPath: string | null;
       removeSavedWorkspacePath: (path: string) => void;
-      setExpandedDirs: (dirs: string[]) => void;
+      setExpandedDirsForSession: (
+        sessionKey: string | null | undefined,
+        dirs: string[],
+      ) => void;
     }) => unknown,
   ) => {
     return typeof selector === 'function' ? selector(uiState) : uiState;
@@ -110,19 +125,25 @@ vi.mock('../../../stores/ui/uiState.js', () => ({
 }));
 
 vi.mock('./use-session-sidebar-file-tree-state.js', () => ({
-  useSessionSidebarFileTreeState: () => ({
-    applyCreatedEntry: sidebarState.applyCreatedEntry,
-    applyDeletedEntry: sidebarState.applyDeletedEntry,
-    applyRenamedEntry: sidebarState.applyRenamedEntry,
-    ensureRootPath: sidebarState.ensureRootPath,
-    fileTree: sidebarState.fileTree,
-    fileTreeError: sidebarState.fileTreeError,
-    fileTreeLoading: sidebarState.fileTreeLoading,
-    handleRefreshFileTree: sidebarState.handleRefreshFileTree,
-    handleToggleDirWithLoad: sidebarState.handleToggleDirWithLoad,
-    refreshDirectory: sidebarState.refreshDirectory,
-    setFileTreeError: sidebarState.setFileTreeError,
-  }),
+  useSessionSidebarFileTreeState: (options: {
+    readonly expandedDirsArr: readonly string[];
+    readonly expandedDirsSessionKey: string;
+  }) => {
+    sidebarHookCalls.lastOptions = options;
+    return {
+      applyCreatedEntry: sidebarState.applyCreatedEntry,
+      applyDeletedEntry: sidebarState.applyDeletedEntry,
+      applyRenamedEntry: sidebarState.applyRenamedEntry,
+      ensureRootPath: sidebarState.ensureRootPath,
+      fileTree: sidebarState.fileTree,
+      fileTreeError: sidebarState.fileTreeError,
+      fileTreeLoading: sidebarState.fileTreeLoading,
+      handleRefreshFileTree: sidebarState.handleRefreshFileTree,
+      handleToggleDirWithLoad: sidebarState.handleToggleDirWithLoad,
+      refreshDirectory: sidebarState.refreshDirectory,
+      setFileTreeError: sidebarState.setFileTreeError,
+    };
+  },
 }));
 
 vi.mock('./SidebarHelpers.js', () => ({
@@ -155,8 +176,9 @@ function renderPanel() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sidebarHookCalls.lastOptions = null;
   uiState.fileTreeRootPath = '/workspace/demo';
-  uiState.expandedDirs = [];
+  uiState.expandedDirsBySession = {};
   sidebarState.fileTree = [
     {
       name: 'index.ts',
@@ -240,5 +262,27 @@ describe('WorkspaceFileTreePanel', () => {
     );
 
     expect(screen.queryByRole('button', { name: '切换工作区' })).toBeNull();
+  });
+
+  it('把会话 key 与对应桶的展开目录传给文件树状态 hook', () => {
+    uiState.expandedDirsBySession = { 'session-a': ['/workspace/demo/src'] };
+
+    render(
+      <WorkspaceFileTreePanel
+        allowMutations={false}
+        fetchTree={vi.fn(async () => [])}
+        onOpenFile={vi.fn()}
+        sessionId="session-a"
+      />,
+    );
+
+    expect(sidebarHookCalls.lastOptions?.expandedDirsSessionKey).toBe('session-a');
+    expect(sidebarHookCalls.lastOptions?.expandedDirsArr).toEqual(['/workspace/demo/src']);
+  });
+
+  it('无会话时使用默认桶', () => {
+    renderPanel();
+
+    expect(sidebarHookCalls.lastOptions?.expandedDirsSessionKey).toBe('__default__');
   });
 });

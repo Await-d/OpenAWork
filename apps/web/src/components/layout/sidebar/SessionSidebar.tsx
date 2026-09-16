@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import {
+  EMPTY_EXPANDED_DIRS,
+  normalizeExpandedDirsSessionKey,
+  useUIStateStore,
+} from '../../../stores/ui/uiState.js';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import SessionContextMenu from './SessionContextMenu.js';
@@ -78,13 +82,15 @@ export function SessionSidebar({
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
   const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+  const sessionId = window.location.pathname.split('/chat/')[1]?.split('/')[0];
+  const expandedDirsSessionKey = normalizeExpandedDirsSessionKey(sessionId);
   const {
     sidebarTab,
     setSidebarTab,
     togglePinSession,
     isPinned,
-    expandedDirs: expandedDirsArr,
-    setExpandedDirs: setExpandedDirsArr,
+    expandedDirsBySession,
+    setExpandedDirsForSession,
     fileTreeRootPath,
     activeFilePathByWorkspace,
     bumpWorkspaceTreeVersion,
@@ -94,13 +100,13 @@ export function SessionSidebar({
     activeFilePathByWorkspace[
       fileTreeRootPath && fileTreeRootPath.trim().length > 0 ? fileTreeRootPath : '__default__'
     ] ?? null;
-  const expandedDirs = new Set(expandedDirsArr);
+  const expandedDirsArr = expandedDirsBySession[expandedDirsSessionKey] ?? EMPTY_EXPANDED_DIRS;
   const setExpandedDirs = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
-      setExpandedDirsArr(Array.from(next));
+      setExpandedDirsForSession(expandedDirsSessionKey, Array.from(next));
     },
-    [expandedDirsArr, setExpandedDirsArr],
+    [expandedDirsArr, expandedDirsSessionKey, setExpandedDirsForSession],
   );
 
   const {
@@ -199,6 +205,7 @@ export function SessionSidebar({
   } = useSessionSidebarFileTreeState({
     active: sidebarTab === 'files',
     expandedDirsArr,
+    expandedDirsSessionKey,
     fetchTree,
     fileTreeRootPath,
     setExpandedDirs,
@@ -485,7 +492,6 @@ export function SessionSidebar({
     [fileTreeRootPath, setFileTreeError, setSidebarTab],
   );
 
-  const { sessionId } = { sessionId: window.location.pathname.split('/chat/')[1]?.split('/')[0] };
   const sessionListRef = useRef<HTMLDivElement>(null);
   useScrollActiveSessionIntoView(sessionListRef, sessionId ?? null);
   const contentSearch = useSessionContentSearch(sessionSearch);

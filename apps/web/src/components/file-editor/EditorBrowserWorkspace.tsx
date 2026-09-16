@@ -1,9 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FileEditorPanel } from './editor/FileEditorPanel.js';
 import { BuiltInBrowser } from '../chat/misc/BuiltInBrowser.js';
+import { ResizeHandle } from '../layout/shared/resize-handle.js';
+import {
+  FILE_TREE_WIDTH_DEFAULT,
+  FILE_TREE_WIDTH_MAX,
+  FILE_TREE_WIDTH_MIN,
+  clampFileTreeWidth,
+} from './workspace-resize.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
 
 export type EditorPaneTab = 'code' | 'browser';
+
+const FILE_TREE_WIDTH_BOUNDS = {
+  min: FILE_TREE_WIDTH_MIN,
+  max: FILE_TREE_WIDTH_MAX,
+  default: FILE_TREE_WIDTH_DEFAULT,
+};
 
 /**
  * 编辑器 + 内置浏览器的可复用工作区。
@@ -74,44 +88,17 @@ export function EditorBrowserWorkspace({
   const setCurrentTab = onTabChange ?? setLocalTab;
 
   // ── File tree resizable width ──────────────────────────────────────
-  const FILE_TREE_MIN = 140;
-  const FILE_TREE_MAX = 480;
-  const FILE_TREE_DEFAULT = 220;
-  const [fileTreeWidth, setFileTreeWidth] = useState(FILE_TREE_DEFAULT);
-  const fileTreeDraggingRef = useRef(false);
-  const fileTreeContainerRef = useRef<HTMLDivElement | null>(null);
-
-  const handleFileTreeResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    fileTreeDraggingRef.current = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!fileTreeDraggingRef.current || !fileTreeContainerRef.current) return;
-      const rect = fileTreeContainerRef.current.getBoundingClientRect();
-      const newWidth = e.clientX - rect.left;
-      setFileTreeWidth(Math.max(FILE_TREE_MIN, Math.min(FILE_TREE_MAX, newWidth)));
-    };
-    const handleMouseUp = () => {
-      if (!fileTreeDraggingRef.current) return;
-      fileTreeDraggingRef.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
+  // 约束在 workspace-resize.ts，拖拽/键盘由共享 ResizeHandle 提供。
+  const [fileTreeWidth, setFileTreeWidth] = useState(FILE_TREE_WIDTH_DEFAULT);
 
   // Keep browser mounted once activated (preserves page state across tab switches)
   const [browserMounted, setBrowserMounted] = useState(false);
-  const showBrowserTab = !!browserPreviewUrl || browserMounted;
+  // 单一浏览器互斥：停靠侧面板的浏览器 tab 持有浏览器时（browserPreviewSurface
+  // === 'dock'），这里绝不挂载第二份 BuiltInBrowser——两份实例会各自建立网关
+  // 实时会话（controller 选举 / ack 额度互相抢占）。停靠面板卸载后自动归还。
+  const browserPreviewSurface = useUIStateStore((s) => s.browserPreviewSurface);
+  const browserHostedByDock = browserPreviewSurface === 'dock';
+  const showBrowserTab = (!!browserPreviewUrl || browserMounted) && !browserHostedByDock;
 
   // Auto-switch to browser tab only when browserPreviewUrl is *newly* set
   // (e.g. dev-server detect 推入或用户主动打开)。挂载时 url 已存在(刷新后从持久化
@@ -286,7 +273,6 @@ export function EditorBrowserWorkspace({
       >
         {fileTree && (
           <div
-            ref={fileTreeContainerRef}
             style={{
               width: fileTreeWidth,
               flexShrink: 0,
@@ -301,7 +287,6 @@ export function EditorBrowserWorkspace({
         )}
         {fileTree && (
           <div
-            onMouseDown={handleFileTreeResizeStart}
             style={{
               width: 4,
               flexShrink: 0,
@@ -309,31 +294,15 @@ export function EditorBrowserWorkspace({
               background: 'var(--border-subtle)',
               position: 'relative',
               zIndex: 5,
-              transition: fileTreeDraggingRef.current ? 'none' : 'background 120ms ease',
-            }}
-            onMouseEnter={(e) => {
-              if (!fileTreeDraggingRef.current) {
-                e.currentTarget.style.background = 'var(--accent)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!fileTreeDraggingRef.current) {
-                e.currentTarget.style.background = 'var(--border-subtle)';
-              }
             }}
           >
-            <div
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: 2,
-                height: 24,
-                borderRadius: 1,
-                background: 'var(--fg-muted)',
-                opacity: 0.4,
-              }}
+            <ResizeHandle
+              width={fileTreeWidth}
+              bounds={FILE_TREE_WIDTH_BOUNDS}
+              clamp={clampFileTreeWidth}
+              ariaLabel="调整文件树宽度"
+              onWidthChange={setFileTreeWidth}
+              onWidthCommit={setFileTreeWidth}
             />
           </div>
         )}
@@ -366,7 +335,7 @@ export function EditorBrowserWorkspace({
       </div>
 
       {/* Browser preview — stays mounted once activated */}
-      {browserMounted && (
+      {browserMounted && !browserHostedByDock && (
         <BuiltInBrowser
           style={{
             flex: 1,

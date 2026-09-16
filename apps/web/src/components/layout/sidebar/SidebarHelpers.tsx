@@ -4,8 +4,8 @@ import React, {
   useRef as useLocalRef,
 } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
+import { FileTypeIcon, FolderTypeIcon } from '@openAwork/shared-ui';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
-import { FileIcon, FolderIcon } from '../../file-editor/preview/FileIcon.js';
 
 export interface FileTreeContextTarget {
   path: string;
@@ -287,7 +287,7 @@ export function FileTreeView({
                 >
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
-                <FolderIcon open={isExpanded} size={13} name={node.name} />
+                <FolderTypeIcon open={isExpanded} size={15} name={node.name} />
                 <span
                   style={{
                     overflow: 'hidden',
@@ -359,7 +359,7 @@ export function FileTreeView({
               >
                 {/* Spacer to align with chevron */}
                 <span style={{ width: 9, flexShrink: 0 }} />
-                <FileIcon path={node.path} size={13} />
+                <FileTypeIcon path={node.path} size={15} />
                 <span
                   style={{
                     overflow: 'hidden',
@@ -370,8 +370,6 @@ export function FileTreeView({
                 >
                   {filter ? highlightMatch(node.name, filter) : node.name}
                 </span>
-                {/* File size hint from extension */}
-                <FileExtBadge name={node.name} />
               </button>
             )}
             {node.type === 'directory' && isExpanded && node.children && (
@@ -430,33 +428,5 @@ function highlightMatch(text: string, query: string): React.ReactNode {
       </span>
       {text.slice(index + query.length)}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helper: subtle extension badge for files
-// ---------------------------------------------------------------------------
-function FileExtBadge({ name }: { name: string }) {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() : null;
-  if (!ext || ext.length > 4) return null;
-
-  // Only show for less obvious extensions
-  const SKIP_EXTS = new Set(['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html']);
-  if (SKIP_EXTS.has(ext)) return null;
-
-  return (
-    <span
-      style={{
-        fontSize: 8,
-        fontWeight: 500,
-        color: 'var(--text-4)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.03em',
-        flexShrink: 0,
-        opacity: 0.7,
-      }}
-    >
-      .{ext}
-    </span>
   );
 }

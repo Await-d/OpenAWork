@@ -1,12 +1,18 @@
 import {
   type CSSProperties,
   type ReactNode,
-  useCallback,
   useEffect,
   useRef,
   useState,
 } from 'react';
 import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
+import { ResizeHandle } from '../layout/shared/resize-handle.js';
+import {
+  clampEditorWidthPx,
+  editorWidthBoundsPx,
+  splitPosFromEditorWidthPx,
+  splitPosToEditorWidthPx,
+} from './workspace-resize.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 
 /**
@@ -87,7 +93,7 @@ const SPLIT_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
-/** split 模式:拖拽手柄 */
+/** split 模式:拖拽手柄的定位容器 */
 const RESIZER_STYLE: CSSProperties = {
   width: 4,
   flexShrink: 0,
@@ -95,7 +101,6 @@ const RESIZER_STYLE: CSSProperties = {
   background: 'transparent',
   position: 'relative',
   zIndex: 91,
-  transition: 'background 100ms ease',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -142,55 +147,28 @@ export function WorkspaceEditorOverlay({
   onModeChange,
   fileTree,
 }: WorkspaceEditorOverlayProps) {
-  // ─── split 模式拖拽状态 ───
+  // ─── split 模式宽度 ───
   const [splitPos, setSplitPos] = useState(splitPosProp);
-  const draggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const splitPosRef = useRef(splitPos);
-  splitPosRef.current = splitPos;
+  // 持久化值是百分比，而 ResizeHandle 以像素增量驱动拖拽，故需跟踪行宽做换算。
+  const [rowWidthPx, setRowWidthPx] = useState(0);
 
   // 同步外部 splitPos 变化
   useEffect(() => {
     setSplitPos(splitPosProp);
   }, [splitPosProp]);
 
-  // 拖拽逻辑
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, []);
-
   useEffect(() => {
-    if (mode !== 'split') return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!draggingRef.current || !containerRef.current) return;
-      const parent = containerRef.current.parentElement;
-      if (!parent) return;
-      const parentRect = parent.getBoundingClientRect();
-      const editorWidth = parentRect.right - e.clientX;
-      const pct = (editorWidth / parentRect.width) * 100;
-      const clamped = Math.min(80, Math.max(20, pct));
-      setSplitPos(clamped);
-    };
-
-    const handleMouseUp = () => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      onSplitPosChange?.(splitPosRef.current);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [mode, onSplitPosChange]);
+    if (mode !== 'split' || !open) return;
+    const row = containerRef.current?.parentElement;
+    if (!row) return;
+    const measure = () => setRowWidthPx(row.getBoundingClientRect().width);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [mode, open]);
 
   if (!open) return null;
 
@@ -316,28 +294,18 @@ export function WorkspaceEditorOverlay({
   if (isSplit) {
     return (
       <>
-        <div
-          style={RESIZER_STYLE}
-          onMouseDown={handleMouseDown}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--border-emphasis)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-          }}
-        >
-          <span
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 2,
-              height: 24,
-              background: 'var(--border-strong)',
-              borderRadius: 1,
-              opacity: 0.6,
-            }}
+        <div style={RESIZER_STYLE}>
+          <ResizeHandle
+            width={splitPosToEditorWidthPx(splitPos, rowWidthPx)}
+            bounds={editorWidthBoundsPx(rowWidthPx)}
+            clamp={(widthPx) => clampEditorWidthPx(widthPx, rowWidthPx)}
+            ariaLabel="调整编辑器宽度"
+            onWidthChange={(widthPx) =>
+              setSplitPos(splitPosFromEditorWidthPx(widthPx, rowWidthPx))
+            }
+            onWidthCommit={(widthPx) =>
+              onSplitPosChange?.(splitPosFromEditorWidthPx(widthPx, rowWidthPx))
+            }
           />
         </div>
         {content}

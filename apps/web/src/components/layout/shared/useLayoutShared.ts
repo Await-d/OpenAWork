@@ -27,6 +27,7 @@ import {
   subscribeSessionPendingPermission,
   subscribeSessionPendingQuestion,
 } from '../../../utils/session/session-list-events.js';
+import { publishDialogueModeSwitchFromReply } from '../../../utils/session/dialogue-mode-events.js';
 import {
   toSessionPendingPermissionStateFromRequest,
   type SessionPendingPermissionState,
@@ -94,8 +95,6 @@ export interface LayoutSharedState {
   readonly layoutMode: 'fusion' | 'classic';
   readonly sidebarTab: 'sessions' | 'files';
   readonly setSidebarTab: (tab: 'sessions' | 'files') => void;
-  readonly expandedDirs: Set<string>;
-  readonly setExpandedDirs: (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   readonly leftSidebarOpen: boolean;
   readonly toggleLeftSidebar: () => void;
   readonly setLeftSidebarOpen: (open: boolean) => void;
@@ -170,9 +169,6 @@ export function useLayoutShared(
   const layoutMode = uiState.workbenchLayoutMode;
   const sidebarTab = uiState.sidebarTab;
   const setSidebarTab = uiState.setSidebarTab;
-  const expandedDirsArr = uiState.expandedDirs;
-  const setExpandedDirsArr = uiState.setExpandedDirs;
-  const expandedDirs = new Set(expandedDirsArr);
   const leftSidebarOpen = uiState.leftSidebarOpen;
   const toggleLeftSidebar = uiState.toggleLeftSidebar;
   const setLeftSidebarOpen = uiState.setLeftSidebarOpen;
@@ -181,13 +177,6 @@ export function useLayoutShared(
   const pinnedSessions = uiState.pinnedSessions;
   const togglePinSession = uiState.togglePinSession;
   const isPinned = uiState.isPinned;
-  const setExpandedDirs = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
-      setExpandedDirsArr(Array.from(next));
-    },
-    [expandedDirsArr, setExpandedDirsArr],
-  );
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -379,11 +368,16 @@ export function useLayoutShared(
       try {
         setPendingQuestionReplyStatus(status);
         setPendingQuestionReplyError(null);
-        await createQuestionsClient(gatewayUrl).reply(
+        const replyResult = await createQuestionsClient(gatewayUrl).reply(
           accessToken,
           pendingQuestion.sessionId,
           payload,
         );
+        // 澄清模式共识确认 / 计划批准会触发服务端自动切换对话模式。
+        publishDialogueModeSwitchFromReply({
+          ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
+          sessionId: pendingQuestion.sessionId,
+        });
         applyPendingQuestion(null);
         if (currentSessionId) {
           requestCurrentSessionRefresh(currentSessionId);
@@ -569,8 +563,6 @@ export function useLayoutShared(
     layoutMode,
     sidebarTab,
     setSidebarTab,
-    expandedDirs,
-    setExpandedDirs,
     leftSidebarOpen,
     toggleLeftSidebar,
     setLeftSidebarOpen,

@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import {
+  EMPTY_EXPANDED_DIRS,
+  normalizeExpandedDirsSessionKey,
+  useUIStateStore,
+} from '../../../stores/ui/uiState.js';
 import { useSessionSidebarFileTreeState } from './use-session-sidebar-file-tree-state.js';
 import FileTreeContextMenu from '../file-tree/FileTreeContextMenu.js';
 import {
@@ -105,12 +109,15 @@ export function WorkspaceFileTreePanel({
 
   const {
     fileTreeRootPath: storeFileTreeRootPath,
-    expandedDirs: expandedDirsArr,
-    setExpandedDirs: setExpandedDirsArr,
+    expandedDirsBySession,
+    setExpandedDirsForSession,
     activeFilePathByWorkspace,
     bumpWorkspaceTreeVersion,
     removeSavedWorkspacePath,
   } = useUIStateStore();
+
+  const expandedDirsSessionKey = normalizeExpandedDirsSessionKey(sessionId);
+  const expandedDirsArr = expandedDirsBySession[expandedDirsSessionKey] ?? EMPTY_EXPANDED_DIRS;
 
   // 当外部传入 workspacePath 时，覆盖 store 中的 fileTreeRootPath，
   // 让文件树反映当前会话的工作目录而非全局选中的工作区。
@@ -125,9 +132,9 @@ export function WorkspaceFileTreePanel({
   const setExpandedDirs = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
-      setExpandedDirsArr(Array.from(next));
+      setExpandedDirsForSession(expandedDirsSessionKey, Array.from(next));
     },
-    [expandedDirsArr, setExpandedDirsArr],
+    [expandedDirsArr, expandedDirsSessionKey, setExpandedDirsForSession],
   );
 
   const [fileTreeFilter, setFileTreeFilter] = useState('');
@@ -151,6 +158,7 @@ export function WorkspaceFileTreePanel({
   } = useSessionSidebarFileTreeState({
     active,
     expandedDirsArr,
+    expandedDirsSessionKey,
     fetchTree,
     fileTreeRootPath,
     setExpandedDirs,
