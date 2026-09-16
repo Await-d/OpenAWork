@@ -16,6 +16,7 @@ import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { invalidateSessionOwnerCache } from '../infra/session-owner-cache.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
@@ -49,14 +50,17 @@ import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { invalidateUserWorkspaceAllowlist } from '../workspace/user-workspace-allowlist.js';
 import { listWorkspaceReviewChangesWithAvailability } from '../workspace/workspace-review.js';
 import {
+  extractSessionSshConnectionId,
   extractSessionWorkingDirectory,
   isSessionWorkspaceRebindingAttempt,
   mergeSessionMetadataForUpdate,
   normalizeIncomingSessionMetadata,
+  normalizeSshRemoteWorkingDirectory,
   parseSessionMetadataJson,
   sanitizeSessionMetadataJson,
   validateSessionMetadataPatch,
 } from '../session/session-workspace-metadata.js';
+import { getSshService } from '../ssh/ssh-service.js';
 import { filterSessionsByPath } from '../session/session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
@@ -950,6 +954,9 @@ async function deleteSessionTree(input: {
 
         deleteSessionWithMalformedRecovery({ sessionId: session.id, userId: input.userId });
       }
+      // The session row is gone — drop its cached owner so later writes do
+      // not resolve a stale user_id through the owner cache.
+      invalidateSessionOwnerCache(session.id);
 
       backupStoragePaths.push(...candidatePaths);
       await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
@@ -1523,11 +1530,30 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
       }
 
+      // SSH 远程工作区：创建前校验连接存在且属于当前账号。
+      const requestedSshConnectionId = extractSessionSshConnectionId(normalizedMetadata.metadata);
+      if (requestedSshConnectionId) {
+        const sshConnection = getSshService().getConnection(user.sub, requestedSshConnectionId);
+        if (!sshConnection) {
+          step.fail('ssh connection not found');
+          return reply.status(404).send({ error: 'SSH 连接不存在或不属于当前账号。' });
+        }
+      }
+
       const id = randomUUID();
       sqliteRun(
         'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?)',
         [id, user.sub, '[]', 'idle', JSON.stringify(normalizedMetadata.metadata)],
       );
+      // 会话创建即绑定 SSH 连接：绑定关系落库并进入内存 registry，后续工具
+      // 调用直接走远端（归属已在上面校验；这里 best-effort，绑定失败不阻断创建）。
+      if (requestedSshConnectionId) {
+        try {
+          getSshService().bindSession(user.sub, id, requestedSshConnectionId);
+        } catch (error) {
+          request.log.warn({ err: error }, 'session create: ssh binding failed');
+        }
+      }
       // Invalidate the workspace allowlist so the user can immediately
       // hit /workspace/* endpoints against the working directory of
       // the freshly-created session.
@@ -2505,6 +2531,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       let nextMetadataJson: string | null = null;
+      let pendingSshConnectionId: string | null = null;
+      let pendingSshUnbind = false;
       if (body.metadata !== undefined) {
         const metadataPatch = validateSessionMetadataPatch(body.metadata);
         if (!metadataPatch.success) {
@@ -2515,7 +2543,19 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           });
         }
         const currentMetadata = parseSessionMetadataJson(session.metadata_json);
-        const requestedWorkingDirectory = getRequestedWorkingDirectory(metadataPatch.data);
+        // 合并后的元数据决定本会话是否处于 SSH 远程工作区模式：patch 里可能
+        // 只带 workingDirectory（远端路径），SSH 身份来自已存的 metadata。
+        const mergedMetadataForPolicy = { ...currentMetadata, ...metadataPatch.data };
+        const mergedSshConnectionId = extractSessionSshConnectionId(mergedMetadataForPolicy);
+        // 显式传 `sshConnectionId: null` 表示清除 SSH 绑定（持久化字段一并移除，
+        // 并在写入后解除会话↔连接绑定）；清除动作同时意味着离开 SSH 工作区，
+        // 因此随后的路径写入按本地语义处理且不受「首次绑定不可变」锁限制。
+        const isExplicitSshClear =
+          Object.hasOwn(metadataPatch.data, 'sshConnectionId') &&
+          metadataPatch.data['sshConnectionId'] === null;
+        const requestedWorkingDirectory = getRequestedWorkingDirectory(metadataPatch.data, {
+          sshSession: mergedSshConnectionId !== null,
+        });
         if (
           requestedWorkingDirectory === null &&
           typeof metadataPatch.data['workingDirectory'] === 'string'
@@ -2538,9 +2578,23 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           step.fail(parentValidation.reason);
           return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
         }
-        if (isSessionWorkspaceRebindingAttempt(currentMetadata, requestedWorkingDirectory)) {
+        // SSH 远程工作区允许切换远端目录 / 连接；显式清除绑定允许在同一次请求
+        // 内改落本地路径；本地工作区的「首次绑定后不可变」锁保持不变。
+        if (
+          mergedSshConnectionId === null &&
+          !isExplicitSshClear &&
+          isSessionWorkspaceRebindingAttempt(currentMetadata, requestedWorkingDirectory)
+        ) {
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
+        }
+        const requestedSshConnectionId = extractSessionSshConnectionId(metadataPatch.data);
+        if (requestedSshConnectionId) {
+          const sshConnection = getSshService().getConnection(user.sub, requestedSshConnectionId);
+          if (!sshConnection) {
+            step.fail('ssh connection not found');
+            return reply.status(404).send({ error: 'SSH 连接不存在或不属于当前账号。' });
+          }
         }
         const normalizedMetadata = mergeSessionMetadataForUpdate(
           currentMetadata,
@@ -2553,7 +2607,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
 
+        if (isExplicitSshClear) {
+          delete normalizedMetadata.metadata['sshConnectionId'];
+          pendingSshUnbind = true;
+        }
+
         nextMetadataJson = JSON.stringify(normalizedMetadata.metadata);
+        pendingSshConnectionId = extractSessionSshConnectionId(normalizedMetadata.metadata);
       }
 
       if (body.title !== undefined && nextMetadataJson !== null) {
@@ -2578,6 +2638,22 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       // endpoint call sees the new value.
       if (nextMetadataJson !== null) {
         invalidateUserWorkspaceAllowlist(user.sub);
+        // SSH 远程工作区：确保会话与连接在内存 registry + 持久层中绑定
+        // （归属已在上方校验；best-effort，失败不阻断元数据更新）。
+        if (pendingSshConnectionId) {
+          try {
+            getSshService().bindSession(user.sub, sessionId, pendingSshConnectionId);
+          } catch (error) {
+            request.log.warn({ err: error }, 'session patch: ssh binding failed');
+          }
+        }
+        if (pendingSshUnbind) {
+          try {
+            getSshService().unbindSession(user.sub, sessionId);
+          } catch (error) {
+            request.log.warn({ err: error }, 'session patch: ssh unbind failed');
+          }
+        }
       }
 
       step.succeed();
@@ -2622,15 +2698,22 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
 
       const metadata = parseSessionMetadataJson(session.metadata_json);
       const currentWorkingDirectory = extractSessionWorkingDirectory(metadata);
+      // SSH 会话语义：warp 目标只能是「本地目录」或「解绑」——这两种操作都
+      // 意味着离开 SSH 工作区，因此成功后同步清除 sshConnectionId 并解绑。
+      const currentSshConnectionId = extractSessionSshConnectionId(metadata);
+      const isSshSession = currentSshConnectionId !== null;
       const { workingDirectory, force } = body;
       const isForcedWarp = force === true;
       let safeWorkingDirectory: string | null = null;
       if (workingDirectory === null) {
-        if (!isForcedWarp && isSessionWorkspaceRebindingAttempt(metadata, null)) {
+        if (!isForcedWarp && !isSshSession && isSessionWorkspaceRebindingAttempt(metadata, null)) {
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
         }
         delete metadata['workingDirectory'];
+        if (isSshSession) {
+          delete metadata['sshConnectionId'];
+        }
       } else {
         safeWorkingDirectory = validateWorkspacePath(workingDirectory);
         if (!safeWorkingDirectory) {
@@ -2640,12 +2723,19 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
 
-        if (!isForcedWarp && isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)) {
+        if (
+          !isForcedWarp &&
+          !isSshSession &&
+          isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)
+        ) {
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
         }
 
         metadata['workingDirectory'] = safeWorkingDirectory;
+        if (isSshSession) {
+          delete metadata['sshConnectionId'];
+        }
       }
       if (currentWorkingDirectory === safeWorkingDirectory) {
         step.succeed(undefined, { unchanged: true });
@@ -2674,6 +2764,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
         [JSON.stringify(metadata), sessionId, user.sub],
       );
+
+      // 离开 SSH 工作区后解除会话↔连接绑定（内存 registry + 持久层），
+      // 避免后续工具调用继续被路由到远端。best-effort，不阻断 warp 结果。
+      if (currentSshConnectionId) {
+        try {
+          getSshService().unbindSession(user.sub, sessionId);
+        } catch (error) {
+          request.log.warn({ err: error }, 'session warp: ssh unbind failed');
+        }
+      }
 
       step.succeed(undefined, isForcedWarp ? { warped: true } : undefined);
       // Workspace warp may have introduced a new working directory.
@@ -2916,10 +3016,17 @@ export function extractParentSessionIdFromMetadata(
 
 function getRequestedWorkingDirectory(
   metadata: Record<string, unknown>,
+  options: { sshSession?: boolean } = {},
 ): string | null | undefined {
   const workingDirectory = metadata['workingDirectory'];
   if (typeof workingDirectory !== 'string') {
     return undefined;
+  }
+
+  // SSH 远程工作区：patch 里可能只携带 workingDirectory（远端路径），是否属于
+  // SSH 会话由调用方基于「合并后的会话 metadata」判断（options.sshSession）。
+  if (options.sshSession || extractSessionSshConnectionId(metadata)) {
+    return normalizeSshRemoteWorkingDirectory(workingDirectory);
   }
 
   return validateWorkspacePath(workingDirectory);

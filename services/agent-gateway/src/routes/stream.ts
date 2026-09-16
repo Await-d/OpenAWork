@@ -49,13 +49,19 @@ import {
   YOLO_MODE_SYSTEM_PROMPT,
   detectThinkingLanguageHintFromText,
 } from './stream-system-prompts.js';
-import { calculateTokenUsageCost, KeywordDetectorImpl, redactText } from '@openAwork/agent-core';
+import {
+  calculateTokenUsageCost,
+  KeywordDetectorImpl,
+  redactText,
+  resolveSessionPermissionMode,
+} from '@openAwork/agent-core';
 import {
   deleteSessionRunEventsByRequest,
+  flushSessionRunEventQueue,
   hasPersistedRunEvent,
   listSessionRunEventsByRequestAfterSeq,
   listSessionRunEventsByRequest,
-  publishSessionRunEvent,
+  queueSessionRunEvent,
   subscribeSessionRunEvents,
 } from '../session/session-run-events.js';
 import { deriveRunEventBookend } from '../session/run-event-envelope.js';
@@ -98,7 +104,10 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { resolveUnboundSessionWorkspaceFallback } from '../workspace/workspace-safety.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
-import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import {
+  filterEnabledGatewayToolsForDialogueMode,
+  filterEnabledGatewayToolsForSession,
+} from '../session/session-tool-visibility.js';
 import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import {
@@ -602,6 +611,10 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
       return value;
     }, upstreamRetryMaxRetriesSchema)
     .optional(),
+  // 会话级权限档位（权限阶梯）：请求级覆盖，仅用于系统提示词投影（见 resolveStreamInteractionModes）。
+  // 工具审批的强制执行读取会话 metadata（tool-sandbox.ensurePermissionForTool），
+  // 因此请求级发送 'auto-edit'（乃至 'yolo'）不会自动放行任何工具。
+  permissionMode: z.enum(['ask', 'auto-edit', 'yolo']).optional(),
   yoloMode: z
     .preprocess((value) => {
       if (typeof value === 'boolean') return value;
@@ -1372,7 +1385,7 @@ function isDialogueMode(value: unknown): value is DialogueMode {
   return value === 'clarify' || value === 'coding' || value === 'programmer';
 }
 
-function resolveStreamInteractionModes(input: {
+export function resolveStreamInteractionModes(input: {
   metadataJson: string;
   requestData: StreamRequest;
 }): StreamInteractionModes {
@@ -1380,10 +1393,17 @@ function resolveStreamInteractionModes(input: {
   const metadataDialogueMode = isDialogueMode(metadata['dialogueMode'])
     ? metadata['dialogueMode']
     : undefined;
+  // 请求级覆盖优先：新档位字段（规范键） > 旧布尔字段 > 会话 metadata 解析出的档位。
+  // 仅带布尔 yoloMode 的历史会话仍经 resolveSessionPermissionMode 兜底判定为 yolo。
+  const requestPermissionMode = input.requestData.permissionMode;
+  const yoloMode =
+    requestPermissionMode !== undefined
+      ? requestPermissionMode === 'yolo'
+      : (input.requestData.yoloMode ?? resolveSessionPermissionMode(metadata) === 'yolo');
 
   return {
     dialogueMode: input.requestData.dialogueMode ?? metadataDialogueMode,
-    yoloMode: input.requestData.yoloMode ?? metadata['yoloMode'] === true,
+    yoloMode,
   };
 }
 
@@ -2253,22 +2273,25 @@ export async function handleStreamRequest(input: {
   const selfEmittedRunEvents = new WeakSet<object>();
   const emitChunk = (chunk: RunEvent) => {
     selfEmittedRunEvents.add(chunk);
-    // publishSessionRunEvent persists + broadcasts to all subscribers,
-    // including the /sessions/:id/stream/attach endpoint which forwards
-    // events to reconnected clients. Previously this used the persist-only
-    // helper, so attach-mode SSE replayed historical events but never
-    // received the live ones — clients fell back to polling /recovery.
-    const persisted = publishSessionRunEvent(input.sessionId, chunk, {
+    // Streamed deltas are queued and flushed in batches (see
+    // session-run-events.ts): a token burst becomes one transaction instead of
+    // one commit per chunk. `seq` is reserved synchronously at enqueue time,
+    // so the cursor handed to the client matches the row it will persist as.
+    // Non-delta events (bookends, tool results, ...) flush the queue first and
+    // persist synchronously, keeping occurrence order == seq order. Subscribers
+    // (e.g. /stream/attach) get their broadcast at flush time, after
+    // persistence — the same contract the old publishSessionRunEvent call had.
+    const { seq } = queueSessionRunEvent(input.sessionId, chunk, {
       clientRequestId: requestData.clientRequestId,
     });
     input.writeChunk({
       ...chunk,
-      ...(persisted.seq === null
+      ...(seq === null
         ? {}
         : {
             cursor: {
               clientRequestId: requestData.clientRequestId,
-              seq: persisted.seq,
+              seq,
             },
           }),
     });
@@ -2555,9 +2578,12 @@ export async function handleStreamRequest(input: {
         ...flatMcpDefs,
         ...(dynamicToolDefs.length > 0 ? buildDynamicGatewayToolDefinitions(dynamicToolDefs) : []),
       ];
-      const filteredTools = filterEnabledGatewayToolsForSession(
-        allTools,
-        input.sessionContext.metadataJson,
+      const filteredTools = filterEnabledGatewayToolsForDialogueMode(
+        filterEnabledGatewayToolsForSession(allTools, input.sessionContext.metadataJson),
+        // 与提示词同源：本轮对话模式以请求为准（元数据兜底），工具面必须跟它收敛。
+        // 典型场景：澄清共识确认后会话元数据已切到 coding，而客户端仍带着 clarify
+        // 发请求——此时若只按元数据过滤，就会出现"澄清提示词 + 写工具"的错配。
+        interactionModes.dialogueMode,
       );
 
       // ─── L1.2.3 toolset-gate + 内置指令注入（与 stream-runtime 共享同一实现）──────
@@ -3076,6 +3102,10 @@ export async function handleStreamRequest(input: {
         userId: input.user.sub,
       });
       unsubscribeSessionEvents();
+      // Safety net: never strand queued stream deltas when the run unwinds.
+      // The bookend chunks already force a flush on the happy path; this
+      // covers abort / throw paths that skip the terminal event.
+      flushSessionRunEventQueue(input.sessionId);
     }
   })().catch(async (err) => {
     if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {

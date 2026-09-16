@@ -333,9 +333,16 @@ export function filterEnabledGatewayToolsForSession(
   );
 }
 
+/**
+ * 按本轮有效对话模式收敛工具面（`dialogueMode` 未指定时不施加额外过滤）。
+ *
+ * 与 `filterEnabledGatewayToolsForSessionMetadata` 的分工：后者读会话元数据里的
+ * `dialogueMode`（持久态 / 工具清单类读取路径），本函数按**本轮实际使用的模式**
+ * （请求优先、元数据兜底）过滤，保证"提示词用哪个模式，工具面就是哪个模式"。
+ */
 export function filterEnabledGatewayToolsForDialogueMode(
   tools: GatewayToolDefinition[],
-  dialogueMode: DialogueMode,
+  dialogueMode: DialogueMode | undefined,
 ): GatewayToolDefinition[] {
   if (dialogueMode !== 'clarify') {
     return tools;

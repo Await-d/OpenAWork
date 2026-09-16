@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GatewayToolDefinition } from '../../tools/tool-definitions.js';
 import {
+  filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
 } from '../../session/session-tool-visibility.js';
@@ -36,6 +37,30 @@ function makeTool(name: string): GatewayToolDefinition {
     },
   };
 }
+
+describe('filterEnabledGatewayToolsForDialogueMode — 本轮模式收敛工具面', () => {
+  const tools = [makeTool('read'), makeTool('edit'), makeTool('bash'), makeTool('question')];
+
+  it('clarify：只保留只读 + 提问类工具', () => {
+    expect(
+      filterEnabledGatewayToolsForDialogueMode(tools, 'clarify').map((tool) => tool.function.name),
+    ).toEqual(['read', 'question']);
+  });
+
+  it('coding / programmer：不额外过滤', () => {
+    for (const mode of ['coding', 'programmer'] as const) {
+      expect(
+        filterEnabledGatewayToolsForDialogueMode(tools, mode).map((tool) => tool.function.name),
+      ).toEqual(['read', 'edit', 'bash', 'question']);
+    }
+  });
+
+  it('未指定模式（team / channel 等）：不额外过滤', () => {
+    expect(
+      filterEnabledGatewayToolsForDialogueMode(tools, undefined).map((tool) => tool.function.name),
+    ).toEqual(['read', 'edit', 'bash', 'question']);
+  });
+});
 
 describe('session tool visibility', () => {
   it('disables desktop control tools for channel-managed sessions', () => {

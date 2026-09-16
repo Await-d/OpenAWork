@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { FileDiffContent, RunEvent } from '@openAwork/shared';
 import type { HandleStreamResult } from './stream-types.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
+import {
+  filterEnabledGatewayToolsForDialogueMode,
+  filterEnabledGatewayToolsForSession,
+} from '../session/session-tool-visibility.js';
 import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
@@ -47,6 +50,7 @@ import {
   isWebSearchEnabled,
   loadSessionContext,
   loadSessionUser,
+  resolveStreamInteractionModes,
   resolveStreamRequestUpstreamRetry,
   resolveStreamModelRoute,
   setPersistedSessionStateStatus,
@@ -185,18 +189,31 @@ async function continueFromApprovedToolResult(input: {
     requestData.dialogueMode !== undefined
       ? DIALOGUE_MODE_SYSTEM_PROMPTS[requestData.dialogueMode]
       : null;
-  const yoloModePrompt = requestData.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
+  // 与 stream.ts 的 resolveStreamInteractionModes 共用同一优先级（请求 permissionMode 规范键
+  // > 请求 yoloMode 旧布尔 > 会话 metadata 解析结果），避免两条入口的 YOLO 提示词投影漂移。
+  const yoloModePrompt = resolveStreamInteractionModes({
+    metadataJson: sessionContext.metadataJson,
+    requestData,
+  }).yoloMode
+    ? YOLO_MODE_SYSTEM_PROMPT
+    : null;
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
-  const filteredTools = filterEnabledGatewayToolsForSession(
-    // Per-turn model-aware tool filter (mirrors opencode
-    // `tool/registry.ts:303-315`). See routes/stream.ts getEnabledTools
-    // doc for the full GPT-5 vs edit/write split rationale.
-    filterPluginControlledToolsForUser(
-      getEnabledTools(webSearchEnabled, { modelId: route.model }),
-      input.userId,
+  const filteredTools = filterEnabledGatewayToolsForDialogueMode(
+    filterEnabledGatewayToolsForSession(
+      // Per-turn model-aware tool filter (mirrors opencode
+      // `tool/registry.ts:303-315`). See routes/stream.ts getEnabledTools
+      // doc for the full GPT-5 vs edit/write split rationale.
+      filterPluginControlledToolsForUser(
+        getEnabledTools(webSearchEnabled, { modelId: route.model }),
+        input.userId,
+      ),
+      sessionContext.metadataJson,
     ),
-    sessionContext.metadataJson,
+    // 本轮提示词由 `requestData.dialogueMode` 决定（恢复轮沿用原始请求）。工具面必须
+    // 跟同一模式收敛：澄清完成会在回复响应前把会话元数据切成 coding，若只按元数据
+    // 过滤，恢复出的那一轮会带着"澄清（只读）"提示词却拿到写/执行工具。
+    requestData.dialogueMode,
   );
   // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
   //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
