@@ -59,20 +59,31 @@ export interface FrameMetrics {
   deviceHeight: number;
 }
 
+/** 退化盒子（0 / 缺失）下兜底绘制的最大边长（CSS 像素）。 */
+export const FALLBACK_FRAME_MAX_SIZE = 2048;
+
 /**
  * 把帧按 `deviceWidth` / `deviceHeight` 等比放进可用盒子：返回渲染尺寸，
  * 绝不拉伸（letterbox 交给外层居中）。
+ *
+ * 可用盒子退化（0 / NaN / 未测量）时**不返回 null**，而是按帧自身设备尺寸兜底
+ * （最长边裁剪到 `FALLBACK_FRAME_MAX_SIZE`）：只要帧有效就必须有渲染尺寸——
+ * 面板高度塌陷时宁可让外围 CSS 裁剪画面，也不能出现「帧在流、画面为空」。
  */
 export function computeFrameLayout(
-  available: { width: number; height: number },
+  available: { width: number; height: number } | null | undefined,
   frame: FrameMetrics,
 ): { width: number; height: number } | null {
   const deviceWidth = frame.deviceWidth;
   const deviceHeight = frame.deviceHeight;
   if (!(deviceWidth > 0) || !(deviceHeight > 0)) return null;
-  if (!(available.width > 0) || !(available.height > 0)) return null;
 
-  const scale = Math.min(available.width / deviceWidth, available.height / deviceHeight);
+  const availableWidth = available?.width ?? 0;
+  const availableHeight = available?.height ?? 0;
+  const scale =
+    availableWidth > 0 && availableHeight > 0
+      ? Math.min(availableWidth / deviceWidth, availableHeight / deviceHeight)
+      : Math.min(1, FALLBACK_FRAME_MAX_SIZE / Math.max(deviceWidth, deviceHeight));
   return {
     width: Math.max(1, Math.round(deviceWidth * scale)),
     height: Math.max(1, Math.round(deviceHeight * scale)),
@@ -668,7 +679,7 @@ export function CdpLiveEngine({
   };
 
   const layout = useMemo(
-    () => (frame !== null && surfaceSize !== null ? computeFrameLayout(surfaceSize, frame) : null),
+    () => (frame !== null ? computeFrameLayout(surfaceSize, frame) : null),
     [frame, surfaceSize],
   );
 

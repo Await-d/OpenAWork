@@ -18,7 +18,10 @@ const HINTS_STYLE: CSSProperties = {
   color: 'var(--fg-subtle)',
   fontSize: 10,
   lineHeight: 1.6,
-  flexShrink: 0,
+  // 唯一可收缩的 chrome：宿主高度不足时（窄面板）先压提示条，绝不把内容区挤成 0。
+  flexShrink: 1,
+  minHeight: 0,
+  overflow: 'hidden',
 };
 
 const COMBO_STYLE: CSSProperties = {

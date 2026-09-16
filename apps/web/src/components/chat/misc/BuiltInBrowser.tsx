@@ -687,8 +687,14 @@ export function BuiltInBrowser({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        // `height: 100%` 只在宿主高度可解析时生效（块级父容器 / 显式高度）。
+        // 停靠面板这类 flex 宿主的高度可能从 `min-height` 派生，百分比会解析成
+        // auto——此时组件按内容收缩（chrome 145px），内容区被压成 0，画面整块消失。
+        // `flex: 1 1 auto` 保证在 flex 宿主里吃掉剩余高度，`minHeight: 0` 允许收缩。
+        flex: '1 1 auto',
         height: '100%',
         minHeight: 0,
+        minWidth: 0,
         gap: 0,
         ...style,
       }}
