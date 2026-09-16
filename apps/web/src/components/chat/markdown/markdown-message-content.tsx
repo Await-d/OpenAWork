@@ -23,6 +23,7 @@ import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
+import { useStreamingFoldDisabled } from './streaming-fold-policy.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -445,6 +446,7 @@ function CodeBlock({
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
+  const foldDisabled = useStreamingFoldDisabled();
 
   // Cleanup on unmount so a stale timer can't toggle state on a
   // dismounted node (StrictMode double-invoke + scroll virtualization).
@@ -466,7 +468,7 @@ function CodeBlock({
   );
 
   const isCollapsible = lineCount > CODE_BLOCK_FOLD_THRESHOLD;
-  const collapsed = isCollapsible && !expanded;
+  const collapsed = isCollapsible && !expanded && !foldDisabled;
 
   const handleCopy = useCallback(() => {
     const writeText = navigator.clipboard?.writeText;
@@ -518,7 +520,7 @@ function CodeBlock({
           </code>
         </pre>
       </div>
-      {isCollapsible && !expanded && (
+      {isCollapsible && !foldDisabled && !expanded && (
         <button
           type="button"
           data-testid="chat-markdown-code-expand"
@@ -528,7 +530,7 @@ function CodeBlock({
           展开全部 {lineCount} 行
         </button>
       )}
-      {isCollapsible && expanded && (
+      {isCollapsible && !foldDisabled && expanded && (
         <button
           type="button"
           data-testid="chat-markdown-code-collapse"
@@ -914,9 +916,10 @@ function MarkdownPreviewCodeBlock({
 }) {
   const [previewOpen, setPreviewOpen] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const foldDisabled = useStreamingFoldDisabled();
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const isLong = copyableCode.length > 400 || copyableCode.split('\n').length > 15;
-  const shouldCollapse = isLong && !expanded;
+  const shouldCollapse = isLong && !expanded && !foldDisabled;
 
   return (
     <div className="chat-markdown-code-block" data-preview-open={previewOpen ? 'true' : undefined}>
@@ -1007,7 +1010,7 @@ function MarkdownPreviewCodeBlock({
               }}
             />
           )}
-          {isLong && (
+          {isLong && !foldDisabled && (
             <div
               style={{
                 display: 'flex',

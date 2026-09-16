@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useMemo } from 'react';
 import { splitStreamingMarkdownIntoSegments } from './streaming-markdown-chunks.js';
 import { normalizeMathMarkdown } from './normalize-math-markdown.js';
 import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
+import { StreamingFoldDisabledContext } from './streaming-fold-policy.js';
 
 const MarkdownMessageContent = lazy(() => import('./markdown-message-content.js'));
 const STREAMING_PLAIN_TAIL_THRESHOLD = 280;
@@ -19,21 +20,28 @@ export default function StreamingMarkdownContent({ content }: { content: string 
     return shouldRenderStreamingTailAsPlainText(segments.activeTail);
   }, [segments.activeTail]);
 
+  // 流式期间禁用围栏块折叠：stableBlocks 分支渲染时同样不带 streaming prop，
+  // 若只靠该 prop 判断，「已闭合的围栏块」仍会在流式过程中被钳住高度。
+  // 因此整个返回树（stableBlocks + activeTail）统一包进 context。
   return (
-    <>
-      {segments.stableBlocks.map((block, index) => (
-        <StableMarkdownBlock key={`${index}:${block.length}`} content={block} />
-      ))}
-      {segments.activeTail.length > 0 &&
-        (shouldRenderPlainTail ? (
-          <div className="chat-markdown-streaming">{segments.activeTail}</div>
-        ) : (
-          <Suspense fallback={<div className="chat-markdown-streaming">{segments.activeTail}</div>}>
-            <MarkdownMessageContent content={segments.activeTail} streaming />
-          </Suspense>
+    <StreamingFoldDisabledContext value={true}>
+      <>
+        {segments.stableBlocks.map((block, index) => (
+          <StableMarkdownBlock key={`${index}:${block.length}`} content={block} />
         ))}
-      <span className="assistant-rich-content-cursor" />
-    </>
+        {segments.activeTail.length > 0 &&
+          (shouldRenderPlainTail ? (
+            <div className="chat-markdown-streaming">{segments.activeTail}</div>
+          ) : (
+            <Suspense
+              fallback={<div className="chat-markdown-streaming">{segments.activeTail}</div>}
+            >
+              <MarkdownMessageContent content={segments.activeTail} streaming />
+            </Suspense>
+          ))}
+        <span className="assistant-rich-content-cursor" />
+      </>
+    </StreamingFoldDisabledContext>
   );
 }
 
