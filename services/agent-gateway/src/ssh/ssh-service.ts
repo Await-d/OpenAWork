@@ -96,6 +96,11 @@ const NOOP_LOGGER: SshServiceLogger = {
   error: () => undefined,
 };
 
+/** POSIX shell 单引号转义（内嵌单引号改写为 `'\''`）。 */
+function shellQuoteSingle(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function projectConnection(row: PersistedSshConnection): SshConnectionView {
   return {
     id: row.id,
@@ -307,6 +312,42 @@ export class SshService {
     });
   }
 
+  /**
+   * 在远端创建目录（`mkdir -p` 语义，已存在不报错）。用于「工作区选择器」
+   * 的 SSH 模式：用户直接在远端新建工作目录后选为会话工作区。
+   * 仅接受远端绝对路径；路径经 shell 单引号转义，无注入面。
+   */
+  async mkdir(userId: string, connectionId: string, path: string): Promise<void> {
+    this.requireOwnedConnection(userId, connectionId);
+    const trimmed = path.trim();
+    if (!trimmed.startsWith('/')) {
+      throw new Error('SSH mkdir requires an absolute remote path');
+    }
+    if (trimmed.includes('\n') || trimmed.includes('\r')) {
+      throw new Error('SSH mkdir path must not contain line breaks');
+    }
+
+    const result = await this.manager.execCommand(
+      connectionId,
+      `mkdir -p ${shellQuoteSingle(trimmed)}`,
+      { timeoutMs: 15_000 },
+    );
+    if (result.timedOut) {
+      throw new Error(`SSH mkdir timed out: ${trimmed}`);
+    }
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim();
+      throw new Error(detail.length > 0 ? detail : `SSH mkdir failed with exit code ${result.exitCode}`);
+    }
+
+    upsertSshDialog({
+      userId,
+      connectionId,
+      cwd: trimmed,
+      touch: true,
+    });
+  }
+
   // ─── Bindings ────────────────────────────────────────────────────────────
 
   bindSession(userId: string, sessionId: string, connectionId: string): SshBindingView {
@@ -437,6 +478,18 @@ export function getSshService(): SshService {
   if (!activeService) {
     activeService = new SshService();
   }
+  return activeService;
+}
+
+/**
+ * Non-creating accessor: returns the boot-registered service, or null when no
+ * service was wired up. Tool-execution paths use this to probe for SSH
+ * bindings without ever instantiating a service (or touching the DB) in
+ * processes that never booted one — e.g. unit tests with a mocked db module or
+ * embedded tool invocations. The gateway registers its instance during boot
+ * (`src/index.ts`), so production always observes the real service.
+ */
+export function peekSshService(): SshService | null {
   return activeService;
 }
 

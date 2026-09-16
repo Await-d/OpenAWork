@@ -48,6 +48,11 @@ const uploadSchema = z.object({
   contentBase64: z.string().min(1),
 });
 
+const mkdirSchema = z.object({
+  connectionId: z.string().min(1),
+  path: z.string().min(1),
+});
+
 const dialogTouchSchema = z.object({
   connectionId: z.string().min(1),
   title: z.string().nullable().optional(),
@@ -72,6 +77,12 @@ function classifySshRouteError(error: unknown, actionLabel: string): ClassifiedS
   }
   if (message.startsWith('SSH client not connected:')) {
     return { statusCode: 409, error: 'SSH 连接尚未建立。' };
+  }
+  if (message.startsWith('SSH mkdir requires an absolute remote path')) {
+    return { statusCode: 400, error: '远端目录路径必须是绝对路径（以 / 开头）。' };
+  }
+  if (message.startsWith('SSH mkdir path must not contain line breaks')) {
+    return { statusCode: 400, error: '远端目录路径不能包含换行。' };
   }
   if (errno === 'ENOENT') {
     return { statusCode: 404, error: '远端文件不存在。' };
@@ -268,6 +279,18 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true });
     } catch (error) {
       return failSshRoute(request, reply, step, '上传 SSH 文件', error);
+    }
+  });
+
+  app.post('/ssh/mkdir', { onRequest: [requireAuth] }, async (request, reply) => {
+    const { step } = startRequestWorkflow(request, 'ssh.file.mkdir');
+    const parsed = parseBody(mkdirSchema, request.body);
+    try {
+      await service().mkdir(userId(request), parsed.connectionId, parsed.path);
+      step.succeed(undefined, { path: parsed.path });
+      return reply.send({ ok: true });
+    } catch (error) {
+      return failSshRoute(request, reply, step, '创建远端目录', error);
     }
   });
 
