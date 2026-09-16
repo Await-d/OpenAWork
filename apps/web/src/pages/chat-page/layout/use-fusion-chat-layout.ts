@@ -13,15 +13,17 @@ export interface UseFusionChatLayoutOptions {
   readonly isNarrowViewport: boolean;
   readonly reviewPanelOpened: boolean;
   readonly setReviewPanelOpened: (open: boolean) => void;
-  readonly setSidePanelActiveTab: (tab: 'review' | 'files' | 'context') => void;
+  readonly setSidePanelActiveTab: (tab: 'review' | 'files' | 'context' | 'browser') => void;
   readonly setTerminalPanelOpened: (open: boolean) => void;
-  readonly sidePanelActiveTab: 'review' | 'files' | 'context';
+  readonly sidePanelActiveTab: 'review' | 'files' | 'context' | 'browser';
   readonly terminalPanelOpened: boolean;
   readonly terminalRunningCount: number;
 }
 
 export interface FusionChatLayoutState {
   readonly conversationLayoutState: ConversationLayoutState;
+  /** 打开停靠侧面板并切到浏览器预览 tab（编辑器面板会同时让出浏览器所有权）。 */
+  readonly openBrowserPreviewPanel: () => void;
   readonly pageRootClassName: string;
   readonly pageRootStyle: CSSProperties | undefined;
   readonly rightPanelCommandDescription: string;
@@ -97,6 +99,11 @@ export function useFusionChatLayout({
     !(editorMode && editorFullScreen) &&
     currentSessionId !== null;
 
+  const openBrowserPreviewPanel = useCallback(() => {
+    setSidePanelActiveTab('browser');
+    setReviewPanelOpened(true);
+  }, [setReviewPanelOpened, setSidePanelActiveTab]);
+
   const conversationLayoutState = useMemo(
     () =>
       resolveFusionConversationLayoutState({
@@ -119,6 +126,7 @@ export function useFusionChatLayout({
 
   return {
     conversationLayoutState,
+    openBrowserPreviewPanel,
     pageRootClassName: 'page-root page-root-fusion-col',
     pageRootStyle,
     rightPanelCommandDescription: '切换审查/文件/Context 侧栏',

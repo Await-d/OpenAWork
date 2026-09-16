@@ -22,6 +22,7 @@ import {
   createQuestionsClient,
   createSessionsClient,
   createSettingsClient,
+  createSshClient,
   createWorkflowsClient,
   dedupePendingPermissionRequests,
 } from '@openAwork/web-client';
@@ -53,8 +54,13 @@ import {
   type UnifiedComposerActivity,
 } from '../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../components/chat/composer/use-mention-file-search.js';
+import {
+  ComposerWorkspaceMenu,
+  type ComposerSshConnectionSummary,
+} from '../../components/chat/composer/ComposerWorkspaceMenu.js';
 import { ChatTopBar } from '../../components/chat/session/ChatTopBar.js';
 import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
+import type { ComposerPermissionMode } from '../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { QuickTerminalToggle } from '../../components/chat/terminal/QuickTerminalToggle.js';
 import { SessionTerminalsChip } from '../../components/chat/terminal/SessionTerminalsChip.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
@@ -75,6 +81,11 @@ import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
+import SshWorkspacePickerModal, {
+  type SshPickerConnection,
+  type SshWorkspaceSelection,
+} from '../../components/common/modal/SshWorkspacePickerModal.js';
+import type { SshConnectionDraft } from '../../components/common/modal/SshConnectionCreateForm.js';
 import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
@@ -100,10 +111,12 @@ import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
 } from '../../utils/session/session-list-events.js';
+import { subscribeSessionDialogueModeSwitch } from '../../utils/session/dialogue-mode-events.js';
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
 import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
+import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
 import {
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
@@ -261,7 +274,6 @@ import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
 import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui-state.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
-import { CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX } from '../../components/conversation-runtime/scroll/scroll-constants.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './conversation/snapshot/use-session-content-artifact-count.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
@@ -298,6 +310,7 @@ import {
   type DialogueMode,
   getDefaultAgentForDialogueMode,
 } from './mode/dialogue-mode.js';
+import { useDialogueModeSwitch } from './mode/use-dialogue-mode-switch.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
 import { usePersistedStreamError } from './hooks/use-persisted-stream-error.js';
@@ -435,7 +448,9 @@ export default function ChatPage() {
     () => useDisplayPreferencesStore.getState().defaultDialogueMode,
   );
   const [manualAgentId, setManualAgentId] = useState('');
-  const [yoloMode, setYoloMode] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<ComposerPermissionMode>('ask');
+  // 档位是唯一事实来源；布尔 yoloMode 是派生投影，供顶栏 / 命令面板 / 流式请求等旧读者消费。
+  const yoloMode = permissionMode === 'yolo';
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
@@ -611,7 +626,11 @@ export default function ChatPage() {
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
+  const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
+  const setSelectedSshConnectionId = useUIStateStore((s) => s.setSelectedSshConnectionId);
+  const setActiveSessionWorkspace = useUIStateStore((s) => s.setActiveSessionWorkspace);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
   const resetToWelcomeSignal = useUIStateStore((s) => s.resetToWelcomeSignal);
   const consumeResetToWelcomeSignal = useUIStateStore((s) => s.consumeResetToWelcomeSignal);
@@ -920,6 +939,7 @@ export default function ChatPage() {
     clearSessionMetadataDirty,
     handleDialogueModeChange,
     handleToggleYolo,
+    handlePermissionModeChange,
     handleToggleWebSearch: rawHandleToggleWebSearch,
     handleThinkingEnabledChange,
     handleReasoningEffortChange,
@@ -928,7 +948,7 @@ export default function ChatPage() {
   } = useSessionSettingsCallbacks(
     {
       dialogueMode,
-      yoloMode,
+      permissionMode,
       webSearchEnabled,
       thinkingEnabled,
       reasoningEffort,
@@ -942,7 +962,7 @@ export default function ChatPage() {
     },
     {
       setDialogueMode,
-      setYoloMode,
+      setPermissionMode,
       setWebSearchEnabled,
       setThinkingEnabled,
       setReasoningEffort,
@@ -958,6 +978,40 @@ export default function ChatPage() {
     if (!webSearchAvailable) return;
     rawHandleToggleWebSearch();
   }, [webSearchAvailable, rawHandleToggleWebSearch]);
+
+  /**
+   * 对话模式切换（自动门控 / 用户点「确认转换」）后的本地同步。
+   * 服务端已在同一请求内落库 `dialogueMode`，这里只对齐本地状态并提示用户；
+   * 不做 markSessionMetadataDirty（无需回写，避免与落库竞态）。
+   */
+  useEffect(() => {
+    return subscribeSessionDialogueModeSwitch(({ dialogueMode: nextMode, sessionId, source }) => {
+      if (sessionId !== currentSessionId) {
+        return;
+      }
+      setDialogueMode(nextMode);
+      if (nextMode === 'coding') {
+        toast(
+          source === 'user'
+            ? '已切换到编程模式，可以直接开始实现。'
+            : '已自动切换到编程模式，可以直接开始实现。',
+          'success',
+          3200,
+        );
+      }
+    });
+  }, [currentSessionId]);
+
+  /**
+   * 「确认转换」按钮（澄清模式顶栏 CTA）：用户显式确认方案完成 → 服务端切换模式
+   * 并结算澄清确认门控。模式状态仍由上面的订阅统一落地。
+   */
+  const { confirmSwitchToCoding, pending: clarifySwitchPending } = useDialogueModeSwitch({
+    enabled: dialogueMode === 'clarify',
+    gatewayUrl,
+    sessionId: currentSessionId,
+    token,
+  });
 
   useEffect(() => {
     if (
@@ -1832,15 +1886,15 @@ export default function ChatPage() {
         setIsSessionLoading(false);
       });
       // Restore scroll position after React renders the cached messages.
-      // Use double rAF to ensure at least one paint cycle has completed.
-      ignoreScrollEventsUntilRef.current = performance.now() + 600;
+      // A single rAF ensures at least one paint cycle has completed; the
+      // manager's restore primitive performs its own rAF internally to land
+      // the position, deriving follow state from that restore. 缓存恢复不是
+      // 用户手势：恢复在历史中部会挂起跟随，恢复在真正底部继续跟随；
+      // 全程不武装任何忽略窗口。
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const sr = scrollRegionRef.current;
-          if (sr && !cancelled) {
-            sr.scrollTo({ top: cachedScrollTop, behavior: 'auto' });
-          }
-        });
+        if (!cancelled) {
+          restoreScrollTop(cachedScrollTop);
+        }
       });
     } else {
       sessionRestoredFromCacheRef.current = false;
@@ -1894,7 +1948,7 @@ export default function ChatPage() {
     resetStreamState();
     setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
     setManualAgentId('');
-    setYoloMode(false);
+    setPermissionMode('ask');
     setWebSearchEnabled(webSearchAvailable);
     setThinkingEnabled(false);
     setReasoningEffort('medium');
@@ -1992,7 +2046,7 @@ export default function ChatPage() {
                 metadata.dialogueMode ?? useDisplayPreferencesStore.getState().defaultDialogueMode,
               );
               setManualAgentId(metadata.agentId ?? '');
-              setYoloMode(metadata.yoloMode);
+              setPermissionMode(metadata.permissionMode);
               setWebSearchEnabled(metadata.webSearchEnabled && webSearchAvailable);
               setThinkingEnabled(metadata.thinkingEnabled);
               setReasoningEffort(metadata.reasoningEffort);
@@ -2010,6 +2064,7 @@ export default function ChatPage() {
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
               agentId: metadata.agentId,
+              permissionMode: metadata.permissionMode,
               yoloMode: metadata.yoloMode,
               webSearchEnabled: metadata.webSearchEnabled,
               thinkingEnabled: metadata.thinkingEnabled,
@@ -2223,24 +2278,31 @@ export default function ChatPage() {
     token,
   ]);
 
-  const { isNearBottomRef, ignoreScrollEventsUntilRef, handleScroll, scrollToBottom } =
-    useScrollManager(
-      {
-        scrollRegionRef,
-        bottomRef,
-        pendingScrollFrameRef,
-        contentColumnRef,
-        editorPaneRef,
-        textareaRef,
-      },
-      { setShowScrollToBottom, setHasPendingFollowContent },
-      {
-        messagesLength: messages.length,
-        visibleStreaming,
-        visibleStreamBufferLength: visibleStreamBuffer.length,
-        editorMode,
-      },
-    );
+  const {
+    isFollowingRef,
+    handleScroll,
+    scrollToBottom,
+    forceFollowToLatest,
+    isFollowEngaged,
+    restoreScrollTop,
+  } = useScrollManager(
+    {
+      scrollRegionRef,
+      bottomRef,
+      pendingScrollFrameRef,
+      contentColumnRef,
+      editorPaneRef,
+      textareaRef,
+    },
+    { setShowScrollToBottom, setHasPendingFollowContent },
+    {
+      sessionKey: currentSessionId,
+      messagesLength: messages.length,
+      visibleStreaming,
+      visibleStreamBufferLength: visibleStreamBuffer.length,
+      editorMode,
+    },
+  );
 
   const prevSnapshotReadyRef = useRef(false);
   const prevPageActiveRef = useRef(isPageActive);
@@ -2256,107 +2318,14 @@ export default function ChatPage() {
   const messagesLengthRef = useRef(messages.length);
   messagesLengthRef.current = messages.length;
 
-  // ── Shared scroll-to-latest helper ───────────────────────────────────
-  // Used by both the snapshot-ready effect and the page-reactivation effect
-  // to force the scroll region to the bottom after messages are committed.
-  //
-  // `behavior`:
-  //   - 'auto'   — instant jump (used for first snapshot load with long history)
-  //   - 'smooth' — animated scroll (used for page reactivation)
-  const forceScrollToLatest = useCallback(
-    (behavior: ScrollBehavior = 'auto') => {
-      isNearBottomRef.current = true;
-      ignoreScrollEventsUntilRef.current = performance.now() + 600;
-      let frameId: number;
-      let fallbackTimer = 0;
-      let retryTimer1 = 0;
-      let retryTimer2 = 0;
-      let retryTimer3 = 0;
-      let settleObserver: ResizeObserver | null = null;
-
-      const doScroll = (): void => {
-        const sr = scrollRegionRef.current;
-        if (sr && sr.clientHeight > 0) {
-          const maxST = Math.max(0, sr.scrollHeight - sr.clientHeight);
-          if (sr.scrollTop < maxST - 1) {
-            sr.scrollTo({ top: maxST, behavior });
-          }
-          return;
-        }
-        if (!sr) {
-          bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
-        }
-      };
-
-      // The settled flag flips to true once content stops resizing.
-      // Until then, every ResizeObserver callback re-scrolls to bottom.
-      let settled = false;
-      let settleTimeout = 0;
-
-      const scheduleSettle = () => {
-        if (settleTimeout) window.clearTimeout(settleTimeout);
-        settleTimeout = window.setTimeout(() => {
-          settled = true;
-        }, 400);
-      };
-
-      frameId = requestAnimationFrame(() => {
-        frameId = requestAnimationFrame(() => {
-          doScroll();
-          scheduleSettle();
-
-          // Progressive setTimeout retries — cover layout stabilisation
-          // from display:none → flex, CSS animations, lazy content.
-          retryTimer1 = window.setTimeout(() => {
-            if (!settled) doScroll();
-          }, 100);
-          retryTimer2 = window.setTimeout(() => {
-            if (!settled) doScroll();
-          }, 300);
-          retryTimer3 = window.setTimeout(() => {
-            if (!settled) doScroll();
-          }, 600);
-
-          // ResizeObserver: keep re-scrolling to bottom until content
-          // stops resizing (400ms of no resize = settled).
-          const contentCol = contentColumnRef.current;
-          if (typeof ResizeObserver !== 'undefined' && contentCol) {
-            settleObserver = new ResizeObserver(() => {
-              if (settled) return;
-              const s = scrollRegionRef.current;
-              if (!s || s.clientHeight === 0) return;
-              s.scrollTo({ top: s.scrollHeight, behavior: 'auto' });
-              scheduleSettle();
-            });
-            settleObserver.observe(contentCol);
-            fallbackTimer = window.setTimeout(() => {
-              settleObserver?.disconnect();
-            }, 3000);
-          }
-        });
-      });
-
-      return () => {
-        cancelAnimationFrame(frameId);
-        if (fallbackTimer) window.clearTimeout(fallbackTimer);
-        if (retryTimer1) window.clearTimeout(retryTimer1);
-        if (retryTimer2) window.clearTimeout(retryTimer2);
-        if (retryTimer3) window.clearTimeout(retryTimer3);
-        if (settleTimeout) window.clearTimeout(settleTimeout);
-        settleObserver?.disconnect();
-      };
-    },
-    [isNearBottomRef, ignoreScrollEventsUntilRef, scrollRegionRef, bottomRef, contentColumnRef],
-  );
-
   // ── Effect A: First snapshot ready → scroll to bottom ────────────────
   // Triggers when `isSessionSnapshotReady` transitions to `true` for the
   // first time after a session switch (prevSnapshotReadyRef guards against
   // re-triggering on every messages.length change).
   //
   // IMPORTANT: Only depends on `isSessionSnapshotReady` and the stable
-  // `forceScrollToLatest` callback.  `messages.length` is read via ref so
-  // streaming updates don't cause cleanup to cancel the settleObserver.
+  // `forceFollowToLatest` callback.  `messages.length` is read via ref so
+  // streaming updates don't cause cleanup to cancel the settle loop.
   useEffect(() => {
     if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messagesLengthRef.current > 0) {
       // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
@@ -2367,18 +2336,12 @@ export default function ChatPage() {
         return;
       }
       suppressNextScrollRef.current = false;
-      const cleanup = forceScrollToLatest('auto');
+      const cleanup = forceFollowToLatest('auto');
       prevSnapshotReadyRef.current = isSessionSnapshotReady;
       return cleanup;
     }
     prevSnapshotReadyRef.current = isSessionSnapshotReady;
-  }, [
-    isSessionSnapshotReady,
-    forceScrollToLatest,
-    isNearBottomRef,
-    ignoreScrollEventsUntilRef,
-    sessionRestoredFromCacheRef,
-  ]);
+  }, [isSessionSnapshotReady, forceFollowToLatest, sessionRestoredFromCacheRef]);
 
   useEffect(() => {
     if (!isSessionSnapshotReady) {
@@ -2394,10 +2357,13 @@ export default function ChatPage() {
   // effect bridges the gap: when the page becomes active again and there
   // are messages, force a scroll to the latest message.
   //
+  // 产品决策：页面重新激活**不**无条件把用户拉回底部。跟随仅在启用
+  // （用户没有明确离开 latest）时才重新贴底；正在翻历史的用户保持原位。
+  //
   // IMPORTANT: This effect only depends on `isPageActive` (and the stable
-  // `forceScrollToLatest` callback).  We deliberately exclude
-  // `isSessionSnapshotReady` and `messages.length` from the dep array so
-  // that streaming updates (which change messages.length) don't cause the
+  // `forceFollowToLatest` / `isFollowEngaged` callbacks).  We deliberately
+  // exclude `isSessionSnapshotReady` and `messages.length` from the dep array
+  // so streaming updates (which change messages.length) don't cause the
   // cleanup to cancel an in-progress smooth scroll.  Those values are read
   // via refs instead.
   useEffect(() => {
@@ -2407,7 +2373,8 @@ export default function ChatPage() {
       !wasActive &&
       isPageActive &&
       isSessionSnapshotReadyRef.current &&
-      messagesLengthRef.current > 0
+      messagesLengthRef.current > 0 &&
+      isFollowEngaged()
     ) {
       // If Effect A just ran a cache-restore skip, don't override the
       // restored scrollTop with a forced scroll-to-bottom.
@@ -2415,10 +2382,10 @@ export default function ChatPage() {
         suppressNextScrollRef.current = false;
         return;
       }
-      const cleanup = forceScrollToLatest('smooth');
+      const cleanup = forceFollowToLatest('auto');
       return cleanup;
     }
-  }, [isPageActive, forceScrollToLatest]);
+  }, [isPageActive, forceFollowToLatest, isFollowEngaged]);
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
@@ -2628,6 +2595,13 @@ export default function ChatPage() {
       reasoningEffort: normalizedThinkingState.reasoningEffort,
       thinkingEnabled: normalizedThinkingState.thinkingEnabled,
     });
+    // SSH 工作区草稿：远端连接 id 随元数据一并创建，网关在创建时自动完成
+    // 会话↔连接绑定（workingDirectory 已由 buildSessionMetadata 取自草稿的
+    // 远端路径；SSH 会话下网关按远端绝对路径校验）。
+    const draftSshConnectionId = useUIStateStore.getState().selectedSshConnectionId;
+    if (draftSshConnectionId) {
+      resolvedMetadata['sshConnectionId'] = draftSshConnectionId;
+    }
     const session = await createSessionsClient(gatewayUrl).create(token ?? '', {
       metadata: resolvedMetadata,
     });
@@ -2907,7 +2881,8 @@ export default function ChatPage() {
 
     const { displayMessageForStream, requestStartedAt, requestText } = startStandardChatStream({
       currentAssistantStreamMessageIdRef,
-      isNearBottomRef,
+      // 发送消息 = 用户明确回到最新：清除中断并把视口落到底部（与回底按钮同一原语）。
+      requestReturnToLatest: () => scrollToBottom('auto', 'latest-edge'),
       ...(localRequestInputParts ? { localRequestInputParts } : {}),
       onQueuedMessageConsumed: () => {
         if (options?.queuedMessageId && queuedComposerScope) {
@@ -3381,7 +3356,7 @@ export default function ChatPage() {
           return applyChatRightPanelEvent(prev, event);
         });
 
-        if (!isNearBottomRef.current) {
+        if (!isFollowingRef.current) {
           setHasPendingFollowContent((previous) => previous || true);
         }
 
@@ -3421,7 +3396,7 @@ export default function ChatPage() {
         } else {
           scheduleStreamReveal({ prefersReducedMotion });
         }
-        if (!isNearBottomRef.current) {
+        if (!isFollowingRef.current) {
           setHasPendingFollowContent((previous) => previous || true);
         }
       },
@@ -4542,7 +4517,7 @@ export default function ChatPage() {
             return applyChatRightPanelEvent(prev, event);
           });
 
-          if (!isNearBottomRef.current) {
+          if (!isFollowingRef.current) {
             setHasPendingFollowContent((previous) => previous || true);
           }
 
@@ -4588,7 +4563,7 @@ export default function ChatPage() {
           } else {
             scheduleStreamReveal({ prefersReducedMotion });
           }
-          if (!isNearBottomRef.current) {
+          if (!isFollowingRef.current) {
             setHasPendingFollowContent((previous) => previous || true);
           }
         },
@@ -4890,6 +4865,140 @@ export default function ChatPage() {
     (currentSessionId !== null && (isSessionLoading || !isSessionSnapshotReady));
   const canAdjustWorkspaceBinding = !workspaceBindingLocked;
 
+  const [workspacePickerCreateMode, setWorkspacePickerCreateMode] = useState(false);
+  /** 工作区选择弹窗来源：本地文件夹 / SSH 远端目录。 */
+  const [workspacePickerSource, setWorkspacePickerSource] = useState<'local' | 'ssh'>('local');
+  const [sshPickerConnections, setSshPickerConnections] = useState<SshPickerConnection[]>([]);
+  const [sshPickerConnectionsLoading, setSshPickerConnectionsLoading] = useState(false);
+
+  /**
+   * 打开工作区选择弹窗。`create` 模式用于「新建工作空间」：弹窗打开后直接展开新建表单。
+   */
+  const openWorkspacePicker = useCallback(
+    (mode: 'browse' | 'create' = 'browse') => {
+      setWorkspacePickerCreateMode(mode === 'create');
+      setWorkspacePickerSource('local');
+      setShowWorkspaceSelector(true);
+    },
+    [setShowWorkspaceSelector],
+  );
+
+  /** 弹窗统一关闭：复位来源，避免下次打开停在 SSH 模式。 */
+  const closeWorkspacePicker = useCallback(() => {
+    setShowWorkspaceSelector(false);
+    setWorkspacePickerSource('local');
+  }, [setShowWorkspaceSelector]);
+
+  /** 懒加载 SSH 连接列表（切到 SSH 来源时才拉取）。 */
+  const loadSshPickerConnections = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setSshPickerConnections([]);
+      return;
+    }
+    setSshPickerConnectionsLoading(true);
+    try {
+      const connections = await createSshClient(gatewayUrl).list(token);
+      setSshPickerConnections(connections);
+    } catch (error: unknown) {
+      toast(error instanceof Error ? error.message : '加载 SSH 连接失败', 'error');
+      setSshPickerConnections([]);
+    } finally {
+      setSshPickerConnectionsLoading(false);
+    }
+  }, [gatewayUrl, token]);
+
+  const switchWorkspacePickerToSsh = useCallback((): void => {
+    setWorkspacePickerSource('ssh');
+    void loadSshPickerConnections();
+  }, [loadSshPickerConnections]);
+
+  /**
+   * 新建 SSH 连接：写入网关的 SSH 连接表（`POST /ssh/connections`）后刷新列表，
+   * 下次打开工作区选择器即可直接选中，无需再进设置页录入。
+   *
+   * 保存成功后尽力自动连接一次，让用户立刻能浏览远端目录；自动连接失败
+   * 不向上抛错（连接已入库），仅提示用户可在设置 → 工作区中重试连接。
+   */
+  const createSshPickerConnection = useCallback(
+    async (draft: SshConnectionDraft): Promise<SshPickerConnection> => {
+      if (!token) {
+        throw new Error('未登录，无法保存 SSH 连接。');
+      }
+
+      const client = createSshClient(gatewayUrl);
+      const created = await client.create(token, {
+        name: draft.name,
+        host: draft.host,
+        port: draft.port,
+        username: draft.username,
+        authType: draft.authType,
+        ...(draft.authType === 'password' && draft.password ? { password: draft.password } : {}),
+        ...(draft.authType === 'key' && draft.privateKeyPath
+          ? { privateKeyPath: draft.privateKeyPath }
+          : {}),
+      });
+
+      let resolved: SshPickerConnection = created;
+      try {
+        await client.connect(token, created.id);
+        // connect 未抛错即视为握手成功（网关侧状态已更新为 connected）：
+        // 新建接口返回的是创建时的状态，这里要按握手结果推进，
+        // 否则弹窗会误判为「尚未连通」而不去读取远端目录。
+        resolved = { ...created, status: 'connected' };
+      } catch (error: unknown) {
+        toast(
+          `连接已保存，但自动连接失败：${error instanceof Error ? error.message : '未知错误'}`,
+          'warning',
+        );
+      }
+
+      await loadSshPickerConnections();
+      return resolved;
+    },
+    [gatewayUrl, loadSshPickerConnections, token],
+  );
+
+  /**
+   * 更新已有 SSH 连接的配置：PATCH 到网关后刷新列表。
+   * 未提供的字段按「保留原值」处理，因此编辑表单里留空的密码不会清空已保存凭据。
+   */
+  const updateSshPickerConnection = useCallback(
+    async (connectionId: string, draft: SshConnectionDraft): Promise<SshPickerConnection> => {
+      if (!token) {
+        throw new Error('未登录，无法更新 SSH 连接。');
+      }
+
+      const updated = await createSshClient(gatewayUrl).update(token, connectionId, {
+        name: draft.name,
+        host: draft.host,
+        port: draft.port,
+        username: draft.username,
+        authType: draft.authType,
+        ...(draft.password !== undefined ? { password: draft.password } : {}),
+        ...(draft.authType === 'key' && draft.privateKeyPath
+          ? { privateKeyPath: draft.privateKeyPath }
+          : {}),
+      });
+
+      await loadSshPickerConnections();
+      return updated;
+    },
+    [gatewayUrl, loadSshPickerConnections, token],
+  );
+
+  /** 测试连接：让网关实际握手一次远端（`/ssh/connections/:id/connect`），随后刷新列表同步状态。 */
+  const testSshPickerConnection = useCallback(
+    async (connectionId: string): Promise<void> => {
+      if (!token) {
+        throw new Error('未登录，无法测试 SSH 连接。');
+      }
+
+      await createSshClient(gatewayUrl).connect(token, connectionId);
+      await loadSshPickerConnections();
+    },
+    [gatewayUrl, loadSshPickerConnections, token],
+  );
+
   /**
    * 「调整绑定工作区」所有入口的统一收口：可调整时打开选择器；已锁定则提示并忽略，
    * 让文件树 / 侧栏里的切换入口在对话开始后自然失效。
@@ -4900,8 +5009,8 @@ export default function ChatPage() {
       return;
     }
 
-    setShowWorkspaceSelector(true);
-  }, [workspaceBindingLocked]);
+    openWorkspacePicker('browse');
+  }, [openWorkspacePicker, workspaceBindingLocked]);
 
   const workspaceBindingChip = useMemo<WorkspaceBindingChipState>(
     () => ({
@@ -4913,6 +5022,173 @@ export default function ChatPage() {
     }),
     [canAdjustWorkspaceBinding, effectiveWorkingDirectory, requestWorkspaceBindingChange],
   );
+
+  /**
+   * 工作区绑定的统一落地点：草稿态只改本地选中值；已有会话（且绑定未锁定）时同步 PATCH 到网关。
+   * 绑定锁兜底：即使入口在锁定后仍被触发，也不会修改已开始对话的会话。
+   */
+  const applyWorkspaceSelection = useCallback(
+    async (path: string): Promise<void> => {
+      const normalizedPath = path.trim();
+      if (!normalizedPath) {
+        return;
+      }
+
+      try {
+        if (currentSessionId && canAdjustWorkspaceBinding) {
+          await workspace.setWorkspace(normalizedPath);
+        }
+        addSavedWorkspacePath(normalizedPath);
+        setSelectedWorkspacePath(normalizedPath);
+        setFileTreeRootPath(normalizedPath);
+        // 绑定本地目录即清理草稿态 SSH 连接：否则菜单会继续标注「远端」，
+        // 且新建会话会把残留的 sshConnectionId 写进元数据。
+        setSelectedSshConnectionId(null);
+      } catch (error: unknown) {
+        toast(error instanceof Error ? error.message : '绑定工作区失败', 'error');
+      }
+    },
+    [
+      addSavedWorkspacePath,
+      canAdjustWorkspaceBinding,
+      currentSessionId,
+      setFileTreeRootPath,
+      setSelectedSshConnectionId,
+      setSelectedWorkspacePath,
+      workspace.setWorkspace,
+    ],
+  );
+
+  /**
+   * SSH 远端工作区的统一落地点：草稿态只记本地选中值（远端路径 + 连接 id）；
+   * 已有会话（未锁定）时同步完成「会话↔连接绑定 + 会话元数据更新」，并立即
+   * 刷新工作区显示。远端目录不写入本地文件树根，避免向本地 /workspace/* 发起
+   * 对远端路径的无效请求。错误向上抛出，由选择弹窗就地展示。
+   */
+  const applySshWorkspaceSelection = useCallback(
+    async (selection: SshWorkspaceSelection): Promise<void> => {
+      const normalizedPath = selection.path.trim();
+      if (!normalizedPath) {
+        return;
+      }
+
+      if (currentSessionId && canAdjustWorkspaceBinding) {
+        if (!token) {
+          throw new Error('未登录，无法绑定远端工作区。');
+        }
+        await createSshClient(gatewayUrl).bind(token, selection.connectionId, currentSessionId);
+        await createSessionsClient(gatewayUrl).updateMetadata(token, currentSessionId, {
+          workingDirectory: normalizedPath,
+          sshConnectionId: selection.connectionId,
+        });
+        setActiveSessionWorkspace(currentSessionId, normalizedPath);
+      }
+
+      setSelectedWorkspacePath(normalizedPath);
+      setSelectedSshConnectionId(selection.connectionId);
+      setFileTreeRootPath(null);
+    },
+    [
+      canAdjustWorkspaceBinding,
+      currentSessionId,
+      gatewayUrl,
+      setActiveSessionWorkspace,
+      setFileTreeRootPath,
+      setSelectedSshConnectionId,
+      setSelectedWorkspacePath,
+      token,
+    ],
+  );
+
+  /** 「不绑定工作区」：解除当前绑定；已有会话时同步清空网关侧 metadata。 */
+  const clearWorkspaceSelection = useCallback(async (): Promise<void> => {
+    try {
+      if (currentSessionId && canAdjustWorkspaceBinding) {
+        await workspace.clearWorkspace();
+      }
+      setSelectedWorkspacePath(null);
+      setSelectedSshConnectionId(null);
+      setFileTreeRootPath(null);
+    } catch (error: unknown) {
+      toast(error instanceof Error ? error.message : '解除工作区绑定失败', 'error');
+    }
+  }, [
+    canAdjustWorkspaceBinding,
+    currentSessionId,
+    setFileTreeRootPath,
+    setSelectedSshConnectionId,
+    setSelectedWorkspacePath,
+    workspace.clearWorkspace,
+  ]);
+
+  /** 「打开本地文件夹」：桌面端调用原生选择器，浏览器端退化为完整浏览弹窗。 */
+  const openLocalWorkspaceFolder = useCallback((): void => {
+    if (!isTauriRuntime()) {
+      openWorkspacePicker('browse');
+      return;
+    }
+
+    void pickDesktopFolder()
+      .then(async (pickedPath) => {
+        if (pickedPath) {
+          await applyWorkspaceSelection(pickedPath);
+        }
+      })
+      .catch((error: unknown) => {
+        toast(error instanceof Error ? error.message : '打开系统文件夹选择器失败', 'error');
+      });
+  }, [applyWorkspaceSelection, openWorkspacePicker]);
+
+  /** 「新建工作空间」：打开浏览弹窗并直接展开新建文件夹表单。 */
+  const createWorkspaceFromComposer = useCallback((): void => {
+    openWorkspacePicker('create');
+  }, [openWorkspacePicker]);
+
+  /**
+   * 「连接 SSH 远端目录」：直接以 SSH 来源打开工作区选择弹窗，复用
+   * SshWorkspacePickerModal 的连接选择 → 远端目录浏览 → 绑定流程。
+   */
+  const openSshWorkspaceFromComposer = useCallback((): void => {
+    setWorkspacePickerCreateMode(false);
+    setShowWorkspaceSelector(true);
+    switchWorkspacePickerToSsh();
+  }, [setShowWorkspaceSelector, switchWorkspacePickerToSsh]);
+
+  /** 草稿态绑定的 SSH 连接摘要：供 composer 工作区菜单标注「远端执行」。 */
+  const composerSshConnection = useMemo<ComposerSshConnectionSummary | null>(() => {
+    if (!selectedSshConnectionId) {
+      return null;
+    }
+
+    const matched = sshPickerConnections.find(
+      (connection) => connection.id === selectedSshConnectionId,
+    );
+    if (!matched) {
+      // 连接列表尚未加载（懒加载）时先给出通用标签，避免菜单显示成未绑定。
+      return { id: selectedSshConnectionId, label: 'SSH 远端连接' };
+    }
+
+    const name = matched.name?.trim();
+    return {
+      id: matched.id,
+      label: name && name.length > 0 ? name : `${matched.username}@${matched.host}:${matched.port}`,
+    };
+  }, [selectedSshConnectionId, sshPickerConnections]);
+
+  /** 输入框外壳上方的「选择工作空间」下拉；仅在绑定未锁定时渲染（新建会话未发首条消息）。 */
+  const composerWorkspaceSlot = canAdjustWorkspaceBinding ? (
+    <ComposerWorkspaceMenu
+      currentPath={effectiveWorkingDirectory}
+      savedWorkspacePaths={savedWorkspacePaths}
+      busy={workspace.loading}
+      onSelectWorkspace={applyWorkspaceSelection}
+      onClearWorkspace={clearWorkspaceSelection}
+      onCreateWorkspace={createWorkspaceFromComposer}
+      onOpenLocalFolder={openLocalWorkspaceFolder}
+      onOpenSshWorkspace={openSshWorkspaceFromComposer}
+      currentSshConnection={composerSshConnection}
+    />
+  ) : null;
   const {
     activeProvider,
     providerCatalog,
@@ -5168,6 +5444,7 @@ export default function ChatPage() {
       onOpenRecoveryStrategy: handleFusionContextOpenRecoveryStrategy,
       pendingPermissions,
       pendingQuestionsCount: pendingQuestions.length,
+      permissionMode,
       sessionStateStatus: fusionContextSessionStateStatus,
       sessionTasks,
       sessionTodos,
@@ -5190,6 +5467,7 @@ export default function ChatPage() {
       messages,
       pendingPermissions,
       pendingQuestions.length,
+      permissionMode,
       rightPanelState.upstreamSummaries,
       fusionContextSessionStateStatus,
       sessionTasks,
@@ -5320,13 +5598,19 @@ export default function ChatPage() {
       {
         id: 'open-browser-preview',
         label: '打开浏览器预览',
-        description: '在编辑器面板中打开内置浏览器（输入 URL 或自动检测 dev server）',
+        description: '打开内置浏览器预览（输入 URL 或自动检测 dev server）',
         category: '视图',
         icon: '🌐',
         onExecute: () => {
           // Set a default URL if none detected yet
           if (!browserPreviewUrl) {
             setBrowserPreviewUrl('http://localhost:3000');
+          }
+          // Fusion 布局：预览停靠在右侧面板；编辑器全屏时停靠面板不可见，保持原行为。
+          if (isFusionLayout && !editorFullScreen) {
+            setEditorPaneTab('code');
+            fusionChatLayout.openBrowserPreviewPanel();
+            return;
           }
           setEditorMode(true);
         },
@@ -5405,6 +5689,7 @@ export default function ChatPage() {
       bookmarkStore,
       handleCopyMessage,
       handleCompactCurrentSession,
+      fusionChatLayout.openBrowserPreviewPanel,
       fusionChatLayout.rightPanelCommandDescription,
       fusionChatLayout.rightPanelCommandLabel,
       fusionChatLayout.toggleReviewPanel,
@@ -5717,25 +6002,43 @@ export default function ChatPage() {
         >
           <SessionPanelFrame>
             <WorkspacePickerModal
-              isOpen={showWorkspaceSelector}
-              onClose={() => setShowWorkspaceSelector(false)}
+              isOpen={showWorkspaceSelector && workspacePickerSource === 'local'}
+              onClose={closeWorkspacePicker}
               onSelect={async (path) => {
                 // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
                 if (currentSessionId && canAdjustWorkspaceBinding) {
                   await workspace.setWorkspace(path);
                 }
+                // 选择本地工作区即清理 SSH 草稿连接。
+                setSelectedSshConnectionId(null);
                 addSavedWorkspacePath(path);
                 setSelectedWorkspacePath(path);
                 setFileTreeRootPath(path);
-                setShowWorkspaceSelector(false);
+                closeWorkspacePicker();
               }}
               fetchRootPath={workspace.fetchRootPath}
               fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
               fetchTree={workspace.fetchTree}
               createDirectory={workspace.createDirectory}
               initialPath={effectiveWorkingDirectory ?? undefined}
+              initialCreateMode={workspacePickerCreateMode}
               validatePath={workspace.validatePath}
               loading={workspace.loading}
+              onSwitchToSshSource={switchWorkspacePickerToSsh}
+            />
+            <SshWorkspacePickerModal
+              isOpen={showWorkspaceSelector && workspacePickerSource === 'ssh'}
+              onClose={closeWorkspacePicker}
+              connections={sshPickerConnections}
+              loadingConnections={sshPickerConnectionsLoading}
+              onSelect={applySshWorkspaceSelection}
+              fetchTree={workspace.fetchSshTree}
+              createDirectory={workspace.createSshDirectory}
+              onSwitchToLocalSource={() => setWorkspacePickerSource('local')}
+              onCreateConnection={createSshPickerConnection}
+              onUpdateConnection={updateSshPickerConnection}
+              onTestConnection={testSshPickerConnection}
+              initialConnectionId={selectedSshConnectionId}
             />
             <LatestAssistantMessageContext value={latestAssistantMessageId}>
               <ChatConversationView
@@ -5755,8 +6058,10 @@ export default function ChatPage() {
                     <ChatTopBar
                       dialogueMode={dialogueMode}
                       onChangeDialogueMode={handleDialogueModeChange}
+                      onConfirmClarifySwitch={() => void confirmSwitchToCoding()}
+                      clarifySwitchPending={clarifySwitchPending}
+                      permissionMode={permissionMode}
                       yoloMode={yoloMode}
-                      onToggleYolo={handleToggleYolo}
                       density="compact"
                       editorMode={editorMode}
                       onToggleEditorMode={() =>
@@ -5848,6 +6153,13 @@ export default function ChatPage() {
                           }
                           if (!browserPreviewUrl) {
                             setBrowserPreviewUrl('http://localhost:3000');
+                          }
+                          // Fusion 布局：预览停靠在右侧面板，编辑器 tab 归还 code
+                          // （单一浏览器互斥；编辑器全屏时停靠面板不可见，保持原行为）。
+                          if (isFusionLayout && !editorFullScreen) {
+                            setEditorPaneTab('code');
+                            fusionChatLayout.openBrowserPreviewPanel();
+                            return;
                           }
                           setEditorMode(true);
                           setEditorPaneTab('browser');
@@ -5973,7 +6285,7 @@ export default function ChatPage() {
                   promptTemplate: true,
                   commandPalette: true,
                   dialogueModeToggle: true,
-                  yoloMode: true,
+                  permissionMode: true,
                   agentSwitch: true,
                 }}
                 messages={messages}
@@ -6095,7 +6407,8 @@ export default function ChatPage() {
                 canStopCurrentSessionStream={canStopCurrentSessionStream}
                 dialogueMode={dialogueMode}
                 manualAgentId={manualAgentId}
-                yoloMode={yoloMode}
+                permissionMode={permissionMode}
+                onPermissionModeChange={handlePermissionModeChange}
                 webSearchEnabled={webSearchEnabled}
                 webSearchAvailable={webSearchAvailable}
                 thinkingEnabled={thinkingEnabled}
@@ -6167,6 +6480,7 @@ export default function ChatPage() {
                 onCompanionActivityChange={setCompanionComposerActivity}
                 markSessionMetadataDirty={markSessionMetadataDirty}
                 statsData={composerStatsData}
+                composerFooterSlot={composerWorkspaceSlot}
               />
             </LatestAssistantMessageContext>
           </SessionPanelFrame>
@@ -6174,25 +6488,43 @@ export default function ChatPage() {
       ) : (
         <>
           <WorkspacePickerModal
-            isOpen={showWorkspaceSelector}
-            onClose={() => setShowWorkspaceSelector(false)}
+            isOpen={showWorkspaceSelector && workspacePickerSource === 'local'}
+            onClose={closeWorkspacePicker}
             onSelect={async (path) => {
               // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
               if (currentSessionId && canAdjustWorkspaceBinding) {
                 await workspace.setWorkspace(path);
               }
+              // 选择本地工作区即清理 SSH 草稿连接。
+              setSelectedSshConnectionId(null);
               addSavedWorkspacePath(path);
               setSelectedWorkspacePath(path);
               setFileTreeRootPath(path);
-              setShowWorkspaceSelector(false);
+              closeWorkspacePicker();
             }}
             fetchRootPath={workspace.fetchRootPath}
             fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
             fetchTree={workspace.fetchTree}
             createDirectory={workspace.createDirectory}
             initialPath={effectiveWorkingDirectory ?? undefined}
+            initialCreateMode={workspacePickerCreateMode}
             validatePath={workspace.validatePath}
             loading={workspace.loading}
+            onSwitchToSshSource={switchWorkspacePickerToSsh}
+          />
+          <SshWorkspacePickerModal
+            isOpen={showWorkspaceSelector && workspacePickerSource === 'ssh'}
+            onClose={closeWorkspacePicker}
+            connections={sshPickerConnections}
+            loadingConnections={sshPickerConnectionsLoading}
+            onSelect={applySshWorkspaceSelection}
+            fetchTree={workspace.fetchSshTree}
+            createDirectory={workspace.createSshDirectory}
+            onSwitchToLocalSource={() => setWorkspacePickerSource('local')}
+            onCreateConnection={createSshPickerConnection}
+            onUpdateConnection={updateSshPickerConnection}
+            onTestConnection={testSshPickerConnection}
+            initialConnectionId={selectedSshConnectionId}
           />
           <LatestAssistantMessageContext value={latestAssistantMessageId}>
             <div
@@ -6239,8 +6571,10 @@ export default function ChatPage() {
                       <ChatTopBar
                         dialogueMode={dialogueMode}
                         onChangeDialogueMode={handleDialogueModeChange}
+                        onConfirmClarifySwitch={() => void confirmSwitchToCoding()}
+                        clarifySwitchPending={clarifySwitchPending}
+                        permissionMode={permissionMode}
                         yoloMode={yoloMode}
-                        onToggleYolo={handleToggleYolo}
                         density="normal"
                         editorMode={editorMode}
                         onToggleEditorMode={() =>
@@ -6454,7 +6788,7 @@ export default function ChatPage() {
                     promptTemplate: true,
                     commandPalette: true,
                     dialogueModeToggle: true,
-                    yoloMode: true,
+                    permissionMode: true,
                     agentSwitch: true,
                   }}
                   messages={messages}
@@ -6576,7 +6910,8 @@ export default function ChatPage() {
                   canStopCurrentSessionStream={canStopCurrentSessionStream}
                   dialogueMode={dialogueMode}
                   manualAgentId={manualAgentId}
-                  yoloMode={yoloMode}
+                  permissionMode={permissionMode}
+                  onPermissionModeChange={handlePermissionModeChange}
                   webSearchEnabled={webSearchEnabled}
                   webSearchAvailable={webSearchAvailable}
                   thinkingEnabled={thinkingEnabled}
@@ -6648,6 +6983,7 @@ export default function ChatPage() {
                   onCompanionActivityChange={setCompanionComposerActivity}
                   markSessionMetadataDirty={markSessionMetadataDirty}
                   statsData={composerStatsData}
+                  composerFooterSlot={composerWorkspaceSlot}
                 />
                 {currentSessionId && !isFusionLayout ? (
                   <QuickTerminalPanel
@@ -6769,6 +7105,7 @@ export default function ChatPage() {
           messages={messages}
           sessionStateStatus={sessionStateStatus}
           workspaceFileItems={workspaceFileItems}
+          permissionMode={permissionMode}
           yoloMode={yoloMode}
           sessionTerminals={sessionTerminals.terminals}
           sessionTerminalsRunningCount={sessionTerminals.runningCount}

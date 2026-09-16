@@ -45,8 +45,15 @@ import { ToastContainer } from './components/common/feedback/ToastNotification.j
 import UpdateBanner from './components/common/feedback/UpdateBanner.js';
 import { usePrefersReducedMotion } from './hooks/ui/usePrefersReducedMotion.js';
 import { PRELOADABLE_ROUTE_MODULES } from './routes/preloadable-route-modules.js';
-import { TelemetryConsentModal } from '@openAwork/shared-ui';
+import {
+  DEFAULT_FILE_ICON_THEME,
+  FileIconThemeProvider,
+  isFileIconThemeId,
+  loadMaterialIconManifest,
+  TelemetryConsentModal,
+} from '@openAwork/shared-ui';
 import { useTelemetry } from './hooks/use-telemetry.js';
+import { logger } from './utils/log/logger.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -289,6 +296,11 @@ export default function App() {
   const setThemeMode = useDisplayPreferencesStore((s) => s.setThemeMode);
   const storeThemeStyle = useDisplayPreferencesStore((s) => s.themeStyle);
   const themeStyle = displayPreferencesHydrated ? storeThemeStyle : initialThemeStyle;
+  const fileIconTheme = useDisplayPreferencesStore((s) => s.fileIconTheme);
+  // localStorage 可能残留非主题 id 的脏值（历史数据/手改），交给类型守卫兜底。
+  const effectiveFileIconTheme = isFileIconThemeId(fileIconTheme)
+    ? fileIconTheme
+    : DEFAULT_FILE_ICON_THEME;
   const openFileRef = useRef<OpenFileFn | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const authHydrated = useHasHydrated();
@@ -313,6 +325,13 @@ export default function App() {
   }, [desktopRuntime]);
 
   useCurrentUserProfileBootstrap(authHydrated);
+
+  useEffect(() => {
+    if (effectiveFileIconTheme !== 'material') return;
+    void loadMaterialIconManifest().catch((error: unknown) => {
+      logger.warn('文件图标清单预热失败，图标将降级为通用轮廓', error);
+    });
+  }, [effectiveFileIconTheme]);
 
   // 登录成功后（accessToken 从 null 变为有值），强制从 localStorage 重新读取主题。
   // 这解决了：登录前显示默认主题，登录后没有切换到用户保存的主题的问题。
@@ -599,7 +618,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <FileIconThemeProvider theme={effectiveFileIconTheme} mode={theme}>
       <CloseConfirmDialog />
       <AboutDialog />
       {showOnboarding && (
@@ -812,6 +831,6 @@ export default function App() {
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </>
+    </FileIconThemeProvider>
   );
 }

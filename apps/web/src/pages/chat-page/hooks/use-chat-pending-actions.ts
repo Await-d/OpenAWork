@@ -52,6 +52,7 @@ import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
 } from '../../../utils/session/session-list-events.js';
+import { publishDialogueModeSwitchFromReply } from '../../../utils/session/dialogue-mode-events.js';
 import {
   type ChatRightPanelState,
   clearResolvedPendingPermissionToolCalls,
@@ -270,11 +271,17 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
       try {
         setInlineQuestionReplyStatus(status);
         setInlineQuestionReplyError(null);
-        await createQuestionsClient(gatewayUrl).reply(
+        const replyResult = await createQuestionsClient(gatewayUrl).reply(
           token,
           activePendingQuestion.sessionId,
           payload,
         );
+        // 澄清模式共识确认 / 计划批准会让服务端把会话自动切换到编程模式，
+        // 这里把新模式广播给持有 dialogueMode 状态的会话页面。
+        publishDialogueModeSwitchFromReply({
+          ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
+          sessionId: activePendingQuestion.sessionId,
+        });
         setPendingQuestions((prev) =>
           prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
         );

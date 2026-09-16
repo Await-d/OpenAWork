@@ -125,7 +125,7 @@ export interface ChatUiState extends ChatSidebarLayout {
  * 解析 by-workspace 字段的查询桶 key，保持与 useFileEditor /
  * BuiltInBrowser / quickTerminal 的兜底一致。
  */
-function resolveWorkspaceKey(workspaceScope: string | null): string {
+export function resolveWorkspaceKey(workspaceScope: string | null): string {
   return workspaceScope && workspaceScope.trim().length > 0 ? workspaceScope : '__default__';
 }
 
