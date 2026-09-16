@@ -381,11 +381,22 @@ export function findToolPartByCallID(input: {
   sessionId: string;
   callID: string;
 }): ToolPart | undefined {
-  // Search parts with type='tool' by scanning data JSON
-  const rows = sqliteAll<PartV2Row>(
-    'SELECT * FROM part_v2 WHERE session_id = ? AND data LIKE ? LIMIT 10',
-    [input.sessionId, `%"callID":"${input.callID}"%`],
+  // Look up by the denormalised `tool_call_id` column (maintained by the part
+  // projector) so the query rides `idx_part_v2_tool_call` instead of scanning
+  // every part's JSON `data` with a leading-wildcard LIKE.
+  let rows = sqliteAll<PartV2Row>(
+    'SELECT * FROM part_v2 WHERE session_id = ? AND tool_call_id = ? LIMIT 10',
+    [input.sessionId, input.callID],
   );
+  if (rows.length === 0) {
+    // Fallback for rows written before the column existed (or by binaries
+    // that predate the backfill): scan the JSON only when the indexed lookup
+    // comes up empty, so the hot path stays on the index.
+    rows = sqliteAll<PartV2Row>(
+      'SELECT * FROM part_v2 WHERE session_id = ? AND data LIKE ? LIMIT 10',
+      [input.sessionId, `%"callID":"${input.callID}"%`],
+    );
+  }
   for (const row of rows) {
     const part = tryPartFromRow(row);
     if (part && part.type === 'tool' && part.callID === input.callID) {

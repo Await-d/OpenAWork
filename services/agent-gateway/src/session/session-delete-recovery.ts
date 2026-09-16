@@ -7,6 +7,7 @@
  */
 
 import { db, sqliteRun } from '../infra/db.js';
+import { invalidateSessionOwnerCache } from '../infra/session-owner-cache.js';
 import { SESSION_DELETE_RECOVERY_STATEMENTS } from './session-delete-recovery-statements.js';
 
 export {
@@ -31,6 +32,9 @@ export function deleteSessionWithMalformedRecovery(input: {
 
     db.exec('COMMIT');
     transactionStarted = false;
+    // The session row is gone — its cached owner would feed FK-checked
+    // inserts for the next 30s otherwise.
+    invalidateSessionOwnerCache(input.sessionId);
   } catch (error) {
     if (transactionStarted) {
       db.exec('ROLLBACK');

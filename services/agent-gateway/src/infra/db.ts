@@ -95,6 +95,13 @@ function createDatabase(dbPath: string): GatewayDatabase {
   if (dbDir) mkdirSync(dbDir, { recursive: true });
   const database = new DatabaseSync(dbPath);
   database.exec('PRAGMA journal_mode=WAL');
+  // WAL + synchronous=NORMAL: commits stop fsyncing the WAL on every COMMIT
+  // (only checkpoints sync). Crash-safe — the db can never be corrupted — at
+  // the cost of losing the last few committed transactions on power loss.
+  // The streaming hot path commits several times per token (session_run_events
+  // + session_entry rows), and the default FULL turns those into an fsync
+  // storm that backpressures the upstream LLM stream.
+  database.exec('PRAGMA synchronous=NORMAL');
   // Serialised WAL writers otherwise throw SQLITE_BUSY the moment two writes
   // overlap; wait up to 5s for the lock so concurrent requests retry instead
   // of failing the operation outright.
@@ -140,7 +147,6 @@ function buildSearchableMessageTextForMigration(contentJson: string): string {
 }
 
 function rebuildSessionMessageSearchIndex(): void {
-  db.exec('DELETE FROM session_messages_fts');
   const rows = db
     .prepare('SELECT id, session_id, user_id, role, content_json FROM session_messages')
     .all() as Array<{
@@ -154,13 +160,19 @@ function rebuildSessionMessageSearchIndex(): void {
     'INSERT INTO session_messages_fts (message_id, session_id, user_id, role, content) VALUES (?, ?, ?, ?, ?)',
   );
 
-  rows.forEach((row) => {
-    const content = buildSearchableMessageTextForMigration(row.content_json);
-    if (content.length === 0) {
-      return;
-    }
+  // Wrapped in one transaction: this rebuild runs on every boot, and the
+  // previous per-row auto-commit turned a large transcript into thousands of
+  // separate WAL commits (seconds of startup latency on a mature install).
+  sqliteTransaction(() => {
+    db.exec('DELETE FROM session_messages_fts');
+    rows.forEach((row) => {
+      const content = buildSearchableMessageTextForMigration(row.content_json);
+      if (content.length === 0) {
+        return;
+      }
 
-    insert.run(row.id, row.session_id, row.user_id, row.role, content);
+      insert.run(row.id, row.session_id, row.user_id, row.role, content);
+    });
   });
 }
 
@@ -199,6 +211,10 @@ export async function closeDb(): Promise<void> {
 }
 
 export async function migrate(): Promise<void> {
+  // Created up-front: later migration steps (the legacy part-order repair)
+  // read and write one-shot markers through get/setAppMetaValue.
+  ensureAppMetaTable();
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -446,6 +462,20 @@ export async function migrate(): Promise<void> {
   `);
   ensureColumn('session_run_events', 'client_request_id', 'TEXT');
   ensureColumn('session_run_events', 'seq', 'INTEGER');
+  // The run-event log takes one INSERT per streamed chunk (≈ per token) and is
+  // otherwise unindexed, so write-path queries degrade into full table scans
+  // that grow with the session:
+  //   - `computeNextSeq` (session-run-events.ts) does MAX(seq) per
+  //     (session_id, client_request_id) on every insert; the composite index
+  //     below lets SQLite satisfy it with an index seek instead of a scan.
+  //   - replay / afterSeq reads filter on the same tuple, and
+  //     `listRecentSessionRunEventsWithMeta` walks (session_id, id).
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_run_events_request_seq ON session_run_events(session_id, client_request_id, seq)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_run_events_session_id ON session_run_events(session_id, id)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_runtime_threads (
@@ -2030,6 +2060,20 @@ function migrateSessionFileDiffsDropLegacyTextColumns(): void {
 }
 
 function dedupeLegacySessionMessagesByRequestRole(): void {
+  // This runs on every boot, so probe first: the partial unique index
+  // (`idx_session_messages_request_role`) makes the grouped scan cheap, and a
+  // healthy database has nothing to dedupe — skip the full rewrite entirely.
+  const duplicate = db
+    .prepare(
+      `SELECT 1 FROM session_messages
+        WHERE client_request_id IS NOT NULL
+        GROUP BY session_id, client_request_id, role
+       HAVING COUNT(*) > 1
+        LIMIT 1`,
+    )
+    .get();
+  if (!duplicate) return;
+
   db.exec(`
     DELETE FROM session_messages
     WHERE client_request_id IS NOT NULL
@@ -2042,8 +2086,24 @@ function dedupeLegacySessionMessagesByRequestRole(): void {
   `);
 }
 
+function hasEventLogAggregateSeqUniqueIndex(): boolean {
+  const indexes = db.prepare('PRAGMA index_list(event_log)').all() as Array<{
+    name: string;
+    unique: number;
+  }>;
+  return indexes.some(
+    (index) => index.unique === 1 && index.name === 'uq_event_log_aggregate_seq',
+  );
+}
+
 function migrateSyncEventTables(): void {
   db.exec('DROP INDEX IF EXISTS idx_event_log_aggregate_seq');
+
+  // The unique index only builds when no (aggregate_id, seq) duplicates exist,
+  // so its presence proves this migration already ran against a deduped table
+  // and `event_sequences` was rebuilt alongside it. Skip the full-table
+  // dedupe + sequence rebuild on every following boot.
+  if (hasEventLogAggregateSeqUniqueIndex()) return;
 
   db.exec(`
     DELETE FROM event_log
@@ -2266,7 +2326,17 @@ function migrateV1MessagesToV2(): void {
 const LEGACY_RANDOM_PART_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// One-shot marker for `repairLegacyMigratedPartOrder`. New parts always use
+// the ordered `prt_` id format, so once the repair has run there is nothing
+// left to fix — the guard saves a per-boot scan over every session_messages
+// row (× an indexed part_v2 probe) on each following start.
+const APP_META_KEY_LEGACY_PART_ORDER_REPAIR = 'legacy_part_order_repair_v1';
+
 function repairLegacyMigratedPartOrder(): void {
+  if (getAppMetaValue(APP_META_KEY_LEGACY_PART_ORDER_REPAIR) === '1') {
+    return;
+  }
+
   const candidates = db
     .prepare(
       `SELECT sm.id, sm.created_at_ms, sm.content_json
