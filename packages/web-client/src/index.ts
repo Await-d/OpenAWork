@@ -176,8 +176,11 @@ export type {
   PendingQuestionItem,
   PendingQuestionOption,
   PendingQuestionRequest,
+  QuestionReplyResult,
   QuestionsClient,
 } from './session/questions.js';
+export { createDialogueModeClient } from './session/dialogue-mode.js';
+export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/dialogue-mode.js';
 export { createSessionsClient, createMultiAttachStream } from './session/sessions.js';
 export { getSessionWorkflowRuntime } from './session/workflow-runtime.js';
 export type { SessionWorkflowRuntimeSource } from './session/workflow-runtime.js';
@@ -273,6 +276,14 @@ export type { CronClient, CronJobRecord, CronJobsResponse } from './infra/cron.j
 export { createHealthClient, isGatewayHealthy } from './infra/health.js';
 export type { HealthClient } from './infra/health.js';
 
+export { createListeningPortsClient } from './infra/ports.js';
+export type {
+  ListeningPortsClient,
+  ListeningPortsSnapshotView,
+  ListeningPortSource,
+  ListeningPortView,
+} from './infra/ports.js';
+
 export { createDesktopAutomationClient } from './infra/desktop-automation.js';
 export type {
   DesktopAutomationClient,
@@ -284,6 +295,15 @@ export type {
   DesktopAutomationStatus,
   DesktopAutomationWaitInput,
 } from './infra/desktop-automation.js';
+
+export { createBrowserLiveClient } from './infra/browser-live.js';
+export type {
+  BrowserLiveCallbacks,
+  BrowserLiveClient,
+  BrowserLiveConnection,
+  BrowserLiveScreenshotResult,
+  BrowserLiveStatus,
+} from './infra/browser-live.js';
 
 export { createDesktopControlClient } from './infra/desktop-control.js';
 export type {
@@ -306,6 +326,7 @@ export type {
 export { createSshClient } from './infra/ssh.js';
 export type {
   CreateSSHConnectionInput,
+  SSHAuthType,
   SSHBindingEntry,
   SSHDialogEntry,
   SSHClient,

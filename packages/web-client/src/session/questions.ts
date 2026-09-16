@@ -1,3 +1,4 @@
+import type { DialogueMode } from '@openAwork/shared';
 import { HttpError } from './sessions.js';
 import {
   extractJsonErrorMessage,
@@ -32,6 +33,14 @@ export interface PendingQuestionRequest {
   toolName: string;
 }
 
+/**
+ * 回答问题的结果。`dialogueMode` 只在服务端改动了会话对话模式时出现——
+ * 典型场景是澄清模式的共识确认 / 计划批准触发了「自动切换到编程模式」。
+ */
+export interface QuestionReplyResult {
+  dialogueMode?: DialogueMode;
+}
+
 export interface QuestionsClient {
   listPending(
     token: string,
@@ -42,11 +51,15 @@ export interface QuestionsClient {
     token: string,
     sessionId: string,
     payload: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
-  ): Promise<void>;
+  ): Promise<QuestionReplyResult>;
 }
 
 function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
+}
+
+function toDialogueMode(value: unknown): DialogueMode | undefined {
+  return value === 'clarify' || value === 'coding' || value === 'programmer' ? value : undefined;
 }
 
 function buildQuestionsActionErrorMessage(
@@ -132,9 +145,8 @@ export function createQuestionsClient(gatewayUrl: string): QuestionsClient {
     },
 
     async reply(token, sessionId, payload) {
-      await performQuestionsRequest({
+      const data = await performQuestionsRequest<{ dialogueMode?: unknown }>({
         actionLabel: '回复问题请求',
-        parseJson: false,
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/questions/reply`, {
             method: 'POST',
@@ -142,6 +154,8 @@ export function createQuestionsClient(gatewayUrl: string): QuestionsClient {
             body: JSON.stringify(payload),
           }),
       });
+      const dialogueMode = toDialogueMode(data?.dialogueMode);
+      return dialogueMode ? { dialogueMode } : {};
     },
   };
 }

@@ -272,6 +272,7 @@ export function createTeamWorkflowsClient(baseUrl: string): TeamWorkflowsClient 
           fetchWithTimeout(`${trimmed}/team/workflows/${encodeURIComponent(workflowDbId)}`, {
             method: 'DELETE',
             headers: jsonAuthHeaders(token),
+            body: '{}',
           }),
       });
       return true;

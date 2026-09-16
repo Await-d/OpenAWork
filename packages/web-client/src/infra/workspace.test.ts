@@ -296,3 +296,56 @@ describe('createWorkspaceClient mutation error handling', () => {
     });
   });
 });
+
+describe('createWorkspaceClient getFileIndexVersion', () => {
+  it('携带 path 查询参数与 Authorization 头，并返回 root/version', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ root: '/workspace/demo', version: 7 }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.getFileIndexVersion('token-1', '/workspace/demo');
+
+    expect(result).toEqual({ root: '/workspace/demo', version: 7 });
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const [url, init] = firstCall;
+    expect(String(url)).toContain('/workspace/files/index-version?');
+    expect(String(url)).toContain('path=%2Fworkspace%2Fdemo');
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBe('Bearer token-1');
+  });
+
+  it('响应缺少字段时回退为入参 path 与 version 0', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return { ok: true, json: async () => ({}) } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.getFileIndexVersion('token-1', '/workspace/demo');
+
+    expect(result).toEqual({ root: '/workspace/demo', version: 0 });
+  });
+
+  it('失败时抛带状态码的 HttpError 并映射权限文案', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+
+    await expect(client.getFileIndexVersion('token-1', '/workspace/demo')).rejects.toThrow(
+      '认证失效或当前账号无权读取工作区文件索引。',
+    );
+  });
+});

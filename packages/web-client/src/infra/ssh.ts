@@ -111,6 +111,8 @@ export interface SSHClient {
     token: string,
     input: { connectionId: string; path: string; contentBase64: string },
   ): Promise<void>;
+  /** 在远端创建目录（`mkdir -p` 语义），用于 SSH 工作区选择器。 */
+  mkdir(token: string, input: { connectionId: string; path: string }): Promise<void>;
   listDialogs(token: string, options?: { signal?: AbortSignal }): Promise<SSHDialogEntry[]>;
   getLastOpenedDialog(
     token: string,
@@ -340,6 +342,19 @@ export function createSshClient(baseUrl: string): SSHClient {
         parseJson: false,
         request: () =>
           fetchWithTimeout(`${baseUrl}/ssh/upload`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(input),
+          }),
+      });
+    },
+
+    async mkdir(token, input) {
+      await performSshRequest({
+        actionLabel: '创建远端目录',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/ssh/mkdir`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(input),

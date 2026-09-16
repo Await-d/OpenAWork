@@ -61,6 +61,25 @@ describe('createSshClient', () => {
     ).rejects.toThrow('网络异常，上传 SSH 文件失败。');
   });
 
+  it('mkdir 会向 /ssh/mkdir 提交 connectionId 与 path', async () => {
+    let capturedUrl = '';
+    let capturedBody = '';
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input);
+      capturedBody = typeof init?.body === 'string' ? init.body : '';
+      return { ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSshClient('http://localhost:3000');
+    await client.mkdir('token-1', { connectionId: 'ssh-1', path: '/home/deploy/app' });
+
+    expect(capturedUrl).toBe('http://localhost:3000/ssh/mkdir');
+    expect(JSON.parse(capturedBody)).toEqual({
+      connectionId: 'ssh-1',
+      path: '/home/deploy/app',
+    });
+  });
+
   it('readFile 404 时会保留 HttpError 状态码', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

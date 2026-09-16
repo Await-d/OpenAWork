@@ -144,6 +144,17 @@ export interface WorkspaceClient {
     path: string,
     options: { query: string; limit?: number; signal?: AbortSignal },
   ): Promise<WorkspaceFileSearchLoadResult>;
+  /**
+   * GET `/workspace/files/index-version?path=`，读取工作区文件索引的进程内版本号。
+   *
+   * 版本随索引（重）建与失效单调前进，内置浏览器预览据此轮询判断工作区文件是否
+   * 变化。只读且 O(1)，不触发索引构建，失败时抛 `HttpError`。
+   */
+  getFileIndexVersion(
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ root: string; version: number }>;
   /** GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。 */
   fetchTree(
     token: string,
@@ -552,6 +563,34 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     }
   };
 
+  const getFileIndexVersion = async (
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ root: string; version: number }> => {
+    const params = buildPathParams(path);
+    const response = await fetchWithTimeout(
+      withQuery(`${baseUrl}/workspace/files/index-version`, params),
+      {
+        headers: authHeader(token),
+        signal: options?.signal,
+      },
+    );
+    if (!response.ok) {
+      const data = await readJsonErrorData<JsonErrorData>(response);
+      throw new HttpError(
+        buildWorkspaceFilesErrorMessage(response.status, data),
+        response.status,
+        data,
+      );
+    }
+    const data = (await response.json()) as { root?: unknown; version?: unknown };
+    return {
+      root: typeof data.root === 'string' ? data.root : path,
+      version: typeof data.version === 'number' ? data.version : 0,
+    };
+  };
+
   const reviewStatusResult = async (
     token: string,
     path: string,
@@ -655,6 +694,8 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     fetchTreeResult,
 
     searchFileIndexResult,
+
+    getFileIndexVersion,
 
     async readFile(token, path, options) {
       const result = await readFileResult(token, path, options);

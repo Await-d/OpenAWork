@@ -56,6 +56,43 @@ describe('createQuestionsClient', () => {
     ).rejects.toThrow('question already answered');
   });
 
+  it('reply 回传服务端自动切换后的 dialogueMode', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, dialogueMode: 'coding' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createQuestionsClient('http://localhost:3000');
+    const result = await client.reply('token-1', 'session-1', {
+      requestId: 'question-1',
+      status: 'answered',
+      answers: [['确认']],
+    });
+
+    expect(result).toEqual({ dialogueMode: 'coding' });
+  });
+
+  it('reply 未自动切换时返回空结果，且忽略非法 dialogueMode', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, dialogueMode: 'unsupported' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createQuestionsClient('http://localhost:3000');
+    const result = await client.reply('token-1', 'session-1', {
+      requestId: 'question-1',
+      status: 'dismissed',
+    });
+
+    expect(result).toEqual({});
+  });
+
   it('listPending 网络异常时会转换成中文网络错误', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('Failed to fetch');

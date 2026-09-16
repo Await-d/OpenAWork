@@ -19,6 +19,17 @@ import {
 export interface DesktopAutomationStatus {
   readonly enabled: boolean;
   readonly started: boolean;
+  /** 网关侧浏览器实时预览（`/browser-live`）的可用性；runtime 未启用时也会返回 disabled 形状。 */
+  readonly liveView?: {
+    readonly available: boolean;
+    readonly engine: string | null;
+    readonly screencast: boolean;
+    readonly reason?: string;
+    readonly installable?: boolean;
+    readonly source?: string | null;
+    readonly expectedRevision?: string | null;
+    readonly executablePath?: string | null;
+  };
 }
 
 export interface DesktopAutomationScreenshotResult {

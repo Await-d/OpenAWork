@@ -1141,6 +1141,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
           fetchWithTimeout(`${baseUrl}/team/force-apply`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
+            body: '{}',
           }),
       });
     },
@@ -1174,6 +1175,7 @@ export function createTeamPhaseAClient(baseUrl: string): TeamPhaseAClient {
           fetchWithTimeout(`${baseUrl}/team/sessions/${encodeURIComponent(sessionId)}/converge`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
+            body: '{}',
           }),
       });
     },
