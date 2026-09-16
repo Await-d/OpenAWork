@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { DialogueMode } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
@@ -12,10 +13,15 @@ import {
   buildConfirmNode,
   CONFIRM_NODE_ID,
   createGrillState,
+  isConfirmAffirmative,
   parseGrillState,
   serializeGrillState,
 } from '@openAwork/agent-core';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import {
+  switchSessionDialogueModeToCoding,
+  type DialogueModeSwitchReason,
+} from '../session/dialogue-mode-switch.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
@@ -240,21 +246,41 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         userId: user.sub,
       });
 
+      let clarifyCompletionReason: DialogueModeSwitchReason | null = null;
+      let autoSwitchedDialogueMode: DialogueMode | undefined;
       if (body.status === 'answered') {
         if (questionRequest.tool_name === 'ExitPlanMode') {
-          updateSessionPlanModeForExitDecision({
+          const { planApproved } = updateSessionPlanModeForExitDecision({
             answers: body.answers,
             sessionId,
           });
+          if (planApproved) {
+            clarifyCompletionReason = 'plan_approved';
+          }
         }
         const answeredQuestions = JSON.parse(
           questionRequest.questions_json,
         ) as QuestionToolInput['questions'];
-        updateSessionClarificationState({
+        const { confirmedApplied } = updateSessionClarificationState({
           answers: body.answers,
           questions: answeredQuestions,
           sessionId,
         });
+        if (confirmedApplied) {
+          clarifyCompletionReason = 'clarification_confirmed';
+        }
+        if (clarifyCompletionReason) {
+          // 设计已完成（共识确认 / 计划批准）→ 澄清模式自动切换到编程模式。
+          // 必须在返回 HTTP 响应前同步落库：前端紧接着会用会话快照刷新本地模式，
+          // 异步写会让它读到旧的 clarify 值。
+          const autoSwitch = switchSessionDialogueModeToCoding({
+            reason: clarifyCompletionReason,
+            sessionId,
+          });
+          if (autoSwitch.switched) {
+            autoSwitchedDialogueMode = autoSwitch.dialogueMode;
+          }
+        }
         if (resumePayload) {
           const answerOutput = formatAnsweredQuestionOutput({
             questions: answeredQuestions,
@@ -278,7 +304,10 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       step.succeed(undefined, { requestId: body.requestId, status: body.status });
-      return reply.send({ ok: true });
+      return reply.send({
+        ok: true,
+        ...(autoSwitchedDialogueMode ? { dialogueMode: autoSwitchedDialogueMode } : {}),
+      });
     },
   );
 }
@@ -286,13 +315,13 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
 function updateSessionPlanModeForExitDecision(input: {
   answers: string[][];
   sessionId: string;
-}): void {
+}): { planApproved: boolean } {
   const session = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [input.sessionId],
   );
   if (!session) {
-    return;
+    return { planApproved: false };
   }
 
   const metadata = parseSessionMetadataJson(session.metadata_json);
@@ -302,42 +331,65 @@ function updateSessionPlanModeForExitDecision(input: {
     JSON.stringify(nextMetadata),
     input.sessionId,
   ]);
+  return { planApproved: shouldExit };
+}
+
+function toGrillOptions(
+  options: QuestionToolInput['questions'][number]['options'],
+): Array<{ description?: string; label: string; recommended?: boolean }> {
+  return options.map((option) => ({
+    label: option.label,
+    ...(option.description !== undefined ? { description: option.description } : {}),
+    ...(option.recommended === true ? { recommended: true } : {}),
+  }));
 }
 
 function updateSessionClarificationState(input: {
   answers: string[][];
   questions: QuestionToolInput['questions'];
   sessionId: string;
-}): void {
+}): { confirmedApplied: boolean } {
+  // 确认节点由引擎按依赖自动构造（`buildConfirmNode`），不接受模型自定义 id，
+  // 否则会与引擎节点重名。模型提供的确认题只用于同步选项文案（见下）。
+  const incomingConfirmQuestion = input.questions.find(
+    (question) => question.nodeId === CONFIRM_NODE_ID,
+  );
   const grillNodes = input.questions.flatMap((question) => {
     const nodeId = question.nodeId;
     if (typeof nodeId !== 'string' || nodeId.length === 0) return [];
+    if (nodeId === CONFIRM_NODE_ID) return [];
     return [
       {
         id: nodeId,
         question: question.question,
-        options: question.options.map((option) => ({
-          label: option.label,
-          ...(option.description !== undefined ? { description: option.description } : {}),
-          ...(option.recommended === true ? { recommended: true } : {}),
-        })),
+        options: toGrillOptions(question.options),
         dependsOn: [],
       },
     ];
   });
-  if (grillNodes.length === 0) return;
+  // 终局确认轮通常只带确认题（frontier 已空），不能因为没有新决策节点就提前返回。
+  if (grillNodes.length === 0 && incomingConfirmQuestion === undefined) {
+    return { confirmedApplied: false };
+  }
 
   const session = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [input.sessionId],
   );
-  if (!session) return;
+  if (!session) {
+    return { confirmedApplied: false };
+  }
 
   const metadata = parseSessionMetadataJson(session.metadata_json);
   const persisted =
     typeof metadata['clarificationState'] === 'string'
       ? parseGrillState(metadata['clarificationState'])
       : null;
+
+  // 只有确认题、却没有已建立的决策树：没有可确认的共识，保持原状。
+  if (grillNodes.length === 0 && persisted === null) {
+    return { confirmedApplied: false };
+  }
 
   let state =
     persisted ??
@@ -369,13 +421,39 @@ function updateSessionClarificationState(input: {
     if (typeof nodeId !== 'string' || nodeId.length === 0) return;
     const answer = (input.answers[index] ?? []).join(', ');
     if (answer.length === 0) return;
+    if (nodeId === CONFIRM_NODE_ID) {
+      // 确认节点的判定依据是「字面量 `confirmed` 或 recommended 项标签」，而模型给出的
+      // 措辞与推荐标记都不可控（可能漏标 recommended，也可能把 recommended 标在"需修改"
+      // 这类否定项上——后者会让驳回被当成确认）。因此：采纳模型给出的选项文案，但把
+      // recommended 强制归位到"肯定"选项上；若整题都没有肯定选项，则保留引擎默认选项。
+      const confirmOptions = toGrillOptions(question.options);
+      const affirmativeIndex = confirmOptions.findIndex((option) =>
+        isConfirmAffirmative(option.label),
+      );
+      if (affirmativeIndex >= 0) {
+        const normalizedOptions = confirmOptions.map((option, index) => {
+          const { recommended: _recommended, ...rest } = option;
+          return index === affirmativeIndex ? { ...rest, recommended: true } : rest;
+        });
+        state = {
+          ...state,
+          nodes: state.nodes.map((node) =>
+            node.id === CONFIRM_NODE_ID ? { ...node, options: normalizedOptions } : node,
+          ),
+        };
+      }
+    }
     state = applyAnswer(state, nodeId, answer);
   });
+
+  const confirmedApplied = state.confirmedAt !== undefined && persisted?.confirmedAt === undefined;
 
   sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
     JSON.stringify({ ...metadata, clarificationState: serializeGrillState(state) }),
     input.sessionId,
   ]);
+
+  return { confirmedApplied };
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {

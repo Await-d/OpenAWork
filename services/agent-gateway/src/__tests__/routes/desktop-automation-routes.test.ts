@@ -6,6 +6,7 @@ import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+process.env['DESKTOP_AUTOMATION'] = '0';
 
 const desktopAutomationMocks = vi.hoisted(() => ({
   back: vi.fn(),
@@ -115,6 +116,12 @@ describe('desktop automation routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ enabled: true, started: false });
+    expect(response.json().liveView).toMatchObject({
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser live view is disabled in this runtime',
+    });
     await app.close();
   });
 

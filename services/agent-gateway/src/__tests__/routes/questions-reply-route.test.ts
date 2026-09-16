@@ -73,11 +73,60 @@ vi.mock('../../runtime/request-workflow.js', () => ({
   }),
 }));
 
+import {
+  applyAnswer,
+  buildConfirmNode,
+  serializeGrillState,
+  createGrillState,
+} from '@openAwork/agent-core';
 import { questionsRoutes } from '../../routes/questions.js';
 
 const SESSION_ID = 'session-abc';
 const USER_ID = 'test-user';
 const REQUEST_ID = 'question-req-1';
+const CONFIRM_QUESTION_JSON = JSON.stringify([
+  {
+    header: '确认',
+    question: '以上共识是否确认？',
+    nodeId: '__grill_confirm__',
+    round: 1,
+    options: [
+      { label: '确认', description: '共识达成，进入执行', recommended: true },
+      { label: '需修改', description: '仍有未决项需要调整' },
+    ],
+  },
+]);
+
+/** 决策节点已全部结算、只剩确认节点的 grill 状态（终局确认轮的前置态）。 */
+function buildAwaitingConfirmStateJson(): string {
+  const state = createGrillState([
+    {
+      id: 'goal',
+      question: '目标是什么？',
+      options: [{ label: '改单文件', description: '范围清晰' }],
+      dependsOn: [],
+    },
+    buildConfirmNode(['goal']),
+  ]);
+  return serializeGrillState(applyAnswer(state, 'goal', '改单文件'));
+}
+
+/**
+ * 找出「设计完成切换模式」写入的那条会话元数据更新。
+ * 以审计字段 `dialogueModeSwitch` 为标识——clarificationState 的写入也可能
+ * 顺带带着当前 dialogueMode，只有模式切换才会写审计字段。
+ */
+function findAutoSwitchMetadataUpdate(): [string, unknown[]] | undefined {
+  return mocks.sqliteRun.mock.calls.find((call) => {
+    const [sql, params] = call as [unknown, unknown[]];
+    if (typeof sql !== 'string' || !sql.includes('UPDATE sessions SET metadata_json')) {
+      return false;
+    }
+    return (
+      typeof params?.[0] === 'string' && (params[0] as string).includes('"dialogueModeSwitch"')
+    );
+  }) as [string, unknown[]] | undefined;
+}
 
 const ANSWERED_PAYLOAD_JSON = JSON.stringify({
   clientRequestId: 'client-req-1',
@@ -128,6 +177,8 @@ describe('questions reply route', () => {
     mocks.publishSessionRunEvent.mockReset();
     mocks.setPersistedSessionStateStatus.mockReset();
     mocks.resumeAnsweredQuestionRequest.mockReset().mockResolvedValue(undefined);
+    mocks.parseSessionMetadataJson.mockReset().mockReturnValue({});
+    mocks.shouldExitPlanModeFromAnswers.mockReset().mockReturnValue(false);
   });
 
   it('synchronously sets state_status="running" before firing the resume when answered with payload', async () => {
@@ -411,6 +462,199 @@ describe('questions reply route', () => {
     expect(
       [...(state.nodes.find((node) => node.id === '__grill_confirm__')?.dependsOn ?? [])].sort(),
     ).toEqual(['goal', 'risk']);
+
+    await app.close();
+  });
+
+  it('澄清模式确认共识 → 会话自动切换到编程模式并在响应里回传 dialogueMode', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+    });
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['确认']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
+
+    const switchUpdate = findAutoSwitchMetadataUpdate();
+    expect(switchUpdate).toBeDefined();
+    const metadata = JSON.parse((switchUpdate as [string, unknown[]])[1][0] as string) as {
+      dialogueMode?: string;
+      dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
+    };
+    expect(metadata.dialogueMode).toBe('coding');
+    expect(metadata.dialogueModeSwitch).toMatchObject({
+      from: 'clarify',
+      reason: 'clarification_confirmed',
+      to: 'coding',
+    });
+
+    await app.close();
+  });
+
+  it('澄清模式选择"需修改" → 不切换对话模式', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+    });
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['需修改']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('非澄清模式（编程/程序员）确认共识时不切换对话模式', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'coding',
+    });
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['确认']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('team 澄清链条（clarificationIntent）确认共识时不切换对话模式', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationIntent: '把会话数据迁移到 Postgres',
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+    });
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['确认']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('模型把 recommended 标在「需修改」上 → 点「需修改」不得被当成确认', async () => {
+    const mislabeledConfirmJson = JSON.stringify([
+      {
+        header: '确认',
+        question: '以上共识是否确认？',
+        nodeId: '__grill_confirm__',
+        round: 2,
+        options: [
+          { label: '结束讨论', description: '继续澄清', recommended: true },
+          { label: '需修改', description: '还有未决项' },
+        ],
+      },
+    ]);
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+    });
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: mislabeledConfirmJson }),
+    );
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['结束讨论']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    // 选项里没有"肯定"文案（引擎默认的「确认」被保留）→ 该点击不构成确认。
+    expect(response.json()).toEqual({ ok: true });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('模型用自定义肯定措辞（是，开始实现）→ 该选项被归一为推荐项并可确认', async () => {
+    const customConfirmJson = JSON.stringify([
+      {
+        header: '确认',
+        question: '以上共识是否确认？',
+        nodeId: '__grill_confirm__',
+        round: 2,
+        options: [
+          { label: '是，开始实现', description: '进入实现' },
+          { label: '需修改', description: '还有未决项', recommended: true },
+        ],
+      },
+    ]);
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+    });
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: customConfirmJson }),
+    );
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['是，开始实现']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
+    expect(findAutoSwitchMetadataUpdate()).toBeDefined();
+
+    await app.close();
+  });
+
+  it('澄清模式批准 ExitPlanMode 计划 → 自动切换到编程模式', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({ dialogueMode: 'clarify' });
+    mocks.shouldExitPlanModeFromAnswers.mockReturnValueOnce(true);
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ tool_name: 'ExitPlanMode' }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['Start implementation']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
+
+    const switchUpdate = findAutoSwitchMetadataUpdate();
+    expect(switchUpdate).toBeDefined();
+    const metadata = JSON.parse((switchUpdate as [string, unknown[]])[1][0] as string) as {
+      dialogueModeSwitch?: { reason?: string };
+    };
+    expect(metadata.dialogueModeSwitch).toMatchObject({ reason: 'plan_approved' });
 
     await app.close();
   });

@@ -4,6 +4,7 @@ import { requireAuth } from '../infra/auth.js';
 import { parseBody } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { desktopAutomationManager } from '../tools/desktop-automation.js';
+import { browserLiveManager } from '../browser-live/manager.js';
 
 function classifyDesktopAutomationError(
   error: unknown,
@@ -54,11 +55,12 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
       const { step } = startRequestWorkflow(request, 'desktop-automation.status');
       try {
         const status = await desktopAutomationManager.status();
+        const liveView = await browserLiveManager.availability();
         step.succeed(undefined, {
           enabled: status.enabled,
           started: status.started,
         });
-        return reply.send(status);
+        return reply.send({ ...status, liveView });
       } catch (error) {
         return failDesktopAutomationRoute(request, reply, step, '读取桌面自动化状态', error);
       }
