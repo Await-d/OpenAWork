@@ -219,6 +219,9 @@ internal static class SessionMetadataSupport
                 case "dialogueMode":
                     ValidateEnumString(property.Value, BuildPath(pathPrefix, property.Name), issues, ["clarify", "coding", "programmer"]);
                     break;
+                case "permissionMode":
+                    ValidateEnumString(property.Value, BuildPath(pathPrefix, property.Name), issues, ["ask", "auto-edit", "yolo"]);
+                    break;
                 case "editSourceMessageId":
                 case "modelId":
                 case "parentSessionId":

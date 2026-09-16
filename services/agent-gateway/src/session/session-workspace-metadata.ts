@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { z } from 'zod';
 import { parseGrillState } from '@openAwork/agent-core';
 import { TEAM_RUNTIME_LAYER_ORDER, DEFAULT_FIXED_TEAM_MEMBER_SLOTS } from '@openAwork/shared';
@@ -129,6 +130,9 @@ const teamRoleInstanceSchema = z.object({
   displayName: z.string().min(1).max(200).nullable().optional(),
 });
 
+/** 会话级权限档位（权限阶梯）：`ask` 默认 / `auto-edit` 文件编辑自动放行 / `yolo` 全部免询问。 */
+const sessionPermissionModeSchema = z.enum(['ask', 'auto-edit', 'yolo']);
+
 const sessionMetadataPatchSchema = z
   .object({
     agentId: z.string().min(1).max(120).optional(),
@@ -151,6 +155,13 @@ const sessionMetadataPatchSchema = z
     reasoningEffort: z
       .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
       .optional(),
+    /**
+     * SSH 远程工作区：绑定的 SSH 连接 id。存在该字段时，`workingDirectory`
+     * 被解释为「远端主机上的绝对路径」，本地 workspace roots 校验不适用
+     * （参见 normalizePersistedSessionMetadata 的 SSH 分支）。
+     * 显式传 `null` 表示清除绑定（PATCH 时同时解除会话↔连接绑定）。
+     */
+    sshConnectionId: z.string().min(1).max(200).nullable().optional(),
     teamDefinition: teamDefinitionSchema.optional(),
     teamInit: teamInitStateSchema.optional(),
     teamRoleInstance: teamRoleInstanceSchema.optional(),
@@ -160,6 +171,8 @@ const sessionMetadataPatchSchema = z
     variant: z.string().min(1).max(80).optional(),
     webSearchEnabled: z.boolean().optional(),
     workingDirectory: z.string().optional(),
+    // 权限阶梯的规范键；保留布尔 yoloMode 作为旧写入方的兼容入口（二者在写路径互为投影）。
+    permissionMode: sessionPermissionModeSchema.optional(),
     yoloMode: z.boolean().optional(),
   })
   .strict();
@@ -168,12 +181,63 @@ export function validateSessionMetadataPatch(metadata: Record<string, unknown>) 
   return sessionMetadataPatchSchema.safeParse(metadata);
 }
 
+/**
+ * 会话绑定的 SSH 连接 id。存在即表示该会话运行在 SSH 远程工作区模式下：
+ * `workingDirectory` 语义为「远端绝对路径」，本地 workspace roots 校验不适用。
+ */
+export function extractSessionSshConnectionId(metadata: Record<string, unknown>): string | null {
+  const value = metadata['sshConnectionId'];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * 远端（POSIX）工作目录规范化：仅接受绝对路径；返回 posix 归一化结果
+ * （去掉尾斜杠、折叠 `.`/`..`）。非法输入返回 null，由调用方按「清空
+ * workingDirectory」处理。
+ */
+export function normalizeSshRemoteWorkingDirectory(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) {
+    return null;
+  }
+  const normalized = path.posix.normalize(trimmed);
+  if (!normalized.startsWith('/')) {
+    return null;
+  }
+  if (normalized.length > 1 && normalized.endsWith('/')) {
+    return normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+/**
+ * 持久化 metadata 的读路径归一化：只收敛 workingDirectory，刻意不做权限档位归一化。
+ *
+ * 历史会话可能只带布尔 `yoloMode`（也可能两个键都缺席），读取时保持原样、不回写、
+ * 不补写 `permissionMode`；需要档位时统一交给 `resolveSessionPermissionMode`
+ * （@openAwork/agent-core）的兜底解析，避免读路径篡改持久化数据。
+ */
 export function normalizePersistedSessionMetadata(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
   const workingDirectory = metadata['workingDirectory'];
   if (typeof workingDirectory !== 'string') {
     return metadata;
+  }
+
+  // SSH 远程工作区：workingDirectory 是远端绝对路径，跳过本地 roots 校验，
+  // 仅做 POSIX 归一化。
+  if (extractSessionSshConnectionId(metadata)) {
+    const normalizedRemote = normalizeSshRemoteWorkingDirectory(workingDirectory);
+    if (normalizedRemote === null) {
+      const nextMetadataWithoutRemote = { ...metadata };
+      delete nextMetadataWithoutRemote['workingDirectory'];
+      return nextMetadataWithoutRemote;
+    }
+    if (normalizedRemote === workingDirectory) {
+      return metadata;
+    }
+    return { ...metadata, workingDirectory: normalizedRemote };
   }
 
   const safeWorkingDirectory = validateWorkspacePath(workingDirectory);
@@ -219,6 +283,21 @@ export function normalizeIncomingSessionMetadata(metadata: Record<string, unknow
     return { metadata };
   }
 
+  // SSH 远程工作区：接受远端绝对路径（POSIX），不要求落在本地 workspace roots。
+  if (extractSessionSshConnectionId(metadata)) {
+    const normalizedRemote = normalizeSshRemoteWorkingDirectory(workingDirectory);
+    if (normalizedRemote === null) {
+      return { metadata, workingDirectory: null };
+    }
+    if (normalizedRemote === workingDirectory) {
+      return { metadata, workingDirectory: normalizedRemote };
+    }
+    return {
+      metadata: { ...metadata, workingDirectory: normalizedRemote },
+      workingDirectory: normalizedRemote,
+    };
+  }
+
   const safeWorkingDirectory = validateWorkspacePath(workingDirectory);
   if (!safeWorkingDirectory) {
     return { metadata, workingDirectory: null };
@@ -234,13 +313,56 @@ export function normalizeIncomingSessionMetadata(metadata: Record<string, unknow
   };
 }
 
+/**
+ * 权限档位写路径规范化：`permissionMode` 是规范键，布尔 `yoloMode` 是它的派生投影。
+ *
+ * `patchMetadata`（本次 PATCH 的原始字段）代表用户本次的显式意图，必须先于合并结果判定，
+ * 否则旧客户端的布尔写入永远无法把已持久化的 `yolo` 关掉。优先级：
+ * 1. patch 携带合法 `permissionMode` → 以 patch 为准，回写 `yoloMode = permissionMode === 'yolo'`；
+ * 2. 否则 patch 携带布尔 `yoloMode` → 以 patch 为准，补齐 `permissionMode = yoloMode ? 'yolo' : 'ask'`
+ *    （true 可升级为 `yolo`，false 必须能降级为 `ask`）；
+ * 3. 否则合并结果含合法 `permissionMode` → 以它为准回写 `yoloMode`（`yolo` → true，其余 → false）；
+ * 4. 否则合并结果含布尔 `yoloMode` → 按它补齐 `permissionMode`（true → `yolo`，false → `ask`）；
+ * 5. 两者都缺席时保持缺席——不凭空写入 `ask`，避免给从未表达过权限档位的会话留下印记。
+ */
+function canonicalizeSessionPermissionMode(
+  metadata: Record<string, unknown>,
+  patchMetadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const patchPermissionMode = sessionPermissionModeSchema.safeParse(
+    patchMetadata['permissionMode'],
+  );
+  if (patchPermissionMode.success) {
+    return { ...metadata, yoloMode: patchPermissionMode.data === 'yolo' };
+  }
+
+  const patchYoloMode = patchMetadata['yoloMode'];
+  if (typeof patchYoloMode === 'boolean') {
+    return { ...metadata, permissionMode: patchYoloMode ? 'yolo' : 'ask' };
+  }
+
+  const mergedPermissionMode = sessionPermissionModeSchema.safeParse(metadata['permissionMode']);
+  if (mergedPermissionMode.success) {
+    return { ...metadata, yoloMode: mergedPermissionMode.data === 'yolo' };
+  }
+
+  const mergedYoloMode = metadata['yoloMode'];
+  if (typeof mergedYoloMode === 'boolean') {
+    return { ...metadata, permissionMode: mergedYoloMode ? 'yolo' : 'ask' };
+  }
+
+  return metadata;
+}
+
 export function mergeSessionMetadataForUpdate(
   currentMetadata: Record<string, unknown>,
   patchMetadata: Record<string, unknown>,
 ): { metadata: Record<string, unknown>; workingDirectory?: string | null } {
   const sanitizedCurrentMetadata = normalizePersistedSessionMetadata(currentMetadata);
   const mergedMetadata = { ...sanitizedCurrentMetadata, ...patchMetadata };
-  return normalizeIncomingSessionMetadata(mergedMetadata);
+  return normalizeIncomingSessionMetadata(
+    canonicalizeSessionPermissionMode(mergedMetadata, patchMetadata),
+  );
 }
 
 export function extractSessionWorkingDirectory(metadata: Record<string, unknown>): string | null {

@@ -609,6 +609,109 @@ public sealed class SessionsEndpointTests : IClassFixture<GatewayWebApplicationF
     }
 
     [Fact]
+    public async Task Patch_ShouldAcceptPermissionModeMetadata()
+    {
+        const string userId = "user-sessions-permission-mode-valid";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var createResponse = await client.PostAsJsonAsync("/sessions", new { });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
+
+        var patchResponse = await client.PatchAsJsonAsync($"/sessions/{sessionId}", new
+        {
+            metadata = new
+            {
+                permissionMode = "auto-edit",
+            },
+        });
+
+        patchResponse.EnsureSuccessStatusCode();
+
+        var getResponse = await client.GetAsync($"/sessions/{sessionId}");
+        var getPayload = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
+        getResponse.EnsureSuccessStatusCode();
+        Assert.Contains("\"permissionMode\":\"auto-edit\"", getPayload.GetProperty("session").GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Patch_ShouldRejectInvalidPermissionModeMetadata()
+    {
+        const string userId = "user-sessions-permission-mode-invalid";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var createResponse = await client.PostAsJsonAsync("/sessions", new { });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
+
+        var patchResponse = await client.PatchAsJsonAsync($"/sessions/{sessionId}", new
+        {
+            metadata = new
+            {
+                permissionMode = "bogus",
+            },
+        });
+        var payload = await patchResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, patchResponse.StatusCode);
+        Assert.Equal("Invalid metadata", payload.GetProperty("error").GetString());
+        Assert.Contains("permissionMode", payload.GetProperty("issues").ToString());
+    }
+
+    [Fact]
+    public async Task Patch_ShouldStillAcceptYoloModeMetadata()
+    {
+        const string userId = "user-sessions-yolo-mode-legacy";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var createResponse = await client.PostAsJsonAsync("/sessions", new { });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
+
+        var patchResponse = await client.PatchAsJsonAsync($"/sessions/{sessionId}", new
+        {
+            metadata = new
+            {
+                yoloMode = true,
+            },
+        });
+
+        patchResponse.EnsureSuccessStatusCode();
+
+        var getResponse = await client.GetAsync($"/sessions/{sessionId}");
+        var getPayload = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
+        getResponse.EnsureSuccessStatusCode();
+        Assert.Contains("\"yoloMode\":true", getPayload.GetProperty("session").GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Patch_ShouldStillRejectUnknownMetadataKeys()
+    {
+        const string userId = "user-sessions-unknown-metadata-patch";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var createResponse = await client.PostAsJsonAsync("/sessions", new { });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
+
+        var patchResponse = await client.PatchAsJsonAsync($"/sessions/{sessionId}", new
+        {
+            metadata = new
+            {
+                unexpected = "value",
+            },
+        });
+        var payload = await patchResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, patchResponse.StatusCode);
+        Assert.Equal("Invalid metadata", payload.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task Delete_ShouldBlockNonIdleSessions_AndRemoveTreeWhenIdle()
     {
         const string userId = "user-sessions-delete";
