@@ -41,6 +41,22 @@ import { publishSessionRunEvent } from './session-run-events.js';
 /** Max bytes retained in `output_tail`. UTF-8 safe truncation enforced. */
 export const TERMINAL_OUTPUT_TAIL_BYTES = 8 * 1024;
 
+/**
+ * Max bytes retained in the per-terminal replay ring buffer. Reconnect
+ * snapshots replay this whole buffer; the default of 512 KiB bounds memory
+ * for long-lived terminals. Override via OPENAWORK_TERMINAL_RING_BUFFER_BYTES.
+ */
+export const TERMINAL_OUTPUT_RING_BYTES: number = resolveTerminalOutputRingBytes();
+
+function resolveTerminalOutputRingBytes(): number {
+  const DEFAULT_RING_BYTES = 512 * 1024;
+  const raw = process.env['OPENAWORK_TERMINAL_RING_BUFFER_BYTES'];
+  if (raw === undefined || raw === null || raw.trim() === '') return DEFAULT_RING_BYTES;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RING_BYTES;
+  return Math.floor(parsed);
+}
+
 /** Min interval between successive terminal_output broadcasts per terminal. */
 const OUTPUT_EMIT_THROTTLE_MS = 100;
 
@@ -75,15 +91,29 @@ export interface RegisterTerminalInput {
   terminalId?: string;
 }
 
+interface ByteChunkBuffer {
+  chunks: Buffer[];
+  bytes: number;
+}
+
 interface LiveTerminalState {
   abortController?: AbortController;
+  sessionId: string;
+  clientRequestId?: string;
   /** Tail emitter throttle bookkeeping. */
   lastEmitMs: number;
   /** Last byte count emitted, so we can skip no-op emits. */
   lastEmittedBytes: number;
-  /** Last buffered tail awaiting emit (post-throttle flush). */
-  pendingTail?: string;
-  pendingBytes: number;
+  /** Incremental text accumulated since the last broadcast (merged, ordered). */
+  pendingDelta: string;
+  /** Monotonic byte counter for the whole terminal lifetime (the `seq`). */
+  totalBytes: number;
+  /** Byte length of the last legacy cumulative snapshot; drives delta extraction. */
+  lastCumulativeBytes: number;
+  /** Replay buffer holding the last TERMINAL_OUTPUT_RING_BYTES bytes. */
+  ring: ByteChunkBuffer;
+  /** Small buffer holding the last TERMINAL_OUTPUT_TAIL_BYTES bytes. */
+  tail: ByteChunkBuffer;
   trailingTimer: NodeJS.Timeout | null;
   /** Process pid once known, for fallback kill path. */
   pid?: number;
@@ -92,6 +122,56 @@ interface LiveTerminalState {
 }
 
 const liveTerminals = new Map<string, LiveTerminalState>();
+
+function createByteChunkBuffer(): ByteChunkBuffer {
+  return { chunks: [], bytes: 0 };
+}
+
+/**
+ * Keeps the first retained byte on a UTF-8 code-point boundary after the
+ * head has been dropped. `0b10xxxxxx` marks continuation bytes.
+ */
+function snapChunkHeadToUtf8Boundary(target: ByteChunkBuffer): void {
+  const head = target.chunks[0];
+  if (head === undefined || head.length === 0) return;
+  let advance = 0;
+  while (advance < head.length && (head[advance]! & 0b1100_0000) === 0b1000_0000) {
+    advance += 1;
+  }
+  if (advance > 0) {
+    target.chunks[0] = head.subarray(advance);
+    target.bytes -= advance;
+  }
+}
+
+function appendByteChunk(target: ByteChunkBuffer, chunk: Buffer, maxBytes: number): void {
+  if (chunk.length === 0) return;
+  target.chunks.push(chunk);
+  target.bytes += chunk.length;
+  while (target.bytes > maxBytes && target.chunks.length > 0) {
+    const over = target.bytes - maxBytes;
+    const head = target.chunks[0]!;
+    if (head.length <= over) {
+      target.chunks.shift();
+      target.bytes -= head.length;
+      continue;
+    }
+    let start = over;
+    while (start < head.length && (head[start]! & 0b1100_0000) === 0b1000_0000) {
+      start += 1;
+    }
+    target.chunks[0] = head.subarray(start);
+    target.bytes -= start;
+  }
+  snapChunkHeadToUtf8Boundary(target);
+}
+
+function byteChunkText(target: ByteChunkBuffer): string {
+  if (target.chunks.length === 0) return '';
+  const head = target.chunks[0]!;
+  if (target.chunks.length === 1) return head.toString('utf-8');
+  return Buffer.concat(target.chunks, target.bytes).toString('utf-8');
+}
 
 interface SessionTerminalRow {
   terminal_id: string;
@@ -261,9 +341,15 @@ export function registerTerminal(input: RegisterTerminalInput): SessionTerminalR
 
   const state: LiveTerminalState = {
     ...(input.abortController ? { abortController: input.abortController } : {}),
+    sessionId: input.sessionId,
+    ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     lastEmitMs: 0,
     lastEmittedBytes: 0,
-    pendingBytes: 0,
+    pendingDelta: '',
+    totalBytes: 0,
+    lastCumulativeBytes: 0,
+    ring: createByteChunkBuffer(),
+    tail: createByteChunkBuffer(),
     trailingTimer: null,
     closed: isTerminalClosed(initialStatus),
   };
@@ -341,72 +427,118 @@ export function setTerminalPid(terminalId: string, pid: number | undefined): voi
 }
 
 /**
- * Update the running output snapshot. `snapshot` is the **cumulative**
- * stdout+stderr text since process start (matching bash-tools'
- * onPartialOutput contract). We compute byte length, store the trailing
- * tail, and broadcast a throttled terminal_output event.
+ * Append a fully-decoded increment to the ring/tail buffers, bump the
+ * monotonic byte counter, persist the fresh tail, and schedule a throttled
+ * broadcast. Throttled windows merge multiple deltas into one ordered chunk.
  */
-export function appendTerminalOutput(terminalId: string, snapshot: string): void {
-  const state = liveTerminals.get(terminalId);
-  if (!state || state.closed) return;
+function appendDeltaInternal(terminalId: string, state: LiveTerminalState, delta: Buffer): void {
+  if (delta.length === 0) return;
+  state.totalBytes += delta.length;
+  appendByteChunk(state.ring, delta, TERMINAL_OUTPUT_RING_BYTES);
+  appendByteChunk(state.tail, delta, TERMINAL_OUTPUT_TAIL_BYTES);
+  const deltaText = delta.toString('utf-8');
+  state.pendingDelta =
+    state.pendingDelta.length === 0 ? deltaText : `${state.pendingDelta}${deltaText}`;
+
   const now = Date.now();
-  const totalBytes = Buffer.byteLength(snapshot, 'utf-8');
-  const tail = tailUtf8(snapshot, TERMINAL_OUTPUT_TAIL_BYTES);
-  // Always persist the latest tail so list endpoints see fresh data even
-  // if throttled emits are pending.
   sqliteRun(
     `UPDATE session_terminals
        SET output_bytes_total = MAX(output_bytes_total, ?),
            output_tail = ?,
            last_activity_ms = ?
      WHERE terminal_id = ?`,
-    [totalBytes, tail, now, terminalId],
+    [state.totalBytes, byteChunkText(state.tail), now, terminalId],
   );
 
-  state.pendingTail = tail;
-  state.pendingBytes = totalBytes;
-  const elapsed = now - state.lastEmitMs;
+  scheduleEmit(terminalId, state);
+}
 
-  // Look up session_id + client_request_id once for the emit; cheap because
-  // the row was just written above.
-  const row = sqliteGet<{ session_id: string; client_request_id: string | null }>(
-    'SELECT session_id, client_request_id FROM session_terminals WHERE terminal_id = ?',
-    [terminalId],
-  );
-  if (!row) return;
-
-  const flushEmit = () => {
-    if (state.pendingTail === undefined) return;
-    if (state.pendingBytes === state.lastEmittedBytes) {
-      state.pendingTail = undefined;
-      return;
-    }
-    state.lastEmitMs = Date.now();
-    state.lastEmittedBytes = state.pendingBytes;
-    const chunk: StreamTerminalOutputChunk = {
-      type: 'terminal_output',
-      terminalId,
-      outputTail: state.pendingTail,
-      outputBytesTotal: state.pendingBytes,
-      occurredAt: state.lastEmitMs,
-    };
-    state.pendingTail = undefined;
-    emitRunEvent(row.session_id, row.client_request_id ?? undefined, chunk);
+function flushEmit(terminalId: string, state: LiveTerminalState): void {
+  if (state.closed) return;
+  if (state.pendingDelta.length === 0 && state.totalBytes === state.lastEmittedBytes) return;
+  state.lastEmitMs = Date.now();
+  state.lastEmittedBytes = state.totalBytes;
+  const chunk: StreamTerminalOutputChunk = {
+    type: 'terminal_output',
+    terminalId,
+    seq: state.totalBytes,
+    data: state.pendingDelta,
+    outputTail: byteChunkText(state.tail),
+    outputBytesTotal: state.totalBytes,
+    occurredAt: state.lastEmitMs,
   };
+  state.pendingDelta = '';
+  emitRunEvent(state.sessionId, state.clientRequestId, chunk);
+}
 
+function scheduleEmit(terminalId: string, state: LiveTerminalState): void {
+  const elapsed = Date.now() - state.lastEmitMs;
   if (elapsed >= OUTPUT_EMIT_THROTTLE_MS) {
     if (state.trailingTimer) {
       clearTimeout(state.trailingTimer);
       state.trailingTimer = null;
     }
-    flushEmit();
+    flushEmit(terminalId, state);
     return;
   }
   if (state.trailingTimer) return; // already scheduled
   state.trailingTimer = setTimeout(() => {
     state.trailingTimer = null;
-    flushEmit();
+    flushEmit(terminalId, state);
   }, OUTPUT_EMIT_THROTTLE_MS - elapsed);
+}
+
+/**
+ * PTY incremental path. `delta` is the text produced by this chunk only;
+ * it is appended to the ring buffer, the byte counter (`seq`) advances and
+ * a throttled `terminal_output` broadcast is scheduled.
+ */
+export function appendTerminalOutputDelta(terminalId: string, delta: string): void {
+  const state = liveTerminals.get(terminalId);
+  if (!state || state.closed) return;
+  appendDeltaInternal(terminalId, state, Buffer.from(delta, 'utf-8'));
+}
+
+/**
+ * Legacy cumulative path (still called by bash-tools). `snapshot` is the
+ * cumulative stdout+stderr text since process start; we internally diff it
+ * against the previous snapshot to obtain a delta and route it through the
+ * incremental path above. If the snapshot shrinks (new process / reset) the
+ * whole snapshot is re-sent.
+ */
+export function appendTerminalOutput(terminalId: string, snapshot: string): void {
+  const state = liveTerminals.get(terminalId);
+  if (!state || state.closed) return;
+  const snapshotBytes = Buffer.byteLength(snapshot, 'utf-8');
+  const previousBytes = state.lastCumulativeBytes;
+  state.lastCumulativeBytes = snapshotBytes;
+  if (snapshotBytes === previousBytes) return;
+  if (snapshotBytes < previousBytes) {
+    appendDeltaInternal(terminalId, state, Buffer.from(snapshot, 'utf-8'));
+    return;
+  }
+  appendDeltaInternal(
+    terminalId,
+    state,
+    Buffer.from(snapshot, 'utf-8').subarray(previousBytes),
+  );
+}
+
+/**
+ * Reconnect snapshot: the whole retained ring buffer plus the current
+ * monotonic `seq`. Returns null when the terminal is no longer live (the
+ * route then falls back to the persisted `outputTail`).
+ */
+export function getTerminalOutputSnapshot(
+  terminalId: string,
+): { seq: number; data: string; outputBytesTotal: number } | null {
+  const state = liveTerminals.get(terminalId);
+  if (!state) return null;
+  return {
+    seq: state.totalBytes,
+    data: byteChunkText(state.ring),
+    outputBytesTotal: state.totalBytes,
+  };
 }
 
 export interface MarkTerminalExitedInput {
@@ -461,7 +593,7 @@ export function markTerminalExited(input: MarkTerminalExitedInput): void {
       clearTimeout(state.trailingTimer);
       state.trailingTimer = null;
     }
-    state.pendingTail = undefined;
+    state.pendingDelta = '';
     // Keep the entry in liveTerminals for one tick so a late
     // appendTerminalOutput from spawnAndCollect drains as a no-op.
     setImmediate(() => liveTerminals.delete(input.terminalId));

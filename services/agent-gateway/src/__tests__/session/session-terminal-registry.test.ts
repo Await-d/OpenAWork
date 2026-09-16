@@ -8,8 +8,10 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StreamTerminalOutputChunk } from '@openAwork/shared';
 import type * as DbModule from '../../infra/db.js';
 import type * as RegistryModule from '../../session/session-terminal-registry.js';
+import type * as RunEventsModule from '../../session/session-run-events.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -20,6 +22,7 @@ vi.mock('../../session/session-run-events.js', () => ({
 
 let dbModule: typeof DbModule;
 let registry: typeof RegistryModule;
+let runEvents: typeof RunEventsModule;
 
 const USER_ID = 'u-term-1';
 const OTHER_USER_ID = 'u-term-2';
@@ -43,6 +46,7 @@ function seedUserAndSession(): void {
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   registry = await import('../../session/session-terminal-registry.js');
+  runEvents = await import('../../session/session-run-events.js');
   await dbModule.connectDb();
   await dbModule.migrate();
   seedUserAndSession();
@@ -362,5 +366,122 @@ describe('deleteTerminalRecord', () => {
     });
     expect(result).toEqual({ found: true, deleted: true, refusedRunning: false });
     expect(registry.getTerminal(record.terminalId, USER_ID)).toBeNull();
+  });
+});
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function outputChunks(): StreamTerminalOutputChunk[] {
+  return vi
+    .mocked(runEvents.publishSessionRunEvent)
+    .mock.calls.map((call) => call[1])
+    .filter(
+      (event): event is StreamTerminalOutputChunk =>
+        typeof event === 'object' &&
+        event !== null &&
+        (event as { type?: unknown }).type === 'terminal_output',
+    );
+}
+
+function registerProbe(command = 'probe'): RegistryModule.SessionTerminalRecord {
+  return registry.registerTerminal({
+    sessionId: SESSION_ID,
+    userId: USER_ID,
+    toolName: 'bash',
+    kind: 'foreground',
+    command,
+    cwd: '/tmp',
+  });
+}
+
+describe('terminal output ring buffer and seq', () => {
+  beforeEach(() => {
+    vi.mocked(runEvents.publishSessionRunEvent).mockClear();
+  });
+
+  it('emits incrementing seq with incremental data and merges throttled deltas in order', async () => {
+    const record = registerProbe();
+    registry.appendTerminalOutputDelta(record.terminalId, 'alpha');
+    registry.appendTerminalOutputDelta(record.terminalId, 'beta');
+    registry.appendTerminalOutputDelta(record.terminalId, 'gamma');
+    await delay(160);
+
+    const chunks = outputChunks();
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    const seqs = chunks.map((chunk) => chunk.seq ?? 0);
+    for (let i = 1; i < seqs.length; i += 1) {
+      expect(seqs[i]).toBeGreaterThan(seqs[i - 1]!);
+    }
+    expect(chunks.map((chunk) => chunk.data ?? '').join('')).toBe('alphabetagamma');
+    const last = chunks[chunks.length - 1]!;
+    expect(last.seq).toBe(last.outputBytesTotal);
+    expect(last.outputBytesTotal).toBe(Buffer.byteLength('alphabetagamma', 'utf-8'));
+    expect(last.outputTail).toBe('alphabetagamma');
+  });
+
+  it('preserves order when several deltas land inside one throttle window', async () => {
+    const record = registerProbe();
+    registry.appendTerminalOutputDelta(record.terminalId, 'first-');
+    registry.appendTerminalOutputDelta(record.terminalId, 'second-');
+    registry.appendTerminalOutputDelta(record.terminalId, 'third');
+    await delay(160);
+
+    const joined = outputChunks()
+      .map((chunk) => chunk.data ?? '')
+      .join('');
+    expect(joined).toBe('first-second-third');
+    const snapshot = registry.getTerminalOutputSnapshot(record.terminalId);
+    expect(snapshot?.data).toBe('first-second-third');
+    expect(snapshot?.outputBytesTotal).toBe(Buffer.byteLength('first-second-third', 'utf-8'));
+  });
+
+  it('returns null from getTerminalOutputSnapshot for an unknown terminal', () => {
+    expect(registry.getTerminalOutputSnapshot('term_missing')).toBeNull();
+  });
+
+  it('bounds the ring buffer and snaps the dropped head to a utf-8 boundary', () => {
+    const record = registerProbe();
+    const ringBytes = registry.TERMINAL_OUTPUT_RING_BYTES;
+    const unit = '€';
+    const unitBytes = Buffer.byteLength(unit, 'utf-8');
+    const content = unit.repeat(Math.ceil((ringBytes + 2) / unitBytes));
+    registry.appendTerminalOutputDelta(record.terminalId, content);
+
+    const snapshot = registry.getTerminalOutputSnapshot(record.terminalId);
+    expect(snapshot).not.toBeNull();
+    expect(Buffer.byteLength(snapshot!.data, 'utf-8')).toBeLessThanOrEqual(ringBytes);
+    expect(snapshot!.data).not.toContain('\uFFFD');
+    expect(snapshot!.data.startsWith(unit)).toBe(true);
+    expect(snapshot!.data.endsWith(unit)).toBe(true);
+    expect(snapshot!.seq).toBe(Buffer.byteLength(content, 'utf-8'));
+  });
+
+  it('converts the legacy cumulative snapshot path into ordered deltas', async () => {
+    const record = registerProbe();
+    registry.appendTerminalOutput(record.terminalId, 'one\n');
+    registry.appendTerminalOutput(record.terminalId, 'one\ntwo\n');
+    registry.appendTerminalOutput(record.terminalId, 'one\ntwo\nthree\n');
+    await delay(160);
+
+    const expected = 'one\ntwo\nthree\n';
+    expect(
+      outputChunks()
+        .map((chunk) => chunk.data ?? '')
+        .join(''),
+    ).toBe(expected);
+    const fetched = registry.getTerminal(record.terminalId, USER_ID);
+    expect(fetched?.outputBytesTotal).toBe(Buffer.byteLength(expected, 'utf-8'));
+    expect(fetched?.outputTail).toBe(expected);
+    expect(registry.getTerminalOutputSnapshot(record.terminalId)?.data).toBe(expected);
+  });
+
+  it('re-sends the whole snapshot when the cumulative text shrinks', () => {
+    const record = registerProbe();
+    registry.appendTerminalOutput(record.terminalId, 'abcdef');
+    registry.appendTerminalOutput(record.terminalId, 'xy');
+
+    const snapshot = registry.getTerminalOutputSnapshot(record.terminalId);
+    expect(snapshot?.data).toBe('abcdefxy');
+    expect(snapshot?.seq).toBe(Buffer.byteLength('abcdefxy', 'utf-8'));
   });
 });

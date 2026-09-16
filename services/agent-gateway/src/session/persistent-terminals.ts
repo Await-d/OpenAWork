@@ -7,38 +7,41 @@
  * an editor-style integrated terminal.
  *
  * Lifecycle:
- *   spawn() → status='running' (PTY-less, but stdio piped both ways)
+ *   spawn() → status='running'
  *           → status flips between 'running' (active stdout) and 'idle'
  *             (no output for >300ms, prompt visible, ready for input)
  *           → close() / process exit / abort → 'exited' | 'killed'
  *
- * NOTE: This is intentionally **not** a real PTY. Programs that need a
- * controlling tty (vim, top, htop, less with paging, anything that
- * checks `isatty(0)`) will degrade or refuse. For the chat-style
- * "let me re-run a quick command" workflow, plain pipes are enough,
- * and they avoid pulling in `node-pty` (a native addon with awkward
- * cross-platform prebuilds).
+ * Backend selection is delegated to `pty-backend.ts`: on Bun (non-Windows)
+ * we allocate a real PTY so `isatty(0)`, `vim`/`top`/`htop` and resize-aware
+ * TUIs work; under Node and on Windows we degrade to piped stdio (input /
+ * output still flow, but resize is a no-op). This avoids pulling in
+ * `node-pty` (a native addon with awkward cross-platform prebuilds).
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import {
-  appendTerminalOutput,
+  getTerminalOutputSnapshot,
   markTerminalExited,
   registerTerminal,
   setTerminalPid,
+  appendTerminalOutputDelta,
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
+import {
+  spawnTerminalProcess,
+  type TerminalProcess,
+} from './pty-backend.js';
 import { resolveShellChoiceForPlatform } from '../tools/shell-choice.js';
 
 interface PersistentEntry {
   terminalId: string;
   sessionId: string;
   userId: string;
-  child: ChildProcess;
+  process: TerminalProcess;
   cwd: string;
-  /** Cumulative stdout+stderr buffer (capped at MAX_BYTES). */
-  buffer: Buffer[];
-  totalBytes: number;
+  /** Decodes PTY bytes across chunk boundaries so multi-byte runes survive. */
+  decoder: StringDecoder;
   /** True after we've emitted the exit event to the registry. */
   closed: boolean;
   /**
@@ -50,7 +53,10 @@ interface PersistentEntry {
 }
 
 const persistentByTerminalId = new Map<string, PersistentEntry>();
-const MAX_BYTES = 256 * 1024; // keep last 256KB so a long session doesn't OOM
+
+/** Initial PTY geometry; the frontend immediately sends a fit-resize. */
+const DEFAULT_TERMINAL_COLS = 80;
+const DEFAULT_TERMINAL_ROWS = 24;
 
 /**
  * Per-session cap on concurrently-live persistent terminals. Each spawn holds
@@ -108,13 +114,8 @@ function getShell(): { shell: string; args: string[] } {
   return { shell: choice.shell, args: ['-i'] };
 }
 
-function appendToBuffer(entry: PersistentEntry, chunk: Buffer): void {
-  entry.buffer.push(chunk);
-  entry.totalBytes += chunk.length;
-  while (entry.totalBytes > MAX_BYTES && entry.buffer.length > 1) {
-    const dropped = entry.buffer.shift();
-    if (dropped) entry.totalBytes -= dropped.length;
-  }
+function terminalSnapshotText(terminalId: string): string {
+  return getTerminalOutputSnapshot(terminalId)?.data ?? '';
 }
 
 export interface SpawnPersistentTerminalInput {
@@ -146,18 +147,61 @@ export function spawnPersistentTerminal(
   }
 
   const { shell, args } = getShell();
-  let child: ChildProcess;
+  const abortController = new AbortController();
+  const decoder = new StringDecoder('utf8');
+  let entry: PersistentEntry | undefined;
+
+  const onData = (chunk: Uint8Array): void => {
+    if (entry === undefined) return;
+    const text = entry.decoder.write(Buffer.from(chunk));
+    if (text.length > 0) appendTerminalOutputDelta(entry.terminalId, text);
+  };
+
+  const onError = (error: Error): void => {
+    if (entry === undefined || entry.closed) return;
+    entry.closed = true;
+    persistentByTerminalId.delete(entry.terminalId);
+    markTerminalExited({
+      terminalId: entry.terminalId,
+      status: 'spawn_error',
+      finalSnapshot: `${terminalSnapshotText(entry.terminalId)}\n[spawn error] ${error.message}`,
+    });
+  };
+
+  const onExit = (code: number | null, signal: string | null): void => {
+    if (entry === undefined || entry.closed) return;
+    entry.closed = true;
+    persistentByTerminalId.delete(entry.terminalId);
+    const exitCode = code ?? (signal ? 128 : 0);
+    // 'killed' covers both kill API calls (which abort the controller)
+    // and user-initiated panel close. 'exited' is the natural shell
+    // exit (Ctrl-D, `exit`, parent terminated).
+    const wasKilled = abortController.signal.aborted || entry.userInitiatedClose;
+    markTerminalExited({
+      terminalId: entry.terminalId,
+      status: wasKilled ? 'killed' : 'exited',
+      exitCode,
+      finalSnapshot: terminalSnapshotText(entry.terminalId),
+    });
+  };
+
+  let terminalProcess: TerminalProcess;
   try {
-    child = spawn(shell, args, {
+    terminalProcess = spawnTerminalProcess({
+      shell,
+      args,
       cwd: input.cwd,
       env: { ...process.env, TERM: 'xterm-256color' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
+      cols: DEFAULT_TERMINAL_COLS,
+      rows: DEFAULT_TERMINAL_ROWS,
+      onData,
+      onExit,
+      onError,
     });
   } catch (error) {
-    // spawn() can throw synchronously for invalid cwd / shell on some
-    // Node versions. Re-throw with a readable message so the route can
-    // surface it to the user instead of crashing the request handler.
+    // spawn can throw synchronously for an invalid cwd / shell. Re-throw
+    // with a readable message so the route can surface it to the user
+    // instead of crashing the request handler.
     throw new Error(
       `Failed to spawn shell '${shell}' in '${input.cwd}': ${
         error instanceof Error ? error.message : String(error)
@@ -173,7 +217,6 @@ export function spawnPersistentTerminal(
         ? '(交互终端)'
         : '(持久终端)';
 
-  const abortController = new AbortController();
   const record = registerTerminal({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -188,78 +231,27 @@ export function spawnPersistentTerminal(
       persistent: true,
       source: input.source,
       shell,
+      backend: terminalProcess.backend,
     },
   });
 
-  const entry: PersistentEntry = {
+  entry = {
     terminalId: record.terminalId,
     sessionId: input.sessionId,
     userId: input.userId,
-    child,
+    process: terminalProcess,
     cwd: input.cwd,
-    buffer: [],
-    totalBytes: 0,
+    decoder,
     closed: false,
     userInitiatedClose: false,
   };
   persistentByTerminalId.set(record.terminalId, entry);
 
-  setTerminalPid(record.terminalId, child.pid);
-
-  const emitSnapshot = (): void => {
-    if (entry.closed) return;
-    const merged = Buffer.concat(entry.buffer);
-    const text =
-      merged.length > MAX_BYTES
-        ? merged.subarray(merged.length - MAX_BYTES).toString('utf-8')
-        : merged.toString('utf-8');
-    appendTerminalOutput(record.terminalId, text);
-  };
-
-  child.stdout?.on('data', (chunk: Buffer) => {
-    appendToBuffer(entry, chunk);
-    emitSnapshot();
-  });
-  child.stderr?.on('data', (chunk: Buffer) => {
-    appendToBuffer(entry, chunk);
-    emitSnapshot();
-  });
-
-  child.on('error', (error) => {
-    if (entry.closed) return;
-    entry.closed = true;
-    persistentByTerminalId.delete(record.terminalId);
-    markTerminalExited({
-      terminalId: record.terminalId,
-      status: 'spawn_error',
-      finalSnapshot: `${Buffer.concat(entry.buffer).toString('utf-8')}\n[spawn error] ${error.message}`,
-    });
-  });
-
-  child.on('exit', (code, signal) => {
-    if (entry.closed) return;
-    entry.closed = true;
-    persistentByTerminalId.delete(record.terminalId);
-    const exitCode = code ?? (signal ? 128 : 0);
-    // 'killed' covers both kill API calls (which abort the controller)
-    // and user-initiated panel close. 'exited' is the natural shell
-    // exit (Ctrl-D, `exit`, parent terminated).
-    const wasKilled = abortController.signal.aborted || entry.userInitiatedClose;
-    markTerminalExited({
-      terminalId: record.terminalId,
-      status: wasKilled ? 'killed' : 'exited',
-      exitCode,
-      finalSnapshot: Buffer.concat(entry.buffer).toString('utf-8'),
-    });
-  });
+  setTerminalPid(record.terminalId, terminalProcess.pid);
 
   if (initialCommand.length > 0) {
     // Append a newline so the shell actually executes it.
-    try {
-      child.stdin?.write(`${initialCommand}\n`);
-    } catch {
-      // ignore — exit handler will fire
-    }
+    terminalProcess.write(`${initialCommand}\n`);
   }
 
   return { terminal: record };
@@ -275,7 +267,7 @@ export function writeStdinToTerminal(terminalId: string, data: string): WriteStd
   if (!entry) return { ok: false, error: 'terminal_not_persistent' };
   if (entry.closed) return { ok: false, error: 'terminal_closed' };
   try {
-    entry.child.stdin?.write(data);
+    entry.process.write(data);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -289,12 +281,16 @@ export interface ResizeTerminalInput {
 }
 
 /**
- * No-op for the pipe-based persistent terminals (we have no pty to
- * resize). Kept as a stable API surface so the frontend can call it
- * without worrying which backend path is in use; once we add a real
- * PTY this is the hook point.
+ * Dispatches a resize to the terminal process. The PTY backend applies it
+ * and the shell receives SIGWINCH; the pipe backend is a no-op. Always
+ * reports `ok: true` for a known terminal so the frontend fit-addon can
+ * call it without branching on the backend.
  */
-export function resizeTerminal(_input: ResizeTerminalInput): { ok: boolean } {
+export function resizeTerminal(input: ResizeTerminalInput): { ok: boolean } {
+  const entry = persistentByTerminalId.get(input.terminalId);
+  if (entry !== undefined && !entry.closed) {
+    entry.process.resize(input.cols, input.rows);
+  }
   return { ok: true };
 }
 
@@ -311,40 +307,11 @@ export function closePersistentTerminal(terminalId: string): ClosePersistentTerm
   const entry = persistentByTerminalId.get(terminalId);
   if (!entry) return { ok: false, error: 'terminal_not_persistent' };
   if (entry.closed) return { ok: true };
-  // Mark before sending the kill so the exit handler labels the row
+  // Mark before tearing down so the exit handler labels the row
   // 'killed' instead of 'exited'.
   entry.userInitiatedClose = true;
-  try {
-    entry.child.stdin?.end();
-  } catch {
-    /* ignore */
-  }
-  try {
-    if (process.platform === 'win32') {
-      const killer = spawn('taskkill', ['/pid', String(entry.child.pid), '/f', '/t'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      // taskkill may be missing / unresolved on PATH; its async 'error'
-      // event would otherwise crash the process as an unhandled exception.
-      killer.on('error', () => {
-        /* best-effort kill — nothing more we can do here */
-      });
-    } else if (entry.child.pid) {
-      process.kill(-entry.child.pid, 'SIGTERM');
-      setTimeout(() => {
-        if (!entry.closed && entry.child.pid) {
-          try {
-            process.kill(-entry.child.pid, 'SIGKILL');
-          } catch {
-            /* gone */
-          }
-        }
-      }, 3000);
-    }
-  } catch {
-    /* gone */
-  }
+  entry.process.close();
+  entry.process.kill();
   return { ok: true };
 }
 
@@ -352,7 +319,7 @@ export function closePersistentTerminal(terminalId: string): ClosePersistentTerm
 export function __resetPersistentTerminalsForTest(): void {
   for (const entry of persistentByTerminalId.values()) {
     try {
-      entry.child.kill('SIGKILL');
+      entry.process.kill();
     } catch {
       /* ignore */
     }

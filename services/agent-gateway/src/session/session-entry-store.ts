@@ -9,7 +9,8 @@
  */
 
 import type { RunEvent, StreamChunk } from '@openAwork/shared';
-import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
+import { getSessionOwnerUserId } from '../infra/session-owner-cache.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import {
   type SessionEvent,
@@ -35,18 +36,7 @@ interface MaxSeqRow {
   max_seq: number | null;
 }
 
-interface SessionOwnerRow {
-  user_id: string;
-}
-
 // ─── Internal helpers ───
-
-function getSessionOwnerUserId(sessionId: string): string | null {
-  return (
-    sqliteGet<SessionOwnerRow>('SELECT user_id FROM sessions WHERE id = ? LIMIT 1', [sessionId])
-      ?.user_id ?? null
-  );
-}
 
 function nextSeq(sessionId: string): number {
   const row = sqliteGet<MaxSeqRow>(
@@ -207,6 +197,118 @@ function decodeRow(row: SessionEntryRow): SessionEvent | null {
   } as SessionEvent;
 }
 
+// ─── Stream-time write batching ───
+//
+// `persistStreamChunkAsSessionEvents` runs once per upstream chunk (≈ per
+// token) and writes 1–2 `session_entry` rows for it. Committing each row on
+// its own makes SQLite the stream's throughput limiter, so stream-time events
+// are buffered and flushed as one transaction every
+// `SESSION_ENTRY_FLUSH_INTERVAL_MS` or once `SESSION_ENTRY_FLUSH_BATCH_SIZE`
+// events accumulate — whichever comes first.
+//
+// Ordering contract (same shape as session-run-events.ts):
+//   - `appendSessionEvent` (the synchronous public writer) flushes the
+//     session's pending events first, so seq still follows occurrence order.
+//   - Replay reads (`listSessionEvents`) flush first (read-your-writes).
+//   - seq is assigned at flush time — session_entry has no client-facing
+//     cursor, so nothing depends on knowing it earlier.
+//
+// A crash can drop at most the last flush window; these rows mirror the
+// stream for replay (`replaySessionEntries`) and are explicitly best-effort
+// (see persistStreamChunkAsSessionEvents' swallow-on-error contract).
+
+export const SESSION_ENTRY_FLUSH_INTERVAL_MS = 50;
+export const SESSION_ENTRY_FLUSH_BATCH_SIZE = 200;
+
+interface PendingSessionEntry {
+  input: AppendSessionEventInput;
+}
+
+interface PendingSessionEntryQueue {
+  entries: PendingSessionEntry[];
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const pendingSessionEntryQueues = new Map<string, PendingSessionEntryQueue>();
+
+/** Test-only: drop all batching state (queues + timers). */
+export function __resetSessionEntryBatchingForTesting(): void {
+  for (const entry of pendingSessionEntryQueues.values()) {
+    if (entry.timer !== null) clearTimeout(entry.timer);
+  }
+  pendingSessionEntryQueues.clear();
+}
+
+function queueStreamSessionEvent(input: AppendSessionEventInput): void {
+  const queue = pendingSessionEntryQueues.get(input.sessionId) ?? { entries: [], timer: null };
+  queue.entries.push({ input });
+  pendingSessionEntryQueues.set(input.sessionId, queue);
+
+  if (queue.entries.length >= SESSION_ENTRY_FLUSH_BATCH_SIZE) {
+    flushPendingSessionEntryQueue(input.sessionId);
+    return;
+  }
+  if (queue.timer !== null) return;
+  const timer = setTimeout(() => {
+    const current = pendingSessionEntryQueues.get(input.sessionId);
+    if (current) current.timer = null;
+    flushPendingSessionEntryQueue(input.sessionId);
+  }, SESSION_ENTRY_FLUSH_INTERVAL_MS);
+  // A pending flush must never keep the process alive on its own.
+  const timerHandle = timer as unknown as { unref?: () => void };
+  timerHandle.unref?.();
+  queue.timer = timer;
+}
+
+/**
+ * Flush queued stream-time events (one session, or every session when
+ * omitted) as a single transaction. Safe to call when nothing is queued.
+ */
+export function flushSessionEntryQueue(sessionId?: string): void {
+  if (pendingSessionEntryQueues.size === 0) return;
+  if (sessionId === undefined) {
+    for (const key of [...pendingSessionEntryQueues.keys()]) {
+      flushPendingSessionEntryQueue(key);
+    }
+    return;
+  }
+  flushPendingSessionEntryQueue(sessionId);
+}
+
+function flushPendingSessionEntryQueue(sessionId: string): void {
+  const queue = pendingSessionEntryQueues.get(sessionId);
+  if (!queue) return;
+  if (queue.timer !== null) {
+    clearTimeout(queue.timer);
+    queue.timer = null;
+  }
+  const queued = queue.entries.splice(0, queue.entries.length);
+  pendingSessionEntryQueues.delete(sessionId);
+  if (queued.length === 0) return;
+
+  try {
+    sqliteTransaction(() => {
+      // One MAX(seq) lookup per batch; seq is internal to session_entry, so
+      // it can safely be assigned at flush time.
+      let nextSeqValue = nextSeq(sessionId);
+      for (const item of queued) {
+        insertSessionEventRow(item.input, nextSeqValue);
+        nextSeqValue += 1;
+        maybePruneSessionEntries(sessionId);
+      }
+    });
+  } catch (error) {
+    // Timer-driven flush: there is no caller to rethrow to. Drop the batch —
+    // these rows are a best-effort mirror, and the transcript itself is
+    // persisted through the message store.
+    console.error('[session-entry] batched flush failed', {
+      error: error instanceof Error ? error.message : String(error),
+      sessionId,
+      queued: queued.length,
+    });
+  }
+}
+
 // ─── Public API ───
 
 export interface AppendSessionEventInput {
@@ -223,6 +325,22 @@ export interface AppendSessionEventInput {
  * (possibly auto-assigned) id and timestamp.
  */
 export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent | null {
+  // Keep seq ordered by occurrence: queued stream-time deltas land first.
+  flushSessionEntryQueue(input.sessionId);
+  const event = insertSessionEventRow(input);
+  if (event) maybePruneSessionEntries(input.sessionId);
+  return event;
+}
+
+/**
+ * Row-level insert shared by `appendSessionEvent` and the batched flush.
+ * Assigns `seqOverride` when the caller batches (one MAX(seq) per batch),
+ * otherwise derives it per row. Does not flush or prune.
+ */
+function insertSessionEventRow(
+  input: AppendSessionEventInput,
+  seqOverride?: number,
+): SessionEvent | null {
   const userId = input.userId ?? getSessionOwnerUserId(input.sessionId);
   if (!userId) return null;
 
@@ -232,7 +350,7 @@ export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent
     timestamp: input.event.timestamp ?? Date.now(),
   };
 
-  const seq = nextSeq(input.sessionId);
+  const seq = seqOverride ?? nextSeq(input.sessionId);
 
   try {
     sqliteRun(
@@ -259,8 +377,6 @@ export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent
     throw err;
   }
 
-  maybePruneSessionEntries(input.sessionId);
-
   return event;
 }
 
@@ -282,6 +398,9 @@ export interface ListSessionEventsInput {
 }
 
 export function listSessionEvents(input: ListSessionEventsInput): SessionEvent[] {
+  // Read-your-writes: a replay must see deltas still sitting in the batch
+  // queue, or it would silently reconstruct a truncated conversation.
+  flushSessionEntryQueue(input.sessionId);
   const conditions = ['session_id = ?'];
   const params: (string | number)[] = [input.sessionId];
   if (input.clientRequestId !== undefined) {
@@ -323,6 +442,9 @@ export function deleteSessionEventsByRequestScope(input: {
   sessionId: string;
   userId: string;
 }): void {
+  // Flush first: a later timer flush would otherwise resurrect rows this call
+  // just deleted.
+  flushSessionEntryQueue(input.sessionId);
   sqliteRun(
     'DELETE FROM session_entry WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
     [input.sessionId, input.userId, input.clientRequestId],
@@ -550,7 +672,9 @@ export function persistStreamChunkAsSessionEvents(input: {
   try {
     const events = translateStreamChunkToSessionEvents(input.chunk, input.state);
     for (const event of events) {
-      appendSessionEvent({
+      // Buffered: the flush (interval / batch size, or any synchronous
+      // writer touching this session) turns a token burst into one commit.
+      queueStreamSessionEvent({
         sessionId: input.sessionId,
         userId: input.userId ?? undefined,
         clientRequestId: input.clientRequestId ?? null,

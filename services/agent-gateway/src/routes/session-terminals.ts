@@ -16,6 +16,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { RunEvent } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
@@ -26,11 +27,13 @@ import {
   spawnPersistentTerminal,
   writeStdinToTerminal,
 } from '../session/persistent-terminals.js';
+import { detectTerminalBackend, type TerminalBackendKind } from '../session/pty-backend.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { createSseClientChannel } from './sse-client-channel.js';
 import {
   deleteTerminalRecord,
   getTerminal,
+  getTerminalOutputSnapshot,
   killTerminal,
   listSessionTerminals,
   renameTerminal,
@@ -84,8 +87,25 @@ function ensureSessionOwnedByUser(sessionId: string, userId: string): boolean {
   return row?.user_id === userId;
 }
 
+/**
+ * Resolve the terminal's process backend for the public payload.
+ *
+ * `persistent-terminals` records `metadata.backend` at spawn time. Rows from
+ * other producers (or older writes) carry no metadata, so fall back to probing
+ * the current runtime. `metadata` itself is never exposed — it may hold
+ * server-only fields.
+ */
+function resolvePublicBackend(record: { metadata: Record<string, unknown> }): TerminalBackendKind {
+  const fromMetadata = record.metadata['backend'];
+  if (fromMetadata === 'pty' || fromMetadata === 'pipe') return fromMetadata;
+  return detectTerminalBackend().kind;
+}
+
 /** Strip server-only fields before returning a terminal to the client. */
 function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
+  // 加法扩展（D7）：前端需要 `supportsResize` 才能知道 pipe 后端下 resize
+  // 是 no-op，从而跳过无意义请求并提示「当前运行时不支持调整尺寸」。
+  const backend = resolvePublicBackend(record);
   return {
     terminalId: record.terminalId,
     sessionId: record.sessionId,
@@ -105,6 +125,8 @@ function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
     outputBytesTotal: record.outputBytesTotal,
     outputTail: record.outputTail,
     ...(record.outputPath ? { outputPath: record.outputPath } : {}),
+    backend,
+    supportsResize: backend === 'pty',
   };
 }
 
@@ -325,8 +347,8 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
 
   /**
    * POST /sessions/:sessionId/terminals/:terminalId/resize
-   * No-op stub for xterm fit-addon resize events; kept stable so we
-   * can swap in a real PTY later without touching the frontend.
+   * xterm fit-addon resize events. Applied by the PTY backend; the pipe
+   * backend accepts the call but cannot resize.
    */
   app.post(
     '/sessions/:sessionId/terminals/:terminalId/resize',
@@ -449,25 +471,53 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
           channel.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
         };
 
-        // Initial snapshot so xterm has output to render immediately.
-        safeWrite('snapshot', {
-          terminalId: record.terminalId,
-          outputTail: record.outputTail,
-          outputBytesTotal: record.outputBytesTotal,
-          status: record.status,
-        });
-
-        const unsubscribe = subscribeSessionRunEvents(sessionId, (event) => {
+        const writeTerminalEvent = (event: RunEvent): void => {
           if (event.type === 'terminal_output' && event.terminalId === terminalId) {
             safeWrite('output', event);
             return;
           }
           if (event.type === 'terminal_exited' && event.terminalId === terminalId) {
             safeWrite('exited', event);
+          }
+        };
+
+        // Subscribe BEFORE emitting the snapshot so no output produced in the
+        // gap is lost. With the incremental `seq` stream an event dropped here
+        // would never self-heal (unlike the old cumulative tail diff). Events
+        // arriving before the snapshot is on the wire are buffered in arrival
+        // order and flushed afterwards; the client de-dupes `seq <= lastSeq`.
+        const buffered: RunEvent[] = [];
+        let snapshotWritten = false;
+        const unsubscribe = subscribeSessionRunEvents(sessionId, (event) => {
+          if (event.type !== 'terminal_output' && event.type !== 'terminal_exited') return;
+          if (event.terminalId !== terminalId) return;
+          if (!snapshotWritten) {
+            buffered.push(event);
             return;
           }
+          writeTerminalEvent(event);
         });
+        // Register immediately: if the snapshot write below tears the channel
+        // down, the subscription is still unregistered.
         channel.addTeardown(unsubscribe);
+
+        // Initial snapshot so xterm has output to render immediately. `data`
+        // carries the whole replay ring buffer; `seq` is its byte cursor so
+        // the client can drop duplicate incremental chunks after reconnect.
+        const snapshot = getTerminalOutputSnapshot(terminalId);
+        safeWrite('snapshot', {
+          terminalId: record.terminalId,
+          seq: snapshot?.seq ?? 0,
+          data: snapshot?.data ?? record.outputTail,
+          outputBytesTotal: snapshot?.outputBytesTotal ?? record.outputBytesTotal,
+          status: record.status,
+        });
+
+        snapshotWritten = true;
+        for (const event of buffered) {
+          writeTerminalEvent(event);
+        }
+        buffered.length = 0;
 
         const heartbeat = setInterval(() => {
           channel.write(': keepalive\n\n');

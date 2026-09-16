@@ -1,18 +1,21 @@
 import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { buildAssistantEventMessageContent } from './assistant-event-message.js';
-import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithRowId } from '../infra/db.js';
+import {
+  sqliteAll,
+  sqliteGet,
+  sqliteRun,
+  sqliteRunWithRowId,
+  sqliteTransaction,
+} from '../infra/db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
+import { getSessionOwnerUserId } from '../infra/session-owner-cache.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
 const sessionHandlers = new Map<string, Set<RunEventHandler>>();
-
-interface SessionOwnerRow {
-  user_id: string;
-}
 
 interface SessionRunEventRow {
   seq?: number | null;
@@ -153,6 +156,223 @@ export function __setSessionRunEventRetentionForTesting(
   sessionRunEventStoreDisabled = false;
 }
 
+// ─── Streaming write batching ───
+//
+// The hot path emits one RunEvent per upstream chunk (≈ per token). Giving
+// every chunk its own implicit transaction makes SQLite the throughput
+// limiter of the whole stream, so "delayable" delta chunks are buffered and
+// flushed as one transaction (plus one broadcast pass) every
+// `RUN_EVENT_FLUSH_INTERVAL_MS` or once `RUN_EVENT_FLUSH_BATCH_SIZE` chunks
+// accumulate — whichever comes first.
+//
+// Ordering contract:
+//   - Every synchronous write entry point (`publishSessionRunEvent`,
+//     `persistSessionRunEventForRequest`) flushes the session's pending deltas
+//     first, so a queued delta always lands before an event that causally
+//     follows it. `seq` therefore stays ordered by occurrence.
+//   - `seq` is reserved from an in-memory cursor per (session, request) that is
+//     initialised from the DB and advanced by *every* writer (batched or not),
+//     so the cursor handed to the client at enqueue time matches the seq the
+//     row later receives.
+//
+// Durability trade-off: a crash can drop at most the last flush window of
+// delta chunks. Those rows are a replay accelerator, not conversation state —
+// the transcript itself is persisted when the round completes — so a small
+// best-effort window is acceptable, matching the session_entry mirror.
+
+const DELAYABLE_RUN_EVENT_TYPES: ReadonlySet<RunEvent['type']> = new Set<RunEvent['type']>([
+  'text_delta',
+  'thinking_delta',
+  'tool_call_delta',
+  'tool_progress',
+  'terminal_output',
+]);
+
+export const RUN_EVENT_FLUSH_INTERVAL_MS = 50;
+export const RUN_EVENT_FLUSH_BATCH_SIZE = 200;
+const RUN_EVENT_SEQ_CURSOR_TTL_MS = 10 * 60 * 1000;
+const RUN_EVENT_SEQ_CURSOR_SWEEP_THRESHOLD = 64;
+
+interface SequencedRunEvent {
+  event: RunEvent;
+  meta: PublishRunEventMeta;
+  sessionId: string;
+  seq: number;
+}
+
+interface PendingRunEventQueue {
+  queue: SequencedRunEvent[];
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+interface RunEventSeqCursor {
+  lastSeq: number;
+  touchedAt: number;
+}
+
+const pendingRunEventQueues = new Map<string, PendingRunEventQueue>();
+const runEventSeqCursors = new Map<string, RunEventSeqCursor>();
+
+function buildRunEventQueueKey(sessionId: string, clientRequestId: string): string {
+  return `${sessionId}\u0000${clientRequestId}`;
+}
+
+function noteRunEventSeq(sessionId: string, clientRequestId: string, seq: number): void {
+  const key = buildRunEventQueueKey(sessionId, clientRequestId);
+  const existing = runEventSeqCursors.get(key);
+  runEventSeqCursors.set(key, {
+    // Math.max: out-of-order writers must never rewind the cursor, or the
+    // next reservation would reuse a seq the client has already seen.
+    lastSeq: Math.max(existing?.lastSeq ?? 0, seq),
+    touchedAt: Date.now(),
+  });
+}
+
+function resolveRunEventSeqCursor(sessionId: string, clientRequestId: string): number {
+  const existing = runEventSeqCursors.get(buildRunEventQueueKey(sessionId, clientRequestId));
+  if (existing) return existing.lastSeq;
+  // Backed by `idx_session_run_events_request_seq` (infra/db.ts).
+  const row = sqliteGet<SessionRunEventSeqRow>(
+    `SELECT MAX(seq) AS max_seq FROM session_run_events WHERE session_id = ? AND client_request_id = ?`,
+    [sessionId, clientRequestId],
+  );
+  return row?.max_seq ?? 0;
+}
+
+function sweepRunEventSeqCursors(now = Date.now()): void {
+  if (runEventSeqCursors.size <= RUN_EVENT_SEQ_CURSOR_SWEEP_THRESHOLD) return;
+  for (const [key, cursor] of runEventSeqCursors) {
+    if (now - cursor.touchedAt > RUN_EVENT_SEQ_CURSOR_TTL_MS) {
+      runEventSeqCursors.delete(key);
+    }
+  }
+}
+
+/** Test-only: drop all batching state (queues, timers, seq cursors). */
+export function __resetSessionRunEventBatchingForTesting(): void {
+  for (const entry of pendingRunEventQueues.values()) {
+    if (entry.timer !== null) clearTimeout(entry.timer);
+  }
+  pendingRunEventQueues.clear();
+  runEventSeqCursors.clear();
+}
+
+/**
+ * Reserve `seq` for a streamed chunk and queue it for the next batched flush.
+ * Delayable delta types are buffered; everything else (bookends, tool
+ * results, permissions, ...) flushes the queue and persists synchronously.
+ * Returns the seq the row will carry (null when the event is unscoped).
+ */
+export function queueSessionRunEvent(
+  sessionId: string,
+  event: RunEvent,
+  meta?: PublishRunEventMeta,
+): { seq: number | null } {
+  const clientRequestId =
+    typeof meta?.clientRequestId === 'string' && meta.clientRequestId.length > 0
+      ? meta.clientRequestId
+      : null;
+
+  if (!clientRequestId || !DELAYABLE_RUN_EVENT_TYPES.has(event.type)) {
+    const persisted = publishSessionRunEvent(sessionId, event, meta);
+    return { seq: persisted.seq };
+  }
+
+  const seq = resolveRunEventSeqCursor(sessionId, clientRequestId) + 1;
+  noteRunEventSeq(sessionId, clientRequestId, seq);
+
+  const key = buildRunEventQueueKey(sessionId, clientRequestId);
+  const entry = pendingRunEventQueues.get(key) ?? { queue: [], timer: null };
+  entry.queue.push({ event, meta: { ...(meta ?? {}), clientRequestId }, sessionId, seq });
+  pendingRunEventQueues.set(key, entry);
+
+  if (entry.queue.length >= RUN_EVENT_FLUSH_BATCH_SIZE) {
+    flushPendingRunEventQueue(key);
+  } else if (entry.timer === null) {
+    const timer = setTimeout(() => {
+      const current = pendingRunEventQueues.get(key);
+      if (current) current.timer = null;
+      flushPendingRunEventQueue(key);
+    }, RUN_EVENT_FLUSH_INTERVAL_MS);
+    // A pending flush must never keep the process alive on its own.
+    const timerHandle = timer as unknown as { unref?: () => void };
+    timerHandle.unref?.();
+    entry.timer = timer;
+  }
+
+  return { seq };
+}
+
+/**
+ * Flush queued deltas (one session, or every session when omitted) as a
+ * single transaction. Safe to call when nothing is queued.
+ */
+export function flushSessionRunEventQueue(sessionId?: string): void {
+  if (pendingRunEventQueues.size === 0) return;
+  if (sessionId === undefined) {
+    for (const key of [...pendingRunEventQueues.keys()]) {
+      flushPendingRunEventQueue(key);
+    }
+    return;
+  }
+  const prefix = `${sessionId}\u0000`;
+  for (const key of [...pendingRunEventQueues.keys()]) {
+    if (key.startsWith(prefix)) flushPendingRunEventQueue(key);
+  }
+}
+
+function flushPendingRunEventQueue(key: string): void {
+  const entry = pendingRunEventQueues.get(key);
+  if (!entry) return;
+  if (entry.timer !== null) {
+    clearTimeout(entry.timer);
+    entry.timer = null;
+  }
+  const queued = entry.queue.splice(0, entry.queue.length);
+  pendingRunEventQueues.delete(key);
+  sweepRunEventSeqCursors();
+  if (queued.length === 0) return;
+
+  const delivered: SequencedRunEvent[] = [];
+  try {
+    sqliteTransaction(() => {
+      for (const item of queued) {
+        // `seq` was reserved at enqueue time so the client cursor and the
+        // persisted row agree; persistRunEventRow picks it up from meta.
+        const persisted = persistRunEventRow(item.sessionId, item.event, {
+          ...item.meta,
+          seq: item.seq,
+        });
+        delivered.push({
+          ...item,
+          seq: persisted.seq ?? item.seq,
+          meta: {
+            ...item.meta,
+            seq: persisted.seq ?? item.seq,
+            ...(persisted.rowId !== null ? { rowId: persisted.rowId } : {}),
+          },
+        });
+      }
+    });
+  } catch (error) {
+    // A batched flush runs off the timer, so there is no caller to rethrow to:
+    // log and drop this batch. The seq cursor is intentionally NOT rewound —
+    // reusing a seq the client already saw would make its dedupe drop new
+    // events — so a failed flush leaves a gap instead of a duplicate.
+    console.error('[session-run-events] batched flush failed', {
+      error: error instanceof Error ? error.message : String(error),
+      key,
+      queued: queued.length,
+    });
+    return;
+  }
+
+  // Broadcast after persistence, mirroring publishSessionRunEvent's contract.
+  for (const item of delivered) {
+    broadcastPersistedSessionRunEvent(item.sessionId, item.event, item.meta);
+  }
+}
+
 const PERSISTED_RUN_EVENT = Symbol('persistedRunEvent');
 
 export function getRunEventRunId(event: RunEvent): string | null {
@@ -161,6 +381,10 @@ export function getRunEventRunId(event: RunEvent): string | null {
 }
 
 function computeNextSeq(sessionId: string, clientRequestId: string): number {
+  // Runs once per streamed chunk on the hot path — the MIN/MAX index
+  // optimisation is what keeps it an index seek rather than a full scan.
+  // Depends on `idx_session_run_events_request_seq` (infra/db.ts); do not
+  // drop that index without replacing this query.
   const row = sqliteGet<SessionRunEventSeqRow>(
     `SELECT MAX(seq) AS max_seq FROM session_run_events WHERE session_id = ? AND client_request_id = ?`,
     [sessionId, clientRequestId],
@@ -193,6 +417,15 @@ function persistRunEventRow(
     (typeof meta?.clientRequestId === 'string' && meta.clientRequestId.length > 0
       ? computeNextSeq(sessionId, meta.clientRequestId)
       : null);
+  if (
+    seq !== null &&
+    typeof meta?.clientRequestId === 'string' &&
+    meta.clientRequestId.length > 0
+  ) {
+    // Keep the reservation cursor in lock-step with sync writers so queued
+    // chunks never reserve a seq that a synchronous write already used.
+    noteRunEventSeq(sessionId, meta.clientRequestId, seq);
+  }
   const rowId = sqliteRunWithRowId(
     `INSERT INTO session_run_events
      (session_id, user_id, client_request_id, seq, event_type, event_id, run_id, occurred_at_ms, payload_json, created_at)
@@ -317,13 +550,6 @@ function buildMirroredAssistantEventClientRequestId(input: {
   return `assistant_event:${input.event.type}:${input.occurredAt}`;
 }
 
-function getSessionOwnerUserId(sessionId: string): string | null {
-  return (
-    sqliteGet<SessionOwnerRow>('SELECT user_id FROM sessions WHERE id = ? LIMIT 1', [sessionId])
-      ?.user_id ?? null
-  );
-}
-
 export function subscribeSessionRunEvents(sessionId: string, handler: RunEventHandler): () => void {
   const handlers = sessionHandlers.get(sessionId) ?? new Set<RunEventHandler>();
   handlers.add(handler);
@@ -344,6 +570,9 @@ export function publishSessionRunEvent(
   event: RunEvent,
   meta?: PublishRunEventMeta,
 ): PersistedRunEventMeta {
+  // Queued stream deltas must land before the event that causally follows
+  // them, so occurrence order and persisted (seq) order stay identical.
+  flushSessionRunEventQueue(sessionId);
   const persisted = persistRunEventRow(sessionId, event, meta);
   const handlers = sessionHandlers.get(sessionId);
   if (!handlers) return persisted;
@@ -405,10 +634,15 @@ export function persistSessionRunEventForRequest(
   event: RunEvent,
   meta?: PublishRunEventMeta,
 ): { seq: number | null; rowId: number | null } {
+  // Same ordering contract as publishSessionRunEvent: pending deltas first.
+  flushSessionRunEventQueue(sessionId);
   return persistRunEventRow(sessionId, event, meta);
 }
 
 export function listSessionRunEvents(sessionId: string): RunEvent[] {
+  // Read-your-writes: pending batched deltas must be visible to a replay that
+  // runs before the next timer flush.
+  flushSessionRunEventQueue(sessionId);
   return sqliteAll<SessionRunEventRow>(
     `SELECT payload_json FROM session_run_events WHERE session_id = ? ORDER BY COALESCE(seq, 2147483647) ASC, occurred_at_ms ASC, id ASC`,
     [sessionId],
@@ -432,6 +666,9 @@ export function listRecentSessionRunEventsWithMeta(input: {
   afterRowId: number;
   limit: number;
 }): Array<{ event: RunEvent; seq: number; clientRequestId: string | null }> {
+  // Read-your-writes: attach replay must include deltas still sitting in the
+  // batch queue, otherwise the reconnect would silently skip them.
+  flushSessionRunEventQueue(input.sessionId);
   return sqliteAll<SessionRunEventRow & { id: number; client_request_id: string | null }>(
     `SELECT payload_json, id, client_request_id
      FROM session_run_events
@@ -461,6 +698,7 @@ export function listSessionRunEventsByRequest(input: {
   sessionId: string;
   clientRequestId: string;
 }): RunEvent[] {
+  flushSessionRunEventQueue(input.sessionId);
   return sqliteAll<SessionRunEventRow>(
     `SELECT payload_json
      FROM session_run_events
@@ -486,6 +724,9 @@ export function listSessionRunEventsByRequestAfterSeq(input: {
   clientRequestId: string;
   afterSeq: number;
 }): PersistedSessionRunEvent[] {
+  // Read-your-writes: a reconnecting client replays from its cursor, so the
+  // in-flight batch must be flushed before the replay window is computed.
+  flushSessionRunEventQueue(input.sessionId);
   return sqliteAll<SessionRunEventRow>(
     `SELECT payload_json, seq
      FROM session_run_events
@@ -509,6 +750,9 @@ export function getLatestSessionRunEventSeqByRequest(input: {
   sessionId: string;
   clientRequestId: string;
 }): number {
+  // Read-your-writes: callers use this to sync a client cursor, so pending
+  // deltas must be visible (and counted) before answering.
+  flushSessionRunEventQueue(input.sessionId);
   const row = sqliteGet<SessionRunEventSeqRow>(
     `SELECT MAX(seq) AS max_seq
      FROM session_run_events
@@ -522,8 +766,14 @@ export function deleteSessionRunEventsByRequest(input: {
   sessionId: string;
   clientRequestId: string;
 }): void {
+  // Flush first: a later timer flush would otherwise resurrect rows this call
+  // just deleted.
+  flushSessionRunEventQueue(input.sessionId);
   sqliteRun('DELETE FROM session_run_events WHERE session_id = ? AND client_request_id = ?', [
     input.sessionId,
     input.clientRequestId,
   ]);
+  // The cursor must re-derive from the (now truncated) table, not from a stale
+  // in-memory high-water mark.
+  runEventSeqCursors.delete(buildRunEventQueueKey(input.sessionId, input.clientRequestId));
 }
