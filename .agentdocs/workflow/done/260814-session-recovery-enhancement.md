@@ -1,5 +1,10 @@
 # 会话恢复功能增强方案
 
+> **归档说明（2026-09-16 归档审计补记）**：本文档正文的 `- [ ]` 任务框**从未同步勾选**，但不代表未实施——实现**已落地并验证**：
+> - 6/6 目标文件均存在于 `services/agent-gateway/src/session/`：`session-interruption-detector.ts`、`session-continuation-injector.ts`、`paste-content-store.ts`、`paste-content-expander.ts`、`session-skill-state-store.ts`、`session-skill-recovery.ts`
+> - `runtime/260814-session-recovery-enhancement/` 曾产出 `COMPLETE_VERIFICATION_REPORT.md` 与 `FINAL_VERIFICATION_REPORT.md`（runtime 属临时目录，按 cleanup-policy 清理）
+> - 权威状态以 `.agentdocs/index.md` 为准；正文任务框保留为历史原貌，不再回填。
+
 ## 任务概述
 
 基于 Claude Code 参考实现，补齐 OpenAWork 在会话恢复、粘贴内容管理、技能状态持久化方面的关键功能，使本地实现达到与参考库功能对等（90%+ 完整度），同时保持现有的分布式架构优势。
