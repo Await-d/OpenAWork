@@ -99,3 +99,15 @@
 .terminal-panel-collapsed-rail:hover .terminal-panel-collapsed-rail__status {
   color: var(--fg-muted);
 }
+
+/* 移动端（< 768px，与 useMobileViewport 断点一致）：底部固定 48px 的
+   FusionMobileBottomPanel tab 条（.fusion-mobile-bottom__strip，z-index 401）
+   盖住处于文档流底部的 rail，真实鼠标点击不可达（T-13 / D-3）。此处让 rail
+   让出 tab 条高度 + 滚动留白，使其完整落在 tab 条之上；不用 z-index 压盖，
+   避免把缺陷转移给 tab bar。桌面（≥768px）不受影响。 */
+@media (max-width: 767px) {
+  .terminal-panel-collapsed-rail {
+    margin-bottom: var(--spacing-12);
+    scroll-margin-bottom: var(--spacing-12);
+  }
+}

@@ -150,6 +150,10 @@ export function useSessionTerminals(
   const pendingKillsRef = useRef<Set<string>>(pendingKills);
   pendingKillsRef.current = pendingKills;
   const failureCountRef = useRef(0);
+  // Last `reloadNonce` handled by the reload effect below. Lets the effect
+  // tell "an imperative reload was requested" apart from "the identity
+  // changed", so a session switch never fires a second, redundant sync.
+  const handledReloadNonceRef = useRef(0);
 
   const hasActiveTerminals = useMemo(
     () => Object.values(terminalsById).some((t) => ACTIVE_STATUSES.has(t.status)),
@@ -227,7 +231,22 @@ export function useSessionTerminals(
       inflightController.current?.abort();
       inflightController.current = null;
     };
-  }, [currentSessionId, gatewayUrl, token, reloadNonce, runSync]);
+  }, [currentSessionId, gatewayUrl, token, runSync]);
+
+  // `reload()` 只负责重新拉取，**不**重置本地快照。
+  //
+  // 之前这个 effect 与上面的身份 effect 合二为一，`reloadNonce` 自增会把
+  // `terminalsById` 清空，`activeTerminalCount` 因此出现一次瞬时 0；
+  // `TerminalPanel` 的「运行中数量 >0 → 0」effect 会把整个抽屉收起，
+  // 于是建第 2 个终端时面板自动折叠（D-1）。重置只允许随身份变化发生。
+  useEffect(() => {
+    if (handledReloadNonceRef.current === reloadNonce) return;
+    handledReloadNonceRef.current = reloadNonce;
+    if (!currentSessionId || !token) return;
+    // `runSync` 自身会 abort 上一个 in-flight 请求，所以这里不需要额外的
+    // abort 清理闭包——它只属于身份 effect（会话切换 / 卸载）。
+    void runSync('initial');
+  }, [reloadNonce, currentSessionId, token, runSync]);
 
   // 兜底 reconcile 循环。延迟同时承担两个职责：常态轮询周期 + 失败退避。
   useEffect(() => {

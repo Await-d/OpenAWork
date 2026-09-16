@@ -19,6 +19,7 @@ import type {
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
+import type { ComposerPermissionMode } from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { TaskToolInline } from '../../../components/chat/tool-call/display/task-tool-inline.js';
 import SkillSettingsPanel from '../../../components/chat/misc/SkillSettingsPanel.js';
 import {
@@ -196,6 +197,8 @@ export interface ChatRightPanelProps {
   messages: ChatMessage[];
   sessionStateStatus: SessionStateStatus | null;
   workspaceFileItems: WorkspaceFileMentionItem[];
+  /** 审批方式档位（比 yoloMode 布尔更细），透传给 overview 面板。 */
+  permissionMode?: ComposerPermissionMode;
   yoloMode: boolean;
   sessionTerminals?: SessionTerminalView[];
   sessionTerminalsRunningCount?: number;
@@ -261,6 +264,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     messages,
     sessionStateStatus,
     workspaceFileItems,
+    permissionMode,
     yoloMode,
   } = props;
 
@@ -634,6 +638,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       sessionTodos={sessionTodos}
                       sessionTasks={sessionTasks}
                       workspaceFileItems={workspaceFileItems}
+                      permissionMode={permissionMode}
                       yoloMode={yoloMode}
                       onCompactSession={onCompactSession}
                       onOpenRecoveryStrategy={onOpenRecoveryStrategy}

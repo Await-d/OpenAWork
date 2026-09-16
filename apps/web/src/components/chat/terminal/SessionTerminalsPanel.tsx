@@ -12,7 +12,8 @@
  *    so wide log lines stay readable without horizontal scroll.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import {
@@ -245,7 +246,7 @@ function TerminalRow({
             textOverflow: 'ellipsis',
             fontSize: 12,
             fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
-            color: 'var(--text-1)',
+            color: 'var(--fg-strong)',
           }}
           title={terminal.command}
         >
@@ -395,6 +396,60 @@ function TerminalRow({
   );
 }
 
+/** popover 与视口边缘之间的最小间隙（px）。 */
+const POPOVER_VIEWPORT_MARGIN = 8;
+
+/** popover 与锚点之间的垂直间隙（px）。 */
+const POPOVER_ANCHOR_GAP = 6;
+
+export interface TerminalChipPositionInput {
+  anchorRect: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>;
+  viewportWidth: number;
+  viewportHeight: number;
+  /** 首帧尺寸未知时传 0，由后续实测值覆盖。 */
+  popoverWidth: number;
+  popoverHeight: number;
+  /** 与视口边缘的最小间隙，默认 {@link POPOVER_VIEWPORT_MARGIN}。 */
+  margin?: number;
+}
+
+/**
+ * 计算「会话终端」popover 的 fixed 定位坐标（纯函数，便于单测）。
+ *
+ * 历史缺陷（T-13 / D-4）：旧实现只按 `right: window.innerWidth - anchor.right`
+ * 锚定，没有左边界夹取；375px 下 chip 靠左（anchor.right ≈ 111）而 popover 宽
+ * 343px，左边缘被推到 -232px（屏幕外）。
+ *
+ * 语义：
+ *  - 水平：优先右边缘对齐锚点右边缘（保留既有手感）；右侧放不下时改为
+ *    左对齐锚点，最后统一夹取到 `[margin, viewportWidth - popoverWidth - margin]`
+ *    —— 任何一边都不越出视口。
+ *  - 垂直：默认贴在锚点下方（+6px）；下方空间不足时翻转到锚点上方，并夹取
+ *    到 `≥ margin`。
+ */
+export function computeTerminalChipPosition(input: TerminalChipPositionInput): {
+  left: number;
+  top: number;
+} {
+  const { anchorRect, viewportWidth, viewportHeight, popoverWidth, popoverHeight } = input;
+  const margin = input.margin ?? POPOVER_VIEWPORT_MARGIN;
+  const maxLeft = Math.max(margin, viewportWidth - popoverWidth - margin);
+
+  // 右对齐放不下（左边缘会越界）时，退回锚点左对齐，再统一夹取。
+  const rightAlignedLeft = anchorRect.right - popoverWidth;
+  const preferredLeft = rightAlignedLeft >= margin ? rightAlignedLeft : anchorRect.left;
+  const left = Math.min(Math.max(preferredLeft, margin), maxLeft);
+
+  const belowTop = anchorRect.bottom + POPOVER_ANCHOR_GAP;
+  const flippedTop = anchorRect.top - popoverHeight - POPOVER_ANCHOR_GAP;
+  const top = Math.max(
+    margin,
+    belowTop + popoverHeight + margin > viewportHeight ? flippedTop : belowTop,
+  );
+
+  return { left, top };
+}
+
 export function SessionTerminalsPanel({
   open,
   onClose,
@@ -424,29 +479,52 @@ export function SessionTerminalsPanel({
     return () => window.clearInterval(timer);
   }, [open, lastSyncedAtMs]);
 
-  // Compute popover position from the anchor's viewport rect on every
-  // open / window resize / scroll. Fixed positioning means parent
-  // `overflow: hidden` and flex-wrap shenanigans no longer matter.
-  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
-  useEffect(() => {
-    if (!open || !anchorRef?.current) {
+  // popover 用 portal + fixed 定位（见 `createPortal` 处注释），坐标由锚点与
+  // 实测 popover 尺寸夹取得出；首帧测量完成前保持不可见，避免闪跳。
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [measured, setMeasured] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!open) {
       setPosition(null);
+      setMeasured(false);
+      return;
+    }
+    const anchorElement = anchorRef?.current;
+    const popoverElement = popoverRef.current;
+    if (!anchorElement || !popoverElement) {
+      setMeasured(true);
       return;
     }
     const update = (): void => {
-      const rect = anchorRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setPosition({
-        top: rect.bottom + 6,
-        right: Math.max(8, window.innerWidth - rect.right),
-      });
+      const currentAnchor = anchorRef?.current;
+      const currentPopover = popoverRef.current;
+      if (!currentAnchor || !currentPopover) return;
+      const anchorRect = currentAnchor.getBoundingClientRect();
+      const popoverRect = currentPopover.getBoundingClientRect();
+      setPosition(
+        computeTerminalChipPosition({
+          anchorRect,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          popoverWidth: popoverRect.width,
+          popoverHeight: popoverRect.height,
+        }),
+      );
     };
     update();
+    setMeasured(true);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
+    // 列表增删 / 展开详情会改变 popover 高度，尺寸变化后重新夹取，避免溢出底部。
+    const observer =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(() => update()) : null;
+    observer?.observe(popoverElement);
     return () => {
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
+      observer?.disconnect();
     };
   }, [open, anchorRef]);
 
@@ -487,7 +565,10 @@ export function SessionTerminalsPanel({
     }
   };
 
-  return (
+  // 宿主链（CachedRouteOutlet 的路由条目）带 `contain: layout style`，CSS containment
+  // 会把 `position: fixed` 的包含块从视口改成该祖先，而坐标夹取按 window 计算 ——
+  // portal 到 body 后 fixed 重新相对视口（与 TerminalContextMenu 同一处理）。
+  return createPortal(
     <>
       <button
         type="button"
@@ -505,13 +586,16 @@ export function SessionTerminalsPanel({
         }}
       />
       <div
+        ref={popoverRef}
         role="dialog"
         aria-label="会话终端"
         style={{
           // fixed 相对视口,绕开任何父级 overflow / wrap 影响。
           position: 'fixed',
           top: position?.top ?? 64,
-          right: position?.right ?? 16,
+          left: position?.left ?? 16,
+          // 定位前的首帧先不可见：宽度已由 min(520px, 100vw - 32px) 兜底不越界。
+          visibility: measured ? 'visible' : 'hidden',
           width: 'min(520px, calc(100vw - 32px))',
           maxHeight: 'min(560px, calc(100vh - 96px))',
           display: 'flex',
@@ -536,7 +620,7 @@ export function SessionTerminalsPanel({
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>会话终端</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>会话终端</span>
             <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               {active.length} 个运行中 / 共 {terminals.length} 条记录
             </span>
@@ -727,6 +811,7 @@ export function SessionTerminalsPanel({
           )}
         </ul>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

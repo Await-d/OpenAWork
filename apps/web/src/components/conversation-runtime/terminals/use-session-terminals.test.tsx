@@ -327,3 +327,104 @@ describe('useSessionTerminals 兜底同步', () => {
     expect(killedUrls.some((url) => url.includes('term_b'))).toBe(true);
   });
 });
+
+/**
+ * D-1 回归：`reload()` 只负责「重新拉取」，不得清空本地终端快照。
+ *
+ * 真实场景：打开终端抽屉 → 建第 1 个终端 → 再建第 2 个时
+ * `QuickTerminalPanel` 会调用 `onReload()`。若 reload 路径把
+ * `terminalsById` 清空，`terminals` 会出现一次「由 N(>0) 变 0」的渲染，
+ * `TerminalPanel` 的折叠 effect 就会把整个抽屉收起（清单项 12a FAIL）。
+ *
+ * 身份变化（session / gateway / token）仍然必须清空，避免泄漏上一个会话
+ * 的终端 —— 两个用例分别锁定这两条互相对立的语义。
+ */
+const NEXT_SESSION_ID = 'session-next';
+
+describe('useSessionTerminals reload 快照连续性（D-1 回归）', () => {
+  it('reload() 重新同步期间终端数不会出现 >0 → 0 的渲染', async () => {
+    const rows = [makeServerRow({ terminalId: 'term_one' }), makeServerRow({ terminalId: 'term_two' })];
+    const fetchMock = vi.fn(async () => jsonResponse({ terminals: rows }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 逐帧记录每次渲染观测到的终端数：任何瞬时空快照都会在这里留下 0。
+    const observedCounts: number[] = [];
+    const { result } = renderHook(() => {
+      const state = useSessionTerminals({
+        currentSessionId: SESSION_ID,
+        gatewayUrl: GATEWAY,
+        token: TOKEN,
+      });
+      observedCounts.push(state.terminals.length);
+      return state;
+    });
+
+    await waitFor(() => expect(result.current.terminals.length).toBe(2));
+
+    const observedBeforeReload = observedCounts.length;
+    const callsBeforeReload = fetchMock.mock.calls.length;
+    await act(async () => {
+      result.current.reload();
+    });
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeReload));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const afterReload = observedCounts.slice(observedBeforeReload);
+    // reload 窗口内确实有渲染帧可断（避免「没渲染所以没塌」的假绿）。
+    expect(afterReload.some((count) => count > 0)).toBe(true);
+
+    const drops: string[] = [];
+    for (let index = 1; index < afterReload.length; index += 1) {
+      const previous = afterReload[index - 1] ?? 0;
+      const current = afterReload[index] ?? 0;
+      if (previous > 0 && current === 0) {
+        drops.push(`#${index}: ${previous} → ${current}`);
+      }
+    }
+    expect(drops).toEqual([]);
+    expect(result.current.terminals.length).toBe(2);
+  });
+
+  it('切换 currentSessionId 仍然立刻清空旧会话终端', async () => {
+    let releaseNextSession: (() => void) | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(NEXT_SESSION_ID)) {
+        // 新会话的首轮快照手动延迟交付：先断言「立刻清空」，
+        // 而不是被新会话自己的快照掩盖。
+        return new Promise<Response>((resolve) => {
+          releaseNextSession = () =>
+            resolve(
+              jsonResponse({
+                terminals: [makeServerRow({ terminalId: 'term_next', sessionId: NEXT_SESSION_ID })],
+              }),
+            );
+        });
+      }
+      return Promise.resolve(
+        jsonResponse({
+          terminals: [makeServerRow({ terminalId: 'term_one' }), makeServerRow({ terminalId: 'term_two' })],
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result, rerender } = renderHook(
+      (props: { sessionId: string }) =>
+        useSessionTerminals({ currentSessionId: props.sessionId, gatewayUrl: GATEWAY, token: TOKEN }),
+      { initialProps: { sessionId: SESSION_ID } },
+    );
+
+    await waitFor(() => expect(result.current.terminals.length).toBe(2));
+
+    rerender({ sessionId: NEXT_SESSION_ID });
+    expect(result.current.terminals.length).toBe(0);
+
+    await act(async () => {
+      releaseNextSession?.();
+    });
+    await waitFor(() =>
+      expect(result.current.terminals.map((terminal) => terminal.terminalId)).toEqual(['term_next']),
+    );
+  });
+});

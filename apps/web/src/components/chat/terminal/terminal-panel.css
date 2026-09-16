@@ -1,0 +1,765 @@
+/**
+ * 终端抽屉 chrome：面板页签栏（32px）+ 终端 tab 条（30px）+ 操作按钮 + 空态 +
+ * 端口页只读列表（T-15：表格 / 绑定地址标注 / 行内动作五态）。
+ *
+ * 为什么单独一个 CSS 文件：内联 style 无法表达 :hover / :active / :focus-visible /
+ * :disabled，而 DESIGN-TOKENS 要求交互元素五态齐全。颜色一律走 E · Nebula CSS
+ * 变量，间距只取 4/8/12/16/20/24/32/48 阶梯。
+ *
+ * 层级表达：行 1 --bg-overlay（含 1px subtle 分隔线）→ 行 2 --bg-raised → 内容区
+ * --bg-base，靠背景阶梯而非描边划分两层头部。
+ */
+
+/* ── 抽屉外壳 ── */
+.terminal-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--bg-overlay);
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+}
+
+.terminal-panel[data-presentation='inline'] {
+  position: relative;
+  z-index: 1;
+  box-shadow: none;
+}
+
+/* 拖拽柄：默认隐形，hover / 键盘聚焦才显形。 */
+.terminal-panel__resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: var(--border-emphasis);
+  opacity: 0;
+  cursor: ns-resize;
+  z-index: 1;
+  transition: opacity var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-panel__resize-handle:hover,
+.terminal-panel__resize-handle:focus-visible {
+  opacity: 1;
+}
+
+.terminal-panel__resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ── 行 1：面板级页签栏 ── */
+.terminal-panel__tab-rail {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+.terminal-panel__tablist {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-width: 0;
+  height: 100%;
+}
+
+.terminal-panel__tab-rail-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-left: auto;
+  padding-left: var(--spacing-2);
+}
+
+.terminal-panel-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 100%;
+  padding: 0 var(--spacing-2);
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-panel-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.terminal-panel-tab:active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+.terminal-panel-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px var(--accent-subtle);
+}
+
+/* 激活态 = accent 文字 + 2px accent 底边（DESIGN-TOKENS：active 用靛青）。 */
+.terminal-panel-tab[aria-selected='true'] {
+  color: var(--accent);
+}
+
+.terminal-panel-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: var(--spacing-1);
+  right: var(--spacing-1);
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+/* ── 通用图标按钮：default / hover / active / focus-visible / disabled 五态 ── */
+.terminal-panel__icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-panel__icon-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-default);
+}
+
+.terminal-panel__icon-btn:active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+.terminal-panel__icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.terminal-panel__icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.terminal-panel__icon-btn[data-open='true'] {
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.terminal-panel__icon-btn[data-busy='true'] {
+  cursor: wait;
+}
+
+/* ── 行 2：终端 tab 条 ── */
+.terminal-panel__tab-strip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 30px;
+  min-height: 30px;
+  padding: 0 var(--spacing-2);
+  background: var(--bg-raised);
+}
+
+.terminal-tab-strip__list {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.terminal-tab-strip__empty {
+  padding: 0 var(--spacing-1);
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.terminal-tab {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--spacing-1);
+  max-width: 200px;
+  height: 22px;
+  padding: 0 var(--spacing-1) 0 var(--spacing-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-muted);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-tab:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+  color: var(--fg-default);
+}
+
+.terminal-tab:active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+/* 激活 tab = accent-subtle 底 + accent 边 + accent 文字（与面板页签的
+   下划线区分层级：行 1 是视图级，行 2 是容器内的页签）。 */
+.terminal-tab[data-active='true'],
+.terminal-tab[data-active='true']:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.terminal-tab__label {
+  display: block;
+  max-width: 160px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.terminal-tab:hover .terminal-tab__label {
+  color: var(--fg-strong);
+}
+
+.terminal-tab[data-active='true'] .terminal-tab__label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.terminal-tab__label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-xs);
+}
+
+.terminal-tab__rename {
+  width: 100px;
+  height: 20px;
+  padding: 0 var(--spacing-1);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.terminal-tab__rename:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.terminal-tab__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-tab__close:hover {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+.terminal-tab__close:active {
+  background: var(--border-emphasis);
+}
+
+.terminal-tab__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.terminal-tab__close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 内容区 ── */
+.terminal-panel__panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.terminal-panel__error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.terminal-panel__body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 面板级瞬态提示（如「分屏已达上限」）：绝对定位 —— 提示自己浮在内容之上，
+   不参与布局，避免 2.4s 的提示把终端挤得重排（xterm 会因此触发一次多余的 fit）。 */
+.terminal-panel__hint {
+  position: absolute;
+  top: 40px; /* 32px 页签行 + 8px 间距 */
+  right: var(--spacing-2);
+  z-index: 2;
+  max-width: min(320px, calc(100% - 2 * var(--spacing-2)));
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-muted);
+  color: var(--fg-default);
+  font-size: 11px;
+  line-height: 1.5;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  animation: terminal-panel-hint-in var(--dur-micro) var(--ease-micro);
+}
+
+@keyframes terminal-panel-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-panel__hint {
+    animation: none;
+  }
+}
+
+.terminal-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--spacing-4);
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── 端口页（T-15：只读列表 + 同机直接打开）── */
+.terminal-ports {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 加载 / 错误：抽屉最矮 160px 也放得下，垂直 padding 取 16px。 */
+.terminal-ports__status {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.terminal-ports__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-emphasis);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: terminal-ports-spin 700ms linear infinite;
+}
+
+@keyframes terminal-ports-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.terminal-ports__error {
+  margin: 0;
+  max-width: 360px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+/* 重试：btn-ghost 变体的五态（default / hover / active / focus-visible / disabled）。 */
+.terminal-ports__retry {
+  height: 28px;
+  padding: 0 var(--spacing-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-ports__retry:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.terminal-ports__retry:active {
+  background: var(--bg-active);
+}
+
+.terminal-ports__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.terminal-ports__scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--spacing-2);
+  overflow: auto;
+}
+
+.terminal-ports__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.terminal-ports__count {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+/* 快照年龄：辅助信息，与计数同排但不抢视觉权重（tabular-nums 让每秒跳动不抖宽）。 */
+.terminal-ports__age {
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-ports__note {
+  margin: 0;
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.terminal-ports__notice {
+  margin: 0;
+  padding: var(--spacing-2);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-muted);
+  color: var(--fg-default);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.terminal-ports__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.terminal-ports__table th {
+  padding: 0 var(--spacing-2) var(--spacing-1);
+  border-bottom: 1px solid var(--border-default);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.terminal-ports__cell {
+  padding: var(--spacing-1) var(--spacing-2);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg-default);
+  vertical-align: middle;
+}
+
+.terminal-ports__table tbody tr:first-child .terminal-ports__cell {
+  border-top: none;
+}
+
+.terminal-ports__row:hover .terminal-ports__cell,
+.terminal-ports__row:focus-within .terminal-ports__cell {
+  background: var(--bg-hover);
+}
+
+.terminal-ports__port-number {
+  color: var(--fg-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.terminal-ports__protocol {
+  margin-left: var(--spacing-1);
+  color: var(--fg-subtle);
+  font-size: 10px;
+}
+
+.terminal-ports__bind-address {
+  color: var(--fg-default);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* 绑定地址标注：Badge 规格（xxx-muted 底 + xxx 色 + xxx-border），紧凑尺寸。 */
+.terminal-ports__bind-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--spacing-1);
+  padding: 1px var(--spacing-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.terminal-ports__bind-tag--loopback {
+  background: var(--aux-muted);
+  border-color: var(--aux-border);
+  color: var(--aux);
+}
+
+.terminal-ports__bind-tag--wildcard {
+  background: var(--warning-muted);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.terminal-ports__bind-tag--specific {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  color: var(--fg-muted);
+}
+
+.terminal-ports__cell--actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 「在浏览器打开」：链接与禁用按钮共用同一套五态。 */
+.terminal-ports__open {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-ports__open:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.terminal-ports__open:active {
+  background: var(--bg-active);
+}
+
+.terminal-ports__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.terminal-ports__open:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 仅供读屏：表头「操作」列与表格 caption 的可访问名。 */
+.terminal-ports__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── 端口页空状态 / 错误卡片（虚线框 + 图标 + 标题 + 说明）── */
+.terminal-ports-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--spacing-4);
+}
+
+/* 面板高度可拖到 160px，垂直 padding 取 24px 而非页面级空状态的 48px，
+   否则最矮档位会直接出现滚动条。 */
+.terminal-ports-empty__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-2);
+  max-width: 360px;
+  padding: var(--spacing-6) var(--spacing-8);
+  border: 1px dashed var(--border-emphasis);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+  text-align: center;
+}
+
+.terminal-ports-empty__icon {
+  display: inline-flex;
+  color: var(--fg-subtle);
+  opacity: 0.6;
+}
+
+.terminal-ports-empty__title {
+  margin: 0;
+  color: var(--fg-strong);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.terminal-ports-empty__desc {
+  margin: 0;
+  max-width: 320px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 移动端（<768px）：压缩 tab 与空状态横向留白，避免两行头部溢出。
+   端口表在 375px 下放不下四列：隐藏「进程」列（信息次优，端口 + 绑定地址 + 动作已够用），
+   绑定地址允许换行，横向不产生滚动。 */
+@media (max-width: 767px) {
+  .terminal-tab {
+    max-width: 148px;
+  }
+
+  .terminal-tab__label {
+    max-width: 108px;
+  }
+
+  .terminal-ports-empty__card {
+    padding: var(--spacing-4) var(--spacing-5);
+  }
+
+  .terminal-ports__col-process {
+    display: none;
+  }
+}

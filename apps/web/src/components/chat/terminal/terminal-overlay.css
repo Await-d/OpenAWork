@@ -1,0 +1,443 @@
+/**
+ * 终端浮层 UI 样式（搜索条 / 滚动到底 / 右键菜单 / 粘贴确认）。
+ *
+ * 为什么单独一个 CSS 文件：内联 style 无法表达 :hover / :active /
+ * :focus-visible，而 DESIGN-TOKENS 强制要求交互元素三态齐全。
+ * 所有颜色走 E · Nebula CSS 变量，间距用 4/8/12/16 阶梯。
+ */
+
+.terminal-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  /* 视觉内缩（4px）必须挂在 root，而不是 xterm 的挂载容器 `.terminal-surface` 上：
+     FitAddon 用 `getComputedStyle(挂载容器).height` 算可用高度（÷ 行高取整），
+     挂载容器带 padding 时这份高度包含 padding，而画布从 padding 之后才开始画 →
+     `.xterm-screen` 底部最多越出容器 4px（最后一行被切，D-2；基线单 pane 也复现）。
+     root 不是 xterm 的父元素，不参与 fit 测量；绝对定位的浮层（搜索条 / 滚动到底 /
+     粘贴确认）以 root 的 padding box 为包含块，位置与修复前一致。 */
+  box-sizing: border-box;
+  padding: 4px;
+}
+
+/* 焦点环：容器内任意元素获得焦点（xterm 的 helper textarea / 搜索框）
+   时给整块终端描边。offset 取负值，避免被父级 overflow 裁掉。 */
+.terminal-root:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px var(--accent-subtle);
+}
+
+.terminal-surface {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  /* 这里**不能**有 padding：本元素就是 FitAddon 的测量父元素（见 `.terminal-root` 注释）。 */
+  overflow: hidden;
+  background: var(--bg-base);
+  outline: none;
+}
+
+/* ── 通用浮层按钮：default / hover / active / focus / disabled 五态 ── */
+.terminal-overlay-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 100ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 100ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.terminal-overlay-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-default);
+}
+
+.terminal-overlay-btn:active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+
+.terminal-overlay-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.terminal-overlay-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.terminal-overlay-btn[aria-pressed='true'] {
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.terminal-overlay-btn--wide {
+  width: auto;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 4px;
+}
+
+/* ── 搜索条 ── */
+.terminal-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+  padding: 4px;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 8px;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+}
+
+.terminal-search-input {
+  width: 160px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.terminal-search-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.terminal-search-input:hover {
+  border-color: var(--border-emphasis);
+}
+
+.terminal-search-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.terminal-search-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: 9999px;
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── 滚动到底部 ── */
+.terminal-scroll-bottom {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  box-shadow: var(--shadow-md);
+}
+
+/* ── 输出流状态提示（重连中 / 已断开）── */
+.terminal-stream-chip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: 9999px;
+  gap: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.terminal-stream-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+/* ── 右键菜单 ── */
+.terminal-context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 168px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal-context-menu:focus {
+  outline: none;
+}
+
+.terminal-context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.terminal-context-menu__item:hover,
+.terminal-context-menu__item[data-active='true'] {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+
+.terminal-context-menu__item:active {
+  background: var(--bg-active);
+}
+
+.terminal-context-menu__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.terminal-context-menu__item:disabled {
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.terminal-context-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  /* accent 在亮色主题的 elevated 底上只有 ~2.9:1，图标改用中性色保证可辨识 */
+  color: var(--fg-muted);
+}
+
+.terminal-context-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-context-menu__hint {
+  flex-shrink: 0;
+  color: var(--fg-default);
+  font-size: 10.5px;
+}
+
+.terminal-context-menu__separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-subtle);
+}
+
+/* ── 粘贴确认（贴底内嵌，不用全屏遮罩，避免打断终端阅读） ── */
+.terminal-paste-confirm {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal-paste-confirm__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.terminal-paste-confirm__icon {
+  display: inline-flex;
+  color: var(--warning);
+}
+
+.terminal-paste-confirm__preview {
+  max-height: 72px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.terminal-paste-confirm__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.terminal-paste-confirm__remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.terminal-paste-confirm__remember input {
+  accent-color: var(--accent);
+}
+
+.terminal-paste-confirm__buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.terminal-paste-confirm__cancel,
+.terminal-paste-confirm__confirm {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 100ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 100ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.terminal-paste-confirm__cancel {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+}
+
+.terminal-paste-confirm__cancel:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.terminal-paste-confirm__confirm {
+  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+
+.terminal-paste-confirm__confirm:hover {
+  background: var(--accent-hover);
+}
+
+.terminal-paste-confirm__cancel:active,
+.terminal-paste-confirm__confirm:active {
+  transform: translateY(1px);
+}
+
+.terminal-paste-confirm__cancel:focus-visible,
+.terminal-paste-confirm__confirm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+/* 提示行：写失败 / 剪贴板失败的灰色反馈，直接写在终端上方一行 */
+.terminal-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 11px;
+}
+
+.terminal-notice__dismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--fg-default);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.terminal-notice__dismiss:hover {
+  color: var(--fg-strong);
+}
+
+.terminal-notice__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .terminal-search-input {
+    width: 112px;
+  }
+
+  .terminal-paste-confirm__preview {
+    max-height: 56px;
+  }
+}

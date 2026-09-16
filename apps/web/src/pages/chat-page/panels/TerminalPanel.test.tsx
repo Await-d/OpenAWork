@@ -137,6 +137,10 @@ describe('TerminalPanel', () => {
       terminalPanelOpened: true,
     });
 
+    const exitedTerminals = (): SessionTerminalView[] => [
+      makeTerminal({ terminalId: 'terminal-active', status: 'exited' }),
+    ];
+
     const { rerender } = render(
       <TerminalPanel
         {...DEFAULT_PROPS}
@@ -144,12 +148,65 @@ describe('TerminalPanel', () => {
       />,
     );
 
-    rerender(
+    // 第一次归零只写入待确认标记（防上游虚假瞬时 0），抽屉此时保持展开。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={exitedTerminals()} />);
+    expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
+
+    // 下一次完整 sync 仍为 0 → 确认归零 → 正常收起。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={exitedTerminals()} />);
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);
+    });
+  });
+
+  it('瞬时 0 不触发自动收起（D-1 防抖回归：2 → 0 → 2）', () => {
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+    });
+
+    const runningTerminals = (): SessionTerminalView[] => [
+      makeTerminal({ terminalId: 'terminal-a', status: 'running' }),
+      makeTerminal({ terminalId: 'terminal-b', status: 'running' }),
+    ];
+
+    const { rerender } = render(
+      <TerminalPanel {...DEFAULT_PROPS} terminals={runningTerminals()} />,
+    );
+
+    // 上游 reload 清空本地快照造成虚假瞬时 0：第一次归零只记录待确认、不收起。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={[]} />);
+    expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
+    expect(screen.getByLabelText('快捷终端面板 mock')).toBeTruthy();
+
+    // 下一次 sync 恢复真实快照：待确认被撤销，抽屉保持展开。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={runningTerminals()} />);
+    expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
+    expect(screen.getByLabelText('快捷终端面板 mock')).toBeTruthy();
+  });
+
+  it('归零需连续两次采样确认（持续 0）才自动收起', async () => {
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+    });
+
+    const exitedTerminals = (): SessionTerminalView[] => [
+      makeTerminal({ terminalId: 'terminal-active', status: 'exited' }),
+    ];
+
+    const { rerender } = render(
       <TerminalPanel
         {...DEFAULT_PROPS}
-        terminals={[makeTerminal({ terminalId: 'terminal-active', status: 'exited' })]}
+        terminals={[makeTerminal({ terminalId: 'terminal-active', status: 'running' })]}
       />,
     );
+
+    // 第一次采样归零：只记录待确认，抽屉保持展开。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={exitedTerminals()} />);
+    expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
+
+    // 第二次采样仍为 0：归零被确认，正常收起。
+    rerender(<TerminalPanel {...DEFAULT_PROPS} terminals={exitedTerminals()} />);
 
     await waitFor(() => {
       expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);

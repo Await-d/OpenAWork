@@ -1,0 +1,256 @@
+/**
+ * 终端分屏（T-10）：递归 flex 树 + 分隔条 + pane 焦点态。
+ *
+ * 颜色 / 间距一律走 E · Nebula token 与 4/8/12/16/20/24/32/48 阶梯。
+ * 分隔条此刻**只提供结构与 hover/active 反馈**（命中区 ≥ 6px、视觉线 1–2px），
+ * 拖拽逻辑由 T-11 接手：元素已带 `data-split-id` / `data-direction`。
+ *
+ * 关键陷阱：flex 子项默认 `min-width: auto`，xterm 撑开后会把布局顶破 ——
+ * 每一层（split 容器 / child / pane / pane body）都必须写 `min-width: 0`。
+ */
+
+/* ── 分屏容器 ── */
+.terminal-split {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.terminal-split[data-direction='row'] {
+  flex-direction: row;
+}
+
+.terminal-split[data-direction='column'] {
+  flex-direction: column;
+}
+
+.terminal-split__child {
+  display: flex;
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-split__child--grow {
+  flex: 1 1 0;
+}
+
+/* ── 分隔条：命中区 6px，视觉线 1px（hover / active 变 accent 并加粗到 2px） ── */
+.terminal-split__divider {
+  position: relative;
+  flex: 0 0 6px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  z-index: 1;
+}
+
+.terminal-split__divider::after {
+  content: '';
+  position: absolute;
+  background: var(--border-subtle);
+  transition: background var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-split[data-direction='row'] > .terminal-split__divider {
+  cursor: col-resize;
+}
+
+.terminal-split[data-direction='row'] > .terminal-split__divider::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.terminal-split[data-direction='column'] > .terminal-split__divider {
+  cursor: row-resize;
+}
+
+.terminal-split[data-direction='column'] > .terminal-split__divider::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.terminal-split__divider:hover::after,
+.terminal-split__divider:active::after,
+.terminal-split__divider:focus-visible::after,
+.terminal-split__divider[data-dragging='true']::after {
+  background: var(--accent);
+}
+
+.terminal-split[data-direction='row'] > .terminal-split__divider:hover::after,
+.terminal-split[data-direction='row'] > .terminal-split__divider:active::after,
+.terminal-split[data-direction='row'] > .terminal-split__divider:focus-visible::after,
+.terminal-split[data-direction='row'] > .terminal-split__divider[data-dragging='true']::after {
+  width: 2px;
+}
+
+.terminal-split[data-direction='column'] > .terminal-split__divider:hover::after,
+.terminal-split[data-direction='column'] > .terminal-split__divider:active::after,
+.terminal-split[data-direction='column'] > .terminal-split__divider:focus-visible::after,
+.terminal-split[data-direction='column'] > .terminal-split__divider[data-dragging='true']::after {
+  height: 2px;
+}
+
+.terminal-split__divider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 拖拽中指针由 body 上的 cursor 接管（见 TerminalSplitView 的 effect），
+   这里再加一层兜底，避免 pointer capture 期间指针短暂落在子元素上时闪烁。 */
+.terminal-split[data-dragging='true'] {
+  user-select: none;
+}
+
+.terminal-split[data-direction='row'][data-dragging='true'] {
+  cursor: col-resize;
+}
+
+.terminal-split[data-direction='column'][data-dragging='true'] {
+  cursor: row-resize;
+}
+
+/* ── pane：一个组 = tab 条 + active 终端 ── */
+.terminal-pane {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  transition: box-shadow var(--dur-micro) var(--ease-micro);
+}
+
+/* 无分屏（隐式 pane，layout === null）时 `.terminal-pane` 是 `.terminal-panel__body`
+   （block 容器）的**直接子元素**：缺省 `height: auto` 会让 pane 按 xterm 的固有高度
+   撑开（fit 结果 ≈ 抽屉可见高度的 2 倍以上），内容溢出抽屉、底部被祖先 overflow
+   与视口裁掉 —— 用户看不到最新输出，且页面不可滚动，等于「终端画出来了但显示不全」。
+   分屏路径有 `.terminal-split { height: 100% }` 提供确定高度，这里补齐同一约束。 */
+.terminal-panel__body > .terminal-pane {
+  height: 100%;
+  min-height: 0;
+}
+
+/* 焦点态：激活 pane 用 2px accent 内描边；其余保持 subtle 细线。 */
+.terminal-pane[data-active='true'] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.terminal-pane:hover:not([data-active='true']) {
+  box-shadow: inset 0 0 0 1px var(--border-emphasis);
+}
+
+.terminal-pane__strip {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.terminal-pane__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* pane 激活时外层已有 2px accent 焦点环，抑制 xterm 自己的第二圈，
+   否则两层描边相距仅 2px，视觉上变成一圈粗边。内层控件仍有各自的焦点样式。 */
+.terminal-pane[data-active='true'] .terminal-root:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ── T-12 拖拽落点预览 ── */
+
+/* pane-center：整组合并高亮。只有落点未被拒绝时组件才会渲染该属性，
+   「看起来能放」与「真的能放」必须一致。 */
+.terminal-pane[data-drop-center='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* pane-edge：新组将要占据的那一半（left/top = 新组在前）。 */
+.terminal-pane__drop-edge {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  background: var(--accent-subtle);
+  border: 1px dashed var(--accent);
+}
+
+.terminal-pane__drop-edge[data-edge='left'] {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  border-right: none;
+}
+
+.terminal-pane__drop-edge[data-edge='right'] {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  border-left: none;
+}
+
+.terminal-pane__drop-edge[data-edge='top'] {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 50%;
+  border-bottom: none;
+}
+
+.terminal-pane__drop-edge[data-edge='bottom'] {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 50%;
+  border-top: none;
+}
+
+/* tab 条落点高亮 + 被拖 tab 的弱化（跨组拖拽时源 tab 仍在源组里，弱化表示「正在移动」）。 */
+.terminal-pane .terminal-tab-strip__list[data-drop-strip='true'] {
+  border-radius: var(--radius-xs);
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.terminal-pane .terminal-tab[data-dragging='true'] {
+  opacity: 0.45;
+}
+
+/* tab 可拖拽的抓取提示：整块 label 是抓取区，关闭 × 保持 pointer。 */
+.terminal-pane .terminal-tab__label {
+  cursor: grab;
+}
+
+.terminal-pane .terminal-tab[data-dragging='true'] .terminal-tab__label {
+  cursor: grabbing;
+}
+
+/* 移动端（<768px）：分屏只允许上下，分隔条命中区放大到 8px 适应触控。 */
+@media (max-width: 767px) {
+  .terminal-split[data-direction='column'] > .terminal-split__divider {
+    flex-basis: 8px;
+  }
+}

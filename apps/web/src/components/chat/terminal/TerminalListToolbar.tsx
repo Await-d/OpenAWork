@@ -165,7 +165,7 @@ export function TerminalListToolbar({
             borderRadius: 6,
             border: '1px solid var(--border-subtle)',
             background: 'var(--bg-base)',
-            color: 'var(--text-1)',
+            color: 'var(--fg-strong)',
           }}
         />
       </div>
