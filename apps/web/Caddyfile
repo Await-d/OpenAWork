@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────
+# OpenAWork 边缘接入层 —— 在反代终止 TLS / HTTP/3
+#
+# 拓扑：
+#   浏览器 / App ──(HTTP/3·QUIC | HTTP/2 | HTTP/1.1)──> Caddy ──(HTTP/1.1)──> web:80 (nginx) ──> gateway:3000
+#
+# 站点地址（必需，见根目录 docker-compose.http3.yml）：
+#   - 公网域名 → 自动签发并续期 ACME 证书，浏览器无警告：
+#       OPENAWORK_SITE_ADDRESS=openawork.example.com
+#   - 内网 / 本地 → 自签证书，需在客户端信任 Caddy 本地 CA，
+#     并取消下方 `tls internal` 注释：
+#       OPENAWORK_SITE_ADDRESS=openawork.local   （localhost 默认即自签）
+#
+# 前置条件：
+#   - 防火墙 / 安全组放行 443/TCP（HTTP/1.1 + HTTP/2 + WebSocket）
+#     与 443/UDP（HTTP/3 / QUIC）；
+#   - ACME 证书签发仅依赖 80/443 TCP，不需要 UDP。
+# ─────────────────────────────────────────────────────────────────────
+
+{$OPENAWORK_SITE_ADDRESS:localhost} {
+	# tls internal
+
+	encode zstd gzip
+
+	# 上游固定为 HTTP/1.1，与 web/nginx.conf 的 proxy_http_version 1.1 保持一致；
+	# 网关与 web 容器零改动。SSE / WebSocket 均由 Caddy 自动处理：
+	#   - text/event-stream 自动立即 flush（不受响应缓冲影响）；
+	#   - Upgrade 请求自动完成握手并转为双向隧道。
+	reverse_proxy web:80 {
+		# 配置重载（修改 Caddyfile / 续期触发重载）时，Caddy 默认立即关闭
+		# 所有流式连接并向两端发送 Close。OpenAWork 同时存在会话流、team events、
+		# 终端等多条长连接，延迟 5 分钟关闭可避免大批客户端在重载瞬间同时重连。
+		stream_close_delay 5m
+	}
+
+	# HTTP/3（QUIC）说明 —— 以下均为 Caddy 默认行为，无需显式配置：
+	#   - TLS 站点默认同时启用 h1 + h2 + h3（监听 UDP 443）；
+	#   - Alt-Svc 响应头自动下发，客户端据此升级到 QUIC；
+	#   - 协商失败的客户端自动回落 HTTP/2 / HTTP/1.1（TCP 443）。
+	#
+	# 注意：浏览器 WebSocket API 不支持 H2/H3 升级（RFC 8441/9220 未普遍实现），
+	# 因此 /sessions/:id/stream 等 WS 通道经 TCP 443 保持 HTTP/1.1；
+	# SSE（/stream/attach、/stream/multi-attach）与 REST 流量可完整享受 H3 收益。
+}

@@ -12,6 +12,12 @@ services:
       JWT_EXPIRES_IN: 15m
       OPENAWORK_DATA_DIR: /var/lib/openawork
       REDIS_URL: redis://redis:6379
+      # 浏览器实时预览（跨域页面也能采集控制台与网络）。
+      # 默认关闭；开启前需保证容器内有 Chromium（系统 Chrome/Edge，或 npx playwright install chromium），
+      # 否则 /browser-live/status 返回 browser-missing，前端回退 iframe 预览。
+      # OPENAWORK_BROWSER_LIVE: '1'
+      # 若确实要连 Agent 的桌面自动化工具一起开（会多暴露 goto/click/type 等工具），再叠加：
+      # DESKTOP_AUTOMATION: '1'
     volumes:
       - gateway_data:/var/lib/openawork
     depends_on:

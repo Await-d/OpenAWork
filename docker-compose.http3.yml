@@ -1,0 +1,51 @@
+# OpenAWork —— HTTP/3 边缘接入层（可选覆盖文件）
+#
+# 在现有 web(nginx) 之前增加 Caddy 反向代理，由它终止 TLS 并对外提供：
+#   - 443/TCP : HTTP/1.1 + HTTP/2（回退保底，同时承载 WebSocket / WSS）
+#   - 443/UDP : HTTP/3 (QUIC)
+#
+# 网关进程与 web 容器本身不做任何改造，仍以 HTTP/1.1 明文在内网运行。
+#
+# 用法（公网域名，Caddy 自动签发并续期 Let's Encrypt 证书）：
+#   OPENAWORK_SITE_ADDRESS=openawork.example.com \
+#     docker compose -f docker-compose.yml -f docker-compose.http3.yml up -d --build
+#
+# 用法（内网 / 本地，自签证书，需在客户端信任 Caddy 本地 CA）：
+#   OPENAWORK_SITE_ADDRESS=openawork.local \
+#     docker compose -f docker-compose.yml -f docker-compose.http3.yml up -d --build
+#   （同时取消 apps/web/Caddyfile 中 `tls internal` 的注释）
+#
+# 验证：
+#   curl -sI https://<域名> | grep -i alt-svc        # 应返回 h3=":443"
+#   curl --http3 -sI https://<域名>                  # curl 需编译 HTTP/3 支持
+#
+# 回退：
+#   客户端 H3 协商失败时依据 Alt-Svc 自动回落 HTTP/2 / HTTP/1.1（TCP 443），
+#   无需任何应用层或配置层回退动作；UDP 443 被封时整套部署退化为普通 HTTPS。
+#
+# 注意：
+# - 默认 `docker compose up` 行为完全不受影响（本文件仅在显式 -f 组合时生效）；
+# - 若宿主机 443 已被占用，可改为其他端口对（如 '8443:443/tcp' + '8443:443/udp'），
+#   此时浏览器地址需带端口访问；
+# - 证书数据持久化在 caddy_data 卷，首次签发后重启不会重复申请。
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '80:80/tcp'   # HTTP → HTTPS 自动重定向 + ACME HTTP-01 挑战（如 80 已被占用可移除，仅影响裸域名跳转）
+      - '443:443/tcp'
+      - '443:443/udp' # HTTP/3 (QUIC)
+    environment:
+      OPENAWORK_SITE_ADDRESS: ${OPENAWORK_SITE_ADDRESS:-localhost}
+    volumes:
+      - ./apps/web/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

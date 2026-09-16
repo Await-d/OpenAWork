@@ -1,0 +1,52 @@
+# Docker 构建上下文过滤器（仓库根）。对所有使用 `context: .` 的构建生效 —— 只排除
+# 任何镜像都不需要从源码树取的东西，保证网关镜像与 Web 镜像都能正常构建。
+
+# 依赖（在镜像内重新安装）
+**/node_modules
+
+# 构建产物与增量缓存（在镜像内重新生成）
+**/dist
+**/*.tsbuildinfo
+**/.expo
+
+# 版本控制 / CI
+.git
+.github
+
+# 本地 Agent / AI 临时数据
+.agentdocs
+.omo
+.sisyphus
+.artifacts
+.verification
+.openAwork
+.serena
+.claude
+.backup
+.evidence
+
+# 密钥与本地 env 覆盖文件 —— 绝不能打进镜像
+.env
+.env.*
+
+# 测试覆盖率产物
+**/coverage
+**/.nyc_output
+
+# 本地运行数据 / SQLite 文件
+services/agent-gateway/data
+**/*.db
+**/*.db-*
+
+# 桌面端重型构建产物（仅 Tauri 构建需要）
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/sidecars
+apps/desktop/src-tauri/binaries
+apps/desktop/src-tauri/gen
+
+# 系统 / 编辑器垃圾文件
+**/.DS_Store
+**/Thumbs.db
+**/.idea
+**/.vscode
+temp/
