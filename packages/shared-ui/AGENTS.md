@@ -2,7 +2,7 @@
 
 ## 概述
 
-60+ React 组件，被 Web、桌面端和移动端三个应用共同使用。是所有平台 UI 的唯一真实来源。组件按业务领域命名，而非抽象控件——这不是通用 UI 库。
+60+ React 组件，被 Web 与桌面端共同使用（`apps/mobile` 零依赖，不复用本包）。是 Web 与桌面端 UI 的唯一真实来源。组件按业务领域命名，而非抽象控件——这不是通用 UI 库。
 
 ## 目录结构
 
@@ -19,7 +19,8 @@ src/
 ├── CostBadge.tsx / CostOverview.tsx / ModelCostDisplay.tsx
 ├── ModelManager.tsx / ModelPriceConfig.tsx / ProviderSettings.tsx
 ├── CommandPalette.tsx
-├── ContextPanel.tsx / FileFilterSettings.tsx / FileSearch.tsx / FileTreePanel.tsx
+├── misc/ContextPanel.tsx
+├── file/                 # 文件树/文件搜索/文件图标主题（FileTreePanel、FileSearch、FileFilterSettings、file-icon-theme/）
 ├── InstallProgressUI.tsx / InstalledSkillsManager.tsx
 ├── SkillDetailPage.tsx / SkillManagerDesktop.tsx / SkillManagerMobile.tsx / SkillMarketHome.tsx
 ├── RegistrySourceManager.tsx

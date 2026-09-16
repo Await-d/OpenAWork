@@ -55,6 +55,10 @@ src/
 - **流式输出**：`/stream` 路由提供 SSE；`@fastify/websocket` 提供实时 WS。
 - **桌面 Sidecar**：通过 `bun build --compile` 编译为二进制，嵌入 Tauri。构建 Tauri 用版本请执行 `pnpm build:binary`，而非 `pnpm build`。
 - **消息渠道**：所有渠道实现 `MessagingChannelService`（start/stop/sendMessage/replyMessage），通过 `manager.ts` 注册管理。
+- **会话权限阶梯**：三档 `ask`（默认）/`auto-edit`/`yolo`，统一由 `resolveSessionPermissionMode` 解析（`packages/agent-core/src/permission/session-permission-mode.ts:20`）。唯一执行点是 `src/tools/tool-sandbox.ts` 的 `ensurePermissionForTool`（:6142）。
+- **阶梯顺序不变量**：免审批快捷分支（`tool-sandbox.ts:6215`，`yolo` 或后台 team 会话）与 `auto-edit` 分支（:6223）都在通配符 allow/deny（:6165）和作用域级 allow/deny（:6183）之后执行，因此 `auto-edit`/`yolo` 只能跳过 ask，绝不会放行被显式 `deny` 的调用。`auto-edit` 仅自动放行 `AUTO_EDIT_PERMISSION_CATEGORIES`（`edit`/`write`），并始终豁免 `AUTO_EDIT_EXCLUDED_TOOLS`（`workspace_review_revert`，回滚类仍需人工确认）。
+- **子会话继承档位**：task 子会话（`tool-sandbox.ts:4231`）与 handoff 子会话（`src/handoff/runner/watcher.ts:460`）仅在父会话确实表达过档位时（已写规范键或历史布尔 `yoloMode === true`）才按父会话解析结果继承 `permissionMode`，父会话未表达时保持缺席（按 `ask` 兜底，不凭空写入）；后台 team 成员无法交互审批，由 `isBackgroundAutoApprovedTeamSession`（`tool-sandbox.ts:5889`）判定免审批。
+- **发布顺序约束**：会话 metadata PATCH 校验是 `.strict()`（`src/session/session-workspace-metadata.ts:136`，`permissionMode` 在 :175），未知键直接报错；.NET 侧同语义（`services/agent-gateway-dotnet/src/OpenAWork.Gateway.Application/Features/Sessions/SessionMetadataSupport.cs:222`，未知键返回 `unrecognized_keys`）。因此网关（含 .NET 校验）必须先于客户端发送 `permissionMode` 上线；回滚时先回滚客户端。
 - **ESLint**：此包参与代码检查（严格 TS 规则，与 `apps/` 不同）。
 
 ## 环境变量
@@ -72,6 +76,9 @@ REDIS_URL=
 AI_API_KEY=
 AI_API_BASE_URL=
 AI_DEFAULT_MODEL=
+OPENAWORK_BROWSER_LIVE=     # 1 = 启用网关侧浏览器实时预览（跨域页面也能采集控制台 / 网络）
+BROWSER_LIVE_IDLE_TTL_MS=   # 浏览器实时预览会话空闲回收毫秒数，默认 120000
+DESKTOP_AUTOMATION=         # 1 = 桌面自动化工具；同时兼容开启浏览器实时预览（桌面 sidecar 会注入）
 ```
 
 ## 常用命令

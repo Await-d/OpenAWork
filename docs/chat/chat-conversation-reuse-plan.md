@@ -1,6 +1,6 @@
 # Chat 对话布局复用方案（v1.5）
 
-> ⚠️ **superseded**：本方案已被 `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` 取代。
+> ⚠️ **superseded**：本方案已被 `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` 取代（该文档已不在仓库中）。
 > chat 与 team 不再共享 `SessionConversationView`，而是各自拥有 `ChatConversationView` / `TeamConversationView`，
 > 通过共享 `components/conversation-runtime/` + chat atoms 实现 UI 复用。
 >
@@ -11,14 +11,14 @@
 >
 > 关联文档：
 >
-> - **后继方案**：`.agentdocs/workflow/260518-team-conversation-decouple-plan.md`（chat / team 解耦）
+> - **后继方案**：`.agentdocs/workflow/260518-team-conversation-decouple-plan.md`（chat / team 解耦；该文档已不在仓库中）
 > - L1 基线：`team-architecture-l1-baseline.md`（特别是 L1.3 / L1.8）
 > - **L1.3 详细 spec**：`team-architecture-l1-3-streaming-handoff-spec.md`（Phase 2b/2c 的后端依据）
 > - 思想分析归档：`team-architecture-spec-kit-borrowing-discussion.md`
 > - 当前 team v2 方案：`.agentdocs/workflow/260516-team-page-功能加强方案.md`
 >
 > 创建时间：2026-05-16
-> 最近更新：2026-05-18（v1.5：D5 决策落地；同日被 260518-team-conversation-decouple-plan 取代）
+> 最近更新：2026-05-18（v1.5：D5 决策落地；同日被 260518-team-conversation-decouple-plan 取代；该文档已不在仓库中）
 > 当前状态：**已被取代（superseded）**。`SessionConversationView` 已重命名为 `ChatConversationView`，team 端独立装配 `TeamConversationView` 已落地。
 
 ---
@@ -199,7 +199,8 @@
 
 - `use-chat-streaming.ts` → `use-streaming.ts`
 - `use-chat-render-data.ts` → `use-render-data.ts`
-- `use-chat-scroll.ts` + `use-scroll-manager.ts` → 同名
+- `use-scroll-manager.ts` → 同名（`use-chat-scroll.ts` 已删除：其常量与滚动逻辑已并入
+  `components/conversation-runtime/scroll/` 的 SSOT，不要再重建）
 - `use-session-snapshot-loader.ts` → 同名
 - `use-session-view-cache.ts` + `use-session-view-guard.ts` → 同名
 - `use-stream-attach-retry.ts` → 同名

@@ -65,6 +65,8 @@ src/
 - **引导**：通过 `localStorage.getItem('onboarded') !== '1'` 控制是否显示。
 - **遥测授权**：通过 `localStorage.getItem('telemetry_consent_shown') !== '1'` 控制。
 - **ESLint**：`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除；`pnpm --filter @openAwork/web lint` 会显式提示跳过，待后续单独收口历史 lint 债务。
+- **会话权限档位（composer）**：档位控件 `src/components/chat/composer/ComposerPermissionModeSelect.tsx`（在 `UnifiedComposer.tsx:616` 渲染，`ComposerPermissionMode = SessionPermissionMode`，选项定义见 :21-37）；顶栏 `src/components/chat/session/ChatTopBar.tsx` 的 `auto-edit`（:167）与 `yolo`（:114）chip 是只读展示。
+- **metadata 快照必须含 `permissionMode`**：`createSessionMetadataSnapshot`（`src/pages/chat-page/conversation/render/chat-page-utils.ts:86`）的 `permissionMode` 字段（:103）参与 dirty 检查；若遗漏，`ask → auto-edit` 会得到完全相同的快照，导致 PATCH 被静默跳过。同一快照里 `yoloMode` 仍按 `permissionMode === 'yolo'` 派生回写（:104）。
 
 ## 约定
 

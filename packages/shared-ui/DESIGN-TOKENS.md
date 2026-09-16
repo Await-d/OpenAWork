@@ -141,6 +141,10 @@ CSS 变量名：`--chart-1` 到 `--chart-8`，按上表序号对应。
 
 所有图标使用 Lucide 风格（24x24 viewBox, stroke, round cap/join）。
 
+> **例外**：第三方图标主题（`material`，来自 material-icon-theme）的图标是**上游自带的品牌色填充式 SVG**，
+> 不适用上述「Lucide 风格 24×24 stroke」与「颜色必须走 CSS 变量」两条规则；
+> 项目自绘图标（含 `minimal` 主题）仍必须遵守。
+
 ## 响应式断点
 
 | 名称       | 宽度        | 布局变化                    |
@@ -413,6 +417,30 @@ shortcut:
 shortcut-icon: 38×38 / radius-md / 4色分类(同 KPI)
 shortcut-arrow: fg-subtle / hover 时 accent + translateX(3px)
 ```
+
+### 浏览器预览状态色（apps/web 内置浏览器）
+
+内置浏览器（`apps/web/src/components/chat/misc/browser/`）的状态语义统一映射到既有 token，
+不为日志级别 / HTTP 状态单独发明颜色：
+
+| 场景         | 取值                                                                 |
+| ------------ | -------------------------------------------------------------------- |
+| 控制台 log   | `--fg-default`                                                       |
+| 控制台 info  | `--accent`                                                           |
+| 控制台 warn  | `--warning`（背景 `color-mix(--warning 6%)`）                        |
+| 控制台 error | `--danger`（背景 `color-mix(--danger 6%)`）                          |
+| 控制台 debug | `--chart-5`（薰衣草，图表序列专用位）                                |
+| 网络条目     | `--aux`                                                              |
+| 瀑布 2xx     | `--success`                                                          |
+| 瀑布 3xx     | `--aux`                                                              |
+| 瀑布 4xx-5xx | `--warning`                                                          |
+| 瀑布失败     | `--danger`                                                           |
+| 瀑布请求中   | `--fg-subtle`                                                        |
+| 检查器 chip  | accent / success / warning / danger / aux（背景 14%、边框 30% 混合） |
+
+> 浏览器预览组件可能被渲染进不加载应用 token 表的宿主（验收 harness、独立预览页）：
+> 所有取值写成 `var(--token, color-mix(in oklch, currentColor N%, transparent))` 兜底，
+> **不含任何硬编码色值**；token 表存在时兜底永不生效。
 
 ---
 

@@ -19,7 +19,6 @@ chat-page/conversation/
 │   ├── chat-render-merge.ts
 │   ├── use-chat-streaming.ts
 │   ├── use-chat-render-data.ts
-│   ├── use-chat-scroll.ts
 │   ├── image-edit-reference-artifacts.ts
 │   ├── image-edit-reference-artifacts.test.ts
 │   └── task-tool-runtime.ts

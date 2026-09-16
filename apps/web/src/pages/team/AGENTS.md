@@ -76,7 +76,8 @@ team/
 
 - `TopTeamHeader.tsx`：顶部导航栏（仅 V1 旧布局 fallback 使用）
 - `TeamTabBar.tsx`：统一 tab 切换栏。`variant="single"` 为 V2 默认的单条超级栏
-  （工作区切换 + 主 tab + 状态栏 + 3D 合并为一行），子 tab 常驻第二行、主 tab 窄屏溢出「更多」
+  （工作区切换 + 主 tab + 状态栏 + 3D 合并为一行），子 tab 常驻第二行、
+  主 tab 窄屏横向滚动（不折叠，两端渐隐提示 + 滚轮/触控/键盘均可翻）
 - `TeamStatusBar.tsx`：全局状态栏（V2 作为超级栏 centerSlot 内嵌）
 - `MainWorkspace.tsx`：主内容区布局容器
 - `WorkspaceSwitcher.tsx`：工作区切换下拉

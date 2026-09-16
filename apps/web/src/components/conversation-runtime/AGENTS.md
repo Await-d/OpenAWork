@@ -14,7 +14,7 @@ conversation-runtime/
 ├── stream/        流式协议（use-conversation-stream / stream-recovery / stream-usage / streaming-segments / streaming-thinking）
 ├── attach/        断线重连（use-stream-attach-retry / attach-stream-eligibility / attach-stream-reconnect / attach-stream-reconnect-wiring）
 ├── reveal/        流式逐字显现节奏（streaming-reveal / use-stream-reveal / think-keyword-detector）
-├── scroll/        滚动管理（use-scroll-manager / scroll-alignment / scroll-constants）
+├── scroll/        滚动管理（use-scroll-manager / scroll-alignment / scroll-constants / scroll-follow-state / use-scroll-intent）
 ├── messages/      消息 / 内容处理（support / reasoning-content / transcript-visibility / context-usage / ordered-id）
 ├── session/       session 协议（session-runtime / recovery-read-model / permission-auto-respond / inbound-types / sequential-polling）
 ├── terminals/     终端（terminals-api / use-session-terminals）
@@ -40,5 +40,4 @@ conversation-runtime/
 
 ## 关联文档
 
-- `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` §5.1
-- `docs/chat-conversation-reuse-plan.md` v1.5
+- `docs/chat/chat-conversation-reuse-plan.md` v1.5
