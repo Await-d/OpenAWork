@@ -5,19 +5,24 @@ import { acquireRefresh } from '@openAwork/web-client';
 /**
  * 根据当前浏览器地址动态计算默认 Gateway 地址。
  * - 浏览器端口为 5173（Vite 默认开发端口）时，Gateway 默认端口 3000；
- * - 浏览器端口非 5173 时（如生产部署或自定义端口），Gateway 默认端口与浏览器端口保持一致。
+ * - 浏览器端口非 5173 时（如生产部署或自定义端口），Gateway 与浏览器同源，
+ *   由接入层（nginx / Caddy 反代）将 /api、/auth、/sessions 转发至网关。
  * - 非 browser 环境（SSR / Tauri）回退到 http://localhost:3000。
+ *
+ * 使用 `window.location.host`（端口为默认值时自动省略端口）而非
+ * `${hostname}:${port}` 拼接：HTTPS 默认端口（443）下 `port` 为空字符串，
+ * 旧写法会产出 `https://example.com:` 这类尾随冒号的脆弱地址。
  */
 function getDefaultGatewayUrl(): string {
   if (typeof window === 'undefined' || !window.location) {
     return 'http://localhost:3000';
   }
-  const { port, protocol } = window.location;
+  const { port, protocol, host } = window.location;
   const isViteDevPort = port === '5173';
   if (isViteDevPort) {
     return 'http://localhost:3000';
   }
-  return `${protocol}//${window.location.hostname}:${port}`;
+  return `${protocol}//${host}`;
 }
 
 interface AuthState {

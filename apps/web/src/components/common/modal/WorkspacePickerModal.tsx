@@ -25,6 +25,10 @@ export interface WorkspacePickerModalProps {
   validatePath?: (path: string) => Promise<{ valid: boolean; error?: string; path?: string }>;
   loading?: boolean;
   initialPath?: string;
+  /** 「新建工作空间」入口：打开后直接展开新建文件夹表单。 */
+  initialCreateMode?: boolean;
+  /** 「使用 SSH 远端目录」入口；未提供时不渲染该按钮（其它调用点不受影响）。 */
+  onSwitchToSshSource?: () => void;
 }
 
 function validateDirectoryName(name: string): string | null {
@@ -56,6 +60,8 @@ export default function WorkspacePickerModal({
   validatePath,
   loading = false,
   initialPath,
+  initialCreateMode = false,
+  onSwitchToSshSource,
 }: WorkspacePickerModalProps) {
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [availableRoots, setAvailableRoots] = useState<string[]>([]);
@@ -151,7 +157,11 @@ export default function WorkspacePickerModal({
     }
 
     void initialize();
-  }, [initialize, isOpen]);
+    // 「新建工作空间」入口：打开后直接展开新建文件夹表单，省去一次点击。
+    if (initialCreateMode && createDirectory) {
+      setShowCreateDirectoryForm(true);
+    }
+  }, [createDirectory, initialCreateMode, initialize, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -268,12 +278,10 @@ export default function WorkspacePickerModal({
 
     try {
       await createDirectory(nextPath);
-      const nodes = fetchTree ? await fetchTree(currentPath, 1) : [];
-      setDirectories(nodes.filter((node) => node.type === 'directory'));
-      setPathInput(currentPath);
+      // 创建后直接进入新目录：它随即成为「当前目录」，可被一键选为工作区。
+      await openDirectory(nextPath);
       setShowCreateDirectoryForm(false);
       setNewDirectoryName('');
-      lastActionRef.current = { kind: 'open', path: currentPath };
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建文件夹失败');
     } finally {
@@ -816,7 +824,32 @@ export default function WorkspacePickerModal({
 
         {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+          <div>
+            {onSwitchToSshSource && (
+              <button
+                type="button"
+                onClick={onSwitchToSshSource}
+                className="workspace-picker-action"
+                disabled={busy}
+                style={{
+                  height: 34,
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-default)',
+                  background: 'transparent',
+                  color: 'var(--fg-default)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy ? 0.5 : 1,
+                }}
+              >
+                使用 SSH 远端目录
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
             onClick={onClose}
@@ -872,6 +905,7 @@ export default function WorkspacePickerModal({
             )}
             选择当前文件夹
           </button>
+          </div>
         </div>
       </div>
       <style>{`

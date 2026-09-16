@@ -123,7 +123,9 @@ describe('WorkspacePickerModal', () => {
       expect(screen.getByText('feature')).toBeTruthy();
     });
     expect(fetchTree).toHaveBeenNthCalledWith(1, '/workspace/demo', 1);
-    expect(fetchTree).toHaveBeenNthCalledWith(2, '/workspace/demo', 1);
+    // 创建后组件会直接进入新目录（新目录随即成为可一键选中的当前目录），
+    // 因此第二次读取的是新目录本身。
+    expect(fetchTree).toHaveBeenNthCalledWith(2, '/workspace/demo/feature', 1);
   });
 
   it('文件夹名称包含路径分隔符时不会创建目录', async () => {
