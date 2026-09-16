@@ -170,6 +170,18 @@ export class DesktopBrowserAutomation {
     return this.engine;
   }
 
+  /**
+   * 获取当前活跃的 Playwright `Page` 实例。
+   *
+   * 该方法供包内的实时会话（`BrowserLiveSession`）复用底层页面使用，
+   * 不属于跨进程代理协议的一部分，因此不会出现在 `BrowserProxyCommand` 中。
+   *
+   * @throws {BrowserAutomationError} 当自动化尚未启动、当前页面缺失或页面已失效时抛出。
+   */
+  getCurrentPage(): Page {
+    return this.requirePage();
+  }
+
   async newPage(url?: string): Promise<string> {
     const context = this.requireContext();
     const page = await context.newPage();
@@ -472,3 +484,7 @@ export type {
 } from 'playwright';
 
 export * from './proxy.js';
+export * from './live-session.js';
+export * from './live-session-types.js';
+export * from './live-browser-availability.js';
+export * from './source-map-resolver.js';
