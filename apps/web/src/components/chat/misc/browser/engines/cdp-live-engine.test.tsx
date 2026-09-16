@@ -17,7 +17,6 @@ import type {
   BrowserLiveSession,
 } from '../hooks/use-browser-live-session.js';
 import { CdpLiveEngine, DEVICE_SYNC_DEBOUNCE_MS, toDevicePoint } from './cdp-live-engine.js';
-
 afterEach(() => {
   cleanup();
 });
