@@ -1079,6 +1079,14 @@ export type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
 
 export type PermissionRequestStatus = 'pending' | 'approved' | 'rejected';
 
+/**
+ * 会话级权限档位（权限阶梯）：
+ * - `ask`：每个敏感操作都需要用户确认（默认档位）；
+ * - `auto-edit`：自动放行编辑/写入类操作，其余仍需确认；
+ * - `yolo`：跳过全部权限确认。
+ */
+export type SessionPermissionMode = 'ask' | 'auto-edit' | 'yolo';
+
 export interface PermissionRequestBase {
   requestId: string;
   toolName: string;
@@ -1500,6 +1508,14 @@ export interface StreamTerminalStartedChunk {
 export interface StreamTerminalOutputChunk {
   type: 'terminal_output';
   terminalId: string;
+  /**
+   * Monotonic sequence number of the last byte in `data` (per terminal,
+   * starting at 1). Optional so producers written before the PTY delta
+   * upgrade remain assignable; new producers always set it.
+   */
+  seq?: number;
+  /** Incremental text for this chunk (**not** cumulative). Optional for legacy producers. */
+  data?: string;
   outputTail: string;
   outputBytesTotal: number;
   occurredAt?: number;
@@ -1675,3 +1691,33 @@ export {
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
 } from './reasoning-ui.js';
+
+export type {
+  BrowserLiveAckMessage,
+  BrowserLiveA11yNode,
+  BrowserLiveA11yPayload,
+  BrowserLiveChannel,
+  BrowserLiveClientMessage,
+  BrowserLiveConsoleLevel,
+  BrowserLiveConsolePayload,
+  BrowserLiveControlMessage,
+  BrowserLiveDeviceMessage,
+  BrowserLiveDevicePayload,
+  BrowserLiveDomNode,
+  BrowserLiveDomPayload,
+  BrowserLiveEnvelope,
+  BrowserLiveErrorPayload,
+  BrowserLiveFramePayload,
+  BrowserLiveHelloPayload,
+  BrowserLiveInputMessage,
+  BrowserLiveNavPayload,
+  BrowserLiveNetworkPayload,
+  BrowserLiveNodePayload,
+  BrowserLiveScreenshotPayload,
+} from './browser-live.js';
+export {
+  BROWSER_LIVE_HIGH_WATER_FRAMES,
+  BROWSER_LIVE_MAX_FRAME_BYTES,
+  BROWSER_LIVE_REST_PREFIX,
+  BROWSER_LIVE_WS_PATH,
+} from './browser-live.js';
