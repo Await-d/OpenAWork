@@ -8,6 +8,7 @@ import {
   CONFIRM_ANSWER,
   CONFIRM_NODE_ID,
   createGrillState,
+  isConfirmAffirmative,
   isFrontierEmpty,
   needsConfirmation,
   parseGrillState,
@@ -177,6 +178,25 @@ describe('needsConfirmation / confirmGrill', () => {
     expect(stillPending.confirmedAt).toBeUndefined();
     expect(stillPending.nodes.find((n) => n.id === CONFIRM_NODE_ID)?.answer).toBeUndefined();
     expect(needsConfirmation(stillPending)).toBe(true);
+  });
+});
+
+describe('isConfirmAffirmative — 肯定确认文案判定（A/C 共用的 SSOT）', () => {
+  it('字面量 confirmed 与常见肯定措辞视为肯定', () => {
+    for (const label of ['confirmed', '确认', '可以', '是的', '是，开始实现', 'OK', 'Go ahead']) {
+      expect(isConfirmAffirmative(label)).toBe(true);
+    }
+  });
+
+  it('否定 / 修饰性文案不视为肯定', () => {
+    for (const label of ['需修改', 'rejected', '先不实现', '继续澄清', '重新讨论']) {
+      expect(isConfirmAffirmative(label)).toBe(false);
+    }
+  });
+
+  it('两侧空白不影响判定，空串不是肯定', () => {
+    expect(isConfirmAffirmative('  确认  ')).toBe(true);
+    expect(isConfirmAffirmative('   ')).toBe(false);
   });
 });
 

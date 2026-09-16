@@ -146,6 +146,13 @@ export {
   writeWorkspacePermissionConfig,
 } from './permission/workspace-permission-config.js';
 
+export type { SessionPermissionMode } from './permission/session-permission-mode.js';
+export {
+  AUTO_EDIT_EXCLUDED_TOOLS,
+  AUTO_EDIT_PERMISSION_CATEGORIES,
+  resolveSessionPermissionMode,
+} from './permission/session-permission-mode.js';
+
 export type {
   BrowserPermissionLevel,
   TrustedDomain,
@@ -194,8 +201,10 @@ export {
   computeNodeStatus,
   confirmGrill,
   CONFIRM_ANSWER,
+  CONFIRM_AFFIRMATIVE_PATTERN,
   CONFIRM_NODE_ID,
   createGrillState,
+  isConfirmAffirmative,
   isFrontierEmpty,
   needsConfirmation,
   parseGrillState,
@@ -449,6 +458,7 @@ export {
   SSHConnectionManagerImpl,
   type SSHConnection,
   type ExecResult,
+  type SSHExecOptions,
   type SSHFileEntry,
   type SSHFilePreview,
   type SSHConnectionManager,

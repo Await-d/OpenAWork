@@ -38,6 +38,20 @@ export const CONFIRM_NODE_ID = '__grill_confirm__';
 export const CONFIRM_ANSWER = 'confirmed';
 export const REJECT_ANSWER = 'rejected';
 
+/**
+ * 「肯定确认」文案模式。确认节点的语义是「用户确认共识、可以进入执行」，但调用方的
+ * 输入形态不同：A 层（chat）传的是选项标签，C 层（team）传的是用户回复文本。
+ * 两侧都必须按同一套判定归一化到 `CONFIRM_ANSWER`，否则会出现"点了确认却被判成驳回"
+ * 或"模型把推荐项标在否定项上导致驳回被当成确认"这类漂移。
+ */
+export const CONFIRM_AFFIRMATIVE_PATTERN =
+  /^(确认|同意|可以|行|好|没问题|是|对的|ok|okay|yes|yep|go)/i;
+
+/** 该文案是否可视为"肯定确认"（用于确认节点的选项标签 / 用户回复文本归一化）。 */
+export function isConfirmAffirmative(label: string): boolean {
+  return label.trim() === CONFIRM_ANSWER || CONFIRM_AFFIRMATIVE_PATTERN.test(label.trim());
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
