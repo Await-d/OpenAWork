@@ -860,6 +860,9 @@ export function useTeamConversationState(
       setHasPendingFollowContent,
     },
     {
+      // team 会话身份 = 当前渲染的 sessionId：切换会话时重置滚动保持，
+      // 流式 tick（buffer / streamingSegments 更新）不会改变它。
+      sessionKey: sessionId,
       messagesLength: messages.length,
       visibleStreaming,
       visibleStreamBufferLength: streamBuffer.length,

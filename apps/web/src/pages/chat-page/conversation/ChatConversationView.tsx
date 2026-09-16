@@ -43,13 +43,13 @@ import type { useChatSearch } from '../../../components/chat/search/chat-search-
 import { ChatSessionSkeleton } from '../../../components/chat/session/chat-session-skeleton.js';
 import { InlineQuestionPanel } from '../../../components/chat/misc/InlineQuestionPanel.js';
 import { UnifiedComposer } from '../../../components/chat/composer/UnifiedComposer.js';
-import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type {
   UnifiedComposerActivity,
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
+import type { ComposerPermissionMode } from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type { ComposerStatsData } from '../../../components/chat/composer/ComposerStatsBar.js';
 import { WelcomeScreen } from '../../../components/chat/session/ChatPageSections.js';
@@ -93,7 +93,7 @@ export interface ConversationComposerExtras {
   promptTemplate?: boolean;
   commandPalette?: boolean;
   dialogueModeToggle?: boolean;
-  yoloMode?: boolean;
+  permissionMode?: boolean;
   agentSwitch?: boolean;
 }
 
@@ -283,7 +283,10 @@ export interface ChatConversationViewProps {
   canStopCurrentSessionStream: boolean;
   dialogueMode: DialogueMode;
   manualAgentId: string;
-  yoloMode: boolean;
+  /** 输入框内审批方式档位（ask / auto-edit / yolo）。 */
+  permissionMode: ComposerPermissionMode;
+  /** 输入框内审批方式档位切换；不提供时不渲染该控件。 */
+  onPermissionModeChange?: (next: ComposerPermissionMode) => void;
   fastEnabled?: boolean;
   webSearchEnabled: boolean;
   webSearchAvailable?: boolean;
@@ -345,6 +348,11 @@ export interface ChatConversationViewProps {
    * UnifiedComposer.composerRightSlot.
    */
   composerRightSlot?: ReactNode;
+  /**
+   * 输入框外壳上方（外层、左对齐）插槽。ChatPage 用它挂载「选择工作空间」下拉，
+   * 转发到 UnifiedComposer.composerFooterSlot；team 会话不传即不渲染。
+   */
+  composerFooterSlot?: ReactNode;
   /** 已索引的工作区文件，供 @ 菜单引用。不传时 @ 菜单会一直显示空状态。 */
   workspaceFileItems?: WorkspaceFileMentionItem[];
   searchMentionFiles?: MentionFileSearchFn;
@@ -414,6 +422,7 @@ function buildComposerFeatures(
     mentions: true,
     agentSwitch: ex.agentSwitch ?? false,
     queuedMessages: true,
+    permissionMode: ex.permissionMode ?? false,
   };
 }
 
@@ -508,7 +517,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     canStopCurrentSessionStream,
     dialogueMode,
     manualAgentId,
-    yoloMode,
+    permissionMode,
+    onPermissionModeChange,
     fastEnabled,
     webSearchEnabled,
     webSearchAvailable = true,
@@ -555,6 +565,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     statsData,
     composerPlaceholder,
     composerRightSlot,
+    composerFooterSlot,
   } = props;
 
   const composerFeatures = buildComposerFeatures(composerExtras, webSearchAvailable);
@@ -619,6 +630,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   const scrollRegionStyle: CSSProperties = {
     flex: 1,
     overflowY: 'auto',
+    overflowAnchor: 'none',
+    overscrollBehavior: 'contain',
     padding: scrollPadding,
     display: 'flex',
     flexDirection: 'column',
@@ -865,7 +878,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           activeModelTooltip={activeModelTooltip}
           dialogueMode={dialogueMode}
           manualAgentId={manualAgentId}
-          yoloMode={yoloMode}
+          permissionMode={permissionMode}
+          onPermissionModeChange={onPermissionModeChange}
           fastEnabled={fastEnabled}
           webSearchEnabled={webSearchEnabled}
           thinkingEnabled={thinkingEnabled}
@@ -912,6 +926,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           statsData={statsData}
           placeholder={composerPlaceholder}
           composerRightSlot={composerRightSlot}
+          composerFooterSlot={composerFooterSlot}
         />
       )}
     </>

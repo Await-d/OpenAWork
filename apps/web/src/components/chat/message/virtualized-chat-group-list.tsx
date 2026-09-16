@@ -292,7 +292,7 @@ function ChatGroupBlock({
   group: ChatRenderGroup;
 }) {
   return (
-    <div className="chat-message-group" data-role={group.role}>
+    <div className="chat-message-group" data-chat-group-root="true" data-role={group.role}>
       {group.entries.map((entry, entryIndex) => (
         <MessageRow
           key={entry.message.id}

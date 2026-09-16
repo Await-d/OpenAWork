@@ -13,7 +13,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { useRef, useState } from 'react';
 import { useChatConversationState } from './use-chat-conversation-state.js';
+import { useSessionSettingsCallbacks } from './settings/use-session-settings-callbacks.js';
+import type { ComposerPermissionMode } from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { subscribeSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
 
 const SESSION_ID = 'session-test-001';
@@ -406,6 +409,125 @@ describe('useChatConversationState — composer setter 暴露', () => {
     expect(result.current.yoloMode).toBe(true);
     expect(result.current.thinkingEnabled).toBe(true);
     expect(result.current.reasoningEffort).toBe('low');
+  });
+});
+
+/**
+ * 组合 harness：用局部档位状态提供审批方式真源（与生产端 ChatPage 的 useState 同构），
+ * 覆盖 useSessionSettingsCallbacks.handlePermissionModeChange 的写入路径：
+ * 本地档位更新 + metadata dirty 标记 + buildSessionMetadata 输出。
+ * 注意生产端 ChatPage 的档位真源也是自身 useState，不走 useChatConversationState。
+ */
+function usePermissionModeHarness() {
+  const conversation = useChatConversationState({
+    sessionId: null,
+    currentUserEmail: EMAIL,
+    gatewayUrl: GATEWAY,
+    token: TOKEN,
+  });
+  const [permissionMode, setPermissionMode] = useState<ComposerPermissionMode>('ask');
+  const sessionMetadataDirtyRef = useRef(false);
+  const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
+  const settings = useSessionSettingsCallbacks(
+    {
+      dialogueMode: conversation.dialogueMode,
+      permissionMode,
+      webSearchEnabled: conversation.webSearchEnabled,
+      thinkingEnabled: conversation.thinkingEnabled,
+      reasoningEffort: conversation.reasoningEffort,
+      activeProviderId: conversation.activeProviderId,
+      activeModelId: conversation.activeModelId,
+      modelSelectionSource: null,
+      manualAgentId: conversation.manualAgentId,
+      effectiveWorkingDirectory: null,
+      sessionMetadataDirty,
+      sessionMetadataDirtyRef,
+    },
+    {
+      setDialogueMode: conversation.setDialogueMode,
+      setPermissionMode,
+      setWebSearchEnabled: conversation.setWebSearchEnabled,
+      setThinkingEnabled: conversation.setThinkingEnabled,
+      setReasoningEffort: conversation.setReasoningEffort,
+      setManualAgentId: conversation.setManualAgentId,
+      setSessionMetadataDirty,
+    },
+    GATEWAY,
+    TOKEN,
+  );
+
+  return {
+    conversation,
+    settings,
+    permissionMode,
+    sessionMetadataDirty,
+    sessionMetadataDirtyRef,
+  };
+}
+
+describe('useChatConversationState — 审批方式切换写路径', () => {
+  it('handlePermissionModeChange 更新档位、标记 metadata dirty 并写入 permissionMode/yoloMode', () => {
+    const { result } = renderHook(() => usePermissionModeHarness());
+
+    expect(result.current.sessionMetadataDirty).toBe(false);
+    expect(result.current.settings.buildSessionMetadata()['permissionMode']).toBe('ask');
+    expect(result.current.settings.buildSessionMetadata()['yoloMode']).toBe(false);
+
+    act(() => {
+      result.current.settings.handlePermissionModeChange('auto-edit');
+    });
+
+    // 中间档位必须写入规范字段并标记 dirty，才能触发 metadata PATCH。
+    expect(result.current.permissionMode).toBe('auto-edit');
+    expect(result.current.sessionMetadataDirty).toBe(true);
+    expect(result.current.sessionMetadataDirtyRef.current).toBe(true);
+    expect(result.current.settings.buildSessionMetadata()['permissionMode']).toBe('auto-edit');
+    expect(result.current.settings.buildSessionMetadata()['yoloMode']).toBe(false);
+
+    act(() => {
+      result.current.settings.handlePermissionModeChange('yolo');
+    });
+
+    expect(result.current.permissionMode).toBe('yolo');
+    expect(result.current.settings.buildSessionMetadata()['permissionMode']).toBe('yolo');
+    // 布尔投影与规范档位保持一致，老读者依赖的 yoloMode 仍可用。
+    expect(result.current.settings.buildSessionMetadata()['yoloMode']).toBe(true);
+
+    act(() => {
+      result.current.settings.handlePermissionModeChange('ask');
+    });
+
+    expect(result.current.permissionMode).toBe('ask');
+    expect(result.current.settings.buildSessionMetadata()['yoloMode']).toBe(false);
+  });
+
+  it('handleToggleYolo 只在 ask / yolo 两档之间切换', () => {
+    const { result } = renderHook(() => usePermissionModeHarness());
+
+    act(() => {
+      result.current.settings.handlePermissionModeChange('auto-edit');
+    });
+    expect(result.current.permissionMode).toBe('auto-edit');
+
+    act(() => {
+      result.current.settings.handleToggleYolo();
+    });
+    expect(result.current.permissionMode).toBe('yolo');
+    expect(result.current.sessionMetadataDirty).toBe(true);
+
+    act(() => {
+      result.current.settings.handleToggleYolo();
+    });
+    expect(result.current.permissionMode).toBe('ask');
+  });
+
+  it('buildSessionMetadata 的 overrides 仍可覆盖 permissionMode 与 yoloMode', () => {
+    const { result } = renderHook(() => usePermissionModeHarness());
+
+    expect(
+      result.current.settings.buildSessionMetadata({ permissionMode: 'yolo' })['permissionMode'],
+    ).toBe('yolo');
+    expect(result.current.settings.buildSessionMetadata({ yoloMode: true })['yoloMode']).toBe(true);
   });
 });
 

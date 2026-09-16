@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { estimateModelUsageCost, resolveModelPriceEntry } from './chat-page-utils.js';
+import {
+  createSessionMetadataSnapshot,
+  estimateModelUsageCost,
+  resolveModelPriceEntry,
+} from './chat-page-utils.js';
 
 describe('estimateModelUsageCost', () => {
   it('按普通输入、输出和缓存读写单价估算聊天费用', () => {
@@ -58,5 +62,80 @@ describe('estimateModelUsageCost', () => {
         },
       }),
     ).toBe(0);
+  });
+});
+
+/**
+ * 回归：审批方式档位必须进入 session metadata 快照。
+ *
+ * 旧实现只记录布尔 `yoloMode`，于是 `ask → auto-edit` 会得到完全相同的快照，
+ * ChatPage 的 dirty-metadata 副作用短路后中档切换永远不会 PATCH 到服务端。
+ */
+type ParsedSnapshot = {
+  dialogueMode: string | null;
+  permissionMode: string;
+  yoloMode: boolean;
+};
+
+function parseSnapshot(snapshot: string): ParsedSnapshot {
+  return JSON.parse(snapshot) as ParsedSnapshot;
+}
+
+describe('createSessionMetadataSnapshot — 审批方式档位', () => {
+  it('ask 与 auto-edit 产生不同快照', () => {
+    const base = { dialogueMode: 'coding' as const };
+
+    const askSnapshot = createSessionMetadataSnapshot({
+      ...base,
+      permissionMode: 'ask',
+      yoloMode: false,
+    });
+    const autoEditSnapshot = createSessionMetadataSnapshot({
+      ...base,
+      permissionMode: 'auto-edit',
+      yoloMode: false,
+    });
+
+    expect(askSnapshot).not.toBe(autoEditSnapshot);
+    expect(parseSnapshot(askSnapshot)).toMatchObject({ permissionMode: 'ask', yoloMode: false });
+    expect(parseSnapshot(autoEditSnapshot)).toMatchObject({
+      permissionMode: 'auto-edit',
+      yoloMode: false,
+    });
+  });
+
+  it('auto-edit 与 yolo 产生不同快照，且布尔投影与档位一致', () => {
+    const autoEditSnapshot = createSessionMetadataSnapshot({
+      permissionMode: 'auto-edit',
+      yoloMode: false,
+    });
+    const yoloSnapshot = createSessionMetadataSnapshot({ permissionMode: 'yolo', yoloMode: true });
+
+    expect(autoEditSnapshot).not.toBe(yoloSnapshot);
+    expect(parseSnapshot(yoloSnapshot)).toMatchObject({ permissionMode: 'yolo', yoloMode: true });
+  });
+
+  it('缺少 permissionMode 时按 legacy yoloMode 布尔回退（老数据兼容）', () => {
+    const legacyYolo = createSessionMetadataSnapshot({ yoloMode: true });
+    const legacyAsk = createSessionMetadataSnapshot({ yoloMode: false });
+
+    expect(parseSnapshot(legacyYolo)).toMatchObject({ permissionMode: 'yolo', yoloMode: true });
+    expect(parseSnapshot(legacyAsk)).toMatchObject({ permissionMode: 'ask', yoloMode: false });
+    expect(legacyYolo).not.toBe(legacyAsk);
+  });
+
+  it('相同档位与设置下快照稳定，不产生误报 dirty', () => {
+    const first = createSessionMetadataSnapshot({
+      dialogueMode: 'coding',
+      permissionMode: 'auto-edit',
+      yoloMode: false,
+    });
+    const second = createSessionMetadataSnapshot({
+      dialogueMode: 'coding',
+      permissionMode: 'auto-edit',
+      yoloMode: false,
+    });
+
+    expect(first).toBe(second);
   });
 });

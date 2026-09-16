@@ -1,3 +1,4 @@
+import type { SessionPermissionMode } from '@openAwork/shared';
 import type {
   SessionMessageRatingRecord,
   SessionRecoveryReadModel,
@@ -71,9 +72,6 @@ export {
   CHAT_SCROLL_BOTTOM_PADDING,
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   CHAT_LATEST_FOCUS_THRESHOLD_PX,
-  CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX,
-  CHAT_LATEST_REGION_FALLBACK_PX,
-  CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS,
 } from '../../../../components/conversation-runtime/scroll/scroll-constants.js';
 
 export function normalizeModelLookupKey(value: string | undefined): string {
@@ -90,6 +88,7 @@ export function createSessionMetadataSnapshot(metadata: {
   dialogueMode?: DialogueMode;
   modelId?: string;
   modelSelectionSource?: ModelSelectionSource | null;
+  permissionMode?: SessionPermissionMode;
   providerId?: string;
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
@@ -99,6 +98,9 @@ export function createSessionMetadataSnapshot(metadata: {
 }): string {
   const snapshot: Record<string, unknown> = {
     dialogueMode: metadata.dialogueMode ?? null,
+    // 档位必须进快照：否则 ask → auto-edit 会得到完全相同的快照，
+    // dirty 检查短路后中档切换永远不会 PATCH 到服务端。
+    permissionMode: metadata.permissionMode ?? (metadata.yoloMode === true ? 'yolo' : 'ask'),
     yoloMode: metadata.yoloMode === true,
     webSearchEnabled: metadata.webSearchEnabled !== false,
     thinkingEnabled: metadata.thinkingEnabled === true,

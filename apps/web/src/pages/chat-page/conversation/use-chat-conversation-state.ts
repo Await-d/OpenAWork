@@ -63,6 +63,7 @@ import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
+import { publishDialogueModeSwitchFromReply } from '../../../utils/session/dialogue-mode-events.js';
 import { useTeamNotificationStore } from '../../../stores/team/team-events.js';
 import {
   formatGatewayStreamErrorMessage,
@@ -425,6 +426,7 @@ export function useChatConversationState(
       setHasPendingFollowContent,
     },
     {
+      sessionKey: sessionId,
       messagesLength: messages.length,
       visibleStreaming,
       visibleStreamBufferLength: streamBuffer.length,
@@ -800,10 +802,15 @@ export function useChatConversationState(
       if (!sessionId || !token) {
         throw new Error('当前会话或登录状态无效，无法处理提问请求。');
       }
-      await createQuestionsClient(gatewayUrl).reply(token, sessionId, {
+      const replyResult = await createQuestionsClient(gatewayUrl).reply(token, sessionId, {
         requestId,
         status,
         ...(answers ? { answers } : {}),
+      });
+      // 澄清模式共识确认 / 计划批准会让服务端自动切换到编程模式，广播给页面同步。
+      publishDialogueModeSwitchFromReply({
+        ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
+        sessionId,
       });
       setPendingQuestions((prev) => prev.filter((q) => q.requestId !== requestId));
     },
