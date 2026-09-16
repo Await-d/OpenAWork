@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
@@ -5,6 +7,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import versionPlugin from '../../scripts/build/vite-plugin-version.mjs';
+import fileIconAssetsPlugin from '../../scripts/build/vite-plugin-file-icons.mjs';
 import { assertNoServiceWorkerInDist } from '../../scripts/build/assert-no-service-worker-dist.mjs';
 
 /**
@@ -15,6 +18,15 @@ import { assertNoServiceWorkerInDist } from '../../scripts/build/assert-no-servi
  */
 const isDesktopBuild =
   Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.OPENAWORK_DESKTOP_BUILD === '1';
+
+/**
+ * material-icon-theme 在 pnpm 下只装在 apps/web/node_modules，
+ * 必须从 apps/web/package.json 锚定解析，否则根目录解析不到该包。
+ */
+const requireFromWeb = createRequire(new URL('./package.json', import.meta.url));
+const materialIconThemeDir = path.dirname(
+  requireFromWeb.resolve('material-icon-theme/package.json'),
+);
 
 /**
  * 桌面端打包防呆：vite build 写盘结束后立刻断言 dist 里没有 SW 产物，
@@ -58,6 +70,7 @@ export default defineConfig({
   },
   plugins: [
     versionPlugin(),
+    fileIconAssetsPlugin({ packageDir: materialIconThemeDir }),
     react({
       // React Compiler（1.0 stable）：自动插入 useMemo / useCallback / React.memo。
       // 启用后无需再手写大量手动 memoize；保留的手写 memo 不会被移除，编译器会跳过。
@@ -99,7 +112,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Monaco editor + workers are large; exclude them from precache
         // and let the browser cache them normally via HTTP caching.
-        globIgnores: ['**/*worker*.js'],
+        // file-icons 为 1000+ 个按需图标，全量预缓存会显著拖慢 SW 安装。
+        globIgnores: ['**/*worker*.js', '**/file-icons/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
         runtimeCaching: [
           {
@@ -115,8 +129,6 @@ export default defineConfig({
     port: 5173,
     hmr: {
       protocol: 'ws',
-      host: 'localhost',
-      port: 5173,
     },
     proxy: {
       '/api': {

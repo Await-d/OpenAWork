@@ -23,6 +23,10 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       '@openAwork/shared': resolve(__dirname, '../../packages/shared/src/index.ts'),
+      // 与 apps/web/vite.config.ts 对齐：desktop 未声明 @openAwork/shared-ui 依赖，
+      // 不加别名会解析失败或落到滞后的 packages/shared-ui/dist（缺最新导出）；
+      // 指向源码可让 Provider 与各页面里的图标组件共用同一模块实例。
+      '@openAwork/shared-ui': resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
       '@openAwork/web-client': resolve(__dirname, '../../packages/web-client/src/index.ts'),
     },
   },

@@ -1,5 +1,6 @@
 import { color } from '../tokens.js';
 import { useState } from 'react';
+import { FileTypeIcon, FolderTypeIcon } from './file-icon-theme/index.js';
 
 export type FileTreeNodeKind = 'file' | 'directory';
 export type FileTreeNodeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
@@ -138,12 +139,14 @@ function FileRow({
           <span style={{ fontSize: 10, color: 'var(--fg-muted)', width: 10, flexShrink: 0 }}>
             {isDir ? (expanded ? '▾' : '▸') : ''}
           </span>
-          {node.status && !isDir ? (
-            <span style={{ fontSize: 11, flexShrink: 0 }}>{STATUS_ICON[node.status]}</span>
+          {isDir ? (
+            <FolderTypeIcon name={node.name} open={expanded} size={15} />
           ) : (
-            <span style={{ fontSize: 11, flexShrink: 0 }}>
-              {isDir ? (expanded ? '📂' : '📁') : '📄'}
-            </span>
+            <FileTypeIcon path={node.path} size={15} />
+          )}
+          {/* git 状态是信息语义，作为角标叠加在类型图标旁，不替换它 */}
+          {node.status && !isDir && (
+            <span style={{ fontSize: 11, flexShrink: 0 }}>{STATUS_ICON[node.status]}</span>
           )}
           <span
             style={{
@@ -355,6 +358,11 @@ export function FileTreePanel({
                 borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))22',
               }}
             >
+              {f.type === 'directory' ? (
+                <FolderTypeIcon name={f.name} size={15} />
+              ) : (
+                <FileTypeIcon path={f.path} size={15} />
+              )}
               {f.status && <span style={{ fontSize: 11 }}>{STATUS_ICON[f.status]}</span>}
               <button
                 type="button"

@@ -286,3 +286,27 @@ export type {
 } from './pairing/PairingPanel.js';
 export { WorkspaceSelector } from './misc/WorkspaceSelector.js';
 export type { WorkspaceSelectorProps } from './misc/WorkspaceSelector.js';
+export {
+  FileTypeIcon,
+  FolderTypeIcon,
+  FileIconThemeProvider,
+  useFileIconTheme,
+  FILE_ICON_THEMES,
+  DEFAULT_FILE_ICON_THEME,
+  isFileIconThemeId,
+  canonicalizeFolderName,
+  resolveFileIcon,
+  resolveFolderIcon,
+  loadMaterialIconManifest,
+  FILE_ICON_BASE_PATH,
+} from './file/file-icon-theme/index.js';
+export type {
+  FileIconThemeId,
+  FileIconThemeOption,
+  FileIconThemeContextValue,
+  MaterialIconManifest,
+  ResolvedFileIcon,
+  ResolvedFolderIcon,
+  FileTypeIconProps,
+  FolderTypeIconProps,
+} from './file/file-icon-theme/index.js';
