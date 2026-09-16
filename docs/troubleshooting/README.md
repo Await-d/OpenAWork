@@ -39,7 +39,7 @@ pnpm exec tsx scripts/diagnose-mcp-tools.ts
 
 ### 网络连接
 
-- 待补充
+- [内置浏览器控制台为空（跨域页面无法注入）](./browser-console-cross-origin.md) - `暂无控制台输出 · 跨域页面(非 localhost)无法注入`
 
 ---
 

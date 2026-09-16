@@ -17,6 +17,13 @@ import {
   formatNetworkResponseText,
 } from './browser-console-format.js';
 import { copyTextToClipboard, quoteEntryIntoComposer } from './browser-clipboard.js';
+import { buildConsoleStackView } from './browser-console-stack.js';
+import { ConsoleStackSection } from './browser-console-stack-view.js';
+import { BrowserPill } from './browser-pill.js';
+import { NetworkWaterfall } from './NetworkWaterfall.js';
+import type { NetworkCaptureStatus } from './NetworkWaterfall.js';
+import { BrowserInspectorPanel } from './BrowserInspectorPanel.js';
+import type { BrowserInspectorPanelProps } from './BrowserInspectorPanel.js';
 
 const LEVEL_COLORS: Record<ConsoleLevel, string> = {
   log: 'var(--fg-default)',
@@ -53,15 +60,40 @@ export function BrowserConsolePanel({
   onClear,
   onClose,
   tauriMode,
+  liveAvailable,
+  pageUrl,
+  pageTitle,
+  networkCaptureStatus,
+  inspector,
 }: {
   logs: ConsoleEntry[];
-  endRef: React.RefObject<HTMLDivElement | null>;
-  onClear: () => void;
-  onClose: () => void;
+  /** 列表底部的自动滚动锚点；缺省时列表不跟随新日志。 */
+  endRef?: React.RefObject<HTMLDivElement | null>;
+  /** 清空回调；缺省时「清空」按钮禁用（harness / 预览场景只读展示）。 */
+  onClear?: () => void;
+  /** 关闭回调；缺省时不渲染关闭按钮（嵌入型宿主自行控制显隐）。 */
+  onClose?: () => void;
   tauriMode?: boolean;
+  /**
+   * 网关侧实时引擎（`/browser-live`）是否可用。CDP 采集不受同源策略限制，
+   * 可用时不能再说"跨域页面无法注入"。
+   */
+  liveAvailable?: boolean;
+  /** 当前页面 URL：瀑布视图导出 HAR 的上下文。 */
+  pageUrl?: string | null;
+  /** 当前页面标题：瀑布视图导出 HAR 的上下文。 */
+  pageTitle?: string | null;
+  /** 网络采集状态；缺省视为正常采集（由宿主按实时引擎状态传入）。 */
+  networkCaptureStatus?: NetworkCaptureStatus;
+  /**
+   * 元素检查器视图的注入边界：宿主透传信封与回调，本面板只负责在视图切换时挂载。
+   * 缺省时不渲染「元素」pill —— 未接线的宿主（含既有测试）行为完全不变。
+   */
+  inspector?: BrowserInspectorPanelProps | null;
 }) {
   const [filter, setFilter] = useState<ConsoleLevel | 'all'>('all');
   const [query, setQuery] = useState('');
+  const [view, setView] = useState<'list' | 'waterfall' | 'inspect'>('list');
 
   const keyword = query.trim().toLowerCase();
   const filteredLogs = logs.filter((entry) => {
@@ -81,7 +113,11 @@ export function BrowserConsolePanel({
       data-testid="browser-console-panel"
       style={{
         flexShrink: 0,
-        height: 'clamp(140px, 32vh, 280px)',
+        // 检查器要读树与样式表，沿用控制台的 280px 高度会把两侧内容都压成一条缝。
+        height:
+          view === 'inspect' && inspector
+            ? 'clamp(260px, 56vh, 560px)'
+            : 'clamp(140px, 32vh, 280px)',
         display: 'flex',
         flexDirection: 'column',
         borderTop: '1px solid var(--border-default)',
@@ -102,81 +138,115 @@ export function BrowserConsolePanel({
           控制台
         </span>
 
-        <FilterPill
-          label="全部"
-          count={logs.length}
-          active={filter === 'all'}
-          onClick={() => setFilter('all')}
+        <BrowserPill
+          label="列表"
+          title="列表视图：按级别展示控制台日志"
+          active={view === 'list'}
+          onClick={() => setView('list')}
+          size="sm"
         />
-        <FilterPill
-          label="错误"
-          count={errorCount}
-          active={filter === 'error'}
-          onClick={() => setFilter('error')}
-          color="var(--danger)"
+        <BrowserPill
+          label="瀑布"
+          title="瀑布视图：按时间轴展示网络请求，可导出 HAR"
+          active={view === 'waterfall'}
+          onClick={() => setView('waterfall')}
+          size="sm"
         />
-        <FilterPill
-          label="警告"
-          count={warnCount}
-          active={filter === 'warn'}
-          onClick={() => setFilter('warn')}
-          color="var(--warning)"
-        />
-        <FilterPill
-          label="日志"
-          count={logs.filter((l) => l.level === 'log').length}
-          active={filter === 'log'}
-          onClick={() => setFilter('log')}
-        />
-        <FilterPill
-          label="网络"
-          count={logs.filter((l) => l.level === 'network').length}
-          active={filter === 'network'}
-          onClick={() => setFilter('network')}
-          color="var(--aux)"
-        />
+        {inspector ? (
+          <BrowserPill
+            label="元素"
+            title="元素检查器：DOM 树 / 无障碍树与计算样式"
+            active={view === 'inspect'}
+            onClick={() => setView('inspect')}
+            testId="browser-console-view-inspect"
+            size="sm"
+          />
+        ) : null}
+
+        {view === 'list' ? (
+          <>
+            <FilterPill
+              label="全部"
+              count={logs.length}
+              active={filter === 'all'}
+              onClick={() => setFilter('all')}
+            />
+            <FilterPill
+              label="错误"
+              count={errorCount}
+              active={filter === 'error'}
+              onClick={() => setFilter('error')}
+              color="var(--danger)"
+            />
+            <FilterPill
+              label="警告"
+              count={warnCount}
+              active={filter === 'warn'}
+              onClick={() => setFilter('warn')}
+              color="var(--warning)"
+            />
+            <FilterPill
+              label="日志"
+              count={logs.filter((l) => l.level === 'log').length}
+              active={filter === 'log'}
+              onClick={() => setFilter('log')}
+            />
+            <FilterPill
+              label="网络"
+              count={logs.filter((l) => l.level === 'network').length}
+              active={filter === 'network'}
+              onClick={() => setFilter('network')}
+              color="var(--aux)"
+            />
+          </>
+        ) : null}
 
         <div style={{ flex: 1 }} />
 
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索日志 / 接口…"
-          aria-label="搜索控制台日志"
-          style={{
-            width: 140,
-            height: 20,
-            padding: '0 6px',
-            borderRadius: 4,
-            border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-overlay)',
-            color: 'var(--fg-default)',
-            fontSize: 9.5,
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => downloadConsoleLogs(filteredLogs)}
-          disabled={filteredLogs.length === 0}
-          title="导出当前可见日志为 .log 文件"
-          style={{
-            height: 20,
-            padding: '0 6px',
-            borderRadius: 4,
-            border: '1px solid var(--border-subtle)',
-            background: 'transparent',
-            color: 'var(--fg-muted)',
-            fontSize: 9,
-            cursor: filteredLogs.length === 0 ? 'not-allowed' : 'pointer',
-            opacity: filteredLogs.length === 0 ? 0.5 : 1,
-          }}
-        >
-          导出（{filteredLogs.length}）
-        </button>
+        {view === 'list' ? (
+          <>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索日志 / 接口…"
+              aria-label="搜索控制台日志"
+              style={{
+                width: 140,
+                height: 20,
+                padding: '0 6px',
+                borderRadius: 4,
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-default)',
+                fontSize: 9.5,
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => downloadConsoleLogs(filteredLogs)}
+              disabled={filteredLogs.length === 0}
+              title="导出当前可见日志为 .log 文件"
+              style={{
+                height: 20,
+                padding: '0 6px',
+                borderRadius: 4,
+                border: '1px solid var(--border-subtle)',
+                background: 'transparent',
+                color: 'var(--fg-muted)',
+                fontSize: 9,
+                cursor: filteredLogs.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: filteredLogs.length === 0 ? 0.5 : 1,
+              }}
+            >
+              导出（{filteredLogs.length}）
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={onClear}
+          disabled={onClear === undefined}
           title="清空控制台"
           style={{
             height: 20,
@@ -186,75 +256,114 @@ export function BrowserConsolePanel({
             background: 'transparent',
             color: 'var(--fg-muted)',
             fontSize: 9,
-            cursor: 'pointer',
+            cursor: onClear === undefined ? 'not-allowed' : 'pointer',
+            opacity: onClear === undefined ? 0.5 : 1,
           }}
         >
           清空
         </button>
-        <button
-          type="button"
-          onClick={onClose}
-          title="关闭控制台"
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--fg-muted)',
-            fontSize: 11,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          ✕
-        </button>
-      </div>
-
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          padding: '2px 0',
-          fontFamily: 'var(--font-mono, monospace)',
-          fontSize: 11,
-          lineHeight: 1.5,
-        }}
-      >
-        {filteredLogs.length === 0 ? (
-          <div
+        {onClose !== undefined ? (
+          <button
+            type="button"
+            onClick={onClose}
+            title="关闭控制台"
             style={{
-              padding: '16px',
-              textAlign: 'center',
-              color: 'var(--text-4)',
+              width: 20,
+              height: 20,
+              borderRadius: 4,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--fg-muted)',
               fontSize: 11,
-              lineHeight: 1.6,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {tauriMode ? (
-              <>
-                Tauri 原生窗口模式下无法监听页面控制台与网络
-                <br />
-                <span style={{ opacity: 0.7 }}>
-                  建议在浏览器(Web)模式下使用控制台,或在 dev tools 中查看
-                </span>
-              </>
-            ) : logs.length === 0 ? (
-              '暂无控制台输出 · 跨域页面(非 localhost)无法注入,只能展示同源页面的日志'
-            ) : (
-              '当前过滤条件下无匹配'
-            )}
-          </div>
-        ) : (
-          filteredLogs.map((entry) => <ConsoleEntryRow key={entry.id} entry={entry} />)
-        )}
-        <div ref={endRef} />
+            ✕
+          </button>
+        ) : null}
       </div>
+
+      {view === 'inspect' && inspector ? (
+        <BrowserInspectorPanel {...inspector} />
+      ) : view === 'waterfall' ? (
+        <NetworkWaterfall
+          entries={logs}
+          context={{ url: pageUrl ?? null, title: pageTitle ?? null }}
+          captureStatus={networkCaptureStatus}
+        />
+      ) : (
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '2px 0',
+            fontFamily: 'var(--font-mono, monospace)',
+            fontSize: 11,
+            lineHeight: 1.5,
+          }}
+        >
+          {filteredLogs.length === 0 ? (
+            <div
+              style={{
+                padding: '16px',
+                textAlign: 'center',
+                color: 'var(--text-4)',
+                fontSize: 11,
+                lineHeight: 1.6,
+              }}
+            >
+              <ConsoleEmptyState
+                tauriMode={tauriMode === true}
+                liveAvailable={liveAvailable === true}
+                hasAnyLogs={logs.length > 0}
+              />
+            </div>
+          ) : (
+            filteredLogs.map((entry) => <ConsoleEntryRow key={entry.id} entry={entry} />)
+          )}
+          <div ref={endRef} />
+        </div>
+      )}
     </div>
   );
+}
+
+/**
+ * 列表视图空态文案。
+ *
+ * 跨域提示只在「iframe 回退且没有实时引擎」时成立：CDP 引擎采集不受同源策略
+ * 限制，此时声称"跨域无法注入"会让用户以为功能坏了。
+ */
+function ConsoleEmptyState({
+  tauriMode,
+  liveAvailable,
+  hasAnyLogs,
+}: {
+  tauriMode: boolean;
+  liveAvailable: boolean;
+  hasAnyLogs: boolean;
+}) {
+  if (tauriMode) {
+    return (
+      <>
+        Tauri 原生窗口模式下无法监听页面控制台与网络
+        <br />
+        <span style={{ opacity: 0.7 }}>
+          建议在浏览器(Web)模式下使用控制台,或在 dev tools 中查看
+        </span>
+      </>
+    );
+  }
+  if (hasAnyLogs) {
+    return '当前过滤条件下无匹配';
+  }
+  return liveAvailable
+    ? '暂无控制台输出 · 日志由网关侧实时引擎采集,页面产生日志后会自动显示'
+    : '暂无控制台输出 · 跨域页面(非 localhost)无法注入,只能展示同源页面的日志';
 }
 
 /**
@@ -297,6 +406,7 @@ function ConsoleEntryRow({ entry }: { entry: ConsoleEntry }) {
 
   const network: NetworkExchange | undefined = entry.network;
   const isNetwork = entry.level === 'network' && network !== undefined;
+  const stackView = buildConsoleStackView(entry);
 
   return (
     <div
@@ -408,6 +518,9 @@ function ConsoleEntryRow({ entry }: { entry: ConsoleEntry }) {
             onCopy={() => runCopy(formatNetworkResponseText(network))}
           />
         </div>
+      ) : null}
+      {stackView !== null ? (
+        <ConsoleStackSection view={stackView} onCopyFrame={runCopy} />
       ) : null}
     </div>
   );

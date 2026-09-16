@@ -221,6 +221,7 @@ export function mergeNetworkIntoEntry(
     }),
   };
 
+  if (patch.resourceType !== undefined) merged.resourceType = patch.resourceType;
   if (patch.requestHeaders) merged.requestHeaders = patch.requestHeaders;
   if (patch.requestBody) merged.requestBody = patch.requestBody;
   if (patch.requestBodyTruncated) merged.requestBodyTruncated = true;

@@ -1,0 +1,101 @@
+/**
+ * 工作区文件索引版本轮询：把「工作区文件是否变化」变成一个可消费的信号。
+ *
+ * 网关侧的文件索引版本是进程内单调计数器——Agent 写盘、用户保存文件、目录增删
+ * 都会让它前进。这里在预览可见时轻量轮询该版本（O(1)，不触发索引构建），一旦
+ * 版本与上次读到的不同（网关重启导致版本变小也算变化），就调用 `onChange`，
+ * 由宿主（内置浏览器）走既有的刷新机制重载预览。
+ *
+ * 全程 best-effort：任何读取失败都只记录日志、绝不抛出，更不会产生 unhandled
+ * rejection；禁停用、无工作区路径、无 token 时完全不轮询，并在卸载 / 依赖变化时
+ * 清理定时器。
+ */
+
+import { useEffect, useRef } from 'react';
+import { createWorkspaceClient } from '@openAwork/web-client';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
+
+/** 默认轮询间隔：兼顾「接近实时」与请求量，2500ms 足以覆盖常见的写盘节奏。 */
+export const WORKSPACE_INDEX_REFRESH_DEFAULT_INTERVAL_MS = 2500;
+
+export interface UseWorkspaceIndexRefreshOptions {
+  /** 是否启用轮询（宿主通常传「预览可见」）。 */
+  enabled: boolean;
+  /** 要监视的工作区路径；空值时不做任何请求。 */
+  workspacePath: string | null;
+  /** 版本发生变化（含变小）时回调，宿主据此刷新预览。 */
+  onChange: () => void;
+  /** 轮询间隔毫秒数，缺省 2500。 */
+  intervalMs?: number;
+}
+
+/**
+ * 轮询工作区索引版本，变化时触发 `onChange`。
+ *
+ * 首次成功读取只用于建立基线，不视为变化（避免挂载即刷新）；之后每次读取若版本
+ * 不同则回调一次。请求进行中会跳过本轮，避免重叠请求堆积。
+ */
+export function useWorkspaceIndexRefresh({
+  enabled,
+  workspacePath,
+  onChange,
+  intervalMs = WORKSPACE_INDEX_REFRESH_DEFAULT_INTERVAL_MS,
+}: UseWorkspaceIndexRefreshOptions): void {
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
+  // 用 ref 持有最新回调，避免调用方每次渲染传入新函数导致轮询被反复重建。
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const path = workspacePath?.trim();
+    if (!path || !accessToken || !gatewayUrl) return;
+
+    let client: ReturnType<typeof createWorkspaceClient> | null = null;
+    try {
+      client = createWorkspaceClient(gatewayUrl);
+    } catch (error) {
+      console.warn('[use-workspace-index-refresh] 创建工作区客户端失败，停止轮询：', String(error));
+      return;
+    }
+    if (!client) return;
+
+    let disposed = false;
+    let inFlight = false;
+    let lastVersion: number | null = null;
+
+    const poll = async (): Promise<void> => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const { version } = await client.getFileIndexVersion(accessToken, path);
+        if (disposed) return;
+        if (lastVersion === null) {
+          // 首次成功读取只建立基线，不触发刷新。
+          lastVersion = version;
+          return;
+        }
+        if (version !== lastVersion) {
+          // 网关版本是进程内计数器，重启后会归零；「变小」同样视为变化。
+          lastVersion = version;
+          onChangeRef.current();
+        }
+      } catch (error) {
+        // 轮询失败静默降级：下一轮重试，绝不抛出 unhandled rejection。
+        if (!disposed) {
+          console.warn('[use-workspace-index-refresh] 读取索引版本失败：', String(error));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), intervalMs);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [enabled, workspacePath, accessToken, gatewayUrl, intervalMs]);
+}

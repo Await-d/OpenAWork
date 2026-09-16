@@ -6,28 +6,25 @@ import React, {
   useState,
   type CSSProperties,
 } from 'react';
-import { BrowserReadinessBar } from './browser/BrowserReadinessBar.js';
-import { usePageReadiness } from './browser/use-page-readiness.js';
 import { BrowserConsolePanel } from './browser/BrowserConsolePanel.js';
-import { injectConsoleProxy } from './browser/console-proxy.js';
+import { BrowserContentArea } from './browser/engines/browser-content-area.js';
 import { insertTextIntoComposer } from './browser/browser-clipboard.js';
 import {
-  formatNetworkEntryMessage,
   isPendingNetworkPayload,
-  mergeNetworkIntoEntry,
   parseNetworkPayload,
 } from './browser/browser-console-format.js';
+import { upsertNetworkEntry } from './browser/live-console-bridge.js';
 import type {
   ConsoleEntry,
   NetworkExchange,
   NetworkMessagePayload,
 } from './browser/browser-console-types.js';
+import { countErrorDigestProblems, sendErrorDigestToComposer } from './browser/error-digest.js';
 import {
   DEFAULT_URL,
   TAB_LIMIT,
   deriveFaviconUrl,
   deriveTabTitle,
-  isLocalhostUrl,
   loadBookmarks,
   loadPersistedState,
   makeTabId,
@@ -36,7 +33,16 @@ import {
   type Bookmark,
   type BrowserTab,
 } from './browser/browser-storage.js';
-import { BrowserBookmarksDropdown, BrowserTabBar, NavButton } from './browser/browser-chrome.js';
+import { BrowserShortcutHints } from './browser/browser-shortcut-hints.js';
+import { BrowserToolbar } from './browser/BrowserToolbar.js';
+import { DEFAULT_DEVICE_PRESET_ID } from './browser/device-presets.js';
+import { useEngineCapability } from './browser/hooks/use-engine-capability.js';
+import { useBrowserLiveWiring } from './browser/hooks/use-browser-live-wiring.js';
+import { useBrowserInspector } from './browser/hooks/use-browser-inspector.js';
+import { useBrowserPreviewShortcutsWiring } from './browser/hooks/use-browser-preview-shortcuts-wiring.js';
+import { useTauriWebview } from './browser/hooks/use-tauri-webview.js';
+import { useWorkspaceIndexRefresh } from './browser/hooks/use-workspace-index-refresh.js';
+import type { NetworkCaptureStatus } from './browser/NetworkWaterfall.js';
 
 const isTauriEnv = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -357,12 +363,6 @@ export function BuiltInBrowser({
   const [consoleLogsByTab, setConsoleLogsByTab] = useState<Record<string, ConsoleEntry[]>>({});
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  /**
-   * 记录"iframe 已经成功加载过哪个 URL"。页面就绪探测成功后据此判断
-   * 是否需要重新加载：只有当当前 URL 从没加载成功过（典型的"服务还没
-   * 起来就先加载了"）才刷新，正常情况不会多打一次请求。
-   */
-  const iframeLoadedUrlRef = useRef<string | null>(null);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
   // 标记"上一次 url 更新来自 iframe 内部 navigate",webview lifecycle 据此跳过重建。
@@ -394,24 +394,10 @@ export function BuiltInBrowser({
             next[op.tabId] = [...list.slice(-CONSOLE_ENTRY_LIMIT), op.entry];
             continue;
           }
-          const index = list.findIndex(
-            (entry) => entry.network?.networkId === op.exchange.networkId,
-          );
-          next[op.tabId] =
-            index >= 0
-              ? list.map((entry, i) =>
-                  i === index ? mergeNetworkIntoEntry(entry, op.exchange) : entry,
-                )
-              : [
-                  ...list.slice(-CONSOLE_ENTRY_LIMIT),
-                  {
-                    id: `net-${op.exchange.networkId}`,
-                    level: 'network',
-                    message: formatNetworkEntryMessage(op.exchange),
-                    timestamp: Date.now(),
-                    network: op.exchange,
-                  },
-                ];
+          next[op.tabId] = upsertNetworkEntry(list, op.exchange, {
+            now: Date.now(),
+            limit: CONSOLE_ENTRY_LIMIT,
+          });
         }
         return next;
       });
@@ -559,33 +545,79 @@ export function BuiltInBrowser({
   }, []);
 
   const [isTauri] = useState(isTauriEnv);
-  const [webviewReady, setWebviewReady] = useState(false);
-  const [webviewError, setWebviewError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // ── 页面就绪探测 ────────────────────────────────────────────────────
-  // dev server 从启动到开始监听端口有几秒空窗，这段时间加载必然是错误页。
-  // 这里主动探活，就绪后如果当前 URL 还没加载成功过就自动重载一次，
-  // 用户不必再手动刷新；探测期间顶部状态条给出明确反馈。
-  // Tauri 原生 webview 由宿主管理加载，不参与探测。
-  const pageReadiness = usePageReadiness({
-    url: activeUrl,
+  const [pickArmed, setPickArmed] = useState(false);
+  // 拾取意图：工具栏与检查器的「在页面中拾取」都下发 `pick`（结果进 composer），
+  // 检查器的「获取完整样式」则下发 `node.styles`（只读样式，不写 composer）。
+  const [pickIntent, setPickIntent] = useState<'composer' | 'styles'>('composer');
+  // 实时引擎接线（可用性 + 事件 → 既有控制台状态）；Tauri 保留原生 webview 分支。
+  const liveWiring = useBrowserLiveWiring({
     enabled: !isTauri,
-    onReady: () => {
-      if (iframeLoadedUrlRef.current === activeUrl) return;
-      setRefreshKey((key) => key + 1);
+    appendLog: appendLogToActiveTab,
+    upsertNetwork: upsertNetworkExchange,
+  });
+  // 网关状态里与实时能力有关的两个布尔值只在这里派生一次；能力矩阵与各面板
+  // 统一消费它们，避免「可用性判断」散落在多个 JSX 表达式里各自漂移。
+  const liveAvailability = liveWiring.availability;
+  const liveEngineAvailable = liveAvailability?.available === true;
+  const liveScreencastAvailable = liveAvailability?.screencast === true;
+  const liveUnavailable = liveAvailability !== null && liveAvailability.available === false;
+  // 元素检查器：与控制台共用同一条实时通道（订阅是扇出的，不新开连接）。
+  const inspector = useBrowserInspector({
+    session: liveWiring.session,
+    enabled: !isTauri,
+    armPickForStyles: () => {
+      setPickIntent('styles');
+      setPickArmed(true);
     },
   });
+  const armPickForComposer = useCallback(() => {
+    setPickIntent('composer');
+    setPickArmed(true);
+  }, []);
+  const disarmPick = useCallback(() => {
+    setPickIntent('composer');
+    setPickArmed(false);
+  }, []);
+  const engineCapability = useEngineCapability({
+    engine: isTauri ? 'tauri-webview' : 'iframe',
+    url: activeUrl,
+    liveAvailable: liveEngineAvailable,
+    liveScreencast: liveScreencastAvailable,
+  });
+  // 设备预览（预设视口 + 纯前端缩放）：CDP 实时与 iframe 回退共用，Tauri 原生 webview 不参与。
+  const [devicePresetId, setDevicePresetId] = useState<string>(DEFAULT_DEVICE_PRESET_ID);
+  const [zoom, setZoom] = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
+  // 工作区文件变化（Agent 写盘 / 用户保存）时，通过既有的 refreshKey 机制强制重载预览。
+  useWorkspaceIndexRefresh({
+    enabled: !hidden && Boolean(workspacePath),
+    workspacePath: workspacePath ?? null,
+    onChange: () => setRefreshKey((value) => value + 1),
+  });
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // URL 变化时重置"已加载"标记，让新地址重新走一次就绪判断。
-  useEffect(() => {
-    iframeLoadedUrlRef.current = null;
-  }, [activeUrl]);
+  // 预览快捷键接线：动作与工具栏控件读写同一份状态（缩放 / 预设算法见 wiring hook）。
+  const previewShortcuts = useBrowserPreviewShortcutsWiring({
+    hidden,
+    surfaceRef: containerRef,
+    devicePreviewEnabled: !isTauri,
+    setRefreshKey,
+    setConsoleOpen,
+    setZoom,
+    setDevicePresetId,
+  });
 
   const generationRef = useRef(0);
-  const activeWebviewRef = useRef<any>(null);
-  const tauriDpiRef = useRef<{ LogicalPosition: any; LogicalSize: any } | null>(null);
+  const { webviewReady, webviewError } = useTauriWebview({
+    isTauri,
+    activeUrl,
+    refreshKey,
+    hidden,
+    containerRef,
+    internalNavRef,
+    activeTabIdRef,
+    generationRef,
+  });
 
   const normalizeUrl = useCallback((raw: string): string => {
     const trimmed = raw.trim();
@@ -633,201 +665,21 @@ export function BuiltInBrowser({
     insertTextIntoComposer(`[${title}](${activeTab.url})`);
   }, [activeTab]);
 
-  // ── Tauri native webview lifecycle ──────────────────────────────────
-  useEffect(() => {
-    if (!isTauri || !containerRef.current || !activeUrl) return;
-
-    // 内部 navigate 同步:iframe/webview 已经在新 url,只是 React state 落后。
-    // 这种情况不要重建 webview(否则页面状态丢失)。
-    const internalNav = internalNavRef.current;
-    if (
-      internalNav &&
-      internalNav.tabId === activeTabIdRef.current &&
-      internalNav.url === activeUrl
-    ) {
-      internalNavRef.current = null;
-      return;
-    }
-
-    const gen = ++generationRef.current;
-    let webview: any = null;
-    let observer: ResizeObserver | null = null;
-    let rafId = 0;
-    let disposed = false;
-
-    setWebviewReady(false);
-    setWebviewError(null);
-
-    async function create() {
-      try {
-        const [{ Webview }, { getCurrentWindow }, dpi] = await Promise.all([
-          import('@tauri-apps/api/webview'),
-          import('@tauri-apps/api/window'),
-          import('@tauri-apps/api/dpi'),
-        ]);
-
-        const { LogicalPosition, LogicalSize } = dpi;
-        if (disposed || gen !== generationRef.current) return;
-        tauriDpiRef.current = { LogicalPosition, LogicalSize };
-
-        const container = containerRef.current;
-        if (!container) return;
-
-        const appWindow = getCurrentWindow();
-        let rect = container.getBoundingClientRect();
-
-        // 容器尚未完成布局(display:none 或零尺寸)时,用 ResizeObserver 等待
-        // 它变为可见且有尺寸后再创建 webview,避免 Tauri 原生 webview 初始化失败。
-        if (rect.width < 1 || rect.height < 1) {
-          await new Promise<void>((resolve) => {
-            const wait = new ResizeObserver(() => {
-              const r = container.getBoundingClientRect();
-              if (r.width >= 1 && r.height >= 1) {
-                wait.disconnect();
-                resolve();
-              }
-            });
-            wait.observe(container);
-            // 安全超时:5s 后即使容器仍零尺寸也继续(用 Math.max 兜底)。
-            const timer = setTimeout(() => {
-              wait.disconnect();
-              resolve();
-            }, 5000);
-            // 清理:组件卸载或 generation 变化时中止等待。
-            const check = setInterval(() => {
-              if (disposed || gen !== generationRef.current) {
-                clearInterval(check);
-                clearTimeout(timer);
-                wait.disconnect();
-                resolve();
-              }
-            }, 200);
-          });
-          if (disposed || gen !== generationRef.current) return;
-          rect = container.getBoundingClientRect();
-        }
-
-        const label = `browser-${Date.now().toString(36)}`;
-
-        webview = new Webview(appWindow, label, {
-          url: activeUrl,
-          x: rect.x,
-          y: rect.y,
-          width: Math.max(rect.width, 100),
-          height: Math.max(rect.height, 100),
-          focus: false,
-        });
-
-        webview.once('tauri://created', () => {
-          if (disposed || gen !== generationRef.current) {
-            if (webview) {
-              webview.close().catch(() => {});
-              webview = null;
-            }
-            return;
-          }
-
-          activeWebviewRef.current = webview;
-          setWebviewReady(true);
-
-          const syncPosition = () => {
-            if (!webview || !container) return;
-            const r = container.getBoundingClientRect();
-            if (r.width === 0 && r.height === 0) {
-              webview.setPosition(new LogicalPosition(-9999, -9999)).catch(() => {});
-              return;
-            }
-            webview.setPosition(new LogicalPosition(r.x, r.y)).catch(() => {});
-            webview
-              .setSize(new LogicalSize(Math.max(r.width, 1), Math.max(r.height, 1)))
-              .catch(() => {});
-          };
-
-          observer = new ResizeObserver(() => {
-            if (disposed) return;
-            cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(syncPosition);
-          });
-          observer.observe(container);
-        });
-
-        webview.once('tauri://error', (e: unknown) => {
-          if (disposed || gen !== generationRef.current) return;
-          const raw =
-            typeof e === 'object' && e !== null && 'payload' in e
-              ? (e as Record<string, unknown>).payload
-              : e;
-          const msg =
-            raw instanceof Error
-              ? raw.message
-              : typeof raw === 'object' && raw !== null && 'message' in raw
-                ? String((raw as Record<string, unknown>).message)
-                : typeof raw === 'string'
-                  ? raw
-                  : String(raw);
-          console.error('[BuiltInBrowser] webview error:', msg);
-          webview = null;
-          activeWebviewRef.current = null;
-          setWebviewError(msg);
-        });
-      } catch (err) {
-        if (!disposed && gen === generationRef.current) {
-          const msg =
-            err instanceof Error
-              ? err.message
-              : typeof err === 'object' && err !== null && 'message' in err
-                ? String((err as Record<string, unknown>).message)
-                : String(err);
-          console.error('[BuiltInBrowser] init error:', msg);
-          setWebviewError(msg);
-        }
-      }
-    }
-
-    void create();
-
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(rafId);
-      if (observer) {
-        observer.disconnect();
-        observer = null;
-      }
-      activeWebviewRef.current = null;
-      if (webview) {
-        webview.close().catch(() => {});
-        webview = null;
-      }
-    };
-  }, [isTauri, activeUrl, refreshKey]);
-
-  // ── 切 tab 不重建 webview 的优化:Tauri webview 仍然要重建,因为它绑定 url。
-  // 已通过 activeUrl 依赖驱动。
-
-  // ── Visibility toggle ───────────────────────────────────────────────
-  useEffect(() => {
-    if (!isTauri) return;
-    const wv = activeWebviewRef.current;
-    const dpi = tauriDpiRef.current;
-    if (!wv || !dpi) return;
-
-    if (hidden) {
-      wv.setPosition(new dpi.LogicalPosition(-9999, -9999)).catch(() => {});
-    } else {
-      const container = containerRef.current;
-      if (!container) return;
-      const r = container.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        wv.setPosition(new dpi.LogicalPosition(r.x, r.y)).catch(() => {});
-        wv.setSize(new dpi.LogicalSize(Math.max(r.width, 1), Math.max(r.height, 1))).catch(
-          () => {},
-        );
-      }
-    }
-  }, [isTauri, hidden]);
+  const handleSendProblems = useCallback(() => {
+    sendErrorDigestToComposer(consoleLogs, { url: activeUrl, title: activeTab?.title ?? null });
+  }, [consoleLogs, activeUrl, activeTab]);
 
   const errorCount = consoleLogs.filter((l) => l.level === 'error').length;
   const warnCount = consoleLogs.filter((l) => l.level === 'warn').length;
+  const problemCount = countErrorDigestProblems(consoleLogs);
+
+  // 网络瀑布视图的空态文案据此区分：Tauri 原生窗口没有实时引擎；建连中展示骨架屏。
+  const livePhase = liveWiring.session.phase;
+  const networkCaptureStatus: NetworkCaptureStatus = isTauri
+    ? 'unavailable'
+    : livePhase === 'connecting' || livePhase === 'reconnecting'
+      ? 'loading'
+      : 'ready';
 
   return (
     <div
@@ -841,380 +693,98 @@ export function BuiltInBrowser({
         ...style,
       }}
     >
-      {/* Tab bar */}
-      <BrowserTabBar
+      <BrowserToolbar
         tabs={tabs}
         activeTabId={activeTabId}
         onSelectTab={setActiveTabId}
         onCloseTab={closeTab}
         onAddTab={() => openNewTab()}
-        canAddTab={tabs.length < TAB_LIMIT}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        onBack={goBack}
+        onForward={goForward}
+        onRefresh={previewShortcuts.reload}
+        addressInput={addressInput}
+        onAddressChange={setAddressInput}
+        onAddressKeyDown={handleKeyDown}
+        isCurrentBookmarked={isCurrentBookmarked}
+        onToggleBookmark={toggleBookmarkCurrent}
+        bookmarks={bookmarks}
+        bookmarksOpen={bookmarksOpen}
+        onToggleBookmarks={() => setBookmarksOpen((v) => !v)}
+        onCloseBookmarks={() => setBookmarksOpen(false)}
+        onSelectBookmark={(url) => {
+          setBookmarksOpen(false);
+          navigateActiveTab(url);
+          setAddressInput(url);
+        }}
+        onRemoveBookmark={removeBookmark}
+        onCopyUrl={handleCopyUrl}
+        onOpenExternal={handleOpenExternal}
+        onSendToChat={handleSendToChat}
+        onNavigate={() => handleNavigate()}
+        consoleOpen={consoleOpen}
+        onToggleConsole={previewShortcuts.toggleConsole}
+        errorCount={errorCount}
+        warnCount={warnCount}
+        problemCount={problemCount}
+        onSendProblems={handleSendProblems}
+        capability={engineCapability}
+        pickArmed={pickArmed}
+        onTogglePick={() => {
+          setPickIntent('composer');
+          setPickArmed((value) => !value);
+        }}
+        devicePresetId={devicePresetId}
+        onDevicePresetChange={setDevicePresetId}
+        zoom={zoom}
+        onZoomChange={setZoom}
+        devicePreviewEnabled={!isTauri}
       />
 
-      {/* Address bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: '5px 8px',
-          borderBottom: '1px solid var(--border-subtle)',
-          background: 'var(--bg-overlay)',
-          flexShrink: 0,
-        }}
-      >
-        <NavButton
-          title="后退"
-          disabled={!canGoBack}
-          onClick={goBack}
-          icon={
-            <>
-              <polyline points="15 18 9 12 15 6" />
-            </>
-          }
-        />
-        <NavButton
-          title="前进"
-          disabled={!canGoForward}
-          onClick={goForward}
-          icon={
-            <>
-              <polyline points="9 18 15 12 9 6" />
-            </>
-          }
-        />
-        <NavButton
-          title="刷新"
-          onClick={() => setRefreshKey((k) => k + 1)}
-          icon={
-            <>
-              <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.8 1 6.5 2.6" />
-              <path d="M21 3v6h-6" />
-            </>
-          }
-        />
-        <input
-          type="text"
-          value={addressInput}
-          onChange={(e) => setAddressInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="输入网址或搜索…"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            height: 26,
-            padding: '0 10px',
-            borderRadius: 13,
-            border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-base)',
-            color: 'var(--fg-strong)',
-            fontSize: 11,
-            outline: 'none',
-            fontFamily: 'var(--font-mono, monospace)',
-            transition: 'border-color 100ms ease, box-shadow 100ms ease',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = 'var(--accent)';
-            e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-muted)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border-subtle)';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        />
-        <button
-          type="button"
-          title={isCurrentBookmarked ? '取消收藏' : '收藏当前页'}
-          onClick={toggleBookmarkCurrent}
-          style={{
-            width: 26,
-            height: 26,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: isCurrentBookmarked
-              ? '1px solid color-mix(in oklch, var(--warning) 40%, var(--border-default))'
-              : '1px solid var(--border-subtle)',
-            borderRadius: 6,
-            background: isCurrentBookmarked
-              ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
-              : 'transparent',
-            color: isCurrentBookmarked ? 'var(--warning)' : 'var(--fg-default)',
-            cursor: 'pointer',
-            flexShrink: 0,
-            fontSize: 0,
-          }}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill={isCurrentBookmarked ? 'currentColor' : 'none'}
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-          </svg>
-        </button>
-        <BrowserBookmarksDropdown
-          bookmarks={bookmarks}
-          open={bookmarksOpen}
-          onToggle={() => setBookmarksOpen((v) => !v)}
-          onClose={() => setBookmarksOpen(false)}
-          onSelect={(url) => {
-            setBookmarksOpen(false);
-            navigateActiveTab(url);
-            setAddressInput(url);
-          }}
-          onRemove={removeBookmark}
-        />
-        <NavButton
-          title="复制 URL"
-          onClick={handleCopyUrl}
-          icon={
-            <>
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </>
-          }
-        />
-        <NavButton
-          title="在系统浏览器中打开"
-          onClick={handleOpenExternal}
-          icon={
-            <>
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </>
-          }
-        />
-        <NavButton
-          title="发送到对话"
-          onClick={handleSendToChat}
-          icon={
-            <>
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </>
-          }
-        />
-        <button
-          type="button"
-          onClick={() => handleNavigate()}
-          style={{
-            height: 26,
-            padding: '0 10px',
-            borderRadius: 6,
-            border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
-            background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))',
-            color: 'var(--accent)',
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          前往
-        </button>
-        {/* Console toggle button */}
-        <button
-          type="button"
-          title={consoleOpen ? '关闭控制台' : '打开控制台'}
-          onClick={() => setConsoleOpen((v) => !v)}
-          style={{
-            width: 26,
-            height: 26,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: consoleOpen
-              ? '1px solid var(--accent)'
-              : errorCount > 0
-                ? '1px solid var(--danger)'
-                : '1px solid var(--border-subtle)',
-            borderRadius: 6,
-            background: consoleOpen
-              ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
-              : errorCount > 0
-                ? 'color-mix(in oklch, var(--danger) 8%, transparent)'
-                : 'transparent',
-            color:
-              errorCount > 0
-                ? 'var(--danger)'
-                : consoleOpen
-                  ? 'var(--accent)'
-                  : 'var(--fg-default)',
-            cursor: 'pointer',
-            flexShrink: 0,
-            fontSize: 0,
-            position: 'relative',
-          }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M7 15h4" />
-            <path d="M7 9l3 3-3 3" />
-          </svg>
-          {(errorCount > 0 || warnCount > 0) && (
-            <span
-              style={{
-                position: 'absolute',
-                top: -3,
-                right: -3,
-                minWidth: 12,
-                height: 12,
-                borderRadius: 6,
-                background: errorCount > 0 ? 'var(--danger)' : 'var(--warning)',
-                color: 'var(--fg-on-accent)',
-                fontSize: 8,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '0 2px',
-              }}
-            >
-              {errorCount || warnCount}
-            </span>
-          )}
-        </button>
-      </div>
+      {!hidden && <BrowserShortcutHints shortcuts={previewShortcuts.active} />}
 
-      {/* Webview / iframe area */}
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        {isTauri ? (
-          <>
-            {!webviewReady && !webviewError && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--fg-muted)',
-                  fontSize: 12,
-                }}
-              >
-                正在加载 Webview…
-              </div>
-            )}
-            {webviewError && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  padding: 16,
-                  color: 'var(--fg-muted)',
-                  fontSize: 11,
-                  textAlign: 'center',
-                }}
-              >
-                <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Webview 创建失败</span>
-                <span style={{ maxWidth: 260, wordBreak: 'break-word' }}>{webviewError}</span>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <BrowserReadinessBar
-              state={pageReadiness.state}
-              attempt={pageReadiness.attempt}
-              nextRetryInMs={pageReadiness.nextRetryInMs}
-              url={activeUrl}
-              onRetry={pageReadiness.retry}
-            />
-            <iframe
-              ref={iframeRef}
-              key={`${activeTabId}-${refreshKey}`}
-              src={activeUrl}
-              title="内置浏览器"
-              sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox"
-              referrerPolicy="no-referrer"
-              allow="clipboard-read; clipboard-write"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                display: hidden ? 'none' : undefined,
-              }}
-              onLoad={() => {
-                iframeLoadedUrlRef.current = activeUrl;
-                try {
-                  const iframeWindow = iframeRef.current?.contentWindow;
-                  if (iframeWindow) {
-                    injectConsoleProxy(iframeWindow);
-                  }
-                } catch {
-                  appendLogToActiveTab({
-                    id: `${Date.now()}-info`,
-                    level: 'info',
-                    message: `页面已加载: ${activeUrl}（跨域页面无法捕获控制台输出）`,
-                    timestamp: Date.now(),
-                  });
-                }
-              }}
-              onError={() => {
-                appendLogToActiveTab({
-                  id: `${Date.now()}-err`,
-                  level: 'error',
-                  message: `无法加载: ${activeUrl}`,
-                  timestamp: Date.now(),
-                });
-              }}
-            />
-            {activeUrl && !isLocalhostUrl(activeUrl) && !consoleOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 8,
-                  left: 8,
-                  right: 8,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  background: 'color-mix(in oklch, var(--bg-overlay) 95%, var(--warning) 5%)',
-                  border:
-                    '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
-                  fontSize: 10,
-                  color: 'var(--fg-default)',
-                  pointerEvents: 'none',
-                  opacity: 0.9,
-                }}
-              >
-                💡 提示：大多数外部网站禁止在 iframe
-                中加载。本地开发服务器（localhost）可正常预览，外部站点请用「在系统浏览器中打开」。
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {liveWiring.unavailableHint !== null && (
+        <div
+          role="status"
+          style={{
+            padding: '5px 10px',
+            borderBottom:
+              '1px solid color-mix(in oklch, var(--warning) 30%, var(--border-default))',
+            background: 'color-mix(in oklch, var(--warning) 10%, var(--bg-overlay))',
+            color: 'var(--fg-default)',
+            fontSize: 11,
+            lineHeight: 1.5,
+          }}
+        >
+          {liveWiring.unavailableHint}
+        </div>
+      )}
+
+      <BrowserContentArea
+        containerRef={containerRef}
+        isTauri={isTauri}
+        webviewReady={webviewReady}
+        webviewError={webviewError}
+        activeUrl={activeUrl}
+        iframeRef={iframeRef}
+        activeTabId={activeTabId}
+        refreshKey={refreshKey}
+        hidden={hidden}
+        appendLogToActiveTab={appendLogToActiveTab}
+        consoleOpen={consoleOpen}
+        onRefreshRequested={previewShortcuts.reload}
+        liveActive={engineCapability.liveView}
+        liveSession={liveWiring.session}
+        liveAvailable={liveEngineAvailable}
+        pickArmed={pickArmed}
+        onPickConsumed={disarmPick}
+        onPickCancel={disarmPick}
+        pickIntent={pickIntent}
+        onPickPoint={inspector.recordPickPoint}
+        devicePresetId={devicePresetId}
+        zoom={zoom}
+      />
 
       {consoleOpen && (
         <BrowserConsolePanel
@@ -1223,6 +793,27 @@ export function BuiltInBrowser({
           onClear={clearActiveTabConsole}
           onClose={() => setConsoleOpen(false)}
           tauriMode={isTauri}
+          liveAvailable={liveEngineAvailable}
+          pageUrl={activeUrl}
+          pageTitle={activeTab?.title ?? null}
+          networkCaptureStatus={networkCaptureStatus}
+          inspector={{
+            dom: inspector.dom,
+            a11y: inspector.a11y,
+            node: inspector.node,
+            domStatus: inspector.domStatus,
+            a11yStatus: inspector.a11yStatus,
+            nodeStatus: inspector.nodeStatus,
+            errorMessage: inspector.errorMessage,
+            unavailable: isTauri || liveUnavailable,
+            unavailableHint: liveWiring.unavailableHint,
+            pickArmed,
+            onRequestDom: inspector.requestDom,
+            onRequestA11y: inspector.requestA11y,
+            onRequestFullStyles: inspector.requestFullStyles,
+            onArmPick: armPickForComposer,
+            onDisarmPick: disarmPick,
+          }}
         />
       )}
     </div>
