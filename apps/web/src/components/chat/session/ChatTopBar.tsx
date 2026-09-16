@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import DialogueModeToggle from '../../../pages/chat-page/mode/DialogueModeToggle.js';
+import DialogueModeSwitchButton from '../../../pages/chat-page/mode/DialogueModeSwitchButton.js';
 import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.js';
+import type { ComposerPermissionMode } from '../composer/ComposerPermissionModeSelect.js';
 import {
   ChatTodoFloatingPanel,
   ChatTopBarTodoSlot,
@@ -27,8 +29,23 @@ export interface WorkspaceBindingChipState {
 export interface ChatTopBarProps {
   dialogueMode: DialogueMode;
   onChangeDialogueMode: (mode: DialogueMode) => void;
+  /**
+   * 「确认转换」CTA（仅澄清模式渲染）：确认方案完成并切到编程模式。
+   * 省略该回调时不渲染按钮（team 等场景）。
+   */
+  onConfirmClarifySwitch?: () => void;
+  clarifySwitchPending?: boolean;
   yoloMode: boolean;
-  onToggleYolo: () => void;
+  /**
+   * YOLO 切换回调。省略时（如切换入口已迁入输入框）顶栏只读展示开启状态：
+   * `yoloMode === true` 时渲染不可交互的琥珀 chip，关闭时不渲染任何内容。
+   */
+  onToggleYolo?: () => void;
+  /**
+   * 审批方式档位（比 yoloMode 布尔更细）：提供时优先于 `yoloMode` 决定只读标识。
+   * `auto-edit` 渲染中性（aux）chip，`yolo` 渲染琥珀 chip，`ask` 不渲染。
+   */
+  permissionMode?: ComposerPermissionMode;
   editorMode: boolean;
   onToggleEditorMode: () => void;
   rightOpen: boolean;
@@ -52,6 +69,7 @@ export interface ChatTopBarProps {
   todoController?: ChatTodoController;
   todoDetailsId?: string;
   hideDialogueModeToggle?: boolean;
+  /** 隐藏 YOLO 入口 / 只读标识（两者都不渲染）。 */
   hideYoloToggle?: boolean;
   hideRightPanelToggle?: boolean;
   /** 会话信息 slot：标题 + 模型 + 模式，合并展示在左侧 */
@@ -76,11 +94,118 @@ export interface ChatTopBarProps {
 // ChatTopBar 总宽度小于此阈值时，todo 入口切到 compact 徽章形态。
 const TODO_COMPACT_WIDTH_THRESHOLD = 720;
 
+/** YOLO 闪电图标：可点击按钮与只读标识共用，保证两态视觉一致。 */
+function YoloBoltGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="none"
+    >
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+    </svg>
+  );
+}
+
+/**
+ * 只读的 YOLO 开启标识：切换入口迁入输入框后，顶栏仅提示「当前已跳过审批」，
+ * 不再可点击，避免与输入框内的控件产生两个写入口。
+ */
+function ReadonlyYoloChip() {
+  return (
+    <span
+      data-testid="chat-top-bar-yolo-chip"
+      data-readonly="true"
+      title="YOLO 模式已开启（在输入框中切换）"
+      style={{
+        height: 26,
+        padding: '0 7px',
+        borderRadius: 5,
+        border: 'none',
+        background: 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))',
+        color: 'var(--warning)',
+        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))',
+        fontSize: 10,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: '0.04em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        userSelect: 'none',
+      }}
+    >
+      <YoloBoltGlyph />
+      YOLO
+    </span>
+  );
+}
+
+/** 「编辑自动」铅笔图标：与输入框档位控件的中档字形保持一致。 */
+function AutoEditPencilGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+
+/**
+ * 只读的「编辑自动」标识：文件编辑 / 写入自动执行，其余工具仍需确认。
+ * 使用 aux（info）中性语义——琥珀警示色只属于免审批档，避免中档被误读为危险。
+ */
+function ReadonlyAutoEditChip() {
+  return (
+    <span
+      data-testid="chat-top-bar-auto-edit-chip"
+      data-readonly="true"
+      data-tone="info"
+      title="编辑自动（在输入框中切换）"
+      style={{
+        height: 26,
+        padding: '0 7px',
+        borderRadius: 5,
+        border: 'none',
+        background: 'color-mix(in srgb, var(--aux) 18%, var(--bg-overlay))',
+        color: 'var(--aux)',
+        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--aux) 42%, var(--border-default))',
+        fontSize: 10,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: '0.04em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        userSelect: 'none',
+      }}
+    >
+      <AutoEditPencilGlyph />
+      编辑自动
+    </span>
+  );
+}
+
 export function ChatTopBar({
   dialogueMode,
   onChangeDialogueMode,
+  onConfirmClarifySwitch,
+  clarifySwitchPending = false,
   yoloMode,
   onToggleYolo,
+  permissionMode,
   editorMode,
   onToggleEditorMode,
   rightOpen,
@@ -116,6 +241,9 @@ export function ChatTopBar({
   const showCommandPaletteButton = useDisplayPreferencesStore((s) => s.showCommandPaletteButton);
   const showTerminalButton = useDisplayPreferencesStore((s) => s.showTerminalButton);
   const compactDensity = density === 'compact';
+  // 档位优先；未传档位时按 legacy 布尔推导（true = 免审批 / YOLO）。
+  const resolvedPermissionMode: ComposerPermissionMode =
+    permissionMode ?? (yoloMode ? 'yolo' : 'ask');
 
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
@@ -289,6 +417,15 @@ export function ChatTopBar({
             style={{ flexShrink: 1, minWidth: 0 }}
           />
         )}
+
+        {onConfirmClarifySwitch ? (
+          <DialogueModeSwitchButton
+            mode={dialogueMode}
+            onConfirm={onConfirmClarifySwitch}
+            pending={clarifySwitchPending}
+            style={{ marginLeft: 4 }}
+          />
+        ) : null}
 
         {/* Command palette trigger */}
         {onOpenCommandPalette && showCommandPaletteButton && (
@@ -496,10 +633,10 @@ export function ChatTopBar({
             终端
           </button>
         )}
-        {hideYoloToggle ? null : (
+        {hideYoloToggle ? null : onToggleYolo ? (
           <button
             type="button"
-            aria-pressed={yoloMode}
+            aria-pressed={resolvedPermissionMode === 'yolo'}
             onClick={onToggleYolo}
             title="YOLO 模式：更少确认、直达结果"
             style={{
@@ -507,13 +644,15 @@ export function ChatTopBar({
               padding: '0 7px',
               borderRadius: 5,
               border: 'none',
-              background: yoloMode
-                ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))'
-                : 'transparent',
-              color: yoloMode ? 'var(--warning)' : 'var(--fg-muted)',
-              boxShadow: yoloMode
-                ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))'
-                : 'none',
+              background:
+                resolvedPermissionMode === 'yolo'
+                  ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))'
+                  : 'transparent',
+              color: resolvedPermissionMode === 'yolo' ? 'var(--warning)' : 'var(--fg-muted)',
+              boxShadow:
+                resolvedPermissionMode === 'yolo'
+                  ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))'
+                  : 'none',
               fontSize: 10,
               fontWeight: 600,
               cursor: 'pointer',
@@ -524,19 +663,14 @@ export function ChatTopBar({
               gap: 3,
             }}
           >
-            <svg
-              aria-hidden="true"
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
-            >
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
+            <YoloBoltGlyph />
             YOLO
           </button>
-        )}
+        ) : resolvedPermissionMode === 'yolo' ? (
+          <ReadonlyYoloChip />
+        ) : resolvedPermissionMode === 'auto-edit' ? (
+          <ReadonlyAutoEditChip />
+        ) : null}
         <button
           type="button"
           onClick={() => {

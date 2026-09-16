@@ -5,6 +5,8 @@ import type { CommandDescriptor } from '@openAwork/shared';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { createWorkflowsClient } from '@openAwork/web-client';
 import { ChatComposer } from './ChatComposer.js';
+import { ComposerPermissionModeSelect } from './ComposerPermissionModeSelect.js';
+import type { ComposerPermissionMode } from './ComposerPermissionModeSelect.js';
 import type { ComposerStatsData } from './ComposerStatsBar.js';
 import { ChatImageGenerationResultStrip } from '../image/ChatImageGenerationResultStrip.js';
 import { ModelPicker, ModelSettingsPopover } from '../session/ChatPageSections.js';
@@ -38,6 +40,8 @@ export interface UnifiedComposerFeatures {
   mentions?: boolean;
   agentSwitch?: boolean;
   queuedMessages?: boolean;
+  /** 输入框内的工具调用审批方式档位选择器；team 会话关闭。 */
+  permissionMode?: boolean;
 }
 
 export interface UnifiedComposerSubmitPayload {
@@ -91,7 +95,15 @@ export interface UnifiedComposerProps {
   activeModelTooltip?: string;
   dialogueMode: DialogueMode;
   manualAgentId: string;
-  yoloMode: boolean;
+  /** 工具调用审批方式档位：ask（每次询问）/ auto-edit（编辑自动）/ yolo（免审批）。 */
+  permissionMode: ComposerPermissionMode;
+  /**
+   * 切换工具调用审批方式（档位语义，不再用布尔取反）。
+   * 未提供时不渲染输入框内的档位选择器。
+   */
+  onPermissionModeChange?: (next: ComposerPermissionMode) => void;
+  /** 档位选择器禁用原因；提供后触发按钮以禁用态展示并附带 title。 */
+  yoloModeDisabledReason?: string;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -131,6 +143,11 @@ export interface UnifiedComposerProps {
    * sibling of the visible input box (outside, not inside).
    */
   composerRightSlot?: React.ReactNode;
+  /**
+   * Optional slot rendered above the composer input box, on the outer side (left aligned).
+   * ChatPage 用它挂载「选择工作空间」下拉；team 会话不传即不渲染。
+   */
+  composerFooterSlot?: React.ReactNode;
   /**
    * 自定义 textarea placeholder。team 接待会话用此覆盖默认的 chat 占位文案。
    */
@@ -176,6 +193,7 @@ const DEFAULT_FEATURES: Required<UnifiedComposerFeatures> = {
   mentions: true,
   agentSwitch: true,
   queuedMessages: true,
+  permissionMode: true,
 };
 
 export function UnifiedComposer(props: UnifiedComposerProps) {
@@ -200,6 +218,9 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     activeModelTooltip,
     dialogueMode,
     manualAgentId,
+    permissionMode,
+    onPermissionModeChange,
+    yoloModeDisabledReason,
     webSearchEnabled,
     thinkingEnabled,
     reasoningEffort,
@@ -588,7 +609,21 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         onReplaceInput={(nextValue: string) => setInput(nextValue)}
         statsData={resolvedStatsData}
         placeholder={props.placeholder}
+        // 档位直通：控件自身负责「首次开启免审批」的内联确认，这里不再做布尔适配。
+        permissionModeControl={
+          features.permissionMode && onPermissionModeChange ? (
+            // key 绑定会话：切换会话即重挂载控件，使「首次开启免审批」的确认重新询问。
+            <ComposerPermissionModeSelect
+              key={sessionId ?? 'draft'}
+              value={permissionMode}
+              onChange={onPermissionModeChange}
+              disabled={yoloModeDisabledReason !== undefined}
+              disabledReason={yoloModeDisabledReason}
+            />
+          ) : undefined
+        }
         composerRightSlot={props.composerRightSlot}
+        composerFooterSlot={props.composerFooterSlot}
         gatewayUrl={gatewayUrl}
         snippetsToken={token}
         onInsertAtCursor={(text: string) => {

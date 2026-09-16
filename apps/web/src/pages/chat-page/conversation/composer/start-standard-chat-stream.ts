@@ -7,10 +7,11 @@ import type { StreamingThinkingBlock } from '../../../../components/conversation
 
 export interface StartStandardChatStreamOptions {
   currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
-  isNearBottomRef: React.MutableRefObject<boolean>;
   localRequestInputParts?: InputImageContent[];
   onQueuedMessageConsumed: () => void;
   requestInputParts?: InputImageContent[];
+  /** 发送即「用户明确回到最新」：清除滚动中断并把视口落到底部。 */
+  requestReturnToLatest: () => void;
   setActiveStreamFirstTokenLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
   setActiveStreamStartedAt: React.Dispatch<React.SetStateAction<number | null>>;
   setHasPendingFollowContent: React.Dispatch<React.SetStateAction<boolean>>;
@@ -46,10 +47,10 @@ export function startStandardChatStream(
 ): StartedStandardChatStream {
   const {
     currentAssistantStreamMessageIdRef,
-    isNearBottomRef,
     localRequestInputParts,
     onQueuedMessageConsumed,
     requestInputParts,
+    requestReturnToLatest,
     setActiveStreamFirstTokenLatencyMs,
     setActiveStreamStartedAt,
     setHasPendingFollowContent,
@@ -84,7 +85,7 @@ export function startStandardChatStream(
   streamRevealTargetCodePointsRef.current = [];
   streamRevealVisibleCodePointCountRef.current = 0;
   streamRevealNextAllowedAtRef.current = 0;
-  isNearBottomRef.current = true;
+  requestReturnToLatest();
 
   const requestStartedAt = Date.now();
   setStreaming(true);

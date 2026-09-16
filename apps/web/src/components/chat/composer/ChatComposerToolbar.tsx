@@ -35,6 +35,8 @@ export interface ChatComposerToolbarProps {
   readonly showImageGenerationButton: boolean;
   readonly showVoiceButton: boolean;
   readonly showAttachmentButton: boolean;
+  /** 工具条左侧的「审批方式」档位选择器插槽；未提供时整个入口不渲染。 */
+  readonly permissionModeControl?: React.ReactNode;
   readonly streaming: boolean;
   readonly imageGenerationBusy: boolean;
   readonly canSubmit: boolean;
@@ -77,6 +79,7 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
   return (
     <div className="composer-toolbar">
       <div className="composer-toolbar-left">
+        {props.permissionModeControl}
         <ChatComposerFeatureToggles
           showWebSearchButton={props.showWebSearchButton}
           showImageGenerationButton={props.showImageGenerationButton}

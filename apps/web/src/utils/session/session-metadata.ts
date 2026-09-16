@@ -1,3 +1,5 @@
+import type { SessionPermissionMode } from '@openAwork/shared';
+
 export type SessionDialogueMode = 'clarify' | 'coding' | 'programmer';
 
 interface ParsedSessionMetadata {
@@ -6,6 +8,8 @@ interface ParsedSessionMetadata {
   modelId?: string;
   modelLabel?: string;
   parentSessionId?: string;
+  /** 审批方式档位：规范字段，旧数据由 yoloMode 布尔回退推导。 */
+  permissionMode: SessionPermissionMode;
   teamWorkspaceId?: string;
   workingDirectory: string | null;
   yoloMode: boolean;
@@ -13,6 +17,7 @@ interface ParsedSessionMetadata {
 
 const FALLBACK_PARSED_SESSION_METADATA: ParsedSessionMetadata = {
   dialogueMode: 'clarify',
+  permissionMode: 'ask',
   workingDirectory: null,
   yoloMode: false,
 };
@@ -38,8 +43,10 @@ export function getSessionModeLabels(metadataJson?: string): string[] {
   const metadata = parseSessionMetadata(metadataJson);
   const labels = [DIALOGUE_MODE_LABELS[metadata.dialogueMode]];
 
-  if (metadata.yoloMode) {
+  if (metadata.permissionMode === 'yolo') {
     labels.push('YOLO');
+  } else if (metadata.permissionMode === 'auto-edit') {
+    labels.push('编辑自动');
   }
 
   // 优先使用保存的 modelLabel，回退到格式化 modelId
@@ -84,10 +91,20 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       modelId?: unknown;
       modelLabel?: unknown;
       parentSessionId?: unknown;
+      permissionMode?: unknown;
       teamWorkspaceId?: unknown;
       workingDirectory?: unknown;
       yoloMode?: unknown;
     };
+
+    const permissionMode: SessionPermissionMode =
+      parsed.permissionMode === 'ask' ||
+      parsed.permissionMode === 'auto-edit' ||
+      parsed.permissionMode === 'yolo'
+        ? parsed.permissionMode
+        : parsed.yoloMode === true
+          ? 'yolo'
+          : 'ask';
 
     const metadata: ParsedSessionMetadata = {
       dialogueMode:
@@ -100,9 +117,11 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       modelId: normalizeOptionalString(parsed.modelId),
       modelLabel: normalizeOptionalString(parsed.modelLabel),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
+      permissionMode,
       teamWorkspaceId: normalizeOptionalString(parsed.teamWorkspaceId),
       workingDirectory: normalizeOptionalString(parsed.workingDirectory) ?? null,
-      yoloMode: parsed.yoloMode === true,
+      // 布尔字段只作为档位的派生投影，避免两个字段互相矛盾。
+      yoloMode: permissionMode === 'yolo',
     };
 
     setCachedSessionMetadata(metadataJson, metadata);

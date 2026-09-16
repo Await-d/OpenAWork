@@ -4,9 +4,10 @@ import { startStandardChatStream } from './start-standard-chat-stream.js';
 describe('startStandardChatStream', () => {
   it('会重置流式 refs、批量设置状态并追加用户消息', () => {
     const setMessages = vi.fn((updater) => updater([]));
+    const requestReturnToLatest = vi.fn();
     const result = startStandardChatStream({
       currentAssistantStreamMessageIdRef: { current: null },
-      isNearBottomRef: { current: false },
+      requestReturnToLatest,
       onQueuedMessageConsumed: vi.fn(),
       requestInputParts: [{ type: 'input_image', artifactId: 'a1' }],
       setActiveStreamFirstTokenLatencyMs: vi.fn(),
@@ -34,6 +35,8 @@ describe('startStandardChatStream', () => {
     expect(result.requestText).toBe('hello');
     expect(result.displayMessageForStream).toBe('hello');
     expect(setMessages).toHaveBeenCalled();
+    // 发送即「用户明确回到最新」：每次启动恰好调用一次，且不再写原始滚动 ref。
+    expect(requestReturnToLatest).toHaveBeenCalledTimes(1);
   });
 
   it('用户消息的有序 ID 早于实时助手占位 ID，保证气泡排在提问之后', () => {
@@ -41,7 +44,7 @@ describe('startStandardChatStream', () => {
     let appended: Array<{ id: string; role: string }> = [];
     startStandardChatStream({
       currentAssistantStreamMessageIdRef,
-      isNearBottomRef: { current: false },
+      requestReturnToLatest: vi.fn(),
       onQueuedMessageConsumed: vi.fn(),
       setActiveStreamFirstTokenLatencyMs: vi.fn(),
       setActiveStreamStartedAt: vi.fn(),
@@ -80,7 +83,7 @@ describe('startStandardChatStream', () => {
   it('空文本但有图片时会生成上传提示文案', () => {
     const result = startStandardChatStream({
       currentAssistantStreamMessageIdRef: { current: null },
-      isNearBottomRef: { current: false },
+      requestReturnToLatest: vi.fn(),
       onQueuedMessageConsumed: vi.fn(),
       requestInputParts: [{ type: 'input_image', artifactId: 'a1' }],
       setActiveStreamFirstTokenLatencyMs: vi.fn(),

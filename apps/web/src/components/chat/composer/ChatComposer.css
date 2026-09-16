@@ -296,3 +296,585 @@
     display: none;
   }
 }
+
+/* ── 工作区选择下拉（新建会话绑定工作目录） ─────────────────────
+   仅在会话尚未开始对话时渲染：搜索/切换已保存工作区、解除绑定、
+   新建工作空间、打开本地文件夹。挂载在输入框外壳上方（外层、左对齐），
+   浮层通过 portal 挂到 body，由脚本按触发按钮位置定位，
+   避免被顶栏 overflow 裁剪。 */
+
+.chat-composer__footer-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: 0 var(--spacing-1) var(--spacing-2);
+}
+
+.composer-workspace-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  max-width: 260px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  appearance: none;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.composer-workspace-trigger[data-bound='true'] {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+.composer-workspace-trigger:hover:not(:disabled) {
+  color: var(--fg-strong);
+  border-color: var(--border-emphasis);
+  background: var(--bg-raised);
+}
+
+.composer-workspace-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.composer-workspace-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer-workspace-trigger__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 已绑定 SSH 远端：按钮整体转为强调色并挂 SSH 徽标，避免与本地目录混淆。 */
+.composer-workspace-trigger[data-ssh='true'] {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-subtle));
+  color: var(--accent);
+}
+
+.composer-workspace-trigger__badge {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu {
+  position: fixed;
+  z-index: 998;
+  width: 320px;
+  max-height: min(420px, calc(100vh - 24px));
+  padding: var(--spacing-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  animation: composer-workspace-menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes composer-workspace-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.composer-workspace-menu__search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  height: 32px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.composer-workspace-menu__search:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.composer-workspace-menu__search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-strong);
+  font-size: 12px;
+}
+
+.composer-workspace-menu__search-input::placeholder {
+  color: var(--fg-subtle);
+}
+
+/* 已绑定 SSH 远端时的顶部提示：说明命令执行与文件读写都在远程主机。 */
+.composer-workspace-menu__ssh-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border-subtle));
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu__ssh-notice svg {
+  color: var(--accent);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu__ssh-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer-workspace-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.composer-workspace-menu__empty {
+  padding: var(--spacing-3) var(--spacing-2);
+  text-align: center;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.composer-workspace-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-default);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.composer-workspace-menu__item:hover:not(:disabled),
+.composer-workspace-menu__item[data-active='true'] {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--fg-strong);
+}
+
+.composer-workspace-menu__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.composer-workspace-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer-workspace-menu__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu__item:hover .composer-workspace-menu__item-icon,
+.composer-workspace-menu__item[data-active='true'] .composer-workspace-menu__item-icon {
+  color: var(--accent);
+}
+
+.composer-workspace-menu__item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-workspace-menu__item-label {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-workspace-menu__item[aria-selected='true'] .composer-workspace-menu__item-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.composer-workspace-menu__item-path {
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 动作条目的补充提示（如 SSH 远端的前置条件），可换行以承载完整说明。 */
+.composer-workspace-menu__item-hint {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--fg-subtle);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.composer-workspace-menu__item-check {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu__divider {
+  height: 1px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.composer-workspace-menu__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-workspace-menu__item--clear .composer-workspace-menu__item-label {
+  color: var(--fg-muted);
+}
+
+/* ── 输入框内「审批方式」档位选择（每次询问 / 免审批 YOLO） ─────────
+   触发按钮挂在 composer 工具条左侧功能组；浮层通过 portal 挂到 body，
+   由脚本按触发按钮位置定位并做视口翻转，避免被 composer / 顶栏裁剪。
+   仅免审批档使用 warning（琥珀）语义色，其余档位保持中性。 */
+
+.composer-permission-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  max-width: 220px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  appearance: none;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.composer-permission-trigger:hover:not(:disabled) {
+  color: var(--fg-strong);
+  border-color: var(--border-emphasis);
+  background: var(--bg-raised);
+}
+
+.composer-permission-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.composer-permission-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 免审批档：与顶栏 YOLO 标识一致的琥珀强调，提醒当前已跳过审批。 */
+.composer-permission-trigger[data-tone='warning'] {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-overlay));
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.composer-permission-trigger__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 档位图标统一在此控制描边 / 填充：闪电（yolo）实心，盾牌走描边。 */
+.composer-permission-trigger svg,
+.composer-permission-menu__item > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.composer-permission-trigger svg[data-glyph='yolo'],
+.composer-permission-menu__item > svg[data-glyph='yolo'] {
+  fill: currentColor;
+  stroke: none;
+}
+
+.composer-permission-trigger__spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: var(--radius-pill);
+  border: 1.6px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.composer-permission-menu {
+  position: fixed;
+  z-index: 998;
+  width: 300px;
+  max-height: min(320px, calc(100vh - 24px));
+  padding: var(--spacing-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  animation: composer-permission-menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* 可用空间不足时在圆角边框内滚动，而不是让内容溢出容器。 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@keyframes composer-permission-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.composer-permission-menu__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-default);
+  text-align: left;
+  cursor: pointer;
+  /* 不参与 flex 压缩：容器高度受限时改为滚动查看，避免档位文案被压扁重叠。 */
+  flex-shrink: 0;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.composer-permission-menu__item:hover,
+.composer-permission-menu__item[data-active='true'] {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--fg-strong);
+}
+
+.composer-permission-menu__item[data-tone='warning']:hover,
+.composer-permission-menu__item[data-tone='warning'][data-active='true'] {
+  background: var(--warning-muted);
+  border-color: var(--warning-border);
+}
+
+.composer-permission-menu__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* 免审批档的图标与文案沿用琥珀警示语义，与触发按钮保持一致。 */
+.composer-permission-menu__item[data-tone='warning'] > svg,
+.composer-permission-menu__item[data-tone='warning'] .composer-permission-menu__item-label {
+  color: var(--warning);
+}
+
+.composer-permission-menu__item-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-permission-menu__item-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.composer-permission-menu__item[aria-checked='true'] .composer-permission-menu__item-label {
+  font-weight: 600;
+}
+
+.composer-permission-menu__item[aria-checked='true']:not([data-tone='warning'])
+  .composer-permission-menu__item-label {
+  color: var(--accent);
+}
+
+.composer-permission-menu__item-description {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 首次开启免审批的内联确认行：不弹全局对话框，就地确认。 */
+.composer-permission-menu__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warning-border);
+  background: var(--warning-muted);
+  flex-shrink: 0;
+}
+
+.composer-permission-menu__confirm-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.composer-permission-menu__confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-2);
+}
+
+.composer-permission-menu__confirm-button {
+  height: 26px;
+  padding: 0 var(--spacing-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.composer-permission-menu__confirm-button:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-raised);
+  color: var(--fg-strong);
+}
+
+.composer-permission-menu__confirm-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.composer-permission-menu__confirm-button--primary {
+  border-color: var(--warning-border);
+  background: color-mix(in srgb, var(--warning) 18%, var(--bg-overlay));
+  color: var(--warning);
+}
+
+.composer-permission-menu__confirm-button--primary:hover {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 26%, var(--bg-overlay));
+  color: var(--warning);
+}
+
+/* 375px 窄屏：触发按钮收敛为图标 + 被截断的短标签，避免挤压工具条。 */
+@media (max-width: 520px) {
+  .composer-permission-trigger {
+    max-width: 132px;
+    padding: 0 var(--spacing-1);
+  }
+
+  .composer-permission-trigger__label {
+    max-width: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-workspace-trigger,
+  .composer-workspace-menu,
+  .composer-workspace-menu__item,
+  .composer-workspace-menu__search,
+  .composer-permission-trigger,
+  .composer-permission-menu,
+  .composer-permission-menu__item,
+  .composer-permission-menu__confirm-button {
+    transition: none;
+    animation: none;
+  }
+}

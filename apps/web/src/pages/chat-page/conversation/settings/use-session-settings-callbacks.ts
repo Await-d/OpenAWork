@@ -1,11 +1,13 @@
 import { useCallback } from 'react';
 import type { DialogueMode } from '../../mode/dialogue-mode.js';
 import type { ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
+import type { ComposerPermissionMode } from '../../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import type { ModelSelectionSource } from './model-selection-source.js';
 
 export interface SessionSettingsState {
   dialogueMode: DialogueMode;
-  yoloMode: boolean;
+  /** 工具调用审批方式档位（ask / auto-edit / yolo）——审批语义的唯一事实来源。 */
+  permissionMode: ComposerPermissionMode;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -20,7 +22,7 @@ export interface SessionSettingsState {
 
 export interface SessionSettingsSetters {
   setDialogueMode: (value: DialogueMode) => void;
-  setYoloMode: (value: boolean | ((prev: boolean) => boolean)) => void;
+  setPermissionMode: (value: ComposerPermissionMode) => void;
   setWebSearchEnabled: (value: boolean | ((prev: boolean) => boolean)) => void;
   setThinkingEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
@@ -34,6 +36,8 @@ export interface SessionSettingsCallbacksReturn {
   clearSessionMetadataDirty: () => void;
   handleDialogueModeChange: (mode: DialogueMode) => void;
   handleToggleYolo: () => void;
+  /** 按目标档位设置审批方式（不再盲目取反）：ask / auto-edit / yolo 三档。 */
+  handlePermissionModeChange: (mode: ComposerPermissionMode) => void;
   handleToggleWebSearch: () => void;
   handleThinkingEnabledChange: (enabled: boolean) => void;
   handleReasoningEffortChange: (effort: ReasoningEffort) => void;
@@ -49,7 +53,7 @@ export function useSessionSettingsCallbacks(
 ): SessionSettingsCallbacksReturn {
   const {
     dialogueMode,
-    yoloMode,
+    permissionMode,
     webSearchEnabled,
     thinkingEnabled,
     reasoningEffort,
@@ -62,7 +66,7 @@ export function useSessionSettingsCallbacks(
   } = state;
   const {
     setDialogueMode,
-    setYoloMode,
+    setPermissionMode,
     setWebSearchEnabled,
     setThinkingEnabled,
     setReasoningEffort,
@@ -74,7 +78,9 @@ export function useSessionSettingsCallbacks(
     (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
       const metadata: Record<string, unknown> = {
         dialogueMode,
-        yoloMode,
+        // 档位为规范字段；yoloMode 是派生的布尔投影，供尚未迁移的老读者消费。
+        permissionMode,
+        yoloMode: permissionMode === 'yolo',
         webSearchEnabled,
         thinkingEnabled,
         reasoningEffort,
@@ -95,10 +101,10 @@ export function useSessionSettingsCallbacks(
       dialogueMode,
       effectiveWorkingDirectory,
       manualAgentId,
+      permissionMode,
       reasoningEffort,
       thinkingEnabled,
       webSearchEnabled,
-      yoloMode,
     ],
   );
 
@@ -120,10 +126,24 @@ export function useSessionSettingsCallbacks(
     [setDialogueMode, markSessionMetadataDirty],
   );
 
+  /** 快捷命令入口的 YOLO 开关：只在 ask 与 yolo 两档之间切换，不触碰中间的编辑自动档。 */
   const handleToggleYolo = useCallback(() => {
-    setYoloMode((prev) => !prev);
+    setPermissionMode(permissionMode === 'yolo' ? 'ask' : 'yolo');
     markSessionMetadataDirty();
-  }, [setYoloMode, markSessionMetadataDirty]);
+  }, [setPermissionMode, permissionMode, markSessionMetadataDirty]);
+
+  /**
+   * 输入框内档位选择器的写入路径：按目标档位设置，避免「取反」在连续切换时
+   * 依赖渲染时序。本地状态先乐观更新，之后由 ChatPage 的 dirty-metadata 副作用
+   * 统一 PATCH；该副作用失败时静默保留本地值（既有行为，不做回滚）。
+   */
+  const handlePermissionModeChange = useCallback(
+    (mode: ComposerPermissionMode) => {
+      setPermissionMode(mode);
+      markSessionMetadataDirty();
+    },
+    [markSessionMetadataDirty, setPermissionMode],
+  );
 
   const handleToggleWebSearch = useCallback(() => {
     setWebSearchEnabled((prev) => !prev);
@@ -165,6 +185,7 @@ export function useSessionSettingsCallbacks(
     clearSessionMetadataDirty,
     handleDialogueModeChange,
     handleToggleYolo,
+    handlePermissionModeChange,
     handleToggleWebSearch,
     handleThinkingEnabledChange,
     handleReasoningEffortChange,

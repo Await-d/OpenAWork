@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PromptOptimizerResult } from '@openAwork/web-client';
 import { UnifiedComposer } from './UnifiedComposer.js';
@@ -17,10 +17,14 @@ vi.mock('@openAwork/web-client', () => ({
 vi.mock('./ChatComposer.js', () => ({
   ChatComposer: (props: {
     onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
+    permissionModeControl?: React.ReactNode;
   }) => (
-    <button type="button" onClick={() => void props.onOptimizePrompt?.('请优化当前输入')}>
-      触发优化
-    </button>
+    <div>
+      <button type="button" onClick={() => void props.onOptimizePrompt?.('请优化当前输入')}>
+        触发优化
+      </button>
+      {props.permissionModeControl}
+    </div>
   ),
 }));
 
@@ -65,7 +69,7 @@ function makeUnifiedComposerProps(): React.ComponentProps<typeof UnifiedComposer
     activeModelTooltip: '模型说明',
     dialogueMode: 'coding',
     manualAgentId: '',
-    yoloMode: false,
+    permissionMode: 'ask',
     webSearchEnabled: true,
     thinkingEnabled: true,
     reasoningEffort: 'high',
@@ -174,6 +178,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 项目未开启 vitest globals，testing-library 的自动清理不会生效，这里显式清理。
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -199,5 +205,68 @@ describe('UnifiedComposer', () => {
     expect(payload.context).toContain('思考模式：开启（高）');
     expect(payload.context).toContain('附件数量：2');
     expect(payload.context).toContain('可用输入辅助：/ 命令、@ 文件');
+  });
+
+  it('features.permissionMode 为 false 时不渲染审批方式控件', () => {
+    render(
+      <UnifiedComposer
+        {...makeUnifiedComposerProps()}
+        onPermissionModeChange={vi.fn()}
+        features={{ permissionMode: false }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '每次询问' })).toBeNull();
+  });
+
+  it('启用审批方式控件时按档位渲染并回调 onPermissionModeChange', () => {
+    const onPermissionModeChange = vi.fn();
+    const props = makeUnifiedComposerProps();
+    const { rerender } = render(
+      <UnifiedComposer {...props} onPermissionModeChange={onPermissionModeChange} />,
+    );
+
+    // permissionMode='ask' 应映射为「每次询问」档。
+    const trigger = screen.getByRole('button', { name: '每次询问' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /编辑自动/ }));
+
+    // 中档无需内联确认，直接按目标档位回调。
+    expect(onPermissionModeChange).toHaveBeenCalledTimes(1);
+    expect(onPermissionModeChange).toHaveBeenCalledWith('auto-edit');
+
+    // 档位 prop 直通控件：受控值切到中间档后渲染对应标签。
+    rerender(
+      <UnifiedComposer
+        {...props}
+        permissionMode="auto-edit"
+        onPermissionModeChange={onPermissionModeChange}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '编辑自动' })).toBeTruthy();
+  });
+
+  it('切换会话后重挂载控件：免审批确认会重新询问', () => {
+    const onPermissionModeChange = vi.fn();
+    const props = makeUnifiedComposerProps();
+    const { rerender } = render(
+      <UnifiedComposer {...props} onPermissionModeChange={onPermissionModeChange} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '每次询问' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /免审批/ }));
+    fireEvent.click(screen.getByRole('button', { name: '确认开启' }));
+
+    rerender(
+      <UnifiedComposer
+        {...props}
+        sessionId="session-2"
+        onPermissionModeChange={onPermissionModeChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '每次询问' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /免审批/ }));
+
+    expect(screen.getByRole('button', { name: '确认开启' })).toBeTruthy();
   });
 });

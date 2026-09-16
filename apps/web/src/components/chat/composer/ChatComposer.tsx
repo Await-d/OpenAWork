@@ -155,6 +155,14 @@ interface ChatComposerProps {
    * it visually attached to the composer area.
    */
   composerRightSlot?: React.ReactNode;
+  /**
+   * 输入框外壳上方的外侧插槽（左对齐，位于输入框外部）：ChatPage 用它挂载「选择工作空间」下拉。
+   */
+  composerFooterSlot?: React.ReactNode;
+  /**
+   * 工具条左侧功能组内的「审批方式」档位选择器插槽（由 UnifiedComposer 构造）。
+   */
+  permissionModeControl?: React.ReactNode;
   /** Gateway URL for prompt snippets API. */
   gatewayUrl?: string;
   /** Auth token for prompt snippets API. */
@@ -249,6 +257,8 @@ export function ChatComposer({
   onReplaceInput,
   placeholder,
   composerRightSlot,
+  composerFooterSlot,
+  permissionModeControl,
   gatewayUrl,
   snippetsToken,
   onInsertAtCursor,
@@ -563,6 +573,10 @@ export function ChatComposer({
           />
         )}
 
+        {composerFooterSlot && (
+          <div className="chat-composer__footer-slot">{composerFooterSlot}</div>
+        )}
+
         {/* 输入框与 buddy chip 同行；chip 不参与 textarea / 工具条布局，仅视觉上紧贴右侧。 */}
         <div className="chat-composer__body">
           <div
@@ -742,6 +756,7 @@ export function ChatComposer({
                 showImageGenerationButton={showImageGenerationButton}
                 showVoiceButton={showVoiceButton}
                 showAttachmentButton={showAttachmentButton}
+                permissionModeControl={permissionModeControl}
                 streaming={streaming}
                 imageGenerationBusy={imageGenerationBusy}
                 canSubmit={canSubmit}

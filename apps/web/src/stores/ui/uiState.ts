@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import type { TerminalLayout } from '../../components/chat/terminal/layout/types.js';
+
 /**
  * Throttled localStorage adapter for the persist middleware.
  *
@@ -190,8 +192,10 @@ export interface UIStateStore {
   toggleSessionGroupCollapsed: (groupKey: string) => void;
 
   // File tree
-  expandedDirs: string[];
-  setExpandedDirs: (dirs: string[]) => void;
+  /** 文件树已展开目录，按会话分桶持久化；无会话时落到 `__default__` 桶。 */
+  expandedDirsBySession: Record<string, string[]>;
+  /** 写入指定会话桶的展开目录；传空数组会删除该桶。 */
+  setExpandedDirsForSession: (sessionKey: string | null | undefined, dirs: string[]) => void;
 
   fileTreeRootPath: string | null;
   setFileTreeRootPath: (path: string | null) => void;
@@ -203,6 +207,13 @@ export interface UIStateStore {
   removeSavedWorkspacePath: (path: string) => void;
   selectedWorkspacePath: string | null;
   setSelectedWorkspacePath: (path: string | null) => void;
+  /**
+   * 草稿会话的 SSH 工作区连接：非空表示当前选中的工作区是「SSH 远端目录」
+   * （`selectedWorkspacePath` 此时存放远端绝对路径）。创建会话时写入
+   * metadata.sshConnectionId，网关在创建时自动完成会话↔连接绑定。
+   */
+  selectedSshConnectionId: string | null;
+  setSelectedSshConnectionId: (connectionId: string | null) => void;
   activeSessionWorkspace: {
     sessionId: string;
     path: string | null;
@@ -319,13 +330,41 @@ export interface UIStateStore {
    */
   fusionDockSplitPos: number;
   setFusionDockSplitPos: (percent: number) => void;
-  sidePanelActiveTab: 'review' | 'files' | 'context';
-  setSidePanelActiveTab: (tab: 'review' | 'files' | 'context') => void;
+  sidePanelActiveTab: 'review' | 'files' | 'context' | 'browser';
+  setSidePanelActiveTab: (tab: 'review' | 'files' | 'context' | 'browser') => void;
+  /**
+   * 单一浏览器互斥标记：`BuiltInBrowser` 持有网关实时会话，全应用同一时刻最多
+   * 只能挂载一个实例。停靠面板的浏览器 tab 挂载时声明 'dock'，卸载时归还
+   * 'editor'；编辑器面板据此在停靠面板持有浏览器期间不挂载自己的浏览器。
+   * 瞬态字段，不持久化（见 partialize）。
+   */
+  browserPreviewSurface: 'editor' | 'dock';
+  setBrowserPreviewSurface: (surface: 'editor' | 'dock') => void;
+  /**
+   * 终端面板打开状态的镜像值——始终等于「当前会话桶」里的值。
+   * 之所以保留这个全局布尔字段：TerminalPanel / ChatPage 等消费端不允许改动，
+   * 按会话隔离必须完全收敛在 store 内部；会话切换时由 setLastChatPath 负责换镜。
+   */
   terminalPanelOpened: boolean;
   setTerminalPanelOpened: (opened: boolean) => void;
   toggleTerminalPanelOpened: () => void;
+  /**
+   * 终端面板打开状态按会话分桶，键为规范化后的完整 chat path（见
+   * terminalPanelSessionKeyFor），无 chat path 时归入 __default__ 桶。
+   */
+  terminalPanelOpenedBySession: Record<string, boolean>;
   terminalPanelHeight: number;
   setTerminalPanelHeight: (height: number) => void;
+  /**
+   * 终端分屏布局按会话分桶，键与 terminalPanelOpenedBySession 同源（见
+   * terminalPanelSessionKeyFor），避免同一会话出现两把钥匙。
+   *
+   * store **只存结构合法的树**：不做任何布局计算（归一 / 变更全部落在
+   * components/chat/terminal/layout/ 纯函数层），载入期只做结构校验，
+   * 非法桶值整条丢弃（见 normalizeTerminalLayoutBySession）。
+   */
+  terminalLayoutBySession: Record<string, TerminalLayout | null>;
+  setTerminalLayoutForSession: (sessionKey: string, layout: TerminalLayout | null) => void;
 
   /**
    * 快捷终端面板(VS Code 风格底部抽屉)是否开启,按 workspace 持久化。
@@ -364,6 +403,150 @@ function normalizeChatPath(path: string | null): string | null {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+export const DEFAULT_EXPANDED_DIRS_SESSION_KEY = '__default__';
+
+/** 稳定引用：zustand selector 缺省返回它，避免每次渲染生成新数组触发重渲染。 */
+export const EMPTY_EXPANDED_DIRS: readonly string[] = [];
+
+export function normalizeExpandedDirsSessionKey(sessionKey: string | null | undefined): string {
+  const trimmed = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+  return trimmed.length > 0 ? trimmed : DEFAULT_EXPANDED_DIRS_SESSION_KEY;
+}
+
+function normalizeExpandedDirsBySession(value: unknown): Record<string, string[]> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const next: Record<string, string[]> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (isStringArray(entry) && entry.length > 0) {
+      next[key] = entry;
+    }
+  }
+  return next;
+}
+
+export const DEFAULT_TERMINAL_PANEL_SESSION_KEY = '__default__';
+
+/**
+ * 会话桶键直接用规范化后的完整 chat path（`/chat` 与 `/chat/<id>` 因此天然分桶），
+ * 不再解析 sessionId——少一处易错解析，且键与 lastChatPath 的形态一一对应。
+ */
+export function terminalPanelSessionKeyFor(lastChatPath: string | null): string {
+  const normalized = lastChatPath?.trim() ?? '';
+  return normalized.length > 0 ? normalized : DEFAULT_TERMINAL_PANEL_SESSION_KEY;
+}
+
+/**
+ * 桶值非布尔直接丢弃，而不是归一为 false：false 与「键不存在」在读取端语义等价，
+ * 保留垃圾值只会让持久化数据膨胀。
+ */
+function normalizeTerminalPanelOpenedBySession(value: unknown): Record<string, boolean> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const next: Record<string, boolean> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'boolean') {
+      next[key] = entry;
+    }
+  }
+  return next;
+}
+
+/**
+ * 终端布局载入期结构校验的三道硬限制。
+ *
+ * localStorage 是用户可写介质，持久化数据可能被手工篡改成**深递归炸弹**或超大对象；
+ * 递归校验若不预算，会在水合阶段爆栈 / 长时间占满主线程。三条限制在递归前先建立，
+ * 任一违反即**丢弃该会话的布局**（不抛错，只 warn 一次）——脏数据只该让该会话退回
+ * 单组，不该阻断整个 store 水合。
+ */
+export const TERMINAL_LAYOUT_MAX_DEPTH = 32;
+export const TERMINAL_LAYOUT_MAX_NODES = 64;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+interface TerminalLayoutBudget {
+  /** 剩余可计数的节点预算，递归过程中递减；归零即中止。 */
+  nodes: number;
+}
+
+/** pane：`terminalIds` 非空字符串数组且 `activeTerminalId` ∈ `terminalIds`。 */
+function isValidTerminalPaneShape(node: Record<string, unknown>): boolean {
+  if (typeof Reflect.get(node, 'id') !== 'string') return false;
+  const terminalIds = Reflect.get(node, 'terminalIds');
+  if (!Array.isArray(terminalIds) || terminalIds.length === 0) return false;
+  if (!terminalIds.every((terminalId) => typeof terminalId === 'string')) return false;
+  const activeTerminalId = Reflect.get(node, 'activeTerminalId');
+  return typeof activeTerminalId === 'string' && terminalIds.includes(activeTerminalId);
+}
+
+function isValidTerminalSplitShape(
+  node: Record<string, unknown>,
+  depth: number,
+  budget: TerminalLayoutBudget,
+): boolean {
+  if (typeof Reflect.get(node, 'id') !== 'string') return false;
+  const direction = Reflect.get(node, 'direction');
+  if (direction !== 'row' && direction !== 'column') return false;
+  // 硬限制三：`ratio` 必须是有限数（NaN / ±Infinity / 非 number 一律非法）。
+  const ratio = Reflect.get(node, 'ratio');
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio)) return false;
+  const children = Reflect.get(node, 'children');
+  if (!Array.isArray(children) || children.length !== 2) return false;
+  const [left, right] = children;
+  return (
+    isValidTerminalLayoutNodeShape(left, depth + 1, budget) &&
+    isValidTerminalLayoutNodeShape(right, depth + 1, budget)
+  );
+}
+
+function isValidTerminalLayoutNodeShape(
+  value: unknown,
+  depth: number,
+  budget: TerminalLayoutBudget,
+): boolean {
+  // 硬限制一（最大深度）与二（最大节点数）先于任何对象访问，避免深链 / 巨物。
+  if (depth > TERMINAL_LAYOUT_MAX_DEPTH) return false;
+  if (budget.nodes <= 0) return false;
+  if (!isPlainRecord(value)) return false;
+  budget.nodes -= 1;
+
+  const kind = Reflect.get(value, 'kind');
+  if (kind === 'pane') return isValidTerminalPaneShape(value);
+  if (kind === 'split') return isValidTerminalSplitShape(value, depth, budget);
+  return false;
+}
+
+function isValidTerminalLayoutShape(value: unknown): boolean {
+  if (value === null) return true;
+  return isValidTerminalLayoutNodeShape(value, 1, { nodes: TERMINAL_LAYOUT_MAX_NODES });
+}
+
+/**
+ * 逐桶做结构校验：非法形状的桶**整条丢弃**（该会话回到「无分屏」）并 warn 一次。
+ * 与 normalizeTerminalPanelOpenedBySession 同口径：保留垃圾只会让持久化膨胀。
+ * 注意这里只做**形状**校验，不做归一（ratio 合法性交给 layout/normalize.ts 渲染期处理）。
+ */
+function normalizeTerminalLayoutBySession(value: unknown): Record<string, TerminalLayout | null> {
+  if (!isPlainRecord(value)) return {};
+
+  const next: Record<string, TerminalLayout | null> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isValidTerminalLayoutShape(entry)) {
+      next[key] = entry as TerminalLayout;
+    } else {
+      console.warn(`[uiState] 丢弃结构非法的终端布局桶: ${key}`);
+    }
+  }
+  return next;
 }
 
 function isWorkbenchLayoutMode(value: unknown): value is WorkbenchLayoutMode {
@@ -637,7 +820,26 @@ export const useUIStateStore = create<UIStateStore>()(
       navigateToSession: () =>
         set((state) => (state.chatView === 'session' ? state : { chatView: 'session' })),
       lastChatPath: null,
-      setLastChatPath: (path) => set({ lastChatPath: normalizeChatPath(path) }),
+      setLastChatPath: (path) =>
+        set((state) => {
+          const nextPath = normalizeChatPath(path);
+          const previousKey = terminalPanelSessionKeyFor(state.lastChatPath);
+          const nextKey = terminalPanelSessionKeyFor(nextPath);
+          if (previousKey === nextKey) {
+            return { lastChatPath: nextPath };
+          }
+
+          // 会话切换：先把当前镜像归档回旧会话桶（保住旧会话的展开态），再把新会话
+          // 桶的值载入镜像（缺省 false，即新会话默认收起）。
+          return {
+            lastChatPath: nextPath,
+            terminalPanelOpened: state.terminalPanelOpenedBySession[nextKey] ?? false,
+            terminalPanelOpenedBySession: {
+              ...state.terminalPanelOpenedBySession,
+              [previousKey]: state.terminalPanelOpened,
+            },
+          };
+        }),
       tabs: [],
       activeTabId: null,
       addSessionTab: (sessionId, title, workspacePath) => {
@@ -894,8 +1096,18 @@ export const useUIStateStore = create<UIStateStore>()(
         })),
 
       // File tree
-      expandedDirs: [],
-      setExpandedDirs: (dirs) => set({ expandedDirs: dirs }),
+      expandedDirsBySession: {},
+      setExpandedDirsForSession: (sessionKey, dirs) =>
+        set((state) => {
+          const key = normalizeExpandedDirsSessionKey(sessionKey);
+          const next = { ...state.expandedDirsBySession };
+          if (dirs.length > 0) {
+            next[key] = dirs;
+          } else {
+            delete next[key];
+          }
+          return { expandedDirsBySession: next };
+        }),
 
       fileTreeRootPath: null,
       setFileTreeRootPath: (path) => set({ fileTreeRootPath: path }),
@@ -962,6 +1174,8 @@ export const useUIStateStore = create<UIStateStore>()(
       selectedWorkspacePath: null,
       setSelectedWorkspacePath: (path) =>
         set({ selectedWorkspacePath: path ? normalizeWorkspacePath(path) : null }),
+      selectedSshConnectionId: null,
+      setSelectedSshConnectionId: (connectionId) => set({ selectedSshConnectionId: connectionId }),
       activeSessionWorkspace: null,
       setActiveSessionWorkspace: (sessionId, path) =>
         set((state) => ({
@@ -1105,13 +1319,47 @@ export const useUIStateStore = create<UIStateStore>()(
         set({ fusionDockSplitPos: clampFusionDockSplitPos(percent) }),
       sidePanelActiveTab: 'review',
       setSidePanelActiveTab: (tab) => set({ sidePanelActiveTab: tab }),
+      browserPreviewSurface: 'editor',
+      setBrowserPreviewSurface: (surface) => set({ browserPreviewSurface: surface }),
       terminalPanelOpened: false,
-      setTerminalPanelOpened: (opened) => set({ terminalPanelOpened: opened }),
+      terminalPanelOpenedBySession: {},
+      setTerminalPanelOpened: (opened) =>
+        set((state) => ({
+          terminalPanelOpened: opened,
+          terminalPanelOpenedBySession: {
+            ...state.terminalPanelOpenedBySession,
+            [terminalPanelSessionKeyFor(state.lastChatPath)]: opened,
+          },
+        })),
       toggleTerminalPanelOpened: () =>
-        set((state) => ({ terminalPanelOpened: !state.terminalPanelOpened })),
+        set((state) => {
+          const nextOpened = !state.terminalPanelOpened;
+          return {
+            terminalPanelOpened: nextOpened,
+            terminalPanelOpenedBySession: {
+              ...state.terminalPanelOpenedBySession,
+              [terminalPanelSessionKeyFor(state.lastChatPath)]: nextOpened,
+            },
+          };
+        }),
       terminalPanelHeight: TERMINAL_PANEL_HEIGHT_BOUNDS.default,
       setTerminalPanelHeight: (height) =>
         set({ terminalPanelHeight: clampTerminalPanelHeight(height) }),
+
+      terminalLayoutBySession: {},
+      setTerminalLayoutForSession: (sessionKey, layout) =>
+        set((state) => {
+          const key = terminalPanelSessionKeyFor(sessionKey);
+          const next = { ...state.terminalLayoutBySession };
+          // null（= 无分屏）与「键不存在」在读取端等价，删除键而不是写 null，
+          // 避免持久化数据无意义膨胀（与 setExpandedDirsForSession 同口径）。
+          if (layout === null) {
+            delete next[key];
+          } else {
+            next[key] = layout;
+          }
+          return { terminalLayoutBySession: next };
+        }),
 
       quickTerminalOpenByWorkspace: {},
       setQuickTerminalOpenForWorkspace: (workspacePath, open) =>
@@ -1145,7 +1393,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 22,
+      version: 25,
       // reviewPanelOpened / editorMode 不持久化——每次启动默认关闭。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
       partialize: (state) => {
@@ -1153,6 +1401,7 @@ export const useUIStateStore = create<UIStateStore>()(
           reviewPanelOpened: _rp,
           editorMode: _em,
           closedSessionTabIds: _cs,
+          browserPreviewSurface: _bps,
           ...rest
         } = state;
         return rest as typeof state;
@@ -1162,6 +1411,12 @@ export const useUIStateStore = create<UIStateStore>()(
         merged.reviewPanelOpened = false;
         merged.editorMode = false;
         merged.closedSessionTabIds = [];
+        // 覆盖方向是 persisted 盖 currentState，所以 currentState 的空桶不会冲掉已持久化的
+        // 布局；但同 version 的脏数据不会走 migrate，这里再兜一次结构校验，保证任何来源的
+        // 非法桶值都进不了 state（成本只有一次小块遍历）。
+        merged.terminalLayoutBySession = normalizeTerminalLayoutBySession(
+          merged.terminalLayoutBySession,
+        );
         return merged as typeof currentState;
       },
       // Throttle storage writes to avoid JSON.stringify+setItem on
@@ -1307,6 +1562,41 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.collapsedSessionGroups = [];
         }
 
+        // v23:文件树展开目录从全局单数组改为按会话分桶,切换会话时各自恢复,
+        // 切回旧会话仍保持展开。旧全局值归入 __default__ 桶。
+        if (version < 23) {
+          const legacyExpandedDirs = isStringArray(nextState.expandedDirs)
+            ? nextState.expandedDirs
+            : [];
+          delete nextState.expandedDirs;
+          nextState.expandedDirsBySession =
+            legacyExpandedDirs.length > 0
+              ? { [DEFAULT_EXPANDED_DIRS_SESSION_KEY]: legacyExpandedDirs }
+              : {};
+        }
+
+        // v24:终端面板打开状态从全局单值改为按会话分桶,切到新会话时不再沿用上一个
+        // 会话的展开态。旧全局值归入 __default__ 桶(沿用 v10 惯例:只有 true 值得归档,
+        // false 与缺省等价);terminalPanelOpened 字段本身保留——它现在是当前会话的
+        // 镜像,消费端读取路径不变。
+        if (version < 24) {
+          nextState.terminalPanelOpenedBySession =
+            nextState.terminalPanelOpened === true
+              ? { [DEFAULT_TERMINAL_PANEL_SESSION_KEY]: true }
+              : {};
+        }
+
+        // v25:终端分屏布局按会话分桶。分屏能力本轮才引入,没有旧字段可迁移,只初始化空桶;
+        // 键必须复用 terminalPanelSessionKeyFor(与 terminalPanelOpenedBySession 同源),
+        // 否则同一会话会出现两把钥匙。实际桶值由 layout/use-terminal-layout 的用户操作写入。
+        if (version < 25) {
+          nextState.terminalLayoutBySession = {};
+        }
+
+        nextState.expandedDirsBySession = normalizeExpandedDirsBySession(
+          nextState.expandedDirsBySession,
+        );
+
         if (!isStringArray(nextState.collapsedSessionGroups)) {
           nextState.collapsedSessionGroups = [];
         }
@@ -1370,6 +1660,14 @@ export const useUIStateStore = create<UIStateStore>()(
         if (typeof nextState.terminalPanelOpened !== 'boolean') {
           nextState.terminalPanelOpened = false;
         }
+
+        nextState.terminalPanelOpenedBySession = normalizeTerminalPanelOpenedBySession(
+          nextState.terminalPanelOpenedBySession,
+        );
+
+        nextState.terminalLayoutBySession = normalizeTerminalLayoutBySession(
+          nextState.terminalLayoutBySession,
+        );
 
         nextState.tabs = normalizePersistedTabs(nextState.tabs);
         if (

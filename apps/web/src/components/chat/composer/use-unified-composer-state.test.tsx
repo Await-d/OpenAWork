@@ -23,6 +23,7 @@ const TEST_FEATURES = {
   mentions: false,
   agentSwitch: false,
   queuedMessages: true,
+  permissionMode: false,
 } satisfies Required<UnifiedComposerFeatures>;
 
 interface HarnessProps {

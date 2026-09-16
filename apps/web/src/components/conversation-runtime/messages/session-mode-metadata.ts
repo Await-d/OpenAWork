@@ -1,9 +1,20 @@
+import type { SessionPermissionMode } from '@openAwork/shared';
 import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.js';
 import type { ReasoningEffort } from './message-model.js';
+
+/**
+ * 读取审批方式档位：以规范字段 `permissionMode` 为准；
+ * 旧数据只有布尔 `yoloMode` 时按 `permissionMode ?? (yoloMode ? 'yolo' : 'ask')` 回退。
+ */
+function normalizeSessionPermissionMode(value: unknown, yoloMode: boolean): SessionPermissionMode {
+  if (value === 'ask' || value === 'auto-edit' || value === 'yolo') return value;
+  return yoloMode ? 'yolo' : 'ask';
+}
 
 export function parseSessionModeMetadata(metadataJson: string | undefined): {
   agentId?: string;
   dialogueMode?: DialogueMode;
+  permissionMode: SessionPermissionMode;
   yoloMode: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
@@ -14,6 +25,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
 } {
   if (!metadataJson) {
     return {
+      permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
       thinkingEnabled: false,
@@ -25,6 +37,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     const parsed = JSON.parse(metadataJson) as {
       dialogueMode?: DialogueMode;
       agentId?: string;
+      permissionMode?: unknown;
       yoloMode?: boolean;
       webSearchEnabled?: boolean;
       thinkingEnabled?: boolean;
@@ -33,6 +46,10 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
       providerId?: string;
       modelId?: string;
     };
+    const permissionMode = normalizeSessionPermissionMode(
+      parsed.permissionMode,
+      parsed.yoloMode === true,
+    );
     return {
       agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
       dialogueMode:
@@ -41,7 +58,9 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
         parsed.dialogueMode === 'programmer'
           ? parsed.dialogueMode
           : undefined,
-      yoloMode: parsed.yoloMode === true,
+      permissionMode,
+      // 布尔字段只作为档位的派生投影返回，保证两个字段不会互相矛盾。
+      yoloMode: permissionMode === 'yolo',
       webSearchEnabled: parsed.webSearchEnabled !== false,
       thinkingEnabled: parsed.thinkingEnabled === true,
       reasoningEffort:
@@ -67,6 +86,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     return {
       agentId: undefined,
       dialogueMode: 'clarify',
+      permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
       thinkingEnabled: false,

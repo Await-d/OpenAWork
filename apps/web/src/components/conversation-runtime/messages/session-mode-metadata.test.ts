@@ -15,6 +15,7 @@ describe('parseSessionModeMetadata', () => {
     const result = parseSessionModeMetadata(undefined);
 
     expect(result).toEqual({
+      permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
       thinkingEnabled: false,
@@ -28,6 +29,7 @@ describe('parseSessionModeMetadata', () => {
       JSON.stringify({
         agentId: 'sisyphus-junior',
         dialogueMode: 'coding',
+        permissionMode: 'yolo',
         yoloMode: true,
         webSearchEnabled: false,
         thinkingEnabled: true,
@@ -41,6 +43,7 @@ describe('parseSessionModeMetadata', () => {
     expect(result).toEqual({
       agentId: 'sisyphus-junior',
       dialogueMode: 'coding',
+      permissionMode: 'yolo',
       yoloMode: true,
       webSearchEnabled: false,
       thinkingEnabled: true,
@@ -57,6 +60,7 @@ describe('parseSessionModeMetadata', () => {
     expect(result.dialogueMode).toBeUndefined();
     expect(result.agentId).toBeUndefined();
     expect(result.modelSelectionSource).toBeUndefined();
+    expect(result.permissionMode).toBe('ask');
     expect(result.yoloMode).toBe(false);
     expect(result.webSearchEnabled).toBe(true);
     expect(result.thinkingEnabled).toBe(false);
@@ -68,6 +72,7 @@ describe('parseSessionModeMetadata', () => {
       JSON.stringify({
         dialogueMode: 'telepathy',
         agentId: 42,
+        permissionMode: 'warp',
         yoloMode: 'yes',
         webSearchEnabled: 'no',
         thinkingEnabled: 1,
@@ -79,6 +84,7 @@ describe('parseSessionModeMetadata', () => {
 
     expect(result.dialogueMode).toBeUndefined();
     expect(result.agentId).toBeUndefined();
+    expect(result.permissionMode).toBe('ask');
     expect(result.yoloMode).toBe(false);
     expect(result.webSearchEnabled).toBe(true);
     expect(result.thinkingEnabled).toBe(false);
@@ -117,6 +123,7 @@ describe('parseSessionModeMetadata', () => {
     expect(result).toEqual({
       agentId: undefined,
       dialogueMode: 'clarify',
+      permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
       thinkingEnabled: false,
@@ -126,5 +133,36 @@ describe('parseSessionModeMetadata', () => {
 
   it('JSON null 也会落入兜底分支（解析后取字段抛错）', () => {
     expect(parseSessionModeMetadata('null').dialogueMode).toBe('clarify');
+  });
+
+  it('水合：permissionMode 直接解析为对应档位', () => {
+    for (const permissionMode of ['ask', 'auto-edit', 'yolo'] as const) {
+      expect(parseSessionModeMetadata(JSON.stringify({ permissionMode })).permissionMode).toBe(
+        permissionMode,
+      );
+    }
+  });
+
+  it('水合：旧数据没有 permissionMode 时按 yoloMode 布尔回退', () => {
+    const legacyYolo = parseSessionModeMetadata(JSON.stringify({ yoloMode: true }));
+    expect(legacyYolo.permissionMode).toBe('yolo');
+    expect(legacyYolo.yoloMode).toBe(true);
+
+    const legacyAsk = parseSessionModeMetadata(JSON.stringify({ yoloMode: false }));
+    expect(legacyAsk.permissionMode).toBe('ask');
+    expect(legacyAsk.yoloMode).toBe(false);
+  });
+
+  it('水合：非法 permissionMode 回退到布尔推导，且布尔始终是档位的投影', () => {
+    expect(
+      parseSessionModeMetadata(JSON.stringify({ permissionMode: 'warp' })).permissionMode,
+    ).toBe('ask');
+
+    // 两个字段互相矛盾时以规范档位为准，布尔投影随之归一。
+    const inconsistent = parseSessionModeMetadata(
+      JSON.stringify({ permissionMode: 'ask', yoloMode: true }),
+    );
+    expect(inconsistent.permissionMode).toBe('ask');
+    expect(inconsistent.yoloMode).toBe(false);
   });
 });
