@@ -171,6 +171,18 @@ export function AboutDialog() {
         <InfoRow label="构建时间" value={buildTime} />
         {gitHash ? <InfoRow label="Git 提交" value={gitHash} mono /> : null}
       </div>
+      <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--fg-muted)' }}>
+        文件图标来自{' '}
+        <a
+          href="https://github.com/material-extensions/vscode-material-icon-theme"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: 'var(--info)' }}
+        >
+          material-icon-theme
+        </a>
+        （MIT License）
+      </p>
     </AppDialog>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { DialogueMode } from '@openAwork/shared';
+import type { FileIconThemeId } from '@openAwork/shared-ui';
 import {
   writeThemeStyle as storageWriteThemeStyle,
   writeThemeMode as storageWriteThemeMode,
@@ -207,6 +208,10 @@ export interface DisplayPreferencesStore {
   themeStyle: ThemeStyle;
   setThemeStyle: (v: ThemeStyle) => void;
 
+  /** 文件树图标主题；可选值与元数据见 shared-ui 的 FILE_ICON_THEMES。 */
+  fileIconTheme: FileIconThemeId;
+  setFileIconTheme: (v: FileIconThemeId) => void;
+
   /** 重置全部为默认值 */
   resetToDefaults: () => void;
 }
@@ -235,6 +240,7 @@ type DisplayPreferenceValues = Omit<
   | 'setShowTerminalButton'
   | 'setThemeMode'
   | 'setThemeStyle'
+  | 'setFileIconTheme'
   | 'resetToDefaults'
 >;
 
@@ -279,6 +285,7 @@ const DEFAULTS: DisplayPreferenceValues = {
   // 直接从 localStorage 读取，不依赖 Zustand persist 水合时序
   themeMode: typeof window !== 'undefined' ? storageReadThemeMode() : 'system',
   themeStyle: typeof window !== 'undefined' ? storageReadThemeStyle() : 'carbon',
+  fileIconTheme: 'material',
 };
 
 export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
@@ -379,6 +386,10 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         set({ themeStyle: v });
         void persistToLocalStorage();
       },
+      setFileIconTheme: (v) => {
+        set({ fileIconTheme: v });
+        void persistToLocalStorage();
+      },
       resetToDefaults: () => {
         set({ ...DEFAULTS });
         void persistToLocalStorage();
@@ -411,6 +422,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         showTerminalButton: s.showTerminalButton,
         themeMode: s.themeMode,
         themeStyle: s.themeStyle,
+        fileIconTheme: s.fileIconTheme,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -457,6 +469,7 @@ function persistToLocalStorage() {
       showTerminalButton: state.showTerminalButton,
       themeMode: state.themeMode,
       themeStyle: state.themeStyle,
+      fileIconTheme: state.fileIconTheme,
     };
     const serialized = JSON.stringify({ state: data, version: 7 });
     localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, serialized);

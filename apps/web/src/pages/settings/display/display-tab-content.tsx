@@ -1,6 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { DialogueMode } from '@openAwork/shared';
+import {
+  FILE_ICON_THEMES,
+  FileIconThemeProvider,
+  FileTypeIcon,
+  FolderTypeIcon,
+  type FileIconThemeId,
+} from '@openAwork/shared-ui';
 import { SS, ST } from '../shared/settings-section-styles.js';
+import { SettingsOptionCardRow } from '../shared/settings-option-card-row.js';
+import type { SettingsOptionCard } from '../shared/settings-option-card-row.js';
 import {
   useDisplayPreferencesStore,
   type ThemeMode,
@@ -408,6 +417,7 @@ export function DisplayTabContent() {
           options={THEME_OPTIONS}
           onChange={(v) => store.setThemeMode(v as ThemeMode)}
         />
+        <FileIconThemeRow />
         <LayoutModeRow />
       </section>
 
@@ -465,78 +475,161 @@ function LayoutModeRow() {
 
 // ── 主题风格选择 ──────────────────────────────────────────
 
+const SWATCH_ROW: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+};
+
+const SWATCH: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  borderRadius: 3,
+  border: '1px solid var(--border-subtle)',
+  flexShrink: 0,
+};
+
+/** 色板预览暴露的是「其他主题」的取色，无法用当前 token 表达，只能内联。 */
+function ThemeStylePreview({ swatches }: { swatches: string[] }) {
+  return (
+    <div aria-hidden style={SWATCH_ROW}>
+      {swatches.map((swatch, index) => (
+        <span key={index} style={{ ...SWATCH, background: swatch }} />
+      ))}
+    </div>
+  );
+}
+
 function ThemeStyleRow() {
   const themeStyle = useDisplayPreferencesStore((s) => s.themeStyle);
   const setThemeStyle = useDisplayPreferencesStore((s) => s.setThemeStyle);
 
+  const options: SettingsOptionCard<ThemeStyle>[] = THEME_STYLE_OPTIONS.map((opt) => ({
+    value: opt.value,
+    label: opt.label,
+    description: opt.description,
+    preview: <ThemeStylePreview swatches={opt.swatches} />,
+  }));
+
   return (
-    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>主题风格</span>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-          选择界面的设计风格，与明暗模式独立组合
-        </span>
+    <SettingsOptionCardRow
+      title="主题风格"
+      description="选择界面的设计风格，与明暗模式独立组合"
+      options={options}
+      value={themeStyle}
+      onChange={setThemeStyle}
+    />
+  );
+}
+
+// ── 文件图标主题选择 ──────────────────────────────────────
+
+/** 预览条目覆盖「通用目录 / 特殊目录 / 扩展名 / 精确文件名 / 无扩展名」五类解析路径，差异最直观。 */
+const FILE_ICON_THEME_PREVIEW: readonly { kind: 'folder' | 'file'; label: string }[] = [
+  { kind: 'folder', label: 'src' },
+  { kind: 'folder', label: 'node_modules' },
+  { kind: 'file', label: 'src/App.tsx' },
+  { kind: 'file', label: 'package.json' },
+  { kind: 'file', label: 'Dockerfile' },
+];
+
+const ICON_PREVIEW_ROW: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: 0,
+};
+
+const ICON_PREVIEW_PATH: React.CSSProperties = {
+  fontSize: 11,
+  lineHeight: 1.4,
+  color: 'var(--fg-muted)',
+  fontFamily: 'var(--font-mono, monospace)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  minWidth: 0,
+};
+
+/**
+ * 用真实图标组件渲染示例条目。`FileTypeIcon` / `FolderTypeIcon` 的主题取自 Context
+ * 而非 store——只有按被预览的主题包一层 Provider，同页才能并排对比。
+ * 预览整体标记 `aria-hidden`：它只是图标的可视化佐证，不该污染按钮的可访问名。
+ */
+function FileIconThemePreview({ theme, mode }: { theme: FileIconThemeId; mode: 'dark' | 'light' }) {
+  return (
+    <FileIconThemeProvider theme={theme} mode={mode}>
+      <div aria-hidden style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {FILE_ICON_THEME_PREVIEW.map((item) => (
+          <div key={item.label} style={ICON_PREVIEW_ROW}>
+            {item.kind === 'folder' ? (
+              <FolderTypeIcon name={item.label} size={16} />
+            ) : (
+              <FileTypeIcon path={item.label} size={16} />
+            )}
+            <span style={ICON_PREVIEW_PATH}>{item.label}</span>
+          </div>
+        ))}
       </div>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-          gap: 10,
-        }}
-      >
-        {THEME_STYLE_OPTIONS.map((opt) => {
-          const active = themeStyle === opt.value;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setThemeStyle(opt.value)}
-              aria-label={opt.label}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                background: active ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
-                cursor: 'pointer',
-                textAlign: 'left',
-                outline: 'none',
-              }}
-            >
-              <div style={{ display: 'flex', gap: 4 }}>
-                {opt.swatches.map((sw, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 3,
-                      background: sw,
-                      border: '1px solid var(--border-subtle)',
-                      flexShrink: 0,
-                    }}
-                  />
-                ))}
-              </div>
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: active ? 'var(--accent)' : 'var(--fg-strong)',
-                }}
-              >
-                {opt.label}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
-                {opt.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    </FileIconThemeProvider>
+  );
+}
+
+/** `<html data-mode>` 是 App 写入的生效值；属性缺失时回退到系统媒体查询。 */
+function readPreviewMode(): 'dark' | 'light' {
+  const attr = document.documentElement.getAttribute('data-mode');
+  if (attr === 'light' || attr === 'dark') return attr;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/**
+ * 预览要跟随「当前生效」的明暗：system 模式下同时监听 `data-mode` 属性（App 异步写入）
+ * 与系统媒体查询（属性缺失时的回退来源），任一变化都重新取值。
+ */
+function usePreviewMode(themeMode: ThemeMode): 'dark' | 'light' {
+  const [systemMode, setSystemMode] = useState<'dark' | 'light'>(readPreviewMode);
+
+  useEffect(() => {
+    if (themeMode !== 'system') return;
+    const sync = () => setSystemMode(readPreviewMode());
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-mode'],
+    });
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery.addEventListener('change', sync);
+    sync();
+    return () => {
+      observer.disconnect();
+      mediaQuery.removeEventListener('change', sync);
+    };
+  }, [themeMode]);
+
+  return themeMode === 'system' ? systemMode : themeMode;
+}
+
+function FileIconThemeRow() {
+  const fileIconTheme = useDisplayPreferencesStore((s) => s.fileIconTheme);
+  const setFileIconTheme = useDisplayPreferencesStore((s) => s.setFileIconTheme);
+  const themeMode = useDisplayPreferencesStore((s) => s.themeMode);
+  const previewMode = usePreviewMode(themeMode);
+
+  const options: SettingsOptionCard<FileIconThemeId>[] = FILE_ICON_THEMES.map((opt) => ({
+    value: opt.id,
+    label: opt.label,
+    description: opt.description,
+    preview: <FileIconThemePreview theme={opt.id} mode={previewMode} />,
+  }));
+
+  return (
+    <SettingsOptionCardRow
+      title="文件图标主题"
+      description="文件树与文件列表的图标样式，切换后即时生效"
+      options={options}
+      value={fileIconTheme}
+      onChange={setFileIconTheme}
+      minCardWidth={180}
+    />
   );
 }
 

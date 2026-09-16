@@ -73,6 +73,10 @@ export default function UpdateBanner() {
           display: 'flex',
           alignItems: 'center',
           gap: 6,
+          // 容器自身不接收指针事件：它是 fixed 在右下角 8px 的悬浮层，若吃事件会
+          // 拦截其下方同类浮层（实测拦截了终端「滚动到底部」按钮的真实鼠标点击）。
+          // 交互子元素（GitHub 链接）单独恢复 auto。
+          pointerEvents: 'none',
         }}
       >
         <span style={{ pointerEvents: 'none' }}>v{version}</span>
@@ -81,7 +85,13 @@ export default function UpdateBanner() {
           target="_blank"
           rel="noopener noreferrer"
           title="GitHub 仓库"
-          style={{ color: 'var(--fg-muted)', lineHeight: 1, display: 'flex', alignItems: 'center' }}
+          style={{
+            color: 'var(--fg-muted)',
+            lineHeight: 1,
+            display: 'flex',
+            alignItems: 'center',
+            pointerEvents: 'auto',
+          }}
         >
           <svg
             width="12"
