@@ -110,7 +110,7 @@ export function useScrollIntent(options: ScrollIntentOptions): ScrollIntentRetur
         return;
       }
       // 意图路径不携带位置裁决：leave 立即挂起（抢占「意图已发出、scroll 事件
-      // 尚未到达」的那一帧），seek 保持原值并交给位置路径裁决。
+      // 尚未到达」的那一帧）。
       const interrupted = resolveFollowInterrupted({
         intent,
         interrupted: userInterruptedRef.current,
