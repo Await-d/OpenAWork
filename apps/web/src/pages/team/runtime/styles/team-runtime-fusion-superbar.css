@@ -1,3 +1,17 @@
+/*
+ * fusion 布局 · 顶部超级栏适配
+ *
+ * 上下文行（leading · 运行状态 · 摘要）按对话区实际宽度适配：
+ * 宽度足够时三栏同行，把原来「状态操作独占一行」的纵向占据还给内容区。
+ */
+
+/* fusion 下 TeamStatusBar 对齐 pill 视觉体系（classic 保持直角 demo 风格）。 */
+.team-v2-root[data-workbench-layout='fusion'] {
+  --team-status-chip-radius: 999px;
+  --team-status-btn-radius: 6px;
+  --team-status-actions-gap: 3px;
+}
+
 .team-fusion-superbar-summary {
   align-items: center;
   display: inline-flex;
@@ -13,7 +27,6 @@
 .team-fusion-superbar-summary__stat,
 .team-fusion-superbar-summary__description {
   align-items: center;
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   display: inline-flex;
   flex-shrink: 0;
@@ -25,7 +38,6 @@
 
 .team-fusion-superbar-summary__lead {
   background: var(--accent-subtle);
-  border-color: var(--accent-border);
   color: var(--accent);
   gap: var(--spacing-1);
   padding: 0 var(--spacing-3);
@@ -61,7 +73,21 @@
   text-overflow: ellipsis;
 }
 
+/* 视口兜底：窄视口隐藏描述类 pill（不支持容器查询的环境同样生效）。 */
 @media (max-width: 1320px) {
+  .team-fusion-superbar-summary__lead-prefix,
+  .team-fusion-superbar-summary__lead-separator,
+  .team-fusion-superbar-summary__description {
+    display: none;
+  }
+}
+
+/*
+ * 容器查询：以「对话区实际宽度」为准（而非视口宽度）。
+ * .team-conversation-area 已声明 container-type: inline-size，
+ * 宽度不足时优先收敛描述/前缀 pill，保证上下文行三栏不互相挤压。
+ */
+@container (max-width: 1180px) {
   .team-fusion-superbar-summary__lead-prefix,
   .team-fusion-superbar-summary__lead-separator,
   .team-fusion-superbar-summary__description {

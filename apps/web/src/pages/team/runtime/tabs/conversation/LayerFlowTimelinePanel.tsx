@@ -26,8 +26,8 @@ const TIMELINE_SCROLL_STYLE: CSSProperties = {
   minHeight: 0,
   overflow: 'auto',
   display: 'grid',
-  gap: 16,
-  padding: '12px',
+  gap: 12,
+  padding: '10px',
   alignContent: 'start',
 };
 

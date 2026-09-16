@@ -41,7 +41,7 @@ const BADGE_STYLE: CSSProperties = {
 const ROOT_STYLE: CSSProperties = {
   display: 'grid',
   gap: 10,
-  padding: '14px',
+  padding: '10px',
 };
 
 const LENS_STYLE: CSSProperties = {
@@ -222,7 +222,7 @@ function DialogueSection({
 const HERO_STYLE: CSSProperties = {
   display: 'grid',
   gap: 8,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 12,
   borderWidth: 1,
   borderStyle: 'solid',

@@ -7,7 +7,12 @@
  *   - 其它 tab：渲染对应 slot，无 slot 时展示「内容接入中」
  */
 
-import type { CSSProperties, ReactNode } from 'react';
+import {
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { TeamLayerRail, type TeamLayerRailLayer } from './TeamLayerRail.js';
 import { TeamRoleStrip, type TeamRoleStripRole } from './TeamRoleStrip.js';
 import {
@@ -106,17 +111,17 @@ function tabBtnStyle(isActive: boolean): CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 5,
-    minHeight: 28,
-    padding: '0 11px',
-    borderTop: isActive ? '1px solid var(--border-default)' : '1px solid transparent',
-    borderBottom: isActive ? '1px solid var(--border-default)' : '1px solid transparent',
-    borderLeft: isActive ? '1px solid var(--border-default)' : '1px solid transparent',
-    borderRight: '1px solid var(--border-default)',
+    minHeight: 30,
+    padding: '0 12px',
+    border: 'none',
     background: isActive ? 'var(--bg-raised)' : 'transparent',
-    boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
+    // 无描边：选中态用底部 accent 线 + 提亮背景表达。
+    boxShadow: isActive
+      ? 'inset 0 -2px 0 color-mix(in srgb, var(--accent) 70%, transparent)'
+      : 'none',
     color: isActive ? 'var(--fg-strong, var(--fg-default))' : 'var(--fg-muted)',
-    fontSize: 11,
-    fontWeight: 650,
+    fontSize: 11.5,
+    fontWeight: isActive ? 750 : 650,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   };
@@ -263,6 +268,39 @@ export function TeamLayerTodoWorkbench({
   className,
 }: TeamLayerTodoWorkbenchProps) {
   const resolvedDetailTodo = detailTodo ?? resolveDetailTodo(todos, activeTodoId);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 键盘方向键在工作台 tab 间切换（配合 roving tabindex：仅激活 tab 可 Tab 聚焦，
+   * 其余靠 ← → / Home / End 移动），切换后焦点跟随到新激活 tab。
+   */
+  const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = TAB_DEFS.map((def) => def.key);
+    if (keys.length === 0) return;
+    const currentIndex = Math.max(keys.indexOf(tab), 0);
+    let nextIndex = -1;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % keys.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + keys.length) % keys.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = keys.length - 1;
+    }
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextKey = keys[nextIndex];
+    if (nextKey === undefined) return;
+    if (nextKey !== tab) {
+      onTabChange(nextKey);
+    }
+    requestAnimationFrame(() => {
+      tabBarRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-workbench-tab="${nextKey}"]`)
+        ?.focus();
+    });
+  };
 
   return (
     <div
@@ -272,7 +310,13 @@ export function TeamLayerTodoWorkbench({
       aria-label="工作台"
     >
       {/* ── tab bar ── */}
-      <div role="tablist" aria-label="工作台选项卡" style={tabBarStyle}>
+      <div
+        ref={tabBarRef}
+        role="tablist"
+        aria-label="工作台选项卡"
+        style={tabBarStyle}
+        onKeyDown={handleTabKeyDown}
+      >
         {TAB_DEFS.map((def) => {
           const isActive = tab === def.key;
           const count = def.countKey != null ? counts?.[def.countKey] : undefined;
@@ -285,6 +329,7 @@ export function TeamLayerTodoWorkbench({
               type="button"
               role="tab"
               id={`workbench-tab-${def.key}`}
+              data-workbench-tab={def.key}
               aria-controls={`workbench-panel-${def.key}`}
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}

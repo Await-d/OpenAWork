@@ -10,7 +10,7 @@
  */
 
 import type { HandoffEvent } from '../../../../../stores/team/team-events.js';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import {
   getTeamNotificationEventKey,
@@ -72,6 +72,42 @@ export function MessagesMergedTab({
   }, [allEvents, isSharedSessionSelected, readEventKeys, scopedTeamId, sharedSession]);
 
   const mentionsLabel = isSharedSessionSelected ? '协作待办' : '待回复';
+  const segmentBarRef = useRef<HTMLDivElement>(null);
+
+  /** 键盘 ← → 在「消息总线 / 待回复」间切换（Home / End 直达首尾），焦点跟随。 */
+  const handleSegmentKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const segments: MessagesSegment[] = ['bus', 'mentions'];
+    if (
+      event.key !== 'ArrowRight' &&
+      event.key !== 'ArrowLeft' &&
+      event.key !== 'Home' &&
+      event.key !== 'End'
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = Math.max(segments.indexOf(segment), 0);
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % segments.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + segments.length) % segments.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = segments.length - 1;
+    }
+    const nextSegment = segments[nextIndex];
+    if (nextSegment === undefined) return;
+    if (nextSegment !== segment) {
+      setSegment(nextSegment);
+    }
+    requestAnimationFrame(() => {
+      segmentBarRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-seg="${nextSegment}"]`)
+        ?.focus();
+    });
+  };
 
   return (
     <div
@@ -80,16 +116,19 @@ export function MessagesMergedTab({
     >
       {/* 统一段切换栏 */}
       <div
+        ref={segmentBarRef}
         className="team-conv-panel-header"
         role="tablist"
         aria-label="消息视图切换"
-        style={{ gap: 6, padding: '12px 20px', alignItems: 'center' }}
+        style={{ gap: 6, padding: '10px 14px', alignItems: 'center' }}
+        onKeyDown={handleSegmentKeyDown}
       >
         <button
           type="button"
           role="tab"
           aria-selected={segment === 'bus'}
           className="team-conv-filter-btn"
+          data-seg="bus"
           data-active={segment === 'bus'}
           onClick={() => setSegment('bus')}
         >
@@ -101,6 +140,7 @@ export function MessagesMergedTab({
           role="tab"
           aria-selected={segment === 'mentions'}
           className="team-conv-filter-btn"
+          data-seg="mentions"
           data-active={segment === 'mentions'}
           onClick={() => setSegment('mentions')}
         >
@@ -127,7 +167,7 @@ export function MessagesMergedTab({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '16px 20px 20px',
+          padding: '10px 12px 12px',
         }}
       >
         {segment === 'bus' ? (

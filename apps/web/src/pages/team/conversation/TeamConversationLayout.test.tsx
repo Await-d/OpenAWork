@@ -176,4 +176,10 @@ describe('TeamConversationLayout', () => {
     ).toBeTruthy();
     expect(screen.queryByTestId('chat-remote-stream-placeholder')).toBeNull();
   });
+
+  it('team 不渲染审批方式档位控件（composerExtras.permissionMode = false）', () => {
+    render(<TeamConversationLayout {...createLayoutProps()} />);
+
+    expect(screen.queryByRole('button', { name: /每次询问|编辑自动|免审批/ })).toBeNull();
+  });
 });

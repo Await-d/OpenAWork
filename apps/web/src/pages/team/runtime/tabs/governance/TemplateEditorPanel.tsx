@@ -138,7 +138,7 @@ function TemplateEditor({
   };
 
   return (
-    <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
+    <div style={{ display: 'grid', gap: 12, padding: '10px 12px', overflow: 'auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{title}</span>

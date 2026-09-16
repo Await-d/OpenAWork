@@ -117,3 +117,72 @@ export function getDefaultLeafFor(primaryKey: PrimaryTabKey): MiddleTabKey {
   }
   return first.key;
 }
+
+// ─── 主 tab 子视图记忆 ──────────────────────────────────────────────
+//
+// 切走再切回某个主 tab 时，恢复上次停留的子视图（而不是一律回到默认 leaf），
+// 让「概览 → 任务·评审 → 概览 → 任务」这类往返切换保持上下文。
+// 存储位置与 teamV2.middleTab 持久化策略一致（localStorage）。
+
+export const LEAF_BY_PRIMARY_STORAGE_KEY = 'teamV2.leafByPrimary';
+
+/** 可注入的存储接口（便于单测；默认取 window.localStorage）。 */
+export interface TabMemoryStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+function resolveStorage(storage?: TabMemoryStorage): TabMemoryStorage | null {
+  if (storage) return storage;
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage;
+  } catch {
+    // 隐私模式等场景访问 localStorage 会抛错，视为无存储
+    return null;
+  }
+}
+
+/** 读取某主 tab 上次停留的合法子视图；无记录 / 记录非法时返回 null。 */
+export function readRememberedLeaf(
+  primaryKey: PrimaryTabKey,
+  storage?: TabMemoryStorage,
+): MiddleTabKey | null {
+  const store = resolveStorage(storage);
+  if (!store) return null;
+  try {
+    const raw = store.getItem(LEAF_BY_PRIMARY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const candidate = (parsed as Record<string, unknown>)[primaryKey];
+    if (typeof candidate !== 'string') return null;
+    if (!MIDDLE_TAB_KEYS.has(candidate as MiddleTabKey)) return null;
+    if (LEAF_TO_PRIMARY.get(candidate as MiddleTabKey) !== primaryKey) return null;
+    return candidate as MiddleTabKey;
+  } catch {
+    // 解析失败视为无记忆，回落到默认 leaf
+    return null;
+  }
+}
+
+/** 记录某子视图属于其主 tab 的最后位置（写失败静默忽略，不阻塞切换）。 */
+export function rememberLeaf(leaf: MiddleTabKey, storage?: TabMemoryStorage): void {
+  const primaryKey = LEAF_TO_PRIMARY.get(leaf);
+  const store = resolveStorage(storage);
+  if (!primaryKey || !store) return;
+  try {
+    const raw = store.getItem(LEAF_BY_PRIMARY_STORAGE_KEY);
+    let map: Record<string, string> = {};
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) {
+        map = parsed as Record<string, string>;
+      }
+    }
+    map[primaryKey] = leaf;
+    store.setItem(LEAF_BY_PRIMARY_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // 记忆是增强能力：存储不可用时静默跳过
+  }
+}

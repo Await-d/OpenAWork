@@ -80,7 +80,7 @@ export interface ConversationComposerExtras {
   promptTemplate?: boolean;
   commandPalette?: boolean;
   dialogueModeToggle?: boolean;
-  yoloMode?: boolean;
+  permissionMode?: boolean;
   agentSwitch?: boolean;
 }
 
@@ -405,6 +405,7 @@ function buildComposerFeatures(
     modelPicker: true,
     modelSettings: true,
     webSearch: false,
+    permissionMode: false,
     imageGen: ex.imageGeneration ?? false,
     promptOptimize: true,
     slashCommands: true,
@@ -506,7 +507,6 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     canStopCurrentSessionStream,
     dialogueMode,
     manualAgentId,
-    yoloMode,
     webSearchEnabled,
     thinkingEnabled,
     reasoningEffort,
@@ -601,6 +601,8 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
   const scrollRegionStyle: CSSProperties = {
     flex: 1,
     overflowY: 'auto',
+    overflowAnchor: 'none',
+    overscrollBehavior: 'contain',
     padding: scrollPadding,
     display: 'flex',
     flexDirection: 'column',
@@ -845,7 +847,8 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
           activeModelTooltip={activeModelTooltip}
           dialogueMode={dialogueMode}
           manualAgentId={manualAgentId}
-          yoloMode={yoloMode}
+          // team 端不渲染审批方式控件（features.permissionMode=false），档位固定为每次询问。
+          permissionMode="ask"
           webSearchEnabled={webSearchEnabled}
           thinkingEnabled={thinkingEnabled}
           reasoningEffort={reasoningEffort}

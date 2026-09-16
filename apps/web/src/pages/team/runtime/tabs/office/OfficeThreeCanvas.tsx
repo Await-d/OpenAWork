@@ -1275,7 +1275,7 @@ export function OfficeThreeCanvas({
               background: 'color-mix(in srgb, var(--bg-base) 88%, transparent)',
               border: `1px solid color-mix(in srgb, ${selectedAgentDotColor} 40%, transparent)`,
               borderRadius: 14,
-              padding: '14px 12px',
+              padding: '10px 12px',
               backdropFilter: 'blur(10px)',
               minWidth: 80,
             }}

@@ -21,7 +21,7 @@ export interface TeamMetricsWorkbenchHeaderProps {
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
   gap: 12,
-  padding: '14px 16px',
+  padding: '10px 12px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 34%, transparent)',
   background:
     'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--aux) 5%), var(--bg-base))',

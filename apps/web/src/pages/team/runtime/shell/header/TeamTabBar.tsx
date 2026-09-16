@@ -25,13 +25,14 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { PRIMARY_TABS, type PrimaryTabKey, type SubTabDef } from '../../tabs/team-page-v2-tabs.js';
 import { TeamTabIcon } from '../../tabs/team-tab-icons.js';
 import type { MiddleTabKey } from '../../tabs/MiddleTabRouter.js';
 import { TeamRunStatePill } from '../../shared/TeamRunStatePill.js';
+import { shouldMergeSubTabs } from './team-tab-bar-layout.js';
 
 // ─── 容器 ────────────────────────────────────────────────────────
 
@@ -69,8 +70,9 @@ const PRIMARY_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '4px 10px',
-  borderRadius: 5,
+  // 点击目标 ≥28px 高：功能切换要容易命中，不能只追求视觉紧凑。
+  padding: '6px 12px',
+  borderRadius: 6,
   border: 'none',
   background: 'transparent',
   color: 'var(--fg-muted)',
@@ -95,10 +97,10 @@ const OFFICE_BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '4px 8px',
-  borderRadius: 5,
-  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-  background: 'transparent',
+  padding: '6px 10px',
+  borderRadius: 6,
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
@@ -111,8 +113,7 @@ const OFFICE_BTN_STYLE: CSSProperties = {
 
 const OFFICE_BTN_ACTIVE_STYLE: CSSProperties = {
   ...OFFICE_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--accent)',
 };
 
@@ -133,7 +134,7 @@ const SUB_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 2,
-  padding: '0 10px 4px',
+  padding: '0 10px 3px',
   overflowX: 'auto',
   scrollbarWidth: 'none',
   minWidth: 0,
@@ -165,12 +166,20 @@ const SUB_PILL_ACTIVE_STYLE: CSSProperties = {
 
 // ─── 单行超级栏（variant='single'，方案 G）────────────────────────
 
+/**
+ * 上下文行合并阈值（px，以 tab bar 自身宽度测量）。
+ * ≥ 该值：leading（工作区/会话）+ centerSlot（运行状态操作）+ trailing（摘要）
+ *   三栏同处一行；
+ * < 该值：centerSlot 自动降级为独立状态行，避免三栏互相挤压裁切。
+ */
+const CONTEXT_MERGE_MIN_WIDTH = 1040;
+
 const SINGLE_CONTEXT_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 8,
-  padding: '4px 10px',
+  padding: '3px 10px',
   minWidth: 0,
 };
 
@@ -178,14 +187,14 @@ const SINGLE_NAV_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
-  padding: '0 10px 4px',
+  padding: '2px 10px',
   minWidth: 0,
 };
 
 const SINGLE_STATUS_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  padding: '0 10px 4px',
+  padding: '2px 10px',
   minWidth: 0,
 };
 
@@ -193,9 +202,11 @@ const LEADING_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
-  flex: '1 1 420px',
+  // 三栏同行时：吸收剩余空间（grow），空间不足时按「摘要 → 标题 → 操作」
+  // 的优先级让位（leading shrink 3 / trailing shrink 6 / center shrink 1）。
+  flex: '1 3 320px',
   minWidth: 0,
-  minHeight: 28,
+  minHeight: 26,
 };
 
 const CONTEXT_TRAILING_STYLE: CSSProperties = {
@@ -203,33 +214,73 @@ const CONTEXT_TRAILING_STYLE: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'flex-end',
   gap: 6,
-  flex: '0 1 auto',
+  flex: '0 6 auto',
   minWidth: 0,
   maxWidth: '100%',
 };
 
-const SINGLE_PRIMARY_GROUP_STYLE: CSSProperties = {
-  ...PRIMARY_GROUP_STYLE,
-  flex: '1 1 280px',
-  minWidth: 0,
-  flexWrap: 'nowrap',
-  overflowX: 'visible',
+/**
+ * 主 tab 组外壳：只做弹性伸缩与遮罩定位（position: relative），
+ * 真正的横向滚动交给内部 `.team-tab-bar__tab-scroll`。
+ */
+const NAV_PRIMARY_WRAP_STYLE: CSSProperties = {
   position: 'relative',
-  // 压缩优先级最低：尽量保住主 tab 可见，真不够了再靠「更多 ▾」溢出兜底。
+  display: 'flex',
+  alignItems: 'center',
+  // 压缩优先级最低：尽量保住主 tab 可见，真放不下时内部横向滚动兜底。
+  flexGrow: 1,
   flexShrink: 1,
+  flexBasis: 280,
+  minWidth: 0,
 };
 
-/** 单行超级栏内嵌的状态栏（centerSlot）包裹层：最优先让位、可整体收缩到 0。 */
+/**
+ * 主 tab 横向滚动容器：窄屏不折叠、不换行，直接横向滚动
+ * （触控滑动、滚轮、键盘方向键都可操作；滚动条隐藏，靠两端渐隐提示）。
+ */
+const SINGLE_PRIMARY_GROUP_STYLE: CSSProperties = {
+  ...PRIMARY_GROUP_STYLE,
+  flex: '1 1 auto',
+  minWidth: 0,
+  flexWrap: 'nowrap',
+  overflowX: 'auto',
+  scrollbarWidth: 'none',
+  overscrollBehaviorX: 'contain',
+};
+
+/** 左右两端渐隐遮罩：提示「这边还有更多主 tab」，不吃指针事件。 */
+const EDGE_MASK_LEFT_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 0,
+  bottom: 0,
+  left: 0,
+  width: 20,
+  borderRadius: '6px 0 0 6px',
+  background: 'linear-gradient(to right, var(--bg-surface), transparent)',
+  pointerEvents: 'none',
+  zIndex: 1,
+  transition: 'opacity 140ms ease',
+};
+
+const EDGE_MASK_RIGHT_STYLE: CSSProperties = {
+  ...EDGE_MASK_LEFT_STYLE,
+  left: 'auto',
+  right: 0,
+  borderRadius: '0 6px 6px 0',
+  background: 'linear-gradient(to left, var(--bg-surface), transparent)',
+};
+
+/** 单行超级栏内嵌的状态栏（centerSlot）包裹层：三栏同行时居中、最后让位收缩。 */
 const CENTER_SLOT_STYLE: CSSProperties = {
   display: 'inline-flex',
+  alignItems: 'center',
   minWidth: 0,
-  flexGrow: 1,
-  flexShrink: 8,
+  flexGrow: 0,
+  flexShrink: 1,
   flexBasis: 'auto',
   overflow: 'hidden',
-  padding: '2px 4px',
+  padding: '2px 0',
   borderRadius: 4,
-  background: 'var(--bg-surface)',
 };
 
 const SINGLE_ACTIONS_STYLE: CSSProperties = {
@@ -239,8 +290,35 @@ const SINGLE_ACTIONS_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
-/** 隐藏的测量行：渲染全部主 tab 的自然宽度，供溢出计算用，不参与可视布局。 */
-const GHOST_ROW_STYLE: CSSProperties = {
+/** 合并态：主 tab 组不再吸收剩余空间，让子 tab 组紧跟其后。 */
+const MERGED_NAV_PRIMARY_WRAP_STYLE: CSSProperties = {
+  ...NAV_PRIMARY_WRAP_STYLE,
+  flexGrow: 0,
+  flexShrink: 1,
+  flexBasis: 'auto',
+};
+
+/** 主 tab 与内联子 tab 之间的竖直分隔线。 */
+const NAV_DIVIDER_STYLE: CSSProperties = {
+  width: 1,
+  height: 16,
+  flexShrink: 0,
+  margin: '0 2px',
+  background: 'color-mix(in srgb, var(--border-default) 55%, transparent)',
+};
+
+/** 合并态：内联子 tab 组（空间不足时优先让位裁切，不挤压主 tab）。 */
+const NAV_SUB_GROUP_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 2,
+  minWidth: 0,
+  flexShrink: 1,
+  overflow: 'hidden',
+};
+
+/** 子 tab 自然宽度测量行：始终渲染（不参与布局），供合并判定用。 */
+const SUB_GHOST_ROW_STYLE: CSSProperties = {
   position: 'absolute',
   top: 0,
   left: 0,
@@ -252,45 +330,24 @@ const GHOST_ROW_STYLE: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const CARET_STYLE: CSSProperties = {
-  fontSize: 9,
-  opacity: 0.7,
-  marginLeft: 1,
-};
-
-const DROPDOWN_STYLE: CSSProperties = {
-  position: 'fixed',
-  zIndex: 1000,
-  minWidth: 184,
-  padding: 5,
-  borderRadius: 10,
-  background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-default)',
-  boxShadow: 'var(--shadow-lg)',
-};
-
-const DROPDOWN_ITEM_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  width: '100%',
-  padding: '8px 10px',
-  borderRadius: 7,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--fg-default)',
-  fontSize: 12,
-  fontWeight: 600,
-  textAlign: 'left',
-  cursor: 'pointer',
+/**
+ * 隐藏的测量行：渲染全部主 tab 的自然宽度，供子 tab 合并判定用。
+ * 零尺寸 + overflow: hidden——它挂在横向滚动容器里，绝不能撑出可滚区域。
+ * （子项带 flexShrink: 0，即使父级宽 0 也保持自然宽度，测量结果不受影响。）
+ */
+const GHOST_ROW_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  width: 0,
+  height: 0,
+  overflow: 'hidden',
+  display: 'inline-flex',
+  gap: 2,
+  visibility: 'hidden',
+  pointerEvents: 'none',
+  zIndex: -1,
   whiteSpace: 'nowrap',
-};
-
-const DROPDOWN_ITEM_ACTIVE_STYLE: CSSProperties = {
-  ...DROPDOWN_ITEM_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
-  color: 'var(--accent)',
-  fontWeight: 700,
 };
 
 // ─── Badge ───────────────────────────────────────────────────────
@@ -341,8 +398,8 @@ export interface TeamTabBarProps {
   /**
    * 布局变体：
    *   - 'rows'（默认）：主 tab 行 + 子 tab 行两条横栏（旧行为，保持向下兼容）。
-   *   - 'single'：单条超级栏。主 tab 用带 ▾ 的胶囊，子 tab 收进点击浮出的下拉，
-   *     额外通过 leadingSlot / trailingSlot 接收工作区切换器、运行状态、暂停等，
+   *   - 'single'：单条超级栏。主 tab 窄屏不折叠、改为横向滚动；额外通过
+   *     leadingSlot / trailingSlot 接收工作区切换器、运行状态、暂停等，
    *     把原来的 page-header + 两层 tab 合并为一条（方案 G）。
    */
   variant?: 'rows' | 'single';
@@ -350,6 +407,12 @@ export interface TeamTabBarProps {
   leadingSlot?: ReactNode;
   /** 单行模式下，主 tab 组与右侧操作之间的内容（如运行状态栏）。 */
   centerSlot?: ReactNode;
+  /**
+   * 强制把 centerSlot（运行状态操作）降级为独立状态行。
+   * 默认 false：宽度充足（≥ CONTEXT_MERGE_MIN_WIDTH）时与 leading / trailing
+   * 三栏同行；宽度不足时组件内部自动降级，无需调用方干预。
+   * 传 true 用于窄屏形态（如 tablet）直接锁定降级，跳过内部测量。
+   */
   stackCenterSlot?: boolean;
   /**
    * 隐藏导航行尾部 TeamRunStatePill。
@@ -534,13 +597,13 @@ type SingleRowProps = Pick<
 >;
 
 /**
- * 单条超级栏：把工作区切换（leadingSlot）+ 主 tab（带子 tab 下拉）+ 运行状态
- * （centerSlot）+ 3D / 暂停 / 治理（trailingSlot）压进一行。
+ * 单条超级栏：把工作区切换（leadingSlot）+ 主 tab + 运行状态（centerSlot）
+ * + 3D / 暂停 / 治理（trailingSlot）压进一行。
  *
- * 主 tab 胶囊点击行为：
- *   - 若该主 tab 只有 1 个子视图（如对话场景下的退化）：直接切换，不弹下拉。
- *   - 若有多个子视图：单击切到该主 tab（并落到默认/当前子 tab）同时展开下拉，
- *     下拉里可进一步选具体子 tab。再次点击同一主 tab 收起下拉。
+ * 主 tab 胶囊点击行为：一击直达，没有二级下拉。
+ *   - 窄屏放不下时不折叠，主 tab 组横向滚动（触控滑动 / 滚轮 / ←→ 均可）；
+ *     两端渐隐提示还有内容，激活项会自动滚进可视区。
+ *   - 子 tab：宽屏时并入本行（分隔线区隔），窄屏时另起一行常驻。
  */
 function SingleRowTabBar({
   activePrimary,
@@ -559,122 +622,241 @@ function SingleRowTabBar({
   hideRunStatePill = false,
   trailingSlot,
 }: SingleRowProps) {
-  // 主 tab「更多」溢出菜单的展开态与锚点。
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [moreRect, setMoreRect] = useState<DOMRect | null>(null);
-  // 可见主 tab 数量（其余进「更多」）。初值先全显，测量后收敛。
-  const [visibleCount, setVisibleCount] = useState<number>(PRIMARY_TABS.length);
+  // 上下文行是否需要让 centerSlot 降级为独立状态行。初值 false（先按合并渲染），
+  // 首帧测量后收敛；jsdom / 未布局（宽度为 0）时保持合并，避免误降级。
+  const [narrowContext, setNarrowContext] = useState(false);
+  // 子 tab 是否并入主 tab 行（nav 行）。初值 false（保持独立行），测量后收敛。
+  const [navMerge, setNavMerge] = useState(false);
+  // 主 tab 横向滚动：左右两端是否还有内容（决定渐隐遮罩显隐）。
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
-  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const subGhostRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLSpanElement | null>(null);
 
-  // 点击外部 / Esc 收起「更多」菜单
-  useEffect(() => {
-    if (!moreOpen) return undefined;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (rootRef.current?.contains(target)) return;
-      if (moreMenuRef.current?.contains(target)) return;
-      setMoreOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMoreOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [moreOpen]);
-
-  // 「更多」菜单锚点定位。
-  useLayoutEffect(() => {
-    if (!moreOpen) {
-      setMoreRect(null);
-      return undefined;
-    }
-    const measure = () => {
-      if (moreBtnRef.current) setMoreRect(moreBtnRef.current.getBoundingClientRect());
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    window.addEventListener('scroll', measure, true);
-    return () => {
-      window.removeEventListener('resize', measure);
-      window.removeEventListener('scroll', measure, true);
-    };
-  }, [moreOpen]);
-
-  // 响应式溢出测量：用 ghost 行测每个主 tab 的自然宽度，按可用宽度决定显示几个，
-  // 其余收进「更多 ▾」。容器宽度变化（ResizeObserver）时重算。
+  // 主 tab 横向滚动：滚动位置或内容宽度变化时刷新两端渐隐遮罩。
+  // 依赖项覆盖会改变 tab 宽度的输入（badge 数量、激活项、合并态）。
   useLayoutEffect(() => {
     const group = groupRef.current;
-    const ghost = ghostRef.current;
-    if (!group || !ghost) return undefined;
-
-    const recompute = () => {
-      const avail = group.clientWidth;
-      const pills = Array.from(ghost.children) as HTMLElement[];
-      if (pills.length === 0) return;
-      // 测不到宽度（如 jsdom 或尚未布局）时，保持全部可见，避免误折叠。
-      if (avail === 0) {
-        setVisibleCount(PRIMARY_TABS.length);
-        return;
-      }
-      const gap = 2;
-      // 预留「更多」按钮宽度（固定估值，足够容纳「更多 ▾」）。
-      const moreWidth = 64;
-      // 先尝试全部放下
-      const widths = pills.map((p) => p.offsetWidth);
-      const totalAll = widths.reduce((a, b) => a + b + gap, 0);
-      if (totalAll <= avail) {
-        setVisibleCount(PRIMARY_TABS.length);
-        return;
-      }
-      // 放不下：逐个累加，给「更多」留位
-      let used = moreWidth;
-      let count = 0;
-      for (let i = 0; i < widths.length; i++) {
-        const w = widths[i]! + gap;
-        if (used + w <= avail) {
-          used += w;
-          count += 1;
-        } else break;
-      }
-      setVisibleCount(Math.max(1, count));
+    if (!group) return undefined;
+    const sync = () => {
+      const maxScroll = group.scrollWidth - group.clientWidth;
+      // jsdom / 未布局时 scrollWidth 与 clientWidth 同为 0：保持无遮罩。
+      const left = group.scrollLeft > 1;
+      const right = maxScroll > 1 && group.scrollLeft < maxScroll - 1;
+      setScrollEdges((prev) =>
+        prev.left === left && prev.right === right ? prev : { left, right },
+      );
     };
-
-    recompute();
-    // ResizeObserver 在部分测试环境（jsdom）下不存在；降级为 window resize 监听，
-    // 保证功能可用且不抛错。
+    sync();
+    group.addEventListener('scroll', sync, { passive: true });
     if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(recompute);
+      const ro = new ResizeObserver(sync);
       ro.observe(group);
+      return () => {
+        group.removeEventListener('scroll', sync);
+        ro.disconnect();
+      };
+    }
+    window.addEventListener('resize', sync);
+    return () => {
+      group.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+    };
+  }, [activePrimary, officeActive, unreadCount, clarificationPending, failedTaskCount, navMerge]);
+
+  // 激活项滚进可视区：从别处切回来 / 键盘跨过滚动区时，
+  // 别让「当前在哪个分类」藏在滚动区外。
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    // jsdom / 未布局（宽度为 0）时不做滚动，避免噪声。
+    if (!group || group.clientWidth === 0) return undefined;
+    const active = group.querySelector<HTMLElement>('[data-tab-key][data-active="true"]');
+    if (!active) return undefined;
+    const groupRect = group.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const margin = 8;
+    if (activeRect.left < groupRect.left + margin) {
+      group.scrollLeft -= groupRect.left + margin - activeRect.left;
+    } else if (activeRect.right > groupRect.right - margin) {
+      group.scrollLeft += activeRect.right - (groupRect.right - margin);
+    }
+    return undefined;
+  }, [activePrimary, officeActive, navMerge]);
+
+  // 纵向滚轮 → 横向滚动：桌面鼠标不用按 Shift 也能翻主 tab。
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group) return undefined;
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0 || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      const maxScroll = group.scrollWidth - group.clientWidth;
+      if (maxScroll <= 1) return;
+      const before = group.scrollLeft;
+      const next = Math.min(maxScroll, Math.max(0, before + event.deltaY));
+      // 已经顶到两端时不动手，把这一滚交还给页面纵向滚动。
+      if (next === before) return;
+      group.scrollLeft = next;
+      event.preventDefault();
+    };
+    // passive: false —— 需要 preventDefault 阻止滚动外溢到页面。
+    group.addEventListener('wheel', onWheel, { passive: false });
+    return () => group.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // 上下文行自适应：宽度足够（≥ CONTEXT_MERGE_MIN_WIDTH）时，
+  // leading / centerSlot（运行状态与操作）/ trailing（摘要）三栏同行；
+  // 不足时 centerSlot 自动降级为独立状态行，避免三栏互相挤压裁切。
+  // 外部 stackCenterSlot 可强制降级（如 tablet）。
+  useLayoutEffect(() => {
+    if (stackCenterSlot || !centerSlot) return undefined;
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const width = el.clientWidth;
+      setNarrowContext(width > 0 && width < CONTEXT_MERGE_MIN_WIDTH);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
       return () => ro.disconnect();
     }
-    window.addEventListener('resize', recompute);
-    return () => window.removeEventListener('resize', recompute);
-  }, []);
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [centerSlot, stackCenterSlot]);
 
   const handlePrimaryClick = (primary: (typeof PRIMARY_TABS)[number]) => {
     onPrimaryChange(primary.key);
-    setMoreOpen(false);
   };
 
-  const visibleTabs = PRIMARY_TABS.slice(0, visibleCount);
-  const overflowTabs = PRIMARY_TABS.slice(visibleCount);
-  const overflowActive = overflowTabs.some((p) => !officeActive && activePrimary === p.key);
-  const hasContextRow = Boolean(leadingSlot || trailingSlot);
+  // 生效的降级标记：外部强制（tablet）或宽度不足自动降级。
+  const effectiveStack = stackCenterSlot || narrowContext;
+  const hasContextRow = Boolean(leadingSlot || trailingSlot || (centerSlot && !effectiveStack));
 
-  // 当前主 tab 的子视图（常驻第二行）。office 视图下不显示子 tab。
+  // 当前主 tab 的子视图。office 视图下不显示子 tab；宽屏时会并入 nav 行。
   const subTabs: ReadonlyArray<SubTabDef> =
     activePrimary && !officeActive
       ? (PRIMARY_TABS.find((tab) => tab.key === activePrimary)?.children ?? [])
       : [];
+
+  const renderSubPill = (sub: SubTabDef) => {
+    const active = middleTab === sub.key;
+    return (
+      <button
+        key={sub.key}
+        type="button"
+        role="tab"
+        aria-selected={active}
+        onClick={() => onMiddleChange(sub.key)}
+        className="team-sub-tab"
+        data-sub-key={sub.key}
+        data-active={active || undefined}
+        style={active ? SUB_PILL_ACTIVE_STYLE : SUB_PILL_STYLE}
+      >
+        <TeamTabIcon name={sub.icon} size={13} />
+        <span>{sub.label}</span>
+        {sub.key === 'messages' && unreadCount > 0 ? (
+          <Badge count={unreadCount} tone="danger" />
+        ) : null}
+      </button>
+    );
+  };
+
+  // 键盘方向键在 tab 组内切换（ARIA tabs 模式）：← → 循环移动，Home / End 到首尾。
+  // 键盘切换后把焦点跟随到目标 tab，保证连续导航不中断。
+  const movePrimaryByKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = PRIMARY_TABS.map((tab) => tab.key);
+    let nextKey: PrimaryTabKey | null = null;
+    if (event.key === 'ArrowRight') {
+      const currentIndex = activePrimary ? keys.indexOf(activePrimary) : -1;
+      nextKey = keys[(currentIndex + 1) % keys.length] ?? null;
+    } else if (event.key === 'ArrowLeft') {
+      const currentIndex = activePrimary ? Math.max(keys.indexOf(activePrimary), 0) : 0;
+      nextKey = keys[(currentIndex - 1 + keys.length) % keys.length] ?? null;
+    } else if (event.key === 'Home') {
+      nextKey = keys[0] ?? null;
+    } else if (event.key === 'End') {
+      nextKey = keys[keys.length - 1] ?? null;
+    }
+    if (!nextKey) return;
+    event.preventDefault();
+    if (nextKey !== activePrimary) {
+      onPrimaryChange(nextKey);
+    }
+    requestAnimationFrame(() => {
+      groupRef.current?.querySelector<HTMLButtonElement>(`[data-tab-key="${nextKey}"]`)?.focus();
+    });
+  };
+
+  const moveSubByKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = subTabs.map((tab) => tab.key);
+    if (keys.length === 0) return;
+    let nextKey: MiddleTabKey | null = null;
+    if (event.key === 'ArrowRight') {
+      const currentIndex = keys.indexOf(middleTab);
+      nextKey = keys[(currentIndex + 1) % keys.length] ?? null;
+    } else if (event.key === 'ArrowLeft') {
+      const currentIndex = Math.max(keys.indexOf(middleTab), 0);
+      nextKey = keys[(currentIndex - 1 + keys.length) % keys.length] ?? null;
+    } else if (event.key === 'Home') {
+      nextKey = keys[0] ?? null;
+    } else if (event.key === 'End') {
+      nextKey = keys[keys.length - 1] ?? null;
+    }
+    if (!nextKey) return;
+    event.preventDefault();
+    if (nextKey !== middleTab) {
+      onMiddleChange(nextKey);
+    }
+    requestAnimationFrame(() => {
+      rootRef.current?.querySelector<HTMLButtonElement>(`[data-sub-key="${nextKey}"]`)?.focus();
+    });
+  };
+
+  // 子 tab 并入 nav 行的自适应测量：主 tab 全量自然宽 + 子 tab 自然宽 +
+  // 右侧操作区 + 余量能放进 nav 行时合并，否则保持独立子 tab 行。
+  // jsdom / 未布局（宽度为 0）时保持独立行（保守，避免误合并）。
+  const subTabsKey = subTabs.map((sub) => sub.key).join('|');
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const subGhost = subGhostRef.current;
+    if (!root || !subGhost) {
+      setNavMerge(false);
+      return undefined;
+    }
+    const measure = () => {
+      const ghost = ghostRef.current;
+      const actions = actionsRef.current;
+      const GAP = 2;
+      const sumWidth = (parent: HTMLElement | null) =>
+        parent
+          ? Array.from(parent.children).reduce<number>(
+              (acc, el) => acc + (el as HTMLElement).offsetWidth + GAP,
+              0,
+            )
+          : 0;
+      setNavMerge(
+        shouldMergeSubTabs({
+          navWidth: root.clientWidth,
+          mainWidth: sumWidth(ghost),
+          subWidth: sumWidth(subGhost),
+          actionsWidth: actions?.offsetWidth ?? 0,
+        }),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(root);
+      if (actionsRef.current) ro.observe(actionsRef.current);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [subTabsKey]);
 
   const renderPrimaryPill = (primary: (typeof PRIMARY_TABS)[number]) => {
     const active = !officeActive && activePrimary === primary.key;
@@ -687,6 +869,7 @@ function SingleRowTabBar({
         aria-selected={active}
         onClick={() => handlePrimaryClick(primary)}
         className="team-tab-pill"
+        data-tab-key={primary.key}
         data-active={active || undefined}
         style={active ? PRIMARY_PILL_ACTIVE_STYLE : PRIMARY_PILL_STYLE}
         title={primary.label}
@@ -703,15 +886,22 @@ function SingleRowTabBar({
       ref={rootRef}
       className="team-tab-bar team-tab-bar--single"
       data-hide-run-state-pill={hideRunStatePill ? 'true' : undefined}
-      data-stack-center={stackCenterSlot ? 'true' : undefined}
+      data-stack-center={effectiveStack ? 'true' : undefined}
       style={BAR_ROOT_STYLE}
     >
-      {/* 第 ① 行：上下文信息。classic 把状态操作放 trailing，作为最顶一行。 */}
+      {/* 第 ① 行：上下文信息。宽度足够时 leading（工作区/会话）+ centerSlot
+          （运行状态与操作）+ trailing（摘要）三栏同行，最大化利用横向空间、
+          压缩顶部纵向占据；不足时 centerSlot 降级为下一行独立状态行。 */}
       {hasContextRow ? (
         <div className="team-tab-bar__context" style={SINGLE_CONTEXT_ROW_STYLE}>
           {leadingSlot ? (
             <span className="team-tab-bar__leading" style={LEADING_STYLE}>
               {leadingSlot}
+            </span>
+          ) : null}
+          {centerSlot && !effectiveStack ? (
+            <span className="team-tab-bar__center" style={CENTER_SLOT_STYLE}>
+              {centerSlot}
             </span>
           ) : null}
           {trailingSlot ? (
@@ -722,103 +912,95 @@ function SingleRowTabBar({
         </div>
       ) : null}
 
-      {centerSlot && stackCenterSlot ? (
+      {centerSlot && effectiveStack ? (
         <div className="team-tab-bar__status" style={SINGLE_STATUS_ROW_STYLE}>
           <span style={CENTER_SLOT_STYLE}>{centerSlot}</span>
         </div>
       ) : null}
 
-      {/* 第 ② 行：主 tab（窄屏溢出「更多」）+ 运行状态 + 3D。 */}
-      <div className="team-tab-bar__nav" style={SINGLE_NAV_ROW_STYLE}>
-        <div
-          ref={groupRef}
-          style={SINGLE_PRIMARY_GROUP_STYLE}
-          role="tablist"
-          aria-label="主分类切换"
-        >
-          {/* 隐藏测量行：始终渲染全部主 tab 以获取自然宽度 */}
-          <div ref={ghostRef} style={GHOST_ROW_STYLE} aria-hidden>
-            {PRIMARY_TABS.map((primary) => (
-              <span key={primary.key} style={PRIMARY_PILL_STYLE}>
-                <TeamTabIcon name={primary.icon} />
-                <span>{primary.label}</span>
+      {/* 第 ② 行：主 tab（窄屏横向滚动、不折叠；宽屏时子 tab 并入本行）+
+          运行状态 + 3D。 */}
+      <div
+        className="team-tab-bar__nav"
+        style={SINGLE_NAV_ROW_STYLE}
+        data-merged-sub={navMerge ? 'true' : undefined}
+      >
+        {/* 外壳只负责定位两端遮罩；滚动发生在内部容器，滚轮 / 触控 / ←→ 都能翻。 */}
+        <div style={navMerge ? MERGED_NAV_PRIMARY_WRAP_STYLE : NAV_PRIMARY_WRAP_STYLE}>
+          <div
+            ref={groupRef}
+            className="team-tab-bar__tab-scroll"
+            style={SINGLE_PRIMARY_GROUP_STYLE}
+            role="tablist"
+            aria-label="主分类切换"
+            onKeyDown={movePrimaryByKeyboard}
+          >
+            {/* 隐藏测量行：渲染全部主 tab 的自然宽度，供子 tab 合并判定用 */}
+            <div ref={ghostRef} style={GHOST_ROW_STYLE} aria-hidden>
+              {PRIMARY_TABS.map((primary) => {
+                const ghostBadge = primaryBadge(
+                  primary.key,
+                  unreadCount,
+                  clarificationPending,
+                  failedTaskCount,
+                );
+                return (
+                  <span key={primary.key} style={PRIMARY_PILL_STYLE}>
+                    <TeamTabIcon name={primary.icon} />
+                    <span>{primary.label}</span>
+                    {ghostBadge ? <Badge count={ghostBadge.count} tone={ghostBadge.tone} /> : null}
+                  </span>
+                );
+              })}
+            </div>
+
+            {PRIMARY_TABS.map(renderPrimaryPill)}
+          </div>
+
+          {/* 两端渐隐：提示「这一侧还有主 tab 可以滚出来」 */}
+          <span
+            className="team-tab-bar__edge-mask"
+            style={{ ...EDGE_MASK_LEFT_STYLE, opacity: scrollEdges.left ? 1 : 0 }}
+            aria-hidden
+          />
+          <span
+            className="team-tab-bar__edge-mask"
+            style={{ ...EDGE_MASK_RIGHT_STYLE, opacity: scrollEdges.right ? 1 : 0 }}
+            aria-hidden
+          />
+        </div>
+
+        {/* 合并态：子 tab 内联在主 tab 组后，用分隔线与主 tab 区隔。 */}
+        {navMerge && subTabs.length > 1 ? (
+          <>
+            <span style={NAV_DIVIDER_STYLE} aria-hidden />
+            <div
+              className="team-tab-bar__sub-inline"
+              style={NAV_SUB_GROUP_STYLE}
+              role="tablist"
+              aria-label="子视图切换"
+            >
+              {subTabs.map(renderSubPill)}
+            </div>
+          </>
+        ) : null}
+
+        {/* 子 tab 自然宽度测量行（始终渲染，不可见、不占位）。 */}
+        {subTabs.length > 1 ? (
+          <div ref={subGhostRef} style={SUB_GHOST_ROW_STYLE} aria-hidden>
+            {subTabs.map((sub) => (
+              <span key={sub.key} style={SUB_PILL_STYLE}>
+                <TeamTabIcon name={sub.icon} size={13} />
+                <span>{sub.label}</span>
+                {sub.key === 'messages' && unreadCount > 0 ? (
+                  <Badge count={unreadCount} tone="danger" />
+                ) : null}
               </span>
             ))}
           </div>
-
-          {visibleTabs.map(renderPrimaryPill)}
-
-          {overflowTabs.length > 0 ? (
-            <button
-              ref={moreBtnRef}
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              onClick={() => {
-                setMoreOpen((v) => !v);
-              }}
-              className="team-tab-pill"
-              data-active={overflowActive || undefined}
-              style={overflowActive ? PRIMARY_PILL_ACTIVE_STYLE : PRIMARY_PILL_STYLE}
-              title="更多分类"
-            >
-              <span>更多</span>
-              <span style={CARET_STYLE}>▾</span>
-            </button>
-          ) : null}
-        </div>
-
-        {/* 「更多」溢出菜单：portal + fixed */}
-        {moreOpen && moreRect && overflowTabs.length > 0
-          ? createPortal(
-              <div
-                ref={moreMenuRef}
-                role="menu"
-                aria-label="更多主分类"
-                style={{
-                  ...DROPDOWN_STYLE,
-                  top: moreRect.bottom + 5,
-                  left: Math.max(8, moreRect.right - 184),
-                }}
-              >
-                {overflowTabs.map((primary) => {
-                  const active = !officeActive && activePrimary === primary.key;
-                  const badge = primaryBadge(
-                    primary.key,
-                    unreadCount,
-                    clarificationPending,
-                    failedTaskCount,
-                  );
-                  return (
-                    <button
-                      key={primary.key}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      onClick={() => {
-                        onPrimaryChange(primary.key);
-                        setMoreOpen(false);
-                      }}
-                      className="team-sub-tab"
-                      data-active={active || undefined}
-                      style={active ? DROPDOWN_ITEM_ACTIVE_STYLE : DROPDOWN_ITEM_STYLE}
-                    >
-                      <TeamTabIcon name={primary.icon} />
-                      <span style={{ flex: 1 }}>{primary.label}</span>
-                      {badge ? <Badge count={badge.count} tone={badge.tone} /> : null}
-                    </button>
-                  );
-                })}
-              </div>,
-              document.body,
-            )
-          : null}
-
-        {centerSlot && !stackCenterSlot ? (
-          <span style={CENTER_SLOT_STYLE}>{centerSlot}</span>
         ) : null}
 
-        <span style={SINGLE_ACTIONS_STYLE}>
+        <span ref={actionsRef} style={SINGLE_ACTIONS_STYLE}>
           {hideRunStatePill ? null : <TeamRunStatePill />}
           {showOffice ? (
             <button
@@ -837,30 +1019,16 @@ function SingleRowTabBar({
         </span>
       </div>
 
-      {/* 第 ③ 行：当前主 tab 的子视图，常驻可见、一键直达（>1 个时才显示）。 */}
-      {subTabs.length > 1 ? (
-        <div style={SUB_ROW_STYLE} role="tablist" aria-label="子视图切换">
-          {subTabs.map((sub) => {
-            const active = middleTab === sub.key;
-            return (
-              <button
-                key={sub.key}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => onMiddleChange(sub.key)}
-                className="team-sub-tab"
-                data-active={active || undefined}
-                style={active ? SUB_PILL_ACTIVE_STYLE : SUB_PILL_STYLE}
-              >
-                <TeamTabIcon name={sub.icon} size={13} />
-                <span>{sub.label}</span>
-                {sub.key === 'messages' && unreadCount > 0 ? (
-                  <Badge count={unreadCount} tone="danger" />
-                ) : null}
-              </button>
-            );
-          })}
+      {/* 第 ③ 行：当前主 tab 的子视图（仅在未并入 nav 行时独立成行）。 */}
+      {!navMerge && subTabs.length > 1 ? (
+        <div
+          className="team-tab-bar__sub-row"
+          style={SUB_ROW_STYLE}
+          role="tablist"
+          aria-label="子视图切换"
+          onKeyDown={moveSubByKeyboard}
+        >
+          {subTabs.map(renderSubPill)}
         </div>
       ) : null}
     </div>

@@ -63,8 +63,8 @@ const HEADER_STYLE: CSSProperties = {
 const BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
-  background: 'transparent',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,

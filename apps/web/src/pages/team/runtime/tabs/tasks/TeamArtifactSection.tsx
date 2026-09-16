@@ -105,7 +105,7 @@ const SHARED_SUMMARY_GRID_STYLE: CSSProperties = {
 const SHARED_SUMMARY_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 10,
   border: '1px solid color-mix(in srgb, var(--border-default) 48%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
@@ -778,7 +778,7 @@ export function TeamArtifactSection({
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 12,
         }}
       >
         {focusHandoffId && artifactContext.focusHandoff ? (

@@ -569,7 +569,7 @@ export default function TeamTemplatesPage() {
           justifyContent: 'space-between',
           alignItems: 'center',
           gap: 10,
-          padding: '12px 20px',
+          padding: '10px 14px',
           borderBottom: '1px solid var(--border-subtle)',
           background: 'var(--bg-overlay)',
         }}
@@ -1074,7 +1074,7 @@ export default function TeamTemplatesPage() {
             style={{
               background: 'var(--bg-overlay)',
               borderRadius: 12,
-              padding: '20px 24px',
+              padding: '10px 12px',
               display: 'grid',
               gap: 12,
               maxWidth: 360,
@@ -1226,7 +1226,7 @@ function CenteredEmpty({ canCreate, onCreate }: { canCreate: boolean; onCreate: 
         display: 'grid',
         placeItems: 'center',
         textAlign: 'center',
-        gap: 14,
+        gap: 12,
         padding: '60px 20px',
       }}
     >

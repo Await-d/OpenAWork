@@ -251,7 +251,7 @@ export function CustomRoleModal({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            padding: '14px 18px',
+            padding: '10px 12px',
             borderBottom: '1px solid var(--border-subtle)',
           }}
         >
@@ -467,7 +467,7 @@ export function CustomRoleModal({
           )}
 
           {/* Model + required */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
             <label style={{ display: 'grid', gap: 5, flex: 1, minWidth: 200 }}>
               <span style={LABEL}>运行模型</span>
               {poolCandidates.length > 0 ? (
@@ -507,7 +507,7 @@ export function CustomRoleModal({
           </div>
 
           {/* 推理强度 + 派发优先级 */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <label style={{ display: 'grid', gap: 5, flex: 1, minWidth: 180 }}>
               <span style={LABEL}>推理强度（仅推理类模型生效）</span>
               <select
@@ -553,7 +553,7 @@ export function CustomRoleModal({
             display: 'flex',
             justifyContent: 'flex-end',
             gap: 8,
-            padding: '12px 18px',
+            padding: '10px 14px',
             borderTop: '1px solid var(--border-subtle)',
           }}
         >

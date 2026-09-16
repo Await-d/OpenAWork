@@ -31,7 +31,7 @@ const CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 12,
   marginTop: 4,
-  padding: '16px 18px',
+  padding: '10px 12px',
   borderRadius: 14,
   border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 4%, var(--bg-overlay))',

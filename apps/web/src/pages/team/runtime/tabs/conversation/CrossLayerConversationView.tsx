@@ -54,7 +54,7 @@ const SPLIT_STYLE: CSSProperties = {
   minHeight: 0,
   display: 'grid',
   gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)',
-  gap: 14,
+  gap: 12,
 };
 
 const DETAIL_PANEL_STYLE: CSSProperties = {
@@ -71,7 +71,7 @@ const DETAIL_PANEL_STYLE: CSSProperties = {
 const PANEL_HEADER_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderBottom: `1px solid ${CK_BORDER}`,
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
   flexShrink: 0,

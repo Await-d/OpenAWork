@@ -130,7 +130,7 @@ const CONFIRM_DIALOG_STYLE: CSSProperties = {
   boxShadow: 'var(--shadow-lg)',
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 12,
   overflow: 'hidden',
   boxSizing: 'border-box',
 };

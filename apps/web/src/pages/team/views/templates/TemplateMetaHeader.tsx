@@ -85,7 +85,7 @@ export function TemplateMetaHeader({
       style={{
         display: 'grid',
         gap: 10,
-        padding: '12px 14px',
+        padding: '10px 12px',
         borderRadius: 12,
         border: '1px solid var(--border-subtle)',
         background: 'var(--bg-overlay)',

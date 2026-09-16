@@ -218,11 +218,11 @@ export function LayeredConversationView({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: 12,
           flex: 1,
           minHeight: 0,
           overflow: 'hidden',
-          padding: '16px 20px',
+          padding: '10px 12px',
         }}
       >
         {/* 头部面板 */}
@@ -348,7 +348,7 @@ export function LayeredConversationView({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 8,
-                  padding: '12px 16px 8px',
+                  padding: '10px 12px 8px',
                   flexShrink: 0,
                 }}
               >
@@ -470,7 +470,7 @@ function SelectedLayerHeader({ row }: { row: LayerConversationRow }) {
         display: 'flex',
         alignItems: 'center',
         gap: 12,
-        padding: '14px 20px',
+        padding: '10px 12px',
         borderBottom: '1px solid color-mix(in srgb, var(--border-default) 25%, transparent)',
         background:
           'linear-gradient(180deg, color-mix(in srgb, var(--layer-color-soft) 60%, var(--bg-overlay)) 0%, transparent 100%)',

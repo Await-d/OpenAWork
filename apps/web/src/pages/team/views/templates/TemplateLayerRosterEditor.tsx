@@ -64,7 +64,7 @@ interface Props {
 const SECTION_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'stretch',
-  gap: 14,
+  gap: 12,
   flexWrap: 'wrap',
   padding: '10px 12px',
   borderRadius: 10,

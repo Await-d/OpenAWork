@@ -71,7 +71,6 @@
 .team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__head-tabs {
   align-items: center;
   background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg-base));
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   display: inline-flex;
   gap: var(--spacing-1);
@@ -99,10 +98,11 @@
   font-size: 12px;
   font-weight: 600;
   gap: var(--spacing-1);
-  height: calc(var(--spacing-3) * 2);
+  /* 点击目标 28px 高 + 12px 水平内边距：面板功能切换要容易命中。 */
+  height: calc(var(--spacing-3) * 2 + var(--spacing-1));
   outline: 2px solid transparent;
   outline-offset: 2px;
-  padding: 0 var(--spacing-2);
+  padding: 0 var(--spacing-3);
   transition:
     background var(--dur-micro) var(--ease-micro),
     border-color var(--dur-micro) var(--ease-micro),
@@ -138,7 +138,6 @@
 
 .team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__tab-badge {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   color: currentColor;
   font-size: 10px;

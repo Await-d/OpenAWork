@@ -20,7 +20,7 @@ const INDICATOR_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  padding: '14px 16px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',

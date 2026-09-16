@@ -50,7 +50,7 @@ export function LayerFlowHandoffHeader({
       style={{
         display: 'grid',
         gap: 10,
-        padding: '12px 14px',
+        padding: '10px 12px',
         borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
         background: `color-mix(in srgb, ${color} 6%, var(--bg-overlay))`,
         flexShrink: 0,

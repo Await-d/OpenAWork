@@ -47,7 +47,7 @@ const CARD_STYLE: CSSProperties = {
   width: '100%',
   maxWidth: 560,
   display: 'grid',
-  gap: 14,
+  gap: 12,
   padding: '24px 28px',
   borderRadius: 16,
   border: '1px dashed color-mix(in srgb, var(--accent) 36%, transparent)',

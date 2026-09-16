@@ -17,7 +17,13 @@
  *   - 解析其 payload / result_json 获取 reviewReport / overallVerdict / sub-checks
  */
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import {
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { getEffectiveReviewDisposition, type HandoffRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
@@ -46,10 +52,8 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  padding: '4px 12px',
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
+  // 无描边 + 更大点击目标（≥28px 高）。
+  padding: '6px 14px',
   background: 'transparent',
   color: 'var(--fg-muted)',
   fontSize: 11,
@@ -61,8 +65,7 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
 
 const SEGMENT_BTN_ACTIVE_STYLE: CSSProperties = {
   ...SEGMENT_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
-  borderColor: 'color-mix(in srgb, var(--accent) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--fg-strong)',
 };
 
@@ -90,12 +93,9 @@ const FOCUS_ACTIONS_ROW_STYLE: CSSProperties = {
 };
 
 const FOCUS_CLEAR_BTN_STYLE: CSSProperties = {
-  padding: '4px 10px',
+  padding: '6px 12px',
   borderRadius: 6,
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'transparent',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
@@ -105,8 +105,7 @@ const FOCUS_CLEAR_BTN_STYLE: CSSProperties = {
 
 const FOCUS_PRIMARY_BTN_STYLE: CSSProperties = {
   ...FOCUS_CLEAR_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--accent)',
 };
 
@@ -128,6 +127,42 @@ export function ReviewMergedTab({
 }: ReviewMergedTabProps) {
   const [segment, setSegment] = useState<ReviewSegment>('report');
   const [retryBusyHandoffId, setRetryBusyHandoffId] = useState<string | null>(null);
+  const segmentBarRef = useRef<HTMLDivElement>(null);
+
+  /** 键盘 ← → 在「评审报告 / 评审待办」间切换（Home / End 直达首尾），焦点跟随。 */
+  const handleSegmentKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const segments: ReviewSegment[] = ['report', 'queue'];
+    if (
+      event.key !== 'ArrowRight' &&
+      event.key !== 'ArrowLeft' &&
+      event.key !== 'Home' &&
+      event.key !== 'End'
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = Math.max(segments.indexOf(segment), 0);
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % segments.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + segments.length) % segments.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = segments.length - 1;
+    }
+    const nextSegment = segments[nextIndex];
+    if (nextSegment === undefined) return;
+    if (nextSegment !== segment) {
+      setSegment(nextSegment);
+    }
+    requestAnimationFrame(() => {
+      segmentBarRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-seg="${nextSegment}"]`)
+        ?.focus();
+    });
+  };
   const nodes = useLayerStore((state) => state.nodes);
   const { runRuntimeAlertRemediation } = useTeamRuntimeReferenceViewData();
   const selectedSessionRoleLayer = selectedTeamId
@@ -259,11 +294,18 @@ export function ReviewMergedTab({
         flexDirection: 'column',
       }}
     >
-      <div style={SEGMENT_BAR_STYLE} role="tablist" aria-label="评审视图切换">
+      <div
+        ref={segmentBarRef}
+        style={SEGMENT_BAR_STYLE}
+        role="tablist"
+        aria-label="评审视图切换"
+        onKeyDown={handleSegmentKeyDown}
+      >
         <button
           type="button"
           role="tab"
           aria-selected={segment === 'report'}
+          data-seg="report"
           onClick={() => setSegment('report')}
           style={segment === 'report' ? SEGMENT_BTN_ACTIVE_STYLE : SEGMENT_BTN_STYLE}
         >
@@ -291,6 +333,7 @@ export function ReviewMergedTab({
           type="button"
           role="tab"
           aria-selected={segment === 'queue'}
+          data-seg="queue"
           onClick={() => setSegment('queue')}
           style={segment === 'queue' ? SEGMENT_BTN_ACTIVE_STYLE : SEGMENT_BTN_STYLE}
         >
@@ -304,10 +347,10 @@ export function ReviewMergedTab({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '12px 14px 16px',
+          padding: '10px 12px 14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: 12,
         }}
       >
         {focusedHandoff ? (

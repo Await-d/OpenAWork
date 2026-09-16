@@ -45,7 +45,6 @@ const MOBILE_TRIGGER_STYLE: CSSProperties = {
   height: 38,
   padding: 0,
   borderRadius: 10,
-  border: '1px solid var(--border-default)',
   background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   color: 'var(--fg-default)',
   boxShadow: 'var(--shadow-sm)',

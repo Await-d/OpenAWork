@@ -15,8 +15,12 @@
  * 圆角胶囊；选中项填 accent 软底 + 强前景。与 TeamTabBar 的子 tab 同族。
  */
 
-import type { CSSProperties, ReactNode } from 'react';
-import { CK_BORDER_SUBTLE } from './content-kit-tokens.js';
+import {
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 
 export interface SegmentedToggleOption<V extends string> {
   value: V;
@@ -44,8 +48,8 @@ const TRACK_STYLE: CSSProperties = {
   gap: 2,
   padding: 2,
   borderRadius: 999,
-  border: `1px solid ${CK_BORDER_SUBTLE}`,
-  background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
+  // 无描边：以淡底承载轨道（与页面整体去描边风格一致）。
+  background: 'color-mix(in srgb, var(--bg-surface) 78%, transparent)',
   flexWrap: 'wrap',
   minWidth: 0,
   maxWidth: '100%',
@@ -59,10 +63,48 @@ export function SegmentedToggle<V extends string>({
   size = 'md',
   style,
 }: SegmentedToggleProps<V>) {
-  const pad = size === 'sm' ? '3px 10px' : '5px 14px';
+  const trackRef = useRef<HTMLDivElement>(null);
+  // 点击目标：md ≥28px 高、sm ≥26px 高，保证模式切换容易命中。
+  const pad = size === 'sm' ? '5px 12px' : '6px 14px';
   const fontSize = size === 'sm' ? 11 : 12;
+
+  /** 键盘方向键在选项间切换（← → 循环，Home / End 到首尾），焦点跟随。 */
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const values = options.map((opt) => opt.value);
+    if (values.length === 0) return;
+    const currentIndex = values.indexOf(value);
+    let nextIndex = -1;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (Math.max(currentIndex, -1) + 1) % values.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (Math.max(currentIndex, 0) - 1 + values.length) % values.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = values.length - 1;
+    }
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextValue = values[nextIndex];
+    if (nextValue === undefined) return;
+    if (nextValue !== value) {
+      onChange(nextValue);
+    }
+    requestAnimationFrame(() => {
+      trackRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-seg-value="${nextValue}"]`)
+        ?.focus();
+    });
+  };
+
   return (
-    <div role="tablist" aria-label={ariaLabel} style={{ ...TRACK_STYLE, ...style }}>
+    <div
+      ref={trackRef}
+      role="tablist"
+      aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
+      style={{ ...TRACK_STYLE, ...style }}
+    >
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -72,6 +114,7 @@ export function SegmentedToggle<V extends string>({
             role="tab"
             aria-selected={active}
             title={opt.title}
+            data-seg-value={opt.value}
             onClick={() => onChange(opt.value)}
             style={{
               display: 'inline-flex',

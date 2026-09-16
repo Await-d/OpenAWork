@@ -27,7 +27,7 @@ interface LayeredItem {
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 12,
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -451,7 +451,7 @@ export function SharedSessionLayeredView({
 
           <div style={DETAIL_PANE_STYLE}>
             {selectedItem ? (
-              <div style={{ display: 'grid', gap: 10, padding: '12px 14px' }}>
+              <div style={{ display: 'grid', gap: 10, padding: '10px 12px' }}>
                 <div style={{ display: 'grid', gap: 4 }}>
                   <strong style={{ color: 'var(--fg-strong)', fontSize: 14 }}>
                     {selectedItem.title}

@@ -147,11 +147,10 @@ const contextBadge: CSSProperties = {
   minHeight: 20,
   padding: '0 7px',
   borderRadius: 0,
-  border: '1px solid var(--border-default)',
   fontSize: 10.5,
   fontWeight: 650,
   color: 'var(--fg-muted)',
-  background: 'transparent',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
 };
 
 const dotBase: CSSProperties = {
@@ -218,7 +217,7 @@ const messageMeta: CSSProperties = {
 };
 
 const emptyState: CSSProperties = {
-  padding: '20px 10px',
+  padding: '14px 10px',
   textAlign: 'center',
   fontSize: 12,
   color: 'var(--fg-faint, var(--fg-subtle))',

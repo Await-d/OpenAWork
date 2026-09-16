@@ -132,7 +132,6 @@ const FILE_TREE_HEADER_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 10px 7px',
   borderRadius: 8,
-  border: '1px solid var(--border-subtle)',
   background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
   margin: '0 10px 8px',
 };
@@ -141,8 +140,8 @@ const FILE_TREE_TOOL_BTN_STYLE: CSSProperties = {
   width: 26,
   height: 26,
   borderRadius: 7,
-  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
-  background: 'transparent',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   cursor: 'pointer',
   display: 'inline-flex',
@@ -219,6 +218,7 @@ export function TeamSidebarWithFileTree({
     treeNodes,
   } = useTeamSidebarFileTreeState({
     active: true,
+    expandedDirsSessionKey: selectedTeamId ?? null,
     gatewayUrl,
     token,
     workspacePath,
@@ -569,8 +569,8 @@ export function TeamSidebarWithFileTree({
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: 8,
-            border: '1px solid var(--border-default)',
-            background: 'transparent',
+            border: 'none',
+            background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
             color: 'var(--fg-default)',
             cursor: 'pointer',
           }}
@@ -745,7 +745,7 @@ export function TeamSidebarWithFileTree({
             {treeLoading && treeNodes.length === 0 ? (
               <div
                 style={{
-                  padding: '20px 10px',
+                  padding: '14px 10px',
                   textAlign: 'center',
                   fontSize: 11,
                   color: 'var(--fg-muted)',
@@ -756,7 +756,7 @@ export function TeamSidebarWithFileTree({
             ) : treeError ? (
               <div
                 style={{
-                  padding: '20px 10px',
+                  padding: '14px 10px',
                   textAlign: 'center',
                   fontSize: 11,
                   color: 'var(--danger)',
@@ -777,7 +777,7 @@ export function TeamSidebarWithFileTree({
         ) : (
           <div
             style={{
-              padding: '20px 10px',
+              padding: '14px 10px',
               textAlign: 'center',
               fontSize: 11,
               color: 'var(--fg-muted)',

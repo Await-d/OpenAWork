@@ -305,7 +305,7 @@ export function TeamInitSummaryPanel({
   const isFull = variant === 'full';
   const wrapperStyle: CSSProperties = isFull
     ? { display: 'grid', gap: 10 }
-    : { ...PANEL_STYLE, padding: '12px 14px', borderRadius: 10, display: 'grid', gap: 10 };
+    : { ...PANEL_STYLE, padding: '10px 12px', borderRadius: 10, display: 'grid', gap: 10 };
 
   return (
     <div style={wrapperStyle}>

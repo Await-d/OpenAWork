@@ -279,7 +279,7 @@ export const FORM_PANE_STYLE: CSSProperties = {
 };
 
 export const FORM_HEADER_STYLE: CSSProperties = {
-  padding: '20px 24px 14px',
+  padding: '12px 14px 10px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   display: 'flex',
   justifyContent: 'space-between',
@@ -293,11 +293,11 @@ export const FORM_BODY_STYLE: CSSProperties = {
   flex: 1,
   overflowY: 'auto',
   display: 'grid',
-  gap: 14,
+  gap: 12,
 };
 
 export const FORM_FOOTER_STYLE: CSSProperties = {
-  padding: '12px 24px',
+  padding: '10px 14px',
   borderTop: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   display: 'flex',
   alignItems: 'center',
@@ -370,7 +370,7 @@ export const SOURCE_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
 export const CARD_BASE_STYLE: CSSProperties = {
   display: 'grid',
   gap: 8,
-  padding: '14px 16px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'var(--bg-overlay)',
@@ -418,7 +418,7 @@ export const ROLE_CARD_STYLE: CSSProperties = {
   gridTemplateColumns: '40px 1fr auto',
   gap: 12,
   alignItems: 'center',
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
   background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
@@ -461,7 +461,7 @@ export const AGENT_CHIP_SELECTED_STYLE: CSSProperties = {
 export const REVIEW_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 10,
-  padding: '16px 18px',
+  padding: '10px 12px',
   borderRadius: 14,
   background: 'var(--bg-overlay)',
   border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',

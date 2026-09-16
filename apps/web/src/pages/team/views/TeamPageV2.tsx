@@ -73,6 +73,8 @@ import {
   LEAF_TO_PRIMARY,
   MIDDLE_TAB_KEYS,
   getDefaultLeafFor,
+  readRememberedLeaf,
+  rememberLeaf,
   type PrimaryTabKey,
 } from '../runtime/tabs/team-page-v2-tabs.js';
 import { TeamTabBar } from '../runtime/shell/header/TeamTabBar.js';
@@ -169,7 +171,9 @@ const SIDEBAR_MAX_WIDTH = 420;
 const SUPERBAR_STATUS_TRIGGER_STYLE: CSSProperties = {
   display: 'flex',
   minWidth: 0,
-  flex: 1,
+  // basis auto：让外层收缩型容器（team-tab-bar__center）能按内容算出宽度；
+  // 三栏同行时该块再吸收容器内剩余空间。
+  flex: '1 1 auto',
   cursor: 'pointer',
   overflow: 'hidden',
   padding: '2px 4px',
@@ -967,6 +971,8 @@ export default function TeamPageV2() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('teamV2.middleTab', next);
     }
+    // 记住该子视图属于哪个主 tab 的最后位置，供主 tab 往返切换时恢复。
+    rememberLeaf(next);
   }, []);
 
   const handleOpenHandoffContext = useCallback(
@@ -1023,9 +1029,10 @@ export default function TeamPageV2() {
 
   const handlePrimaryTabChange = useCallback(
     (next: PrimaryTabKey) => {
-      // 切主 tab 时：若当前 leaf 已属于该主 tab，则保留 leaf；否则回落到该主 tab 的默认子 tab。
+      // 切主 tab 时：若当前 leaf 已属于该主 tab，则保留 leaf；
+      // 否则优先恢复该主 tab 上次停留的子视图，无记忆时回落到默认子 tab。
       if (LEAF_TO_PRIMARY.get(middleTab) === next) return;
-      handleMiddleTabChange(getDefaultLeafFor(next));
+      handleMiddleTabChange(readRememberedLeaf(next) ?? getDefaultLeafFor(next));
     },
     [handleMiddleTabChange, middleTab],
   );
@@ -1408,6 +1415,55 @@ export default function TeamPageV2() {
       />
     ) : null;
 
+  /**
+   * 错误诊断简报（非 classic）：注入对话流尾部的 afterMessages，
+   * 跟随对话流渲染在消息末尾、composer 上方——与 classic 的 InlineOpsCard
+   * 共用同一落点。不再挂在主面板最顶部（原先会压在顶栏 tab 栏之上并
+   * 挤占顶部空间）；失败提醒本身由「任务」主 tab 的红色徽标承担。
+   */
+  const errorDiagnosticsSlot =
+    !isClassicWorkbench && !isSelectedSharedSession && failedTaskCount > 0 ? (
+      <ErrorDiagnosticsPanel
+        failedHandoffs={scopedHandoffs}
+        selectedTeam={selectedTeam}
+        onRetryFailed={canManageSelectedRuntimeTree ? handleRetryFailed : undefined}
+        retrying={retryingFailed}
+      />
+    ) : null;
+
+  /**
+   * 智能输入引导气泡（非 classic）：失败态给出「改写需求 / 针对性修复 / 拆分任务」
+   * 等一键填入建议，空闲态提示 / 命令与 @ 引用。与错误诊断简报一样注入对话流尾部，
+   * 紧贴输入区上方（点击建议即填入 composer，越靠近输入框越顺手），
+   * 不再占用主面板顶部空间。
+   */
+  const smartSuggestionSlot =
+    !isClassicWorkbench &&
+    selectedTeamId &&
+    (suggestionContext === 'failure' || suggestionContext === 'idle') &&
+    !suggestionDismissed &&
+    !isMobile ? (
+      <SmartSuggestionBubble
+        context={suggestionContext}
+        failedCount={failedTaskCount}
+        onSelectSuggestion={data.canManageSessionEntries ? handleSubmitMessage : undefined}
+        onDismiss={() => setSuggestionDismissed(true)}
+      />
+    ) : null;
+
+  /**
+   * 对话流尾部的运行反馈卡：classic InlineOpsCard、非 classic 错误诊断简报
+   * 与智能输入引导气泡共用同一落点（自上而下：诊断 → 引导）。
+   */
+  const conversationTailCards =
+    classicInlineCards || errorDiagnosticsSlot || smartSuggestionSlot ? (
+      <>
+        {classicInlineCards}
+        {errorDiagnosticsSlot}
+        {smartSuggestionSlot}
+      </>
+    ) : null;
+
   const conversationMessagesOverride = isSelectedSharedSession ? (
     <div
       style={{
@@ -1448,7 +1504,7 @@ export default function TeamPageV2() {
         composerEnabled={inboundComposerEnabled}
         classicWorkbench={isClassicWorkbench}
         beforeMessages={classicOpsChrome}
-        afterMessages={classicInlineCards}
+        afterMessages={conversationTailCards}
         onOpenSession={handleOpenRoleSession}
       />
     </div>
@@ -1500,15 +1556,8 @@ export default function TeamPageV2() {
             className="team-v2-pane team-v2-pane--main"
             style={{ ...LEFT_AREA_STYLE, position: 'relative' }}
           >
-            {/* classic 工作台：失败诊断/专注按钮改由左侧 ops chrome 承载，去掉旧浮动控件 */}
-            {!isClassicWorkbench && failedTaskCount > 0 && !isSelectedSharedSession ? (
-              <ErrorDiagnosticsPanel
-                failedHandoffs={scopedHandoffs}
-                selectedTeam={selectedTeam}
-                onRetryFailed={canManageSelectedRuntimeTree ? handleRetryFailed : undefined}
-                retrying={retryingFailed}
-              />
-            ) : null}
+            {/* 失败诊断简报已迁至对话流尾部（afterMessages）；classic 的
+                失败/澄清/重试入口由左侧 ops chrome 与 InlineOpsCard 承载。 */}
 
             {/* 专注模式切换按钮（classic 用 ChatOpsBar「专注对话」） */}
             {!isClassicWorkbench && !isMobile ? (
@@ -1568,19 +1617,8 @@ export default function TeamPageV2() {
               </button>
             ) : null}
 
-            {/* 智能输入引导气泡（classic 由 ops/inline cards 替代，避免双套引导） */}
-            {!isClassicWorkbench &&
-            selectedTeamId &&
-            (suggestionContext === 'failure' || suggestionContext === 'idle') &&
-            !suggestionDismissed &&
-            !isMobile ? (
-              <SmartSuggestionBubble
-                context={suggestionContext}
-                failedCount={failedTaskCount}
-                onSelectSuggestion={data.canManageSessionEntries ? handleSubmitMessage : undefined}
-                onDismiss={() => setSuggestionDismissed(true)}
-              />
-            ) : null}
+            {/* 智能输入引导气泡已迁至对话流尾部（afterMessages），紧贴输入区；
+                classic 由 ops/inline cards 替代，避免双套引导。 */}
 
             <div
               style={
@@ -1656,10 +1694,8 @@ export default function TeamPageV2() {
                       : undefined
                   }
                   conversationAfterMessages={
-                    classicInlineCards &&
-                    selectedTeamId &&
-                    selectedTeamId === conversationReceptionSessionId
-                      ? classicInlineCards
+                    selectedTeamId && selectedTeamId === conversationReceptionSessionId
+                      ? conversationTailCards
                       : undefined
                   }
                   topBar={
@@ -1736,8 +1772,11 @@ export default function TeamPageV2() {
                             ) : null
                           }
                           stackCenterSlot={
-                            // classic 不把状态挤到第二行；tablet/fusion 仍可 stack
-                            isClassicWorkbench ? false : isTablet || isFusionWorkbench
+                            // desktop（含 fusion）优先把「运行状态 + 操作」合并进
+                            // 上下文行，与 leading/trailing 三栏同行，压缩顶部纵向占据；
+                            // 宽度不足时由 TeamTabBar 内部按实测宽度自动降级。
+                            // tablet 窄屏直接强制独立状态行。
+                            isTablet
                           }
                           hideRunStatePill={isClassicWorkbench}
                           trailingSlot={

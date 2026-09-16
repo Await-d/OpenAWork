@@ -23,7 +23,7 @@ const SUMMARY_CARD_STYLE: CSSProperties = {
 const ITEM_STYLE: CSSProperties = {
   display: 'grid',
   gap: 8,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',

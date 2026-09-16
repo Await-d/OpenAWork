@@ -219,7 +219,7 @@ const SPINNER_STYLE: CSSProperties = {
 
 const RECEPTION_CARD_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 18,
+  gap: 12,
   margin: '20px auto 24px',
   padding: '24px 28px',
   width: '100%',

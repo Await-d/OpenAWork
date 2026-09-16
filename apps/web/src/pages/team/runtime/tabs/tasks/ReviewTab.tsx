@@ -188,7 +188,6 @@ export function ReviewTab({
               flexWrap: 'wrap',
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px solid var(--border-subtle)',
               background: 'var(--bg-overlay)',
               boxShadow: 'var(--shadow-sm)',
             }}
@@ -248,11 +247,10 @@ export function ReviewTab({
                   className="team-card-tinted"
                   style={{
                     ...PANEL_STYLE,
-                    padding: '12px 14px',
+                    padding: '10px 12px',
                     borderRadius: 10,
                     display: 'grid',
                     gap: 8,
-                    border: '1px solid var(--border-default)',
                     background: 'var(--bg-raised)',
                     boxShadow: 'var(--shadow-md)',
                     ['--tint' as string]: typeMeta.color,
@@ -348,7 +346,6 @@ export function ReviewTab({
                             padding: '8px 10px',
                             borderRadius: 6,
                             background: 'var(--bg-base)',
-                            border: '1px solid var(--border-subtle)',
                             fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
                             fontSize: 11,
                             lineHeight: 1.6,
@@ -383,7 +380,6 @@ export function ReviewTab({
                           style={{
                             padding: '8px 10px',
                             borderRadius: 6,
-                            border: '1px solid var(--border-default)',
                             background: 'var(--bg-raised)',
                             boxShadow: 'var(--shadow-sm)',
                             fontSize: 11,
@@ -486,8 +482,7 @@ export function ReviewTab({
                           style={{
                             padding: '4px 8px',
                             borderRadius: 6,
-                            border: '1px solid var(--border-default)',
-                            background: 'transparent',
+                            background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
                             color: 'var(--fg-muted)',
                             fontSize: 10,
                             fontWeight: 600,
@@ -585,7 +580,7 @@ export function ReviewTab({
             <div
               style={{
                 ...PANEL_STYLE,
-                padding: '12px 14px',
+                padding: '10px 12px',
                 borderRadius: 10,
                 display: 'grid',
                 gap: 8,
@@ -685,7 +680,7 @@ export function ReviewTab({
           <div
             style={{
               ...PANEL_STYLE,
-              padding: '12px 14px',
+              padding: '10px 12px',
               borderRadius: 10,
               display: 'grid',
               gap: 8,
@@ -788,13 +783,6 @@ export function ReviewTab({
                         style={{
                           padding: '8px 10px',
                           borderRadius: 6,
-                          border: `1px solid ${
-                            d.severity === 'warning'
-                              ? 'color-mix(in oklch, var(--warning) 40%, var(--border-default) 60%)'
-                              : d.severity === 'critical'
-                                ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
-                                : 'color-mix(in oklch, var(--accent) 40%, var(--border-default) 60%)'
-                          }`,
                           background: 'var(--bg-raised)',
                           boxShadow: `0 1px 3px ${
                             d.severity === 'warning'
@@ -856,7 +844,6 @@ export function ReviewTab({
                         padding: '8px 10px',
                         borderRadius: 6,
                         background: 'var(--bg-overlay)',
-                        border: '1px solid var(--border-subtle)',
                         margin: '4px 0 0',
                         maxHeight: 200,
                         overflowY: 'auto',

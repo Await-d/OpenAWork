@@ -7,11 +7,13 @@
  *   4. 上游来源（sourceLayer / sourceDisplayName）必须可见 —— 它是层级对话上下关系的落点；
  *   5. 无上游时标注「顶层入口」；
  *   6. 流式但尚无正文时用角色身份 typing 占位；
- *   7. 折叠态只渲染最新一条消息，展开后渲染多轮对话，收起可复原；
+ *   7. 折叠态只渲染最新一条消息的**一行纯文本预览**（不进 markdown 管道），
+ *      展开后才渲染完整多轮对话，收起可复原为一行；
  *   8. 「全部展开 / 全部收起」批量作用于所有角色实例；
  *   9. 待处理权限按 sessionId 归到对应卡片，可在卡片上直接处置；
  *  10. 非主会话卡片提供「完整会话」入口，主会话卡片不给（用户就在里面）；
- *  11. 展开态按 scopeKey（会话）持久化，重新挂载后还原，跨会话不串味。
+ *  11. 展开态按 scopeKey（会话）持久化，重新挂载后还原，跨会话不串味；
+ *  12. 稀疏层级（接待层 / 规划层）实例少时并排在同一行，实例变多自动回到整行占位。
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -97,6 +99,74 @@ describe('TeamMultiLayerCardWall', () => {
     expect(isBefore(planning, executor)).toBe(true);
   });
 
+  // ─── 稀疏层级并排：接待层 + 规划层 ───────────────────────────────────
+  // 背景：这两层几乎只会有一个角色实例，各占一整行会在墙的顶部留出两片空白。
+
+  it('接待层与规划层实例少时并排在同一行', () => {
+    render(
+      <TeamMultiLayerCardWall
+        layers={[
+          makeInstance({ layer: 'reception', sessionIds: ['s-reception'] }),
+          makeInstance({ layer: 'pm1', sessionIds: ['s-pm1'] }),
+        ]}
+      />,
+    );
+
+    const receptionCell = screen.getByLabelText('接待层 的对话窗口').closest('[data-compact-lane]');
+    const planningCell = screen
+      .getByLabelText('PM1 规划层 的对话窗口')
+      .closest('[data-compact-lane]');
+
+    expect(receptionCell).not.toBeNull();
+    expect(planningCell).not.toBeNull();
+    // 同一行 = 同一个并排容器
+    expect(receptionCell?.parentElement).toBe(planningCell?.parentElement);
+  });
+
+  it('稀疏层级实例变多时回到整行展示', () => {
+    render(
+      <TeamMultiLayerCardWall
+        layers={[
+          makeInstance({ layer: 'reception', sessionIds: ['s-a'] }),
+          makeInstance({ layer: 'reception', sessionIds: ['s-b'] }),
+          makeInstance({ layer: 'pm1', sessionIds: ['s-pm1'] }),
+          makeInstance({ layer: 'executor', sessionIds: ['s-exec'] }),
+        ]}
+      />,
+    );
+
+    // 接待层有 2 个实例 → 退出并排行，重新占一整行（两张卡片的 aria-label 相同，逐个断言）
+    const receptionCards = screen.getAllByLabelText('接待层 的对话窗口');
+    expect(receptionCards).toHaveLength(2);
+    for (const card of receptionCards) {
+      expect(card.closest('[data-compact-lane]')).toBeNull();
+    }
+    // 执行层不在稀疏层级名单里，始终整行
+    expect(screen.getByLabelText('执行层 的对话窗口').closest('[data-compact-lane]')).toBeNull();
+    // 规划层仍是唯一的稀疏层 → 保留在并排容器里
+    expect(
+      screen.getByLabelText('PM1 规划层 的对话窗口').closest('[data-compact-lane]'),
+    ).not.toBeNull();
+  });
+
+  it('并排后层级顺序不变：接待层仍在规划层之前', () => {
+    render(
+      <TeamMultiLayerCardWall
+        layers={[
+          makeInstance({ layer: 'pm1', sessionIds: ['s-pm1'] }),
+          makeInstance({ layer: 'reception', sessionIds: ['s-reception'] }),
+        ]}
+      />,
+    );
+
+    expect(
+      isBefore(
+        screen.getByLabelText('接待层 的对话窗口'),
+        screen.getByLabelText('PM1 规划层 的对话窗口'),
+      ),
+    ).toBe(true);
+  });
+
   it('同层多个角色实例各自成卡，不合并', () => {
     render(
       <TeamMultiLayerCardWall
@@ -154,7 +224,9 @@ describe('TeamMultiLayerCardWall', () => {
       />,
     );
 
-    expect(screen.getByTestId('md').textContent).toBe('拆成三个子任务');
+    // 折叠态是一行纯文本预览，不走 markdown 渲染管道
+    expect(screen.getByText('拆成三个子任务')).toBeTruthy();
+    expect(screen.queryByTestId('md')).toBeNull();
   });
 
   it('流式但尚无正文时用角色身份 typing 占位', () => {
@@ -190,8 +262,10 @@ describe('TeamMultiLayerCardWall', () => {
       />,
     );
 
-    expect(screen.getAllByTestId('md')).toHaveLength(1);
-    expect(screen.getByTestId('md').textContent).toBe('第三步：补测试');
+    // 折叠态：最新一条压成一行预览，更早的消息不渲染
+    expect(screen.getByText('第三步：补测试')).toBeTruthy();
+    expect(screen.queryByText('第二步：接接口')).toBeNull();
+    expect(screen.queryByTestId('md')).toBeNull();
   });
 
   it('展开后渲染多轮对话，收起可复原', () => {
@@ -219,8 +293,8 @@ describe('TeamMultiLayerCardWall', () => {
     ]);
 
     fireEvent.click(screen.getByLabelText('收起执行层的对话'));
-    expect(screen.getAllByTestId('md')).toHaveLength(1);
-    expect(screen.getByTestId('md').textContent).toBe('第三步：补测试');
+    expect(screen.queryByTestId('md')).toBeNull();
+    expect(screen.getByText('第三步：补测试')).toBeTruthy();
   });
 
   it('展开态追加渲染流式消息', () => {
@@ -270,14 +344,14 @@ describe('TeamMultiLayerCardWall', () => {
       />,
     );
 
-    // 折叠态：两张卡片各只留最新一条。
-    expect(screen.getAllByTestId('md')).toHaveLength(2);
+    // 折叠态：两张卡片各只留最新一条的一行预览
+    expect(screen.queryAllByTestId('md')).toHaveLength(0);
 
     fireEvent.click(screen.getByText('全部展开'));
     expect(screen.getAllByTestId('md')).toHaveLength(4);
 
     fireEvent.click(screen.getByText('全部收起'));
-    expect(screen.getAllByTestId('md')).toHaveLength(2);
+    expect(screen.queryAllByTestId('md')).toHaveLength(0);
   });
 
   it('「主会话所在层」由数据推导，不跟着点选的层级跑', () => {
@@ -324,7 +398,7 @@ describe('TeamMultiLayerCardWall', () => {
 
     // 卡片没消失，最近一条消息照常渲染
     expect(screen.getByLabelText('前端开发者 的对话窗口')).toBeTruthy();
-    expect(screen.getByTestId('md').textContent).toBe('三步都做完了');
+    expect(screen.getByText('三步都做完了')).toBeTruthy();
     // 终态标识条：图标 + 标签 + 结束时间
     expect(screen.getByLabelText('已完成')).toBeTruthy();
     expect(screen.getByText('已完成')).toBeTruthy();
@@ -377,7 +451,8 @@ describe('TeamMultiLayerCardWall', () => {
     expect(screen.queryByText(/正在生成/)).toBeNull();
     expect(screen.queryByText('执行 正在思考')).toBeNull();
     // 折叠态回落到最后一条正式消息，而不是那条残留的流式内容
-    expect(screen.getAllByTestId('md').map((node) => node.textContent)).toEqual(['做到第二就停了']);
+    expect(screen.getByText('做到第二就停了')).toBeTruthy();
+    expect(screen.queryByTestId('md')).toBeNull();
   });
 
   it('终态优先于「当前角色」—— 已结束的实例不再自称活跃', () => {
@@ -500,7 +575,7 @@ describe('TeamMultiLayerCardWall', () => {
     expect(screen.queryByText('已完成')).toBeNull();
     expect(screen.queryByText(/个已结束/)).toBeNull();
     // 正在生成的回复必须照常可见，不能被终态展示藏起来
-    expect(screen.getByTestId('md').textContent).toBe('新一轮回复');
+    expect(screen.getByText('新一轮回复')).toBeTruthy();
   });
 
   // ─── 卡片内的可操作项：权限处置 / 打开完整会话 ────────────────────────
@@ -663,7 +738,7 @@ describe('TeamMultiLayerCardWall', () => {
     ];
 
     const first = render(<TeamMultiLayerCardWall layers={layers} scopeKey="s-1" />);
-    expect(screen.getAllByTestId('md')).toHaveLength(1);
+    expect(screen.queryAllByTestId('md')).toHaveLength(0);
     fireEvent.click(screen.getByLabelText('展开执行层的对话'));
     expect(screen.getAllByTestId('md')).toHaveLength(2);
     first.unmount();
@@ -675,7 +750,7 @@ describe('TeamMultiLayerCardWall', () => {
 
     // 换一个会话不继承上一个会话的展开态
     render(<TeamMultiLayerCardWall layers={layers} scopeKey="s-2" />);
-    expect(screen.getAllByTestId('md')).toHaveLength(1);
+    expect(screen.queryAllByTestId('md')).toHaveLength(0);
   });
 
   it('不传 scopeKey 时不落盘 —— 内嵌 / 只读场景不污染 localStorage', () => {

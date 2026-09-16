@@ -46,7 +46,7 @@ const DOT_STYLE: CSSProperties = {
 };
 
 const NOTICE_STYLE: CSSProperties = {
-  padding: '12px',
+  padding: '10px',
   borderRadius: 8,
   border: '1px dashed color-mix(in srgb, var(--border-default) 65%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 72%, var(--bg-base))',

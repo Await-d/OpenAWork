@@ -177,7 +177,7 @@ const SECTION_ACTIONS_STYLE: CSSProperties = {
 };
 
 const CARD_PADDING_STYLE: CSSProperties = {
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 72%, transparent)',

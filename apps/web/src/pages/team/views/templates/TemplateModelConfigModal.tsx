@@ -152,7 +152,7 @@ export function TemplateModelConfigModal({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 10,
-            padding: '14px 18px',
+            padding: '10px 12px',
             borderBottom: '1px solid var(--border-subtle)',
           }}
         >
@@ -478,7 +478,7 @@ export function TemplateModelConfigModal({
             display: 'flex',
             justifyContent: 'flex-end',
             gap: 8,
-            padding: '12px 18px',
+            padding: '10px 14px',
             borderTop: '1px solid var(--border-subtle)',
           }}
         >

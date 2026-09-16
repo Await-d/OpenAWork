@@ -70,8 +70,8 @@ const TONE_COLOR: Record<GovernanceTone, string> = {
 
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 14,
-  padding: '14px 16px',
+  gap: 12,
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 58%, transparent)',
   background:

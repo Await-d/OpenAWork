@@ -60,7 +60,6 @@
 .team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__summary-stat {
   align-items: baseline;
   background: color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base));
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   column-gap: var(--spacing-1);
   display: grid;
@@ -132,7 +131,6 @@
 
 .team-v2-root[data-workbench-layout] .team-v2-fusion-side-panel__meta-pill {
   background: var(--bg-surface);
-  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   color: var(--fg-muted);
   flex: 0 1 auto;

@@ -36,14 +36,12 @@ const FEEDBACK_STYLE_BASE = {
 
 const FEEDBACK_STYLE_DANGER = {
   ...FEEDBACK_STYLE_BASE,
-  border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)',
   background: 'color-mix(in oklch, var(--danger) 8%, var(--bg-overlay))',
   color: 'var(--danger)',
 } as const;
 
 const FEEDBACK_STYLE_SUCCESS = {
   ...FEEDBACK_STYLE_BASE,
-  border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
   background: 'color-mix(in oklch, var(--success) 8%, var(--bg-overlay))',
   color: 'var(--success)',
 } as const;
@@ -218,7 +216,7 @@ export function MessagesTab({
       {/* ─── 顶部标题栏 + 筛选器 ─── */}
       <div
         className="team-conv-panel-header"
-        style={{ gap: 12, flexWrap: 'wrap', padding: '14px 20px' }}
+        style={{ gap: 12, flexWrap: 'wrap', padding: '10px 12px' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span
@@ -294,9 +292,8 @@ export function MessagesTab({
             gap: 12,
             alignItems: 'center',
             flexWrap: 'wrap',
-            padding: '12px 16px',
+            padding: '10px 12px',
             borderRadius: 12,
-            border: '1px solid var(--border-subtle)',
             background: 'var(--bg-overlay)',
             boxShadow: 'var(--shadow-sm)',
           }}
@@ -372,11 +369,10 @@ export function MessagesTab({
                 className="team-card-tinted team-message-card-enter"
                 style={{
                   ...PANEL_STYLE,
-                  padding: '14px 16px',
+                  padding: '10px 12px',
                   borderRadius: 12,
                   display: 'grid',
                   gap: 10,
-                  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
                   background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
                   boxShadow: '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
                   transition: 'box-shadow 200ms ease, transform 200ms ease',
@@ -520,7 +516,6 @@ export function MessagesTab({
                             padding: '8px 10px',
                             borderRadius: 6,
                             background: 'var(--bg-base)',
-                            border: '1px solid var(--border-subtle)',
                             fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
                             fontSize: 11.5,
                             lineHeight: 1.6,
@@ -612,8 +607,7 @@ export function MessagesTab({
                       aria-label={`取消跟进 ${card.from}`}
                       className="team-btn-focusable"
                       style={{
-                        background: 'none',
-                        border: '1px solid var(--border-subtle)',
+                        background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
                         borderRadius: 8,
                         cursor: 'pointer',
                         padding: '6px',
@@ -640,8 +634,7 @@ export function MessagesTab({
                     disabled={!canManageSessionEntries}
                     className="team-btn-outline team-btn-focusable"
                     style={{
-                      background: 'none',
-                      border: '1px solid var(--border-subtle)',
+                      background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
                       borderRadius: 8,
                       padding: '4px 10px',
                       color: 'var(--fg-muted)',
@@ -676,7 +669,6 @@ export function MessagesTab({
                 gap: 6,
                 padding: '10px 16px',
                 borderRadius: 10,
-                border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-overlay)',
                 color: 'var(--fg-muted)',
                 fontSize: 12,
@@ -696,7 +688,7 @@ export function MessagesTab({
           <div
             style={{
               ...PANEL_STYLE,
-              padding: '14px 16px',
+              padding: '10px 12px',
               borderRadius: 12,
               display: 'grid',
               gap: 10,
@@ -805,7 +797,7 @@ export function MessagesTab({
             <div
               style={{
                 ...PANEL_STYLE,
-                padding: '14px 16px',
+                padding: '10px 12px',
                 borderRadius: 12,
                 display: 'grid',
                 gap: 10,
@@ -856,7 +848,6 @@ export function MessagesTab({
                       borderRadius: 10,
                       display: 'grid',
                       gap: 4,
-                      border: '1px solid var(--border-default)',
                       background: 'var(--bg-raised)',
                       boxShadow: 'var(--shadow-sm)',
                     }}
@@ -914,7 +905,6 @@ export function MessagesTab({
                                 padding: '6px 8px',
                                 borderRadius: 6,
                                 background: 'var(--bg-base)',
-                                border: '1px solid var(--border-subtle)',
                                 fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
                                 fontSize: 11,
                                 lineHeight: 1.5,

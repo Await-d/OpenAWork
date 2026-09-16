@@ -13,11 +13,13 @@
  * 布局：
  *   - 顶部：层级数 / 实例数 / 消息数 指标 + 全部展开收起
  *   - 主体：层级轨道（左）+ 泳道（右）。一条泳道 = 一个层级，泳道内是该层的角色实例卡片
- *   - 卡片：身份头（实例名 + 层级 + 状态）+ 上游徽章 + 消息区 + 底栏
+ *   - 稀疏层级（接待层 / 规划层，见 COMPACT_LANE_LAYERS）实例 ≤1 时并到同一行各占一半，
+ *     避免墙面顶部出现两大片只放一张卡片的空白行
+ *   - 卡片：身份头（实例名 + 层级 + 条数 + 状态 + 展开）+ 上游来源行 + 消息凹槽 + 终态/动作
  *
  * 卡片两态（固定卡宽 → 窄而高的长方形，泳道内自动折行并排）：
- *   - 折叠（默认）：只展示**最新一条**消息，用于扫视「谁刚说了什么」；
- *     长消息按约 3 行截断，不滚动。
+ *   - 折叠（默认）：只展示**最新一条消息的一行**预览，用于扫视「谁刚说了什么」。
+ *     正文 / 角色标签 / 时间戳这些细节一律不显示，只有展开后才看得到。
  *   - 展开：缩小版 chat 布局 —— assistant 左对齐气泡、用户右对齐气泡，
  *     固定更高的高度 + 独立滚动 + 贴底跟随。
  *   - 展开态按会话分键持久化到 localStorage：刷新 / 重建面板后仍保持
@@ -37,11 +39,13 @@
  *   - 唯一例外：当前会话正在本地流式输出时不判终态（用户可能刚给已结束的
  *     实例发了新消息），见 resolveTerminalStatus 注释
  *
- * 密度：卡片宽度固定（CARD_WIDTH），泳道内 flex-wrap 折行 —— 面板越宽并排越多，
- * 而不是把单张卡片拉宽。这样每张卡始终是同一个「长方形」，视觉节奏稳定。
+ * 密度：卡片以 CARD_WIDTH 为基准宽、泳道内 flex-wrap 折行、剩余宽度等分吸收
+ * （单卡上限 CARD_MAX_WIDTH）—— 面板越宽并排越多，同时卡片自身也会略微变宽，
+ * 不在右侧留出一条空白带。
  *
- * 性能策略：卡片内消息用 TeamMessageBody 渲染（markdown / 事件卡 / JSON），
- * 不挂载 ChatMessageGroupList 那套完整消息机制；折叠态只渲染 1 条，展开态最多渲染
+ * 性能策略：展开态用 TeamMessageBody 渲染（markdown / 事件卡 / JSON），
+ * 不挂载 ChatMessageGroupList 那套完整消息机制；折叠态更省 —— 只渲染一行纯文本预览
+ * （`getTeamMessagePreviewText`，完全不进 markdown 管道），展开态最多渲染
  * 最近 EXPANDED_MESSAGE_LIMIT 条，更早的折叠成一行提示。
  *
  * 滚动：每个卡片是独立滚动容器，贴底逻辑统一走 useStickToBottom ——
@@ -71,7 +75,7 @@ import {
   type LayerMessages,
 } from './team-layer-messages.js';
 import { readCardWallExpandedKeys, writeCardWallExpandedKeys } from './card-wall-expanded-state.js';
-import { TeamMessageBody } from './team-message-content.js';
+import { getTeamMessagePreviewText, TeamMessageBody } from './team-message-content.js';
 import { TeamRoleTypingIndicator } from './TeamRoleTypingIndicator.js';
 import { useStickToBottom } from './use-stick-to-bottom.js';
 
@@ -130,15 +134,37 @@ export interface TeamMultiLayerCardWallProps {
  * 卡片宽度（px）。刻意固定而不拉伸填满：右侧面板本身只有 45% 宽，
  * 固定宽度才能让每张卡稳定呈现「窄而高的长方形」，并让泳道内自动折行并排。
  */
-const CARD_WIDTH = 268;
+const CARD_WIDTH = 336;
+/**
+ * 卡片可伸展到的上限。
+ *
+ * 为什么不是一个硬宽度：面板宽度差异极大（分屏 45% 可能只有 480px，宽屏能到 900px+）。
+ * 写死一个值，窄面板会挤、宽面板会留一大片空白；只写 `flex: 1` 又会让单张卡在一整行里
+ * 被拉成一条宽横幅，失去「窗口」的形状。所以用「基准宽度 + 等分剩余 + 上限」：
+ * 一行放得下几张就放几张，剩下的横向空间由卡片吸收，最多到 320px。
+ */
+const CARD_MAX_WIDTH = 448;
 
-/** 折叠态：消息区最大高度，约 3 行。 */
-const COLLAPSED_BODY_MAX_HEIGHT = 58;
+/**
+ * 折叠态：消息区高度 = **一行**。
+ * 30px = 上下内边距 10px + 正文 1 行（12px × 1.6 ≈ 19px）。
+ * 折叠态只负责回答「谁刚说了什么」，一行足够；正文、角色标签、时间这些细节
+ * 一律留到展开态，卡片因此变得极扁，一屏能放下更多窗口。
+ */
+const COLLAPSED_BODY_HEIGHT = 30;
 /** 展开态：消息区高度与上限 —— 固定高度是为了让展开卡高度一致，读起来像一列 chat 窗。 */
 const EXPANDED_BODY_HEIGHT = 360;
 const EXPANDED_BODY_MAX_HEIGHT = 440;
 /** 展开态最多渲染的消息条数（更早的折叠为一行提示）。 */
 const EXPANDED_MESSAGE_LIMIT = 40;
+
+/**
+ * 实例稀少的层级：接待层与规划层。
+ *
+ * 这两层几乎只会存在一个角色实例（派活的入口 + 拆活的规划），各占一整行会在
+ * 墙的顶部留出两大片空白。它们放在同一行左右并排，纵向上省掉一整行高度。
+ */
+const COMPACT_LANE_LAYERS = new Set(['reception', 'pm1']);
 
 /** 层级深度序 —— 决定泳道从上到下的排列，也是「上下关系」的视觉依据。 */
 const LAYER_DEPTH: Record<string, number> = {
@@ -203,7 +229,6 @@ const METRIC_PILL_STYLE: CSSProperties = {
   gap: 4,
   padding: '2px 8px',
   borderRadius: 'var(--radius-pill, 9999px)',
-  border: '1px solid var(--border-subtle)',
   background: 'var(--bg-overlay)',
   color: 'var(--fg-muted)',
   fontSize: 10,
@@ -211,15 +236,18 @@ const METRIC_PILL_STYLE: CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
 };
 
+/** 批量展开 / 收起按钮：底色与 hover 态由 `.team-v2-control--surface` 提供。 */
 const HEADER_BULK_BUTTON_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
   marginLeft: 'auto',
+  minHeight: 20,
   padding: '3px 9px',
   borderRadius: 'var(--radius-sm, 6px)',
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-surface) 60%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 10,
   fontWeight: 600,
+  lineHeight: 1,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
@@ -229,16 +257,35 @@ const WALL_STYLE: CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   overflowX: 'hidden',
-  padding: '12px var(--spacing-3, 12px) 20px',
+  padding: '7px 7px 10px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 8,
 };
 
 const LANE_STYLE: CSSProperties = {
   display: 'flex',
-  gap: 8,
+  gap: 6,
   alignItems: 'stretch',
+};
+
+/** 紧凑层级的并排行：接待层 + 规划层各占一半宽（见 COMPACT_LANE_LAYERS）。 */
+const COMPACT_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 8,
+  // 窄面板（半宽放不下 ~190px）时自动折回上下两行，不把卡片挤扁。
+  flexWrap: 'wrap',
+};
+
+/**
+ * 并排单元格。basis 取基准卡宽 —— 也就是「两半各自都要放得下一张同宽的卡片」
+ * 才并排：面板不够宽时自动折回上下两行（整行满宽）。这样全墙卡片宽度一致，
+ * 不会出现上半屏 280px、下半屏 560px 的两种卡型。
+ */
+const COMPACT_CELL_STYLE: CSSProperties = {
+  flex: `1 1 ${String(CARD_WIDTH)}px`,
+  minWidth: 0,
 };
 
 const RAIL_STYLE: CSSProperties = {
@@ -269,13 +316,13 @@ const CARD_ROW_STYLE: CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
   alignItems: 'flex-start',
-  gap: 8,
+  gap: 6,
   minWidth: 0,
 };
 
 const LANE_BODY_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 8,
+  gap: 6,
   minWidth: 0,
   flex: 1,
 };
@@ -317,33 +364,46 @@ const LANE_META_STYLE: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+/**
+ * 卡片本体。
+ *
+ * 边界靠「背景层级 + shadow-sm」表达，不描边（描边政策：线是例外，不是默认）——
+ * 直角描边在折叠态只会让 268px 的小卡片显得碎，阴影 + 提亮的表面更能读成「一扇窗口」。
+ */
 const CARD_BASE_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minWidth: 0,
   overflow: 'hidden',
-  borderRadius: 'var(--radius-md, 10px)',
-  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-lg, 12px)',
   background: 'var(--bg-overlay)',
+  boxShadow: 'var(--shadow-sm)',
 };
 
 const CARD_HEADER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '8px 10px',
+  gap: 6,
+  padding: '6px 7px 4px',
   flexShrink: 0,
 };
 
+/**
+ * 身份头按钮（点击聚焦该层级）。
+ *
+ * 内边距 + 负外边距的组合是为了让 hover 时出现的底色是一块贴着内容的小圆角，
+ * 而不是把整个头部条刷亮；负边距保证不因此改变头部的视觉对齐。
+ */
 const CARD_TITLE_BUTTON_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
   minWidth: 0,
   flex: 1,
-  padding: 0,
+  margin: '-2px -4px',
+  padding: '2px 4px',
   border: 'none',
-  background: 'transparent',
+  borderRadius: 'var(--radius-sm, 6px)',
   color: 'inherit',
   textAlign: 'left',
   cursor: 'pointer',
@@ -372,15 +432,21 @@ const CARD_SUB_STYLE: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+/**
+ * 展开 / 收起按钮。
+ *
+ * 刻意不写 background / hover：交给 team 页的通用控件态
+ * （`.team-v2-control` + `--surface` 变体，见 team-runtime.css）统一提供
+ * default / hover / active / focus-visible。内联 background 会压过这些规则，
+ * 一个没有 hover 反馈的图标按钮在密集的卡片墙里等于不可点。
+ */
 const CARD_EXPAND_BUTTON_STYLE: CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
-  width: 20,
-  height: 20,
+  width: 22,
+  height: 22,
   flexShrink: 0,
   borderRadius: 'var(--radius-sm, 6px)',
-  border: '1px solid var(--border-default)',
-  background: 'transparent',
   color: 'var(--fg-muted)',
   fontSize: 10,
   lineHeight: 1,
@@ -394,15 +460,21 @@ const STATUS_DOT_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
+/**
+ * 上游来源行。
+ *
+ * 刻意不做成「底色 + 圆角」的徽章条：它每张卡片都有，做成实心条就在墙面上
+ * 拉出 6 条等宽灰带，比消息本身还抢眼。压成一行细字（谁指向我），关系照样
+ * 一眼可见，卡片重心回到消息。
+ */
 const UPSTREAM_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 5,
-  margin: '0 10px',
-  padding: '3px 7px',
-  borderRadius: 'var(--radius-sm, 6px)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, transparent)',
+  gap: 4,
+  padding: '0 7px',
+  marginBottom: 4,
   fontSize: 10,
+  lineHeight: 1.4,
   color: 'var(--fg-muted)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -415,20 +487,36 @@ const UPSTREAM_ARROW_STYLE: CSSProperties = {
   flexShrink: 0,
 };
 
+/**
+ * 消息区（两态共用的「对话凹槽」）。
+ *
+ * 用比卡片更暗一档的表面把消息圈出来：卡片墙的主体是「谁说了什么」，消息区
+ * 必须有独立表面，否则文字直接浮在卡片底色上，卡片看起来像一块没排版的灰布。
+ * 凹槽本身不描边，靠明度差切分。
+ */
 const CARD_BODY_BASE_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 8,
-  padding: '8px 10px',
+  gap: 6,
+  margin: '0 5px',
+  padding: '5px 6px',
+  borderRadius: 'var(--radius-md, 8px)',
+  background: 'color-mix(in srgb, var(--bg-base) 52%, transparent)',
   overflowX: 'hidden',
   overscrollBehavior: 'contain',
   minHeight: 0,
 };
 
+/**
+ * 折叠态固定高度而非 `max-height`：卡片墙是拿来「扫视」的，折叠卡高矮不齐
+ * 会让整条泳道的底边参差得像没对齐的便签墙。固定高度后同排卡片高度一致，
+ * 露出几行算几行，多出来的部分由下面的渐隐负责收口。
+ */
 const COLLAPSED_BODY_STYLE: CSSProperties = {
   ...CARD_BODY_BASE_STYLE,
-  maxHeight: COLLAPSED_BODY_MAX_HEIGHT,
+  height: COLLAPSED_BODY_HEIGHT,
   overflowY: 'hidden',
+  marginBottom: 6,
 };
 
 const EXPANDED_BODY_STYLE: CSSProperties = {
@@ -436,6 +524,7 @@ const EXPANDED_BODY_STYLE: CSSProperties = {
   height: EXPANDED_BODY_HEIGHT,
   maxHeight: EXPANDED_BODY_MAX_HEIGHT,
   overflowY: 'auto',
+  marginBottom: 8,
 };
 
 const OMITTED_STYLE: CSSProperties = {
@@ -443,7 +532,6 @@ const OMITTED_STYLE: CSSProperties = {
   color: 'var(--fg-subtle)',
   textAlign: 'center',
   padding: '2px 0',
-  borderBottom: '1px dashed var(--border-subtle)',
   flexShrink: 0,
 };
 
@@ -471,17 +559,18 @@ const ENDED_STRIP_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 5,
-  padding: '3px 10px',
-  fontSize: 10.5,
+  margin: '0 5px',
+  padding: '3px 6px',
+  borderRadius: 'var(--radius-sm, 6px)',
+  fontSize: 10,
   fontWeight: 700,
-  borderTop: '1px solid var(--border-subtle)',
   flexShrink: 0,
 };
 
 /** 失败原因 —— 单行省略，完整内容走 title 提示。 */
 const FAILURE_REASON_STYLE: CSSProperties = {
-  padding: '3px 10px 5px',
-  fontSize: 10.5,
+  padding: '3px 7px 0',
+  fontSize: 10,
   lineHeight: 1.4,
   color: 'var(--fg-muted)',
   whiteSpace: 'nowrap',
@@ -499,96 +588,106 @@ const FAILURE_REASON_STYLE: CSSProperties = {
  *   2. 它不是对话内容，是「需要你现在做决定」的告警，贴在卡片固定区域语义更准。
  */
 const PERMISSION_STRIP_STYLE: CSSProperties = {
-  margin: '0 10px 8px',
-  padding: '6px 8px',
+  margin: '0 5px 5px',
+  padding: '5px 6px',
   borderRadius: 'var(--radius-sm, 6px)',
-  border: '1px solid color-mix(in srgb, var(--warning) 34%, var(--border-subtle))',
   background: 'color-mix(in srgb, var(--warning) 8%, transparent)',
   flexShrink: 0,
 };
 
-/** 折叠态的最新消息：左侧一道层级色竖线做归属暗示，不套气泡外壳。 */
+/**
+ * 折叠态的最新消息：**单行**纯文本预览，左侧一道层级色竖线做归属暗示。
+ *
+ * 这里刻意不用 markdown 渲染：折叠态只回答「谁刚说了什么」，一行足够。
+ * 多行内容、角色标签、时间戳一律留到展开态 —— 否则卡片会被撑高，一屏能放的窗口变少。
+ * 文本走 `getTeamMessagePreviewText`（去 markdown 标记 / 归纳 JSON / 截断），
+ * 保证任何形态的消息在单行里都可读。
+ */
 const LATEST_MESSAGE_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 3,
-  paddingLeft: 8,
+  display: 'block',
+  paddingLeft: 6,
   borderLeftWidth: 2,
   borderLeftStyle: 'solid',
+  borderRadius: '2px',
   minWidth: 0,
 };
 
-const LATEST_MESSAGE_ROLE_STYLE: CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: 0.2,
-};
-
 const LATEST_MESSAGE_TEXT_STYLE: CSSProperties = {
-  fontSize: 11.5,
-  lineHeight: 1.5,
+  display: 'block',
+  fontSize: 12,
+  lineHeight: 1.55,
+  color: 'var(--fg-default)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };
 
-/** 展开态的缩小版 chat：气泡按说话人左右分列。 */
+/** 展开态的缩小版 chat：气泡按说话人左右分列，靠明度差而不是描边分形。 */
 const BUBBLE_BASE_STYLE: CSSProperties = {
   display: 'grid',
   gap: 3,
   padding: '6px 9px',
-  borderRadius: 10,
+  borderRadius: 'var(--radius-md, 8px)',
   maxWidth: '92%',
   minWidth: 0,
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'var(--border-subtle)',
-  background: 'color-mix(in srgb, var(--bg-base) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-surface) 62%, transparent)',
 };
 
 const BUBBLE_ASSISTANT_STYLE: CSSProperties = {
   ...BUBBLE_BASE_STYLE,
   justifySelf: 'start',
-  borderRadius: '10px 10px 10px 3px',
+  borderBottomLeftRadius: 'var(--radius-xs, 4px)',
 };
 
 const BUBBLE_USER_STYLE: CSSProperties = {
   ...BUBBLE_BASE_STYLE,
   justifySelf: 'end',
-  borderRadius: '10px 10px 3px 10px',
-  borderColor: 'color-mix(in srgb, var(--accent) 26%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+  borderBottomRightRadius: 'var(--radius-xs, 4px)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
 };
 
 const BUBBLE_ROLE_STYLE: CSSProperties = {
-  fontSize: 10,
+  fontSize: 10.5,
   fontWeight: 700,
   letterSpacing: 0.2,
 };
 
 const BUBBLE_TEXT_STYLE: CSSProperties = {
-  fontSize: 11.5,
-  lineHeight: 1.55,
+  fontSize: 12,
+  lineHeight: 1.6,
 };
 
+/**
+ * 卡片底栏：只放动作，不再放「N 条」（已并入头部副行）。
+ * 卡片动作在折叠态最多一个，实心条底栏换来的是一条空灰带 + 一个重复的「展开」。
+ */
 const CARD_FOOTER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'space-between',
+  justifyContent: 'flex-end',
   gap: 6,
-  padding: '6px 10px',
-  marginTop: 'auto',
-  borderTop: '1px solid var(--border-subtle)',
+  padding: '3px 7px 6px',
   fontSize: 10,
   color: 'var(--fg-muted)',
   flexShrink: 0,
   fontVariantNumeric: 'tabular-nums',
 };
 
+/**
+ * 卡片动作按钮（完整会话 / 回到底部）。
+ * 同样把 background / hover 交给 `.team-v2-control--surface` 统一提供 ——
+ * 内联 background 会压过 hover 规则，按钮就只剩一个「点了没反应」的静态色块。
+ */
 const CARD_ACTION_STYLE: CSSProperties = {
-  padding: '2px 7px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  minHeight: 20,
+  padding: '3px 8px',
   borderRadius: 'var(--radius-sm, 6px)',
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-surface) 60%, transparent)',
-  color: 'var(--fg-default)',
-  fontSize: 10,
+  color: 'var(--fg-muted)',
+  fontSize: 10.5,
   fontWeight: 600,
+  lineHeight: 1,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
@@ -819,16 +918,7 @@ function CardMessage({
             : `color-mix(in srgb, ${identity.color} 55%, transparent)`,
         }}
       >
-        <span
-          style={{
-            ...LATEST_MESSAGE_ROLE_STYLE,
-            color: isUser ? 'var(--fg-muted)' : identity.color,
-          }}
-        >
-          {roleLabel}
-          {streaming ? ' · 正在生成' : ''}
-        </span>
-        <TeamMessageBody message={message} textStyle={LATEST_MESSAGE_TEXT_STYLE} />
+        <span style={LATEST_MESSAGE_TEXT_STYLE}>{getTeamMessagePreviewText(message)}</span>
       </div>
     );
   }
@@ -918,6 +1008,8 @@ function LayerRoleCard({
   // 一次无意义的重新选中（还会顺带切 middle tab、关掉文件编辑器浮层）。
   const openSessionTarget = instance.isActive ? undefined : instance.sessionIds[0];
   const canOpenSession = Boolean(openSessionTarget && onOpenSession);
+  // 「回到底部」只在展开态、有内容、且用户已经上滚离开底部时出现（见 useStickToBottom）。
+  const showPinToBottom = expanded && hasContent && !pinned;
 
   const handleSelect = useCallback(() => {
     onLayerSelect?.(instance.layer);
@@ -935,22 +1027,24 @@ function LayerRoleCard({
 
   const cardStyle: CSSProperties = {
     ...CARD_BASE_STYLE,
-    flex: `0 0 ${String(CARD_WIDTH)}px`,
-    width: CARD_WIDTH,
-    maxWidth: '100%',
+    // 基准宽度 + 等分剩余空间（上限 CARD_MAX_WIDTH）：面板越宽，卡片越舒展。
+    flex: `1 1 ${String(CARD_WIDTH)}px`,
+    maxWidth: CARD_MAX_WIDTH,
+    // 主会话卡片：底色按角色色轻微染色 + 一圈内描边做「当前窗口」的高亮。
+    // 内描边走 boxShadow 而不是 border：它不参与布局，高亮切换时卡片不会跳 1px。
     ...(instance.isActive
       ? {
-          borderColor: `color-mix(in srgb, ${identity.color} 55%, transparent)`,
           background: `color-mix(in srgb, ${identity.color} 6%, var(--bg-overlay))`,
+          boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${identity.color} 26%, transparent), var(--shadow-sm)`,
         }
       : null),
-    // 终态：边框改虚线、底色按状态色轻微染色，和「活着」的卡片区分开。
-    // 刻意不降低不透明度 —— 已结束的实例仍要被阅读，弱化到发灰就本末倒置了。
+    // 终态：底色按状态色轻微染色 + 状态色内描边，和「活着」的卡片区分开。
+    // 刻意不降低不透明度 —— 已结束的实例仍要被阅读，弱化到发灰就本末倒置了；
+    // 也不再用虚线边框 —— 没有 borderWidth 的 dashed 会渲染成浏览器默认的 3px 粗虚线。
     ...(terminalStatus
       ? {
-          borderStyle: 'dashed',
-          borderColor: `color-mix(in srgb, ${tone.color} 36%, var(--border-subtle))`,
-          background: `color-mix(in srgb, ${tone.color} 4%, var(--bg-overlay))`,
+          background: `color-mix(in srgb, ${tone.color} 5%, var(--bg-overlay))`,
+          boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tone.color} 20%, transparent), var(--shadow-sm)`,
         }
       : null),
   };
@@ -969,15 +1063,14 @@ function LayerRoleCard({
             style={{
               display: 'inline-grid',
               placeItems: 'center',
-              width: 22,
-              height: 22,
+              width: 20,
+              height: 20,
               borderRadius: '50%',
               flexShrink: 0,
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: 800,
               color: identity.color,
               background: `color-mix(in srgb, ${identity.color} 18%, var(--bg-surface))`,
-              border: `1px solid color-mix(in srgb, ${identity.color} 42%, transparent)`,
             }}
           >
             {identity.initials}
@@ -986,19 +1079,20 @@ function LayerRoleCard({
             <span style={CARD_NAME_STYLE}>{instance.displayName ?? identity.label}</span>
             <span style={CARD_SUB_STYLE}>
               {identity.code ? `${identity.code} · ` : ''}
-              {identity.label}
+              {identity.label} · {instance.messages.length} 条
             </span>
           </span>
         </button>
         <button
           type="button"
+          className="team-v2-control team-v2-control--surface"
           style={CARD_EXPAND_BUTTON_STYLE}
           onClick={handleToggle}
           aria-expanded={expanded}
           aria-label={`${expanded ? '收起' : '展开'}${instance.displayName ?? identity.label}的对话`}
           title={expanded ? '收起为最新一条' : '展开为对话详情'}
         >
-          {expanded ? '▾' : '▴'}
+          {expanded ? '▴' : '▾'}
         </button>
         {terminalStatus ? (
           // 终态：色点换成图标徽章。一眼能分出「还在跑」的脉冲点和「已经结束」的图标。
@@ -1009,7 +1103,6 @@ function LayerRoleCard({
             style={{
               ...STATUS_GLYPH_STYLE,
               color: tone.color,
-              border: `1px solid color-mix(in srgb, ${tone.color} 45%, transparent)`,
               background: `color-mix(in srgb, ${tone.color} 12%, transparent)`,
             }}
           >
@@ -1036,14 +1129,20 @@ function LayerRoleCard({
         )}
       </header>
 
-      {/* 上游徽章 —— 层级对话的上下关系在这里落地 */}
+      {/* 上游来源 —— 层级对话的上下关系在这里落地（细字一行，不做徽章条） */}
       <div style={UPSTREAM_STYLE}>
-        <span aria-hidden style={UPSTREAM_ARROW_STYLE}>
+        <span
+          aria-hidden
+          style={{
+            ...UPSTREAM_ARROW_STYLE,
+            ...(sourceIdentity ? { color: sourceIdentity.color } : null),
+          }}
+        >
           ↳
         </span>
         {sourceIdentity ? (
           <>
-            <span style={{ color: sourceIdentity.color, fontWeight: 700, flexShrink: 0 }}>
+            <span style={{ color: sourceIdentity.color, fontWeight: 600, flexShrink: 0 }}>
               上游 {sourceIdentity.short}
             </span>
             <span
@@ -1139,19 +1238,26 @@ function LayerRoleCard({
         </div>
       ) : null}
 
-      <footer style={CARD_FOOTER_STYLE}>
-        <span>
-          {instance.messages.length} 条{status === 'streaming' ? ' · 正在生成' : ''}
-        </span>
-        <span style={{ display: 'inline-flex', gap: 4 }}>
-          {expanded && hasContent && !pinned ? (
-            <button type="button" style={CARD_ACTION_STYLE} onClick={pinToBottom}>
+      {/*
+        底栏只在真的有动作时出现：折叠态的「展开」已经在身份头右侧给了一个按钮，
+        底栏再放一个同名按钮只是把同一个动作说两遍，还白白占掉一行高度。
+      */}
+      {showPinToBottom || canOpenSession ? (
+        <footer style={CARD_FOOTER_STYLE}>
+          {showPinToBottom ? (
+            <button
+              type="button"
+              className="team-v2-control team-v2-control--surface"
+              style={CARD_ACTION_STYLE}
+              onClick={pinToBottom}
+            >
               回到底部
             </button>
           ) : null}
           {canOpenSession ? (
             <button
               type="button"
+              className="team-v2-control team-v2-control--surface"
               style={CARD_ACTION_STYLE}
               onClick={handleOpenSession}
               title="在底部面板打开该角色的完整会话"
@@ -1160,11 +1266,8 @@ function LayerRoleCard({
               完整会话
             </button>
           ) : null}
-          <button type="button" style={CARD_ACTION_STYLE} onClick={handleToggle}>
-            {expanded ? '收起' : '展开'}
-          </button>
-        </span>
-      </footer>
+        </footer>
+      ) : null}
     </section>
   );
 }
@@ -1231,7 +1334,6 @@ function LayerLaneRow({
               ...LANE_CODE_STYLE,
               color: lane.identity.color,
               background: `color-mix(in srgb, ${lane.identity.color} 16%, transparent)`,
-              border: `1px solid color-mix(in srgb, ${lane.identity.color} 34%, transparent)`,
             }}
           >
             {lane.identity.code ?? (ordinal === null ? '·' : String(ordinal))}
@@ -1244,6 +1346,11 @@ function LayerLaneRow({
           >
             {lane.identity.label}
           </span>
+          {/*
+            标记刻意保持为同一元素内的纯文本：`getNodeText` 只拼接**直接文本子节点**，
+            一旦拆成 <span> 子元素，「第 N 层」与「主会话所在层」就不再属于同一个文本节点，
+            已有的泳道断言（/第 4 层.*主会话所在层/）会被判空。
+          */}
           <span style={LANE_META_STYLE}>
             {ordinal === null ? '' : `第 ${ordinal} 层 · `}
             {instanceCount} 个角色 · {lane.messageCount} 条
@@ -1287,6 +1394,20 @@ export function TeamMultiLayerCardWall({
   onOpenSession,
 }: TeamMultiLayerCardWallProps): ReactElement {
   const lanes = useMemo(() => buildLanes(layers), [layers]);
+  // 稀疏层级（接待层 / 规划层）单独拎出来并排展示：它们各占一行时，一行里只有
+  // 一张 220px 的卡片，剩下的横向空间全空着，整面墙被拉得很长。
+  const { compactLanes, fullLanes } = useMemo(() => {
+    const compact: LayerLane[] = [];
+    const full: LayerLane[] = [];
+    for (const lane of lanes) {
+      if (COMPACT_LANE_LAYERS.has(lane.layer) && lane.instances.length <= 1) {
+        compact.push(lane);
+      } else {
+        full.push(lane);
+      }
+    }
+    return { compactLanes: compact, fullLanes: full };
+  }, [lanes]);
   // 展开态从 localStorage 还原（按会话分键）——刷新一次就要把刚摆好的阅读态
   // 全部折回折叠态，等于让用户重做一遍。
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(() =>
@@ -1365,9 +1486,11 @@ export function TeamMultiLayerCardWall({
       <div style={HEADER_STYLE}>
         <div style={HEADER_TITLE_STYLE}>
           <span style={HEADER_NAME_STYLE}>角色窗口墙</span>
-          <span style={HEADER_HINT_STYLE}>
-            折叠只看最新一条，展开看完整对话；已结束的角色窗口仍可查阅
-          </span>
+          {/*
+            提示压到一行：右侧面板最窄时只有 ~500px，原来那句 24 字的说明会折成两行，
+            和标题抢视线。折叠/展开的行为在卡片上已经有按钮自解释，这里只留最短的提示。
+          */}
+          <span style={HEADER_HINT_STYLE}>折叠看最新一条 · 展开看完整对话 · 已结束的窗口保留</span>
         </div>
         <div style={METRIC_ROW_STYLE}>
           <span style={METRIC_PILL_STYLE}>{lanes.length} 个层级</span>
@@ -1377,7 +1500,12 @@ export function TeamMultiLayerCardWall({
             <span style={METRIC_PILL_STYLE}>{endedInstanceCount} 个已结束</span>
           ) : null}
           {instanceCount > 0 ? (
-            <button type="button" style={HEADER_BULK_BUTTON_STYLE} onClick={handleToggleAll}>
+            <button
+              type="button"
+              className="team-v2-control team-v2-control--surface"
+              style={HEADER_BULK_BUTTON_STYLE}
+              onClick={handleToggleAll}
+            >
               {allExpanded ? '全部收起' : '全部展开'}
             </button>
           ) : null}
@@ -1391,20 +1519,42 @@ export function TeamMultiLayerCardWall({
             团队开始协作后，这里会为每个角色实例开一个独立的对话窗口。
           </div>
         ) : (
-          lanes.map((lane, index) => (
-            <LayerLaneRow
-              key={lane.layer}
-              lane={lane}
-              isLast={index === lanes.length - 1}
-              activeLayer={activeLayer}
-              expandedKeys={expandedKeys}
-              onToggleExpanded={handleToggleExpanded}
-              onLayerSelect={onLayerSelect}
-              pendingPermissions={pendingPermissions}
-              resolveInlinePermissionActions={resolveInlinePermissionActions}
-              onOpenSession={onOpenSession}
-            />
-          ))
+          <>
+            {compactLanes.length > 0 ? (
+              <div style={COMPACT_ROW_STYLE}>
+                {compactLanes.map((lane, index) => (
+                  <div key={lane.layer} style={COMPACT_CELL_STYLE} data-compact-lane="true">
+                    <LayerLaneRow
+                      lane={lane}
+                      // 并排行下方若还有整行泳道，轨道线要继续往下画。
+                      isLast={fullLanes.length === 0 && index === compactLanes.length - 1}
+                      activeLayer={activeLayer}
+                      expandedKeys={expandedKeys}
+                      onToggleExpanded={handleToggleExpanded}
+                      onLayerSelect={onLayerSelect}
+                      pendingPermissions={pendingPermissions}
+                      resolveInlinePermissionActions={resolveInlinePermissionActions}
+                      onOpenSession={onOpenSession}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {fullLanes.map((lane, index) => (
+              <LayerLaneRow
+                key={lane.layer}
+                lane={lane}
+                isLast={index === fullLanes.length - 1}
+                activeLayer={activeLayer}
+                expandedKeys={expandedKeys}
+                onToggleExpanded={handleToggleExpanded}
+                onLayerSelect={onLayerSelect}
+                pendingPermissions={pendingPermissions}
+                resolveInlinePermissionActions={resolveInlinePermissionActions}
+                onOpenSession={onOpenSession}
+              />
+            ))}
+          </>
         )}
       </div>
     </div>

@@ -14,7 +14,7 @@ const CARD_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  padding: '14px 16px',
+  padding: '10px 12px',
   borderRadius: 10,
   background: 'var(--bg-overlay)',
   transition: 'background 160ms ease',

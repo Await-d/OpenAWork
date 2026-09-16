@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { MiddleTabKey } from '../runtime/tabs/MiddleTabRouter.js';
 import { PRIMARY_TABS, type PrimaryTabKey } from '../runtime/tabs/team-page-v2-tabs.js';
 import { TeamTabIcon } from '../runtime/tabs/team-tab-icons.js';
@@ -57,6 +57,33 @@ export function TeamFusionSidePanel({
   const activeViewLabel = SIDE_PANEL_LEAF_LABELS.get(middleTab) ?? middleTab;
   const runtimeTone: FusionRuntimeTone = failedTaskCount > 0 ? 'failure' : effectiveMode;
   const runtimeLabel = formatRuntimeModeLabel(effectiveMode, failedTaskCount);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  /** 键盘方向键在面板 tab 组内切换（← → 循环，Home / End 到首尾），焦点跟随目标 tab。 */
+  const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = SIDE_PANEL_TABS.map((tab) => tab.key);
+    if (keys.length === 0) return;
+    let nextKey: PrimaryTabKey | null = null;
+    if (event.key === 'ArrowRight') {
+      const currentIndex = activePrimary ? Math.max(keys.indexOf(activePrimary), 0) : -1;
+      nextKey = keys[(currentIndex + 1) % keys.length] ?? null;
+    } else if (event.key === 'ArrowLeft') {
+      const currentIndex = activePrimary ? Math.max(keys.indexOf(activePrimary), 0) : 0;
+      nextKey = keys[(currentIndex - 1 + keys.length) % keys.length] ?? null;
+    } else if (event.key === 'Home') {
+      nextKey = keys[0] ?? null;
+    } else if (event.key === 'End') {
+      nextKey = keys[keys.length - 1] ?? null;
+    }
+    if (!nextKey) return;
+    event.preventDefault();
+    if (nextKey !== activePrimary) {
+      onPrimaryChange(nextKey);
+    }
+    requestAnimationFrame(() => {
+      tabsRef.current?.querySelector<HTMLButtonElement>(`[data-tab-key="${nextKey}"]`)?.focus();
+    });
+  };
 
   return (
     <div
@@ -70,9 +97,11 @@ export function TeamFusionSidePanel({
           <strong>{activeViewLabel}</strong>
         </div>
         <div
+          ref={tabsRef}
           className="team-v2-fusion-side-panel__head-tabs"
           role="tablist"
           aria-label="团队工作台视图"
+          onKeyDown={handleTabsKeyDown}
         >
           {SIDE_PANEL_TABS.map((tab) => (
             <button
@@ -82,6 +111,7 @@ export function TeamFusionSidePanel({
               aria-label={`${tab.label}视图`}
               aria-selected={activePrimary === tab.key}
               className="team-v2-fusion-side-panel__tab"
+              data-tab-key={tab.key}
               data-active={activePrimary === tab.key ? 'true' : 'false'}
               onClick={() => onPrimaryChange(tab.key)}
             >

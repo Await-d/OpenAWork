@@ -67,7 +67,6 @@
   min-height: 0;
   overflow: hidden;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(12px);
 }
@@ -259,7 +258,6 @@
 }
 
 .team-v2-floating-trigger {
-  border: 1px solid color-mix(in srgb, var(--border-default) 58%, transparent);
   box-shadow:
     var(--shadow-md),
     0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
@@ -351,9 +349,8 @@
 
 .team-v2-overview-workbench-map {
   display: grid;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  gap: 10px;
+  padding: 10px;
   border-radius: 12px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, transparent), transparent),
@@ -411,7 +408,6 @@
   min-width: 0;
   min-height: 124px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base));
 }
@@ -430,7 +426,6 @@
   width: 28px;
   height: 28px;
   flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
@@ -483,7 +478,6 @@
   gap: 4px;
   max-width: 100%;
   padding: 3px 6px;
-  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
   color: var(--fg-default);
@@ -793,6 +787,19 @@
   transform: none;
 }
 
+/* 主 tab 横向滚动容器（单行超级栏）：窄屏不折叠，滚动条隐藏，
+   两端内容提示由组件内的渐隐遮罩负责，避免滚动条挤占 28px 高的导航行。
+   Firefox 走 inline 的 scrollbar-width: none，这里兜 WebKit。 */
+.team-tab-bar__tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* 滚动容器会裁掉外扩的 focus ring（overflow 已隐式带上 y 轴），
+   主 tab 的键盘焦点改用内描边，保证「焦点在哪」始终可见。 */
+.team-tab-bar__tab-scroll .team-tab-pill:focus-visible {
+  outline-offset: -2px;
+}
+
 /* role chip：依赖 element `style={{ '--chip-accent': item.accent }}` */
 .team-role-chip {
   transition:
@@ -1039,7 +1046,7 @@
 .team-conversation-message-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
-  gap: 16px;
+  gap: 12px;
   align-items: start;
 }
 
@@ -1128,7 +1135,6 @@
   place-items: center;
   inline-size: calc(var(--spacing-8, 32px) + var(--spacing-2, 8px));
   block-size: calc(var(--spacing-8, 32px) + var(--spacing-2, 8px));
-  border: 1px solid var(--accent-border);
   border-radius: var(--radius-lg);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), transparent),
@@ -1149,7 +1155,6 @@
   min-block-size: calc(var(--spacing-5, 20px) + var(--spacing-1, 4px));
   max-inline-size: min(100%, 420px);
   padding: 0 var(--spacing-3, 12px);
-  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
   color: var(--fg-muted);
@@ -1190,7 +1195,6 @@
   gap: var(--spacing-2, 8px);
   min-block-size: 132px;
   padding: var(--spacing-4, 16px);
-  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: linear-gradient(
     180deg,
@@ -1205,7 +1209,6 @@
   place-items: center;
   inline-size: calc(var(--spacing-6, 24px) + var(--spacing-2, 8px));
   block-size: calc(var(--spacing-6, 24px) + var(--spacing-2, 8px));
-  border: 1px solid var(--aux-border);
   border-radius: var(--radius-md);
   background: var(--aux-subtle);
   color: var(--aux);
@@ -1245,7 +1248,6 @@
 }
 
 .team-welcome-screen__primary {
-  border: 1px solid color-mix(in srgb, var(--fg-strong) 12%, transparent);
   background: var(--accent);
   color: var(--fg-on-accent);
   box-shadow: var(--shadow-glow);
@@ -1256,7 +1258,6 @@
 }
 
 .team-welcome-screen__secondary {
-  border: 1px solid var(--border-default);
   background: var(--bg-surface);
   color: var(--fg-default);
 }
@@ -1280,7 +1281,6 @@
   min-block-size: 30px;
   max-inline-size: 100%;
   padding: 0 var(--spacing-3, 12px);
-  border: 1px solid var(--accent-border);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-overlay));
   color: var(--fg-default);
@@ -1306,7 +1306,7 @@
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  gap: 16px;
+  gap: 12px;
   overflow: hidden;
 }
 
@@ -1345,7 +1345,7 @@
 
 .team-v2-root[data-breakpoint='mobile'] .team-conversation-empty-state {
   max-width: 100%;
-  padding: 20px 16px;
+  padding: 16px 14px;
 }
 
 .team-v2-root[data-breakpoint='mobile'] .team-welcome-screen {
@@ -1405,7 +1405,7 @@
 
   .team-conversation-empty-state {
     max-width: 100%;
-    padding: 20px 16px;
+    padding: 16px 14px;
   }
 
   .team-welcome-screen__cards {

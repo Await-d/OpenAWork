@@ -43,13 +43,13 @@ const MODAL_STYLE: CSSProperties = {
   boxShadow: 'var(--shadow-lg)',
   padding: 22,
   display: 'grid',
-  gap: 16,
+  gap: 12,
 };
 
 const HERO_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 14,
+  gap: 12,
 };
 
 const ICON_BADGE_STYLE: CSSProperties = {

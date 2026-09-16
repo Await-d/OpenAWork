@@ -21,7 +21,7 @@ const STEP_ORDER: WizardStep[] = ['spec_draft', 'clarifying', 'plan_ready', 'tas
 
 const WIZARD_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 16,
+  gap: 12,
   padding: 16,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',

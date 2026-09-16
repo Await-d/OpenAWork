@@ -829,7 +829,7 @@ export function NewTeamSessionModal({
                               style={{
                                 display: 'grid',
                                 gap: 10,
-                                padding: '12px 14px',
+                                padding: '10px 12px',
                                 borderRadius: 12,
                                 background:
                                   'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',

@@ -28,48 +28,49 @@ const BAR_STYLE: CSSProperties = {
   maxWidth: '100%',
 };
 
+/**
+ * 圆角 / 间距通过 CSS 变量控制，让同一组件适配两套布局视觉语言：
+ *   - classic（默认 fallback=0）：demo 式直角 chip / 按钮组；
+ *   - fusion：圆角 pill / 独立按钮组（变量在 team-runtime-fusion-superbar.css 覆盖）。
+ *
+ * 视觉基调：**无描边**——状态与操作统一用极淡语义底色表达，
+ * 不再给每个 chip / 按钮套 1px border（页面整体去描边风格）。
+ */
 const CHIP_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
   minHeight: 22,
-  padding: '0 7px',
-  borderRadius: 0,
-  border: '1px solid var(--border-default)',
+  padding: '0 9px',
+  borderRadius: 'var(--team-status-chip-radius, 0)',
   color: 'var(--fg-faint)',
   fontSize: 10,
   fontWeight: 650,
   whiteSpace: 'nowrap',
   flexShrink: 0,
-  background: 'transparent',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
 };
 
 const BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   minHeight: 22,
-  padding: '0 8px',
-  borderRadius: 0,
+  padding: '0 10px',
+  borderRadius: 'var(--team-status-btn-radius, 0)',
   fontSize: 10.5,
   fontWeight: 650,
   flexShrink: 0,
   whiteSpace: 'nowrap',
-  border: '1px solid var(--border-default)',
-  borderRightWidth: 0,
-  background: 'var(--bg-base)',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-muted)',
   cursor: 'pointer',
-};
-
-const BTN_LAST_STYLE: CSSProperties = {
-  ...BTN_STYLE,
-  borderRightWidth: 1,
 };
 
 const ACTIONS_WRAP: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 0,
+  gap: 'var(--team-status-actions-gap, 3px)',
   marginLeft: 4,
   flexShrink: 0,
   minWidth: 0,
@@ -95,7 +96,7 @@ function statusChip(paused?: boolean, running = 0): { label: string; style: CSSP
       style: {
         ...CHIP_STYLE,
         color: 'var(--warning)',
-        borderColor: 'color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
       },
     };
   }
@@ -105,7 +106,7 @@ function statusChip(paused?: boolean, running = 0): { label: string; style: CSSP
       style: {
         ...CHIP_STYLE,
         color: 'var(--success)',
-        borderColor: 'color-mix(in srgb, var(--success) 30%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--success) 14%, transparent)',
       },
     };
   }
@@ -165,7 +166,7 @@ export function TeamStatusBar({
           style={{
             ...CHIP_STYLE,
             color: 'var(--danger)',
-            borderColor: 'color-mix(in srgb, var(--danger) 30%, var(--border-default))',
+            background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
           }}
         >
           失败 <b style={{ color: 'inherit', fontWeight: 700 }}>{failed}</b>
@@ -218,8 +219,7 @@ export function TeamStatusBar({
                 active: Boolean(focusMode),
               });
             }
-            return actions.map((action, index) => {
-              const isLast = index === actions.length - 1;
+            return actions.map((action) => {
               return (
                 <button
                   key={action.key}
@@ -227,13 +227,13 @@ export function TeamStatusBar({
                   onClick={action.onClick}
                   disabled={busy}
                   style={{
-                    ...(isLast ? BTN_LAST_STYLE : BTN_STYLE),
+                    ...BTN_STYLE,
                     color: action.color ?? 'var(--fg-muted)',
                     cursor: busy ? 'not-allowed' : 'pointer',
                     opacity: busy ? 0.6 : 1,
                     ...(action.active
                       ? {
-                          background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-base))',
+                          background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
                           color: 'var(--fg-strong)',
                         }
                       : null),

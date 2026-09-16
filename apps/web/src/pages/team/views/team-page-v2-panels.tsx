@@ -33,8 +33,8 @@ const FOCUS_BANNER_ROW_STYLE: CSSProperties = {
 const FOCUS_BANNER_ACTION_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
-  background: 'transparent',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 700,
@@ -43,8 +43,7 @@ const FOCUS_BANNER_ACTION_STYLE: CSSProperties = {
 
 const FOCUS_BANNER_PRIMARY_ACTION_STYLE: CSSProperties = {
   ...FOCUS_BANNER_ACTION_STYLE,
-  border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--accent)',
 };
 
@@ -82,7 +81,7 @@ const SUMMARY_GRID_STYLE: CSSProperties = {
 const SUMMARY_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
@@ -98,8 +97,8 @@ const SHARED_ACTION_ROW_STYLE: CSSProperties = {
 const SHARED_ACTION_STYLE: CSSProperties = {
   padding: '7px 12px',
   borderRadius: 9,
-  border: '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)',
-  background: 'transparent',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 12,
   fontWeight: 700,
@@ -108,8 +107,7 @@ const SHARED_ACTION_STYLE: CSSProperties = {
 
 const SHARED_PRIMARY_ACTION_STYLE: CSSProperties = {
   ...SHARED_ACTION_STYLE,
-  border: '1px solid color-mix(in srgb, var(--accent) 46%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--accent)',
 };
 
@@ -123,8 +121,7 @@ const CURRENT_SESSION_PILL_STYLE: CSSProperties = {
   maxWidth: 280,
   padding: '4px 11px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 11,
   whiteSpace: 'nowrap',
@@ -151,8 +148,7 @@ const CURRENT_SESSION_META_PILL_STYLE: CSSProperties = {
   gap: 4,
   padding: '4px 10px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 74%, var(--bg-base))',
+  background: 'color-mix(in srgb, var(--fg-muted) 8%, transparent)',
   color: 'var(--fg-muted)',
   fontSize: 10,
   fontWeight: 600,
@@ -222,8 +218,7 @@ const SUPERBAR_CONTEXT_STYLE: CSSProperties = {
   maxWidth: 360,
   padding: '4px 10px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
   color: 'var(--fg-default)',
   fontSize: 10,
   fontWeight: 600,
@@ -542,7 +537,7 @@ export function TeamSharedConversationPanel({
               <div
                 data-testid="team-shared-conversation-latest-output"
                 style={{
-                  padding: '12px 14px',
+                  padding: '10px 12px',
                   borderRadius: 10,
                   border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
                   background: 'color-mix(in srgb, var(--bg-overlay) 72%, var(--bg-base))',
@@ -602,7 +597,7 @@ export function IdleHint() {
     <div
       style={{
         display: 'grid',
-        gap: 14,
+        gap: 12,
         padding: '24px 20px',
         margin: '16px 0',
         borderRadius: 14,

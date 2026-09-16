@@ -1475,7 +1475,7 @@ export function TeamConversationView({
                 // drawer 等）。
                 imageGeneration: false,
                 skillRecommendation: false,
-                yoloMode: false,
+                permissionMode: false,
                 dialogueModeToggle: false,
                 // v1.5：放开这些通用对话能力，与 chat 体验对齐。
                 multiSelect: true,

@@ -6,6 +6,11 @@ import {
 } from '../../../hooks/recoverable-read-model.js';
 import { useRecoverableRetryController } from '../../../hooks/use-recoverable-retry.js';
 import { isPathWithinRoot, rebasePath } from '../../../../../utils/workspace-path.js';
+import {
+  EMPTY_EXPANDED_DIRS,
+  normalizeExpandedDirsSessionKey,
+  useUIStateStore,
+} from '../../../../../stores/ui/uiState.js';
 
 const TEAM_SIDEBAR_FILE_TREE_RETRY_BASE_MS = 2_000;
 const TEAM_SIDEBAR_FILE_TREE_RETRY_MAX_MS = 30_000;
@@ -122,6 +127,7 @@ function renameTeamSidebarFileTreeNode(
 
 interface UseTeamSidebarFileTreeStateOptions {
   active: boolean;
+  expandedDirsSessionKey: string | null;
   gatewayUrl: string;
   token: string | null;
   workspacePath?: string | null;
@@ -148,12 +154,25 @@ export function useTeamSidebarFileTreeState(
     [options.gatewayUrl],
   );
   const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const treeNodesRef = useRef<FileTreeNode[]>([]);
   const currentRootRef = useRef<string | null>(null);
+  const treeExpandedSessionKey = normalizeExpandedDirsSessionKey(options.expandedDirsSessionKey);
+  const expandedDirsArr = useUIStateStore(
+    (state) => state.expandedDirsBySession[treeExpandedSessionKey] ?? EMPTY_EXPANDED_DIRS,
+  );
+  const setExpandedDirsForSession = useUIStateStore((state) => state.setExpandedDirsForSession);
+  const expandedDirs = useMemo(() => new Set(expandedDirsArr), [expandedDirsArr]);
+  const setExpandedDirs = useCallback(
+    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+      const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
+      setExpandedDirsForSession(treeExpandedSessionKey, Array.from(next));
+    },
+    [expandedDirsArr, setExpandedDirsForSession, treeExpandedSessionKey],
+  );
+  const previousExpandedSessionKeyRef = useRef(treeExpandedSessionKey);
   const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   useEffect(() => {
@@ -173,7 +192,6 @@ export function useTeamSidebarFileTreeState(
       currentRootRef.current = null;
       resetRetry();
       setTreeNodes([]);
-      setExpandedDirs(new Set());
       setTreeLoading(false);
       setTreeError(null);
       return () => {
@@ -181,12 +199,50 @@ export function useTeamSidebarFileTreeState(
       };
     }
 
-    const rootChanged = currentRootRef.current !== options.workspacePath;
+    const previousRoot = currentRootRef.current;
+    const sessionChanged = previousExpandedSessionKeyRef.current !== treeExpandedSessionKey;
+    previousExpandedSessionKeyRef.current = treeExpandedSessionKey;
+    const rootChanged = previousRoot !== options.workspacePath;
     currentRootRef.current = options.workspacePath;
     if (rootChanged) {
-      setExpandedDirs(new Set());
       setTreeNodes([]);
+      // 仅同一会话内换工作区时清空；换会话或重新挂载（previousRoot 为 null）保留目标桶。
+      if (!sessionChanged && previousRoot !== null) {
+        setExpandedDirs(new Set());
+      }
     }
+
+    const restoreExpandedChildren = async (rootNodes: FileTreeNode[]): Promise<void> => {
+      const rootPath = options.workspacePath;
+      const token = options.token;
+      const wantedDirs =
+        useUIStateStore.getState().expandedDirsBySession[treeExpandedSessionKey] ?? [];
+      if (!rootPath || !token || wantedDirs.length === 0) {
+        setTreeNodes(rootNodes);
+        return;
+      }
+      const orderedDirs = [...wantedDirs].sort(
+        (left, right) => left.split('/').length - right.split('/').length,
+      );
+      let nextNodes = rootNodes;
+      for (const dirPath of orderedDirs) {
+        if (cancelled) {
+          return;
+        }
+        if (!isPathWithinRoot(dirPath, rootPath)) {
+          continue;
+        }
+        const childResult = await workspaceClient.fetchTreeResult(token, dirPath, { depth: 1 });
+        if (cancelled) {
+          return;
+        }
+        if (!childResult.ok) {
+          continue;
+        }
+        nextNodes = injectChildren(nextNodes, dirPath, childResult.nodes);
+      }
+      setTreeNodes(nextNodes);
+    };
 
     const hasCachedTree = treeNodesRef.current.length > 0;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -235,9 +291,9 @@ export function useTeamSidebarFileTreeState(
         }
 
         resetRetry();
-        setTreeNodes(result.nodes);
         setTreeLoading(false);
         setTreeError(null);
+        void restoreExpandedChildren(result.nodes);
       });
 
     return () => {
@@ -251,6 +307,7 @@ export function useTeamSidebarFileTreeState(
     refreshTick,
     resetRetry,
     scheduleRetry,
+    treeExpandedSessionKey,
     workspaceClient,
   ]);
 

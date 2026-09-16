@@ -2,6 +2,7 @@
 
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUIStateStore } from '../../../../../stores/ui/uiState.js';
 import {
   computeTeamSidebarFileTreeRetryDelay,
   formatTeamSidebarFileTreeLoadError,
@@ -10,6 +11,7 @@ import {
 
 const GATEWAY_URL = 'https://gw.test';
 const ROOT_PATH = '/workspace/demo';
+const OTHER_ROOT_PATH = '/workspace/other';
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -26,6 +28,10 @@ function resolveRequestUrl(input: RequestInfo | URL): string {
     return input.toString();
   }
   return input.url;
+}
+
+function requestTreePath(input: RequestInfo | URL): string {
+  return new URL(resolveRequestUrl(input)).searchParams.get('path') ?? '';
 }
 
 async function flushAsyncWork(rounds = 8): Promise<void> {
@@ -45,6 +51,7 @@ function setNavigatorOnline(value: boolean): void {
 
 beforeEach(() => {
   localStorage.clear();
+  useUIStateStore.setState({ expandedDirsBySession: {} });
   setNavigatorOnline(true);
 });
 
@@ -112,6 +119,7 @@ describe('useTeamSidebarFileTreeState', () => {
     const { result } = renderHook(() =>
       useTeamSidebarFileTreeState({
         active: true,
+        expandedDirsSessionKey: 'session-a',
         gatewayUrl: GATEWAY_URL,
         token: 'token-1',
         workspacePath: ROOT_PATH,
@@ -163,6 +171,7 @@ describe('useTeamSidebarFileTreeState', () => {
     const { result } = renderHook(() =>
       useTeamSidebarFileTreeState({
         active: true,
+        expandedDirsSessionKey: 'session-a',
         gatewayUrl: GATEWAY_URL,
         token: 'token-1',
         workspacePath: ROOT_PATH,
@@ -187,5 +196,219 @@ describe('useTeamSidebarFileTreeState', () => {
 
     expect(result.current.treeNodes[0]?.name).toBe('src-new');
     expect(result.current.treeError).toBeNull();
+  });
+
+  it('同一会话展开状态在卸载重挂后从 store 恢复', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url.startsWith(`${GATEWAY_URL}/workspace/tree?`)) {
+          const path = requestTreePath(input);
+          if (path === ROOT_PATH) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src`, name: 'src', type: 'directory' }],
+            });
+          }
+          if (path === `${ROOT_PATH}/src`) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src/index.ts`, name: 'index.ts', type: 'file' }],
+            });
+          }
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const first = renderHook(() =>
+      useTeamSidebarFileTreeState({
+        active: true,
+        expandedDirsSessionKey: 'session-a',
+        gatewayUrl: GATEWAY_URL,
+        token: 'token-1',
+        workspacePath: ROOT_PATH,
+      }),
+    );
+
+    await flushAsyncWork();
+    act(() => {
+      first.result.current.handleToggleDir(`${ROOT_PATH}/src`);
+    });
+    await flushAsyncWork(40);
+
+    expect(first.result.current.expandedDirs.has(`${ROOT_PATH}/src`)).toBe(true);
+    expect(first.result.current.treeNodes[0]?.children?.[0]?.name).toBe('index.ts');
+
+    first.unmount();
+    expect(useUIStateStore.getState().expandedDirsBySession['session-a']).toContain(
+      `${ROOT_PATH}/src`,
+    );
+
+    const second = renderHook(() =>
+      useTeamSidebarFileTreeState({
+        active: true,
+        expandedDirsSessionKey: 'session-a',
+        gatewayUrl: GATEWAY_URL,
+        token: 'token-1',
+        workspacePath: ROOT_PATH,
+      }),
+    );
+
+    await flushAsyncWork(40);
+    expect(second.result.current.expandedDirs.has(`${ROOT_PATH}/src`)).toBe(true);
+    expect(second.result.current.treeNodes[0]?.children?.[0]?.name).toBe('index.ts');
+  });
+
+  it('不同会话的展开状态互不串味', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url.startsWith(`${GATEWAY_URL}/workspace/tree?`)) {
+          const path = requestTreePath(input);
+          if (path === ROOT_PATH) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src`, name: 'src', type: 'directory' }],
+            });
+          }
+          if (path === `${ROOT_PATH}/src`) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src/index.ts`, name: 'index.ts', type: 'file' }],
+            });
+          }
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const first = renderHook(() =>
+      useTeamSidebarFileTreeState({
+        active: true,
+        expandedDirsSessionKey: 'session-a',
+        gatewayUrl: GATEWAY_URL,
+        token: 'token-1',
+        workspacePath: ROOT_PATH,
+      }),
+    );
+
+    await flushAsyncWork();
+    act(() => {
+      first.result.current.handleToggleDir(`${ROOT_PATH}/src`);
+    });
+    await flushAsyncWork(40);
+    expect(first.result.current.expandedDirs.has(`${ROOT_PATH}/src`)).toBe(true);
+    first.unmount();
+
+    const second = renderHook(() =>
+      useTeamSidebarFileTreeState({
+        active: true,
+        expandedDirsSessionKey: 'session-b',
+        gatewayUrl: GATEWAY_URL,
+        token: 'token-1',
+        workspacePath: ROOT_PATH,
+      }),
+    );
+
+    await flushAsyncWork(40);
+    expect(second.result.current.expandedDirs.size).toBe(0);
+    expect(second.result.current.treeNodes[0]?.children).toBeUndefined();
+    expect(useUIStateStore.getState().expandedDirsBySession['session-a']).toContain(
+      `${ROOT_PATH}/src`,
+    );
+  });
+
+  it('同一会话内切换工作区会清空展开桶', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url.startsWith(`${GATEWAY_URL}/workspace/tree?`)) {
+          const path = requestTreePath(input);
+          if (path === ROOT_PATH) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src`, name: 'src', type: 'directory' }],
+            });
+          }
+          if (path === `${ROOT_PATH}/src`) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src/index.ts`, name: 'index.ts', type: 'file' }],
+            });
+          }
+          if (path === OTHER_ROOT_PATH) {
+            return jsonResponse({
+              nodes: [{ path: `${OTHER_ROOT_PATH}/lib`, name: 'lib', type: 'directory' }],
+            });
+          }
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ workspacePath }: { workspacePath: string }) =>
+        useTeamSidebarFileTreeState({
+          active: true,
+          expandedDirsSessionKey: 'session-a',
+          gatewayUrl: GATEWAY_URL,
+          token: 'token-1',
+          workspacePath,
+        }),
+      { initialProps: { workspacePath: ROOT_PATH } },
+    );
+
+    await flushAsyncWork();
+    act(() => {
+      result.current.handleToggleDir(`${ROOT_PATH}/src`);
+    });
+    await flushAsyncWork(40);
+    expect(result.current.expandedDirs.has(`${ROOT_PATH}/src`)).toBe(true);
+
+    rerender({ workspacePath: OTHER_ROOT_PATH });
+    await flushAsyncWork(40);
+
+    expect(result.current.expandedDirs.size).toBe(0);
+    expect(useUIStateStore.getState().expandedDirsBySession['session-a']).toBeUndefined();
+    expect(result.current.treeNodes[0]?.name).toBe('lib');
+  });
+
+  it('桶中已展开目录会在根节点加载后自动拉取并渲染子节点', async () => {
+    useUIStateStore.setState({
+      expandedDirsBySession: { 'session-a': [`${ROOT_PATH}/src`] },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url.startsWith(`${GATEWAY_URL}/workspace/tree?`)) {
+          const path = requestTreePath(input);
+          if (path === ROOT_PATH) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src`, name: 'src', type: 'directory' }],
+            });
+          }
+          if (path === `${ROOT_PATH}/src`) {
+            return jsonResponse({
+              nodes: [{ path: `${ROOT_PATH}/src/index.ts`, name: 'index.ts', type: 'file' }],
+            });
+          }
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useTeamSidebarFileTreeState({
+        active: true,
+        expandedDirsSessionKey: 'session-a',
+        gatewayUrl: GATEWAY_URL,
+        token: 'token-1',
+        workspacePath: ROOT_PATH,
+      }),
+    );
+
+    await flushAsyncWork(40);
+    expect(result.current.expandedDirs.has(`${ROOT_PATH}/src`)).toBe(true);
+    expect(result.current.treeNodes[0]?.children?.[0]?.name).toBe('index.ts');
   });
 });

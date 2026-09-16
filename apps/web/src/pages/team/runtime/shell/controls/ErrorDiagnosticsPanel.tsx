@@ -1,10 +1,14 @@
 /**
  * 错误诊断折叠面板
  *
- * 当团队任务存在失败项时，在主面板顶部展示可折叠的错误诊断简报：
+ * 当团队任务存在失败项时，由 TeamPageV2 注入对话流尾部（afterMessages，
+ * 跟随消息流渲染在消息末尾、composer 上方）展示可折叠的错误诊断简报：
  *   - 默认折叠为单行摘要（"29 个任务失败"）
  *   - 展开后按错误类型分组（API 超时 / 代码生成语法错误 / 工具绑定冲突 等）
  *   - 提供「一键重试失败任务」按钮（断点续传语义）
+ *
+ * 注意：不再挂在主面板最顶部（原先会压在顶栏 tab 栏之上、挤占顶部空间）；
+ * 兜底的失败提醒由顶栏「任务」主 tab 的红色徽标承担。
  *
  * 错误分类策略：
  *   - 从 handoff 的 state='failed' 条目 + session 的 failedStatus 推断
@@ -21,9 +25,13 @@ const PANEL_ROOT_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   margin: '0 0 8px',
+  // 渲染在对话流尾部（内容列内）：宽度对齐对话内容列（1080），
+  // 超宽屏下不再随内容列无限拉伸。
+  width: '100%',
+  maxWidth: 1080,
+  alignSelf: 'center',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--complement) 35%, transparent)',
-  background: 'color-mix(in srgb, var(--complement) 6%, var(--bg-overlay))',
+  background: 'color-mix(in srgb, var(--complement) 10%, var(--bg-overlay))',
   overflow: 'hidden',
   flexShrink: 0,
 };
@@ -140,10 +148,10 @@ const RETRY_BUTTON_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
-  padding: '6px 14px',
+  padding: '6px 12px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+  border: 'none',
+  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
   color: 'var(--accent)',
   fontSize: 11,
   fontWeight: 700,

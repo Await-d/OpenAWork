@@ -10,7 +10,7 @@ import {
 const ROOT_STYLE: CSSProperties = {
   display: 'grid',
   gap: 10,
-  padding: '12px 14px',
+  padding: '10px 12px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 24%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
   flexShrink: 0,

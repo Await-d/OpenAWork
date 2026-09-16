@@ -162,11 +162,11 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: 12,
           minHeight: 0,
           flex: 1,
           overflow: 'hidden',
-          padding: '16px 20px',
+          padding: '10px 12px',
         }}
       >
         {/* 流水线 + 密度切换 */}
@@ -177,7 +177,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
             gridTemplateColumns: isNarrowLayout ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) auto',
             alignItems: 'flex-start',
             gap: 12,
-            padding: '16px 20px',
+            padding: '10px 12px',
             flexShrink: 0,
           }}
         >
@@ -216,7 +216,7 @@ export function LayerFlowView({ selectedTeam = null }: LayerFlowViewProps) {
                   minHeight: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 16,
+                  gap: 12,
                   overflow: 'hidden',
                 }
               : undefined

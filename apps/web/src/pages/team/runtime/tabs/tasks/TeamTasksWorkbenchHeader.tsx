@@ -33,7 +33,7 @@ interface TeamTasksEmptyBoardStateProps {
 const HERO_STYLE: CSSProperties = {
   display: 'grid',
   gap: 12,
-  padding: '14px 16px',
+  padding: '10px 12px',
   borderRadius: 12,
   border: '1px solid var(--border-default)',
   background:

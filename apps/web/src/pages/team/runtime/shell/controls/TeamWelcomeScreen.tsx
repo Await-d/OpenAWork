@@ -85,7 +85,7 @@ export function TeamWelcomeScreen({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '24px 24px 16px',
-        gap: 20,
+        gap: 12,
         maxWidth: 860,
         width: '100%',
       }}
@@ -255,7 +255,7 @@ export function TeamWelcomeScreen({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8,
-                padding: '14px 13px',
+                padding: '10px 12px',
                 borderRadius: 12,
                 border: '1px solid var(--border-subtle)',
                 background:

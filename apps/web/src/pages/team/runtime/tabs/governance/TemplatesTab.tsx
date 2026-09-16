@@ -96,7 +96,7 @@ function TemplateCard({
           display: 'grid',
           gridTemplateColumns: 'auto 1fr auto',
           gap: 10,
-          padding: '12px 14px',
+          padding: '10px 12px',
           border: 'none',
           background: 'transparent',
           cursor: 'pointer',
