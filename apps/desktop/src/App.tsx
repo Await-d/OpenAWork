@@ -11,6 +11,12 @@ import {
   readThemeStyle as storageReadThemeStyle,
   readThemeMode as storageReadThemeMode,
 } from '../../web/src/stores/settings/theme-storage.js';
+import {
+  DEFAULT_FILE_ICON_THEME,
+  FileIconThemeProvider,
+  isFileIconThemeId,
+  loadMaterialIconManifest,
+} from '@openAwork/shared-ui';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
 import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
 import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
@@ -315,6 +321,10 @@ export default function App() {
   const themeMode = useDisplayPreferencesStore((state) => state.themeMode);
   const storeThemeStyle = useDisplayPreferencesStore((state) => state.themeStyle);
   const themeStyle = displayPreferencesHydrated ? storeThemeStyle : initialThemeStyle;
+  const fileIconTheme = useDisplayPreferencesStore((state) => state.fileIconTheme);
+  const effectiveFileIconTheme = isFileIconThemeId(fileIconTheme)
+    ? fileIconTheme
+    : DEFAULT_FILE_ICON_THEME;
   const accessToken = useAuthStore((state) => state.accessToken);
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -322,6 +332,12 @@ export default function App() {
 
   useEffect(() => {
     console.log('[App] 已挂载, BUILD_V2');
+  }, []);
+
+  useEffect(() => {
+    void loadMaterialIconManifest().catch((error: unknown) => {
+      console.warn('文件图标清单预热失败，图标将降级为通用轮廓', error);
+    });
   }, []);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
@@ -417,7 +433,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <FileIconThemeProvider theme={effectiveFileIconTheme} mode={theme}>
       <CloseConfirmDialog />
       <AboutDialog />
       <NotificationListener />
@@ -459,6 +475,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/sessions" replace />} />
         </Routes>
       </Layout>
-    </>
+    </FileIconThemeProvider>
   );
 }

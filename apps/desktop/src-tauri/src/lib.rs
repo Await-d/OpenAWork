@@ -413,6 +413,16 @@ fn gateway_data_dir(app: &tauri::AppHandle, settings: &PersistedSettings) -> Pat
     effective_data_root(app, settings).join(GATEWAY_SUBDIR)
 }
 
+/// Playwright 浏览器目录：受管浏览器（用户手动安装或后续引导下载）的每用户可写位置。
+/// 外部已注入 `PLAYWRIGHT_BROWSERS_PATH` 时沿用外部值（开发机常见），否则落到
+/// `<effective_data_root>/browsers`。
+fn playwright_browsers_dir(app: &tauri::AppHandle, settings: &PersistedSettings) -> PathBuf {
+    match std::env::var("PLAYWRIGHT_BROWSERS_PATH") {
+        Ok(path) if !path.trim().is_empty() => PathBuf::from(path),
+        _ => effective_data_root(app, settings).join("browsers"),
+    }
+}
+
 /// 旧版本的 settings.json 位置（`app_config_dir()/settings.json`），仅用于一次性迁移。
 fn legacy_settings_file(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path()
@@ -1059,15 +1069,19 @@ async fn spawn_gateway_sidecar(
     }
 
     // 在拿 GatewayProcess 锁**之前**算数据目录，避免与 SettingsState 形成锁顺序耦合。
-    let data_dir = {
+    let (data_dir, playwright_browsers_dir) = {
         let settings_state = app.state::<SettingsState>();
         let settings_guard = settings_state
             .0
             .lock()
             .map_err(|e| format!("settings lock poisoned: {e}"))?;
-        gateway_data_dir(&app, &settings_guard)
+        (
+            gateway_data_dir(&app, &settings_guard),
+            playwright_browsers_dir(&app, &settings_guard),
+        )
     };
     let _ = fs::create_dir_all(&data_dir);
+    let _ = fs::create_dir_all(&playwright_browsers_dir);
 
     let state = app.state::<GatewayProcess>();
     let gateway_state = state.0.clone();
@@ -1139,6 +1153,10 @@ async fn spawn_gateway_sidecar(
     if let Some(resources_dir) = resolve_gateway_resources_path(&app) {
         command = command.env("OPENAWORK_RESOURCES_DIR", resources_dir);
     }
+    // Playwright 受管浏览器目录：live 浏览器预览与 `desktop_automation` 工具共用
+    // 同一个 sidecar 进程，这里统一注入；外部已提供该 env 时沿用外部值
+    // （开发机常见），否则落到数据目录下的 browsers/。
+    command = command.env("PLAYWRIGHT_BROWSERS_PATH", &playwright_browsers_dir);
     #[cfg(target_os = "windows")]
     if let Some((ffmpeg_path, ffprobe_path)) = resolve_packaged_windows_media_paths(&app) {
         command = command
