@@ -21,6 +21,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { resolveSessionPermissionMode } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../../infra/sqlite-batch.js';
 import {
@@ -450,8 +451,14 @@ export class HandoffWatcher {
               if (typeof parentMeta['workingDirectory'] === 'string') {
                 inherited['workingDirectory'] = parentMeta['workingDirectory'];
               }
-              // 继承 yoloMode：team 成员在后台运行，无法与用户交互审批。
-              // 父 session 开启了 yoloMode 时，子 session 也应继承免审批。
+              // 继承权限档位：team 成员在后台运行，无法与用户交互审批。
+              // permissionMode 是规范键，仅在父会话确实表达过档位时才继承（已写规范键，
+              // 或历史布尔 yoloMode === true）——auto-edit 父会话的子会话不得降级为 ask；
+              // 父会话未表达时保持缺席（读取侧按 ask 兜底，不凭空写入）。
+              // 旧布尔 yoloMode 同步保留，兼容仍直接读取它的历史消费方。
+              if (parentMeta['permissionMode'] !== undefined || parentMeta['yoloMode'] === true) {
+                inherited['permissionMode'] = resolveSessionPermissionMode(parentMeta);
+              }
               if (parentMeta['yoloMode'] === true) {
                 inherited['yoloMode'] = true;
               }

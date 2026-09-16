@@ -802,6 +802,73 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(after?.retryCount).toBe(1);
     expect(after?.toSessionId).toBeNull();
   });
+
+  // 权限档位继承守卫：父会话未表达档位时不得凭空写入 permissionMode:'ask'
+  // （否则 Object.keys(inherited).length > 0 恒为真，且违背 metadata 模块「不凭空写 ask」的约定）。
+  it('子会话仅在父会话表达过档位时继承 permissionMode', async () => {
+    const watcher = new watcherModule.HandoffWatcher({
+      taskRunner: async () => {},
+      scheduler: new InProcessScheduler(),
+    });
+
+    const seedParentWithMetadata = (sessionId: string, metadata: Record<string, unknown>): void => {
+      dbModule.sqliteRun(
+        `INSERT INTO sessions (id, user_id, title, metadata_json) VALUES (?, ?, 'demo', ?)`,
+        [sessionId, USER_ID, JSON.stringify(metadata)],
+      );
+    };
+    const readChildMetadata = (handoffId: string): Record<string, unknown> => {
+      const handoff = store.getHandoff({ userId: USER_ID, handoffId });
+      expect(handoff?.toSessionId).toBeTruthy();
+      const row = dbModule.sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+        [handoff?.toSessionId],
+      );
+      return JSON.parse(row?.metadata_json ?? '{}') as Record<string, unknown>;
+    };
+
+    // ① 父会话从未表达档位 → 子会话保持缺席
+    seedParentWithMetadata('s-watcher-inherit-absent', {});
+    const absent = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: 's-watcher-inherit-absent',
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { intent: '继承档位回归' },
+    });
+    await watcher.tickOnce();
+    const absentMetadata = readChildMetadata(absent.id);
+    expect('permissionMode' in absentMetadata).toBe(false);
+    expect('yoloMode' in absentMetadata).toBe(false);
+
+    // ② 父会话显式 auto-edit → 子会话继承规范键，且不被降级为 ask
+    seedParentWithMetadata('s-watcher-inherit-auto-edit', {
+      permissionMode: 'auto-edit',
+    });
+    const autoEdit = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: 's-watcher-inherit-auto-edit',
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { intent: '继承档位回归' },
+    });
+    await watcher.tickOnce();
+    expect(readChildMetadata(autoEdit.id)['permissionMode']).toBe('auto-edit');
+
+    // ③ 父会话只有历史布尔 yoloMode:true → 子会话补齐规范键与布尔投影
+    seedParentWithMetadata('s-watcher-inherit-yolo', { yoloMode: true });
+    const yolo = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: 's-watcher-inherit-yolo',
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { intent: '继承档位回归' },
+    });
+    await watcher.tickOnce();
+    const yoloMetadata = readChildMetadata(yolo.id);
+    expect(yoloMetadata['permissionMode']).toBe('yolo');
+    expect(yoloMetadata['yoloMode']).toBe(true);
+  });
 });
 
 describe('HandoffWatcher.recoveryTick', () => {

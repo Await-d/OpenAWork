@@ -82,13 +82,25 @@ function insertPendingRequest(input: {
   return requestId;
 }
 
-function readClarificationState(sessionId: string): GrillState {
+function readSessionMetadata(sessionId: string): {
+  clarificationState?: string;
+  dialogueMode?: string;
+  dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
+} {
   const row = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [sessionId],
   );
   assert(row !== undefined, 'session row should exist');
-  const metadata = JSON.parse(row.metadata_json) as { clarificationState?: string };
+  return JSON.parse(row.metadata_json) as {
+    clarificationState?: string;
+    dialogueMode?: string;
+    dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
+  };
+}
+
+function readClarificationState(sessionId: string): GrillState {
+  const metadata = readSessionMetadata(sessionId);
   assert(
     typeof metadata.clarificationState === 'string',
     'clarificationState should be persisted to session metadata',
@@ -113,8 +125,8 @@ async function main(): Promise<void> {
       'hash',
     ]);
     sqliteRun(
-      `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
-      [sessionId, userId],
+      `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
+      [sessionId, userId, JSON.stringify({ dialogueMode: 'clarify' })],
     );
 
     const app = Fastify();
@@ -165,6 +177,10 @@ async function main(): Promise<void> {
       const afterReject = readClarificationState(sessionId);
       assert(afterReject.confirmedAt === undefined, 'rejection must not set confirmedAt');
       assert(
+        readSessionMetadata(sessionId).dialogueMode === 'clarify',
+        'rejection must not auto-switch the dialogue mode',
+      );
+      assert(
         afterReject.nodes.find((node) => node.id === CONFIRM_NODE_ID)?.answer === undefined,
         'rejection must not settle the confirm node',
       );
@@ -193,6 +209,23 @@ async function main(): Promise<void> {
       assert(
         !needsConfirmation(afterConfirm),
         'confirmation must clear the needsConfirmation gate',
+      );
+
+      // 设计已完成（共识确认）→ 会话自动切换到编程模式，并在响应里回传新模式，
+      // 让前端无需额外拉取就能同步模式选择器。
+      const confirmBody: { dialogueMode?: string } = confirmRes.json();
+      assert(
+        confirmBody.dialogueMode === 'coding',
+        'confirm reply should return the auto-switched dialogue mode',
+      );
+      const afterConfirmMetadata = readSessionMetadata(sessionId);
+      assert(
+        afterConfirmMetadata.dialogueMode === 'coding',
+        'session metadata dialogueMode should be switched to coding after confirmation',
+      );
+      assert(
+        afterConfirmMetadata.dialogueModeSwitch?.reason === 'clarification_confirmed',
+        'auto-switch should record its reason for observability',
       );
 
       console.log('verify-grill-end-to-end: ok');

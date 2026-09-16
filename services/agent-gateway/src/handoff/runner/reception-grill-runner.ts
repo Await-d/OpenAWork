@@ -6,6 +6,7 @@ import {
   CONFIRM_ANSWER,
   CONFIRM_NODE_ID,
   createGrillState,
+  isConfirmAffirmative,
   needsConfirmation,
   parseGrillState,
   serializeGrillState,
@@ -14,8 +15,6 @@ import {
 } from '@openAwork/agent-core';
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import { parseSessionMetadataJson } from '../../session/session-workspace-metadata.js';
-
-const AFFIRMATIVE_PATTERN = /^(确认|同意|可以|行|好|没问题|是的|对的|ok|okay|yes|yep|go)/i;
 
 export interface ReceptionGrill {
   state: GrillState;
@@ -116,8 +115,9 @@ export function advanceReceptionGrill(input: { state: GrillState; reply: string 
     return { state: input.state, kind: 'question', text: formatFrontierPrompt(input.state) };
   }
 
+  // 肯定确认的判定与 A 层共用引擎实现（`isConfirmAffirmative`），避免两侧漂移。
   const normalized =
-    target.id === CONFIRM_NODE_ID && AFFIRMATIVE_PATTERN.test(reply) ? CONFIRM_ANSWER : reply;
+    target.id === CONFIRM_NODE_ID && isConfirmAffirmative(reply) ? CONFIRM_ANSWER : reply;
   const nextState = applyAnswer(input.state, target.id, normalized);
 
   if (nextState.confirmedAt !== undefined) {
