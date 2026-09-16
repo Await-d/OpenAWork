@@ -1,6 +1,7 @@
 import type {
   SSHConnectionManager,
   ExecResult,
+  SSHExecOptions,
   SSHFileEntry,
   SSHFilePreview,
 } from './ssh-connection-manager.js';
@@ -11,7 +12,7 @@ export interface SSHBoundSession {
 }
 
 export interface SSHToolProxy {
-  execCommand(command: string): Promise<ExecResult>;
+  execCommand(command: string, options?: SSHExecOptions): Promise<ExecResult>;
   readFile(remotePath: string): Promise<SSHFilePreview>;
   writeFile(remotePath: string, content: string | Uint8Array): Promise<void>;
   listFiles(remotePath: string): Promise<SSHFileEntry[]>;
@@ -22,8 +23,8 @@ export function createSSHToolProxy(
   connectionId: string,
 ): SSHToolProxy {
   return {
-    execCommand(command: string): Promise<ExecResult> {
-      return sshManager.execCommand(connectionId, command);
+    execCommand(command: string, options?: SSHExecOptions): Promise<ExecResult> {
+      return sshManager.execCommand(connectionId, command, options);
     },
     readFile(remotePath: string): Promise<SSHFilePreview> {
       return sshManager.readFile(connectionId, remotePath);
