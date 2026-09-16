@@ -3,11 +3,14 @@ import { join } from 'node:path';
 import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
 import {
   AgentTaskManagerImpl,
+  AUTO_EDIT_EXCLUDED_TOOLS,
+  AUTO_EDIT_PERMISSION_CATEGORIES,
   defaultIgnoreManager,
   lspDiagnosticsTool,
   lspTouchTool,
   PERMISSION_CATEGORIES,
   resolvePermissionCategory,
+  resolveSessionPermissionMode,
   ToolNotFoundError,
   ToolRegistry,
   ToolTimeoutError,
@@ -124,6 +127,14 @@ import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import type { McpSessionScope } from '../mcp/mcp-server-authorization.js';
 import { isBuiltinInstructionName } from '../handoff/capability/layer-capabilities.js';
 import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
+import {
+  classifySshRemoteToolPolicy,
+  executeSshRemoteTool,
+  formatSshBlockedToolMessage,
+  formatSshUnavailableToolMessage,
+  resolveSshRemoteExecutionContext,
+  type SshRemoteResolution,
+} from './ssh-remote-execution.js';
 import {
   callMcpToolForSession,
   getConfiguredMcpServerForSession,
@@ -1671,9 +1682,56 @@ function summarizeBashCommand(command: string): string {
   return `${firstLineClipped}…`;
 }
 
+/**
+ * 文件类工具（write / edit / multi_edit）的权限作用域构造。
+ *
+ * 本地路径校验失败时：若会话运行在 SSH 远程模式，则用远端路径原文作为
+ * 作用域，保证远端编辑同样受可配置的 'ask' 规则管辖；否则返回 null
+ * （与既有行为一致 —— 无有效路径时不要求审批）。
+ */
+function buildFileToolPermissionContext(input: {
+  sessionId: string;
+  pathValue: string | undefined;
+  sshManaged: boolean;
+  reason: string;
+  remoteReason: string;
+  previewVerb: string;
+}): PermissionRequestContext | null {
+  const effectivePath = input.pathValue
+    ? rewriteUnboundPlaceholderPath(input.sessionId, input.pathValue)
+    : null;
+  const validation = effectivePath
+    ? validateSessionWorkspacePath({ path: effectivePath, sessionId: input.sessionId })
+    : null;
+  const safePath = validation?.ok ? validation.safePath : null;
+
+  if (!safePath) {
+    const remotePath = input.pathValue?.trim();
+    if (input.sshManaged && remotePath && remotePath.length > 0) {
+      return {
+        scope: remotePath,
+        reason: input.remoteReason,
+        riskLevel: 'medium',
+        previewAction: `${input.previewVerb} SSH 远端 ${remotePath}`,
+        always: ['*'],
+      };
+    }
+    return null;
+  }
+
+  return {
+    scope: toRelativeScope(safePath),
+    reason: input.reason,
+    riskLevel: 'medium',
+    previewAction: `${input.previewVerb} ${safePath}`,
+    always: ['*'],
+  };
+}
+
 function buildPermissionRequestContext(
   sessionId: string,
   request: ToolCallRequest,
+  sshManaged = false,
 ): PermissionRequestContext | null {
   const rawInput = request.rawInput as Record<string, unknown>;
   const pathValue = readToolPathInput(rawInput);
@@ -1714,52 +1772,34 @@ function buildPermissionRequestContext(
 
   switch (request.toolName) {
     case 'write': {
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safePath = validation?.ok ? validation.safePath : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
+      return buildFileToolPermissionContext({
+        sessionId,
+        pathValue,
+        sshManaged,
         reason: '需要写入工作区文件',
-        riskLevel: 'medium',
-        previewAction: `写入 ${safePath}`,
-        always: ['*'],
-      };
+        remoteReason: '需要写入 SSH 远端文件',
+        previewVerb: '写入',
+      });
     }
     case 'edit': {
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safePath = validation?.ok ? validation.safePath : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
+      return buildFileToolPermissionContext({
+        sessionId,
+        pathValue,
+        sshManaged,
         reason: '需要编辑工作区文件',
-        riskLevel: 'medium',
-        previewAction: `编辑 ${safePath}`,
-        always: ['*'],
-      };
+        remoteReason: '需要编辑 SSH 远端文件',
+        previewVerb: '编辑',
+      });
     }
     case 'multi_edit': {
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safePath = validation?.ok ? validation.safePath : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
+      return buildFileToolPermissionContext({
+        sessionId,
+        pathValue,
+        sshManaged,
         reason: '需要批量编辑工作区文件',
-        riskLevel: 'medium',
-        previewAction: `批量编辑 ${safePath}`,
-        always: ['*'],
-      };
+        remoteReason: '需要批量编辑 SSH 远端文件',
+        previewVerb: '批量编辑',
+      });
     }
     case 'task_create': {
       const subject = typeof rawInput.subject === 'string' ? rawInput.subject.trim() : '';
@@ -2099,6 +2139,7 @@ async function executeGatewayManagedTool(
   signal: AbortSignal,
   observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
+  sshResolution?: SshRemoteResolution | null,
 ): Promise<ToolCallResult | null> {
   const result = await executeGatewayManagedToolImpl(
     sandbox,
@@ -2107,6 +2148,7 @@ async function executeGatewayManagedTool(
     signal,
     observability,
     executionContext,
+    sshResolution,
   );
 
   if (!result) return null;
@@ -2176,7 +2218,21 @@ async function executeGatewayManagedToolImpl(
   signal: AbortSignal,
   observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
+  sshResolution?: SshRemoteResolution | null,
 ): Promise<ToolCallResult | null> {
+  // SSH 远程会话：交由远端执行器处理（bash / read / write / edit /
+  // multi_edit / list / glob / grep）。blocked 工具与连接不可用的情况
+  // 已在外层 `execute()` 中提前拒绝，这里只会看到 kind === 'ready' 的远程
+  // 工具请求；未绑定会话的 sshResolution 为 null 或 undefined。
+  if (sshResolution?.kind === 'ready') {
+    const remoteResult = await executeSshRemoteTool({
+      request,
+      sessionId,
+      context: sshResolution.context,
+    });
+    if (remoteResult) return remoteResult;
+  }
+
   const rawInput = request.rawInput as Record<string, unknown>;
 
   try {
@@ -4163,7 +4219,17 @@ async function executeGatewayManagedToolImpl(
       if (typeof inheritedDialogueMode === 'string') {
         childSessionMetadata.dialogueMode = inheritedDialogueMode;
       }
-      // 继承 yoloMode：子代理 session 在后台运行，无法与用户交互审批。
+      // 继承权限档位：子代理 session 在后台运行，无法与用户交互审批。
+      // permissionMode 是规范键，仅在父会话确实表达过档位时才继承（已写规范键，
+      // 或历史布尔 yoloMode === true）——auto-edit 父会话的子会话不得降级为 ask；
+      // 父会话未表达时保持缺席（读取侧按 ask 兜底，不凭空写入）。
+      // 旧布尔 yoloMode 同步保留，兼容仍直接读取它的历史消费方。
+      if (
+        parentSessionMetadata.permissionMode !== undefined ||
+        parentSessionMetadata.yoloMode === true
+      ) {
+        childSessionMetadata.permissionMode = resolveSessionPermissionMode(parentSessionMetadata);
+      }
       if (parentSessionMetadata.yoloMode === true) {
         childSessionMetadata.yoloMode = true;
       }
@@ -6078,6 +6144,7 @@ function ensurePermissionForTool(
   request: ToolCallRequest,
   observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
+  sshManaged = false,
 ): PermissionState {
   // Rule engine: evaluate default rules + workspace rules (last-match-wins).
   // Users override defaults via .openawork.permissions.json.
@@ -6107,7 +6174,7 @@ function ensurePermissionForTool(
   }
 
   // 'ask' → build permission context for scope-specific evaluation.
-  const context = buildPermissionRequestContext(sessionId, request);
+  const context = buildPermissionRequestContext(sessionId, request, sshManaged);
   if (!context) {
     return { kind: 'not_needed' };
   }
@@ -6132,19 +6199,34 @@ function ensurePermissionForTool(
     };
   }
 
-  // Team session 自动批准修改类工具：
-  // 后台运行的 team 成员（pm1/pm2/executor/reviewer）无法与用户交互审批，
-  // 且父 session 已通过权限检查——子 session 继承信任链。
-  // 同样适用于 yoloMode 开启的 session（用户已显式授权免审批）。
-  // 注意：这里只跳过 ask，不绕过显式 deny。deny 已在 scopedAction 分支提前返回。
-  if (sessionMetadata['yoloMode'] === true || isBackgroundAutoApprovedTeamSession(sessionId)) {
-    return { kind: 'not_needed' };
-  }
-
   // Use category ID for all permission lookup/storage so that tools in the
   // same category (e.g. edit, apply_patch, workspace_review_revert → 'edit')
   // share a single approval and don't prompt the user repeatedly.
   const category = resolveEffectivePermissionCategory(request.toolName);
+
+  // Team session 自动批准修改类工具：
+  // 后台运行的 team 成员（pm1/pm2/executor/reviewer）无法与用户交互审批，
+  // 且父 session 已通过权限检查——子 session 继承信任链。
+  // 同样适用于 yolo 档位的 session（用户已显式授权免审批）。
+  //
+  // 权限阶梯不变量：此免审批快捷分支只会在通配符 allow/deny 与作用域级
+  // allow/deny 评估之后执行——显式 deny 已在上面两个分支提前返回，
+  // 因此 auto-edit / yolo 只能跳过 ask，永远无法放行被 deny 的调用。
+  const permissionMode = resolveSessionPermissionMode(sessionMetadata);
+  if (permissionMode === 'yolo' || isBackgroundAutoApprovedTeamSession(sessionId)) {
+    return { kind: 'not_needed' };
+  }
+
+  // auto-edit 档位：仅自动放行文件编辑 / 写入类别（edit、write）。
+  // bash、MCP、浏览器、桌面控制等其余类别仍走 ask；
+  // 回滚类工具（AUTO_EDIT_EXCLUDED_TOOLS）保持人工确认。
+  if (
+    permissionMode === 'auto-edit' &&
+    AUTO_EDIT_PERMISSION_CATEGORIES.has(category) &&
+    !AUTO_EDIT_EXCLUDED_TOOLS.has(request.toolName)
+  ) {
+    return { kind: 'not_needed' };
+  }
 
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
     return {
@@ -6407,11 +6489,65 @@ export class ToolSandbox {
       }
     }
 
+    // SSH 远程会话：解析当前会话（或沿父会话链）的绑定关系。未绑定的会话在
+    // 这里只产生一次内存 Map 查询 + 一次父链查询；非 SSH 管辖的工具
+    // （unmanaged）完全不走这段逻辑，保持零额外开销。
+    const sshToolPolicy = classifySshRemoteToolPolicy(effectiveRequest.toolName);
+    const sshResolution: SshRemoteResolution | null =
+      sshToolPolicy === 'unmanaged' ? null : await resolveSshRemoteExecutionContext(sessionId);
+    const sshManaged = sshResolution !== null && sshResolution.kind !== 'unbound';
+
+    // 绑定会话下：未实现远程执行的工作区/进程工具直接拒绝；连接不可用时所有
+    // SSH 管辖工具都拒绝。二者均在权限流之前返回 —— 避免用户审批一个注定
+    // 不会执行的调用，也避免任何"以为在改远端、实际改了本地"的静默回退。
+    if (sshResolution?.kind === 'ready' && sshToolPolicy === 'blocked') {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: formatSshBlockedToolMessage(effectiveRequest.toolName, sshResolution),
+        isError: true,
+        durationMs: 0,
+      };
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: effectiveRequest.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
+      return result;
+    }
+
+    if (sshResolution?.kind === 'unavailable') {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: formatSshUnavailableToolMessage(effectiveRequest.toolName, sshResolution),
+        isError: true,
+        durationMs: 0,
+      };
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: effectiveRequest.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
+      return result;
+    }
+
     if (
       SESSION_WORKSPACE_REQUIRED_TOOLS.has(effectiveRequest.toolName) &&
       hasWorkspaceScopedExecutionInput(effectiveRequest) &&
       requiresBoundSessionWorkspace(sessionId) &&
-      !getSessionWorkingDirectory(sessionId)
+      !getSessionWorkingDirectory(sessionId) &&
+      !sshManaged
     ) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
@@ -6499,6 +6635,7 @@ export class ToolSandbox {
       effectiveRequest,
       toolObservability,
       executionContext,
+      sshManaged,
     );
     if (permissionState.kind === 'denied') {
       const result: ToolCallResult = {
@@ -6563,6 +6700,7 @@ export class ToolSandbox {
       signal,
       toolObservability,
       executionContext,
+      sshResolution,
     );
     if (gatewayManagedResult) {
       gatewayManagedResult.toolName = request.toolName;

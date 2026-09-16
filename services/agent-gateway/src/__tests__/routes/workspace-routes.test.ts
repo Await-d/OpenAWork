@@ -579,4 +579,55 @@ describe('workspace routes', () => {
       await app.close();
     }
   });
+
+  it('GET /workspace/files/index-version 返回 root 与数值 version', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/index-version?path=${encodeURIComponent(projectRoot)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { root: string; version: number };
+      expect(body.root).toBe(projectRoot);
+      expect(typeof body.version).toBe('number');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/index-version 未认证返回 401', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/index-version?path=${encodeURIComponent(projectRoot)}`,
+      });
+
+      expect(response.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/index-version 缺少 path 返回中文 400', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/workspace/files/index-version',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '查询参数无效。' },
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });

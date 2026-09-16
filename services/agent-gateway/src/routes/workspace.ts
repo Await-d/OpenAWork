@@ -31,6 +31,7 @@ import {
 } from '../workspace/workspace-safety.js';
 import {
   getWorkspaceFileIndex,
+  getWorkspaceFileIndexVersion,
   getWorkspaceIgnoreManager,
   invalidateWorkspaceFileIndex,
 } from '../workspace/workspace-file-index.js';
@@ -512,6 +513,42 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         truncated: index.truncated,
         count: files.length + directories.length,
       });
+    },
+  );
+
+  /**
+   * GET /workspace/files/index-version?path=
+   *
+   * 只读、O(1) 的工作区文件索引「版本」查询：前端内置浏览器预览轮询它来判断
+   * 工作区文件是否变化（Agent 写盘 / 用户保存都会让版本前进），变化时刷新预览。
+   *
+   * 与 `/workspace/files/search` 不同：这里**不触发**索引构建，也不占用文件索引
+   * 全量扫描的限流预算——只读一个进程内计数器，代价恒定。
+   */
+  app.get(
+    '/workspace/files/index-version',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'workspace.files.index-version');
+      const schema = z.object({ path: z.string() });
+
+      const parseStep = child('parse-query');
+      const parsed = parseQuery(schema, request.query);
+      parseStep.succeed();
+
+      const pathStep = child('path-safety');
+      const safePath = validateWorkspacePathForRequest(parsed.path);
+      if (!safePath) {
+        pathStep.fail('forbidden path');
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      }
+      pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+
+      const version = getWorkspaceFileIndexVersion(safePath);
+      step.succeed(undefined, { version });
+      return reply.send({ root: safePath, version });
     },
   );
 

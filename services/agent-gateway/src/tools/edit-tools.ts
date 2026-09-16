@@ -26,7 +26,7 @@ import { getProjectWideDiagnostics } from './project-diagnostics.js';
 const EDIT_ERROR_RECOVERY_SUFFIX =
   'STOP: Read the file immediately to see its actual current state before retrying the edit. Your assumption about the file content was wrong.';
 
-const editInputSchema = z.object({
+export const editInputSchema = z.object({
   filePath: z.string().min(1),
   oldString: z.string(),
   newString: z.string(),

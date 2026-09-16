@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
@@ -381,3 +381,434 @@ describe('tool-sandbox team session auto approval', () => {
     expect(result.pendingPermissionRequestId).toBeUndefined();
   });
 });
+
+function executionContext(clientRequestId: string) {
+  return {
+    clientRequestId,
+    nextRound: 1,
+    requestData: { clientRequestId },
+  };
+}
+
+function permissionInsertParams(): readonly unknown[] | undefined {
+  const insertCall = mocks.sqliteRunMock.mock.calls.find(
+    ([query]) => typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
+  );
+  return insertCall?.[1] as readonly unknown[] | undefined;
+}
+
+describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () => {
+  beforeEach(() => {
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+    mkdirSync(TEST_WORKSPACE, { recursive: true });
+    mocks.sqliteAllMock.mockReset();
+    mocks.sqliteAllMock.mockImplementation(() => []);
+    mocks.sqliteGetMock.mockClear();
+    mocks.sqliteRunMock.mockReset();
+    mocks.transitionToolToRunningMock.mockReset();
+    mocks.roleLayer = 'executor';
+    mocks.teamParentSessionId = null;
+    mocks.handoffState = null;
+    mocks.requireBoundWorkspace = false;
+    mocks.metadataJson = '{}';
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+  });
+
+  it('auto-edit 档位下 write 自动执行且不创建 pending 权限请求', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-write.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-write',
+        toolName: 'write',
+        rawInput: { path: targetPath, content: 'demo' },
+      },
+      new AbortController().signal,
+      'session-auto-edit-write',
+      executionContext('req-auto-edit-write'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(existsSync(targetPath)).toBe(true);
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('auto-edit 档位下 edit 自动执行且不创建 pending 权限请求', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-edit.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-edit',
+        toolName: 'edit',
+        rawInput: { filePath: targetPath, oldString: '', newString: 'created by edit' },
+      },
+      new AbortController().signal,
+      'session-auto-edit-edit',
+      executionContext('req-auto-edit-edit'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(readFileSync(targetPath, 'utf8')).toBe('created by edit');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('auto-edit 档位下 multi_edit 自动执行且不创建 pending 权限请求', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-multi.txt');
+    writeFileSync(targetPath, 'alpha beta\n', 'utf8');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-multi',
+        toolName: 'multi_edit',
+        rawInput: {
+          filePath: targetPath,
+          edits: [{ oldString: 'alpha', newString: 'gamma' }],
+        },
+      },
+      new AbortController().signal,
+      'session-auto-edit-multi',
+      executionContext('req-auto-edit-multi'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(readFileSync(targetPath, 'utf8')).toBe('gamma beta\n');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('auto-edit 档位下 apply_patch 自动执行且不创建 pending 权限请求', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-patch.txt');
+    const patchText = [
+      '*** Begin Patch',
+      `*** Add File: ${targetPath}`,
+      '+patched content',
+      '*** End Patch',
+    ].join('\n');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-patch',
+        toolName: 'apply_patch',
+        rawInput: { patchText },
+      },
+      new AbortController().signal,
+      'session-auto-edit-patch',
+      executionContext('req-auto-edit-patch'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(readFileSync(targetPath, 'utf8')).toContain('patched content');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('auto-edit 档位下 workspace_review_revert 仍需要审批（豁免工具）', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-revert',
+        toolName: 'workspace_review_revert',
+        rawInput: { path: TEST_WORKSPACE, filePath: 'revert.txt' },
+      },
+      new AbortController().signal,
+      'session-auto-edit-revert',
+      executionContext('req-auto-edit-revert'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval');
+    expect(permissionInsertParams()?.[2]).toBe('edit');
+  });
+
+  it('auto-edit 档位下 bash 仍需要审批（类别不在自动放行集合）', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-bash',
+        toolName: 'bash',
+        rawInput: { command: 'printf auto-edit-bash', description: '权限阶梯回归' },
+      },
+      new AbortController().signal,
+      'session-auto-edit-bash',
+      executionContext('req-auto-edit-bash'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval');
+    expect(permissionInsertParams()?.[2]).toBe('bash');
+  });
+
+  it('yolo 档位下 bash 自动执行且不创建 pending 权限请求', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'yolo',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const markerPath = join(TEST_WORKSPACE, 'yolo-bash-marker.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-yolo-bash',
+        toolName: 'bash',
+        rawInput: { command: `touch ${markerPath}`, description: '权限阶梯回归' },
+      },
+      new AbortController().signal,
+      'session-yolo-bash',
+      executionContext('req-yolo-bash'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(existsSync(markerPath)).toBe(true);
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('历史布尔 yoloMode:true 会话的 bash 仍自动执行（向后兼容）', async () => {
+    mocks.metadataJson = JSON.stringify({
+      yoloMode: true,
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const markerPath = join(TEST_WORKSPACE, 'legacy-yolo-bash-marker.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-legacy-yolo-bash',
+        toolName: 'bash',
+        rawInput: { command: `touch ${markerPath}`, description: '权限阶梯回归' },
+      },
+      new AbortController().signal,
+      'session-legacy-yolo-bash',
+      executionContext('req-legacy-yolo-bash'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(existsSync(markerPath)).toBe(true);
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('yoloMode:false 不会触发 auto-edit，write 仍需审批', async () => {
+    mocks.metadataJson = JSON.stringify({
+      yoloMode: false,
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'yolo-false-write.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-yolo-false-write',
+        toolName: 'write',
+        rawInput: { path: targetPath, content: 'demo' },
+      },
+      new AbortController().signal,
+      'session-yolo-false-write',
+      executionContext('req-yolo-false-write'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(existsSync(targetPath)).toBe(false);
+    expect(permissionInsertParams()?.[2]).toBe('write');
+  });
+
+  it('未声明档位的默认会话写入仍需审批（auto-edit 不泄漏到默认）', async () => {
+    mocks.metadataJson = '{}';
+    const targetPath = join(TEST_WORKSPACE, 'default-write.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-default-write',
+        toolName: 'write',
+        rawInput: { path: targetPath, content: 'demo' },
+      },
+      new AbortController().signal,
+      'session-default-write',
+      executionContext('req-default-write'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(existsSync(targetPath)).toBe(false);
+    expect(permissionInsertParams()?.[2]).toBe('write');
+  });
+
+  it('yolo 档位无法绕过显式 deny：write 被拒绝且未执行', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'yolo',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    writeFileSync(
+      join(TEST_WORKSPACE, '.openawork.permissions.json'),
+      JSON.stringify({
+        rules: [{ permission: 'write', pattern: 'blocked-yolo/**', action: 'deny' }],
+      }),
+      'utf8',
+    );
+    const targetPath = join(TEST_WORKSPACE, 'blocked-yolo', 'file.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-yolo-denied-write',
+        toolName: 'write',
+        rawInput: { path: targetPath, content: 'demo' },
+      },
+      new AbortController().signal,
+      'session-yolo-denied-write',
+      executionContext('req-yolo-denied-write'),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('被权限规则禁止');
+    expect(existsSync(targetPath)).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('auto-edit 档位无法绕过显式 deny：write 被拒绝且未执行', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    writeFileSync(
+      join(TEST_WORKSPACE, '.openawork.permissions.json'),
+      JSON.stringify({
+        rules: [{ permission: 'write', pattern: 'blocked-auto-edit/**', action: 'deny' }],
+      }),
+      'utf8',
+    );
+    const targetPath = join(TEST_WORKSPACE, 'blocked-auto-edit', 'file.txt');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-denied-write',
+        toolName: 'write',
+        rawInput: { path: targetPath, content: 'demo' },
+      },
+      new AbortController().signal,
+      'session-auto-edit-denied-write',
+      executionContext('req-auto-edit-denied-write'),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('被权限规则禁止');
+    expect(existsSync(targetPath)).toBe(false);
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  // 继承守卫：父会话未表达档位时，task 子会话不得凭空写入 permissionMode:'ask'
+  // （否则会污染「从未表达过档位」的会话，并违背 metadata 模块「不凭空写 ask」的约定）。
+  it('task 子会话在父会话未表达档位时保持权限键缺席', async () => {
+    mocks.metadataJson = '{}';
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-task-inherit-absent',
+        toolName: 'task',
+        rawInput: {
+          description: '继承档位回归',
+          prompt: '输出最终结论',
+          subagent_type: 'explore',
+          load_skills: [],
+        },
+      },
+      new AbortController().signal,
+      'session-task-inherit-absent',
+      executionContext('req-task-inherit-absent'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    const insertedMetadata = readInsertedChildSessionMetadata();
+    expect(insertedMetadata).toBeDefined();
+    expect('permissionMode' in (insertedMetadata ?? {})).toBe(false);
+    expect('yoloMode' in (insertedMetadata ?? {})).toBe(false);
+  });
+
+  it('task 子会话继承父会话显式 permissionMode（不被降级为 ask）', async () => {
+    mocks.metadataJson = JSON.stringify({ permissionMode: 'auto-edit' });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-task-inherit-auto-edit',
+        toolName: 'task',
+        rawInput: {
+          description: '继承档位回归',
+          prompt: '输出最终结论',
+          subagent_type: 'explore',
+          load_skills: [],
+        },
+      },
+      new AbortController().signal,
+      'session-task-inherit-auto-edit',
+      executionContext('req-task-inherit-auto-edit'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    const insertedMetadata = readInsertedChildSessionMetadata();
+    expect(insertedMetadata?.['permissionMode']).toBe('auto-edit');
+    expect(insertedMetadata?.['yoloMode']).toBeUndefined();
+  });
+
+  it('task 子会话继承父会话历史布尔 yoloMode:true', async () => {
+    mocks.metadataJson = JSON.stringify({ yoloMode: true });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-task-inherit-yolo',
+        toolName: 'task',
+        rawInput: {
+          description: '继承档位回归',
+          prompt: '输出最终结论',
+          subagent_type: 'explore',
+          load_skills: [],
+        },
+      },
+      new AbortController().signal,
+      'session-task-inherit-yolo',
+      executionContext('req-task-inherit-yolo'),
+    );
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    const insertedMetadata = readInsertedChildSessionMetadata();
+    expect(insertedMetadata?.['permissionMode']).toBe('yolo');
+    expect(insertedMetadata?.['yoloMode']).toBe(true);
+  });
+});
+
+function readInsertedChildSessionMetadata(): Record<string, unknown> | undefined {
+  const insertCall = mocks.sqliteRunMock.mock.calls.find(
+    ([query]) => typeof query === 'string' && query.includes('INSERT INTO sessions'),
+  );
+  const params = insertCall?.[1] as readonly unknown[] | undefined;
+  const metadataJson = params?.[2];
+  return typeof metadataJson === 'string'
+    ? (JSON.parse(metadataJson) as Record<string, unknown>)
+    : undefined;
+}

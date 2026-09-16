@@ -180,6 +180,48 @@ function isSamePathOrAncestor(candidatePath: string, targetPath: string): boolea
   return targetPath.startsWith(candidatePath === '/' ? '/' : `${candidatePath}/`);
 }
 
+/**
+ * 索引「版本」——供前端轮询工作区是否变化，与缓存条目**解耦**。
+ *
+ * 缓存条目（`fileIndexCache`）会被 TTL 过期或容量淘汰删除，`builtAt` 又是墙钟
+ * 时间、既不单调也会随条目一起消失。预览刷新需要的是一个**只增不减的进程内序号**：
+ * 某根目录的索引一旦被（重）建或失效，它的版本就前进一次，即便缓存条目随后被
+ * 淘汰，这个前进仍然可被观察到。
+ *
+ * 版本按 `normalizeCachePath(root)` 分根记录；某路径首次被读取时惰性登记为当前
+ * 全局值。这样「从未建过索引的根」也不会被其他根目录的构建 / 失效波及——它只在
+ * 自己真正变化时才前进，避免无关工作区触发预览刷新。
+ */
+let globalIndexVersion = 0;
+const indexVersionByRoot = new Map<string, number>();
+
+/** 单调推进全局序号，并把给定根目录的版本钉到新值。 */
+function bumpIndexVersions(keys: Iterable<string>): void {
+  globalIndexVersion += 1;
+  for (const key of keys) {
+    indexVersionByRoot.set(key, globalIndexVersion);
+  }
+}
+
+/**
+ * 返回索引版本：无参数给全局序号；给 `rootPath` 时给该根目录的版本。
+ *
+ * 未见过的根目录首次读取会被惰性登记为当前全局值，之后无关根目录的变化不会
+ * 改变它——调用方据此判断「自己关心的根」是否真的变了。
+ */
+export function getWorkspaceFileIndexVersion(rootPath?: string): number {
+  if (rootPath === undefined) {
+    return globalIndexVersion;
+  }
+  const key = normalizeCachePath(rootPath);
+  const known = indexVersionByRoot.get(key);
+  if (known !== undefined) {
+    return known;
+  }
+  indexVersionByRoot.set(key, globalIndexVersion);
+  return globalIndexVersion;
+}
+
 function buildWorkspaceFileIndexEntries(relativePaths: readonly string[]): {
   files: WorkspaceFileIndexEntry[];
   directories: string[];
@@ -262,6 +304,8 @@ export async function getWorkspaceFileIndex(
     builtAt: now,
   };
   fileIndexCache.set(cacheKey, built);
+  // 每次（重）建都推进版本，让「首次构建」也能被版本轮询观察到。
+  bumpIndexVersions([cacheKey]);
   evictOldestCachedIndexes();
   return built;
 }
@@ -274,10 +318,13 @@ export async function getWorkspaceFileIndex(
 export function invalidateWorkspaceFileIndex(targetPath?: string): void {
   if (targetPath === undefined) {
     fileIndexCache.clear();
+    // 全清：所有已知根目录版本整体前进，未登记者继续用全局序号兜底。
+    bumpIndexVersions([...indexVersionByRoot.keys()]);
     return;
   }
 
   const normalizedTarget = normalizeCachePath(targetPath);
+  const affectedRoots = new Set<string>([normalizedTarget]);
   for (const key of [...fileIndexCache.keys()]) {
     const normalizedKey = normalizeCachePath(key);
     if (
@@ -285,11 +332,22 @@ export function invalidateWorkspaceFileIndex(targetPath?: string): void {
       isSamePathOrAncestor(normalizedTarget, normalizedKey)
     ) {
       fileIndexCache.delete(key);
+      affectedRoots.add(normalizedKey);
     }
   }
+  // 失效目标常常是文件 / 子目录，而前端轮询的是工作区根：把所有「目标的祖先」
+  // 版本一并推进，保证根路径的版本能反映子路径的变化（即使根的缓存已淘汰）。
+  for (const key of indexVersionByRoot.keys()) {
+    if (isSamePathOrAncestor(key, normalizedTarget)) {
+      affectedRoots.add(key);
+    }
+  }
+  bumpIndexVersions(affectedRoots);
 }
 
 export function __resetWorkspaceFileIndexCacheForTest(): void {
   fileIndexCache.clear();
   ignoreManagerCache.clear();
+  indexVersionByRoot.clear();
+  globalIndexVersion = 0;
 }

@@ -41,14 +41,14 @@ interface WorkspaceTreeNode {
 // Must stay the CORE set (see workspace-ignored-dirs.ts): the file index's larger
 // build-artifact set would hide `build/`, `out/`, `temp/` from the agent.
 export const IGNORED_NAMES = WORKSPACE_CORE_IGNORED_DIRS;
-const MAX_TREE_ENTRIES = 500;
-const MAX_TREE_DEPTH = 4;
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_TREE_ENTRIES = 500;
+export const MAX_TREE_DEPTH = 4;
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_READ_LINE_LIMIT = 2000;
 const MAX_READ_LINE_LIMIT = 2000;
 const MAX_READ_LINE_CHARS = 2000;
 const READ_LINE_TRUNCATION_NOTICE = '...[line truncated]';
-const MAX_GLOB_MATCHES = 100;
+export const MAX_GLOB_MATCHES = 100;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 // Internal time budgets kept below the externally enforced `ToolDefinition.timeout`
@@ -417,7 +417,7 @@ function escapeRegex(text: string): string {
   return text.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
-function globPatternToRegex(pattern: string): RegExp {
+export function globPatternToRegex(pattern: string): RegExp {
   const normalizedPattern = pattern.replace(/\\/g, '/');
   let regex = '^';
 
@@ -458,7 +458,11 @@ function globPatternToRegex(pattern: string): RegExp {
   return new RegExp(regex);
 }
 
-function matchesGlobLikePath(pattern: string, patternRegex: RegExp, relativePath: string): boolean {
+export function matchesGlobLikePath(
+  pattern: string,
+  patternRegex: RegExp,
+  relativePath: string,
+): boolean {
   if (patternRegex.test(relativePath)) {
     return true;
   }
@@ -763,7 +767,7 @@ export async function executeListTool(
   };
 }
 
-function applyLineWindow(
+export function applyLineWindow(
   rawContent: string,
   byteLimitReached: boolean,
   input: { offset?: number; limit?: number },

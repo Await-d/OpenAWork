@@ -7,6 +7,7 @@ import {
   __resetWorkspaceFileIndexCacheForTest,
   collectWorkspaceFileIndex,
   getWorkspaceFileIndex,
+  getWorkspaceFileIndexVersion,
   invalidateWorkspaceFileIndex,
   WORKSPACE_FILE_INDEX_CACHE_MAX_ENTRIES,
   WORKSPACE_FILE_INDEX_CACHE_TTL_MS,
@@ -337,5 +338,111 @@ describe('getWorkspaceFileIndex 缓存', () => {
     const rebuiltA2 = await getWorkspaceFileIndex({ rootPath: rootA, now: 3_000 });
     expect(relativePaths(rebuiltA2)).not.toContain('anchored-only-in-a.txt');
     expect(relativePaths(rebuiltA2).some((path) => path.startsWith('ignored-dir-a'))).toBe(false);
+  });
+});
+
+describe('getWorkspaceFileIndexVersion', () => {
+  beforeEach(() => {
+    __resetWorkspaceFileIndexCacheForTest();
+  });
+
+  it('首次读取建立基线，构建后版本前进且缓存命中不再前进', async () => {
+    const root = createFixtureRoot('version-build');
+    writeFixtureFile(root, 'a.txt');
+
+    const baseline = getWorkspaceFileIndexVersion(root);
+
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_000 });
+    const afterBuild = getWorkspaceFileIndexVersion(root);
+    expect(afterBuild).toBeGreaterThan(baseline);
+
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_001 });
+    expect(getWorkspaceFileIndexVersion(root)).toBe(afterBuild);
+  });
+
+  it('版本单调不减：连续构建 / 失效只前进', async () => {
+    const root = createFixtureRoot('version-monotonic');
+    writeFixtureFile(root, 'a.txt');
+
+    const seen: number[] = [getWorkspaceFileIndexVersion()];
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_000 });
+    seen.push(getWorkspaceFileIndexVersion());
+    invalidateWorkspaceFileIndex(root);
+    seen.push(getWorkspaceFileIndexVersion());
+    await getWorkspaceFileIndex({ rootPath: root, now: 2_000 });
+    seen.push(getWorkspaceFileIndexVersion());
+
+    for (let index = 1; index < seen.length; index += 1) {
+      expect(seen[index]!).toBeGreaterThanOrEqual(seen[index - 1]!);
+    }
+    expect(seen[seen.length - 1]!).toBeGreaterThan(seen[0]!);
+  });
+
+  it('前缀分支失效推进被命中的根目录版本', async () => {
+    const root = createFixtureRoot('version-prefix');
+    writeFixtureFile(root, 'a.txt');
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_000 });
+    const before = getWorkspaceFileIndexVersion(root);
+
+    invalidateWorkspaceFileIndex(root);
+
+    expect(getWorkspaceFileIndexVersion(root)).toBeGreaterThan(before);
+  });
+
+  it('无参数失效推进全部已知根目录版本', async () => {
+    const rootA = createFixtureRoot('version-clear-all-a');
+    const rootB = createFixtureRoot('version-clear-all-b');
+    writeFixtureFile(rootA, 'a.txt');
+    writeFixtureFile(rootB, 'b.txt');
+    await getWorkspaceFileIndex({ rootPath: rootA, now: 1_000 });
+    await getWorkspaceFileIndex({ rootPath: rootB, now: 1_000 });
+    const beforeA = getWorkspaceFileIndexVersion(rootA);
+    const beforeB = getWorkspaceFileIndexVersion(rootB);
+
+    invalidateWorkspaceFileIndex();
+
+    expect(getWorkspaceFileIndexVersion(rootA)).toBeGreaterThan(beforeA);
+    expect(getWorkspaceFileIndexVersion(rootB)).toBeGreaterThan(beforeB);
+  });
+
+  it('子路径失效时其祖先根目录版本同样前进', async () => {
+    const root = createFixtureRoot('version-ancestor');
+    const filePath = writeFixtureFile(root, join('src', 'index.ts'));
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_000 });
+    const before = getWorkspaceFileIndexVersion(root);
+
+    invalidateWorkspaceFileIndex(filePath);
+
+    expect(getWorkspaceFileIndexVersion(root)).toBeGreaterThan(before);
+  });
+
+  it('失效一个根目录不会改变其它根目录（含从未构建者）的版本', async () => {
+    const rootA = createFixtureRoot('version-isolation-a');
+    const rootB = createFixtureRoot('version-isolation-b');
+    const rootC = createFixtureRoot('version-isolation-c');
+    writeFixtureFile(rootA, 'a.txt');
+    writeFixtureFile(rootB, 'b.txt');
+    await getWorkspaceFileIndex({ rootPath: rootA, now: 1_000 });
+    await getWorkspaceFileIndex({ rootPath: rootB, now: 1_000 });
+    const beforeB = getWorkspaceFileIndexVersion(rootB);
+    // rootC 从未构建，首次读取建立基线后也不应被无关失效波及。
+    const beforeC = getWorkspaceFileIndexVersion(rootC);
+
+    invalidateWorkspaceFileIndex(rootA);
+
+    expect(getWorkspaceFileIndexVersion(rootB)).toBe(beforeB);
+    expect(getWorkspaceFileIndexVersion(rootC)).toBe(beforeC);
+  });
+
+  it('__resetWorkspaceFileIndexCacheForTest 清空版本状态', async () => {
+    const root = createFixtureRoot('version-reset');
+    writeFixtureFile(root, 'a.txt');
+    await getWorkspaceFileIndex({ rootPath: root, now: 1_000 });
+    expect(getWorkspaceFileIndexVersion(root)).toBeGreaterThan(0);
+
+    __resetWorkspaceFileIndexCacheForTest();
+
+    expect(getWorkspaceFileIndexVersion()).toBe(0);
+    expect(getWorkspaceFileIndexVersion(root)).toBe(0);
   });
 });

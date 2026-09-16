@@ -83,7 +83,7 @@ import {
 // Mirrors opencode's `DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000`.
 // We don't expose the experimental flag yet, but the env override hook keeps
 // the door open for the same operator escape valve opencode provides.
-const DEFAULT_BASH_TIMEOUT_MS = (() => {
+export const DEFAULT_BASH_TIMEOUT_MS = (() => {
   const raw = process.env.OPENAWORK_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 2 * 60 * 1000;
