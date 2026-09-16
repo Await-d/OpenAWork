@@ -151,11 +151,57 @@ describe('right-panel-sections UI', () => {
     expect(screen.getAllByText('当前聚焦请求').length).toBeGreaterThan(0);
     expect(screen.getAllByText('请求 req-ui-1').length).toBeGreaterThan(0);
     expect(screen.getByText('2 条 · 错误 1 / 卡住 1 / 工具 2')).toBeTruthy();
+    // 未传 permissionMode 时按 legacy yoloMode 布尔回退：false → 「每次询问」。
+    expect(screen.getByText('每次询问')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '复制当前聚焦请求诊断上下文' }));
 
     expect(copyTextToClipboardMock).toHaveBeenCalledTimes(1);
     const copiedText = copyTextToClipboardMock.mock.calls[0]?.[0];
     expect(copiedText).toContain('请求 req-ui-1');
+  });
+
+  it('overview 按档位展示审批方式文案（每次询问 / 编辑自动 / 免审批）', () => {
+    const renderOverview = (permissionMode: 'ask' | 'auto-edit' | 'yolo', yoloMode: boolean) =>
+      render(
+        <MemoryRouter>
+          <ChatOverviewTabContent
+            attachmentItems={[]}
+            artifactsWorkspaceHref={null}
+            childSessions={[]}
+            compactions={[]}
+            contextUsageSnapshot={null}
+            contentArtifactCount={0}
+            contentArtifactCountStatus="ready"
+            currentSessionId="session-1"
+            dialogueMode="coding"
+            effectiveWorkingDirectory="/workspace/demo"
+            messages={[]}
+            pendingPermissions={[]}
+            pendingQuestionsCount={0}
+            permissionMode={permissionMode}
+            sessionStateStatus="running"
+            sessionTodos={[]}
+            sessionTasks={[]}
+            upstreamSummaries={[]}
+            workspaceFileItems={[]}
+            yoloMode={yoloMode}
+            onCompactSession={() => {}}
+            onOpenRecoveryStrategy={() => {}}
+          />
+        </MemoryRouter>,
+      );
+
+    renderOverview('ask', false);
+    expect(screen.getByText('审批方式')).toBeTruthy();
+    expect(screen.getByText('每次询问')).toBeTruthy();
+    cleanup();
+
+    renderOverview('auto-edit', false);
+    expect(screen.getByText('编辑自动')).toBeTruthy();
+    cleanup();
+
+    renderOverview('yolo', true);
+    expect(screen.getByText('免审批（YOLO）')).toBeTruthy();
   });
 });

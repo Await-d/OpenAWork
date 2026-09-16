@@ -3,6 +3,7 @@ import type { WorkspaceFileTreePanelProps } from '../../../components/layout/sid
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import './FusionSessionSidePanel.css';
+import { FusionBrowserTab } from './FusionBrowserTab.js';
 import { FusionContextTab } from './FusionContextTab.js';
 import type {
   FusionContextOverviewProps,
@@ -103,6 +104,11 @@ export function FusionSessionSidePanel({
           onShowEditor={onShowEditor}
           saving={saving}
           workspaceFileItems={workspaceFileItems}
+        />
+      ) : activeTab === 'browser' ? (
+        <FusionBrowserTab
+          currentSessionId={currentSessionId}
+          effectiveWorkingDirectory={effectiveWorkingDirectory}
         />
       ) : (
         <FusionContextTab

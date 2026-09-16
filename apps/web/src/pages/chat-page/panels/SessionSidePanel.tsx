@@ -15,7 +15,7 @@ import {
 } from 'react';
 import './SessionSidePanel.css';
 
-export type SidePanelTabId = 'review' | 'files' | 'context';
+export type SidePanelTabId = 'review' | 'files' | 'context' | 'browser';
 
 export interface SessionSidePanelProps {
   readonly reviewCount?: number;
@@ -34,14 +34,14 @@ interface TabDef {
 
 type TabDirection = 'next' | 'previous';
 
+/** tab 顺序的唯一事实来源——键盘左右循环与 Home/End 都从它推导。 */
+const PANEL_TAB_ORDER: readonly SidePanelTabId[] = ['review', 'files', 'context', 'browser'];
+
 function getAdjacentTabId(tabId: SidePanelTabId, direction: TabDirection): SidePanelTabId {
-  if (tabId === 'review') {
-    return direction === 'next' ? 'files' : 'context';
-  }
-  if (tabId === 'files') {
-    return direction === 'next' ? 'context' : 'review';
-  }
-  return direction === 'next' ? 'review' : 'files';
+  const index = PANEL_TAB_ORDER.indexOf(tabId);
+  const offset = direction === 'next' ? 1 : -1;
+  const count = PANEL_TAB_ORDER.length;
+  return PANEL_TAB_ORDER[(index + offset + count) % count] ?? tabId;
 }
 
 export function SessionSidePanel({
@@ -54,6 +54,7 @@ export function SessionSidePanel({
 }: SessionSidePanelProps) {
   const panelInstanceId = useId();
   const tabButtonRefs = useRef<Record<SidePanelTabId, HTMLButtonElement | null>>({
+    browser: null,
     context: null,
     files: null,
     review: null,
@@ -62,6 +63,7 @@ export function SessionSidePanel({
     { id: 'review', label: '审查', badge: reviewCount || undefined },
     { id: 'files', label: '文件' },
     { id: 'context', label: 'Context' },
+    { id: 'browser', label: '浏览器预览' },
   ];
   const activePanelId = `${panelInstanceId}-${activeTab}-panel`;
   const activeTabId = `${panelInstanceId}-${activeTab}-tab`;
@@ -83,7 +85,7 @@ export function SessionSidePanel({
       } else if (event.key === 'Home') {
         nextTabId = 'review';
       } else if (event.key === 'End') {
-        nextTabId = 'context';
+        nextTabId = 'browser';
       }
 
       if (nextTabId === null) {

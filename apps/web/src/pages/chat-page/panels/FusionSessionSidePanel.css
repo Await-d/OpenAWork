@@ -533,3 +533,45 @@ button.fusion-side-panel__file-row:focus-visible {
     width: 100%;
   }
 }
+
+/* ─── 浏览器预览 tab ─────────────────────────────────────────────── */
+
+.fusion-side-panel__browser-host {
+  display: flex;
+  flex: 1;
+  /* 必须是纵向 flex 容器：BuiltInBrowser 靠 `flex: 1 1 auto` 吃掉剩余高度，
+     row 方向下该增长只作用于宽度，宿主高度不足时内容区仍会被 chrome 挤成 0。 */
+  flex-direction: column;
+  min-height: 320px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-side-panel__browser-input {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--fg-default);
+  flex: 1 1 0;
+  font-size: 11px;
+  min-height: 26px;
+  min-width: 0;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-2);
+}
+
+.fusion-side-panel__browser-input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.fusion-side-panel__browser-input:focus-visible {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.fusion-side-panel__ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

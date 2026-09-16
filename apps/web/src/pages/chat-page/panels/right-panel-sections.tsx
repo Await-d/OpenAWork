@@ -10,6 +10,10 @@ import type {
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import { Link } from 'react-router';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
+import {
+  COMPOSER_PERMISSION_MODE_OPTIONS,
+  type ComposerPermissionMode,
+} from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type {
@@ -1378,6 +1382,8 @@ export function ChatOverviewTabContent(props: {
   sessionTodos: SessionTodoItem[];
   sessionTasks: HierarchicalSessionTask[];
   workspaceFileItems: WorkspaceFileMentionItem[];
+  /** 审批方式档位（比 yoloMode 布尔更细）；未传入时按 legacy 布尔回退推导。 */
+  permissionMode?: ComposerPermissionMode;
   yoloMode: boolean;
   onCompactSession: () => void;
   onOpenRecoveryStrategy: () => void;
@@ -1403,6 +1409,7 @@ export function ChatOverviewTabContent(props: {
     sessionTodos,
     sessionTasks,
     workspaceFileItems,
+    permissionMode,
     yoloMode,
     onCompactSession,
     onOpenRecoveryStrategy,
@@ -1477,6 +1484,13 @@ export function ChatOverviewTabContent(props: {
     />
   );
 
+  // 档位优先；未传档位时按 legacy 布尔推导（与 ChatTopBar 只读 chip 同一规则）。
+  const resolvedPermissionMode = permissionMode ?? (yoloMode ? 'yolo' : 'ask');
+  // 档位文案直接取输入框档位控件的选项标签，避免两处措辞漂移。
+  const permissionModeLabel =
+    COMPOSER_PERMISSION_MODE_OPTIONS.find((option) => option.value === resolvedPermissionMode)
+      ?.label ?? resolvedPermissionMode;
+
   const metaGrid: Array<{ label: string; value: string; highlight?: boolean }> = [
     {
       label: '会话 ID',
@@ -1495,7 +1509,11 @@ export function ChatOverviewTabContent(props: {
       label: '对话模式',
       value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
     },
-    { label: 'YOLO', value: yoloMode ? '开启' : '关闭', highlight: yoloMode },
+    {
+      label: '审批方式',
+      value: permissionModeLabel,
+      highlight: resolvedPermissionMode === 'yolo',
+    },
     { label: '最近压缩', value: latestCompactionLabel },
     {
       label: '当前聚焦请求',

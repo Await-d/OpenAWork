@@ -17,6 +17,7 @@ import type {
   FusionContextOverviewProps,
   FusionContextRuntimeSummary,
 } from './FusionContextTab.js';
+import { FusionBrowserTab } from './FusionBrowserTab.js';
 import { FusionFilesTab } from './FusionFilesTab.js';
 import type { FusionFilesEditorState } from './FusionFilesTab.js';
 import { FusionReviewTab } from './FusionReviewTab.js';
@@ -114,6 +115,26 @@ function ContextIcon() {
   );
 }
 
+function BrowserIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
 function CloseIcon() {
   return (
     <svg
@@ -180,6 +201,7 @@ export function FusionMobileBottomPanel({
     { id: 'review', label: '审查', icon: <ReviewIcon />, badge: reviewCount || undefined },
     { id: 'files', label: '文件', icon: <FilesIcon /> },
     { id: 'context', label: 'Context', icon: <ContextIcon /> },
+    { id: 'browser', label: '浏览器', icon: <BrowserIcon /> },
   ];
 
   const handleTabClick = (tabId: SidePanelTabId) => {
@@ -235,6 +257,11 @@ export function FusionMobileBottomPanel({
                   onShowEditor={onShowEditor}
                   saving={saving}
                   workspaceFileItems={workspaceFileItems}
+                />
+              ) : activeTab === 'browser' ? (
+                <FusionBrowserTab
+                  currentSessionId={currentSessionId}
+                  effectiveWorkingDirectory={effectiveWorkingDirectory}
                 />
               ) : (
                 <FusionContextTab

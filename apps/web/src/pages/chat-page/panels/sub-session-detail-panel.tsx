@@ -6,6 +6,7 @@ import {
   type ChatRenderEntry,
   type ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
+import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import {
   formatGatewayStreamErrorMessage,
   useGatewayClient,
@@ -111,10 +112,6 @@ function parseModelSelectionFromMetadataJson(metadataJson: string | undefined): 
 
 const VISIBLE_TASK_COUNT = 5;
 const SUB_SESSION_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(140px, 28vh, 240px)';
-const SUB_SESSION_LATEST_FOCUS_THRESHOLD_PX = 32;
-const SUB_SESSION_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
-const SUB_SESSION_LATEST_REGION_FALLBACK_PX = 320;
-const SUB_SESSION_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 420;
 
 const SUB_SESSION_FLAT_SECTION_STYLE: React.CSSProperties = {
   display: 'flex',
@@ -203,9 +200,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
+  const contentColumnRef = useRef<HTMLDivElement>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
-  const ignoreScrollEventsUntilRef = useRef(0);
-  const isNearLatestRef = useRef(true);
+  // 协议层的回焦分支只在「编辑器面板内的元素持有焦点」时才动作
+  // （`editorPaneRef.current?.contains(activeElement)` → 回焦 textarea）；
+  // 本面板没有编辑器面板，编辑器相关 ref 传常量空 ref，不新增无用接线。
+  const editorPaneRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     void childSessionId;
@@ -217,7 +218,6 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     setSendError(null);
     setShowScrollToLatest(false);
     setHasPendingFollowContent(false);
-    isNearLatestRef.current = true;
   }, [childSessionId]);
 
   const renderedMessages = useMemo(() => {
@@ -254,7 +254,6 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     streaming,
   ]);
 
-  const scrollAnchorKey = `${messages.length}:${optimisticUserMessage?.id ?? ''}:${streamBuffer}:${sendError ?? ''}:${liveToolCalls.length}`;
   const headlineStatus = useMemo(() => getHeadlineStatus(tasks), [tasks]);
   const currentTaskSelection = useMemo(
     () =>
@@ -285,179 +284,65 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     [tasks],
   );
 
-  const getLatestAssistantAnchor = React.useCallback((): HTMLElement | null => {
-    const scrollRegion = scrollRegionRef.current;
-    if (!scrollRegion) {
-      return bottomRef.current;
-    }
-
-    const groups = scrollRegion.querySelectorAll<HTMLElement>(
-      '[data-chat-group-root="true"][data-role="assistant"]',
-    );
-
-    return groups[groups.length - 1] ?? bottomRef.current;
-  }, []);
-
-  const isScrollRegionNearLatest = React.useCallback(
-    (scrollRegion: HTMLDivElement | null): boolean => {
-      if (!scrollRegion) {
-        return true;
-      }
-
-      const distanceToBottom =
-        scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight;
-      if (distanceToBottom <= SUB_SESSION_LATEST_EDGE_VISIBILITY_THRESHOLD_PX) {
-        return true;
-      }
-
-      const latestAnchor = getLatestAssistantAnchor();
-      if (
-        !latestAnchor ||
-        latestAnchor === bottomRef.current ||
-        !scrollRegion.contains(latestAnchor)
-      ) {
-        return (
-          scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight <
-          SUB_SESSION_LATEST_REGION_FALLBACK_PX
-        );
-      }
-
-      const scrollRegionRect = scrollRegion.getBoundingClientRect();
-      const latestAnchorRect = latestAnchor.getBoundingClientRect();
-      const relativeTop = latestAnchorRect.top - scrollRegionRect.top;
-      const relativeBottom = latestAnchorRect.bottom - scrollRegionRect.top;
-      const focusBandTop = scrollRegion.clientHeight * 0.16;
-      const focusBandBottom = scrollRegion.clientHeight * 0.92;
-
-      return relativeBottom >= focusBandTop && relativeTop <= focusBandBottom;
+  // 滚动协议层（components/conversation-runtime/scroll）是唯一事实来源：
+  // 跟随由「显式输入意图 + 非程序化外部滚动」挂起、由「位置回到最新边缘」恢复，
+  // 程序化滚动只记录落点；全程没有「忽略 scroll 事件 N 毫秒」的时间窗口。
+  const visibleStreaming = streaming || streamBuffer.length > 0 || liveToolCalls.length > 0;
+  const { isFollowingRef, handleScroll, scrollToBottom, forceFollowToLatest } = useScrollManager(
+    {
+      scrollRegionRef,
+      bottomRef,
+      pendingScrollFrameRef,
+      contentColumnRef,
+      editorPaneRef,
+      textareaRef,
     },
-    [getLatestAssistantAnchor],
+    {
+      setShowScrollToBottom: setShowScrollToLatest,
+      setHasPendingFollowContent,
+    },
+    {
+      // 子会话身份：切换时协议层整体重置跟随 / 中断状态；流式 tick 不改变它。
+      sessionKey: childSessionId,
+      messagesLength: messages.length,
+      visibleStreaming,
+      visibleStreamBufferLength: streamBuffer.length,
+      // 本面板没有 ChatPage 的编辑器面板（code editor）模式：协议层唯一的
+      // editorMode 消费点是「编辑器面板抢焦点时回焦 textarea」，此处不存在。
+      editorMode: false,
+    },
   );
 
-  const scrollToLatest = React.useCallback(
-    // Default to latest-edge so tool-card growth stays pinned to the bottom.
-    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'latest-edge') => {
-      const scrollRegion = scrollRegionRef.current;
-      const latestAnchor = getLatestAssistantAnchor();
-
-      isNearLatestRef.current = true;
-      setShowScrollToLatest(false);
-      setHasPendingFollowContent(false);
-
-      if (pendingScrollFrameRef.current !== null) {
-        cancelAnimationFrame(pendingScrollFrameRef.current);
-      }
-
-      ignoreScrollEventsUntilRef.current =
-        behavior === 'smooth'
-          ? performance.now() + SUB_SESSION_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS
-          : 0;
-
-      pendingScrollFrameRef.current = requestAnimationFrame(() => {
-        if (scrollRegion) {
-          const maxScrollTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
-          let nextTop = maxScrollTop;
-          let shouldForceScroll = scrollRegion.clientHeight === 0;
-
-          if (
-            align === 'center' &&
-            latestAnchor &&
-            latestAnchor !== bottomRef.current &&
-            scrollRegion.contains(latestAnchor)
-          ) {
-            const scrollRegionRect = scrollRegion.getBoundingClientRect();
-            const latestAnchorRect = latestAnchor.getBoundingClientRect();
-            shouldForceScroll =
-              shouldForceScroll || scrollRegionRect.height === 0 || latestAnchorRect.height === 0;
-            const latestAnchorCenter =
-              scrollRegion.scrollTop +
-              (latestAnchorRect.top - scrollRegionRect.top) +
-              latestAnchorRect.height / 2;
-            nextTop = Math.max(
-              0,
-              Math.min(maxScrollTop, latestAnchorCenter - scrollRegion.clientHeight / 2),
-            );
-          }
-
-          if (
-            shouldForceScroll ||
-            Math.abs(scrollRegion.scrollTop - nextTop) > SUB_SESSION_LATEST_FOCUS_THRESHOLD_PX
-          ) {
-            scrollRegion.scrollTo({ top: nextTop, behavior });
-          }
-        } else {
-          bottomRef.current?.scrollIntoView({
-            behavior,
-            block: align === 'center' ? 'center' : 'end',
-          });
-        }
-
-        pendingScrollFrameRef.current = null;
-      });
-    },
-    [getLatestAssistantAnchor],
-  );
-
-  const handleScrollRegion = React.useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      const region = event.currentTarget;
-      if (performance.now() < ignoreScrollEventsUntilRef.current) {
-        return;
-      }
-
-      const isNearLatest = isScrollRegionNearLatest(region);
-      isNearLatestRef.current = isNearLatest;
-      setShowScrollToLatest(!isNearLatest);
-      if (isNearLatest) {
-        setHasPendingFollowContent(false);
-      }
-    },
-    [isScrollRegionNearLatest],
-  );
+  // 打开子会话时「初始贴底」只发生一次：等该子会话自己的消息就位（messages 可用 ⇒
+  // 内容已渲染）再强制贴底。刻意不与 `session.id === childSessionId` 严格比对——
+  // 临时 / 乐观 id、切换中残留的旧会话都会让严格相等永不成立，贴底静默失效。
+  // 就绪判断只依赖 `hasMessages` 布尔位（空 → 非空的翻转），配合 keyed ref 保证一次性：
+  // 同一 childSessionId 只贴一次，消息提交 / 流式 tick 不重跑；切换子会话重新武装。
+  // 后续提交的贴底由协议层在「跟随仍启用」时接管。
+  const initialOpenSessionRef = useRef<string | null>(null);
+  const hasMessages = messages.length > 0;
 
   useEffect(() => {
-    return () => {
-      if (pendingScrollFrameRef.current !== null) {
-        cancelAnimationFrame(pendingScrollFrameRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (renderedMessages.length === 0 && !streaming && !streamBuffer && !sendError) {
-      setShowScrollToLatest(false);
-      setHasPendingFollowContent(false);
-      isNearLatestRef.current = true;
-    }
-  }, [renderedMessages.length, sendError, streamBuffer, streaming]);
-
-  useEffect(() => {
-    void scrollAnchorKey;
-    if (isNearLatestRef.current) {
-      // Always edge-pin while following. Center-align leaves expanding tool
-      // cards below the fold until a later commit-time edge scroll.
-      scrollToLatest('auto', 'latest-edge');
+    if (childSessionId === null) {
+      initialOpenSessionRef.current = null;
       return;
     }
+    if (initialOpenSessionRef.current === childSessionId) return;
+    if (!hasMessages) return;
+    initialOpenSessionRef.current = childSessionId;
+    return forceFollowToLatest('auto');
+  }, [childSessionId, forceFollowToLatest, hasMessages]);
 
-    if (streaming || streamBuffer.length > 0 || sendError || liveToolCalls.length > 0) {
-      setHasPendingFollowContent(true);
-      setShowScrollToLatest(true);
-    }
-  }, [
-    liveToolCalls.length,
-    scrollAnchorKey,
-    scrollToLatest,
-    sendError,
-    streamBuffer.length,
-    streaming,
-  ]);
-
+  // 跟随已挂起时，新的流式内容 / 工具卡 / 错误到达 → 标记「有待跟内容」，
+  // 让回底按钮升级为强调态（与 ChatPage 的 setHasPendingFollowContent(prev => prev || true) 同构）；
+  // 恢复跟随后由协议层清除该标记。
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToLatest('auto', 'latest-edge');
+    if (isFollowingRef.current) return;
+    if (!streaming && streamBuffer.length === 0 && liveToolCalls.length === 0 && !sendError) {
+      return;
     }
-  }, [messages.length, scrollToLatest]);
+    setHasPendingFollowContent((previous) => previous || true);
+  }, [isFollowingRef, liveToolCalls.length, sendError, streamBuffer.length, streaming]);
 
   async function handleSend() {
     if (!childSessionId || !input.trim() || isChildSessionBusy || cancellingTask) {
@@ -865,7 +750,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
         </div>
         <div
           ref={scrollRegionRef}
-          onScroll={handleScrollRegion}
+          onScroll={handleScroll}
           data-testid="sub-session-scroll-region"
           style={{
             flex: 1,
@@ -909,7 +794,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               {error}
             </div>
           ) : renderedMessages.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div
+              ref={contentColumnRef}
+              style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
+            >
               <ChatMessageGroupList
                 activeModelId={childSessionSelection.modelId}
                 activeProviderId={childSessionSelection.providerId}
@@ -941,7 +829,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           <button
             type="button"
             data-testid="sub-session-scroll-bottom"
-            onClick={() => scrollToLatest('smooth', 'latest-edge')}
+            onClick={() => scrollToBottom('smooth', 'latest-edge')}
             aria-label={
               streaming
                 ? hasPendingFollowContent

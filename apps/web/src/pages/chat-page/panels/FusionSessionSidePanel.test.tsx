@@ -51,8 +51,14 @@ vi.mock('../../../components/file-editor/EditorBrowserWorkspace.js', () => ({
   ),
 }));
 
+vi.mock('../../../components/chat/misc/BuiltInBrowser.js', () => ({
+  BuiltInBrowser: () => <div data-testid="built-in-browser-mock" />,
+}));
+
 function resetUiState(): void {
   useUIStateStore.setState({
+    browserPreviewSurface: 'editor',
+    browserPreviewUrlByWorkspace: {},
     reviewPanelOpened: true,
     reviewPanelWidth: 400,
     fusionDockSplitPos: 35,
@@ -337,6 +343,28 @@ describe('FusionSessionSidePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复详情' }));
 
     expect(openRecoveryStrategy).toHaveBeenCalledTimes(1);
+  });
+
+  it('在浏览器预览 tab 挂载内置浏览器面板', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    useUIStateStore.setState({
+      browserPreviewUrlByWorkspace: { '/home/await/project/OpenAWork': 'http://localhost:3000' },
+    });
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="browser" />);
+
+    expect(screen.getByRole('tab', { name: '浏览器预览' })).not.toBeNull();
+    expect(screen.getByTestId('built-in-browser-mock')).not.toBeNull();
+  });
+
+  it('未设置预览地址时浏览器 tab 展示空状态与地址输入', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="browser" />);
+
+    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.getByLabelText('预览地址')).not.toBeNull();
+    expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
   });
 
   it('在融合 dock 内拖拽手柄可调整对话列/侍审查面板的分栏百分比', () => {
