@@ -31,9 +31,8 @@ function buildClosedMarkdownFence(lineCount: number): string {
 
 function findPreviewClamp(container: HTMLElement): Element | null {
   return (
-    [...container.querySelectorAll('div')].find(
-      (element) => element.style.maxHeight === '300px',
-    ) ?? null
+    [...container.querySelectorAll('div')].find((element) => element.style.maxHeight === '300px') ??
+    null
   );
 }
 

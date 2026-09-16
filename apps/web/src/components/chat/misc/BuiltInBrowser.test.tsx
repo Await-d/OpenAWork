@@ -249,4 +249,16 @@ describe('BuiltInBrowser', () => {
       expect(hints.textContent).toContain(shortcut.combination);
     }
   });
+
+  it('根节点在 flex 宿主中可增长且允许收缩，避免内容区被 chrome 挤成 0', () => {
+    const view = render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    // jsdom 没有布局引擎，这里钉住的是「宿主高度不足时内容区不被 chrome 挤成 0」
+    // 所依赖的契约：flex-grow 吃掉剩余高度、min-height/min-width 允许真正收缩。
+    const root = view.container.firstElementChild as HTMLElement;
+    expect(root.style.flexGrow).toBe('1');
+    expect(root.style.flexShrink).toBe('1');
+    expect(root.style.minHeight).toBe('0px');
+    expect(root.style.minWidth).toBe('0px');
+  });
 });

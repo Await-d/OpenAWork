@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorBrowserWorkspace } from '../../../components/file-editor/EditorBrowserWorkspace.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionBrowserTab } from './FusionBrowserTab.js';
+import sidePanelCss from './FusionSessionSidePanel.css?raw';
 
 vi.mock('../../../components/chat/misc/BuiltInBrowser.js', () => ({
   BuiltInBrowser: (props: { readonly hidden?: boolean }) => (
@@ -148,5 +149,27 @@ describe('FusionBrowserTab', () => {
     );
 
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
+  });
+
+  it('宿主类名与 CSS 契约一致：纵向 flex 且允许浏览器子节点增长', () => {
+    useUIStateStore.setState({
+      browserPreviewUrlByWorkspace: { [WORKSPACE_PATH]: PREVIEW_URL },
+    });
+
+    render(
+      <FusionBrowserTab currentSessionId="session-1" effectiveWorkingDirectory={WORKSPACE_PATH} />,
+    );
+
+    const host = screen.getByTestId('fusion-browser-tab-host');
+    expect(host.className).toBe('fusion-side-panel__browser-host');
+
+    // jsdom 不应用样式表也不做布局，宿主能否让浏览器吃到剩余高度完全取决于这条
+    // 真实 CSS 规则；直接对样式源文本断言，避免规则被改回 row 时测试仍然全绿。
+    const rule =
+      sidePanelCss.match(/\.fusion-side-panel__browser-host\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toMatch(/display:\s*flex/);
+    expect(rule).toMatch(/flex-direction:\s*column/);
+    expect(rule).toMatch(/flex:\s*1/);
+    expect(rule).toMatch(/min-height:\s*320px/);
   });
 });

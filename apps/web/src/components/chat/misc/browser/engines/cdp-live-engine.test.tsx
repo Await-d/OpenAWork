@@ -16,7 +16,14 @@ import type {
   BrowserLivePhase,
   BrowserLiveSession,
 } from '../hooks/use-browser-live-session.js';
-import { CdpLiveEngine, DEVICE_SYNC_DEBOUNCE_MS, toDevicePoint } from './cdp-live-engine.js';
+import {
+  CdpLiveEngine,
+  computeFrameLayout,
+  DEVICE_SYNC_DEBOUNCE_MS,
+  FALLBACK_FRAME_MAX_SIZE,
+  toDevicePoint,
+} from './cdp-live-engine.js';
+
 afterEach(() => {
   cleanup();
 });
@@ -486,6 +493,83 @@ describe('CdpLiveEngine 缩放坐标', () => {
       { ch: 'control', action: 'pick', x: 75, y: 50 },
     ]);
     expect(screen.getByTestId('cdp-live-frame').style.transform).toBe('scale(2)');
+  });
+});
+
+describe('computeFrameLayout 退化盒子兜底', () => {
+  const frame = { deviceWidth: 200, deviceHeight: 100 };
+
+  it('正常盒子按等比缩放放进可用空间', () => {
+    expect(computeFrameLayout({ width: 100, height: 100 }, frame)).toEqual({
+      width: 100,
+      height: 50,
+    });
+    expect(computeFrameLayout({ width: 400, height: 400 }, frame)).toEqual({
+      width: 400,
+      height: 200,
+    });
+  });
+
+  it('0 高 / 0 宽 / 未测量时回退到帧自身设备尺寸，而不是返回 null', () => {
+    expect(computeFrameLayout({ width: 520, height: 0 }, frame)).toEqual({ width: 200, height: 100 });
+    expect(computeFrameLayout({ width: 0, height: 320 }, frame)).toEqual({ width: 200, height: 100 });
+    expect(computeFrameLayout({ width: 0, height: 0 }, frame)).toEqual({ width: 200, height: 100 });
+    expect(computeFrameLayout(null, frame)).toEqual({ width: 200, height: 100 });
+    expect(computeFrameLayout(undefined, frame)).toEqual({ width: 200, height: 100 });
+  });
+
+  it('兜底尺寸把最长边裁剪到上限并保持比例', () => {
+    expect(computeFrameLayout({ width: 0, height: 0 }, { deviceWidth: 4096, deviceHeight: 2048 })).toEqual({
+      width: FALLBACK_FRAME_MAX_SIZE,
+      height: FALLBACK_FRAME_MAX_SIZE / 2,
+    });
+  });
+
+  it('不变式：设备尺寸有效 ⇒ 任意（含退化）盒子都得到非 null 布局', () => {
+    const boxes: ReadonlyArray<{ width: number; height: number } | null | undefined> = [
+      null,
+      undefined,
+      { width: 0, height: 0 },
+      { width: 0, height: 320 },
+      { width: 520, height: 0 },
+      { width: Number.NaN, height: 320 },
+      { width: 520, height: Number.NaN },
+    ];
+    for (const box of boxes) {
+      expect(computeFrameLayout(box, { deviceWidth: 1, deviceHeight: 1 })).not.toBeNull();
+    }
+    expect(
+      computeFrameLayout({ width: 0, height: 0 }, { deviceWidth: 0, deviceHeight: 0 }),
+    ).toBeNull();
+    expect(
+      computeFrameLayout({ width: 0, height: 0 }, { deviceWidth: -10, deviceHeight: 100 }),
+    ).toBeNull();
+  });
+});
+
+describe('CdpLiveEngine 退化容器', () => {
+  it('容器量到 0 高时仍渲染画面（jsdom 天然返回 0 rect，正是面板塌陷路径）', () => {
+    const harness = createSessionHarness();
+    render(
+      <CdpLiveEngine
+        session={harness.session}
+        url="about:blank"
+        hidden={false}
+        pickArmed={false}
+        onPickConsumed={() => undefined}
+        onPickCancel={() => undefined}
+        refreshKey={0}
+        devicePresetId={DEFAULT_DEVICE_PRESET_ID}
+        zoom={1}
+      />,
+    );
+
+    act(() => harness.emit(FRAME_ENVELOPE));
+
+    expect(screen.queryByTestId('cdp-live-frame')).not.toBeNull();
+    const img = screen.getByTestId('cdp-live-frame');
+    expect(img.style.width).toBe('200px');
+    expect(img.style.height).toBe('100px');
   });
 });
 
