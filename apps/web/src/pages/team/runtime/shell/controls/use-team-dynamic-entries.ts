@@ -6,6 +6,10 @@ import {
   useLayerStore,
   useTeamNotificationStore,
 } from '../../../../../stores/team/team-events.js';
+import {
+  filterActiveAuditEntries,
+  useRollbackVoidWindows,
+} from '../../../../../stores/team/rollback-tombstones.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { collectSessionScope } from '../../data/team-runtime-session-scope.js';
 import {
@@ -48,6 +52,7 @@ export function buildTeamDynamicScopeNodes(input: {
 export function useTeamDynamicEntries(receptionSessionId: string | null): TeamDynamicEntry[] {
   const { sessions } = useTeamRuntimeReferenceViewData();
   const events = useTeamNotificationStore((state) => state.events);
+  const rollbackVoidWindows = useRollbackVoidWindows();
   const clarificationItems = useClarificationStore((state) => state.items);
   const layerNodes = useLayerStore((state) => state.nodes);
 
@@ -65,13 +70,13 @@ export function useTeamDynamicEntries(receptionSessionId: string | null): TeamDy
     [dynamicScopeNodes, receptionSessionId],
   );
 
-  const scopedEvents = useMemo(
-    () =>
-      receptionSessionId
-        ? filterTeamDynamicEventsForScope(events, dynamicSessionScope, receptionSessionId)
-        : [],
-    [dynamicSessionScope, events, receptionSessionId],
-  );
+  const scopedEvents = useMemo(() => {
+    // 被回退回合的事件不再进入「团队动态」。
+    const activeEvents = filterActiveAuditEntries(events, rollbackVoidWindows);
+    return receptionSessionId
+      ? filterTeamDynamicEventsForScope(activeEvents, dynamicSessionScope, receptionSessionId)
+      : [];
+  }, [dynamicSessionScope, events, receptionSessionId, rollbackVoidWindows]);
 
   const scopedClarificationItems = useMemo(
     () =>
