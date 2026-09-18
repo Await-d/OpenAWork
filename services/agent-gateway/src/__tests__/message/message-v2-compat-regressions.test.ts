@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../infra/db.js', () => ({
+  WORKSPACE_ACCESS_RESTRICTED: false,
+  WORKSPACE_ROOTS: [],
   sqliteAll: mocks.sqliteAll,
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,

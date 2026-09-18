@@ -6,6 +6,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  DIALOGUE_MODE_SYSTEM_PROMPTS,
+  buildTwoPartSystemPrompts,
+} from '../../routes/stream-system-prompts.js';
+import {
   resolveStreamInteractionModes,
   streamRequestSchema,
   type StreamRequest,
@@ -104,5 +108,84 @@ describe('streamRequestSchema · 权限档位字段', () => {
       permissionMode: 'bogus',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('resolveStreamInteractionModes · 对话模式解析', () => {
+  it('请求级 dialogueMode 覆盖会话 metadata 的 clarify', () => {
+    const modes = resolveStreamInteractionModes({
+      metadataJson: JSON.stringify({ dialogueMode: 'clarify' }),
+      requestData: buildRequest({ dialogueMode: 'coding' }),
+    });
+
+    expect(modes.dialogueMode).toBe('coding');
+  });
+
+  it('无请求级覆盖时沿用 metadata 的 clarify（grill / 澄清轮次行为不变）', () => {
+    const modes = resolveStreamInteractionModes({
+      metadataJson: JSON.stringify({ dialogueMode: 'clarify' }),
+      requestData: buildRequest(),
+    });
+
+    expect(modes.dialogueMode).toBe('clarify');
+  });
+
+  it('metadata 与请求都未指定时保持未指定', () => {
+    const modes = resolveStreamInteractionModes({
+      metadataJson: JSON.stringify({}),
+      requestData: buildRequest(),
+    });
+
+    expect(modes.dialogueMode).toBeUndefined();
+  });
+
+  it('接受 programmer 并拒绝枚举外取值', () => {
+    expect(buildRequest({ dialogueMode: 'programmer' }).dialogueMode).toBe('programmer');
+    expect(
+      streamRequestSchema.safeParse({
+        clientRequestId: 'req-dialogue-mode',
+        message: 'hello',
+        dialogueMode: 'bogus',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * reception direct / light 轮的生命周期：router 已判定"前台轻量承接"，本轮通过
+ * 请求级 `dialogueMode: 'coding'` 覆盖 reception 会话持久态的 clarify；而 grill /
+ * 澄清轮次不带覆盖，仍解析到 clarify。这里按生产同源的方式（`stream.ts` 选取
+ * `DIALOGUE_MODE_SYSTEM_PROMPTS[mode]`，`stream-model-round.ts` 交给
+ * `buildTwoPartSystemPrompts`）拼出该轮实际注入的 stable 提示词并断言内容。
+ */
+describe('reception 轮次的有效提示词注入', () => {
+  const RECEPTION_METADATA = JSON.stringify({ dialogueMode: 'clarify' });
+
+  function composeStablePrompt(requestData: StreamRequest): string {
+    const modes = resolveStreamInteractionModes({
+      metadataJson: RECEPTION_METADATA,
+      requestData,
+    });
+    return buildTwoPartSystemPrompts({
+      workspaceCtx: null,
+      dialogueModePrompt:
+        modes.dialogueMode !== undefined ? DIALOGUE_MODE_SYSTEM_PROMPTS[modes.dialogueMode] : null,
+    }).stable;
+  }
+
+  it('direct / light 轮不再注入澄清人设与 __grill_confirm__ 确认门控', () => {
+    const stable = composeStablePrompt(buildRequest({ dialogueMode: 'coding' }));
+
+    expect(stable).not.toContain('需求澄清助手');
+    expect(stable).not.toContain('多轮提问');
+    expect(stable).not.toContain('__grill_confirm__');
+  });
+
+  it('grill / 澄清轮（无请求级覆盖）仍注入澄清人设与确认门控', () => {
+    const stable = composeStablePrompt(buildRequest());
+
+    expect(stable).toContain('需求澄清助手');
+    expect(stable).toContain('多轮提问');
+    expect(stable).toContain('__grill_confirm__');
   });
 });

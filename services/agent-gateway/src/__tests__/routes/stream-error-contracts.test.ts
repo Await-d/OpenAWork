@@ -246,7 +246,7 @@ describe('stream error contracts', () => {
         providerId: 'fixed-provider',
         modelId: 'fixed-model',
       },
-      { fallbackToChat: false },
+      { fallbackToChat: false, honorRequestedModel: false },
     );
   });
 
@@ -285,7 +285,7 @@ describe('stream error contracts', () => {
         providerId: 'openai-chat',
         modelId: 'gpt-4o',
       },
-      { fallbackToChat: true },
+      { fallbackToChat: true, honorRequestedModel: false },
     );
   });
 
@@ -325,7 +325,43 @@ describe('stream error contracts', () => {
         providerId: 'openai-chat',
         modelId: 'gpt-4o',
       },
-      { fallbackToChat: true },
+      { fallbackToChat: true, honorRequestedModel: true },
+    );
+  });
+
+  it('请求显式选择与会话 metadata 绑定不一致时以请求为准', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: anthropicProvider,
+      modelId: 'claude-opus-4-0',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+      }),
+      requestData: {
+        afterSeq: 0,
+        clientRequestId: 'req-explicit-wins',
+        maxTokens: 2048,
+        message: 'hello',
+        model: 'claude-opus-4-0',
+        providerId: 'anthropic-chat',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.model).toBe('claude-opus-4-0');
+    expect(route.providerId).toBe('anthropic-chat');
+    expect(route.providerType).toBe('anthropic');
+    expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        providerId: 'anthropic-chat',
+        modelId: 'claude-opus-4-0',
+      },
+      { fallbackToChat: true, honorRequestedModel: true },
     );
   });
 
@@ -366,7 +402,7 @@ describe('stream error contracts', () => {
         providerId: undefined,
         modelId: 'grok-code-fast-1',
       },
-      { fallbackToChat: true },
+      { fallbackToChat: true, honorRequestedModel: false },
     );
   });
 

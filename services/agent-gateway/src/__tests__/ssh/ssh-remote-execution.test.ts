@@ -115,9 +115,8 @@ function buildService(state: FakeSshState): SshServiceModule.SshService {
 
 beforeAll(async () => {
   ({ connectDb, migrate, closeDb, sqliteRun } = await import('../../infra/db.js'));
-  ({ SshService, setSshService, __resetSshServiceForTests } = await import(
-    '../../ssh/ssh-service.js'
-  ));
+  ({ SshService, setSshService, __resetSshServiceForTests } =
+    await import('../../ssh/ssh-service.js'));
   ({ __resetSshStoreForTests } = await import('../../ssh/ssh-store.js'));
   remoteExecution = await import('../../tools/ssh-remote-execution.js');
   await connectDb();

@@ -86,6 +86,7 @@ function getHandoffAsRecord(id: string): HandoffStore.HandoffRecord {
     failure_reason: string | null;
     retry_count: number;
     idempotency_key: string | null;
+    client_request_id: string | null;
     paused: number;
     paused_at: string | null;
     paused_by_user_id: string | null;
@@ -111,6 +112,7 @@ function getHandoffAsRecord(id: string): HandoffStore.HandoffRecord {
     failureReason: row.failure_reason,
     retryCount: row.retry_count,
     idempotencyKey: row.idempotency_key,
+    clientRequestId: row.client_request_id ?? null,
     paused: row.paused === 1,
     pausedAt: row.paused_at,
     pausedByUserId: row.paused_by_user_id,

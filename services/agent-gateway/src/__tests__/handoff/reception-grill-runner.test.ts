@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { serializeGrillState } from '@openAwork/agent-core';
+import {
+  buildConfirmNode,
+  createGrillState,
+  serializeGrillState,
+  type ClarificationNode,
+} from '@openAwork/agent-core';
 import type * as DbModule from '../../infra/db.js';
 import type * as GrillModule from '../../handoff/runner/reception-grill-runner.js';
 
@@ -140,5 +145,171 @@ describe('持久化', () => {
     grill.persistReceptionGrill(SESSION_ID, grill.startReceptionGrill(INTENT), INTENT);
     grill.clearReceptionGrill(SESSION_ID);
     expect(grill.readReceptionGrill(SESSION_ID)).toBeNull();
+  });
+});
+
+function settleAllDimensions(state: ReturnType<typeof grill.startReceptionGrill>) {
+  return grill.advanceReceptionGrill({
+    state,
+    reply: '1. 改单文件；2. 无约束；3. 代码变更；4. 测试通过',
+  });
+}
+
+describe('advanceReceptionGrill — 一轮多答（P3）', () => {
+  it('一条回复结算整个 frontier，直接进入待确认', () => {
+    const state = grill.startReceptionGrill(INTENT);
+    const advanced = settleAllDimensions(state);
+
+    expect(advanced.kind).toBe('awaiting-confirmation');
+    expect(
+      advanced.state.nodes
+        .filter((node) => node.id !== '__grill_confirm__')
+        .map((node) => node.answer),
+    ).toEqual(['改单文件', '无约束', '代码变更', '测试通过']);
+    expect(state.nodes.every((node) => node.answer === undefined)).toBe(true);
+  });
+
+  it('维度式回复同样可一次回答多项', () => {
+    const advanced = grill.advanceReceptionGrill({
+      state: grill.startReceptionGrill(INTENT),
+      reply: '目标：改单文件。约束：无约束。',
+    });
+    expect(advanced.state.nodes.find((node) => node.id === 'goal')?.answer).toBe('改单文件');
+    expect(advanced.state.nodes.find((node) => node.id === 'constraint')?.answer).toBe('无约束');
+    expect(advanced.state.nodes.find((node) => node.id === 'deliverable')?.answer).toBeUndefined();
+  });
+
+  it('多段均无法定位时不推进，提示歧义片段', () => {
+    const state = grill.startReceptionGrill(INTENT);
+    const advanced = grill.advanceReceptionGrill({ state, reply: '第一点\n第二点' });
+    expect(advanced.kind).toBe('question');
+    expect(advanced.state).toBe(state);
+    expect(advanced.text).toContain('我没能确定这几段回复对应哪一项');
+  });
+});
+
+describe('advanceReceptionGrill — 有界驳回（P2）', () => {
+  it('驳回后的重提列出仍需拍板的共识项并记录 rejections', () => {
+    const awaiting = settleAllDimensions(grill.startReceptionGrill(INTENT)).state;
+    const rejected = grill.advanceReceptionGrill({ state: awaiting, reply: '需修改' });
+
+    expect(rejected.kind).toBe('awaiting-confirmation');
+    expect(rejected.text).toContain('还需你拍板的还有 4 项');
+    expect(rejected.state.rejections).toHaveLength(1);
+    expect(rejected.state.rejections?.[0]?.outstanding).toEqual([
+      'goal',
+      'constraint',
+      'deliverable',
+      'acceptance',
+    ]);
+  });
+
+  it('连续 6 次驳回后进入 exhausted，不再无休止重提', () => {
+    let advanced = grill.advanceReceptionGrill({
+      state: settleAllDimensions(grill.startReceptionGrill(INTENT)).state,
+      reply: '需修改',
+    });
+    for (let attempt = 1; attempt < 6; attempt += 1) {
+      advanced = grill.advanceReceptionGrill({ state: advanced.state, reply: '需修改' });
+    }
+
+    expect(advanced.kind).toBe('exhausted');
+    expect(advanced.state.exhaustedAt).toBeTypeOf('number');
+    expect(advanced.state.rejections).toHaveLength(6);
+    expect(advanced.text).toContain('先暂停澄清');
+  });
+});
+
+describe('formatFrontierPrompt — 多答提示（P3）', () => {
+  it('明示可一次回复多项并给出两种写法', () => {
+    const text = grill.formatFrontierPrompt(grill.startReceptionGrill(INTENT));
+    expect(text).toContain('你可以一次性回复多项');
+    expect(text).toContain('写法一（按序号）');
+    expect(text).toContain('写法二（按维度）');
+  });
+});
+
+function exhaustGrill() {
+  let advanced = grill.advanceReceptionGrill({
+    state: settleAllDimensions(grill.startReceptionGrill(INTENT)).state,
+    reply: '需修改',
+  });
+  for (let attempt = 1; attempt < 6; attempt += 1) {
+    advanced = grill.advanceReceptionGrill({ state: advanced.state, reply: '需修改' });
+  }
+  return advanced.state;
+}
+
+describe('advanceReceptionGrill — 耗尽态的两条承诺出路', () => {
+  it('已耗尽态 + 「按推荐项继续」→ confirmed 且写入 confirmedAt', () => {
+    const advanced = grill.advanceReceptionGrill({ state: exhaustGrill(), reply: '按推荐项继续' });
+
+    expect(advanced.kind).toBe('confirmed');
+    expect(typeof advanced.state.confirmedAt).toBe('number');
+  });
+
+  it('已耗尽态 + 肯定同义词（确认）→ confirmed', () => {
+    const advanced = grill.advanceReceptionGrill({ state: exhaustGrill(), reply: '确认' });
+
+    expect(advanced.kind).toBe('confirmed');
+    expect(typeof advanced.state.confirmedAt).toBe('number');
+  });
+
+  it('已耗尽态 + 「取消」→ cancelled，状态不变且不写 confirmedAt', () => {
+    const state = exhaustGrill();
+    const advanced = grill.advanceReceptionGrill({ state, reply: '取消' });
+
+    expect(advanced.kind).toBe('cancelled');
+    expect(advanced.state).toBe(state);
+    expect(advanced.state.confirmedAt).toBeUndefined();
+  });
+
+  it('已耗尽态 + 无关文本 → 仍 exhausted（重述提示），不改状态、不写 confirmedAt', () => {
+    const state = exhaustGrill();
+    const advanced = grill.advanceReceptionGrill({ state, reply: '随便说点什么' });
+
+    expect(advanced.kind).toBe('exhausted');
+    expect(advanced.state).toBe(state);
+    expect(advanced.state.confirmedAt).toBeUndefined();
+    expect(advanced.text).toContain('先暂停澄清');
+  });
+
+  it('已耗尽态 + 空回复 → 仍 exhausted（不退回普通前沿提示）', () => {
+    const state = exhaustGrill();
+    const advanced = grill.advanceReceptionGrill({ state, reply: '   ' });
+
+    expect(advanced.kind).toBe('exhausted');
+    expect(advanced.state).toBe(state);
+  });
+
+  it('无推荐选项且无答案的节点：记录显式「未决」标记而非编造答案，仍能确认', () => {
+    const nodes: ClarificationNode[] = [
+      {
+        id: 'goal',
+        dimension: 'goal',
+        question: '目标？',
+        options: [{ label: '默认目标', recommended: true }],
+        dependsOn: [],
+      },
+      {
+        id: 'constraint',
+        dimension: 'constraint',
+        question: '约束？',
+        options: [{ label: '约束 X' }, { label: '约束 Y' }],
+        dependsOn: [],
+      },
+    ];
+    const state = {
+      ...createGrillState([...nodes, buildConfirmNode(['goal', 'constraint'])]),
+      exhaustedAt: 1,
+    };
+
+    const advanced = grill.advanceReceptionGrill({ state, reply: '按推荐项继续' });
+
+    expect(advanced.kind).toBe('confirmed');
+    expect(advanced.state.nodes.find((node) => node.id === 'goal')?.answer).toBe('默认目标');
+    const unresolved = advanced.state.nodes.find((node) => node.id === 'constraint')?.answer;
+    expect(unresolved).toBe(grill.EXHAUSTED_UNRESOLVED_ANSWER);
+    expect(unresolved).toContain('未决');
   });
 });

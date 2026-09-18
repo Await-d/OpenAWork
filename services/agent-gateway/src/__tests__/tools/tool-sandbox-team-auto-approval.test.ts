@@ -802,6 +802,196 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
   });
 });
 
+describe('tool-sandbox reception 后台会话只读工具免审批', () => {
+  beforeEach(() => {
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+    mkdirSync(TEST_WORKSPACE, { recursive: true });
+    mocks.sqliteAllMock.mockReset();
+    mocks.sqliteAllMock.mockImplementation(() => []);
+    mocks.sqliteGetMock.mockClear();
+    mocks.sqliteRunMock.mockReset();
+    mocks.transitionToolToRunningMock.mockReset();
+    mocks.requireBoundWorkspace = true;
+    mocks.roleLayer = 'reception';
+    mocks.teamParentSessionId = 'team-root-session';
+    mocks.handoffState = '{"status":"running"}';
+    mocks.metadataJson = JSON.stringify({ workingDirectory: TEST_WORKSPACE });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+  });
+
+  function writeReadPermissionRule(action: 'allow' | 'ask' | 'deny'): void {
+    writeFileSync(
+      join(TEST_WORKSPACE, '.openawork.permissions.json'),
+      JSON.stringify({ rules: [{ permission: 'read', pattern: '*', action }] }),
+      'utf8',
+    );
+  }
+
+  async function executeTeamTool(toolName: string, rawInput: Record<string, unknown>) {
+    return createDefaultSandbox().execute(
+      {
+        toolCallId: `call-team-${toolName}`,
+        toolName,
+        rawInput,
+      },
+      new AbortController().signal,
+      'team-reception-session',
+      executionContext(`req-team-${toolName}`),
+    );
+  }
+
+  it('reception 后台会话调 read 不创建权限请求', async () => {
+    const targetPath = join(TEST_WORKSPACE, 'reception-read.txt');
+    writeFileSync(targetPath, 'reception read content', 'utf8');
+
+    const result = await executeTeamTool('read', { filePath: targetPath });
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(JSON.stringify(result.output)).toContain('reception read content');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('reception 后台会话调 grep 不创建权限请求', async () => {
+    writeFileSync(join(TEST_WORKSPACE, 'reception-grep.txt'), 'needle-in-reception', 'utf8');
+
+    const result = await executeTeamTool('grep', {
+      pattern: 'needle-in-reception',
+      path: TEST_WORKSPACE,
+    });
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(String(result.output)).toContain('reception-grep.txt');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('reception 后台会话调 webfetch 不创建权限请求', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('fetched-by-reception', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executeTeamTool('webfetch', { url: 'https://example.com/reception' });
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('reception 后台会话在工作区规则 ask 只读工具时仍自动放行', async () => {
+    writeReadPermissionRule('ask');
+    const targetPath = join(TEST_WORKSPACE, 'reception-ask-rule.txt');
+    writeFileSync(targetPath, 'ask rule read', 'utf8');
+
+    const result = await executeTeamTool('read', { filePath: targetPath });
+
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(JSON.stringify(result.output)).toContain('ask rule read');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('reception 会话缺少 team_parent_session_id 时只读工具仍需审批', async () => {
+    mocks.teamParentSessionId = null;
+    writeReadPermissionRule('ask');
+    const targetPath = join(TEST_WORKSPACE, 'reception-no-parent.txt');
+    writeFileSync(targetPath, 'no parent', 'utf8');
+
+    const result = await executeTeamTool('read', { filePath: targetPath });
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(permissionInsertParams()?.[2]).toBe('read');
+  });
+
+  it('reception 后台会话命中显式 deny 的只读工具时仍被拒绝', async () => {
+    writeReadPermissionRule('deny');
+    const targetPath = join(TEST_WORKSPACE, 'reception-denied.txt');
+    writeFileSync(targetPath, 'denied', 'utf8');
+
+    const result = await executeTeamTool('read', { filePath: targetPath });
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('被权限规则禁止');
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('reception 后台会话调 write 仍需审批', async () => {
+    const targetPath = join(TEST_WORKSPACE, 'reception-write.txt');
+
+    const result = await executeTeamTool('write', { path: targetPath, content: 'demo' });
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval');
+    expect(existsSync(targetPath)).toBe(false);
+    expect(permissionInsertParams()?.[2]).toBe('write');
+  });
+
+  it('reception 后台会话调 edit 仍需审批', async () => {
+    const targetPath = join(TEST_WORKSPACE, 'reception-edit.txt');
+    writeFileSync(targetPath, 'before', 'utf8');
+
+    const result = await executeTeamTool('edit', {
+      filePath: targetPath,
+      oldString: 'before',
+      newString: 'after',
+    });
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(readFileSync(targetPath, 'utf8')).toBe('before');
+    expect(permissionInsertParams()?.[2]).toBe('edit');
+  });
+
+  it('reception 后台会话调 bash 仍需审批', async () => {
+    const result = await executeTeamTool('bash', {
+      command: 'printf reception-bash',
+      description: '权限阶梯回归',
+    });
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval');
+    expect(permissionInsertParams()?.[2]).toBe('bash');
+  });
+
+  it('reception 后台会话调 lsp_rename 仍需审批（lsp 不在只读白名单）', async () => {
+    const targetPath = join(TEST_WORKSPACE, 'reception-rename.ts');
+    writeFileSync(targetPath, 'const alpha = 1;\n', 'utf8');
+
+    const result = await executeTeamTool('lsp_rename', {
+      filePath: targetPath,
+      line: 1,
+      character: 6,
+      newName: 'beta',
+    });
+
+    expect(result.pendingPermissionRequestId).toBeDefined();
+    expect(String(result.output)).toContain('requires approval');
+    expect(permissionInsertParams()?.[2]).toBe('lsp');
+  });
+
+  it.each(['pm1', 'pm2', 'executor', 'reviewer'])(
+    '%s 后台会话调 write 仍保持全量免审批',
+    async (roleLayer) => {
+      mocks.roleLayer = roleLayer;
+      const targetPath = join(TEST_WORKSPACE, `team-${roleLayer}-write.txt`);
+
+      const result = await executeTeamTool('write', { path: targetPath, content: 'demo' });
+
+      expect(result.isError).toBe(false);
+      expect(result.pendingPermissionRequestId).toBeUndefined();
+      expect(existsSync(targetPath)).toBe(true);
+      expect(permissionInsertParams()).toBeUndefined();
+    },
+  );
+});
+
 function readInsertedChildSessionMetadata(): Record<string, unknown> | undefined {
   const insertCall = mocks.sqliteRunMock.mock.calls.find(
     ([query]) => typeof query === 'string' && query.includes('INSERT INTO sessions'),

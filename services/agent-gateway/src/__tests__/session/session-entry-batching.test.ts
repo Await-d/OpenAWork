@@ -27,10 +27,9 @@ function readRows(): StoredRow[] {
 }
 
 function storedSeqList(): Array<{ seq: number }> {
-  return dbModule.sqliteAll<{ seq: number }>(
-    'SELECT seq FROM session_entry WHERE session_id = ?',
-    [SESSION_ID],
-  );
+  return dbModule.sqliteAll<{ seq: number }>('SELECT seq FROM session_entry WHERE session_id = ?', [
+    SESSION_ID,
+  ]);
 }
 
 beforeAll(async () => {

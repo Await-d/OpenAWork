@@ -75,4 +75,58 @@ describe('PM1 自主只读调查', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('单次重复动作被纠正后模型可换路径继续调查', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pm1-repeat-'));
+    try {
+      await writeFile(join(directory, 'a.ts'), 'export const a = 1;');
+      await writeFile(join(directory, 'b.ts'), 'export const b = 2;');
+      let calls = 0;
+      const result = await investigatePlanningProject({
+        directory,
+        intent: '调查两个文件',
+        initialContext: '',
+        signal: new AbortController().signal,
+        callLlm: async (_system, prompt) => {
+          calls += 1;
+          if (calls <= 2) return JSON.stringify({ action: 'read', path: 'a.ts' });
+          if (calls === 3) {
+            expect(prompt).toContain('已忽略重复动作');
+            expect(prompt).toContain('export const a = 1');
+            return JSON.stringify({ action: 'read', path: 'b.ts' });
+          }
+          expect(prompt).toContain('export const b = 2');
+          return JSON.stringify({ action: 'finish', summary: '已读取 a.ts 与 b.ts' });
+        },
+      });
+
+      expect(result).toContain('已读取 a.ts 与 b.ts');
+      expect(calls).toBe(4);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('持续重复同一动作超过容忍次数后仍判定无进展', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pm1-stuck-'));
+    try {
+      await writeFile(join(directory, 'a.ts'), 'export const a = 1;');
+      let calls = 0;
+      await expect(
+        investigatePlanningProject({
+          directory,
+          intent: '调查',
+          initialContext: '',
+          signal: new AbortController().signal,
+          callLlm: async () => {
+            calls += 1;
+            return JSON.stringify({ action: 'read', path: 'a.ts' });
+          },
+        }),
+      ).rejects.toThrow('项目调查无进展：a.ts');
+      expect(calls).toBe(4);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

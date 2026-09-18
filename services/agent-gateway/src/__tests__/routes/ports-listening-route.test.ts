@@ -1,4 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as DbModule from '../../infra/db.js';
+import type * as PortsRoutesModule from '../../routes/ports.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -13,15 +17,10 @@ vi.mock('../../ports/listening-ports.js', () => ({
   listListeningPorts: mocks.listListeningPorts,
 }));
 
-type AuthModule = typeof import('../../infra/auth.js');
-type DbModule = typeof import('../../infra/db.js');
-type PortsRoutesModule = typeof import('../../routes/ports.js');
-type RequestWorkflowModule = typeof import('../../runtime/request-workflow.js');
-
-let dbModule: DbModule;
-let authPlugin: AuthModule['default'];
-let portsRoutes: PortsRoutesModule['portsRoutes'];
-let requestWorkflowPlugin: RequestWorkflowModule['default'];
+let dbModule: typeof DbModule;
+let authPlugin: (typeof AuthModule)['default'];
+let portsRoutes: (typeof PortsRoutesModule)['portsRoutes'];
+let requestWorkflowPlugin: (typeof RequestWorkflowModule)['default'];
 
 const USER_ID = 'u-ports-route';
 
@@ -62,9 +61,13 @@ beforeEach(() => {
         pid: 4321,
         processName: 'node',
         source: 'procfs',
+        establishedConnections: 2,
+        processAlive: true,
+        terminal: { sessionId: 'session-1', terminalId: 'term-1' },
       },
     ],
     strategy: 'procfs',
+    attributionSupported: true,
     collectedAtMs: 1_700_000_000_000,
   });
 });
@@ -85,7 +88,7 @@ describe('GET /sessions/ports/listening', () => {
     }
   });
 
-  it('携带有效 token → 返回枚举快照（不要求 sessionId）', async () => {
+  it('携带有效 token → 返回枚举快照（不要求 sessionId，归属字段原样透传）', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({
@@ -96,6 +99,7 @@ describe('GET /sessions/ports/listening', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
         strategy: 'procfs',
+        attributionSupported: true,
         ports: [
           {
             port: 34567,
@@ -104,11 +108,21 @@ describe('GET /sessions/ports/listening', () => {
             pid: 4321,
             processName: 'node',
             source: 'procfs',
+            establishedConnections: 2,
+            processAlive: true,
+            terminal: { sessionId: 'session-1', terminalId: 'term-1' },
           },
         ],
         collectedAtMs: 1_700_000_000_000,
       });
       expect(mocks.listListeningPorts).toHaveBeenCalledTimes(1);
+      // 归属按请求用户计算：路由必须把 user.sub 与只读的终端 pid 查询一起传下去。
+      expect(mocks.listListeningPorts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: USER_ID,
+          listOwnedTerminalPids: expect.any(Function),
+        }),
+      );
     } finally {
       await app.close();
     }

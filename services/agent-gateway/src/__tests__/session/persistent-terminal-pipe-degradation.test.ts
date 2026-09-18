@@ -102,7 +102,10 @@ describe('Node pipe degradation', () => {
     });
 
     try {
-      const writeResult = persistent.writeStdinToTerminal(terminal.terminalId, 'echo PIPE_ECHO_OK\n');
+      const writeResult = persistent.writeStdinToTerminal(
+        terminal.terminalId,
+        'echo PIPE_ECHO_OK\n',
+      );
       expect(writeResult.ok).toBe(true);
 
       const output = await waitForMarker(terminal.terminalId, 'PIPE_ECHO_OK');

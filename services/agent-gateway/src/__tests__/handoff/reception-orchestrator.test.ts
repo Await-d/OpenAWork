@@ -118,6 +118,26 @@ function listSessionTextParts(sessionId: string): string[] {
     .filter((text): text is string => text !== null);
 }
 
+async function seedExhaustedGrill(sessionId: string, intent: string): Promise<void> {
+  const grill = await import('../../handoff/runner/reception-grill-runner.js');
+  const awaiting = grill.advanceReceptionGrill({
+    state: grill.startReceptionGrill(intent),
+    reply: '1. 改单文件；2. 无约束；3. 代码变更；4. 测试通过',
+  }).state;
+  let exhausted = awaiting;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    exhausted = grill.advanceReceptionGrill({ state: exhausted, reply: '需修改' }).state;
+  }
+  grill.persistReceptionGrill(sessionId, exhausted, intent);
+}
+
+function listHandoffsFor(sessionId: string): Array<{ id: string }> {
+  return dbModule.sqliteAll<{ id: string }>(
+    `SELECT id FROM handoff_records WHERE from_session_id = ?`,
+    [sessionId],
+  );
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
@@ -217,6 +237,10 @@ describe('orchestrateReceptionInput', () => {
         sessionId: SESSION_ID,
         userId: USER_ID,
         requestData: expect.objectContaining({
+          // direct 轮必须用请求级非 clarify 模式回答：reception 会话 metadata 里
+          // 默认是 clarify，若不带该覆盖，简单问候/轻量问题会套用"需求澄清助手"
+          // 人设（多轮提问 + 强制 __grill_confirm__）。
+          dialogueMode: 'coding',
           message: '你好',
           providerId: 'openai',
           model: 'gpt-5.4',
@@ -243,6 +267,7 @@ describe('orchestrateReceptionInput', () => {
         sessionId: SESSION_ID,
         userId: USER_ID,
         requestData: expect.objectContaining({
+          dialogueMode: 'coding',
           message: '了解一下当前项目',
         }),
       }),
@@ -254,6 +279,19 @@ describe('orchestrateReceptionInput', () => {
       [SESSION_ID],
     );
     expect(handoffs).toHaveLength(0);
+  });
+
+  it('grill 决策走确定性澄清链条，不触发前台模型轮次（无 dialogueMode 覆盖）', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '重构整个系统架构并把数据迁移到 Postgres',
+      persistUserMessage: false,
+      persistAckMessage: false,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'grill-started' });
+    expect(runSessionInBackgroundMock).not.toHaveBeenCalled();
   });
 
   it('路由超时信号透传给 workflow LLM', async () => {
@@ -418,5 +456,221 @@ describe('orchestrateReceptionInput', () => {
     expect(rewritePrompt).toContain('workspace-knowledge:reception');
     expect(rewritePrompt).toContain('接待层改写模型必须使用的工作区知识。');
     expect(rewritePrompt).not.toContain('PM1 专用知识不应进入接待层改写模型。');
+  }, 10_000);
+
+  it('意图改写失败时 ack 透出上游真实原因、模型与上游地址，而非只提示重试', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://relay.example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'qwen-test';
+
+    const relayDetail =
+      '全局密钥已绑定 14 个节点，存在可支持模型 qwen-test 的有效订单，但对应节点上游配置不可用';
+    const upstreamError = Object.assign(
+      new Error(`RequestExecutor.execute: Provider request failed with HTTP 403: ${relayDetail}`),
+      {
+        reason: {
+          _tag: 'Authentication',
+          kind: 'insufficient-permissions',
+          message: relayDetail,
+          http: { response: { status: 403 } },
+        },
+        retryable: false,
+      },
+    );
+
+    const original = llmCompletion.getMockImplementation();
+    llmCompletion.mockImplementation(async () => {
+      throw upstreamError;
+    });
+    try {
+      const result = await orchestrator.orchestrateReceptionInput({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: '帮我实现一个登录页面',
+        persistUserMessage: false,
+        persistAckMessage: true,
+        autoRunInit: false,
+      });
+
+      expect(result.triggered).toBe(false);
+      expect(result.reason).toBe('llm-failed');
+
+      const ack = listSessionTextParts(SESSION_ID).join('\n');
+      // 真实原因（上游原话 + 状态码）必须可见
+      expect(ack).toContain(relayDetail);
+      expect(ack).toContain('403');
+      expect(ack).not.toContain('Provider request failed with HTTP');
+      // 必须指出是哪家平台的哪个模型出的问题，便于用户直接去修配置
+      expect(ack).toContain('`qwen-test`');
+      expect(ack).toContain('relay.example.test');
+      // 配置类错误不得再引导用户「稍后重试」
+      expect(ack).not.toContain('稍后重试');
+      expect(ack).toContain('重试是否有效：否');
+
+      const handoffs = dbModule.sqliteAll<{ id: string }>(
+        `SELECT id FROM handoff_records WHERE from_session_id = ?`,
+        [SESSION_ID],
+      );
+      expect(handoffs).toHaveLength(0);
+    } finally {
+      if (original) {
+        llmCompletion.mockImplementation(original);
+      }
+    }
+  }, 10_000);
+
+  it('确认后把已确认共识写入 handoff payload，并跳过重复路由（P4）', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+
+    const intent = '把数据迁移到 Postgres';
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    const awaiting = grill.advanceReceptionGrill({
+      state: grill.startReceptionGrill(intent),
+      reply: '1. 改单文件；2. 无约束；3. 代码变更；4. 测试通过',
+    }).state;
+    grill.persistReceptionGrill(SESSION_ID, awaiting, intent);
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '确认',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    expect(result.triggered).toBe(true);
+    // 确认后的 intent 仍是高影响措辞；若重跑路由会再次进入 grill，故必须以 orchestrate 收口。
+    const prompts = llmCompletion.mock.calls.map((call) => call[0].prompt);
+    expect(prompts.some((prompt) => prompt.includes('团队协作交互代理'))).toBe(true);
+
+    const row = dbModule.sqliteGet<{ payload_json: string }>(
+      `SELECT payload_json FROM handoff_records WHERE from_session_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [SESSION_ID],
+    );
+    const payload = JSON.parse(row?.payload_json ?? '{}') as Record<string, unknown>;
+    const confirmation = payload['grillConfirmation'] as
+      | { kind?: string; intent?: string; answers?: Array<{ nodeId: string; answer: string }> }
+      | undefined;
+    expect(confirmation?.kind).toBe('reception-confirmed');
+    expect(confirmation?.intent).toBe(intent);
+    expect(confirmation?.answers).toContainEqual({ nodeId: 'goal', answer: '改单文件' });
+
+    expect(grill.readReceptionGrill(SESSION_ID)).toBeNull();
+  }, 10_000);
+
+  it('耗尽后回复「按推荐项继续」→ handoff 携带 grillConfirmation，pm1 不再重问', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+
+    const intent = '把数据迁移到 Postgres';
+    await seedExhaustedGrill(SESSION_ID, intent);
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '按推荐项继续',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    expect(result.triggered).toBe(true);
+
+    const row = dbModule.sqliteGet<{ payload_json: string }>(
+      `SELECT payload_json FROM handoff_records WHERE from_session_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [SESSION_ID],
+    );
+    const payload = JSON.parse(row?.payload_json ?? '{}') as Record<string, unknown>;
+
+    const { readGrillConfirmation } =
+      await import('../../handoff/capability/grill-confirmation.js');
+    const confirmation = readGrillConfirmation(payload);
+    expect(confirmation?.kind).toBe('reception-confirmed');
+    expect(confirmation?.intent).toBe(intent);
+    expect(confirmation?.answers).toContainEqual({ nodeId: 'goal', answer: '改单文件' });
+    if (!confirmation) {
+      throw new Error('handoff payload 缺少 grillConfirmation');
+    }
+
+    const { buildConfirmedPm1GrillSeed } = await import('../../handoff/runner/pm1-grill-runner.js');
+    const { computeFrontier } = await import('@openAwork/agent-core');
+    const pm1Seed = buildConfirmedPm1GrillSeed(intent, confirmation);
+    expect(typeof pm1Seed.confirmedAt).toBe('number');
+    expect(computeFrontier(pm1Seed)).toHaveLength(0);
+
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    expect(grill.readReceptionGrill(SESSION_ID)).toBeNull();
+  }, 10_000);
+
+  it('耗尽后回复「取消」→ 清空 grill、写确认、不创建 handoff', async () => {
+    const intent = '把数据迁移到 Postgres';
+    await seedExhaustedGrill(SESSION_ID, intent);
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '取消',
+      persistUserMessage: false,
+      persistAckMessage: true,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'grill-cancelled' });
+
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    expect(grill.readReceptionGrill(SESSION_ID)).toBeNull();
+    expect(listSessionTextParts(SESSION_ID).some((text) => text.includes('已取消'))).toBe(true);
+    expect(listHandoffsFor(SESSION_ID)).toHaveLength(0);
+  }, 10_000);
+
+  it('耗尽后回复无关文本 → 仍 exhausted，不创建 handoff，不写 confirmedAt', async () => {
+    const intent = '把数据迁移到 Postgres';
+    await seedExhaustedGrill(SESSION_ID, intent);
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '今天天气不错',
+      persistUserMessage: false,
+      persistAckMessage: true,
+    });
+
+    expect(result).toMatchObject({ triggered: false, reason: 'grill-exhausted' });
+
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    const restored = grill.readReceptionGrill(SESSION_ID);
+    expect(restored).not.toBeNull();
+    expect(restored?.state.confirmedAt).toBeUndefined();
+    expect(listSessionTextParts(SESSION_ID).some((text) => text.includes('先暂停澄清'))).toBe(true);
+    expect(listHandoffsFor(SESSION_ID)).toHaveLength(0);
+  }, 10_000);
+
+  it('不变量：用户未显式确认时永不获得 handoff', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+
+    const intent = '把数据迁移到 Postgres';
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    const awaiting = grill.advanceReceptionGrill({
+      state: grill.startReceptionGrill(intent),
+      reply: '1. 改单文件；2. 无约束；3. 代码变更；4. 测试通过',
+    }).state;
+    grill.persistReceptionGrill(SESSION_ID, awaiting, intent);
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '这个我想想再说',
+      persistUserMessage: false,
+      persistAckMessage: true,
+    });
+
+    expect(result.triggered).toBe(false);
+    expect(listHandoffsFor(SESSION_ID)).toHaveLength(0);
+    expect(grill.readReceptionGrill(SESSION_ID)?.state.confirmedAt).toBeUndefined();
   }, 10_000);
 });

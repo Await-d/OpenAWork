@@ -82,3 +82,44 @@ describe('getProviderForSelection strict selection', () => {
     expect(resolved).toBeNull();
   });
 });
+
+describe('getProviderForSelection honorRequestedModel', () => {
+  it('开启后显式选择的模型即使不在 catalog 也按请求原样路由', async () => {
+    const resolved = await providerCatalog.getProviderForSelection(
+      'user-honor',
+      { providerId: enabledProvider.id, modelId: 'drifted-model' },
+      { honorRequestedModel: true },
+    );
+
+    expect(resolved?.provider.id).toBe(enabledProvider.id);
+    expect(resolved?.modelId).toBe('drifted-model');
+  });
+
+  it('provider 不存在或已禁用时不做无依据路由，仍回退 chat', async () => {
+    const missingProvider = await providerCatalog.getProviderForSelection(
+      'user-honor',
+      { providerId: 'missing-provider', modelId: 'drifted-model' },
+      { honorRequestedModel: true },
+    );
+    expect(missingProvider?.provider.id).toBe(enabledProvider.id);
+    expect(missingProvider?.modelId).toBe('enabled-model');
+
+    const disabledProviderSelection = await providerCatalog.getProviderForSelection(
+      'user-honor',
+      { providerId: disabledProvider.id, modelId: 'disabled-model' },
+      { honorRequestedModel: true },
+    );
+    expect(disabledProviderSelection?.provider.id).toBe(enabledProvider.id);
+    expect(disabledProviderSelection?.modelId).toBe('enabled-model');
+  });
+
+  it('未开启 honorRequestedModel 时保持历史回退行为', async () => {
+    const resolved = await providerCatalog.getProviderForSelection('user-honor', {
+      providerId: enabledProvider.id,
+      modelId: 'drifted-model',
+    });
+
+    expect(resolved?.provider.id).toBe(enabledProvider.id);
+    expect(resolved?.modelId).toBe('enabled-model');
+  });
+});

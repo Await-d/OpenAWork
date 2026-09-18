@@ -45,6 +45,41 @@ describe('reception-router', () => {
       });
     });
 
+    it('名词短语型提问（无修改/执行意图）规则直接走 light，不再默认升级编排', () => {
+      expect(routeByRules('这是一个什么项目')).toMatchObject({
+        decision: 'light',
+        decisionSource: 'rule',
+        reason: '只读提问默认按轻量回答处理',
+      });
+      expect(routeByRules('什么是 OAuth 2.0')).toMatchObject({
+        decision: 'light',
+        decisionSource: 'rule',
+      });
+      expect(routeByRules('这个项目用了什么技术栈')).toMatchObject({
+        decision: 'light',
+        decisionSource: 'rule',
+        reason: '只读提问默认按轻量回答处理',
+      });
+    });
+
+    it('带修改/执行意图的提问保持升级路径，不被降级为 light', () => {
+      expect(routeByRules('帮我实现一个登录页面')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
+        reason: '开发任务',
+      });
+      expect(routeByRules('修复这个 bug')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
+        reason: '修复任务',
+      });
+      expect(routeByRules('重构一下这个后端模块')).toMatchObject({
+        decision: 'orchestrate',
+        decisionSource: 'rule',
+        reason: '重构任务',
+      });
+    });
+
     it('实现/修复/设计等任务继续走 orchestrate', () => {
       expect(routeByRules('帮我实现一个 OAuth 登录')).toMatchObject({
         decision: 'orchestrate',

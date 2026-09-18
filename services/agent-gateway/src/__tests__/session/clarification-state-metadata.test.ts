@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildConfirmNode, createGrillState, serializeGrillState } from '@openAwork/agent-core';
+import {
+  applyAnswer,
+  buildConfirmNode,
+  CONFIRM_NODE_ID,
+  createGrillState,
+  serializeGrillState,
+} from '@openAwork/agent-core';
 import { validateSessionMetadataPatch } from '../../session/session-workspace-metadata.js';
 
 function validClarificationState(): string {
@@ -15,6 +21,24 @@ function validClarificationState(): string {
       buildConfirmNode(['goal']),
     ]),
   );
+}
+
+function rejectedClarificationState(): string {
+  const pending = applyAnswer(
+    createGrillState([
+      {
+        id: 'goal',
+        dimension: 'goal',
+        question: '目标是什么？',
+        options: [{ label: '改单文件', recommended: true }],
+        dependsOn: [],
+      },
+      buildConfirmNode(['goal']),
+    ]),
+    'goal',
+    '改单文件',
+  );
+  return serializeGrillState(applyAnswer(pending, CONFIRM_NODE_ID, '需修改'));
 }
 
 describe('session metadata: clarificationState', () => {
@@ -49,5 +73,33 @@ describe('session metadata: clarificationState', () => {
 
   it('拒绝非字符串类型', () => {
     expect(validateSessionMetadataPatch({ clarificationState: { nodes: [] } }).success).toBe(false);
+  });
+
+  it('接受带 rejections 的 GrillState（新字段可选且可被解析）', () => {
+    const result = validateSessionMetadataPatch({
+      clarificationState: rejectedClarificationState(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('拒绝 rejections 结构不符的 JSON', () => {
+    expect(
+      validateSessionMetadataPatch({
+        clarificationState: JSON.stringify({
+          nodes: [],
+          round: 0,
+          history: [],
+          rejections: [{ at: 1 }],
+        }),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('拒绝 exhaustedAt 类型错误的 JSON', () => {
+    expect(
+      validateSessionMetadataPatch({
+        clarificationState: JSON.stringify({ nodes: [], round: 0, history: [], exhaustedAt: 'x' }),
+      }).success,
+    ).toBe(false);
   });
 });

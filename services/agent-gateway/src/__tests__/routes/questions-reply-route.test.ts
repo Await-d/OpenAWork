@@ -471,7 +471,9 @@ describe('questions reply route', () => {
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'clarify',
     });
-    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }),
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -504,7 +506,9 @@ describe('questions reply route', () => {
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'clarify',
     });
-    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }),
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -525,7 +529,9 @@ describe('questions reply route', () => {
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'coding',
     });
-    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }),
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -547,7 +553,9 @@ describe('questions reply route', () => {
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'clarify',
     });
-    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }));
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({ questions_json: CONFIRM_QUESTION_JSON }),
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -616,9 +624,7 @@ describe('questions reply route', () => {
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'clarify',
     });
-    mocks.sqliteGet.mockReturnValue(
-      buildPendingQuestionRow({ questions_json: customConfirmJson }),
-    );
+    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ questions_json: customConfirmJson }));
 
     const app = await createApp();
     const response = await app.inject({

@@ -69,15 +69,31 @@ const desktopMocks = vi.hoisted(() => ({
   status: vi.fn(),
 }));
 
+const installMocks = vi.hoisted(() => ({
+  install: vi.fn(),
+  status: vi.fn(),
+  runtimeEnabled: true,
+}));
+
 vi.mock('../../browser-live/manager.js', () => ({
   BROWSER_LIVE_DISABLED_MESSAGE: DISABLED_MESSAGE,
   BROWSER_LIVE_UNAVAILABLE_MESSAGE: UNAVAILABLE_MESSAGE,
+  isBrowserLiveRuntimeEnabled: () => installMocks.runtimeEnabled,
   browserLiveManager: {
     availability: liveMocks.availability,
     acquire: liveMocks.acquire,
     release: liveMocks.release,
     handleFor: liveMocks.handleFor,
     close: liveMocks.close,
+  },
+}));
+
+vi.mock('../../browser-live/browser-installer.js', () => ({
+  BROWSER_INSTALL_CONFLICT_CODE: 'browser_install_in_progress',
+  BROWSER_INSTALL_CONFLICT_MESSAGE: '调试浏览器安装已在进行中，请稍候。',
+  browserInstaller: {
+    install: installMocks.install,
+    status: installMocks.status,
   },
 }));
 
@@ -198,7 +214,8 @@ beforeAll(async () => {
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   browserLiveRoutes = (await import('../../routes/browser-live.js')).browserLiveRoutes;
-  classifyBrowserLiveError = (await import('../../routes/browser-live.js')).classifyBrowserLiveError;
+  classifyBrowserLiveError = (await import('../../routes/browser-live.js'))
+    .classifyBrowserLiveError;
   desktopAutomationRoutes = (await import('../../routes/desktop-automation.js'))
     .desktopAutomationRoutes;
 });
@@ -249,16 +266,17 @@ beforeEach(() => {
 
   desktopMocks.status.mockReset();
   desktopMocks.status.mockResolvedValue({ enabled: true, started: false });
+
+  installMocks.runtimeEnabled = true;
+  installMocks.install.mockReset();
+  installMocks.status.mockReset();
 });
 
 describe('browser live routes', () => {
   it('sends a hello envelope with availability right after the WS handshake', async () => {
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       const hello = await socket.nextMessage<BrowserLiveEnvelope<BrowserLiveHelloPayload>>();
 
       expect(hello.ch).toBe('hello');
@@ -479,16 +497,13 @@ describe('browser live routes', () => {
   it('applies screencast credit gating over a live WS connection', async () => {
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'screencast.start' }));
-      await expect(waitFor(() => liveMocks.session.startScreencast.mock.calls.length === 1)).resolves.toBe(
-        true,
-      );
+      await expect(
+        waitFor(() => liveMocks.session.startScreencast.mock.calls.length === 1),
+      ).resolves.toBe(true);
 
       liveMocks.emitEvent({
         type: 'screencastFrame',
@@ -515,7 +530,8 @@ describe('browser live routes', () => {
         timestamp: Date.now(),
       });
 
-      const firstFrame = await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
+      const firstFrame =
+        await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
       expect(firstFrame.ch).toBe('frame');
       const firstWireId = firstFrame.payload.frameSessionId;
       expect(Number.isInteger(firstWireId)).toBe(true);
@@ -528,7 +544,8 @@ describe('browser live routes', () => {
       // 网关必须把线路帧 id 映射回真实 CDP session id 后再 ack。
       expect(liveMocks.session.ackScreencastFrame).toHaveBeenCalledWith(11);
 
-      const secondFrame = await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
+      const secondFrame =
+        await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
       expect(secondFrame.ch).toBe('frame');
       expect(secondFrame.payload.frameSessionId).not.toBe(firstWireId);
 
@@ -541,10 +558,7 @@ describe('browser live routes', () => {
   it('replies with pong to a control ping', async () => {
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'ping' }));
@@ -573,10 +587,7 @@ describe('browser live routes', () => {
 
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'dom.tree', depth: 3 }));
@@ -602,10 +613,7 @@ describe('browser live routes', () => {
 
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'a11y.tree' }));
@@ -635,10 +643,7 @@ describe('browser live routes', () => {
 
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'node.styles', x: 12, y: 34 }));
@@ -664,10 +669,7 @@ describe('browser live routes', () => {
 
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'dom.tree' }));
@@ -691,10 +693,7 @@ describe('browser live routes', () => {
 
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'control', action: 'a11y.tree' }));
@@ -780,10 +779,7 @@ describe('browser live routes', () => {
   it('rejects an unknown client message with INVALID_MESSAGE', async () => {
     const app = await buildApp();
     try {
-      const socket = await openSocket(
-        app,
-        `/browser-live?token=${encodeURIComponent(token(app))}`,
-      );
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
       await socket.nextMessage();
 
       socket.ws.send(JSON.stringify({ ch: 'nope' }));
@@ -889,6 +885,135 @@ describe('browser live routes', () => {
       code: 'browser_live_failed',
       statusCode: 500,
     });
+  });
+
+  it('starts a browser install with 202 and returns the running snapshot', async () => {
+    const running = {
+      state: 'running',
+      startedAt: 1,
+      finishedAt: null,
+      tailLog: ['downloading…'],
+      error: null,
+      browsersPath: '/data/openawork/browsers',
+    };
+    installMocks.install.mockResolvedValue({ started: true, status: running });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/browser-live/install-browser',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual(running);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 409 browser_install_in_progress when an install is already running', async () => {
+    const running = {
+      state: 'running',
+      startedAt: 1,
+      finishedAt: null,
+      tailLog: [],
+      error: null,
+      browsersPath: null,
+    };
+    installMocks.install.mockResolvedValue({ started: false, status: running });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/browser-live/install-browser',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ code: 'browser_install_in_progress' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 503 browser_live_unavailable when the installer CLI cannot be resolved', async () => {
+    installMocks.install.mockResolvedValue({
+      started: false,
+      status: {
+        state: 'unavailable',
+        startedAt: null,
+        finishedAt: 2,
+        tailLog: [],
+        error: '请改为在终端执行 npx playwright install chromium',
+        browsersPath: null,
+      },
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/browser-live/install-browser',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ code: 'browser_live_unavailable' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 503 browser_live_disabled on install when the runtime is disabled', async () => {
+    installMocks.runtimeEnabled = false;
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/browser-live/install-browser',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ code: 'browser_live_disabled' });
+      expect(installMocks.install).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('exposes the install status snapshot on GET /browser-live/install-browser/status', async () => {
+    const snapshot = {
+      state: 'succeeded',
+      startedAt: 1,
+      finishedAt: 2,
+      tailLog: ['done'],
+      error: null,
+      browsersPath: '/data/openawork/browsers',
+    };
+    installMocks.status.mockReturnValue(snapshot);
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/browser-live/install-browser/status',
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(snapshot);
+    } finally {
+      await app.close();
+    }
   });
 });
 

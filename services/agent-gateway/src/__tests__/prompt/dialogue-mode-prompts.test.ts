@@ -44,4 +44,14 @@ describe('对话模式提示词：agentdocs 工作流规范', () => {
     expect(prompt).toContain('T-XX');
     expect(prompt).toContain('done/');
   });
+
+  it('非澄清模式提示词不携带澄清人设与 __grill_confirm__ 确认门控', () => {
+    for (const mode of ['coding', 'programmer'] as const) {
+      const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS[mode];
+
+      expect(prompt).not.toContain('需求澄清助手');
+      expect(prompt).not.toContain('多轮提问');
+      expect(prompt).not.toContain('__grill_confirm__');
+    }
+  });
 });

@@ -1,17 +1,30 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  promises as fsp,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SessionsRoutesModule from '../../routes/sessions.js';
+import type * as SessionFileDiffStoreModule from '../../session/session-file-diff-store.js';
+import type * as SessionFileReviewDecisionStoreModule from '../../session/session-file-review-decision-store.js';
 import type * as SessionSnapshotStoreModule from '../../session/session-snapshot-store.js';
 
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'openawork-sessions-routes-'));
 const outsideRoot = mkdtempSync(join(tmpdir(), 'openawork-sessions-outside-'));
+const dataDir = mkdtempSync(join(tmpdir(), 'openawork-sessions-routes-data-'));
 const SESSION_ID = 'sess-error-routes';
 const USER_ID = 'u-session-error-routes';
 
@@ -21,11 +34,14 @@ process.env['AI_DEFAULT_MODEL'] = '';
 process.env['DATABASE_URL'] = ':memory:';
 process.env['JWT_SECRET'] = 'session-routes-test-secret-1234567890';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+process.env['OPENAWORK_DATA_DIR'] = dataDir;
 process.env['WORKSPACE_ACCESS_MODE'] = 'restricted';
 process.env['WORKSPACE_ROOT'] = workspaceRoot;
 
 let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
+let fileDiffStore: typeof SessionFileDiffStoreModule;
+let reviewDecisionStore: typeof SessionFileReviewDecisionStoreModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let sessionsRoutes: typeof SessionsRoutesModule.sessionsRoutes;
 let snapshotStore: typeof SessionSnapshotStoreModule;
@@ -67,9 +83,14 @@ beforeAll(async () => {
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   sessionsRoutes = (await import('../../routes/sessions.js')).sessionsRoutes;
   snapshotStore = await import('../../session/session-snapshot-store.js');
+  fileDiffStore = await import('../../session/session-file-diff-store.js');
+  reviewDecisionStore = await import('../../session/session-file-review-decision-store.js');
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM session_file_review_decisions', []);
+  dbModule.sqliteRun('DELETE FROM session_file_diffs', []);
+  dbModule.sqliteRun('DELETE FROM session_file_backups', []);
   dbModule.sqliteRun('DELETE FROM session_snapshots', []);
   dbModule.sqliteRun('DELETE FROM message_ratings', []);
   dbModule.sqliteRun('DELETE FROM permission_requests', []);
@@ -83,6 +104,7 @@ afterAll(async () => {
   await dbModule.closeDb();
   rmSync(workspaceRoot, { recursive: true, force: true });
   rmSync(outsideRoot, { recursive: true, force: true });
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe('sessions route error contracts', () => {
@@ -831,6 +853,1068 @@ describe('sessions route error contracts', () => {
           status: 'available',
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+function initGitRepo(root: string): void {
+  execFileSync('git', ['init'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'review@example.com'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Review Test'], { cwd: root });
+}
+
+function reviewPayload(requestId: string, filePath: string, decision: 'accepted' | 'rejected') {
+  return { requestId, filePath, decision };
+}
+
+function postReview(
+  app: FastifyInstance,
+  requestId: string,
+  filePath: string,
+  decision: 'accepted' | 'rejected',
+  extra: Record<string, unknown> = {},
+) {
+  return app.inject({
+    method: 'POST',
+    url: `/sessions/${SESSION_ID}/file-changes/review`,
+    headers: { authorization: bearer(app), 'content-type': 'application/json' },
+    payload: { ...reviewPayload(requestId, filePath, decision), ...extra },
+  });
+}
+
+describe('POST /sessions/:sessionId/file-changes/review', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('接受变更时只写决策行，不修改文件也不追加 diff', async () => {
+    const projectRoot = join(workspaceRoot, 'review-accept');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'a.txt'), 'after content\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-accept',
+      requestId: 'req-accept:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'a.txt',
+          before: 'before content\n',
+          after: 'after content\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-accept:tool:write', 'a.txt', 'accepted');
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        decision: {
+          requestId: 'req-accept:tool:write',
+          filePath: 'a.txt',
+          decision: 'accepted',
+          createdAt: expect.any(String),
+        },
+        revertClientRequestId: null,
+      });
+
+      expect(readFileSync(join(projectRoot, 'a.txt'), 'utf8')).toBe('after content\n');
+      const diffCount = dbModule.sqliteGet<{ count: number }>(
+        'SELECT COUNT(*) as count FROM session_file_diffs WHERE session_id = ?',
+        [SESSION_ID],
+      )?.count;
+      expect(diffCount).toBe(1);
+      const decisions = reviewDecisionStore.listReviewDecisions({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+      });
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0]?.decision).toBe('accepted');
+      expect(decisions[0]?.revertRequestId).toBeNull();
+
+      const changesResponse = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/file-changes`,
+        headers: { authorization: bearer(app) },
+      });
+      const changes = changesResponse.json().fileChanges as {
+        fileDiffs: Array<{ file: string; reviewStatus?: string; revertRequestId?: string | null }>;
+        summary: { acceptedCount?: number; rejectedCount?: number };
+      };
+      const reviewed = changes.fileDiffs.find((diff) => diff.file === 'a.txt');
+      expect(reviewed?.reviewStatus).toBe('accepted');
+      expect(reviewed?.revertRequestId).toBeNull();
+      expect(changes.summary.acceptedCount).toBe(1);
+      expect(changes.summary.rejectedCount).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('拒绝修改文件时把文件写回 before，并记录 manual_revert diff', async () => {
+    const projectRoot = join(workspaceRoot, 'review-reject-modified');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'b.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-reject-mod',
+      requestId: 'req-reject-mod:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'b.txt',
+          before: 'original version\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-reject-mod:tool:write', 'b.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { revertClientRequestId: string | null };
+      expect(body.revertClientRequestId).toMatch(/^file-revert-/);
+      expect(readFileSync(join(projectRoot, 'b.txt'), 'utf8')).toBe('original version\n');
+
+      const revertRows = dbModule.sqliteAll<{
+        client_request_id: string;
+        guarantee_level: string;
+        source_kind: string;
+      }>(
+        `SELECT client_request_id, source_kind, guarantee_level FROM session_file_diffs
+         WHERE session_id = ? AND source_kind = 'manual_revert'`,
+        [SESSION_ID],
+      );
+      expect(revertRows).toHaveLength(1);
+      expect(revertRows[0]?.client_request_id).toBe(body.revertClientRequestId);
+      expect(revertRows[0]?.guarantee_level).toBe('strong');
+
+      const decisionRows = dbModule.sqliteAll<{
+        decision: string;
+        revert_request_id: string | null;
+      }>(
+        `SELECT decision, revert_request_id FROM session_file_review_decisions
+         WHERE session_id = ? AND request_id = ? AND file_path = ?`,
+        [SESSION_ID, 'req-reject-mod:tool:write', 'b.txt'],
+      );
+      expect(decisionRows).toHaveLength(1);
+      expect(decisionRows[0]?.decision).toBe('rejected');
+      expect(decisionRows[0]?.revert_request_id).toBe(body.revertClientRequestId);
+
+      const changesResponse = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/file-changes`,
+        headers: { authorization: bearer(app) },
+      });
+      const changes = changesResponse.json().fileChanges as {
+        fileDiffs: Array<{
+          file: string;
+          requestId?: string;
+          reviewStatus?: string;
+          revertRequestId?: string | null;
+        }>;
+        summary: { acceptedCount?: number; rejectedCount?: number };
+      };
+      const reviewed = changes.fileDiffs.find(
+        (diff) => diff.requestId === 'req-reject-mod:tool:write',
+      );
+      expect(reviewed?.reviewStatus).toBe('rejected');
+      expect(reviewed?.revertRequestId).toBe(body.revertClientRequestId);
+      expect(changes.summary.rejectedCount).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('拒绝新增文件时删除该文件', async () => {
+    const projectRoot = join(workspaceRoot, 'review-reject-added');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'c.txt'), 'brand new\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-reject-added',
+      requestId: 'req-reject-added:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'c.txt',
+          before: '',
+          after: 'brand new\n',
+          additions: 1,
+          deletions: 0,
+          status: 'added',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-reject-added:tool:write', 'c.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      expect(existsSync(join(projectRoot, 'c.txt'))).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('拒绝删除文件时用 before 内容重建文件', async () => {
+    const projectRoot = join(workspaceRoot, 'review-reject-deleted');
+    mkdirSync(projectRoot, { recursive: true });
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-reject-deleted',
+      requestId: 'req-reject-deleted:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'd.txt',
+          before: 'gone content\n',
+          after: '',
+          additions: 0,
+          deletions: 1,
+          status: 'deleted',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-reject-deleted:tool:write', 'd.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      expect(readFileSync(join(projectRoot, 'd.txt'), 'utf8')).toBe('gone content\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('内容与 after 一致时即使 git 工作区脏也允许撤销（内容优先）', async () => {
+    const projectRoot = join(workspaceRoot, 'review-conflict');
+    mkdirSync(projectRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    writeFileSync(join(projectRoot, 'e.txt'), 'baseline\n', 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: projectRoot });
+    execFileSync('git', ['commit', '-m', 'baseline'], { cwd: projectRoot });
+    writeFileSync(join(projectRoot, 'e.txt'), 'dirty leftover\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-conflict',
+      requestId: 'req-conflict:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'e.txt',
+          before: 'original\n',
+          after: 'dirty leftover\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-conflict:tool:write', 'e.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      expect(readFileSync(join(projectRoot, 'e.txt'), 'utf8')).toBe('original\n');
+      const decisions = reviewDecisionStore.listReviewDecisions({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+      });
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0]?.decision).toBe('rejected');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('forceConflicts 为 true 时内容冲突也能完成撤销', async () => {
+    const projectRoot = join(workspaceRoot, 'review-force');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'f.txt'), 'human edit\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-force',
+      requestId: 'req-force:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'f.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const blocked = await postReview(app, 'req-force:tool:write', 'f.txt', 'rejected');
+      expect(blocked.statusCode).toBe(409);
+
+      const response = await postReview(app, 'req-force:tool:write', 'f.txt', 'rejected', {
+        forceConflicts: true,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(readFileSync(join(projectRoot, 'f.txt'), 'utf8')).toBe('original\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('弱可信度变更拒绝撤销时返回中文 400 且不改文件', async () => {
+    const projectRoot = join(workspaceRoot, 'review-weak');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'g.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-weak',
+      requestId: 'req-weak:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'g.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'workspace_reconcile',
+          guaranteeLevel: 'weak',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-weak:tool:write', 'g.txt', 'rejected');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '该文件变更可信度不足，无法安全撤销。' },
+      });
+      expect(readFileSync(join(projectRoot, 'g.txt'), 'utf8')).toBe('agent version\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('缺少 before 内容时返回中文 400 而不是用空串覆盖', async () => {
+    const projectRoot = join(workspaceRoot, 'review-no-before');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'h.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    dbModule.sqliteRun(
+      `INSERT INTO session_file_diffs
+        (session_id, user_id, client_request_id, request_id, tool_name, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, created_at)
+       VALUES (?, ?, NULL, ?, 'write', 'h.txt', NULL, NULL, 1, 1, 'modified', 'structured_tool_diff', 'strong', datetime('now'))`,
+      [SESSION_ID, USER_ID, 'req-no-before:tool:write'],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-no-before:tool:write', 'h.txt', 'rejected');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '该文件变更缺少可恢复的原始内容，无法安全撤销。' },
+      });
+      expect(readFileSync(join(projectRoot, 'h.txt'), 'utf8')).toBe('agent version\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('目标 diff 行不存在时返回中文 400', async () => {
+    seedSession();
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'missing:tool:write', 'nope.txt', 'accepted');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '目标文件变更记录不存在。' },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('非会话所有者返回中文 404', async () => {
+    seedUser('u-other-review');
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+       VALUES ('sess-other-review', 'u-other-review', 'other', '{}', 'idle')`,
+      [],
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/sessions/sess-other-review/file-changes/review',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: { requestId: 'req-other:tool:write', filePath: 'x.txt', decision: 'accepted' },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        name: 'NotFound',
+        data: { message: '目标会话不存在。' },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('非 git 工作区中内容与 after 不一致时返回 409 且不写决策、不改文件', async () => {
+    const projectRoot = join(workspaceRoot, 'review-nongit-conflict');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'stale.txt'), 'newer human work\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-nongit',
+      requestId: 'req-nongit:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'stale.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-nongit:tool:write', 'stale.txt', 'rejected');
+      expect(response.statusCode).toBe(409);
+      const body = response.json() as {
+        contentConflict: { expectedAfterAvailable: boolean; filePath: string };
+        validateOnly: boolean;
+        workspaceReview: { conflicts: Array<{ filePath: string }> };
+      };
+      expect(body.validateOnly).toBe(true);
+      expect(body.contentConflict).toMatchObject({
+        filePath: 'stale.txt',
+        expectedAfterAvailable: true,
+      });
+      expect(body.workspaceReview.conflicts.map((conflict) => conflict.filePath)).toContain(
+        'stale.txt',
+      );
+      expect(readFileSync(join(projectRoot, 'stale.txt'), 'utf8')).toBe('newer human work\n');
+      expect(
+        reviewDecisionStore.listReviewDecisions({ sessionId: SESSION_ID, userId: USER_ID }),
+      ).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('工作区 warp 后拒绝旧工作区的变更行返回中文 400 且不改文件', async () => {
+    const oldRoot = join(workspaceRoot, 'review-root-old');
+    const newRoot = join(workspaceRoot, 'review-root-new');
+    mkdirSync(oldRoot, { recursive: true });
+    mkdirSync(newRoot, { recursive: true });
+    writeFileSync(join(oldRoot, 'warp.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: newRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-warp',
+      requestId: 'req-warp:tool:write',
+      toolName: 'write',
+      workspaceRoot: oldRoot,
+      diffs: [
+        {
+          file: 'warp.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-warp:tool:write', 'warp.txt', 'rejected');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '该文件变更属于其他工作区，无法在当前会话工作区中撤销。' },
+      });
+      expect(readFileSync(join(oldRoot, 'warp.txt'), 'utf8')).toBe('agent version\n');
+      expect(
+        reviewDecisionStore.listReviewDecisions({ sessionId: SESSION_ID, userId: USER_ID }),
+      ).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('会话运行中拒绝撤销时返回 409 且不改文件', async () => {
+    const projectRoot = join(workspaceRoot, 'review-busy');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'busy.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    dbModule.sqliteRun("UPDATE sessions SET state_status = 'running' WHERE id = ?", [SESSION_ID]);
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-busy',
+      requestId: 'req-busy:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'busy.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-busy:tool:write', 'busy.txt', 'rejected');
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        name: 'Conflict',
+        data: { message: '会话正在运行中，无法撤销文件变更，请等待当前回合结束后重试。' },
+      });
+      expect(readFileSync(join(projectRoot, 'busy.txt'), 'utf8')).toBe('agent version\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('重复提交同一撤销请求只产生一条 manual_revert 行', async () => {
+    const projectRoot = join(workspaceRoot, 'review-idempotent');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'idem.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-idem',
+      requestId: 'req-idem:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'idem.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const first = await postReview(app, 'req-idem:tool:write', 'idem.txt', 'rejected');
+      const second = await postReview(app, 'req-idem:tool:write', 'idem.txt', 'rejected');
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+      const firstBody = first.json() as { revertClientRequestId: string | null };
+      const secondBody = second.json() as { revertClientRequestId: string | null };
+      expect(firstBody.revertClientRequestId).toMatch(/^file-revert-/);
+      expect(secondBody.revertClientRequestId).toBe(firstBody.revertClientRequestId);
+
+      const revertRows = dbModule.sqliteAll<{ count: number }>(
+        `SELECT COUNT(*) as count FROM session_file_diffs
+         WHERE session_id = ? AND source_kind = 'manual_revert'`,
+        [SESSION_ID],
+      );
+      expect(revertRows[0]?.count).toBe(1);
+      const decisionRows = dbModule.sqliteAll<{ count: number }>(
+        `SELECT COUNT(*) as count FROM session_file_review_decisions
+         WHERE session_id = ? AND request_id = ?`,
+        [SESSION_ID, 'req-idem:tool:write'],
+      );
+      expect(decisionRows[0]?.count).toBe(1);
+      expect(readFileSync(join(projectRoot, 'idem.txt'), 'utf8')).toBe('original\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('符号链接指向工作区外时拒绝撤销', async () => {
+    const projectRoot = join(workspaceRoot, 'review-symlink');
+    const escapeTarget = join(outsideRoot, 'symlink-secret.txt');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(escapeTarget, 'agent version\n', 'utf8');
+    symlinkSync(escapeTarget, join(projectRoot, 'link.txt'));
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-symlink',
+      requestId: 'req-symlink:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'link.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-symlink:tool:write', 'link.txt', 'rejected');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '目标文件路径不在允许范围内。' },
+      });
+      expect(readFileSync(escapeTarget, 'utf8')).toBe('agent version\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('绝对路径位于工作区外时拒绝撤销', async () => {
+    const projectRoot = join(workspaceRoot, 'review-abs');
+    const outsideFile = join(outsideRoot, 'absolute-escape.txt');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(outsideFile, 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-abs',
+      requestId: 'req-abs:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: outsideFile,
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-abs:tool:write', outsideFile, 'rejected');
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        name: 'BadRequest',
+        data: { message: '目标文件路径不在允许范围内。' },
+      });
+      expect(readFileSync(outsideFile, 'utf8')).toBe('agent version\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('after 内容不可用时按冲突处理并要求强制覆盖', async () => {
+    const projectRoot = join(workspaceRoot, 'review-after-missing');
+    mkdirSync(projectRoot, { recursive: true });
+    // On-disk content AND the fallback after are both '', so only the
+    // `!expectedAfterAvailable` branch can produce the 409 here.
+    writeFileSync(join(projectRoot, 'after-missing.txt'), '', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-after-missing',
+      requestId: 'req-after-missing:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'after-missing.txt',
+          before: 'original\n',
+          after: '',
+          additions: 0,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+    dbModule.sqliteRun(
+      `UPDATE session_file_diffs SET after_backup_id = NULL, backup_after_ref_json = NULL
+       WHERE session_id = ? AND request_id = ? AND file_path = ?`,
+      [SESSION_ID, 'req-after-missing:tool:write', 'after-missing.txt'],
+    );
+
+    const app = await buildApp();
+    try {
+      const blocked = await postReview(
+        app,
+        'req-after-missing:tool:write',
+        'after-missing.txt',
+        'rejected',
+      );
+      expect(blocked.statusCode).toBe(409);
+      const blockedBody = blocked.json() as {
+        contentConflict: { expectedAfterAvailable: boolean };
+      };
+      expect(blockedBody.contentConflict.expectedAfterAvailable).toBe(false);
+      expect(readFileSync(join(projectRoot, 'after-missing.txt'), 'utf8')).toBe('');
+
+      const forced = await postReview(
+        app,
+        'req-after-missing:tool:write',
+        'after-missing.txt',
+        'rejected',
+        { forceConflicts: true },
+      );
+      expect(forced.statusCode).toBe(200);
+      expect(readFileSync(join(projectRoot, 'after-missing.txt'), 'utf8')).toBe('original\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('撤销后的 manual_revert 行 before 等于撤销前内容、after 等于目标内容', async () => {
+    const projectRoot = join(workspaceRoot, 'review-chain');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'chain.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-chain',
+      requestId: 'req-chain:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'chain.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-chain:tool:write', 'chain.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { revertClientRequestId: string };
+      const details = await fileDiffStore.getSessionFileDiffDetails({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestId: body.revertClientRequestId,
+        filePath: 'chain.txt',
+      });
+      expect(details).not.toBeNull();
+      expect(details?.diff.before).toBe('agent version\n');
+      expect(details?.diff.after).toBe('original\n');
+      expect(details?.beforeBackupContent).toBe('agent version\n');
+      expect(details?.diff.sourceKind).toBe('manual_revert');
+      expect(details?.diff.guaranteeLevel).toBe('strong');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('决策已写入但回读失败时不得回滚文件（避免重放误报已撤销）', async () => {
+    const projectRoot = join(workspaceRoot, 'review-decision-readback');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'readback.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-readback',
+      requestId: 'req-readback:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'readback.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    // Decision committed but read-back yields nothing: rolling the file back
+    // here is what lets a replay falsely report "reverted".
+    const readSpy = vi.spyOn(reviewDecisionStore, 'getReviewDecision').mockReturnValue(null);
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(app, 'req-readback:tool:write', 'readback.txt', 'rejected');
+      expect(response.statusCode).toBe(200);
+      expect(readFileSync(join(projectRoot, 'readback.txt'), 'utf8')).toBe('original\n');
+      const revertRows = dbModule.sqliteAll<{ count: number }>(
+        `SELECT COUNT(*) as count FROM session_file_diffs
+         WHERE session_id = ? AND source_kind = 'manual_revert'`,
+        [SESSION_ID],
+      );
+      expect(revertRows[0]?.count).toBe(1);
+      expect(readSpy).toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('决策写入失败时回滚已写入的文件并删除孤儿 manual_revert 行', async () => {
+    const projectRoot = join(workspaceRoot, 'review-m1-rollback');
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(join(projectRoot, 'rollback.txt'), 'agent version\n', 'utf8');
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-m1-rollback',
+      requestId: 'req-m1-rollback:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'rollback.txt',
+          before: 'original\n',
+          after: 'agent version\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const upsertSpy = vi
+      .spyOn(reviewDecisionStore, 'upsertReviewDecision')
+      .mockImplementation(() => {
+        throw new Error('decision persist boom');
+      });
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(
+        app,
+        'req-m1-rollback:tool:write',
+        'rollback.txt',
+        'rejected',
+      );
+      expect(response.statusCode).toBe(500);
+      expect(readFileSync(join(projectRoot, 'rollback.txt'), 'utf8')).toBe('agent version\n');
+      const revertRows = dbModule.sqliteAll<{ count: number }>(
+        `SELECT COUNT(*) as count FROM session_file_diffs
+         WHERE session_id = ? AND source_kind = 'manual_revert'`,
+        [SESSION_ID],
+      );
+      expect(revertRows[0]?.count).toBe(0);
+      expect(upsertSpy).toHaveBeenCalled();
+      expect(
+        reviewDecisionStore.listReviewDecisions({ sessionId: SESSION_ID, userId: USER_ID }),
+      ).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('realpath 检查与写入之间被换成越界符号链接时拒绝撤销', async () => {
+    const projectRoot = join(workspaceRoot, 'review-toctou');
+    const outsideDir = join(outsideRoot, 'toctou-outside');
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(outsideDir, { recursive: true });
+    seedSession({ workingDirectory: projectRoot });
+    await fileDiffStore.persistSessionFileDiffs({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: 'req-toctou',
+      requestId: 'req-toctou:tool:write',
+      toolName: 'write',
+      diffs: [
+        {
+          file: 'sub/newfile.txt',
+          before: 'original\n',
+          after: '',
+          additions: 0,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+
+    const targetSafePath = join(projectRoot, 'sub', 'newfile.txt');
+    const originalReadFile = fsp.readFile;
+    const callOriginalReadFile = originalReadFile as (
+      target: string,
+      options?: unknown,
+    ) => Promise<unknown>;
+    let targetReads = 0;
+    const readFileReplacement = (async (target: unknown, options?: unknown) => {
+      if (typeof target === 'string' && target === targetSafePath) {
+        targetReads += 1;
+        if (targetReads === 2) {
+          // Swap the not-yet-existing parent for an out-of-root symlink in the
+          // window between the realpath guard and the pre-write recheck; the
+          // recheck still passes because the target content is absent ('' === '').
+          rmSync(join(projectRoot, 'sub'), { recursive: true, force: true });
+          symlinkSync(outsideDir, join(projectRoot, 'sub'));
+        }
+      }
+      return callOriginalReadFile(target as string, options);
+    }) as unknown as typeof fsp.readFile;
+    fsp.readFile = readFileReplacement;
+
+    const app = await buildApp();
+    try {
+      const response = await postReview(
+        app,
+        'req-toctou:tool:write',
+        'sub/newfile.txt',
+        'rejected',
+      );
+      expect(response.statusCode).toBe(400);
+      expect(existsSync(join(outsideDir, 'newfile.txt'))).toBe(false);
+      expect(existsSync(targetSafePath)).toBe(false);
+    } finally {
+      fsp.readFile = originalReadFile;
+      await app.close();
+    }
+  });
+});
+
+describe('file-changes read model latestSnapshotRef', () => {
+  it('revert 的 scope 快照不会顶替 request 快照成为 latestSnapshotRef', async () => {
+    seedSession({ workingDirectory: workspaceRoot });
+    snapshotStore.persistSessionSnapshot({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      snapshotRef: 'req:req-latest-turn',
+      fileDiffs: [
+        {
+          file: 'turn.txt',
+          before: 'a\n',
+          after: 'b\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+    snapshotStore.persistSessionSnapshot({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      snapshotRef: 'scope:req-revert-latest',
+      fileDiffs: [
+        {
+          file: 'turn.txt',
+          before: 'b\n',
+          after: 'a\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          sourceKind: 'manual_revert',
+          guaranteeLevel: 'strong',
+        },
+      ],
+    });
+    // Make the scope snapshot strictly newest so the raw `snapshots[0]` (pre-fix)
+    // would deterministically pick it.
+    dbModule.sqliteRun(
+      `UPDATE session_snapshots SET created_at = '2099-01-01 00:00:00'
+       WHERE session_id = ? AND client_request_id = 'scope:req-revert-latest'`,
+      [SESSION_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(response.statusCode).toBe(200);
+      const summary = (
+        response.json().session as {
+          fileChangesSummary: {
+            latestSnapshotRef?: string;
+            latestSnapshotScopeKind?: string;
+            snapshotCount: number;
+          };
+        }
+      ).fileChangesSummary;
+      expect(summary.latestSnapshotRef).toBe('req:req-latest-turn');
+      expect(summary.latestSnapshotScopeKind).toBe('request');
+      expect(summary.snapshotCount).toBe(2);
     } finally {
       await app.close();
     }

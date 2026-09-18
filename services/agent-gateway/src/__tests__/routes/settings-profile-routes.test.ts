@@ -393,4 +393,82 @@ describe('settings profile routes', () => {
       await app.close();
     }
   });
+
+  it('PUT /settings/providers 只落库用户覆盖项，catalog 派生模型不入库', async () => {
+    const app = await buildApp();
+    try {
+      const authorization = await bearer(app);
+
+      const getResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/providers',
+        headers: { authorization },
+      });
+      expect(getResponse.statusCode).toBe(200);
+      const initial = getResponse.json() as {
+        providers: Array<{
+          id: string;
+          type: string;
+          defaultModels: Array<Record<string, unknown>>;
+        }>;
+        activeSelection: unknown;
+      };
+      const target = initial.providers.find((provider) => provider.id === 'deepseek');
+      expect(target).toBeDefined();
+      expect(target?.defaultModels.length ?? 0).toBeGreaterThan(0);
+
+      await app.inject({
+        method: 'PUT',
+        url: '/settings/providers',
+        headers: { authorization },
+        payload: { providers: initial.providers, activeSelection: initial.activeSelection },
+      });
+
+      const readStoredProviders = () =>
+        JSON.parse(
+          dbModule.sqliteGet<{ value: string }>(
+            `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+            [USER_ID],
+          )?.value ?? '[]',
+        ) as Array<{ id: string; defaultModels: Array<Record<string, unknown>> }>;
+
+      const afterNoop = readStoredProviders().find((provider) => provider.id === 'deepseek');
+      expect(afterNoop?.defaultModels).toEqual([]);
+
+      const toggled = initial.providers.map((provider) =>
+        provider.id === 'deepseek'
+          ? {
+              ...provider,
+              defaultModels: provider.defaultModels.map((model, index) =>
+                index === 0 ? { ...model, enabled: false } : model,
+              ),
+            }
+          : provider,
+      );
+
+      const putResponse = await app.inject({
+        method: 'PUT',
+        url: '/settings/providers',
+        headers: { authorization },
+        payload: { providers: toggled, activeSelection: initial.activeSelection },
+      });
+      expect(putResponse.statusCode).toBe(200);
+
+      const responseProviders = (
+        putResponse.json() as {
+          providers: Array<{ id: string; defaultModels: Array<{ id: string }> }>;
+        }
+      ).providers;
+      expect(
+        responseProviders.find((provider) => provider.id === 'deepseek')?.defaultModels,
+      ).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: target?.defaultModels[0]?.['id'] })]),
+      );
+
+      const afterToggle = readStoredProviders().find((provider) => provider.id === 'deepseek');
+      expect(afterToggle?.defaultModels).toEqual([{ ...target?.defaultModels[0], enabled: false }]);
+    } finally {
+      await app.close();
+    }
+  });
 });

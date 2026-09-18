@@ -183,6 +183,93 @@ describe('team crud routes', () => {
     }
   });
 
+  it('POST /team/tasks 指派其他用户的成员时返回结构化 404', async () => {
+    seedTeamMember('member-other', OTHER_USER_ID, 'other@example.com');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/team/tasks',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          title: '跨用户指派',
+          assigneeId: 'member-other',
+        },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        code: 'team_member_not_found',
+        error: '目标团队成员不存在。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PATCH /team/tasks/:id 指派其他用户的成员时返回结构化 404', async () => {
+    seedTask('task-1', USER_ID);
+    seedTeamMember('member-other', OTHER_USER_ID, 'other@example.com');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/team/tasks/task-1',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          assigneeId: 'member-other',
+        },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        code: 'team_member_not_found',
+        error: '目标团队成员不存在。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PATCH /team/tasks/:id 允许清空 assigneeId 与 result', async () => {
+    seedTeamMember('member-1', USER_ID, 'member@example.com');
+    dbModule.sqliteRun(
+      `INSERT INTO team_tasks (id, user_id, title, assignee_id, status, priority, result)
+       VALUES (?, ?, '任务', 'member-1', 'pending', 'medium', '旧结果')`,
+      ['task-assigned', USER_ID],
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/team/tasks/task-assigned',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          assigneeId: null,
+          result: null,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const row = dbModule.sqliteGet<{ assignee_id: string | null; result: string | null }>(
+        `SELECT assignee_id, result FROM team_tasks WHERE id = ?`,
+        ['task-assigned'],
+      );
+      expect(row).toMatchObject({ assignee_id: null, result: null });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /team/session-shares 在会话不存在时返回结构化 404', async () => {
     seedTeamMember('member-1', USER_ID, 'member@example.com');
     const app = await buildApp();

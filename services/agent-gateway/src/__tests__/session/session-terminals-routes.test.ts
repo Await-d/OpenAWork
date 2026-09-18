@@ -14,7 +14,9 @@ import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SessionTerminalsRoutesModule from '../../routes/session-terminals.js';
 import type * as RegistryModule from '../../session/session-terminal-registry.js';
 import type * as RunEventsModule from '../../session/session-run-events.js';
+import type * as PersistentTerminalsModule from '../../session/persistent-terminals.js';
 import { detectTerminalBackend } from '../../session/pty-backend.js';
+import { listPublicShellProfiles } from '../../session/shell-profiles.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -50,6 +52,49 @@ vi.mock('../../session/session-terminal-registry.js', async (importOriginal) => 
     getTerminalOutputSnapshot: (terminalId: string) => {
       raceWindow.onSnapshot?.();
       return actual.getTerminalOutputSnapshot(terminalId);
+    },
+  };
+});
+
+/**
+ * Spawn spy. The shell-profile contract is that a client-supplied string may
+ * never become an executable, so these tests assert BOTH the response contract
+ * and the fact that `spawnPersistentTerminal` was not reached at all for a
+ * rejected id. The real implementation is replaced because spawning would
+ * start a live PTY shell in the test process.
+ */
+const spawnSpy = vi.hoisted(() => ({
+  calls: [] as Array<{
+    sessionId: string;
+    userId: string;
+    cwd: string;
+    shellProfileId?: string;
+  }>,
+  impl: undefined as
+    | ((input: {
+        sessionId: string;
+        userId: string;
+        cwd: string;
+        shellProfileId?: string;
+      }) => unknown)
+    | undefined,
+}));
+
+vi.mock('../../session/persistent-terminals.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof PersistentTerminalsModule>();
+  return {
+    ...actual,
+    spawnPersistentTerminal: (input: {
+      sessionId: string;
+      userId: string;
+      cwd: string;
+      shellProfileId?: string;
+    }) => {
+      spawnSpy.calls.push(input);
+      if (spawnSpy.impl === undefined) {
+        throw new Error('spawnPersistentTerminal test impl not configured');
+      }
+      return spawnSpy.impl(input);
     },
   };
 });
@@ -124,6 +169,22 @@ beforeEach(() => {
   seedUser(OTHER_USER_ID, 'b@example.com');
   seedSession(SESSION_ID, USER_ID);
   seedSession(OTHER_SESSION_ID, OTHER_USER_ID);
+  spawnSpy.calls.length = 0;
+  spawnSpy.impl = (input) => {
+    const row = registry.registerTerminal({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      toolName: 'bash',
+      kind: 'foreground',
+      command: 'shell',
+      cwd: input.cwd,
+      metadata: {
+        backend: 'pty',
+        ...(input.shellProfileId !== undefined ? { shellProfileId: input.shellProfileId } : {}),
+      },
+    });
+    return { terminal: row };
+  };
 });
 
 describe('GET /sessions/:sessionId/terminals', () => {
@@ -509,9 +570,120 @@ describe('GET /sessions/:sessionId/terminals/:terminalId/stream', () => {
     expect(outputPayload.data).toBe(raceData);
     const occurrences = events.filter(
       (entry) =>
-        entry.event === 'output' &&
-        (JSON.parse(entry.data) as { data?: string }).data === raceData,
+        entry.event === 'output' && (JSON.parse(entry.data) as { data?: string }).data === raceData,
     );
     expect(occurrences).toHaveLength(1);
+  });
+});
+
+describe('POST /sessions/:sessionId/terminals（shell profile）', () => {
+  it('未指定 profile：照旧创建，公共载荷不含 shell，且不泄漏 metadata', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/terminals`,
+      headers: { authorization: bearer(app) },
+      payload: { description: 'plain' },
+    });
+    expect(res.statusCode).toBe(200);
+    const terminal = (res.json() as { terminal: Record<string, unknown> }).terminal;
+    expect(terminal).not.toHaveProperty('shell');
+    expect(terminal).not.toHaveProperty('metadata');
+    expect(spawnSpy.calls).toHaveLength(1);
+    expect(spawnSpy.calls[0]).toMatchObject({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      source: 'user',
+    });
+    expect(spawnSpy.calls[0]).not.toHaveProperty('shellProfileId');
+    await app.close();
+  });
+
+  it('指定合法 profile：透传服务端规范化 id，并以 {id,label} 加法暴露', async () => {
+    const [profile] = listPublicShellProfiles(process.platform, process.env);
+    expect(profile).toBeDefined();
+    if (profile === undefined) return;
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/terminals`,
+      headers: { authorization: bearer(app) },
+      payload: { shellProfileId: profile.id },
+    });
+    expect(res.statusCode).toBe(200);
+    const terminal = (res.json() as { terminal: Record<string, unknown> }).terminal;
+    expect(terminal['shell']).toEqual({ id: profile.id, label: profile.label });
+    expect(terminal).not.toHaveProperty('metadata');
+    expect(spawnSpy.calls[0]).toMatchObject({ shellProfileId: profile.id });
+    await app.close();
+  });
+
+  it('安全回归：路径形态 / 含参数 / 未知 id 一律 400，且绝不触达 spawn', async () => {
+    const app = await buildApp();
+    const rejectedIds = [
+      '/bin/evil',
+      '../../bin/sh',
+      'C:\\Windows\\evil.exe',
+      'bash -c whoami',
+      'definitely-not-a-shell',
+    ];
+    for (const rejected of rejectedIds) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/terminals`,
+        headers: { authorization: bearer(app) },
+        payload: { shellProfileId: rejected },
+      });
+      expect(res.statusCode, `应拒绝 ${rejected}`).toBe(400);
+      expect(res.json(), `应拒绝 ${rejected}`).toMatchObject({ error: 'invalid_shell_profile' });
+    }
+    expect(spawnSpy.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('非字符串 / 空白 shellProfileId 一律 400，且绝不触达 spawn', async () => {
+    const app = await buildApp();
+    const rejectedValues: unknown[] = [42, null, true, '', '   ', { id: 'bash' }, ['bash']];
+    for (const rejected of rejectedValues) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/terminals`,
+        headers: { authorization: bearer(app) },
+        payload: { shellProfileId: rejected },
+      });
+      expect(res.statusCode, `应拒绝 ${JSON.stringify(rejected)}`).toBe(400);
+    }
+    expect(spawnSpy.calls).toHaveLength(0);
+    await app.close();
+  });
+});
+
+describe('GET /terminals/shell-profiles', () => {
+  it('rejects unauthenticated callers', async () => {
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/terminals/shell-profiles' });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('返回 {id,label,isDefault}，且载荷里不含任何文件系统路径', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/terminals/shell-profiles',
+      headers: { authorization: bearer(app) },
+    });
+    expect(res.statusCode).toBe(200);
+    const { profiles } = res.json() as { profiles: Array<Record<string, unknown>> };
+    expect(Array.isArray(profiles)).toBe(true);
+    for (const profile of profiles) {
+      expect(profile).not.toHaveProperty('shell');
+      expect(profile).not.toHaveProperty('metadata');
+      expect(String(profile['id'])).not.toMatch(/[\\/]/);
+      expect(String(profile['label'])).not.toMatch(/[\\/]/);
+    }
+    expect(profiles.filter((profile) => profile['isDefault'] === true).length).toBeLessThanOrEqual(
+      1,
+    );
   });
 });

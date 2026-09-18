@@ -125,11 +125,7 @@ describe('session run event batching', () => {
     expect(persisted.seq).toBe(3);
     const rows = readStoredRows();
     expect(rows.map((row) => row.seq)).toEqual([1, 2, 3]);
-    expect(rows.map((row) => row.event_type)).toEqual([
-      'text_delta',
-      'text_delta',
-      'tool_result',
-    ]);
+    expect(rows.map((row) => row.event_type)).toEqual(['text_delta', 'text_delta', 'tool_result']);
   });
 
   it('persists non-delayable events synchronously through the queue entry point', () => {

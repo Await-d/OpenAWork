@@ -14,7 +14,8 @@ import type {
   BrowserLiveSessionLike,
 } from '../../browser-live/manager.js';
 
-const MANAGED_EXECUTABLE_PATH = '/home/user/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome';
+const MANAGED_EXECUTABLE_PATH =
+  '/home/user/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome';
 const SYSTEM_CHROME_EXECUTABLE_PATH = '/usr/bin/google-chrome';
 
 const AVAILABLE_PROBE: BrowserLiveProbeResultLike = {

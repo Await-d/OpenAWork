@@ -8,7 +8,7 @@
  *   - handoff result_json 写入
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as ArtifactChainModule from '../../handoff/runner/artifact-chain.js';
 import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
@@ -690,5 +690,289 @@ TypeScript
     expect(substate?.substate).toBe('cancelled');
     expect(handoffRow?.result_json).toBeNull();
     expect(planPrompt).toBe('');
+  });
+
+  it('确认门控：frontier 清空但未获确认时不得进入 plan（超时即失败）', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    const inboundStore = await import('../../handoff/store/inbound-store.js');
+    inboundStore.__resetInboundForTesting(SESSION_ID);
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        planPrompt = user;
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须支持登录`;
+    };
+
+    // 答满 4 个维度前沿，但始终不确认 → 确认轮超时。
+    const timer = setTimeout(() => {
+      for (const dimension of ['goal', 'constraint', 'deliverable', 'acceptance']) {
+        inboundStore.submitInboundMessage({
+          userId: USER_ID,
+          toSessionId: SESSION_ID,
+          fromRoleLayer: 'reception',
+          messageType: 'clarification_answer',
+          payload: { questionId: dimension, answer: `已定：${dimension}` },
+        });
+      }
+    }, 60);
+
+    try {
+      await expect(
+        artifactChain.runArtifactChain({
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          handoff,
+          sourceIntent: '重构整个系统架构',
+          rewrittenIntent: '重构整个系统架构',
+          teamWorkspaceId: null,
+          callLlm: validPlanningLlm(mockLlm),
+        }),
+      ).rejects.toThrow('planning-generation-failed:');
+    } finally {
+      clearTimeout(timer);
+    }
+
+    expect(planPrompt).toBe('');
+    const stored = dbModule.sqliteGet<{ metadata_json: string }>(
+      `SELECT metadata_json FROM sessions WHERE id = ?`,
+      [SESSION_ID],
+    );
+    const metadata = JSON.parse(stored?.metadata_json ?? '{}') as Record<string, unknown>;
+    expect(metadata['clarificationState']).toBeDefined();
+  });
+
+  it('轮次态恢复：同一意图且已确认时不再重复提问', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    const { confirmGrill } = await import('@openAwork/agent-core');
+    const grillStore = await import('../../handoff/runner/pm1-grill-runner.js');
+    const intent = '重构整个系统架构';
+    // 确认节点依赖全部维度节点，故必须先答满前沿才能结算（引擎语义）。
+    const settled = grillStore.applyPm1GrillAnswers(grillStore.buildPm1GrillSeed(intent), [
+      { nodeId: 'goal', answer: '跨多个文件' },
+      { nodeId: 'constraint', answer: '不得改既有接口' },
+      { nodeId: 'deliverable', answer: '方案 + 代码' },
+      { nodeId: 'acceptance', answer: '需要新增测试' },
+    ]);
+    grillStore.persistPm1Grill(SESSION_ID, confirmGrill(settled, Date.now()), intent);
+
+    const substateStore = await import('../../handoff/store/substate-store.js');
+    const substates: string[] = [];
+    const originalSetSubstate = substateStore.setSubstate;
+    const spy = vi.spyOn(substateStore, 'setSubstate').mockImplementation((input) => {
+      if (input.substate) substates.push(input.substate);
+      return originalSetSubstate(input);
+    });
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        planPrompt = user;
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须支持登录`;
+    };
+
+    try {
+      await artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: intent,
+        rewrittenIntent: intent,
+        teamWorkspaceId: null,
+        callLlm: validPlanningLlm(mockLlm),
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(substates).not.toContain('clarifying');
+    expect(substates).not.toContain('awaiting_confirmation');
+    // 已确认的共识仍作为 plan 上下文注入（不重复提问、也不丢答案）。
+    expect(planPrompt).toContain('clarifications');
+  });
+
+  it('质量评审退回的重规划不再重复 grill', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    const substateStore = await import('../../handoff/store/substate-store.js');
+    const substates: string[] = [];
+    const originalSetSubstate = substateStore.setSubstate;
+    const spy = vi.spyOn(substateStore, 'setSubstate').mockImplementation((input) => {
+      if (input.substate) substates.push(input.substate);
+      return originalSetSubstate(input);
+    });
+
+    let specPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      specPrompt = user;
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须支持登录`;
+    };
+
+    try {
+      await artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '重构整个系统架构',
+        rewrittenIntent: '重构整个系统架构',
+        teamWorkspaceId: null,
+        qualityFeedback: '上次计划缺少回滚步骤',
+        callLlm: validPlanningLlm(mockLlm),
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(substates).not.toContain('clarifying');
+    expect(substates).not.toContain('awaiting_confirmation');
+    expect(specPrompt).toContain('质量评审反馈');
+  });
+
+  it('reception 已确认的共识经 handoff payload 传播：pm1 不重复 grill，答案注入 plan', async () => {
+    const intent = '重构整个系统架构';
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {
+        sourceIntent: intent,
+        rewrittenIntent: intent,
+        grillConfirmation: {
+          kind: 'reception-confirmed',
+          confirmedAt: Date.now(),
+          intent,
+          answers: [
+            { nodeId: 'goal', answer: '跨多个文件' },
+            { nodeId: 'constraint', answer: '不得改既有接口' },
+            { nodeId: 'deliverable', answer: '方案 + 代码' },
+            { nodeId: 'acceptance', answer: '需要新增测试' },
+          ],
+        },
+      },
+    });
+
+    const substateStore = await import('../../handoff/store/substate-store.js');
+    const substates: string[] = [];
+    const originalSetSubstate = substateStore.setSubstate;
+    const spy = vi.spyOn(substateStore, 'setSubstate').mockImplementation((input) => {
+      if (input.substate) substates.push(input.substate);
+      return originalSetSubstate(input);
+    });
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        planPrompt = user;
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须支持登录`;
+    };
+
+    try {
+      await artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: intent,
+        rewrittenIntent: intent,
+        teamWorkspaceId: null,
+        callLlm: validPlanningLlm(mockLlm),
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(substates).not.toContain('clarifying');
+    expect(substates).not.toContain('awaiting_confirmation');
+    expect(planPrompt).toContain('clarifications');
+    expect(planPrompt).toContain('需要新增测试');
+
+    const { parseGrillState } = await import('@openAwork/agent-core');
+    const stored = dbModule.sqliteGet<{ metadata_json: string }>(
+      `SELECT metadata_json FROM sessions WHERE id = ?`,
+      [SESSION_ID],
+    );
+    const metadata = JSON.parse(stored?.metadata_json ?? '{}') as Record<string, unknown>;
+    const state = parseGrillState(String(metadata['clarificationState'] ?? ''));
+    expect(state?.confirmedAt).toBeTypeOf('number');
+  });
+
+  it('确认驳回达到上限：pm1 以 planning-generation-failed 硬失败收口（不放行 plan）', async () => {
+    const intent = '重构整个系统架构';
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    const grillStore = await import('../../handoff/runner/pm1-grill-runner.js');
+    const { applyAnswer, CONFIRM_NODE_ID } = await import('@openAwork/agent-core');
+    let exhausted = grillStore.applyPm1GrillAnswers(grillStore.buildPm1GrillSeed(intent), [
+      { nodeId: 'goal', answer: '跨多个文件' },
+      { nodeId: 'constraint', answer: '不得改既有接口' },
+      { nodeId: 'deliverable', answer: '方案 + 代码' },
+      { nodeId: 'acceptance', answer: '需要新增测试' },
+    ]);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      exhausted = applyAnswer(exhausted, CONFIRM_NODE_ID, '需修改');
+    }
+    grillStore.persistPm1Grill(SESSION_ID, exhausted, intent);
+
+    const mockLlm = async (): Promise<string> => '# x';
+    await expect(
+      artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: intent,
+        rewrittenIntent: intent,
+        teamWorkspaceId: null,
+        callLlm: validPlanningLlm(mockLlm),
+      }),
+    ).rejects.toThrow(/planning-generation-failed:.*grill-rounds-exhausted/s);
+
+    const planCount = dbModule.sqliteGet<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM artifacts WHERE session_id = ? AND phase = 'plan'`,
+      [SESSION_ID],
+    );
+    expect(planCount?.count).toBe(0);
   });
 });
