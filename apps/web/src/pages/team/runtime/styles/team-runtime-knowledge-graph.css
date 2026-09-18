@@ -382,9 +382,16 @@
   color: var(--accent);
 }
 
-.workspace-knowledge-graph-toggle-btn:disabled {
-  opacity: 0.45;
+/* 禁用态（容量不足时的「展开全部 / 展开 <分组>」）：token 派生的静默表面 + 明确非交互光标。
+   hover 规则一律带 `:not(:disabled)`，因此禁用时没有任何悬停反馈。 */
+.workspace-knowledge-graph-toggle-btn:disabled,
+.workspace-knowledge-graph-toggle-btn[aria-disabled='true'] {
+  border-color: color-mix(in srgb, var(--border-default) 22%, transparent);
+  background: color-mix(in srgb, var(--fg-subtle) 8%, transparent);
+  color: var(--fg-subtle);
+  opacity: 0.62;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .workspace-knowledge-graph-toggle-btn:focus-visible {
@@ -399,6 +406,15 @@
   align-items: center;
   gap: var(--spacing-1);
   flex-wrap: wrap;
+}
+
+/* 「展开全部」在大图上的禁用原因：与按钮同排，读屏与视觉都能得到解释。 */
+.workspace-knowledge-graph-toolbar-hint {
+  flex-basis: 100%;
+  max-width: 260px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .workspace-knowledge-graph-control-button {
@@ -537,51 +553,18 @@
   overflow-wrap: anywhere;
 }
 
-.workspace-knowledge-graph-access-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-
-.workspace-knowledge-graph-access-layer button {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  border: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.workspace-knowledge-graph-access-layer button:focus-visible {
-  top: var(--spacing-3);
-  left: var(--spacing-3);
-  z-index: 4;
-  width: auto;
-  height: auto;
-  margin: 0;
+.workspace-knowledge-graph-capacity-notice {
+  display: block;
+  min-width: 0;
   padding: var(--spacing-1) var(--spacing-2);
-  clip: auto;
-  clip-path: none;
-  border: 1px solid var(--accent-border);
+  border: 1px solid color-mix(in srgb, var(--info) 32%, transparent);
   border-radius: var(--radius-sm);
-  background: var(--bg-overlay);
-  color: var(--accent);
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--accent-subtle);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  color: var(--info);
   font-size: 11px;
   font-weight: 700;
-  pointer-events: auto;
-}
-
-.workspace-knowledge-graph-access-layer button:focus-visible::after {
-  content: attr(data-label);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .workspace-knowledge-graph-fallback {
@@ -873,137 +856,6 @@
   font-weight: 700;
 }
 
-.workspace-knowledge-graph-fixed-count {
-  position: absolute;
-  top: var(--spacing-3);
-  left: var(--spacing-3);
-  z-index: 3;
-  max-width: min(260px, calc(100% - var(--spacing-6)));
-  min-height: var(--spacing-6);
-  padding: var(--spacing-1) var(--spacing-2);
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
-    color-mix(in srgb, var(--bg-base) 72%, transparent)
-  );
-  box-shadow: 0 8px 24px -16px color-mix(in srgb, var(--bg-base) 72%, transparent);
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-knowledge-graph-node-hint {
-  position: absolute;
-  left: var(--spacing-3);
-  bottom: var(--spacing-3);
-  z-index: 3;
-  max-width: min(360px, calc(100% - var(--spacing-12) - var(--spacing-12)));
-  min-height: var(--spacing-6);
-  padding: var(--spacing-1) var(--spacing-2);
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
-    color-mix(in srgb, var(--bg-base) 72%, transparent)
-  );
-  box-shadow: 0 8px 28px -18px color-mix(in srgb, var(--bg-base) 76%, transparent);
-  color: var(--fg-default);
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-knowledge-graph-settings-panel {
-  position: absolute;
-  bottom: var(--spacing-2);
-  right: var(--spacing-2);
-  z-index: 5;
-  width: auto;
-  min-width: 92px;
-  max-width: min(280px, calc(100% - var(--spacing-4)));
-  border: 1px solid color-mix(in srgb, var(--border-default) 38%, transparent);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
-  backdrop-filter: blur(8px);
-  color: var(--fg-default);
-  box-shadow: var(--shadow-sm);
-}
-
-.workspace-knowledge-graph-settings-panel summary {
-  min-height: 32px;
-  padding: var(--spacing-1) var(--spacing-2);
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
-  list-style: none;
-}
-
-.workspace-knowledge-graph-settings-panel summary::-webkit-details-marker {
-  display: none;
-}
-
-.workspace-knowledge-graph-settings-panel summary::after {
-  float: right;
-  color: var(--fg-subtle);
-  content: '调整';
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.workspace-knowledge-graph-settings-panel[open] {
-  width: min(280px, calc(100% - var(--spacing-4)));
-  max-height: calc(100% - var(--spacing-4));
-  overflow: auto;
-  padding-bottom: var(--spacing-2);
-}
-
-.workspace-knowledge-graph-settings-panel[open] summary {
-  color: var(--fg-strong);
-}
-
-.workspace-knowledge-graph-settings-panel summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--accent-subtle);
-}
-
-.workspace-knowledge-graph-force-controls {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--spacing-2);
-  width: 100%;
-  padding: 0 var(--spacing-2);
-}
-
-.workspace-knowledge-graph-force-range {
-  display: grid;
-  gap: var(--spacing-1);
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.workspace-knowledge-graph-force-range input {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.workspace-knowledge-graph-force-range input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--accent-subtle);
-}
-
 .workspace-knowledge-graph-footer {
   display: flex;
   flex-direction: row;
@@ -1057,29 +909,14 @@
     max-height: none;
   }
 
-  .workspace-knowledge-graph-force-controls {
-    grid-template-columns: 1fr;
-  }
-
   .workspace-knowledge-graph-toolbar-toggles {
     flex-wrap: wrap;
   }
 }
 
 @media (max-width: 640px) {
-  .workspace-knowledge-graph-settings-panel {
-    position: static;
-    width: 100%;
-    margin-top: var(--spacing-2);
-  }
-
   .workspace-knowledge-graph-toolbar {
     padding: var(--spacing-2);
-  }
-
-  .workspace-knowledge-graph-settings-panel[open] {
-    width: 100%;
-    max-height: none;
   }
 
   .workspace-knowledge-graph-toolbar-search {
@@ -1127,19 +964,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .workspace-knowledge-graph-fixed-count {
-    max-width: calc(50% - var(--spacing-4));
-  }
-
-  .workspace-knowledge-graph-node-hint {
-    right: var(--spacing-3);
-    max-width: calc(100% - var(--spacing-6));
-  }
-
-  .workspace-knowledge-graph-force-controls {
-    grid-template-columns: 1fr;
   }
 
   .workspace-knowledge-graph-toolbar-row {
