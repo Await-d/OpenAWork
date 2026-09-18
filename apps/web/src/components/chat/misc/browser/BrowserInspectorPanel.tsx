@@ -41,7 +41,10 @@ import {
   nextInspectorDepth,
   toggleExpandedId,
 } from './browser-inspector-model.js';
-import type { BrowserInspectorLoadStatus, BrowserInspectorView } from './browser-inspector-model.js';
+import type {
+  BrowserInspectorLoadStatus,
+  BrowserInspectorView,
+} from './browser-inspector-model.js';
 import {
   InspectorActionButton,
   InspectorA11yIcon,
@@ -51,7 +54,11 @@ import {
   InspectorSkeleton,
   InspectorStrip,
 } from './browser-inspector-chrome.js';
-import { InspectorA11yDetailPane, InspectorEmptyDetail, InspectorNodeDetailPane } from './browser-inspector-detail.js';
+import {
+  InspectorA11yDetailPane,
+  InspectorEmptyDetail,
+  InspectorNodeDetailPane,
+} from './browser-inspector-detail.js';
 import { InspectorTreeView } from './browser-inspector-tree.js';
 import type { InspectorTreeItem } from './browser-inspector-tree.js';
 import { BrowserPill } from './browser-pill.js';
@@ -400,7 +407,9 @@ export function BrowserInspectorPanel({
               selectedId={selectedDomId === null ? null : String(selectedDomId)}
               scrollTick={scrollTick}
               onSelect={(id) => setSelectedDomId(Number(id))}
-              onToggle={(id) => setExpandedDomIds((current) => toggleExpandedId(current, Number(id)))}
+              onToggle={(id) =>
+                setExpandedDomIds((current) => toggleExpandedId(current, Number(id)))
+              }
               onRequestDom={() => requestDomWithDepth(depth)}
             />
           ) : (

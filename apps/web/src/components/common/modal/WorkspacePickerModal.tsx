@@ -850,61 +850,61 @@ export default function WorkspacePickerModal({
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            className="workspace-picker-action"
-            disabled={busy}
-            style={{
-              height: 34,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border-default)',
-              background: 'transparent',
-              color: 'var(--fg-muted)',
-              fontSize: 12,
-              cursor: busy ? 'not-allowed' : 'pointer',
-              opacity: busy ? 0.5 : 1,
-            }}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSelectCurrent()}
-            className="workspace-picker-action"
-            disabled={busy || !currentPath}
-            style={{
-              height: 34,
-              padding: '0 18px',
-              borderRadius: 8,
-              border: 'none',
-              background: 'var(--accent)',
-              color: 'var(--fg-on-accent)',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: busy || !currentPath ? 'not-allowed' : 'pointer',
-              opacity: busy || !currentPath ? 0.5 : 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            {busy && (
-              <span
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  border: '2px solid color-mix(in srgb, var(--fg-on-accent) 30%, transparent)',
-                  borderTopColor: 'var(--fg-on-accent)',
-                  display: 'inline-block',
-                  animation: 'spin 0.7s linear infinite',
-                }}
-              />
-            )}
-            选择当前文件夹
-          </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="workspace-picker-action"
+              disabled={busy}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border-default)',
+                background: 'transparent',
+                color: 'var(--fg-muted)',
+                fontSize: 12,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.5 : 1,
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSelectCurrent()}
+              className="workspace-picker-action"
+              disabled={busy || !currentPath}
+              style={{
+                height: 34,
+                padding: '0 18px',
+                borderRadius: 8,
+                border: 'none',
+                background: 'var(--accent)',
+                color: 'var(--fg-on-accent)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: busy || !currentPath ? 'not-allowed' : 'pointer',
+                opacity: busy || !currentPath ? 0.5 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {busy && (
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    border: '2px solid color-mix(in srgb, var(--fg-on-accent) 30%, transparent)',
+                    borderTopColor: 'var(--fg-on-accent)',
+                    display: 'inline-block',
+                    animation: 'spin 0.7s linear infinite',
+                  }}
+                />
+              )}
+              选择当前文件夹
+            </button>
           </div>
         </div>
       </div>
