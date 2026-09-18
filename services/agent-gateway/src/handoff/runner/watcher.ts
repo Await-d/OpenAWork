@@ -38,6 +38,7 @@ import {
   HEARTBEAT_STALE_AFTER_MS,
   touchSessionHeartbeat,
 } from '../bus/heartbeat.js';
+import { humanizePlanningFailureReason } from '../capability/planning-failure.js';
 import { getBackgroundTaskScheduler, type BackgroundTaskScheduler } from './scheduler.js';
 import { publishHandoffEvent, publishHallucinationEvent } from '../bus/team-events-bus.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
@@ -349,6 +350,7 @@ export class HandoffWatcher {
                 failure_reason: string | null;
                 retry_count: number;
                 idempotency_key: string | null;
+                client_request_id: string | null;
                 paused: number;
                 paused_at: string | null;
                 paused_by_user_id: string | null;
@@ -376,6 +378,7 @@ export class HandoffWatcher {
                   failureReason: failedRecord.failure_reason,
                   retryCount: failedRecord.retry_count,
                   idempotencyKey: failedRecord.idempotency_key,
+                  clientRequestId: failedRecord.client_request_id ?? null,
                   paused: failedRecord.paused === 1,
                   pausedAt: failedRecord.paused_at,
                   pausedByUserId: failedRecord.paused_by_user_id,
@@ -1080,6 +1083,11 @@ export class HandoffWatcher {
                 fromSessionId: input.toSessionId,
                 fromRoleLayer: 'pm1',
                 toRoleLayer: 'pm2',
+                // 父 handoff 此刻已是终态（completeHandoff 先于本链执行），活跃父继承
+                // 路径不再成立（resolveSessionTurnClientRequestId 只继承 pending/claimed/
+                // running 的父 handoff）。回合键必须显式携带，否则 pm2 及其下游记录落
+                // NULL、回退用户回合无法删除；不得为此外放宽 resolver 去继承终态父。
+                clientRequestId: input.handoff.clientRequestId,
                 // 幂等键：以 pm1 handoff id 派生。auto-chain 可能因双 tick / 进程重启
                 // 后的重放被触发多次；没有幂等键时每次都会新建一条 pm1→pm2，导致 pm2
                 // 重复接管 + 重复 d→e/f/g 派发 + 重复 LLM 花费。createHandoff 命中已存在
@@ -1345,6 +1353,10 @@ export class HandoffWatcher {
                   fromSessionId: input.toSessionId,
                   fromRoleLayer: 'pm1',
                   toRoleLayer: 'pm2',
+                  // 降级链在 failHandoff 之后执行，父 handoff 已是终态（failed），
+                  // 活跃父继承不成立；与正常 auto-chain 一致显式携带父回合键，
+                  // 否则降级派发出的 pm2 记录无法被回合回退删除。
+                  clientRequestId: input.handoff.clientRequestId,
                   idempotencyKey: `auto-chain-degraded:pm1-pm2:${input.handoff.id}`,
                   notBeforeMs: computeAutoRetryAvailableAtMs(escalationRound),
                   payload: {
@@ -1433,7 +1445,19 @@ export class HandoffWatcher {
                 userId: input.handoff.userId,
                 role: 'assistant',
                 agentId: 'interaction-agent',
-                content: [{ type: 'text', text: `规划已停止自动重试：${reason}` }],
+                content: [
+                  {
+                    type: 'text',
+                    text: [
+                      '⚠️ PM1 规划未能完成，已停止自动重试。',
+                      '',
+                      `**原因**：${humanizePlanningFailureReason(reason)}`,
+                      '**下一步**：请重新发送该需求；若仍失败，请检查团队工作目录内容与所选模型。',
+                      '',
+                      `_技术详情：${reason}_`,
+                    ].join('\n'),
+                  },
+                ],
                 clientRequestId: `handoff:${input.handoff.id}:planning-stopped`,
               });
             }

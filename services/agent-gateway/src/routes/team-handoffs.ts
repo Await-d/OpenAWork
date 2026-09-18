@@ -46,15 +46,12 @@ import { setSubstate } from '../handoff/store/substate-store.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import {
-  cancelTeamRuntimeTree,
   pauseTeamRuntimeTree,
   resumeTeamRuntimeTree,
   type TeamRuntimeControlScope,
 } from '../team/team-runtime-control-store.js';
-import {
-  getAnyInFlightStreamRequestForSession,
-  stopAllInFlightStreamRequestsForSession,
-} from './stream-cancellation.js';
+import { cascadeCancelDownstream } from '../session/cascade-cancel-downstream.js';
+import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
 import { buildTeamResumeBackgroundRequestData } from '../team/team-resume-context.js';
 import { assessTeamResumeMode, resolveBackgroundRerunTarget } from '../team/team-resume-context.js';
 import { preResumeConsistencyCheck } from '../team/team-resume-consistency-check.js';
@@ -95,6 +92,14 @@ const reviewActionSchema = z.enum(['redispatch', 'return-to-c', 'escalate-to-use
 const reviewActionParamsSchema = z.object({
   action: reviewActionSchema,
   handoffId: z.string().min(1).max(200),
+});
+
+const handoffIdParamsSchema = z.object({
+  handoffId: z.string().min(1).max(200),
+});
+
+const sessionIdParamsSchema = z.object({
+  sessionId: z.string().min(1).max(200),
 });
 
 type TeamHandoffRouteErrorCode =
@@ -216,6 +221,7 @@ function logHandoffControl(input: {
       action: 'handoff_control',
       actorEmail: input.actorEmail,
       actorUserId: input.actorUserId,
+      clientRequestId: input.record.clientRequestId,
       detail: JSON.stringify({
         action: input.action,
         handoffId: input.record.id,
@@ -358,93 +364,6 @@ function logSessionTreeControl(
   }
 }
 
-/**
- * 级联取消某个 session 子树下的所有未终止 handoff（跨层健壮性补强）。
- *
- * 单条 cancelHandoff 只翻自身状态；本函数沿 team_parent_session_id 递归取消整棵
- * 下游子树，并对每个下游 session：
- *   1. 注入 cancel_signal（team-stream-control gate 在下个 round 边界中止执行）。
- *   2. stopAllInFlightStreamRequestsForSession 立即 abort 正在跑的 LLM 流。
- *   3. setSubstate('cancelled') 让前端进度条立刻反映终态。
- *
- * 全程 best-effort：单个 session 的信号注入/停流失败不阻塞其余 session。
- */
-async function cascadeCancelDownstream(input: {
-  rootSessionId: string;
-  userId: string;
-  excludeHandoffId?: string;
-}): Promise<void> {
-  const result = cancelTeamRuntimeTree({
-    rootSessionId: input.rootSessionId,
-    userId: input.userId,
-  });
-  if (!result) return;
-
-  // 对子树里每个 session 停流 + 置 substate。treeSessionIds 含 root 自身与所有后代。
-  for (const sessionId of result.treeSessionIds) {
-    try {
-      submitInboundMessage({
-        userId: input.userId,
-        toSessionId: sessionId,
-        fromRoleLayer: 'system',
-        messageType: 'cancel_signal',
-        payload: { reason: 'cascade-cancel', rootSessionId: input.rootSessionId },
-      });
-    } catch (err) {
-      console.warn(
-        `[team-handoffs] cascade cancel_signal 注入失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    try {
-      await stopAllInFlightStreamRequestsForSession({ sessionId, userId: input.userId });
-    } catch (err) {
-      console.warn(
-        `[team-handoffs] cascade 停流失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    try {
-      setSubstate({ sessionId, substate: 'cancelled', userId: input.userId });
-    } catch (err) {
-      console.warn(
-        `[team-handoffs] cascade setSubstate('cancelled') 失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  for (const cancelledHandoffId of result.cancelledHandoffIds) {
-    if (cancelledHandoffId === input.excludeHandoffId) continue;
-    const record = getHandoff({ userId: input.userId, handoffId: cancelledHandoffId });
-    if (record) {
-      publishHandoffEvent({ type: 'handoff.cancelled', record });
-    }
-  }
-
-  // 审计：记录级联取消的范围（根 session、波及 session 数、取消 handoff 数），
-  // 便于事后排查「取消了什么」。best-effort，不阻塞。
-  try {
-    logTeamAudit({
-      action: 'handoff_control',
-      actorUserId: input.userId,
-      detail: JSON.stringify({
-        action: 'cascade-cancel',
-        rootSessionId: input.rootSessionId,
-        excludeHandoffId: input.excludeHandoffId ?? null,
-        treeSessionCount: result.treeSessionIds.length,
-        cascadeCancelledHandoffIds: result.cancelledHandoffIds,
-      }),
-      entityId: input.rootSessionId,
-      entityType: 'session',
-      sessionId: input.rootSessionId,
-      summary: `cascade cancel: root=${input.rootSessionId.slice(0, 8)} sessions=${result.treeSessionIds.length} handoffs=${result.cancelledHandoffIds.length}`,
-      userId: input.userId,
-    });
-  } catch (err) {
-    console.warn(
-      `[team-handoffs] cascade 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-}
-
 export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
   // ─── Team Sessions ──────────────────────────────────────────────────────
 
@@ -542,7 +461,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'team.handoffs.get');
       const user = request.user as JwtPayload;
-      const handoffId = (request.params as { handoffId: string }).handoffId;
+      const handoffId = parseParams(handoffIdParamsSchema, request.params).handoffId;
 
       const record = getHandoff({ userId: user.sub, handoffId });
       if (!record) {
@@ -560,7 +479,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'team.handoffs.list-by-session');
       const user = request.user as JwtPayload;
-      const sessionId = (request.params as { sessionId: string }).sessionId;
+      const sessionId = parseParams(sessionIdParamsSchema, request.params).sessionId;
 
       if (!validateTeamParentSession({ userId: user.sub, teamParentSessionId: sessionId })) {
         step.fail('session not found');
@@ -719,7 +638,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'team.handoffs.cancel');
       const user = request.user as JwtPayload;
-      const handoffId = (request.params as { handoffId: string }).handoffId;
+      const handoffId = parseParams(handoffIdParamsSchema, request.params).handoffId;
 
       const before = getHandoff({ userId: user.sub, handoffId });
       if (!before) {
@@ -777,6 +696,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               rootSessionId: after.toSessionId,
               userId: user.sub,
               excludeHandoffId: after.id,
+              clientRequestId: after.clientRequestId,
             });
           } catch (e) {
             console.warn(
@@ -796,7 +716,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'team.handoffs.pause');
       const user = request.user as JwtPayload;
-      const handoffId = (request.params as { handoffId: string }).handoffId;
+      const handoffId = parseParams(handoffIdParamsSchema, request.params).handoffId;
 
       const parseStep = child('parse-body');
       const body = parseBody(pauseHandoffSchema, request.body ?? {});
@@ -857,7 +777,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'team.handoffs.resume');
       const user = request.user as JwtPayload;
-      const handoffId = (request.params as { handoffId: string }).handoffId;
+      const handoffId = parseParams(handoffIdParamsSchema, request.params).handoffId;
 
       const before = getHandoff({ userId: user.sub, handoffId });
       if (!before) {
@@ -907,7 +827,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'team.sessions.pause-all');
       const user = request.user as JwtPayload;
-      const sessionId = (request.params as { sessionId: string }).sessionId;
+      const sessionId = parseParams(sessionIdParamsSchema, request.params).sessionId;
 
       const parseStep = child('parse-body');
       const body = parseBody(pauseHandoffSchema, request.body ?? {});
@@ -1002,7 +922,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'team.sessions.resume-all');
       const user = request.user as JwtPayload;
-      const sessionId = (request.params as { sessionId: string }).sessionId;
+      const sessionId = parseParams(sessionIdParamsSchema, request.params).sessionId;
 
       // ── 阶段 1：恢复前一致性校验 ────────────────────────────────────
       // 修复 orphan session、zombie handoff、duplicate handoff、stale heartbeat、stuck running
@@ -1357,8 +1277,9 @@ function replayPm1FromPm2Failure(input: {
 }): HandoffRecord | null {
   const pm2Row = sqliteGet<{
     from_session_id: string;
+    client_request_id: string | null;
   }>(
-    `SELECT from_session_id
+    `SELECT from_session_id, client_request_id
        FROM handoff_records
       WHERE id = ? AND user_id = ? AND to_role_layer = 'pm2'
       LIMIT 1`,
@@ -1399,6 +1320,7 @@ function replayPm1FromPm2Failure(input: {
     fromSessionId: upstream.from_session_id,
     fromRoleLayer: upstream.from_role_layer as HandoffRoleLayer,
     toRoleLayer: 'pm1',
+    clientRequestId: pm2Row.client_request_id ?? null,
     payload,
   });
 }

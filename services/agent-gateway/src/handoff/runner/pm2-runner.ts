@@ -198,8 +198,12 @@ async function createReturnToPm1Handoff(input: {
   try {
     const { createHandoff } = await import('../store/handoff-store.js');
     // 从 DB 读取 PM2 handoff 的 retry_count，用于递增 escalationRound
-    const pm2Row = sqliteGet<{ retry_count: number; payload_json: string }>(
-      `SELECT retry_count, payload_json FROM handoff_records WHERE id = ? LIMIT 1`,
+    const pm2Row = sqliteGet<{
+      retry_count: number;
+      payload_json: string;
+      client_request_id: string | null;
+    }>(
+      `SELECT retry_count, payload_json, client_request_id FROM handoff_records WHERE id = ? LIMIT 1`,
       [input.pm2HandoffId],
     );
     const round = nextPlanningRound(
@@ -256,6 +260,7 @@ async function createReturnToPm1Handoff(input: {
       toRoleLayer: 'pm1',
       idempotencyKey: `pm2-return:${input.step}:${input.pm2HandoffId}`,
       notBeforeMs: computeAutoRetryAvailableAtMs(round),
+      clientRequestId: pm2Row?.client_request_id ?? null,
       payload: {
         sourceIntent,
         rewrittenIntent: `【${input.step} 退回重新规划】${sourceIntent}\n\n---\n\n## 质量反馈\n${input.feedback}\n\n请根据以上反馈修正 spec/plan/tasks。`,

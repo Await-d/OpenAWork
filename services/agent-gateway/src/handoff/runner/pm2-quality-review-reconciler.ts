@@ -128,6 +128,7 @@ interface Pm2HandoffRow {
   state: string;
   to_session_id: string | null;
   user_id: string;
+  client_request_id: string | null;
 }
 
 interface Pm2ResultJson {
@@ -432,7 +433,7 @@ export async function reconcilePm2QualityReview(input: {
   inFlightPm2QualityReviews.add(input.pm2HandoffId);
   try {
     const row = sqliteGet<Pm2HandoffRow>(
-      `SELECT id, payload_json, result_json, retry_count, state, to_session_id, user_id
+      `SELECT id, payload_json, result_json, retry_count, state, to_session_id, user_id, client_request_id
          FROM handoff_records
         WHERE id = ? AND user_id = ?
         LIMIT 1`,
@@ -947,6 +948,7 @@ export async function reconcilePm2QualityReview(input: {
                 toRoleLayer: 'pm1',
                 idempotencyKey: `quality-feedback:pm1-replan:${row.id}`,
                 notBeforeMs: computeAutoRetryAvailableAtMs((row.retry_count ?? 0) + 1),
+                clientRequestId: row.client_request_id ?? null,
                 payload: {
                   sourceIntent,
                   rewrittenIntent: `【质量评审退回重新规划】${sourceIntent}\n\n---\n\n${qualityFeedback}`,

@@ -20,6 +20,10 @@ import { sqliteAll, sqliteGet, sqliteRun as dbSqliteRun } from '../../infra/db.j
 import { createHash, randomUUID } from 'node:crypto';
 import type { TeamReasoningEffort } from '@openAwork/shared';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import {
+  describeUpstreamErrorForUser,
+  type UpstreamErrorUserDescription,
+} from '../../provider/retry-classify.js';
 import { resolveMemberModelForSessionLayer } from '../bus/resolve-member-model.js';
 import { createHandoff } from '../store/handoff-store.js';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
@@ -40,6 +44,10 @@ import {
   readReceptionGrill,
   startReceptionGrill,
 } from './reception-grill-runner.js';
+import {
+  buildGrillConfirmation,
+  type GrillConfirmationPayload,
+} from '../capability/grill-confirmation.js';
 import {
   buildTeamResumeContext,
   resolveTeamRootSessionId,
@@ -156,6 +164,11 @@ export interface OrchestrateReceptionInput {
    * 避免对同一高影响意图再次进入拷问（否则会无限循环）。外部调用方不应设置。
    */
   __skipGrill?: boolean;
+  /**
+   * 内部使用：grill 确认后随 handoff payload 传给 pm1 的「共识已确认」数据，
+   * 让 pm1 复用同一份已确认共识、不再二次拷问。外部调用方不应设置。
+   */
+  grillConfirmation?: GrillConfirmationPayload;
 }
 
 export interface OrchestrateReceptionResult {
@@ -302,15 +315,45 @@ async function runReceptionOrchestrationBody(
 
     if (advanced.kind === 'confirmed') {
       const confirmedIntent = activeGrill.intent || input.userIntent;
+      const confirmation = buildGrillConfirmation(advanced.state, confirmedIntent);
       clearReceptionGrill(input.receptionSessionId);
       if (persistAck) {
         writeAck(input.userId, input.receptionSessionId, '共识已确认，开始按此派发任务。');
       }
       return await runReceptionOrchestrationBody(
-        { ...input, userIntent: confirmedIntent, __skipGrill: true },
+        {
+          ...input,
+          userIntent: confirmedIntent,
+          __skipGrill: true,
+          ...(confirmation ? { grillConfirmation: confirmation } : {}),
+        },
         persistAck,
         streamClientRequestId,
       );
+    }
+
+    if (advanced.kind === 'cancelled') {
+      clearReceptionGrill(input.receptionSessionId);
+      setSubstate({
+        sessionId: input.receptionSessionId,
+        substate: SUBSTATES_RECEPTION.IDLE,
+        userId: input.userId,
+        roleLayer: 'reception',
+      });
+      if (persistAck) {
+        writeAck(input.userId, input.receptionSessionId, '已取消本次任务，未创建任何派发。');
+      }
+      return { triggered: false, reason: 'grill-cancelled' };
+    }
+
+    if (advanced.kind === 'exhausted') {
+      // 复用现有「等待用户」子状态，不新增 substate 值。
+      setSubstate({
+        sessionId: input.receptionSessionId,
+        substate: SUBSTATES_RECEPTION.AWAITING_CONFIRMATION,
+        userId: input.userId,
+        roleLayer: 'reception',
+      });
     }
 
     persistReceptionGrill(input.receptionSessionId, advanced.state, activeGrill.intent);
@@ -355,60 +398,74 @@ async function runReceptionOrchestrationBody(
   // ─── L1.2 b.router：意图路由判断 ─────────────────────────────────────────
   // 规则做确定性预筛（问候/致谢→direct，空/极短→clarify），其余交给 LLM。
   // LLM 同时看到用户输入和历史任务上下文，判断是 resume / orchestrate / direct / clarify。
-  let routeResult: RouteResult | null = routeByRules(input.userIntent);
-  if (!routeResult) {
-    const resolvedAuxiliaryContext = await ensureAuxiliaryContext();
-    if (!resolvedAuxiliaryContext) {
-      if (persistAck) {
-        writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
+  // grill 确认后跳过重复路由：确认后的 intent 仍可能命中 grill/clarify 等分支，导致
+  // 反复回问或误判，故直接进入 orchestrate。
+  let routeResult: RouteResult;
+  if (input.__skipGrill) {
+    routeResult = {
+      decision: 'orchestrate',
+      decisionSource: 'rule',
+      reason: 'grill 已确认，跳过重复路由',
+    };
+  } else {
+    const ruled = routeByRules(input.userIntent);
+    if (ruled) {
+      routeResult = ruled;
+    } else {
+      const resolvedAuxiliaryContext = await ensureAuxiliaryContext();
+      if (!resolvedAuxiliaryContext) {
+        if (persistAck) {
+          writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_NO_LLM);
+        }
+        return { triggered: false, reason: 'no-llm-config' };
       }
-      return { triggered: false, reason: 'no-llm-config' };
-    }
-    const { llmConfig, instructionPrefix } = resolvedAuxiliaryContext;
-    // 构建 LLM 路由上下文：让 LLM 看到上次任务的状态，从而判断是否需要续接
-    const routeLlmContext = await buildRouteLlmContext({
-      userId: input.userId,
-      receptionSessionId: input.receptionSessionId,
-    });
+      const { llmConfig, instructionPrefix } = resolvedAuxiliaryContext;
+      // 构建 LLM 路由上下文：让 LLM 看到上次任务的状态，从而判断是否需要续接
+      const routeLlmContext = await buildRouteLlmContext({
+        userId: input.userId,
+        receptionSessionId: input.receptionSessionId,
+      });
 
-    const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
-    routeResult = await routeByLlm(
-      input.userIntent,
-      async (prompt, signal) => {
-        return requestWorkflowLlmCompletion({
-          apiBaseUrl: llmConfig.apiBaseUrl,
-          apiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
-          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
-          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
-          signal,
-          prompt: prependAuxiliaryTeamInstructionPrefix({
-            instructionPrefix,
-            prompt,
-          }),
-          temperature: 0.1,
-          usageContext: {
-            userId: input.userId,
-            sessionId: input.receptionSessionId,
-            layer: 'reception',
-            ...(typeof llmConfig.inputPricePerMillion === 'number'
-              ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
-              : {}),
-            ...(typeof llmConfig.outputPricePerMillion === 'number'
-              ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
-              : {}),
-            ...(typeof llmConfig.cacheReadPricePerMillion === 'number'
-              ? { cacheReadPricePerMillion: llmConfig.cacheReadPricePerMillion }
-              : {}),
-            ...(typeof llmConfig.cacheWritePricePerMillion === 'number'
-              ? { cacheWritePricePerMillion: llmConfig.cacheWritePricePerMillion }
-              : {}),
-          },
-        });
-      },
-      routeLlmContext,
-    );
+      const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+      routeResult = await routeByLlm(
+        input.userIntent,
+        async (prompt, signal) => {
+          return requestWorkflowLlmCompletion({
+            apiBaseUrl: llmConfig.apiBaseUrl,
+            apiKey: llmConfig.apiKey,
+            model: llmConfig.model,
+            ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+            ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+            ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
+            signal,
+            prompt: prependAuxiliaryTeamInstructionPrefix({
+              instructionPrefix,
+              prompt,
+            }),
+            temperature: 0.1,
+            usageContext: {
+              userId: input.userId,
+              sessionId: input.receptionSessionId,
+              layer: 'reception',
+              clientRequestId: streamClientRequestId,
+              ...(typeof llmConfig.inputPricePerMillion === 'number'
+                ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
+                : {}),
+              ...(typeof llmConfig.outputPricePerMillion === 'number'
+                ? { outputPricePerMillion: llmConfig.outputPricePerMillion }
+                : {}),
+              ...(typeof llmConfig.cacheReadPricePerMillion === 'number'
+                ? { cacheReadPricePerMillion: llmConfig.cacheReadPricePerMillion }
+                : {}),
+              ...(typeof llmConfig.cacheWritePricePerMillion === 'number'
+                ? { cacheWritePricePerMillion: llmConfig.cacheWritePricePerMillion }
+                : {}),
+            },
+          });
+        },
+        routeLlmContext,
+      );
+    }
   }
 
   // 写 audit log（L1.4 要求）——路由决策只记录到审计日志，不展示给用户
@@ -438,6 +495,11 @@ async function runReceptionOrchestrationBody(
         sessionId: input.receptionSessionId,
         userId: input.userId,
         requestData: {
+          // direct/light 是 router 判定的「前台轻量承接」，本轮不该再套 reception 的默认
+          // clarify 人设（否则简单问题被做多轮提问 + 强制 __grill_confirm__ 确认）。走 stream
+          // 的请求级 dialogueMode 覆盖（stream.ts 中请求优先于会话 metadata），只影响本轮、
+          // 不改持久态；grill/clarify 分支不经模型轮次，仍走确定性澄清链条。
+          dialogueMode: 'coding',
           message: input.userIntent,
           model: input.requestedModelId ?? 'default',
           ...(input.requestedProviderId ? { providerId: input.requestedProviderId } : {}),
@@ -628,6 +690,7 @@ async function runReceptionOrchestrationBody(
         userId: input.userId,
         sessionId: input.receptionSessionId,
         layer: 'reception',
+        clientRequestId: streamClientRequestId,
         ...(typeof llmConfig.inputPricePerMillion === 'number'
           ? { inputPricePerMillion: llmConfig.inputPricePerMillion }
           : {}),
@@ -653,7 +716,16 @@ async function runReceptionOrchestrationBody(
       roleLayer: 'reception',
     });
     if (persistAck) {
-      writeAck(input.userId, input.receptionSessionId, FALLBACK_ACK_LLM_FAILED);
+      writeAck(
+        input.userId,
+        input.receptionSessionId,
+        buildLlmFailureAck({
+          description: describeUpstreamErrorForUser(err),
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          apiBaseUrl: llmConfig.apiBaseUrl,
+        }),
+      );
     }
     return { triggered: false, reason: 'llm-failed' };
   }
@@ -671,12 +743,14 @@ async function runReceptionOrchestrationBody(
     fromSessionId: input.receptionSessionId,
     fromRoleLayer: 'reception',
     toRoleLayer: 'pm1',
+    clientRequestId: streamClientRequestId,
     payload: {
       sourceIntent: input.userIntent,
       rewrittenIntent,
       recommendedRole,
       recommendedNextStep,
       teamWorkspaceId: input.teamWorkspaceId ?? null,
+      ...(input.grillConfirmation ? { grillConfirmation: input.grillConfirmation } : {}),
     },
   });
 
@@ -743,7 +817,41 @@ async function runReceptionOrchestrationBody(
 const FALLBACK_ACK_HANDOFF_ACTIVE =
   '收到。当前已有进行中的任务，本条输入已记录，会在合适的节点合并到现有流程。';
 const FALLBACK_ACK_NO_LLM = '收到。当前没有可用的辅助 LLM 配置，无法自动派发，请稍后重试。';
-const FALLBACK_ACK_LLM_FAILED = '收到。意图改写失败，请稍后重试。';
+const FALLBACK_ACK_LLM_FAILED = '收到，但团队暂时没能接管这条需求：意图改写调用失败。';
+
+/**
+ * 意图改写失败时的 ack：必须带真实原因 + 涉及模型 + 上游地址，并区分「重试有效 /
+ * 无效」。不要退化成一句「请稍后重试」——对 401/403 这类配置类错误那是误导。
+ */
+function buildLlmFailureAck(input: {
+  description: UpstreamErrorUserDescription;
+  model: string;
+  providerType?: string;
+  apiBaseUrl: string;
+}): string {
+  const modelLabel = input.providerType
+    ? `\`${input.model}\`（${input.providerType}）`
+    : `\`${input.model}\``;
+  const lines = [
+    FALLBACK_ACK_LLM_FAILED,
+    '',
+    input.description.message,
+    '',
+    `_涉及模型：${modelLabel} @ ${describeUpstreamHost(input.apiBaseUrl)} · 重试是否有效：${
+      input.description.retryable ? '是' : '否（需先修复配置）'
+    }_`,
+  ];
+  return lines.join('\n');
+}
+
+/** 只暴露上游主机名（不泄漏路径与查询串），便于用户核对是哪家平台出的问题。 */
+function describeUpstreamHost(apiBaseUrl: string): string {
+  try {
+    return new URL(apiBaseUrl).host;
+  } catch {
+    return apiBaseUrl;
+  }
+}
 
 function buildSuccessAck(input: {
   rewrittenIntent: string;
@@ -917,6 +1025,7 @@ async function tryResumePreviousWork(input: {
     fromSessionId: input.receptionSessionId,
     fromRoleLayer: 'reception',
     toRoleLayer: 'pm1',
+    clientRequestId: input.streamClientRequestId,
     payload: {
       sourceIntent: input.userIntent,
       rewrittenIntent: `【续接模式】用户请求继续上次未完成的任务。\n\n未完成任务概览：\n${incompleteTaskSummary}`,

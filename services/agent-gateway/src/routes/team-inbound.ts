@@ -243,6 +243,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               action: 'escape_hatch_used' satisfies TeamAuditAction,
               actorEmail: user.email,
               actorUserId: user.sub,
+              clientRequestId: streamClientRequestId,
               detail: JSON.stringify({
                 hatchType,
                 messageType: body.messageType,

@@ -41,6 +41,8 @@ export interface InstructionContext {
   userId: string;
   /** 当前 handoff id（如果有） */
   handoffId?: string;
+  /** 当前 stream 请求的 clientRequestId：用户回合键优先；子层内部运行键由解析器继承父 handoff */
+  clientRequestId?: string | null;
 }
 
 export interface InstructionResult {

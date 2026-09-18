@@ -11,8 +11,12 @@
  */
 
 import { z } from 'zod';
-import { registerInstruction, type InstructionResult } from './builtin-instructions.js';
-import { createHandoff } from '../store/handoff-store.js';
+import {
+  registerInstruction,
+  type InstructionContext,
+  type InstructionResult,
+} from './builtin-instructions.js';
+import { createHandoff, resolveSessionTurnClientRequestId } from '../store/handoff-store.js';
 import { submitInboundMessage } from '../store/inbound-store.js';
 import { setSubstate } from '../store/substate-store.js';
 import { sqliteRun, sqliteGet } from '../../infra/db.js';
@@ -32,6 +36,16 @@ import {
   SUBMIT_EXECUTION_RESULT_PROTOCOL,
   SUBMIT_REVIEW_REPORT_PROTOCOL,
 } from './completion-protocol-contract.js';
+
+/**
+ * 指令写入的回合键解析：会话自身的真实回合键优先，其次活跃父 handoff 继承。
+ * 子层（pm1/pm2/executor/reviewer）内部运行的 stream 请求键是重放幂等键
+ * （`handoff:` / `pm1:` / `pm2:`），由 `resolveSessionTurnClientRequestId`
+ * 识别后继续继承父回合；用户直接向子会话发消息时传入的是用户回合键，直接采用。
+ */
+function resolveInstructionTurnClientRequestId(ctx: InstructionContext): string | null {
+  return resolveSessionTurnClientRequestId(ctx.sessionId, ctx.clientRequestId);
+}
 
 // ─── b: reception 层指令 ────────────────────────────────────────────────────
 
@@ -57,6 +71,7 @@ registerInstruction({
       fromSessionId: ctx.sessionId,
       fromRoleLayer: 'reception',
       toRoleLayer: 'pm1',
+      clientRequestId: resolveInstructionTurnClientRequestId(ctx),
       payload: {
         sourceIntent: args.sourceIntent,
         rewrittenIntent: args.rewrittenIntent,
@@ -231,6 +246,7 @@ registerInstruction({
       logTeamAudit({
         action: 'handoff_control',
         actorUserId: ctx.userId,
+        clientRequestId: resolveInstructionTurnClientRequestId(ctx),
         entityType: 'handoff',
         entityId: args.handoffId,
         sessionId: ctx.sessionId,
@@ -459,15 +475,17 @@ registerInstruction({
          session_id,
          summary,
          detail,
+         client_request_id,
          created_at
        )
-       VALUES (?, 'constitution_check', 'artifact', ?, ?, ?, ?, datetime('now'))`,
+       VALUES (?, 'constitution_check', 'artifact', ?, ?, ?, ?, ?, datetime('now'))`,
       [
         ctx.userId,
         args.planArtifactId,
         ctx.sessionId,
         `Constitution Check: ${args.pass ? 'PASS' : 'FAIL'} (${violations.length} 违反)`,
         JSON.stringify({ pass: args.pass, violations, sessionId: ctx.sessionId }),
+        resolveInstructionTurnClientRequestId(ctx),
       ],
     );
     return {
