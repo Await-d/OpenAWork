@@ -176,6 +176,17 @@ function rebuildSessionMessageSearchIndex(): void {
   });
 }
 
+export function repairOrphanedSessionMessageSearchDocuments(): void {
+  // Only the derived search index is repaired; audit/analytics tables
+  // (event_log, team_audit_logs, request_workflow_logs, team_usage_records,
+  // event_sequences) keep their dangling session refs by design and are not
+  // repaired here. team_audit_logs / team_usage_records are otherwise
+  // append-only; per-turn rollback deletes are the sole exception.
+  db.exec(
+    'DELETE FROM session_messages_fts WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_messages_fts.session_id)',
+  );
+}
+
 const sessionStore = new Map<string, boolean>();
 
 export const redis = {
@@ -355,6 +366,8 @@ export async function migrate(): Promise<void> {
   );
   rebuildSessionMessageSearchIndex();
 
+  repairOrphanedSessionMessageSearchDocuments();
+
   migrateSessionTodosTable();
 
   db.exec(`
@@ -390,6 +403,7 @@ export async function migrate(): Promise<void> {
       observability_json TEXT,
       backup_before_ref_json TEXT,
       backup_after_ref_json TEXT,
+      workspace_root TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (session_id, request_id, file_path)
     )
@@ -403,6 +417,35 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_file_diffs', 'backup_after_ref_json', 'TEXT');
   ensureColumn('session_file_diffs', 'before_backup_id', 'TEXT');
   ensureColumn('session_file_diffs', 'after_backup_id', 'TEXT');
+  // Binds each diff row to the workspace root it was written under so a reject
+  // after a workspace warp (`PATCH /sessions/:id/workspace`) can refuse to resolve
+  // the relative `file_path` against the NEW root. Nullable: legacy rows stay
+  // NULL and fall back to the content-based conflict check.
+  ensureColumn('session_file_diffs', 'workspace_root', 'TEXT');
+
+  // ─── Per-file review decisions (accept / reject) ───
+  // The append-only `session_file_diffs` stays the source of truth for the
+  // before/after snapshot; this table is only the user's per-file verdict
+  // overlay, keyed by (session, request, file). Kept separate so re-reviewing
+  // a file never rewrites the immutable diff audit trail.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_file_review_decisions (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK(decision IN ('accepted', 'rejected')),
+      revert_request_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, request_id, file_path)
+    )
+  `);
+  ensureColumn('session_file_review_decisions', 'decision', 'TEXT');
+  ensureColumn('session_file_review_decisions', 'revert_request_id', 'TEXT');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_review_decisions_session ON session_file_review_decisions(session_id, user_id, created_at DESC)',
+  );
+
   ensureColumn('session_messages', 'agent_id', 'TEXT');
 
   // ─── Session Recovery Enhancement (2026-08-14) ───
@@ -853,6 +896,11 @@ export async function migrate(): Promise<void> {
   // 不落库。导致刷新页面 / 重连 / 事件在打开页面前发完，"度量"tab 全部归零——
   // 用户每次用都"统计不到"。这里按 (session_id, layer, provider, model) 聚合累加，
   // 让 GET /team/runtime 能回灌历史用量，前端不再依赖实时事件窗口。
+  //
+  // 260917 team turn rollback：聚合键追加 client_request_id（回合键）。缺失回合的
+  // 写入在应用层归一到空串 ''（与 layer/provider/model 的归一策略一致），存量行
+  // 回填为 NULL = "不可归因的历史"；UNIQUE 键变更需要一次破坏性重建，
+  // 见 migrateTeamUsageRecordsRequestScopedUniqueKey()。
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_usage_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -862,6 +910,7 @@ export async function migrate(): Promise<void> {
       agent_id TEXT,
       provider TEXT,
       model TEXT,
+      client_request_id TEXT,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -873,7 +922,7 @@ export async function migrate(): Promise<void> {
       tool_call_count INTEGER NOT NULL DEFAULT 0,
       tool_error_count INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(user_id, session_id, layer, provider, model)
+      UNIQUE(user_id, session_id, layer, provider, model, client_request_id)
     )
   `);
   db.exec(
@@ -1412,7 +1461,7 @@ export async function migrate(): Promise<void> {
       from_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       from_role_layer TEXT NOT NULL,
       to_role_layer TEXT NOT NULL,
-      to_session_id TEXT,
+      to_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
       payload_json TEXT NOT NULL DEFAULT '{}',
       available_at_ms INTEGER DEFAULT NULL,
       state TEXT NOT NULL DEFAULT 'pending',
@@ -1426,6 +1475,7 @@ export async function migrate(): Promise<void> {
       cancel_requested INTEGER NOT NULL DEFAULT 0,
       paused INTEGER NOT NULL DEFAULT 0,
       crash_retry_count INTEGER NOT NULL DEFAULT 0,
+      client_request_id TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -1535,6 +1585,10 @@ export async function migrate(): Promise<void> {
   // 也一定被创建。
   ensureTeamSchemaSafe();
 
+  // Phase 0（team turn rollback）：团队 S3 表补回合维度 + 既有缺陷修复。
+  // 必须在 ensureTeamSchemaSafe() 之后：team_converge_results 由后者兜底创建。
+  migrateTeamTurnDimension();
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS qq_wakeup_windows (
       plugin_id TEXT NOT NULL,
@@ -1622,7 +1676,7 @@ function ensureTeamSchemaSafe(): void {
         from_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         from_role_layer TEXT NOT NULL,
         to_role_layer TEXT NOT NULL,
-        to_session_id TEXT,
+        to_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
         payload_json TEXT NOT NULL DEFAULT '{}',
         available_at_ms INTEGER DEFAULT NULL,
         state TEXT NOT NULL DEFAULT 'pending',
@@ -1640,6 +1694,7 @@ function ensureTeamSchemaSafe(): void {
         paused_at TEXT DEFAULT NULL,
         paused_by_user_id TEXT DEFAULT NULL,
         pause_reason TEXT DEFAULT NULL,
+        client_request_id TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
@@ -2011,6 +2066,292 @@ function migrateTeamRoleSessionInstancesTable(): void {
   db.exec('DROP TABLE team_role_session_instances_legacy');
 }
 
+function sqliteTableExists(table: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+    .get(table) as { name: string } | undefined;
+  return row !== undefined;
+}
+
+/**
+ * team_usage_records 的 UNIQUE 键是否已是回合维度版本
+ * `(user_id, session_id, layer, provider, model, client_request_id)`。
+ */
+function hasTeamUsageRecordsRequestScopedUniqueKey(): boolean {
+  const indexes = db.prepare('PRAGMA index_list(team_usage_records)').all() as Array<{
+    name: string;
+    unique: number;
+  }>;
+
+  return indexes.some((index) => {
+    if (index.unique !== 1) {
+      return false;
+    }
+    const columns = db.prepare(`PRAGMA index_info(${index.name})`).all() as Array<{
+      name: string;
+    }>;
+    return (
+      columns.length === 6 &&
+      columns[0]?.name === 'user_id' &&
+      columns[1]?.name === 'session_id' &&
+      columns[2]?.name === 'layer' &&
+      columns[3]?.name === 'provider' &&
+      columns[4]?.name === 'model' &&
+      columns[5]?.name === 'client_request_id'
+    );
+  });
+}
+
+/**
+ * 破坏性重建 team_usage_records：UNIQUE 键从 5 列扩展为含回合键的 6 列。
+ * SQLite 不支持改约束，只能 create-new + copy + drop + rename（沿用文件内既有的
+ * rebuild 惯用法）。探测到已是 6 列键时直接返回，因此可重复执行。
+ */
+function migrateTeamUsageRecordsRequestScopedUniqueKey(): void {
+  if (hasTeamUsageRecordsRequestScopedUniqueKey()) {
+    return;
+  }
+
+  // 重建的 INSERT 会校验 `user_id REFERENCES users(id)`。异常恢复路径（FK OFF）可能
+  // 留下 user_id 已悬挂的孤儿行——与 handoff 重建同理，必须先按 FK CASCADE 语义清掉，
+  // 否则单条孤儿就会让整个网关无法启动。session_id 无 FK，缺会话的行按原样保留。
+  const danglingUsers = sqliteGet<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM team_usage_records
+      WHERE NOT EXISTS (
+        SELECT 1 FROM users WHERE users.id = team_usage_records.user_id
+      )`,
+  );
+  const danglingUserCount = danglingUsers?.count ?? 0;
+  if (danglingUserCount > 0) {
+    console.warn(
+      `[migrate] team_usage_records: 清理 ${danglingUserCount} 条 user_id 已悬挂的孤儿记录（等价于 FK CASCADE）`,
+    );
+  }
+  db.exec(`
+    DELETE FROM team_usage_records
+     WHERE NOT EXISTS (
+       SELECT 1 FROM users WHERE users.id = team_usage_records.user_id
+     )
+  `);
+
+  db.exec('DROP INDEX IF EXISTS idx_team_usage_records_user_session');
+  db.exec('DROP INDEX IF EXISTS idx_team_usage_records_session_request');
+  db.exec('ALTER TABLE team_usage_records RENAME TO team_usage_records_legacy');
+  db.exec(`
+    CREATE TABLE team_usage_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      layer TEXT,
+      agent_id TEXT,
+      provider TEXT,
+      model TEXT,
+      client_request_id TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      call_count INTEGER NOT NULL DEFAULT 0,
+      total_duration_ms INTEGER NOT NULL DEFAULT 0,
+      tool_call_count INTEGER NOT NULL DEFAULT 0,
+      tool_error_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, session_id, layer, provider, model, client_request_id)
+    )
+  `);
+  // 存量行的 client_request_id 由 ensureColumn 补出，值为 NULL =
+  // "不可归因的历史"；NULL 在 SQLite UNIQUE 里互不相等，旧 5 列键下的唯一性
+  // 使其重建后也不会互相冲突。此处不做任何 NULL→'' 的改写。
+  db.exec(`
+    INSERT INTO team_usage_records (
+      id, user_id, session_id, layer, agent_id, provider, model, client_request_id,
+      input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
+      cost_usd, call_count, total_duration_ms, tool_call_count, tool_error_count, updated_at
+    )
+    SELECT
+      id, user_id, session_id, layer, agent_id, provider, model, client_request_id,
+      input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
+      cost_usd, call_count, total_duration_ms, tool_call_count, tool_error_count, updated_at
+    FROM team_usage_records_legacy
+  `);
+  db.exec('DROP TABLE team_usage_records_legacy');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_usage_records_user_session ON team_usage_records(user_id, session_id)',
+  );
+}
+
+function hasHandoffRecordsToSessionForeignKey(): boolean {
+  const foreignKeys = db.prepare('PRAGMA foreign_key_list(handoff_records)').all() as Array<{
+    from: string;
+    on_delete: string;
+    table: string;
+  }>;
+  return foreignKeys.some(
+    (foreignKey) =>
+      foreignKey.from === 'to_session_id' &&
+      foreignKey.table === 'sessions' &&
+      foreignKey.on_delete === 'SET NULL',
+  );
+}
+
+/**
+ * 给 handoff_records.to_session_id 补 FK（REFERENCES sessions(id) ON DELETE SET NULL）。
+ * 该列此前没有 FK，异常恢复路径（FK OFF）会留下悬挂指针。重建前先按 FK 语义清理
+ * 存量悬挂行：to_session_id 悬挂 → NULL（SET NULL），from_session_id 悬挂 → 删除
+ * （CASCADE）。否则重建的 INSERT 会因 FK 校验失败，让整个网关无法启动。
+ */
+function migrateHandoffRecordsToSessionForeignKey(): void {
+  const columns = db.prepare('PRAGMA table_info(handoff_records)').all() as Array<{ name: string }>;
+  if (columns.length === 0) {
+    return;
+  }
+  if (hasHandoffRecordsToSessionForeignKey()) {
+    return;
+  }
+
+  const danglingFrom = sqliteGet<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM handoff_records
+      WHERE NOT EXISTS (
+        SELECT 1 FROM sessions WHERE sessions.id = handoff_records.from_session_id
+      )`,
+  );
+  const danglingFromCount = danglingFrom?.count ?? 0;
+  if (danglingFromCount > 0) {
+    console.warn(
+      `[migrate] handoff_records: 清理 ${danglingFromCount} 条 from_session_id 已悬挂的孤儿记录（等价于 FK CASCADE）`,
+    );
+  }
+  db.exec(`
+    DELETE FROM handoff_records
+     WHERE NOT EXISTS (
+       SELECT 1 FROM sessions WHERE sessions.id = handoff_records.from_session_id
+     )
+  `);
+  db.exec(`
+    UPDATE handoff_records
+       SET to_session_id = NULL
+     WHERE to_session_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM sessions WHERE sessions.id = handoff_records.to_session_id
+       )
+  `);
+
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_state');
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_pending_available');
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_from_session');
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_to_session');
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_user');
+  db.exec('DROP INDEX IF EXISTS idx_handoff_records_idempotency');
+  db.exec('ALTER TABLE handoff_records RENAME TO handoff_records_legacy');
+  db.exec(`
+    CREATE TABLE handoff_records (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      from_role_layer TEXT NOT NULL,
+      to_role_layer TEXT NOT NULL,
+      to_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      available_at_ms INTEGER DEFAULT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      claim_token TEXT,
+      claimed_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      failure_reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      escalation_round INTEGER NOT NULL DEFAULT 0,
+      cancel_requested INTEGER NOT NULL DEFAULT 0,
+      paused INTEGER NOT NULL DEFAULT 0,
+      crash_retry_count INTEGER NOT NULL DEFAULT 0,
+      idempotency_key TEXT DEFAULT NULL,
+      paused_at TEXT DEFAULT NULL,
+      paused_by_user_id TEXT DEFAULT NULL,
+      pause_reason TEXT DEFAULT NULL,
+      client_request_id TEXT DEFAULT NULL,
+      result_json TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(`
+    INSERT INTO handoff_records (
+      id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id,
+      payload_json, available_at_ms, state, claim_token, claimed_at, started_at,
+      completed_at, failure_reason, retry_count, escalation_round, cancel_requested,
+      paused, crash_retry_count, idempotency_key, paused_at, paused_by_user_id,
+      pause_reason, client_request_id, result_json, created_at, updated_at
+    )
+    SELECT
+      id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id,
+      payload_json, available_at_ms, state, claim_token, claimed_at, started_at,
+      completed_at, failure_reason, retry_count, escalation_round, cancel_requested,
+      paused, crash_retry_count, idempotency_key, paused_at, paused_by_user_id,
+      pause_reason, client_request_id, result_json, created_at, updated_at
+    FROM handoff_records_legacy
+  `);
+  db.exec('DROP TABLE handoff_records_legacy');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_state ON handoff_records(state, created_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_pending_available ON handoff_records(state, paused, available_at_ms, created_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_from_session ON handoff_records(from_session_id, created_at DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_to_session ON handoff_records(to_session_id) WHERE to_session_id IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_user ON handoff_records(user_id, updated_at DESC)',
+  );
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_records_idempotency ON handoff_records(idempotency_key) WHERE idempotency_key IS NOT NULL',
+  );
+}
+
+/**
+ * 团队 S3 表回合维度迁移（team turn rollback Phase 0）。
+ * 列用 ensureColumn 探测，重建带结构探测，索引用 IF NOT EXISTS——整体幂等；
+ * 包在单个事务里，任一重建失败/进程中断都会整体回滚后重试，可安全重入。
+ */
+function migrateTeamTurnDimension(): void {
+  sqliteTransaction(() => {
+    ensureColumn('handoff_records', 'client_request_id', 'TEXT');
+    ensureColumn('team_usage_records', 'client_request_id', 'TEXT');
+    ensureColumn('team_tool_call_records', 'client_request_id', 'TEXT');
+    ensureColumn('team_audit_logs', 'client_request_id', 'TEXT');
+    ensureColumn('team_messages', 'client_request_id', 'TEXT');
+    if (sqliteTableExists('team_converge_results')) {
+      ensureColumn('team_converge_results', 'client_request_id', 'TEXT');
+    }
+
+    migrateTeamUsageRecordsRequestScopedUniqueKey();
+    migrateHandoffRecordsToSessionForeignKey();
+
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_usage_records_session_request ON team_usage_records(session_id, client_request_id)',
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_tool_call_records_session_request ON team_tool_call_records(session_id, client_request_id)',
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_audit_logs_session_request ON team_audit_logs(session_id, client_request_id)',
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_team_messages_session_request ON team_messages(session_id, client_request_id)',
+    );
+    if (sqliteTableExists('team_converge_results')) {
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_team_converge_results_session_request ON team_converge_results(session_id, client_request_id)',
+      );
+    }
+  });
+}
+
 function migrateSessionFileDiffsDropLegacyTextColumns(): void {
   const cols = db.prepare('PRAGMA table_info(session_file_diffs)').all() as Array<{
     name: string;
@@ -2038,6 +2379,7 @@ function migrateSessionFileDiffsDropLegacyTextColumns(): void {
       observability_json TEXT,
       backup_before_ref_json TEXT,
       backup_after_ref_json TEXT,
+      workspace_root TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (session_id, request_id, file_path)
     )
@@ -2091,9 +2433,7 @@ function hasEventLogAggregateSeqUniqueIndex(): boolean {
     name: string;
     unique: number;
   }>;
-  return indexes.some(
-    (index) => index.unique === 1 && index.name === 'uq_event_log_aggregate_seq',
-  );
+  return indexes.some((index) => index.unique === 1 && index.name === 'uq_event_log_aggregate_seq');
 }
 
 function migrateSyncEventTables(): void {
@@ -2457,6 +2797,19 @@ export function sqliteRunWithRowId(
   const stmt = db.prepare(query);
   const result = stmt.run(...normalizeSqliteBindParams(params)) as { lastInsertRowid?: unknown };
   return Number(result.lastInsertRowid ?? 0);
+}
+
+/**
+ * Like sqliteRun but returns the number of rows the statement changed.
+ * Used by the turn-scoped delete helpers, which report deleted row counts.
+ */
+export function sqliteRunWithChanges(
+  query: string,
+  params: readonly SqliteBindableValue[] = [],
+): number {
+  const stmt = db.prepare(query);
+  const result = stmt.run(...normalizeSqliteBindParams(params)) as { changes?: unknown };
+  return Number(result.changes ?? 0);
 }
 
 export function sqliteGet<T>(
