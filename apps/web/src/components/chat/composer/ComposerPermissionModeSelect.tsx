@@ -70,6 +70,25 @@ function ModeGlyph({ mode }: { mode: ComposerPermissionMode }) {
 }
 
 /**
+ * 选中档右侧对勾：与档位图标同源的内联 SVG（不引图标库），
+ * 只作视觉标记——`aria-hidden` 保证不进入可访问名，也不改变行的 role / aria-checked 语义。
+ */
+function SelectionCheck() {
+  return (
+    <svg
+      aria-hidden="true"
+      data-testid="composer-permission-check"
+      className="composer-permission-menu__item-check"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+/**
  * 输入框工具条左侧的「审批方式」档位选择器；首次切到免审批时先在浮层内联确认一次。
  */
 export function ComposerPermissionModeSelect(props: ComposerPermissionModeSelectProps) {
@@ -122,8 +141,12 @@ export function ComposerPermissionModeSelect(props: ComposerPermissionModeSelect
     // 浮层始终锚定触发按钮：上下各预留 MENU_OFFSET 间距后，按可用空间决定展开方向。
     const spaceAbove = rect.top - MENU_OFFSET * 2;
     const spaceBelow = window.innerHeight - rect.bottom - MENU_OFFSET * 2;
-    // 优先向下展开；下方放不下测得高度、且上方更宽裕时才上翻。
-    const placeAbove = spaceBelow < measuredHeight && spaceAbove > spaceBelow;
+    // composer 贴近视口底部：只有下方能完整放下且确实比上方宽裕时才向下展开，
+    // 否则默认上翻；两侧都放不下时取更宽裕的一侧，余量交给 max-height + 滚动吸收。
+    const belowFits = spaceBelow >= measuredHeight;
+    const placeAbove = belowFits
+      ? spaceAbove > spaceBelow
+      : spaceAbove >= spaceBelow || spaceAbove > MENU_OFFSET * 2;
     // 高度上限取展开方向的可用空间；空间不足由 max-height + overflow-y 在盒内滚动吸收。
     const maxHeight = Math.max(
       MENU_OFFSET * 4,
@@ -262,14 +285,23 @@ export function ComposerPermissionModeSelect(props: ComposerPermissionModeSelect
                   data-active={index === activeIndex}
                   data-tone={option.tone ?? 'default'}
                   className="composer-permission-menu__item"
+                  // 非当前档位只留标题行，说明收进 title 由 hover 展示，列表保持紧凑。
+                  title={selected ? undefined : option.description}
                   onClick={() => selectOption(option.value)}
                 >
                   <ModeGlyph mode={option.value} />
                   <span className="composer-permission-menu__item-body">
-                    <span className="composer-permission-menu__item-label">{option.label}</span>
-                    <span className="composer-permission-menu__item-description">
-                      {option.description}
+                    {/* 标签行：标签靠左、选中对勾靠右（对齐标签行，而非两行整体居中）。 */}
+                    <span className="composer-permission-menu__item-label-row">
+                      <span className="composer-permission-menu__item-label">{option.label}</span>
+                      {selected && <SelectionCheck />}
                     </span>
+                    {/* 说明行在标签行下方独占整行宽度，不参与对勾的左右排布。 */}
+                    {selected && (
+                      <span className="composer-permission-menu__item-description">
+                        {option.description}
+                      </span>
+                    )}
                   </span>
                 </button>
               );

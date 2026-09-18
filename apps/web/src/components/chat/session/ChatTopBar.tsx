@@ -35,21 +35,23 @@ export interface ChatTopBarProps {
    */
   onConfirmClarifySwitch?: () => void;
   clarifySwitchPending?: boolean;
-  yoloMode: boolean;
   /**
-   * YOLO 切换回调。省略时（如切换入口已迁入输入框）顶栏只读展示开启状态：
-   * `yoloMode === true` 时渲染不可交互的琥珀 chip，关闭时不渲染任何内容。
-   */
-  onToggleYolo?: () => void;
-  /**
-   * 审批方式档位（比 yoloMode 布尔更细）：提供时优先于 `yoloMode` 决定只读标识。
-   * `auto-edit` 渲染中性（aux）chip，`yolo` 渲染琥珀 chip，`ask` 不渲染。
+   * 审批方式档位只读标识：`auto-edit` 渲染中性（aux）chip，`ask` / `yolo`
+   * 不渲染任何内容（YOLO 已在输入框内可调，顶栏不再重复提示）。
    */
   permissionMode?: ComposerPermissionMode;
-  editorMode: boolean;
-  onToggleEditorMode: () => void;
+  /**
+   * 经典（非 Fusion）布局的分屏编辑器开关。Fusion 统一面板已接管编辑器入口，
+   * 不传则顶栏不渲染该按钮。
+   */
+  editorMode?: boolean;
+  onToggleEditorMode?: () => void;
   rightOpen: boolean;
   onToggleRightOpen: () => void;
+  /**
+   * 经典布局的编辑器全屏开关。Fusion 的「放大」动作位于统一面板内，不传则
+   * 顶栏不渲染该按钮。
+   */
   editorFullScreen?: boolean;
   onToggleEditorFullScreen?: () => void;
   editorPaneTab?: 'code' | 'browser';
@@ -61,6 +63,10 @@ export interface ChatTopBarProps {
   bookmarkCount?: number;
   multiSelectActive?: boolean;
   onToggleMultiSelect?: () => void;
+  /**
+   * 经典布局的浏览器预览入口。Fusion 的预览统一从会话面板进入，不传则顶栏
+   * 不渲染该按钮。
+   */
   onOpenBrowser?: () => void;
   browserActive?: boolean;
   sidebarOpen?: boolean;
@@ -69,8 +75,6 @@ export interface ChatTopBarProps {
   todoController?: ChatTodoController;
   todoDetailsId?: string;
   hideDialogueModeToggle?: boolean;
-  /** 隐藏 YOLO 入口 / 只读标识（两者都不渲染）。 */
-  hideYoloToggle?: boolean;
   hideRightPanelToggle?: boolean;
   /** 会话信息 slot：标题 + 模型 + 模式，合并展示在左侧 */
   sessionInfo?: {
@@ -83,7 +87,7 @@ export interface ChatTopBarProps {
    * 一旦产生消息则只读展示、不再允许调整。
    */
   workspaceBinding?: WorkspaceBindingChipState;
-  /** 审查面板切换（从 SessionHeaderBar 迁移） */
+  /** 会话面板切换（Fusion 统一面板 / classic 审查面板共用同一入口） */
   reviewPanelOpened?: boolean;
   onToggleReviewPanel?: () => void;
   /** 终端面板切换（从 SessionHeaderBar 迁移） */
@@ -93,56 +97,6 @@ export interface ChatTopBarProps {
 
 // ChatTopBar 总宽度小于此阈值时，todo 入口切到 compact 徽章形态。
 const TODO_COMPACT_WIDTH_THRESHOLD = 720;
-
-/** YOLO 闪电图标：可点击按钮与只读标识共用，保证两态视觉一致。 */
-function YoloBoltGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      stroke="none"
-    >
-      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-    </svg>
-  );
-}
-
-/**
- * 只读的 YOLO 开启标识：切换入口迁入输入框后，顶栏仅提示「当前已跳过审批」，
- * 不再可点击，避免与输入框内的控件产生两个写入口。
- */
-function ReadonlyYoloChip() {
-  return (
-    <span
-      data-testid="chat-top-bar-yolo-chip"
-      data-readonly="true"
-      title="YOLO 模式已开启（在输入框中切换）"
-      style={{
-        height: 26,
-        padding: '0 7px',
-        borderRadius: 5,
-        border: 'none',
-        background: 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))',
-        color: 'var(--warning)',
-        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))',
-        fontSize: 10,
-        fontWeight: 600,
-        flexShrink: 0,
-        letterSpacing: '0.04em',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 3,
-        userSelect: 'none',
-      }}
-    >
-      <YoloBoltGlyph />
-      YOLO
-    </span>
-  );
-}
 
 /** 「编辑自动」铅笔图标：与输入框档位控件的中档字形保持一致。 */
 function AutoEditPencilGlyph() {
@@ -203,10 +157,8 @@ export function ChatTopBar({
   onChangeDialogueMode,
   onConfirmClarifySwitch,
   clarifySwitchPending = false,
-  yoloMode,
-  onToggleYolo,
   permissionMode,
-  editorMode,
+  editorMode = false,
   onToggleEditorMode,
   rightOpen,
   onToggleRightOpen,
@@ -229,7 +181,6 @@ export function ChatTopBar({
   todoController,
   todoDetailsId,
   hideDialogueModeToggle = false,
-  hideYoloToggle = false,
   hideRightPanelToggle = false,
   sessionInfo,
   workspaceBinding,
@@ -241,9 +192,6 @@ export function ChatTopBar({
   const showCommandPaletteButton = useDisplayPreferencesStore((s) => s.showCommandPaletteButton);
   const showTerminalButton = useDisplayPreferencesStore((s) => s.showTerminalButton);
   const compactDensity = density === 'compact';
-  // 档位优先；未传档位时按 legacy 布尔推导（true = 免审批 / YOLO）。
-  const resolvedPermissionMode: ComposerPermissionMode =
-    permissionMode ?? (yoloMode ? 'yolo' : 'ask');
 
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
@@ -532,7 +480,7 @@ export function ChatTopBar({
         </div>
       ) : null}
 
-      {/* Right group: YOLO + editor + panel — unified pill container */}
+      {/* Right group: terminal + panel — unified pill container */}
       <div
         style={{
           display: 'flex',
@@ -633,89 +581,56 @@ export function ChatTopBar({
             终端
           </button>
         )}
-        {hideYoloToggle ? null : onToggleYolo ? (
+        {permissionMode === 'auto-edit' && <ReadonlyAutoEditChip />}
+        {onToggleEditorMode && (
           <button
             type="button"
-            aria-pressed={resolvedPermissionMode === 'yolo'}
-            onClick={onToggleYolo}
-            title="YOLO 模式：更少确认、直达结果"
+            data-testid="chat-top-bar-editor-toggle"
+            onClick={() => {
+              if (onActivateCodeTab) {
+                onActivateCodeTab();
+                return;
+              }
+              onToggleEditorMode();
+            }}
+            title={
+              editorMode && editorPaneTab === 'code'
+                ? '关闭代码编辑器'
+                : editorMode
+                  ? '切换到代码编辑器'
+                  : '打开代码编辑器'
+            }
+            className={`icon-btn${editorMode && (editorPaneTab === undefined || editorPaneTab === 'code') ? ' active' : ''}`}
             style={{
-              height: 26,
-              padding: '0 7px',
-              borderRadius: 5,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               border: 'none',
-              background:
-                resolvedPermissionMode === 'yolo'
-                  ? 'color-mix(in srgb, var(--warning) 22%, var(--bg-overlay))'
-                  : 'transparent',
-              color: resolvedPermissionMode === 'yolo' ? 'var(--warning)' : 'var(--fg-muted)',
-              boxShadow:
-                resolvedPermissionMode === 'yolo'
-                  ? 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, var(--border-default))'
-                  : 'none',
-              fontSize: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-              flexShrink: 0,
-              letterSpacing: '0.04em',
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
-              gap: 3,
+              justifyContent: 'center',
             }}
           >
-            <YoloBoltGlyph />
-            YOLO
+            <svg
+              aria-hidden="true"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
           </button>
-        ) : resolvedPermissionMode === 'yolo' ? (
-          <ReadonlyYoloChip />
-        ) : resolvedPermissionMode === 'auto-edit' ? (
-          <ReadonlyAutoEditChip />
-        ) : null}
-        <button
-          type="button"
-          onClick={() => {
-            if (onActivateCodeTab) {
-              onActivateCodeTab();
-              return;
-            }
-            onToggleEditorMode();
-          }}
-          title={
-            editorMode && editorPaneTab === 'code'
-              ? '关闭代码编辑器'
-              : editorMode
-                ? '切换到代码编辑器'
-                : '打开代码编辑器'
-          }
-          className={`icon-btn${editorMode && (editorPaneTab === undefined || editorPaneTab === 'code') ? ' active' : ''}`}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="16 18 22 12 16 6" />
-            <polyline points="8 6 2 12 8 18" />
-          </svg>
-        </button>
+        )}
         {onOpenBrowser && (
           <button
             type="button"
+            data-testid="chat-top-bar-browser-toggle"
             onClick={() => {
               if (onActivateBrowserTab) {
                 onActivateBrowserTab();
@@ -761,6 +676,7 @@ export function ChatTopBar({
         {onToggleEditorFullScreen && (
           <button
             type="button"
+            data-testid="chat-top-bar-fullscreen-toggle"
             onClick={onToggleEditorFullScreen}
             aria-pressed={editorFullScreen}
             title={

@@ -714,9 +714,11 @@
 
 .composer-permission-menu__item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--spacing-2);
   width: 100%;
+  /* 紧凑行不因文案长短抖动：未选中档只渲染一行标签，高度由 min-height 兜底。 */
+  min-height: var(--spacing-8);
   padding: var(--spacing-2);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -732,15 +734,35 @@
     color 120ms ease;
 }
 
-.composer-permission-menu__item:hover,
-.composer-permission-menu__item[data-active='true'] {
+/* 选中档带说明行：图标回到首行基线，与两行文案的标签行对齐。
+   选中态只以「柔和底色 + 右侧对勾」表达，不再叠 1px 描边：
+   此处把描边颜色收敛为透明——基类的 1px 透明边框继续占位，选中行与相邻行的
+   内边距 / 高度完全一致，视觉上则是纯底色行，不会与外层浮层边框叠成双重边框。 */
+.composer-permission-menu__item[aria-checked='true'] {
+  align-items: flex-start;
+  background: var(--accent-subtle);
+  border-color: transparent;
+  color: var(--fg-strong);
+}
+
+/* 免审批档选中时沿用琥珀底色，与行内琥珀文字 / 图标保持同一警示语义。 */
+.composer-permission-menu__item[data-tone='warning'][aria-checked='true'] {
+  background: var(--warning-muted);
+}
+
+/* 未选中行的 hover / 键盘激活态：底色 + 描边提示当前焦点；
+   选中行排除在外——选中行只用对勾识别，任何状态下都不再出现内边框。 */
+.composer-permission-menu__item:not([aria-checked='true']):hover,
+.composer-permission-menu__item:not([aria-checked='true'])[data-active='true'] {
   background: var(--accent-subtle);
   border-color: var(--accent-border);
   color: var(--fg-strong);
 }
 
-.composer-permission-menu__item[data-tone='warning']:hover,
-.composer-permission-menu__item[data-tone='warning'][data-active='true'] {
+.composer-permission-menu__item[data-tone='warning']:not([aria-checked='true']):hover,
+.composer-permission-menu__item[data-tone='warning']:not(
+    [aria-checked='true']
+  )[data-active='true'] {
   background: var(--warning-muted);
   border-color: var(--warning-border);
 }
@@ -762,6 +784,37 @@
   gap: var(--spacing-1);
   min-width: 0;
   flex: 1;
+}
+
+/* 选中档的标签行：标签靠左、对勾靠右，说明行在其下方独占整行宽度。 */
+.composer-permission-menu__item-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+}
+
+.composer-permission-menu__item-label-row .composer-permission-menu__item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选中档右侧对勾：与档位图标共用描边风格，固定宽度不参与压缩。 */
+.composer-permission-menu__item-check {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* 免审批档的对勾跟随琥珀语义色，与同行文字 / 图标一致。 */
+.composer-permission-menu__item[data-tone='warning'] .composer-permission-menu__item-check {
+  color: var(--warning);
 }
 
 .composer-permission-menu__item-label {
@@ -857,11 +910,15 @@
 @media (max-width: 520px) {
   .composer-permission-trigger {
     max-width: 132px;
+    /* 工具条被极窄布局压缩时允许收敛到「图标 + 省略号标签」，而不是把内容顶出视口。 */
+    flex-shrink: 1;
+    min-width: var(--spacing-8);
     padding: 0 var(--spacing-1);
   }
 
   .composer-permission-trigger__label {
     max-width: 72px;
+    min-width: 0;
   }
 }
 
