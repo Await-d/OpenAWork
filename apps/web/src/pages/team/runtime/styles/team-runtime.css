@@ -18,7 +18,9 @@
 @import './team-runtime-fusion.css';
 @import './team-runtime-flow-animations.css';
 @import './team-runtime-conversation-tabs.css';
+@import './team-runtime-layer-viz.css';
 @import './team-runtime-classic-compact.css';
+@import './team-workbench-controls.css';
 
 /* ───── 页面壳层：背景、面板和移动抽屉 ───── */
 .team-v2-root {
@@ -561,13 +563,19 @@
   background: color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base));
 }
 .team-v2-control--transparent {
+  border-color: transparent;
   background: transparent;
 }
 .team-v2-control--accent-soft {
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-overlay));
 }
 .team-v2-control--tab-active {
   background: color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base));
+}
+.team-v2-control--warning-soft {
+  border: 1px solid color-mix(in srgb, var(--warning) 42%, transparent);
+  background: color-mix(in srgb, var(--warning) 8%, var(--bg-overlay));
 }
 .team-v2-control:hover:not(:disabled),
 .team-v2-control[role='button']:hover,
@@ -578,12 +586,18 @@
 .team-v2-control--accent-soft:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-overlay));
 }
+.team-v2-control--warning-soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-overlay));
+}
 .team-v2-control:active:not(:disabled),
 .team-v2-control[role='button']:active,
 .team-v2-root button:not(.team-v2-control):active:not(:disabled),
 .team-v2-root [role='button']:not(.team-v2-control):active {
   transform: scale(0.97);
   background: color-mix(in srgb, var(--bg-hover) 82%, var(--bg-overlay));
+}
+.team-v2-control--warning-soft:active:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 22%, var(--bg-overlay));
 }
 .team-v2-control:focus-visible,
 .team-v2-control[role='button']:focus-visible,

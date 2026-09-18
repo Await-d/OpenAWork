@@ -160,30 +160,10 @@ const dotBase: CSSProperties = {
   flexShrink: 0,
 };
 
-const filterRow: CSSProperties = {
-  display: 'flex',
-  gap: 0,
-  padding: 0,
-  flexShrink: 0,
-  borderBottom: '1px solid var(--border-default)',
-  background: 'var(--bg-base)',
-};
-
-const filterChip = (isActive: boolean): CSSProperties => ({
-  minHeight: 22,
-  padding: '0 8px',
-  borderRadius: 0,
-  borderTop: 'none',
-  borderBottom: 'none',
-  borderLeft: 'none',
-  borderRight: '1px solid var(--border-default)',
-  background: isActive ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-base))' : 'transparent',
-  color: isActive ? 'var(--fg-strong, var(--fg-default))' : 'var(--fg-muted)',
-  fontSize: 10.5,
-  fontWeight: 650,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-});
+/**
+ * 明细头的消息类型过滤：L3 内容筛选行（`.team-wb-filter-row` + `.team-wb-filter-chip`），
+ * 无边框轻量胶囊 + 横向滚动兜底；视觉态集中在 team-workbench-controls.css。
+ */
 
 const messageList: CSSProperties = {
   display: 'flex',
@@ -377,15 +357,15 @@ export function TeamTodoDetailStream({
         <div style={{ ...emptyState, padding: '16px 0' }}>请选择一个任务查看详情</div>
       )}
 
-      {/* message filter row */}
+      {/* message filter row（L3 轻量胶囊筛选行） */}
       {onMsgFilterChange && (
-        <div style={filterRow} role="group" aria-label="消息类型过滤">
+        <div className="team-wb-filter-row" role="group" aria-label="消息类型过滤">
           {MSG_FILTER_OPTIONS.map((opt) => (
             <button
               key={opt.key}
               type="button"
               aria-pressed={effectiveFilter === opt.key}
-              style={filterChip(effectiveFilter === opt.key)}
+              className="team-wb-filter-chip"
               onClick={() => onMsgFilterChange(opt.key)}
             >
               {opt.label}

@@ -1,0 +1,331 @@
+/**
+ * team-workbench-controls · classic Team 右侧工作台「切换 / 筛选」控件族
+ *
+ * 设计目标（主次分层）：把原先等权重平铺的五条方角工具栏，重排为三层视觉语言，
+ * 让「导航」与「过滤」一眼可分——
+ *
+ *   L1 导航 —— `.team-wb-nav` / `.team-wb-nav-tab`
+ *       下划线式主 tab（任务 / 概览 / 度量 / 治理），12px 加粗、34px 高、
+ *       选中 accent 下划线；计数 badge 改圆角 pill。
+ *   L2 过滤 —— `.team-wb-filter-zone`（层级 / 角色）
+ *       独立浅色区块（微提亮背景 + 上下边界），与导航靠「区块感」分离；
+ *       层 chips 为带层色标识的实心胶囊，角色 chips 为轻量胶囊（同行带标签）。
+ *   L3 内容 —— `.team-wb-filter-row`（任务筛选 / 消息过滤）
+ *       列头轻量筛选行：无边框小胶囊，选中 accent 浅底，贴各自的列。
+ *
+ * 作用域：仅 classic 工作台（TeamLayerTodoWorkbench 只在 classic 挂载，
+ * 这里再以 `[data-workbench-layout='classic']` 前缀双保险，不影响 fusion）。
+ *
+ * 颜色 / 边框 / 交互态集中在本文件；组件内只保留布局类内联样式
+ * （按钮一旦写内联 background，hover / active / focus-visible 会被压掉）。
+ */
+
+/* ─────────── L1 · 主导航 tab ─────────── */
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-base);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro, 100ms) var(--ease-micro, ease),
+    background var(--dur-micro, 100ms) var(--ease-micro, ease),
+    box-shadow var(--dur-micro, 100ms) var(--ease-micro, ease);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-nav-tab:hover {
+  color: var(--fg-default);
+  background: color-mix(in srgb, var(--bg-hover) 40%, transparent);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-nav-tab[aria-selected='true'] {
+  color: var(--fg-strong);
+  font-weight: 750;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-nav-tab[aria-selected='true']:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-nav-badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-nav-badge[data-tone='warning'] {
+  background: var(--warning);
+  color: var(--fg-on-contrast);
+}
+
+/* ─────────── L2 · 过滤区（层级 / 角色） ─────────── */
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 9px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-default);
+  /* 略暗于内容区（--bg-raised），与导航条一起构成「控制带」，和内容区分开 */
+  background: color-mix(in srgb, var(--bg-overlay) 30%, var(--bg-base));
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 14px;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--fg-subtle);
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* 紧跟「层级」标签成句（层级 · 共N层 · 运行n · 失败n），不做两端对齐的工具栏感 */
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-stat-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 4px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-roles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* ─────────── 胶囊 chips（层级 / 角色 / 内容筛选共用） ─────────── */
+
+/* 横向滚动容器：层级导轨、角色行共用 */
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-chip-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 层 chips：带层色标识的实心胶囊，选中态取层色 */
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-overlay) 65%, transparent);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro, 100ms) var(--ease-micro, ease),
+    background var(--dur-micro, 100ms) var(--ease-micro, ease),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, ease);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-layer-chip:hover {
+  border-color: var(--border-emphasis);
+  background: color-mix(in srgb, var(--bg-hover) 60%, var(--bg-overlay));
+  color: var(--fg-default);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-layer-chip[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--team-layer-color, var(--accent)) 45%, transparent);
+  background: color-mix(in srgb, var(--team-layer-color, var(--accent)) 16%, var(--bg-overlay));
+  color: var(--fg-strong);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-layer-chip[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--team-layer-color, var(--accent)) 22%, var(--bg-overlay));
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-layer-chip-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-layer-chip-state {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-layer-rail-empty {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  padding: 4px 0;
+}
+
+/* 轻量 chips：角色行 + 内容筛选行共用（无边框，选中 accent 浅底） */
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 22px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro, 100ms) var(--ease-micro, ease),
+    background var(--dur-micro, 100ms) var(--ease-micro, ease);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-filter-chip:hover {
+  background: color-mix(in srgb, var(--bg-hover) 55%, transparent);
+  color: var(--fg-default);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-filter-chip[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+.team-v2-root[data-workbench-layout='classic']
+  .team-layer-todo-workbench
+  .team-wb-filter-chip[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--accent) 19%, transparent);
+}
+
+/* ─────────── L3 · 列头内容筛选行（任务筛选 / 消息过滤） ─────────── */
+
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ─────────── 相邻 tab 面板（概览 / 度量 / 治理）在窄栏中的紧凑化 ───────────
+ *
+ * 这三个 tab 复用中间区的面板组件（TabContainer / TeamMetricsWorkbenchHeader），
+ * 组件内尺寸已参数化为「带默认值的 CSS 变量」；这里仅在 classic 工作台作用域内
+ * 覆盖变量：把面板自带头部从「页面级大标题」降级为紧凑说明行（不再与应用级
+ * 导航打架），并收紧密度。中间区沿用默认值，完全不受影响。
+ */
+.team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench {
+  /* TabContainer：概览 / 治理 等 leaf 面板的通用容器（取值与 Fusion 侧面板约定一致） */
+  --team-tab-container-padding: var(--spacing-3) var(--spacing-3) var(--spacing-4);
+  --team-tab-container-gap: var(--spacing-3);
+  --team-tab-container-header-gap: var(--spacing-2);
+  --team-tab-container-header-padding-bottom: var(--spacing-2);
+  --team-tab-container-title-size: 13px;
+  --team-tab-container-subtitle-size: 11px;
+  --team-tab-container-subtitle-line-height: 1.45;
+
+  /* 度量面板头部（TeamMetricsWorkbenchHeader） */
+  --team-metrics-head-gap: var(--spacing-2);
+  --team-metrics-head-padding: var(--spacing-2) var(--spacing-3);
+  --team-metrics-hero-gap: var(--spacing-2);
+  --team-metrics-icon-size: 30px;
+  --team-metrics-eyebrow-size: 9.5px;
+  --team-metrics-title-size: 13px;
+  --team-metrics-desc-size: 10.5px;
+  /* 窄栏里这段 30+ 字的说明会撑 3 行，隐藏后头部只留「眉题 + 标题 + 指标 + 信号」 */
+  --team-metrics-desc-display: none;
+  /* 6 张指标卡固定 3×2，窄栏与宽栏都保持整齐网格 */
+  --team-metrics-summary-columns: repeat(3, minmax(0, 1fr));
+  --team-metrics-summary-gap: var(--spacing-2);
+  --team-metrics-card-padding: var(--spacing-1) var(--spacing-2);
+  --team-metrics-card-label-size: 9.5px;
+  --team-metrics-card-value-size: 15px;
+}

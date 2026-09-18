@@ -18,10 +18,15 @@ export interface TeamMetricsWorkbenchHeaderProps {
   readonly sharedSnapshot: boolean;
 }
 
+/**
+ * 尺寸全部走带默认值的 CSS 变量：中间区保持原尺寸；
+ * classic 右侧工作台（窄栏）在 team-workbench-controls.css 里覆盖变量做紧凑化，
+ * 无需给组件加 variant 或 !important。
+ */
 const HEADER_STYLE: CSSProperties = {
   display: 'grid',
-  gap: 12,
-  padding: '10px 12px',
+  gap: 'var(--team-metrics-head-gap, 12px)',
+  padding: 'var(--team-metrics-head-padding, 10px 12px)',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 34%, transparent)',
   background:
     'linear-gradient(180deg, color-mix(in oklch, var(--bg-overlay) 92%, var(--aux) 5%), var(--bg-base))',
@@ -30,13 +35,13 @@ const HEADER_STYLE: CSSProperties = {
 const HERO_ROW_STYLE: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-  gap: 12,
+  gap: 'var(--team-metrics-hero-gap, 12px)',
   alignItems: 'start',
 };
 
 const ICON_FRAME_STYLE: CSSProperties = {
-  width: 36,
-  height: 36,
+  width: 'var(--team-metrics-icon-size, 36px)',
+  height: 'var(--team-metrics-icon-size, 36px)',
   borderRadius: 10,
   display: 'grid',
   placeItems: 'center',
@@ -46,7 +51,7 @@ const ICON_FRAME_STYLE: CSSProperties = {
 };
 
 const EYEBROW_STYLE: CSSProperties = {
-  fontSize: 10,
+  fontSize: 'var(--team-metrics-eyebrow-size, 10px)',
   fontWeight: 800,
   color: 'var(--fg-muted)',
   letterSpacing: '0.08em',
@@ -54,7 +59,7 @@ const EYEBROW_STYLE: CSSProperties = {
 };
 
 const TITLE_STYLE: CSSProperties = {
-  fontSize: 16,
+  fontSize: 'var(--team-metrics-title-size, 16px)',
   fontWeight: 800,
   color: 'var(--fg-strong)',
   lineHeight: 1.25,
@@ -62,38 +67,41 @@ const TITLE_STYLE: CSSProperties = {
 };
 
 const DESCRIPTION_STYLE: CSSProperties = {
-  fontSize: 11.5,
+  fontSize: 'var(--team-metrics-desc-size, 11.5px)',
   lineHeight: 1.55,
   color: 'var(--fg-muted)',
   wordBreak: 'keep-all',
   textWrap: 'pretty',
+  /* 窄栏（classic 工作台）下可整体隐藏这段营销式说明，省出垂直空间 */
+  display: 'var(--team-metrics-desc-display, block)',
 };
 
 const SUMMARY_GRID_STYLE: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))',
-  gap: 8,
+  /* 整个列模板走变量：窄栏（classic 工作台）可切成固定 3 列，避免 auto-fit 出现 5+1 参差 */
+  gridTemplateColumns: 'var(--team-metrics-summary-columns, repeat(auto-fit, minmax(116px, 1fr)))',
+  gap: 'var(--team-metrics-summary-gap, 8px)',
 };
 
 const SUMMARY_CARD_STYLE: CSSProperties = {
   display: 'grid',
   gap: 3,
   minWidth: 0,
-  padding: '9px 10px',
+  padding: 'var(--team-metrics-card-padding, 9px 10px)',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 48%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 const SUMMARY_LABEL_STYLE: CSSProperties = {
-  fontSize: 10,
+  fontSize: 'var(--team-metrics-card-label-size, 10px)',
   fontWeight: 700,
   color: 'var(--fg-muted)',
   whiteSpace: 'nowrap',
 };
 
 const SUMMARY_VALUE_STYLE: CSSProperties = {
-  fontSize: 18,
+  fontSize: 'var(--team-metrics-card-value-size, 18px)',
   fontWeight: 800,
   lineHeight: 1.05,
   fontVariantNumeric: 'tabular-nums',

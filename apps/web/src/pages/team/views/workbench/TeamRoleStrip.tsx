@@ -1,10 +1,10 @@
 /**
- * TeamRoleStrip · 角色 chip 条
+ * TeamRoleStrip · 角色筛选 chips 行
  *
- * 含「全部」chip + 各 role chip，展示 run/fail/idle 状态。
+ * 主次分层中的 L2 次级筛选：轻量胶囊（无边框 / 透明底），选中态 accent 浅底 +
+ * accent 文字；视觉态由 `team-workbench-controls.css` 的 `.team-wb-filter-chip`
+ * 提供，组件只保留结构与状态点。
  */
-
-import type { CSSProperties } from 'react';
 
 export interface TeamRoleStripRole {
   readonly id: string;
@@ -19,38 +19,6 @@ export interface TeamRoleStripProps {
   readonly onSelect: (roleId: 'all' | string) => void;
 }
 
-const stripStyle: CSSProperties = {
-  display: 'flex',
-  gap: 0,
-  flexWrap: 'nowrap',
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  padding: 0,
-  scrollbarWidth: 'thin',
-  scrollbarColor: 'var(--scrollbar-thumb) transparent',
-};
-
-function chipStyle(isActive: boolean, tone: string): CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    minHeight: 26,
-    padding: '0 9px',
-    borderRadius: 0,
-    borderTop: 'none',
-    borderBottom: 'none',
-    borderLeft: 'none',
-    borderRight: '1px solid var(--border-default)',
-    background: isActive ? `color-mix(in srgb, ${tone} 12%, var(--bg-base))` : 'var(--bg-base)',
-    color: isActive ? tone : 'var(--fg-muted)',
-    fontSize: 10.5,
-    fontWeight: 650,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  };
-}
-
 function stateDotColor(state: string): string {
   switch (state) {
     case 'run':
@@ -62,20 +30,18 @@ function stateDotColor(state: string): string {
   }
 }
 
-const dotStyle: CSSProperties = {
-  width: 5,
-  height: 5,
-  borderRadius: '50%',
-  flexShrink: 0,
-};
+function roleStateTone(role: TeamRoleStripRole): string {
+  if (role.color) return role.color;
+  return stateDotColor(role.state);
+}
 
 export function TeamRoleStrip({ roles, activeRoleId, onSelect }: TeamRoleStripProps) {
   return (
-    <div role="group" aria-label="角色筛选" style={stripStyle}>
+    <div role="group" aria-label="角色筛选" className="team-wb-chip-scroll">
       <button
         type="button"
         aria-pressed={activeRoleId === 'all'}
-        style={chipStyle(activeRoleId === 'all', 'var(--accent)')}
+        className="team-wb-filter-chip"
         onClick={() => onSelect('all')}
       >
         全部
@@ -83,18 +49,18 @@ export function TeamRoleStrip({ roles, activeRoleId, onSelect }: TeamRoleStripPr
 
       {roles.map((role) => {
         const isActive = activeRoleId === role.id;
-        const tone = roleStateTone(role);
 
         return (
           <button
             key={role.id}
             type="button"
             aria-pressed={isActive}
-            style={chipStyle(isActive, tone)}
+            className="team-wb-filter-chip"
             onClick={() => onSelect(role.id)}
           >
             <span
-              style={{ ...dotStyle, background: stateDotColor(role.state) }}
+              className="team-wb-chip-dot"
+              style={{ background: roleStateTone(role) }}
               aria-hidden="true"
             />
             <span>{role.name}</span>
@@ -103,16 +69,4 @@ export function TeamRoleStrip({ roles, activeRoleId, onSelect }: TeamRoleStripPr
       })}
     </div>
   );
-}
-
-function roleStateTone(role: TeamRoleStripRole): string {
-  if (role.color) return role.color;
-  switch (role.state) {
-    case 'run':
-      return 'var(--success)';
-    case 'fail':
-      return 'var(--error, var(--warning))';
-    default:
-      return 'var(--fg-muted)';
-  }
 }

@@ -109,30 +109,10 @@ const panelStyle: CSSProperties = {
   height: '100%',
 };
 
-const toolbarStyle: CSSProperties = {
-  display: 'flex',
-  gap: 0,
-  padding: 0,
-  flexShrink: 0,
-  borderBottom: '1px solid var(--border-default)',
-  background: 'var(--bg-base)',
-};
-
-const filterChipStyle = (isActive: boolean): CSSProperties => ({
-  minHeight: 24,
-  padding: '0 9px',
-  borderRadius: 0,
-  borderTop: 'none',
-  borderBottom: 'none',
-  borderLeft: 'none',
-  borderRight: '1px solid var(--border-default)',
-  background: isActive ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-base))' : 'transparent',
-  color: isActive ? 'var(--fg-strong, var(--fg-default))' : 'var(--fg-muted)',
-  fontSize: 10.5,
-  fontWeight: 650,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-});
+/**
+ * 列表头的任务筛选：L3 内容筛选行（`.team-wb-filter-row` + `.team-wb-filter-chip`），
+ * 无边框轻量胶囊 + 横向滚动兜底；视觉态集中在 team-workbench-controls.css。
+ */
 
 const listStyle: CSSProperties = {
   display: 'flex',
@@ -160,13 +140,39 @@ const itemStyle = (isActive: boolean): CSSProperties => ({
   cursor: 'pointer',
 });
 
+/**
+ * meta 行：状态点 + 任务 key + 优先级 + 耗时。
+ * 左右分栏后列表列变窄（约 216px），标题从此行移出独占一行，
+ * 避免窄列下 title / priority / time 互相挤压换行。
+ */
 const itemHeaderStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
   fontSize: 12,
   lineHeight: 1.4,
+  minWidth: 0,
 };
+
+const itemTitleStyle = (isActive: boolean): CSSProperties => ({
+  fontSize: 12,
+  lineHeight: 1.4,
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontWeight: isActive ? 600 : 400,
+  color: 'var(--fg-default)',
+});
+
+const priorityBadgeStyle = (priority: string): CSSProperties => ({
+  fontSize: 10,
+  padding: '0 4px',
+  borderRadius: 4,
+  border: `1px solid ${priorityColor(priority)}`,
+  color: priorityColor(priority),
+  flexShrink: 0,
+});
 
 const statusDot: CSSProperties = {
   width: 5,
@@ -219,14 +225,14 @@ export function TeamTodoListPanel({
 
   return (
     <section style={panelStyle} aria-label="任务列表">
-      {/* filter chips */}
-      <div style={toolbarStyle} role="group" aria-label="任务筛选">
+      {/* filter chips（L3 轻量胶囊筛选行） */}
+      <div className="team-wb-filter-row" role="group" aria-label="任务筛选">
         {FILTER_OPTIONS.map((opt) => (
           <button
             key={opt.key}
             type="button"
             aria-pressed={filter === opt.key}
-            style={filterChipStyle(filter === opt.key)}
+            className="team-wb-filter-chip"
             onClick={() => onFilterChange(opt.key)}
           >
             {opt.label}
@@ -257,26 +263,16 @@ export function TeamTodoListPanel({
                     aria-label={statusLabel(todo.status)}
                   />
                   <span style={monospace}>{todo.key}</span>
-                  <span style={{ fontWeight: isActive ? 600 : 400, color: 'var(--fg-default)' }}>
-                    {todo.title}
-                  </span>
 
                   {todo.priority ? (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        padding: '0 4px',
-                        borderRadius: 4,
-                        border: `1px solid ${priorityColor(todo.priority)}`,
-                        color: priorityColor(todo.priority),
-                        flexShrink: 0,
-                      }}
-                    >
-                      {todo.priority}
-                    </span>
+                    <span style={priorityBadgeStyle(todo.priority)}>{todo.priority}</span>
                   ) : null}
 
                   {todo.time ? <span style={timeStyle}>{todo.time}</span> : null}
+                </div>
+
+                <div style={itemTitleStyle(isActive)} title={todo.title}>
+                  {todo.title}
                 </div>
 
                 {todo.sub ? (

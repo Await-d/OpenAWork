@@ -1,9 +1,9 @@
 /**
  * TeamLayerTodoWorkbench · 经典 Team 对话右侧工作台壳组件
  *
- * Props 驱动的纯 UI 组件：
+ * Props 驱动的纯 UI 组件（classic-only：仅由 ClassicTeamLayerTodoSidePanel 挂载）：
  *   - 顶 tab：任务(count) / 概览 / 度量 / 治理(count)
- *   - tasks tab：layer 概要 + LayerRail + RoleStrip + 上下分栏(todo list ~30% / detail ~70%)
+ *   - tasks tab：layer 概要 + LayerRail + RoleStrip + 左右分栏(todo 列表在左 / 选中明细在右)
  *   - 其它 tab：渲染对应 slot，无 slot 时展示「内容接入中」
  */
 
@@ -95,49 +95,6 @@ const shellStyle: CSSProperties = {
   color: 'var(--fg-default)',
 };
 
-const tabBarStyle: CSSProperties = {
-  display: 'flex',
-  gap: 0,
-  alignItems: 'stretch',
-  minHeight: 28,
-  borderBottom: '1px solid var(--border-default)',
-  flexShrink: 0,
-  padding: 0,
-  background: 'var(--bg-base)',
-};
-
-function tabBtnStyle(isActive: boolean): CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 5,
-    minHeight: 30,
-    padding: '0 12px',
-    border: 'none',
-    background: isActive ? 'var(--bg-raised)' : 'transparent',
-    // 无描边：选中态用底部 accent 线 + 提亮背景表达。
-    boxShadow: isActive
-      ? 'inset 0 -2px 0 color-mix(in srgb, var(--accent) 70%, transparent)'
-      : 'none',
-    color: isActive ? 'var(--fg-strong, var(--fg-default))' : 'var(--fg-muted)',
-    fontSize: 11.5,
-    fontWeight: isActive ? 750 : 650,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  };
-}
-
-const badgeStyle = (tone: string): CSSProperties => ({
-  fontSize: 10,
-  padding: '0 5px',
-  borderRadius: 0,
-  background: tone === 'var(--fg-subtle)' ? 'var(--bg-elevated)' : tone,
-  color: tone === 'var(--fg-subtle)' ? 'var(--fg-muted)' : '#fff',
-  fontWeight: 700,
-  lineHeight: '14px',
-  fontVariantNumeric: 'tabular-nums',
-});
-
 const bodyStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
@@ -146,62 +103,39 @@ const bodyStyle: CSSProperties = {
   flexDirection: 'column',
 };
 
-const railRowStyle: CSSProperties = {
-  padding: '0',
-  borderBottom: '1px solid var(--border-default)',
-  flexShrink: 0,
-};
-
-const roleRowStyle: CSSProperties = {
-  padding: '0',
-  borderBottom: '1px solid var(--border-default)',
-  flexShrink: 0,
-};
+/**
+ * 过滤区行内标签（层级 / 角色）与内容筛选行的视觉态全部下沉到
+ * `team-workbench-controls.css`（classic 作用域），组件只保留布局。
+ */
 
 const splitStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   display: 'grid',
-  gridTemplateRows: 'minmax(108px, 0.30fr) minmax(0, 1.70fr)',
+  // 左右分栏：todo 列表在左、选中明细在右，一屏同时可见列表与详情；
+  // 左列带最小宽度（窄面板下不再被明细挤压），右列自适应吃掉剩余宽度。
+  gridTemplateColumns: 'minmax(216px, 0.32fr) minmax(0, 1fr)',
   gap: 0,
   overflow: 'hidden',
 };
 
-const upperPane: CSSProperties = {
+const listColumnStyle: CSSProperties = {
+  minWidth: 0,
   minHeight: 0,
   overflow: 'hidden',
   padding: 0,
-  borderBottom: '1px solid var(--border-default)',
+  borderRight: '1px solid var(--border-default)',
   display: 'flex',
   flexDirection: 'column',
 };
 
-const lowerPane: CSSProperties = {
+const detailColumnStyle: CSSProperties = {
+  minWidth: 0,
   minHeight: 0,
   overflow: 'hidden',
   padding: 0,
   display: 'flex',
   flexDirection: 'column',
-};
-
-const summaryLine: CSSProperties = {
-  fontSize: 10.5,
-  color: 'var(--fg-faint, var(--fg-subtle))',
-  padding: '4px 10px',
-  flexShrink: 0,
-  display: 'flex',
-  gap: 10,
-  alignItems: 'center',
-  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 70%, transparent)',
-  background: 'var(--bg-base)',
-};
-
-const dotSmall: CSSProperties = {
-  display: 'inline-block',
-  width: 5,
-  height: 5,
-  borderRadius: '50%',
-  verticalAlign: 'middle',
 };
 
 const emptySlot: CSSProperties = {
@@ -215,29 +149,40 @@ const emptySlot: CSSProperties = {
 
 /* ─── helpers ─── */
 
-function layerSummary(layers: readonly TeamLayerRailLayer[]): ReactNode {
+/**
+ * 层级统计（过滤区标题行右侧）：共 N 层 · 运行 n · 失败 n。
+ * 原先独立占一条横条，现降级为过滤区头部的弱信息，与「层级」标签同行。
+ */
+function layerStatsNode(layers: readonly TeamLayerRailLayer[]): ReactNode {
   const running = layers.filter((l) => l.state === 'running').length;
   const failed = layers.filter((l) => l.state === 'failed').length;
-  const total = layers.length;
 
   return (
-    <span style={summaryLine} aria-label="层概要">
+    <>
       <span>
-        共 <strong>{total}</strong> 层
+        共 <strong>{layers.length}</strong> 层
       </span>
-      {running > 0 && (
+      {running > 0 ? (
         <span>
-          <span style={{ ...dotSmall, background: 'var(--success)' }} aria-hidden="true" /> 运行{' '}
-          {running}
+          <span
+            className="team-wb-stat-dot"
+            style={{ background: 'var(--success)' }}
+            aria-hidden="true"
+          />
+          运行 {running}
         </span>
-      )}
-      {failed > 0 && (
+      ) : null}
+      {failed > 0 ? (
         <span>
-          <span style={{ ...dotSmall, background: 'var(--warning)' }} aria-hidden="true" /> 失败{' '}
-          {failed}
+          <span
+            className="team-wb-stat-dot"
+            style={{ background: 'var(--warning)' }}
+            aria-hidden="true"
+          />
+          失败 {failed}
         </span>
-      )}
-    </span>
+      ) : null}
+    </>
   );
 }
 
@@ -309,19 +254,18 @@ export function TeamLayerTodoWorkbench({
       role="region"
       aria-label="工作台"
     >
-      {/* ── tab bar ── */}
+      {/* ── tab bar（L1 主导航：下划线 tab，样式见 team-workbench-controls.css）── */}
       <div
         ref={tabBarRef}
+        className="team-wb-nav"
         role="tablist"
         aria-label="工作台选项卡"
-        style={tabBarStyle}
         onKeyDown={handleTabKeyDown}
       >
         {TAB_DEFS.map((def) => {
           const isActive = tab === def.key;
           const count = def.countKey != null ? counts?.[def.countKey] : undefined;
           const failCount = def.failKey != null ? counts?.[def.failKey] : undefined;
-          const tone = failCount && failCount > 0 ? 'var(--warning)' : 'var(--fg-subtle)';
 
           return (
             <button
@@ -333,11 +277,18 @@ export function TeamLayerTodoWorkbench({
               aria-controls={`workbench-panel-${def.key}`}
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
-              style={tabBtnStyle(isActive)}
+              className="team-wb-nav-tab"
               onClick={() => onTabChange(def.key)}
             >
               {def.label}
-              {count != null && count > 0 && <span style={badgeStyle(tone)}>{count}</span>}
+              {count != null && count > 0 && (
+                <span
+                  className="team-wb-nav-badge"
+                  data-tone={failCount && failCount > 0 ? 'warning' : undefined}
+                >
+                  {count}
+                </span>
+              )}
             </button>
           );
         })}
@@ -352,26 +303,28 @@ export function TeamLayerTodoWorkbench({
             aria-labelledby="workbench-tab-tasks"
             style={{ ...bodyStyle, overflow: 'hidden' }}
           >
-            {/* layer summary */}
-            <div style={railRowStyle}>{layerSummary(layers)}</div>
-
-            {/* layer rail */}
-            <div style={railRowStyle}>
+            {/* L2 过滤区：层级 / 角色（与主 tab 导航分层的独立区块） */}
+            <div className="team-wb-filter-zone">
+              <div className="team-wb-filter-head">
+                <span className="team-wb-filter-label">层级</span>
+                <span className="team-wb-filter-stats" aria-label="层概要">
+                  {layerStatsNode(layers)}
+                </span>
+              </div>
               <TeamLayerRail
                 layers={layers}
                 activeLayerId={activeLayerId}
                 onSelect={onSelectLayer}
               />
+              <div className="team-wb-filter-roles">
+                <span className="team-wb-filter-label">角色</span>
+                <TeamRoleStrip roles={roles} activeRoleId={activeRoleId} onSelect={onSelectRole} />
+              </div>
             </div>
 
-            {/* role strip */}
-            <div style={roleRowStyle}>
-              <TeamRoleStrip roles={roles} activeRoleId={activeRoleId} onSelect={onSelectRole} />
-            </div>
-
-            {/* split: todo list / detail */}
-            <div style={splitStyle}>
-              <div style={upperPane}>
+            {/* split: 左列 todo 列表 / 右列选中明细（左右并排，一屏同见） */}
+            <div style={splitStyle} data-team-workbench-split="list-detail">
+              <div style={listColumnStyle}>
                 <TeamTodoListPanel
                   todos={todos}
                   activeTodoId={activeTodoId}
@@ -380,7 +333,7 @@ export function TeamLayerTodoWorkbench({
                   onSelectTodo={onSelectTodo}
                 />
               </div>
-              <div style={lowerPane}>
+              <div style={detailColumnStyle}>
                 <TeamTodoDetailStream
                   todo={resolvedDetailTodo}
                   messages={detailMessages}

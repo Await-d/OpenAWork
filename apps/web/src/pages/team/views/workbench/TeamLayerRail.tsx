@@ -1,7 +1,12 @@
 /**
- * TeamLayerRail · 横向可滚动「层」按钮轨
+ * TeamLayerRail · 层级导轨（胶囊 chips 行）
  *
- * 展示团队各 layer 的状态，active 高亮，live 小点，failed 用 warning/error 色。
+ * 主次分层中的 L2 主筛选：每层一枚胶囊，层色通过 `--team-layer-color`
+ * 变量交给 `team-workbench-controls.css` 的 `.team-wb-layer-chip` 计算
+ * 选中态背景 / 描边；组件只负责结构与实时 / 状态点。
+ *
+ * 层色不再直接写成按钮的内联 background —— 内联背景会压掉 CSS 的
+ * hover / active / focus-visible 态，按钮会退化成「点了没反馈」的静态色块。
  */
 
 import type { CSSProperties } from 'react';
@@ -22,46 +27,7 @@ export interface TeamLayerRailProps {
   readonly onSelect: (layerId: string) => void;
 }
 
-const railStyle: CSSProperties = {
-  display: 'flex',
-  gap: 0,
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  padding: 0,
-  scrollbarWidth: 'thin',
-  scrollbarColor: 'var(--scrollbar-thumb) transparent',
-};
-
-function layerButtonStyle(isActive: boolean, layerColor: string): CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 5,
-    flexShrink: 0,
-    minHeight: 28,
-    padding: '0 10px',
-    borderRadius: 0,
-    borderTop: 'none',
-    borderBottom: 'none',
-    borderLeft: 'none',
-    borderRight: '1px solid var(--border-default)',
-    background: isActive
-      ? `color-mix(in srgb, ${layerColor} 12%, var(--bg-base))`
-      : 'var(--bg-base)',
-    color: isActive ? layerColor : 'var(--fg-muted)',
-    fontSize: 11,
-    fontWeight: 650,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  };
-}
-
-const dotBase: CSSProperties = {
-  width: 6,
-  height: 6,
-  borderRadius: '50%',
-  flexShrink: 0,
-};
+type LayerChipStyle = CSSProperties & Record<'--team-layer-color', string>;
 
 function stateColor(state: string): string {
   switch (state) {
@@ -79,61 +45,55 @@ function stateColor(state: string): string {
 export function TeamLayerRail({ layers, activeLayerId, onSelect }: TeamLayerRailProps) {
   if (layers.length === 0) {
     return (
-      <div
-        style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '4px 0' }}
-        aria-label="暂无层数据"
-      >
+      <div className="team-wb-layer-rail-empty" aria-label="暂无层数据">
         暂无层数据
       </div>
     );
   }
 
   return (
-    <nav aria-label="层列表" style={railStyle}>
+    <nav aria-label="层列表" className="team-wb-chip-scroll">
       {layers.map((layer) => {
         const isActive = layer.id === activeLayerId;
-        const borderColor =
-          layer.state === 'failed' ? 'var(--warning)' : layerColor(layer.color, isActive);
+        const chipStyle: LayerChipStyle = {
+          '--team-layer-color': layer.color || 'var(--accent)',
+        };
 
         return (
           <button
             key={layer.id}
             type="button"
             aria-pressed={isActive}
-            style={{
-              ...layerButtonStyle(isActive, borderColor),
-              borderRightColor: borderColor,
-              color: isActive ? borderColor : 'var(--fg-muted)',
-            }}
+            className="team-wb-layer-chip"
+            style={chipStyle}
             onClick={() => onSelect(layer.id)}
           >
             {/* live 点 */}
-            {layer.live && (
-              <span style={{ ...dotBase, background: 'var(--success)' }} aria-label="实时连接" />
-            )}
-
-            {/* 状态点 */}
-            {!layer.live && layer.state !== 'idle' && (
+            {layer.live ? (
               <span
-                style={{ ...dotBase, background: stateColor(layer.state) }}
+                className="team-wb-chip-dot"
+                style={{ background: 'var(--success)' }}
+                aria-label="实时连接"
+              />
+            ) : layer.state !== 'idle' ? (
+              /* 状态点 */
+              <span
+                className="team-wb-chip-dot"
+                style={{ background: stateColor(layer.state) }}
                 aria-label={layer.stateLabel ?? layer.state}
               />
-            )}
+            ) : null}
 
-            {layer.code ? <span style={{ opacity: 0.65 }}>{layer.code}</span> : null}
+            {layer.code ? <span className="team-wb-layer-chip-code">{layer.code}</span> : null}
 
             <span>{layer.name}</span>
 
             {layer.stateLabel && layer.state !== 'idle' && layer.state !== 'running' ? (
-              <span style={{ fontSize: 10, opacity: 0.7 }}>{layer.stateLabel}</span>
+              <span className="team-wb-layer-chip-state">{layer.stateLabel}</span>
             ) : null}
           </button>
         );
       })}
     </nav>
   );
-}
-
-function layerColor(color: string, isActive: boolean): string {
-  return color || (isActive ? 'var(--accent)' : 'var(--border-default)');
 }
