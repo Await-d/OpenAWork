@@ -24,6 +24,7 @@ import { createSessionsClient } from '@openAwork/web-client';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
 import { filterTranscriptMessages } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
+import { applyRollbackReceipt } from '../../../stores/team/rollback-tombstones.js';
 import type { HistoryEditPrompt, RetryPrompt } from './use-chat-message-actions.js';
 
 export interface UseChatRetryAndEditOptions {
@@ -108,10 +109,21 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
   const truncateSessionMessagesInPlace = useCallback(
     async (sessionId: string, messageId: string, messageText?: string): Promise<Message[]> => {
       if (!token) return [];
-      return createSessionsClient(gatewayUrl).truncateMessages(token, sessionId, messageId, {
-        inclusive: true,
-        ...(messageText !== undefined ? { messageText } : {}),
-      });
+      const { messages, rollback } = await createSessionsClient(gatewayUrl).truncateMessages(
+        token,
+        sessionId,
+        messageId,
+        {
+          inclusive: true,
+          ...(messageText !== undefined ? { messageText } : {}),
+        },
+      );
+      // ChatPage 也可能承载 team 会话：回执是作废窗口的载体，登记后晚到的
+      // team 事件才会在读取期被过滤（多端幂等失效）。
+      if (rollback) {
+        applyRollbackReceipt(rollback);
+      }
+      return messages;
     },
     [gatewayUrl, token],
   );
@@ -131,11 +143,21 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
   const handleRetryInCurrentSession = useCallback(async () => {
     if (!retryPrompt) return;
     if (!currentSessionId || !token) return;
-    const remainingMessages = await truncateSessionMessagesInPlace(
-      currentSessionId,
-      retryPrompt.sourceMessageId,
-      retryPrompt.text,
-    );
+    let remainingMessages: Message[];
+    try {
+      remainingMessages = await truncateSessionMessagesInPlace(
+        currentSessionId,
+        retryPrompt.sourceMessageId,
+        retryPrompt.text,
+      );
+    } catch (err) {
+      // 网关在截断失败时会中止（消息未删成功却继续重发会造成回合不一致）。
+      // 调用方以 void 调用本函数，这里必须兜住 rejection 并给出可见错误。
+      const message = err instanceof Error ? err.message : '截断失败';
+      console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
+      setStreamError(`回退失败，已取消重发：${message}`);
+      return;
+    }
     const normalizedRemainingMessages = filterTranscriptMessages(
       normalizeChatMessages(remainingMessages),
     );
@@ -171,11 +193,19 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
     async (text: string, sourceMessageId: string, editedInputParts?: InputImageContent[]) => {
       if (!currentSessionId || !token) return;
       const sourceMessage = messages.find((message) => message.id === sourceMessageId);
-      const remainingMessages = await truncateSessionMessagesInPlace(
-        currentSessionId,
-        sourceMessageId,
-        sourceMessage?.content,
-      );
+      let remainingMessages: Message[];
+      try {
+        remainingMessages = await truncateSessionMessagesInPlace(
+          currentSessionId,
+          sourceMessageId,
+          sourceMessage?.content,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '截断失败';
+        console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
+        setStreamError(`回退失败，已取消重发：${message}`);
+        return;
+      }
       const normalizedRemainingMessages = filterTranscriptMessages(
         normalizeChatMessages(remainingMessages),
       );
