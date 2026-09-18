@@ -48,6 +48,20 @@ chat-page/conversation/
     └── retry-mode-dialog.tsx
 ```
 
+## 长内容折叠与虚拟列表不变量
+
+- **折叠策略（`components/chat/markdown/fold-policy.ts`）**：`FoldDisabledContext` 为真时，
+  围栏块（`CodeBlock` >100 行 → 60vh、`MarkdownPreviewCodeBlock` >15 行/400 字 → 300px）不折叠。
+  两处 provider：① `StreamingMarkdownContent` 包住整棵流式树（含 stable blocks）—— 流式期间钳高会让
+  滚动容器停止增长、自动贴底失效且把刚流出的尾部裁掉；② `CollapsibleAssistantContent` 在 `isLatest`
+  时提供 —— 避免"刚读完内容就收起 + 视口上跳"。历史回复的整条折叠（`FOLD_CHAR_THRESHOLD`）行为不变；
+  `data-collapsed` / `data-testid` 语义不得改。
+- **虚拟列表高度（`components/chat/message/chat-message-group-list.tsx` 的 `resolveGroupHeight`）**：
+  该组有已挂载、被 ResizeObserver 观测的节点时，即使签名变化也**沿用上次实测高度**——屏幕内的组永远有
+  DOM，RO 会在真实尺寸变化时纠正；此时退回封顶估算会让后续所有组整体上移并与长消息重叠、`minHeight`
+  同时低估。离屏（无节点）的组仍走签名门禁（其实测值可能已过期）。失效逻辑只在内容**收缩**或状态迁移时
+  丢弃实测值；估算封顶是给离屏组兜底的，不要为了"流式很长"就把门禁整体去掉。
+
 ## 依赖约束（关键）
 
 - ❌ **禁止** import `pages/team/**`（team 是平级产品，不互引）

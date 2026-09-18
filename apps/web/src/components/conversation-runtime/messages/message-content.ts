@@ -155,7 +155,9 @@ export function extractToolResults(rawContent: unknown[]): Array<{
   });
 }
 
-export function extractModifiedFilesSummary(rawContent: unknown[]): ModifiedFilesSummaryContent | null {
+export function extractModifiedFilesSummary(
+  rawContent: unknown[],
+): ModifiedFilesSummaryContent | null {
   for (const item of rawContent) {
     const summary = parseModifiedFilesSummaryContent(item);
     if (summary) {
@@ -165,7 +167,9 @@ export function extractModifiedFilesSummary(rawContent: unknown[]): ModifiedFile
   return null;
 }
 
-export function parseModifiedFilesSummaryContent(value: unknown): ModifiedFilesSummaryContent | null {
+export function parseModifiedFilesSummaryContent(
+  value: unknown,
+): ModifiedFilesSummaryContent | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
@@ -193,7 +197,9 @@ export function parseModifiedFilesSummaryContent(value: unknown): ModifiedFilesS
   };
 }
 
-export function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnotation | undefined {
+export function parseToolCallObservability(
+  value: unknown,
+): ToolCallObservabilityAnnotation | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }

@@ -1,5 +1,5 @@
-import type { AssistantTraceToolCall, Message } from '@openAwork/shared';
-import type { ChatMessage } from './message-model.js';
+import type { AssistantTracePayload, AssistantTraceToolCall, Message } from '@openAwork/shared';
+import type { ChatMessage, ChatMessagePart, ChatToolPart } from './message-model.js';
 import {
   getComparableCreatedAt,
   joinReasoningBlocks,
@@ -376,9 +376,26 @@ function preferLocalTerminalStatus(
 }
 
 /**
- * When the previous message and snapshot share the same ID and are both non-streaming,
- * prefer the previous message's local annotations (tool call states, pending permissions)
- * but adopt the snapshot's text if it is strictly longer (more complete).
+ * When the previous message and snapshot share the same ID, prefer the previous
+ * message's local annotations (tool call states, pending permissions) but adopt
+ * the snapshot's text if it is strictly longer (more complete).
+ *
+ * A parts-less side only offers a flattened `text` plus a `toolCalls` list — it
+ * cannot say where tools / reasoning split the text. So whenever a message
+ * carries `parts`, those parts are the single source of ordering: the more
+ * complete text is written back into them and `content` is derived from the
+ * result. The branches are:
+ *
+ * 1. previous has parts → keep its part order, absorb the snapshot text into the
+ *    matching text part, then derive `content` from the merged parts.
+ * 2. only the snapshot has parts → adopt the snapshot's part order and carry the
+ *    previous side's local tool annotations (pending permission /
+ *    resumedAfterApproval / non-running status) back onto the matching tools.
+ * 3. neither side has parts → `content` is the only representation, so the
+ *    flattened trace merge below is safe.
+ *
+ * Every returned message with parts therefore has a `content` that is exactly
+ * the serialization of those parts — no consumer can observe a different order.
  */
 function mergePreferringCompleteContent(previous: ChatMessage, snapshot: ChatMessage): ChatMessage {
   if (previous.role !== 'assistant') return previous;
@@ -394,20 +411,42 @@ function mergePreferringCompleteContent(previous: ChatMessage, snapshot: ChatMes
   const snapReasoningLen = joinReasoningBlocks(snapTrace.reasoningBlocks).length;
   if (snapText.length <= prevText.length && snapReasoningLen <= prevReasoningLen) return previous;
 
-  // Merge: use snapshot's text but preserve previous's local tool call annotations.
-  const mergedToolCalls: AssistantTraceToolCall[] = snapTrace.toolCalls.map((snapTC) => {
-    const prevTC = prevTrace.toolCalls.find((tc) => tc.toolCallId === snapTC.toolCallId);
-    if (!prevTC) return snapTC;
+  const modifiedFilesSummary = snapTrace.modifiedFilesSummary ?? previous.modifiedFilesSummary;
+  const hasPreviousTraceParts = previous.parts?.some((part) => part.type !== 'event') ?? false;
+  const hasSnapshotTraceParts = snapshot.parts?.some((part) => part.type !== 'event') ?? false;
 
+  if (hasPreviousTraceParts && previous.parts) {
+    const mergedParts = adoptSnapshotTextIntoParts(
+      previous.parts,
+      previous.id,
+      prevTrace.text,
+      snapTrace.text,
+    );
     return {
-      ...snapTC,
-      ...(prevTC.pendingPermissionRequestId
-        ? { pendingPermissionRequestId: prevTC.pendingPermissionRequestId }
-        : {}),
-      ...(prevTC.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-      status: prevTC.status !== 'running' ? prevTC.status : snapTC.status,
-    } satisfies AssistantTraceToolCall;
-  });
+      ...previous,
+      parts: mergedParts,
+      content: contentFromParts(mergedParts, modifiedFilesSummary),
+      modifiedFilesSummary,
+      ...preferLocalTerminalStatus(previous, snapshot),
+    };
+  }
+
+  if (hasSnapshotTraceParts && snapshot.parts) {
+    const mergedParts = preserveLocalToolAnnotations(snapshot.parts, prevTrace);
+    return {
+      ...previous,
+      parts: mergedParts,
+      content: contentFromParts(mergedParts, modifiedFilesSummary),
+      modifiedFilesSummary,
+      ...preferLocalTerminalStatus(previous, snapshot),
+    };
+  }
+
+  // Neither side has parts: keep the legacy flattened-trace merge. There is no
+  // parts array to disagree with, so rebuilding `content` here is safe.
+  const mergedToolCalls: AssistantTraceToolCall[] = snapTrace.toolCalls.map((snapshotCall) =>
+    mergeToolCallMetadata(snapshotCall, findToolCallById(prevTrace, snapshotCall.toolCallId)),
+  );
 
   return {
     ...previous,
@@ -423,8 +462,109 @@ function mergePreferringCompleteContent(previous: ChatMessage, snapshot: ChatMes
         ? { modifiedFilesSummary: snapTrace.modifiedFilesSummary }
         : {}),
     }),
-    modifiedFilesSummary: snapTrace.modifiedFilesSummary ?? previous.modifiedFilesSummary,
+    modifiedFilesSummary,
     ...preferLocalTerminalStatus(previous, snapshot),
   };
 }
 
+/**
+ * 把快照更完整的扁平文本写回 parts，同时不改变任何 part 的相对位置。
+ *
+ * 只有当快照文本是 parts 扁平文本的前缀扩展、或 parts 只有一个 text part 时
+ * 才能安全映射；多个 text part 且文本发生重排时无法在不臆造分段位置的前提下
+ * 写回，此时保留原 parts 并让 content 从 parts 派生，宁可少吸收快照文本，也
+ * 不让两种表示出现不同顺序。
+ */
+function adoptSnapshotTextIntoParts(
+  parts: ChatMessagePart[],
+  messageId: string,
+  previousText: string,
+  snapshotText: string,
+): ChatMessagePart[] {
+  if (snapshotText === previousText) return parts;
+
+  const textIndexes: number[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index]?.type === 'text') textIndexes.push(index);
+  }
+
+  if (snapshotText.startsWith(previousText)) {
+    const suffix = snapshotText.slice(previousText.length);
+    if (suffix.length === 0) return parts;
+    const lastTextIndex = textIndexes[textIndexes.length - 1];
+    if (lastTextIndex === undefined) {
+      return [...parts, { id: `${messageId}:text`, type: 'text', text: snapshotText }];
+    }
+    return parts.map((part, index) =>
+      index === lastTextIndex && part.type === 'text'
+        ? { ...part, text: part.text + suffix }
+        : part,
+    );
+  }
+
+  if (textIndexes.length === 1) {
+    const onlyTextIndex = textIndexes[0]!;
+    return parts.map((part, index) =>
+      index === onlyTextIndex && part.type === 'text' ? { ...part, text: snapshotText } : part,
+    );
+  }
+
+  return parts;
+}
+
+/**
+ * 以快照 parts 的顺序为基准，把 previous 的本地工具注解搬回对应工具分片：
+ * 待审批 id、审批后恢复标记，以及本地已进入的非 running 终态优先于快照状态。
+ * 其它字段（输出 / 错误 / 工期等）仍以快照为准。
+ */
+function preserveLocalToolAnnotations(
+  parts: ChatMessagePart[],
+  previousTrace: AssistantTracePayload,
+): ChatMessagePart[] {
+  const previousCallsById = new Map<string, AssistantTraceToolCall>();
+  for (const call of previousTrace.toolCalls) {
+    if (call.toolCallId) previousCallsById.set(call.toolCallId, call);
+  }
+  if (previousCallsById.size === 0) return parts;
+
+  return parts.map((part) => {
+    if (part.type !== 'tool') return part;
+    const previousCall = previousCallsById.get(part.toolCallId);
+    if (!previousCall) return part;
+    return {
+      ...part,
+      ...(previousCall.pendingPermissionRequestId
+        ? { pendingPermissionRequestId: previousCall.pendingPermissionRequestId }
+        : {}),
+      ...(previousCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+      ...(previousCall.status && previousCall.status !== 'running'
+        ? { status: previousCall.status }
+        : {}),
+    } satisfies ChatToolPart;
+  });
+}
+
+function mergeToolCallMetadata(
+  snapshotCall: AssistantTraceToolCall,
+  previousCall: AssistantTraceToolCall | undefined,
+): AssistantTraceToolCall {
+  if (!previousCall) return snapshotCall;
+  return {
+    ...snapshotCall,
+    ...(previousCall.pendingPermissionRequestId
+      ? { pendingPermissionRequestId: previousCall.pendingPermissionRequestId }
+      : {}),
+    ...(previousCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+    ...(previousCall.status && previousCall.status !== 'running'
+      ? { status: previousCall.status }
+      : {}),
+  } satisfies AssistantTraceToolCall;
+}
+
+function findToolCallById(
+  trace: AssistantTracePayload,
+  toolCallId: string | undefined,
+): AssistantTraceToolCall | undefined {
+  if (!toolCallId) return undefined;
+  return trace.toolCalls.find((call) => call.toolCallId === toolCallId);
+}

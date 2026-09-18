@@ -127,6 +127,20 @@ export function partsFromOrderedAssistantContent(
         record['input'] && typeof record['input'] === 'object' && !Array.isArray(record['input'])
           ? (record['input'] as Record<string, unknown>)
           : {};
+      if (toolCallId.length > 0) {
+        const existingIndex = toolPartIndexByCallId.get(toolCallId);
+        const existingPart = existingIndex === undefined ? undefined : parts[existingIndex];
+        if (existingPart && existingPart.type === 'tool' && existingIndex !== undefined) {
+          // 该 id 已有占位段（孤儿 tool_result 先到）：就地补齐真实名称与入参，
+          // 保留结果已写入的 output / status，位置仍是结果到达时的 wire 位置。
+          parts[existingIndex] = {
+            ...existingPart,
+            ...(toolName.length > 0 ? { toolName } : {}),
+            input,
+          };
+          continue;
+        }
+      }
       // Tool parts default to `running` so a result that hasn't arrived yet
       // (e.g. a snapshot taken mid-execution) does not look "completed".
       // The tool_result branch below upgrades the status when the matching
@@ -148,10 +162,6 @@ export function partsFromOrderedAssistantContent(
     if (type === 'tool_result') {
       const toolCallId = typeof record['toolCallId'] === 'string' ? record['toolCallId'] : '';
       if (toolCallId.length === 0) continue;
-      const targetIndex = toolPartIndexByCallId.get(toolCallId);
-      if (targetIndex === undefined) continue;
-      const existing = parts[targetIndex];
-      if (!existing || existing.type !== 'tool') continue;
       const isError = record['isError'] === true;
       const pendingPermissionRequestId =
         typeof record['pendingPermissionRequestId'] === 'string'
@@ -172,8 +182,39 @@ export function partsFromOrderedAssistantContent(
       const fileDiffs = Array.isArray(record['fileDiffs'])
         ? record['fileDiffs'].flatMap((entry) => parseFileDiffContent(entry))
         : undefined;
-      parts[targetIndex] = {
-        ...existing,
+      const targetIndex = toolPartIndexByCallId.get(toolCallId);
+      if (targetIndex !== undefined) {
+        const existing = parts[targetIndex];
+        if (existing && existing.type === 'tool') {
+          parts[targetIndex] = {
+            ...existing,
+            output: record['output'],
+            isError: hasPendingPermission ? false : isError,
+            ...(observability ? { observability } : {}),
+            ...(fileDiffs && fileDiffs.length > 0 ? { fileDiffs } : {}),
+            ...(hasPendingPermission && pendingPermissionRequestId
+              ? { pendingPermissionRequestId }
+              : { pendingPermissionRequestId: undefined }),
+            ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+            status: nextStatus,
+          } satisfies ChatToolPart;
+          continue;
+        }
+      }
+      // 孤儿 tool_result：wire 上没有任何前置 tool_call（attach/重连后快照从
+      // 工具中段开始）。不能丢弃，否则该工具输出在刷新后消失；在此按 wire
+      // 位置补一个占位工具段，`toolName` 沿用未知工具名的回退约定，待后续
+      // 同名 tool_call 就地补齐。
+      const orphanToolName =
+        typeof record['toolName'] === 'string' && record['toolName'].length > 0
+          ? record['toolName']
+          : 'tool';
+      parts.push({
+        id: toolCallId,
+        type: 'tool',
+        toolCallId,
+        toolName: orphanToolName,
+        input: {},
         output: record['output'],
         isError: hasPendingPermission ? false : isError,
         ...(observability ? { observability } : {}),
@@ -183,7 +224,8 @@ export function partsFromOrderedAssistantContent(
           : { pendingPermissionRequestId: undefined }),
         ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
         status: nextStatus,
-      } satisfies ChatToolPart;
+      } satisfies ChatToolPart);
+      toolPartIndexByCallId.set(toolCallId, parts.length - 1);
       continue;
     }
   }

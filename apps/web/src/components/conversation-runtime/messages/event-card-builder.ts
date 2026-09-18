@@ -1,9 +1,6 @@
 import type { CommandResultCard, RunEvent } from '@openAwork/shared';
 import type { AssistantEventKind, AssistantEventStatus } from './message-model.js';
-import {
-  createAssistantEventCardContent,
-  createCompactionCardContent,
-} from './card-codec.js';
+import { createAssistantEventCardContent, createCompactionCardContent } from './card-codec.js';
 import type { StatusTone } from './card-codec.js';
 
 export function createCommandCardContent(

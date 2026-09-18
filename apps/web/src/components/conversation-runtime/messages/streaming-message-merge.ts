@@ -112,4 +112,3 @@ export function replaceOrAppendStreamedAssistantMessage(
 
   return deduplicated;
 }
-

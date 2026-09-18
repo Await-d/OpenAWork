@@ -504,4 +504,3 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
 
   return normalizedMessages;
 }
-

@@ -31,6 +31,21 @@ conversation-runtime/
 - ⚠️ **type-only** 例外：可保留对 `pages/dialogue-mode.ts` 的 type 引用（DialogueMode 是普适 string union）
 - ⚠️ **utils 例外**：可引 `utils/pending-permission-state`、`utils/chat-session-defaults` 等纯 utils
 
+## 不变量（改动前必读）
+
+- **滚动恢复只有三条路径**（`scroll/scroll-follow-state.ts` 的 `resolveFollowInterrupted` 是唯一裁决处）：
+  ① 程序化落点落在 latest 边缘内（`scroll-alignment.ts` 的 `resolveAtLatestEdge`）；
+  ② 非程序化位置回到**真正底部**（`distanceToBottom <= CHAT_TRUE_BOTTOM_TOLERANCE_PX`）；
+  ③ **显式向下意图**（`seek-latest`：wheel 向下 / 触控朝新内容 / ArrowDown·PageDown·End·Space）
+  且落在 latest 边缘内 —— 由 `use-scroll-manager.ts` 的 `handleSeekLatest` 处理。
+  向上手势一律走 `leave-latest` 立即挂起。**禁止**引入时间窗口 / 防抖式"忽略若干毫秒内滚动事件"，
+  也**禁止**把宽松的 latest 边缘判定开放给非向下意图：那正是历史回归（一个滚轮刻度被静默撤销）的来源。
+- **`tool_result` 先到时必须就地占位**：live（`stream/streaming-segments.ts`
+  `applyToolResultToStreamingSegment`）与持久化（`messages/trace-codec.ts`
+  `partsFromOrderedAssistantContent`）两条路径必须**同序**；匹配不到 `tool_call` 时在**到达位置**
+  插入占位 tool 段（`toolName` 回退字面量 `'tool'`，后续同 `toolCallId` 的 `tool_call_delta`
+  原地补齐 name/input），**不得**推到数组末尾，也不得静默丢弃。
+
 ## 演进规则
 
 - 协议变更（消息 shape / 流式事件 / 滚动行为等）需要：

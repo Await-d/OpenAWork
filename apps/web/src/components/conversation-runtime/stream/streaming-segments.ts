@@ -181,11 +181,17 @@ export function upsertStreamingToolSegment(
   if (matchIndex >= 0) {
     const existing = next[matchIndex];
     if (existing && existing.type === 'tool') {
+      // 占位段可能因先到的 tool_result 已进入终态；后续 tool_call_delta
+      // 只携带 'running'，不得把它降级回运行中，否则先到结果的 status
+      // 会被覆盖。
+      const existingIsTerminal = existing.status !== undefined && existing.status !== 'running';
+      const nextStatus =
+        toolCall.status === 'running' && existingIsTerminal ? existing.status : toolCall.status;
       next[matchIndex] = {
         ...existing,
         toolName: toolCall.toolName || existing.toolName,
         input: toolCall.input,
-        ...(toolCall.status ? { status: toolCall.status } : {}),
+        ...(nextStatus ? { status: nextStatus } : {}),
         ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
         ...(toolCall.isError !== undefined ? { isError: toolCall.isError } : {}),
         ...(toolCall.kind ? { kind: toolCall.kind } : {}),
@@ -216,10 +222,14 @@ export function upsertStreamingToolSegment(
 }
 
 /**
- * Update an existing tool segment with a tool_result payload. No-op if the
- * matching segment does not exist (which can happen for tool_results that
- * arrive before any tool_call_delta in attach scenarios — those are handled
- * by `upsertStreamingToolSegment` later).
+ * Update an existing tool segment with a tool_result payload.
+ *
+ * 当同一 `toolCallId` 尚无对应工具段时（attach / 断线重连时 `tool_result`
+ * 先于 `tool_call_delta` 到达），在 segments 末尾插入一个占位工具段：此刻的
+ * 末尾正是该结果在 wire 上的到达位置，因此不会再像旧实现那样把工具卡片推迟
+ * 到后面由 upsert 追加——那会把它插到更晚到达的文本 / 推理之后。占位段的
+ * `toolName` 沿用本仓库对未知工具名的回退约定 `'tool'`，真实名称会在匹配的
+ * `tool_call_delta` 到达时由 `upsertStreamingToolSegment` 原地补齐。
  */
 export function applyToolResultToStreamingSegment(
   segments: ChatMessagePart[],
@@ -236,7 +246,23 @@ export function applyToolResultToStreamingSegment(
   const matchIndex = next.findIndex(
     (segment) => segment.type === 'tool' && segment.toolCallId === toolResult.toolCallId,
   );
-  if (matchIndex < 0) return segments;
+  if (matchIndex < 0) {
+    next.push({
+      id: toolResult.toolCallId,
+      type: 'tool',
+      toolCallId: toolResult.toolCallId,
+      toolName: 'tool',
+      input: {},
+      ...(toolResult.output !== undefined ? { output: toolResult.output } : {}),
+      ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
+      ...(toolResult.status ? { status: toolResult.status } : {}),
+      ...(toolResult.pendingPermissionRequestId !== undefined
+        ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
+        : {}),
+      ...(toolResult.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+    });
+    return next;
+  }
   const existing = next[matchIndex];
   if (existing && existing.type === 'tool') {
     next[matchIndex] = {
