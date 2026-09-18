@@ -94,6 +94,10 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
     params: ({ sessionId, userId }) => [sessionId, userId],
   },
   {
+    sql: 'DELETE FROM session_file_review_decisions WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
     sql: 'DELETE FROM permission_decision_logs WHERE session_id = ?',
     params: ({ sessionId }) => [sessionId],
   },
@@ -146,6 +150,48 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
   {
     sql: 'DELETE FROM task_parent_auto_resume_contexts WHERE parent_session_id = ? AND user_id = ?',
     params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  // ── Team / handoff 归属行：此前完全缺失，异常路径下会残留悬挂指针。
+  //    语义与建表 FK 对齐：CASCADE → DELETE，SET NULL → UPDATE ... SET NULL。──
+  {
+    sql: 'DELETE FROM handoff_records WHERE from_session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'UPDATE handoff_records SET to_session_id = NULL WHERE to_session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM team_role_session_instances WHERE root_session_id = ? OR session_id = ?',
+    params: ({ sessionId }) => [sessionId, sessionId],
+  },
+  {
+    sql: 'DELETE FROM team_role_session_instances WHERE parent_session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM session_inbound_messages WHERE to_session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM team_usage_records WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM team_tool_call_records WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM team_converge_results WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'UPDATE team_messages SET session_id = NULL WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'UPDATE team_audit_logs SET session_id = NULL WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
   },
   {
     sql: 'DELETE FROM sessions WHERE id = ? AND user_id = ?',
