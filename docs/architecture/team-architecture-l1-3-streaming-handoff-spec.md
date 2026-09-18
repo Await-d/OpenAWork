@@ -915,7 +915,7 @@ T+10s  Watcher 检测到 handoff completed → 触发后续 d 层 handoff
 
 - spec/plan/tasks 等 markdown：**保留**（用户可参考）
 - e/f/g 已写入的代码 patch：**不自动回滚**（需用户手动 git revert）
-- audit log：cancelled handoff 不删除
+- audit log：cancelled handoff 不删除（**例外**：回合回退会按回合删除审计行，见 `adr-turn-rollback-hard-delete.md`）
 
 ### 3.2 pause 级联流程
 

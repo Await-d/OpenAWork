@@ -1291,7 +1291,7 @@ ALTER TABLE handoff_records ADD COLUMN cancel_reason TEXT;
 
 - **保留**：spec/plan/tasks 等 markdown 仍留在 artifact 系统中（用户可参考）
 - **不回滚**：e/f/g 已写入的代码 patch 不自动回滚（需要用户手动 git revert）
-- **审计可见**：cancelled handoff 不删除，留作 audit log
+- **审计可见**：cancelled handoff 不删除，留作 audit log（**例外**：回合回退会按回合删除审计行，见 `docs/architecture/adr-turn-rollback-hard-delete.md`）
 
 **BackgroundTaskScheduler 接口（v3.4 新增，D40 = D3 拍板落地）**：
 

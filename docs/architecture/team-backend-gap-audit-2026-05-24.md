@@ -289,6 +289,7 @@
 - 加固：给 `logTeamAudit` 增加「每用户保留最近 N 条」的有界裁剪（默认 `DEFAULT_TEAM_AUDIT_MAX_ROWS_PER_USER = 2000`，可经 `OPENAWORK_TEAM_AUDIT_MAX_ROWS_PER_USER` 配置，传非正数关闭，与其它 env 死线开关语义一致）。裁剪用 `id NOT IN (… ORDER BY id DESC LIMIT N)` 按自增主键保留最新 N 条（避免 `created_at` 秒级精度同秒并列的问题）。关键是**摊销执行**：不是每次 INSERT 都 DELETE（否则写放大翻倍），而是按用户累计每 `TEAM_AUDIT_PRUNE_CHECK_INTERVAL = 50` 次插入才触发一次，实际行数最多比上限多出一个检查间隔的过冲。裁剪包在 try/catch 里，失败只 `console.warn`、**绝不影响审计写入本身**。
 - 与 §0.35 的关系：§0.35 收敛的是 latency 违规对审计表的高频**写入**（让去重真正生效）；本项收口的是审计表自身的**总量**上界。二者互补——前者降低写入速率，后者保证即便长期低速写入也不会无界沉淀。
 - 回归证据：新增 `__tests__/team/team-audit-retention.test.ts`（4 用例：超量插入后行数被裁剪到 `上限 + 检查间隔` 以内且远小于插入次数、最新记录仍保留；连续多轮触发稳定收敛；裁剪按 user 隔离不误删其它用户行；上限设 0 时关闭裁剪、行数随插入线性增长）。`team-runtime-routes`（20 用例，含 §0.35 的审计断言）与 `team-events-bus`（6 用例）回归通过；网关 `typecheck` 与改动文件（impl + test）ESLint 干净。
+- 例外（2026-09-18）：回合回退会按回合**删除**该回合的 `team_audit_logs` 行（`deleteTeamAuditLogsByClientRequest`），因此本表**不再严格只增**；§0.36 的保留裁剪与该例外并存，且回退自身写入的 `turn_rollback` 审计行以 `client_request_id IS NULL` 保证不被回退命中。详见 `adr-turn-rollback-hard-delete.md`。
 
 ### 0.37 渠道流式部分更新失败回退已完成运行（防 happy-path 误判）（2026-05-30 续）
 
