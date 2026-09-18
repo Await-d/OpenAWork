@@ -372,3 +372,216 @@ export function classifyUpstreamError(error: unknown): UpstreamRetryClassificati
     message: info.message ?? 'Upstream error',
   };
 }
+
+// ─── 面向用户的上游错误说明 ───────────────────────────────────────────────
+
+export interface UpstreamErrorUserDescription {
+  /** 中文说明（现象 / 上游原话 / 建议三段），可直接写入用户可见文本。 */
+  message: string;
+  category: UpstreamRetryClassification['category'];
+  /** `false` 表示配置 / 权限类问题，重试不会恢复——调用方不得再提示「稍后重试」。 */
+  retryable: boolean;
+  status?: number;
+}
+
+const USER_DETAIL_MAX_LENGTH = 300;
+
+/**
+ * 状态码在 `LLM.Error` 上位于 `reason.status` 或 `reason.http.response.status`；
+ * 同时兼容 SDK 常见的扁平形态。
+ */
+function readErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const obj = error as Record<string, unknown>;
+  const reason = asRecord(obj['reason']);
+  const fromReason = reason?.['status'];
+  const fromHttp = asRecord(asRecord(reason?.['http'])?.['response'])?.['status'];
+  const flatHttp = asRecord(asRecord(obj['http'])?.['response'])?.['status'];
+  for (const candidate of [
+    fromReason,
+    fromHttp,
+    flatHttp,
+    obj['statusCode'],
+    obj['status'],
+    obj['httpStatus'],
+  ]) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+/**
+ * 读 `LLM.Error.reason` 上的字符串字段：`_tag`（reason 类型）或 `kind`
+ * （Authentication 的 `invalid` / `insufficient-permissions` / `expired` / `missing`）。
+ */
+function readReasonField(error: unknown, key: string): string | undefined {
+  const value = asRecord(asRecord(error)?.['reason'])?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** `LLM.Error.retryable` 是语义化 getter（403=false / 429=true / 5xx=true），优先于纯文本分类。 */
+function readErrorRetryable(error: unknown): boolean | undefined {
+  const direct = asRecord(error)?.['retryable'];
+  if (typeof direct === 'boolean') return direct;
+  const nested = asRecord(asRecord(error)?.['reason'])?.['retryable'];
+  return typeof nested === 'boolean' ? nested : undefined;
+}
+
+/**
+ * 上游错误 message 形如 `RequestExecutor.execute: Provider request failed with
+ * HTTP 403: <上游 body>`（body 在构造时已脱敏）。剥掉两层包装，只留给用户看的原因。
+ */
+function extractUpstreamDetail(rawMessage: string): string | null {
+  const withoutModulePrefix = rawMessage.replace(/^[A-Za-z_$][\w$]*\.[\w$]+:\s*/, '');
+  if (/^Provider request failed with HTTP \d+$/.test(withoutModulePrefix.trim())) {
+    return null;
+  }
+  const detail = withoutModulePrefix
+    .replace(/^Provider request failed with HTTP \d+:\s*/, '')
+    .trim();
+  if (detail.length === 0) return null;
+  return detail.length > USER_DETAIL_MAX_LENGTH
+    ? `${detail.slice(0, USER_DETAIL_MAX_LENGTH)}…`
+    : detail;
+}
+
+function buildUserDescription(input: {
+  summary: string;
+  action: string;
+  classification: UpstreamRetryClassification;
+  retryable: boolean;
+  status: number | undefined;
+  detail: string | null;
+}): UpstreamErrorUserDescription {
+  const lines = [`**原因**：${input.summary}`];
+  if (input.detail) {
+    lines.push(`**上游返回**：${input.detail}`);
+  }
+  lines.push(`**建议**：${input.action}`);
+  return {
+    message: lines.join('\n'),
+    category: input.classification.category,
+    retryable: input.retryable,
+    ...(input.status !== undefined ? { status: input.status } : {}),
+  };
+}
+
+/**
+ * 把上游错误翻译成「现象 + 上游原话 + 建议」的中文说明，替代调用方各自写死的
+ * 「请稍后重试」——对 401/403 这类配置类错误，后者会让用户反复重试却看不到原因。
+ * 永不抛出。判据优先级：reason tag → HTTP 状态码 → `classifyUpstreamError` 的 category。
+ */
+export function describeUpstreamErrorForUser(error: unknown): UpstreamErrorUserDescription {
+  const classification = classifyUpstreamError(error);
+  const status = readErrorStatus(error);
+  const tag = readReasonField(error, '_tag');
+  const authKind = readReasonField(error, 'kind');
+  const retryable = readErrorRetryable(error) ?? classification.retryable;
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const detail = extractUpstreamDetail(rawMessage);
+  const base = { classification, retryable, status, detail };
+
+  if (classification.category === 'free_usage_exhausted') {
+    return buildUserDescription({
+      ...base,
+      summary: '该平台的免费额度已用尽。',
+      action: '订阅或切换平台后重试（重试当前模型不会恢复）。',
+    });
+  }
+
+  if (classification.category === 'context_overflow') {
+    return buildUserDescription({
+      ...base,
+      summary: '请求上下文超出模型的长度限制。',
+      action: '压缩或清理会话上下文后重试。',
+    });
+  }
+
+  if (tag === 'Authentication' || status === 401 || status === 403) {
+    if (authKind === 'insufficient-permissions' || status === 403) {
+      return buildUserDescription({
+        ...base,
+        summary: '上游拒绝访问该模型（HTTP 403）：账号无权访问，或该模型的节点上游不可用。',
+        action:
+          '请在「设置 → 提供商」核对该平台的账号 / 节点配置，或改用其它可用模型后重试（重试不会恢复）。',
+      });
+    }
+    return buildUserDescription({
+      ...base,
+      summary:
+        status === undefined
+          ? '上游判定凭证无效或未授权。'
+          : `上游判定凭证无效或未授权（HTTP ${status}）。`,
+      action: '请在「设置 → 提供商」重新配置该平台的 API Key（重试不会恢复）。',
+    });
+  }
+
+  if (tag === 'QuotaExceeded' || tag === 'RateLimit' || classification.category === 'rate_limit') {
+    const isQuota = tag === 'QuotaExceeded';
+    return buildUserDescription({
+      ...base,
+      summary: isQuota
+        ? '该模型的额度已用尽。'
+        : `上游限流：请求过于频繁${status !== undefined ? `（HTTP ${status}）` : ''}。`,
+      action: isQuota ? '请更换模型或等待额度重置。' : '稍后重试；持续出现请检查该平台的限流额度。',
+    });
+  }
+
+  if (
+    classification.category === 'overloaded' ||
+    tag === 'ProviderInternal' ||
+    classification.category === 'transient_5xx' ||
+    (status !== undefined && status >= 500)
+  ) {
+    return buildUserDescription({
+      ...base,
+      summary:
+        status !== undefined && status >= 500
+          ? `上游模型服务异常（HTTP ${status}）。`
+          : '上游模型服务当前负载过高。',
+      action: '这属于瞬时故障，稍后重试通常可以恢复。',
+    });
+  }
+
+  if (tag === 'Transport' || classification.category === 'network') {
+    return buildUserDescription({
+      ...base,
+      summary: '与上游的连接失败或超时。',
+      action: '请检查网络与 Base URL 是否可达后重试。',
+    });
+  }
+
+  if (tag === 'NoRoute') {
+    return buildUserDescription({
+      ...base,
+      summary: '没有可用的上游路由。',
+      action: '请检查该平台的 Base URL 与模型名是否正确（重试不会恢复）。',
+    });
+  }
+
+  if (tag === 'InvalidRequest' || tag === 'InvalidProviderOutput') {
+    return buildUserDescription({
+      ...base,
+      summary: status !== undefined ? `上游判定请求非法（HTTP ${status}）。` : '上游判定请求非法。',
+      action: '多为 Base URL 与「上游协议」不匹配，或该平台不支持此模型名，请核对配置。',
+    });
+  }
+
+  if (tag === 'ContentPolicy') {
+    return buildUserDescription({
+      ...base,
+      summary: '请求被上游的内容安全策略拦截。',
+      action: '调整输入内容后重试。',
+    });
+  }
+
+  return buildUserDescription({
+    ...base,
+    summary: status !== undefined ? `上游调用失败（HTTP ${status}）。` : '上游调用失败。',
+    action: retryable ? '稍后重试。' : '请检查该平台的服务商配置或改用其它模型后重试。',
+  });
+}

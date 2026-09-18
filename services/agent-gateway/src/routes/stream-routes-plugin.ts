@@ -15,6 +15,7 @@ import {
   streamRequestSchema,
   createStreamErrorChunk,
 } from './stream.js';
+import { formatStreamRequestIssues } from './stream-request-issues.js';
 import { buildRunEventEnvelope, deriveRunEventBookend } from '../session/run-event-envelope.js';
 import {
   getRunEventRunId,
@@ -417,6 +418,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
                 'INVALID_REQUEST',
                 STREAM_PLUGIN_ERROR_MESSAGES.invalidRequest,
                 requestRunId,
+                undefined,
+                undefined,
+                formatStreamRequestIssues(body.error.issues),
               ),
               issues: body.error.issues,
             });
