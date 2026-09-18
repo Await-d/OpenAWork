@@ -160,7 +160,10 @@ describe('ScreencastConvergence', () => {
 
 describe('readJpegDimensions', () => {
   function buildJpeg(width: number, height: number): string {
-    const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]);
+    const app0 = Buffer.from([
+      0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00,
+      0x01, 0x00, 0x00,
+    ]);
     const sof0 = Buffer.alloc(11);
     sof0[0] = 0xff;
     sof0[1] = 0xc0;
@@ -186,6 +189,8 @@ describe('readJpegDimensions', () => {
   it('非 JPEG 或截断数据返回 null', () => {
     expect(readJpegDimensions('')).toBeNull();
     expect(readJpegDimensions(Buffer.from('not-a-jpeg').toString('base64'))).toBeNull();
-    expect(readJpegDimensions(Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00]).toString('base64'))).toBeNull();
+    expect(
+      readJpegDimensions(Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00]).toString('base64')),
+    ).toBeNull();
   });
 });

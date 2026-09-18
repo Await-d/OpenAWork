@@ -151,9 +151,7 @@ describe('resolveStackFrames', () => {
       contentType: 'text/javascript',
     });
 
-    const resolved = await resolveStackFrames([
-      { url: `${baseUrl}/nomap.js`, line: 0, column: 0 },
-    ]);
+    const resolved = await resolveStackFrames([{ url: `${baseUrl}/nomap.js`, line: 0, column: 0 }]);
 
     const frame = resolved[0];
     expect(frame?.mapped).toBe(false);

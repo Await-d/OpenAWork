@@ -140,7 +140,10 @@ describe('probeLiveBrowserAvailability', () => {
 
   it('stale-managed 不遮蔽可用的系统 Chrome', async () => {
     const probe = await probeLiveBrowserAvailability('chromium', {
-      candidates: [candidate('managed', MANAGED_PATH), candidate('system-chrome', SYSTEM_CHROME_PATH)],
+      candidates: [
+        candidate('managed', MANAGED_PATH),
+        candidate('system-chrome', SYSTEM_CHROME_PATH),
+      ],
       isExecutableUsable: usableOnly([SYSTEM_CHROME_PATH]),
       directoryExists: async (directoryPath) => directoryPath === MANAGED_REVISION_DIR,
     });
@@ -258,31 +261,28 @@ describe('probeLiveBrowserAvailability', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')(
-    '默认磁盘校验要求 posix 可执行位',
-    async () => {
-      const directory = await mkdtemp(join(tmpdir(), 'openawork-probe-'));
-      const scriptPath = join(directory, 'chrome');
-      try {
-        await writeFile(scriptPath, '#!/bin/sh\nexit 0\n');
-        await chmod(scriptPath, 0o644);
-        const notExecutable = await probeLiveBrowserAvailability('chromium', {
-          candidates: onlySystemChrome(scriptPath),
-        });
-        expect(notExecutable.available).toBe(false);
+  it.skipIf(process.platform === 'win32')('默认磁盘校验要求 posix 可执行位', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'openawork-probe-'));
+    const scriptPath = join(directory, 'chrome');
+    try {
+      await writeFile(scriptPath, '#!/bin/sh\nexit 0\n');
+      await chmod(scriptPath, 0o644);
+      const notExecutable = await probeLiveBrowserAvailability('chromium', {
+        candidates: onlySystemChrome(scriptPath),
+      });
+      expect(notExecutable.available).toBe(false);
 
-        resetLiveBrowserAvailabilityCache();
-        await chmod(scriptPath, 0o755);
-        const executable = await probeLiveBrowserAvailability('chromium', {
-          candidates: onlySystemChrome(scriptPath),
-        });
-        expect(executable.available).toBe(true);
-        expect(executable.source).toBe('system-chrome');
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
-    },
-  );
+      resetLiveBrowserAvailabilityCache();
+      await chmod(scriptPath, 0o755);
+      const executable = await probeLiveBrowserAvailability('chromium', {
+        candidates: onlySystemChrome(scriptPath),
+      });
+      expect(executable.available).toBe(true);
+      expect(executable.source).toBe('system-chrome');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('默认候选顺序为 override → managed → 各系统浏览器', () => {
     const candidates = buildDefaultLiveBrowserCandidates({
@@ -695,9 +695,7 @@ describe('resolveSystemBrowserCandidatePaths', () => {
       join(localAppData, 'Microsoft', 'Edge SxS', 'Application', 'msedge.exe'),
     ]);
     expect(resolved.brave).toEqual(
-      roots.map((root) =>
-        join(root, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      ),
+      roots.map((root) => join(root, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe')),
     );
     expect(resolved.vivaldi).toEqual(
       roots.map((root) => join(root, 'Vivaldi', 'Application', 'vivaldi.exe')),

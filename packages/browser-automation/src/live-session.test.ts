@@ -50,10 +50,7 @@ function utf8DataUrl(html: string): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-async function withHtmlServer(
-  html: string,
-  run: (url: string) => Promise<void>,
-): Promise<void> {
+async function withHtmlServer(html: string, run: (url: string) => Promise<void>): Promise<void> {
   const server = createServer((_request, response) => {
     response.setHeader('content-type', 'text/html; charset=utf-8');
     response.end(html);
@@ -99,26 +96,22 @@ function findA11yNode(
 }
 
 describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', () => {
-  it(
-    'start / close 具备幂等性',
-    async () => {
-      const session = new BrowserLiveSession({ engine: 'chromium' });
-      expect(session.isStarted()).toBe(false);
+  it('start / close 具备幂等性', async () => {
+    const session = new BrowserLiveSession({ engine: 'chromium' });
+    expect(session.isStarted()).toBe(false);
 
-      await session.start();
-      expect(session.isStarted()).toBe(true);
-      await expect(session.start()).rejects.toBeInstanceOf(BrowserAutomationError);
+    await session.start();
+    expect(session.isStarted()).toBe(true);
+    await expect(session.start()).rejects.toBeInstanceOf(BrowserAutomationError);
 
-      await session.close();
-      await session.close();
-      expect(session.isStarted()).toBe(false);
+    await session.close();
+    await session.close();
+    expect(session.isStarted()).toBe(false);
 
-      await session.start();
-      expect(session.isStarted()).toBe(true);
-      await session.close();
-    },
-    60_000,
-  );
+    await session.start();
+    expect(session.isStarted()).toBe(true);
+    await session.close();
+  }, 60_000);
 
   describe('已启动会话', () => {
     let session: BrowserLiveSession;
@@ -138,7 +131,9 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
     });
 
     it('goto / reload / currentUrl / currentTitle 可用', async () => {
-      await session.goto(dataUrl('<html><head><title>live-title</title></head><body>ok</body></html>'));
+      await session.goto(
+        dataUrl('<html><head><title>live-title</title></head><body>ok</body></html>'),
+      );
       expect(await session.currentTitle()).toBe('live-title');
       expect((await session.currentUrl()).startsWith('data:text/html')).toBe(true);
       await session.reload();
@@ -150,7 +145,9 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
         session,
         (event) => event.type === 'nav' && event.url.includes('live-nav-probe'),
       );
-      await session.goto(dataUrl('<html><head><title>live-nav-probe</title></head><body>ok</body></html>'));
+      await session.goto(
+        dataUrl('<html><head><title>live-nav-probe</title></head><body>ok</body></html>'),
+      );
 
       const event = await navPromise;
       expect(event.type).toBe('nav');
@@ -165,7 +162,9 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
         session,
         (event) => event.type === 'console' && event.text.includes('live-console-probe'),
       );
-      await session.goto(dataUrl("<html><body><script>console.warn('live-console-probe')</script></body></html>"));
+      await session.goto(
+        dataUrl("<html><body><script>console.warn('live-console-probe')</script></body></html>"),
+      );
 
       const event = await consolePromise;
       expect(event.type).toBe('console');
@@ -175,13 +174,20 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
     }, 30_000);
 
     it('startScreencast 收到帧且 ackScreencastFrame 可解析', async () => {
-      await session.goto(dataUrl('<html><body style="margin:0;background:#0af"><h1>screencast</h1></body></html>'));
+      await session.goto(
+        dataUrl('<html><body style="margin:0;background:#0af"><h1>screencast</h1></body></html>'),
+      );
       const framePromise = waitForEvent(
         session,
         (event) => event.type === 'screencastFrame',
         20_000,
       );
-      await session.startScreencast({ quality: 60, maxWidth: 800, maxHeight: 600, everyNthFrame: 1 });
+      await session.startScreencast({
+        quality: 60,
+        maxWidth: 800,
+        maxHeight: 600,
+        everyNthFrame: 1,
+      });
       await session.dispatchInput({ kind: 'mouse', type: 'mouseMoved', x: 40, y: 40 });
 
       const event = await framePromise;
@@ -367,7 +373,11 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
 
       try {
         await session.startScreencast({ quality: 60 });
-        const first = await waitForEvent(session, (event) => event.type === 'screencastFrame', 20_000);
+        const first = await waitForEvent(
+          session,
+          (event) => event.type === 'screencastFrame',
+          20_000,
+        );
         if (first.type !== 'screencastFrame') throw new Error('unexpected event type');
 
         // 静态页且上一帧已 ack 后 screencast 静默：同尺寸覆写无视觉变化，修复前不会再有新帧。
