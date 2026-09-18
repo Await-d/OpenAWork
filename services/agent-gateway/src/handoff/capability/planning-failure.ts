@@ -6,6 +6,18 @@ export class PlanningFailure extends Error {
   }
 }
 
+/**
+ * 把 `planning-generation-failed: <原因>；需要用户介入` 还原成给用户看的纯原因：剥掉内部
+ * 前缀与固定尾注。直接把内部串贴进对话会让用户看不懂该做什么。
+ */
+export function humanizePlanningFailureReason(reason: string): string {
+  const stripped = reason
+    .replace(/^planning-generation-failed:\s*/, '')
+    .replace(/；?需要用户介入\s*$/, '')
+    .trim();
+  return stripped.length > 0 ? stripped : reason;
+}
+
 export function nextPlanningRound(payload: unknown, retryCount: number): number {
   const values: unknown[] = [retryCount];
   if (typeof payload === 'object' && payload !== null) {

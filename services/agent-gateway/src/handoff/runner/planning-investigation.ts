@@ -9,6 +9,12 @@ const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('finish'), summary: z.string().min(1) }),
 ]);
 
+/**
+ * 容忍的重复动作次数：弱模型在原地打转时先纠正，超过该次数才判定「无进展」。
+ * 一次重复不等于无进展——空项目 / 单文件项目上模型很容易重问同一路径。
+ */
+const REPEATED_ACTION_TOLERANCE = 2;
+
 /** Model-directed investigation with a strict read-only capability boundary. */
 export async function investigatePlanningProject(input: {
   directory: string;
@@ -20,6 +26,7 @@ export async function investigatePlanningProject(input: {
   const root = await realpath(input.directory);
   const observations: string[] = [];
   const visited = new Set<string>();
+  let repeatedActions = 0;
   let successfulReads = 0;
   for (let round = 0; round < 6; round += 1) {
     input.signal.throwIfAborted();
@@ -43,7 +50,16 @@ export async function investigatePlanningProject(input: {
       return `${input.initialContext}\n${observations.join('\n')}\n调查结论：${action.summary}`;
     }
     const key = `${action.action}:${action.path}`;
-    if (visited.has(key)) throw new PlanningFailure(`项目调查无进展：${action.path}`);
+    if (visited.has(key)) {
+      repeatedActions += 1;
+      if (repeatedActions > REPEATED_ACTION_TOLERANCE) {
+        throw new PlanningFailure(`项目调查无进展：${action.path}`);
+      }
+      observations.push(
+        `已忽略重复动作：${action.action} ${action.path} 之前已调查过，请改查其它文件/目录，或直接 finish。`,
+      );
+      continue;
+    }
     visited.add(key);
     try {
       const target = await realpath(resolve(root, action.path));
