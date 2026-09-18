@@ -1,5 +1,4 @@
 import { memo, type CSSProperties } from 'react';
-import { SessionModeBadges } from '../../../components/common/display/SessionModeBadges.js';
 import type { SessionRow } from '../state/session-page-types.js';
 import {
   isNestedInteractiveTarget,
@@ -237,16 +236,6 @@ export const SessionCard = memo(function SessionCard({
                   />
                 ) : null}
                 {statusLabel(s.state_status)}
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  minWidth: 0,
-                  maxWidth: 112,
-                  overflow: 'hidden',
-                }}
-              >
-                <SessionModeBadges compact metadataJson={s.metadata_json} />
               </span>
             </span>
             <span

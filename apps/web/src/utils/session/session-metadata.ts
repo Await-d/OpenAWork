@@ -39,20 +39,47 @@ export function extractParentSessionId(metadataJson?: string): string | null {
   return parseSessionMetadata(metadataJson).parentSessionId ?? null;
 }
 
-export function getSessionModeLabels(metadataJson?: string): string[] {
-  const metadata = parseSessionMetadata(metadataJson);
-  const labels = [DIALOGUE_MODE_LABELS[metadata.dialogueMode]];
+export interface SessionModeLabelOptions {
+  /** 是否包含对话模式标签（澄清(方案) / 编程 / 程序员）。默认包含。 */
+  includeDialogueMode?: boolean;
+  /** 是否包含审批档位标签（YOLO / 编辑自动）。默认包含。 */
+  includePermissionMode?: boolean;
+  /** 是否包含模型名标签。默认包含。 */
+  includeModel?: boolean;
+}
 
-  if (metadata.permissionMode === 'yolo') {
-    labels.push('YOLO');
-  } else if (metadata.permissionMode === 'auto-edit') {
-    labels.push('编辑自动');
+/**
+ * 生成会话标签列表。
+ *
+ * 会话列表等展示场景可关闭 `includeDialogueMode` / `includeModel`，
+ * 仅保留审批档位等运行状态信息。
+ */
+export function getSessionModeLabels(
+  metadataJson?: string,
+  options: SessionModeLabelOptions = {},
+): string[] {
+  const { includeDialogueMode = true, includePermissionMode = true, includeModel = true } = options;
+  const metadata = parseSessionMetadata(metadataJson);
+  const labels: string[] = [];
+
+  if (includeDialogueMode) {
+    labels.push(DIALOGUE_MODE_LABELS[metadata.dialogueMode]);
   }
 
-  // 优先使用保存的 modelLabel，回退到格式化 modelId
-  const modelLabel = metadata.modelLabel || formatModelLabel(metadata.modelId);
-  if (modelLabel) {
-    labels.push(modelLabel);
+  if (includePermissionMode) {
+    if (metadata.permissionMode === 'yolo') {
+      labels.push('YOLO');
+    } else if (metadata.permissionMode === 'auto-edit') {
+      labels.push('编辑自动');
+    }
+  }
+
+  if (includeModel) {
+    // 优先使用保存的 modelLabel，回退到格式化 modelId
+    const modelLabel = metadata.modelLabel || formatModelLabel(metadata.modelId);
+    if (modelLabel) {
+      labels.push(modelLabel);
+    }
   }
 
   return labels;

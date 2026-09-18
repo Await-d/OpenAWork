@@ -1,10 +1,8 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import type { Session } from '../../../hooks/workspace/useSessions.js';
 import {
   extractDialogueMode,
   extractSessionIcon,
-  getSessionModeLabels,
-  hasParentSession,
 } from '../../../utils/session/session-metadata.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
 import {
@@ -72,12 +70,7 @@ export function SessionSidebarSessionRow({
   const isActive = session.id === activeSessionId;
   const isHovered = hoveredSessionId === session.id;
   const isRenaming = renamingSessionId === session.id;
-  const showChildBadge = depth > 0 || hasParentSession(session.metadata_json);
   const deleting = isDeletingSession(session.id);
-  const modeLabels = useMemo(
-    () => getSessionModeLabels(session.metadata_json),
-    [session.metadata_json],
-  );
   const sessionIcon = useMemo(
     () => extractSessionIcon(session.metadata_json),
     [session.metadata_json],
@@ -234,7 +227,8 @@ export function SessionSidebarSessionRow({
     </span>
   );
 
-  const metaNode = (
+  // 会话列表行不展示对话模式 / 模型名 / 审批档位 / 子会话标记，仅在内容搜索命中时提示
+  const metaNode = contentMatched ? (
     <span
       style={{
         flex: 1,
@@ -247,49 +241,9 @@ export function SessionSidebarSessionRow({
         fontSize: 10,
       }}
     >
-      {showChildBadge && (
-        <>
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>子会话</span>
-          {modeLabels.length > 0 && (
-            <span style={{ color: 'var(--fg-muted)', margin: '0 3px' }}>·</span>
-          )}
-        </>
-      )}
-      {modeLabels.map((label, i) => (
-        <React.Fragment key={label}>
-          {i > 0 && <span style={{ color: 'var(--fg-muted)', margin: '0 3px' }}>·</span>}
-          <span
-            style={{
-              fontWeight: 600,
-              flexShrink: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              color:
-                label === '澄清(方案)'
-                  ? 'var(--warning)'
-                  : label === '编程'
-                    ? 'var(--contrast)'
-                    : label === '程序员'
-                      ? 'var(--success)'
-                      : label === 'YOLO'
-                        ? 'var(--accent)'
-                        : 'var(--aux)',
-            }}
-          >
-            {label}
-          </span>
-        </React.Fragment>
-      ))}
-      {contentMatched && (
-        <>
-          {(showChildBadge || modeLabels.length > 0) && (
-            <span style={{ color: 'var(--fg-muted)', margin: '0 3px' }}>·</span>
-          )}
-          <span style={{ color: 'var(--aux)', fontWeight: 600 }}>内容命中</span>
-        </>
-      )}
+      <span style={{ color: 'var(--aux)', fontWeight: 600 }}>内容命中</span>
     </span>
-  );
+  ) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -315,7 +269,6 @@ export function SessionSidebarSessionRow({
         onHoverChange={onHoveredSessionChange}
         onPreload={preloadChatRoute}
         onPointerPositionChange={onPointerPositionChange}
-        depth={depth}
         dataState={session.state_status ?? 'idle'}
         renaming={isRenaming}
         renameValue={renameValue}
@@ -368,10 +321,10 @@ export function SessionSidebarSessionRow({
       {node.children.length > 0 && (
         <div
           style={{
-            marginLeft: `${18 + depth * 12}px`,
+            marginLeft: `${10 + depth * 8}px`,
             // 与父行 / 相邻子行之间留出空隙，让树形层级更清晰
             marginTop: 3,
-            paddingLeft: 8,
+            paddingLeft: 6,
             paddingTop: 2,
             paddingBottom: 2,
             borderLeft: '1px solid var(--border-subtle)',

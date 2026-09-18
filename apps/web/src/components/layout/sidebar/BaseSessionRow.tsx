@@ -11,11 +11,11 @@
  * - transition 使用 cubic-bezier 缓动，手感更有弹性
  *
  * 视觉结构：
- *   ┌─────────────────────────────────────────────┐
- *   │ [icon slot]  title ···················· time │  ← headRow
- *   │ [meta slot / hover actions]                  │  ← metaRow
- *   │ [extra slot]                                 │  ← optional
- *   └─────────────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │ [icon slot]  title ·······  [time ↔ hover 操作]      │  ← headRow（右侧槽位互斥显示）
+ *   │ [meta slot]                                          │  ← metaRow（compact 时嵌在标题正下方）
+ *   │ [extra slot]                                         │  ← optional
+ *   └──────────────────────────────────────────────────────┘
  */
 
 import React, {
@@ -153,8 +153,6 @@ export interface BaseSessionRowProps {
   onPreload?: (sessionId: string) => void;
   /** 指针位置变化（用于恢复 hover） */
   onPointerPositionChange?: (position: { x: number; y: number } | null) => void;
-  /** 行缩进深度 */
-  depth?: number;
   /** 自定义 data 属性 */
   dataState?: string;
   /** aria-label */
@@ -242,7 +240,6 @@ export function BaseSessionRow({
   onHoverChange,
   onPreload,
   onPointerPositionChange,
-  depth = 0,
   dataState,
   ariaLabel,
   renaming = false,
@@ -366,7 +363,6 @@ export function BaseSessionRow({
         gap: tokens.rowGap,
         padding: tokens.rowPadding,
         margin: tokens.rowMargin,
-        paddingLeft: `${parseInt(tokens.rowPadding.split(' ')[1] ?? '10', 10) + depth * 12}px`,
         borderRadius: 10,
         border: '1px solid transparent',
         cursor: 'pointer',
@@ -399,24 +395,6 @@ export function BaseSessionRow({
           minWidth: 0,
         }}
       >
-        {depth > 0 && (
-          <span
-            aria-hidden="true"
-            style={{
-              width: 14,
-              marginRight: 3,
-              flexShrink: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--fg-muted)',
-              fontSize: 10,
-              fontWeight: 700,
-            }}
-          >
-            ↳
-          </span>
-        )}
         {icon}
         <div
           style={{
@@ -468,7 +446,7 @@ export function BaseSessionRow({
             ))
           )}
 
-          {/* compact 模式下 meta 直接嵌入在标题正下方，与标题同 X 对齐；actions 不再覆盖 meta，而是浮到行右下角（日期正下方） */}
+          {/* compact 模式下 meta 直接嵌入在标题正下方，与标题同 X 对齐；hover 操作位于标题行右侧槽位，不会与之重叠 */}
           {hasInlineMetaContent && !renaming && meta && (
             <div
               style={{
@@ -493,45 +471,65 @@ export function BaseSessionRow({
             </div>
           )}
         </div>
-        {/* 时间挂在标题行右侧，与标题第一行对齐（不随 meta 居中） */}
-        {timeLabel && (
-          <span style={{ ...TIME_STYLE, alignSelf: 'flex-start' }} title={timeTitle}>
-            {timeLabel}
-          </span>
+        {/*
+          右侧槽位：时间与 hover 操作共用同一格（grid 叠放），
+          槽位宽度取二者较大值 —— 既不会压住标题，也不会因 hover 导致行内宽度抖动。
+        */}
+        {(timeLabel || (inlineMeta && hasActions)) && (
+          <div
+            style={{
+              flexShrink: 0,
+              alignSelf: 'flex-start',
+              display: 'grid',
+              gridTemplateAreas: '"slot"',
+              justifyItems: 'end',
+              alignItems: 'center',
+              height: 18,
+            }}
+          >
+            {timeLabel && (
+              <span
+                style={{
+                  ...TIME_STYLE,
+                  gridArea: 'slot',
+                  opacity: inlineMeta && showActions ? 0 : 1,
+                  transition: 'opacity 120ms ease-out',
+                }}
+                title={timeTitle}
+              >
+                {timeLabel}
+              </span>
+            )}
+            {inlineMeta && hasActions && (
+              <div
+                className="session-actions"
+                style={{
+                  gridArea: 'slot',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 2,
+                  height: 16,
+                  opacity: showActions ? 1 : 0,
+                  transform: showActions ? 'translateY(0)' : 'translateY(2px)',
+                  transition: 'opacity 120ms ease-out, transform 120ms ease-out',
+                  pointerEvents: showActions ? 'auto' : 'none',
+                  willChange: 'opacity, transform',
+                }}
+              >
+                {actions!.map((action) => (
+                  <SessionActionButton
+                    key={action.key}
+                    action={action}
+                    compact
+                    visible={showActions}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {/* compact 模式下，hover actions 浮到 meta 行右侧（日期下方），不挤占 meta、不遮挡日期 */}
-      {inlineMeta && hasActions && !renaming && (
-        <div
-          className="session-actions"
-          style={{
-            position: 'absolute',
-            right: parseInt(tokens.rowPadding.split(' ')[1] ?? '6', 10),
-            bottom: parseInt(tokens.rowPadding.split(' ')[0] ?? '2', 10),
-            height: 16,
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 2,
-            alignItems: 'center',
-            opacity: showActions ? 1 : 0,
-            transform: showActions ? 'translateY(0)' : 'translateY(2px)',
-            transition: 'opacity 120ms ease-out, transform 120ms ease-out',
-            pointerEvents: showActions ? 'auto' : 'none',
-            willChange: 'opacity, transform',
-            background: active
-              ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
-              : 'var(--bg-overlay)',
-            boxShadow: '-6px 0 8px -4px var(--bg-overlay)',
-            borderRadius: 4,
-            padding: '0 1px',
-          }}
-        >
-          {actions!.map((action) => (
-            <SessionActionButton key={action.key} action={action} compact visible={showActions} />
-          ))}
-        </div>
-      )}
 
       {/* 非 compact 模式时才使用外层 meta 行 */}
       {hasOuterMetaContent && (
