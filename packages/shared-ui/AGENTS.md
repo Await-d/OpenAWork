@@ -27,7 +27,6 @@ src/
 ├── PermissionPrompt.tsx / PermissionConfirmDialog.tsx / PermissionHistory.tsx
 ├── PlanPanel.tsx / PlanHistoryPanel.tsx / RootCausePanel.tsx
 ├── CronManager.tsx / ScheduleManagerUI.tsx
-├── TeamPanel.tsx / TeammateCard.tsx
 ├── UsageDashboard.tsx / BudgetAlert.tsx
 ├── DiagnosticCard.tsx / LogViewer.tsx
 ├── OAuthButton.tsx / QRCodeDisplay.tsx / QRCodeScanner.tsx

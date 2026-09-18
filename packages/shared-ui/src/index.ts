@@ -111,10 +111,6 @@ export type {
 } from './misc/ChannelManager.js';
 export { CronManager } from './misc/CronManager.js';
 export type { CronManagerProps, CronJob, ScheduleKind, CronJobStatus } from './misc/CronManager.js';
-export { TeammateCard } from './team/TeammateCard.js';
-export type { TeammateCardProps, TeamMember, MemberStatus } from './team/TeammateCard.js';
-export { TeamPanel } from './team/TeamPanel.js';
-export type { TeamPanelProps, TeamTask, TaskStatus, TeamMessage } from './team/TeamPanel.js';
 export { ContextPanel } from './misc/ContextPanel.js';
 export type { ContextPanelProps, ContextItem, ContextItemKind } from './misc/ContextPanel.js';
 export { FileTreePanel } from './file/FileTreePanel.js';
