@@ -233,6 +233,8 @@ export interface TeamRuntimeClarificationRecord {
   status: 'answered' | 'dismissed' | 'pending';
   createdAt: number;
   question: string;
+  /** 结构化选项（PM1 grill 下发；旧题可能缺失，缺失时前端回退自由输入）。 */
+  options?: Array<{ label: string; description?: string; recommended?: boolean }>;
 }
 
 export interface TeamRuntimeNotificationRecord {
@@ -519,6 +521,7 @@ export interface TeamRuntimeDiagnostics {
         | 'scheduler.task-resumed'
         | 'session.heartbeat'
         | 'session.inbound.submitted'
+        | 'session.messages.rolled_back'
         | 'session.substate.changed',
         number
       >

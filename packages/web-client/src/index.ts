@@ -189,6 +189,7 @@ export type {
   DeleteSessionErrorData,
   DeleteSessionResult,
   MultiAttachCallbacks,
+  RollbackReceipt,
   Session,
   SessionActiveStream,
   SessionBackupRestorePreviewResult,
@@ -197,6 +198,9 @@ export type {
   SessionFileChangesQueryOptions,
   SessionFileChangesSummary,
   SessionFileDiffEntry,
+  SessionFileReviewDecision,
+  SessionFileReviewInput,
+  SessionFileReviewResult,
   SessionImportInput,
   SessionImportResult,
   SessionMessageRatingRecord,
@@ -231,6 +235,7 @@ export type {
   SessionTask,
   SessionTodo,
   SessionTodoLanes,
+  SessionTruncateMessagesResult,
   SessionTurnDiffFileSummary,
   SessionTurnDiffReadModel,
   SessionsClient,
@@ -281,6 +286,7 @@ export type {
   ListeningPortsClient,
   ListeningPortsSnapshotView,
   ListeningPortSource,
+  ListeningPortTerminalRef,
   ListeningPortView,
 } from './infra/ports.js';
 
@@ -298,6 +304,8 @@ export type {
 
 export { createBrowserLiveClient } from './infra/browser-live.js';
 export type {
+  BrowserInstallState,
+  BrowserInstallStatus,
   BrowserLiveCallbacks,
   BrowserLiveClient,
   BrowserLiveConnection,
@@ -369,6 +377,7 @@ export type {
   ListSessionTerminalsOptions,
   SessionTerminalView,
   SessionTerminalsClient,
+  ShellProfileOption,
 } from './session/session-terminals.js';
 
 export { createTeamRuntimeClient } from './team/team-runtime.js';

@@ -20,9 +20,30 @@ export interface SharedSessionPermissionReplyInput {
   requestId: string;
 }
 
+export type SessionFileReviewDecision = 'accepted' | 'rejected';
+
 export interface SessionFileDiffEntry extends Omit<FileDiffContent, 'before' | 'after'> {
   before?: string;
   after?: string;
+  reviewStatus?: SessionFileReviewDecision;
+  revertRequestId?: string | null;
+}
+
+export interface SessionFileReviewInput {
+  requestId: string;
+  filePath: string;
+  decision: SessionFileReviewDecision;
+  forceConflicts?: boolean;
+}
+
+export interface SessionFileReviewResult {
+  decision: {
+    requestId: string;
+    filePath: string;
+    decision: SessionFileReviewDecision;
+    createdAt: string;
+  };
+  revertClientRequestId: string | null;
 }
 
 export interface SessionSnapshotSummary {
@@ -34,9 +55,11 @@ export interface SessionSnapshotSummary {
 }
 
 export interface SessionFileChangesSummary {
+  acceptedCount?: number;
   latestSnapshotAt?: string;
   latestSnapshotRef?: string;
   latestSnapshotScopeKind?: SessionSnapshotScopeKind;
+  rejectedCount?: number;
   snapshotCount: number;
   sourceKinds: FileChangeSourceKind[];
   totalAdditions: number;
@@ -466,6 +489,40 @@ export interface SessionsListOptions {
   excludeTeam?: boolean;
 }
 
+/**
+ * 回合回退（turn rollback）回执。
+ *
+ * 「回退到消息 M」= 撤销 M（含）之后的一切回合产物。回执是前端「作废窗口」的载体：
+ * `affectedSessionIds` 内的会话，其落在 `[cutoffTimeMs, tombstoneAtMs)` 区间的时间线
+ * 记录（handoff / 任务 / 事件）都视为已作废——即便晚到的 WS 事件把旧状态重新写回，
+ * 读取期过滤也会把它们挡掉（多端幂等失效）。
+ */
+export interface RollbackReceipt {
+  sessionId: string;
+  cutoffMessageId: string;
+  cutoffTimeMs: number;
+  tombstoneAtMs: number;
+  removedMessageIds: string[];
+  invalidatedClientRequestIds: string[];
+  affectedSessionIds: string[];
+  /**
+   * `false` 表示幂等重放的空操作：没有删除任何消息、没有失效任何请求，
+   * `cutoffTimeMs` / `tombstoneAtMs` 只是「当前时刻」而非真实回退窗口。
+   * 前端据此跳过作废窗口登记；旧网关不返回该字段（`undefined`），
+   * 由「两个数组均为空」兜底识别为同一类空操作。
+   */
+  applied?: boolean;
+}
+
+/**
+ * `truncateMessages` 的返回结构：消息列表保持向后兼容，
+ * `rollback` 是回执（网关未实现回退契约的旧版本返回 `null`，消费方需容忍）。
+ */
+export interface SessionTruncateMessagesResult {
+  messages: Message[];
+  rollback: RollbackReceipt | null;
+}
+
 export interface SessionsClient {
   list(token: string, options?: SessionsListOptions): Promise<Session[]>;
   listSharedWithMe(
@@ -561,6 +618,11 @@ export interface SessionsClient {
     sessionId: string,
     data: SessionRestoreApplyInput,
   ): Promise<SessionRestoreApplyResult>;
+  reviewFileChange(
+    token: string,
+    sessionId: string,
+    input: SessionFileReviewInput,
+  ): Promise<SessionFileReviewResult>;
   getChildren(
     token: string,
     sessionId: string,
@@ -610,7 +672,7 @@ export interface SessionsClient {
     sessionId: string,
     messageId: string,
     options?: { inclusive?: boolean; messageText?: string },
-  ): Promise<Message[]>;
+  ): Promise<SessionTruncateMessagesResult>;
   cancelTask(
     token: string,
     sessionId: string,
@@ -793,6 +855,47 @@ async function performSessionRequest<
   } catch (error) {
     throw normalizeSessionActionError(input.actionLabel, error);
   }
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+/**
+ * 回执边界解析：形状完整的对象才被接受；旧网关（尚未返回 receipt）得到 `null`，
+ * 由消费方按「无失效范围」处理，而不是把 undefined 当作 receipt 使用。
+ */
+function normalizeRollbackReceipt(value: unknown): RollbackReceipt | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const sessionId = record['sessionId'];
+  const cutoffMessageId = record['cutoffMessageId'];
+  const cutoffTimeMs = record['cutoffTimeMs'];
+  const tombstoneAtMs = record['tombstoneAtMs'];
+  if (
+    typeof sessionId !== 'string' ||
+    typeof cutoffMessageId !== 'string' ||
+    typeof cutoffTimeMs !== 'number' ||
+    typeof tombstoneAtMs !== 'number'
+  ) {
+    return null;
+  }
+  const applied = record['applied'];
+  return {
+    sessionId,
+    cutoffMessageId,
+    cutoffTimeMs,
+    tombstoneAtMs,
+    removedMessageIds: readStringArray(record['removedMessageIds']),
+    invalidatedClientRequestIds: readStringArray(record['invalidatedClientRequestIds']),
+    affectedSessionIds: readStringArray(record['affectedSessionIds']),
+    // 只在显式布尔值时透传：保持「旧网关缺字段」与「applied === false」可区分。
+    ...(typeof applied === 'boolean' ? { applied } : {}),
+  };
 }
 
 export async function replySharedSessionPermissionRequest(input: {
@@ -1251,6 +1354,18 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       });
     },
 
+    async reviewFileChange(token, sessionId, input) {
+      return performSessionRequest<SessionFileReviewResult>({
+        actionLabel: '提交文件审查决定',
+        request: () =>
+          fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/file-changes/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify(input),
+          }),
+      });
+    },
+
     async getChildren(token, sessionId, options) {
       const data = await performSessionRequest<{ sessions?: Session[] }>({
         actionLabel: '读取子会话列表',
@@ -1351,7 +1466,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async truncateMessages(token, sessionId, messageId, options = {}) {
-      const data = await performSessionRequest<{ messages?: Message[] }>({
+      const data = await performSessionRequest<{ messages?: Message[]; rollback?: unknown }>({
         actionLabel: '截断会话消息',
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
@@ -1364,7 +1479,10 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
             }),
           }),
       });
-      return data.messages ?? [];
+      return {
+        messages: data.messages ?? [],
+        rollback: normalizeRollbackReceipt(data.rollback),
+      };
     },
 
     async stopStream(token, sessionId, clientRequestId) {
