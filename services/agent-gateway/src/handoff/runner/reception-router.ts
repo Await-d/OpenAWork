@@ -21,7 +21,7 @@
  *   - decision_source: 'rule' | 'llm'
  */
 
-import { createSessionContext, evaluate } from '@openAwork/agent-core';
+import { shouldGrillIntent } from '../capability/grill-intent.js';
 
 export type RouteDecision = 'direct' | 'light' | 'orchestrate' | 'clarify' | 'resume' | 'grill';
 
@@ -93,7 +93,7 @@ const LIGHT_PATTERNS: readonly RoutePattern[] = [
 
 const GENERIC_QUESTION_PATTERN = {
   pattern: /(吗|么|呢|？|\?)/i,
-  reason: '团队模式下的实质性提问默认升级处理',
+  reason: '只读提问默认按轻量回答处理',
 } as const;
 
 function matchRoutePattern(
@@ -115,18 +115,8 @@ const MIN_ORCHESTRATE_LENGTH = 8;
  */
 const MIN_LLM_FALLBACK_LENGTH = 2;
 
-const GRILL_PROBE_SESSION_ID = 'reception-router:grill-probe';
-
-const GRILL_HIGH_IMPACT_PATTERN =
-  /(重构|重写|架构级|跨系统|整体改造|全量迁移|迁移到|数据迁移|删库|清空数据|删除生产|删除线上|不可逆|破坏性|生产环境|线上环境)/;
-
-export function shouldGrillIntent(userIntent: string): boolean {
-  const trimmed = userIntent.trim();
-  if (trimmed.length === 0) return false;
-  if (GRILL_HIGH_IMPACT_PATTERN.test(trimmed)) return true;
-  if (trimmed.length < MIN_ORCHESTRATE_LENGTH) return false;
-  return evaluate(trimmed, createSessionContext(GRILL_PROBE_SESSION_ID)).level === 'R3';
-}
+// 实现已下沉到 capability/grill-intent（c 层也要用；c 直接 import b 层 runner 违反跨层禁令）。
+export { shouldGrillIntent };
 
 /**
  * 规则引擎路由判断（快速预筛）。
@@ -192,9 +182,10 @@ export function routeByRules(userIntent: string): RouteResult | null {
   const direct = matchRoutePattern(DIRECT_ANSWER_PATTERNS, trimmed, 'direct');
   if (direct) return direct;
 
+  // 能走到这里说明不含任何修改/执行信号（EXPLICIT_ORCHESTRATE_PATTERNS 已提前返回），提问按只读处理
   if (GENERIC_QUESTION_PATTERN.pattern.test(trimmed)) {
     return {
-      decision: 'orchestrate',
+      decision: 'light',
       decisionSource: 'rule',
       reason: GENERIC_QUESTION_PATTERN.reason,
     };

@@ -35,10 +35,25 @@ import {
   consumePendingInboundMessage,
   hasPendingCancelSignal,
   listPendingInboundMessages,
+  parseGrillClarificationAnswerPayload,
   submitInboundMessage,
 } from '../store/inbound-store.js';
 import type { InboundMessageRecord } from '../store/inbound-store.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
+import { shouldGrillIntent } from '../capability/grill-intent.js';
+import {
+  applyPm1GrillAnswers,
+  buildConfirmedPm1GrillSeed,
+  buildPm1GrillSeed,
+  clearPm1Grill,
+  formatGrillExhaustedReason,
+  formatSettledAnswers,
+  frontierToQuestions,
+  persistPm1Grill,
+  readPm1GrillTask,
+} from './pm1-grill-runner.js';
+import { readGrillConfirmation } from '../capability/grill-confirmation.js';
+import { computeFrontier, isGrillExhausted, needsConfirmation } from '@openAwork/agent-core';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import { extractComparablePathsFromText, parseAllTasks } from '../capability/dispatch-package.js';
 
@@ -662,6 +677,15 @@ function extractClarificationAnswer(
 ): CollectedClarificationAnswer | null {
   if (message.messageType === 'clarification_answer') {
     const payload = (message.payload ?? {}) as Record<string, unknown>;
+    // grill 载荷带 questionId（= 决策树节点 id）；旧纯文本载荷没有，需保留兜底分支。
+    const grillAnswer = parseGrillClarificationAnswerPayload(payload);
+    if (grillAnswer) {
+      return {
+        questionId: grillAnswer.questionId,
+        answer: grillAnswer.answer,
+        receivedAt: message.createdAt,
+      };
+    }
     const answerText = typeof payload['answer'] === 'string' ? payload['answer'] : '';
     const questionId = typeof payload['questionId'] === 'string' ? payload['questionId'] : null;
     return answerText.trim()
@@ -833,16 +857,54 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
   });
   setC(SUBSTATES_C.SPEC_READY);
 
-  // ─── Step 2: 解析 [NEEDS CLARIFICATION]，多轮阻塞等待回答（L1.3 + grill 多轮） ──
+  // ─── Step 2: grill 多轮澄清（frontier 引擎 + 确认门控，260914·T-12） ──────
+  // 触发：spec 标记了 [NEEDS CLARIFICATION]，或原始/改写意图命中高影响（R3）。
+  // 问题来源统一走 agent-core 决策树；网关侧不实现澄清算法（§5.1 SSOT 铁律）。
   const allClarifications = parseClarifications(specContent);
-  const clarificationAnswers: CollectedClarificationAnswer[] = [];
-  if (allClarifications.length > 0) {
-    const answeredIds = new Set<string>();
-    const MAX_CLARIFICATION_ROUNDS = 3;
+  const grillTriggered =
+    allClarifications.length > 0 ||
+    shouldGrillIntent(input.sourceIntent) ||
+    shouldGrillIntent(input.rewrittenIntent);
+  // 质量评审退回的重规划沿用既有共识，不重复拷问用户。
+  const isQualityRevision =
+    typeof input.qualityFeedback === 'string' && input.qualityFeedback.trim().length > 0;
 
-    for (let round = 0; round < MAX_CLARIFICATION_ROUNDS; round += 1) {
-      const pending = allClarifications.filter((item) => !answeredIds.has(item.id));
-      if (pending.length === 0) break;
+  // reception 已确认的共识随 handoff payload 传播过来：pm1 复用同一份已确认共识，
+  // 直接置为已确认态并跳过本轮 grill（跨层单次确认，P4）。
+  const receptionConfirmed = readGrillConfirmation(input.handoff.payload);
+
+  // 轮次态恢复（G5）：同一意图续跑、或质量退回的重规划，复用已持久化决策树，不重复问已答节点。
+  const persistedGrill = readPm1GrillTask(input.sessionId);
+  const resumableGrillState =
+    persistedGrill !== null &&
+    (persistedGrill.intent === input.rewrittenIntent || isQualityRevision)
+      ? persistedGrill.state
+      : null;
+  let grillState =
+    resumableGrillState ??
+    (receptionConfirmed
+      ? buildConfirmedPm1GrillSeed(input.rewrittenIntent, receptionConfirmed)
+      : buildPm1GrillSeed(input.rewrittenIntent));
+  const grillAlreadyConfirmed = grillState.confirmedAt !== undefined;
+  const clarificationAnswers: CollectedClarificationAnswer[] = [];
+
+  // 传播来的确认态需要落库，供后续质量退回的重规划复用（不重复提问、也不丢答案）。
+  if (receptionConfirmed && resumableGrillState === null) {
+    persistPm1Grill(input.sessionId, grillState, input.rewrittenIntent);
+  }
+
+  if (grillTriggered && !isQualityRevision && !grillAlreadyConfirmed) {
+    persistPm1Grill(input.sessionId, grillState, input.rewrittenIntent);
+    const MAX_GRILL_ROUNDS = 6;
+
+    for (let round = 0; round < MAX_GRILL_ROUNDS; round += 1) {
+      if (isGrillExhausted(grillState)) break;
+      const frontier = computeFrontier(grillState);
+      if (frontier.length === 0) break;
+
+      const awaitingConfirmation = needsConfirmation(grillState);
+      const questions = frontierToQuestions(grillState);
+      setC(awaitingConfirmation ? SUBSTATES_C.AWAITING_CONFIRMATION : SUBSTATES_C.CLARIFYING);
 
       publishTeamEvent({
         type: 'artifact.needs-clarification',
@@ -850,16 +912,11 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
         sessionId: input.sessionId,
         layer: 'pm1',
         timestamp: Date.now(),
-        payload: {
-          clarifications: pending,
-          specArtifactId,
-          round,
-        },
+        payload: { clarifications: questions, specArtifactId, round, awaitingConfirmation },
         userId: input.userId,
       });
 
-      // 反向写一条 escalation_request 到 reception inbox（让 b 在 UI 渲染问题）。
-      // 失败不阻塞主流程（只是少了 UI 推送）。
+      // 反向写 escalation_request 到 reception inbox（让 b 在 UI 渲染问题）；失败不阻塞主流程。
       try {
         submitInboundMessage({
           userId: input.userId,
@@ -871,13 +928,17 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
             fromSessionId: input.sessionId,
             reason: 'needs_clarification',
             escalationRound: round,
-            context: `c 层在生成 spec 时遇到 ${pending.length} 个待澄清问题（第 ${round + 1} 轮）`,
-            questions: pending.map((c) => ({
-              id: c.id,
-              question: c.question,
-              context: c.context,
-            })),
-            suggestedActions: [{ label: '回答澄清问题', action: 'answer' }],
+            awaitingConfirmation,
+            context: awaitingConfirmation
+              ? 'c 层已完成本轮全部澄清，等待用户对共识的显式确认。'
+              : `c 层第 ${round + 1} 轮 frontier 共 ${frontier.length} 个待澄清问题`,
+            questions,
+            suggestedActions: awaitingConfirmation
+              ? [
+                  { label: '确认', action: 'confirm' },
+                  { label: '需修改', action: 'reject' },
+                ]
+              : [{ label: '回答澄清问题', action: 'answer' }],
           },
         });
       } catch (err) {
@@ -886,37 +947,55 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
         );
       }
 
-      setC(SUBSTATES_C.CLARIFYING);
       let roundAnswers: CollectedClarificationAnswer[] = [];
       try {
         roundAnswers = await waitForClarificationAnswers({
           sessionId: input.sessionId,
-          expectedCount: pending.length,
+          expectedCount: frontier.length,
           signal: input.signal ?? new AbortController().signal,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message === 'cancelled-by-inbound' || message === 'aborted') {
+          clearPm1Grill(input.sessionId);
           setC(SUBSTATES_C.CANCELLED);
           throw err;
         }
         console.warn(`[artifact-chain] clarification 等待异常：${message}`);
       }
-      setC(SUBSTATES_C.SPEC_READY);
 
-      if (roundAnswers.length === 0) break;
-
-      for (const answer of roundAnswers) {
-        clarificationAnswers.push(answer);
-        if (answer.questionId) {
-          answeredIds.add(answer.questionId);
-          continue;
+      if (roundAnswers.length === 0) {
+        // 确认门控是硬约束（文档 §5.2）：未获显式确认不得产出任何执行副作用，
+        // 故确认轮超时视为「grill 未完成」直接失败，而非降级放行。
+        if (awaitingConfirmation) {
+          setC(SUBSTATES_C.FAILED);
+          throw new PlanningFailure('未获用户对共识的显式确认，grill 未完成，不进入 plan 生成');
         }
-        // 未携带 questionId（如纯文本 user_input）→ 按顺序认领尚未回答的问题
-        const next = pending.find((item) => !answeredIds.has(item.id));
-        if (next) answeredIds.add(next.id);
+        console.warn('[artifact-chain] 澄清轮超时未获回答，按保守默认继续生成 plan。');
+        break;
       }
+
+      clarificationAnswers.push(...roundAnswers);
+      grillState = applyPm1GrillAnswers(
+        grillState,
+        roundAnswers.map((answer) => ({
+          nodeId: answer.questionId ?? '',
+          answer: answer.answer,
+        })),
+      );
+      persistPm1Grill(input.sessionId, grillState, input.rewrittenIntent);
+
+      // 确认门控：仅当确认节点落定（confirmedAt 已写）才收口；被驳回则循环重提确认节点。
+      if (awaitingConfirmation && grillState.confirmedAt !== undefined) break;
     }
+
+    if (grillState.confirmedAt === undefined && isGrillExhausted(grillState)) {
+      // 连续驳回达到上限：硬失败收口（不放行未经确认的执行副作用），但给出明确原因。
+      setC(SUBSTATES_C.FAILED);
+      throw new PlanningFailure(formatGrillExhaustedReason(grillState));
+    }
+
+    setC(SUBSTATES_C.SPEC_READY);
   }
 
   // ─── Step 3: 生成 plan（注入 constitution + 用户答案） ────────────────────
@@ -937,17 +1016,11 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     constitutionBlock = `\n\n<constitution>\n当前团队工作区未设置宪法。请在"宪法对齐检查"表格中填入以下占位内容：\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|----------|---------------|------|\n| 无宪法（未设置） | ✅ | 当前团队工作区未配置 constitution_md，跳过宪法对齐检查 |\n</constitution>`;
   }
 
-  // 把用户的澄清回答注入到 plan 提示中
+  const settledAnswers = formatSettledAnswers(grillState);
   let clarificationBlock = '';
-  if (clarificationAnswers.length > 0) {
-    const lines = clarificationAnswers
-      .map((ans, idx) => {
-        const qIdx = idx < allClarifications.length ? idx : -1;
-        const qText = qIdx >= 0 ? allClarifications[qIdx]?.question : '（用户中途追加输入）';
-        return `${idx + 1}. 问：${qText ?? '（未知问题）'}\n   答：${ans.answer}`;
-      })
-      .join('\n');
-    clarificationBlock = `\n\n<clarifications>\n以下是用户对 [NEEDS CLARIFICATION] 的回答，请在 plan 中按这些答案细化设计：\n${lines}\n</clarifications>`;
+  if (settledAnswers.length > 0) {
+    const lines = settledAnswers.map((line, idx) => `${idx + 1}. ${line}`).join('\n');
+    clarificationBlock = `\n\n<clarifications>\n以下是用户对本轮 grill 澄清的回答，请在 plan 中按这些答案细化设计：\n${lines}\n</clarifications>`;
   } else if (allClarifications.length > 0) {
     clarificationBlock = `\n\n<clarifications>\n用户未在超时前回答 ${allClarifications.length} 个澄清问题。请使用最稳妥的默认假设（保守选择）继续生成 plan。\n</clarifications>`;
   }
