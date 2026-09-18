@@ -28,6 +28,12 @@ import {
   writeStdinToTerminal,
 } from '../session/persistent-terminals.js';
 import { detectTerminalBackend, type TerminalBackendKind } from '../session/pty-backend.js';
+import {
+  InvalidShellProfileError,
+  listPublicShellProfiles,
+  resolveShellProfile,
+  shellProfileLabelForId,
+} from '../session/shell-profiles.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { createSseClientChannel } from './sse-client-channel.js';
 import {
@@ -50,13 +56,15 @@ type SessionTerminalErrorCode =
   | 'terminal_running'
   | 'spawn_failed'
   | 'terminal_not_persistent'
-  | 'invalid_body';
+  | 'invalid_body'
+  | 'invalid_shell_profile';
 
 const SESSION_TERMINAL_ERROR_MESSAGES: Record<
   Exclude<SessionTerminalErrorCode, 'spawn_failed'>,
   string
 > = {
   invalid_body: '请求体参数无效。',
+  invalid_shell_profile: '指定的 Shell 配置不存在或不可用。',
   session_not_found: '目标会话不存在。',
   terminal_not_found: '目标终端不存在。',
   terminal_not_persistent: '该终端是 agent 的一次性命令，不支持继续输入。',
@@ -101,11 +109,25 @@ function resolvePublicBackend(record: { metadata: Record<string, unknown> }): Te
   return detectTerminalBackend().kind;
 }
 
+/**
+ * Project the persisted `shellProfileId` into a path-free `{ id, label }`.
+ * The label is derived purely from the opaque id, so no `metadata` (which may
+ * hold the server-only shell path) is ever exposed.
+ */
+function resolvePublicShell(record: {
+  metadata: Record<string, unknown>;
+}): { id: string; label: string } | undefined {
+  const id = record.metadata['shellProfileId'];
+  if (typeof id !== 'string' || id.length === 0) return undefined;
+  return { id, label: shellProfileLabelForId(id) };
+}
+
 /** Strip server-only fields before returning a terminal to the client. */
 function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
   // 加法扩展（D7）：前端需要 `supportsResize` 才能知道 pipe 后端下 resize
   // 是 no-op，从而跳过无意义请求并提示「当前运行时不支持调整尺寸」。
   const backend = resolvePublicBackend(record);
+  const shell = resolvePublicShell(record);
   return {
     terminalId: record.terminalId,
     sessionId: record.sessionId,
@@ -127,6 +149,7 @@ function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
     ...(record.outputPath ? { outputPath: record.outputPath } : {}),
     backend,
     supportsResize: backend === 'pty',
+    ...(shell ? { shell } : {}),
   };
 }
 
@@ -264,6 +287,22 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
   );
 
   /**
+   * GET /terminals/shell-profiles
+   * Host-level allowlist of shells a client may request when creating a
+   * terminal. Returns only `{ id, label, isDefault }` — never a path.
+   */
+  app.get(
+    '/terminals/shell-profiles',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send(terminalErrorPayload('unauthorized'));
+      const profiles = listPublicShellProfiles(process.platform, process.env);
+      return reply.send({ profiles });
+    },
+  );
+
+  /**
    * POST /sessions/:sessionId/terminals
    * Create a new user-driven persistent terminal. The terminal stays
    * open across requests; the user's keystrokes go through the stdin
@@ -283,9 +322,30 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
         cwd?: string;
         initialCommand?: string;
         description?: string;
+        shellProfileId?: unknown;
       };
       const cwd =
         typeof body.cwd === 'string' && body.cwd.trim().length > 0 ? body.cwd : process.cwd();
+
+      // The client supplies ONLY an opaque id. We validate it against the live
+      // allowlist and forward the server-canonical id onward — a path-like or
+      // unknown value is rejected here before spawn is ever reached.
+      let shellProfileId: string | undefined;
+      if (body.shellProfileId !== undefined) {
+        if (typeof body.shellProfileId !== 'string') {
+          return reply.code(400).send(terminalErrorPayload('invalid_shell_profile'));
+        }
+        const candidate = body.shellProfileId.trim();
+        if (candidate.length === 0) {
+          return reply.code(400).send(terminalErrorPayload('invalid_shell_profile'));
+        }
+        const profile = resolveShellProfile(candidate, process.platform, process.env);
+        if (profile === undefined) {
+          return reply.code(400).send(terminalErrorPayload('invalid_shell_profile'));
+        }
+        shellProfileId = profile.id;
+      }
+
       try {
         const result = spawnPersistentTerminal({
           sessionId,
@@ -294,9 +354,13 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
           source: 'user',
           ...(body.initialCommand ? { initialCommand: body.initialCommand } : {}),
           ...(body.description ? { description: body.description } : {}),
+          ...(shellProfileId !== undefined ? { shellProfileId } : {}),
         });
         return reply.send({ terminal: toPublicTerminal(result.terminal) });
       } catch (error) {
+        if (error instanceof InvalidShellProfileError) {
+          return reply.code(400).send(terminalErrorPayload('invalid_shell_profile'));
+        }
         return reply
           .code(500)
           .send(

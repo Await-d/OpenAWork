@@ -6,7 +6,12 @@
  */
 
 import { createSessionTerminalsClient } from '@openAwork/web-client';
-import type { SessionTerminalView as GatewaySessionTerminalView } from '@openAwork/web-client';
+import type {
+  SessionTerminalView as GatewaySessionTerminalView,
+  ShellProfileOption,
+} from '@openAwork/web-client';
+
+export type { ShellProfileOption };
 
 /**
  * 终端视图（加法扩展，T-06）：网关公共载荷新增 `backend` / `supportsResize`
@@ -108,6 +113,8 @@ export interface CreateSessionTerminalParams {
   cwd?: string;
   initialCommand?: string;
   description?: string;
+  /** 服务端白名单 id（来自 listShellProfiles）；非法值由网关 400 拒绝。 */
+  shellProfileId?: string;
   signal?: AbortSignal;
 }
 
@@ -124,8 +131,26 @@ export async function createSessionTerminal(
     cwd: params.cwd,
     initialCommand: params.initialCommand,
     description: params.description,
+    shellProfileId: params.shellProfileId,
     signal: params.signal,
   });
+}
+
+export interface ListShellProfilesParams {
+  gatewayUrl: string;
+  token: string;
+  signal?: AbortSignal;
+}
+
+/** 宿主级（非会话级）的 shell 配置列表，因此不需要 sessionId。 */
+export async function listShellProfiles(
+  params: ListShellProfilesParams,
+): Promise<ShellProfileOption[]> {
+  const { profiles } = await createSessionTerminalsClient(params.gatewayUrl).listShellProfiles(
+    params.token,
+    { signal: params.signal },
+  );
+  return profiles;
 }
 
 export interface WriteTerminalStdinParams {

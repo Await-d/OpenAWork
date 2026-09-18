@@ -28,11 +28,9 @@ import {
   appendTerminalOutputDelta,
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
-import {
-  spawnTerminalProcess,
-  type TerminalProcess,
-} from './pty-backend.js';
+import { spawnTerminalProcess, type TerminalProcess } from './pty-backend.js';
 import { resolveShellChoiceForPlatform } from '../tools/shell-choice.js';
+import { resolveShellForSpawn } from './shell-profiles.js';
 
 interface PersistentEntry {
   terminalId: string;
@@ -114,6 +112,32 @@ function getShell(): { shell: string; args: string[] } {
   return { shell: choice.shell, args: ['-i'] };
 }
 
+/**
+ * Resolve the shell for a spawn. The client only ever supplies an opaque
+ * `shellProfileId`; the executable and argv both come from the server-side
+ * allowlist (`shell-profiles.ts`). `resolveShellForSpawn` throws a typed
+ * `InvalidShellProfileError` for an unknown id, so spawn is never reached.
+ */
+function resolveSpawnShell(shellProfileId: string | undefined): {
+  shell: string;
+  args: string[];
+  shellProfileId?: string;
+} {
+  const fallback = getShell();
+  return resolveShellForSpawn({
+    ...(shellProfileId !== undefined ? { shellProfileId } : {}),
+    platform: process.platform,
+    env: process.env,
+    defaultShell: fallback.shell,
+    defaultArgs: fallback.args,
+    onFallback: ({ requestedId, missingShell }) => {
+      console.warn(
+        `[persistent-terminals] shell profile '${requestedId}' resolved to missing executable '${missingShell}'; falling back to the default shell`,
+      );
+    },
+  });
+}
+
 function terminalSnapshotText(terminalId: string): string {
   return getTerminalOutputSnapshot(terminalId)?.data ?? '';
 }
@@ -128,6 +152,11 @@ export interface SpawnPersistentTerminalInput {
   source: 'agent' | 'user';
   toolName?: string;
   description?: string;
+  /**
+   * Opaque server-allowlisted shell profile id. Absent → today's default
+   * shell. Clients must never supply a shell path, argv or env.
+   */
+  shellProfileId?: string;
 }
 
 export interface SpawnPersistentTerminalResult {
@@ -146,7 +175,8 @@ export function spawnPersistentTerminal(
     throw new PersistentTerminalLimitError(input.sessionId, maxPerSession);
   }
 
-  const { shell, args } = getShell();
+  const resolvedShell = resolveSpawnShell(input.shellProfileId);
+  const { shell, args } = resolvedShell;
   const abortController = new AbortController();
   const decoder = new StringDecoder('utf8');
   let entry: PersistentEntry | undefined;
@@ -231,6 +261,7 @@ export function spawnPersistentTerminal(
       persistent: true,
       source: input.source,
       shell,
+      ...(resolvedShell.shellProfileId ? { shellProfileId: resolvedShell.shellProfileId } : {}),
       backend: terminalProcess.backend,
     },
   });

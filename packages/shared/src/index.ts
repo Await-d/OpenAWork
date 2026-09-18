@@ -1486,6 +1486,12 @@ export interface SessionTerminalSummary {
   outputBytesTotal: number;
   outputTail: string;
   outputPath?: string;
+  /**
+   * Server-resolved shell profile, additive. Contains only an opaque id and a
+   * human label — never a filesystem path. Absent for terminals that did not
+   * select a profile.
+   */
+  shell?: { id: string; label: string };
 }
 
 export interface StreamTerminalStartedChunk {

@@ -31,8 +31,10 @@ import type {
 import {
   killSessionTerminal,
   listSessionTerminals,
+  listShellProfiles,
   renameSessionTerminal,
   type SessionTerminalView,
+  type ShellProfileOption,
 } from './terminals-api.js';
 
 export interface UseSessionTerminalsResult {
@@ -66,6 +68,8 @@ export interface UseSessionTerminalsResult {
   dismissTerminal: (terminalId: string) => void;
   /** True while a kill request is in-flight for this terminal id. */
   pendingKillIds: Set<string>;
+  /** 宿主级 shell 配置；空数组 = 不可用（面板不渲染 profile 下拉）。 */
+  shellProfiles: ShellProfileOption[];
 }
 
 const ACTIVE_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set(['running', 'tmux-spawned']);
@@ -144,6 +148,7 @@ export function useSessionTerminals(
   // Bumped after every reconcile attempt to re-arm the polling timer even
   // when the snapshot didn't change any state.
   const [syncTick, setSyncTick] = useState(0);
+  const [shellProfiles, setShellProfiles] = useState<ShellProfileOption[]>([]);
   const inflightController = useRef<AbortController | null>(null);
   // Mirrors `pendingKills` for use inside async callbacks without adding a
   // dependency that would re-create `runSync` (and restart the loop).
@@ -154,6 +159,24 @@ export function useSessionTerminals(
   // tell "an imperative reload was requested" apart from "the identity
   // changed", so a session switch never fires a second, redundant sync.
   const handledReloadNonceRef = useRef(0);
+
+  // shell profile 列表是宿主级的，与会话无关：刻意不依赖 currentSessionId，
+  // 否则每次切会话都会重取一份内容完全相同的列表。
+  useEffect(() => {
+    if (!token) {
+      setShellProfiles([]);
+      return;
+    }
+    const controller = new AbortController();
+    void listShellProfiles({ gatewayUrl, token, signal: controller.signal })
+      .then((profiles) => {
+        if (!controller.signal.aborted) setShellProfiles(profiles);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setShellProfiles([]);
+      });
+    return () => controller.abort();
+  }, [gatewayUrl, token]);
 
   const hasActiveTerminals = useMemo(
     () => Object.values(terminalsById).some((t) => ACTIVE_STATUSES.has(t.status)),
@@ -502,5 +525,6 @@ export function useSessionTerminals(
     renameTerminal: renameTerminalFn,
     dismissTerminal,
     pendingKillIds: pendingKills,
+    shellProfiles,
   };
 }

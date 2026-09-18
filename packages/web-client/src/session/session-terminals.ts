@@ -18,6 +18,16 @@ import {
 
 export type SessionTerminalView = SessionTerminalSummary;
 
+/**
+ * 服务端白名单里的 shell 配置。只含不透明 id 与展示标签——服务端绝不会
+ * 下发可执行文件路径，客户端也只能回传 id。
+ */
+export interface ShellProfileOption {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
+
 export interface ListSessionTerminalsOptions {
   status?: 'running' | 'all';
   limit?: number;
@@ -30,10 +40,21 @@ export interface SessionTerminalsClient {
     sessionId: string,
     options?: ListSessionTerminalsOptions,
   ): Promise<{ terminals: SessionTerminalView[] }>;
+  listShellProfiles(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ profiles: ShellProfileOption[] }>;
   create(
     token: string,
     sessionId: string,
-    input?: { cwd?: string; description?: string; initialCommand?: string; signal?: AbortSignal },
+    input?: {
+      cwd?: string;
+      description?: string;
+      initialCommand?: string;
+      /** 必须是 listShellProfiles 返回的白名单 id；服务端拒绝其他取值。 */
+      shellProfileId?: string;
+      signal?: AbortSignal;
+    },
   ): Promise<{ terminal: SessionTerminalView }>;
   kill(
     token: string,
@@ -106,6 +127,9 @@ function buildSessionTerminalActionErrorMessage(
   }
   if (data?.error === 'invalid_body') {
     return `请求参数无效，无法${actionLabel}。`;
+  }
+  if (data?.error === 'invalid_shell_profile') {
+    return '所选 Shell 配置在此机器上不可用，请重新选择。';
   }
   if (data?.error === 'spawn_failed') {
     return typeof data.message === 'string' && data.message.length > 0
@@ -184,6 +208,15 @@ export function createSessionTerminalsClient(baseUrl: string): SessionTerminalsC
       });
     },
 
+    async listShellProfiles(token, options) {
+      const init: RequestInit = { headers: authHeader(token) };
+      if (options?.signal) init.signal = options.signal;
+      return performSessionTerminalRequest<{ profiles: ShellProfileOption[] }>({
+        actionLabel: '读取 Shell 配置',
+        request: () => fetchWithTimeout(`${baseUrl}/terminals/shell-profiles`, init),
+      });
+    },
+
     async create(token, sessionId, input) {
       const init: RequestInit = {
         method: 'POST',
@@ -192,6 +225,7 @@ export function createSessionTerminalsClient(baseUrl: string): SessionTerminalsC
           ...(input?.cwd ? { cwd: input.cwd } : {}),
           ...(input?.initialCommand ? { initialCommand: input.initialCommand } : {}),
           ...(input?.description ? { description: input.description } : {}),
+          ...(input?.shellProfileId ? { shellProfileId: input.shellProfileId } : {}),
         }),
       };
       if (input?.signal) init.signal = input.signal;
