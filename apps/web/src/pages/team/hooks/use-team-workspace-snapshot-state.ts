@@ -56,6 +56,7 @@ export function useTeamWorkspaceSnapshotState(
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const snapshotRef = useRef<TeamWorkspaceSnapshot | null>(null);
+  const previousWorkspaceIdRef = useRef<string | null>(null);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
   const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
@@ -80,6 +81,14 @@ export function useTeamWorkspaceSnapshotState(
       return () => {
         cancelled = true;
       };
+    }
+
+    // 切换工作区：先清掉上一个工作区的快照，避免旧工作区数据在新工作区下继续显示；
+    // 同一工作区内的刷新仍保留快照，避免整页 loading 闪烁。
+    if (previousWorkspaceIdRef.current !== teamWorkspaceId) {
+      previousWorkspaceIdRef.current = teamWorkspaceId;
+      snapshotRef.current = null;
+      setSnapshot(null);
     }
 
     const hasCachedSnapshot = snapshotRef.current !== null;
@@ -140,6 +149,7 @@ export function useTeamWorkspaceSnapshotState(
           status: item.status,
           ...(item.answer ? { answer: item.answer } : {}),
           ...(typeof item.answeredAt === 'number' ? { answeredAt: item.answeredAt } : {}),
+          ...(item.options && item.options.length > 0 ? { options: item.options } : {}),
         })),
       );
       hydrateNotificationStore(
