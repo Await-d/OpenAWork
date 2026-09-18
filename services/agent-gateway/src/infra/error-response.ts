@@ -9,7 +9,8 @@
  */
 import type { ZodIssue } from 'zod';
 
-export type ApiErrorName = 'BadRequest' | 'NotFound' | 'Unauthorized' | 'InternalError';
+export type ApiErrorName =
+  'BadRequest' | 'Conflict' | 'NotFound' | 'Unauthorized' | 'InternalError';
 export type ApiErrorKind = 'Body' | 'Query' | 'Params' | 'Headers';
 
 export interface ApiErrorResponse {
@@ -46,6 +47,10 @@ export class ApiError extends Error {
 
   static badRequest(message: string, opts?: { kind?: ApiErrorKind; issues?: ZodIssue[] }) {
     return new ApiError(400, 'BadRequest', message, opts);
+  }
+
+  static conflict(message: string) {
+    return new ApiError(409, 'Conflict', message);
   }
 
   static notFound(message: string) {
