@@ -389,6 +389,10 @@ export type {
 } from './plugin/index.js';
 export { PluginLifecycleManagerImpl, PluginManifestValidatorImpl } from './plugin/index.js';
 
+// worker 子系统当前尚未接入 services/agent-gateway（仓库内零消费者）：
+// 这里仅为未来使用保留导出，不代表云 worker / 沙箱能力已可用；
+// 缺少协议规格时云 worker 连接会直接抛错，不会伪造成功状态。
+// CloudWorkerTransport 为未来注入云 worker 远端传输的接口类型。
 export type {
   WorkerStatus,
   WorkerMode,
@@ -398,6 +402,7 @@ export type {
   WorkerSessionManager,
   SandboxConfig,
   WorkerManager,
+  CloudWorkerTransport,
 } from './worker/index.js';
 export { WorkerManagerImpl, createWorkerSessionManager } from './worker/index.js';
 

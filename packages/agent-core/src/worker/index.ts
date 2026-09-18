@@ -1,6 +1,8 @@
 import type { ChildProcess } from 'node:child_process';
 import { CloudWorkerConnection } from '../onboarding/cloud-worker-connection.js';
 
+export type { CloudWorkerTransport } from '../onboarding/cloud-worker-connection.js';
+
 export type WorkerStatus = 'idle' | 'running' | 'stopped' | 'error';
 export type WorkerMode = 'local' | 'cloud_worker' | 'sandbox';
 
@@ -75,6 +77,14 @@ function generateId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+/**
+ * 本地子进程 worker 管理器（spawn / connect / stop）。
+ *
+ * @remarks
+ * 该子系统当前尚未接入 `services/agent-gateway`——`packages/agent-core` 之外
+ * 没有任何消费者，仅为未来使用保留；这里 spawn / 超时 kill 的逻辑是真实可用的，
+ * 但“云 worker / 沙箱”相关能力并未因此变得可用。
+ */
 export class WorkerManagerImpl implements WorkerManager {
   private workers = new Map<string, WorkerRuntime>();
 
@@ -195,6 +205,15 @@ export class WorkerManagerImpl implements WorkerManager {
   }
 }
 
+/**
+ * Worker 会话管理器（local / sandbox / cloud_worker 三种模式）。
+ *
+ * @remarks
+ * 该子系统当前尚未接入 `services/agent-gateway`——`packages/agent-core` 之外
+ * 没有任何消费者，仅为未来使用保留。`cloud_worker` 模式不会再伪造成功：由于云
+ * worker 协议规格尚未定义、也没有注入远端传输，`CloudWorkerConnection.connect`
+ * 会直接抛错。
+ */
 class WorkerSessionManagerImpl implements WorkerSessionManager {
   private sessions = new Map<string, WorkerSession>();
   private cloudConnection = new CloudWorkerConnection();
@@ -226,7 +245,9 @@ class WorkerSessionManagerImpl implements WorkerSessionManager {
       workerId,
       name: config.name,
       mode: config.mode,
-      status: config.mode === 'local' ? 'idle' : 'running',
+      // local / sandbox 都还没有接上真正的运行时：sandbox 目前只是登记一个会话，
+      // 没有任何沙箱运行时被启动，因此不能谎报 'running'，只能是 'idle'。
+      status: 'idle',
       startedAt: Date.now(),
       ...(config.mode === 'sandbox'
         ? {
@@ -273,6 +294,13 @@ class WorkerSessionManagerImpl implements WorkerSessionManager {
   }
 }
 
+/**
+ * 创建 Worker 会话管理器实例。
+ *
+ * @remarks
+ * 该子系统当前尚未接入 `services/agent-gateway`——`packages/agent-core` 之外
+ * 零消费者（包括本工厂函数），导出仅为未来使用保留。
+ */
 export function createWorkerSessionManager(): WorkerSessionManager {
   return new WorkerSessionManagerImpl();
 }
