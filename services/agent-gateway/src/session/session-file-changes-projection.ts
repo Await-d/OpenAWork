@@ -86,7 +86,9 @@ export function buildSessionFileChangesProjection(input: {
     });
   });
 
-  const latestSnapshot = input.snapshots[0];
+  // `latestSnapshotRef` means "current turn" to consumers, so only request
+  // snapshots may win it — a revert's `scope:`/`backup:` snapshot must not.
+  const latestSnapshot = input.snapshots.find((snapshot) => snapshot.scopeKind === 'request');
   return {
     fileDiffs: input.fileDiffs,
     snapshots: input.snapshots,

@@ -5,11 +5,15 @@ import type {
   FileDiffContent,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
-import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   captureBeforeWriteBackup,
   readSessionFileBackupContent,
 } from './session-file-backup-store.js';
+import {
+  extractSessionWorkingDirectory,
+  parseSessionMetadataJson,
+} from './session-workspace-metadata.js';
 
 interface SessionFileDiffRow {
   client_request_id: string | null;
@@ -27,7 +31,21 @@ interface SessionFileDiffRow {
   tool_name: string;
   tool_call_id: string | null;
   request_id: string;
+  workspace_root: string | null;
   created_at: string;
+}
+
+function resolveSessionWorkspaceRoot(sessionId: string, userId: string): string {
+  const row = sqliteGet<{ metadata_json: string | null }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [sessionId, userId],
+  );
+  if (!row?.metadata_json) {
+    return WORKSPACE_ROOT;
+  }
+  return (
+    extractSessionWorkingDirectory(parseSessionMetadataJson(row.metadata_json)) ?? WORKSPACE_ROOT
+  );
 }
 
 export async function persistSessionFileDiffs(input: {
@@ -43,7 +61,10 @@ export async function persistSessionFileDiffs(input: {
   backupBeforeRef?: FileBackupRef;
   backupAfterRef?: FileBackupRef;
   observability?: ToolCallObservabilityAnnotation;
+  workspaceRoot?: string;
 }): Promise<void> {
+  const workspaceRoot =
+    input.workspaceRoot ?? resolveSessionWorkspaceRoot(input.sessionId, input.userId);
   for (const diff of input.diffs) {
     // Store before/after content as file system backups instead of in DB
     const beforeBackupRef =
@@ -77,8 +98,8 @@ export async function persistSessionFileDiffs(input: {
 
     sqliteRun(
       `INSERT OR REPLACE INTO session_file_diffs
-       (session_id, user_id, client_request_id, request_id, tool_name, tool_call_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+       (session_id, user_id, client_request_id, request_id, tool_name, tool_call_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, workspace_root, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       [
         input.sessionId,
         input.userId,
@@ -97,6 +118,7 @@ export async function persistSessionFileDiffs(input: {
         JSON.stringify(diff.observability ?? input.observability ?? null),
         JSON.stringify(beforeBackupRef ?? input.backupBeforeRef ?? null),
         JSON.stringify(afterBackupRef ?? input.backupAfterRef ?? null),
+        workspaceRoot,
       ],
     );
   }
@@ -159,6 +181,61 @@ export function deleteRequestFileDiffs(input: {
   );
 }
 
+export interface SessionFileDiffDetails {
+  afterBackupContent: string | null;
+  afterBackupId: string | null;
+  beforeBackupContent: string | null;
+  beforeBackupId: string | null;
+  diff: FileDiffContent;
+  workspaceRoot: string | null;
+}
+
+export async function getSessionFileDiffDetails(input: {
+  filePath: string;
+  requestId: string;
+  sessionId: string;
+  userId: string;
+}): Promise<SessionFileDiffDetails | null> {
+  const row = sqliteGet<SessionFileDiffRow>(
+    `SELECT client_request_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, workspace_root, created_at
+     FROM session_file_diffs
+     WHERE session_id = ? AND user_id = ? AND request_id = ? AND file_path = ?
+     LIMIT 1`,
+    [input.sessionId, input.userId, input.requestId, input.filePath],
+  );
+  if (!row) {
+    return null;
+  }
+
+  const beforeBackupContent = row.before_backup_id
+    ? await readSessionFileBackupContent({
+        backupId: row.before_backup_id,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      })
+    : null;
+  const afterBackupContent = row.after_backup_id
+    ? await readSessionFileBackupContent({
+        backupId: row.after_backup_id,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      })
+    : null;
+
+  return {
+    afterBackupContent,
+    afterBackupId: row.after_backup_id,
+    beforeBackupId: row.before_backup_id,
+    beforeBackupContent,
+    diff: mapSessionFileDiffRow(
+      row,
+      beforeBackupContent ?? undefined,
+      afterBackupContent ?? undefined,
+    ),
+    workspaceRoot: row.workspace_root,
+  };
+}
+
 function listSessionFileDiffsWithWhere(input: {
   sessionId: string;
   userId: string;
@@ -166,7 +243,7 @@ function listSessionFileDiffsWithWhere(input: {
   whereParams?: string[];
 }): FileDiffContent[] {
   const rows = sqliteAll<SessionFileDiffRow>(
-    `SELECT client_request_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, created_at
+    `SELECT client_request_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, workspace_root, created_at
      FROM session_file_diffs
      WHERE session_id = ? AND user_id = ? ${input.whereClause ?? ''}
      ORDER BY created_at DESC, file_path ASC`,
@@ -184,7 +261,7 @@ async function listSessionFileDiffsWithWhereAndText(input: {
   whereParams?: string[];
 }): Promise<FileDiffContent[]> {
   const rows = sqliteAll<SessionFileDiffRow>(
-    `SELECT client_request_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, created_at
+    `SELECT client_request_id, file_path, before_backup_id, after_backup_id, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, workspace_root, created_at
      FROM session_file_diffs
      WHERE session_id = ? AND user_id = ? ${input.whereClause ?? ''}
      ORDER BY created_at DESC, file_path ASC`,
