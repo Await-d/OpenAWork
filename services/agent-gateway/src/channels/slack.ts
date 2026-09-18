@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   ChannelEvent,
   ChannelGroup,
@@ -7,6 +8,7 @@ import type {
   ChannelStreamingHandle,
   MessagingChannelService,
 } from './types.js';
+import { listBuiltinChannelCommands } from './channel-command-experience.js';
 import { parseSlackInboundMessage } from './inbound-parsers/slack.js';
 
 type SlackApp = {
@@ -208,35 +210,26 @@ export class SlackChannelService implements MessagingChannelService {
   private registerHandlers(): void {
     if (!this.app) return;
 
-    this.app.command('/new', async ({ ack, say }) => {
-      await ack();
-      await say('New session started.');
-    });
-
-    this.app.command('/status', async ({ ack, say }) => {
-      await ack();
-      await say('System is running.');
-    });
-
-    this.app.command('/plan', async ({ ack, say }) => {
-      await ack();
-      await say('No active plan in this session.');
-    });
-
-    this.app.command('/approve', async ({ ack, say }) => {
-      await ack();
-      await say('Approval registered.');
-    });
-
-    this.app.command('/deny', async ({ ack, say }) => {
-      await ack();
-      await say('Action denied.');
-    });
-
-    this.app.command('/history', async ({ ack, say }) => {
-      await ack();
-      await say('No session history available yet.');
-    });
+    // 斜杠命令与其它渠道统一走共享命令管线：先 ack 满足 Slack 的三秒约束，
+    // 再把命令合成为标准 ChannelMessage 交给 notify，由 auto-reply 管线调用
+    // 内置命令处理器；这里不再直接 say 任何固定话术。
+    for (const descriptor of listBuiltinChannelCommands()) {
+      const trigger = descriptor.canonicalTrigger;
+      this.app.command(trigger, async ({ ack, command }) => {
+        await ack();
+        const trimmed = command.text.trim();
+        const message: ChannelMessage = {
+          id: randomUUID(),
+          senderId: command.user_id,
+          senderName: command.user_id,
+          chatId: command.channel_id,
+          content: trimmed.length > 0 ? `${trigger} ${trimmed}` : trigger,
+          timestamp: Date.now(),
+          raw: command,
+        };
+        this.notify({ type: 'message', pluginId: this.pluginId, message });
+      });
+    }
 
     this.app.message(/.*/, async ({ message }) => {
       const msg = parseSlackInboundMessage(message, {
