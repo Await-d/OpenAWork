@@ -8,16 +8,19 @@ import {
   CONFIRM_ANSWER,
   CONFIRM_NODE_ID,
   createGrillState,
+  GRILL_MAX_ROUNDS,
   isConfirmAffirmative,
   isFrontierEmpty,
+  isGrillExhausted,
   needsConfirmation,
   parseGrillState,
+  parseMultiGrillReply,
   REJECT_ANSWER,
   seedGrillState,
   serializeGrillState,
   type ClarificationNode,
 } from './clarification-tree.js';
-import type { ClarificationQuestion } from './routing.js';
+import type { ClarificationDimension, ClarificationQuestion } from './routing.js';
 import { buildClarificationQuestions } from './routing.js';
 
 function node(id: string, dependsOn: readonly string[] = [], answer?: string): ClarificationNode {
@@ -301,5 +304,147 @@ describe('serializeGrillState / parseGrillState', () => {
     const restored = parseGrillState(serializeGrillState(state));
     restored!.nodes[0]!.options[0]!.label = 'mutated';
     expect(state.nodes[0]?.options[0]?.label).toBe('a');
+  });
+
+  it('往返保留 rejections 与 exhaustedAt（persist→read 不丢字段）', () => {
+    let state = applyAnswer(createGrillState(awaitingConfirm()), 'a', 'yes', T0);
+    for (let attempt = 0; attempt < GRILL_MAX_ROUNDS; attempt += 1) {
+      state = applyAnswer(state, CONFIRM_NODE_ID, '需修改', T0 + attempt + 1);
+    }
+
+    const restored = parseGrillState(serializeGrillState(state));
+    expect(restored).toEqual(state);
+    expect(restored?.rejections).toHaveLength(GRILL_MAX_ROUNDS);
+    expect(restored?.exhaustedAt).toBe(state.exhaustedAt);
+  });
+});
+
+function awaitingConfirm(): ClarificationNode[] {
+  return [node('a'), buildConfirmNode(['a'])];
+}
+
+function optionNode(
+  id: string,
+  dimension: ClarificationDimension,
+  options: string[],
+): ClarificationNode {
+  return {
+    id,
+    dimension,
+    question: `${dimension} 问题`,
+    options: options.map((label) => ({ label })),
+    dependsOn: [],
+  };
+}
+
+describe('确认驳回记录（rejections）与有界上限', () => {
+  it('驳回时追加 rejections，outstanding 列出全部共识项（不含确认节点）', () => {
+    const pending = applyAnswer(createGrillState(awaitingConfirm()), 'a', 'yes', T0);
+    const rejected = applyAnswer(pending, CONFIRM_NODE_ID, '需修改', T0 + 1);
+
+    expect(rejected.rejections).toEqual([{ at: T0 + 1, answer: '需修改', outstanding: ['a'] }]);
+    expect(rejected.exhaustedAt).toBeUndefined();
+    expect(isGrillExhausted(rejected)).toBe(false);
+  });
+
+  it('第 6 次驳回写入 exhaustedAt，前 5 次不判定为耗尽', () => {
+    let state = applyAnswer(createGrillState(awaitingConfirm()), 'a', 'yes', T0);
+    for (let attempt = 0; attempt < GRILL_MAX_ROUNDS; attempt += 1) {
+      state = applyAnswer(state, CONFIRM_NODE_ID, '需修改', T0 + attempt + 1);
+      if (attempt < GRILL_MAX_ROUNDS - 1) {
+        expect(isGrillExhausted(state)).toBe(false);
+        expect(state.exhaustedAt).toBeUndefined();
+      }
+    }
+
+    expect(state.rejections).toHaveLength(GRILL_MAX_ROUNDS);
+    expect(state.exhaustedAt).toBe(T0 + GRILL_MAX_ROUNDS);
+    expect(isGrillExhausted(state)).toBe(true);
+  });
+
+  it('陈旧状态（无 rejections）不被追溯判定为耗尽，即使 round 很大', () => {
+    const pending = applyAnswer(createGrillState(awaitingConfirm()), 'a', 'yes', T0);
+    expect(isGrillExhausted({ ...pending, round: 99 })).toBe(false);
+  });
+
+  it('确认成功后 confirmedAt 生效，既有 rejections 不影响收口', () => {
+    let state = applyAnswer(createGrillState(awaitingConfirm()), 'a', 'yes', T0);
+    state = applyAnswer(state, CONFIRM_NODE_ID, '需修改', T0 + 1);
+    const confirmed = confirmGrill(state, T0 + 2);
+    expect(confirmed.confirmedAt).toBe(T0 + 2);
+    expect(confirmed.rejections).toHaveLength(1);
+  });
+});
+
+describe('parseMultiGrillReply — 一轮多答解析', () => {
+  const fourNodes = (): ClarificationNode[] => [
+    optionNode('goal', 'goal', ['改单文件', '跨模块']),
+    optionNode('constraint', 'constraint', ['无约束', '必须兼容']),
+    optionNode('deliverable', 'deliverable', ['代码变更', '仅方案']),
+    optionNode('acceptance', 'acceptance', ['测试通过', '需新测试']),
+  ];
+
+  it('序号式：一次回复多项，按序号映射到节点', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '1. 改单文件；2. 无约束');
+    expect(parsed.assigned).toEqual([
+      { nodeId: 'goal', answer: '改单文件' },
+      { nodeId: 'constraint', answer: '无约束' },
+    ]);
+    expect(parsed.ambiguous).toEqual([]);
+  });
+
+  it('维度式：用「维度：答案」在句内一次回答多项', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '目标：改单文件。约束：无约束。');
+    expect(parsed.assigned).toEqual([
+      { nodeId: 'goal', answer: '改单文件' },
+      { nodeId: 'constraint', answer: '无约束' },
+    ]);
+  });
+
+  it('单段纯文本回复保持历史语义：落到 frontier[0]', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '就按最省事的来');
+    expect(parsed.assigned).toEqual([{ nodeId: 'goal', answer: '就按最省事的来' }]);
+  });
+
+  it('段数与前沿数一致且均无目标：按位置一一对应', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '改单文件\n无约束\n代码变更\n测试通过');
+    expect(parsed.assigned).toEqual([
+      { nodeId: 'goal', answer: '改单文件' },
+      { nodeId: 'constraint', answer: '无约束' },
+      { nodeId: 'deliverable', answer: '代码变更' },
+      { nodeId: 'acceptance', answer: '测试通过' },
+    ]);
+  });
+
+  it('同一节点被两段命中：第二段进入 ambiguous，禁止 last-wins', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '1. 改单文件；1. 跨模块');
+    expect(parsed.assigned).toEqual([{ nodeId: 'goal', answer: '改单文件' }]);
+    expect(parsed.ambiguous).toEqual([{ segment: '1. 跨模块', reason: 'duplicate-target' }]);
+  });
+
+  it('多段均无目标且段数不足：不猜，全部标记 no-target', () => {
+    const parsed = parseMultiGrillReply(fourNodes(), '第一点\n第二点');
+    expect(parsed.assigned).toEqual([]);
+    expect(parsed.ambiguous.map((item) => item.reason)).toEqual(['no-target', 'no-target']);
+  });
+
+  it('共享选项标签且段数与前沿数一致：不按位置硬塞，标记 shared-label', () => {
+    const frontier = [
+      optionNode('a', 'goal', ['是', '否']),
+      optionNode('b', 'constraint', ['是', '否']),
+    ];
+    const parsed = parseMultiGrillReply(frontier, '是；是');
+    expect(parsed.assigned).toEqual([]);
+    expect(parsed.ambiguous.map((item) => item.reason)).toEqual(['shared-label', 'shared-label']);
+  });
+
+  it('序号越界不落位，标记 no-target', () => {
+    const frontier = [
+      optionNode('a', 'goal', ['是', '否']),
+      optionNode('b', 'constraint', ['是', '否']),
+    ];
+    const parsed = parseMultiGrillReply(frontier, '9. 越界');
+    expect(parsed.assigned).toEqual([]);
+    expect(parsed.ambiguous).toEqual([{ segment: '9. 越界', reason: 'no-target' }]);
   });
 });

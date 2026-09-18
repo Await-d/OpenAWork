@@ -72,11 +72,19 @@ describe('models-dev single-flight fetch', () => {
 
   it('a failed fetch releases the in-flight slot so the next refresh retries', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    let call = 0;
+    let apiCalls = 0;
     const payload = { openai: { id: 'openai', name: 'OpenAI', models: {} } };
-    const fetchSpy = vi.fn((_url: string, _init?: RequestInit): Promise<Response> => {
-      call += 1;
-      if (call === 1) return Promise.reject(new Error('boom'));
+    const fetchSpy = vi.fn((url: string, _init?: RequestInit): Promise<Response> => {
+      if (!String(url).endsWith('/api.json')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      apiCalls += 1;
+      if (apiCalls === 1) return Promise.reject(new Error('boom'));
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -90,12 +98,12 @@ describe('models-dev single-flight fetch', () => {
 
     // First refresh fails and must not wedge the in-flight slot.
     await mod.refresh();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(apiCalls).toBe(1);
     expect(mod.getSync()).toBeNull();
 
     // Second refresh succeeds because the slot was released in finally.
     await mod.refresh();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(apiCalls).toBe(2);
     expect(mod.getSync()).toEqual(payload);
     expect(warnSpy).toHaveBeenCalled();
   });
