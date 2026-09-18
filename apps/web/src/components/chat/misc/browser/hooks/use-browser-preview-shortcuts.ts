@@ -24,12 +24,7 @@ import { useEffect } from 'react';
 import type { RefObject } from 'react';
 
 export type BrowserPreviewShortcutId =
-  | 'reload'
-  | 'toggleConsole'
-  | 'zoomIn'
-  | 'zoomOut'
-  | 'zoomReset'
-  | 'cycleDevicePreset';
+  'reload' | 'toggleConsole' | 'zoomIn' | 'zoomOut' | 'zoomReset' | 'cycleDevicePreset';
 
 export interface BrowserPreviewShortcutBinding {
   /** `KeyboardEvent.key` 归一化后的小写值。 */
@@ -239,16 +234,7 @@ export function useBrowserPreviewShortcuts(
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [
-    hidden,
-    surfaceRef,
-    reload,
-    toggleConsole,
-    zoomIn,
-    zoomOut,
-    zoomReset,
-    cycleDevicePreset,
-  ]);
+  }, [hidden, surfaceRef, reload, toggleConsole, zoomIn, zoomOut, zoomReset, cycleDevicePreset]);
 
   const active = BROWSER_PREVIEW_SHORTCUTS.filter(
     (shortcut) => resolveAction(shortcut.id) !== undefined,

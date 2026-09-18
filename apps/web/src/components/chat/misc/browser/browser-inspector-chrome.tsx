@@ -9,7 +9,11 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { INSPECTOR_CHIP_TONE, INSPECTOR_TOKEN, mergeInspectorShadows } from './browser-inspector-tokens.js';
+import {
+  INSPECTOR_CHIP_TONE,
+  INSPECTOR_TOKEN,
+  mergeInspectorShadows,
+} from './browser-inspector-tokens.js';
 import type { InspectorChipTone } from './browser-inspector-model.js';
 
 // ── 按钮 ───────────────────────────────────────────────────────────────

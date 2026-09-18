@@ -122,7 +122,9 @@ export function buildConsoleStackView(
   const limit = maxFrames > 0 ? maxFrames : frames.length;
   const views = frames
     .slice(0, limit)
-    .map((frame, index) => toStackFrameView(frame, useResolved ? raw[index] : undefined, index + 1));
+    .map((frame, index) =>
+      toStackFrameView(frame, useResolved ? raw[index] : undefined, index + 1),
+    );
 
   return {
     frames: views,

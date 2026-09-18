@@ -8,8 +8,9 @@
  * 可用性、订阅与逐事件映射；抽出来后宿主只需要透传几个 prop。
  */
 
-import { useEffect, useRef } from 'react';
-import type { BrowserLiveStatus } from '@openAwork/web-client';
+import { useEffect, useMemo, useRef } from 'react';
+import { createBrowserLiveClient } from '@openAwork/web-client';
+import type { BrowserLiveClient, BrowserLiveStatus } from '@openAwork/web-client';
 import type {
   BrowserLiveConsolePayload,
   BrowserLiveErrorPayload,
@@ -24,6 +25,9 @@ import {
 } from '../live-console-bridge.js';
 import { useBrowserLiveSession } from './use-browser-live-session.js';
 import type { BrowserLiveSession } from './use-browser-live-session.js';
+import { useBrowserInstall } from './use-browser-install.js';
+import type { BrowserInstallController } from './use-browser-install.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 export interface UseBrowserLiveWiringOptions {
   /** 非 Tauri（网页端）才启用实时通道；Tauri 保留原生 webview 分支。 */
@@ -39,6 +43,8 @@ export interface BrowserLiveWiring {
   availability: BrowserLiveStatus | null;
   /** 网关声明不可用时的中文可操作提示；宿主负责渲染（可用时为 null）。 */
   unavailableHint: string | null;
+  /** 应用内安装调试浏览器的状态机（含入口可用性）。 */
+  install: BrowserInstallController;
 }
 
 export function useBrowserLiveWiring({
@@ -48,8 +54,28 @@ export function useBrowserLiveWiring({
 }: UseBrowserLiveWiringOptions): BrowserLiveWiring {
   const session = useBrowserLiveSession({ enabled });
   const { subscribe } = session;
+  const token = useAuthStore((state) => state.accessToken);
+  const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   /** 控制台行 id 计数器：与 iframe 注入脚本的 id 形状一样，只在宿主内唯一即可。 */
   const sequenceRef = useRef(0);
+
+  // 惰性客户端：只有真正点「安装」时才需要，避免仅渲染提示条也构造连接器。
+  const lazyClientRef = useRef<{ baseUrl: string; client: BrowserLiveClient } | null>(null);
+  const installClient = useMemo((): BrowserLiveClient | null => {
+    if (!enabled || !token) return null;
+    if (lazyClientRef.current?.baseUrl !== gatewayUrl) {
+      lazyClientRef.current = { baseUrl: gatewayUrl, client: createBrowserLiveClient(gatewayUrl) };
+    }
+    return lazyClientRef.current.client;
+  }, [enabled, token, gatewayUrl]);
+
+  const availability = session.availability;
+  const install = useBrowserInstall({
+    installable: availability?.installable === true,
+    client: installClient,
+    token,
+    onInstalled: session.recheckAvailability,
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -90,5 +116,6 @@ export function useBrowserLiveWiring({
     session,
     availability: session.availability,
     unavailableHint: session.unavailableHint,
+    install,
   };
 }

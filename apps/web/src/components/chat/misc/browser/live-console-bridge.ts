@@ -10,10 +10,7 @@
  * 脚本上报路径，两条来源因此不会出现「一边合并、一边拆行」的漂移。
  */
 
-import type {
-  BrowserLiveNetworkPayload,
-  BrowserLiveNodePayload,
-} from '@openAwork/shared';
+import type { BrowserLiveNetworkPayload, BrowserLiveNodePayload } from '@openAwork/shared';
 
 import { formatNetworkEntryMessage, mergeNetworkIntoEntry } from './browser-console-format.js';
 import type {
@@ -142,9 +139,7 @@ export function consolePayloadToEntry(
 ): ConsoleEntry {
   const { timestamp } = payload;
   const usableTimestamp =
-    typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0
-      ? timestamp
-      : now;
+    typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0 ? timestamp : now;
 
   const entry: ConsoleEntry = {
     id: `${LIVE_CONSOLE_ID_PREFIX}${sequence}`,
@@ -204,7 +199,8 @@ export function networkPayloadToExchange(payload: BrowserLiveNetworkPayload): Ne
   const exchange: NetworkExchange = {
     networkId: typeof payload.requestId === 'string' ? payload.requestId : '',
     source: 'fetch',
-    method: typeof payload.method === 'string' && payload.method.length > 0 ? payload.method : 'GET',
+    method:
+      typeof payload.method === 'string' && payload.method.length > 0 ? payload.method : 'GET',
     url: typeof payload.url === 'string' ? payload.url : '',
   };
 
@@ -262,9 +258,7 @@ export function upsertNetworkEntry(
   }
 
   const base =
-    options.limit === undefined || options.limit <= 0
-      ? entries
-      : entries.slice(-options.limit);
+    options.limit === undefined || options.limit <= 0 ? entries : entries.slice(-options.limit);
 
   return [
     ...base,

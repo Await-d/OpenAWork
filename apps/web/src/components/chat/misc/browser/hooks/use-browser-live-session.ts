@@ -64,6 +64,8 @@ export interface BrowserLiveSession {
   send: (message: BrowserLiveClientMessage) => void;
   screenshot: (options?: { fullPage?: boolean }) => Promise<BrowserLiveScreenshotFrame | null>;
   close: () => void;
+  /** 重新探测网关可用性（安装调试浏览器成功后调用，无需刷新页面即可接入实时引擎）。 */
+  recheckAvailability: () => void;
   /** 订阅下行信封；返回取消订阅函数。多个消费者（帧渲染 / 控制台桥接）互不影响。 */
   subscribe: (listener: (envelope: BrowserLiveEnvelope) => void) => () => void;
 }
@@ -103,9 +105,9 @@ export function describeBrowserLiveUnavailable(reason: string | null | undefined
   }
   switch (reason) {
     case 'browser-missing':
-      return '未检测到可用的调试浏览器：安装 Chrome/Edge 即可直接使用，或执行 npx playwright install chromium；当前已自动切换为 iframe 预览。';
+      return '未检测到可用的调试浏览器：可点击下方「安装调试浏览器」自动安装，或安装 Chrome/Edge，也可执行 npx playwright install chromium；当前已自动切换为 iframe 预览。';
     case 'browser-outdated':
-      return '调试浏览器版本与当前 Playwright 不匹配，请重新执行 npx playwright install chromium；当前已自动切换为 iframe 预览。';
+      return '调试浏览器版本与当前 Playwright 不匹配：可点击下方「安装调试浏览器」重新安装，也可重新执行 npx playwright install chromium；当前已自动切换为 iframe 预览。';
     case 'probe-failed':
       return '调试浏览器检测失败，请稍后重试或确认 Playwright 浏览器安装完整；当前已自动切换为 iframe 预览。';
     case BROWSER_LIVE_DISABLED_REASON:
@@ -138,6 +140,8 @@ export function useBrowserLiveSession({
   const [availability, setAvailability] = useState<BrowserLiveStatus | null>(null);
   const [phase, setPhase] = useState<BrowserLivePhase>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
+  /** 递增即强制重新探测可用性（安装完成后接入实时引擎，无需刷新页面）。 */
+  const [availabilityNonce, setAvailabilityNonce] = useState(0);
 
   const listenersRef = useRef(new Set<(envelope: BrowserLiveEnvelope) => void>());
   const connectionRef = useRef<BrowserLiveConnection | null>(null);
@@ -185,7 +189,7 @@ export function useBrowserLiveSession({
       disposed = true;
       controller.abort();
     };
-  }, [client, token]);
+  }, [client, token, availabilityNonce]);
 
   const available = availability?.available === true;
   const unavailableHint = useMemo(
@@ -402,15 +406,42 @@ export function useBrowserLiveSession({
     setPhase('idle');
   }, []);
 
-  const subscribe = useCallback((listener: (envelope: BrowserLiveEnvelope) => void): (() => void) => {
-    listenersRef.current.add(listener);
-    return () => {
-      listenersRef.current.delete(listener);
-    };
+  const subscribe = useCallback(
+    (listener: (envelope: BrowserLiveEnvelope) => void): (() => void) => {
+      listenersRef.current.add(listener);
+      return () => {
+        listenersRef.current.delete(listener);
+      };
+    },
+    [],
+  );
+
+  const recheckAvailability = useCallback((): void => {
+    setAvailabilityNonce((value) => value + 1);
   }, []);
 
   return useMemo(
-    () => ({ availability, phase, lastError, unavailableHint, send, screenshot, close, subscribe }),
-    [availability, phase, lastError, unavailableHint, send, screenshot, close, subscribe],
+    () => ({
+      availability,
+      phase,
+      lastError,
+      unavailableHint,
+      send,
+      screenshot,
+      close,
+      recheckAvailability,
+      subscribe,
+    }),
+    [
+      availability,
+      phase,
+      lastError,
+      unavailableHint,
+      send,
+      screenshot,
+      close,
+      recheckAvailability,
+      subscribe,
+    ],
   );
 }

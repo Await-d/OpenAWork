@@ -96,7 +96,11 @@ export function InspectorNodeDetailPane({
           />
         ) : null}
         {detail.selectorAmbiguous ? (
-          <InspectorChip label="选择器可能不唯一" tone="warning" testId="inspector-selector-warning" />
+          <InspectorChip
+            label="选择器可能不唯一"
+            tone="warning"
+            testId="inspector-selector-warning"
+          />
         ) : null}
       </div>
 

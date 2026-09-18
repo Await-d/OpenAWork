@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BuiltInBrowser } from '../../../components/chat/misc/BuiltInBrowser.js';
+import { normalizeBrowserPreviewInput } from '../../../components/chat/misc/browser/browser-url.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { resolveChatUiWorkspaceScope, resolveWorkspaceKey } from '../hooks/use-chat-ui-state.js';
 import './FusionSessionSidePanel.css';
@@ -7,15 +8,6 @@ import './FusionSessionSidePanel.css';
 export interface FusionBrowserTabProps {
   readonly currentSessionId: string | null;
   readonly effectiveWorkingDirectory: string | null;
-}
-
-/** 用户手输的地址补全 scheme；空输入返回 null（不写 store）。 */
-function normalizeBrowserPreviewInput(value: string): string | null {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
 }
 
 /**
@@ -63,13 +55,6 @@ export function FusionBrowserTab({
 
   return (
     <div className="fusion-side-panel__scroll">
-      <div className="fusion-side-panel__section-head">
-        <div>
-          <div className="fusion-side-panel__eyebrow">浏览器预览</div>
-          <div className="fusion-side-panel__title">在停靠面板内打开并调试预览页面</div>
-        </div>
-      </div>
-
       {browserPreviewUrl !== null ? (
         ownsBrowserSurface ? (
           <div className="fusion-side-panel__browser-host" data-testid="fusion-browser-tab-host">

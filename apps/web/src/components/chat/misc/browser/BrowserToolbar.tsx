@@ -23,6 +23,8 @@ interface BrowserToolbarProps {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onAddTab: () => void;
+  /** 标签右键：透传给 tab bar，由宿主渲染菜单。 */
+  onTabContextMenu?: (tabId: string, x: number, y: number) => void;
 
   canGoBack: boolean;
   canGoForward: boolean;
@@ -95,6 +97,7 @@ export function BrowserToolbar({
   onSelectTab,
   onCloseTab,
   onAddTab,
+  onTabContextMenu,
   canGoBack,
   canGoForward,
   onBack,
@@ -143,6 +146,7 @@ export function BrowserToolbar({
         onCloseTab={onCloseTab}
         onAddTab={onAddTab}
         canAddTab={tabs.length < TAB_LIMIT}
+        onTabContextMenu={onTabContextMenu}
       />
 
       {/* Address bar */}
@@ -658,10 +662,7 @@ function DevicePreviewBar({
       <span style={DEVICE_BAR_LABEL_STYLE}>设备</span>
       <select
         aria-label="设备预设"
-        title={browserPreviewShortcutTitle(
-          '设备预设：模拟目标设备的视口尺寸',
-          'cycleDevicePreset',
-        )}
+        title={browserPreviewShortcutTitle('设备预设：模拟目标设备的视口尺寸', 'cycleDevicePreset')}
         value={preset?.id ?? DEFAULT_DEVICE_PRESET_ID}
         onChange={(event) => onDevicePresetChange(event.target.value)}
         onMouseEnter={() => setPresetHovered(true)}

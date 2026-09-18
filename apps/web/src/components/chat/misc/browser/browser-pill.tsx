@@ -23,7 +23,8 @@ const ACCENT_SUBTLE = 'var(--accent-subtle, color-mix(in oklch, currentColor 10%
 const HOVER_BG = 'var(--bg-hover, color-mix(in oklch, currentColor 10%, transparent))';
 const PRESSED_BG = 'var(--bg-active, color-mix(in oklch, currentColor 14%, transparent))';
 const BORDER_SUBTLE = 'var(--border-subtle, color-mix(in oklch, currentColor 14%, transparent))';
-const BORDER_EMPHASIS = 'var(--border-emphasis, color-mix(in oklch, currentColor 32%, transparent))';
+const BORDER_EMPHASIS =
+  'var(--border-emphasis, color-mix(in oklch, currentColor 32%, transparent))';
 const FG_DEFAULT = 'var(--fg-default, currentColor)';
 const FG_MUTED = 'var(--fg-muted, color-mix(in oklch, currentColor 70%, transparent))';
 

@@ -155,7 +155,11 @@ export function InspectorTreeView({
   };
 
   const activeRowId =
-    indexOf(activeId) >= 0 ? activeId : indexOf(selectedId) >= 0 ? selectedId : items[0]?.id ?? null;
+    indexOf(activeId) >= 0
+      ? activeId
+      : indexOf(selectedId) >= 0
+        ? selectedId
+        : (items[0]?.id ?? null);
 
   return (
     <div

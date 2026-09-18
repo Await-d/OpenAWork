@@ -103,9 +103,7 @@ export interface WaterfallLayout {
  *   1%，保证仍然可见；
  * - 百分比保留两位小数，同输入永远得到同输出。
  */
-export function computeWaterfallLayout(
-  items: readonly WaterfallLayoutInput[],
-): WaterfallLayout {
+export function computeWaterfallLayout(items: readonly WaterfallLayoutInput[]): WaterfallLayout {
   if (items.length === 0) return { items: [], spanMs: 0 };
 
   let start = Number.POSITIVE_INFINITY;
@@ -720,7 +718,10 @@ function WaterfallDetail({
           marginTop: 8,
         }}
       >
-        <HeaderBlock title="请求头（已脱敏）" text={formatHeaderLines(network.requestHeaders) || '无'} />
+        <HeaderBlock
+          title="请求头（已脱敏）"
+          text={formatHeaderLines(network.requestHeaders) || '无'}
+        />
         <HeaderBlock
           title="响应头（已脱敏）"
           text={formatHeaderLines(network.responseHeaders) || '无'}
@@ -903,7 +904,14 @@ function WaterfallSkeleton() {
       data-testid="waterfall-loading"
       aria-busy="true"
       role="status"
-      style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 12, flex: 1, minHeight: 0 }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: 12,
+        flex: 1,
+        minHeight: 0,
+      }}
     >
       <span style={{ fontSize: 10, color: WF_TOKEN.textMuted }}>正在等待网络事件…</span>
       {[0, 1, 2, 3].map((index) => (

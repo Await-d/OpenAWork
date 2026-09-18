@@ -75,9 +75,7 @@ export function ConsoleStackSection({ view, onCopyFrame }: ConsoleStackSectionPr
           height: 18,
           padding: '0 8px',
           borderRadius: 6,
-          border: `1px solid ${
-            hovered || pressed ? TOKEN.borderEmphasis : TOKEN.borderSubtle
-          }`,
+          border: `1px solid ${hovered || pressed ? TOKEN.borderEmphasis : TOKEN.borderSubtle}`,
           background: pressed ? TOKEN.pressedBg : hovered ? TOKEN.hoverBg : 'transparent',
           color: hovered || pressed ? TOKEN.textDefault : TOKEN.textMuted,
           fontFamily: 'inherit',

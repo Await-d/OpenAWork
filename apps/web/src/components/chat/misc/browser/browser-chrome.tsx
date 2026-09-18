@@ -18,8 +18,11 @@ export function BrowserTabBar(props: {
   onCloseTab: (id: string) => void;
   onAddTab: () => void;
   canAddTab: boolean;
+  /** 标签右键：由宿主决定菜单内容与落点（坐标来自鼠标事件）。 */
+  onTabContextMenu?: (tabId: string, x: number, y: number) => void;
 }) {
-  const { tabs, activeTabId, onSelectTab, onCloseTab, onAddTab, canAddTab } = props;
+  const { tabs, activeTabId, onSelectTab, onCloseTab, onAddTab, canAddTab, onTabContextMenu } =
+    props;
   return (
     <div
       data-testid="browser-tab-bar"
@@ -48,6 +51,11 @@ export function BrowserTabBar(props: {
                 e.preventDefault();
                 onCloseTab(tab.id);
               }
+            }}
+            onContextMenu={(e) => {
+              if (!onTabContextMenu) return;
+              e.preventDefault();
+              onTabContextMenu(tab.id, e.clientX, e.clientY);
             }}
             title={tab.url}
             style={{

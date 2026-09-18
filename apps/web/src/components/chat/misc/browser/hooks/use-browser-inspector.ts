@@ -20,7 +20,12 @@ import type {
   BrowserLiveNodePayload,
 } from '@openAwork/shared';
 
-import { clampInspectorDepth, toA11yPayload, toDomPayload, toNodePayload } from '../browser-inspector-model.js';
+import {
+  clampInspectorDepth,
+  toA11yPayload,
+  toDomPayload,
+  toNodePayload,
+} from '../browser-inspector-model.js';
 import type { BrowserInspectorLoadStatus } from '../browser-inspector-model.js';
 import type { BrowserLiveSession } from './use-browser-live-session.js';
 

@@ -96,7 +96,9 @@ const DOM_LABEL_CLASS_LIMIT = 3;
  *   这是比静默省略更诚实的表达，也解释了为什么该行不能展开。
  */
 export function buildDomNodeLabelParts(node: BrowserLiveDomNode): InspectorLabelPart[] {
-  const parts: InspectorLabelPart[] = [{ text: `<${normalizeNodeName(node.nodeName)}`, tone: 'tag' }];
+  const parts: InspectorLabelPart[] = [
+    { text: `<${normalizeNodeName(node.nodeName)}`, tone: 'tag' },
+  ];
 
   const id = node.attributes['id'];
   if (typeof id === 'string' && id.length > 0) {
@@ -689,9 +691,9 @@ export const INSPECTOR_STYLE_DEFAULT_VALUES: Readonly<Record<string, readonly st
   'shape-rendering': ['auto'],
   'image-rendering': ['auto'],
   'backface-visibility': ['visible'],
-  'perspective': ['none'],
+  perspective: ['none'],
   'transform-style': ['flat'],
-  'contain': ['none'],
+  contain: ['none'],
   'container-type': ['normal'],
 };
 
@@ -866,7 +868,10 @@ export function toDomPayload(value: unknown): BrowserLiveDomPayload | null {
   return { root: value['root'], truncated: value['truncated'] };
 }
 
-function isA11yNodeLike(value: unknown, budget: { remaining: number }): value is BrowserLiveA11yNode {
+function isA11yNodeLike(
+  value: unknown,
+  budget: { remaining: number },
+): value is BrowserLiveA11yNode {
   if (!isRecord(value)) return false;
   if (typeof value['role'] !== 'string' || typeof value['name'] !== 'string') return false;
   if (typeof value['ignored'] !== 'boolean') return false;

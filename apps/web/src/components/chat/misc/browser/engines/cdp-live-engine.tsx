@@ -768,8 +768,7 @@ export function CdpLiveEngine({
             height: 6,
             borderRadius: 'var(--radius-pill)',
             background: chip.dot,
-            boxShadow:
-              session.phase === 'connected' ? '0 0 6px var(--accent)' : 'none',
+            boxShadow: session.phase === 'connected' ? '0 0 6px var(--accent)' : 'none',
           }}
         />
         <span style={{ color: chip.color }}>{chip.label}</span>

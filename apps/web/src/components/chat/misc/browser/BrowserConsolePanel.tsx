@@ -519,9 +519,7 @@ function ConsoleEntryRow({ entry }: { entry: ConsoleEntry }) {
           />
         </div>
       ) : null}
-      {stackView !== null ? (
-        <ConsoleStackSection view={stackView} onCopyFrame={runCopy} />
-      ) : null}
+      {stackView !== null ? <ConsoleStackSection view={stackView} onCopyFrame={runCopy} /> : null}
     </div>
   );
 }

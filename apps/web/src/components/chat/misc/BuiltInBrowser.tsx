@@ -8,11 +8,8 @@ import React, {
 } from 'react';
 import { BrowserConsolePanel } from './browser/BrowserConsolePanel.js';
 import { BrowserContentArea } from './browser/engines/browser-content-area.js';
-import { insertTextIntoComposer } from './browser/browser-clipboard.js';
-import {
-  isPendingNetworkPayload,
-  parseNetworkPayload,
-} from './browser/browser-console-format.js';
+import { copyTextToClipboard, insertTextIntoComposer } from './browser/browser-clipboard.js';
+import { isPendingNetworkPayload, parseNetworkPayload } from './browser/browser-console-format.js';
 import { upsertNetworkEntry } from './browser/live-console-bridge.js';
 import type {
   ConsoleEntry,
@@ -34,7 +31,9 @@ import {
   type BrowserTab,
 } from './browser/browser-storage.js';
 import { BrowserShortcutHints } from './browser/browser-shortcut-hints.js';
+import { BrowserTabContextMenu } from './browser/BrowserTabContextMenu.js';
 import { BrowserToolbar } from './browser/BrowserToolbar.js';
+import { InstallBrowserProgress } from './browser/InstallBrowserProgress.js';
 import { DEFAULT_DEVICE_PRESET_ID } from './browser/device-presets.js';
 import { useEngineCapability } from './browser/hooks/use-engine-capability.js';
 import { useBrowserLiveWiring } from './browser/hooks/use-browser-live-wiring.js';
@@ -290,6 +289,37 @@ export function BuiltInBrowser({
     [activeTabId],
   );
 
+  /** 标签右键菜单：只保留命中的标签，其余全部关闭。 */
+  const closeOtherTabs = useCallback((tabId: string) => {
+    setTabs((prev) => {
+      const kept = prev.find((tab) => tab.id === tabId);
+      if (!kept || prev.length <= 1) {
+        return prev;
+      }
+      setActiveTabId(kept.id);
+      return [kept];
+    });
+  }, []);
+
+  /** 标签右键菜单：关闭命中标签右侧的全部标签。 */
+  const closeTabsToRight = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const index = prev.findIndex((tab) => tab.id === tabId);
+        if (index < 0 || index >= prev.length - 1) {
+          return prev;
+        }
+        const next = prev.slice(0, index + 1);
+        // 被关掉的可能是当前激活标签：回落到命中的标签，避免 iframe 仍指向已删除的 tab。
+        if (!next.some((tab) => tab.id === activeTabId)) {
+          setActiveTabId(tabId);
+        }
+        return next;
+      });
+    },
+    [activeTabId],
+  );
+
   // 外部 previewUrl 注入 — 仅当 previewUrl 是"新值"时才 navigate(刷新时 ChatPage
   // 会重新把 store 中持久化的 url 作为 previewUrl 传入,但此时 tabs 已经从
   // localStorage 恢复完毕,不应被 previewUrl 强制 navigate 覆盖。
@@ -324,6 +354,10 @@ export function BuiltInBrowser({
   // ── Bookmarks ───────────────────────────────────────────────────────
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => loadBookmarks());
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
+
+  // 标签栏右键菜单：坐标来自 contextmenu 事件，菜单本体 portal 到 body（tab bar 会裁剪内联菜单）。
+  const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const tabMenuIndex = tabMenu ? tabs.findIndex((tab) => tab.id === tabMenu.tabId) : -1;
 
   useEffect(() => {
     saveBookmarks(bookmarks);
@@ -705,6 +739,7 @@ export function BuiltInBrowser({
         onSelectTab={setActiveTabId}
         onCloseTab={closeTab}
         onAddTab={() => openNewTab()}
+        onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y })}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
         onBack={goBack}
@@ -764,6 +799,7 @@ export function BuiltInBrowser({
           }}
         >
           {liveWiring.unavailableHint}
+          <InstallBrowserProgress controller={liveWiring.install} />
         </div>
       )}
 
@@ -822,6 +858,25 @@ export function BuiltInBrowser({
           }}
         />
       )}
+
+      {tabMenu && tabMenuIndex >= 0 ? (
+        <BrowserTabContextMenu
+          active={tabMenu.tabId === activeTabId}
+          index={tabMenuIndex}
+          tabCount={tabs.length}
+          x={tabMenu.x}
+          y={tabMenu.y}
+          onClose={() => setTabMenu(null)}
+          onReload={previewShortcuts.reload}
+          onCopyUrl={() => {
+            const target = tabs.find((tab) => tab.id === tabMenu.tabId);
+            if (target) void copyTextToClipboard(target.url);
+          }}
+          onCloseTab={() => closeTab(tabMenu.tabId)}
+          onCloseOtherTabs={() => closeOtherTabs(tabMenu.tabId)}
+          onCloseTabsToRight={() => closeTabsToRight(tabMenu.tabId)}
+        />
+      ) : null}
     </div>
   );
 }
