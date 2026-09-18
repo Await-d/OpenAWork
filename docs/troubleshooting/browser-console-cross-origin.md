@@ -87,13 +87,13 @@ iframeWindow.document.head.appendChild(script);
 
 ## 相关文件
 
-| 作用                 | 路径                                                                 |
-| -------------------- | -------------------------------------------------------------------- |
-| iframe 注入脚本      | `apps/web/src/components/chat/misc/browser/console-proxy.ts`          |
-| 控制台面板           | `apps/web/src/components/chat/misc/browser/BrowserConsolePanel.tsx`   |
-| 实时通道 → 控制台桥接 | `apps/web/src/components/chat/misc/browser/live-console-bridge.ts`   |
-| 实时会话 hook        | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts` |
-| 引擎能力矩阵         | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`    |
-| 网关 WS 路由         | `services/agent-gateway/src/routes/browser-live.ts`                   |
-| 会话管理器 + 开关     | `services/agent-gateway/src/browser-live/manager.ts`                  |
-| 浏览器可用性探测     | `packages/browser-automation/src/live-browser-availability.ts`        |
+| 作用                  | 路径                                                                          |
+| --------------------- | ----------------------------------------------------------------------------- |
+| iframe 注入脚本       | `apps/web/src/components/chat/misc/browser/console-proxy.ts`                  |
+| 控制台面板            | `apps/web/src/components/chat/misc/browser/BrowserConsolePanel.tsx`           |
+| 实时通道 → 控制台桥接 | `apps/web/src/components/chat/misc/browser/live-console-bridge.ts`            |
+| 实时会话 hook         | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts` |
+| 引擎能力矩阵          | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`    |
+| 网关 WS 路由          | `services/agent-gateway/src/routes/browser-live.ts`                           |
+| 会话管理器 + 开关     | `services/agent-gateway/src/browser-live/manager.ts`                          |
+| 浏览器可用性探测      | `packages/browser-automation/src/live-browser-availability.ts`                |

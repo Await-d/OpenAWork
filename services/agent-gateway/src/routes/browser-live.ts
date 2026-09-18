@@ -33,8 +33,14 @@ import {
   BROWSER_LIVE_DISABLED_MESSAGE,
   BROWSER_LIVE_UNAVAILABLE_MESSAGE,
   browserLiveManager,
+  isBrowserLiveRuntimeEnabled,
 } from '../browser-live/manager.js';
 import type { BrowserLiveHandle } from '../browser-live/manager.js';
+import {
+  BROWSER_INSTALL_CONFLICT_CODE,
+  BROWSER_INSTALL_CONFLICT_MESSAGE,
+  browserInstaller,
+} from '../browser-live/browser-installer.js';
 import { browserLiveHub, toNodePayload } from '../browser-live/hub.js';
 import type { BrowserLiveSink } from '../browser-live/hub.js';
 import { installWsHeartbeat } from './ws-heartbeat.js';
@@ -119,7 +125,10 @@ function buildEnvelope<TPayload>(
   return { ch, seq: 0, ts: Date.now(), payload };
 }
 
-function buildErrorEnvelope(code: string, message: string): BrowserLiveEnvelope<BrowserLiveErrorPayload> {
+function buildErrorEnvelope(
+  code: string,
+  message: string,
+): BrowserLiveEnvelope<BrowserLiveErrorPayload> {
   return buildEnvelope('error', { code, message });
 }
 
@@ -195,7 +204,7 @@ function parseInputMessage(value: JsonObject): BrowserLiveInputMessage | null {
       message.button = button;
     }
     if (value['clickCount'] !== undefined) {
-      message.clickCount = value['clickCount'] as number;
+      message.clickCount = value['clickCount'];
     }
     return message;
   }
@@ -239,16 +248,16 @@ function parseInputMessage(value: JsonObject): BrowserLiveInputMessage | null {
       type,
     };
     if (value['key'] !== undefined) {
-      message.key = value['key'] as string;
+      message.key = value['key'];
     }
     if (value['text'] !== undefined) {
-      message.text = value['text'] as string;
+      message.text = value['text'];
     }
     if (value['code'] !== undefined) {
-      message.code = value['code'] as string;
+      message.code = value['code'];
     }
     if (value['windowsVirtualKeyCode'] !== undefined) {
-      message.windowsVirtualKeyCode = value['windowsVirtualKeyCode'] as number;
+      message.windowsVirtualKeyCode = value['windowsVirtualKeyCode'];
     }
     return message;
   }
@@ -295,7 +304,7 @@ function parseControlMessage(value: JsonObject): BrowserLiveControlMessage | nul
       action: 'screenshot',
     };
     if (value['fullPage'] !== undefined) {
-      message.fullPage = value['fullPage'] as boolean;
+      message.fullPage = value['fullPage'];
     }
     return message;
   }
@@ -313,7 +322,7 @@ function parseControlMessage(value: JsonObject): BrowserLiveControlMessage | nul
       action: 'dom.tree',
     };
     if (value['depth'] !== undefined) {
-      message.depth = value['depth'] as number;
+      message.depth = value['depth'];
     }
     return message;
   }
@@ -366,13 +375,13 @@ export function parseBrowserLiveClientMessage(value: unknown): BrowserLiveClient
 
     const message: BrowserLiveDeviceMessage = { ch: 'device', width, height };
     if (value['deviceScaleFactor'] !== undefined) {
-      message.deviceScaleFactor = value['deviceScaleFactor'] as number;
+      message.deviceScaleFactor = value['deviceScaleFactor'];
     }
     if (value['mobile'] !== undefined) {
-      message.mobile = value['mobile'] as boolean;
+      message.mobile = value['mobile'];
     }
     if (value['userAgent'] !== undefined) {
-      message.userAgent = value['userAgent'] as string;
+      message.userAgent = value['userAgent'];
     }
     return message;
   }
@@ -516,7 +525,10 @@ async function handleControlMessage(input: {
         safeSendEnvelope(socket, buildEnvelope('node', payload));
       } catch (error) {
         void error;
-        safeSendEnvelope(socket, buildErrorEnvelope('NODE_STYLES_FAILED', '获取元素计算样式失败。'));
+        safeSendEnvelope(
+          socket,
+          buildErrorEnvelope('NODE_STYLES_FAILED', '获取元素计算样式失败。'),
+        );
       }
       return;
     }
@@ -725,6 +737,61 @@ export async function browserLiveRoutes(app: FastifyInstance): Promise<void> {
         });
       } catch (error) {
         return failBrowserLiveRoute(request, reply, step, '获取浏览器实时预览截图', error);
+      }
+    },
+  );
+
+  app.post(
+    '/browser-live/install-browser',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'browser-live.install-browser');
+      if (!isBrowserLiveRuntimeEnabled()) {
+        step.fail('browser_live_disabled');
+        return reply.status(503).send({
+          error: '当前运行环境未启用浏览器实时预览。',
+          code: 'browser_live_disabled',
+        });
+      }
+
+      try {
+        const result = await browserInstaller.install();
+        if (result.started) {
+          step.succeed(undefined, { state: result.status.state });
+          return reply.status(202).send(result.status);
+        }
+        // 未启动且原因不是「已在运行」——CLI 缺席等：如实回 503。
+        if (result.status.state !== 'running') {
+          step.fail('browser_live_unavailable');
+          return reply.status(503).send({
+            error: result.status.error ?? '当前环境无法安装调试浏览器。',
+            code: 'browser_live_unavailable',
+            install: result.status,
+          });
+        }
+        step.fail(BROWSER_INSTALL_CONFLICT_CODE);
+        return reply.status(409).send({
+          error: BROWSER_INSTALL_CONFLICT_MESSAGE,
+          code: BROWSER_INSTALL_CONFLICT_CODE,
+          install: result.status,
+        });
+      } catch (error) {
+        return failBrowserLiveRoute(request, reply, step, '安装调试浏览器', error);
+      }
+    },
+  );
+
+  app.get(
+    '/browser-live/install-browser/status',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'browser-live.install-browser.status');
+      try {
+        const status = browserInstaller.status();
+        step.succeed(undefined, { state: status.state });
+        return reply.send(status);
+      } catch (error) {
+        return failBrowserLiveRoute(request, reply, step, '读取调试浏览器安装状态', error);
       }
     },
   );

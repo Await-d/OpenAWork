@@ -121,10 +121,7 @@ const EMPTY_SYSTEM_BROWSER_PATHS: SystemBrowserCandidatePaths = {
  * 环境变量覆盖键，顺序即优先级：本产品专用覆盖优先于通用约定。
  * 两者都只是「优先尝试」，任一不可用都继续走正常候选。
  */
-export const BROWSER_PATH_OVERRIDE_ENV_KEYS = [
-  'OPENAWORK_BROWSER_PATH',
-  'CHROME_PATH',
-] as const;
+export const BROWSER_PATH_OVERRIDE_ENV_KEYS = ['OPENAWORK_BROWSER_PATH', 'CHROME_PATH'] as const;
 
 /** PATH 上按浏览器家族搜索的可执行文件名（同一家族内按此顺序尝试）。 */
 const PATH_BROWSER_EXECUTABLE_NAMES: readonly {
@@ -306,7 +303,10 @@ export function resolveSystemBrowserCandidatePaths(
       return {
         chrome: [
           ...macOSAppExecutables(homeDir, 'Google Chrome.app/Contents/MacOS/Google Chrome'),
-          ...macOSAppExecutables(homeDir, 'Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta'),
+          ...macOSAppExecutables(
+            homeDir,
+            'Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
+          ),
           ...macOSAppExecutables(homeDir, 'Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev'),
           ...macOSAppExecutables(
             homeDir,
@@ -315,10 +315,7 @@ export function resolveSystemBrowserCandidatePaths(
         ],
         chromium: macOSAppExecutables(homeDir, 'Chromium.app/Contents/MacOS/Chromium'),
         edge: macOSAppExecutables(homeDir, 'Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
-        brave: macOSAppExecutables(
-          homeDir,
-          'Brave Browser.app/Contents/MacOS/Brave Browser',
-        ),
+        brave: macOSAppExecutables(homeDir, 'Brave Browser.app/Contents/MacOS/Brave Browser'),
         vivaldi: macOSAppExecutables(homeDir, 'Vivaldi.app/Contents/MacOS/Vivaldi'),
         opera: macOSAppExecutables(homeDir, 'Opera.app/Contents/MacOS/Opera'),
       };
@@ -332,42 +329,23 @@ export function resolveSystemBrowserCandidatePaths(
       return {
         chrome: [
           ...windowsInstallPaths(allRoots, ['Google', 'Chrome', 'Application', 'chrome.exe']),
-          ...windowsInstallPaths(allRoots, [
-            'Google',
-            'Chrome Beta',
-            'Application',
-            'chrome.exe',
-          ]),
+          ...windowsInstallPaths(allRoots, ['Google', 'Chrome Beta', 'Application', 'chrome.exe']),
           ...windowsInstallPaths(allRoots, ['Google', 'Chrome Dev', 'Application', 'chrome.exe']),
           // Canary 只做 per-user 安装，目录名为 `Chrome SxS`。
-          ...windowsInstallPaths([localAppData], [
-            'Google',
-            'Chrome SxS',
-            'Application',
-            'chrome.exe',
-          ]),
+          ...windowsInstallPaths(
+            [localAppData],
+            ['Google', 'Chrome SxS', 'Application', 'chrome.exe'],
+          ),
         ],
         chromium: windowsInstallPaths(allRoots, ['Chromium', 'Application', 'chrome.exe']),
         edge: [
           ...windowsInstallPaths(allRoots, ['Microsoft', 'Edge', 'Application', 'msedge.exe']),
-          ...windowsInstallPaths(allRoots, [
-            'Microsoft',
-            'Edge Beta',
-            'Application',
-            'msedge.exe',
-          ]),
-          ...windowsInstallPaths(allRoots, [
-            'Microsoft',
-            'Edge Dev',
-            'Application',
-            'msedge.exe',
-          ]),
-          ...windowsInstallPaths([localAppData], [
-            'Microsoft',
-            'Edge SxS',
-            'Application',
-            'msedge.exe',
-          ]),
+          ...windowsInstallPaths(allRoots, ['Microsoft', 'Edge Beta', 'Application', 'msedge.exe']),
+          ...windowsInstallPaths(allRoots, ['Microsoft', 'Edge Dev', 'Application', 'msedge.exe']),
+          ...windowsInstallPaths(
+            [localAppData],
+            ['Microsoft', 'Edge SxS', 'Application', 'msedge.exe'],
+          ),
         ],
         brave: windowsInstallPaths(allRoots, [
           'BraveSoftware',

@@ -38,11 +38,7 @@ import {
   BROWSER_LIVE_DOM_MAX_NODES,
 } from './live-session-types.js';
 import { ScreencastConvergence, readJpegDimensions } from './screencast-convergence.js';
-import {
-  resolveStackFrames,
-  type RawStackFrame,
-  type ResolvedStackFrame,
-} from './source-map-resolver.js';
+import { resolveStackFrames, type RawStackFrame } from './source-map-resolver.js';
 
 const SENSITIVE_HEADERS = new Set([
   'authorization',
@@ -1029,15 +1025,20 @@ export class BrowserLiveSession {
     try {
       for (;;) {
         const consoles = this.pendingConsoleEvents.splice(0, this.pendingConsoleEvents.length);
-        const pageErrors = this.pendingPageErrorEvents.splice(0, this.pendingPageErrorEvents.length);
+        const pageErrors = this.pendingPageErrorEvents.splice(
+          0,
+          this.pendingPageErrorEvents.length,
+        );
         if (consoles.length === 0 && pageErrors.length === 0) {
           return;
         }
 
         // 从队首按顺序关联；一旦某条尚未拿到 CDP 样本，就把它及其后的全部挂起，
         // 保证不会让后续事件越过它、也不会把栈错配到别的调用上。
-        const matchedConsoles: Array<{ pending: PendingConsoleEvent; stack: RawStackFrame[] | null }> =
-          [];
+        const matchedConsoles: Array<{
+          pending: PendingConsoleEvent;
+          stack: RawStackFrame[] | null;
+        }> = [];
         let consoleHoldFrom = -1;
         for (let index = 0; index < consoles.length; index += 1) {
           const pending = consoles[index];
@@ -1054,8 +1055,10 @@ export class BrowserLiveSession {
           this.pendingConsoleEvents.unshift(...consoles.slice(consoleHoldFrom));
         }
 
-        const matchedErrors: Array<{ pending: PendingPageErrorEvent; stack: RawStackFrame[] | null }> =
-          [];
+        const matchedErrors: Array<{
+          pending: PendingPageErrorEvent;
+          stack: RawStackFrame[] | null;
+        }> = [];
         let errorHoldFrom = -1;
         for (let index = 0; index < pageErrors.length; index += 1) {
           const pending = pageErrors[index];
@@ -1313,28 +1316,31 @@ export class BrowserLiveSession {
 
   private async buildCssPathFromPoint(x: number, y: number): Promise<string | null> {
     const page = this.requirePage();
-    return await page.evaluate((point: { x: number; y: number }): string | null => {
-      const target = document.elementFromPoint(point.x, point.y);
-      if (!target) return null;
-      const segments: string[] = [];
-      let current: Element | null = target;
-      while (current) {
-        const element: Element = current;
-        const tag = element.tagName.toLowerCase();
-        const parent: Element | null = element.parentElement;
-        if (!parent) {
-          segments.unshift(tag);
-          break;
+    return await page.evaluate(
+      (point: { x: number; y: number }): string | null => {
+        const target = document.elementFromPoint(point.x, point.y);
+        if (!target) return null;
+        const segments: string[] = [];
+        let current: Element | null = target;
+        while (current) {
+          const element: Element = current;
+          const tag = element.tagName.toLowerCase();
+          const parent: Element | null = element.parentElement;
+          if (!parent) {
+            segments.unshift(tag);
+            break;
+          }
+          const sameTagSiblings = Array.from(parent.children).filter(
+            (child) => child.tagName === element.tagName,
+          );
+          const index = sameTagSiblings.indexOf(element) + 1;
+          segments.unshift(`${tag}:nth-of-type(${index})`);
+          current = parent;
         }
-        const sameTagSiblings = Array.from(parent.children).filter(
-          (child) => child.tagName === element.tagName,
-        );
-        const index = sameTagSiblings.indexOf(element) + 1;
-        segments.unshift(`${tag}:nth-of-type(${index})`);
-        current = parent;
-      }
-      return segments.length > 0 ? segments.join(' > ') : null;
-    }, { x, y });
+        return segments.length > 0 ? segments.join(' > ') : null;
+      },
+      { x, y },
+    );
   }
 
   private requirePage(): Page {

@@ -210,7 +210,9 @@ export interface BrowserLiveSessionLike {
   ): Promise<BrowserLiveNodeInfoLike | null>;
   domTree(options?: { depth?: number }): Promise<BrowserLiveDomTreeResultLike>;
   accessibilitySnapshot(): Promise<BrowserLiveA11ySnapshotResultLike>;
-  screenshot(options?: BrowserLiveScreenshotOptionsLike): Promise<{ buffer: Buffer; mimeType: string }>;
+  screenshot(
+    options?: BrowserLiveScreenshotOptionsLike,
+  ): Promise<{ buffer: Buffer; mimeType: string }>;
   close(): Promise<void>;
 }
 
@@ -242,10 +244,7 @@ export type BrowserLiveProbeSourceLike =
 
 /** 探测结论 token。 */
 export type BrowserLiveProbeReasonLike =
-  | 'ready'
-  | 'browser-missing'
-  | 'browser-outdated'
-  | 'probe-failed';
+  'ready' | 'browser-missing' | 'browser-outdated' | 'probe-failed';
 
 /** `@openAwork/browser-automation` 探针结果的结构镜像（避免顶层依赖 Playwright 类型）。 */
 export interface BrowserLiveProbeResultLike {
@@ -346,7 +345,8 @@ class BrowserLiveManagerImpl implements BrowserLiveManager {
   constructor(options: BrowserLiveManagerOptions) {
     this.enabled = options.enabled;
     this.idleTtlMs =
-      options.idleTtlMs ?? readPositiveIntEnv('BROWSER_LIVE_IDLE_TTL_MS', DEFAULT_BROWSER_LIVE_IDLE_TTL_MS);
+      options.idleTtlMs ??
+      readPositiveIntEnv('BROWSER_LIVE_IDLE_TTL_MS', DEFAULT_BROWSER_LIVE_IDLE_TTL_MS);
     this.createSession = options.createSession ?? null;
     this.probeBrowserAvailability = options.probeBrowserAvailability ?? null;
   }
@@ -477,8 +477,7 @@ class BrowserLiveManagerImpl implements BrowserLiveManager {
       return await this.probeBrowserAvailability();
     }
 
-    const browserAutomation =
-      (await import('@openAwork/browser-automation')) as BrowserLiveModule;
+    const browserAutomation = (await import('@openAwork/browser-automation')) as BrowserLiveModule;
     return await browserAutomation.probeLiveBrowserAvailability();
   }
 
@@ -501,8 +500,7 @@ class BrowserLiveManagerImpl implements BrowserLiveManager {
       return await this.createSession(options);
     }
 
-    const browserAutomation =
-      (await import('@openAwork/browser-automation')) as BrowserLiveModule;
+    const browserAutomation = (await import('@openAwork/browser-automation')) as BrowserLiveModule;
     return new browserAutomation.BrowserLiveSession(options);
   }
 
@@ -551,9 +549,7 @@ class BrowserLiveManagerImpl implements BrowserLiveManager {
   }
 }
 
-export function createBrowserLiveManager(
-  options: BrowserLiveManagerOptions,
-): BrowserLiveManager {
+export function createBrowserLiveManager(options: BrowserLiveManagerOptions): BrowserLiveManager {
   return new BrowserLiveManagerImpl(options);
 }
 
@@ -566,6 +562,11 @@ export function createBrowserLiveManager(
  */
 export function isBrowserLiveEnabled(env: Readonly<Record<string, string | undefined>>): boolean {
   return env['OPENAWORK_BROWSER_LIVE'] === '1' || env['DESKTOP_AUTOMATION'] === '1';
+}
+
+/** 当前进程是否启用了实时预览运行环境（单例 `browserLiveManager` 的 gate 入口）。 */
+export function isBrowserLiveRuntimeEnabled(): boolean {
+  return isBrowserLiveEnabled(process.env);
 }
 
 export const browserLiveManager = createBrowserLiveManager({

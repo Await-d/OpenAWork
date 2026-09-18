@@ -39,6 +39,19 @@ export interface BrowserLiveScreenshotResult {
   sizeBytes: number;
 }
 
+/** 应用内安装调试浏览器的状态机快照。 */
+export type BrowserInstallState = 'idle' | 'running' | 'succeeded' | 'failed' | 'unavailable';
+
+export interface BrowserInstallStatus {
+  state: BrowserInstallState;
+  startedAt: number | null;
+  finishedAt: number | null;
+  /** 最近若干行安装输出，用于展示进度。 */
+  tailLog: string[];
+  error: string | null;
+  browsersPath: string | null;
+}
+
 export interface BrowserLiveCallbacks {
   onEnvelope(envelope: BrowserLiveEnvelope): void;
   onOpen?(): void;
@@ -61,6 +74,12 @@ export interface BrowserLiveClient {
     input: { sessionId: string; fullPage?: boolean },
     options?: { signal?: AbortSignal },
   ): Promise<BrowserLiveScreenshotResult>;
+  /** 触发应用内安装调试浏览器；若已有安装在进行中，网关返回 409（HttpError）。 */
+  installBrowser(token: string, options?: { signal?: AbortSignal }): Promise<void>;
+  getInstallStatus(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<BrowserInstallStatus>;
   connect(input: { token: string; callbacks: BrowserLiveCallbacks }): BrowserLiveConnection;
 }
 
@@ -224,6 +243,32 @@ export function createBrowserLiveClient(baseUrl: string): BrowserLiveClient {
             method: 'POST',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(input),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async installBrowser(token, options) {
+      await performBrowserLiveRequest({
+        actionLabel: '安装调试浏览器',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}${BROWSER_LIVE_REST_PREFIX}/install-browser`, {
+            method: 'POST',
+            headers: jsonAuthHeaders(token),
+            // Fastify 5 收到 JSON content-type 的空 body 会直接 400；无入参也需发合法 JSON。
+            body: '{}',
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async getInstallStatus(token, options) {
+      return performBrowserLiveRequest<BrowserInstallStatus>({
+        actionLabel: '读取调试浏览器安装状态',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}${BROWSER_LIVE_REST_PREFIX}/install-browser/status`, {
+            headers: authHeader(token),
             signal: options?.signal,
           }),
       });
