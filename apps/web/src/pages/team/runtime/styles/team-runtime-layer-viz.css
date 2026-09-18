@@ -1,0 +1,635 @@
+/**
+ * 260916-层级可视化重构 · 层间可视化样式
+ *
+ * 服务「对话」主 tab 下两个页面：
+ *   - 层级流动：泳道轨迹画布（team-conv-swimlane-*）
+ *   - 历史层级：追踪瀑布（team-conv-trace-*）
+ *
+ * 色彩（E · Nebula）：面板底色走 --bg-overlay/--bg-base；层色与状态色一律
+ * 由组件内联注入 CSS 变量（--node-color / --trace-layer-color / --trace-bar-color），
+ * 本文件不硬编码任何色值。
+ */
+
+/* ════════════════════════════════════════════════════════════════════
+   1. 泳道轨迹画布
+   ════════════════════════════════════════════════════════════════════ */
+
+.team-conv-swimlane {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  /* 内容高度 = 5 条泳道（固定）；父容器更高时撑满，更矮时由外层滚动而不是被压扁 */
+  height: fit-content;
+  min-height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 55%, var(--bg-base));
+}
+
+.team-conv-swimlane__labels {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  /* 与追踪瀑布的轨道标签列同宽，保持两个页面的视觉语言一致 */
+  width: 132px;
+  border-right: 1px solid color-mix(in srgb, var(--border-default) 30%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 72%, var(--bg-base));
+}
+
+.team-conv-swimlane__axis-spacer {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
+  flex-shrink: 0;
+}
+
+.team-conv-swimlane__axis-hint {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+}
+
+.team-conv-swimlane__lane-label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  width: 100%;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 18%, transparent);
+  background: transparent;
+  text-align: left;
+  cursor: default;
+  transition: background var(--motion-micro, 100ms) ease;
+}
+
+.team-conv-swimlane__lane-label[data-clickable='true'] {
+  cursor: pointer;
+}
+
+.team-conv-swimlane__lane-label[data-clickable='true']:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* 折叠的空泳道标签：只保留层名，弱化到背景层 */
+.team-conv-swimlane__lane-label[data-empty='true'] {
+  opacity: 0.55;
+}
+
+.team-conv-swimlane__lane-label[data-empty='true'] .team-conv-swimlane__lane-meta {
+  display: none;
+}
+
+.team-conv-swimlane__lane-label[data-empty='true'] .team-conv-swimlane__lane-name {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.team-conv-swimlane__lane[data-empty='true'] {
+  opacity: 0.55;
+}
+
+.team-conv-swimlane__lane-label[data-clickable='true']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.team-conv-swimlane__lane-label[data-active='true'] {
+  background: color-mix(in srgb, var(--layer-color, var(--accent)) 6%, transparent);
+}
+
+.team-conv-swimlane__lane-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--border-default) 40%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base));
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.team-conv-swimlane__lane-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-conv-swimlane__lane-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-conv-swimlane__lane-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.team-conv-swimlane__scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  position: relative;
+}
+
+.team-conv-swimlane__canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.team-conv-swimlane__axis {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
+}
+
+.team-conv-swimlane__axis-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid color-mix(in srgb, var(--border-default) 14%, transparent);
+}
+
+.team-conv-swimlane__lanes {
+  position: relative;
+  overflow: hidden;
+}
+
+.team-conv-swimlane__lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 14%, transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bg-overlay) 46%, transparent) 0%,
+    transparent 42%
+  );
+}
+
+.team-conv-swimlane__lane:nth-child(even) {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bg-overlay) 68%, transparent) 0%,
+    transparent 42%
+  );
+}
+
+.team-conv-swimlane__links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.team-conv-swimlane__link {
+  fill: none;
+  stroke-width: 1.5;
+  /* 默认压低不透明度：轨迹线是"背景骨架"，节点才是主体 */
+  opacity: 0.38;
+  transition: opacity var(--motion-normal, 200ms) ease;
+}
+
+.team-conv-swimlane__link[data-state='failed'] {
+  stroke-dasharray: 4 4;
+  opacity: 0.75;
+}
+
+.team-conv-swimlane__link[data-active='true'] {
+  opacity: 1;
+  stroke-width: 2;
+  stroke-dasharray: 7 6;
+  animation: team-conv-swimlane-dash 1.1s linear infinite;
+}
+
+/* 聚焦链之外的连线：降到背景层，但保留可读轮廓（不隐藏） */
+.team-conv-swimlane__link[data-dim='true'] {
+  opacity: 0.12;
+  stroke-dasharray: none;
+  animation: none;
+}
+
+@keyframes team-conv-swimlane-dash {
+  from {
+    stroke-dashoffset: 26;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.team-conv-swimlane-node {
+  position: absolute;
+  display: grid;
+  gap: 3px;
+  /* 节点固定高 72px：内边距 + 路由行 + 两行摘要 + 状态脚必须完整容纳，否则摘要被裁 */
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--fg-muted)) 42%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--node-color, var(--fg-muted)) 7%,
+    color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))
+  );
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform var(--motion-micro, 100ms) ease,
+    border-color var(--motion-micro, 100ms) ease,
+    box-shadow var(--motion-micro, 100ms) ease;
+}
+
+.team-conv-swimlane-node:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--node-color, var(--fg-muted)) 70%, transparent);
+  box-shadow: 0 4px 14px -10px var(--node-color, var(--fg-muted));
+}
+
+.team-conv-swimlane-node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle, color-mix(in srgb, var(--accent) 12%, transparent));
+}
+
+.team-conv-swimlane-node[data-active='true'] {
+  border-color: var(--node-color, var(--fg-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color, var(--fg-muted)) 16%, transparent);
+  animation: team-conv-swimlane-node-pulse 2.4s ease-in-out infinite;
+}
+
+.team-conv-swimlane-node[data-selected='true'] {
+  border-width: 1.5px;
+  border-color: var(--node-color, var(--fg-muted));
+  background: color-mix(
+    in srgb,
+    var(--node-color, var(--fg-muted)) 14%,
+    color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))
+  );
+}
+
+/* 聚焦链之外的节点：淡化但可点；hover / 选中时恢复，便于临时比对 */
+.team-conv-swimlane-node[data-dim='true'] {
+  opacity: 0.3;
+  animation: none;
+}
+
+.team-conv-swimlane-node[data-dim='true']:hover,
+.team-conv-swimlane-node[data-dim='true'][data-selected='true'] {
+  opacity: 1;
+}
+
+@keyframes team-conv-swimlane-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color, var(--fg-muted)) 16%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--node-color, var(--fg-muted)) 0%, transparent);
+  }
+}
+
+.team-conv-swimlane-node__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.team-conv-swimlane-node__route {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--node-color, var(--fg-strong));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-conv-swimlane-node__time {
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.team-conv-swimlane-node__summary {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-default);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.team-conv-swimlane-node__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.team-conv-swimlane-node__state {
+  font-weight: 700;
+  color: var(--node-color, var(--fg-muted));
+}
+
+.team-conv-swimlane-node__retry {
+  padding: 0 5px;
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.team-conv-swimlane__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  padding: 0 24px;
+  text-align: center;
+}
+
+.team-conv-swimlane__empty strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+
+.team-conv-swimlane__empty span {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   2. 追踪瀑布（历史层级）
+   ════════════════════════════════════════════════════════════════════ */
+
+.team-conv-trace {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid color-mix(in srgb, var(--border-default) 36%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 55%, var(--bg-base));
+}
+
+.team-conv-trace__axis {
+  display: flex;
+  align-items: stretch;
+  height: 26px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base));
+}
+
+.team-conv-trace__axis-label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 132px;
+  padding: 0 12px;
+  border-right: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+}
+
+.team-conv-trace__axis-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.team-conv-trace__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.team-conv-trace__body {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+}
+
+.team-conv-trace__labels {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 132px;
+  border-right: 1px solid color-mix(in srgb, var(--border-default) 24%, transparent);
+  background: color-mix(in srgb, var(--bg-overlay) 72%, var(--bg-base));
+}
+
+.team-conv-trace__lane-label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 18%, transparent);
+  min-width: 0;
+}
+
+.team-conv-trace__lane-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid color-mix(in srgb, var(--trace-layer-color, var(--fg-muted)) 40%, transparent);
+  background: color-mix(in srgb, var(--trace-layer-color, var(--fg-muted)) 12%, transparent);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.team-conv-trace__lane-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.team-conv-trace__lane-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-conv-trace__lane-meta {
+  font-size: 9px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-conv-trace__tracks {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.team-conv-trace__lane {
+  position: relative;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 14%, transparent);
+}
+
+.team-conv-trace__lane:nth-child(even) {
+  background: color-mix(in srgb, var(--bg-overlay) 42%, transparent);
+}
+
+.team-conv-trace__bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 8px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--trace-bar-color, var(--fg-muted)) 45%, transparent);
+  border-left: 3px solid var(--trace-layer-color, var(--fg-muted));
+  background: color-mix(
+    in srgb,
+    var(--trace-bar-color, var(--fg-muted)) 16%,
+    color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))
+  );
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color var(--motion-micro, 100ms) ease,
+    box-shadow var(--motion-micro, 100ms) ease;
+}
+
+.team-conv-trace__bar:hover {
+  border-color: color-mix(in srgb, var(--trace-bar-color, var(--fg-muted)) 75%, transparent);
+  box-shadow: 0 3px 12px -8px var(--trace-bar-color, var(--fg-muted));
+}
+
+.team-conv-trace__bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle, color-mix(in srgb, var(--accent) 12%, transparent));
+}
+
+.team-conv-trace__bar[data-active='true'] {
+  animation: team-conv-trace-bar-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes team-conv-trace-bar-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--trace-bar-color, var(--fg-muted)) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px
+      color-mix(in srgb, var(--trace-bar-color, var(--fg-muted)) 0%, transparent);
+  }
+}
+
+.team-conv-trace__bar[data-selected='true'] {
+  border-width: 1.5px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle, color-mix(in srgb, var(--accent) 12%, transparent));
+}
+
+.team-conv-trace__bar[data-dim='true'] {
+  opacity: 0.32;
+}
+
+.team-conv-trace__bar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-conv-trace__bar-substate {
+  font-size: 9px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.team-conv-trace__edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.team-conv-trace__edge {
+  fill: none;
+  stroke-width: 1.25;
+  opacity: 0.36;
+}
+
+.team-conv-trace__edge[data-active='true'] {
+  opacity: 0.85;
+  stroke-dasharray: 6 5;
+  animation: team-conv-swimlane-dash 1.4s linear infinite;
+}
+
+.team-conv-trace__edge[data-state='failed'] {
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .team-conv-swimlane__labels,
+  .team-conv-trace__labels,
+  .team-conv-trace__axis-label {
+    width: 104px;
+  }
+
+  .team-conv-swimlane__lane-meta,
+  .team-conv-trace__lane-meta {
+    display: none;
+  }
+}

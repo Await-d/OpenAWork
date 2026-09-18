@@ -1,4 +1,4 @@
-import type { LayerNodeView } from './LayerFlowPipeline.js';
+import type { LayerNodeView } from './layer-flow-view-model.js';
 
 interface LayerFlowRoleInstanceTabsProps {
   selectedSessionId: string;

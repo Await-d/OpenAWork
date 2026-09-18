@@ -7,10 +7,9 @@ import { LayerConversationContextHeader } from './LayerConversationContextHeader
 import { LayerFlowDetailEmptyState } from './LayerFlowDetailEmptyState.js';
 import { LayerFlowDetailModeBar } from './LayerFlowDetailModeBar.js';
 import { LayerFlowHandoffHeader } from './LayerFlowHandoffHeader.js';
-import type { LayerNodeView } from './LayerFlowPipeline.js';
 import { LayerFlowRoleInstanceTabs } from './LayerFlowRoleInstanceTabs.js';
 import { LayerFlowSelectedHandoffMeta } from './LayerFlowSelectedHandoffMeta.js';
-import { type LayerFlowDetailMode } from './layer-flow-view-model.js';
+import { type LayerFlowDetailMode, type LayerNodeView } from './layer-flow-view-model.js';
 import {
   CONVERSATION_WRAPPER_STYLE,
   DETAIL_BODY_STYLE,

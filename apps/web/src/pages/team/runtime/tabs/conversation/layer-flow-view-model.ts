@@ -7,7 +7,6 @@ import type {
 } from '../../../../../stores/team/team-events.js';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
-import type { EdgeView, LayerNodeView } from './LayerFlowPipeline.js';
 import {
   FLOW_LAYERS,
   isActiveHandoffState,
@@ -19,6 +18,21 @@ import {
 
 export type LayerFlowDensityMode = 'active' | 'all';
 export type LayerFlowDetailMode = 'session' | 'thread';
+
+/** 单个泳道（角色层）的聚合视图：最新状态、交接次数与角色实例列表。 */
+export interface LayerNodeView {
+  active: boolean;
+  inboundCount: number;
+  layer: TeamRoleLayer;
+  roleInstances: Array<{
+    sessionId: string;
+    displayName: string | null;
+    personaKey: string | null;
+    state: HandoffState | 'idle';
+  }>;
+  sessionId: string | null;
+  state: HandoffState | 'idle';
+}
 
 export function buildSnapshotNodes(sessions: readonly TeamRuntimeSessionRecord[]): LayerNode[] {
   const result: LayerNode[] = [];
@@ -133,30 +147,6 @@ export function buildLayerViews(
       view.sessionId !== null ||
       view.sessionId === selectedSessionId,
   );
-}
-
-export function buildLayerEdges(scopedHandoffs: ReadonlyMap<string, HandoffEntry>): EdgeView[] {
-  const entries = Array.from(scopedHandoffs.values());
-  const result: EdgeView[] = [];
-  for (let i = 0; i < FLOW_LAYERS.length - 1; i += 1) {
-    const from = FLOW_LAYERS[i];
-    const to = FLOW_LAYERS[i + 1];
-    if (!from || !to) {
-      continue;
-    }
-    const matching = entries
-      .filter((handoff) => handoff.fromRoleLayer === from && handoff.toRoleLayer === to)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-    const latest = matching[0] ?? null;
-    result.push({
-      fromIndex: i,
-      toIndex: i + 1,
-      latest,
-      active: latest ? isActiveHandoffState(latest.state) : false,
-      state: latest?.state ?? 'idle',
-    });
-  }
-  return result;
 }
 
 export function buildSessionTitleById(
