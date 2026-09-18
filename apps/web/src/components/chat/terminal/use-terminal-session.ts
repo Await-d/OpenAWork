@@ -43,6 +43,11 @@ export interface UseTerminalSessionParams {
   inputEnabled: boolean;
   /** 写失败等异常的上报通道（父面板已有 error 条）。 */
   onWriteError?: (message: string) => void;
+  /**
+   * 面板命令段（新建 / 拆分 / 终止 / 重命名 / 关闭），由 pane 构建后透传。
+   * 面板语义不进本 hook：这里只负责把它拼在剪贴板项之前。
+   */
+  menuItems?: TerminalContextMenuItem[];
 }
 
 export interface TerminalSessionState {
@@ -90,6 +95,7 @@ export function useTerminalSession({
   terminal,
   inputEnabled,
   onWriteError,
+  menuItems,
 }: UseTerminalSessionParams): TerminalSessionState {
   const terminalId = terminal.terminalId;
   const terminalSessionId = terminal.sessionId;
@@ -360,53 +366,63 @@ export function useTerminalSession({
   };
 
   const selection = termRef.current?.getSelection() ?? '';
+  const clipboardItems: TerminalContextMenuItem[] = [
+    {
+      id: 'copy',
+      label: '复制',
+      hint: 'Ctrl+Shift+C',
+      disabled: selection.length === 0,
+      onSelect: () => {
+        void writeClipboardText(selection).catch((error: unknown) => {
+          const message = `复制失败：${errorMessage(error)}`;
+          setNotice(message);
+          onWriteErrorRef.current?.(message);
+        });
+      },
+    },
+    {
+      id: 'paste',
+      label: '粘贴',
+      hint: 'Ctrl+Shift+V',
+      disabled: !inputEnabled,
+      onSelect: () => actionsRef.current?.requestPaste(),
+    },
+    {
+      id: 'select-all',
+      label: '全选',
+      onSelect: () => termRef.current?.selectAll(),
+    },
+    {
+      id: 'clear',
+      label: '清屏',
+      hint: 'Ctrl+K',
+      separatorBefore: true,
+      onSelect: () => termRef.current?.clear(),
+    },
+    {
+      id: 'search',
+      label: '搜索',
+      hint: 'Ctrl+F',
+      onSelect: () => setSearchOpen(true),
+    },
+    {
+      id: 'copy-on-select',
+      label: '选中即复制',
+      checked: copyOnSelect,
+      separatorBefore: true,
+      onSelect: toggleCopyOnSelect,
+    },
+  ];
+
+  const hasCommandItems = (menuItems?.length ?? 0) > 0;
+  // 面板命令段置顶，copy 是剪贴板段的首项：只在命令段非空时给它加分隔线，
+  // 否则（无命令段，如未接线的宿主）菜单字面量与升级前保持一致。
   const contextMenuItems: TerminalContextMenuItem[] = contextMenu
     ? [
-        {
-          id: 'copy',
-          label: '复制',
-          hint: 'Ctrl+Shift+C',
-          disabled: selection.length === 0,
-          onSelect: () => {
-            void writeClipboardText(selection).catch((error: unknown) => {
-              const message = `复制失败：${errorMessage(error)}`;
-              setNotice(message);
-              onWriteErrorRef.current?.(message);
-            });
-          },
-        },
-        {
-          id: 'paste',
-          label: '粘贴',
-          hint: 'Ctrl+Shift+V',
-          disabled: !inputEnabled,
-          onSelect: () => actionsRef.current?.requestPaste(),
-        },
-        {
-          id: 'select-all',
-          label: '全选',
-          onSelect: () => termRef.current?.selectAll(),
-        },
-        {
-          id: 'clear',
-          label: '清屏',
-          hint: 'Ctrl+K',
-          separatorBefore: true,
-          onSelect: () => termRef.current?.clear(),
-        },
-        {
-          id: 'search',
-          label: '搜索',
-          hint: 'Ctrl+F',
-          onSelect: () => setSearchOpen(true),
-        },
-        {
-          id: 'copy-on-select',
-          label: '选中即复制',
-          checked: copyOnSelect,
-          separatorBefore: true,
-          onSelect: toggleCopyOnSelect,
-        },
+        ...(menuItems ?? []),
+        ...clipboardItems.map((item, index) =>
+          hasCommandItems && index === 0 ? { ...item, separatorBefore: true } : item,
+        ),
       ]
     : [];
 

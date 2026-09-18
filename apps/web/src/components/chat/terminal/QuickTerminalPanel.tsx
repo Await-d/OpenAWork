@@ -24,12 +24,17 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import {
+  resolveEffectiveTerminalPanelPosition,
+  useUIStateStore,
+  type TerminalPanelPosition,
+} from '../../../stores/ui/uiState.js';
 import {
   closeTerminal,
   createSessionTerminal,
   writeTerminalStdin,
   type SessionTerminalView,
+  type ShellProfileOption,
 } from '../../conversation-runtime/terminals/terminals-api.js';
 import {
   insertTerminalIntoPane,
@@ -50,6 +55,7 @@ import {
   TerminalLayoutContext,
   type TerminalLayoutContextValue,
   type TerminalPaneActions,
+  type TerminalRenameRequest,
   type TerminalTabDragState,
 } from './TerminalLayoutContext.js';
 import {
@@ -82,6 +88,30 @@ interface QuickTerminalPanelProps {
   onReload: () => void;
   onRenameTerminal?: (terminalId: string, name: string | null) => Promise<void>;
   onDismissTerminal?: (terminalId: string) => void;
+  /** 🗑 真终止（强制结束进程）；缺省时 🗑 禁用并提示未接入。 */
+  onKillTerminal?: (terminalId: string) => Promise<void>;
+  /** 宿主级 shell 配置；空数组 = 不可用（不渲染 profile 下拉）。 */
+  shellProfiles?: readonly ShellProfileOption[];
+  /**
+   * 是否最大化（瞬态）。可选：缺省回落到 store 的 `terminalPanelMaximized` ——
+   * classic overlay 调用点不显式接线，靠这条回落与 fusion 宿主共用同一个开关；
+   * fusion 宿主显式传入，因为它还要在自己的渲染分支里据此跳过像素高度。
+   */
+  maximized?: boolean;
+  /** 最大化 / 还原切换；缺省同样回落 store（见上）。 */
+  onToggleMaximized?: () => void;
+  /**
+   * 停靠位置。缺省回落 store 的 `terminalPanelPosition`（与 maximized 同一套
+   * 「可选 prop + store 回落」模式）；fusion 宿主显式传入，因为它要按有效位置
+   * 跳过像素高度。传入值应是**有效位置**（窄视口下已是底部）。
+   */
+  position?: TerminalPanelPosition;
+  /**
+   * 停靠位置写入动作；缺省回落 store 的 `setTerminalPanelPosition`。
+   * 调用方只负责「写到哪里」——最大化清理与侧栏让位由本面板统一补齐
+   * （见 requestMovePosition），否则每个调用点都要复制一遍联动。
+   */
+  onMovePosition?: (position: TerminalPanelPosition) => void;
 }
 
 const ACTIVE_STATUSES: ReadonlySet<string> = new Set(['running', 'idle', 'tmux-spawned']);
@@ -92,7 +122,11 @@ const NARROW_VIEWPORT_QUERY = '(max-width: 767px)';
 /** 「分屏已达上限」提示的停留时长：够看清，又不长期占位。 */
 const SPLIT_HINT_DURATION_MS = 2_400;
 
-function usePreferredSplitDirection(): TerminalSplitDirection {
+/**
+ * 窄视口（<768px）检测：面板内**唯一的** matchMedia 订阅 —— 拆分方向默认值
+ * 与停靠可用性共用同一份判断，避免两处各自订阅出现「一个说窄、一个说宽」的中间帧。
+ */
+function useNarrowViewport(): boolean {
   const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
@@ -104,7 +138,7 @@ function usePreferredSplitDirection(): TerminalSplitDirection {
     return () => query.removeEventListener('change', sync);
   }, []);
 
-  return narrow ? 'column' : 'row';
+  return narrow;
 }
 
 /** 焦点回落到真实存在的 pane：显式 pane 被收敛掉时不至于整面板失去焦点态。 */
@@ -151,6 +185,12 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     onReload,
     onRenameTerminal,
     onDismissTerminal,
+    onKillTerminal,
+    shellProfiles,
+    maximized: maximizedProp,
+    onToggleMaximized: onToggleMaximizedProp,
+    position: positionProp,
+    onMovePosition: onMovePositionProp,
   } = props;
 
   const quickTerminalHeight = useUIStateStore((s) => s.quickTerminalHeight);
@@ -158,13 +198,39 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const activeIdByWs = useUIStateStore((s) => s.quickTerminalActiveIdByWorkspace);
   const setActiveIdForWs = useUIStateStore((s) => s.setQuickTerminalActiveIdForWorkspace);
   const setTerminalLayoutForSession = useUIStateStore((s) => s.setTerminalLayoutForSession);
+  // 最大化开关的真实来源是 store（瞬态）；props 只是可选的显式覆盖。
+  const storeMaximized = useUIStateStore((s) => s.terminalPanelMaximized);
+  const toggleStoreMaximized = useUIStateStore((s) => s.toggleTerminalPanelMaximized);
+  const setStoreMaximized = useUIStateStore((s) => s.setTerminalPanelMaximized);
+  const maximized = maximizedProp ?? storeMaximized;
+  const onToggleMaximized = onToggleMaximizedProp ?? toggleStoreMaximized;
+  // 停靠位置同上一套回落模式；归一化/降级只发生在读取端，store 里始终是用户偏好。
+  const storePosition = useUIStateStore((s) => s.terminalPanelPosition);
+  const setStorePosition = useUIStateStore((s) => s.setTerminalPanelPosition);
+  const setLeftSidebarOpen = useUIStateStore((s) => s.setLeftSidebarOpen);
+  const setReviewPanelOpened = useUIStateStore((s) => s.setReviewPanelOpened);
+  const position = positionProp ?? storePosition;
+  const movePosition = onMovePositionProp ?? setStorePosition;
 
   const wsKey = workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
   const height = controlledHeight ?? quickTerminalHeight;
   const setHeight = onHeightChange ?? setQuickTerminalHeight;
   const inlinePresentation = presentation === 'inline';
   const tabsId = useId();
-  const preferredSplitDirection = usePreferredSplitDirection();
+  // 窄视口同时决定拆分默认方向与停靠可用性，只订阅一次（见 useNarrowViewport）。
+  const isNarrowViewport = useNarrowViewport();
+  const preferredSplitDirection: TerminalSplitDirection = isNarrowViewport ? 'column' : 'row';
+  const effectivePosition = inlinePresentation
+    ? resolveEffectiveTerminalPanelPosition(position, isNarrowViewport)
+    : 'bottom';
+  const docked = effectivePosition !== 'bottom';
+  // overlay（classic）形态本身就是一个脱离文档流的底部抽屉条，没有侧列语义：
+  // 停靠项在那里必须禁用并说明原因，而不是渲染出一个矛盾的菜单。
+  const dockingDisabledReason = !inlinePresentation
+    ? '经典 overlay 形态是底部抽屉，不支持侧停靠'
+    : isNarrowViewport
+      ? '视口不足 768px，侧停靠会把工作台挤到无法使用'
+      : null;
 
   // Show only currently-live terminals as tabs; closed ones live in the
   // top-bar history popover (SessionTerminalsPanel) where the user can
@@ -196,14 +262,17 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const [pendingActive, setPendingActive] = useState<string | null>(null);
   // T-12 拖拽预览（瞬态，不持久化）：drop 前的高亮 / 插入条由它驱动。
   const [tabDrag, setTabDrag] = useState<TerminalTabDragState | null>(null);
+  // 内容区右键「重命名」请求（瞬态，不持久化）：发起方在终端内容子树，消费方在目标 pane。
+  const [renameRequest, setRenameRequest] = useState<TerminalRenameRequest | null>(null);
 
   // Reset the user's tab pick when the session or workspace changes —
   // a stale id from a different session would silently fall through to
   // the persisted/first-fallback path, but keeping it around is misleading.
-  // 顺带清掉 T-12 拖拽预览：瞬态态跨会话没有任何意义。
+  // 顺带清掉 T-12 拖拽预览与重命名请求：瞬态态跨会话没有任何意义。
   useEffect(() => {
     setPendingActive(null);
     setTabDrag(null);
+    setRenameRequest(null);
   }, [sessionId, wsKey]);
 
   // 隐式 pane（无分屏）的 active 解析：用户显式点选 > workspace 持久化 > 第一个。
@@ -269,7 +338,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     setTerminalLayoutForSession(sessionKey, normalizeLayout(next, ids, { maxPanes: MAX_PANES }));
   };
 
-  const createTerminalInPane = async (paneId: string): Promise<void> => {
+  const createTerminalInPane = async (paneId: string, shellProfileId?: string): Promise<void> => {
     if (!sessionId || !token || busyPaneId !== null) return;
     setBusyPaneId(paneId);
     setCreateError(null);
@@ -279,6 +348,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
         sessionId,
         token,
         ...(workspacePath ? { cwd: workspacePath } : {}),
+        ...(shellProfileId !== undefined ? { shellProfileId } : {}),
       });
       const newTerminalId = result.terminal.terminalId;
       if (layout === null) {
@@ -503,11 +573,18 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
 
   // Drag-resize handle. We track movement via mousemove on window and
   // translate it into a height delta from the bottom of the viewport.
+  //
+  // 拖拽期间由 body 接管 cursor / user-select（与 TerminalSplitView 的分屏条同法）：
+  // 手柄只有 6px 高，指针一旦离开手柄就落回面板内容上，不接管会选中终端文本。
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const onDragStart = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();
       dragRef.current = { startY: event.clientY, startHeight: height };
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
       const onMove = (e: MouseEvent) => {
         if (!dragRef.current) return;
         const delta = dragRef.current.startY - e.clientY;
@@ -518,12 +595,39 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
         dragRef.current = null;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
       };
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
     [height, setHeight],
   );
+
+  /**
+   * 停靠切换的唯一入口：调用方只负责「写位置」，三件联动在面板层补齐（顺序有意）。
+   *
+   *  ① 离开底部前清掉最大化 —— 两种「占满」无法同时成立，且最大化标记是全局瞬态，
+   *     留着它会在下一次展开时把面板重新顶到占满态；
+   *  ② 写位置；
+   *  ③ 收起同侧侧栏 —— 侧停靠是全高列，同侧已有侧栏时工作台会被压到没有宽度。
+   *     注意这是**单向礼节**：改回底部时不自动展开被我方收起的侧栏，因为用户手动
+   *     收起的侧栏同样是合法状态，自动展开会覆盖用户的显式选择。
+   *
+   * 放在面板层而不是调用点：overlay / fusion 两个宿主都要这条联动，调用点只传
+   * 「位置写到哪里」（onMovePosition），避免同一规则出现两份实现。
+   */
+  const requestMovePosition = (destination: TerminalPanelPosition): void => {
+    if (destination !== 'bottom') {
+      setStoreMaximized(false);
+    }
+    movePosition(destination);
+    if (destination === 'left') {
+      setLeftSidebarOpen(false);
+    } else if (destination === 'right') {
+      setReviewPanelOpened(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -532,8 +636,13 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const portsTabElementId = terminalPanelTabElementId(tabsId, 'ports');
 
   const paneActions: TerminalPaneActions = {
-    createTerminal: (paneId) => {
-      void createTerminalInPane(paneId);
+    createTerminal: (paneId, shellProfileId) => {
+      void createTerminalInPane(paneId, shellProfileId);
+    },
+    killTerminal: (terminalId) => {
+      void onKillTerminal?.(terminalId).catch((error: unknown) => {
+        setWriteError(error instanceof Error ? error.message : String(error));
+      });
     },
     splitPane: (paneId, direction) => {
       void splitPaneById(paneId, direction);
@@ -569,9 +678,18 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     maxPanes: MAX_PANES,
     preferredSplitDirection,
     totalTerminalCount: activeTerminals.length,
+    shellProfiles: shellProfiles ?? [],
     busyPaneId,
     tabDrag,
     setTabDrag,
+    renameRequest,
+    // 请求只做一次转发：目标 pane 消费后调用 clearRenameRequest，避免同一请求被重复消费。
+    requestRename: (paneId, terminalId) => {
+      setRenameRequest({ paneId, terminalId });
+    },
+    clearRenameRequest: () => {
+      setRenameRequest(null);
+    },
     view: { gatewayUrl, token, sessionId, inputEnabled, onWriteError: setWriteError },
     actions: paneActions,
   };
@@ -609,26 +727,41 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     paneActions.splitPane(effectiveActivePaneId);
   };
 
+  // 最大化 / 侧停靠下都不下发内联像素高度：让 CSS 按布局决定占位（inline 吃满剩余
+  // 空间 / overlay 覆盖包含块 / 侧停靠列吃满全高），避免用 !important 去压受控高度。
+  // 两种模式下也都不渲染拖拽柄：最大化理由见下；侧停靠是横轴占位，纵向手柄会改错轴。
   return (
     <div
       role="region"
       aria-label="快捷终端面板"
       className="terminal-panel"
       data-presentation={inlinePresentation ? 'inline' : 'overlay'}
-      style={{ height, minHeight: height }}
+      data-docked={docked ? effectivePosition : undefined}
+      data-maximized={maximized ? 'true' : undefined}
+      style={maximized || docked ? undefined : { height, minHeight: height }}
       onKeyDownCapture={handlePanelKeyDownCapture}
     >
-      <button
-        type="button"
-        aria-label="拖动调整高度"
-        className="terminal-panel__resize-handle"
-        onMouseDown={onDragStart}
-      />
+      {/* 最大化时不渲染拖拽手柄：拖动会按持久化高度域（上限 900px）钳制，从最大化
+          直接拖会先跳变到钳制值；本轮只提供「还原」路径，与 VS Code 的「拖动即还原」
+          不同是有意取舍（理由见 uiState 的 terminalPanelMaximized 注释）。 */}
+      {maximized || docked ? null : (
+        <button
+          type="button"
+          aria-label="拖动调整高度"
+          className="terminal-panel__resize-handle"
+          onMouseDown={onDragStart}
+        />
+      )}
       <TerminalPanelTabs
         idBase={tabsId}
         activeTab={panelTab}
         onSelectTab={setPanelTab}
         onRequestClose={onRequestClose}
+        maximized={maximized}
+        onToggleMaximized={onToggleMaximized}
+        position={effectivePosition}
+        onMovePosition={requestMovePosition}
+        dockingDisabledReason={dockingDisabledReason}
       />
       {panelTab === 'terminal' ? (
         <div

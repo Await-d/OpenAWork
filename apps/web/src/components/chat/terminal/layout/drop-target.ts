@@ -47,10 +47,7 @@ function clamp(value: number, min: number, max: number): number {
 /** 零尺寸矩形不可是命中目标（隐藏 / 未布局的 pane 会算出 0 或负数）。 */
 function isPositiveRect(rect: Rect): boolean {
   return (
-    Number.isFinite(rect.width) &&
-    Number.isFinite(rect.height) &&
-    rect.width > 0 &&
-    rect.height > 0
+    Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0
   );
 }
 
@@ -87,15 +84,17 @@ export function resolveRatioFromPointer(
   if (!isPositiveRect(box)) return FALLBACK_RATIO;
   const resolvedMin = resolveMinRatio(minRatio);
   const raw =
-    direction === 'row'
-      ? (pointer.x - box.x) / box.width
-      : (pointer.y - box.y) / box.height;
+    direction === 'row' ? (pointer.x - box.x) / box.width : (pointer.y - box.y) / box.height;
   if (!Number.isFinite(raw)) return FALLBACK_RATIO;
   return clamp(raw, resolvedMin, 1 - resolvedMin);
 }
 
 /** 边带宽度按短边计（`edgeRatio * min(width, height)`），因此在极端长宽比下也不会互相吞没。 */
-function resolveEdge(rect: Rect, pointer: { x: number; y: number }, edgeRatio: number): TerminalPaneEdge | null {
+function resolveEdge(
+  rect: Rect,
+  pointer: { x: number; y: number },
+  edgeRatio: number,
+): TerminalPaneEdge | null {
   const band = edgeRatio * Math.min(rect.width, rect.height);
   const candidates: readonly { edge: TerminalPaneEdge; distance: number }[] = [
     { edge: 'left', distance: pointer.x - rect.x },
@@ -113,7 +112,11 @@ function resolveEdge(rect: Rect, pointer: { x: number; y: number }, edgeRatio: n
   return best === null ? null : best.edge;
 }
 
-function resolveTabIndex(rect: Rect, pointer: { x: number; y: number }, tabCount: number | undefined): number {
+function resolveTabIndex(
+  rect: Rect,
+  pointer: { x: number; y: number },
+  tabCount: number | undefined,
+): number {
   if (typeof tabCount !== 'number' || !Number.isFinite(tabCount) || tabCount <= 0) return 0;
   const ratio = clamp((pointer.x - rect.x) / rect.width, 0, 1);
   return Math.min(Math.floor(tabCount), Math.floor(ratio * tabCount));

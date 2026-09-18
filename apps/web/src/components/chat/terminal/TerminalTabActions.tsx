@@ -10,24 +10,18 @@
  */
 
 import { useState } from 'react';
-import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
+import type {
+  SessionTerminalView,
+  ShellProfileOption,
+} from '../../conversation-runtime/terminals/terminals-api.js';
 import type { TerminalSplitDirection } from './layout/types.js';
 import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu.js';
-import { MoreIcon, PlusIcon, SplitIcon } from './TerminalIcons.js';
+import { ChevronDownIcon, MoreIcon, PlusIcon, SplitIcon, TrashIcon } from './TerminalIcons.js';
+// 方向项的文案与构造与内容区右键菜单同源（见 terminal-pane-menu.ts）。
+import { buildSplitDirectionItems } from './terminal-pane-menu.js';
 
 /** 与面板其它位置一致：这些状态下的持久终端可以接收 stdin。 */
 const WRITABLE_STATUSES = new Set(['running', 'idle', 'tmux-spawned']);
-
-/** 方向拆分的菜单文案：row = 左右并排（向右），column = 上下堆叠（向下）。 */
-const SPLIT_DIRECTION_LABELS: Record<TerminalSplitDirection, string> = {
-  row: '向右拆分',
-  column: '向下拆分',
-};
-
-const SPLIT_DIRECTION_HINTS: Record<TerminalSplitDirection, string> = {
-  row: '左右',
-  column: '上下',
-};
 
 /** 桌面上两种方向都可用；窄屏由调用方传 `['column']` 覆盖。 */
 const DEFAULT_SPLIT_MENU_DIRECTIONS: readonly TerminalSplitDirection[] = ['row', 'column'];
@@ -42,6 +36,13 @@ export interface TerminalTabActionsProps {
   canCreate: boolean;
   creating: boolean;
   onRequestCreate: () => void;
+  /** ＋ ▾ 下拉择定的 shell profile（值来自 `shellProfiles` 白名单 id）。 */
+  shellProfiles?: readonly ShellProfileOption[];
+  onRequestCreateWithProfile?: (shellProfileId: string) => void;
+  /** 🗑 真终止（强制结束进程）；缺省时按钮禁用并提示未接入。 */
+  onRequestKill?: () => void;
+  /** 存在即禁用 🗑，文案即原因。 */
+  killDisabledReason?: string;
   onRequestRename: () => void;
   onRequestClear: () => void;
   onRequestCloseOthers: () => void;
@@ -72,6 +73,10 @@ export function TerminalTabActions({
   canCreate,
   creating,
   onRequestCreate,
+  shellProfiles,
+  onRequestCreateWithProfile,
+  onRequestKill,
+  killDisabledReason,
   onRequestRename,
   onRequestClear,
   onRequestCloseOthers,
@@ -85,6 +90,25 @@ export function TerminalTabActions({
   mergeDisabledReason,
 }: TerminalTabActionsProps) {
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [profileMenuPosition, setProfileMenuPosition] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
+  const profileOptions = shellProfiles ?? [];
+  const canPickProfile = profileOptions.length > 0 && onRequestCreateWithProfile !== undefined;
+
+  const killDisabled =
+    onRequestKill === undefined || activeTerminal === null || killDisabledReason !== undefined;
+  const killTitle = killDisabled
+    ? (killDisabledReason ?? (activeTerminal === null ? '没有可终止的终端' : '终止未接入'))
+    : '终止当前终端（强制结束进程）';
+
+  const profileItems: TerminalContextMenuItem[] = profileOptions.map((profile) => ({
+    id: `shell-profile-${profile.id}`,
+    label: profile.isDefault ? `${profile.label}（默认）` : profile.label,
+    title: `用 ${profile.label} 新建终端`,
+    onSelect: () => onRequestCreateWithProfile?.(profile.id),
+  }));
 
   // 清屏走既有 stdin 能力（`\x0c` = Ctrl+L，仓库定义为 shell 清屏语义），
   // 只有可交互的持久终端才接受 stdin，其余状态下禁用该项。
@@ -102,19 +126,9 @@ export function TerminalTabActions({
     ? (mergeDisabledReason ?? '合并未接入')
     : '把其他终端 tab 合并进当前组';
 
-  const directionItems: TerminalContextMenuItem[] = splitMenuDirections.map((direction, index) => {
-    const disabled = onRequestSplitWithDirection === undefined || splitDisabledReason !== undefined;
-    const title = disabled
-      ? (splitDisabledReason ?? '分屏未接入')
-      : `拆分当前组（${SPLIT_DIRECTION_HINTS[direction]}，新建终端）`;
-    return {
-      id: `split-${direction}`,
-      label: SPLIT_DIRECTION_LABELS[direction],
-      separatorBefore: index === 0,
-      title,
-      disabled,
-      onSelect: () => onRequestSplitWithDirection?.(direction),
-    };
+  const directionItems: TerminalContextMenuItem[] = buildSplitDirectionItems(splitMenuDirections, {
+    onRequestSplitWithDirection,
+    splitDisabledReason,
   });
 
   const items: TerminalContextMenuItem[] = [
@@ -170,6 +184,25 @@ export function TerminalTabActions({
       >
         <PlusIcon size={14} />
       </button>
+      {canPickProfile ? (
+        <button
+          type="button"
+          className="terminal-panel__icon-btn"
+          aria-label="按 Shell 配置新建终端"
+          title="选择 Shell 配置新建终端"
+          disabled={!canCreate || creating}
+          aria-haspopup="menu"
+          aria-expanded={profileMenuPosition !== null}
+          data-open={profileMenuPosition !== null ? 'true' : 'false'}
+          data-testid="terminal-tab-actions-create-profile"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setProfileMenuPosition({ x: rect.left, y: rect.bottom + 4 });
+          }}
+        >
+          <ChevronDownIcon size={12} />
+        </button>
+      ) : null}
       <button
         type="button"
         className="terminal-panel__icon-btn"
@@ -180,6 +213,17 @@ export function TerminalTabActions({
         onClick={onRequestSplit}
       >
         <SplitIcon size={14} />
+      </button>
+      <button
+        type="button"
+        className="terminal-panel__icon-btn terminal-panel__icon-btn--danger"
+        aria-label="终止终端"
+        title={killTitle}
+        disabled={killDisabled}
+        data-testid="terminal-tab-actions-kill"
+        onClick={onRequestKill}
+      >
+        <TrashIcon size={14} />
       </button>
       <button
         type="button"
@@ -203,6 +247,14 @@ export function TerminalTabActions({
           y={menuPosition.y}
           items={items}
           onClose={() => setMenuPosition(null)}
+        />
+      ) : null}
+      {profileMenuPosition ? (
+        <TerminalContextMenu
+          x={profileMenuPosition.x}
+          y={profileMenuPosition.y}
+          items={profileItems}
+          onClose={() => setProfileMenuPosition(null)}
         />
       ) : null}
     </>

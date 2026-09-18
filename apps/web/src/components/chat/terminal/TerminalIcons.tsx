@@ -68,6 +68,15 @@ export function CopyIcon({ size }: IconProps) {
   );
 }
 
+export function LinkIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </Svg>
+  );
+}
+
 export function ClipboardIcon({ size }: IconProps) {
   return (
     <Svg size={size}>
@@ -166,6 +175,84 @@ export function PlugIcon({ size }: IconProps) {
       <path d="M9 8V2" />
       <path d="M15 8V2" />
       <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+    </Svg>
+  );
+}
+
+export function MaximizeIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </Svg>
+  );
+}
+
+export function RestoreIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <polyline points="4 14 10 14 10 20" />
+      <polyline points="20 10 14 10 14 4" />
+      <line x1="14" y1="10" x2="21" y2="3" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </Svg>
+  );
+}
+
+export function RefreshIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </Svg>
+  );
+}
+
+export function PauseIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <rect x="6.5" y="4" width="3.5" height="16" rx="1" />
+      <rect x="14" y="4" width="3.5" height="16" rx="1" />
+    </Svg>
+  );
+}
+
+export function PlayIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <polygon points="6 3.5 20 12 6 20.5 6 3.5" />
+    </Svg>
+  );
+}
+
+export function ExternalLinkIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </Svg>
+  );
+}
+
+export function SquareStopIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function TrashIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M4 7h16" />
+      <path d="M10 4h4" />
+      <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </Svg>
   );
 }

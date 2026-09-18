@@ -249,10 +249,7 @@ export function setPaneActiveTerminal(
   if (pane === null) return layout;
   if (pane.activeTerminalId === terminalId) return layout;
   if (!pane.terminalIds.includes(terminalId)) return layout;
-  return applyEdit(
-    layout,
-    replacePaneNode(paneId, { ...pane, activeTerminalId: terminalId }),
-  );
+  return applyEdit(layout, replacePaneNode(paneId, { ...pane, activeTerminalId: terminalId }));
 }
 
 /** 设置分隔比例：非法值回落 0.5，合法值钳制到 [MIN_RATIO, MAX_RATIO]。 */

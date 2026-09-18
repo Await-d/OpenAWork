@@ -9,12 +9,12 @@
  *  - 搜索：Ctrl/⌘+F，SearchAddon 增量查找 + 「无结果」反馈；
  *  - 剪贴板：Ctrl/⌘+Shift+C / +Shift+V，走输入队列而非 `term.paste()`；
  *  - 清屏：Ctrl/⌘+K 清本地缓冲，Ctrl/⌘+L 发 `\x0c` 交给 shell；
- *  - 右键菜单：复制 / 粘贴 / 全选 / 清屏 / 搜索 / 选中即复制；
+ *  - 右键菜单：面板命令段（新建 / 拆分 / 终止 / 重命名 / 关闭）+ 复制 / 粘贴 / 全选 / 清屏 / 搜索 / 选中即复制；
  *  - 焦点环：容器 `:focus-within` 显示 accent 描边。
  */
 
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
-import { TerminalContextMenu } from './TerminalContextMenu.js';
+import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu.js';
 import { TerminalPasteConfirm } from './TerminalPasteConfirm.js';
 import { TerminalScrollToBottomButton } from './TerminalScrollToBottomButton.js';
 import { TerminalSearchBar } from './TerminalSearchBar.js';
@@ -30,6 +30,11 @@ interface InteractiveTerminalViewProps {
   inputEnabled: boolean;
   /** 写失败 / 剪贴板失败的上报通道，接到宿主面板已有的 error 条。 */
   onWriteError?: (message: string) => void;
+  /**
+   * 内容区右键菜单的**面板命令段**（新建 / 拆分 / 终止 / 重命名 / 关闭）。
+   * 由 pane 提供：本组件只负责把它与剪贴板项拼在一起（见 useTerminalSession）。
+   */
+  menuItems?: TerminalContextMenuItem[];
 }
 
 export function InteractiveTerminalView({
@@ -39,6 +44,7 @@ export function InteractiveTerminalView({
   terminal,
   inputEnabled,
   onWriteError,
+  menuItems,
 }: InteractiveTerminalViewProps) {
   const session = useTerminalSession({
     gatewayUrl,
@@ -47,6 +53,7 @@ export function InteractiveTerminalView({
     terminal,
     inputEnabled,
     onWriteError,
+    menuItems,
   });
 
   const streamHint =

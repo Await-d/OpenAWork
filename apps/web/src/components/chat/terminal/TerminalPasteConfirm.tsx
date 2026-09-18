@@ -58,11 +58,7 @@ export function TerminalPasteConfirm({ summary, onConfirm, onCancel }: TerminalP
           不再提示
         </label>
         <span className="terminal-paste-confirm__buttons">
-          <button
-            type="button"
-            className="terminal-paste-confirm__cancel"
-            onClick={onCancel}
-          >
+          <button type="button" className="terminal-paste-confirm__cancel" onClick={onCancel}>
             取消
           </button>
           <button

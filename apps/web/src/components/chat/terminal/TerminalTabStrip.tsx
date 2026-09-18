@@ -72,6 +72,12 @@ export interface TerminalTabStripProps {
   renameValue: string;
   /** T-12：tab 拖拽绑定；缺省 = 拖拽整体禁用。 */
   drag?: TerminalTabDragBinding;
+  /**
+   * 右键 / 键盘菜单键某 tab：上报该 terminalId 与该 tab 的视口坐标，
+   * 由 `TerminalPane` 打开共享的 `TerminalContextMenu`。
+   * 本组件是表现层，只上报事件、不持有菜单状态（与 `drag` 同一纪律）。
+   */
+  onTabContextMenu?: (terminalId: string, position: { x: number; y: number }) => void;
   onSelect: (terminalId: string) => void;
   onStartRename: (terminalId: string, currentLabel: string) => void;
   onRenameValueChange: (value: string) => void;
@@ -87,6 +93,7 @@ export function TerminalTabStrip({
   renamingId,
   renameValue,
   drag,
+  onTabContextMenu,
   onSelect,
   onStartRename,
   onRenameValueChange,
@@ -130,10 +137,34 @@ export function TerminalTabStrip({
               data-terminal-id={term.terminalId}
               data-dragging={drag?.draggingTerminalId === term.terminalId ? 'true' : undefined}
               onKeyDown={
-                drag === undefined
+                drag === undefined && onTabContextMenu === undefined
                   ? undefined
                   : (event) => {
-                      drag.onTabKeyDown(term.terminalId, event);
+                      // Shift+F10 / ContextMenu 键 = 键盘版右键（VS Code 同款）：
+                      // 锚点取 tab 自身矩形，菜单贴着该 tab 弹出。
+                      // 行内重命名时让位给输入框（与 onContextMenu 同一抑制口径）。
+                      if (onTabContextMenu !== undefined && !isRenaming) {
+                        const wantsMenu =
+                          event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
+                        if (wantsMenu) {
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          onTabContextMenu(term.terminalId, { x: rect.left, y: rect.bottom });
+                          return;
+                        }
+                      }
+                      drag?.onTabKeyDown(term.terminalId, event);
+                    }
+              }
+              onContextMenu={
+                onTabContextMenu === undefined
+                  ? undefined
+                  : (event) => {
+                      // 行内重命名期间保留浏览器原生编辑菜单（剪切 / 复制 / 粘贴 / 全选）：
+                      // 输入框有焦点时它的文本语义优先于 tab 菜单。
+                      if (isRenaming) return;
+                      event.preventDefault();
+                      onTabContextMenu(term.terminalId, { x: event.clientX, y: event.clientY });
                     }
               }
               /**

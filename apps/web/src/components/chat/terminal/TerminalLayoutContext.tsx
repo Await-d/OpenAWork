@@ -10,7 +10,10 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
+import type {
+  SessionTerminalView,
+  ShellProfileOption,
+} from '../../conversation-runtime/terminals/terminals-api.js';
 import type { TerminalDropTarget, TerminalLayout, TerminalSplitDirection } from './layout/types.js';
 
 /**
@@ -36,14 +39,33 @@ export interface TerminalTabDragState {
 }
 
 /**
+ * 内容区右键菜单「重命名」的一次性请求（瞬态，不持久化）。
+ *
+ * 为什么放在面板级 context：请求的**发起方**是终端内容子树（右键菜单在
+ * `InteractiveTerminalView` 里渲染与点击），而行内输入框的状态归 tab 条所在的 pane。
+ * 与 `activePaneId` / `tabDrag` 同理，这种跨子树的一次性意图只能由面板层单点转发：
+ * 复制一份 rename 状态，或把 pane 内部的 setState 透传进终端视图，都会制造第二套真相。
+ */
+export interface TerminalRenameRequest {
+  /** 目标 pane；只有该 pane 会消费（避免多个 pane 同时抢一个请求）。 */
+  paneId: string;
+  terminalId: string;
+}
+
+/**
  * 每个 pane 的操作区（＋ / ⊟ / ⋯）与 tab 条需要的面板级动作。
  *
  * 全部以 `paneId`（显式 pane 或隐式 pane 常量）为作用域参数，避免把「当前是哪个
  * pane」的推断下沉到动作实现里。
  */
 export interface TerminalPaneActions {
-  /** ＋：新建终端到该 pane 所在的组。 */
-  createTerminal(paneId: string): void;
+  /** ＋：新建终端到该 pane 所在的组；可指定服务端白名单里的 shell profile id。 */
+  createTerminal(paneId: string, shellProfileId?: string): void;
+  /**
+   * 🗑：真终止（网关 `POST /kill`，强杀进程）。
+   * 与 `closeTerminal`（tab ×，走 `/close` 优雅收尾）是两条不同的路径。
+   */
+  killTerminal(terminalId: string): void;
   /** ⊟ / ⋯ 方向拆分：POST 新终端后把该 pane 一分为二；方向缺省用 preferredSplitDirection。 */
   splitPane(paneId: string, direction?: TerminalSplitDirection): void;
   /** ⋯：把其他 tab 合并进该 pane 的组（纯函数层 insertTerminalIntoPane）。 */
@@ -93,12 +115,20 @@ export interface TerminalLayoutContextValue {
   preferredSplitDirection: TerminalSplitDirection;
   /** 面板内可见终端总数（判「当前组已包含所有终端」用）。 */
   totalTerminalCount: number;
+  /** 宿主级 shell 配置；空数组 = 不可用（不渲染 profile 下拉，默认 shell 仍可用）。 */
+  shellProfiles: readonly ShellProfileOption[];
   /** 正在执行创建 / 拆分的 pane；非 null 时全部操作入口禁用，避免重入。 */
   busyPaneId: string | null;
   /** T-12 拖拽预览（瞬态）；null = 当前没有 tab 拖拽。 */
   tabDrag: TerminalTabDragState | null;
   /** T-12：pointermove 期间高频更新预览（**不落盘**）；null 清除。 */
   setTabDrag(state: TerminalTabDragState | null): void;
+  /** 内容区右键「重命名」请求（瞬态）；null = 没有待处理请求。 */
+  renameRequest: TerminalRenameRequest | null;
+  /** 发起重命名请求；由目标 pane 的行内重命名机制消费。 */
+  requestRename(paneId: string, terminalId: string): void;
+  /** 请求被消费（或会话切换）后清空；同一个请求只允许生效一次。 */
+  clearRenameRequest(): void;
   view: TerminalViewEnvironment;
   actions: TerminalPaneActions;
 }

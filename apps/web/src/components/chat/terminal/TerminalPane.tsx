@@ -27,6 +27,8 @@ import {
   type TerminalTabDragBinding,
 } from './TerminalTabStrip.js';
 import { useTerminalLayoutContext, type TerminalTabDragState } from './TerminalLayoutContext.js';
+import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu.js';
+import { buildTerminalCommandItems } from './terminal-pane-menu.js';
 import { paneLimitMessage } from './terminal-panel-shortcuts.js';
 import './terminal-split.css';
 
@@ -368,10 +370,16 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
     totalTerminalCount,
     preferredSplitDirection,
     tabDrag,
+    renameRequest,
+    requestRename,
+    clearRenameRequest,
+    shellProfiles,
   } = useTerminalLayoutContext();
   // 行内重命名是纯 pane 内的瞬态 UI 态：每个 pane 各自持有，互不干扰。
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // tab 右键菜单（瞬态）：被点击的 terminalId + 视口坐标；同一时刻最多一个。
+  const [tabMenu, setTabMenu] = useState<{ terminalId: string; x: number; y: number } | null>(null);
   const tabDragGesture = useTabDragGesture(paneId, terminals);
 
   const activeTerminal =
@@ -422,6 +430,79 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
     startRename(activeTerminal.terminalId, terminalTabLabel(activeTerminal, Math.max(index, 0)));
   };
 
+  // 内容区右键「重命名」：请求由面板层转发，只有目标 pane 且终端仍在本组时才消费。
+  // 不匹配的请求保持原样（不抢其他 pane 的请求），孤儿请求由会话切换时的清空收口。
+  useEffect(() => {
+    if (renameRequest === null || renameRequest.paneId !== paneId) return;
+    const index = terminals.findIndex(
+      (terminal) => terminal.terminalId === renameRequest.terminalId,
+    );
+    const target = index < 0 ? undefined : terminals[index];
+    if (target === undefined) return;
+    startRename(target.terminalId, terminalTabLabel(target, index));
+    clearRenameRequest();
+  }, [renameRequest, paneId, terminals, clearRenameRequest]);
+
+  /**
+   * 「关闭其他」的唯一实现：关闭本组除 `exceptTerminalId` 外的终端。
+   * 保留谁由调用方给定 —— ⋯ / 内容区菜单保留 active 终端，tab 右键菜单保留被点击的 tab。
+   */
+  const closeOtherTerminals = (exceptTerminalId: string | null): void => {
+    actions.closeTerminals(
+      terminals
+        .filter((terminal) => terminal.terminalId !== exceptTerminalId)
+        .map((terminal) => terminal.terminalId),
+    );
+  };
+
+  const paneMenuItems = buildTerminalCommandItems({
+    terminalCount: terminals.length,
+    totalTerminalCount,
+    sessionReady,
+    creating: busy,
+    splitDisabledReason,
+    splitDirections: splitMenuDirections,
+    onRequestCreate: () => actions.createTerminal(paneId),
+    onRequestSplit: (direction) => actions.splitPane(paneId, direction),
+    onRequestKill: () => {
+      if (activeTerminal !== null) actions.killTerminal(activeTerminal.terminalId);
+    },
+    // 走面板级请求通道而不是直接改本 pane 的行内状态：菜单点击发生在终端内容子树，
+    // 与持有输入框状态的 tab 条不是同一棵子树（见 TerminalLayoutContext 的说明）。
+    onRequestRename: () => {
+      if (activeTerminal !== null) requestRename(paneId, activeTerminal.terminalId);
+    },
+    onRequestCloseOthers: () => closeOtherTerminals(activeTerminalId),
+    onRequestCloseAll: () => actions.closeAllTerminals(),
+  });
+
+  /**
+   * tab 右键菜单：项集 / 顺序 / 措辞模板与内容区菜单同源（`buildTerminalCommandItems`），
+   * 只是把所有涉及终端的目标换成被点击的那个 tab。
+   *
+   * 不隐式激活被点击的 tab：菜单语义是「对这一个终端做操作」，标题里的「该终端」
+   * 已经把目标写清楚；顺手切换 active 会连带改变 ⋯ 菜单与内容区菜单的作用对象
+   * （它们看 active），用户只是右键看一眼就要付出换焦点的代价。
+   */
+  const buildTabMenuItems = (terminalId: string): TerminalContextMenuItem[] =>
+    buildTerminalCommandItems({
+      terminalCount: terminals.length,
+      totalTerminalCount,
+      sessionReady,
+      creating: busy,
+      splitDisabledReason,
+      splitDirections: splitMenuDirections,
+      target: { long: '该终端', short: '该终端' },
+      onRequestCreate: () => actions.createTerminal(paneId),
+      onRequestSplit: (direction) => actions.splitPane(paneId, direction),
+      onRequestKill: () => actions.killTerminal(terminalId),
+      // 复用 phase-1 的重命名请求通道：tab 条持有输入框状态，菜单在 pane 内构建，
+      // 两个入口必须走同一套「请求 → 目标 pane 消费 → startRename」，不允许第二条。
+      onRequestRename: () => requestRename(paneId, terminalId),
+      onRequestCloseOthers: () => closeOtherTerminals(terminalId),
+      onRequestCloseAll: () => actions.closeAllTerminals(),
+    });
+
   return (
     <section
       className="terminal-pane"
@@ -461,6 +542,9 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
           onCommitRename={commitRename}
           onCancelRename={() => setRenamingId(null)}
           onClose={(terminalId) => actions.closeTerminal(terminalId)}
+          onTabContextMenu={(terminalId, position) =>
+            setTabMenu({ terminalId, x: position.x, y: position.y })
+          }
         />
         <TerminalTabActions
           activeTerminal={activeTerminal}
@@ -469,17 +553,18 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
           canCreate={sessionReady && !busy}
           creating={busyPaneId === paneId}
           onRequestCreate={() => actions.createTerminal(paneId)}
+          shellProfiles={shellProfiles}
+          onRequestCreateWithProfile={(shellProfileId) =>
+            actions.createTerminal(paneId, shellProfileId)
+          }
+          onRequestKill={() => {
+            if (activeTerminal !== null) actions.killTerminal(activeTerminal.terminalId);
+          }}
           onRequestRename={requestRenameActive}
           onRequestClear={() => {
             if (activeTerminal !== null) actions.clearTerminal(activeTerminal);
           }}
-          onRequestCloseOthers={() =>
-            actions.closeTerminals(
-              terminals
-                .filter((terminal) => terminal.terminalId !== activeTerminalId)
-                .map((terminal) => terminal.terminalId),
-            )
-          }
+          onRequestCloseOthers={() => closeOtherTerminals(activeTerminalId)}
           onRequestCloseAll={() => actions.closeAllTerminals()}
           onRequestSplit={() => actions.splitPane(paneId)}
           splitDisabledReason={splitDisabledReason}
@@ -500,6 +585,7 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
             terminal={activeTerminal}
             inputEnabled={view.inputEnabled(activeTerminal)}
             onWriteError={view.onWriteError}
+            menuItems={paneMenuItems}
           />
         ) : (
           <div className="terminal-panel__empty">
@@ -507,6 +593,14 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
           </div>
         )}
       </div>
+      {tabMenu ? (
+        <TerminalContextMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          items={buildTabMenuItems(tabMenu.terminalId)}
+          onClose={() => setTabMenu(null)}
+        />
+      ) : null}
     </section>
   );
 }

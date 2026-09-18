@@ -620,7 +620,9 @@ export function SessionTerminalsPanel({
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>会话终端</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              会话终端
+            </span>
             <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               {active.length} 个运行中 / 共 {terminals.length} 条记录
             </span>

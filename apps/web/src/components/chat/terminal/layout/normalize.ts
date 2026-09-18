@@ -119,5 +119,11 @@ function normalizeSplit(
   const unchanged =
     split.children[0] === left && split.children[1] === right && split.ratio === ratio;
   if (unchanged) return split;
-  return { kind: 'split', id: split.id, direction: split.direction, children: [left, right], ratio };
+  return {
+    kind: 'split',
+    id: split.id,
+    direction: split.direction,
+    children: [left, right],
+    ratio,
+  };
 }

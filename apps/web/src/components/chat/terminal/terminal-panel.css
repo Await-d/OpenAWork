@@ -1,6 +1,6 @@
 /**
- * 终端抽屉 chrome：面板页签栏（32px）+ 终端 tab 条（30px）+ 操作按钮 + 空态 +
- * 端口页只读列表（T-15：表格 / 绑定地址标注 / 行内动作五态）。
+ * 终端抽屉 chrome：面板页签栏 + 终端 tab 条（两行同高，见 --terminal-panel-header-height）
+ * + 操作按钮 + 空态 + 端口页只读列表（T-15：表格 / 绑定地址标注 / 行内动作五态）。
  *
  * 为什么单独一个 CSS 文件：内联 style 无法表达 :hover / :active / :focus-visible /
  * :disabled，而 DESIGN-TOKENS 要求交互元素五态齐全。颜色一律走 E · Nebula CSS
@@ -12,6 +12,12 @@
 
 /* ── 抽屉外壳 ── */
 .terminal-panel {
+  /* 两行头部（面板页签行 + 终端 tab 条）的统一高度。
+     这是**组件几何规格**（对齐 VS Code 页签条的真实高度），不是间距阶梯的成员：
+     4/8/12/16/20/24/32/48 是内容间距的标尺，头部高度是 chrome 尺寸 —— 请不要把它
+     「修正」成 32。改这里 = 两行头部 + hint 偏移一起变。 */
+  --terminal-panel-header-height: 35px;
+
   position: absolute;
   left: 0;
   right: 0;
@@ -29,6 +35,74 @@
   position: relative;
   z-index: 1;
   box-shadow: none;
+}
+
+/* ── 最大化（data-maximized='true'）──
+   最大化放弃内联像素高度，改由布局模式决定占位：inline 宿主靠外壳（FusionChatMainShell
+   折叠工作台行 + 终端行吃满剩余）让出高度，面板用 flex 吃满；overlay 是脱离文档流的
+   覆盖层，top: 0 与基类的 bottom: 0 一起铺满包含块即可。
+   之所以不写像素高度、也不用 !important 压：还原时不需要任何恢复逻辑 —— 持久化高度
+   从未被覆盖，可拖拽状态下内联 height 重新生效即精确回到用户此前的高度。
+   手柄在最大化下本就不渲染（见 QuickTerminalPanel），这里再兜一层：任何宿主都不该在
+   最大化时留下可拖拽的手柄 —— 拖动按持久化高度域（上限 900px）钳制，从最大化直接拖
+   会先跳变，所以本轮只保留「还原」路径（VS Code 的「拖动即还原」是有意不做）。 */
+.terminal-panel[data-maximized='true'] .terminal-panel__resize-handle {
+  display: none;
+}
+
+.terminal-panel[data-presentation='inline'][data-maximized='true'] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terminal-panel[data-presentation='overlay'][data-maximized='true'] {
+  top: 0;
+  height: auto;
+  min-height: 0;
+}
+
+/* ── 侧停靠几何（data-docked='left' | 'right'，仅 inline 宿主）──
+   为什么宽度必须由 CSS 而不是 JS/store 决定：停靠列宽是「工作台的百分比」决策，
+   不是用户像素偏好。存进 store 就要为不同宽度的工作台做迁移与钳制（并在换窗口
+   时失真），而 clamp(下限, 占比, 上限) 天然同时满足「窄工作台不塌、宽工作台不喧宾」。
+   对比之下，底部高度是用户亲手拖出来的像素值，才需要 terminalPanelHeight 持久化。
+   高度 100% 由横向分栏后的外壳行（面板是它的 flex item）的确定高度解析，零像素写死。
+   拖拽手柄在停靠下不渲染（见 QuickTerminalPanel）：本轮没有「拖宽度」手势，
+   一个仍按行高逻辑改轴的纵向手柄比没有手柄更糟；这里再兜一层，任何宿主都不该
+   在停靠态留下可拖拽的纵向手柄。 */
+.terminal-panel[data-presentation='inline'][data-docked='left'],
+.terminal-panel[data-presentation='inline'][data-docked='right'] {
+  --terminal-panel-dock-min-width: 280px;
+  --terminal-panel-dock-width: 32%;
+  --terminal-panel-dock-max-width: 560px;
+
+  flex: 0 0 auto;
+  height: 100%;
+  width: clamp(
+    var(--terminal-panel-dock-min-width),
+    var(--terminal-panel-dock-width),
+    var(--terminal-panel-dock-max-width)
+  );
+}
+
+/* 停靠列与工作台的分隔线画在相邻的那一侧；基类的 border-top 在全高列上
+   会在顶部横拉一条无意义的线。
+   左停靠还需要 order: -1：外壳的 DOM 顺序是「工作台在前、终端行在后」（不重排 JSX，
+   才能在左右切换时不重挂载终端），而终端行在外壳里是 display: contents —— 真正被提升为
+   flex item 的是本面板，所以 order 必须落在面板上才生效，放在终端行上会被忽略。 */
+.terminal-panel[data-presentation='inline'][data-docked='left'] {
+  border-top: none;
+  border-right: 1px solid var(--border-subtle);
+  order: -1;
+}
+
+.terminal-panel[data-presentation='inline'][data-docked='right'] {
+  border-top: none;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.terminal-panel[data-docked] .terminal-panel__resize-handle {
+  display: none;
 }
 
 /* 拖拽柄：默认隐形，hover / 键盘聚焦才显形。 */
@@ -63,8 +137,8 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  height: 32px;
-  min-height: 32px;
+  height: var(--terminal-panel-header-height);
+  min-height: var(--terminal-panel-header-height);
   padding: 0 var(--spacing-2);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-overlay);
@@ -91,7 +165,6 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--spacing-1);
   height: 100%;
   padding: 0 var(--spacing-2);
   border: none;
@@ -191,14 +264,28 @@
   cursor: wait;
 }
 
+/* 危险态（破坏性动作）的图标按钮：常态中性、hover/active 才用 danger token 提亮 ——
+   提前就位，等后续任务接上使用方；当前无消费者，不影响任何现有按钮表现。 */
+.terminal-panel__icon-btn--danger:hover {
+  border-color: var(--danger-border);
+  background: var(--danger-muted);
+  color: var(--danger);
+}
+
+.terminal-panel__icon-btn--danger:active {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--fg-on-complement);
+}
+
 /* ── 行 2：终端 tab 条 ── */
 .terminal-panel__tab-strip {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   gap: var(--spacing-1);
-  height: 30px;
-  min-height: 30px;
+  height: var(--terminal-panel-header-height);
+  min-height: var(--terminal-panel-header-height);
   padding: 0 var(--spacing-2);
   background: var(--bg-raised);
 }
@@ -231,19 +318,16 @@
   max-width: 200px;
   height: 22px;
   padding: 0 var(--spacing-1) 0 var(--spacing-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  border: none;
   background: transparent;
   color: var(--fg-muted);
   transition:
     background var(--dur-micro) var(--ease-micro),
-    border-color var(--dur-micro) var(--ease-micro),
     color var(--dur-micro) var(--ease-micro);
 }
 
 .terminal-tab:hover {
   background: var(--bg-hover);
-  border-color: var(--border-subtle);
   color: var(--fg-default);
 }
 
@@ -252,13 +336,26 @@
   color: var(--fg-strong);
 }
 
-/* 激活 tab = accent-subtle 底 + accent 边 + accent 文字（与面板页签的
-   下划线区分层级：行 1 是视图级，行 2 是容器内的页签）。 */
+/* 激活 tab（VS Code 平铺风格）= 顶部 2px accent 规则线 + 从 tab 条（--bg-raised）
+   抬一级的底色（--bg-overlay），不再是 accent-subtle 填充 + 圆角卡片。
+   用 ::before 而不是 border-top：border 参与盒模型，22px 高度被吃掉 2px 会让文字
+   基线随激活态上下跳；伪元素不占布局，几何零影响。
+   与行 1 的区分：行 1（视图级）用底边线，行 2（容器内页签）用顶线，同用 accent 表 active。
+   [data-active='true']:hover 一并选中：激活态在 hover 下不退化回普通 hover 底色。 */
 .terminal-tab[data-active='true'],
 .terminal-tab[data-active='true']:hover {
-  background: var(--accent-subtle);
-  border-color: var(--accent-border);
+  background: var(--bg-overlay);
   color: var(--accent);
+}
+
+.terminal-tab[data-active='true']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
 }
 
 .terminal-tab__label {
@@ -291,6 +388,7 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-radius: var(--radius-xs);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
 }
 
 .terminal-tab__rename {
@@ -323,10 +421,22 @@
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--fg-subtle);
+  opacity: 0;
   cursor: pointer;
   transition:
+    opacity var(--dur-micro) var(--ease-micro),
     background var(--dur-micro) var(--ease-micro),
     color var(--dur-micro) var(--ease-micro);
+}
+
+/* 关闭 × 只在 hover / 激活 / 键盘焦点进入时显形（VS Code 行为）。
+   用 opacity 而不是 display:none / visibility:hidden：后两者会把按钮移出 Tab 序列
+   与可访问性树，键盘用户永远到不了它；opacity: 0 的元素仍可聚焦，:focus-within 会把它
+   显形，焦点环随后可见。 */
+.terminal-tab:hover .terminal-tab__close,
+.terminal-tab[data-active='true'] .terminal-tab__close,
+.terminal-tab:focus-within .terminal-tab__close {
+  opacity: 1;
 }
 
 .terminal-tab__close:hover {
@@ -341,6 +451,7 @@
 .terminal-tab__close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
 }
 
 .terminal-tab__close:disabled {
@@ -378,7 +489,8 @@
    不参与布局，避免 2.4s 的提示把终端挤得重排（xterm 会因此触发一次多余的 fit）。 */
 .terminal-panel__hint {
   position: absolute;
-  top: 40px; /* 32px 页签行 + 8px 间距 */
+  /* 偏移 = 两行头部高度 + 8px 间距；跟随 --terminal-panel-header-height 自动更新。 */
+  top: calc(var(--terminal-panel-header-height) + var(--spacing-2));
   right: var(--spacing-2);
   z-index: 2;
   max-width: min(320px, calc(100% - 2 * var(--spacing-2)));
@@ -410,6 +522,11 @@
   .terminal-panel__hint {
     animation: none;
   }
+
+  /* 关闭 × 的显隐直接切换，不做淡入淡出（可达性不受影响）。 */
+  .terminal-tab__close {
+    transition: none;
+  }
 }
 
 .terminal-panel__empty {
@@ -424,7 +541,7 @@
   text-align: center;
 }
 
-/* ── 端口页（T-15：只读列表 + 同机直接打开）── */
+/* ── 端口页（T-15：只读列表 + 同机直接打开；P0：容器查询重排 + 工具条收口）── */
 .terminal-ports {
   display: flex;
   flex: 1;
@@ -432,20 +549,28 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* 容器查询上下文：窄宽度重排必须跟随**面板实际宽度**，不是视口宽度 ——
+     侧停靠时面板宽是 clamp(280px, 32%, 560px)，1440px 视口下端口表可能只有 300px 宽，
+     视口 media 对此完全不可见。container-type 附带 layout containment（建立包含块），
+     已核对：本子树内没有任何 position: fixed（fixed 层在 .terminal-panel /
+     .terminal-overlay 上，不在端口页内部），包含块变化不影响任何元素。 */
+  container-type: inline-size;
+  container-name: terminal-ports;
 }
 
-/* 加载 / 错误：抽屉最矮 160px 也放得下，垂直 padding 取 16px。 */
+/* 加载 / 错误：抽屉最矮 160px 也放得下，垂直 padding 取 16px。
+   内容锚左上（VS Code 端口视图口径）：不做水平 / 垂直居中。 */
 .terminal-ports__status {
   display: flex;
   flex: 1;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: var(--spacing-2);
   padding: var(--spacing-4);
   color: var(--fg-muted);
   font-size: 12px;
-  text-align: center;
+  text-align: left;
 }
 
 .terminal-ports__spinner {
@@ -470,8 +595,8 @@
   line-height: 1.5;
 }
 
-/* 重试：btn-ghost 变体的五态（default / hover / active / focus-visible / disabled）。 */
-.terminal-ports__retry {
+/* 通用次要按钮（错误态「重试」/ 无匹配态「清除筛选」共用）：btn-ghost 变体的五态。 */
+.terminal-ports__btn {
   height: 28px;
   padding: 0 var(--spacing-3);
   border: 1px solid var(--border-default);
@@ -488,17 +613,17 @@
     color var(--dur-micro) var(--ease-micro);
 }
 
-.terminal-ports__retry:hover {
+.terminal-ports__btn:hover {
   background: var(--bg-hover);
   border-color: var(--border-emphasis);
   color: var(--fg-strong);
 }
 
-.terminal-ports__retry:active {
+.terminal-ports__btn:active {
   background: var(--bg-active);
 }
 
-.terminal-ports__retry:focus-visible {
+.terminal-ports__btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px var(--accent-subtle);
@@ -508,30 +633,130 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--spacing-2);
   min-width: 0;
   min-height: 0;
-  padding: var(--spacing-2);
+  /* 顶部不留 padding：sticky 表头吸附到 scrollport 顶边时，padding 区会让行内容从
+     表头上方露出一条。表格自身用 margin-top 留初始间距（随手滚动一起走）。 */
+  padding: 0 var(--spacing-2) var(--spacing-2);
   overflow: auto;
 }
 
-.terminal-ports__meta {
+/* 工具条（L4）：计数 / 年龄 / 筛选 / 暂停 / 刷新 + 说明 chip 收进一条；在滚动容器
+   **外**，所以列表滚动时它始终可见（sticky 表头只管表格内部）。 */
+.terminal-ports__toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+/* flex-wrap：窄容器（280px 侧停靠）下自然折成两行，而不是横向溢出。 */
+.terminal-ports__toolbar-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--spacing-2);
+  min-width: 0;
+}
+
+/* 筛选框：flex-basis 给下限，放不下时整块换行；focus 环画在外壳上（原生 outline
+   会被圆角切掉，且 4px shadow 与仓库其它输入控件口径一致）。 */
+.terminal-ports__filter {
+  display: flex;
+  flex: 1 1 132px;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--fg-subtle);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-ports__filter:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+}
+
+.terminal-ports__filter:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
   color: var(--fg-muted);
+}
+
+.terminal-ports__filter-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: 11.5px;
+  outline: none;
+}
+
+.terminal-ports__filter-input::placeholder {
+  color: var(--fg-subtle);
+}
+
+/* 工具条按钮（暂停 / 继续、刷新）：宽容器图标 + 文案，窄容器只留图标
+   （文案由容器查询隐藏，aria-label / title 保住可访问名与提示）。 */
+.terminal-ports__tool-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-family: inherit;
   font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
+}
+
+.terminal-ports__tool-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.terminal-ports__tool-btn:active {
+  background: var(--bg-active);
+}
+
+.terminal-ports__tool-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
 }
 
 .terminal-ports__count {
   color: var(--fg-default);
+  font-size: 11px;
   font-weight: 600;
 }
 
 /* 快照年龄：辅助信息，与计数同排但不抢视觉权重（tabular-nums 让每秒跳动不抖宽）。 */
 .terminal-ports__age {
   color: var(--fg-subtle);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -542,26 +767,39 @@
   line-height: 1.5;
 }
 
-.terminal-ports__notice {
+/* 远端 / 降级说明 chip：单行 + ellipsis（title 保全文）；窄容器里不能靠换行吃掉列表高度。 */
+.terminal-ports__chip {
   margin: 0;
-  padding: var(--spacing-2);
+  padding: 1px var(--spacing-1);
   border: 1px solid var(--warning-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: var(--warning-muted);
   color: var(--fg-default);
   font-size: 11px;
   line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* 表头 sticky（L1）：solid 背景 + 底边线，行滚过时不会有内容从表头后面透出来。
+   border-collapse 用 separate 而不是 collapse：collapse 模式下 sticky 单元格的边框
+   归属表格、会跟着内容滚走，separate + border-spacing: 0 才能让表头线稳定吸住。 */
 .terminal-ports__table {
   width: 100%;
-  border-collapse: collapse;
+  margin-top: var(--spacing-2);
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12px;
 }
 
 .terminal-ports__table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 0 var(--spacing-2) var(--spacing-1);
   border-bottom: 1px solid var(--border-default);
+  background: var(--bg-overlay);
   color: var(--fg-muted);
   font-size: 11px;
   font-weight: 600;
@@ -584,17 +822,39 @@
   background: var(--bg-hover);
 }
 
+/* 端口列（L5）：左对齐（VS Code 端口视图口径）+ tabular-nums —— 数字仍在 5ch 列内
+   等宽对齐（竖向可扫），但整列贴左缘读起，不再右对齐。
+   协议作为独立子列跟在数字右侧，列序写成 auto + 1fr，保证「数字左缘 → 协议左缘」
+   依次紧排；「tcp / tcp6」的宽度差因此不会推动数字的位置。 */
+.terminal-ports__th--port,
+.terminal-ports__cell--port {
+  text-align: left;
+}
+
+.terminal-ports__cell--port {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--spacing-1);
+}
+
 .terminal-ports__port-number {
+  /* 5ch 覆盖最大 5 位端口：列宽固定，位数不同的端口左缘落在同一条竖线上（可扫描）。 */
+  min-width: 5ch;
   color: var(--fg-strong);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .terminal-ports__protocol {
-  margin-left: var(--spacing-1);
+  /* 4ch 让 tcp / tcp6 占同样宽度，协议列内文字宽度稳定；数字列已由 5ch 固定，
+     协议宽度不再推动数字位置。 */
+  min-width: 4ch;
   color: var(--fg-subtle);
   font-size: 10px;
+  text-align: left;
 }
 
 .terminal-ports__bind-address {
@@ -635,15 +895,85 @@
   color: var(--fg-muted);
 }
 
-.terminal-ports__cell--actions {
-  text-align: right;
+/* 状态列（A/B）：归属 chip + 连接状态 + 「已退出」警示横排；放不下就换行，
+   不允许撑破单元格（宽布局下这一列是自适应的最窄列之一）。 */
+.terminal-ports__cell--status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+/* 归属 chip 三态：本网关终端（success）/ 外部进程（中性）/ 归属不可用（warning）。
+   颜色只表达语义分级，具体文案与原因在 title 与行内文本里。 */
+.terminal-ports__owner-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--spacing-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
-/* 「在浏览器打开」：链接与禁用按钮共用同一套五态。 */
-.terminal-ports__open {
+.terminal-ports__owner-chip--gateway {
+  background: var(--success-muted);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.terminal-ports__owner-chip--external {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  color: var(--fg-muted);
+}
+
+.terminal-ports__owner-chip--unavailable {
+  background: var(--warning-muted);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+/* 连接状态：辅助信息，与 chip 同级但更弱（tabular-nums 让数字不跳宽）。 */
+.terminal-ports__connections {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 「进程已退出」：只在 processAlive === false（真实异常）时出现，warning 级别；
+   图标与文案一起出现，避免只有一个色块的歧义。 */
+.terminal-ports__exited {
   display: inline-flex;
   align-items: center;
+  gap: var(--spacing-1);
+  padding: 1px var(--spacing-1);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-xs);
+  background: var(--warning-muted);
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 动作列（L5）：左对齐（VS Code 端口视图口径），动作从列左缘排起。 */
+.terminal-ports__cell--actions {
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* 行内动作：「复制地址」（纯图标）+「在浏览器打开」（链接与禁用按钮共用五态）。
+   旧版是一个 ~96px 的文字链接独占动作列 —— 窄容器里动作必须收缩到图标级，
+   文案由容器查询隐藏、aria-label / title 保住可访问名与提示。 */
+.terminal-ports__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-1);
   height: 24px;
   padding: 0 var(--spacing-2);
   border: 1px solid var(--border-default);
@@ -662,25 +992,121 @@
     color var(--dur-micro) var(--ease-micro);
 }
 
-.terminal-ports__open:hover {
+.terminal-ports__action + .terminal-ports__action {
+  margin-left: var(--spacing-1);
+}
+
+.terminal-ports__action:hover {
   background: var(--bg-hover);
   border-color: var(--border-emphasis);
   color: var(--fg-strong);
 }
 
-.terminal-ports__open:active {
+.terminal-ports__action:active {
   background: var(--bg-active);
 }
 
-.terminal-ports__open:focus-visible {
+.terminal-ports__action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px var(--accent-subtle);
 }
 
-.terminal-ports__open:disabled {
+.terminal-ports__action:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 复制成功：按钮切对勾并转 success 色（2s 后复位），与读屏播报同一时刻发生。 */
+.terminal-ports__action[data-copied='true'] {
+  border-color: var(--success-border);
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+/* 终止动作（破坏性）：常态保持中性，hover 才用 danger token 提亮 ——
+   它不是主操作，不能和「复制 / 打开」抢视觉权重。 */
+.terminal-ports__action--kill:hover {
+  border-color: var(--danger-border);
+  background: var(--danger-muted);
+  color: var(--danger);
+}
+
+/* 终止结果提示（成功 / 失败共用一行，插在工具条下方；不引入 toast 体系）。 */
+.terminal-ports__notice {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.terminal-ports__notice--ok {
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.terminal-ports__notice--error {
+  background: var(--danger-muted);
+  color: var(--danger);
+}
+
+/* 危险按钮：确认终止用 danger 实心强调，明确性是第一优先级（不做图标化收缩）。 */
+.terminal-ports__btn--danger {
+  border-color: var(--danger-border);
+  background: var(--danger-muted);
+  color: var(--danger);
+}
+
+.terminal-ports__btn--danger:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--fg-on-accent);
+}
+
+.terminal-ports__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── 终止确认条（贴底内嵌，形态对齐终端面板的粘贴确认；不用全屏遮罩打断阅读）── */
+.terminal-ports__kill-confirm {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3);
+  border-top: 1px solid var(--danger-border);
+  background: var(--bg-elevated);
+}
+
+.terminal-ports__kill-confirm-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.terminal-ports__kill-confirm-icon {
+  display: inline-flex;
+  color: var(--danger);
+}
+
+.terminal-ports__kill-confirm-desc {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.terminal-ports__kill-confirm-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-2);
 }
 
 /* 仅供读屏：表头「操作」列与表格 caption 的可访问名。 */
@@ -696,29 +1122,30 @@
   border: 0;
 }
 
-/* ── 端口页空状态 / 错误卡片（虚线框 + 图标 + 标题 + 说明）── */
+/* ── 端口页空状态 / 错误卡片（虚线框 + 图标 + 标题 + 说明）──
+   整块锚左上（VS Code 端口视图口径）：卡片从内容区左上角展开，不做居中。 */
 .terminal-ports-empty {
   display: flex;
   flex: 1;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   min-height: 0;
   padding: var(--spacing-4);
 }
 
 /* 面板高度可拖到 160px，垂直 padding 取 24px 而非页面级空状态的 48px，
-   否则最矮档位会直接出现滚动条。 */
+   否则最矮档位会直接出现滚动条；卡片内部同样左对齐（图标 / 标题 / 说明）。 */
 .terminal-ports-empty__card {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--spacing-2);
   max-width: 360px;
   padding: var(--spacing-6) var(--spacing-8);
   border: 1px dashed var(--border-emphasis);
   border-radius: var(--radius-lg);
   background: var(--bg-overlay);
-  text-align: center;
+  text-align: left;
 }
 
 .terminal-ports-empty__icon {
@@ -743,9 +1170,165 @@
   line-height: 1.5;
 }
 
+/* ── 筛选无匹配（与「没有监听端口」的空态区分：数据还在，只是被筛掉了；
+   同样按 VS Code 口径左对齐）── */
+.terminal-ports__filter-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+  color: var(--fg-subtle);
+  text-align: left;
+}
+
+.terminal-ports__filter-empty-text {
+  margin: 0;
+  max-width: 320px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ── 窄容器重排（L2：容器查询跟随面板实际宽度，不是视口）──
+   阈值 520px 的来历：宽布局五列（端口+协议 / 进程 / 状态 / 地址+标注 / 操作）加
+   单元格 padding 最小需要约 480–510px，520 给长短不一的进程名与地址留余量；侧停靠
+   宽度域是 280–560px，底部停靠（通常 ≥ 600px）继续用宽布局。 */
+@container terminal-ports (max-width: 520px) {
+  /* 动作与工具条按钮收缩为纯图标：可访问名由 aria-label / title 保住。 */
+  .terminal-ports__action-label,
+  .terminal-ports__tool-label {
+    display: none;
+  }
+
+  /* 表头折成单行：只留与首行直接对应的「端口 / 操作」。进程与绑定地址在行内是
+     自解释字段（进程名·pid / 等宽地址），不需要列头对齐；状态同理。 */
+  .terminal-ports__th--process,
+  .terminal-ports__th--status,
+  .terminal-ports__th--bind {
+    display: none;
+  }
+
+  /* 表格转块级、行转三行网格：<table>/<caption>/scope 语义标记全部保留，只改布局盒。
+     进程单元格必须照常渲染 —— 旧版在这里 display:none 掉整列，正是 L2 要修的丢字段。 */
+  .terminal-ports__table,
+  .terminal-ports__table thead,
+  .terminal-ports__table tbody {
+    display: block;
+  }
+
+  /* 表头吸附改由 thead 承担：display:block 之后 th 的 sticky 不再可靠。 */
+  .terminal-ports__table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  /* 表头折成单行、左对齐：只留与首行直接对应的「端口 / 操作」，两者依次从左侧排起。 */
+  .terminal-ports__table thead tr {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--spacing-2);
+    padding: 0 var(--spacing-2) var(--spacing-1);
+    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-overlay);
+  }
+
+  .terminal-ports__table th {
+    position: static;
+    padding: 0;
+    border-bottom: none;
+    background: transparent;
+  }
+
+  .terminal-ports__row {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'port tag actions'
+      'process process address'
+      'status status status';
+    align-items: center;
+    column-gap: var(--spacing-2);
+    row-gap: var(--spacing-1);
+    padding: var(--spacing-2);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .terminal-ports__row:first-child {
+    border-top: none;
+  }
+
+  /* 单元格的 padding / 分隔线交给行容器，单元格只当网格槽位。 */
+  .terminal-ports__row .terminal-ports__cell {
+    padding: 0;
+    border-top: none;
+  }
+
+  .terminal-ports__row:hover,
+  .terminal-ports__row:focus-within {
+    background: var(--bg-hover);
+  }
+
+  .terminal-ports__cell--port {
+    grid-area: port;
+  }
+
+  /* 状态独占末行：280px 档位下 chip + 连接数 + 「已退出」横排放不下时在槽位内
+     换行，不横向溢出（首行留给端口与操作，次行留给进程与地址）。 */
+  .terminal-ports__cell--status {
+    grid-area: status;
+  }
+
+  /* 绑定地址单元格拆成两个槽位：标注进首行、地址进次行 —— display: contents 让两个
+     span 直接参与行网格（td 自身不出盒），语义上仍是同一个单元格。 */
+  .terminal-ports__cell--bind {
+    display: contents;
+  }
+
+  .terminal-ports__bind-tag {
+    grid-area: tag;
+    margin-left: 0;
+    justify-self: start;
+  }
+
+  /* 地址左对齐（与全表 VS Code 左对齐口径一致）；允许换行、不截断（信息不能因为窄而消失）。 */
+  .terminal-ports__bind-address {
+    grid-area: address;
+    justify-self: start;
+    text-align: left;
+  }
+
+  /* 进程名允许在槽位内换行（不省略号截断），长进程名与长地址都不丢信息。 */
+  .terminal-ports__col-process {
+    grid-area: process;
+    overflow-wrap: anywhere;
+  }
+
+  .terminal-ports__cell--actions {
+    grid-area: actions;
+    /* 动作数量随行变化（远端 + 归属成功时是四个：复制 / 打开 / 隧道 / 终止），
+       280px 档位放不下就让动作列内部折行 —— 左对齐、从槽位左缘排起，
+       折行比横向溢出诚实（父级的 white-space: nowrap 只约束宽布局）。 */
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: var(--spacing-1);
+  }
+
+  /* 间距交给上面的 flex gap，去掉相邻按钮的 margin-left，避免间距翻倍。 */
+  .terminal-ports__cell--actions .terminal-ports__action + .terminal-ports__action {
+    margin-left: 0;
+  }
+}
+
 /* 移动端（<768px）：压缩 tab 与空状态横向留白，避免两行头部溢出。
-   端口表在 375px 下放不下四列：隐藏「进程」列（信息次优，端口 + 绑定地址 + 动作已够用），
-   绑定地址允许换行，横向不产生滚动。 */
+   端口表的窄宽度重排不在这里 —— 它由 .terminal-ports 的容器查询驱动，
+   视口 media 测不到侧停靠下 300px 宽的面板。 */
 @media (max-width: 767px) {
   .terminal-tab {
     max-width: 148px;
@@ -759,7 +1342,11 @@
     padding: var(--spacing-4) var(--spacing-5);
   }
 
-  .terminal-ports__col-process {
-    display: none;
+  /* 展开态的 inline 抽屉同样落在文档流底部，会被固定 48px 的 FusionMobileBottomPanel
+     tab 条（.fusion-mobile-bottom__strip，z-index 401）盖住最后约 2 行（含提示符），
+     且被遮部分不可点击。与收起态 rail 的 D-3 修法同源：让出 tab 条高度，而不是抬
+     z-index 压盖（那会把缺陷转移给 tab bar）。--spacing-12 = 48px，与 tab 条等高。 */
+  .terminal-panel[data-presentation='inline'] {
+    margin-bottom: var(--spacing-12);
   }
 }

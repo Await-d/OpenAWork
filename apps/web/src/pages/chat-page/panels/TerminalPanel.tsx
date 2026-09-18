@@ -7,12 +7,32 @@
  *
  * 从 uiState store 读取 terminalPanelOpened 控制可见性。
  * Fusion 布局下使用 terminalPanelHeight，避免复用 classic 快捷终端的抽屉高度。
+ *
+ * 高度策略（用户未拖拽过 → 按视口给默认高；拖拽过 → 记住用户的值）：
+ *  - 有效高度在**渲染期**按当前视口求解，结果不写回 store——resize 持续落盘既无意义
+ *    也会污染用户偏好；视口变化时由 useViewportHeight 触发重渲染即可
+ *  - 分屏时按 paneCount 派生下限抬升（见 resolveTerminalPanelHeightWithPaneFloor），
+ *    取消拆分后自然恢复用户原高度
+ *  - 最大化（瞬态）时整个避开像素高度：面板交给外壳布局撑满，持久化高度原样保留
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import {
+  clampTerminalPanelHeightToBounds,
+  resolveEffectiveTerminalPanelPosition,
+  resolveTerminalPanelHeightBounds,
+  resolveTerminalPanelHeightWithPaneFloor,
+  terminalPanelSessionKeyFor,
+  useUIStateStore,
+} from '../../../stores/ui/uiState.js';
+import { useViewportHeight } from '../../../hooks/ui/useViewportHeight.js';
+import { useMobileViewport } from '../layout/use-mobile-viewport.js';
 import { QuickTerminalPanel } from '../../../components/chat/terminal/QuickTerminalPanel.js';
-import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
+import { countPanes } from '../../../components/chat/terminal/layout/queries.js';
+import type {
+  SessionTerminalView,
+  ShellProfileOption,
+} from '../../../components/conversation-runtime/terminals/terminals-api.js';
 import './TerminalPanel.css';
 
 const ACTIVE_TERMINAL_STATUSES = new Set(['running', 'idle', 'tmux-spawned']);
@@ -38,13 +58,30 @@ export interface TerminalPanelProps {
   onReload: () => void;
   onRenameTerminal?: (terminalId: string, name: string | null) => Promise<void>;
   onDismissTerminal?: (terminalId: string) => void;
+  onKillTerminal?: (terminalId: string) => Promise<void>;
+  shellProfiles?: readonly ShellProfileOption[];
 }
 
 export function TerminalPanel(props: TerminalPanelProps) {
   const opened = useUIStateStore((s) => s.terminalPanelOpened);
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const terminalPanelHeight = useUIStateStore((s) => s.terminalPanelHeight);
+  const terminalPanelHeightCustomized = useUIStateStore((s) => s.terminalPanelHeightCustomized);
   const setTerminalPanelHeight = useUIStateStore((s) => s.setTerminalPanelHeight);
+  const terminalPanelMaximized = useUIStateStore((s) => s.terminalPanelMaximized);
+  const toggleTerminalPanelMaximized = useUIStateStore((s) => s.toggleTerminalPanelMaximized);
+  const terminalPanelPosition = useUIStateStore((s) => s.terminalPanelPosition);
+  const setTerminalPanelPosition = useUIStateStore((s) => s.setTerminalPanelPosition);
+  const lastChatPath = useUIStateStore((s) => s.lastChatPath);
+  const terminalLayoutBySession = useUIStateStore((s) => s.terminalLayoutBySession);
+  const viewportHeight = useViewportHeight();
+  // 窄视口降级只在这里做一次（与外壳共用 resolveEffectiveTerminalPanelPosition）：
+  // 传给 QuickTerminalPanel 的是**有效位置**，面板内部对同一降级再算一次是幂等的。
+  const isNarrowViewport = useMobileViewport();
+  const effectivePosition = resolveEffectiveTerminalPanelPosition(
+    terminalPanelPosition,
+    isNarrowViewport,
+  );
   const previousSessionIdRef = useRef<string | null>(props.sessionId);
   const previousActiveTerminalCountRef = useRef(0);
   // 「归零待确认」标记：第一次看到活跃终端数 >0 → 0 只记录，不收起；
@@ -132,13 +169,35 @@ export function TerminalPanel(props: TerminalPanelProps) {
     );
   }
 
+  // 最大化 / 侧停靠时完全跳过像素高度求解（也不调用 bounds / pane-floor 帮手）：面板改由
+  // FusionChatMainShell 的布局撑满（最大化）或由 CSS 的停靠列宽高决定（侧停靠），
+  // store 里的高度偏好保持原样，还原即精确恢复。
+  let effectiveHeight: number | undefined;
+  if (!terminalPanelMaximized && effectivePosition === 'bottom') {
+    const heightBounds = resolveTerminalPanelHeightBounds(viewportHeight);
+    const preferredHeight = terminalPanelHeightCustomized
+      ? clampTerminalPanelHeightToBounds(terminalPanelHeight, heightBounds)
+      : heightBounds.default;
+    const sessionLayout = terminalLayoutBySession[terminalPanelSessionKeyFor(lastChatPath)] ?? null;
+    const paneCount = sessionLayout === null ? 1 : countPanes(sessionLayout);
+    effectiveHeight = resolveTerminalPanelHeightWithPaneFloor(
+      preferredHeight,
+      paneCount,
+      heightBounds,
+    );
+  }
+
   return (
     <QuickTerminalPanel
       open={true}
       onRequestClose={handleClose}
       presentation="inline"
-      height={terminalPanelHeight}
+      height={effectiveHeight}
       onHeightChange={setTerminalPanelHeight}
+      maximized={terminalPanelMaximized}
+      onToggleMaximized={toggleTerminalPanelMaximized}
+      position={effectivePosition}
+      onMovePosition={setTerminalPanelPosition}
       workspacePath={props.workspacePath}
       gatewayUrl={props.gatewayUrl}
       token={props.token}
@@ -148,6 +207,8 @@ export function TerminalPanel(props: TerminalPanelProps) {
       onReload={props.onReload}
       onRenameTerminal={props.onRenameTerminal}
       onDismissTerminal={props.onDismissTerminal}
+      onKillTerminal={props.onKillTerminal}
+      shellProfiles={props.shellProfiles}
     />
   );
 }
