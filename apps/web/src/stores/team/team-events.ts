@@ -14,7 +14,14 @@
  */
 
 import { create } from 'zustand';
+import type { RollbackReceipt } from '@openAwork/web-client';
 import { useTeamUsageStore, useTeamToolCallStore } from './team-usage.js';
+import { applyRollbackReceipt } from './rollback-tombstones.js';
+import {
+  canonicalClarificationNodeId,
+  countActionablePendingClarifications,
+  resolveClarificationNodeId,
+} from './clarification-identity.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -490,8 +497,21 @@ export const useTeamNotificationStore = create<TeamNotificationStoreState>((set)
  */
 export type ClarificationStatus = 'pending' | 'answered' | 'dismissed';
 
+/** PM1 grill 澄清题的结构化选项（缺省时前端回退自由输入）。 */
+export interface ClarificationOption {
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
 export interface ClarificationItem {
+  /** 传输 id：原样用于 inbound submit（questionId）/ 忽略 / 去重。 */
   id: string;
+  /**
+   * 规范节点 id：引擎侧的逻辑问题身份（剥离确认节点的 `@rN` 轮次后缀）。
+   * 用于把同一问题跨轮的旧条目识别为「已被新一轮取代」，而不是并列成多个待答题。
+   */
+  nodeId: string;
   sessionId: string;
   /** PM1 的 source session id（用作 inbound submit 的 target sessionId） */
   fromSessionId: string;
@@ -503,16 +523,58 @@ export interface ClarificationItem {
   answeredAt?: number;
   /** 澄清轮次（多轮 grill 时由 PM1 的 artifact.needs-clarification 载荷携带；0 基） */
   round?: number;
+  /** 结构化选项；空/缺失表示该题只能自由输入 */
+  options?: ClarificationOption[];
+}
+
+/**
+ * 外部输入形态：runtime snapshot / 历史构造可能没有 `nodeId`，
+ * 由 `replaceFromRuntime` 统一补齐（不改变既有调用方签名语义）。
+ */
+export type ClarificationItemInput = Omit<ClarificationItem, 'nodeId'> & {
+  nodeId?: string;
+};
+
+function parseClarificationOptions(value: unknown): ClarificationOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const options: ClarificationOption[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      continue;
+    }
+    const record = candidate as Record<string, unknown>;
+    const label = record['label'];
+    if (typeof label !== 'string' || label.trim().length === 0) {
+      continue;
+    }
+    const description = record['description'];
+    if (description !== undefined && typeof description !== 'string') {
+      continue;
+    }
+    const recommended = record['recommended'];
+    if (recommended !== undefined && typeof recommended !== 'boolean') {
+      continue;
+    }
+    options.push({
+      label,
+      ...(typeof description === 'string' ? { description } : {}),
+      ...(typeof recommended === 'boolean' ? { recommended } : {}),
+    });
+  }
+  return options;
 }
 
 interface ClarificationStoreState {
   items: ClarificationItem[];
+  /** 待回答数：只计「可回答」的 pending（被新一轮取代的轮次不计入）。 */
   pendingCount: number;
   push: (event: HandoffEvent) => void;
   markAnswered: (id: string, answer: string) => void;
   dismiss: (id: string) => void;
   clear: () => void;
-  replaceFromRuntime: (items: ClarificationItem[]) => void;
+  replaceFromRuntime: (items: readonly ClarificationItemInput[]) => void;
 }
 
 export const useClarificationStore = create<ClarificationStoreState>((set) => ({
@@ -529,18 +591,26 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       const newItems: ClarificationItem[] = [];
       for (const entry of raw) {
         if (!entry || typeof entry !== 'object') continue;
-        const item = entry as { id?: string; question?: string; context?: string };
+        const item = entry as {
+          context?: string;
+          id?: string;
+          options?: unknown;
+          question?: string;
+        };
         if (!item.id || !item.question) continue;
         // 去重：已有相同 id 不重复 push
         if (state.items.some((existing) => existing.id === item.id)) continue;
+        const options = parseClarificationOptions(item.options);
         newItems.push({
           id: item.id,
+          nodeId: canonicalClarificationNodeId(item.id),
           sessionId: event.sessionId ?? '',
           fromSessionId,
           question: item.question,
           context: item.context ?? '',
           createdAt: event.timestamp,
           status: 'pending',
+          ...(options.length > 0 ? { options } : {}),
           ...(round !== undefined ? { round } : {}),
         });
       }
@@ -548,7 +618,7 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       const items = [...state.items, ...newItems];
       return {
         items,
-        pendingCount: items.filter((i) => i.status === 'pending').length,
+        pendingCount: countActionablePendingClarifications(items),
       };
     }),
   markAnswered: (id, answer) =>
@@ -560,7 +630,7 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       );
       return {
         items,
-        pendingCount: items.filter((i) => i.status === 'pending').length,
+        pendingCount: countActionablePendingClarifications(items),
       };
     }),
   dismiss: (id) =>
@@ -570,13 +640,17 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       );
       return {
         items,
-        pendingCount: items.filter((i) => i.status === 'pending').length,
+        pendingCount: countActionablePendingClarifications(items),
       };
     }),
   replaceFromRuntime: (items) =>
     set((state) => {
-      const runtimeById = new Map(items.map((item) => [item.id, item]));
-      const merged = [...items];
+      const normalized = items.map((item) => ({
+        ...item,
+        nodeId: resolveClarificationNodeId(item),
+      }));
+      const runtimeById = new Map(normalized.map((item) => [item.id, item]));
+      const merged: ClarificationItem[] = [...normalized];
       for (const existing of state.items) {
         const runtimeItem = runtimeById.get(existing.id);
         if (!runtimeItem) {
@@ -597,7 +671,7 @@ export const useClarificationStore = create<ClarificationStoreState>((set) => ({
       }
       return {
         items: merged,
-        pendingCount: merged.filter((item) => item.status === 'pending').length,
+        pendingCount: countActionablePendingClarifications(merged),
       };
     }),
   clear: () => set({ items: [], pendingCount: 0 }),
@@ -635,11 +709,53 @@ export const useTeamEventsConnectionStore = create<TeamEventsConnectionStoreStat
 
 // ─── Event Dispatcher ───────────────────────────────────────────────────────
 
+/** 解析 `session.messages.rolled_back` 的 payload；形状不完整时返回 null。 */
+function parseRollbackReceiptPayload(payload: Record<string, unknown>): RollbackReceipt | null {
+  const sessionId = payload['sessionId'];
+  const cutoffMessageId = payload['cutoffMessageId'];
+  const cutoffTimeMs = payload['cutoffTimeMs'];
+  const tombstoneAtMs = payload['tombstoneAtMs'];
+  if (
+    typeof sessionId !== 'string' ||
+    typeof cutoffMessageId !== 'string' ||
+    typeof cutoffTimeMs !== 'number' ||
+    typeof tombstoneAtMs !== 'number'
+  ) {
+    return null;
+  }
+  const readStringArray = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const applied = payload['applied'];
+  return {
+    sessionId,
+    cutoffMessageId,
+    cutoffTimeMs,
+    tombstoneAtMs,
+    removedMessageIds: readStringArray(payload['removedMessageIds']),
+    invalidatedClientRequestIds: readStringArray(payload['invalidatedClientRequestIds']),
+    affectedSessionIds: readStringArray(payload['affectedSessionIds']),
+    ...(typeof applied === 'boolean' ? { applied } : {}),
+  };
+}
+
 export function dispatchTeamEvent(event: HandoffEvent): void {
   const { applyEvent } = useHandoffStore.getState();
   const { addNode, updateNodeState, updateNodeSubstate } = useLayerStore.getState();
   const { push } = useTeamNotificationStore.getState();
   const { push: pushClarifications } = useClarificationStore.getState();
+
+  // 回合回退：先登记作废窗口（晚到事件仍可能复活旧记录，读取期过滤是最后一道闸）。
+  // 事件继续进通知缓冲区——reload 策略以它为事件源；随即标记已读，且「团队动态」
+  // 白名单不含该类型，因此既不产生未读角标、也不进动态流。
+  if (event.type === 'session.messages.rolled_back') {
+    const receipt = parseRollbackReceiptPayload(event.payload);
+    if (receipt) {
+      applyRollbackReceipt(receipt);
+    }
+    push(event);
+    useTeamNotificationStore.getState().markEventRead(getTeamNotificationEventKey(event));
+    return;
+  }
 
   // 后端 stream-team-events.ts 通过 __teamEventKind 标记区分事件类型。
   const teamEventKind = event.payload?.['__teamEventKind'] as string | undefined;
@@ -911,16 +1027,18 @@ export function hydrateClarificationStore(
     createdAt: number;
     fromSessionId: string;
     id: string;
+    options?: ClarificationOption[];
     question: string;
     sessionId: string;
     status: ClarificationStatus;
   }>,
 ): void {
   useClarificationStore.getState().replaceFromRuntime(
-    items.map((item) => ({
+    items.map(({ options, ...item }) => ({
       ...item,
       ...(item.answer ? { answer: item.answer } : {}),
       ...(typeof item.answeredAt === 'number' ? { answeredAt: item.answeredAt } : {}),
+      ...(options && options.length > 0 ? { options } : {}),
     })),
   );
 }
