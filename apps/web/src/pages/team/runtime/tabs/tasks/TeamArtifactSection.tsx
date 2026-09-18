@@ -22,6 +22,7 @@ import {
   useLayerStore,
   type HandoffEntry,
 } from '../../../../../stores/team/team-events.js';
+import { resolveSupersededClarificationIds } from '../../../../../stores/team/clarification-identity.js';
 import { useReviewDisposition } from '../../hooks/use-review-disposition.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
 import { FailureFlowIndicator } from '../../shell/controls/FailureFlowIndicator.js';
@@ -583,6 +584,11 @@ export function TeamArtifactSection({
     preferredReviewArtifactId: reviewReportFromHandoffs.reviewArtifactId,
   });
 
+  const supersededClarificationIds = useMemo(
+    () => resolveSupersededClarificationIds(clarificationItems),
+    [clarificationItems],
+  );
+
   useEffect(() => {
     const nextStep = buildWizardStep({
       hasPlan: Boolean(planArtifact?.content),
@@ -590,7 +596,9 @@ export function TeamArtifactSection({
       hasTasks: Boolean(tasksArtifact?.content),
       pendingClarificationCount: clarificationItems.filter(
         (item) =>
-          item.status === 'pending' && item.sessionId === artifactContext.pm1ArtifactSessionId,
+          item.status === 'pending' &&
+          !supersededClarificationIds.has(item.id) &&
+          item.sessionId === artifactContext.pm1ArtifactSessionId,
       ).length,
     });
     setWizardStep(nextStep);
@@ -599,6 +607,7 @@ export function TeamArtifactSection({
     clarificationItems,
     planArtifact?.content,
     specArtifact?.content,
+    supersededClarificationIds,
     tasksArtifact?.content,
   ]);
 
@@ -617,13 +626,15 @@ export function TeamArtifactSection({
       clarificationItems
         .filter(
           (item) =>
-            item.status === 'pending' && item.sessionId === artifactContext.pm1ArtifactSessionId,
+            item.status === 'pending' &&
+            !supersededClarificationIds.has(item.id) &&
+            item.sessionId === artifactContext.pm1ArtifactSessionId,
         )
         .map((item) => ({
           id: item.id,
           question: item.question,
         })),
-    [artifactContext.pm1ArtifactSessionId, clarificationItems],
+    [artifactContext.pm1ArtifactSessionId, clarificationItems, supersededClarificationIds],
   );
   const retryFocusedHandoff = async (handoffId: string) => {
     setRetryBusyHandoffId(handoffId);
