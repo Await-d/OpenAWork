@@ -102,11 +102,9 @@
   background: var(--bg-raised, var(--bg-overlay));
 }
 
-.team-v2-root[data-workbench-layout='classic'] [data-team-classic-inline-cards='true'] {
-  gap: 6px;
-  padding: 6px 10px 8px;
-  width: min(680px, 100%);
-}
+/* classic 内联运营卡的宽度 / 居中 / 间距由组件内联样式（LIST_STYLE）统一决定：
+   此处曾声明 gap / padding / width，但全部被内联样式覆盖（属死代码），
+   且 width 缺居中导致宽屏下卡片贴左，故移除，只保留下方工作台密度规则。 */
 
 /* 工作台内部密度 */
 .team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench {
