@@ -37,6 +37,11 @@ export function shouldAdoptSessionModelSelectionDefaults(input: {
 
 export function shouldSendExplicitStreamModelSelection(
   source: ModelSelectionSource | null,
+  resolved?: { sessionModesHydrated: boolean; effectiveModelId: string },
 ): boolean {
-  return source !== null;
+  if (source !== null) {
+    return true;
+  }
+
+  return resolved?.sessionModesHydrated === true && resolved.effectiveModelId.trim().length > 0;
 }
