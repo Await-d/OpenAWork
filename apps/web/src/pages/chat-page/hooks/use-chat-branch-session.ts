@@ -6,6 +6,7 @@ import { normalizeChatMessages } from '../../../components/conversation-runtime/
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { filterTranscriptMessages } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
 import { createSessionMetadataSnapshot } from '../conversation/render/chat-page-utils.js';
+import { reuploadOversizedInlineImages } from './reupload-oversized-input-images.js';
 
 export interface UseChatBranchSessionOptions {
   token: string | null;
@@ -96,8 +97,14 @@ export function useChatBranchSession(options: UseChatBranchSessionOptions) {
       if (inputParts && inputParts.length > 0) {
         requestSessionListRefresh();
         navigateToSession(imported.sessionId);
+        const resendInputParts = await reuploadOversizedInlineImages({
+          gatewayUrl,
+          inputParts,
+          sessionId: imported.sessionId,
+          token,
+        });
         await sendMessage(text, {
-          existingInputParts: inputParts,
+          existingInputParts: resendInputParts,
           forcedSessionId: imported.sessionId,
         });
       } else {
