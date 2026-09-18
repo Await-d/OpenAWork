@@ -35,6 +35,8 @@ export interface AgentTask extends Omit<
   revision?: number;
   idempotencyKey?: string;
   causationId?: string;
+  /** 创建该任务的聊天回合键；用于按回合回退时清理该回合的任务节点。 */
+  clientRequestId?: string;
   metadata?: Record<string, unknown>;
   result?: string;
   errorMessage?: string;
@@ -64,6 +66,8 @@ export interface AgentTaskDraft {
   revision?: number;
   idempotencyKey?: string;
   causationId?: string;
+  /** 创建该任务的聊天回合键；用于按回合回退时清理该回合的任务节点。 */
+  clientRequestId?: string;
   metadata?: Record<string, unknown>;
   result?: string;
   errorMessage?: string;
@@ -130,6 +134,7 @@ const agentTaskSchema = z.object({
   revision: z.number().int().nonnegative().default(0),
   idempotencyKey: z.string().min(1).optional(),
   causationId: z.string().min(1).optional(),
+  clientRequestId: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   result: z.string().optional(),
   errorMessage: z.string().optional(),

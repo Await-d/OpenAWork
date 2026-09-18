@@ -33,7 +33,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../../infra/db.js';
+import { buildSqlitePlaceholders } from '../../infra/sqlite-batch.js';
 import { assertCanHandoffTo } from '../capability/layer-capabilities.js';
 
 export type HandoffState = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -58,6 +59,7 @@ interface HandoffRow {
   failure_reason: string | null;
   retry_count: number;
   idempotency_key: string | null;
+  client_request_id: string | null;
   paused: number;
   paused_at: string | null;
   paused_by_user_id: string | null;
@@ -83,6 +85,8 @@ export interface HandoffRecord {
   failureReason: string | null;
   retryCount: number;
   idempotencyKey: string | null;
+  /** 发起本 handoff 的聊天回合键（显式传入或从父 handoff 继承）；NULL = "不可归因的历史"。 */
+  clientRequestId: string | null;
   paused: boolean;
   pausedAt: string | null;
   pausedByUserId: string | null;
@@ -166,6 +170,7 @@ function mapRow(row: HandoffRow): HandoffRecord {
     failureReason: row.failure_reason,
     retryCount: row.retry_count,
     idempotencyKey: row.idempotency_key,
+    clientRequestId: row.client_request_id ?? null,
     paused: row.paused === 1,
     pausedAt: row.paused_at,
     pausedByUserId: row.paused_by_user_id,
@@ -335,6 +340,196 @@ export interface CreateHandoffInput {
   payload?: unknown;
   idempotencyKey?: string | null;
   notBeforeMs?: number | null;
+  /** 发起本 handoff 的聊天回合键；缺失时从父 handoff 继承，仍不可得则落 NULL。 */
+  clientRequestId?: string | null;
+}
+
+/**
+ * 网关内部后台流请求键的形状注册表——实现与守卫测试共同消费的唯一事实来源。
+ *
+ * 每项声明一个保留前缀（`isGatewayInternalRequestKey` 按 startsWith 匹配）、一个
+ * 代表性样例键（守卫测试断言其被拒绝）与形状来源。实现方的前缀集合由本表派生；
+ * 新增网关内部请求键 builder 必须在此登记，否则守卫测试
+ * （`verification/verify-team-turn-rollback-internal-keys.ts`）的源码扫描会失败。
+ *
+ * 这些键由网关自身生成，代表服务端发起的执行，不是用户在该会话发起的回合键：
+ *   - `handoff:` / `pm1:` / `pm2:` / `pm2-return:` —— handoff runner 的重放 / 幂等键
+ *     （pm1-runner / artifact-chain / pm2-runner / watcher）；
+ *   - `reception:` / `reception-client:` —— reception-orchestrator 无显式用户键时的兜底键；
+ *   - `team-resume:` —— 团队恢复后台运行的请求键（team-resume-context）；
+ *   - `task:` / `task-reminder:` / `task-auto-resume:` / `task-parent-decision:` ——
+ *     task 子代理请求键、父任务完成提醒、父会话自动续跑 / 决策请求；
+ *   - `command:` / `command-card:` / `loop:` / `ulw-verify:` / `permission:` ——
+ *     斜杠命令运行、命令卡片、命令循环、ULW 验证与权限兜底键；
+ *   - `team-inbound:` / `start-work:` / `workflow-plan:` —— 团队反向消息、start-work
+ *     子任务幂等键与工作流计划标签；
+ *   - `restore-apply:` / `restore-apply-` / `file-revert-` —— 会话恢复应用与文件回滚键；
+ *   - `cron-` —— 计划任务触发的后台运行。
+ *
+ * 会话存在活跃父 handoff 时，这些后台运行仍继承父回合键（回退父回合可连带清理它们）。
+ * 只有不透明的外部客户端键（web-client 生成的 UUID、消息渠道 key 等）才视为会话自身
+ * 的新回合键并优先于继承——用户直发团队子会话时必须归到自己的回合，否则回退该条
+ * 消息清不掉这一回合的团队记录。外部键都是随机 UUID，不以任何保留前缀开头。
+ */
+export interface GatewayInternalRequestKeyShape {
+  /** 保留前缀；`isGatewayInternalRequestKey` 按 startsWith 匹配。 */
+  readonly prefix: string;
+  /** 代表性样例键（真实 builder 前缀 + 占位 id）；守卫测试断言它被拒绝。 */
+  readonly sample: string;
+  /** 形状来源（阅读与守卫失败信息用）。 */
+  readonly source: string;
+}
+
+const SAMPLE_UUID = '00000000-0000-4000-8000-000000000000';
+
+export const GATEWAY_INTERNAL_REQUEST_KEY_SHAPES: readonly GatewayInternalRequestKeyShape[] = [
+  { prefix: 'handoff:', sample: `handoff:${SAMPLE_UUID}:completed`, source: 'handoff/runner/**' },
+  {
+    prefix: 'pm1:',
+    sample: `pm1:${SAMPLE_UUID}:escalation-limit`,
+    source: 'handoff/runner/pm1-runner',
+  },
+  { prefix: 'pm2:', sample: `pm2:${SAMPLE_UUID}:dispatch`, source: 'handoff/runner/pm2-runner' },
+  {
+    prefix: 'pm2-return:',
+    sample: `pm2-return:dispatch:${SAMPLE_UUID}`,
+    source: 'handoff/runner/pm2-runner',
+  },
+  {
+    prefix: 'reception:',
+    sample: `reception:${SAMPLE_UUID}`,
+    source: 'handoff/runner/reception-orchestrator',
+  },
+  {
+    prefix: 'reception-client:',
+    sample: `reception-client:${'a'.repeat(48)}`,
+    source: 'handoff/runner/reception-orchestrator',
+  },
+  {
+    prefix: 'team-resume:',
+    sample: `team-resume:${SAMPLE_UUID}`,
+    source: 'team/team-resume-context',
+  },
+  {
+    prefix: 'task:',
+    sample: `task:${SAMPLE_UUID}:child:${SAMPLE_UUID}`,
+    source: 'tools/call-omo-agent-output',
+  },
+  {
+    prefix: 'task-reminder:',
+    sample: `task-reminder:${SAMPLE_UUID}:done:1730000000000`,
+    source: 'tools/tool-sandbox',
+  },
+  {
+    prefix: 'task-auto-resume:',
+    sample: `task-auto-resume:${SAMPLE_UUID}:${SAMPLE_UUID}`,
+    source: 'task/task-parent-auto-resume',
+  },
+  {
+    prefix: 'task-parent-decision:',
+    sample: `task-parent-decision:${SAMPLE_UUID}:${SAMPLE_UUID}`,
+    source: 'task/task-parent-auto-decision',
+  },
+  {
+    prefix: 'command:',
+    sample: `command:${SAMPLE_UUID}:${SAMPLE_UUID}:${SAMPLE_UUID}`,
+    source: 'routes/commands',
+  },
+  { prefix: 'command-card:', sample: `command-card:${SAMPLE_UUID}`, source: 'routes/commands' },
+  {
+    prefix: 'loop:',
+    sample: `loop:start-work:${SAMPLE_UUID}:iteration:1`,
+    source: 'routes/command-loop-runtime',
+  },
+  {
+    prefix: 'ulw-verify:',
+    sample: `ulw-verify:${SAMPLE_UUID}:recovered-task-id`,
+    source: 'routes/commands',
+  },
+  {
+    prefix: 'team-inbound:',
+    sample: `team-inbound:user_input:${SAMPLE_UUID}`,
+    source: 'routes/team-inbound',
+  },
+  {
+    prefix: 'workflow-plan:',
+    sample: 'workflow-plan:.omo/plans/team-turn-rollback.md',
+    source: 'routes/start-work-subtasks',
+  },
+  {
+    prefix: 'start-work:',
+    sample: `start-work:${SAMPLE_UUID}:plan.md:任务`,
+    source: 'routes/start-work-subtasks',
+  },
+  { prefix: 'permission:', sample: `permission:${SAMPLE_UUID}`, source: 'routes/permissions' },
+  { prefix: 'restore-apply:', sample: `restore-apply:${SAMPLE_UUID}`, source: 'routes/sessions' },
+  { prefix: 'restore-apply-', sample: `restore-apply-${SAMPLE_UUID}`, source: 'routes/sessions' },
+  { prefix: 'file-revert-', sample: `file-revert-${'b'.repeat(32)}`, source: 'routes/sessions' },
+  { prefix: 'cron-', sample: `cron-job-123-${SAMPLE_UUID}`, source: 'cron/agent-handler' },
+];
+
+const GATEWAY_INTERNAL_REQUEST_KEY_PREFIXES = GATEWAY_INTERNAL_REQUEST_KEY_SHAPES.map(
+  (shape) => shape.prefix,
+);
+
+/** 判断请求键是否由网关后台运行生成（幂等 / 恢复 / 调度键，不是用户回合键）。 */
+export function isGatewayInternalRequestKey(clientRequestId: string): boolean {
+  return GATEWAY_INTERNAL_REQUEST_KEY_PREFIXES.some((prefix) => clientRequestId.startsWith(prefix));
+}
+
+/**
+ * 解析「某 session 当前归属的发起回合键」，严格优先序：
+ *   1. 调用方传入的**自身回合键**（非空、且非网关内部后台键）→ 直接采用。
+ *      用户直接向团队子会话发消息时走这一支：新回合的用量 / 审计 / 子孙 handoff
+ *      必须归到该消息自己的回合键，否则回退这条消息时清不掉它们。
+ *   2. 否则继承 `to_session_id = sessionId` 的**活跃**父 handoff 的 `client_request_id`。
+ *      网关内部后台键走这一支：子层执行属于派发它的父回合。
+ *   3. 都没有 → 后台键在无活跃父 handoff 时仍是该会话自己的请求键（reception
+ *      的 `reception:<uuid>` 兜底依赖它）；其余返回 null（不伪造）。
+ *
+ * 继承判定与回退删除口径一致：`to_session_id = sessionId`（由 `startHandoff` 派发时
+ * 写入），state ∈ (pending, claimed, running)，按
+ * `COALESCE(started_at, created_at) DESC, rowid DESC` 取最近一条（`created_at` 只有
+ * 秒级精度，rowid 兜底同秒并列）。终态（completed / failed / cancelled）**不参与**：
+ * 终态父 handoff 属于上一回合，在新回合的 handoff 还在 pending/claimed（`to_session_id`
+ * 尚未写入）时，取终态会把新回合的用量 / 审计 / 子孙 handoff 错误归属到旧回合。
+ */
+export function resolveSessionTurnClientRequestId(
+  sessionId: string,
+  ownClientRequestId?: string | null,
+): string | null {
+  const own = ownClientRequestId?.trim();
+  if (own && own.length > 0 && !isGatewayInternalRequestKey(own)) {
+    return own;
+  }
+
+  const row = sqliteGet<{ client_request_id: string | null }>(
+    `SELECT client_request_id
+       FROM handoff_records
+      WHERE to_session_id = ?
+        AND state IN ('pending', 'claimed', 'running')
+        AND client_request_id IS NOT NULL
+        AND TRIM(client_request_id) <> ''
+      ORDER BY COALESCE(started_at, created_at) DESC, rowid DESC
+      LIMIT 1`,
+    [sessionId],
+  );
+  if (row?.client_request_id) {
+    return row.client_request_id;
+  }
+  return own && own.length > 0 ? own : null;
+}
+
+/**
+ * 回合键解析顺序：会话自身真实回合键 → 活跃父 handoff 继承 → 内部运行键兜底 → NULL。
+ *
+ * 继承：子层 handoff 的 `fromSessionId` 是被父 handoff 派发出来的 session，
+ * 其 `to_session_id = fromSessionId` 的**活跃**（pending/claimed/running）父 handoff
+ * 即当前回合的来源；父的回合键来自更上一层继承，最终收敛到 reception 发起回合的
+ * 用户 `clientRequestId`。终态父 handoff 不参与（见 `resolveSessionTurnClientRequestId`）。
+ */
+function resolveHandoffTurnClientRequestId(input: CreateHandoffInput): string | null {
+  return resolveSessionTurnClientRequestId(input.fromSessionId, input.clientRequestId);
 }
 
 export function createHandoff(input: CreateHandoffInput): HandoffRecord {
@@ -362,11 +557,13 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
   const id = randomUUID();
   const payloadJson = JSON.stringify(input.payload ?? {});
   const availableAtMs = normalizeAvailableAtMs(input.notBeforeMs);
+  const clientRequestId = resolveHandoffTurnClientRequestId(input);
   sqliteRun(
     `INSERT INTO handoff_records (
        id, user_id, from_session_id, from_role_layer, to_role_layer,
-       payload_json, available_at_ms, state, retry_count, idempotency_key
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
+       payload_json, available_at_ms, state, retry_count, idempotency_key,
+       client_request_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     [
       id,
       input.userId,
@@ -376,6 +573,7 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
       payloadJson,
       availableAtMs,
       input.idempotencyKey ?? null,
+      clientRequestId,
     ],
   );
   const row = sqliteGet<HandoffRow>(`SELECT * FROM handoff_records WHERE id = ? LIMIT 1`, [id]);
@@ -383,6 +581,33 @@ export function createHandoff(input: CreateHandoffInput): HandoffRecord {
     throw new Error('Failed to read back handoff after insert');
   }
   return mapRow(row);
+}
+
+/**
+ * 按回合删除 handoff 记录：归属判定与 listHandoffsBySession 一致
+ * （from/to 任一命中给定会话集合），并同时精确匹配回合键集合与 user_id。
+ *
+ * 会话集合 × 回合键集合按笛卡尔积删除，等价于逐 (会话, 回合) 对调用；
+ * 单语句把回退事务内的语句数从 O(会话数 × 回合数) 降为 1。空集合删除 0 行。
+ * 返回删除总行数。
+ */
+export function deleteHandoffsByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  const requestPlaceholders = buildSqlitePlaceholders(input.clientRequestIds.length);
+  const sessionPlaceholders = buildSqlitePlaceholders(input.sessionIds.length);
+  return sqliteRunWithChanges(
+    `DELETE FROM handoff_records
+      WHERE user_id = ?
+        AND client_request_id IN (${requestPlaceholders})
+        AND (from_session_id IN (${sessionPlaceholders}) OR to_session_id IN (${sessionPlaceholders}))`,
+    [input.userId, ...input.clientRequestIds, ...input.sessionIds, ...input.sessionIds],
+  );
 }
 
 // ─── Read ───────────────────────────────────────────────────────────────────

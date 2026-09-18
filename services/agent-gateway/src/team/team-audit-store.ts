@@ -1,9 +1,15 @@
-import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 
 /**
- * team_audit_logs 是只增表：handoff 控制、共享、评论、route 决策、runtime incident
- * 等每条治理事件都会落一行，且从无裁剪。长时间运行的网关会让它无界膨胀，最终拖慢
+ * team_audit_logs 是治理审计汇聚点：handoff 控制、共享、评论、route 决策、runtime
+ * incident 等每条治理事件都会落一行。长时间运行的网关会让它无界膨胀，最终拖慢
  * `/team/runtime` 审计查询并吃满磁盘。这里按「每用户保留最近 N 条」做有界裁剪。
+ *
+ * 本表对「只增」只有一个例外：回合回退按 `client_request_id` 硬删该回合的审计行，
+ * 该例外经产品负责人书面确认，除此之外不存在按行删除审计的调用方。
+ * 回退自身的权威作废痕迹是一条 `client_request_id IS NULL` 的 `turn_rollback` 行；
+ * NULL 永不等于任何绑定值，因此它不会被回退的按回合删除命中。
  *
  * 裁剪是摊销执行的：不是每次 INSERT 都跑一次 DELETE（那会让写放大一倍），而是每累计
  * `TEAM_AUDIT_PRUNE_CHECK_INTERVAL` 次插入才触发一次。因此实际行数最多比上限多出一个
@@ -97,7 +103,8 @@ export type TeamAuditAction =
   | 'runtime_incident'
   | 'runtime_alert_control'
   | 'runtime_remediation'
-  | 'route_decision';
+  | 'route_decision'
+  | 'turn_rollback';
 
 export type TeamAuditEntityType =
   | 'artifact'
@@ -149,6 +156,8 @@ export function logTeamAudit(input: {
   sessionId?: string | null;
   summary: string;
   userId: string;
+  /** 归属的聊天回合键；缺失时落 NULL = "不可归因的历史"。 */
+  clientRequestId?: string | null;
 }): void {
   sqliteRun(
     `INSERT INTO team_audit_logs (
@@ -161,8 +170,9 @@ export function logTeamAudit(input: {
        session_id,
        summary,
        detail,
+       client_request_id,
        created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       input.userId,
       input.actorUserId ?? null,
@@ -173,10 +183,34 @@ export function logTeamAudit(input: {
       input.sessionId ?? null,
       input.summary,
       input.detail ?? null,
+      input.clientRequestId ?? null,
     ],
   );
 
   maybePruneTeamAuditLogs(input.userId);
+}
+
+/**
+ * 按回合删除审计日志（回退时精确抹除该回合的审计行）。
+ * 会话集合 × 回合键集合按笛卡尔积删除，等价于逐 (会话, 回合) 对调用；
+ * 同时按 user_id 收口，防止未来调用方漏传用户归属校验。空集合删除 0 行。
+ * 返回删除总行数。
+ */
+export function deleteTeamAuditLogsByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  return sqliteRunWithChanges(
+    `DELETE FROM team_audit_logs
+      WHERE user_id = ?
+        AND session_id IN (${buildSqlitePlaceholders(input.sessionIds.length)})
+        AND client_request_id IN (${buildSqlitePlaceholders(input.clientRequestIds.length)})`,
+    [input.userId, ...input.sessionIds, ...input.clientRequestIds],
+  );
 }
 
 /** 测试用：直接落一条审计日志，便于验证 sessionId 归属字段。 */

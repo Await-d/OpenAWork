@@ -12,7 +12,8 @@
  * prune failure break the message write.
  */
 
-import { sqliteRun } from '../infra/db.js';
+import { sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 
 const DEFAULT_TEAM_MESSAGE_MAX_ROWS_PER_USER = 1000;
@@ -96,6 +97,8 @@ export interface TeamMessageInput {
   replyToMessageId?: string | null;
   content: string;
   type: string;
+  /** 归属的聊天回合键；缺失时落 NULL = "不可归因的历史"。 */
+  clientRequestId?: string | null;
 }
 
 /**
@@ -112,8 +115,9 @@ export function appendTeamMessage(input: TeamMessageInput): void {
       recipient_member_id,
       reply_to_message_id,
       content,
-      type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      type,
+      client_request_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.id,
       input.userId,
@@ -123,9 +127,32 @@ export function appendTeamMessage(input: TeamMessageInput): void {
       input.replyToMessageId ?? null,
       input.content,
       input.type,
+      input.clientRequestId ?? null,
     ],
   );
   maybePrune(input.userId);
+}
+
+/**
+ * 按回合删除该回合的团队消息行：会话集合 × 回合键集合按笛卡尔积一次删除，
+ * 等价于逐 (会话, 回合) 对调用；同时按 user_id 收口。空集合删除 0 行。
+ * 返回删除总行数。
+ */
+export function deleteTeamMessagesByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  return sqliteRunWithChanges(
+    `DELETE FROM team_messages
+      WHERE user_id = ?
+        AND session_id IN (${buildSqlitePlaceholders(input.sessionIds.length)})
+        AND client_request_id IN (${buildSqlitePlaceholders(input.clientRequestIds.length)})`,
+    [input.userId, ...input.sessionIds, ...input.clientRequestIds],
+  );
 }
 
 /** Test-only: override the per-user row cap (null clears the override). */

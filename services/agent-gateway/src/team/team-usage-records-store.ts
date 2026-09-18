@@ -11,9 +11,110 @@
  * 让 `GET /team/runtime` 能回灌历史用量，前端不再只依赖实时事件窗口。
  */
 
-import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
+import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { normalizeTokenCount } from '@openAwork/agent-core';
+
+/**
+ * team_usage_records 的按用户有界裁剪。回合键（client_request_id）进入聚合唯一键后，
+ * 同一 (session, layer, provider, model) 的不同回合各占一行，写入粒度比旧 5 列键细
+ * 一个数量级：一个完整团队回合（reception/pm1/pm2/executor/reviewer）可新增约 10–20 行。
+ * 因此默认上限取 20000（约 1000 个完整回合的度量历史；审计表的 2000 行按治理事件
+ * 计数、粒度更粗，不能直接套用）。env `OPENAWORK_TEAM_USAGE_MAX_ROWS_PER_USER`
+ * 可覆盖；非正数 / NaN 关闭裁剪。
+ *
+ * 裁剪与 `team-audit-store.ts` 同一摊销惯用法：每累计
+ * `TEAM_USAGE_PRUNE_CHECK_INTERVAL` 次写入触发一次，最多过冲一个检查间隔；
+ * 排序用自增主键 `id`（`updated_at` 只有秒级精度，同秒并列无法稳定区分「最新 N 行」）。
+ * 保留最新 N 行意味着刚写入的行必然存活（其 id 是该用户当前最大值）；
+ * 裁剪失败只告警，绝不阻断写入。
+ */
+const DEFAULT_TEAM_USAGE_MAX_ROWS_PER_USER = 20000;
+export const TEAM_USAGE_PRUNE_CHECK_INTERVAL = 50;
+
+let usageRetentionOverride: number | null = null;
+let usagePruneCheckInterval = TEAM_USAGE_PRUNE_CHECK_INTERVAL;
+const usageInsertsSincePruneByUser = new Map<string, number>();
+let usageStoreDisabled = false;
+
+function resolveUsageRetention(): number {
+  if (usageRetentionOverride !== null) {
+    return usageRetentionOverride;
+  }
+  const raw = globalThis.process?.env['OPENAWORK_TEAM_USAGE_MAX_ROWS_PER_USER'];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return DEFAULT_TEAM_USAGE_MAX_ROWS_PER_USER;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function pruneTeamUsageRecords(userId: string, limit: number): void {
+  sqliteRun(
+    `DELETE FROM team_usage_records
+      WHERE user_id = ?
+        AND id NOT IN (
+          SELECT id FROM team_usage_records
+           WHERE user_id = ?
+           ORDER BY id DESC
+           LIMIT ?
+        )`,
+    [userId, userId, limit],
+  );
+}
+
+function maybePruneTeamUsageRecords(userId: string): void {
+  if (usageStoreDisabled) {
+    return;
+  }
+  const limit = resolveUsageRetention();
+  if (limit <= 0) {
+    usageInsertsSincePruneByUser.delete(userId);
+    return;
+  }
+  const pending = (usageInsertsSincePruneByUser.get(userId) ?? 0) + 1;
+  if (pending < usagePruneCheckInterval) {
+    usageInsertsSincePruneByUser.set(userId, pending);
+    return;
+  }
+  usageInsertsSincePruneByUser.set(userId, 0);
+  try {
+    pruneTeamUsageRecords(userId, limit);
+  } catch (error) {
+    if (isSqliteMalformedError(error)) {
+      usageStoreDisabled = true;
+      return;
+    }
+    console.warn(
+      `[team-usage-records-store] 裁剪 team_usage_records 失败（user=${userId}）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/** 测试用：覆盖每用户保留上限与检查间隔（limit 传 null 恢复 env / 默认值）。 */
+export function __setTeamUsageRetentionForTesting(
+  limit: number | null,
+  checkInterval?: number,
+): void {
+  usageRetentionOverride = limit;
+  usagePruneCheckInterval =
+    typeof checkInterval === 'number' && checkInterval > 0
+      ? Math.floor(checkInterval)
+      : TEAM_USAGE_PRUNE_CHECK_INTERVAL;
+  usageInsertsSincePruneByUser.clear();
+  usageStoreDisabled = false;
+}
+
+/** 测试用：清空摊销计数状态。 */
+export function __resetTeamUsagePruneStateForTesting(): void {
+  usageInsertsSincePruneByUser.clear();
+}
 
 export interface TeamUsagePersistInput {
   userId: string;
@@ -28,6 +129,8 @@ export interface TeamUsagePersistInput {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   costUsd?: number;
+  /** 归属的聊天回合键；缺失时归一到 ''（聚合键的一部分，见 normalizeKey）。 */
+  clientRequestId?: string | null;
 }
 
 export interface TeamToolCallPersistInput {
@@ -39,6 +142,8 @@ export interface TeamToolCallPersistInput {
   durationMs?: number;
   success: boolean;
   errorType?: string | null;
+  /** 归属的聊天回合键；缺失时落 NULL = "不可归因的历史"。 */
+  clientRequestId?: string | null;
 }
 
 export interface TeamUsageRecordRow {
@@ -162,15 +267,16 @@ export function persistTeamUsageRecord(input: TeamUsagePersistInput): void {
   const layer = normalizeKey(input.layer);
   const provider = normalizeKey(input.provider);
   const model = normalizeKey(input.model);
+  const clientRequestId = normalizeKey(input.clientRequestId);
   const agentId = input.agentId ?? null;
 
   sqliteRun(
     `INSERT INTO team_usage_records (
-       user_id, session_id, layer, agent_id, provider, model,
+       user_id, session_id, layer, agent_id, provider, model, client_request_id,
        input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
        cost_usd, call_count, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
-     ON CONFLICT(user_id, session_id, layer, provider, model) DO UPDATE SET
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+     ON CONFLICT(user_id, session_id, layer, provider, model, client_request_id) DO UPDATE SET
        agent_id = COALESCE(excluded.agent_id, team_usage_records.agent_id),
        input_tokens = team_usage_records.input_tokens + excluded.input_tokens,
        output_tokens = team_usage_records.output_tokens + excluded.output_tokens,
@@ -187,6 +293,7 @@ export function persistTeamUsageRecord(input: TeamUsagePersistInput): void {
       agentId,
       provider,
       model,
+      clientRequestId,
       inputTokens,
       outputTokens,
       reasoningTokens,
@@ -195,6 +302,7 @@ export function persistTeamUsageRecord(input: TeamUsagePersistInput): void {
       costUsd,
     ],
   );
+  maybePruneTeamUsageRecords(input.userId);
 }
 
 /**
@@ -209,6 +317,8 @@ export function persistTeamTimingRecord(input: {
   provider?: string | null;
   model?: string | null;
   durationMs: number;
+  /** 归属的聊天回合键；缺失时归一到 ''（聚合键的一部分，见 normalizeKey）。 */
+  clientRequestId?: string | null;
 }): void {
   const durationMs = Math.max(0, Math.trunc(input.durationMs));
   if (durationMs === 0) {
@@ -217,16 +327,19 @@ export function persistTeamTimingRecord(input: {
   const layer = normalizeKey(input.layer);
   const provider = normalizeKey(input.provider);
   const model = normalizeKey(input.model);
+  const clientRequestId = normalizeKey(input.clientRequestId);
 
   sqliteRun(
     `INSERT INTO team_usage_records (
-       user_id, session_id, layer, provider, model, total_duration_ms, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(user_id, session_id, layer, provider, model) DO UPDATE SET
+       user_id, session_id, layer, provider, model, client_request_id,
+       total_duration_ms, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, session_id, layer, provider, model, client_request_id) DO UPDATE SET
        total_duration_ms = team_usage_records.total_duration_ms + excluded.total_duration_ms,
        updated_at = datetime('now')`,
-    [input.userId, input.sessionId, layer, provider, model, durationMs],
+    [input.userId, input.sessionId, layer, provider, model, clientRequestId, durationMs],
   );
+  maybePruneTeamUsageRecords(input.userId);
 }
 
 /**
@@ -236,6 +349,7 @@ export function persistTeamTimingRecord(input: {
  */
 export function persistTeamToolCallRecord(input: TeamToolCallPersistInput): void {
   const layer = normalizeKey(input.layer);
+  const clientRequestId = normalizeKey(input.clientRequestId);
   const errorDelta = input.success ? 0 : 1;
   const toolName = input.toolName.trim();
   if (toolName.length === 0) {
@@ -247,19 +361,20 @@ export function persistTeamToolCallRecord(input: TeamToolCallPersistInput): void
 
   sqliteRun(
     `INSERT INTO team_usage_records (
-       user_id, session_id, layer, provider, model,
+       user_id, session_id, layer, provider, model, client_request_id,
        tool_call_count, tool_error_count, updated_at
-     ) VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
-     ON CONFLICT(user_id, session_id, layer, provider, model) DO UPDATE SET
+     ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+     ON CONFLICT(user_id, session_id, layer, provider, model, client_request_id) DO UPDATE SET
        tool_call_count = team_usage_records.tool_call_count + 1,
        tool_error_count = team_usage_records.tool_error_count + excluded.tool_error_count,
        updated_at = datetime('now')`,
-    [input.userId, input.sessionId, layer, '', '', errorDelta],
+    [input.userId, input.sessionId, layer, '', '', clientRequestId, errorDelta],
   );
   sqliteRun(
     `INSERT INTO team_tool_call_records (
-       user_id, session_id, layer, agent_id, tool_name, duration_ms, success, error_type
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       user_id, session_id, layer, agent_id, tool_name, duration_ms, success, error_type,
+       client_request_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.userId,
       input.sessionId,
@@ -269,7 +384,52 @@ export function persistTeamToolCallRecord(input: TeamToolCallPersistInput): void
       durationMs,
       input.success ? 1 : 0,
       errorType,
+      input.clientRequestId ?? null,
     ],
+  );
+  maybePruneTeamUsageRecords(input.userId);
+}
+
+/**
+ * 按回合删除该回合的用量聚合行。无匹配行时返回 0。
+ * 注意：存量迁移行与未携带回合键的写入不会匹配，回退不会误删它们。
+ */
+export function deleteTeamUsageRecordsByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  return sqliteRunWithChanges(
+    `DELETE FROM team_usage_records
+      WHERE user_id = ?
+        AND session_id IN (${buildSqlitePlaceholders(input.sessionIds.length)})
+        AND client_request_id IN (${buildSqlitePlaceholders(input.clientRequestIds.length)})`,
+    [input.userId, ...input.sessionIds, ...input.clientRequestIds],
+  );
+}
+
+/**
+ * 按回合删除该回合的工具调用明细行：会话集合 × 回合键集合按笛卡尔积一次删除，
+ * 等价于逐 (会话, 回合) 对调用；同时按 user_id 收口。空集合删除 0 行。
+ * 返回删除总行数。
+ */
+export function deleteTeamToolCallRecordsByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  return sqliteRunWithChanges(
+    `DELETE FROM team_tool_call_records
+      WHERE user_id = ?
+        AND session_id IN (${buildSqlitePlaceholders(input.sessionIds.length)})
+        AND client_request_id IN (${buildSqlitePlaceholders(input.clientRequestIds.length)})`,
+    [input.userId, ...input.sessionIds, ...input.clientRequestIds],
   );
 }
 

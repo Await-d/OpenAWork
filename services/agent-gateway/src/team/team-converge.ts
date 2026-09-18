@@ -11,7 +11,8 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
+import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 
 export interface ConvergeInput {
   userId: string;
@@ -306,15 +307,50 @@ function generateConvergeReport(
 
 /**
  * 记录 converge 评估结果到 DB，用于后续增量评估。
+ * `clientRequestId` 为发起该回合的聊天回合键（可选；缺失落 NULL = "不可归因的历史"）。
  */
 export function recordConvergeResult(
   teamWorkspaceId: string,
   sessionId: string,
   result: ConvergeResult,
+  clientRequestId?: string | null,
 ): void {
   sqliteRun(
-    `INSERT INTO team_converge_results (id, team_workspace_id, session_id, result_json, created_at)
-     VALUES (?, ?, ?, ?, datetime('now'))`,
-    [`converge-${result.timestamp}`, teamWorkspaceId, sessionId, JSON.stringify(result)],
+    `INSERT INTO team_converge_results (
+       id, team_workspace_id, session_id, result_json, client_request_id, created_at
+     ) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      `converge-${result.timestamp}`,
+      teamWorkspaceId,
+      sessionId,
+      JSON.stringify(result),
+      clientRequestId ?? null,
+    ],
+  );
+}
+
+/**
+ * 按回合删除 converge 结果行：会话集合 × 回合键集合按笛卡尔积一次删除，
+ * 等价于逐 (会话, 回合) 对调用。空集合删除 0 行。返回删除总行数。
+ *
+ * `team_converge_results` 没有 user_id 列，`team_workspace_id` 只是写入时从
+ * `sessions.team_workspace_id` 复制的可空指针（工作区被删后即悬挂），不能作为
+ * 所有权依据。这里用最可靠的所有权链收口：session_id 必须属于该 user
+ * （`sessions.user_id` NOT NULL，与回退入口的取数口径一致）。
+ */
+export function deleteTeamConvergeResultsByClientRequest(input: {
+  userId: string;
+  sessionIds: readonly string[];
+  clientRequestIds: readonly string[];
+}): number {
+  if (input.sessionIds.length === 0 || input.clientRequestIds.length === 0) {
+    return 0;
+  }
+  return sqliteRunWithChanges(
+    `DELETE FROM team_converge_results
+      WHERE session_id IN (${buildSqlitePlaceholders(input.sessionIds.length)})
+        AND client_request_id IN (${buildSqlitePlaceholders(input.clientRequestIds.length)})
+        AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)`,
+    [...input.sessionIds, ...input.clientRequestIds, input.userId],
   );
 }
