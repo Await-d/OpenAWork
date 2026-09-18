@@ -11,8 +11,15 @@ const GATEWAY_URL = 'http://mock-gateway.invalid';
 const NOW = 1_784_368_800_000;
 const SHOT_DIR = '/tmp/opencode';
 
-// 首个用例需要等待 vite 冷启动 + 首次编译，放宽超时避免环境性抖动。
-test.setTimeout(120_000);
+/**
+ * 冷启动预算：每次 playwright test 都会拉起全新的 vite dev server，
+ * 「按需编译复用的 web App」只由下方 beforeAll 预热付一次——预热与首屏等待放宽到 240s；
+ * 用例超时保持 120s 仅作兜底（预热完成后交互链路本身是秒级的）。
+ */
+const APP_SHELL_TIMEOUT = 240_000;
+const TEST_TIMEOUT = 120_000;
+
+test.setTimeout(TEST_TIMEOUT);
 
 const SESSION_FIXTURE = {
   id: SESSION_ID,
@@ -139,9 +146,27 @@ async function seedDesktopStorage(page: Page): Promise<void> {
 async function openChat(page: Page): Promise<void> {
   await installDesktopGatewayMocks(page);
   await seedDesktopStorage(page);
-  await page.goto(`/chat/${SESSION_ID}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.page-root')).toBeVisible();
+  // 用 commit 让 goto 尽快返回：HTML 解析、模块加载、首屏渲染都改由显式断言吸收，
+  // 避免 vite 的按需编译时间藏在 goto 内部；冷编译已由下方 beforeAll 预热承担。
+  await page.goto(`/chat/${SESSION_ID}`, { waitUntil: 'commit' });
+  await expect(page.locator('.page-root')).toBeVisible({ timeout: APP_SHELL_TIMEOUT });
 }
+
+/**
+ * 冷启动预热：每个 worker 先用一次性上下文跑通与用例完全一致的 mock/auth + 路由，
+ * 让 vite 的按需编译只在 beforeAll 付一次，而不是算进首个用例的超时预算。
+ */
+test.beforeAll(async ({ browser }) => {
+  // beforeAll 钩子使用项目级超时（playwright.config.ts 中为 30s），必须单独放宽才能覆盖冷编译。
+  test.setTimeout(APP_SHELL_TIMEOUT + 30_000);
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await openChat(page);
+  } finally {
+    await context.close();
+  }
+});
 
 /**
  * 断言浮层紧贴触发按钮：按实际展开方向计算两者间隙，必须落在 0–16px。
@@ -162,7 +187,7 @@ async function expectMenuAdjacentToTrigger(menu: Locator, trigger: Locator): Pro
   ).toBe(true);
 }
 
-test('审批方式档位下拉：交互链路 + 琥珀语义色 + 顶栏只读 chip', async ({ page }) => {
+test('审批方式档位下拉：交互链路 + 琥珀语义色（顶栏不再重复展示 YOLO）', async ({ page }) => {
   await openChat(page);
 
   const trigger = page.getByRole('button', { name: /每次询问|免审批/ });
@@ -172,6 +197,15 @@ test('审批方式档位下拉：交互链路 + 琥珀语义色 + 顶栏只读 c
   await trigger.click();
   const menu = page.getByRole('menu', { name: '工具调用审批方式' });
   await expect(menu).toBeVisible();
+
+  // 设计令牌守门：dev / e2e harness 必须加载 web 样式入口，浮层背景不能被解析为透明，
+  // 否则说明 var(--bg-overlay) 未解析（菜单会退化成无背景、无边框的裸浮层）。
+  const menuBackground = await menu.evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(
+    menuBackground !== 'rgba(0, 0, 0, 0)' && menuBackground !== 'transparent',
+    `浮层背景色解析为 ${menuBackground}，说明设计令牌未加载（dev harness 缺少 web 样式入口）`,
+  ).toBe(true);
+
   await expect(page.getByRole('menuitemradio', { name: /每次询问/ })).toHaveAttribute(
     'aria-checked',
     'true',
@@ -243,10 +277,9 @@ test('审批方式档位下拉：交互链路 + 琥珀语义色 + 顶栏只读 c
   await expect(trigger).toContainText('免审批');
   await page.screenshot({ path: `${SHOT_DIR}/permission-03-enabled.png` });
 
-  // 顶栏降级为只读 chip：存在但不可点击（不是 button）
+  // 顶栏不再重复展示 YOLO：该档位只在输入框的权限档位控件内调整
   const chip = page.getByTestId('chat-top-bar-yolo-chip');
-  await expect(chip).toBeVisible();
-  await expect(page.locator('button[data-testid="chat-top-bar-yolo-chip"]')).toHaveCount(0);
+  await expect(chip).toHaveCount(0);
 
   // 再切回每次询问：不应二次确认
   await trigger.click();
