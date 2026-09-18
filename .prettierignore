@@ -12,3 +12,6 @@ apps/*/test-results
 
 # 外部同步的技能快照保留上游格式，不在仓库内重写。
 packages/resources/resources/skills/reference/
+
+# .NET 网关是独立解决方案，其 obj/bin 构建产物不纳入仓库格式检查。
+services/agent-gateway-dotnet/

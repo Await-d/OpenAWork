@@ -67,5 +67,9 @@ services/agent-gateway/data/
 file.txt
 .claude/
 
+# Playwright 生成的产物（每次运行 apps/desktop/e2e 后重建，不得提交）
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+
 # 生成的富内容主题预览页（由 scripts/markdown-theme-demo.mjs 重新生成）
 demo/markdown-theme-matrix.html

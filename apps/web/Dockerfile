@@ -17,5 +17,7 @@ RUN pnpm --filter @openAwork/web build
 
 FROM nginx:alpine
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+# 主配置必须显式下发：worker_connections 在 events{} 上下文，conf.d/*.conf 无法覆盖它。
+COPY apps/web/nginx.main.conf /etc/nginx/nginx.conf
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
