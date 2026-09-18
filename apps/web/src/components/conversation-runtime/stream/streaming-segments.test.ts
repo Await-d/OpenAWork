@@ -319,13 +319,54 @@ describe('applyToolResultToStreamingSegment', () => {
     });
   });
 
-  it('returns the same array when no segment matches', () => {
-    const segments: ChatMessagePart[] = [];
+  it('tool_result 先到时按到达位置占位，不从末尾补', () => {
+    // attach/断线重连场景：同一 toolCallId 的 tool_call_delta 尚未到达，
+    // 结果先到。此前的实现直接 no-op，靠后续 upsert 把工具卡片补到末尾，
+    // 于是它会插到更晚到达的文本之后——位置错误。现在必须在结果到达的
+    // 当前末尾就地占位。
+    const segments: ChatMessagePart[] = [{ id: `${MESSAGE_ID}:text`, type: 'text', text: 'hi' }];
     const after = applyToolResultToStreamingSegment(segments, {
-      toolCallId: 'missing',
-      output: 'whatever',
+      toolCallId: 'tool-late',
+      output: { ok: true },
+      status: 'completed',
     });
-    expect(after).toBe(segments);
+    expect(after.map((s) => s.type)).toEqual(['text', 'tool']);
+    expect(after[1]).toMatchObject({
+      id: 'tool-late',
+      type: 'tool',
+      toolCallId: 'tool-late',
+      toolName: 'tool',
+      status: 'completed',
+      output: { ok: true },
+    });
+  });
+
+  it('后续 tool_call_delta 原地补齐占位，不产生第二个工具段', () => {
+    let segments: ChatMessagePart[] = [{ id: `${MESSAGE_ID}:text`, type: 'text', text: 'hi' }];
+    segments = applyToolResultToStreamingSegment(segments, {
+      toolCallId: 'tool-late',
+      output: 'done',
+      status: 'completed',
+    });
+    const placeholderIndex = segments.findIndex(
+      (segment) => segment.type === 'tool' && segment.toolCallId === 'tool-late',
+    );
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-late',
+      toolName: 'fetch',
+      input: { url: 'https://example.com' },
+      status: 'running',
+    });
+    const tools = segments.filter((s): s is ChatToolPart => s.type === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(segments.findIndex((segment) => segment.type === 'tool')).toBe(placeholderIndex);
+    expect(tools[0]).toMatchObject({
+      toolCallId: 'tool-late',
+      toolName: 'fetch',
+      input: { url: 'https://example.com' },
+      output: 'done',
+      status: 'completed',
+    });
   });
 });
 

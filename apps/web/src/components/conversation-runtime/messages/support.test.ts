@@ -308,14 +308,23 @@ describe('partsFromOrderedAssistantContent', () => {
     expect(b.status).toBe('running');
   });
 
-  it('silently drops a tool_result whose toolCallId has no preceding tool_call', () => {
+  it('keeps a tool_result whose toolCallId has no preceding tool_call, at its wire position', () => {
+    // 该结果此前被直接丢弃，刷新后工具输出消失。现在必须按到达位置产出占位
+    // 工具段（`toolName` 回退为 'tool'），待后续同名 tool_call 补齐。
     const wire = [
       { type: 'text', text: 'hello' },
       { type: 'tool_result', toolCallId: 'orphan', output: 'x', isError: false },
     ];
     const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
-    expect(parts).toHaveLength(1);
-    expect(parts[0]).toMatchObject({ type: 'text', text: 'hello' });
+    expect(parts.map((p) => p.type)).toEqual(['text', 'tool']);
+    expect(parts[1]).toMatchObject({
+      type: 'tool',
+      toolCallId: 'orphan',
+      toolName: 'tool',
+      output: 'x',
+      isError: false,
+      status: 'completed',
+    });
   });
 });
 

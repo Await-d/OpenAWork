@@ -14,9 +14,14 @@ import {
   reconcileSnapshotChatMessages,
   toSharedMessageSnapshot,
 } from './snapshot-reconciliation.js';
-import type { ChatMessage } from './message-model.js';
+import type { ChatMessage, ChatMessagePart } from './message-model.js';
 import type { Message } from '@openAwork/shared';
-import { createAssistantTraceContent } from './trace-codec.js';
+import {
+  contentFromParts,
+  createAssistantTraceContent,
+  parseAssistantTraceContent,
+  readAssistantTracePayload,
+} from './trace-codec.js';
 
 function assistantMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -154,6 +159,129 @@ describe('reconcileSnapshotChatMessages', () => {
 
     expect(reconciled).toHaveLength(1);
     expect(reconciled[0]?.id).toBe('server-same-text');
+  });
+});
+
+describe('mergePreferringCompleteContent 的 parts / content 顺序一致性', () => {
+  const MERGE_ID = 'm-merge-order';
+
+  function interleavedParts(): ChatMessagePart[] {
+    return [
+      { id: `${MERGE_ID}:text`, type: 'text', text: 'A' },
+      {
+        id: 'tool-merge',
+        type: 'tool',
+        toolCallId: 'tool-merge',
+        toolName: 'read',
+        input: {},
+        status: 'running',
+      },
+      { id: `${MERGE_ID}:text:1`, type: 'text', text: 'B' },
+    ];
+  }
+
+  it('快照无 parts 但文本更长时，parts 保持交错且 content 与 parts 编码同一顺序', () => {
+    const parts = interleavedParts();
+    const previous = assistantMessage({
+      id: MERGE_ID,
+      content: contentFromParts(parts),
+      parts,
+      status: 'completed',
+    });
+    // 快照没有 parts，只带来一份更完整的扁平文本（A → 工具 → B → C）。
+    const snapshot = assistantMessage({
+      id: MERGE_ID,
+      content: createAssistantTraceContent({
+        text: 'A\n\nB\n\nC',
+        toolCalls: [
+          {
+            toolCallId: 'tool-merge',
+            toolName: 'read',
+            input: {},
+            status: 'completed',
+            output: 'ok',
+          },
+        ],
+      }),
+      status: 'completed',
+    });
+
+    const [merged] = reconcileSnapshotChatMessages([previous], [snapshot]);
+
+    // (a) parts 的交错顺序不变。
+    expect(merged?.parts?.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
+    // (b) content 与 parts 编码同一顺序 / 内容（content 是 parts 的序列化）。
+    expect(merged?.content).toBe(contentFromParts(merged?.parts ?? []));
+    // 快照更完整的文本已被吸收进 parts。
+    expect(readAssistantTracePayload(merged!)?.text).toBe('A\n\nB\n\nC');
+    expect(parseAssistantTraceContent(merged?.content ?? '')?.text).toBe('A\n\nB\n\nC');
+  });
+
+  it('快照带 parts 而 previous 无 parts 时，采用快照 parts 顺序并保留本地工具注解', () => {
+    const previous = assistantMessage({
+      id: MERGE_ID,
+      content: createAssistantTraceContent({
+        text: '本地较短文本',
+        toolCalls: [
+          {
+            toolCallId: 'tool-merge',
+            toolName: 'read',
+            input: {},
+            status: 'paused',
+            pendingPermissionRequestId: 'perm-1',
+          },
+        ],
+      }),
+      status: 'completed',
+    });
+    const snapshotParts: ChatMessagePart[] = [
+      { id: `${MERGE_ID}:text`, type: 'text', text: '服务端更完整的回答' },
+      {
+        id: 'tool-merge',
+        type: 'tool',
+        toolCallId: 'tool-merge',
+        toolName: 'read',
+        input: {},
+        status: 'running',
+      },
+      { id: `${MERGE_ID}:text:1`, type: 'text', text: '后半段' },
+    ];
+    const snapshot = assistantMessage({
+      id: MERGE_ID,
+      content: contentFromParts(snapshotParts),
+      parts: snapshotParts,
+      status: 'completed',
+    });
+
+    const [merged] = reconcileSnapshotChatMessages([previous], [snapshot]);
+
+    expect(merged?.parts?.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
+    expect(merged?.parts?.find((part) => part.type === 'tool')).toMatchObject({
+      pendingPermissionRequestId: 'perm-1',
+      status: 'paused',
+    });
+    expect(merged?.content).toBe(contentFromParts(merged?.parts ?? []));
+  });
+
+  it('快照并不更完整时保持 previous 的 parts 与 content 原样返回', () => {
+    const parts = interleavedParts();
+    const previous = assistantMessage({
+      id: MERGE_ID,
+      content: contentFromParts(parts),
+      parts,
+      status: 'completed',
+    });
+    const snapshot = assistantMessage({
+      id: MERGE_ID,
+      content: createAssistantTraceContent({ text: 'A', toolCalls: [] }),
+      status: 'completed',
+    });
+
+    const [merged] = reconcileSnapshotChatMessages([previous], [snapshot]);
+
+    expect(merged?.id).toBe(previous.id);
+    expect(merged?.content).toBe(previous.content);
+    expect(merged?.parts).toBe(previous.parts);
   });
 });
 

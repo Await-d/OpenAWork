@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   createSessionTerminal: vi.fn(),
   closeTerminal: vi.fn(),
   writeTerminalStdin: vi.fn(),
+  killSessionTerminal: vi.fn(),
 }));
 
 const hook = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ vi.mock('../../conversation-runtime/terminals/terminals-api.js', () => ({
   createSessionTerminal: api.createSessionTerminal,
   closeTerminal: api.closeTerminal,
   writeTerminalStdin: api.writeTerminalStdin,
+  killSessionTerminal: api.killSessionTerminal,
 }));
 
 vi.mock('./InteractiveTerminalView.js', () => ({

@@ -91,7 +91,8 @@ describe('TerminalInputQueue', () => {
 
   it('写入失败时上报错误、把数据放回队首、并与后续输入合并重试', async () => {
     const error = new Error('写入终端输入失败');
-    const write = vi.fn<(data: string) => Promise<void>>()
+    const write = vi
+      .fn<(data: string) => Promise<void>>()
       .mockRejectedValueOnce(error)
       .mockResolvedValue(undefined);
     const onError = vi.fn();

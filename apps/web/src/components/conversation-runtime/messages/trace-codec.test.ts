@@ -338,15 +338,51 @@ describe('partsFromOrderedAssistantContent', () => {
     expect(tool.pendingPermissionRequestId).toBeUndefined();
   });
 
-  it('孤立 tool_result 与畸形条目被跳过', () => {
+  it('孤儿 tool_result 不再丢失，按 wire 位置产出 tool part', () => {
+    // wire 上没有前置 tool_call 的 tool_result（attach/重连后快照从工具中段
+    // 开始）此前会被直接丢弃，刷新后工具输出凭空消失。现在必须留在它到达时
+    // 的 wire 位置（此处夹在两段文本之间）。
     const parts = partsFromOrderedAssistantContent('m1', [
+      { type: 'text', text: '前' },
+      { type: 'tool_result', toolCallId: 'ghost', output: 'x', isError: false },
+      { type: 'text', text: '后' },
       null,
       'junk',
       { type: 'mystery' },
-      { type: 'tool_result', toolCallId: 'ghost', output: 'x' },
     ]);
 
-    expect(parts).toEqual([]);
+    expect(parts.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
+    const tool = parts[1] as ChatToolPart;
+    expect(tool).toMatchObject({
+      id: 'ghost',
+      type: 'tool',
+      toolCallId: 'ghost',
+      toolName: 'tool',
+      input: {},
+      output: 'x',
+      isError: false,
+      status: 'completed',
+    });
+  });
+
+  it('孤儿 tool_result 之后的同名 tool_call 原地补齐占位，不追加第二个工具段', () => {
+    const parts = partsFromOrderedAssistantContent('m1', [
+      { type: 'text', text: '前' },
+      { type: 'tool_result', toolCallId: 'ghost', output: 'x', isError: false },
+      { type: 'text', text: '后' },
+      { type: 'tool_call', toolCallId: 'ghost', toolName: 'read', input: { path: 'a' } },
+    ]);
+
+    expect(parts.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
+    const tools = parts.filter((part): part is ChatToolPart => part.type === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      toolCallId: 'ghost',
+      toolName: 'read',
+      input: { path: 'a' },
+      output: 'x',
+      status: 'completed',
+    });
   });
 });
 

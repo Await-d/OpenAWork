@@ -12,10 +12,7 @@ import type { BrowserLiveEnvelope, BrowserLiveNodePayload } from '@openAwork/sha
 
 import { COMPOSER_INSERT_EVENT } from '../browser-clipboard.js';
 import { DEFAULT_DEVICE_PRESET_ID, resolveDevicePreset } from '../device-presets.js';
-import type {
-  BrowserLivePhase,
-  BrowserLiveSession,
-} from '../hooks/use-browser-live-session.js';
+import type { BrowserLivePhase, BrowserLiveSession } from '../hooks/use-browser-live-session.js';
 import {
   CdpLiveEngine,
   computeFrameLayout,
@@ -53,6 +50,7 @@ function createSessionHarness(): SessionHarness {
       },
       screenshot: () => Promise.resolve(null),
       close: () => undefined,
+      recheckAvailability: () => undefined,
       subscribe: (listener) => {
         listeners.add(listener);
         return () => {
@@ -511,15 +509,23 @@ describe('computeFrameLayout 退化盒子兜底', () => {
   });
 
   it('0 高 / 0 宽 / 未测量时回退到帧自身设备尺寸，而不是返回 null', () => {
-    expect(computeFrameLayout({ width: 520, height: 0 }, frame)).toEqual({ width: 200, height: 100 });
-    expect(computeFrameLayout({ width: 0, height: 320 }, frame)).toEqual({ width: 200, height: 100 });
+    expect(computeFrameLayout({ width: 520, height: 0 }, frame)).toEqual({
+      width: 200,
+      height: 100,
+    });
+    expect(computeFrameLayout({ width: 0, height: 320 }, frame)).toEqual({
+      width: 200,
+      height: 100,
+    });
     expect(computeFrameLayout({ width: 0, height: 0 }, frame)).toEqual({ width: 200, height: 100 });
     expect(computeFrameLayout(null, frame)).toEqual({ width: 200, height: 100 });
     expect(computeFrameLayout(undefined, frame)).toEqual({ width: 200, height: 100 });
   });
 
   it('兜底尺寸把最长边裁剪到上限并保持比例', () => {
-    expect(computeFrameLayout({ width: 0, height: 0 }, { deviceWidth: 4096, deviceHeight: 2048 })).toEqual({
+    expect(
+      computeFrameLayout({ width: 0, height: 0 }, { deviceWidth: 4096, deviceHeight: 2048 }),
+    ).toEqual({
       width: FALLBACK_FRAME_MAX_SIZE,
       height: FALLBACK_FRAME_MAX_SIZE / 2,
     });

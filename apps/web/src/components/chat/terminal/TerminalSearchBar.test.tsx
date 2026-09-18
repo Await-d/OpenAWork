@@ -29,7 +29,12 @@ function renderBar(overrides: { next?: boolean; previous?: boolean } = {}) {
 describe('TerminalSearchBar', () => {
   it('未打开时不渲染也不占位', () => {
     render(
-      <TerminalSearchBar open={false} onClose={vi.fn()} onFindNext={vi.fn()} onFindPrevious={vi.fn()} />,
+      <TerminalSearchBar
+        open={false}
+        onClose={vi.fn()}
+        onFindNext={vi.fn()}
+        onFindPrevious={vi.fn()}
+      />,
     );
     expect(screen.queryByTestId('terminal-search-bar')).toBeNull();
   });

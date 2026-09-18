@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
   createSessionTerminal: vi.fn(),
   closeTerminal: vi.fn(),
   writeTerminalStdin: vi.fn(),
+  killSessionTerminal: vi.fn(),
 }));
 
 const hook = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ vi.mock('../../conversation-runtime/terminals/terminals-api.js', () => ({
   createSessionTerminal: api.createSessionTerminal,
   closeTerminal: api.closeTerminal,
   writeTerminalStdin: api.writeTerminalStdin,
+  killSessionTerminal: api.killSessionTerminal,
 }));
 
 /**
@@ -292,9 +294,9 @@ describe('Ctrl/⌘+Shift+5 拆分当前激活 pane', () => {
       />,
     );
 
-    expect(
-      screen.getByTestId('terminal-search-input').hasAttribute('data-terminal-ui-input'),
-    ).toBe(true);
+    expect(screen.getByTestId('terminal-search-input').hasAttribute('data-terminal-ui-input')).toBe(
+      true,
+    );
   });
 
   it('端口页签不接管（没有可见 pane 可拆）；Ctrl+F / 无 Shift / 长按重复都不触发', () => {

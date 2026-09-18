@@ -144,27 +144,24 @@ describe('useBrowserLiveSession', () => {
     ['browser-outdated', '重新执行 npx playwright install chromium'],
     ['probe-failed', '稍后重试'],
     [BROWSER_LIVE_DISABLED_REASON, 'OPENAWORK_BROWSER_LIVE=1'],
-  ] as const)(
-    'reason=%s 时状态不可用、不建连并给出对应中文提示',
-    async (reason, hintFragment) => {
-      mocks.getStatus.mockResolvedValue({
-        available: false,
-        engine: 'chromium',
-        screencast: false,
-        reason,
-      } satisfies BrowserLiveStatus);
+  ] as const)('reason=%s 时状态不可用、不建连并给出对应中文提示', async (reason, hintFragment) => {
+    mocks.getStatus.mockResolvedValue({
+      available: false,
+      engine: 'chromium',
+      screencast: false,
+      reason,
+    } satisfies BrowserLiveStatus);
 
-      const { result } = await renderLiveSession();
-      await act(async () => {
-        await Promise.resolve();
-      });
+    const { result } = await renderLiveSession();
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-      expect(mocks.connect).not.toHaveBeenCalled();
-      expect(result.current.phase).toBe('idle');
-      expect(result.current.availability).toMatchObject({ available: false, reason });
-      expect(result.current.unavailableHint).toContain(hintFragment);
-    },
-  );
+    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.availability).toMatchObject({ available: false, reason });
+    expect(result.current.unavailableHint).toContain(hintFragment);
+  });
 
   it('状态可用时不产生不可用提示', async () => {
     mocks.getStatus.mockResolvedValue(AVAILABLE_STATUS);
@@ -175,6 +172,32 @@ describe('useBrowserLiveSession', () => {
     });
 
     expect(result.current.unavailableHint).toBeNull();
+  });
+
+  it('recheckAvailability 强制重新探测可用性', async () => {
+    mocks.getStatus.mockResolvedValue({
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser-missing',
+    } satisfies BrowserLiveStatus);
+
+    const { result } = await renderLiveSession();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.getStatus).toHaveBeenCalledTimes(1);
+
+    mocks.getStatus.mockResolvedValue(AVAILABLE_STATUS);
+    act(() => {
+      result.current.recheckAvailability();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.getStatus).toHaveBeenCalledTimes(2);
+    expect(result.current.availability?.available).toBe(true);
   });
 
   it('可用时建连，open 后进入 connected，hello 后请求 screencast', async () => {

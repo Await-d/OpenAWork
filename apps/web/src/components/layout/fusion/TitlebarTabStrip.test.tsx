@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { writeWorkspaceAlias } from '../../../utils/workspace-alias.js';
+
+const OPENAWORK_PATH = '/home/await/project/OpenAWork';
 
 const tauriWindowControls = vi.hoisted(() => ({
   close: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -46,10 +49,12 @@ vi.mock('../../../hooks/workspace/useSessions.js', () => ({
 }));
 
 function resetUiState(): void {
+  localStorage.clear();
   useUIStateStore.setState({
     activeTabId: null,
     closedSessionTabIds: [],
     lastChatPath: null,
+    selectedWorkspacePath: OPENAWORK_PATH,
     tabs: [],
     workbenchLayoutMode: 'fusion',
   });
@@ -196,6 +201,40 @@ describe('TitlebarTabStrip', () => {
     fireEvent.click(screen.getByRole('tab', { name: '首页' }));
 
     expect(screen.getByTestId('location-probe').textContent).toBe('/chat');
+  });
+
+  it('标题栏首页位展示系统品牌 Logo', () => {
+    renderTitlebar('/chat');
+
+    const homeSlot = document.querySelector('.titlebar-tab-strip__home-slot');
+    const homeButton = screen.getByRole('tab', { name: '首页' });
+
+    expect(homeSlot?.contains(homeButton)).toBe(true);
+    expect(homeButton.getAttribute('title')).toBe('OpenAWork · 返回首页');
+    expect(homeButton.querySelector('[data-testid="brand-logo"]')).not.toBeNull();
+  });
+
+  it('标题栏左侧展示当前项目名，重命名别名后实时刷新', () => {
+    renderTitlebar('/chat');
+
+    const projectLabel = () => document.querySelector('.titlebar-tab-strip__project-name');
+
+    expect(projectLabel()?.textContent).toBe('OpenAWork');
+    expect(projectLabel()?.getAttribute('title')).toBe(OPENAWORK_PATH);
+
+    act(() => {
+      writeWorkspaceAlias(OPENAWORK_PATH, '我的项目');
+    });
+
+    expect(projectLabel()?.textContent).toBe('我的项目');
+  });
+
+  it('未选择项目时不渲染项目名占位', () => {
+    useUIStateStore.setState({ selectedWorkspacePath: null });
+
+    renderTitlebar('/chat');
+
+    expect(document.querySelector('.titlebar-tab-strip__project-name')).toBeNull();
   });
 
   it('在 Chat 路由下保留会话标签，并常驻展示当前布局入口', () => {

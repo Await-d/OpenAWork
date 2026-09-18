@@ -62,6 +62,7 @@ function makeTerminal(overrides: Partial<SessionTerminalView> = {}): SessionTerm
 function makeActions(): TerminalPaneActions {
   return {
     createTerminal: vi.fn(),
+    killTerminal: vi.fn(),
     splitPane: vi.fn(),
     mergeOthersIntoPane: vi.fn(),
     selectTerminal: vi.fn(),
@@ -108,10 +109,14 @@ function renderSplit(props: HarnessProps) {
           paneCount,
           maxPanes,
           preferredSplitDirection,
+          shellProfiles: [],
           totalTerminalCount: terminals.length,
           busyPaneId: null,
           tabDrag: null,
           setTabDrag: vi.fn(),
+          renameRequest: null,
+          requestRename: vi.fn(),
+          clearRenameRequest: vi.fn(),
           view: {
             gatewayUrl: 'https://gateway.test',
             token: 'token-1',

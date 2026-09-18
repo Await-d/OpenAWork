@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 终端 tab 条：标签优先级、激活态、单击选中、双击重命名、关闭 ×、
- * 重命名输入框的提交 / 取消 / 失焦提交、空态文案。
+ * 重命名输入框的提交 / 取消 / 失焦提交、空态文案、右键 / 键盘菜单上报。
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -139,5 +139,77 @@ describe('TerminalTabStrip', () => {
     fireEvent.blur(screen.getByRole('textbox', { name: '重命名终端' }));
 
     expect(onCommitRename).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('tab 右键 / 键盘菜单入口', () => {
+  /** 键盘锚点来自 tab 矩形；jsdom 一律返回 0，这里给出非零值以便断言位置。 */
+  function stubTabRect(tab: HTMLElement): void {
+    const rect = {
+      x: 30,
+      y: 30,
+      width: 96,
+      height: 22,
+      top: 30,
+      left: 30,
+      right: 126,
+      bottom: 52,
+      toJSON: () => ({}),
+    } as DOMRect;
+    tab.getBoundingClientRect = () => rect;
+  }
+
+  it('右键 tab：拦截原生菜单并上报 terminalId 与 client 坐标', () => {
+    const onTabContextMenu = vi.fn();
+    renderStrip({ onTabContextMenu });
+
+    const notPrevented = fireEvent.contextMenu(screen.getByTestId('terminal-tab-terminal-1'), {
+      clientX: 120,
+      clientY: 48,
+    });
+
+    expect(notPrevented).toBe(false);
+    expect(onTabContextMenu).toHaveBeenCalledWith('terminal-1', { x: 120, y: 48 });
+  });
+
+  it('未接入 onTabContextMenu：不拦截原生菜单（与今日行为一致）', () => {
+    renderStrip();
+
+    const notPrevented = fireEvent.contextMenu(screen.getByTestId('terminal-tab-terminal-1'));
+
+    expect(notPrevented).toBe(true);
+  });
+
+  it('行内重命名期间：输入框的原生编辑菜单优先，不上报', () => {
+    const onTabContextMenu = vi.fn();
+    renderStrip({ renamingId: 'terminal-1', renameValue: '终端 1', onTabContextMenu });
+
+    const notPrevented = fireEvent.contextMenu(screen.getByRole('textbox', { name: '重命名终端' }));
+
+    expect(notPrevented).toBe(true);
+    expect(onTabContextMenu).not.toHaveBeenCalled();
+  });
+
+  it('Shift+F10 / ContextMenu 键：以 tab 矩形为锚点上报同一入口', () => {
+    const onTabContextMenu = vi.fn();
+    renderStrip({ onTabContextMenu });
+    const tab = screen.getByTestId('terminal-tab-terminal-1');
+    stubTabRect(tab);
+
+    fireEvent.keyDown(tab, { key: 'F10', shiftKey: true });
+    expect(onTabContextMenu).toHaveBeenCalledWith('terminal-1', { x: 30, y: 52 });
+
+    onTabContextMenu.mockClear();
+    fireEvent.keyDown(tab, { key: 'ContextMenu' });
+    expect(onTabContextMenu).toHaveBeenCalledWith('terminal-1', { x: 30, y: 52 });
+  });
+
+  it('单独按 F10（无 Shift）不触发菜单', () => {
+    const onTabContextMenu = vi.fn();
+    renderStrip({ onTabContextMenu });
+
+    fireEvent.keyDown(screen.getByTestId('terminal-tab-terminal-1'), { key: 'F10' });
+
+    expect(onTabContextMenu).not.toHaveBeenCalled();
   });
 });

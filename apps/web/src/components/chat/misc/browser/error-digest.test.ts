@@ -9,7 +9,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConsoleEntry, NetworkExchange } from './browser-console-types.js';
 import { COMPOSER_INSERT_EVENT } from './browser-clipboard.js';
-import { buildErrorDigest, countErrorDigestProblems, sendErrorDigestToComposer } from './error-digest.js';
+import {
+  buildErrorDigest,
+  countErrorDigestProblems,
+  sendErrorDigestToComposer,
+} from './error-digest.js';
 
 const FIXED_TIMESTAMP = 1_700_000_000_000;
 
@@ -136,10 +140,9 @@ describe('buildErrorDigest', () => {
   });
 
   it('按 maxMessageChars 截断消息', () => {
-    const digest = buildErrorDigest(
-      [makeEntry({ level: 'error', message: 'x'.repeat(5000) })],
-      { maxMessageChars: 100 },
-    );
+    const digest = buildErrorDigest([makeEntry({ level: 'error', message: 'x'.repeat(5000) })], {
+      maxMessageChars: 100,
+    });
 
     expect(digest).toContain(`${'x'.repeat(99)}…`);
     expect(digest).not.toContain('x'.repeat(100));
@@ -216,7 +219,12 @@ describe('countErrorDigestProblems', () => {
     expect(
       countErrorDigestProblems([
         makeEntry({ id: '1', level: 'error', message: '重复报错' }),
-        makeEntry({ id: '2', level: 'error', message: '重复报错', timestamp: FIXED_TIMESTAMP + 10 }),
+        makeEntry({
+          id: '2',
+          level: 'error',
+          message: '重复报错',
+          timestamp: FIXED_TIMESTAMP + 10,
+        }),
       ]),
     ).toBe(1);
   });
@@ -258,9 +266,7 @@ describe('sendErrorDigestToComposer', () => {
     const handler = vi.fn();
     window.addEventListener(COMPOSER_INSERT_EVENT, handler);
     try {
-      const count = sendErrorDigestToComposer([
-        makeEntry({ level: 'log', message: '普通日志' }),
-      ]);
+      const count = sendErrorDigestToComposer([makeEntry({ level: 'log', message: '普通日志' })]);
 
       expect(count).toBe(0);
       expect(handler).not.toHaveBeenCalled();

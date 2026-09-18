@@ -13,7 +13,14 @@ import type {
 function snapshot(
   overrides: Partial<TerminalStreamSnapshotPayload> = {},
 ): TerminalStreamSnapshotPayload {
-  return { terminalId: 'term_1', seq: 0, data: '', outputBytesTotal: 0, status: 'running', ...overrides };
+  return {
+    terminalId: 'term_1',
+    seq: 0,
+    data: '',
+    outputBytesTotal: 0,
+    status: 'running',
+    ...overrides,
+  };
 }
 
 function output(overrides: Partial<TerminalStreamOutputPayload> = {}): TerminalStreamOutputPayload {
@@ -24,9 +31,9 @@ describe('createTerminalStreamReplay', () => {
   it('首次 snapshot 要求 reset 并写入全文', () => {
     const replay = createTerminalStreamReplay();
 
-    expect(replay.applySnapshot(snapshot({ seq: 12, data: 'ring buffer', outputBytesTotal: 11 }))).toEqual(
-      { reset: true, text: 'ring buffer' },
-    );
+    expect(
+      replay.applySnapshot(snapshot({ seq: 12, data: 'ring buffer', outputBytesTotal: 11 })),
+    ).toEqual({ reset: true, text: 'ring buffer' });
   });
 
   it('重复 snapshot（重连重发）被丢弃，避免清掉用户半输入', () => {
@@ -34,8 +41,12 @@ describe('createTerminalStreamReplay', () => {
 
     replay.applySnapshot(snapshot({ seq: 1, data: 'history', outputBytesTotal: 7 }));
 
-    expect(replay.applySnapshot(snapshot({ seq: 1, data: 'history', outputBytesTotal: 7 }))).toBeNull();
-    expect(replay.applySnapshot(snapshot({ seq: 99, data: 'reconnect', outputBytesTotal: 20 }))).toBeNull();
+    expect(
+      replay.applySnapshot(snapshot({ seq: 1, data: 'history', outputBytesTotal: 7 })),
+    ).toBeNull();
+    expect(
+      replay.applySnapshot(snapshot({ seq: 99, data: 'reconnect', outputBytesTotal: 20 })),
+    ).toBeNull();
   });
 
   it('seq 单调递增时写入增量，重复或更旧的 seq 丢弃', () => {
@@ -52,9 +63,9 @@ describe('createTerminalStreamReplay', () => {
     const replay = createTerminalStreamReplay();
     replay.applySnapshot(snapshot({ seq: 1, data: 'hello', outputBytesTotal: 5 }));
 
-    expect(replay.applyOutput(output({ seq: 2, outputTail: 'hello world', outputBytesTotal: 11 }))).toBe(
-      ' world',
-    );
+    expect(
+      replay.applyOutput(output({ seq: 2, outputTail: 'hello world', outputBytesTotal: 11 })),
+    ).toBe(' world');
   });
 
   it('旧后端（无 seq / 无 data）按累积 tail 的字节差回放', () => {
@@ -62,8 +73,12 @@ describe('createTerminalStreamReplay', () => {
     // 旧后端的 snapshot 经 terminals-api 归一化后就是 data + seq=0。
     replay.applySnapshot(snapshot({ seq: 0, data: 'hello', outputBytesTotal: 5 }));
 
-    expect(replay.applyOutput(output({ outputTail: 'hello world', outputBytesTotal: 11 }))).toBe(' world');
-    expect(replay.applyOutput(output({ outputTail: 'hello world', outputBytesTotal: 11 }))).toBe('');
+    expect(replay.applyOutput(output({ outputTail: 'hello world', outputBytesTotal: 11 }))).toBe(
+      ' world',
+    );
+    expect(replay.applyOutput(output({ outputTail: 'hello world', outputBytesTotal: 11 }))).toBe(
+      '',
+    );
     // tail 窗口滚过头：差值大于 tail 长度时整段写入并信任后端
     expect(replay.applyOutput(output({ outputTail: 'fresh tail', outputBytesTotal: 200 }))).toBe(
       'fresh tail',

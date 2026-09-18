@@ -130,11 +130,19 @@ describe('parseTerminalOutputPayload', () => {
       outputBytesTotal: 99,
     });
 
-    expect(parsed).toEqual({ seq: 9, data: 'delta text', outputTail: 'tail text', outputBytesTotal: 99 });
+    expect(parsed).toEqual({
+      seq: 9,
+      data: 'delta text',
+      outputTail: 'tail text',
+      outputBytesTotal: 99,
+    });
   });
 
   it('旧后端缺省 seq/data 时保持字段缺省（走 tail-diff 兼容路径）', () => {
-    const parsed = parseTerminalOutputPayload({ outputTail: 'cumulative tail', outputBytesTotal: 12 });
+    const parsed = parseTerminalOutputPayload({
+      outputTail: 'cumulative tail',
+      outputBytesTotal: 12,
+    });
 
     expect(parsed.seq).toBeUndefined();
     expect(parsed.data).toBeUndefined();
@@ -182,9 +190,7 @@ class MockEventSource {
 
   emit(type: string, payload?: unknown): void {
     const event =
-      payload === undefined
-        ? new Event(type)
-        : ({ data: JSON.stringify(payload) } as MessageEvent);
+      payload === undefined ? new Event(type) : ({ data: JSON.stringify(payload) } as MessageEvent);
     for (const handler of this.listeners.get(type) ?? []) {
       handler(event);
     }
@@ -225,7 +231,9 @@ describe('openTerminalStream', () => {
   it('用真实 URL 构造 EventSource 并上报连接状态', () => {
     const { mock, onStatus } = openWithSpies();
 
-    expect(mock.url).toBe('https://gateway.test/sessions/session-1/terminals/term_1/stream?token=token-1');
+    expect(mock.url).toBe(
+      'https://gateway.test/sessions/session-1/terminals/term_1/stream?token=token-1',
+    );
     expect(onStatus).toHaveBeenCalledWith('connecting');
 
     mock.emit('open');

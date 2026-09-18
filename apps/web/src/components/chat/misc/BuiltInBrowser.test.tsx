@@ -21,15 +21,28 @@ const consoleTitleOpen = browserPreviewShortcutTitle('打开控制台', 'toggleC
 const liveMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   connect: vi.fn(),
+  installBrowser: vi.fn(),
+  getInstallStatus: vi.fn(),
 }));
 
 vi.mock('@openAwork/web-client', () => ({
+  HttpError: class HttpError extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly data?: unknown,
+    ) {
+      super(message);
+    }
+  },
   createBrowserLiveClient: () => ({
     getStatus: liveMocks.getStatus,
     connect: liveMocks.connect,
     start: vi.fn(),
     stop: vi.fn(),
     screenshot: vi.fn(),
+    installBrowser: liveMocks.installBrowser,
+    getInstallStatus: liveMocks.getInstallStatus,
   }),
   // 工作区索引版本轮询（预览自动刷新）依赖它；返回稳定版本，避免触发重载。
   createWorkspaceClient: () => ({
@@ -41,6 +54,8 @@ beforeEach(() => {
   localStorage.clear();
   liveMocks.getStatus.mockReset();
   liveMocks.connect.mockReset();
+  liveMocks.installBrowser.mockReset();
+  liveMocks.getInstallStatus.mockReset();
   useAuthStore.setState({ accessToken: null });
 });
 
@@ -223,6 +238,127 @@ describe('BuiltInBrowser', () => {
     expect(screen.getByText(/重新执行 npx playwright install chromium/)).toBeTruthy();
     expect(screen.getByTitle('内置浏览器')).toBeTruthy();
     expect(liveMocks.connect).not.toHaveBeenCalled();
+  });
+
+  it('browser-missing 且可安装时展示安装按钮，仅在点击后触发安装与轮询', async () => {
+    liveMocks.getStatus.mockResolvedValue({
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser-missing',
+      installable: true,
+      source: null,
+      expectedRevision: null,
+      executablePath: null,
+    } satisfies BrowserLiveStatus);
+    liveMocks.installBrowser.mockResolvedValue(undefined);
+    liveMocks.getInstallStatus.mockResolvedValue({
+      state: 'running',
+      startedAt: 1,
+      finishedAt: null,
+      tailLog: ['正在下载 chromium 50%'],
+      error: null,
+      browsersPath: '/data/browsers',
+    });
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    const button = await screen.findByRole('button', { name: '安装调试浏览器' });
+    expect(liveMocks.installBrowser).not.toHaveBeenCalled();
+    expect(liveMocks.getInstallStatus).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(liveMocks.installBrowser).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('browser-install-progress').textContent).toContain(
+        '正在下载 chromium 50%',
+      ),
+    );
+  });
+
+  it('安装成功后重探可用性（无需刷新页面）', async () => {
+    const missing = {
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser-missing',
+      installable: true,
+      source: null,
+      expectedRevision: null,
+      executablePath: null,
+    } satisfies BrowserLiveStatus;
+    liveMocks.getStatus.mockResolvedValue(missing);
+    liveMocks.installBrowser.mockResolvedValue(undefined);
+    liveMocks.getInstallStatus.mockResolvedValue({
+      state: 'succeeded',
+      startedAt: 1,
+      finishedAt: 2,
+      tailLog: ['done'],
+      error: null,
+      browsersPath: '/data/browsers',
+    });
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+    const button = await screen.findByRole('button', { name: '安装调试浏览器' });
+    const statusCallsBefore = liveMocks.getStatus.mock.calls.length;
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '已安装' })).toBeTruthy());
+    // 安装成功后 hook 递增 nonce，可用性 effect 必须重新请求 /browser-live/status。
+    await waitFor(() =>
+      expect(liveMocks.getStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore),
+    );
+  });
+
+  it('安装失败（CLI 不可用）时展示错误与手动命令', async () => {
+    liveMocks.getStatus.mockResolvedValue({
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser-missing',
+      installable: true,
+      source: null,
+      expectedRevision: null,
+      executablePath: null,
+    } satisfies BrowserLiveStatus);
+    liveMocks.installBrowser.mockResolvedValue(undefined);
+    liveMocks.getInstallStatus.mockResolvedValue({
+      state: 'unavailable',
+      startedAt: null,
+      finishedAt: 2,
+      tailLog: [],
+      error: '当前运行环境未内置 Playwright 安装器',
+      browsersPath: null,
+    });
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+    fireEvent.click(await screen.findByRole('button', { name: '安装调试浏览器' }));
+
+    await waitFor(() => {
+      const error = screen.getByTestId('browser-install-error');
+      expect(error.textContent).toContain('未内置 Playwright 安装器');
+      expect(error.textContent).toContain('npx playwright install chromium');
+    });
+  });
+
+  it('disabled runtime 时不展示安装按钮', async () => {
+    liveMocks.getStatus.mockResolvedValue({
+      available: false,
+      engine: null,
+      screencast: false,
+      reason: 'browser live view is disabled in this runtime',
+    } satisfies BrowserLiveStatus);
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    await waitFor(() => expect(screen.getByText(/OPENAWORK_BROWSER_LIVE=1/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /安装调试浏览器/ })).toBeNull();
   });
 
   it('工具栏控件的 title 与快捷键提示条共用 BROWSER_PREVIEW_SHORTCUTS，不会漂移', () => {

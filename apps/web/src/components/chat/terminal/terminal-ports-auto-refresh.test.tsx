@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 /**
- * 端口页自动刷新（T-13，TASK 2）：
+ * 端口页自动刷新（T-13，TASK 2；P0 手动刷新 / 暂停）：
  *  - 可见时按 `PORTS_POLL_INTERVAL_MS` 轮询；不可见即停（切页签 = 面板卸载，标签页隐藏 =
  *    `visibilitychange`），恢复可见立刻拉一次；
  *  - 单飞：在途请求未回来不发新请求（可见性恢复的重复触发被吞掉）；
  *  - 失败 → error 态 + **停止**轮询；用户「重试」成功后恢复轮询；
  *  - 轮询静默（不闪回 loading）；「更新于 N 秒前」只更新文案、不重新请求；
  *  - 卸载清定时器与监听。
+ *  - P0：「刷新」立刻静默取数并让下一拍从完成后重新计时；「暂停 / 继续」停 / 续自动轮询
+ *    （继续从当下重新计时，不立刻拉一次）；暂停不影响在途请求收尾，也不拦手动刷新。
  *
  * 网关客户端整体换成替身（仓库规定：apps 内不得直接 fetch 网关端点，必须走 web-client；
  * 这里 mock 的正是那一层，消费端接线仍被完整覆盖）。
@@ -32,12 +34,14 @@ const api = vi.hoisted(() => ({
   createSessionTerminal: vi.fn(),
   closeTerminal: vi.fn(),
   writeTerminalStdin: vi.fn(),
+  killSessionTerminal: vi.fn(),
 }));
 
 vi.mock('../../conversation-runtime/terminals/terminals-api.js', () => ({
   createSessionTerminal: api.createSessionTerminal,
   closeTerminal: api.closeTerminal,
   writeTerminalStdin: api.writeTerminalStdin,
+  killSessionTerminal: api.killSessionTerminal,
 }));
 
 vi.mock('./InteractiveTerminalView.js', () => ({
@@ -61,6 +65,9 @@ function makePort(overrides: Partial<ListeningPortView> = {}): ListeningPortView
     pid: 1234,
     processName: 'node',
     source: 'procfs',
+    establishedConnections: 0,
+    processAlive: true,
+    terminal: null,
     ...overrides,
   };
 }
@@ -68,7 +75,13 @@ function makePort(overrides: Partial<ListeningPortView> = {}): ListeningPortView
 function makeSnapshot(
   overrides: Partial<ListeningPortsSnapshotView> = {},
 ): ListeningPortsSnapshotView {
-  return { ports: [makePort()], strategy: 'procfs', collectedAtMs: Date.now(), ...overrides };
+  return {
+    ports: [makePort()],
+    strategy: 'procfs',
+    attributionSupported: true,
+    collectedAtMs: Date.now(),
+    ...overrides,
+  };
 }
 
 function makeTerminal(overrides: Partial<SessionTerminalView> = {}): SessionTerminalView {
@@ -269,5 +282,85 @@ describe('QuickTerminalPanel：「端口」页签可见性', () => {
     fireEvent.click(screen.getByRole('tab', { name: '端口' }));
     await flush();
     expect(portsClient.list).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('TerminalPortsPanel：P0 手动刷新 / 暂停', () => {
+  it('「刷新」立刻静默取数：不闪回 loading，下一拍从本次完成后重新计时', async () => {
+    renderPortsPanel();
+    await flush();
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    // 走到距下一拍还剩 2s 的位置再刷新：倒计时若没被重置，2s 后就会开火。
+    await flush(PORTS_POLL_INTERVAL_MS - 2_000);
+    fireEvent.click(screen.getByTestId('terminal-ports-refresh'));
+    await flush();
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('terminal-ports-loading')).toBeNull();
+
+    await flush(2_000);
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+
+    await flush(PORTS_POLL_INTERVAL_MS - 2_000);
+    expect(portsClient.list).toHaveBeenCalledTimes(3);
+  });
+
+  it('「暂停」停止轮询；「继续」从当下重新计时，不立刻拉一次', async () => {
+    renderPortsPanel();
+    await flush();
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('terminal-ports-pause'));
+    await flush(PORTS_POLL_INTERVAL_MS * 3);
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('terminal-ports-pause'));
+    await flush(0);
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    await flush(PORTS_POLL_INTERVAL_MS);
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('暂停不影响在途请求：响应照常收尾更新列表，之后不再排下一拍', async () => {
+    renderPortsPanel();
+    await flush();
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    // 第二拍（自动轮询）挂起，模拟慢响应。
+    let resolveSecond!: (snapshot: ListeningPortsSnapshotView) => void;
+    portsClient.list.mockReturnValueOnce(
+      new Promise<ListeningPortsSnapshotView>((resolve) => {
+        resolveSecond = resolve;
+      }),
+    );
+    await flush(PORTS_POLL_INTERVAL_MS);
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByTestId('terminal-ports-pause'));
+    resolveSecond(makeSnapshot({ ports: [makePort({ port: 4000, processName: 'gunicorn' })] }));
+    await flush();
+
+    // 在途响应照常落地（暂停只停「下一拍」，不丢在途结果）。
+    expect(screen.getByTestId('terminal-ports-row-4000')).toBeTruthy();
+
+    await flush(PORTS_POLL_INTERVAL_MS * 3);
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('暂停期间「刷新」仍可用：立刻静默取数，且不会顺带复活自动轮询', async () => {
+    renderPortsPanel();
+    await flush();
+    fireEvent.click(screen.getByTestId('terminal-ports-pause'));
+    await flush(PORTS_POLL_INTERVAL_MS * 2);
+    expect(portsClient.list).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('terminal-ports-refresh'));
+    await flush();
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('terminal-ports-loading')).toBeNull();
+
+    await flush(PORTS_POLL_INTERVAL_MS * 3);
+    expect(portsClient.list).toHaveBeenCalledTimes(2);
   });
 });

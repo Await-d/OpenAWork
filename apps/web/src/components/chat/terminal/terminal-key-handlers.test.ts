@@ -33,8 +33,12 @@ describe('resolveTerminalShortcut', () => {
   const withoutSelection = { hasSelection: false };
 
   it('Ctrl+Shift+C 命中复制，⌘+Shift+C 同样命中', () => {
-    expect(resolveTerminalShortcut(keyEvent({ key: 'C', ctrlKey: true, shiftKey: true }), withSelection)).toBe('copy');
-    expect(resolveTerminalShortcut(keyEvent({ key: 'C', metaKey: true, shiftKey: true }), withSelection)).toBe('copy');
+    expect(
+      resolveTerminalShortcut(keyEvent({ key: 'C', ctrlKey: true, shiftKey: true }), withSelection),
+    ).toBe('copy');
+    expect(
+      resolveTerminalShortcut(keyEvent({ key: 'C', metaKey: true, shiftKey: true }), withSelection),
+    ).toBe('copy');
   });
 
   it('无选中时不劫持复制', () => {
@@ -47,14 +51,30 @@ describe('resolveTerminalShortcut', () => {
   });
 
   it('Ctrl/⌘+Shift+V 命中粘贴', () => {
-    expect(resolveTerminalShortcut(keyEvent({ key: 'V', ctrlKey: true, shiftKey: true }), withoutSelection)).toBe('paste');
-    expect(resolveTerminalShortcut(keyEvent({ key: 'v', metaKey: true, shiftKey: true }), withoutSelection)).toBe('paste');
+    expect(
+      resolveTerminalShortcut(
+        keyEvent({ key: 'V', ctrlKey: true, shiftKey: true }),
+        withoutSelection,
+      ),
+    ).toBe('paste');
+    expect(
+      resolveTerminalShortcut(
+        keyEvent({ key: 'v', metaKey: true, shiftKey: true }),
+        withoutSelection,
+      ),
+    ).toBe('paste');
   });
 
   it('Ctrl/⌘+F 命中搜索，Ctrl/⌘+K 清缓冲，Ctrl/⌘+L 交 shell 清屏', () => {
-    expect(resolveTerminalShortcut(keyEvent({ key: 'f', ctrlKey: true }), withoutSelection)).toBe('search');
-    expect(resolveTerminalShortcut(keyEvent({ key: 'k', metaKey: true }), withoutSelection)).toBe('clear-buffer');
-    expect(resolveTerminalShortcut(keyEvent({ key: 'l', ctrlKey: true }), withoutSelection)).toBe('clear-shell');
+    expect(resolveTerminalShortcut(keyEvent({ key: 'f', ctrlKey: true }), withoutSelection)).toBe(
+      'search',
+    );
+    expect(resolveTerminalShortcut(keyEvent({ key: 'k', metaKey: true }), withoutSelection)).toBe(
+      'clear-buffer',
+    );
+    expect(resolveTerminalShortcut(keyEvent({ key: 'l', ctrlKey: true }), withoutSelection)).toBe(
+      'clear-shell',
+    );
   });
 
   it('未命中的组合一律放行', () => {
@@ -90,7 +110,12 @@ describe('createTerminalCustomKeyHandler', () => {
   it('复制命中时阻止默认行为并回传选中文本', () => {
     const deps = createDeps('echo hi');
     const handler = createTerminalCustomKeyHandler(deps);
-    const event = new KeyboardEvent('keydown', { key: 'C', ctrlKey: true, shiftKey: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'C',
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
 
     expect(handler(event)).toBe(false);
     expect(event.defaultPrevented).toBe(true);
@@ -100,7 +125,12 @@ describe('createTerminalCustomKeyHandler', () => {
   it('无选中时复制快捷键交还浏览器', () => {
     const deps = createDeps('');
     const handler = createTerminalCustomKeyHandler(deps);
-    const event = new KeyboardEvent('keydown', { key: 'C', ctrlKey: true, shiftKey: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'C',
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
 
     expect(handler(event)).toBe(true);
     expect(event.defaultPrevented).toBe(false);
@@ -111,7 +141,9 @@ describe('createTerminalCustomKeyHandler', () => {
     const deps = createDeps();
     const handler = createTerminalCustomKeyHandler(deps);
 
-    handler(new KeyboardEvent('keydown', { key: 'V', ctrlKey: true, shiftKey: true, cancelable: true }));
+    handler(
+      new KeyboardEvent('keydown', { key: 'V', ctrlKey: true, shiftKey: true, cancelable: true }),
+    );
     handler(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true }));
     handler(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, cancelable: true }));
     handler(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, cancelable: true }));

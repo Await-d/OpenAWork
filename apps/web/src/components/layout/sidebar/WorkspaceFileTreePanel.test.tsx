@@ -114,10 +114,7 @@ vi.mock('../../../stores/ui/uiState.js', () => ({
       expandedDirsBySession: Record<string, string[]>;
       fileTreeRootPath: string | null;
       removeSavedWorkspacePath: (path: string) => void;
-      setExpandedDirsForSession: (
-        sessionKey: string | null | undefined,
-        dirs: string[],
-      ) => void;
+      setExpandedDirsForSession: (sessionKey: string | null | undefined, dirs: string[]) => void;
     }) => unknown,
   ) => {
     return typeof selector === 'function' ? selector(uiState) : uiState;

@@ -16,7 +16,13 @@ import {
 import { normalizeLayout } from './normalize.js';
 import { countPanes, enumeratePanes } from './queries.js';
 import { clone, makePane, makeSplit } from './test-fixtures.js';
-import { MAX_PANES, type TerminalDropTarget, type TerminalLayout, type TerminalLayoutNode, type TerminalPaneEdge } from './types.js';
+import {
+  MAX_PANES,
+  type TerminalDropTarget,
+  type TerminalLayout,
+  type TerminalLayoutNode,
+  type TerminalPaneEdge,
+} from './types.js';
 
 const EDGES: readonly TerminalPaneEdge[] = ['top', 'bottom', 'left', 'right'];
 
@@ -30,9 +36,9 @@ describe('assertLayoutInvariants 的判定力', () => {
   });
 
   it('空 pane 被抓', () => {
-    expect(() => assertLayoutInvariants({ kind: 'pane', id: 'p1', terminalIds: [], activeTerminalId: 'a' })).toThrow(
-      /禁止空 pane/,
-    );
+    expect(() =>
+      assertLayoutInvariants({ kind: 'pane', id: 'p1', terminalIds: [], activeTerminalId: 'a' }),
+    ).toThrow(/禁止空 pane/);
   });
 
   it('active 不在 terminalIds 里被抓', () => {
@@ -41,13 +47,17 @@ describe('assertLayoutInvariants 的判定力', () => {
 
   it('全树重复 terminalId 被抓', () => {
     expect(() =>
-      assertLayoutInvariants(makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['a'])])),
+      assertLayoutInvariants(
+        makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['a'])]),
+      ),
     ).toThrow(/重复出现/);
   });
 
   it('ratio 越界 / NaN 被抓', () => {
     expect(() =>
-      assertLayoutInvariants(makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b'])], 1.4)),
+      assertLayoutInvariants(
+        makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b'])], 1.4),
+      ),
     ).toThrow(/ratio/);
     expect(() =>
       assertLayoutInvariants(
@@ -113,7 +123,10 @@ describe('任意 mutation 序列后不变量恒成立', () => {
       // 起点：一棵合法树（3 个 pane），外加一批「还不存在于树里」的终端 id。
       let layout: TerminalLayout = makeSplit('s-root', 'row', [
         makePane(`p${round}-a`, ['a0', 'a1']),
-        makeSplit('s-root2', 'column', [makePane(`p${round}-b`, ['b0']), makePane(`p${round}-c`, ['c0'])]),
+        makeSplit('s-root2', 'column', [
+          makePane(`p${round}-b`, ['b0']),
+          makePane(`p${round}-c`, ['c0']),
+        ]),
       ]);
       const pool = ['a0', 'a1', 'b0', 'c0'];
 
@@ -132,10 +145,16 @@ describe('任意 mutation 序列后不变量恒成立', () => {
           serial += 1;
           const newId = `n${serial}`;
           pool.push(newId);
-          next = splitPane(layout, pick(rng, ids.paneIds), rng() < 0.5 ? 'row' : 'column', `np${serial}`, {
-            seedTerminalId: rng() < 0.5 ? newId : pick(rng, [...ids.terminalIds, ...pool]),
-            position: rng() < 0.5 ? 'first' : 'second',
-          });
+          next = splitPane(
+            layout,
+            pick(rng, ids.paneIds),
+            rng() < 0.5 ? 'row' : 'column',
+            `np${serial}`,
+            {
+              seedTerminalId: rng() < 0.5 ? newId : pick(rng, [...ids.terminalIds, ...pool]),
+              position: rng() < 0.5 ? 'first' : 'second',
+            },
+          );
         } else if (roll < 0.28) {
           next = removePane(layout, pick(rng, ids.paneIds));
         } else if (roll < 0.42) {
@@ -152,11 +171,20 @@ describe('任意 mutation 序列后不变量恒成立', () => {
           );
         } else if (roll < 0.8) {
           serial += 1;
-          next = moveTerminal(layout, pick(rng, [...ids.terminalIds, ...pool]), randomTarget(rng, ids), {
-            newPaneId: `np${serial}`,
-          });
+          next = moveTerminal(
+            layout,
+            pick(rng, [...ids.terminalIds, ...pool]),
+            randomTarget(rng, ids),
+            {
+              newPaneId: `np${serial}`,
+            },
+          );
         } else if (roll < 0.9) {
-          next = setPaneActiveTerminal(layout, pick(rng, ids.paneIds), pick(rng, [...ids.terminalIds, ...pool]));
+          next = setPaneActiveTerminal(
+            layout,
+            pick(rng, ids.paneIds),
+            pick(rng, [...ids.terminalIds, ...pool]),
+          );
         } else if (ids.splitIds.length > 0) {
           next = setSplitRatio(layout, pick(rng, ids.splitIds), rng() * 1.4 - 0.2);
         } else {
@@ -182,7 +210,10 @@ describe('任意 mutation 序列后不变量恒成立', () => {
     const liveIds = new Set(['live-1', 'live-2']);
     let layout = normalizeLayout(dirty, liveIds);
     assertLayoutInvariants(layout);
-    expect(enumeratePanes(layout).map((pane) => pane.terminalIds)).toEqual([['live-1'], ['live-2']]);
+    expect(enumeratePanes(layout).map((pane) => pane.terminalIds)).toEqual([
+      ['live-1'],
+      ['live-2'],
+    ]);
 
     let serial = 0;
     const rng = createRng(7);

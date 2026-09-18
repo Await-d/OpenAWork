@@ -84,10 +84,7 @@ describe('splitPane', () => {
   });
 
   it('显式种子来自其它组时从原组摘除（不变量 7：全树唯一）', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a']),
-      makePane('p2', ['b', 'c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b', 'c'])]);
     const result = checked(splitPane(layout, 'p1', 'row', 'p3', { seedTerminalId: 'b' }));
     expect(result).toEqual(
       makeSplit('s1', 'row', [
@@ -202,12 +199,16 @@ describe('removeTerminal', () => {
 describe('insertTerminalIntoPane', () => {
   it('index 缺省追加到末尾并设为 active', () => {
     const layout = makePane('p1', ['a']);
-    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b'))).toEqual(makePane('p1', ['a', 'b'], 'b'));
+    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b'))).toEqual(
+      makePane('p1', ['a', 'b'], 'b'),
+    );
   });
 
   it('显式 index 生效', () => {
     const layout = makePane('p1', ['a']);
-    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b', 0))).toEqual(makePane('p1', ['b', 'a']));
+    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b', 0))).toEqual(
+      makePane('p1', ['b', 'a']),
+    );
   });
 
   it('index 越界 / 负数 / NaN 都被收敛（NaN 视为追加）', () => {
@@ -237,10 +238,7 @@ describe('insertTerminalIntoPane', () => {
   });
 
   it('从其它组搬入（维护全树唯一）', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a']),
-      makePane('p2', ['b', 'c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b', 'c'])]);
     expect(checked(insertTerminalIntoPane(layout, 'p1', 'b'))).toEqual(
       makeSplit('s1', 'row', [makePane('p1', ['a', 'b'], 'b'), makePane('p2', ['c'])]),
     );
@@ -248,7 +246,9 @@ describe('insertTerminalIntoPane', () => {
 
   it('搬走了最后一个终端时原组被移除并上提', () => {
     const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b'])]);
-    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b'))).toEqual(makePane('p1', ['a', 'b'], 'b'));
+    expect(checked(insertTerminalIntoPane(layout, 'p1', 'b'))).toEqual(
+      makePane('p1', ['a', 'b'], 'b'),
+    );
   });
 
   it('目标 pane 不存在 → 原树引用', () => {
@@ -266,10 +266,7 @@ describe('insertTerminalIntoPane', () => {
 
 describe('moveTerminal', () => {
   it('detach / tab-strip → 从树上移除（成为独立 tab）', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a']),
-      makePane('p2', ['b', 'c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b', 'c'])]);
     const detached = checked(moveTerminal(layout, 'b', { kind: 'detach' }, { newPaneId: 'np' }));
     expect(detached).toEqual(
       makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['c'])]),
@@ -280,24 +277,25 @@ describe('moveTerminal', () => {
   });
 
   it('pane-center → 并进该组末尾并设为 active', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a']),
-      makePane('p2', ['b', 'c']),
-    ]);
-    expect(checked(moveTerminal(layout, 'b', { kind: 'pane-center', paneId: 'p1' }, { newPaneId: 'np' }))).toEqual(
-      makeSplit('s1', 'row', [makePane('p1', ['a', 'b'], 'b'), makePane('p2', ['c'])]),
-    );
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b', 'c'])]);
+    expect(
+      checked(
+        moveTerminal(layout, 'b', { kind: 'pane-center', paneId: 'p1' }, { newPaneId: 'np' }),
+      ),
+    ).toEqual(makeSplit('s1', 'row', [makePane('p1', ['a', 'b'], 'b'), makePane('p2', ['c'])]));
   });
 
   it('pane-edge：左右 → row，上下 → column；左/上把新组放在前面', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a', 'b']),
-      makePane('p2', ['c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a', 'b']), makePane('p2', ['c'])]);
 
     expect(
       checked(
-        moveTerminal(layout, 'b', { kind: 'pane-edge', paneId: 'p2', edge: 'right' }, { newPaneId: 'np' }),
+        moveTerminal(
+          layout,
+          'b',
+          { kind: 'pane-edge', paneId: 'p2', edge: 'right' },
+          { newPaneId: 'np' },
+        ),
       ),
     ).toEqual(
       makeSplit('s1', 'row', [
@@ -308,7 +306,12 @@ describe('moveTerminal', () => {
 
     expect(
       checked(
-        moveTerminal(layout, 'b', { kind: 'pane-edge', paneId: 'p2', edge: 'left' }, { newPaneId: 'np' }),
+        moveTerminal(
+          layout,
+          'b',
+          { kind: 'pane-edge', paneId: 'p2', edge: 'left' },
+          { newPaneId: 'np' },
+        ),
       ),
     ).toEqual(
       makeSplit('s1', 'row', [
@@ -319,7 +322,12 @@ describe('moveTerminal', () => {
 
     expect(
       checked(
-        moveTerminal(layout, 'b', { kind: 'pane-edge', paneId: 'p2', edge: 'top' }, { newPaneId: 'np' }),
+        moveTerminal(
+          layout,
+          'b',
+          { kind: 'pane-edge', paneId: 'p2', edge: 'top' },
+          { newPaneId: 'np' },
+        ),
       ),
     ).toEqual(
       makeSplit('s1', 'row', [
@@ -330,7 +338,12 @@ describe('moveTerminal', () => {
 
     expect(
       checked(
-        moveTerminal(layout, 'b', { kind: 'pane-edge', paneId: 'p2', edge: 'bottom' }, { newPaneId: 'np' }),
+        moveTerminal(
+          layout,
+          'b',
+          { kind: 'pane-edge', paneId: 'p2', edge: 'bottom' },
+          { newPaneId: 'np' },
+        ),
       ),
     ).toEqual(
       makeSplit('s1', 'row', [
@@ -341,15 +354,12 @@ describe('moveTerminal', () => {
   });
 
   it('pane-center 落回自己所在的组 → 组内重排（末尾 + active）', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a', 'b'], 'a'),
-      makePane('p2', ['c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a', 'b'], 'a'), makePane('p2', ['c'])]);
     expect(
-      checked(moveTerminal(layout, 'a', { kind: 'pane-center', paneId: 'p1' }, { newPaneId: 'np' })),
-    ).toEqual(
-      makeSplit('s1', 'row', [makePane('p1', ['b', 'a'], 'a'), makePane('p2', ['c'])]),
-    );
+      checked(
+        moveTerminal(layout, 'a', { kind: 'pane-center', paneId: 'p1' }, { newPaneId: 'np' }),
+      ),
+    ).toEqual(makeSplit('s1', 'row', [makePane('p1', ['b', 'a'], 'a'), makePane('p2', ['c'])]));
   });
 
   it('pane-edge 在 maxPanes 上限时 → 原树引用', () => {
@@ -361,24 +371,39 @@ describe('moveTerminal', () => {
       ]),
     ]);
     expect(
-      moveTerminal(layout, 'x', { kind: 'pane-edge', paneId: 'p1', edge: 'right' }, { newPaneId: 'np' }),
+      moveTerminal(
+        layout,
+        'x',
+        { kind: 'pane-edge', paneId: 'p1', edge: 'right' },
+        { newPaneId: 'np' },
+      ),
     ).toBe(layout);
   });
 
   it('被拖终端是目标组唯一终端时 pane-edge → 原树引用', () => {
     const layout = makePane('p1', ['a']);
     expect(
-      moveTerminal(layout, 'a', { kind: 'pane-edge', paneId: 'p1', edge: 'right' }, { newPaneId: 'np' }),
+      moveTerminal(
+        layout,
+        'a',
+        { kind: 'pane-edge', paneId: 'p1', edge: 'right' },
+        { newPaneId: 'np' },
+      ),
     ).toBe(layout);
   });
 
   it('跨组 pane-edge：来源组被清空时自动上提', () => {
     const layout = makeSplit('s1', 'row', [makePane('p1', ['a']), makePane('p2', ['b', 'c'])]);
     expect(
-      checked(moveTerminal(layout, 'a', { kind: 'pane-edge', paneId: 'p2', edge: 'top' }, { newPaneId: 'np' })),
-    ).toEqual(
-      makeSplit('split-np', 'column', [makePane('np', ['a']), makePane('p2', ['b', 'c'])]),
-    );
+      checked(
+        moveTerminal(
+          layout,
+          'a',
+          { kind: 'pane-edge', paneId: 'p2', edge: 'top' },
+          { newPaneId: 'np' },
+        ),
+      ),
+    ).toEqual(makeSplit('split-np', 'column', [makePane('np', ['a']), makePane('p2', ['b', 'c'])]));
   });
 
   it('拖拽到不存在的 pane → 原树引用', () => {
@@ -387,16 +412,18 @@ describe('moveTerminal', () => {
       moveTerminal(layout, 'a', { kind: 'pane-center', paneId: 'nope' }, { newPaneId: 'np' }),
     ).toBe(layout);
     expect(
-      moveTerminal(layout, 'a', { kind: 'pane-edge', paneId: 'nope', edge: 'left' }, { newPaneId: 'np' }),
+      moveTerminal(
+        layout,
+        'a',
+        { kind: 'pane-edge', paneId: 'nope', edge: 'left' },
+        { newPaneId: 'np' },
+      ),
     ).toBe(layout);
   });
 });
 
 describe('setPaneActiveTerminal', () => {
-  const layout = makeSplit('s1', 'row', [
-    makePane('p1', ['a', 'b'], 'a'),
-    makePane('p2', ['c']),
-  ]);
+  const layout = makeSplit('s1', 'row', [makePane('p1', ['a', 'b'], 'a'), makePane('p2', ['c'])]);
 
   it('切换组内 active', () => {
     expect(checked(setPaneActiveTerminal(layout, 'p1', 'b'))).toEqual(
@@ -470,7 +497,12 @@ describe('不可变性', () => {
       removeTerminal(layout, 'c'),
       insertTerminalIntoPane(layout, 'p1', 'c'),
       moveTerminal(layout, 'd', { kind: 'pane-center', paneId: 'p1' }, { newPaneId: 'np2' }),
-      moveTerminal(layout, 'd', { kind: 'pane-edge', paneId: 'p1', edge: 'right' }, { newPaneId: 'np3' }),
+      moveTerminal(
+        layout,
+        'd',
+        { kind: 'pane-edge', paneId: 'p1', edge: 'right' },
+        { newPaneId: 'np3' },
+      ),
       setPaneActiveTerminal(layout, 'p1', 'a'),
       setSplitRatio(layout, 's1', 0.2),
     ];

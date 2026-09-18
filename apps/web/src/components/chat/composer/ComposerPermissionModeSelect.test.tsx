@@ -70,6 +70,51 @@ describe('ComposerPermissionModeSelect', () => {
     ).toBe('true');
   });
 
+  it('仅当前档位渲染说明行，其余档位把说明收进 title', () => {
+    renderSelect({ value: 'auto-edit' });
+
+    // 当前档位为「编辑自动」：触发按钮名不含「每次询问 / 免审批」，直接点击打开。
+    fireEvent.click(screen.getByRole('button', { name: /编辑自动/ }));
+
+    const selectedItem = screen.getByRole('menuitemradio', { name: /编辑自动/ });
+    expect(selectedItem.getAttribute('aria-checked')).toBe('true');
+    // 选中档：说明直接渲染在行内可读文本里，不需要再挂 title。
+    expect(selectedItem.textContent).toContain('文件编辑与写入自动执行');
+    expect(selectedItem.getAttribute('title')).toBeNull();
+
+    // 非选中档：说明不渲染成行（列表保持紧凑），只挂在 title 上供 hover 查看。
+    const otherRows = [
+      { label: /每次询问/, description: '工具调用前先征求你的确认' },
+      { label: /免审批/, description: '跳过审批、直达结果；显式禁止的规则仍然生效' },
+    ];
+    for (const row of otherRows) {
+      const item = screen.getByRole('menuitemradio', { name: row.label });
+      expect(item.getAttribute('aria-checked')).toBe('false');
+      expect(item.textContent).not.toContain(row.description);
+      expect(item.getAttribute('title')).toBe(row.description);
+    }
+  });
+
+  it('仅选中档渲染右侧对勾，未选中档不渲染且不改变行语义', () => {
+    renderSelect({ value: 'auto-edit' });
+
+    fireEvent.click(screen.getByRole('button', { name: /编辑自动/ }));
+
+    const selectedItem = screen.getByRole('menuitemradio', { name: /编辑自动/ });
+    const check = selectedItem.querySelector('[data-testid="composer-permission-check"]');
+    expect(check).toBeTruthy();
+    // 对勾只是视觉标记：aria-hidden 保证不进入可访问名，也不影响 role / aria-checked / 轮转 tabindex。
+    expect(check?.getAttribute('aria-hidden')).toBe('true');
+    expect(selectedItem.getAttribute('aria-checked')).toBe('true');
+    expect(selectedItem.getAttribute('tabindex')).toBe('0');
+
+    for (const row of [{ label: /每次询问/ }, { label: /免审批/ }]) {
+      const item = screen.getByRole('menuitemradio', { name: row.label });
+      expect(item.getAttribute('aria-checked')).toBe('false');
+      expect(item.querySelector('[data-testid="composer-permission-check"]')).toBeNull();
+    }
+  });
+
   it('选择「编辑自动」直接回调 onChange("auto-edit")，不经过内联确认', () => {
     const { onChange } = renderSelect();
 

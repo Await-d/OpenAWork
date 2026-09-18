@@ -24,6 +24,7 @@ function makeSession() {
     send,
     screenshot: vi.fn(async () => null),
     close: vi.fn(),
+    recheckAvailability: vi.fn(),
     subscribe: (listener: Listener) => {
       listeners.add(listener);
       return () => {
@@ -60,9 +61,7 @@ const DOM_ROOT = {
   nodeName: '#document',
   attributes: {},
   childCount: 1,
-  children: [
-    { nodeId: 2, backendNodeId: 20, nodeName: 'HTML', attributes: {}, childCount: 0 },
-  ],
+  children: [{ nodeId: 2, backendNodeId: 20, nodeName: 'HTML', attributes: {}, childCount: 0 }],
 };
 
 const NODE_PAYLOAD = {

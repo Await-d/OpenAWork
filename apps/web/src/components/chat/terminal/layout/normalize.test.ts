@@ -151,17 +151,13 @@ describe('规则 6：超出 maxPanes 时按 DFS 从左到右保留', () => {
     const result = normalizeLayout(fivePaneTree(), FIVE_LIVE);
     expect(countPanes(result)).toBe(4);
     expect(result).toEqual(
-      makeSplit(
-        's1',
-        'row',
-        [
-          makePane('p1', ['e1']),
-          makeSplit('s2', 'row', [
-            makePane('p2', ['e2']),
-            makeSplit('s3', 'row', [makePane('p3', ['e3']), makePane('p4', ['e4'])]),
-          ]),
-        ],
-      ),
+      makeSplit('s1', 'row', [
+        makePane('p1', ['e1']),
+        makeSplit('s2', 'row', [
+          makePane('p2', ['e2']),
+          makeSplit('s3', 'row', [makePane('p3', ['e3']), makePane('p4', ['e4'])]),
+        ]),
+      ]),
     );
     expect(layoutTerminalIds(result).has('e5')).toBe(false);
     assertLayoutInvariants(result);
@@ -180,7 +176,9 @@ describe('规则 6：超出 maxPanes 时按 DFS 从左到右保留', () => {
   });
 
   it('maxPanes 非法 → 回落默认 4', () => {
-    expect(countPanes(normalizeLayout(fivePaneTree(), FIVE_LIVE, { maxPanes: Number.NaN }))).toBe(4);
+    expect(countPanes(normalizeLayout(fivePaneTree(), FIVE_LIVE, { maxPanes: Number.NaN }))).toBe(
+      4,
+    );
   });
 
   it('maxPanes 超过硬顶 6 时钳制到 6', () => {
@@ -207,10 +205,7 @@ describe('规则 6：超出 maxPanes 时按 DFS 从左到右保留', () => {
 
 describe('规则 7：全树 terminalId 唯一', () => {
   it('跨 pane 重复 → 保留首次出现，后续位置移除', () => {
-    const layout = makeSplit('s1', 'row', [
-      makePane('p1', ['a', 'b']),
-      makePane('p2', ['b', 'c']),
-    ]);
+    const layout = makeSplit('s1', 'row', [makePane('p1', ['a', 'b']), makePane('p2', ['b', 'c'])]);
     const result = normalizeLayout(layout, new Set(['a', 'b', 'c']));
     expect(result).toEqual(
       makeSplit('s1', 'row', [makePane('p1', ['a', 'b']), makePane('p2', ['c'])]),

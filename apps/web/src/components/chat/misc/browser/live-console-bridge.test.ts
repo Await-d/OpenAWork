@@ -8,10 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  BrowserLiveNetworkPayload,
-  BrowserLiveNodePayload,
-} from '@openAwork/shared';
+import type { BrowserLiveNetworkPayload, BrowserLiveNodePayload } from '@openAwork/shared';
 import {
   consolePayloadToEntry,
   errorPayloadToEntry,
@@ -71,11 +68,7 @@ describe('consolePayloadToEntry', () => {
   });
 
   it('时间戳非法时回落到当前时间', () => {
-    const entry = consolePayloadToEntry(
-      { level: 'log', text: 'x', timestamp: Number.NaN },
-      8,
-      NOW,
-    );
+    const entry = consolePayloadToEntry({ level: 'log', text: 'x', timestamp: Number.NaN }, 8, NOW);
 
     expect(entry.timestamp).toBe(NOW);
   });
@@ -155,7 +148,11 @@ describe('errorPayloadToEntry', () => {
   it('载荷缺省时回落到兜底 code，不产生栈字段', () => {
     const entry = errorPayloadToEntry(undefined, 4, NOW);
 
-    expect(entry).toMatchObject({ id: 'live-error-4', level: 'error', message: 'browser_live_error' });
+    expect(entry).toMatchObject({
+      id: 'live-error-4',
+      level: 'error',
+      message: 'browser_live_error',
+    });
     expect('stack' in entry).toBe(false);
   });
 });
@@ -201,9 +198,13 @@ describe('networkPayloadToExchange', () => {
 
 describe('upsertNetworkEntry', () => {
   it('同一 requestId 的三段上报归并成一行，响应到达后请求头仍在', () => {
-    let entries: ConsoleEntry[] = upsertNetworkEntry([], networkPayloadToExchange(networkPayload()), {
-      now: NOW,
-    });
+    let entries: ConsoleEntry[] = upsertNetworkEntry(
+      [],
+      networkPayloadToExchange(networkPayload()),
+      {
+        now: NOW,
+      },
+    );
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.level).toBe('network');
@@ -241,7 +242,9 @@ describe('upsertNetworkEntry', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.network?.requestHeaders).toEqual({ 'content-type': 'application/json' });
     expect(entries[0]?.network?.errorMessage).toBe('net::ERR_FAILED');
-    expect(entries[0]?.message).toBe('✗ POST http://localhost:5173/api/login · 30ms · net::ERR_FAILED');
+    expect(entries[0]?.message).toBe(
+      '✗ POST http://localhost:5173/api/login · 30ms · net::ERR_FAILED',
+    );
   });
 
   it('响应阶段到达时不会丢掉先到的请求体（与 iframe 路径共享同一套归并语义）', () => {
@@ -434,7 +437,16 @@ describe('nodePayloadToMarkdown', () => {
   it('总块长度受上限约束，超限时给出截断说明', () => {
     const long = 'x'.repeat(500);
     const attributes: Record<string, string> = {};
-    for (const key of ['data-testid', 'id', 'role', 'aria-label', 'name', 'type', 'class', 'title']) {
+    for (const key of [
+      'data-testid',
+      'id',
+      'role',
+      'aria-label',
+      'name',
+      'type',
+      'class',
+      'title',
+    ]) {
       attributes[key] = long;
     }
     const computedStyles: Record<string, string> = {};

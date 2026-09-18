@@ -13,8 +13,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
+import type { TerminalContextMenuItem } from './TerminalContextMenu.js';
+import { buildTerminalCommandItems } from './terminal-pane-menu.js';
 
 interface FakeTerminalState {
   written: string[];
@@ -215,11 +217,12 @@ describe('InteractiveTerminalView', () => {
     hoisted.initialRows = 24;
     MockEventSource.instances = [];
     MockResizeObserver.callbacks = [];
-    fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('EventSource', MockEventSource);
@@ -233,7 +236,10 @@ describe('InteractiveTerminalView', () => {
     vi.useRealTimers();
   });
 
-  function renderView(terminal: SessionTerminalView = makeTerminalView()) {
+  function renderView(
+    terminal: SessionTerminalView = makeTerminalView(),
+    menuItems?: TerminalContextMenuItem[],
+  ) {
     render(
       <InteractiveTerminalView
         gatewayUrl="https://gateway.test"
@@ -241,6 +247,7 @@ describe('InteractiveTerminalView', () => {
         sessionId="session-1"
         terminal={terminal}
         inputEnabled
+        menuItems={menuItems}
       />,
     );
   }
@@ -313,9 +320,7 @@ describe('InteractiveTerminalView', () => {
       await vi.advanceTimersByTimeAsync(20);
     });
 
-    const stdinCalls = fetchMock.mock.calls.filter((call) =>
-      String(call[0]).endsWith('/stdin'),
-    );
+    const stdinCalls = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/stdin'));
     expect(stdinCalls.length).toBe(1);
     expect(JSON.parse(String((stdinCalls[0]?.[1] as RequestInit).body))).toEqual({ data: 'ls\r' });
   });
@@ -444,5 +449,91 @@ describe('InteractiveTerminalView', () => {
       await vi.advanceTimersByTimeAsync(500);
     });
     expect(resizeCalls()).toHaveLength(0);
+  });
+
+  describe('内容区右键菜单的面板命令段', () => {
+    function renderWithCommandMenu() {
+      const commands = {
+        onRequestCreate: vi.fn(),
+        onRequestSplit: vi.fn(),
+        onRequestKill: vi.fn(),
+        onRequestRename: vi.fn(),
+        onRequestCloseOthers: vi.fn(),
+        onRequestCloseAll: vi.fn(),
+      };
+      renderView(
+        makeTerminalView(),
+        buildTerminalCommandItems({
+          terminalCount: 1,
+          totalTerminalCount: 2,
+          sessionReady: true,
+          creating: false,
+          splitDirections: ['row', 'column'],
+          ...commands,
+        }),
+      );
+      openMenu();
+      return commands;
+    }
+
+    /** 每次点击菜单项都会关闭菜单，因此连续点击前都要重新打开。 */
+    function openMenu(): void {
+      fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 40, clientY: 60 });
+    }
+
+    it('命令段置顶、剪贴板段随后，copy 因此带上与命令段的分隔线', () => {
+      renderWithCommandMenu();
+
+      const menu = screen.getByTestId('terminal-context-menu');
+      const ids = [
+        ...menu.querySelectorAll<HTMLElement>('[data-testid^="terminal-context-menu-"]'),
+      ].map((element) => element.dataset.testid);
+      expect(ids).toEqual([
+        'terminal-context-menu-terminal-new',
+        'terminal-context-menu-terminal-split-row',
+        'terminal-context-menu-terminal-split-column',
+        'terminal-context-menu-terminal-kill',
+        'terminal-context-menu-terminal-rename',
+        'terminal-context-menu-terminal-close-others',
+        'terminal-context-menu-terminal-close-all',
+        'terminal-context-menu-copy',
+        'terminal-context-menu-paste',
+        'terminal-context-menu-select-all',
+        'terminal-context-menu-clear',
+        'terminal-context-menu-search',
+        'terminal-context-menu-copy-on-select',
+      ]);
+
+      const copy = screen.getByTestId('terminal-context-menu-copy');
+      expect(copy.parentElement?.querySelector('[role="separator"]')).not.toBeNull();
+    });
+
+    it('未传命令段时剪贴板菜单保持原样（copy 前无分隔线）', () => {
+      renderView();
+      openMenu();
+
+      const copy = screen.getByTestId('terminal-context-menu-copy');
+      expect(copy.parentElement?.querySelector('[role="separator"]')).toBeNull();
+    });
+
+    it('选择 新建终端 / 终止终端 / 重命名 分别触发对应回调', () => {
+      const commands = renderWithCommandMenu();
+
+      fireEvent.click(screen.getByTestId('terminal-context-menu-terminal-new'));
+      expect(commands.onRequestCreate).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('terminal-context-menu')).toBeNull();
+
+      openMenu();
+      fireEvent.click(screen.getByTestId('terminal-context-menu-terminal-kill'));
+      expect(commands.onRequestKill).toHaveBeenCalledTimes(1);
+
+      openMenu();
+      fireEvent.click(screen.getByTestId('terminal-context-menu-terminal-rename'));
+      expect(commands.onRequestRename).toHaveBeenCalledTimes(1);
+
+      expect(commands.onRequestSplit).not.toHaveBeenCalled();
+      expect(commands.onRequestCloseOthers).not.toHaveBeenCalled();
+      expect(commands.onRequestCloseAll).not.toHaveBeenCalled();
+    });
   });
 });

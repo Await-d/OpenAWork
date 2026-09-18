@@ -41,24 +41,19 @@ function makeDomPayload(truncated = false): BrowserLiveDomPayload {
   const root = domNode(1, '#document', {}, [
     domNode(2, 'HTML', {}, [
       domNode(3, 'HEAD', {}, [domNode(4, 'TITLE', {})]),
-      domNode(
-        5,
-        'BODY',
-        {},
-        [
-          domNode(6, 'DIV', { id: 'app', class: 'shell grid' }, [
-            domNode(7, 'BUTTON', {
-              id: 'submit',
-              class: 'primary',
-              'data-testid': 'submit-order',
-            }),
-            domNode(8, 'UL', { class: 'list' }, [
-              domNode(9, 'LI', { class: 'item' }),
-              domNode(10, 'LI', { class: 'item' }),
-            ]),
+      domNode(5, 'BODY', {}, [
+        domNode(6, 'DIV', { id: 'app', class: 'shell grid' }, [
+          domNode(7, 'BUTTON', {
+            id: 'submit',
+            class: 'primary',
+            'data-testid': 'submit-order',
+          }),
+          domNode(8, 'UL', { class: 'list' }, [
+            domNode(9, 'LI', { class: 'item' }),
+            domNode(10, 'LI', { class: 'item' }),
           ]),
-        ],
-      ),
+        ]),
+      ]),
     ]),
   ]);
   return { root, truncated };
@@ -360,9 +355,7 @@ describe('BrowserInspectorPanel 无障碍视图', () => {
     const detail = screen.getByTestId('inspector-a11y-detail');
     expect(detail.textContent).toContain('checkbox');
     expect(within(detail).getByTestId('inspector-a11y-chip-mixed').textContent).toBe('部分勾选');
-    expect(within(detail).getByTestId('inspector-a11y-chip-unselected').textContent).toBe(
-      '未选中',
-    );
+    expect(within(detail).getByTestId('inspector-a11y-chip-unselected').textContent).toBe('未选中');
 
     const ignoredRow = screen
       .getAllByTestId('inspector-a11y-row')
@@ -376,9 +369,7 @@ describe('BrowserInspectorPanel 无障碍视图', () => {
     const { spies } = renderInspector({ a11y: { root: null, nodeCount: 0 } });
 
     fireEvent.click(screen.getByTestId('inspector-view-a11y'));
-    expect(screen.getByTestId('inspector-a11y-empty').textContent).toContain(
-      '页面未提供无障碍树',
-    );
+    expect(screen.getByTestId('inspector-a11y-empty').textContent).toContain('页面未提供无障碍树');
 
     fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
     expect(spies.onRequestA11y).toHaveBeenCalled();
@@ -437,7 +428,9 @@ describe('BrowserInspectorPanel 样式与拾取', () => {
     const button = screen.getByTestId('inspector-full-styles') as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toContain('先在页面中拾取元素');
-    expect(screen.getByTestId('inspector-styles-empty').textContent).toContain('还没有该元素的样式');
+    expect(screen.getByTestId('inspector-styles-empty').textContent).toContain(
+      '还没有该元素的样式',
+    );
 
     view.rerender(
       <BrowserInspectorPanel

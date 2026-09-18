@@ -343,7 +343,10 @@ const NEXT_SESSION_ID = 'session-next';
 
 describe('useSessionTerminals reload 快照连续性（D-1 回归）', () => {
   it('reload() 重新同步期间终端数不会出现 >0 → 0 的渲染', async () => {
-    const rows = [makeServerRow({ terminalId: 'term_one' }), makeServerRow({ terminalId: 'term_two' })];
+    const rows = [
+      makeServerRow({ terminalId: 'term_one' }),
+      makeServerRow({ terminalId: 'term_two' }),
+    ];
     const fetchMock = vi.fn(async () => jsonResponse({ terminals: rows }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -403,7 +406,10 @@ describe('useSessionTerminals reload 快照连续性（D-1 回归）', () => {
       }
       return Promise.resolve(
         jsonResponse({
-          terminals: [makeServerRow({ terminalId: 'term_one' }), makeServerRow({ terminalId: 'term_two' })],
+          terminals: [
+            makeServerRow({ terminalId: 'term_one' }),
+            makeServerRow({ terminalId: 'term_two' }),
+          ],
         }),
       );
     });
@@ -411,7 +417,11 @@ describe('useSessionTerminals reload 快照连续性（D-1 回归）', () => {
 
     const { result, rerender } = renderHook(
       (props: { sessionId: string }) =>
-        useSessionTerminals({ currentSessionId: props.sessionId, gatewayUrl: GATEWAY, token: TOKEN }),
+        useSessionTerminals({
+          currentSessionId: props.sessionId,
+          gatewayUrl: GATEWAY,
+          token: TOKEN,
+        }),
       { initialProps: { sessionId: SESSION_ID } },
     );
 
@@ -424,7 +434,9 @@ describe('useSessionTerminals reload 快照连续性（D-1 回归）', () => {
       releaseNextSession?.();
     });
     await waitFor(() =>
-      expect(result.current.terminals.map((terminal) => terminal.terminalId)).toEqual(['term_next']),
+      expect(result.current.terminals.map((terminal) => terminal.terminalId)).toEqual([
+        'term_next',
+      ]),
     );
   });
 });

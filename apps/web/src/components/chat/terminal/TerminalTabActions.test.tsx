@@ -364,3 +364,59 @@ describe('TASK-0：⋯ 菜单的方向拆分入口', () => {
     expect(unbound.getAttribute('title')).toBe('分屏未接入');
   });
 });
+
+describe('TerminalTabActions — 终止按钮与 Shell profile 下拉', () => {
+  const profiles = [
+    { id: 'bash', label: 'Bash', isDefault: true },
+    { id: 'zsh', label: 'Zsh', isDefault: false },
+  ];
+
+  it('🗑 无活动终端时禁用，并说明原因', () => {
+    renderActions({ onRequestKill: vi.fn(), activeTerminal: null });
+    const kill = screen.getByTestId('terminal-tab-actions-kill') as HTMLButtonElement;
+    expect(kill.disabled).toBe(true);
+    expect(kill.getAttribute('title')).toBe('没有可终止的终端');
+  });
+
+  it('🗑 未接入回调时禁用并提示未接入', () => {
+    renderActions();
+    const kill = screen.getByTestId('terminal-tab-actions-kill') as HTMLButtonElement;
+    expect(kill.disabled).toBe(true);
+    expect(kill.getAttribute('title')).toBe('终止未接入');
+  });
+
+  it('🗑 点击触发 onRequestKill（真终止），且不经过 ⋯ 里的关闭入口', () => {
+    const onRequestKill = vi.fn();
+    const { onRequestCloseAll } = renderActions({ onRequestKill });
+    const kill = screen.getByTestId('terminal-tab-actions-kill') as HTMLButtonElement;
+    expect(kill.disabled).toBe(false);
+    expect(kill.getAttribute('title')).toBe('终止当前终端（强制结束进程）');
+    fireEvent.click(kill);
+    expect(onRequestKill).toHaveBeenCalledTimes(1);
+    expect(onRequestCloseAll).not.toHaveBeenCalled();
+  });
+
+  it('没有 profile 列表时不渲染 ＋ ▾（不留无数据的死控件）', () => {
+    renderActions({ onRequestCreateWithProfile: vi.fn() });
+    expect(screen.queryByTestId('terminal-tab-actions-create-profile')).toBeNull();
+  });
+
+  it('＋ ▾ 列出 profile，默认项有标记，选中后按 id 创建', () => {
+    const onRequestCreateWithProfile = vi.fn();
+    renderActions({ shellProfiles: profiles, onRequestCreateWithProfile });
+
+    fireEvent.click(screen.getByTestId('terminal-tab-actions-create-profile'));
+    const bash = screen.getByTestId('terminal-context-menu-shell-profile-bash');
+    expect(bash.textContent).toContain('Bash');
+    expect(bash.textContent).toContain('默认');
+
+    fireEvent.click(screen.getByTestId('terminal-context-menu-shell-profile-zsh'));
+    expect(onRequestCreateWithProfile).toHaveBeenCalledWith('zsh');
+  });
+
+  it('＋ ▾ 在未就绪 / 创建中时禁用', () => {
+    renderActions({ shellProfiles: profiles, onRequestCreateWithProfile: vi.fn(), creating: true });
+    const pick = screen.getByTestId('terminal-tab-actions-create-profile') as HTMLButtonElement;
+    expect(pick.disabled).toBe(true);
+  });
+});

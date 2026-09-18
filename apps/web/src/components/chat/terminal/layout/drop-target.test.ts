@@ -45,7 +45,9 @@ describe('resolveRatioFromPointer', () => {
   });
 
   it('零尺寸盒子 / 非有限指针 → 0.5', () => {
-    expect(resolveRatioFromPointer({ x: 0, y: 0, width: 0, height: 500 }, 'row', { x: 0, y: 0 })).toBe(0.5);
+    expect(
+      resolveRatioFromPointer({ x: 0, y: 0, width: 0, height: 500 }, 'row', { x: 0, y: 0 }),
+    ).toBe(0.5);
     expect(resolveRatioFromPointer(box, 'row', { x: Number.NaN, y: 0 })).toBe(0.5);
     expect(resolveRatioFromPointer(box, 'column', { x: 0, y: Number.POSITIVE_INFINITY })).toBe(0.5);
   });

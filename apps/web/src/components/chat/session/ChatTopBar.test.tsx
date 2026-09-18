@@ -9,10 +9,6 @@ function renderTopBar(props: Partial<ChatTopBarProps> = {}) {
       {...props}
       dialogueMode={props.dialogueMode ?? 'coding'}
       onChangeDialogueMode={props.onChangeDialogueMode ?? (() => undefined)}
-      yoloMode={props.yoloMode ?? false}
-      onToggleYolo={props.onToggleYolo}
-      editorMode={props.editorMode ?? false}
-      onToggleEditorMode={props.onToggleEditorMode ?? (() => undefined)}
       rightOpen={props.rightOpen ?? false}
       onToggleRightOpen={props.onToggleRightOpen ?? (() => undefined)}
     />,
@@ -22,19 +18,6 @@ function renderTopBar(props: Partial<ChatTopBarProps> = {}) {
 afterEach(() => {
   cleanup();
 });
-
-/** YOLO 场景的必填 props 基线：默认不传 onToggleYolo，用于验证只读 chip 分支。 */
-function yoloDefaults(yoloMode: boolean): ChatTopBarProps {
-  return {
-    dialogueMode: 'coding',
-    onChangeDialogueMode: () => undefined,
-    yoloMode,
-    editorMode: false,
-    onToggleEditorMode: () => undefined,
-    rightOpen: false,
-    onToggleRightOpen: () => undefined,
-  };
-}
 
 describe('ChatTopBar — 工作区绑定 chip', () => {
   it('未提供 workspaceBinding 时不渲染 chip', () => {
@@ -83,45 +66,54 @@ describe('ChatTopBar — 工作区绑定 chip', () => {
   });
 });
 
-describe('ChatTopBar — YOLO 入口', () => {
-  it('未提供 onToggleYolo 且已开启 YOLO 时渲染只读 chip，而不是按钮', () => {
-    render(<ChatTopBar {...yoloDefaults(true)} />);
-
-    const chip = screen.getByTestId('chat-top-bar-yolo-chip');
-    expect(chip.tagName).toBe('SPAN');
-    expect(chip.getAttribute('data-readonly')).toBe('true');
-    expect(chip.getAttribute('title')).toBe('YOLO 模式已开启（在输入框中切换）');
-    expect(chip.textContent).toContain('YOLO');
-    expect(screen.queryByRole('button', { name: 'YOLO' })).toBeNull();
-  });
-
-  it('未提供 onToggleYolo 且未开启 YOLO 时不渲染任何内容', () => {
-    render(<ChatTopBar {...yoloDefaults(false)} />);
+describe('ChatTopBar — YOLO 已从顶栏移除', () => {
+  it('permissionMode="yolo" 不再渲染任何 YOLO 入口或只读 chip', () => {
+    renderTopBar({ permissionMode: 'yolo' });
 
     expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'YOLO' })).toBeNull();
     expect(screen.queryByText('YOLO')).toBeNull();
   });
+});
 
-  it('提供 onToggleYolo 时保留原有可点击按钮行为', () => {
-    const onToggleYolo = vi.fn();
-    render(<ChatTopBar {...yoloDefaults(true)} onToggleYolo={onToggleYolo} />);
+describe('ChatTopBar — 编辑器 / 浏览器 / 全屏入口由回调决定是否渲染', () => {
+  it('未提供回调（Fusion 统一面板接管）时不渲染编辑器 / 浏览器 / 全屏按钮', () => {
+    renderTopBar();
 
-    const button = screen.getByRole('button', { name: 'YOLO' });
-    expect(button.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
-
-    fireEvent.click(button);
-    expect(onToggleYolo).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('chat-top-bar-editor-toggle')).toBeNull();
+    expect(screen.queryByTestId('chat-top-bar-browser-toggle')).toBeNull();
+    expect(screen.queryByTestId('chat-top-bar-fullscreen-toggle')).toBeNull();
   });
 
-  it('hideYoloToggle 同时隐藏按钮与只读 chip', () => {
-    const onToggleYolo = vi.fn();
-    render(<ChatTopBar {...yoloDefaults(true)} onToggleYolo={onToggleYolo} hideYoloToggle />);
-    expect(screen.queryByRole('button', { name: 'YOLO' })).toBeNull();
+  it('提供 onToggleEditorMode 时渲染编辑器按钮并触发回调', () => {
+    const onToggleEditorMode = vi.fn();
+    renderTopBar({ editorMode: false, onToggleEditorMode });
 
-    cleanup();
-    render(<ChatTopBar {...yoloDefaults(true)} hideYoloToggle />);
-    expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
+    const button = screen.getByTestId('chat-top-bar-editor-toggle');
+    expect(button.getAttribute('title')).toBe('打开代码编辑器');
+
+    fireEvent.click(button);
+    expect(onToggleEditorMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('提供 onOpenBrowser 时渲染浏览器按钮并触发回调', () => {
+    const onOpenBrowser = vi.fn();
+    renderTopBar({ onOpenBrowser });
+
+    fireEvent.click(screen.getByTestId('chat-top-bar-browser-toggle'));
+
+    expect(onOpenBrowser).toHaveBeenCalledTimes(1);
+  });
+
+  it('提供 onToggleEditorFullScreen 时渲染全屏按钮并反映 pressed 状态', () => {
+    const onToggleEditorFullScreen = vi.fn();
+    renderTopBar({ editorFullScreen: true, onToggleEditorFullScreen });
+
+    const button = screen.getByTestId('chat-top-bar-fullscreen-toggle');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(button);
+    expect(onToggleEditorFullScreen).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -139,14 +131,6 @@ describe('ChatTopBar — 审批方式档位标识', () => {
     expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
   });
 
-  it('permissionMode="yolo" 渲染琥珀只读 chip', () => {
-    renderTopBar({ permissionMode: 'yolo' });
-
-    const chip = screen.getByTestId('chat-top-bar-yolo-chip');
-    expect(chip.getAttribute('title')).toBe('YOLO 模式已开启（在输入框中切换）');
-    expect(screen.queryByTestId('chat-top-bar-auto-edit-chip')).toBeNull();
-  });
-
   it('permissionMode="ask" 不渲染任何只读标识', () => {
     renderTopBar({ permissionMode: 'ask' });
 
@@ -154,16 +138,10 @@ describe('ChatTopBar — 审批方式档位标识', () => {
     expect(screen.queryByTestId('chat-top-bar-auto-edit-chip')).toBeNull();
   });
 
-  it('未提供 permissionMode 时，legacy yoloMode 布尔仍渲染琥珀 chip', () => {
-    renderTopBar({ yoloMode: true });
+  it('未提供 permissionMode 时不渲染任何只读标识', () => {
+    renderTopBar();
 
-    expect(screen.getByTestId('chat-top-bar-yolo-chip')).toBeTruthy();
-    expect(screen.queryByTestId('chat-top-bar-auto-edit-chip')).toBeNull();
-  });
-
-  it('hideYoloToggle 同时隐藏 auto-edit 只读 chip', () => {
-    renderTopBar({ permissionMode: 'auto-edit', hideYoloToggle: true });
-
+    expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
     expect(screen.queryByTestId('chat-top-bar-auto-edit-chip')).toBeNull();
   });
 });

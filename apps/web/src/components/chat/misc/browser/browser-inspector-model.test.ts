@@ -61,24 +61,19 @@ function makeDomRoot(): BrowserLiveDomNode {
   return domNode(1, '#document', {}, [
     domNode(2, 'HTML', {}, [
       domNode(3, 'HEAD', {}, [domNode(4, 'TITLE', {})]),
-      domNode(
-        5,
-        'BODY',
-        {},
-        [
-          domNode(6, 'DIV', { id: 'app', class: 'shell grid' }, [
-            domNode(7, 'BUTTON', {
-              id: 'submit',
-              class: 'primary',
-              'data-testid': 'submit-order',
-            }),
-            domNode(8, 'UL', { class: 'list' }, [
-              domNode(9, 'LI', { class: 'item' }),
-              domNode(10, 'LI', { class: 'item' }),
-            ]),
+      domNode(5, 'BODY', {}, [
+        domNode(6, 'DIV', { id: 'app', class: 'shell grid' }, [
+          domNode(7, 'BUTTON', {
+            id: 'submit',
+            class: 'primary',
+            'data-testid': 'submit-order',
+          }),
+          domNode(8, 'UL', { class: 'list' }, [
+            domNode(9, 'LI', { class: 'item' }),
+            domNode(10, 'LI', { class: 'item' }),
           ]),
-        ],
-      ),
+        ]),
+      ]),
     ]),
   ]);
 }
@@ -248,7 +243,10 @@ describe('matchDomNodeForNodePayload', () => {
     const root = domNode(1, '#document', {}, [
       domNode(2, 'DIV', { class: 'card' }, [domNode(3, 'DIV', { class: 'card' })]),
     ]);
-    const match = matchDomNodeForNodePayload(root, { nodeName: 'DIV', attributes: { class: 'card' } });
+    const match = matchDomNodeForNodePayload(root, {
+      nodeName: 'DIV',
+      attributes: { class: 'card' },
+    });
     expect(match?.node.nodeId).toBe(3);
   });
 
@@ -321,7 +319,9 @@ describe('describeA11yStateChips', () => {
 
   it('全部状态都不存在时没有芯片；checked=true 是 success 语义', () => {
     expect(describeA11yStateChips(a11yNode())).toEqual([]);
-    const chips = describeA11yStateChips(a11yNode({ checked: true, expanded: true, selected: true }));
+    const chips = describeA11yStateChips(
+      a11yNode({ checked: true, expanded: true, selected: true }),
+    );
     expect(chips.map((chip) => `${chip.key}:${chip.tone}`)).toEqual([
       'expanded:info',
       'selected:accent',
@@ -491,7 +491,9 @@ describe('线路数据收窄', () => {
 
   it('无障碍信封允许 root 为 null（空文档）', () => {
     expect(toA11yPayload({ root: null, nodeCount: 0 })).toEqual({ root: null, nodeCount: 0 });
-    expect(toA11yPayload({ root: a11yNode({ role: 'button', name: 'ok' }), nodeCount: 1 })).not.toBeNull();
+    expect(
+      toA11yPayload({ root: a11yNode({ role: 'button', name: 'ok' }), nodeCount: 1 }),
+    ).not.toBeNull();
     expect(toA11yPayload({ root: { role: 'button' }, nodeCount: 1 })).toBeNull();
     expect(toA11yPayload({ root: null })).toBeNull();
   });

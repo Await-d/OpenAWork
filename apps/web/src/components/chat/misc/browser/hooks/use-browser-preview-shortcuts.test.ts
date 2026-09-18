@@ -173,10 +173,12 @@ describe('useBrowserPreviewShortcuts', () => {
     const { surface, surfaceRef } = createSurface();
     renderHook(() => useBrowserPreviewShortcuts({ hidden: false, surfaceRef, ...actions }));
 
-    expect(press(surface, { key: 'R', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
-    expect(
-      press(surface, { key: 'R', metaKey: true, shiftKey: true }).defaultPrevented,
-    ).toBe(false);
+    expect(press(surface, { key: 'R', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    expect(press(surface, { key: 'R', metaKey: true, shiftKey: true }).defaultPrevented).toBe(
+      false,
+    );
     expect(press(surface, { key: 'j', ctrlKey: true }).defaultPrevented).toBe(false);
 
     expectNoActionFired(actions);
@@ -269,7 +271,10 @@ describe('useBrowserPreviewShortcuts', () => {
       { initialProps: { wireDeviceActions: false } },
     );
 
-    expect(result.current.active.map((shortcut) => shortcut.id)).toEqual(['reload', 'toggleConsole']);
+    expect(result.current.active.map((shortcut) => shortcut.id)).toEqual([
+      'reload',
+      'toggleConsole',
+    ]);
     // 设备动作未接线：组合键不拦截，原生缩放仍然可用。
     expect(press(surface, { key: '0', ctrlKey: true }).defaultPrevented).toBe(false);
 
@@ -366,11 +371,7 @@ interface WiringHarnessOptions {
 }
 
 /** 用真实 state 复刻 `BuiltInBrowser` 的接线：快捷键必须驱动既有状态，而不是平行副本。 */
-function useWiringHarness({
-  hidden,
-  devicePreviewEnabled,
-  surfaceRef,
-}: WiringHarnessOptions) {
+function useWiringHarness({ hidden, devicePreviewEnabled, surfaceRef }: WiringHarnessOptions) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [zoom, setZoom] = useState(1);

@@ -20,12 +20,14 @@ const api = vi.hoisted(() => ({
   createSessionTerminal: vi.fn(),
   closeTerminal: vi.fn(),
   writeTerminalStdin: vi.fn(),
+  killSessionTerminal: vi.fn(),
 }));
 
 vi.mock('../../conversation-runtime/terminals/terminals-api.js', () => ({
   createSessionTerminal: api.createSessionTerminal,
   closeTerminal: api.closeTerminal,
   writeTerminalStdin: api.writeTerminalStdin,
+  killSessionTerminal: api.killSessionTerminal,
 }));
 
 vi.mock('./InteractiveTerminalView.js', () => ({
@@ -183,6 +185,7 @@ beforeEach(() => {
     quickTerminalActiveIdByWorkspace: {},
     lastChatPath: null,
     terminalLayoutBySession: {},
+    terminalPanelMaximized: false,
   });
 });
 
@@ -194,6 +197,7 @@ afterEach(() => {
     quickTerminalActiveIdByWorkspace: {},
     lastChatPath: null,
     terminalLayoutBySession: {},
+    terminalPanelMaximized: false,
   });
 });
 
@@ -220,7 +224,10 @@ describe('QuickTerminalPanel', () => {
     expect(screen.queryByTestId('terminal-view')).toBeNull();
     // 面板挂载即请求一次监听端口（走 T-14 客户端）。
     await waitFor(() => {
-      expect(portsClient.list).toHaveBeenCalledWith('token-1', expect.objectContaining({ signal: expect.anything() }));
+      expect(portsClient.list).toHaveBeenCalledWith(
+        'token-1',
+        expect.objectContaining({ signal: expect.anything() }),
+      );
     });
 
     fireEvent.click(screen.getByRole('tab', { name: '终端' }));
@@ -639,5 +646,211 @@ describe('T-12 拖拽语义修订：源组折叠（2026-09-16 协调者裁定，
       expect(view.container.querySelectorAll('.terminal-pane')).toHaveLength(1);
       expect(view.container.querySelector('.terminal-panel__empty')).toBeNull();
     });
+  });
+});
+
+describe('面板高度拖拽（手柄）', () => {
+  beforeEach(() => {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+
+  it('拖拽期间接管 body cursor / user-select，松手后还原', () => {
+    const onHeightChange = vi.fn();
+    renderPanel([makeTerminal()], { height: 300, onHeightChange });
+
+    const handle = screen.getByRole('button', { name: '拖动调整高度' });
+    fireEvent.mouseDown(handle, { clientY: 500 });
+
+    expect(document.body.style.cursor).toBe('row-resize');
+    expect(document.body.style.userSelect).toBe('none');
+
+    fireEvent.mouseUp(window);
+
+    expect(document.body.style.cursor).toBe('');
+    expect(document.body.style.userSelect).toBe('');
+    expect(onHeightChange).not.toHaveBeenCalled();
+  });
+
+  it('向上拖拽按 startHeight + delta 回调受控 setter', () => {
+    const onHeightChange = vi.fn();
+    renderPanel([makeTerminal()], { height: 300, onHeightChange });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: '拖动调整高度' }), { clientY: 500 });
+    fireEvent.mouseMove(window, { clientY: 420 });
+
+    expect(onHeightChange).toHaveBeenCalledWith(380);
+  });
+});
+
+describe('面板最大化（瞬态）', () => {
+  it('maximized：根节点带 data-maximized、不写内联高度、拖拽手柄不渲染', () => {
+    const { view } = renderPanel([makeTerminal()], { height: 300, maximized: true });
+    const panel = view.container.querySelector<HTMLElement>('.terminal-panel');
+
+    expect(panel?.getAttribute('data-maximized')).toBe('true');
+    expect(panel?.style.height).toBe('');
+    expect(panel?.style.minHeight).toBe('');
+    expect(screen.queryByRole('button', { name: '拖动调整高度' })).toBeNull();
+    expect(screen.getByRole('button', { name: '还原终端面板' })).toBeTruthy();
+  });
+
+  it('非 maximized：保留受控内联高度、手柄与最大化按钮', () => {
+    const { view } = renderPanel([makeTerminal()], { height: 300 });
+    const panel = view.container.querySelector<HTMLElement>('.terminal-panel');
+
+    expect(panel?.getAttribute('data-maximized')).toBeNull();
+    expect(panel?.style.height).toBe('300px');
+    expect(screen.getByRole('button', { name: '拖动调整高度' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '最大化终端面板' })).toBeTruthy();
+  });
+
+  it('显式 props 优先：点击最大化按钮触发回调，不触碰 store', () => {
+    const onToggleMaximized = vi.fn();
+    renderPanel([makeTerminal()], { maximized: false, onToggleMaximized });
+
+    fireEvent.click(screen.getByRole('button', { name: '最大化终端面板' }));
+
+    expect(onToggleMaximized).toHaveBeenCalledTimes(1);
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(false);
+  });
+
+  it('未传 props 时回落 store 开关：点击后进入最大化并切换为还原按钮', () => {
+    renderPanel([makeTerminal()]);
+
+    fireEvent.click(screen.getByRole('button', { name: '最大化终端面板' }));
+
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(true);
+    expect(screen.getByRole('button', { name: '还原终端面板' })).toBeTruthy();
+  });
+});
+
+describe('终端面板停靠（left / right）', () => {
+  function panelElement(): HTMLElement {
+    const panel = screen.getByRole('region', { name: '快捷终端面板' });
+    return panel;
+  }
+
+  it('inline 侧停靠：data-docked、无内联高度、不渲染拖拽手柄', () => {
+    renderPanel([makeTerminal()], { position: 'left', presentation: 'inline' });
+
+    const panel = panelElement();
+    expect(panel.getAttribute('data-docked')).toBe('left');
+    expect(panel.style.height).toBe('');
+    expect(panel.style.minHeight).toBe('');
+    expect(screen.queryByRole('button', { name: '拖动调整高度' })).toBeNull();
+  });
+
+  it('右侧停靠：data-docked=right，最大化按钮禁用并说明原因', () => {
+    renderPanel([makeTerminal()], { position: 'right', presentation: 'inline' });
+
+    expect(panelElement().getAttribute('data-docked')).toBe('right');
+    const maximizeButton = screen.getByRole('button', {
+      name: '最大化终端面板',
+    }) as HTMLButtonElement;
+    expect(maximizeButton.disabled).toBe(true);
+    expect(maximizeButton.getAttribute('title')).toContain('侧停靠');
+  });
+
+  it('overlay 形态回落底部：侧停靠偏好被忽略，停靠项禁用并说明是 overlay', () => {
+    useUIStateStore.setState({ terminalPanelPosition: 'left' });
+    renderPanel([makeTerminal()]);
+
+    const panel = panelElement();
+    expect(panel.getAttribute('data-docked')).toBeNull();
+    expect(panel.style.height).toBe('280px');
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    const moveLeft = screen.getByRole('menuitem', { name: '移动面板到左侧' }) as HTMLButtonElement;
+    expect(moveLeft.disabled).toBe(true);
+    expect(moveLeft.getAttribute('title')).toContain('overlay');
+  });
+
+  it('窄视口：持久化的侧停靠降级为底部渲染，停靠项禁用', () => {
+    stubNarrowViewport();
+    useUIStateStore.setState({ terminalPanelPosition: 'left' });
+    renderPanel([makeTerminal()], { presentation: 'inline' });
+
+    const panel = panelElement();
+    expect(panel.getAttribute('data-docked')).toBeNull();
+    expect(panel.style.height).toBe('280px');
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    const moveRight = screen.getByRole('menuitem', { name: '移动面板到右侧' }) as HTMLButtonElement;
+    expect(moveRight.disabled).toBe(true);
+    expect(moveRight.getAttribute('title')).toContain('768px');
+  });
+
+  it('store 回落：侧停靠清最大化并收同侧侧栏；改回底部不自动展开', () => {
+    useUIStateStore.setState({
+      leftSidebarOpen: true,
+      reviewPanelOpened: true,
+      terminalPanelMaximized: true,
+      terminalPanelPosition: 'bottom',
+    });
+    renderPanel([makeTerminal()], { presentation: 'inline' });
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '移动面板到左侧' }));
+
+    expect(useUIStateStore.getState()).toMatchObject({
+      leftSidebarOpen: false,
+      reviewPanelOpened: true,
+      terminalPanelMaximized: false,
+      terminalPanelPosition: 'left',
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '移动面板到底部' }));
+
+    // 单向礼节：改回底部不自动展开被停靠收起的左侧栏。
+    expect(useUIStateStore.getState()).toMatchObject({
+      leftSidebarOpen: false,
+      terminalPanelPosition: 'bottom',
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '移动面板到右侧' }));
+
+    expect(useUIStateStore.getState()).toMatchObject({
+      reviewPanelOpened: false,
+      terminalPanelPosition: 'right',
+    });
+  });
+
+  it('显式 onMovePosition 覆盖 store 写入，但最大化清理与侧栏联动仍在面板层', () => {
+    const onMovePosition = vi.fn();
+    useUIStateStore.setState({
+      reviewPanelOpened: true,
+      terminalPanelMaximized: true,
+      terminalPanelPosition: 'bottom',
+    });
+    renderPanel([makeTerminal()], { position: 'bottom', onMovePosition, presentation: 'inline' });
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-panel-tab-rail'), {
+      clientX: 8,
+      clientY: 8,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '移动面板到右侧' }));
+
+    expect(onMovePosition).toHaveBeenCalledWith('right');
+    expect(useUIStateStore.getState().terminalPanelPosition).toBe('bottom');
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(false);
+    expect(useUIStateStore.getState().reviewPanelOpened).toBe(false);
   });
 });

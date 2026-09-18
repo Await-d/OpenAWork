@@ -6,10 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  ConsoleSourceMappedStackFrame,
-  ConsoleStackFrame,
-} from './browser-console-types.js';
+import type { ConsoleSourceMappedStackFrame, ConsoleStackFrame } from './browser-console-types.js';
 import {
   buildConsoleStackView,
   CONSOLE_STACK_LOCATION_MAX_CHARS,
@@ -137,7 +134,10 @@ describe('buildConsoleStackView', () => {
   });
 
   it('优先使用 sourceMappedStack，逐帧 0-based → 1-based', () => {
-    const view = buildConsoleStackView({ stack: [rawFrame()], sourceMappedStack: [resolvedFrame()] });
+    const view = buildConsoleStackView({
+      stack: [rawFrame()],
+      sourceMappedStack: [resolvedFrame()],
+    });
 
     expect(view).not.toBeNull();
     expect(view?.total).toBe(1);
@@ -148,7 +148,10 @@ describe('buildConsoleStackView', () => {
   });
 
   it('sourceMappedStack 为空数组时整条回落原始帧', () => {
-    const view = buildConsoleStackView({ stack: [rawFrame({ line: 3, column: 0 })], sourceMappedStack: [] });
+    const view = buildConsoleStackView({
+      stack: [rawFrame({ line: 3, column: 0 })],
+      sourceMappedStack: [],
+    });
 
     expect(view?.frames[0]?.location).toBe(`${BUNDLE_URL}:4:1`);
     expect(view?.frames[0]?.unmapped).toBe(true);
@@ -160,7 +163,12 @@ describe('buildConsoleStackView', () => {
       stack: [rawFrame({ line: 40, column: 1 }), rawFrame({ line: 7, column: 2 })],
       sourceMappedStack: [
         resolvedFrame({ mapped: false, sourceName: null, sourceLine: null, sourceColumn: null }),
-        resolvedFrame({ sourceName: 'helper.ts', sourceLine: 6, sourceColumn: 2, functionName: 'inner' }),
+        resolvedFrame({
+          sourceName: 'helper.ts',
+          sourceLine: 6,
+          sourceColumn: 2,
+          functionName: 'inner',
+        }),
       ],
     });
 
