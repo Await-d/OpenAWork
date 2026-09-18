@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { BaseSessionRow } from '../sidebar/BaseSessionRow.js';
+import { BaseSessionRow, DeleteIcon, RenameIcon } from '../sidebar/BaseSessionRow.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { TeamWorkspaceGroup } from '../../../hooks/workspace/useTeamSidebarSessions.js';
 import {
@@ -15,6 +15,41 @@ import {
 } from '../../../utils/session/format-session-time.js';
 import { buildTeamSessionRoute } from '../../../utils/session/team-session-route.js';
 import '../sidebar/sidebar-interactions.css';
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+
+const PAUSE_ICON = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+const RESUME_ICON = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </svg>
+);
 
 export interface AppSidebarTeamGroupSectionProps {
   group: TeamWorkspaceGroup;
@@ -37,6 +72,12 @@ export interface AppSidebarTeamGroupSectionProps {
   renameValue: string;
   onRenameChange: (value: string) => void;
   onRenameCommit: (sessionId: string) => void;
+  /** 行内 hover 操作：开始重命名 */
+  onStartRename: (session: { id: string; title: string }) => void;
+  /** 行内 hover 操作：暂停 / 恢复 */
+  onTogglePause: (sessionId: string, stateStatus: string) => void;
+  /** 行内 hover 操作：删除 */
+  onDelete: (sessionId: string) => void;
   onWorkspaceContextMenu: (workspace: { id: string; name: string }, x: number, y: number) => void;
   workspaceRenamingId: string | null;
   workspaceRenameValue: string;
@@ -56,6 +97,9 @@ export function AppSidebarTeamGroupSection({
   renameValue,
   onRenameChange,
   onRenameCommit,
+  onStartRename,
+  onTogglePause,
+  onDelete,
   onWorkspaceContextMenu,
   workspaceRenamingId,
   workspaceRenameValue,
@@ -73,6 +117,8 @@ export function AppSidebarTeamGroupSection({
   // 折叠状态持久化（与对话工作区分组共用 store，`team:` 前缀避免 key 冲突）
   const collapsedGroupKey = `team:${group.id}`;
   const collapsed = collapsedSessionGroups.includes(collapsedGroupKey);
+  // 与 chat 会话列表保持一致：组标题展示运行中会话数量
+  const runningCount = group.sessions.filter((session) => session.stateStatus === 'running').length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 2 }}>
@@ -174,6 +220,25 @@ export function AppSidebarTeamGroupSection({
               group.label
             )}
           </span>
+          {runningCount > 0 ? (
+            <span
+              style={{
+                alignItems: 'center',
+                color: 'var(--accent)',
+                display: 'inline-flex',
+                flexShrink: 0,
+                fontSize: 10,
+                gap: 3,
+              }}
+              title={`${runningCount} 个会话运行中`}
+            >
+              <span
+                aria-hidden="true"
+                style={{ background: 'var(--accent)', borderRadius: '50%', height: 5, width: 5 }}
+              />
+              {runningCount}
+            </span>
+          ) : null}
           <span
             style={{
               fontSize: 10,
@@ -241,12 +306,6 @@ export function AppSidebarTeamGroupSection({
           const isRunning = ts.stateStatus === 'running';
           const isPaused = ts.stateStatus === 'paused';
 
-          const statusColor = isRunning
-            ? 'var(--accent)'
-            : isPaused
-              ? 'var(--warning)'
-              : 'var(--border-default)';
-
           return (
             <BaseSessionRow
               key={ts.id}
@@ -296,6 +355,28 @@ export function AppSidebarTeamGroupSection({
               renameValue={renameValue}
               onRenameChange={onRenameChange}
               onRenameCommit={onRenameCommit}
+              actions={[
+                {
+                  key: 'rename',
+                  title: '重命名',
+                  icon: RenameIcon,
+                  onClick: () => onStartRename({ id: ts.id, title: ts.title }),
+                  disabled: renamingSessionId === ts.id,
+                },
+                {
+                  key: 'toggle-pause',
+                  title: isRunning ? '暂停' : '恢复',
+                  icon: isRunning ? PAUSE_ICON : RESUME_ICON,
+                  onClick: () => onTogglePause(ts.id, ts.stateStatus),
+                },
+                {
+                  key: 'delete',
+                  title: '删除',
+                  icon: DeleteIcon,
+                  onClick: () => onDelete(ts.id),
+                  danger: true,
+                },
+              ]}
               icon={
                 <span
                   style={{
@@ -310,49 +391,56 @@ export function AppSidebarTeamGroupSection({
                     background: isActive
                       ? 'color-mix(in oklch, var(--accent) 15%, transparent)'
                       : 'transparent',
+                    color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
+                    transition: 'background 120ms ease',
                   }}
                 >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
-                      background: statusColor,
-                      animation: isRunning
-                        ? 'permissionPulse 1.5s ease-in-out infinite'
-                        : undefined,
-                    }}
-                  />
-                </span>
-              }
-              meta={
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--fg-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  {isRunning && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                      <span
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: '50%',
-                          background: 'var(--accent)',
-                          animation: 'permissionPulse 1.5s ease-in-out infinite',
-                        }}
-                      />
-                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>运行中</span>
-                    </span>
-                  )}
-                  {isPaused && (
-                    <span style={{ color: 'var(--warning)', fontWeight: 600 }}>已暂停</span>
-                  )}
-                  {!isRunning && !isPaused && <span style={{ opacity: 0.7 }}>空闲</span>}
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  {isRunning ? (
+                    <span
+                      aria-label="运行中"
+                      style={{
+                        position: 'absolute',
+                        bottom: -1,
+                        right: -1,
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: 'var(--success)',
+                        boxShadow: '0 0 5px var(--success)',
+                        animation: 'pulse 1.5s ease-in-out infinite',
+                      }}
+                    />
+                  ) : null}
+                  {isPaused ? (
+                    <span
+                      aria-label="已暂停"
+                      style={{
+                        position: 'absolute',
+                        bottom: -1,
+                        right: -1,
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: 'var(--warning)',
+                      }}
+                    />
+                  ) : null}
                 </span>
               }
             />

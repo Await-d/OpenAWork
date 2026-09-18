@@ -1053,6 +1053,11 @@ export default function AppSidebar({
                     renameValue={teamRenameValue}
                     onRenameChange={setTeamRenameValue}
                     onRenameCommit={(id) => void handleTeamRenameCommit(id)}
+                    onStartRename={handleTeamRename}
+                    onTogglePause={(sessionId, stateStatus) =>
+                      void handleTeamTogglePause(sessionId, stateStatus)
+                    }
+                    onDelete={(sessionId) => void handleTeamDelete(sessionId)}
                     onWorkspaceContextMenu={handleTeamWorkspaceContextMenu}
                     workspaceRenamingId={teamWorkspaceRenamingId}
                     workspaceRenameValue={teamWorkspaceRenameValue}
