@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import type { AgentTeamsSidebarTeam, AgentTeamsTaskCard } from '../../data/team-runtime-types.js';
 import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
@@ -42,6 +43,9 @@ const ACTION_BTN_STYLE: CSSProperties = {
   borderRadius: 4,
   transition: 'background 120ms ease, opacity 120ms ease',
 };
+
+/** 展开态按会话记忆的 fallback：模块级常量，保证跨渲染引用稳定。 */
+const EMPTY_STRING_LIST: readonly string[] = [];
 
 /* ──────────────────────────────────────────────────────────────
  * TaskCard
@@ -488,27 +492,29 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
   const { busy, canManageSessionEntries, createTask, moveTask, taskLanes } =
     useTeamRuntimeReferenceViewData();
   const [addingLane, setAddingLane] = useState<string | null>(null);
-  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+  // Set 不是可持久化类型：展开态按 readonly string[] 记忆，渲染时再派生 Set 做查找。
+  const [expandedTaskIds, setExpandedTaskIds] = useTeamTabState<readonly string[]>(
+    'taskboard.expandedTaskIds',
+    EMPTY_STRING_LIST,
+  );
   const [newTitle, setNewTitle] = useState('');
-  const [filter, setFilter] = useState<TaskBoardFilterMode>('all');
+  const [filter, setFilter] = useTeamTabState<TaskBoardFilterMode>('taskboard.filter', 'all');
+  const expandedTaskIdSet = useMemo(() => new Set<string>(expandedTaskIds), [expandedTaskIds]);
 
-  useEffect(() => {
-    setAddingLane(null);
-    setExpandedTaskIds(new Set());
-    setNewTitle('');
-  }, [selectedTeam?.id]);
+  // 原「selectedTeam.id 变化时重置看板状态」的 effect 已移除：filter 与展开态改为按会话记忆，
+  // 作用域切换时由 useTeamTabState 重新载入；addingLane / newTitle 属 R5 瞬态草稿，不做记忆。
 
-  const toggleExpandTask = useCallback((id: string) => {
-    setExpandedTaskIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
+  const toggleExpandTask = useCallback(
+    (id: string) => {
+      // setter 只接受值：从当前记忆值推算下一数组，保持与 Set 一致的去重与追加顺序。
+      setExpandedTaskIds(
+        expandedTaskIds.includes(id)
+          ? expandedTaskIds.filter((taskId) => taskId !== id)
+          : [...expandedTaskIds, id],
+      );
+    },
+    [expandedTaskIds, setExpandedTaskIds],
+  );
 
   const handleAddTask = useCallback(
     (laneId: string) => {
@@ -619,7 +625,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                 key={lane.id}
                 lane={lane}
                 cards={lane.cards}
-                expandedTaskIds={expandedTaskIds}
+                expandedTaskIds={expandedTaskIdSet}
                 canManageSessionEntries={canManageSessionEntries}
                 onToggleExpand={toggleExpandTask}
                 onMove={handleMoveTask}

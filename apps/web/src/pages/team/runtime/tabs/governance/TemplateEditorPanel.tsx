@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { WorkflowTemplateScale } from '@openAwork/web-client';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS, type TeamCoreRole } from '@openAwork/shared';
 import { useTeamRuntimeRoleBindings } from '../../hooks/use-team-runtime-role-bindings.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { agentTeamsNewTemplateProviders } from '../../data/team-runtime-ui-config.js';
 import {
   ROLE_COLOR_MAP,
@@ -39,7 +40,7 @@ function TemplateEditor({
 }) {
   const roleBindings = useTeamRuntimeRoleBindings();
   const [state, setState] = useState<EditorState>(initialState);
-  const [jsonMode, setJsonMode] = useState(false);
+  const [jsonMode, setJsonMode] = useTeamTabState<boolean>('templates.jsonMode', false);
   const [jsonText, setJsonText] = useState(() =>
     JSON.stringify(editorStateToTemplateData(initialState), null, 2),
   );

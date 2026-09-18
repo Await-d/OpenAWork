@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { type SoulRoleLayer } from '@openAwork/web-client';
 import { useInstructionStackPreviewRead } from './use-team-phase-a-settings-read-model.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import {
   ERROR_STYLE,
   PANEL_INSET_STYLE,
@@ -23,7 +23,10 @@ export function InstructionStackPreviewSection({
   client,
   teamWorkspaceId,
 }: InstructionStackPreviewSectionProps) {
-  const [previewLayer, setPreviewLayer] = useState<SoulRoleLayer>('executor');
+  const [previewLayer, setPreviewLayer] = useTeamTabState<SoulRoleLayer>(
+    'settings.instructionPreviewLayer',
+    'executor',
+  );
   const { busy, error, preview, previewInstructionStack } = useInstructionStackPreviewRead({
     client,
     token,

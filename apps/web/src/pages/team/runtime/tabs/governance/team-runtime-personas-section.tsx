@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HttpError, type SoulRoleLayer } from '@openAwork/web-client';
 import { useRecoverablePersonaRead } from './use-team-phase-a-settings-read-model.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import {
   ERROR_STYLE,
   PANEL_INSET_STYLE,
@@ -20,7 +21,10 @@ interface PersonasSectionProps {
 }
 
 export function PersonasSection({ token, client }: PersonasSectionProps) {
-  const [activeLayer, setActiveLayer] = useState<SoulRoleLayer>('reception');
+  const [activeLayer, setActiveLayer] = useTeamTabState<SoulRoleLayer>(
+    'settings.personasActiveLayer',
+    'reception',
+  );
   const {
     applyPersonaResponse,
     error: loadError,

@@ -6,13 +6,14 @@
  * 数据来源：useTeamRuntimeReferenceViewData().auditLogs
  */
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { formatTimelineDetail } from '../../data/team-runtime-reference-formatters.js';
 import { TabContainer } from '../TabContainer.js';
 import { collectSessionScope, isSessionInScope } from '../../data/team-runtime-session-scope.js';
 import { SecurityIcon } from '../../shared/TeamIcons.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 
 const ACTION_LABELS: Record<TeamAuditLogRecord['action'], string> = {
@@ -104,9 +105,12 @@ export function AuditView({
 }: AuditViewProps = {}) {
   const { auditLogs, sessions } = useTeamRuntimeReferenceViewData();
 
-  const [entityFilter, setEntityFilter] = useState<TeamAuditLogRecord['entityType'] | 'all'>('all');
-  const [actorFilter, setActorFilter] = useState<string>('');
-  const [scopeMode, setScopeMode] = useState<AuditScopeMode>('workspace');
+  const [entityFilter, setEntityFilter] = useTeamTabState<TeamAuditLogRecord['entityType'] | 'all'>(
+    'audit.entityFilter',
+    'all',
+  );
+  const [actorFilter, setActorFilter] = useTeamTabState<string>('audit.actorFilter', '');
+  const [scopeMode, setScopeMode] = useTeamTabState<AuditScopeMode>('audit.scopeMode', 'workspace');
 
   const sessionScope = useMemo(
     () => (selectedSessionId ? collectSessionScope(selectedSessionId, sessions) : null),

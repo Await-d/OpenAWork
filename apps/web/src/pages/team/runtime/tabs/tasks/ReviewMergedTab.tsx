@@ -28,6 +28,7 @@ import { getEffectiveReviewDisposition, type HandoffRecord } from '@openAwork/we
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { useLayerStore } from '../../../../../stores/team/team-events.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { ReviewReportView, type ReviewVerdict } from './ReviewReportView.js';
 import { ReviewTab } from './ReviewTab.js';
 import { useSessionHandoffs } from '../../hooks/use-session-handoffs.js';
@@ -125,7 +126,7 @@ export function ReviewMergedTab({
   selectedTeam,
   selectedTeamId,
 }: ReviewMergedTabProps) {
-  const [segment, setSegment] = useState<ReviewSegment>('report');
+  const [segment, setSegment] = useTeamTabState<ReviewSegment>('review.segment', 'report');
   const [retryBusyHandoffId, setRetryBusyHandoffId] = useState<string | null>(null);
   const segmentBarRef = useRef<HTMLDivElement>(null);
 

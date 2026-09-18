@@ -3,6 +3,7 @@ import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-referen
 import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
 import { ChevronDownIcon, PlusIcon, TemplateIcon, SyncIcon } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { NewTeamTemplateModal } from '../../shell/modals/NewTeamTemplateModal.js';
 import { TemplateDetailView } from './TemplateDetailView.js';
 import {
@@ -12,6 +13,9 @@ import {
 } from './TemplateEditorPanel.js';
 import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 import type { WorkflowTemplateRecord, UpdateWorkflowTemplateInput } from '@openAwork/web-client';
+
+// 模块级常量：折叠分类持久化为 readonly string[] 时使用的空数组 fallback（避免每次渲染新建数组）
+const EMPTY_STRING_LIST: readonly string[] = [];
 
 function getBadgeToneStyle(tone: string | undefined): { background: string; color: string } {
   switch (tone) {
@@ -276,19 +280,33 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
     updateTemplate,
   } = useTeamRuntimeReferenceViewData();
 
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [collapsedSections, setCollapsedSections] = useTeamTabState<readonly string[]>(
+    'templates.collapsedSections',
+    EMPTY_STRING_LIST,
+  );
   const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [editorMode, setEditorMode] = useState<'idle' | 'edit'>('idle');
+  const [selectedTemplateId, setSelectedTemplateId] = useTeamTabState<string>(
+    'templates.selectedTemplateId',
+    '',
+  );
+  const [editorMode, setEditorMode] = useTeamTabState<'idle' | 'edit'>(
+    'templates.editorMode',
+    'idle',
+  );
 
-  const toggleSection = useCallback((id: string) => {
-    setCollapsedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // collapsedSections 按会话持久化的是分类 id 数组（Set 不可持久化），渲染时派生 Set 供 O(1) 查找
+  const collapsedSectionSet = new Set(collapsedSections);
+
+  const toggleSection = useCallback(
+    (id: string) => {
+      setCollapsedSections(
+        collapsedSections.includes(id)
+          ? collapsedSections.filter((sectionId) => sectionId !== id)
+          : [...collapsedSections, id],
+      );
+    },
+    [collapsedSections, setCollapsedSections],
+  );
 
   // Group templates by category
   const sections = new Map<string, typeof templates>();
@@ -540,7 +558,7 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
                 <span
                   style={{
                     transition: 'transform 0.15s',
-                    transform: collapsedSections.has(sectionId) ? 'rotate(-90deg)' : 'none',
+                    transform: collapsedSectionSet.has(sectionId) ? 'rotate(-90deg)' : 'none',
                     display: 'inline-flex',
                     alignItems: 'center',
                   }}
@@ -565,7 +583,7 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
                 </span>
               </button>
 
-              {!collapsedSections.has(sectionId) && (
+              {!collapsedSectionSet.has(sectionId) && (
                 <div
                   style={{
                     display: 'grid',
@@ -581,8 +599,10 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
                       canUse={canCreateSession}
                       onUse={onUseTemplate}
                       onSelect={(templateId) => {
-                        setSelectedTemplateId((current) =>
-                          current === templateId && editorMode === 'idle' ? null : templateId,
+                        setSelectedTemplateId(
+                          selectedTemplateId === templateId && editorMode === 'idle'
+                            ? ''
+                            : templateId,
                         );
                         setEditorMode('idle');
                       }}
@@ -638,7 +658,7 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
                 onDelete={async () => {
                   const ok = await removeTemplate(selectedTemplate.id);
                   if (ok) {
-                    setSelectedTemplateId(null);
+                    setSelectedTemplateId('');
                     setEditorMode('idle');
                   }
                 }}
@@ -662,7 +682,7 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
                 onDelete={async () => {
                   const ok = await removeTemplate(selectedTemplate.id);
                   if (ok) {
-                    setSelectedTemplateId(null);
+                    setSelectedTemplateId('');
                   }
                 }}
                 onUpdate={async (input) => updateTemplate(selectedTemplate.id, input)}

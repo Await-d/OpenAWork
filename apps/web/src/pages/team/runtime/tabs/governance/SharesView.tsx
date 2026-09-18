@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { TeamSessionShareRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { TabContainer } from '../TabContainer.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { TeamGovernanceWorkbenchHeader } from './TeamGovernanceWorkbenchHeader.js';
 
 const PERMISSION_LABELS: Record<TeamSessionShareRecord['permission'], string> = {
@@ -83,7 +84,7 @@ export function SharesView() {
     updateSessionShare,
     workspaceGroups,
   } = useTeamRuntimeReferenceViewData();
-  const [tab, setTab] = useState<ShareTab>('outgoing');
+  const [tab, setTab] = useTeamTabState<ShareTab>('shares.tab', 'outgoing');
   const [busyShareId, setBusyShareId] = useState<string | null>(null);
   const [newShareMemberId, setNewShareMemberId] = useState('');
   const [newSharePermission, setNewSharePermission] =

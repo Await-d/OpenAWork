@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { AGENT_TEAMS_EVENT_CONFIG } from '../../data/team-runtime-ui-config.js';
 import type {
   AgentTeamsSidebarTeam,
@@ -10,10 +10,14 @@ import { PANEL_STYLE, TREND_META } from '../../shared/team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from '../../shared/TeamIcons.js';
 import type { IconKey } from '../../shared/TeamIcons.js';
 import { TabContainer } from '../TabContainer.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { CK_GAP_LG, MetricGrid, MiniBar, SectionPanel } from '../../shared/content-kit/index.js';
 import { SharedSessionOverviewView } from './shared-session-overview-view.js';
 import { TeamSessionContextStrip } from './TeamSessionContextStrip.js';
 import { TeamOverviewWorkbenchMap } from './TeamOverviewWorkbenchMap.js';
+
+/** useTeamTabState 只支持原始值与 readonly string[]，Set 类状态统一以字符串数组持久化。 */
+const EMPTY_STRING_LIST: readonly string[] = [];
 
 export function OverviewTab({
   selectedTeam = null,
@@ -31,14 +35,28 @@ export function OverviewTab({
       </TabContainer>
     );
   }
-  const [timelineFilter, setTimelineFilter] = useState<Set<AgentTeamsTimelineEventType>>(new Set());
-  const [searchQuery, setSearchQuery] = useState('');
-  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
-  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
+  const [timelineFilter, setTimelineFilter] = useTeamTabState<readonly string[]>(
+    'overview.timelineFilter',
+    EMPTY_STRING_LIST,
+  );
+  const [searchQuery, setSearchQuery] = useTeamTabState<string>('overview.searchQuery', '');
+  const [expandedCardIds, setExpandedCardIds] = useTeamTabState<readonly string[]>(
+    'overview.expandedCardIds',
+    EMPTY_STRING_LIST,
+  );
+  const [expandedEventIds, setExpandedEventIds] = useTeamTabState<readonly string[]>(
+    'overview.expandedEventIds',
+    EMPTY_STRING_LIST,
+  );
+
+  // Set 仅为渲染期查询派生：其引用每次渲染都会变，禁止进入 memo / callback 依赖数组。
+  const timelineFilterSet = new Set<string>(timelineFilter);
+  const expandedCardIdsSet = new Set<string>(expandedCardIds);
+  const expandedEventIdsSet = new Set<string>(expandedEventIds);
 
   const filteredEvents = useMemo(() => {
     let result = timelineEvents;
-    if (timelineFilter.size > 0) result = result.filter((e) => timelineFilter.has(e.type));
+    if (timelineFilter.length > 0) result = result.filter((e) => timelineFilterSet.has(e.type));
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -53,32 +71,38 @@ export function OverviewTab({
     Object.values(activityStats).reduce((a, b) => a + b, 0),
   );
 
-  const toggleFilter = useCallback((type: AgentTeamsTimelineEventType) => {
-    setTimelineFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  }, []);
+  const toggleFilter = useCallback(
+    (type: AgentTeamsTimelineEventType) => {
+      setTimelineFilter(
+        timelineFilter.includes(type)
+          ? timelineFilter.filter((item) => item !== type)
+          : [...timelineFilter, type],
+      );
+    },
+    [setTimelineFilter, timelineFilter],
+  );
 
-  const toggleCardExpand = useCallback((id: string) => {
-    setExpandedCardIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleCardExpand = useCallback(
+    (id: string) => {
+      setExpandedCardIds(
+        expandedCardIds.includes(id)
+          ? expandedCardIds.filter((item) => item !== id)
+          : [...expandedCardIds, id],
+      );
+    },
+    [expandedCardIds, setExpandedCardIds],
+  );
 
-  const toggleEventExpand = useCallback((id: string) => {
-    setExpandedEventIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleEventExpand = useCallback(
+    (id: string) => {
+      setExpandedEventIds(
+        expandedEventIds.includes(id)
+          ? expandedEventIds.filter((item) => item !== id)
+          : [...expandedEventIds, id],
+      );
+    },
+    [expandedEventIds, setExpandedEventIds],
+  );
 
   return (
     <TabContainer title="运行概览" subtitle="关键指标 + 活动时间线，按会话联动。">
@@ -96,7 +120,7 @@ export function OverviewTab({
         >
           {overviewCards.map((card) => {
             const trend = TREND_META[card.trend ?? 'stable'];
-            const isExpanded = expandedCardIds.has(card.id);
+            const isExpanded = expandedCardIdsSet.has(card.id);
             return (
               <div
                 key={card.id}
@@ -270,7 +294,7 @@ export function OverviewTab({
                 const config = AGENT_TEAMS_EVENT_CONFIG[type as AgentTeamsTimelineEventType];
                 if (!config) return null;
                 const pct = Math.round((count / totalActivityCount) * 100);
-                const isFiltered = timelineFilter.has(type as AgentTeamsTimelineEventType);
+                const isFiltered = timelineFilterSet.has(type as AgentTeamsTimelineEventType);
                 return (
                   <MiniBar
                     key={type}
@@ -279,15 +303,15 @@ export function OverviewTab({
                     color={config.color}
                     valueText={`${count} 次 (${pct}%)`}
                     leading={<Icon name={config.icon as IconKey} size={10} color={config.color} />}
-                    dimmed={!(isFiltered || timelineFilter.size === 0)}
+                    dimmed={!(isFiltered || timelineFilter.length === 0)}
                     onClick={() => toggleFilter(type as AgentTeamsTimelineEventType)}
                   />
                 );
               })}
-            {timelineFilter.size > 0 && (
+            {timelineFilter.length > 0 && (
               <button
                 type="button"
-                onClick={() => setTimelineFilter(new Set())}
+                onClick={() => setTimelineFilter(EMPTY_STRING_LIST)}
                 style={{
                   padding: '3px 8px',
                   borderRadius: 6,
@@ -332,7 +356,7 @@ export function OverviewTab({
             {/* Type filters */}
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {Object.entries(AGENT_TEAMS_EVENT_CONFIG).map(([type, config]) => {
-                const isActive = timelineFilter.has(type as AgentTeamsTimelineEventType);
+                const isActive = timelineFilterSet.has(type as AgentTeamsTimelineEventType);
                 return (
                   <button
                     key={type}
@@ -359,10 +383,10 @@ export function OverviewTab({
                   </button>
                 );
               })}
-              {timelineFilter.size > 0 && (
+              {timelineFilter.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setTimelineFilter(new Set())}
+                  onClick={() => setTimelineFilter(EMPTY_STRING_LIST)}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -387,7 +411,7 @@ export function OverviewTab({
                   hour: '2-digit',
                   minute: '2-digit',
                 });
-                const isExpanded = expandedEventIds.has(event.id);
+                const isExpanded = expandedEventIdsSet.has(event.id);
                 return (
                   <button
                     key={event.id}

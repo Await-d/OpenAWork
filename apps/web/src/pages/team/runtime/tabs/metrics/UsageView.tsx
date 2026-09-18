@@ -19,6 +19,7 @@ import {
   resolveMatchedSharedSessionDetail,
   resolveMatchedSharedSummary,
 } from '../../data/team-runtime-shared-context.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import { TabContainer } from '../TabContainer.js';
 import { TeamTabIcon } from '../team-tab-icons.js';
 import { SessionStatsPanel } from './SessionStatsPanel.js';
@@ -163,6 +164,8 @@ export interface UsageViewProps {
  * initialMode="tools" 时复用本组件已有的共享会话快照链路。
  */
 export function UsageView(props: UsageViewProps = {}) {
+  // 用量 / 工具调用以「叶子 tab」为唯一事实来源；此处若再按会话记忆会与 leafByPrimary 双控，
+  // 切回会话时两者互相覆盖。跨会话的「我在哪个 tab」记忆由 middleTab / leafByPrimary 承担。
   const [mode, setMode] = useState<MetricsMode>(props.initialMode ?? 'usage');
   const nodes = useLayerStore((s) => s.nodes);
   const total = useTeamUsageStore((s) => s.total);
@@ -325,8 +328,13 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
   const bySessionLayer = useTeamUsageStore((s) => s.bySessionLayer);
   const recent = useTeamUsageStore((s) => s.recent);
 
-  const [group, setGroup] = useState<GroupKey>('provider');
-  const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
+  const [group, setGroup] = useTeamTabState<GroupKey>('usage.group', 'provider');
+  // 持久化层不支持 null：下钻层用空串表示「未展开」，在边界处映射回 null。
+  const [expandedLayerKey, setExpandedLayerKey] = useTeamTabState<string>(
+    'usage.expandedLayer',
+    '',
+  );
+  const expandedLayer = expandedLayerKey === '' ? null : expandedLayerKey;
   const sessionScope = useMemo(
     () => (selectedSessionId ? collectSessionScope(nodes, selectedSessionId) : null),
     [nodes, selectedSessionId],
@@ -490,7 +498,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
             active={group === 'provider'}
             onClick={() => {
               setGroup('provider');
-              setExpandedLayer(null);
+              setExpandedLayerKey('');
             }}
           />
           <GroupBtn
@@ -498,7 +506,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
             active={group === 'agent'}
             onClick={() => {
               setGroup('agent');
-              setExpandedLayer(null);
+              setExpandedLayerKey('');
             }}
           />
           <GroupBtn label="按 layer" active={group === 'layer'} onClick={() => setGroup('layer')} />
@@ -507,7 +515,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
             active={group === 'session'}
             onClick={() => {
               setGroup('session');
-              setExpandedLayer(null);
+              setExpandedLayerKey('');
             }}
           />
         </div>
@@ -529,7 +537,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
                     {...(drillable
                       ? {
                           expanded,
-                          onClick: () => setExpandedLayer((prev) => (prev === key ? null : key)),
+                          onClick: () => setExpandedLayerKey(expandedLayer === key ? '' : key),
                         }
                       : {})}
                   />

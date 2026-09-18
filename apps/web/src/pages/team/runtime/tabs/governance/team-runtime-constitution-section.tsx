@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HttpError } from '@openAwork/web-client';
 import { useRecoverableConstitutionRead } from './use-team-phase-a-settings-read-model.js';
+import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import {
   ERROR_STYLE,
   PANEL_INSET_STYLE,
@@ -33,7 +34,10 @@ export function ConstitutionSection({ token, client, teamWorkspaceId }: Constitu
   });
   const [draft, setDraft] = useState('');
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' });
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreview, setShowPreview] = useTeamTabState<boolean>(
+    'settings.constitutionShowPreview',
+    false,
+  );
   const draftRef = useRef('');
   const lastHydratedBodyRef = useRef('');
   const lastHydratedVersionRef = useRef<number | null>(null);
@@ -168,7 +172,7 @@ export function ConstitutionSection({ token, client, teamWorkspaceId }: Constitu
         <button
           type="button"
           style={SECONDARY_BUTTON_STYLE}
-          onClick={() => setShowPreview((v) => !v)}
+          onClick={() => setShowPreview(!showPreview)}
         >
           {showPreview ? '收起预览' : '展开预览'}
         </button>
