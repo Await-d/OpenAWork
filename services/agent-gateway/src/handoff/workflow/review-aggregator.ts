@@ -576,6 +576,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
       failure_reason: string | null;
       retry_count: number;
       idempotency_key: string | null;
+      client_request_id: string | null;
       paused: number;
       paused_at: string | null;
       paused_by_user_id: string | null;
@@ -602,6 +603,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
       failure_reason: string | null;
       retry_count: number;
       idempotency_key: string | null;
+      client_request_id: string | null;
       paused: number;
       paused_at: string | null;
       paused_by_user_id: string | null;
@@ -640,6 +642,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
         failure_reason: string | null;
         retry_count: number;
         idempotency_key: string | null;
+        client_request_id: string | null;
         paused: number;
         paused_at: string | null;
         paused_by_user_id: string | null;
@@ -671,6 +674,7 @@ export function checkAllChildrenCompleted(pm2HandoffId: string): {
     failureReason: c.failure_reason,
     retryCount: c.retry_count,
     idempotencyKey: c.idempotency_key,
+    clientRequestId: c.client_request_id ?? null,
     paused: c.paused === 1,
     pausedAt: c.paused_at,
     pausedByUserId: c.paused_by_user_id,
