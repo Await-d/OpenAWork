@@ -146,6 +146,39 @@ async function main(): Promise<void> {
         });
 
       const round0 = insertPendingRequest({ sessionId, userId, questions: GRILL_QUESTIONS });
+
+      // V-06 的「pending 列表」判定项：一轮返回整个 frontier（≥2 张卡片），
+      // 且每题恰好可被用户"确认"——即至少一个 recommended 选项 + 稳定的 nodeId。
+      const pendingRes = await app.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}/questions/pending`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert(pendingRes.statusCode === 200, 'pending questions route should succeed');
+      const pendingBody: {
+        requests: Array<{
+          questions: Array<{
+            nodeId?: string;
+            options?: Array<{ recommended?: boolean }>;
+          }>;
+        }>;
+      } = pendingRes.json();
+      const pendingQuestions = pendingBody.requests.flatMap((entry) => entry.questions);
+      assert(
+        pendingQuestions.length >= 2,
+        `frontier batch should expose >=2 question cards, got ${pendingQuestions.length}`,
+      );
+      for (const question of pendingQuestions) {
+        assert(
+          question.options?.some((option) => option.recommended === true) === true,
+          'every frontier question must carry at least one recommended option',
+        );
+        assert(
+          typeof question.nodeId === 'string' && question.nodeId.length > 0,
+          'every frontier question must carry a nodeId for round bookkeeping',
+        );
+      }
+
       const round0Res = await reply(round0, [['改单文件'], ['无约束'], ['代码变更'], ['测试通过']]);
       assert(round0Res.statusCode === 200, 'round 0 reply should succeed');
 

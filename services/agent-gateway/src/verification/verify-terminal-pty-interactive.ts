@@ -205,9 +205,7 @@ async function caseIsatty(state: RunnerState): Promise<{ note: string; evidence:
   const driver = createDriver(state.deps, state.tempDir);
   try {
     const mark = driver.mark();
-    driver.send(
-      "test -t 0 && printf 'ISATTY_%s\\n' TRUE || printf 'ISATTY_%s\\n' FALSE\r",
-    );
+    driver.send("test -t 0 && printf 'ISATTY_%s\\n' TRUE || printf 'ISATTY_%s\\n' FALSE\r");
     await driver.waitFor(
       () => {
         const segment = driver.since(mark);
@@ -229,13 +227,13 @@ async function caseResizeSigwinch(state: RunnerState): Promise<{ note: string; e
   const driver = createDriver(state.deps, state.tempDir);
   try {
     const mark = driver.mark();
-    driver.send("trap \"printf 'WINCH_%s\\n' TRAP_FIRED\" WINCH\r");
+    driver.send('trap "printf \'WINCH_%s\\n\' TRAP_FIRED" WINCH\r');
     driver.send("printf 'TRAP_%s\\n' READY\r");
     await driver.waitForText('TRAP_READY', mark, 5_000, 'trap ready');
 
     driver.resize(100, 30);
-    driver.send("printf 'GEOM_%s_%s\\n' \"$(tput cols)\" \"$(tput lines)\"\r");
-    driver.send("printf 'STTYOUT_%s\\n' \"$(stty size)\"\r");
+    driver.send('printf \'GEOM_%s_%s\\n\' "$(tput cols)" "$(tput lines)"\r');
+    driver.send('printf \'STTYOUT_%s\\n\' "$(stty size)"\r');
     await driver.waitFor(
       () => {
         const segment = driver.since(mark);
@@ -299,11 +297,7 @@ async function caseBackgroundJobs(state: RunnerState): Promise<{ note: string; e
   try {
     const mark = driver.mark();
     driver.send('sleep 20 &\r');
-    await driver.waitFor(
-      () => driver.since(mark).includes('[1] '),
-      5_000,
-      'background job banner',
-    );
+    await driver.waitFor(() => driver.since(mark).includes('[1] '), 5_000, 'background job banner');
     driver.send('jobs\r');
     await driver.waitForText('Running', mark, 5_000, 'jobs output');
     const jobsSegment = driver.since(mark);
@@ -331,7 +325,9 @@ async function caseBackgroundJobs(state: RunnerState): Promise<{ note: string; e
   }
 }
 
-async function caseCtrlZForeground(state: RunnerState): Promise<{ note: string; evidence: string }> {
+async function caseCtrlZForeground(
+  state: RunnerState,
+): Promise<{ note: string; evidence: string }> {
   const driver = createDriver(state.deps, state.tempDir);
   try {
     const mark = driver.mark();
@@ -455,7 +451,10 @@ async function caseUnicode(state: RunnerState): Promise<{ note: string; evidence
       'large CJK output across chunk boundaries',
     );
     const bigSegment = driver.since(mark2);
-    expect(bigSegment.includes('中'.repeat(20_000)), '20000 CJK chars must survive chunk boundaries');
+    expect(
+      bigSegment.includes('中'.repeat(20_000)),
+      '20000 CJK chars must survive chunk boundaries',
+    );
     expect(!bigSegment.includes('\uFFFD'), 'large CJK output must not contain U+FFFD');
     return {
       note: 'echo CJK + 20000×中 via python: no U+FFFD (StringDecoder carry verified)',
@@ -484,12 +483,17 @@ async function caseThrottleSeq(state: RunnerState): Promise<{ note: string; evid
       expect(typeof event.seq === 'number', 'terminal_output must carry numeric seq');
       expect(typeof event.data === 'string', 'terminal_output must carry string data');
       expect(typeof event.outputTail === 'string', 'terminal_output must carry outputTail');
-      expect(typeof event.outputBytesTotal === 'number', 'terminal_output must carry outputBytesTotal');
+      expect(
+        typeof event.outputBytesTotal === 'number',
+        'terminal_output must carry outputBytesTotal',
+      );
       expect(event.seq > previousSeq, `seq must be strictly increasing, got ${event.seq}`);
       previousSeq = event.seq;
     }
 
-    const mergedEvents = events.filter((event) => countOccurrences(event.data ?? '', 'CHUNK-') >= 2);
+    const mergedEvents = events.filter(
+      (event) => countOccurrences(event.data ?? '', 'CHUNK-') >= 2,
+    );
     expect(
       mergedEvents.length > 0,
       '100ms throttle should merge several small deltas into one event (no drops)',
@@ -522,7 +526,9 @@ async function caseThrottleSeq(state: RunnerState): Promise<{ note: string; evid
 // Node pipe-degradation probe (T-10)
 // ---------------------------------------------------------------------------
 
-async function casePipeDegradation(state: RunnerState): Promise<{ note: string; evidence: string }> {
+async function casePipeDegradation(
+  state: RunnerState,
+): Promise<{ note: string; evidence: string }> {
   const capabilities = state.capabilities;
   expect(
     capabilities.kind === 'pipe',
@@ -624,11 +630,36 @@ async function main(): Promise<void> {
   await seed(db);
 
   const cases: MatrixCase[] = [
-    { id: 'P1', item: 'isatty(0) 为真 (test -t 0)', run: () => caseIsatty(state), skipReason: () => ptySkipReason(state) },
-    { id: 'P2', item: 'SIGWINCH / resize 生效 (tput/stty/trap)', run: () => caseResizeSigwinch(state), skipReason: () => ptySkipReason(state) },
-    { id: 'P3', item: 'Ctrl+C 产生 SIGINT 且 shell 存活', run: () => caseCtrlC(state), skipReason: () => ptySkipReason(state) },
-    { id: 'P4', item: '作业控制: sleep 20 & / jobs / kill %1', run: () => caseBackgroundJobs(state), skipReason: () => ptySkipReason(state) },
-    { id: 'P5', item: '作业控制: Ctrl+Z / jobs / fg', run: () => caseCtrlZForeground(state), skipReason: () => ptySkipReason(state) },
+    {
+      id: 'P1',
+      item: 'isatty(0) 为真 (test -t 0)',
+      run: () => caseIsatty(state),
+      skipReason: () => ptySkipReason(state),
+    },
+    {
+      id: 'P2',
+      item: 'SIGWINCH / resize 生效 (tput/stty/trap)',
+      run: () => caseResizeSigwinch(state),
+      skipReason: () => ptySkipReason(state),
+    },
+    {
+      id: 'P3',
+      item: 'Ctrl+C 产生 SIGINT 且 shell 存活',
+      run: () => caseCtrlC(state),
+      skipReason: () => ptySkipReason(state),
+    },
+    {
+      id: 'P4',
+      item: '作业控制: sleep 20 & / jobs / kill %1',
+      run: () => caseBackgroundJobs(state),
+      skipReason: () => ptySkipReason(state),
+    },
+    {
+      id: 'P5',
+      item: '作业控制: Ctrl+Z / jobs / fg',
+      run: () => caseCtrlZForeground(state),
+      skipReason: () => ptySkipReason(state),
+    },
     {
       id: 'P6',
       item: '交互式程序: less 全屏 + q 退出',
@@ -663,8 +694,18 @@ async function main(): Promise<void> {
       run: () => casePythonRepl(state),
       skipReason: () => ptySkipReason(state) ?? missingToolReason('python3'),
     },
-    { id: 'P11', item: '中文宽字符 + 跨 chunk carry (无 U+FFFD)', run: () => caseUnicode(state), skipReason: () => ptySkipReason(state) },
-    { id: 'P12', item: '节流与 seq (订阅 terminal_output)', run: () => caseThrottleSeq(state), skipReason: () => ptySkipReason(state) },
+    {
+      id: 'P11',
+      item: '中文宽字符 + 跨 chunk carry (无 U+FFFD)',
+      run: () => caseUnicode(state),
+      skipReason: () => ptySkipReason(state),
+    },
+    {
+      id: 'P12',
+      item: '节流与 seq (订阅 terminal_output)',
+      run: () => caseThrottleSeq(state),
+      skipReason: () => ptySkipReason(state),
+    },
     {
       id: 'N1',
       item: 'Node/pipe 降级回归 (T-10)',
@@ -680,13 +721,25 @@ async function main(): Promise<void> {
   for (const testCase of cases) {
     const reason = testCase.skipReason?.() ?? null;
     if (reason) {
-      entries.push({ id: testCase.id, item: testCase.item, status: 'SKIP', note: reason, evidence: '' });
+      entries.push({
+        id: testCase.id,
+        item: testCase.item,
+        status: 'SKIP',
+        note: reason,
+        evidence: '',
+      });
       continue;
     }
     try {
       const result = await testCase.run();
       if (result === null) {
-        entries.push({ id: testCase.id, item: testCase.item, status: 'SKIP', note: 'no result', evidence: '' });
+        entries.push({
+          id: testCase.id,
+          item: testCase.item,
+          status: 'SKIP',
+          note: 'no result',
+          evidence: '',
+        });
       } else {
         entries.push({
           id: testCase.id,
@@ -713,7 +766,9 @@ async function main(): Promise<void> {
   const failed = entries.filter((entry) => entry.status === 'FAIL').length;
   const skipped = entries.filter((entry) => entry.status === 'SKIP').length;
   console.log('');
-  console.log(`=== 汇总: PASS=${passed} FAIL=${failed} SKIP=${skipped} TOTAL=${entries.length} ===`);
+  console.log(
+    `=== 汇总: PASS=${passed} FAIL=${failed} SKIP=${skipped} TOTAL=${entries.length} ===`,
+  );
   if (failed > 0) process.exitCode = 1;
 }
 

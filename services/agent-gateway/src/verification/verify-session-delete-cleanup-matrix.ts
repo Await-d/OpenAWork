@@ -103,6 +103,13 @@ async function main(): Promise<void> {
             role: 'assistant',
             content: [{ type: 'text', text: 'child assistant message' }],
           });
+          assert(
+            (sqliteGet<{ count: number }>(
+              'SELECT COUNT(*) as count FROM session_messages_fts WHERE session_id IN (?, ?)',
+              [parentSessionId, childSessionId],
+            )?.count ?? 0) === 2,
+            'both sessions should be indexed before their deletion',
+          );
 
           const sharedBackupParent = await persistSessionFileBackup({
             sessionId: parentSessionId,
@@ -143,6 +150,12 @@ async function main(): Promise<void> {
               },
             ],
           });
+          sqliteRun(
+            `INSERT INTO session_file_review_decisions
+               (session_id, user_id, request_id, file_path, decision, revert_request_id, created_at)
+             VALUES (?, ?, 'req-parent:tool:write', 'tracked.txt', 'accepted', NULL, datetime('now'))`,
+            [parentSessionId, userId],
+          );
           persistSessionSnapshot({
             sessionId: parentSessionId,
             userId,
@@ -184,6 +197,13 @@ async function main(): Promise<void> {
               payload.deletedSessionIds.includes(childSessionId),
             'parent delete should include descendant sessions',
           );
+          assert(
+            (sqliteGet<{ count: number }>(
+              'SELECT COUNT(*) as count FROM session_messages_fts WHERE session_id IN (?, ?)',
+              [parentSessionId, childSessionId],
+            )?.count ?? 0) === 0,
+            'session_messages_fts should not keep rows for deleted sessions',
+          );
 
           const counts = {
             sessions:
@@ -199,6 +219,11 @@ async function main(): Promise<void> {
             diffs:
               sqliteGet<{ count: number }>(
                 'SELECT COUNT(*) as count FROM session_file_diffs WHERE session_id IN (?, ?)',
+                [parentSessionId, childSessionId],
+              )?.count ?? 0,
+            reviewDecisions:
+              sqliteGet<{ count: number }>(
+                'SELECT COUNT(*) as count FROM session_file_review_decisions WHERE session_id IN (?, ?)',
                 [parentSessionId, childSessionId],
               )?.count ?? 0,
             snapshots:
@@ -238,6 +263,10 @@ async function main(): Promise<void> {
           assert(counts.sessions === 0, 'deleted sessions should be removed');
           assert(counts.messages === 0, 'session_messages should cascade delete');
           assert(counts.diffs === 0, 'session_file_diffs should cascade delete');
+          assert(
+            counts.reviewDecisions === 0,
+            'session_file_review_decisions should cascade delete',
+          );
           assert(counts.snapshots === 0, 'session_snapshots should cascade delete');
           assert(counts.runEvents === 0, 'session_run_events should cascade delete');
           assert(counts.backups === 0, 'session_file_backups rows should be removed');

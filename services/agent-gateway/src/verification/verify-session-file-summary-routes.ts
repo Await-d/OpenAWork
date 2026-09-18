@@ -612,6 +612,168 @@ async function main(): Promise<void> {
         'backup restore apply should preserve empty file content instead of deleting the file',
       );
 
+      // ─── File review decisions (accept / reject) ───
+      const reviewTargetPath = path.join(workspaceRoot, 'review-target.txt');
+      writeFileSync(reviewTargetPath, 'after review\n', 'utf8');
+      await persistSessionFileDiffs({
+        sessionId,
+        userId: currentAdmin.id,
+        clientRequestId: 'req-review',
+        requestId: 'req-review:tool:write',
+        toolName: 'write',
+        diffs: [
+          {
+            file: 'review-target.txt',
+            before: 'before review\n',
+            after: 'after review\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'strong',
+          },
+        ],
+      });
+
+      const acceptReviewRes = await app.inject({
+        method: 'POST',
+        url: `/sessions/${sessionId}/file-changes/review`,
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        payload: {
+          requestId: 'req-review:tool:write',
+          filePath: 'review-target.txt',
+          decision: 'accepted',
+        },
+      });
+      const acceptReviewPayload = JSON.parse(acceptReviewRes.body) as {
+        decision: { createdAt: string; decision: string; filePath: string; requestId: string };
+        revertClientRequestId: string | null;
+      };
+      assert(acceptReviewRes.statusCode === 200, 'accept review should succeed');
+      assert(
+        acceptReviewPayload.decision.decision === 'accepted' &&
+          acceptReviewPayload.decision.requestId === 'req-review:tool:write' &&
+          acceptReviewPayload.decision.filePath === 'review-target.txt' &&
+          typeof acceptReviewPayload.decision.createdAt === 'string',
+        'accept review should echo the captured decision',
+      );
+      assert(
+        acceptReviewPayload.revertClientRequestId === null,
+        'accept review should not report a revert request id',
+      );
+      assert(
+        readFileSync(reviewTargetPath, 'utf8') === 'after review\n',
+        'accept review must not touch the workspace file',
+      );
+
+      const rejectTargetPath = path.join(workspaceRoot, 'reject-target.txt');
+      writeFileSync(rejectTargetPath, 'agent version\n', 'utf8');
+      await persistSessionFileDiffs({
+        sessionId,
+        userId: currentAdmin.id,
+        clientRequestId: 'req-review-reject',
+        requestId: 'req-review-reject:tool:write',
+        toolName: 'write',
+        diffs: [
+          {
+            file: 'reject-target.txt',
+            before: 'original version\n',
+            after: 'agent version\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'strong',
+          },
+        ],
+      });
+
+      const rejectReviewRes = await app.inject({
+        method: 'POST',
+        url: `/sessions/${sessionId}/file-changes/review`,
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        payload: {
+          requestId: 'req-review-reject:tool:write',
+          filePath: 'reject-target.txt',
+          decision: 'rejected',
+        },
+      });
+      const rejectReviewPayload = JSON.parse(rejectReviewRes.body) as {
+        decision: { decision: string };
+        revertClientRequestId: string | null;
+      };
+      assert(rejectReviewRes.statusCode === 200, 'reject review should succeed');
+      assert(
+        rejectReviewPayload.decision.decision === 'rejected',
+        'reject review should echo the rejected decision',
+      );
+      assert(
+        typeof rejectReviewPayload.revertClientRequestId === 'string' &&
+          rejectReviewPayload.revertClientRequestId.startsWith('file-revert-'),
+        'reject review should return a file-revert client request id',
+      );
+      assert(
+        readFileSync(rejectTargetPath, 'utf8') === 'original version\n',
+        'reject review should restore the recorded before content',
+      );
+      const manualRevertRow = sqliteGet<{ count: number }>(
+        `SELECT COUNT(*) as count FROM session_file_diffs
+         WHERE session_id = ? AND client_request_id = ? AND source_kind = 'manual_revert' AND guarantee_level = 'strong'`,
+        [sessionId, rejectReviewPayload.revertClientRequestId],
+      );
+      assert(
+        (manualRevertRow?.count ?? 0) === 1,
+        'reject review should persist a manual_revert strong diff row',
+      );
+      const reviewDecisionRow = sqliteGet<{ decision: string; revert_request_id: string | null }>(
+        `SELECT decision, revert_request_id FROM session_file_review_decisions
+         WHERE session_id = ? AND request_id = ? AND file_path = ?`,
+        [sessionId, 'req-review-reject:tool:write', 'reject-target.txt'],
+      );
+      assert(
+        reviewDecisionRow?.decision === 'rejected' &&
+          reviewDecisionRow.revert_request_id === rejectReviewPayload.revertClientRequestId,
+        'reject review should persist the decision with the revert request id',
+      );
+
+      const reviewedChangesRes = await app.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}/file-changes`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const reviewedChangesPayload = JSON.parse(reviewedChangesRes.body) as {
+        fileChanges: {
+          fileDiffs: Array<{
+            file: string;
+            requestId?: string;
+            reviewStatus?: string;
+            revertRequestId?: string | null;
+          }>;
+          summary: { acceptedCount?: number; rejectedCount?: number };
+        };
+      };
+      const acceptedReviewDiff = reviewedChangesPayload.fileChanges.fileDiffs.find(
+        (diff) => diff.requestId === 'req-review:tool:write',
+      );
+      const rejectedReviewDiff = reviewedChangesPayload.fileChanges.fileDiffs.find(
+        (diff) => diff.requestId === 'req-review-reject:tool:write',
+      );
+      assert(
+        acceptedReviewDiff?.reviewStatus === 'accepted' &&
+          acceptedReviewDiff.revertRequestId === null,
+        'file-changes should project the accepted review state onto its diff',
+      );
+      assert(
+        rejectedReviewDiff?.reviewStatus === 'rejected' &&
+          rejectedReviewDiff.revertRequestId === rejectReviewPayload.revertClientRequestId,
+        'file-changes should project the rejected review state onto its diff',
+      );
+      assert(
+        reviewedChangesPayload.fileChanges.summary.acceptedCount === 1 &&
+          reviewedChangesPayload.fileChanges.summary.rejectedCount === 1,
+        'file-changes summary should expose review decision counts',
+      );
+
       const sessionWorkspaceRoot = path.join(workspaceRoot, 'apps', 'web');
       const customSessionRes = await app.inject({
         method: 'POST',
@@ -739,6 +901,101 @@ async function main(): Promise<void> {
       assert(
         readFileSync(globalShadowPath, 'utf8') === 'global current\n',
         'custom workspace snapshot apply should not touch same relative path under global workspace root',
+      );
+
+      // ─── Content-based review conflict, no git required ───
+      const conflictReviewPath = path.join(workspaceRoot, 'conflict-review.txt');
+      writeFileSync(conflictReviewPath, 'stale human work\n', 'utf8');
+      await persistSessionFileDiffs({
+        sessionId,
+        userId: currentAdmin.id,
+        clientRequestId: 'req-review-conflict',
+        requestId: 'req-review-conflict:tool:write',
+        toolName: 'write',
+        diffs: [
+          {
+            file: 'conflict-review.txt',
+            before: 'original\n',
+            after: 'agent version\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'strong',
+          },
+        ],
+      });
+      const conflictReviewRes = await app.inject({
+        method: 'POST',
+        url: `/sessions/${sessionId}/file-changes/review`,
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        payload: {
+          requestId: 'req-review-conflict:tool:write',
+          filePath: 'conflict-review.txt',
+          decision: 'rejected',
+        },
+      });
+      const conflictReviewPayload = JSON.parse(conflictReviewRes.body) as {
+        contentConflict: { expectedAfterAvailable: boolean };
+        validateOnly: boolean;
+      };
+      assert(
+        conflictReviewRes.statusCode === 409,
+        'review reject should block on a content mismatch even without git',
+      );
+      assert(
+        conflictReviewPayload.validateOnly === true &&
+          conflictReviewPayload.contentConflict.expectedAfterAvailable === true,
+        'content conflict should report the expected-after availability',
+      );
+      assert(
+        readFileSync(conflictReviewPath, 'utf8') === 'stale human work\n',
+        'content conflict must not overwrite newer work',
+      );
+      assert(
+        !sqliteGet(
+          `SELECT 1 FROM session_file_review_decisions WHERE session_id = ? AND request_id = ? LIMIT 1`,
+          [sessionId, 'req-review-conflict:tool:write'],
+        ),
+        'blocked review should not persist a decision',
+      );
+
+      // ─── Workspace-root binding refusal (workspace warp) ───
+      const staleWorkspaceRoot = path.join(workspaceRoot, 'stale-workspace-root');
+      mkdirSync(staleWorkspaceRoot, { recursive: true });
+      await persistSessionFileDiffs({
+        sessionId: customSessionId,
+        userId: currentAdmin.id,
+        clientRequestId: 'req-review-warp',
+        requestId: 'req-review-warp:tool:write',
+        toolName: 'write',
+        workspaceRoot: staleWorkspaceRoot,
+        diffs: [
+          {
+            file: 'warp-review.txt',
+            before: 'original\n',
+            after: 'agent version\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'strong',
+          },
+        ],
+      });
+      const warpReviewRes = await app.inject({
+        method: 'POST',
+        url: `/sessions/${customSessionId}/file-changes/review`,
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        payload: {
+          requestId: 'req-review-warp:tool:write',
+          filePath: 'warp-review.txt',
+          decision: 'rejected',
+        },
+      });
+      assert(
+        warpReviewRes.statusCode === 400,
+        'review reject should refuse a diff row bound to a different workspace root',
       );
 
       await execGit(['init'], workspaceRoot);
