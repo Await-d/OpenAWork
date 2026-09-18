@@ -65,6 +65,7 @@ import { dispatchClaudeCodeTool } from '../claude-code/claude-code-tool-dispatch
 import { codesearchToolDefinition } from './codesearch-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import { isTeamRoleLayer } from '../handoff/capability/apply-team-layer-tools.js';
+import { resolveSessionTurnClientRequestId } from '../handoff/store/handoff-store.js';
 import {
   buildBackgroundCancelAllMessage,
   buildBackgroundCancelSingleMessage,
@@ -126,6 +127,7 @@ import {
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import type { McpSessionScope } from '../mcp/mcp-server-authorization.js';
 import { isBuiltinInstructionName } from '../handoff/capability/layer-capabilities.js';
+import { TOOLSET_TO_TOOL_NAMES } from '../handoff/capability/toolset-gate.js';
 import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
 import {
   classifySshRemoteToolPolicy,
@@ -1181,6 +1183,18 @@ function buildTaskTags(input: {
     ...(input.category ? [`category:${input.category}`] : []),
     ...input.requestedSkills.map((skill) => `skill:${skill}`),
   ];
+}
+
+/**
+ * 任务图节点归属的回合键：会话自身的真实回合键优先；子层内部运行键
+ * （`handoff:` / `pm1:` / `pm2:`）继承活跃父 handoff 的回合键；普通 chat 会话
+ * 无父 handoff，回退到当前 stream 请求键。两者都没有则返回 null。
+ */
+function resolveTaskGraphTurnClientRequestId(
+  sessionId: string,
+  executionContext: SandboxExecutionContext | undefined,
+): string | null {
+  return resolveSessionTurnClientRequestId(sessionId, executionContext?.clientRequestId);
 }
 
 interface TeamRoleBindingEntry {
@@ -2618,7 +2632,11 @@ async function executeGatewayManagedToolImpl(
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: await runTaskCreateTool(sessionId, parsed.data),
+        output: await runTaskCreateTool(
+          sessionId,
+          parsed.data,
+          resolveTaskGraphTurnClientRequestId(sessionId, executionContext),
+        ),
         isError: false,
         durationMs: 0,
       };
@@ -4511,6 +4529,8 @@ async function executeGatewayManagedToolImpl(
         assignedAgent: resolvedAgent.agentId,
         priority: 'medium',
         tags: taskTags,
+        clientRequestId:
+          resolveTaskGraphTurnClientRequestId(sessionId, executionContext) ?? undefined,
       });
       if (canExecuteImmediately) {
         taskManager.startTask(graph, childTask.id);
@@ -5128,6 +5148,7 @@ async function executeGatewayManagedToolImpl(
               callerLayer: layer,
               sessionId,
               userId,
+              clientRequestId: executionContext?.clientRequestId ?? null,
             },
             instructionName: request.toolName,
             rawArgs: rawInput,
@@ -5886,11 +5907,30 @@ interface SessionRoleContextRow {
   team_parent_session_id: string | null;
 }
 
-function isBackgroundAutoApprovedTeamSession(sessionId: string): boolean {
-  const row = sqliteGet<SessionRoleContextRow>(
-    'SELECT role_layer, team_parent_session_id, handoff_state FROM sessions WHERE id = ? LIMIT 1',
-    [sessionId],
+function getSessionRoleContext(sessionId: string): SessionRoleContextRow | null {
+  return (
+    sqliteGet<SessionRoleContextRow>(
+      'SELECT role_layer, team_parent_session_id, handoff_state FROM sessions WHERE id = ? LIMIT 1',
+      [sessionId],
+    ) ?? null
   );
+}
+
+function hasTeamParentSessionId(row: SessionRoleContextRow): boolean {
+  return (
+    typeof row.team_parent_session_id === 'string' && row.team_parent_session_id.trim().length > 0
+  );
+}
+
+function hasBackgroundTeamContext(row: SessionRoleContextRow): boolean {
+  return (
+    hasTeamParentSessionId(row) &&
+    typeof row.handoff_state === 'string' &&
+    row.handoff_state.trim().length > 0
+  );
+}
+
+function isBackgroundAutoApprovedTeamSession(row: SessionRoleContextRow | null): boolean {
   if (!row) {
     return false;
   }
@@ -5901,12 +5941,29 @@ function isBackgroundAutoApprovedTeamSession(sessionId: string): boolean {
     row.role_layer === 'executor' ||
     row.role_layer === 'reviewer';
 
+  return isTeamRole && hasBackgroundTeamContext(row);
+}
+
+const RECEPTION_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...TOOLSET_TO_TOOL_NAMES.read,
+  ...TOOLSET_TO_TOOL_NAMES.web,
+]);
+
+// reception 只读白名单免审批：仅放行 read/web 类别工具，写入、Shell、LSP 改名等修改类
+// 工具仍走 ask；显式 deny 在本分支之前求值（权限阶梯不变量），白名单只能跳过 ask，
+// 永远无法放行被拒绝的调用。
+function isReceptionReadOnlyToolAutoApproved(
+  row: SessionRoleContextRow | null,
+  toolName: string,
+): boolean {
+  if (!row) {
+    return false;
+  }
+
   return (
-    isTeamRole &&
-    typeof row.team_parent_session_id === 'string' &&
-    row.team_parent_session_id.trim().length > 0 &&
-    typeof row.handoff_state === 'string' &&
-    row.handoff_state.trim().length > 0
+    row.role_layer === 'reception' &&
+    hasTeamParentSessionId(row) &&
+    RECEPTION_READ_ONLY_TOOL_NAMES.has(toolName)
   );
 }
 
@@ -6213,7 +6270,12 @@ function ensurePermissionForTool(
   // allow/deny 评估之后执行——显式 deny 已在上面两个分支提前返回，
   // 因此 auto-edit / yolo 只能跳过 ask，永远无法放行被 deny 的调用。
   const permissionMode = resolveSessionPermissionMode(sessionMetadata);
-  if (permissionMode === 'yolo' || isBackgroundAutoApprovedTeamSession(sessionId)) {
+  const sessionRoleContext = getSessionRoleContext(sessionId);
+  if (
+    permissionMode === 'yolo' ||
+    isBackgroundAutoApprovedTeamSession(sessionRoleContext) ||
+    isReceptionReadOnlyToolAutoApproved(sessionRoleContext, request.toolName)
+  ) {
     return { kind: 'not_needed' };
   }
 

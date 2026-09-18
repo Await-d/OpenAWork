@@ -131,6 +131,8 @@ export interface WorkflowLlmRequestConfig {
     /** 角色层级（reception/pm1/pm2/...）。空则不发事件。 */
     layer: string | null | undefined;
     agentId?: string | null;
+    /** 调用方已知的回合键；无父 handoff 的会话（reception）用它兜底归属回合。 */
+    clientRequestId?: string | null;
     /** 每百万输入 token 单价（USD），用于估算成本；缺省则成本记 0。 */
     inputPricePerMillion?: number;
     /** 每百万输出 token 单价（USD）。 */
@@ -271,6 +273,7 @@ export async function requestWorkflowLlmCompletion(
           sessionId: usageContext.sessionId,
           layer: usageContext.layer,
           agentId: usageContext.agentId ?? null,
+          clientRequestId: usageContext.clientRequestId ?? null,
           provider: providerType,
           model: input.model,
           inputTokens,

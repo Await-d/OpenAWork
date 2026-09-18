@@ -564,6 +564,7 @@ async function continueFromApprovedToolResult(input: {
             agentId: route.effectiveAgentId ?? undefined,
             provider: route.providerType ?? undefined,
             model: route.model ?? undefined,
+            clientRequestId: input.payload.clientRequestId,
             inputTokens: result.usage.inputTokens,
             outputTokens: result.usage.outputTokens,
             reasoningTokens: result.usage.reasoningTokens,

@@ -164,6 +164,7 @@ async function loadGraph(sessionId: string) {
 export async function runTaskCreateTool(
   sessionId: string,
   input: z.infer<typeof taskCreateInputSchema>,
+  clientRequestId?: string | null,
 ) {
   const taskManager = new AgentTaskManagerImpl();
   const graph = await loadGraph(sessionId);
@@ -202,6 +203,7 @@ export async function runTaskCreateTool(
     revision: 0,
     idempotencyKey: input.idempotencyKey,
     causationId: input.causationId,
+    clientRequestId: clientRequestId ?? undefined,
     metadata: input.metadata,
   });
   await taskManager.save(graph);

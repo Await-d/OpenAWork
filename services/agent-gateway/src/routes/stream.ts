@@ -1456,6 +1456,8 @@ export async function resolveStreamModelRoute(input: {
         ? (sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'])
         : input.requestData.reasoningEffort,
   };
+  const hasExplicitRequestSelection =
+    requestedProviderId !== undefined && requestedModelId !== undefined;
   const providerConfig = await getProviderForSelection(
     input.userId,
     {
@@ -1464,6 +1466,7 @@ export async function resolveStreamModelRoute(input: {
     },
     {
       fallbackToChat: !hasAuthoritativeTeamModel,
+      honorRequestedModel: !hasAuthoritativeTeamModel && hasExplicitRequestSelection,
     },
   );
 
@@ -1922,6 +1925,7 @@ export async function executeToolCalls(input: {
         toolName: toolCall.toolName,
         durationMs: result.durationMs ?? 0,
         success: !result.isError,
+        clientRequestId: input.clientRequestId,
         errorMessage:
           result.isError && typeof result.output === 'string'
             ? result.output.slice(0, 200)
@@ -2821,6 +2825,7 @@ export async function handleStreamRequest(input: {
               agentId: route.effectiveAgentId ?? undefined,
               provider: route.providerType ?? undefined,
               model: route.model ?? undefined,
+              clientRequestId: requestData.clientRequestId,
               inputTokens: result.usage.inputTokens,
               outputTokens: result.usage.outputTokens,
               reasoningTokens: result.usage.reasoningTokens,
@@ -2853,6 +2858,7 @@ export async function handleStreamRequest(input: {
                 : Date.now() - roundStartedAt,
               model: route.model ?? undefined,
               provider: route.providerType ?? undefined,
+              clientRequestId: requestData.clientRequestId,
             });
           }
         }

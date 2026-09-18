@@ -13,12 +13,27 @@
  */
 
 import { publishTeamEvent } from '../handoff/bus/team-events-bus.js';
+import { resolveSessionTurnClientRequestId } from '../handoff/store/handoff-store.js';
 import {
   persistTeamTimingRecord,
   persistTeamToolCallRecord,
   persistTeamUsageRecord,
 } from '../team/team-usage-records-store.js';
 import type { SessionStreamContext } from './stream.js';
+
+/**
+ * 团队记录归属的回合键解析（严格优先序，见 `resolveSessionTurnClientRequestId`）：
+ *   1. 会话自身的真实回合键（用户直接向团队子会话发消息时传入的键）→ 直接采用；
+ *   2. 子层（pm1/pm2/executor/reviewer）内部运行的 stream 请求键是重放幂等键
+ *      （`handoff:` / `pm1:` / `pm2:`），继承活跃父 handoff 的回合键；
+ *   3. 都没有 → 调用方兜底键（reception 路径）；仍无 → null（不伪造）。
+ */
+function resolveTeamRecordTurnClientRequestId(input: {
+  sessionId: string;
+  clientRequestId?: string | null;
+}): string | null {
+  return resolveSessionTurnClientRequestId(input.sessionId, input.clientRequestId);
+}
 
 function _parseTeamWorkspaceId(metadataJson: string): string | null {
   try {
@@ -46,10 +61,16 @@ export interface TeamUsageEventInput {
   cacheWriteTokens?: number;
   /** 估算成本 USD（可选，由调用方按 price-per-million 计算） */
   costUsd?: number;
+  /** 会话自身的回合键；用户直发子会话时优先于父 handoff 继承，见解析函数注释。 */
+  clientRequestId?: string | null;
 }
 
 export function publishTeamUsageEvent(input: TeamUsageEventInput): void {
   if (!input.sessionContext.roleLayer) return;
+  const turnClientRequestId = resolveTeamRecordTurnClientRequestId({
+    sessionId: input.sessionId,
+    clientRequestId: input.clientRequestId,
+  });
   // 持久化（落库）——让刷新/重连后"度量"tab 仍能看到历史用量，不再只活在内存。
   persistTeamUsageRecord({
     userId: input.userId,
@@ -58,6 +79,7 @@ export function publishTeamUsageEvent(input: TeamUsageEventInput): void {
     agentId: input.agentId ?? null,
     provider: input.provider ?? null,
     model: input.model ?? null,
+    clientRequestId: turnClientRequestId,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
     reasoningTokens: input.reasoningTokens ?? 0,
@@ -114,6 +136,8 @@ export interface TeamWorkflowUsageEventInput {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   costUsd?: number;
+  /** 会话自身的回合键；用户直发子会话时优先于父 handoff 继承，见解析函数注释。 */
+  clientRequestId?: string | null;
 }
 
 export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput): void {
@@ -138,6 +162,10 @@ export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput
       agentId: input.agentId ?? null,
       provider: input.provider ?? null,
       model: input.model ?? null,
+      clientRequestId: resolveTeamRecordTurnClientRequestId({
+        sessionId: input.sessionId,
+        clientRequestId: input.clientRequestId,
+      }),
       inputTokens: input.inputTokens,
       outputTokens: input.outputTokens,
       reasoningTokens: input.reasoningTokens ?? 0,
@@ -183,10 +211,16 @@ export interface TeamToolCallEventInput {
   durationMs: number;
   success: boolean;
   errorMessage?: string;
+  /** 会话自身的回合键；用户直发子会话时优先于父 handoff 继承，见解析函数注释。 */
+  clientRequestId?: string | null;
 }
 
 export function publishTeamToolCallEvent(input: TeamToolCallEventInput): void {
   if (!input.sessionContext.roleLayer) return;
+  const turnClientRequestId = resolveTeamRecordTurnClientRequestId({
+    sessionId: input.sessionId,
+    clientRequestId: input.clientRequestId,
+  });
   // 持久化工具调用计数（成功 / 失败），让刷新后仍能统计。
   persistTeamToolCallRecord({
     userId: input.userId,
@@ -197,6 +231,7 @@ export function publishTeamToolCallEvent(input: TeamToolCallEventInput): void {
     durationMs: input.durationMs,
     success: input.success,
     errorType: input.errorMessage ?? null,
+    clientRequestId: turnClientRequestId,
   });
   publishTeamEvent({
     type: 'session.substate.changed', // 同上
@@ -229,6 +264,8 @@ export interface TeamTimingEventInput {
   totalMs: number;
   model?: string;
   provider?: string;
+  /** 会话自身的回合键；用户直发子会话时优先于父 handoff 继承，见解析函数注释。 */
+  clientRequestId?: string | null;
 }
 
 export function publishTeamTimingEvent(input: TeamTimingEventInput): void {
@@ -242,6 +279,10 @@ export function publishTeamTimingEvent(input: TeamTimingEventInput): void {
     provider: input.provider ?? null,
     model: input.model ?? null,
     durationMs: input.totalMs,
+    clientRequestId: resolveTeamRecordTurnClientRequestId({
+      sessionId: input.sessionId,
+      clientRequestId: input.clientRequestId,
+    }),
   });
   publishTeamEvent({
     type: 'session.substate.changed', // 同上
