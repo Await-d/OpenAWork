@@ -152,6 +152,15 @@ export default defineConfig({
     sourcemap: true,
     chunkSizeWarningLimit: 800,
     rollupOptions: {
+      // @antv/g6 依赖 @antv/util，后者在模块顶层使用 `"use client"` 指令，
+      // 在 ESM 构建下会刷 MODULE_LEVEL_DIRECTIVE 警告（不影响运行）。
+      // 官方 FAQ 给出的处理方式即在此处静默该警告。
+      onwarn(warning, warn) {
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.message.includes('@antv/util')) {
+          return;
+        }
+        warn(warning);
+      },
       output: {
         manualChunks: {
           react: ['react', 'react-dom'],

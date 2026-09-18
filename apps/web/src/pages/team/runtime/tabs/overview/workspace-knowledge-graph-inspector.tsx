@@ -8,7 +8,7 @@ import {
   MAX_KNOWLEDGE_VALUE_LENGTH,
   ROLE_LAYER_LABELS,
   ROLE_LAYER_ORDER,
-} from './workspace-knowledge-graph-constants.js';
+} from './graph/knowledge-graph-constants.js';
 import type { LocalGraphDepth } from './workspace-knowledge-graph-toolbar.js';
 import { SectionPanel } from '../../shared/content-kit/SectionPanel.js';
 import { SegmentedToggle } from '../../shared/content-kit/SegmentedToggle.js';

@@ -3,20 +3,60 @@ import type { GraphRoleLayer } from '../../data/build-knowledge-graph.js';
 import { workspaceKnowledgeRoleLayerFromSearchTerm } from '../../data/workspace-knowledge-key-classification.js';
 import {
   type KnowledgeGraphColorMode,
-  type KnowledgeGraphForceSettings,
   type KnowledgeGraphLabelDensity,
-} from './workspace-knowledge-graph-canvas.js';
+} from './graph/knowledge-graph-canvas.js';
 import {
   MAX_KNOWLEDGE_SEARCH_LENGTH,
   ROLE_LAYER_LABELS,
   ROLE_LAYER_ORDER,
-} from './workspace-knowledge-graph-constants.js';
+} from './graph/knowledge-graph-constants.js';
 import {
   SegmentedToggle,
   type SegmentedToggleOption,
 } from '../../shared/content-kit/SegmentedToggle.js';
 
 export type LocalGraphDepth = 0 | 1 | 2 | 3;
+
+/** 可见折叠分组的「展开 <分组>」控件；`blocked` 为真时该分组在当前视口下无法展开。 */
+export interface GraphExpandGroupControl {
+  readonly id: string;
+  readonly label: string;
+  readonly blocked: boolean;
+}
+
+export interface GraphToolbarProps {
+  activeRoleLayer: GraphRoleLayer | null;
+  appliedQuery: string;
+  colorMode: KnowledgeGraphColorMode;
+  hideOrphans: boolean;
+  labelDensity: KnowledgeGraphLabelDensity;
+  localGraphEnabled: boolean;
+  localGraphAutoApplied: boolean;
+  localGraphDepth: LocalGraphDepth;
+  queryDraft: string;
+  onApplyQuery: () => void;
+  onCollapseAll?: () => void;
+  onColorModeChange: (mode: KnowledgeGraphColorMode) => void;
+  onClearQuery: () => void;
+  onExpandAll?: () => void;
+  /** 规模感知：图谱过大时禁用「展开全部」，改由点击分组逐层钻取。 */
+  expandAllDisabled?: boolean;
+  /** 禁用原因；渲染为 `title` 与 `aria-describedby`，让鼠标与读屏都能得到解释。 */
+  expandAllDisabledReason?: string;
+  /** 可见的折叠分组：逐组展开入口，被容量拒绝的分组渲染为禁用态。 */
+  expandGroups?: readonly GraphExpandGroupControl[];
+  onExpandGroup?: (nodeId: string) => void;
+  onHideOrphansChange: (hide: boolean) => void;
+  onLabelDensityChange: (density: KnowledgeGraphLabelDensity) => void;
+  onLocalGraphDepthChange: (depth: LocalGraphDepth) => void;
+  onUseAutoLocalGraph: () => void;
+  onSelectRoleLayer: (roleLayer: GraphRoleLayer | null) => void;
+  onQueryDraftChange: (value: string) => void;
+}
+
+/** 分组被容量拒绝时的提示；与顶部容量横幅同义，用于 `title`。 */
+const EXPAND_GROUP_BLOCKED_HINT =
+  '当前容器尺寸下该分组的子节点过多，无法展开；请放大窗口或使用搜索定位。';
 
 export function GraphToolbar({
   activeRoleLayer,
@@ -29,34 +69,21 @@ export function GraphToolbar({
   localGraphDepth,
   queryDraft,
   onApplyQuery,
+  onCollapseAll,
   onColorModeChange,
   onClearQuery,
+  onExpandAll,
+  expandAllDisabled,
+  expandAllDisabledReason,
+  expandGroups,
+  onExpandGroup,
   onHideOrphansChange,
   onLabelDensityChange,
   onLocalGraphDepthChange,
   onUseAutoLocalGraph,
   onSelectRoleLayer,
   onQueryDraftChange,
-}: {
-  activeRoleLayer: GraphRoleLayer | null;
-  appliedQuery: string;
-  colorMode: KnowledgeGraphColorMode;
-  hideOrphans: boolean;
-  labelDensity: KnowledgeGraphLabelDensity;
-  localGraphEnabled: boolean;
-  localGraphAutoApplied: boolean;
-  localGraphDepth: LocalGraphDepth;
-  queryDraft: string;
-  onApplyQuery: () => void;
-  onColorModeChange: (mode: KnowledgeGraphColorMode) => void;
-  onClearQuery: () => void;
-  onHideOrphansChange: (hide: boolean) => void;
-  onLabelDensityChange: (density: KnowledgeGraphLabelDensity) => void;
-  onLocalGraphDepthChange: (depth: LocalGraphDepth) => void;
-  onUseAutoLocalGraph: () => void;
-  onSelectRoleLayer: (roleLayer: GraphRoleLayer | null) => void;
-  onQueryDraftChange: (value: string) => void;
-}) {
+}: GraphToolbarProps) {
   const normalizedQueryDraft = queryDraft.trim();
   const inferredRoleLayer = workspaceKnowledgeRoleLayerFromSearchTerm(normalizedQueryDraft);
   const effectiveQueryDraft = inferredRoleLayer === undefined ? normalizedQueryDraft : '';
@@ -194,6 +221,54 @@ export function GraphToolbar({
             />
           </div>
         </ToolbarField>
+
+        {onExpandAll && onCollapseAll ? (
+          <ToolbarField label="展开">
+            <div className="workspace-knowledge-graph-toolbar-inline-group">
+              <button
+                type="button"
+                className="workspace-knowledge-graph-toggle-btn"
+                disabled={expandAllDisabled === true}
+                aria-disabled={expandAllDisabled === true}
+                aria-describedby={expandAllDisabled ? 'graph-expand-all-hint' : undefined}
+                title={expandAllDisabled ? expandAllDisabledReason : '展开全部聚合节点'}
+                onClick={onExpandAll}
+              >
+                展开全部
+              </button>
+              <button
+                type="button"
+                className="workspace-knowledge-graph-toggle-btn"
+                title="收起全部到顶层"
+                onClick={onCollapseAll}
+              >
+                收起全部
+              </button>
+              {expandGroups?.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  className="workspace-knowledge-graph-toggle-btn"
+                  disabled={group.blocked}
+                  aria-disabled={group.blocked}
+                  title={group.blocked ? EXPAND_GROUP_BLOCKED_HINT : `展开 ${group.label}`}
+                  onClick={() => onExpandGroup?.(group.id)}
+                >
+                  展开 {group.label}
+                </button>
+              ))}
+              {expandAllDisabled ? (
+                <span
+                  id="graph-expand-all-hint"
+                  className="workspace-knowledge-graph-toolbar-hint"
+                  role="status"
+                >
+                  {expandAllDisabledReason}
+                </span>
+              ) : null}
+            </div>
+          </ToolbarField>
+        ) : null}
       </div>
     </div>
   );
@@ -228,82 +303,4 @@ function localGraphStatus(
 ): string {
   if (localGraphDepth === 0) return '全图';
   return `${localGraphAutoApplied ? '自动 ' : ''}${localGraphDepth}跳`;
-}
-
-/* ─── 布局力控制（画布内折叠面板使用） ───────────────────── */
-
-export function GraphForceControls({
-  forceSettings,
-  onForceSettingsChange,
-}: {
-  forceSettings: KnowledgeGraphForceSettings;
-  onForceSettingsChange: (settings: KnowledgeGraphForceSettings) => void;
-}) {
-  return (
-    <div className="workspace-knowledge-graph-force-controls">
-      <GraphForceRange
-        label="排斥"
-        max={360}
-        min={60}
-        step={10}
-        value={forceSettings.repel}
-        onChange={(repel) => onForceSettingsChange({ ...forceSettings, repel })}
-      />
-      <GraphForceRange
-        label="连线"
-        max={180}
-        min={56}
-        step={4}
-        value={forceSettings.distance}
-        onChange={(distance) => onForceSettingsChange({ ...forceSettings, distance })}
-      />
-      <GraphForceRange
-        label="中心"
-        max={0.2}
-        min={0.02}
-        step={0.01}
-        value={forceSettings.center}
-        onChange={(center) => onForceSettingsChange({ ...forceSettings, center })}
-      />
-      <GraphForceRange
-        label="拉力"
-        max={0.5}
-        min={0.05}
-        step={0.01}
-        value={forceSettings.link}
-        onChange={(link) => onForceSettingsChange({ ...forceSettings, link })}
-      />
-    </div>
-  );
-}
-
-function GraphForceRange({
-  label,
-  max,
-  min,
-  onChange,
-  step,
-  value,
-}: {
-  label: string;
-  max: number;
-  min: number;
-  onChange: (value: number) => void;
-  step: number;
-  value: number;
-}) {
-  return (
-    <label className="workspace-knowledge-graph-force-range">
-      <span>{label}</span>
-      <input
-        type="range"
-        aria-label={`图谱${label}`}
-        max={max}
-        min={min}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.currentTarget.value))}
-      />
-    </label>
-  );
 }

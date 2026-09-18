@@ -1,0 +1,107 @@
+/* ───── 知识图谱无障碍层：canvas 无 DOM，用隐藏按钮承载键盘 / 屏幕阅读器访问 ───── */
+
+.knowledge-graph-a11y-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 每个节点一个 1px 隐藏按钮：保持在 tab 顺序与无障碍树中。
+   只做视觉隐藏（clip），禁止 display:none / visibility:hidden —— 否则会退出 tab 顺序。 */
+.knowledge-graph-a11y-node {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 键盘焦点到达时还原为可读 chip；文案来自 data-label（按钮本身无子节点）。 */
+.knowledge-graph-a11y-node:focus-visible {
+  top: var(--spacing-3);
+  left: var(--spacing-3);
+  z-index: 4;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  clip: auto;
+  clip-path: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.knowledge-graph-a11y-node:focus-visible::after {
+  content: attr(data-label);
+}
+
+/* 当前选中节点的 chip 强化对比，仍走 accent token。 */
+.knowledge-graph-a11y-node[aria-current='true']:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-overlay));
+}
+
+/* 容量不足被拒绝展开：chip 同样走静默 token，读作不可用。 */
+.knowledge-graph-a11y-node[aria-disabled='true']:focus-visible {
+  border-color: color-mix(in srgb, var(--border-default) 30%, transparent);
+  background: var(--bg-overlay);
+  color: var(--fg-subtle);
+  outline-color: var(--fg-subtle);
+  cursor: not-allowed;
+}
+
+/* 焦点播报区：始终留在无障碍树中，SR 才能可靠播报内容变化。
+   有内容时是画布左下角的可读 chip；为空时用 clip 收敛为 1px（不占位、不退出无障碍树）。 */
+.knowledge-graph-a11y-live {
+  position: absolute;
+  left: var(--spacing-3);
+  bottom: var(--spacing-3);
+  z-index: 3;
+  max-width: min(360px, calc(100% - var(--spacing-12) - var(--spacing-12)));
+  min-height: var(--spacing-6);
+  padding: var(--spacing-1) var(--spacing-2);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-default) 46%, transparent);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
+    color-mix(in srgb, var(--bg-base) 72%, transparent)
+  );
+  box-shadow: 0 8px 28px -18px color-mix(in srgb, var(--bg-base) 76%, transparent);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.knowledge-graph-a11y-live:empty {
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+}

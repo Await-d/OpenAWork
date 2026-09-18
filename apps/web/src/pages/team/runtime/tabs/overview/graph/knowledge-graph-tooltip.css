@@ -1,0 +1,64 @@
+/* 知识图谱 hover 提示框：用 E · Nebula token 覆盖 @antv/component 的默认浅色皮肤。
+   选择器带容器前缀以确保压过组件注入的 `.tooltip` 基础样式；不触碰 visibility（由组件内联控制）。 */
+
+.workspace-knowledge-graph-canvas .tooltip {
+  padding: 0;
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-overlay) 96%, transparent),
+    color-mix(in srgb, var(--bg-base) 92%, transparent)
+  );
+  box-shadow: var(--shadow-md);
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  min-width: 0;
+  max-width: min(320px, calc(100% - var(--spacing-6)));
+  pointer-events: none;
+}
+
+.knowledge-graph-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+.knowledge-graph-tooltip-title {
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.knowledge-graph-tooltip-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.knowledge-graph-tooltip-kind {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.knowledge-graph-tooltip-persisted {
+  padding: 0 var(--spacing-1);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  background: var(--success-muted);
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.knowledge-graph-tooltip-detail {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
