@@ -274,6 +274,20 @@ export {
   resolveModelsDevProvider,
 } from './provider/models-dev.js';
 export type { ModelsDevData, ModelsDevProvider, ModelsDevModel } from './provider/models-dev.js';
+export {
+  get as getCanonicalModelsData,
+  getSync as getCanonicalModelsDataSync,
+  refresh as refreshCanonicalModelsData,
+} from './provider/canonical-models.js';
+export type { CanonicalModelsData, CanonicalModelEntry } from './provider/canonical-models.js';
+export {
+  applyCanonicalModelAliases,
+  buildCanonicalAliasIndex,
+  deriveCanonicalLab,
+  isOfficialProviderHost,
+  resolveCanonicalModelId,
+} from './provider/canonical-alias.js';
+export type { CanonicalAliasIndex } from './provider/canonical-alias.js';
 export type { OAuthFlowManager, OAuthTokens, PlatformOAuthAdapter } from './provider/oauth.js';
 export { OAuthFlowManagerImpl } from './provider/oauth.js';
 export type { ProviderPersistenceAdapter } from './provider/persistence.js';

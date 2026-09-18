@@ -18,6 +18,14 @@ import {
   normalizeProviderBaseUrl,
 } from './utils.js';
 import * as ModelsDev from './models-dev.js';
+import * as CanonicalModels from './canonical-models.js';
+import {
+  applyCanonicalModelAliases,
+  buildCanonicalAliasIndex,
+  deriveCanonicalLab,
+  isOfficialProviderHost,
+  type CanonicalAliasIndex,
+} from './canonical-alias.js';
 
 const cloneModel = (model: AIModelConfig): AIModelConfig => ({
   ...model,
@@ -307,10 +315,27 @@ export class ProviderManagerImpl implements ProviderManager {
   }
 
   public async syncFromModelsDev(): Promise<AIProvider[]> {
-    return this.syncProviderCatalog(await ModelsDev.get());
+    const [data, canonical] = await Promise.all([ModelsDev.get(), CanonicalModels.get()]);
+    return this.syncProviderCatalog(data, canonical);
   }
 
-  private syncProviderCatalog(data?: ModelsDev.ModelsDevData): AIProvider[] {
+  private resolveAliasLab(
+    aliasIndex: CanonicalAliasIndex | null,
+    existing: AIProvider,
+    builtin: AIProvider,
+    liveProvider?: ModelsDev.ModelsDevProvider,
+  ): string | null {
+    if (!aliasIndex) return null;
+    if (isOfficialProviderHost(existing.baseUrl, builtin.baseUrl)) return null;
+    return deriveCanonicalLab(aliasIndex, Object.keys(liveProvider?.models ?? {}));
+  }
+
+  private syncProviderCatalog(
+    data?: ModelsDev.ModelsDevData,
+    canonical?: CanonicalModels.CanonicalModelsData,
+  ): AIProvider[] {
+    const aliasIndex = canonical ? buildCanonicalAliasIndex(canonical) : null;
+
     for (const type of BUILTIN_PROVIDER_TYPES) {
       const builtin = getBuiltinProviderPreset(type);
       const liveProvider = ModelsDev.resolveModelsDevProvider(data, type, builtin.id);
@@ -327,14 +352,22 @@ export class ProviderManagerImpl implements ProviderManager {
         continue;
       }
 
+      const aliasLab = this.resolveAliasLab(aliasIndex, existing, builtin, liveProvider);
+      const configuredModels = existing.defaultModels.filter((model) =>
+        this.isSupportedBuiltinModelId(type, model.id),
+      );
       const next: AIProvider = {
         ...existing,
         name: builtin.name,
         baseUrl: normalizeProviderBaseUrl(existing.baseUrl || builtin.baseUrl),
         apiKeyEnv: existing.apiKeyEnv ?? builtin.apiKeyEnv,
         defaultModels: mergeBuiltinModels(
-          builtinModels,
-          existing.defaultModels.filter((model) => this.isSupportedBuiltinModelId(type, model.id)),
+          aliasLab && aliasIndex
+            ? applyCanonicalModelAliases(builtinModels, aliasIndex, aliasLab)
+            : builtinModels,
+          aliasLab && aliasIndex
+            ? applyCanonicalModelAliases(configuredModels, aliasIndex, aliasLab)
+            : configuredModels,
         ),
         updatedAt: nowIso(),
       };

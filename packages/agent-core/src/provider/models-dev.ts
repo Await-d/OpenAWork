@@ -10,6 +10,7 @@ import {
 import type { BuiltinProviderType } from './presets.js';
 import type { AIModelConfig } from './types.js';
 import { normalizeOptionalTokenPrice } from './utils.js';
+import * as CanonicalModels from './canonical-models.js';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -225,6 +226,7 @@ export async function refresh(): Promise<void> {
   } catch (err) {
     console.warn('[models-dev] refresh failed', err);
   }
+  await CanonicalModels.refresh();
 }
 
 /**
@@ -236,7 +238,9 @@ export async function refresh(): Promise<void> {
  * stale cache left by an earlier successful fetch.
  */
 export async function refreshOrThrow(): Promise<ModelsDevData> {
-  return fetchAndCache();
+  const data = await fetchAndCache();
+  await CanonicalModels.refresh();
+  return data;
 }
 
 export async function get(): Promise<ModelsDevData> {
