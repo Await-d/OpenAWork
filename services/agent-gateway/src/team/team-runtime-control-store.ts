@@ -3,7 +3,15 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
 
-const TEAM_RUNTIME_CONTROL_SESSION_LIMIT = 200;
+/**
+ * 一次团队运行时控制（取消 / 暂停 / 恢复）波及的会话数上限；回合回退的受影响子树
+ * 检查复用同一常量（`session-turn-rollback.ts` 的 `resolveAffectedSessionIds`）。
+ *
+ * 对照两种超限语义：拦截类控制把子树截断到上限并标记 `truncated`；回合回退是破坏性
+ * 删除，超限时整体中止（409，一行不删）。因此该常量同时决定「多大的团队无法回退」，
+ * 上调必须带删除扇出的实测证据，不得仅因遇到大团队就提高。
+ */
+export const TEAM_RUNTIME_CONTROL_SESSION_LIMIT = 200;
 const TEAM_RUNTIME_CONTROL_MAX_DEPTH = 16;
 
 /**
