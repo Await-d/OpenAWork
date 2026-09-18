@@ -17,6 +17,7 @@ import {
 } from '../session/sync-event.js';
 import { sqliteRun, sqliteGet } from '../infra/db.js';
 import { invalidateSessionOwnerCache } from '../infra/session-owner-cache.js';
+import { deleteSessionMessageSearchDocumentsForSession } from '../session/session-search-store.js';
 import {
   type MessageInfo,
   type MessagePart,
@@ -284,6 +285,7 @@ registerProjector(SessionEvents.Updated.type, (event) => {
 registerProjector(SessionEvents.Deleted.type, (event) => {
   const data = event.data as { sessionID: string; info: SessionInfo };
   sqliteRun('DELETE FROM sessions WHERE id = ?', [data.sessionID]);
+  deleteSessionMessageSearchDocumentsForSession(data.sessionID);
   // The row is gone — drop its cached owner so later writes do not resolve a
   // stale user_id through the owner cache.
   invalidateSessionOwnerCache(data.sessionID);

@@ -132,6 +132,10 @@ export function deleteSessionMessageSearchDocument(messageId: string): void {
   sqliteRun('DELETE FROM session_messages_fts WHERE message_id = ?', [messageId]);
 }
 
+export function deleteSessionMessageSearchDocumentsForSession(sessionId: string): void {
+  sqliteRun('DELETE FROM session_messages_fts WHERE session_id = ?', [sessionId]);
+}
+
 export function rebuildSessionMessageSearchIndex(): void {
   sqliteRun('DELETE FROM session_messages_fts');
   const rows = sqliteAll<SessionMessageIndexRow>(
