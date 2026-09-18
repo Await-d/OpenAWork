@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useMemo } from 'react';
 import { splitStreamingMarkdownIntoSegments } from './streaming-markdown-chunks.js';
 import { normalizeMathMarkdown } from './normalize-math-markdown.js';
 import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
-import { StreamingFoldDisabledContext } from './streaming-fold-policy.js';
+import { FoldDisabledContext } from './fold-policy.js';
 
 const MarkdownMessageContent = lazy(() => import('./markdown-message-content.js'));
 const STREAMING_PLAIN_TAIL_THRESHOLD = 280;
@@ -24,7 +24,7 @@ export default function StreamingMarkdownContent({ content }: { content: string 
   // 若只靠该 prop 判断，「已闭合的围栏块」仍会在流式过程中被钳住高度。
   // 因此整个返回树（stableBlocks + activeTail）统一包进 context。
   return (
-    <StreamingFoldDisabledContext value={true}>
+    <FoldDisabledContext value={true}>
       <>
         {segments.stableBlocks.map((block, index) => (
           <StableMarkdownBlock key={`${index}:${block.length}`} content={block} />
@@ -41,7 +41,7 @@ export default function StreamingMarkdownContent({ content }: { content: string 
           ))}
         <span className="assistant-rich-content-cursor" />
       </>
-    </StreamingFoldDisabledContext>
+    </FoldDisabledContext>
   );
 }
 

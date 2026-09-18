@@ -23,7 +23,7 @@ import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
-import { useStreamingFoldDisabled } from './streaming-fold-policy.js';
+import { useFoldDisabled } from './fold-policy.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -446,7 +446,7 @@ function CodeBlock({
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
-  const foldDisabled = useStreamingFoldDisabled();
+  const foldDisabled = useFoldDisabled();
 
   // Cleanup on unmount so a stale timer can't toggle state on a
   // dismounted node (StrictMode double-invoke + scroll virtualization).
@@ -916,7 +916,7 @@ function MarkdownPreviewCodeBlock({
 }) {
   const [previewOpen, setPreviewOpen] = useState(true);
   const [expanded, setExpanded] = useState(false);
-  const foldDisabled = useStreamingFoldDisabled();
+  const foldDisabled = useFoldDisabled();
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const isLong = copyableCode.length > 400 || copyableCode.split('\n').length > 15;
   const shouldCollapse = isLong && !expanded && !foldDisabled;

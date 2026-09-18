@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useState } from 'react';
+import { FoldDisabledContext } from '../markdown/fold-policy.js';
 
 /**
  * Threshold above which an assistant message body is collapsed by
@@ -36,7 +37,8 @@ export const LatestAssistantMessageContext = createContext<string | null>(null);
  *
  * If `messageId` matches the value supplied by
  * `LatestAssistantMessageContext`, the fold is skipped so the latest
- * answer stays fully visible.
+ * answer stays fully visible — and `FoldDisabledContext` is provided
+ * so fenced blocks inside it also skip their own fold.
  */
 export function CollapsibleAssistantContent({
   content,
@@ -52,7 +54,13 @@ export function CollapsibleAssistantContent({
   const isLong = content.length > FOLD_CHAR_THRESHOLD;
   const [expanded, setExpanded] = useState(false);
 
-  if (!isLong || isLatest) return <>{children}</>;
+  // 最新一条已完成回复整体不折叠时，块级折叠（代码块 / Markdown 预览块）也必须跟着
+  // 禁用：它承载着用户刚问的问题的答案，若在 finalize 瞬间把块收起来，刚读完的内容
+  // 会突然塌缩，且该块高度突变会把视口向上顶（视口上跳）。这里透传 context，让围栏块
+  // 跳过自身折叠；历史回复仍走下面的整条折叠逻辑。
+  if (isLatest) return <FoldDisabledContext value={true}>{children}</FoldDisabledContext>;
+
+  if (!isLong) return <>{children}</>;
 
   return (
     <div className="chat-markdown-fold-container" data-expanded={expanded ? 'true' : 'false'}>
