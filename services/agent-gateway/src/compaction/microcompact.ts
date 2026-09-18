@@ -164,16 +164,12 @@ function collectCompactableToolResults(
         ? legacyNext
         : undefined);
     const imageCount = linkedAttachment?.images?.length ?? 0;
-    const imageUrlChars = linkedAttachment?.images?.reduce(
-      (sum, image) => sum + (image.imageUrl?.length ?? 0),
-      0,
-    );
-    const imageCostChars = Math.max(
+    // Media is billed at a flat per-image rate; the encoded data URL length must
+    // not dominate the prune budget.
+    const imageCostChars =
       imageCount *
-        DEFAULT_TOOL_CONTEXT_POLICY.estimatedImageTokens *
-        DEFAULT_TOOL_CONTEXT_POLICY.charsPerToken,
-      imageUrlChars ?? 0,
-    );
+      DEFAULT_TOOL_CONTEXT_POLICY.estimatedImageTokens *
+      DEFAULT_TOOL_CONTEXT_POLICY.charsPerToken;
     const outputLength = msg.content.length + imageCostChars;
     // Skip already-cleared results
     if (outputLength <= MICROCOMPACT_CLEARED_PLACEHOLDER.length + 10) continue;

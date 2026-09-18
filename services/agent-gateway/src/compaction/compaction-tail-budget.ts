@@ -15,6 +15,7 @@
  */
 
 import type { Message } from '@openAwork/shared';
+import { MEDIA_PAYLOAD_CHARS } from './media-payload-estimate.js';
 
 /** Default token preserve budget when caller does not supply one.
  * Increased from 2K/8K to 10K/40K to align with Claude Code's
@@ -46,9 +47,21 @@ export function estimateMessageTokens(message: Message): number {
         chars += content.toolCallId.length + (content.toolName?.length ?? 0);
         chars += JSON.stringify(content.input ?? {}).length;
         break;
-      case 'tool_result':
+      case 'tool_result': {
         chars += content.toolCallId.length;
         chars += typeof content.output === 'string' ? content.output.length : 0;
+        // Screenshot/tool images live on `attachments`, not in `output`.
+        for (const _attachment of content.attachments ?? []) {
+          chars += MEDIA_PAYLOAD_CHARS;
+        }
+        break;
+      }
+      case 'input_image':
+      case 'input_audio':
+      case 'input_video':
+        // Provider protocols normalize media to a flat token cost; the inlined
+        // base64 payload must never be billed by its encoded length.
+        chars += MEDIA_PAYLOAD_CHARS;
         break;
       default:
         // Unknown variant — fall back to JSON length.

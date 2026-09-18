@@ -19,6 +19,7 @@ import {
   parsePercentageOverride,
 } from '../compaction/compaction-parity-contract.js';
 import { microcompactMessages } from '../compaction/microcompact.js';
+import { stripMediaPayloadsForEstimate } from '../compaction/media-payload-estimate.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
   toModelMessages,
@@ -301,7 +302,10 @@ export function estimateModelMessagesTokens(messages: readonly unknown[]): numbe
   for (const message of messages) {
     try {
       const content = (message as { content?: unknown })?.content;
-      chars += typeof content === 'string' ? content.length : JSON.stringify(content ?? '').length;
+      chars +=
+        typeof content === 'string'
+          ? content.length
+          : JSON.stringify(stripMediaPayloadsForEstimate(content ?? '')).length;
     } catch {
       // 序列化失败（极少）跳过该条，不阻塞估算。
     }
@@ -316,7 +320,7 @@ export function estimateProviderRequestTokens(input: {
   readonly tools: unknown;
 }): number {
   try {
-    return Math.ceil(JSON.stringify(input).length / 4);
+    return Math.ceil(JSON.stringify(stripMediaPayloadsForEstimate(input)).length / 4);
   } catch {
     return estimateModelMessagesTokens([...input.system, ...input.messages]);
   }
