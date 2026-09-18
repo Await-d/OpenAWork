@@ -25,3 +25,36 @@ describe('getSessionModeLabels — 审批方式档位标签', () => {
     ).toEqual(['编程', 'YOLO']);
   });
 });
+
+describe('getSessionModeLabels — 标签范围选项', () => {
+  it('关闭对话模式标签后不再输出模式文案', () => {
+    expect(
+      getSessionModeLabels(JSON.stringify({ dialogueMode: 'coding' }), {
+        includeDialogueMode: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it('会话列表过滤模式下仅保留审批档位标签', () => {
+    const metadataJson = JSON.stringify({
+      dialogueMode: 'programmer',
+      permissionMode: 'yolo',
+      modelId: 'deepseek-chat',
+    });
+
+    expect(
+      getSessionModeLabels(metadataJson, {
+        includeDialogueMode: false,
+        includeModel: false,
+      }),
+    ).toEqual(['YOLO']);
+  });
+
+  it('模型名标签可独立关闭', () => {
+    expect(
+      getSessionModeLabels(JSON.stringify({ dialogueMode: 'coding', modelId: 'gpt-4o' }), {
+        includeModel: false,
+      }),
+    ).toEqual(['编程']);
+  });
+});

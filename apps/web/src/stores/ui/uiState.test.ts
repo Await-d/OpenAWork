@@ -7,11 +7,19 @@ import {
   SIDEBAR_PANEL_WIDTH_BOUNDS,
   TERMINAL_LAYOUT_MAX_DEPTH,
   TERMINAL_LAYOUT_MAX_NODES,
+  TERMINAL_PANEL_CHROME_HEIGHT,
   TERMINAL_PANEL_HEIGHT_BOUNDS,
+  TERMINAL_PANEL_POSITIONS,
+  TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS,
+  TERMINAL_MIN_PANE_HEIGHT,
   clampReviewPanelWidth,
   clampSidebarPanelWidth,
   clampTerminalPanelHeight,
+  clampTerminalPanelHeightToBounds,
   normalizeExpandedDirsSessionKey,
+  resolveEffectiveTerminalPanelPosition,
+  resolveTerminalPanelHeightBounds,
+  resolveTerminalPanelHeightWithPaneFloor,
   terminalPanelSessionKeyFor,
   useUIStateStore,
 } from './uiState.js';
@@ -36,8 +44,11 @@ function resetLayoutState(): void {
     teamSplitPos: 50,
     terminalLayoutBySession: {},
     terminalPanelHeight: TERMINAL_PANEL_HEIGHT_BOUNDS.default,
+    terminalPanelHeightCustomized: false,
+    terminalPanelMaximized: false,
     terminalPanelOpened: false,
     terminalPanelOpenedBySession: {},
+    terminalPanelPosition: 'bottom',
     workbenchLayoutMode: 'fusion',
   });
 }
@@ -209,6 +220,206 @@ describe('chat panels state', () => {
 
     expect(useUIStateStore.getState().reviewPanelOpened).toBe(true);
     expect(useUIStateStore.getState().terminalPanelOpened).toBe(true);
+  });
+});
+
+describe('reviewPanelOpened 刷新后保持（持久化偏好）', () => {
+  it('partialize 保留 reviewPanelOpened，不再被排除出存储', () => {
+    const partialize = useUIStateStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('useUIStateStore.persist 未配置 partialize');
+    }
+
+    const partial = partialize({
+      ...useUIStateStore.getState(),
+      reviewPanelOpened: true,
+    }) as { reviewPanelOpened?: boolean };
+
+    expect(partial.reviewPanelOpened).toBe(true);
+  });
+
+  it('merge 尊重存储值；缺省与非布尔脏数据回落 false', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+    // 水合期 currentState 取 store 默认值（reviewPanelOpened: false）。
+    const defaultCurrent = { ...useUIStateStore.getState(), reviewPanelOpened: false };
+
+    // 存储中的展开态必须被保留（本次修复的核心：不再被水合强制关闭）。
+    expect(merge({ reviewPanelOpened: true }, defaultCurrent).reviewPanelOpened).toBe(true);
+    // 存储中的收起态同样保留，覆盖 currentState 的 true。
+    expect(
+      merge({ reviewPanelOpened: false }, { ...defaultCurrent, reviewPanelOpened: true })
+        .reviewPanelOpened,
+    ).toBe(false);
+    // 旧版本未持久化该键 → 保留 currentState 的默认 false。
+    expect(merge({}, defaultCurrent).reviewPanelOpened).toBe(false);
+    // 手改出的非布尔值不穿到渲染期。
+    expect(
+      merge({ reviewPanelOpened: 'yes' }, { ...defaultCurrent, reviewPanelOpened: true })
+        .reviewPanelOpened,
+    ).toBe(false);
+  });
+
+  it('migrate 对 v20 之前的历史快照强制关闭，尾部兜底非布尔值', () => {
+    // v20 起该字段才停止持久化，因此 v19 及更早存储里可能残留 true，需清掉。
+    expect(runPersistMigration({ reviewPanelOpened: true }, 19).reviewPanelOpened).toBe(false);
+    expect(runPersistMigration({ reviewPanelOpened: 'yes' }, 26).reviewPanelOpened).toBe(false);
+    expect(runPersistMigration({}, 26).reviewPanelOpened).toBe(false);
+  });
+});
+
+describe('sidePanelActiveTab 载入期兜底（统一面板 tab）', () => {
+  it('merge 保留已知 tab（含新增的 code / preview），未知值回落 review', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+    const defaultCurrent = { ...useUIStateStore.getState(), sidePanelActiveTab: 'review' as const };
+
+    for (const tab of ['review', 'code', 'preview', 'context', 'files', 'browser'] as const) {
+      expect(merge({ sidePanelActiveTab: tab }, defaultCurrent).sidePanelActiveTab).toBe(tab);
+    }
+
+    expect(merge({ sidePanelActiveTab: 'legacy-unknown' }, defaultCurrent).sidePanelActiveTab).toBe(
+      'review',
+    );
+    expect(merge({ sidePanelActiveTab: 42 }, defaultCurrent).sidePanelActiveTab).toBe('review');
+    expect(merge({}, defaultCurrent).sidePanelActiveTab).toBe('review');
+  });
+});
+
+describe('sidePanelWorkspaceTab 已移除（一级 tab 扁平化）', () => {
+  it('store 不再暴露该字段，旧持久化残留值在 merge 被丢弃且无害', () => {
+    const state = useUIStateStore.getState();
+    expect('sidePanelWorkspaceTab' in state).toBe(false);
+    expect('setSidePanelWorkspaceTab' in state).toBe(false);
+
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+    const merged = merge({ sidePanelWorkspaceTab: 'browser' }, state);
+
+    expect('sidePanelWorkspaceTab' in merged).toBe(false);
+    expect(merged.sidePanelActiveTab).toBe(state.sidePanelActiveTab);
+  });
+});
+
+describe('terminal panel height bounds（视口相对）', () => {
+  it.each([
+    [768, 553, 269],
+    [800, 576, 280],
+    [1080, 778, 378],
+    [1440, 900, 504],
+  ])('视口 %ipx → min 120 / max %i / default %i', (viewportHeight, max, defaultHeight) => {
+    const bounds = resolveTerminalPanelHeightBounds(viewportHeight);
+
+    expect(bounds).toEqual({
+      min: TERMINAL_PANEL_HEIGHT_BOUNDS.min,
+      max,
+      default: defaultHeight,
+    });
+    expect(bounds.default).toBeLessThanOrEqual(bounds.max);
+    expect(bounds.max).toBeGreaterThanOrEqual(bounds.min + 120);
+  });
+
+  it('极矮视口仍保证 max ≥ min + 120，default 不低于 min + 40', () => {
+    const bounds = resolveTerminalPanelHeightBounds(200);
+
+    expect(bounds.max).toBe(TERMINAL_PANEL_HEIGHT_BOUNDS.min + 120);
+    expect(bounds.default).toBe(TERMINAL_PANEL_HEIGHT_BOUNDS.min + 40);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -100])(
+    '视口为 %s 时回落到静态 bounds',
+    (viewportHeight) => {
+      expect(resolveTerminalPanelHeightBounds(viewportHeight)).toEqual({
+        ...TERMINAL_PANEL_HEIGHT_BOUNDS,
+      });
+    },
+  );
+});
+
+describe('clampTerminalPanelHeightToBounds', () => {
+  const bounds = resolveTerminalPanelHeightBounds(800);
+
+  it('下越界抬到 min、上越界压到 max', () => {
+    expect(clampTerminalPanelHeightToBounds(10, bounds)).toBe(bounds.min);
+    expect(clampTerminalPanelHeightToBounds(9999, bounds)).toBe(bounds.max);
+  });
+
+  it('NaN 回落到 bounds.default', () => {
+    expect(clampTerminalPanelHeightToBounds(Number.NaN, bounds)).toBe(bounds.default);
+  });
+
+  it('边界值原样保留，中间值四舍五入', () => {
+    expect(clampTerminalPanelHeightToBounds(bounds.min, bounds)).toBe(bounds.min);
+    expect(clampTerminalPanelHeightToBounds(bounds.max, bounds)).toBe(bounds.max);
+    expect(clampTerminalPanelHeightToBounds(300.6, bounds)).toBe(301);
+  });
+});
+
+describe('分屏下限抬升（resolveTerminalPanelHeightWithPaneFloor）', () => {
+  const bounds = resolveTerminalPanelHeightBounds(800);
+
+  it('单 pane 不抬升', () => {
+    expect(resolveTerminalPanelHeightWithPaneFloor(200, 1, bounds)).toBe(200);
+  });
+
+  it('2 pane 抬到 chrome + 2 × 单 pane 下限', () => {
+    expect(resolveTerminalPanelHeightWithPaneFloor(200, 2, bounds)).toBe(
+      TERMINAL_PANEL_CHROME_HEIGHT + 2 * TERMINAL_MIN_PANE_HEIGHT,
+    );
+  });
+
+  it('4 pane 抬到 chrome + 4 × 单 pane 下限', () => {
+    expect(resolveTerminalPanelHeightWithPaneFloor(200, 4, bounds)).toBe(
+      TERMINAL_PANEL_CHROME_HEIGHT + 4 * TERMINAL_MIN_PANE_HEIGHT,
+    );
+  });
+
+  it('已超过所需高度时不动', () => {
+    expect(resolveTerminalPanelHeightWithPaneFloor(400, 2, bounds)).toBe(400);
+  });
+
+  it('抬升结果仍受 bounds.max 约束', () => {
+    const shortBounds = resolveTerminalPanelHeightBounds(500);
+    const floor = TERMINAL_PANEL_CHROME_HEIGHT + 4 * TERMINAL_MIN_PANE_HEIGHT;
+
+    expect(floor).toBeGreaterThan(shortBounds.max);
+    expect(resolveTerminalPanelHeightWithPaneFloor(200, 4, shortBounds)).toBe(shortBounds.max);
+  });
+
+  it('paneCount 非有限数按单 pane 处理', () => {
+    expect(resolveTerminalPanelHeightWithPaneFloor(200, Number.NaN, bounds)).toBe(200);
+  });
+});
+
+describe('terminalPanelHeight 自定义标记', () => {
+  it('默认为未自定义', () => {
+    expect(useUIStateStore.getState().terminalPanelHeightCustomized).toBe(false);
+  });
+
+  it('setTerminalPanelHeight 写值并置自定义标记', () => {
+    useUIStateStore.getState().setTerminalPanelHeight(240);
+
+    const state = useUIStateStore.getState();
+    expect(state.terminalPanelHeight).toBe(240);
+    expect(state.terminalPanelHeightCustomized).toBe(true);
+  });
+
+  it('写入值按持久化域 bounds 钳制（上限放宽到绝对上限）', () => {
+    useUIStateStore.getState().setTerminalPanelHeight(9999);
+    expect(useUIStateStore.getState().terminalPanelHeight).toBe(
+      TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.max,
+    );
+
+    useUIStateStore.getState().setTerminalPanelHeight(10);
+    expect(useUIStateStore.getState().terminalPanelHeight).toBe(
+      TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.min,
+    );
   });
 });
 
@@ -577,14 +788,40 @@ function fullBinaryLayout(depth: number): unknown {
 }
 
 describe('terminalLayoutBySession v24 → v25 迁移', () => {
-  it('persist 版本已提升到 25', () => {
-    expect(useUIStateStore.persist.getOptions().version).toBe(25);
+  it('persist 版本已提升到 26', () => {
+    expect(useUIStateStore.persist.getOptions().version).toBe(26);
   });
 
   it('v24 快照迁移得到空桶（分屏能力本轮才引入，无历史值可迁移）', () => {
     const migrated = runPersistMigration({ terminalPanelOpened: true }, 24);
 
     expect(migrated.terminalLayoutBySession).toEqual({});
+  });
+});
+
+describe('terminalPanelHeightCustomized v25 → v26 迁移', () => {
+  it('老数据无自定义标记 → false（老用户也能拿到视口默认高）', () => {
+    const migrated = runPersistMigration({ terminalPanelHeight: 240 }, 25);
+
+    expect(migrated.terminalPanelHeightCustomized).toBe(false);
+    expect(migrated.terminalPanelHeight).toBe(240);
+  });
+
+  it('老数据高度越界 → 钳到持久化域上限', () => {
+    const migrated = runPersistMigration({ terminalPanelHeight: 9999 }, 25);
+
+    expect(migrated.terminalPanelHeight).toBe(TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.max);
+    expect(migrated.terminalPanelHeightCustomized).toBe(false);
+  });
+
+  it('同版本脏数据（非布尔标记 / 越界高度）在载入期被归一', () => {
+    const migrated = runPersistMigration(
+      { terminalPanelHeight: 1_000_000, terminalPanelHeightCustomized: 'yes' },
+      26,
+    );
+
+    expect(migrated.terminalPanelHeight).toBe(TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.max);
+    expect(migrated.terminalPanelHeightCustomized).toBe(false);
   });
 });
 
@@ -821,5 +1058,114 @@ describe('terminalLayoutBySession 持久化装配（partialize / merge 核查）
 
     expect(merged.terminalLayoutBySession).toEqual({ '/chat/good': VALID_PANE });
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('terminalPanelMaximized 瞬态契约（不落盘 + 启动强制 false）', () => {
+  it('默认 false，setter / toggle 只改瞬态字段', () => {
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(false);
+
+    useUIStateStore.getState().setTerminalPanelMaximized(true);
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(true);
+
+    useUIStateStore.getState().toggleTerminalPanelMaximized();
+    expect(useUIStateStore.getState().terminalPanelMaximized).toBe(false);
+  });
+
+  it('partialize 把 terminalPanelMaximized 排除在持久化之外', () => {
+    const partialize = useUIStateStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('useUIStateStore.persist 未配置 partialize');
+    }
+
+    const partial = partialize({
+      ...useUIStateStore.getState(),
+      terminalPanelMaximized: true,
+    }) as { terminalPanelMaximized?: boolean };
+
+    expect(partial.terminalPanelMaximized).toBeUndefined();
+  });
+
+  it('merge 强制 false：存储里的 true 不得带进启动态', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+
+    const merged = merge(
+      { terminalPanelMaximized: true },
+      { ...useUIStateStore.getState(), terminalPanelMaximized: true },
+    );
+
+    expect(merged.terminalPanelMaximized).toBe(false);
+  });
+});
+
+describe('terminalPanelPosition 停靠位置（持久化偏好）', () => {
+  it('默认底部，setter 在三档位置间往返', () => {
+    expect(TERMINAL_PANEL_POSITIONS).toEqual(['bottom', 'left', 'right']);
+    expect(useUIStateStore.getState().terminalPanelPosition).toBe('bottom');
+
+    useUIStateStore.getState().setTerminalPanelPosition('right');
+    expect(useUIStateStore.getState().terminalPanelPosition).toBe('right');
+
+    useUIStateStore.getState().setTerminalPanelPosition('left');
+    expect(useUIStateStore.getState().terminalPanelPosition).toBe('left');
+
+    useUIStateStore.getState().setTerminalPanelPosition('bottom');
+    expect(useUIStateStore.getState().terminalPanelPosition).toBe('bottom');
+  });
+
+  it('partialize 保留位置（用户布局偏好，不在排除名单里）', () => {
+    const partialize = useUIStateStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('useUIStateStore.persist 未配置 partialize');
+    }
+
+    const partial = partialize({
+      ...useUIStateStore.getState(),
+      terminalPanelPosition: 'left',
+    }) as { terminalPanelPosition?: string };
+
+    expect(partial.terminalPanelPosition).toBe('left');
+  });
+
+  it('merge 把非成员值退回底部，成员值原样保留', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+    const current = { ...useUIStateStore.getState(), terminalPanelPosition: 'bottom' as const };
+
+    expect(merge({ terminalPanelPosition: 'diagonal' }, current).terminalPanelPosition).toBe(
+      'bottom',
+    );
+    expect(merge({ terminalPanelPosition: 42 }, current).terminalPanelPosition).toBe('bottom');
+    expect(merge({}, current).terminalPanelPosition).toBe('bottom');
+    expect(merge({ terminalPanelPosition: 'right' }, current).terminalPanelPosition).toBe('right');
+  });
+
+  it('migrate 尾部同样兜底成员校验（同版本脏数据 / 旧数据缺省）', () => {
+    expect(
+      runPersistMigration({ terminalPanelPosition: 'diagonal' }, 26).terminalPanelPosition,
+    ).toBe('bottom');
+    expect(runPersistMigration({ terminalPanelPosition: 'left' }, 26).terminalPanelPosition).toBe(
+      'left',
+    );
+    expect(runPersistMigration({}, 1).terminalPanelPosition).toBe('bottom');
+  });
+});
+
+describe('resolveEffectiveTerminalPanelPosition（窄视口降级）', () => {
+  it('宽视口保留三档位置', () => {
+    expect(resolveEffectiveTerminalPanelPosition('bottom', false)).toBe('bottom');
+    expect(resolveEffectiveTerminalPanelPosition('left', false)).toBe('left');
+    expect(resolveEffectiveTerminalPanelPosition('right', false)).toBe('right');
+  });
+
+  it('窄视口一律降级为底部', () => {
+    expect(resolveEffectiveTerminalPanelPosition('left', true)).toBe('bottom');
+    expect(resolveEffectiveTerminalPanelPosition('right', true)).toBe('bottom');
+    expect(resolveEffectiveTerminalPanelPosition('bottom', true)).toBe('bottom');
   });
 });

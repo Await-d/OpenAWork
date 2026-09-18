@@ -13,6 +13,7 @@ import {
   useLayerStore,
   useTeamNotificationStore,
 } from './team-events.js';
+import { clearRollbackTombstones, useRollbackTombstoneStore } from './rollback-tombstones.js';
 import { useTeamToolCallStore, useTeamUsageStore } from './team-usage.js';
 
 beforeEach(() => {
@@ -22,6 +23,7 @@ beforeEach(() => {
   useTeamNotificationStore.getState().clear();
   useTeamUsageStore.getState().clear();
   useTeamToolCallStore.getState().clear();
+  clearRollbackTombstones();
 });
 
 describe('computeTeamEventsReconnectDelay', () => {
@@ -229,13 +231,161 @@ describe('dispatchTeamEvent · 角色实例展示', () => {
   });
 });
 
+describe('useClarificationStore.push · 结构化选项', () => {
+  it('会从载荷读取合法 options 并带到澄清项', () => {
+    useClarificationStore.getState().push({
+      type: 'artifact.needs-clarification',
+      sessionId: 'pm1-session',
+      timestamp: 100,
+      payload: {
+        fromSessionId: 'pm1-session',
+        clarifications: [
+          {
+            id: 'q-options',
+            question: '是否确认？',
+            context: '',
+            options: [
+              { label: '确认', description: '共识达成', recommended: true },
+              { label: '需修改' },
+            ],
+          },
+        ],
+      },
+    });
+
+    const item = useClarificationStore.getState().items.find((entry) => entry.id === 'q-options');
+    expect(item?.options).toEqual([
+      { label: '确认', description: '共识达成', recommended: true },
+      { label: '需修改' },
+    ]);
+  });
+  it('非法选项元素逐个跳过，全非法时该题不带 options', () => {
+    useClarificationStore.getState().push({
+      type: 'artifact.needs-clarification',
+      sessionId: 'pm1-session',
+      timestamp: 100,
+      payload: {
+        fromSessionId: 'pm1-session',
+        clarifications: [
+          {
+            id: 'q-mixed',
+            question: '混合非法',
+            context: '',
+            options: [{ label: '有效选项' }, { label: 42 }, { label: '   ' }, null],
+          },
+          {
+            id: 'q-all-invalid',
+            question: '全部非法',
+            context: '',
+            options: ['text', { recommended: true }],
+          },
+        ],
+      },
+    });
+
+    const items = useClarificationStore.getState().items;
+    expect(items.find((entry) => entry.id === 'q-mixed')?.options).toEqual([{ label: '有效选项' }]);
+    expect(items.find((entry) => entry.id === 'q-all-invalid')?.options).toBeUndefined();
+  });
+});
+
+describe('useClarificationStore · 规范身份与轮次收敛', () => {
+  function pushClarifications(
+    entries: Array<{ id: string; question: string }>,
+    round?: number,
+  ): void {
+    useClarificationStore.getState().push({
+      type: 'artifact.needs-clarification',
+      sessionId: 'pm1-session',
+      timestamp: round ?? 0,
+      payload: {
+        fromSessionId: 'pm1-session',
+        ...(round !== undefined ? { round } : {}),
+        clarifications: entries,
+      },
+    });
+  }
+
+  it('按 id 去重的同时保存剥离轮次后缀的 nodeId', () => {
+    pushClarifications([{ id: '__grill_confirm__@r3', question: '确认？' }], 3);
+    pushClarifications([{ id: '__grill_confirm__@r3', question: '确认？' }], 3);
+
+    const items = useClarificationStore.getState().items;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.id).toBe('__grill_confirm__@r3');
+    expect(items[0]?.nodeId).toBe('__grill_confirm__');
+  });
+
+  it('同一 nodeId 的旧轮次被新一轮取代后不再计入 pendingCount', () => {
+    pushClarifications([{ id: '__grill_confirm__@r0', question: '确认？' }], 0);
+    pushClarifications([{ id: '__grill_confirm__@r1', question: '确认？' }], 1);
+
+    expect(useClarificationStore.getState().items).toHaveLength(2);
+    expect(useClarificationStore.getState().pendingCount).toBe(1);
+  });
+
+  it('不同 nodeId 各自计为待回答', () => {
+    pushClarifications(
+      [
+        { id: 'goal', question: '目标？' },
+        { id: '__grill_confirm__@r0', question: '确认？' },
+      ],
+      0,
+    );
+
+    expect(useClarificationStore.getState().pendingCount).toBe(2);
+  });
+
+  it('runtime 恢复缺少 nodeId 时按传输 id 补齐', () => {
+    useClarificationStore.getState().replaceFromRuntime([
+      {
+        id: '__grill_confirm__@r2',
+        sessionId: 'pm1-session',
+        fromSessionId: 'pm1-session',
+        question: '确认？',
+        context: '',
+        createdAt: 1,
+        status: 'pending',
+      },
+    ]);
+
+    const item = useClarificationStore.getState().items[0];
+    expect(item?.nodeId).toBe('__grill_confirm__');
+  });
+});
+
 describe('hydrateClarificationStore', () => {
+  it('会把 options 透传给 runtime 恢复的澄清项', () => {
+    hydrateClarificationStore([
+      {
+        context: '',
+        createdAt: 10,
+        fromSessionId: 'pm1-session',
+        id: 'q-options',
+        options: [
+          { label: '确认', description: '共识达成', recommended: true },
+          { label: '需修改' },
+        ],
+        question: '是否确认？',
+        sessionId: 'pm1-session',
+        status: 'pending',
+      },
+    ]);
+
+    const item = useClarificationStore.getState().items.find((entry) => entry.id === 'q-options');
+    expect(item?.options).toEqual([
+      { label: '确认', description: '共识达成', recommended: true },
+      { label: '需修改' },
+    ]);
+  });
+
   it('会用 runtime snapshot 覆盖待处理项，并保留本地已答/已忽略状态', () => {
     useClarificationStore.getState().markAnswered('local-answered', '已有答案');
     useClarificationStore.setState({
       items: [
         {
           id: 'local-answered',
+          nodeId: 'local-answered',
           sessionId: 'pm1-session',
           fromSessionId: 'pm1-session',
           question: '已有问题',
@@ -284,6 +434,7 @@ describe('hydrateClarificationStore', () => {
         }),
       ]),
     );
+    expect(items.find((item) => item.id === 'q-1')?.nodeId).toBe('q-1');
     expect(useClarificationStore.getState().pendingCount).toBe(1);
   });
 });
@@ -713,5 +864,67 @@ describe('dispatchTeamEvent · 度量遥测事件不污染通知 / handoff store
     });
     expect(useTeamNotificationStore.getState().events).toHaveLength(1);
     expect(useTeamNotificationStore.getState().events[0]?.type).toBe('session.substate.changed');
+  });
+});
+
+describe('dispatchTeamEvent · session.messages.rolled_back', () => {
+  const rollbackEvent = {
+    type: 'session.messages.rolled_back',
+    sessionId: 'root',
+    timestamp: 5_000,
+    payload: {
+      sessionId: 'root',
+      cutoffMessageId: 'msg-cutoff',
+      cutoffTimeMs: 1_000,
+      tombstoneAtMs: 2_000,
+      removedMessageIds: ['msg-cutoff'],
+      invalidatedClientRequestIds: ['req-1'],
+      affectedSessionIds: ['root', 'child'],
+    },
+  };
+
+  it('回执写入作废窗口，事件进入通知缓冲区但不产生未读', () => {
+    dispatchTeamEvent(rollbackEvent);
+
+    const windows = useRollbackTombstoneStore.getState().windows;
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.key).toBe('msg-cutoff');
+    expect(windows[0]?.affectedSessionIds).toEqual(new Set(['root', 'child']));
+
+    expect(useTeamNotificationStore.getState().events).toHaveLength(1);
+    expect(useTeamNotificationStore.getState().unreadCount).toBe(0);
+  });
+
+  it('重复投递同一回执保持幂等', () => {
+    dispatchTeamEvent(rollbackEvent);
+    dispatchTeamEvent(rollbackEvent);
+
+    expect(useRollbackTombstoneStore.getState().windows).toHaveLength(1);
+  });
+
+  it('applied === false 的空操作回执不写入作废窗口', () => {
+    dispatchTeamEvent({
+      ...rollbackEvent,
+      payload: {
+        ...rollbackEvent.payload,
+        applied: false,
+        removedMessageIds: [],
+        invalidatedClientRequestIds: [],
+      },
+    });
+
+    expect(useRollbackTombstoneStore.getState().windows).toHaveLength(0);
+  });
+
+  it('payload 形状不完整时忽略回执且不抛错', () => {
+    expect(() =>
+      dispatchTeamEvent({
+        type: 'session.messages.rolled_back',
+        sessionId: 'root',
+        timestamp: 5_000,
+        payload: { sessionId: 'root' },
+      }),
+    ).not.toThrow();
+    expect(useRollbackTombstoneStore.getState().windows).toHaveLength(0);
   });
 });

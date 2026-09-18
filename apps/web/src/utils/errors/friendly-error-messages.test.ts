@@ -81,4 +81,28 @@ describe('friendly-error-messages', () => {
     expect(formatted).toContain('这是错误信息');
     expect(formatted).toContain('💡 这是建议');
   });
+
+  it('无法归类的错误必须原样保留原始原因，而不是换成泛化模板', () => {
+    const result = getFriendlyErrorMessage('上游返回了一个无法归类的原因');
+
+    expect(result.title).toBe('请求失败');
+    expect(result.message).toBe('上游返回了一个无法归类的原因');
+  });
+
+  it('传入错误码后依赖前缀的 MODEL_ERROR 规则可以命中', () => {
+    const result = getFriendlyErrorMessage(
+      'Failed after 4 attempts. Last error: AI_APICallError: Service Unavailable',
+      'MODEL_ERROR',
+    );
+
+    expect(result.title).toBe('模型服务暂时不可用');
+    expect(result.message).toContain('4 次连接');
+  });
+
+  it('默认兜底不会把 [错误: CODE] 前缀带进文案', () => {
+    const result = getFriendlyErrorMessage('SSE 连接异常。', 'SSE_ERROR');
+
+    expect(result.title).toBe('请求失败');
+    expect(result.message).toBe('SSE 连接异常。');
+  });
 });

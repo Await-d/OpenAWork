@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildTeamSessionRoute, resolveTeamSessionFromRoute } from './team-session-route.js';
+import {
+  buildTeamSessionRoute,
+  resolveTeamSessionFromRoute,
+  resolveTeamSessionWorkspacePath,
+  resolveTeamWorkspaceIdForWorkspacePath,
+} from './team-session-route.js';
 
 const groups = [
   {
@@ -42,5 +47,86 @@ describe('team session route', () => {
         requestedSessionId: 'session-missing',
       }),
     ).toBe('session-default');
+  });
+
+  it('返回会话所在分组的工作区路径', () => {
+    expect(
+      resolveTeamSessionWorkspacePath({
+        groups: [
+          {
+            sessions: [{ id: 'session-default' }, { id: 'session-requested' }],
+            workspacePath: '/workspace/demo',
+          },
+          { sessions: [{ id: 'session-other' }], workspacePath: '/workspace/other' },
+        ],
+        sessionId: 'session-requested',
+      }),
+    ).toBe('/workspace/demo');
+  });
+
+  it('会话不属于任何分组时返回 null', () => {
+    expect(
+      resolveTeamSessionWorkspacePath({
+        groups: [{ sessions: [{ id: 'session-default' }], workspacePath: '/workspace/demo' }],
+        sessionId: 'session-missing',
+      }),
+    ).toBeNull();
+  });
+
+  it('分组没有工作区路径时返回 null', () => {
+    expect(
+      resolveTeamSessionWorkspacePath({
+        groups: [{ sessions: [{ id: 'session-default' }], workspacePath: null }],
+        sessionId: 'session-default',
+      }),
+    ).toBeNull();
+  });
+
+  it('工作区路径为空白时返回 null', () => {
+    expect(
+      resolveTeamSessionWorkspacePath({
+        groups: [{ sessions: [{ id: 'session-default' }], workspacePath: '   ' }],
+        sessionId: 'session-default',
+      }),
+    ).toBeNull();
+  });
+
+  it('嵌套路径命中工作区根目录时返回工作区 id', () => {
+    expect(
+      resolveTeamWorkspaceIdForWorkspacePath({
+        workspacePath: '/workspace/demo/packages/app',
+        workspaces: [{ id: 'workspace-demo', defaultWorkingRoot: '/workspace/demo' }],
+      }),
+    ).toBe('workspace-demo');
+  });
+
+  it('路径不在任何工作区根目录下时返回 null', () => {
+    expect(
+      resolveTeamWorkspaceIdForWorkspacePath({
+        workspacePath: '/workspace/outside',
+        workspaces: [{ id: 'workspace-demo', defaultWorkingRoot: '/workspace/demo' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('工作区路径为 null 时返回 null', () => {
+    expect(
+      resolveTeamWorkspaceIdForWorkspacePath({
+        workspacePath: null,
+        workspaces: [{ id: 'workspace-demo', defaultWorkingRoot: '/workspace/demo' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('路径归属第二个工作区时不误取第一个工作区', () => {
+    expect(
+      resolveTeamWorkspaceIdForWorkspacePath({
+        workspacePath: '/workspace/beta/project',
+        workspaces: [
+          { id: 'workspace-alpha', defaultWorkingRoot: '/workspace/alpha' },
+          { id: 'workspace-beta', defaultWorkingRoot: '/workspace/beta' },
+        ],
+      }),
+    ).toBe('workspace-beta');
   });
 });
