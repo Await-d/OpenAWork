@@ -37,6 +37,7 @@ import {
 } from '../../../utils/session/session-grouping.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { getPathBasename } from '../../../utils/workspace-path.js';
+import { readWorkspaceAlias, writeWorkspaceAlias } from '../../../utils/workspace-alias.js';
 import { buildTeamSessionRoute } from '../../../utils/session/team-session-route.js';
 import WorkspacePickerModal from '../../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../../common/modal/workspace-picker-data-source.js';
@@ -240,41 +241,21 @@ export function FusionSidebar({
   const sessionListRef = useRef<HTMLDivElement>(null);
 
   // 工作区显示别名：localStorage 持久化，key = 'ws-alias:' + path
-  const [workspaceAlias, setWorkspaceAlias] = useState<string>(() => {
-    if (!selectedWorkspacePath) return '';
-    try {
-      return localStorage.getItem(`ws-alias:${selectedWorkspacePath}`) ?? '';
-    } catch {
-      return '';
-    }
-  });
+  // （读写实现与标题栏共用 utils/workspace-alias，写入时会广播变更）
+  const [workspaceAlias, setWorkspaceAlias] = useState<string>(() =>
+    readWorkspaceAlias(selectedWorkspacePath),
+  );
 
   // 当 selectedWorkspacePath 变化时，从 localStorage 重新读取别名
   useEffect(() => {
-    if (!selectedWorkspacePath) {
-      setWorkspaceAlias('');
-      return;
-    }
-    try {
-      setWorkspaceAlias(localStorage.getItem(`ws-alias:${selectedWorkspacePath}`) ?? '');
-    } catch {
-      setWorkspaceAlias('');
-    }
+    setWorkspaceAlias(readWorkspaceAlias(selectedWorkspacePath));
   }, [selectedWorkspacePath]);
 
   const handleWorkspaceAliasChange = useCallback(
     (newAlias: string): void => {
       if (!selectedWorkspacePath) return;
       setWorkspaceAlias(newAlias);
-      try {
-        if (newAlias) {
-          localStorage.setItem(`ws-alias:${selectedWorkspacePath}`, newAlias);
-        } else {
-          localStorage.removeItem(`ws-alias:${selectedWorkspacePath}`);
-        }
-      } catch {
-        // localStorage 不可用时静默失败
-      }
+      writeWorkspaceAlias(selectedWorkspacePath, newAlias);
     },
     [selectedWorkspacePath],
   );

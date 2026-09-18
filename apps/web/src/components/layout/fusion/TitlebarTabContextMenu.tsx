@@ -10,9 +10,9 @@
 
 import { useCallback, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { resolveContextMenuPosition } from '../../common/display/context-menu-position.js';
 import './TitlebarTabContextMenu.css';
 
-const MENU_MARGIN = 8;
 const MENU_MIN_WIDTH = 200;
 const ESTIMATED_MENU_HEIGHT = 272;
 const MENU_ITEM_SELECTOR = '[role="menuitem"]:not(:disabled)';
@@ -143,17 +143,6 @@ export interface TitlebarTabContextMenuProps {
   readonly onDeleteSession: () => void;
 }
 
-function resolveMenuPosition(x: number, y: number): { left: number; top: number } {
-  if (typeof window === 'undefined') {
-    return { left: x, top: y };
-  }
-
-  return {
-    left: Math.max(MENU_MARGIN, Math.min(x, window.innerWidth - MENU_MIN_WIDTH - MENU_MARGIN)),
-    top: Math.max(MENU_MARGIN, Math.min(y, window.innerHeight - ESTIMATED_MENU_HEIGHT)),
-  };
-}
-
 export function TitlebarTabContextMenu({
   x,
   y,
@@ -172,7 +161,10 @@ export function TitlebarTabContextMenu({
 }: TitlebarTabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   // 位置直接由坐标派生：同一实例被复用到另一个标签时（右键切换标签）也要跟着移动。
-  const position = resolveMenuPosition(x, y);
+  const position = resolveContextMenuPosition(x, y, {
+    width: MENU_MIN_WIDTH,
+    height: ESTIMATED_MENU_HEIGHT,
+  });
   const trimmedTitle = tabTitle.trim();
 
   // 点击/右键菜单外的任意位置关闭。

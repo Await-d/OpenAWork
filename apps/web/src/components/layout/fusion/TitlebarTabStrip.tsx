@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -20,6 +21,10 @@ import { TitlebarTab } from './TitlebarTab.js';
 import { TitlebarTabContextMenu } from './TitlebarTabContextMenu.js';
 import { TitlebarToolsMenu } from './TitlebarToolsMenu.js';
 import { isTauriRuntime } from '../../../utils/gateway/desktop-gateway.js';
+import {
+  resolveWorkspaceDisplayName,
+  subscribeWorkspaceAlias,
+} from '../../../utils/workspace-alias.js';
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
 import './TitlebarTabStrip.css';
@@ -63,6 +68,11 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const togglePinSession = useUIStateStore((s) => s.togglePinSession);
   const closedSessionTabIds = useUIStateStore((s) => s.closedSessionTabIds);
   const clearClosedSessionTabIds = useUIStateStore((s) => s.clearClosedSessionTabIds);
+  const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+  // 当前项目名：与侧栏面板头部同源（别名优先），别名被重命名时通过订阅实时刷新。
+  const projectDisplayName = useSyncExternalStore(subscribeWorkspaceAlias, () =>
+    selectedWorkspacePath ? resolveWorkspaceDisplayName(selectedWorkspacePath) : '',
+  );
 
   const { sessions, quickDeleteSession, isDeletingSession } = useSessions();
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
@@ -345,6 +355,14 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
       <div className="titlebar-tab-strip__home-slot">
         <TitlebarHomeButton active={isHomeActive} onClick={handleGoHome} />
       </div>
+      {projectDisplayName ? (
+        <span
+          className="titlebar-tab-strip__project-name"
+          title={selectedWorkspacePath ?? undefined}
+        >
+          {projectDisplayName}
+        </span>
+      ) : null}
     </div>
   );
   const layoutControls = (

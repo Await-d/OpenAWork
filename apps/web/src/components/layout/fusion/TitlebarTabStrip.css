@@ -55,12 +55,25 @@
   flex-shrink: 0;
 }
 
+/* 首页位不再占满整条 64px：48px + 标题栏 8px 内边距后，Logo 中轴正好落在下方 64px Rail 的中轴上。 */
 .titlebar-tab-strip__home-slot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
+  width: 48px;
   flex-shrink: 0;
+}
+
+/* 当前项目名：占用原先的空白宽度，超长省略，完整路径走 tooltip。 */
+.titlebar-tab-strip__project-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .titlebar-tab-strip__traffic-lights {
@@ -129,25 +142,23 @@
     transform var(--dur-micro) var(--ease-micro);
 }
 
+/* 首页位承载品牌 Logo（filled 形态自带圆角底色），因此不再用「描边 + 底色」表达常态，
+   hover / active 反馈改为光晕，避免 Logo 底色上再叠一层方块。 */
 .titlebar-tab-strip__home-button {
   width: calc(var(--spacing-3) * 2 + var(--spacing-1));
   height: calc(var(--spacing-3) * 2 + var(--spacing-1));
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
   color: var(--fg-muted);
+  border-radius: calc(var(--radius-sm) + 2px);
 }
 
-.titlebar-tab-strip__home-button:hover,
-.titlebar-tab-strip__home-button[data-active='true'] {
-  border-color: var(--border-emphasis);
-  background: var(--bg-hover);
-  color: var(--fg-default);
+.titlebar-tab-strip__home-button:hover {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 
 .titlebar-tab-strip__home-button[data-active='true'] {
-  border-color: var(--accent-border);
-  background: var(--accent-subtle);
-  color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 55%, transparent);
 }
 
 .titlebar-tab-strip__new-session-button {
@@ -350,6 +361,11 @@
 
   .titlebar-tab-strip__home-slot {
     width: auto;
+  }
+
+  /* 窄屏优先把宽度让给会话标签，项目名折叠隐藏。 */
+  .titlebar-tab-strip__project-name {
+    display: none;
   }
 }
 
