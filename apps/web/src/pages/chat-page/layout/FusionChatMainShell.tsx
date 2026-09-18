@@ -1,4 +1,5 @@
 import type { CSSProperties, MutableRefObject, ReactNode, RefObject } from 'react';
+import type { TerminalPanelPosition } from '../../../stores/ui/uiState.js';
 import './FusionChatMainShell.css';
 
 type SplitStyle = {
@@ -11,7 +12,7 @@ type SplitStyle = {
 export interface FusionChatMainShellProps {
   readonly children: ReactNode;
   /**
-   * 侍审查/文件/Context 面板停靠打开时，对话+编辑器分组占工作台总宽度的百分比。
+   * 审查/Context 面板停靠打开时，对话+编辑器分组占工作台总宽度的百分比。
    * 默认落在 30%-40% 区间（见 {@link FUSION_DOCK_SPLIT_BOUNDS}），可拖拽调整。
    * 仅在 `showDockedSidePanel` 为 true 时生效。
    */
@@ -30,6 +31,16 @@ export interface FusionChatMainShellProps {
   readonly splitContainerRef: RefObject<HTMLDivElement | null>;
   readonly splitDragging: MutableRefObject<boolean>;
   readonly splitPos: number;
+  /**
+   * 终端面板最大化（瞬态）：为 true 时折叠工作台行，把剩余高度全部让给终端。
+   * 由 ChatPage 以「已最大化且面板可见」派生传入 —— 面板收起时不应折叠工作台。
+   */
+  readonly terminalMaximized: boolean;
+  /**
+   * 终端面板停靠位置（已按视口降级为有效值）：left / right 时根切换为横向分栏，
+   * 终端行成为全高列。与 terminalMaximized 互斥（选择侧停靠会先清最大化标记）。
+   */
+  readonly terminalPosition: TerminalPanelPosition;
   readonly terminal: ReactNode;
 }
 
@@ -46,6 +57,8 @@ export function FusionChatMainShell({
   splitContainerRef,
   splitDragging,
   splitPos,
+  terminalMaximized,
+  terminalPosition,
   terminal,
 }: FusionChatMainShellProps) {
   const conversationHidden = editorMode && editorFullScreen;
@@ -63,7 +76,17 @@ export function FusionChatMainShell({
     width: conversationHidden ? 0 : editorMode ? 'calc(var(--split-pos) - 2.5px)' : undefined,
   };
 
-  const rootClassName = 'fusion-chat-main-shell fusion-chat-main-shell--fusion';
+  const rootClassName = [
+    'fusion-chat-main-shell',
+    'fusion-chat-main-shell--fusion',
+    terminalMaximized ? 'fusion-chat-main-shell--terminal-maximized' : null,
+    // 侧停靠修饰类按位置二选一；terminalPosition 恒为有效值（窄视口 / overlay 已降级），
+    // 因此这里不需要再判一次可用性。
+    terminalPosition === 'left' ? 'fusion-chat-main-shell--terminal-left' : null,
+    terminalPosition === 'right' ? 'fusion-chat-main-shell--terminal-right' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
   const splitClassName = [
     'fusion-chat-main-shell__split',
     'fusion-chat-main-shell__split--fusion',

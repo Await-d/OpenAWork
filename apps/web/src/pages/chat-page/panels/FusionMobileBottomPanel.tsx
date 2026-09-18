@@ -50,6 +50,7 @@ export interface FusionMobileBottomPanelProps {
   readonly onShowEditor: () => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
   readonly overview?: FusionContextOverviewProps;
+  readonly reviewRevision?: number;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
   readonly saving: boolean;
   readonly token: string | null;
@@ -161,6 +162,13 @@ interface TabDef {
   readonly badge?: number;
 }
 
+const MOBILE_PANEL_TAB_IDS: readonly SidePanelTabId[] = ['review', 'files', 'context', 'browser'];
+
+/** 共享 store 在跨断点 / 布局切换后可能残留桌面 tab；渲染前收敛到审查，避免空面板。 */
+export function resolveMobilePanelTab(tab: SidePanelTabId): SidePanelTabId {
+  return MOBILE_PANEL_TAB_IDS.includes(tab) ? tab : 'review';
+}
+
 export function FusionMobileBottomPanel({
   activeEditorFilePath,
   activeTab,
@@ -182,14 +190,19 @@ export function FusionMobileBottomPanel({
   onShowEditor,
   onTabChange,
   overview,
+  reviewRevision,
   runtimeSummary,
   saving,
   token,
   workspaceFileItems,
 }: FusionMobileBottomPanelProps) {
+  const [mutationRefetchTick, setMutationRefetchTick] = useState(0);
+  const externalReviewRevision = reviewRevision ?? 0;
+  const mobileTab = resolveMobilePanelTab(activeTab);
   const reviewState = useReviewPanelFileChanges({
     gatewayUrl,
     opened: isOpen,
+    revision: externalReviewRevision + mutationRefetchTick,
     sessionId: currentSessionId,
     token,
   });
@@ -205,7 +218,7 @@ export function FusionMobileBottomPanel({
   ];
 
   const handleTabClick = (tabId: SidePanelTabId) => {
-    if (isOpen && activeTab === tabId) {
+    if (isOpen && mobileTab === tabId) {
       onClose();
     } else if (isOpen) {
       onTabChange(tabId);
@@ -234,15 +247,20 @@ export function FusionMobileBottomPanel({
           >
             <div className="fusion-mobile-bottom__sheet-drag-handle" />
             <div className="fusion-mobile-bottom__sheet-content">
-              {activeTab === 'review' ? (
+              {mobileTab === 'review' ? (
                 <FusionReviewTab
                   changeScope={changeScope}
                   diffViewMode={diffViewMode}
+                  gatewayUrl={gatewayUrl}
                   onChangeScope={setChangeScope}
                   onChangeViewMode={setDiffViewMode}
+                  onReviewMutated={() => setMutationRefetchTick((tick) => tick + 1)}
+                  revision={externalReviewRevision + mutationRefetchTick}
+                  sessionId={currentSessionId}
                   state={reviewState}
+                  token={token}
                 />
-              ) : activeTab === 'files' ? (
+              ) : mobileTab === 'files' ? (
                 <FusionFilesTab
                   activeEditorFilePath={activeEditorFilePath}
                   currentSessionId={currentSessionId}
@@ -258,7 +276,7 @@ export function FusionMobileBottomPanel({
                   saving={saving}
                   workspaceFileItems={workspaceFileItems}
                 />
-              ) : activeTab === 'browser' ? (
+              ) : mobileTab === 'browser' ? (
                 <FusionBrowserTab
                   currentSessionId={currentSessionId}
                   effectiveWorkingDirectory={effectiveWorkingDirectory}
@@ -286,7 +304,7 @@ export function FusionMobileBottomPanel({
         data-testid="fusion-mobile-bottom-strip"
       >
         {tabs.map((tab) => {
-          const isActive = isOpen && activeTab === tab.id;
+          const isActive = isOpen && mobileTab === tab.id;
           return (
             <button
               key={tab.id}

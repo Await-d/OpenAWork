@@ -42,6 +42,12 @@ export interface ChatUiActionsDeps {
    * intent — the file would be loaded but never displayed.
    */
   setEditorPaneTab: (tab: 'code' | 'browser') => void;
+  /**
+   * Fusion 桌面：文件打开入口改为聚焦会话面板的「代码」tab，而不是展开
+   * 主内容区分屏编辑器（编辑器的唯一入口已收敛到统一面板）。
+   * 省略时保持经典行为（editorMode + 主区 code tab）。
+   */
+  openFileInDockPanel?: () => void;
   setSaving: (value: boolean | ((prev: boolean) => boolean)) => void;
   splitDragging: React.MutableRefObject<boolean>;
   splitContainerRef: React.RefObject<HTMLElement | null>;
@@ -69,6 +75,7 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
     setRightTab,
     fileEditor,
     openFileRef,
+    openFileInDockPanel,
     setEditorMode,
     setEditorPaneTab,
     setSaving,
@@ -216,15 +223,19 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       // Always force the editor pane open on the code tab so a click
       // from chat / tool-call / hover popover lands in a visible
       // panel, even if the pane was previously on the browser tab
-      // or fully collapsed.
-      setEditorMode(true);
-      setEditorPaneTab('code');
+      // or fully collapsed. Fusion desktop 改为聚焦会话面板的代码 tab。
+      if (openFileInDockPanel) {
+        openFileInDockPanel();
+      } else {
+        setEditorMode(true);
+        setEditorPaneTab('code');
+      }
       void fileEditor.openFile(path, options);
     };
     return () => {
       openFileRef.current = null;
     };
-  }, [openFileRef, fileEditor, setEditorMode, setEditorPaneTab]);
+  }, [openFileRef, fileEditor, openFileInDockPanel, setEditorMode, setEditorPaneTab]);
 
   return {
     appendCommandCard,

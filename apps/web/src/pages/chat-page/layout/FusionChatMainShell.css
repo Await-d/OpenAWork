@@ -113,3 +113,51 @@
   flex-shrink: 0;
   min-width: 0;
 }
+
+/* ── 终端侧停靠（left / right；由 ChatPage 传入按视口降级后的有效位置）──
+   根从纵向堆叠改为横向分栏：工作台行吃剩余宽度并允许收缩（min-width: 0 必须有，
+   否则内容宽度会把终端列挤出容器），终端行成为全高列。
+
+   终端行用 display: contents 而不是自己充当定宽列：停靠列宽是「外壳宽度的百分比」，
+   百分比只能相对**确定宽度**的包含块解析。若终端行是内容驱动的 flex item，面板的
+   32% 在固有尺寸阶段不可解析（按 auto 处理），停靠列宽会被 xterm 的固有宽度反向决定，
+   在窄屏上足以把工作台挤到 0。display: contents 让面板直接成为外壳的 flex item，
+   百分比就落在外壳这个确定宽度上（与对话列的 --split-pos 同源）。
+
+   左停靠用 order 而不是重排 JSX：DOM 顺序恒定，终端面板在左右切换时才不会被卸载
+   重建（xterm 会话一旦卸载只能靠 ring 回放恢复）；order 落在面板自身（见
+   terminal-panel.css 的 [data-docked='left']），因为它才是被 contents 提升后的项。
+   与 --terminal-maximized 不会叠加：选择侧停靠会先清掉最大化标记（见 QuickTerminalPanel）。 */
+.fusion-chat-main-shell--terminal-left,
+.fusion-chat-main-shell--terminal-right {
+  flex-direction: row;
+}
+
+.fusion-chat-main-shell--terminal-left .fusion-chat-main-shell__workbench-row,
+.fusion-chat-main-shell--terminal-right .fusion-chat-main-shell__workbench-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fusion-chat-main-shell--terminal-left .fusion-chat-main-shell__terminal,
+.fusion-chat-main-shell--terminal-right .fusion-chat-main-shell__terminal {
+  display: contents;
+}
+
+/* ── 终端最大化（瞬态，由 ChatPage 派生传入）──
+   工作台行折叠为零高（裁掉溢出：聊天/编辑器让位而不是被隐藏），终端行吃掉全部剩余
+   高度。这是有意为之：没有别的还原入口 —— 唯一的方式是 terminal 面板 rail 上的
+   还原按钮与 rail 右键菜单的「还原面板」（见 terminal-panel.css 的 data-maximized）。
+   --classic 变体共享这两条规则：只要宿主传了 terminalMaximized，语义就一致。 */
+.fusion-chat-main-shell--terminal-maximized .fusion-chat-main-shell__workbench-row {
+  flex: 0 0 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fusion-chat-main-shell--terminal-maximized .fusion-chat-main-shell__terminal {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}

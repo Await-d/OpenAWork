@@ -1,23 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { FileEditorPanel } from './editor/FileEditorPanel.js';
 import { BuiltInBrowser } from '../chat/misc/BuiltInBrowser.js';
+import { normalizeBrowserPreviewInput } from '../chat/misc/browser/browser-url.js';
 import { ResizeHandle } from '../layout/shared/resize-handle.js';
 import {
   FILE_TREE_WIDTH_DEFAULT,
   FILE_TREE_WIDTH_MAX,
   FILE_TREE_WIDTH_MIN,
-  clampFileTreeWidth,
 } from './workspace-resize.js';
 import type { OpenFile, RevealTarget } from '../../hooks/editor/useFileEditor.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import './editor-browser-workspace.css';
 
 export type EditorPaneTab = 'code' | 'browser';
 
-const FILE_TREE_WIDTH_BOUNDS = {
+export interface FileTreeWidthBounds {
+  readonly min: number;
+  readonly max: number;
+}
+
+const FILE_TREE_WIDTH_BOUNDS: FileTreeWidthBounds = {
   min: FILE_TREE_WIDTH_MIN,
   max: FILE_TREE_WIDTH_MAX,
-  default: FILE_TREE_WIDTH_DEFAULT,
 };
+
+function clampWidthToBounds(width: number, bounds: FileTreeWidthBounds): number {
+  if (!Number.isFinite(width)) return bounds.min;
+  return Math.min(bounds.max, Math.max(bounds.min, width));
+}
 
 /**
  * 编辑器 + 内置浏览器的可复用工作区。
@@ -57,6 +67,30 @@ export interface EditorBrowserWorkspaceProps {
   /** Callback when the active tab changes. */
   onTabChange?: (tab: EditorPaneTab) => void;
   /**
+   * 本实例声明的浏览器宿主面。全应用同一时刻只有 `browserPreviewSurface` 与之一致
+   * 的那一个实例挂载 `BuiltInBrowser`：停靠面板的工作区 pane 传 `'dock'`，主内容区
+   * / 团队页 / 移动端文件 tab 缺省 `'editor'`。
+   */
+  browserSurface?: 'editor' | 'dock';
+  /**
+   * 缺省 `false`：没有预览地址且从未挂载过浏览器时不出现「预览」子 tab
+   * （主内容区 / 移动端保持既有行为）。停靠面板传 `true`，让工作区在没有地址时
+   * 也永远有一个可见的预览入口。
+   */
+  alwaysShowBrowserTab?: boolean;
+  /**
+   * 缺省 `false`：渲染内建「代码 / 预览」两个子 tab 按钮。停靠面板传 `true` ——
+   * 一级 tab 条（审查 / 代码 / 预览 / Context）是唯一切换 UI，子 tab 按钮必须隐藏，
+   * 避免出现两层切换；隐藏的只是按钮，全屏按钮仍照常渲染。
+   */
+  hidePaneTabs?: boolean;
+  /**
+   * 空态里用户提交预览地址时的回调（已补全 scheme）。缺省时不渲染地址输入 ——
+   * 主内容区 / 移动端的空态行为因此保持原样；停靠面板把它写回当前 workspace 的
+   * 预览 URL。
+   */
+  onBrowserPreviewUrlChange?: (url: string | null) => void;
+  /**
    * Whether the workspace is currently rendered full-width (occupying the
    * whole content area). Drives the fullscreen toggle's pressed state /
    * icon. Optional — when `onToggleFullScreen` is omitted no toggle shows.
@@ -69,6 +103,16 @@ export interface EditorBrowserWorkspaceProps {
    * (e.g. a workspace file explorer in the chat editor pane).
    */
   fileTree?: React.ReactNode;
+  /**
+   * Initial width of the file tree column. Callers embedding the workspace in a
+   * narrow pane (e.g. the dock side panel) pass a smaller value.
+   */
+  fileTreeInitialWidth?: number;
+  /**
+   * Width bounds of the file tree column. Narrow panes pass tighter bounds so
+   * the editor column always keeps usable width.
+   */
+  fileTreeWidthBounds?: FileTreeWidthBounds;
 }
 
 export function EditorBrowserWorkspace({
@@ -79,9 +123,15 @@ export function EditorBrowserWorkspace({
   workspacePath,
   activeTab = 'code',
   onTabChange,
+  browserSurface = 'editor',
+  alwaysShowBrowserTab = false,
+  hidePaneTabs = false,
+  onBrowserPreviewUrlChange,
   fullScreen = false,
   onToggleFullScreen,
   fileTree,
+  fileTreeInitialWidth,
+  fileTreeWidthBounds,
 }: EditorBrowserWorkspaceProps) {
   const [localTab, setLocalTab] = useState<EditorPaneTab>('code');
   const currentTab = onTabChange ? activeTab : localTab;
@@ -89,16 +139,26 @@ export function EditorBrowserWorkspace({
 
   // ── File tree resizable width ──────────────────────────────────────
   // 约束在 workspace-resize.ts，拖拽/键盘由共享 ResizeHandle 提供。
-  const [fileTreeWidth, setFileTreeWidth] = useState(FILE_TREE_WIDTH_DEFAULT);
+  const treeBounds = fileTreeWidthBounds ?? FILE_TREE_WIDTH_BOUNDS;
+  const [fileTreeWidth, setFileTreeWidth] = useState(
+    fileTreeInitialWidth ?? FILE_TREE_WIDTH_DEFAULT,
+  );
+
+  // 容器变窄（分栏拖动 / 停靠面板宽度变化）时把已有宽度重新钳回新区间，
+  // 否则文件树会越过 45% 上限把编辑器压到不可用。
+  useEffect(() => {
+    setFileTreeWidth((width) => clampWidthToBounds(width, treeBounds));
+  }, [treeBounds.min, treeBounds.max]);
 
   // Keep browser mounted once activated (preserves page state across tab switches)
   const [browserMounted, setBrowserMounted] = useState(false);
-  // 单一浏览器互斥：停靠侧面板的浏览器 tab 持有浏览器时（browserPreviewSurface
-  // === 'dock'），这里绝不挂载第二份 BuiltInBrowser——两份实例会各自建立网关
-  // 实时会话（controller 选举 / ack 额度互相抢占）。停靠面板卸载后自动归还。
-  const browserPreviewSurface = useUIStateStore((s) => s.browserPreviewSurface);
-  const browserHostedByDock = browserPreviewSurface === 'dock';
-  const showBrowserTab = (!!browserPreviewUrl || browserMounted) && !browserHostedByDock;
+  // 单一浏览器互斥：BuiltInBrowser 持有唯一的网关实时会话，全应用同一时刻最多
+  // 挂载一份。每个实例声明自己的宿主面（editor / dock），只有与 store 中当前激活
+  // 宿主一致的实例才挂载浏览器；停靠面板卸载归还 'editor' 后由主内容区接管。
+  const activeBrowserSurface = useUIStateStore((s) => s.browserPreviewSurface);
+  const ownsBrowserSurface = browserSurface === activeBrowserSurface;
+  const showBrowserTab =
+    (!!browserPreviewUrl || browserMounted || alwaysShowBrowserTab) && ownsBrowserSurface;
 
   // Auto-switch to browser tab only when browserPreviewUrl is *newly* set
   // (e.g. dev-server detect 推入或用户主动打开)。挂载时 url 已存在(刷新后从持久化
@@ -121,8 +181,14 @@ export function EditorBrowserWorkspace({
   const effectiveTab: EditorPaneTab =
     currentTab === 'browser' && !showBrowserTab ? 'code' : currentTab;
 
-  // 只有「需要 tab 栏」或「需要全屏切换按钮」时才渲染顶部工具条。
-  const showToolbar = showBrowserTab || !!onToggleFullScreen;
+  // 无地址时的预览入口：只有宿主提供了写回回调才渲染（主内容区 / 移动端缺省不渲染）。
+  const showBrowserEmptyState =
+    effectiveTab === 'browser' && !browserPreviewUrl && !!onBrowserPreviewUrlChange;
+
+  // 停靠面板（`hidePaneTabs`）把子 tab 与全屏入口都移到面板一级 tab 条上，本组件
+  // 完全不渲染内部工具条，避免在 tab 条与内容之间残留一条只有图标的空行；主内容区 /
+  // 移动端保持原工具条（子 tab + 内建全屏按钮）。
+  const showToolbar = !hidePaneTabs && (showBrowserTab || !!onToggleFullScreen);
 
   return (
     <div
@@ -137,6 +203,7 @@ export function EditorBrowserWorkspace({
     >
       {showToolbar && (
         <div
+          data-testid="editor-browser-workspace-toolbar"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -298,8 +365,8 @@ export function EditorBrowserWorkspace({
           >
             <ResizeHandle
               width={fileTreeWidth}
-              bounds={FILE_TREE_WIDTH_BOUNDS}
-              clamp={clampFileTreeWidth}
+              bounds={{ ...treeBounds, default: fileTreeInitialWidth ?? FILE_TREE_WIDTH_DEFAULT }}
+              clamp={(width) => clampWidthToBounds(width, treeBounds)}
               ariaLabel="调整文件树宽度"
               onWidthChange={setFileTreeWidth}
               onWidthCommit={setFileTreeWidth}
@@ -335,18 +402,85 @@ export function EditorBrowserWorkspace({
       </div>
 
       {/* Browser preview — stays mounted once activated */}
-      {browserMounted && !browserHostedByDock && (
-        <BuiltInBrowser
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: effectiveTab === 'browser' ? 'flex' : 'none',
-          }}
-          previewUrl={browserPreviewUrl}
-          workspacePath={workspacePath}
-          hidden={effectiveTab !== 'browser'}
+      {browserMounted &&
+        ownsBrowserSurface &&
+        // 提供空态回调的宿主（停靠面板）在无地址时用空态替代浏览器，避免出现
+        // 一个没有地址栏来源的空白浏览器；主内容区 / 移动端保持原行为。
+        (!!browserPreviewUrl || !onBrowserPreviewUrlChange) && (
+          <BuiltInBrowser
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: effectiveTab === 'browser' ? 'flex' : 'none',
+            }}
+            previewUrl={browserPreviewUrl}
+            workspacePath={workspacePath}
+            hidden={effectiveTab !== 'browser'}
+          />
+        )}
+
+      {showBrowserEmptyState && onBrowserPreviewUrlChange ? (
+        <BrowserPreviewEmptyState onSubmit={onBrowserPreviewUrlChange} />
+      ) : null}
+    </div>
+  );
+}
+
+function BrowserPreviewEmptyState({ onSubmit }: { onSubmit: (url: string) => void }) {
+  const [draftUrl, setDraftUrl] = useState('');
+  const normalizedDraftUrl = normalizeBrowserPreviewInput(draftUrl);
+
+  return (
+    <div className="editor-browser-workspace__empty" data-testid="editor-browser-empty-state">
+      <span className="editor-browser-workspace__empty-icon" aria-hidden="true">
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      </span>
+      <div className="editor-browser-workspace__empty-copy">
+        <strong>还没有预览地址</strong>
+        <span>
+          在对话里执行 /open &lt;url&gt;、让 Agent 启动 dev server 自动检测端口，或直接填入地址。
+        </span>
+      </div>
+      <form
+        className="editor-browser-workspace__empty-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (normalizedDraftUrl === null) {
+            return;
+          }
+          onSubmit(normalizedDraftUrl);
+          setDraftUrl('');
+        }}
+      >
+        <input
+          className="editor-browser-workspace__empty-input"
+          type="text"
+          value={draftUrl}
+          aria-label="预览地址"
+          placeholder="http://localhost:5173"
+          onChange={(event) => setDraftUrl(event.target.value)}
         />
-      )}
+        <button
+          className="editor-browser-workspace__empty-submit"
+          type="submit"
+          disabled={normalizedDraftUrl === null}
+        >
+          打开预览
+        </button>
+      </form>
     </div>
   );
 }

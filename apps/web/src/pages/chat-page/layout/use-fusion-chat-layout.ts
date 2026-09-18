@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import type { SidePanelActiveTab } from '../../../stores/ui/uiState.js';
 import {
   resolveFusionConversationLayoutState,
   type ConversationLayoutState,
@@ -12,18 +13,18 @@ export interface UseFusionChatLayoutOptions {
   readonly enabled: boolean;
   readonly isNarrowViewport: boolean;
   readonly reviewPanelOpened: boolean;
+  readonly setEditorFullScreen: (value: boolean) => void;
+  readonly setEditorMode: (value: boolean) => void;
   readonly setReviewPanelOpened: (open: boolean) => void;
-  readonly setSidePanelActiveTab: (tab: 'review' | 'files' | 'context' | 'browser') => void;
+  readonly setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
   readonly setTerminalPanelOpened: (open: boolean) => void;
-  readonly sidePanelActiveTab: 'review' | 'files' | 'context' | 'browser';
+  readonly sidePanelActiveTab: SidePanelActiveTab;
   readonly terminalPanelOpened: boolean;
   readonly terminalRunningCount: number;
 }
 
 export interface FusionChatLayoutState {
   readonly conversationLayoutState: ConversationLayoutState;
-  /** 打开停靠侧面板并切到浏览器预览 tab（编辑器面板会同时让出浏览器所有权）。 */
-  readonly openBrowserPreviewPanel: () => void;
   readonly pageRootClassName: string;
   readonly pageRootStyle: CSSProperties | undefined;
   readonly rightPanelCommandDescription: string;
@@ -40,6 +41,8 @@ export function useFusionChatLayout({
   enabled,
   isNarrowViewport,
   reviewPanelOpened,
+  setEditorFullScreen,
+  setEditorMode,
   setReviewPanelOpened,
   setSidePanelActiveTab,
   setTerminalPanelOpened,
@@ -82,6 +85,17 @@ export function useFusionChatLayout({
   ]);
 
   const toggleReviewPanel = useCallback(() => {
+    // 放大态（editorMode + editorFullScreen）下面板被隐藏：顶栏「审查」按钮的
+    // 语义是「收起到面板并回到审查」——退出全屏、收起主区分屏并把面板切回审查，
+    // 避免出现点了没反应的死按钮。
+    if (editorMode && editorFullScreen) {
+      setEditorFullScreen(false);
+      setEditorMode(false);
+      setSidePanelActiveTab('review');
+      setReviewPanelOpened(true);
+      return;
+    }
+
     if (!reviewPanelOpened || sidePanelActiveTab !== 'review') {
       setSidePanelActiveTab('review');
       setReviewPanelOpened(true);
@@ -89,7 +103,16 @@ export function useFusionChatLayout({
     }
 
     setReviewPanelOpened(false);
-  }, [reviewPanelOpened, setReviewPanelOpened, setSidePanelActiveTab, sidePanelActiveTab]);
+  }, [
+    editorFullScreen,
+    editorMode,
+    reviewPanelOpened,
+    setEditorFullScreen,
+    setEditorMode,
+    setReviewPanelOpened,
+    setSidePanelActiveTab,
+    sidePanelActiveTab,
+  ]);
 
   const showDockedSidePanel =
     enabled &&
@@ -98,11 +121,6 @@ export function useFusionChatLayout({
     !isNarrowViewport &&
     !(editorMode && editorFullScreen) &&
     currentSessionId !== null;
-
-  const openBrowserPreviewPanel = useCallback(() => {
-    setSidePanelActiveTab('browser');
-    setReviewPanelOpened(true);
-  }, [setReviewPanelOpened, setSidePanelActiveTab]);
 
   const conversationLayoutState = useMemo(
     () =>
@@ -126,11 +144,10 @@ export function useFusionChatLayout({
 
   return {
     conversationLayoutState,
-    openBrowserPreviewPanel,
     pageRootClassName: 'page-root page-root-fusion-col',
     pageRootStyle,
-    rightPanelCommandDescription: '切换审查/文件/Context 侧栏',
-    rightPanelCommandLabel: reviewPanelOpened ? '收起审查侧栏' : '展开审查侧栏',
+    rightPanelCommandDescription: '审查 / 代码 / 预览 / Context 停靠侧栏',
+    rightPanelCommandLabel: reviewPanelOpened ? '收起会话面板' : '展开会话面板',
     showDockedSidePanel,
     toggleReviewPanel,
   };

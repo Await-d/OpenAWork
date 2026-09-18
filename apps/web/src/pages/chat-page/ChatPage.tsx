@@ -96,7 +96,7 @@ import {
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useCurrentUserDisplayName } from '../../stores/user-profile/current-user-profile.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { resolveEffectiveTerminalPanelPosition, useUIStateStore } from '../../stores/ui/uiState.js';
 import {
   type ChatSettingsProvider,
   loadSavedChatSessionDefaults,
@@ -130,6 +130,10 @@ import {
   uploadChatAttachments,
 } from '../../components/conversation-runtime/attachments/attachment-upload.js';
 import { ChatEditorPane } from './panels/chat-editor-pane.js';
+import {
+  collapseFusionWorkspaceToPanel,
+  promoteFusionWorkspaceTab,
+} from './panels/fusion-workspace-promotion.js';
 import { WorkspaceFileTreePanel } from '../../components/layout/sidebar/WorkspaceFileTreePanel.js';
 import {
   buildQueuedComposerScopeKey,
@@ -358,6 +362,8 @@ import { useFusionDockedPanelViewport } from './layout/use-fusion-docked-panel-v
 import { useMobileViewport } from './layout/use-mobile-viewport.js';
 import { resolveClassicConversationLayoutState } from './layout/conversation-layout-state.js';
 import { FusionMobileBottomPanel } from './panels/FusionMobileBottomPanel.js';
+import { useFusionWorkspaceBrowserSurface } from './panels/use-fusion-workspace-browser-surface.js';
+import { useOpenFusionBrowserPreview } from './hooks/use-fusion-browser-preview.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
 const LOAD_MORE_MESSAGE_INCREMENT = 20;
@@ -513,6 +519,14 @@ export default function ChatPage() {
   const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
   rightPanelStateRef.current = rightPanelState;
   const lastAttachAttemptTimestampRef = useRef<number>(0);
+  const [reviewRefreshRevision, setReviewRefreshRevision] = useState(0);
+  const previousStreamingRef = useRef(streaming);
+  useEffect(() => {
+    if (previousStreamingRef.current && !streaming) {
+      setReviewRefreshRevision((revision) => revision + 1);
+    }
+    previousStreamingRef.current = streaming;
+  }, [streaming]);
 
   // ─── 待处理操作域 — 抽到 useChatPendingActions。
   // 参见 docs/architecture/chat-page-split-plan.md 域 C。
@@ -618,6 +632,11 @@ export default function ChatPage() {
   const terminalPanelOpened = useUIStateStore((s) => s.terminalPanelOpened);
   const setTerminalPanelOpened = useUIStateStore((s) => s.setTerminalPanelOpened);
   const toggleTerminalPanelOpened = useUIStateStore((s) => s.toggleTerminalPanelOpened);
+  const terminalPanelMaximized = useUIStateStore((s) => s.terminalPanelMaximized);
+  const terminalPanelPosition = useUIStateStore((s) => s.terminalPanelPosition);
+  // 最大化只在面板可见时折叠工作台行：面板收起后如果仍然折叠，聊天区会凭空消失；
+  // 重新展开时 store 的瞬态标记还在，面板会自动回到最大化。
+  const terminalMaximizedForLayout = terminalPanelMaximized && terminalPanelOpened;
   const updateTabStreaming = useUIStateStore((s) => s.updateTabStreaming);
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
@@ -637,6 +656,13 @@ export default function ChatPage() {
   const isFusionLayout = layoutMode === 'fusion';
   const canDockFusionSidePanel = useFusionDockedPanelViewport();
   const isMobileViewport = useMobileViewport();
+  // 窄视口必须降级为底部渲染（与 TerminalPanel 共用同一个判据），否则外壳会按
+  // 持久化的侧停靠切进横向分栏，而面板自己已经退回底部抽屉。
+  // 收起时不切横向分栏：收起态是横跨整宽的 rail，落到行布局里会变成一条不可用的竖条；
+  // 与 terminalMaximizedForLayout 同一条「面板可见才让外壳改布局」的原则。
+  const terminalPositionForLayout = terminalPanelOpened
+    ? resolveEffectiveTerminalPanelPosition(terminalPanelPosition, isMobileViewport)
+    : 'bottom';
 
   // sidebar / viewport / overlay 自愈 + 整个 UI 状态域 — 抽到 useChatUiState。
   // 参见 docs/architecture/chat-page-split-plan.md 域 D。
@@ -793,6 +819,8 @@ export default function ChatPage() {
     enabled: isFusionLayout,
     isNarrowViewport,
     reviewPanelOpened,
+    setEditorFullScreen,
+    setEditorMode,
     setReviewPanelOpened,
     setSidePanelActiveTab,
     setTerminalPanelOpened,
@@ -2923,6 +2951,7 @@ export default function ChatPage() {
     const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
     const shouldSendExplicitSelection = shouldSendExplicitStreamModelSelection(
       sessionModelSelectionSourceRef.current,
+      { sessionModesHydrated, effectiveModelId },
     );
     const requestAgentId = effectiveAgentId || undefined;
 
@@ -3770,6 +3799,61 @@ export default function ChatPage() {
     [gatewayUrl, setMcpServers, token],
   );
 
+  // ─── 统一工作区面板（Fusion 桌面）────────────────────────────────────────
+  // 编辑器 / 浏览器预览在 Fusion 桌面的唯一入口是会话面板的「代码 / 预览」一级
+  // tab（共享一个常驻工作区 pane，全屏提升到主内容区）；主内容区的 ChatEditorPane
+  // 只服务于移动端与面板的「放大」提升。经典布局保持原分屏行为。
+  const dockOwnsWorkspacePanels = isFusionLayout && !isMobileViewport;
+
+  // 浏览器宿主面由「谁可见」派生（见 hook 注释）：提升 / 分屏态归主内容区，
+  // 否则归停靠面板。面板 pane 常驻挂载，因此互斥不能依赖挂载 / 卸载副作用。
+  useFusionWorkspaceBrowserSurface({ enabled: dockOwnsWorkspacePanels, editorMode });
+
+  const openWorkspacePanelTab = (tab: 'code' | 'preview') => {
+    setSidePanelActiveTab(tab);
+    setReviewPanelOpened(true);
+  };
+
+  const promoteWorkspaceTab = (tab: 'code' | 'browser') => {
+    startSessionSwitchTransition(() => {
+      promoteFusionWorkspaceTab(
+        { setEditorFullScreen, setEditorMode, setEditorPaneTab, setReviewPanelOpened },
+        tab,
+      );
+    });
+  };
+
+  const collapseWorkspaceToPanel = () => {
+    startSessionSwitchTransition(() => {
+      collapseFusionWorkspaceToPanel({
+        setEditorFullScreen,
+        setEditorMode,
+        setEditorPaneTab,
+        setReviewPanelOpened,
+      });
+    });
+  };
+
+  // 命令面板与 `/browser` 事件共用：桌面 Fusion 落到面板的「预览」一级 tab
+  // （空态带地址输入，绝不伪造默认地址）；经典布局 / 移动端保持原行为。
+  const openBrowserPreview = useOpenFusionBrowserPreview({
+    browserPreviewUrl,
+    collapseWorkspaceToPanel,
+    dockOwnsWorkspacePanels,
+    editorMode,
+    openPreviewPanel: () => openWorkspacePanelTab('preview'),
+    setBrowserPreviewUrl,
+    setEditorMode,
+    setEditorPaneTab,
+  });
+
+  // `/browser` 事件只在 messages 变化时重新订阅，而路由决策依赖 editorMode /
+  // 布局；这里暴露最新编排，避免事件落进旧闭包（提升态下点了没反应）。
+  const openBrowserPreviewRef = useRef(openBrowserPreview);
+  useEffect(() => {
+    openBrowserPreviewRef.current = openBrowserPreview;
+  });
+
   const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
     useChatUiActions({
       token,
@@ -3784,6 +3868,9 @@ export default function ChatPage() {
       setRightTab,
       fileEditor,
       openFileRef,
+      openFileInDockPanel: dockOwnsWorkspacePanels
+        ? () => openWorkspacePanelTab('code')
+        : undefined,
       setEditorMode,
       setEditorPaneTab,
       setSaving,
@@ -5489,6 +5576,26 @@ export default function ChatPage() {
     });
   }, [setEditorMode, setEditorPaneTab]);
 
+  // 主编辑器面板与停靠面板「代码」tab 共用同一份文件树配置，避免两处漂移；
+  // 只有当前可见的那份 active=true，避免两份树同时拉取数据。
+  const renderWorkspaceFileTree = (active: boolean) => (
+    <WorkspaceFileTreePanel
+      workspacePath={effectiveWorkingDirectory}
+      sessionId={currentSessionId}
+      onOpenFile={(path) => void fileEditor.openFile(path)}
+      fetchTree={workspace.fetchTree}
+      active={active}
+      variant="embedded"
+      onSwitchWorkspace={canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        background: 'var(--bg-surface)',
+        overflow: 'hidden',
+      }}
+    />
+  );
+
   // ─── Command Palette items ──────────────────────────────────────────────
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () => [
@@ -5566,54 +5673,34 @@ export default function ChatPage() {
         },
       },
       {
-        id: 'toggle-editor',
-        label: editorMode ? '关闭编辑器' : '打开编辑器',
-        description: '切换分屏代码编辑器',
+        id: 'open-workspace-code-panel',
+        label: '打开代码面板',
+        description: '在会话面板中打开文件代码编辑器',
         category: '视图',
         icon: '💻',
-        onExecute: () =>
-          setEditorMode(
-            (() => {
-              const next = !editorMode;
-              if (!next) setEditorFullScreen(false);
-              return next;
-            })(),
-          ),
+        onExecute: () => openWorkspacePanelTab('code'),
       },
       {
-        id: 'toggle-editor-fullscreen',
-        label: editorFullScreen ? '退出编辑器全屏' : '全屏编辑器/浏览器',
-        description: '让编辑器与浏览器工作区占据整个内容区',
+        id: 'promote-workspace-panel',
+        label: editorFullScreen ? '退出放大（回到会话面板）' : '放大代码 / 预览面板',
+        description: '让代码编辑器或浏览器预览占据整个内容区；再次执行收回到会话面板',
         category: '视图',
         icon: '🖥',
         onExecute: () => {
           if (editorFullScreen) {
-            setEditorFullScreen(false);
+            collapseWorkspaceToPanel();
             return;
           }
-          setEditorMode(true);
-          setEditorFullScreen(true);
+          promoteWorkspaceTab(editorPaneTab);
         },
       },
       {
         id: 'open-browser-preview',
         label: '打开浏览器预览',
-        description: '打开内置浏览器预览（输入 URL 或自动检测 dev server）',
+        description: '在会话面板中打开内置浏览器预览（输入 URL 或自动检测 dev server）',
         category: '视图',
         icon: '🌐',
-        onExecute: () => {
-          // Set a default URL if none detected yet
-          if (!browserPreviewUrl) {
-            setBrowserPreviewUrl('http://localhost:3000');
-          }
-          // Fusion 布局：预览停靠在右侧面板；编辑器全屏时停靠面板不可见，保持原行为。
-          if (isFusionLayout && !editorFullScreen) {
-            setEditorPaneTab('code');
-            fusionChatLayout.openBrowserPreviewPanel();
-            return;
-          }
-          setEditorMode(true);
-        },
+        onExecute: () => openBrowserPreview(),
       },
       {
         id: 'toggle-right-panel',
@@ -5680,8 +5767,10 @@ export default function ChatPage() {
       chatSearch,
       messages,
       multiSelect,
-      editorMode,
+      editorPaneTab,
       editorFullScreen,
+      browserPreviewUrl,
+      dockOwnsWorkspacePanels,
       reviewPanelOpened,
       rightOpen,
       yoloMode,
@@ -5689,15 +5778,12 @@ export default function ChatPage() {
       bookmarkStore,
       handleCopyMessage,
       handleCompactCurrentSession,
-      fusionChatLayout.openBrowserPreviewPanel,
       fusionChatLayout.rightPanelCommandDescription,
       fusionChatLayout.rightPanelCommandLabel,
       fusionChatLayout.toggleReviewPanel,
       isFusionLayout,
       navigate,
       navigateToHome,
-      setEditorMode,
-      setEditorFullScreen,
       setRightOpen,
       setRightTab,
       handleToggleYolo,
@@ -5773,9 +5859,9 @@ export default function ChatPage() {
         setRightOpen((v) => !v);
       },
       onToggleReviewPanel: () => {
-        if (isFusionLayout) {
-          fusionChatLayout.toggleReviewPanel();
-        }
+        // 审查面板状态固定在共享 store（reviewPanelOpened / sidePanelActiveTab），
+        // classic 布局与顶栏按钮走同一条路径（否则 Cmd/Ctrl+Shift+R 在 classic 是死键）。
+        fusionChatLayout.toggleReviewPanel();
       },
       onToggleTerminalPanel: () => {
         toggleTerminalPanelOpened();
@@ -5815,12 +5901,7 @@ export default function ChatPage() {
       downloadExport(content, `chat-export-${Date.now()}.md`, 'text/markdown');
       toast('对话已导出为 Markdown', 'success');
     };
-    const handleOpenBrowser = () => {
-      if (!browserPreviewUrl) {
-        setBrowserPreviewUrl('http://localhost:3000');
-      }
-      setEditorMode(true);
-    };
+    const handleOpenBrowser = () => openBrowserPreviewRef.current();
     const handleComposerInsert = (event: Event) => {
       const detail = (event as CustomEvent).detail as
         { text?: string; mode?: 'append' | 'replace' } | undefined;
@@ -5891,35 +5972,19 @@ export default function ChatPage() {
               activeTab={editorPaneTab}
               onTabChange={setEditorPaneTab}
               fullScreen={editorFullScreen}
-              onToggleFullScreen={() =>
-                startSessionSwitchTransition(() => {
-                  if (editorFullScreen) {
-                    setEditorFullScreen(false);
+              onToggleFullScreen={() => {
+                if (editorFullScreen) {
+                  // 桌面：退出放大 = 内容收回到统一面板；移动端保持原来的「退出全屏」。
+                  if (isMobileViewport) {
+                    startSessionSwitchTransition(() => setEditorFullScreen(false));
                     return;
                   }
-                  setEditorMode(true);
-                  setEditorFullScreen(true);
-                })
-              }
-              fileTree={
-                <WorkspaceFileTreePanel
-                  workspacePath={effectiveWorkingDirectory}
-                  sessionId={currentSessionId}
-                  onOpenFile={(path) => void fileEditor.openFile(path)}
-                  fetchTree={workspace.fetchTree}
-                  active={editorMode}
-                  variant="embedded"
-                  onSwitchWorkspace={
-                    canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined
-                  }
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    background: 'var(--bg-surface)',
-                    overflow: 'hidden',
-                  }}
-                />
-              }
+                  collapseWorkspaceToPanel();
+                  return;
+                }
+                promoteWorkspaceTab(editorPaneTab);
+              }}
+              fileTree={renderWorkspaceFileTree(editorMode)}
             />
           }
           hasSession={currentSessionId !== null}
@@ -5950,6 +6015,7 @@ export default function ChatPage() {
                 onShowEditor={handleShowFusionEditor}
                 onTabChange={setSidePanelActiveTab}
                 overview={fusionContextOverview}
+                reviewRevision={reviewRefreshRevision}
                 runtimeSummary={fusionContextRuntimeSummary}
                 saving={saving}
                 token={token}
@@ -5960,32 +6026,32 @@ export default function ChatPage() {
           showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
           sidePanel={
             <FusionDockedSidePanel
-              activeEditorFilePath={fileEditor.activeFilePath}
               activeTab={sidePanelActiveTab}
               contextUsageSnapshot={contextUsageSnapshot}
               currentSessionId={currentSessionId}
-              editorMode={editorMode}
-              editorFileState={fileEditor}
-              editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
               effectiveWorkingDirectory={effectiveWorkingDirectory}
-              fetchTree={workspace.fetchTree}
+              fileEditor={fileEditor}
+              fileTree={renderWorkspaceFileTree(true)}
               gatewayUrl={gatewayUrl}
               handleSaveFile={handleSaveFile}
               onCompactSession={() => void handleCompactCurrentSession()}
-              onOpenFileInEditor={handleOpenFusionEditorFile}
-              onOpenWorkspace={requestWorkspaceBindingChange}
-              onShowEditor={handleShowFusionEditor}
+              onPromoteToFullScreen={promoteWorkspaceTab}
               onTabChange={setSidePanelActiveTab}
               overview={fusionContextOverview}
+              reviewRevision={reviewRefreshRevision}
               runtimeSummary={fusionContextRuntimeSummary}
               saving={saving}
               token={token}
               workspaceFileItems={workspaceFileItems}
+              workspacePath={uiWorkspaceScope}
+              workspacePromoted={editorMode}
             />
           }
           splitContainerRef={splitContainerRef}
           splitDragging={splitDragging}
           splitPos={splitPos}
+          terminalMaximized={terminalMaximizedForLayout}
+          terminalPosition={terminalPositionForLayout}
           terminal={
             <TerminalPanel
               workspacePath={effectiveWorkingDirectory}
@@ -5997,6 +6063,8 @@ export default function ChatPage() {
               onReload={sessionTerminals.reload}
               onRenameTerminal={sessionTerminals.renameTerminal}
               onDismissTerminal={sessionTerminals.dismissTerminal}
+              onKillTerminal={sessionTerminals.killTerminal}
+              shellProfiles={sessionTerminals.shellProfiles}
             />
           }
         >
@@ -6061,30 +6129,10 @@ export default function ChatPage() {
                       onConfirmClarifySwitch={() => void confirmSwitchToCoding()}
                       clarifySwitchPending={clarifySwitchPending}
                       permissionMode={permissionMode}
-                      yoloMode={yoloMode}
                       density="compact"
-                      editorMode={editorMode}
-                      onToggleEditorMode={() =>
-                        startSessionSwitchTransition(() => {
-                          const next = !editorMode;
-                          setEditorMode(next);
-                          if (!next) setEditorFullScreen(false);
-                        })
-                      }
                       rightOpen={rightOpen}
                       onToggleRightOpen={() => setRightOpen((o) => !o)}
                       hideRightPanelToggle
-                      editorFullScreen={editorFullScreen}
-                      onToggleEditorFullScreen={() =>
-                        startSessionSwitchTransition(() => {
-                          if (editorFullScreen) {
-                            setEditorFullScreen(false);
-                            return;
-                          }
-                          setEditorMode(true);
-                          setEditorFullScreen(true);
-                        })
-                      }
                       terminalsChip={
                         currentSessionId ? (
                           <SessionTerminalsChip
@@ -6123,47 +6171,6 @@ export default function ChatPage() {
                           multiSelect.enableMultiSelect();
                           requestAnimationFrame(() => multiSelect.selectAll(messages));
                         }
-                      }}
-                      onOpenBrowser={() => {
-                        startSessionSwitchTransition(() => {
-                          if (!browserPreviewUrl) {
-                            setBrowserPreviewUrl('http://localhost:3000');
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('browser');
-                        });
-                      }}
-                      browserActive={!!browserPreviewUrl}
-                      editorPaneTab={editorPaneTab}
-                      onActivateCodeTab={() => {
-                        startSessionSwitchTransition(() => {
-                          if (editorMode && editorPaneTab === 'code' && !editorFullScreen) {
-                            setEditorMode(false);
-                            return;
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('code');
-                        });
-                      }}
-                      onActivateBrowserTab={() => {
-                        startSessionSwitchTransition(() => {
-                          if (editorMode && editorPaneTab === 'browser' && !editorFullScreen) {
-                            setEditorMode(false);
-                            return;
-                          }
-                          if (!browserPreviewUrl) {
-                            setBrowserPreviewUrl('http://localhost:3000');
-                          }
-                          // Fusion 布局：预览停靠在右侧面板，编辑器 tab 归还 code
-                          // （单一浏览器互斥；编辑器全屏时停靠面板不可见，保持原行为）。
-                          if (isFusionLayout && !editorFullScreen) {
-                            setEditorPaneTab('code');
-                            fusionChatLayout.openBrowserPreviewPanel();
-                            return;
-                          }
-                          setEditorMode(true);
-                          setEditorPaneTab('browser');
-                        });
                       }}
                       todoController={todoController}
                       todoDetailsId={todoDetailsId}
@@ -6574,7 +6581,6 @@ export default function ChatPage() {
                         onConfirmClarifySwitch={() => void confirmSwitchToCoding()}
                         clarifySwitchPending={clarifySwitchPending}
                         permissionMode={permissionMode}
-                        yoloMode={yoloMode}
                         density="normal"
                         editorMode={editorMode}
                         onToggleEditorMode={() =>
@@ -6684,6 +6690,8 @@ export default function ChatPage() {
                         todoController={todoController}
                         todoDetailsId={todoDetailsId}
                         workspaceBinding={workspaceBindingChip}
+                        reviewPanelOpened={reviewPanelOpened}
+                        onToggleReviewPanel={fusionChatLayout.toggleReviewPanel}
                       />
                       {multiSelect.multiSelect.enabled && (
                         <MultiSelectToolbar
@@ -6986,6 +6994,8 @@ export default function ChatPage() {
                   composerFooterSlot={composerWorkspaceSlot}
                 />
                 {currentSessionId && !isFusionLayout ? (
+                  // classic overlay 不显式接线最大化：QuickTerminalPanel 缺省回落 store 的
+                  // 瞬态开关，rail 的最大化/还原在两种 presentation 下语义一致（无死控件）。
                   <QuickTerminalPanel
                     open={quickTerminalOpen}
                     onRequestClose={() =>
@@ -7053,7 +7063,8 @@ export default function ChatPage() {
       )}
 
       {/* Classic: ChatRightPanel 作为唯一右侧面板。
-          Fusion: ChatRightPanel 不渲染，使用 ReviewPanel 作为独立侧面板。 */}
+          Fusion: ChatRightPanel 不渲染，改由 FusionSessionSidePanel 提供
+          「审查 / 代码 / 预览 / Context」标签式侧面板。 */}
       {!isFusionLayout ? (
         <ChatRightPanel
           rightOpen={rightOpen && !(editorMode && editorFullScreen)}

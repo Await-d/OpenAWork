@@ -1,10 +1,4 @@
-import {
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { EditorBrowserWorkspace, type EditorPaneTab } from './EditorBrowserWorkspace.js';
 import { ResizeHandle } from '../layout/shared/resize-handle.js';
 import {
@@ -300,9 +294,7 @@ export function WorkspaceEditorOverlay({
             bounds={editorWidthBoundsPx(rowWidthPx)}
             clamp={(widthPx) => clampEditorWidthPx(widthPx, rowWidthPx)}
             ariaLabel="调整编辑器宽度"
-            onWidthChange={(widthPx) =>
-              setSplitPos(splitPosFromEditorWidthPx(widthPx, rowWidthPx))
-            }
+            onWidthChange={(widthPx) => setSplitPos(splitPosFromEditorWidthPx(widthPx, rowWidthPx))}
             onWidthCommit={(widthPx) =>
               onSplitPosChange?.(splitPosFromEditorWidthPx(widthPx, rowWidthPx))
             }

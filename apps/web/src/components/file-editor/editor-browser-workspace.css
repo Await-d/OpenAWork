@@ -1,0 +1,136 @@
+/* 工作区「预览」空态。表单用 intrinsic flex-wrap：停靠面板宽度掉到 ~360px 时
+   输入框与按钮自动换行，不依赖视口媒体查询。样式全部走 design token。 */
+
+.editor-browser-workspace__empty {
+  align-items: center;
+  background:
+    radial-gradient(circle at 50% 0%, var(--accent-subtle), transparent 62%), var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--fg-muted);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  justify-content: center;
+  margin: var(--spacing-3);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--spacing-6) var(--spacing-5);
+  text-align: center;
+}
+
+.editor-browser-workspace__empty-icon {
+  align-items: center;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent);
+  display: flex;
+  flex-shrink: 0;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.editor-browser-workspace__empty-copy {
+  display: grid;
+  gap: var(--spacing-1);
+  max-width: 320px;
+}
+
+.editor-browser-workspace__empty-copy strong {
+  color: var(--fg-strong);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.editor-browser-workspace__empty-copy span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.editor-browser-workspace__empty-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  justify-content: center;
+  margin-top: var(--spacing-1);
+  max-width: 340px;
+  width: 100%;
+}
+
+.editor-browser-workspace__empty-input {
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--fg-default);
+  flex: 1 1 150px;
+  font-size: 11px;
+  min-height: 30px;
+  min-width: 0;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-2);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+}
+
+.editor-browser-workspace__empty-input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.editor-browser-workspace__empty-input:hover {
+  border-color: var(--border-emphasis);
+}
+
+.editor-browser-workspace__empty-input:focus-visible {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.editor-browser-workspace__empty-submit {
+  background: var(--accent);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-on-accent);
+  cursor: pointer;
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 30px;
+  min-width: 96px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-3);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.editor-browser-workspace__empty-submit:hover {
+  background: var(--accent-hover);
+}
+
+.editor-browser-workspace__empty-submit:active {
+  background: var(--accent-active);
+  transform: translateY(1px);
+}
+
+.editor-browser-workspace__empty-submit:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.editor-browser-workspace__empty-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

@@ -83,13 +83,6 @@ export function FusionFilesTab({
 
   return (
     <div className="fusion-side-panel__scroll">
-      <div className="fusion-side-panel__section-head">
-        <div>
-          <div className="fusion-side-panel__eyebrow">文件工作台</div>
-          <div className="fusion-side-panel__title">在当前侧面板内浏览、打开并编辑工作区文件</div>
-        </div>
-      </div>
-
       <div className="fusion-side-panel__action-row">
         <button type="button" className="fusion-side-panel__ghost-button" onClick={onShowEditor}>
           打开编辑器

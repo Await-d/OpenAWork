@@ -9,20 +9,28 @@
   overflow: hidden;
 }
 
-.session-side-panel__tabs {
+.session-side-panel__tabs-row {
   align-items: center;
   background: var(--bg-overlay);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   flex-shrink: 0;
-  gap: 2px;
+  gap: var(--spacing-1);
   height: 40px;
-  overflow-x: auto;
+  min-width: 0;
   padding: 0 var(--spacing-2);
 }
 
-.session-side-panel__tab,
-.session-side-panel__add-button {
+.session-side-panel__tabs {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.session-side-panel__tab {
   align-items: center;
   background: transparent;
   border: none;
@@ -52,6 +60,55 @@
   white-space: nowrap;
 }
 
+/* Tab 条右端的动作槽位（可选扩展点），与 tablist 同级以便键盘 /
+   读屏只聚焦 tab 本身。 */
+.session-side-panel__tabs-action {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--spacing-1);
+}
+
+/* 动作槽位里的图标按钮（如工作区全屏提升）：与 tab 同高、同样有
+   hover / active / focus-visible 反馈，不占用内容区一行。 */
+.session-side-panel__tabs-action-btn {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 28px;
+  justify-content: center;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+  width: 28px;
+}
+
+.session-side-panel__tabs-action-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+  color: var(--fg-default);
+}
+
+.session-side-panel__tabs-action-btn:active {
+  transform: translateY(1px);
+}
+
+.session-side-panel__tabs-action-btn:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
 .session-side-panel__tab-badge {
   background: var(--accent-subtle);
   border-radius: var(--radius-pill);
@@ -63,12 +120,6 @@
   min-width: 16px;
   padding: 0 var(--spacing-1);
   place-items: center;
-}
-
-.session-side-panel__add-button {
-  height: 26px;
-  margin-left: auto;
-  width: 26px;
 }
 
 .session-side-panel__content {
@@ -91,18 +142,11 @@
   color: var(--fg-strong);
 }
 
-.session-side-panel__tab:active,
-.session-side-panel__add-button:active {
+.session-side-panel__tab:active {
   transform: translateY(1px);
 }
 
-.session-side-panel__tab:focus-visible,
-.session-side-panel__add-button:focus-visible {
+.session-side-panel__tab:focus-visible {
   box-shadow: 0 0 0 4px var(--accent-subtle);
   outline-color: var(--accent);
-}
-
-.session-side-panel__add-button:hover {
-  background: var(--bg-hover);
-  color: var(--fg-default);
 }

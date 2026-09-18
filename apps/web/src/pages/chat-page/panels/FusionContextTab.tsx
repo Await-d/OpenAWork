@@ -122,13 +122,11 @@ export function FusionContextTab({
 
   return (
     <div className="fusion-side-panel__scroll">
-      <div className="fusion-side-panel__section-head">
-        <div>
-          <div className="fusion-side-panel__eyebrow">Context</div>
-          <div className="fusion-side-panel__title">
-            {rawPercent === null ? '等待上下文窗口' : `${rawPercent}% 已用`}
-          </div>
-        </div>
+      {/* section-head 已移除：标题由面板 Tab 承担，这里只保留用量摘要与压缩入口 */}
+      <div className="fusion-side-panel__head-actions">
+        <span className="fusion-side-panel__head-meta">
+          {rawPercent === null ? '等待上下文窗口' : `${rawPercent}% 已用`}
+        </span>
         <button
           type="button"
           className="fusion-side-panel__ghost-button"

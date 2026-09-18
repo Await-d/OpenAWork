@@ -1,8 +1,15 @@
 /**
- * SessionSidePanel — 右侧统一 Tab 式侧面板。
+ * SessionSidePanel — 会话侧面板的 Tab 条（桌面停靠面板 + 键盘导航的唯一事实来源）。
  *
- * 参照 OpenCode SessionSidePanel：
- *   [审查 N] [文件] [Context] [+]
+ * 信息架构（一级扁平化）：
+ *   [审查 N] [代码] [预览] [Context]
+ *
+ * 桌面端不再有第二层「工作区」tab：代码编辑器与浏览器预览是一级 tab，共享同一个
+ * 常驻工作区 pane（见 `FusionSessionSidePanel`）。
+ *
+ * `SidePanelTabId` 是桌面 / 移动端共享的联合类型：`files` / `browser` 只属于
+ * 移动端底部面板（`FusionMobileBottomPanel`），桌面停靠面板会把它们收敛到
+ * `code` / `preview`，保证联合类型始终自洽。
  */
 
 import {
@@ -15,15 +22,18 @@ import {
 } from 'react';
 import './SessionSidePanel.css';
 
-export type SidePanelTabId = 'review' | 'files' | 'context' | 'browser';
+export type SidePanelTabId = 'review' | 'code' | 'preview' | 'context' | 'files' | 'browser';
 
 export interface SessionSidePanelProps {
   readonly reviewCount?: number;
   readonly activeTab: SidePanelTabId;
   readonly onTabChange: (tab: SidePanelTabId) => void;
-  readonly onAddFile?: () => void;
   readonly children: ReactNode;
   readonly style?: CSSProperties;
+  /**
+   * Tab 条右端的附加动作槽位（可选扩展点）。不传时 tab 条只渲染 tab 按钮。
+   */
+  readonly trailingAction?: ReactNode;
 }
 
 interface TabDef {
@@ -35,10 +45,15 @@ interface TabDef {
 type TabDirection = 'next' | 'previous';
 
 /** tab 顺序的唯一事实来源——键盘左右循环与 Home/End 都从它推导。 */
-const PANEL_TAB_ORDER: readonly SidePanelTabId[] = ['review', 'files', 'context', 'browser'];
+const PANEL_TAB_ORDER: readonly SidePanelTabId[] = ['review', 'code', 'preview', 'context'];
 
 function getAdjacentTabId(tabId: SidePanelTabId, direction: TabDirection): SidePanelTabId {
   const index = PANEL_TAB_ORDER.indexOf(tabId);
+  // 未知 / 移动端专属 id 不可能落在本 tab 条上（消费端会先收敛）；仍兜底到
+  // 首位，保证键盘导航永远不会落到不存在的 tab。
+  if (index < 0) {
+    return PANEL_TAB_ORDER[0] ?? tabId;
+  }
   const offset = direction === 'next' ? 1 : -1;
   const count = PANEL_TAB_ORDER.length;
   return PANEL_TAB_ORDER[(index + offset + count) % count] ?? tabId;
@@ -48,22 +63,24 @@ export function SessionSidePanel({
   reviewCount = 0,
   activeTab,
   onTabChange,
-  onAddFile,
   children,
   style,
+  trailingAction,
 }: SessionSidePanelProps) {
   const panelInstanceId = useId();
   const tabButtonRefs = useRef<Record<SidePanelTabId, HTMLButtonElement | null>>({
     browser: null,
+    code: null,
     context: null,
     files: null,
+    preview: null,
     review: null,
   });
   const tabs: TabDef[] = [
     { id: 'review', label: '审查', badge: reviewCount || undefined },
-    { id: 'files', label: '文件' },
+    { id: 'code', label: '代码' },
+    { id: 'preview', label: '预览' },
     { id: 'context', label: 'Context' },
-    { id: 'browser', label: '浏览器预览' },
   ];
   const activePanelId = `${panelInstanceId}-${activeTab}-panel`;
   const activeTabId = `${panelInstanceId}-${activeTab}-tab`;
@@ -83,9 +100,9 @@ export function SessionSidePanel({
       } else if (event.key === 'ArrowLeft') {
         nextTabId = getAdjacentTabId(tabId, 'previous');
       } else if (event.key === 'Home') {
-        nextTabId = 'review';
+        nextTabId = PANEL_TAB_ORDER[0] ?? tabId;
       } else if (event.key === 'End') {
-        nextTabId = 'browser';
+        nextTabId = PANEL_TAB_ORDER[PANEL_TAB_ORDER.length - 1] ?? tabId;
       }
 
       if (nextTabId === null) {
@@ -100,58 +117,40 @@ export function SessionSidePanel({
 
   return (
     <aside className="session-side-panel" style={style}>
-      <div className="session-side-panel__tabs" role="tablist" aria-label="会话侧面板">
-        {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
-          const tabId = `${panelInstanceId}-${tab.id}-tab`;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-controls={isActive ? activePanelId : undefined}
-              aria-selected={isActive}
-              className="session-side-panel__tab"
-              data-active={isActive ? 'true' : 'false'}
-              id={tabId}
-              onClick={() => onTabChange(tab.id)}
-              onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
-              ref={(element) => {
-                tabButtonRefs.current[tab.id] = element;
-              }}
-              tabIndex={isActive ? 0 : -1}
-            >
-              {tab.label}
-              {tab.badge !== undefined && (
-                <span className="session-side-panel__tab-badge">{tab.badge}</span>
-              )}
-            </button>
-          );
-        })}
+      <div className="session-side-panel__tabs-row">
+        <div className="session-side-panel__tabs" role="tablist" aria-label="会话侧面板">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            const tabId = `${panelInstanceId}-${tab.id}-tab`;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-controls={isActive ? activePanelId : undefined}
+                aria-selected={isActive}
+                className="session-side-panel__tab"
+                data-active={isActive ? 'true' : 'false'}
+                id={tabId}
+                onClick={() => onTabChange(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+                ref={(element) => {
+                  tabButtonRefs.current[tab.id] = element;
+                }}
+                tabIndex={isActive ? 0 : -1}
+              >
+                {tab.label}
+                {tab.badge !== undefined && (
+                  <span className="session-side-panel__tab-badge">{tab.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-        {onAddFile && (
-          <button
-            type="button"
-            className="session-side-panel__add-button"
-            title="打开文件"
-            aria-label="打开文件"
-            onClick={onAddFile}
-          >
-            <svg
-              aria-hidden="true"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              strokeLinecap="round"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-        )}
+        {trailingAction ? (
+          <div className="session-side-panel__tabs-action">{trailingAction}</div>
+        ) : null}
       </div>
 
       <div

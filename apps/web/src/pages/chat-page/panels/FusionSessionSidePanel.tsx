@@ -1,72 +1,104 @@
-import { useState } from 'react';
-import type { WorkspaceFileTreePanelProps } from '../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
+import type {
+  EditorBrowserWorkspaceProps,
+  EditorPaneTab,
+} from '../../../components/file-editor/EditorBrowserWorkspace.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { resolveChatUiWorkspaceScope, resolveWorkspaceKey } from '../hooks/use-chat-ui-state.js';
 import './FusionSessionSidePanel.css';
-import { FusionBrowserTab } from './FusionBrowserTab.js';
 import { FusionContextTab } from './FusionContextTab.js';
 import type {
   FusionContextOverviewProps,
   FusionContextRuntimeSummary,
 } from './FusionContextTab.js';
-import { FusionFilesTab } from './FusionFilesTab.js';
-import type { FusionFilesEditorState } from './FusionFilesTab.js';
 import { FusionReviewTab } from './FusionReviewTab.js';
+import { FusionWorkspaceTab } from './FusionWorkspaceTab.js';
 import { SessionSidePanel } from './SessionSidePanel.js';
 import type { SidePanelTabId } from './SessionSidePanel.js';
 import type { ChangeScope, DiffViewMode } from './review-panel-model.js';
 import { useReviewPanelFileChanges } from './use-review-panel-file-changes.js';
 
+export type FusionDesktopPanelTab = 'review' | 'code' | 'preview' | 'context';
+
+/**
+ * 桌面停靠面板一级 tab（审查 / 代码 / 预览 / Context）；移动端专属 tab 收敛到
+ * 桌面近义 tab：`files` → `code`、`browser` → `preview`（移动端「浏览器」与桌面
+ * 「预览」是同一浏览器工作区），其余未知脏值 → `review`，保证永远有可渲染内容。
+ */
+export function resolveFusionDesktopPanelTab(tab: SidePanelTabId): FusionDesktopPanelTab {
+  switch (tab) {
+    case 'code':
+      return 'code';
+    case 'preview':
+    case 'browser':
+      return 'preview';
+    case 'context':
+      return 'context';
+    case 'files':
+      return 'code';
+    default:
+      return 'review';
+  }
+}
+
 export interface FusionSessionSidePanelProps {
-  readonly activeEditorFilePath: string | null;
   readonly activeTab: SidePanelTabId;
   readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
   readonly currentSessionId: string | null;
-  readonly editorMode: boolean;
-  readonly editorFileState: FusionFilesEditorState;
-  readonly editorOpenFilePaths: readonly string[];
   readonly effectiveWorkingDirectory: string | null;
-  readonly fetchTree: WorkspaceFileTreePanelProps['fetchTree'];
+  /** 代码 / 预览一级 tab 共享的文件编辑器状态（与主编辑器面板共用同一份）。 */
+  readonly fileEditor: EditorBrowserWorkspaceProps['fileEditor'];
+  /** 工作区文件树（由 ChatPage 复用与主编辑器面板相同的 WorkspaceFileTreePanel 配置）。 */
+  readonly fileTree: ReactNode;
   readonly gatewayUrl: string;
   readonly handleSaveFile: (path: string) => Promise<void>;
   readonly onCompactSession: () => void;
-  readonly onOpenFileInEditor: (path: string) => void;
-  readonly onOpenWorkspace: () => void;
-  readonly onShowEditor: () => void;
+  /** 把工作区提升到主内容区（editorMode + editorFullScreen + 对应 tab）。 */
+  readonly onPromoteToFullScreen: (tab: EditorPaneTab) => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
   readonly overview?: FusionContextOverviewProps;
+  readonly reviewRevision?: number;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
   readonly saving: boolean;
   readonly token: string | null;
   readonly workspaceFileItems: readonly WorkspaceFileMentionItem[];
+  readonly workspacePath: string | null;
+  /**
+   * 主内容区工作区已处于提升 / 分屏态：全屏入口由主内容区内建按钮承担，
+   * 面板 tab 条不再重复渲染，保证屏幕上恰好一个全屏入口。
+   */
+  readonly workspacePromoted?: boolean;
 }
 
 export function FusionSessionSidePanel({
-  activeEditorFilePath,
   activeTab,
   contextUsageSnapshot,
   currentSessionId,
-  editorMode,
-  editorFileState,
-  editorOpenFilePaths,
   effectiveWorkingDirectory,
-  fetchTree,
+  fileEditor,
+  fileTree,
   gatewayUrl,
   handleSaveFile,
   onCompactSession,
-  onOpenFileInEditor,
-  onOpenWorkspace,
-  onShowEditor,
+  onPromoteToFullScreen,
   onTabChange,
   overview,
+  reviewRevision,
   runtimeSummary,
   saving,
   token,
   workspaceFileItems,
+  workspacePath,
+  workspacePromoted = false,
 }: FusionSessionSidePanelProps) {
+  const [mutationRefetchTick, setMutationRefetchTick] = useState(0);
+  const externalReviewRevision = reviewRevision ?? 0;
   const reviewState = useReviewPanelFileChanges({
     gatewayUrl,
     opened: true,
+    revision: externalReviewRevision + mutationRefetchTick,
     sessionId: currentSessionId,
     token,
   });
@@ -74,43 +106,100 @@ export function FusionSessionSidePanel({
   const [changeScope, setChangeScope] = useState<ChangeScope>('all');
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>('unified');
 
+  // 旧持久化状态 / 移动端 tab 落到桌面面板时先收敛，再通知父级让共享 store 同步，
+  // 保证 tab 条永远有选中项、内容区永不为空。
+  const desktopTab = resolveFusionDesktopPanelTab(activeTab);
+  useEffect(() => {
+    if (desktopTab !== activeTab) {
+      onTabChange(desktopTab);
+    }
+  }, [activeTab, desktopTab, onTabChange]);
+
+  const workspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
+  const browserPreviewUrlByWorkspace = useUIStateStore((s) => s.browserPreviewUrlByWorkspace);
+  const setBrowserPreviewUrlForWorkspace = useUIStateStore(
+    (s) => s.setBrowserPreviewUrlForWorkspace,
+  );
+  const previewUrl = browserPreviewUrlByWorkspace[resolveWorkspaceKey(workspaceScope)] ?? null;
+
+  // 一级 tab 扁平化：代码 / 预览共享同一个常驻工作区 pane，pane 的内部子视图由一级
+  // tab 单向派生（预览 ↔ browser、代码 ↔ code），不再有第二层 tab 状态。
+  const workspacePaneVisible = desktopTab === 'code' || desktopTab === 'preview';
+  const workspaceTab: EditorPaneTab = desktopTab === 'preview' ? 'browser' : 'code';
+
+  // 内建全屏的语义 = 提升到主内容区，目标 tab 跟随一级 tab（无地址时预览不可用，
+  // 回落到代码，避免主区落到空白的浏览器视图）。
+  const workspacePromoteTarget: EditorPaneTab =
+    desktopTab === 'preview' && previewUrl !== null ? 'browser' : 'code';
+
+  // 全屏入口停靠在面板一级 tab 条右端（与旧工作区内部工具条的可见性一致）：
+  // 只在工作区 pane 可见且主内容区尚未接管时出现，屏幕上任何时刻恰好一个。
+  const showWorkspaceFullScreenAction = workspacePaneVisible && !workspacePromoted;
+
+  // 三个 pane 常驻挂载、用 hidden 切换：工作区里的浏览器实时会话（以及审查 /
+  // Context 各自的滚动与展开状态）不会因切 tab 而重建。hidden 同时覆盖 a11y
+  // （不可聚焦、不进可访问性树），见 FusionSessionSidePanel.css。
   return (
     <SessionSidePanel
-      activeTab={activeTab}
-      onAddFile={onOpenWorkspace}
+      activeTab={desktopTab}
       onTabChange={onTabChange}
       reviewCount={reviewCount}
+      trailingAction={
+        showWorkspaceFullScreenAction ? (
+          <PanelFullScreenAction onClick={() => onPromoteToFullScreen(workspacePromoteTarget)} />
+        ) : undefined
+      }
     >
-      {activeTab === 'review' ? (
+      <div
+        className="fusion-side-panel__pane"
+        data-testid="fusion-panel-pane-review"
+        hidden={desktopTab !== 'review'}
+      >
         <FusionReviewTab
           changeScope={changeScope}
           diffViewMode={diffViewMode}
+          gatewayUrl={gatewayUrl}
           onChangeScope={setChangeScope}
           onChangeViewMode={setDiffViewMode}
+          onReviewMutated={() => setMutationRefetchTick((tick) => tick + 1)}
+          revision={externalReviewRevision + mutationRefetchTick}
+          sessionId={currentSessionId}
           state={reviewState}
+          token={token}
         />
-      ) : activeTab === 'files' ? (
-        <FusionFilesTab
-          activeEditorFilePath={activeEditorFilePath}
-          currentSessionId={currentSessionId}
-          editorMode={editorMode}
-          editorFileState={editorFileState}
-          editorOpenFilePaths={editorOpenFilePaths}
-          effectiveWorkingDirectory={effectiveWorkingDirectory}
-          fetchTree={fetchTree}
+      </div>
+      <div
+        className="fusion-side-panel__pane"
+        data-testid="fusion-panel-pane-workspace"
+        hidden={!workspacePaneVisible}
+      >
+        <FusionWorkspaceTab
+          activeTab={workspaceTab}
+          browserPreviewUrl={previewUrl}
+          fileEditor={fileEditor}
+          fileTree={fileTree}
           handleSaveFile={handleSaveFile}
-          onOpenFileInEditor={onOpenFileInEditor}
-          onOpenWorkspace={onOpenWorkspace}
-          onShowEditor={onShowEditor}
+          onBrowserPreviewUrlChange={(url) => setBrowserPreviewUrlForWorkspace(workspaceScope, url)}
+          onTabChange={(tab) => {
+            // 子 tab 按钮已隐藏：这里只承载「新预览地址到达自动切到预览」的内建副作用。
+            // pane 不可见（审查 / Context）时吞掉，避免抢走用户当前的一级 tab。
+            if (tab === 'code') {
+              onTabChange('code');
+              return;
+            }
+            if (workspacePaneVisible) {
+              onTabChange('preview');
+            }
+          }}
           saving={saving}
-          workspaceFileItems={workspaceFileItems}
+          workspacePath={workspacePath}
         />
-      ) : activeTab === 'browser' ? (
-        <FusionBrowserTab
-          currentSessionId={currentSessionId}
-          effectiveWorkingDirectory={effectiveWorkingDirectory}
-        />
-      ) : (
+      </div>
+      <div
+        className="fusion-side-panel__pane"
+        data-testid="fusion-panel-pane-context"
+        hidden={desktopTab !== 'context'}
+      >
         <FusionContextTab
           contextUsageSnapshot={contextUsageSnapshot}
           currentSessionId={currentSessionId}
@@ -120,7 +209,36 @@ export function FusionSessionSidePanel({
           runtimeSummary={runtimeSummary}
           workspaceFileItems={workspaceFileItems}
         />
-      )}
+      </div>
     </SessionSidePanel>
+  );
+}
+
+function PanelFullScreenAction({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="session-side-panel__tabs-action-btn"
+      onClick={onClick}
+      title="全屏 · 占据整个内容区"
+      aria-label="全屏"
+    >
+      <svg
+        aria-hidden="true"
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="15 3 21 3 21 9" />
+        <polyline points="9 21 3 21 3 15" />
+        <line x1="21" y1="3" x2="14" y2="10" />
+        <line x1="3" y1="21" x2="10" y2="14" />
+      </svg>
+    </button>
   );
 }

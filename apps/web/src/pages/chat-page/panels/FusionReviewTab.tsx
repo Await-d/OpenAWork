@@ -5,29 +5,41 @@ import './ReviewPanelContent.css';
 import { ReviewPanelEmptyState } from './ReviewPanelEmptyState.js';
 import { ReviewPanelFileList } from './ReviewPanelFileList.js';
 import { ReviewPanelHeader } from './ReviewPanelHeader.js';
-import { ReviewPanelStats } from './ReviewPanelStats.js';
+import { ReviewPanelMutationFeedback } from './ReviewPanelMutationFeedback.js';
 import {
   type ChangeScope,
   type DiffViewMode,
   type ReviewPanelContentState,
   formatReviewPanelStatus,
   selectReviewPanelFiles,
+  selectReviewPanelPendingFiles,
 } from './review-panel-model.js';
+import { useReviewPanelFileActions } from './use-review-panel-file-actions.js';
 
 export interface FusionReviewTabProps {
   readonly changeScope: ChangeScope;
   readonly diffViewMode: DiffViewMode;
+  readonly gatewayUrl: string;
   readonly onChangeScope: (scope: ChangeScope) => void;
   readonly onChangeViewMode: (mode: DiffViewMode) => void;
+  readonly onReviewMutated: () => void;
+  readonly revision: number;
+  readonly sessionId: string | null;
   readonly state: ReviewPanelContentState;
+  readonly token: string | null;
 }
 
 export function FusionReviewTab({
   changeScope,
   diffViewMode,
+  gatewayUrl,
   onChangeScope,
   onChangeViewMode,
+  onReviewMutated,
+  revision,
+  sessionId,
   state,
+  token,
 }: FusionReviewTabProps) {
   const reviewPanelOpened = useUIStateStore((s) => s.reviewPanelOpened);
   const toggleReviewPanelOpened = useUIStateStore((s) => s.toggleReviewPanelOpened);
@@ -51,35 +63,54 @@ export function FusionReviewTab({
     );
   }, [files]);
 
+  const actions = useReviewPanelFileActions({
+    files,
+    gatewayUrl,
+    onRefetch: onReviewMutated,
+    revision,
+    sessionId,
+    token,
+  });
+
   const selectedFile = files.find((file) => file.file === selectedFilePath) ?? files[0] ?? null;
-  const additions = files.reduce((sum, file) => sum + file.additions, 0);
-  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
   const status = formatReviewPanelStatus(activeState, changeScope);
+  const actionableCount = selectReviewPanelPendingFiles(files).length;
 
   return (
     <>
       <ReviewPanelHeader
+        bulkActionableCount={actionableCount}
+        bulkPending={actions.bulkPending}
         changeScope={changeScope}
         diffViewMode={diffViewMode}
+        onAcceptAll={actions.acceptAll}
         onChangeScope={onChangeScope}
         onChangeViewMode={onChangeViewMode}
         onClose={toggleReviewPanelOpened}
+        onRejectAll={actions.rejectAll}
         status={status}
       />
       <div className="fusion-side-panel__review-body">
         {activeState.kind === 'ready' ? (
           <>
-            <ReviewPanelStats
-              additions={additions}
-              deletions={deletions}
-              fileCount={files.length}
-            />
+            {actions.feedback ? (
+              <ReviewPanelMutationFeedback
+                busy={actions.busy}
+                feedback={actions.feedback}
+                onDismiss={actions.dismissFeedback}
+                onRetryWithForce={actions.retryWithForce}
+              />
+            ) : null}
             <div className="fusion-side-panel__review-split">
               <ReviewPanelFileList
+                actionsDisabled={actions.busy}
                 changeScope={changeScope}
                 files={files}
-                selectedFile={selectedFile}
+                isFilePending={actions.isFilePending}
+                onAcceptFile={actions.acceptFile}
+                onRejectFile={actions.rejectFile}
                 onSelectFilePath={setSelectedFilePath}
+                selectedFile={selectedFile}
               />
               <ReviewPanelDiffPreview diffViewMode={diffViewMode} selectedFile={selectedFile} />
             </div>

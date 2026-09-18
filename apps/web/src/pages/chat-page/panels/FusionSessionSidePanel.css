@@ -18,14 +18,21 @@
   gap: var(--spacing-3);
   min-height: 0;
   overflow: auto;
-  padding: var(--spacing-3);
 }
 
-.fusion-side-panel__section-head {
-  align-items: flex-start;
+/* 顶部摘要行：原 section-head 的用量摘要 + 右侧操作按钮收成一行 */
+.fusion-side-panel__head-actions {
+  align-items: center;
   display: flex;
-  gap: var(--spacing-3);
+  gap: var(--spacing-2);
   justify-content: space-between;
+}
+
+.fusion-side-panel__head-meta {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
 }
 
 .fusion-side-panel__action-row {
@@ -489,13 +496,16 @@ button.fusion-side-panel__file-row:focus-visible {
     width: 100%;
   }
 
-  .fusion-side-panel__scroll,
+  .fusion-side-panel__scroll {
+    gap: var(--spacing-2);
+  }
+
   .fusion-side-panel__review-body {
     gap: var(--spacing-2);
     padding: var(--spacing-2);
   }
 
-  .fusion-side-panel__section-head {
+  .fusion-side-panel__head-actions {
     align-items: stretch;
     flex-direction: column;
     gap: var(--spacing-2);
@@ -534,7 +544,32 @@ button.fusion-side-panel__file-row:focus-visible {
   }
 }
 
-/* ─── 浏览器预览 tab ─────────────────────────────────────────────── */
+/* ─── 面板 pane 容器（工作区 / 审查 / Context 常驻挂载，hidden 切换可见性） ─── */
+
+.fusion-side-panel__pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.fusion-side-panel__pane[hidden] {
+  display: none;
+}
+
+/* ─── 工作区 tab（停靠面板内复用完整编辑器工作区） ─────────────────── */
+
+.fusion-side-panel__workspace-host {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ─── 浏览器预览 tab（移动端底部面板） ───────────────────────────── */
 
 .fusion-side-panel__browser-host {
   display: flex;
