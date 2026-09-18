@@ -834,6 +834,9 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         workspaceRoot,
       });
 
+      // 手工 converge（ReviewTab「执行评估」按钮）由 HTTP 请求直接触发，没有聊天回合
+      // 上下文，因此 clientRequestId 缺省落 NULL（不可归因）：任何回合回退都不会删除
+      // 这条评估记录——它是用户手动动作，不是某回合的派生物（ADR 边界明确列出）。
       recordConvergeResult(teamWorkspaceId, sessionId, result);
 
       step.succeed(undefined, {

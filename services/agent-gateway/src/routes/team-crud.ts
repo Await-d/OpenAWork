@@ -300,6 +300,21 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const { title, assigneeId, status, priority } = body;
+
+      if (assigneeId !== undefined) {
+        const assigneeStep = child('check-assignee');
+        const assignee = sqliteGet<{ id: string }>(
+          `SELECT id FROM team_members WHERE id = ? AND user_id = ? LIMIT 1`,
+          [assigneeId, user.sub],
+        );
+        if (!assignee) {
+          assigneeStep.fail('assignee not found');
+          step.fail('assignee not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_member_not_found'));
+        }
+        assigneeStep.succeed();
+      }
+
       const taskId = randomUUID();
       const insertStep = child('insert', undefined, { taskId, priority, status });
       sqliteRun(
@@ -346,16 +361,42 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       }
       lookupStep.succeed();
 
+      if (body.assigneeId !== undefined && body.assigneeId !== null) {
+        const assigneeStep = child('check-assignee');
+        const assignee = sqliteGet<{ id: string }>(
+          `SELECT id FROM team_members WHERE id = ? AND user_id = ? LIMIT 1`,
+          [body.assigneeId, user.sub],
+        );
+        if (!assignee) {
+          assigneeStep.fail('assignee not found');
+          step.fail('assignee not found');
+          return reply.status(404).send(teamCrudRouteErrorPayload('team_member_not_found'));
+        }
+        assigneeStep.succeed();
+      }
+
+      const assignments: string[] = [];
+      const assignmentValues: (string | null)[] = [];
+      if (body.assigneeId !== undefined) {
+        assignments.push('assignee_id = ?');
+        assignmentValues.push(body.assigneeId);
+      }
+      if (body.status !== undefined) {
+        assignments.push('status = ?');
+        assignmentValues.push(body.status);
+      }
+      if (body.result !== undefined) {
+        assignments.push('result = ?');
+        assignmentValues.push(body.result);
+      }
+
       const updateStep = child('update');
-      sqliteRun(
-        `UPDATE team_tasks SET
-          assignee_id = COALESCE(?, assignee_id),
-          status = COALESCE(?, status),
-          result = COALESCE(?, result),
-          updated_at = datetime('now')
-         WHERE id = ? AND user_id = ?`,
-        [body.assigneeId ?? null, body.status ?? null, body.result ?? null, taskId, user.sub],
-      );
+      const setClauses = [...assignments, `updated_at = datetime('now')`];
+      sqliteRun(`UPDATE team_tasks SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`, [
+        ...assignmentValues,
+        taskId,
+        user.sub,
+      ]);
       updateStep.succeed();
 
       step.succeed(undefined, {
@@ -489,6 +530,10 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
 
       const id = randomUUID();
       const insertStep = child('insert', undefined, { messageId: id, type: body.type });
+      // 工作区级团队消息（成员间留言）：POST /team/messages 契约不含回合键，读侧
+      // listMessages 也按 user 级最近 100 条返回。写入保持 client_request_id = NULL
+      // （不可归因 = 本就没有回合上下文），按回合回退永不删除这些行——它们是用户
+      // 动作本身，不是某回合的派生物。断言见 verifyTurnLessWritesSurviveRollback。
       appendTeamMessage({
         id,
         userId: user.sub,

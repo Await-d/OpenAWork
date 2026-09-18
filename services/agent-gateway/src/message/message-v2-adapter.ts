@@ -927,16 +927,27 @@ export function listSessionMessagesV2(input: {
     .filter((message) => message.content.length > 0);
 }
 
+export interface TruncateSessionMessagesAfterV2Result {
+  /** 截断后剩余的 V1 兼容消息列表（向后兼容既有调用方）。 */
+  messages: Message[];
+  /** 本次真正删除的消息 id（含无法归因回合的历史行）。 */
+  removedMessageIds: string[];
+  /** 作废窗口起点：第一条被删消息的 time_created（无删除时为当前时间）。 */
+  cutoffTimeMs: number;
+  /** 被删消息 `data` JSON 中解析出的回合键（去重，保持时间顺序）。 */
+  invalidatedClientRequestIds: string[];
+}
+
 export function truncateSessionMessagesAfterV2(input: {
   sessionId: string;
   userId: string;
   messageId: string;
   inclusive?: boolean;
   messageText?: string;
-}): Message[] {
+}): TruncateSessionMessagesAfterV2Result {
   // ── V2 truncate: delete messages after the given messageId ──
-  const rows = sqliteAll<{ id: string; time_created: number }>(
-    'SELECT id, time_created FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
+  const rows = sqliteAll<{ id: string; time_created: number; data: string }>(
+    'SELECT id, time_created, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
     [input.sessionId, input.userId],
   );
   let targetIndex = rows.findIndex((row) => row.id === input.messageId);
@@ -964,7 +975,34 @@ export function truncateSessionMessagesAfterV2(input: {
 
   if (targetIndex !== -1) {
     const cutoffIndex = input.inclusive === false ? targetIndex + 1 : targetIndex;
-    const deleteIds = rows.slice(cutoffIndex).map((r) => r.id);
+    const deleteRows = rows.slice(cutoffIndex);
+    const deleteIds = deleteRows.map((r) => r.id);
+    const cutoffTimeMs =
+      deleteRows[0]?.time_created ?? rows[targetIndex]?.time_created ?? Date.now();
+
+    // 回合键只存在于 `message_v2.data` JSON（message_v2 无 client_request_id 列）。
+    // 缺失 / 损坏的行按「不可归因的历史行」跳过，但仍计入 removedMessageIds。
+    const invalidatedClientRequestIds: string[] = [];
+    const seenClientRequestIds = new Set<string>();
+    const unattributedMessageIds: string[] = [];
+    for (const row of deleteRows) {
+      const clientRequestId = parseClientRequestIdFromMessageRow(row.data);
+      if (!clientRequestId) {
+        unattributedMessageIds.push(row.id);
+        continue;
+      }
+      if (seenClientRequestIds.has(clientRequestId)) continue;
+      seenClientRequestIds.add(clientRequestId);
+      invalidatedClientRequestIds.push(clientRequestId);
+    }
+    if (unattributedMessageIds.length > 0) {
+      const preview = unattributedMessageIds.slice(0, 20).join(', ');
+      console.warn(
+        `[message-v2] truncate: ${unattributedMessageIds.length} 条被删消息缺少 clientRequestId，已跳过回合归因：${preview}${
+          unattributedMessageIds.length > 20 ? ' …' : ''
+        }`,
+      );
+    }
 
     if (deleteIds.length > 0) {
       // Phase 2.1 — emit `MessageEvents.Removed` per truncated message and
@@ -981,12 +1019,16 @@ export function truncateSessionMessagesAfterV2(input: {
       // Defensive sweep — if any rows survived projector deletion (e.g. due
       // to a partially-migrated session where projector registration is
       // skipped) fall back to explicit SQL so the caller's invariant
-      // ``no messages after messageId remain'' still holds.
+      // ``no messages after messageId remain'' still holds. Also sweeps the
+      // legacy `session_messages` / `session_messages_fts` search mirror in
+      // lock-step with the Removed projector.
       for (const id of deleteIds) {
         sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [
           id,
           input.sessionId,
         ]);
+        sqliteRun('DELETE FROM session_messages WHERE id = ?', [id]);
+        sqliteRun('DELETE FROM session_messages_fts WHERE message_id = ?', [id]);
       }
       deleteMessageV2RowsByIds({
         messageIds: deleteIds,
@@ -994,10 +1036,41 @@ export function truncateSessionMessagesAfterV2(input: {
         userId: input.userId,
       });
     }
+
+    return {
+      messages: listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId }),
+      removedMessageIds: deleteIds,
+      cutoffTimeMs,
+      invalidatedClientRequestIds,
+    };
   }
 
-  // Return remaining messages from V2
-  return listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
+  // 幂等分支：目标消息已不存在（同一 cutoffMessageId 的重复回退）——
+  // 不做任何删除，返回当前消息与空 receipt 字段，重复调用不抛错、不二次删除。
+  // `cutoffTimeMs` 用 0 哨兵而非 `Date.now()`：没有删除就没有有意义的窗口左端点，
+  // 谎报「现在」会把多标签页里已有作废窗口的右边界推到现在，误伤随后重发的新回合。
+  return {
+    messages: listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId }),
+    removedMessageIds: [],
+    cutoffTimeMs: 0,
+    invalidatedClientRequestIds: [],
+  };
+}
+
+function parseClientRequestIdFromMessageRow(dataJson: string): string | null {
+  try {
+    const data = JSON.parse(dataJson) as MessageInfo;
+    return typeof data.clientRequestId === 'string' && data.clientRequestId.length > 0
+      ? data.clientRequestId
+      : null;
+  } catch (error) {
+    console.warn(
+      `[message-v2] truncate: message_v2.data 解析失败，跳过回合归因：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
 }
 
 // ─── Tool Permission Flow (V2 native) ───

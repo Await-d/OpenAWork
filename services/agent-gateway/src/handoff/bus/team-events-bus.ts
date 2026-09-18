@@ -25,6 +25,7 @@
 import type { HandoffRecord } from '../store/handoff-store.js';
 import { isRecoverableFailedHandoff } from '../store/handoff-store.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
+import type { RollbackReceipt } from '../../session/session-turn-rollback.js';
 
 export type TeamEventType =
   | 'handoff.created'
@@ -38,6 +39,7 @@ export type TeamEventType =
   | 'session.substate.changed'
   | 'session.inbound.submitted'
   | 'session.init.changed'
+  | 'session.messages.rolled_back'
   | 'scheduler.task-paused'
   | 'scheduler.task-resumed'
   | 'scheduler.all-paused'
@@ -263,6 +265,28 @@ export function publishHandoffEvent(input: {
       ...(input.payload ?? {}),
     },
     userId: input.record.userId,
+  });
+}
+
+/**
+ * 发布「回合回退」事件（payload = receipt）。
+ *
+ * 其它标签页 / 桌面端 / 移动端收到后按 receipt 建立作废窗口（幂等 apply），
+ * 使被回退回合的团队可观测面（过程时间线 / 审计 / 用量 / 任务图）失效。
+ *
+ * `userId` 单独传入而不从 receipt 反查：事件总线不做 DB 状态读取，
+ * 且 WS 订阅按 userId 过滤，收件人必须显式给出。
+ */
+export function publishSessionRolledBackEvent(input: {
+  receipt: RollbackReceipt;
+  userId: string;
+}): void {
+  publishTeamEvent({
+    type: 'session.messages.rolled_back',
+    sessionId: input.receipt.sessionId,
+    timestamp: input.receipt.tombstoneAtMs,
+    payload: { ...input.receipt },
+    userId: input.userId,
   });
 }
 

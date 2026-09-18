@@ -86,6 +86,50 @@ export function expirePendingQuestionRequests(input: {
   return requests.length;
 }
 
+/**
+ * 按回合键把 pending 提问请求置为终态（dismissed）——回合回退专用原语。
+ *
+ * 与 `expirePendingQuestionRequests` 的区别（因此不可复用）：
+ *   - 只匹配 `request_payload_json.clientRequestId === clientRequestId` 的行，
+ *     不会误伤同会话其它回合的 pending 提问；
+ *   - 不依赖 `expires_at`，回退发生时立即置终态；
+ *   - 不做 session 全量级联（回退语义是「只作废被回退回合」）。
+ *
+ * 返回被置终态的请求数；无匹配行时返回 0（重复调用幂等）。
+ */
+export function cancelPendingQuestionRequestsByClientRequest(input: {
+  sessionId: string;
+  userId: string;
+  clientRequestId: string;
+}): number {
+  const requests = sqliteAll<QuestionRequestRow>(
+    `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
+     FROM question_requests
+     WHERE session_id = ? AND user_id = ? AND status = 'pending'
+     ORDER BY created_at ASC`,
+    [input.sessionId, input.userId],
+  ).filter(
+    (request) =>
+      parseQuestionRequestClientRequestId(request.request_payload_json) === input.clientRequestId,
+  );
+
+  for (const request of requests) {
+    sqliteRun(
+      `UPDATE question_requests
+       SET status = 'dismissed', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status = 'pending'`,
+      [request.id, input.sessionId],
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createQuestionRepliedEvent({ requestId: request.id, status: 'dismissed' }),
+      { clientRequestId: input.clientRequestId },
+    );
+  }
+
+  return requests.length;
+}
+
 // Corrupt-row tolerance (§0.89 class): `questions_json` is persisted via
 // `JSON.stringify`, but a crash mid-write / disk error / hand-edited DB can
 // leave it invalid. The pending-questions list does `rows.map(...)`, so a
@@ -312,10 +356,9 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
   );
 }
 
-function updateSessionPlanModeForExitDecision(input: {
-  answers: string[][];
-  sessionId: string;
-}): { planApproved: boolean } {
+function updateSessionPlanModeForExitDecision(input: { answers: string[][]; sessionId: string }): {
+  planApproved: boolean;
+} {
   const session = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [input.sessionId],

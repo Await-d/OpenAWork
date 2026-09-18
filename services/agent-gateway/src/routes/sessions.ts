@@ -1,9 +1,14 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { makeOrderedMessageId } from '../infra/ordered-id.js';
 import { promises as fsp } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { RunEvent } from '@openAwork/shared';
+import type {
+  FileBackupRef,
+  FileChangeSourceKind,
+  FileDiffContent,
+  RunEvent,
+} from '@openAwork/shared';
 import { trackEvent } from '../telemetry/telemetry-service.js';
 import {
   AgentTaskManagerImpl,
@@ -15,11 +20,16 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
-import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { invalidateSessionOwnerCache } from '../infra/session-owner-cache.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
+  collectDescendantSessionIds,
+  parseSessionParentId,
+} from '../session/session-descendant-tree.js';
+import {
+  deleteSessionMessageSearchDocumentsForSession,
   hydrateLegacySessionMessagesForSearch,
   searchSessionMessages,
 } from '../session/session-search-store.js';
@@ -46,7 +56,12 @@ import {
   toPublicSessionResponse,
   validateImportedMessagesPayload,
 } from './session-route-helpers.js';
-import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import {
+  isPathWithinRoot,
+  isSamePath,
+  resolveWorkspaceEntryPath,
+  validateWorkspacePath,
+} from '../workspace/workspace-paths.js';
 import { invalidateUserWorkspaceAllowlist } from '../workspace/user-workspace-allowlist.js';
 import { listWorkspaceReviewChangesWithAvailability } from '../workspace/workspace-review.js';
 import {
@@ -84,12 +99,21 @@ import {
   buildSessionTurnDiffReadModel,
 } from '../session/session-file-changes-projection.js';
 import {
+  deleteRequestFileDiffs,
+  getSessionFileDiffDetails,
   listRequestFileDiffs,
   listRequestFileDiffsWithText,
   listSessionFileDiffs,
   listSessionFileDiffsWithText,
   persistSessionFileDiffs,
 } from '../session/session-file-diff-store.js';
+import {
+  getReviewDecision,
+  listReviewDecisions,
+  upsertReviewDecision,
+  type SessionFileReviewDecision,
+  type SessionFileReviewDecisionRecord,
+} from '../session/session-file-review-decision-store.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import {
   compareSessionSnapshots,
@@ -107,8 +131,12 @@ import { hasPendingSessionInteraction } from '../session/session-runtime-state.j
 import {
   listSessionMessagesV2,
   listRuntimeSafeSessionMessagesV2,
-  truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
 } from '../message/message-v2-adapter.js';
+import {
+  rollbackSessionTurn,
+  RollbackScopeLimitExceededError,
+} from '../session/session-turn-rollback.js';
+import { publishSessionRolledBackEvent } from '../handoff/bus/team-events-bus.js';
 import { countUserMessages } from '../message/message-store-v2.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
 import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
@@ -289,6 +317,15 @@ const restoreApplySchema = z
     }
   });
 
+const fileChangeReviewSchema = z
+  .object({
+    decision: z.enum(['accepted', 'rejected']),
+    filePath: z.string().min(1),
+    forceConflicts: z.boolean().optional().default(false),
+    requestId: z.string().min(1),
+  })
+  .strict();
+
 function buildSessionFileChangesSummary(input: { sessionId: string; userId: string }) {
   return buildSessionFileChangesProjection({
     fileDiffs: listSessionFileDiffs({ sessionId: input.sessionId, userId: input.userId }),
@@ -314,6 +351,45 @@ function toPublicFileDiff(
         ...(diff.sourceKind ? { sourceKind: diff.sourceKind } : {}),
         ...(diff.guaranteeLevel ? { guaranteeLevel: diff.guaranteeLevel } : {}),
       };
+}
+
+function buildReviewDecisionIndex(
+  decisions: SessionFileReviewDecisionRecord[],
+): Map<string, SessionFileReviewDecisionRecord> {
+  const index = new Map<string, SessionFileReviewDecisionRecord>();
+  for (const decision of decisions) {
+    index.set(`${decision.requestId}\u0000${decision.filePath}`, decision);
+  }
+  return index;
+}
+
+function withFileReview<T extends { file: string; requestId?: string }>(
+  diff: T,
+  index: Map<string, SessionFileReviewDecisionRecord>,
+): T & { reviewStatus?: SessionFileReviewDecision; revertRequestId?: string | null } {
+  const review = diff.requestId ? index.get(`${diff.requestId}\u0000${diff.file}`) : undefined;
+  if (!review) {
+    return diff;
+  }
+  return {
+    ...diff,
+    reviewStatus: review.decision,
+    revertRequestId: review.revertRequestId,
+  };
+}
+
+function buildFileChangesSummaryWithReview(
+  summary: ReturnType<typeof buildSessionFileChangesProjection>['summary'],
+  decisions: SessionFileReviewDecisionRecord[],
+) {
+  if (decisions.length === 0) {
+    return summary;
+  }
+  return {
+    ...summary,
+    acceptedCount: decisions.filter((decision) => decision.decision === 'accepted').length,
+    rejectedCount: decisions.filter((decision) => decision.decision === 'rejected').length,
+  };
 }
 
 function toPublicSnapshot(input: {
@@ -452,11 +528,97 @@ function resolveRestoreTargetPath(input: {
   filePath: string;
   workspaceRoot: string;
 }): string | null {
-  if (isAbsolute(input.filePath)) {
-    return validateWorkspacePath(input.filePath);
-  }
+  // Anchor every restore/revert target to the session workspace root: absolute
+  // paths outside the root and `..` traversal both resolve to null here instead
+  // of being trusted verbatim (the non-restricted workspace mode used to return
+  // any absolute path).
+  return resolveWorkspaceEntryPath(input.filePath, input.workspaceRoot);
+}
 
-  return validateWorkspacePath(resolve(join(input.workspaceRoot, input.filePath)));
+const FILE_REVERT_CLIENT_REQUEST_ID_PREFIX = 'file-revert-';
+
+function buildFileRevertClientRequestId(input: {
+  filePath: string;
+  requestId: string;
+  sessionId: string;
+}): string {
+  const digest = createHash('sha256')
+    .update(`${input.sessionId}\u0000${input.requestId}\u0000${input.filePath}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `${FILE_REVERT_CLIENT_REQUEST_ID_PREFIX}${digest}`;
+}
+
+/**
+ * L3: resolve the canonical (symlink-free) target for a workspace write.
+ *
+ * Walks up to the deepest existing ancestor, realpaths it, re-appends the
+ * not-yet-existing tail, and returns null when the canonical target escapes the
+ * workspace root. Callers MUST write to the returned path so the check and the
+ * write cannot diverge, and SHOULD call this immediately before the write to
+ * shrink the TOCTOU window.
+ */
+async function resolveWorkspaceWritePath(input: {
+  safePath: string;
+  workspaceRoot: string;
+}): Promise<string | null> {
+  const realRoot = await fsp.realpath(input.workspaceRoot).catch(() => null);
+  if (!realRoot) {
+    return null;
+  }
+  let probe = input.safePath;
+  let missingTail = '';
+  for (;;) {
+    const real = await fsp.realpath(probe).catch(() => null);
+    if (real) {
+      const canonicalPath = missingTail ? join(real, missingTail) : real;
+      return isPathWithinRoot(canonicalPath, realRoot) ? canonicalPath : null;
+    }
+    const parent = dirname(probe);
+    if (!parent || parent === probe) {
+      return null;
+    }
+    const segment = basename(probe);
+    missingTail = missingTail ? join(segment, missingTail) : segment;
+    probe = parent;
+  }
+}
+
+async function isRealPathWithinWorkspaceRoot(input: {
+  safePath: string;
+  workspaceRoot: string;
+}): Promise<boolean> {
+  return (await resolveWorkspaceWritePath(input)) !== null;
+}
+
+async function rollbackRevertFileWrite(input: {
+  backupBeforeRef?: FileBackupRef;
+  clientRequestId: string;
+  currentContent: string;
+  currentExists: boolean;
+  deleteFile: boolean;
+  safePath: string;
+  sessionId: string;
+  userId: string;
+}): Promise<void> {
+  if (input.currentExists) {
+    const backupContent = input.backupBeforeRef
+      ? await readSessionFileBackupContent({
+          backupId: input.backupBeforeRef.backupId,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        })
+      : null;
+    await fsp.mkdir(dirname(input.safePath), { recursive: true });
+    await fsp.writeFile(input.safePath, backupContent ?? input.currentContent, 'utf8');
+  } else if (!input.deleteFile) {
+    await fsp.rm(input.safePath, { force: true });
+  }
+  deleteRequestFileDiffs({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
 }
 
 async function readWorkspaceContentForPreview(input: {
@@ -619,6 +781,62 @@ async function buildSnapshotRestorePreviewState(input: {
   };
 }
 
+async function applyFileWriteOperation(input: {
+  clientRequestId: string;
+  currentContent: string;
+  currentExists: boolean;
+  deleteFile: boolean;
+  filePath: string;
+  requestId: string;
+  safePath?: string;
+  sessionId: string;
+  sourceKind: FileChangeSourceKind;
+  targetContent: string;
+  toolCallId: string;
+  toolName: string;
+  userId: string;
+  validPath: boolean;
+}): Promise<FileDiffContent> {
+  if (!input.validPath || !input.safePath) {
+    throw new Error(`Invalid restore path: ${input.filePath}`);
+  }
+
+  const backupBeforeRef = input.currentExists
+    ? await captureBeforeWriteBackup({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        requestId: input.requestId,
+        toolCallId: input.toolCallId,
+        toolName: input.toolName,
+        filePath: input.filePath,
+        content: input.currentContent,
+        kind: 'before_write',
+      })
+    : undefined;
+
+  if (input.deleteFile) {
+    await fsp.rm(input.safePath, { force: true });
+  } else {
+    await fsp.mkdir(dirname(input.safePath), { recursive: true });
+    await fsp.writeFile(input.safePath, input.targetContent, 'utf8');
+  }
+
+  return {
+    ...buildFileDiff({
+      file: input.filePath,
+      before: input.currentContent,
+      after: input.targetContent,
+    }),
+    clientRequestId: input.clientRequestId,
+    requestId: input.requestId,
+    toolName: input.toolName,
+    toolCallId: input.toolCallId,
+    sourceKind: input.sourceKind,
+    guaranteeLevel: 'strong',
+    ...(backupBeforeRef ? { backupBeforeRef } : {}),
+  };
+}
+
 async function applyRestoreOperations(input: {
   clientRequestId: string;
   operations: Array<{
@@ -632,49 +850,30 @@ async function applyRestoreOperations(input: {
   }>;
   sessionId: string;
   userId: string;
+  workspaceRoot?: string;
 }) {
   const requestId = `restore-apply:${input.clientRequestId}`;
-  const diffs: ReturnType<typeof listSessionFileDiffs> = [];
+  const diffs: FileDiffContent[] = [];
 
   for (const operation of input.operations) {
-    if (!operation.validPath || !operation.safePath) {
-      throw new Error(`Invalid restore path: ${operation.filePath}`);
-    }
-
-    const backupBeforeRef = operation.currentExists
-      ? await captureBeforeWriteBackup({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          requestId,
-          toolCallId: 'restore-apply',
-          toolName: 'restore_apply',
-          filePath: operation.filePath,
-          content: operation.currentContent,
-          kind: 'before_write',
-        })
-      : undefined;
-
-    if (operation.deleteFile) {
-      await fsp.rm(operation.safePath, { force: true });
-    } else {
-      await fsp.mkdir(dirname(operation.safePath), { recursive: true });
-      await fsp.writeFile(operation.safePath, operation.targetContent, 'utf8');
-    }
-
-    diffs.push({
-      ...buildFileDiff({
-        file: operation.filePath,
-        before: operation.currentContent,
-        after: operation.targetContent,
+    diffs.push(
+      await applyFileWriteOperation({
+        clientRequestId: input.clientRequestId,
+        currentContent: operation.currentContent,
+        currentExists: operation.currentExists,
+        deleteFile: operation.deleteFile,
+        filePath: operation.filePath,
+        requestId,
+        safePath: operation.safePath,
+        sessionId: input.sessionId,
+        sourceKind: 'restore_replay',
+        targetContent: operation.targetContent,
+        toolCallId: 'restore-apply',
+        toolName: 'restore_apply',
+        userId: input.userId,
+        validPath: operation.validPath,
       }),
-      clientRequestId: input.clientRequestId,
-      requestId,
-      toolName: 'restore_apply',
-      toolCallId: 'restore-apply',
-      sourceKind: 'restore_replay',
-      guaranteeLevel: 'strong',
-      ...(backupBeforeRef ? { backupBeforeRef } : {}),
-    });
+    );
   }
 
   await persistSessionFileDiffs({
@@ -687,6 +886,7 @@ async function applyRestoreOperations(input: {
     sourceKind: 'restore_replay',
     guaranteeLevel: 'strong',
     diffs,
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
   });
   persistSessionSnapshot({
     sessionId: input.sessionId,
@@ -753,46 +953,6 @@ function buildSafeSessionSelectColumns(): string {
   return safeColumns.join(', ');
 }
 
-function collectDescendantSessionIds(sessions: SessionRow[], rootSessionId: string): Set<string> {
-  const childrenByParent = new Map<string, string[]>();
-
-  const linkChild = (parentSessionId: string | null | undefined, childId: string): void => {
-    if (!parentSessionId || parentSessionId === childId) {
-      return;
-    }
-
-    const existingChildren = childrenByParent.get(parentSessionId) ?? [];
-    existingChildren.push(childId);
-    childrenByParent.set(parentSessionId, existingChildren);
-  };
-
-  for (const session of sessions) {
-    linkChild(parseParentSessionId(session.metadata_json), session.id);
-    linkChild(session.team_parent_session_id ?? null, session.id);
-  }
-
-  const includedSessionIds = new Set<string>([rootSessionId]);
-  const queue = [rootSessionId];
-
-  while (queue.length > 0) {
-    const currentSessionId = queue.shift();
-    if (!currentSessionId) {
-      continue;
-    }
-
-    for (const childSessionId of childrenByParent.get(currentSessionId) ?? []) {
-      if (includedSessionIds.has(childSessionId)) {
-        continue;
-      }
-
-      includedSessionIds.add(childSessionId);
-      queue.push(childSessionId);
-    }
-  }
-
-  return includedSessionIds;
-}
-
 function collectAncestorSessionIds(
   sessionsById: ReadonlyMap<string, SessionRow>,
   sessionId: string,
@@ -827,7 +987,7 @@ function collectAncestorSessionIds(
 
 function getSessionParentIds(session: SessionRow): string[] {
   const parentIds = [
-    parseParentSessionId(session.metadata_json),
+    parseSessionParentId(session.metadata_json),
     session.team_parent_session_id ?? null,
   ];
   return parentIds.filter(
@@ -840,7 +1000,7 @@ function getSessionParentIds(session: SessionRow): string[] {
 }
 
 function readRuntimeSessionParentSessionId(session: SessionRow): string | null {
-  return session.team_parent_session_id ?? parseParentSessionId(session.metadata_json);
+  return session.team_parent_session_id ?? parseSessionParentId(session.metadata_json);
 }
 
 function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string): SessionRow[] {
@@ -865,7 +1025,7 @@ function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string)
     //      this column, so without following it here, deleting a reception root
     //      deletes only the root row and orphans every team descendant (plus
     //      their CASCADE-linked message_v2 / handoff_records / inbound rows).
-    linkChild(parseParentSessionId(session.metadata_json), session.id);
+    linkChild(parseSessionParentId(session.metadata_json), session.id);
     linkChild(session.team_parent_session_id ?? null, session.id);
   }
 
@@ -946,7 +1106,13 @@ async function deleteSessionTree(input: {
       resetDoomLoopHistory(session.id);
 
       try {
-        sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [session.id, input.userId]);
+        sqliteTransaction(() => {
+          sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [
+            session.id,
+            input.userId,
+          ]);
+          deleteSessionMessageSearchDocumentsForSession(session.id);
+        });
       } catch (error) {
         if (!isSqliteMalformedError(error)) {
           throw error;
@@ -1112,6 +1278,13 @@ const taskStore = new AgentTaskStoreImpl();
 const SESSION_ROUTE_ERROR_MESSAGES = {
   backupNotFound: '目标备份不存在。',
   deleteBlocked: '仅当相关会话全部处于空闲状态时才能删除。',
+  fileReviewBeforeUnavailable: '该文件变更缺少可恢复的原始内容，无法安全撤销。',
+  fileReviewContentChanged: '文件内容在校验后发生变化，已中止撤销，请刷新后重试。',
+  fileReviewDiffNotFound: '目标文件变更记录不存在。',
+  fileReviewSessionBusy: '会话正在运行中，无法撤销文件变更，请等待当前回合结束后重试。',
+  fileReviewUnsafePath: '目标文件路径不在允许范围内。',
+  fileReviewWeakGuarantee: '该文件变更可信度不足，无法安全撤销。',
+  fileReviewWorkspaceMismatch: '该文件变更属于其他工作区，无法在当前会话工作区中撤销。',
   messageNotFound: '目标消息不存在。',
   metadataInvalid: '会话元数据无效。',
   parentNotFound: '目标父会话不存在。',
@@ -1920,6 +2093,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         fileDiffs,
         snapshots: listSessionSnapshots({ sessionId, userId: user.sub }),
       });
+      const reviewDecisions = listReviewDecisions({ sessionId, userId: user.sub });
+      const reviewIndex = buildReviewDecisionIndex(reviewDecisions);
       step.succeed(undefined, {
         diffCount: fileChanges.summary.totalFileDiffs,
         snapshotCount: fileChanges.summary.snapshotCount,
@@ -1927,7 +2102,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         fileChanges: {
           ...fileChanges,
-          fileDiffs: fileChanges.fileDiffs.map((diff) => toPublicFileDiff(diff, query.includeText)),
+          summary: buildFileChangesSummaryWithReview(fileChanges.summary, reviewDecisions),
+          fileDiffs: fileChanges.fileDiffs.map((diff) =>
+            withFileReview(toPublicFileDiff(diff, query.includeText), reviewIndex),
+          ),
           snapshots: fileChanges.snapshots.map((snapshot) =>
             toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
@@ -1974,6 +2152,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         fileDiffs,
         snapshots: listRequestSnapshots({ clientRequestId, sessionId, userId: user.sub }),
       });
+      const reviewDecisions = listReviewDecisions({ sessionId, userId: user.sub });
+      const reviewIndex = buildReviewDecisionIndex(reviewDecisions);
       step.succeed(undefined, {
         clientRequestId,
         diffCount: fileChanges.summary.totalFileDiffs,
@@ -1983,12 +2163,378 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         clientRequestId,
         fileChanges: {
           ...fileChanges,
-          fileDiffs: fileChanges.fileDiffs.map((diff) => toPublicFileDiff(diff, query.includeText)),
+          summary: buildFileChangesSummaryWithReview(fileChanges.summary, reviewDecisions),
+          fileDiffs: fileChanges.fileDiffs.map((diff) =>
+            withFileReview(toPublicFileDiff(diff, query.includeText), reviewIndex),
+          ),
           snapshots: fileChanges.snapshots.map((snapshot) =>
             toPublicSnapshot({ includeText: query.includeText, snapshot }),
           ),
         },
       });
+    },
+  );
+
+  app.post(
+    '/sessions/:sessionId/file-changes/review',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const body = parseBody(fileChangeReviewSchema, request.body);
+      const { step } = startRequestWorkflow(request, 'session.file-changes.review', undefined, {
+        sessionId,
+      });
+
+      const session = sqliteGet<{ id: string; metadata_json: string; state_status: string }>(
+        'SELECT id, metadata_json, state_status FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        throw ApiError.notFound('目标会话不存在。');
+      }
+
+      const details = await getSessionFileDiffDetails({
+        sessionId,
+        userId: user.sub,
+        requestId: body.requestId,
+        filePath: body.filePath,
+      });
+      if (!details) {
+        step.fail('diff row not found');
+        throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewDiffNotFound);
+      }
+
+      const existingDecision = getReviewDecision({
+        sessionId,
+        userId: user.sub,
+        requestId: body.requestId,
+        filePath: body.filePath,
+      });
+      if (
+        existingDecision &&
+        existingDecision.decision === body.decision &&
+        (body.decision === 'accepted' || existingDecision.revertRequestId !== null)
+      ) {
+        // Idempotent replay of the same review action: converge on the existing
+        // decision/revert row instead of re-running the mutation.
+        step.succeed(undefined, {
+          decision: existingDecision.decision,
+          filePath: existingDecision.filePath,
+          reverted: existingDecision.revertRequestId !== null,
+          idempotent: true,
+        });
+        return reply.send({
+          decision: {
+            requestId: existingDecision.requestId,
+            filePath: existingDecision.filePath,
+            decision: existingDecision.decision,
+            createdAt: existingDecision.createdAt,
+          },
+          revertClientRequestId: existingDecision.revertRequestId,
+        });
+      }
+
+      let revertClientRequestId: string | null = null;
+      let revertDiffForSnapshot: FileDiffContent | null = null;
+      let revertWorkspaceRoot: string | null = null;
+      let rollbackContext: {
+        backupBeforeRef?: FileBackupRef;
+        clientRequestId: string;
+        currentContent: string;
+        currentExists: boolean;
+        deleteFile: boolean;
+        safePath: string;
+      } | null = null;
+      let decisionPersisted = false;
+
+      if (body.decision === 'rejected') {
+        if (details.diff.guaranteeLevel === 'weak') {
+          step.fail('weak guarantee level');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewWeakGuarantee);
+        }
+
+        const isAdded = details.diff.status === 'added';
+        if (!isAdded && (details.beforeBackupId === null || details.beforeBackupContent === null)) {
+          step.fail('before content unavailable');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewBeforeUnavailable);
+        }
+
+        // C3(a): the revert mutates on-disk state, so never race an in-flight
+        // agent turn. Uses the codebase's authoritative run signals (persisted
+        // state_status + in-flight stream + fresh runtime thread), not a new one.
+        if (
+          session.state_status !== 'idle' ||
+          getAnyInFlightStreamRequestForSession({ sessionId, userId: user.sub }) ||
+          hasFreshSessionRuntimeThread({ sessionId, userId: user.sub })
+        ) {
+          step.fail('session busy');
+          throw ApiError.conflict(SESSION_ROUTE_ERROR_MESSAGES.fileReviewSessionBusy);
+        }
+
+        const currentSessionRoot =
+          extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
+          WORKSPACE_ROOT;
+        // C2: a diff row is bound to the workspace root it was written under.
+        // Refuse a revert after a workspace warp instead of resolving the stored
+        // relative path against the NEW root. Legacy rows (NULL) fall back to the
+        // content-based conflict check below.
+        if (details.workspaceRoot && !isSamePath(details.workspaceRoot, currentSessionRoot)) {
+          step.fail('workspace root mismatch');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewWorkspaceMismatch);
+        }
+        const workspaceRoot = details.workspaceRoot ?? currentSessionRoot;
+        // Bind the revert's diff row to the root just resolved, not to whatever
+        // metadata says at persist time (a workspace PATCH could race in between).
+        revertWorkspaceRoot = workspaceRoot;
+
+        const current = await readWorkspaceContentForPreview({
+          filePath: body.filePath,
+          workspaceRoot,
+        });
+        if (!current.validPath || !current.safePath) {
+          step.fail('unsafe path');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewUnsafePath);
+        }
+        // L1: a symlink that lives inside the root can still redirect the write
+        // outside it — realpath the target (or its deepest existing ancestor).
+        if (
+          !(await isRealPathWithinWorkspaceRoot({
+            safePath: current.safePath,
+            workspaceRoot,
+          }))
+        ) {
+          step.fail('symlink escapes workspace root');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewUnsafePath);
+        }
+
+        const deleteFile = isAdded;
+        const targetContent = isAdded ? '' : (details.beforeBackupContent ?? '');
+        const previewDiff = buildFileDiff({
+          file: body.filePath,
+          before: current.content,
+          after: targetContent,
+        });
+        // C1: conflict is purely content-based — current on-disk content vs the
+        // diff row's expected `after`. An unavailable `after` counts as a conflict
+        // so a stale row can never silently overwrite newer work (and this works
+        // with no git at all).
+        const expectedAfterAvailable =
+          details.afterBackupId !== null && details.afterBackupContent !== null;
+        const hasContentConflict =
+          !expectedAfterAvailable || current.content !== details.diff.after;
+        const gitReview = await buildWorkspaceReviewSummary({
+          workspaceRoot,
+          filePaths: [body.filePath],
+        });
+        // `workspaceReview.available` / `dirtyCount` stay informational git data;
+        // the conflict list shown here is the content gate's own output.
+        const workspaceReview = hasContentConflict
+          ? {
+              ...gitReview,
+              conflicts: [
+                {
+                  filePath: body.filePath,
+                  change: {
+                    path: toWorkspaceRelativeCandidate(workspaceRoot, body.filePath),
+                    status: 'modified' as const,
+                  },
+                },
+              ],
+            }
+          : gitReview;
+        if (hasContentConflict && !body.forceConflicts) {
+          step.fail('revert blocked', { hasContentConflict, expectedAfterAvailable });
+          return reply.status(409).send({
+            error: SESSION_ROUTE_ERROR_MESSAGES.restoreBlocked,
+            validateOnly: true,
+            mode: 'file-review',
+            target: {
+              requestId: body.requestId,
+              filePath: body.filePath,
+              decision: body.decision,
+            },
+            validation: {
+              canRestore: true,
+              currentExists: current.exists,
+              validPath: current.validPath,
+              beforeContentAvailable: isAdded ? false : details.beforeBackupContent !== null,
+            },
+            contentConflict: {
+              filePath: body.filePath,
+              expectedAfterAvailable,
+            },
+            workspaceReview,
+            preview: {
+              changed: previewDiff.before !== previewDiff.after,
+              currentExists: current.exists,
+              validPath: current.validPath,
+              diff: toPublicFileDiff(previewDiff, false),
+            },
+          });
+        }
+
+        // C3(b): re-read immediately before writing and abort if it no longer
+        // matches what was validated/conflict-checked.
+        const recheck = await readWorkspaceContentForPreview({
+          filePath: body.filePath,
+          workspaceRoot,
+        });
+        if (
+          !recheck.validPath ||
+          !recheck.safePath ||
+          recheck.exists !== current.exists ||
+          recheck.content !== current.content
+        ) {
+          step.fail('content changed before write');
+          throw ApiError.conflict(SESSION_ROUTE_ERROR_MESSAGES.fileReviewContentChanged);
+        }
+
+        // L3: recompute the canonical write target immediately before writing.
+        // The realpath check above is separated from the write by the git review
+        // and this re-read, so a path component swapped for an out-of-root
+        // symlink in that window must still be caught (and the write must use the
+        // canonical path so check and write cannot diverge).
+        const canonicalWritePath = await resolveWorkspaceWritePath({
+          safePath: current.safePath,
+          workspaceRoot,
+        });
+        if (!canonicalWritePath) {
+          step.fail('symlink escapes workspace root');
+          throw ApiError.badRequest(SESSION_ROUTE_ERROR_MESSAGES.fileReviewUnsafePath);
+        }
+
+        // M1: deterministic id so a double-submit converges on one diff row (and
+        // one decision) instead of appending orphan manual_revert rows. The diff
+        // row's request_id equals the client request id so the review decision can
+        // join it back (L2).
+        const clientRequestId = buildFileRevertClientRequestId({
+          sessionId,
+          requestId: body.requestId,
+          filePath: body.filePath,
+        });
+        const revertDiff = await applyFileWriteOperation({
+          clientRequestId,
+          currentContent: current.content,
+          currentExists: current.exists,
+          deleteFile,
+          filePath: body.filePath,
+          requestId: clientRequestId,
+          safePath: canonicalWritePath,
+          sessionId,
+          sourceKind: 'manual_revert',
+          targetContent,
+          toolCallId: 'file-review-revert',
+          toolName: 'file_review_revert',
+          userId: user.sub,
+          validPath: current.validPath,
+        });
+        rollbackContext = {
+          ...(revertDiff.backupBeforeRef ? { backupBeforeRef: revertDiff.backupBeforeRef } : {}),
+          clientRequestId,
+          currentContent: current.content,
+          currentExists: current.exists,
+          deleteFile,
+          safePath: canonicalWritePath,
+        };
+        revertDiffForSnapshot = revertDiff;
+        revertClientRequestId = clientRequestId;
+      }
+
+      try {
+        if (rollbackContext && revertDiffForSnapshot) {
+          await persistSessionFileDiffs({
+            sessionId,
+            userId: user.sub,
+            clientRequestId: rollbackContext.clientRequestId,
+            requestId: rollbackContext.clientRequestId,
+            toolName: 'file_review_revert',
+            toolCallId: 'file-review-revert',
+            sourceKind: 'manual_revert',
+            guaranteeLevel: 'strong',
+            diffs: [revertDiffForSnapshot],
+            ...(revertWorkspaceRoot ? { workspaceRoot: revertWorkspaceRoot } : {}),
+          });
+        }
+        upsertReviewDecision({
+          sessionId,
+          userId: user.sub,
+          requestId: body.requestId,
+          filePath: body.filePath,
+          decision: body.decision,
+          revertRequestId: revertClientRequestId,
+        });
+        // Decision is durable from here: a read-back failure must NOT roll the
+        // revert back, else a replay would falsely report "reverted".
+        decisionPersisted = true;
+        let decision: SessionFileReviewDecisionRecord | null = null;
+        try {
+          decision = getReviewDecision({
+            sessionId,
+            userId: user.sub,
+            requestId: body.requestId,
+            filePath: body.filePath,
+          });
+        } catch (readBackError) {
+          console.error(
+            '[sessions] 文件评审决策回读失败（决策已持久化，不回滚文件）。',
+            readBackError,
+          );
+        }
+        if (!decision) {
+          decision = {
+            requestId: body.requestId,
+            filePath: body.filePath,
+            decision: body.decision,
+            revertRequestId: revertClientRequestId,
+            createdAt: new Date().toISOString(),
+          };
+        }
+
+        // M1 ordering: the decision is durable before the display-only snapshot;
+        // a snapshot failure therefore never rolls the revert back.
+        if (revertClientRequestId && revertDiffForSnapshot) {
+          persistSessionSnapshot({
+            sessionId,
+            userId: user.sub,
+            // M3: non-request scope so the panel's "current" scope does not flip
+            // to the revert row after a reject.
+            snapshotRef: `scope:${revertClientRequestId}`,
+            fileDiffs: [revertDiffForSnapshot],
+          });
+        }
+
+        step.succeed(undefined, {
+          decision: decision.decision,
+          filePath: decision.filePath,
+          reverted: revertClientRequestId !== null,
+        });
+        return reply.send({
+          decision: {
+            requestId: decision.requestId,
+            filePath: decision.filePath,
+            decision: decision.decision,
+            createdAt: decision.createdAt,
+          },
+          revertClientRequestId,
+        });
+      } catch (error) {
+        // M1: a post-write failure must not leave a reverted file without a
+        // durable decision — restore from the before-write backup and drop the
+        // orphan revert row. Only safe while the decision is not yet persisted.
+        if (rollbackContext && !decisionPersisted) {
+          try {
+            await rollbackRevertFileWrite({
+              ...rollbackContext,
+              sessionId,
+              userId: user.sub,
+            });
+          } catch (rollbackError) {
+            console.error('[sessions] 撤销失败后的文件回滚未完成。', rollbackError);
+          }
+        }
+        throw error;
+      }
     },
   );
 
@@ -2288,6 +2834,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           clientRequestId,
           sessionId,
           userId: user.sub,
+          workspaceRoot,
           operations: [
             {
               deleteFile: false,
@@ -2345,6 +2892,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         clientRequestId,
         sessionId,
         userId: user.sub,
+        workspaceRoot,
         operations: previewState.previews.map((preview) => ({
           deleteFile: preview.deleteFile,
           filePath: preview.filePath,
@@ -2439,15 +2987,37 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         throw ApiError.notFound('目标会话不存在。');
       }
 
-      const messages = truncateSessionMessagesAfter({
-        sessionId,
-        userId: user.sub,
-        messageId: body.messageId,
-        inclusive: body.inclusive,
-        messageText: body.messageText,
-      });
-      step.succeed(undefined, { count: messages.length });
-      return reply.send({ messages });
+      // 回合回退：截断失败必须中止并返回结构化错误，绝不部分生效
+      // （消息删除与 receipt 必须在同一事务内成功，否则前端处于「消息已删、失效未应用」的不一致态）。
+      let result: Awaited<ReturnType<typeof rollbackSessionTurn>>;
+      try {
+        result = await rollbackSessionTurn({
+          sessionId,
+          userId: user.sub,
+          messageId: body.messageId,
+          inclusive: body.inclusive,
+          messageText: body.messageText,
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error, sessionId, messageId: body.messageId },
+          'session turn rollback failed',
+        );
+        if (error instanceof RollbackScopeLimitExceededError) {
+          throw ApiError.conflict(
+            `回退失败：受影响会话数 ${error.affectedSessionCount} 超过上限 ${error.limit}，未删除任何数据。`,
+          );
+        }
+        throw ApiError.internal('回退回合失败，操作已中止。');
+      }
+
+      // no-op 回退（幂等重放，什么都没删）不广播：伪造的 `[now, now)` 窗口会与
+      // 前端已有的作废窗口合并、把右边界推到当前时刻，过滤掉随后重发的新回合。
+      if (result.rollback.applied !== false) {
+        publishSessionRolledBackEvent({ receipt: result.rollback, userId: user.sub });
+      }
+      step.succeed(undefined, { count: result.messages.length });
+      return reply.send({ messages: result.messages, rollback: result.rollback });
     },
   );
 
@@ -3074,15 +3644,6 @@ export function validateParentSessionBinding(input: {
   }
 
   return { ok: true };
-}
-
-function parseParentSessionId(metadataJson: string): string | null {
-  try {
-    const parsed = JSON.parse(metadataJson) as { parentSessionId?: unknown };
-    return typeof parsed.parentSessionId === 'string' ? parsed.parentSessionId : null;
-  } catch {
-    return null;
-  }
 }
 
 export { normalizeImportedMessages };

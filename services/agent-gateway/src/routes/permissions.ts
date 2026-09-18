@@ -106,6 +106,59 @@ export function expirePendingPermissionRequests(input: {
   return requests.length;
 }
 
+/**
+ * 按回合键把 pending 权限请求置为终态（rejected）——回合回退专用原语。
+ *
+ * 与 `expirePendingPermissionRequests` 的区别（因此不可复用）：
+ *   - 只匹配 `request_payload_json.clientRequestId === clientRequestId` 的行，
+ *     不会误伤同会话其它回合的 pending 请求；
+ *   - 不依赖 `expires_at`，回退发生时立即置终态；
+ *   - 不做 session 全量级联（回退语义是「只作废被回退回合」）。
+ *
+ * 返回被置终态的请求数；无匹配行时返回 0（重复调用幂等）。
+ */
+export function cancelPendingPermissionRequestsByClientRequest(input: {
+  sessionId: string;
+  userId: string;
+  clientRequestId: string;
+}): number {
+  if (!ownsSession(input.sessionId, input.userId)) {
+    return 0;
+  }
+
+  const requests = sqliteAll<PermissionRequestRow>(
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
+     FROM permission_requests
+     WHERE session_id = ? AND status = 'pending'
+     ORDER BY created_at ASC`,
+    [input.sessionId],
+  ).filter(
+    (request) =>
+      parsePermissionRequestClientRequestId(request.request_payload_json) === input.clientRequestId,
+  );
+
+  for (const request of requests) {
+    sqliteRun(
+      `UPDATE permission_requests
+       SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status = 'pending'`,
+      [request.id, input.sessionId],
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createPermissionRepliedEvent({ requestId: request.id, decision: 'reject' }),
+      { clientRequestId: input.clientRequestId },
+    );
+  }
+
+  if (requests.length > 0) {
+    // 该回合已作废：清掉可能存在的 team resume 注册，避免后续 approve 续跑已删回合。
+    clearInternalTeamResumeRequest(input.clientRequestId);
+  }
+
+  return requests.length;
+}
+
 export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/sessions/:sessionId/permissions/pending',
