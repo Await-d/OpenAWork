@@ -1,4 +1,9 @@
-import type { AIProvider, ActiveSelection, ProviderType } from '@openAwork/agent-core';
+import type {
+  AIModelConfig,
+  AIProvider,
+  ActiveSelection,
+  ProviderType,
+} from '@openAwork/agent-core';
 import {
   MAX_PRICE_PER_MILLION,
   ProviderManagerImpl,
@@ -352,6 +357,7 @@ export const resolveStoredDefaultThinkingMode = (
 const createProviderManager = async (
   rawProviders: unknown,
   rawActiveSelection: unknown,
+  options: { syncModelsDev?: boolean } = {},
 ): Promise<InstanceType<typeof ProviderManagerImpl>> => {
   const providers = parseStoredProviders(rawProviders);
   const active = parseStoredActiveSelection(rawActiveSelection);
@@ -361,9 +367,60 @@ const createProviderManager = async (
       ? new ProviderManagerImpl({ active })
       : new ProviderManagerImpl();
 
-  await manager.syncFromModelsDev();
+  if (options.syncModelsDev !== false) {
+    await manager.syncFromModelsDev();
+  }
+
   return manager;
 };
+
+/**
+ * 与 ModelManager 的编辑项保持一致：只有这些字段的差异才算用户覆写。
+ * 其余字段（label/价格/模态等）由 catalog 派生，落库时应丢弃，否则陈旧同步值会长期滞留。
+ */
+const USER_EDITABLE_MODEL_FIELDS = [
+  'enabled',
+  'contextWindowOverride',
+  'autoCompactThresholdRatio',
+  'autoCompactTargetRatio',
+  'supportsTools',
+  'supportsVision',
+  'supportsThinking',
+  'supportsImageGeneration',
+  'supportsImageGeneration4K',
+] as const;
+
+const isModelEqualToCatalog = (catalogModel: AIModelConfig, userModel: AIModelConfig): boolean => {
+  const catalogRecord = catalogModel as unknown as Record<string, unknown>;
+  const userRecord = userModel as unknown as Record<string, unknown>;
+  const hasNovelField = Object.entries(userRecord).some(
+    ([key, value]) => value !== undefined && !(key in catalogRecord),
+  );
+  if (hasNovelField) {
+    return false;
+  }
+  return USER_EDITABLE_MODEL_FIELDS.every(
+    (field) => JSON.stringify(userRecord[field]) === JSON.stringify(catalogRecord[field]),
+  );
+};
+
+/** 落库只存覆盖项；完整清单由读取路径的 `mergeBuiltinModels` 以 catalog 为底重新派生。 */
+const reduceProvidersToUserOverrides = (
+  providers: AIProvider[],
+  catalogProviders: AIProvider[],
+): AIProvider[] =>
+  providers.map((provider) => {
+    const catalogProvider = catalogProviders.find((item) => item.type === provider.type);
+    if (!catalogProvider) {
+      return provider;
+    }
+    const catalogModels = new Map(catalogProvider.defaultModels.map((model) => [model.id, model]));
+    const overrides = provider.defaultModels.filter((model) => {
+      const catalogModel = catalogModels.get(model.id);
+      return !catalogModel || !isModelEqualToCatalog(catalogModel, model);
+    });
+    return { ...provider, defaultModels: overrides };
+  });
 
 export const materializeProviderConfig = (
   rawProviders: unknown,
@@ -377,6 +434,23 @@ export const materializeProviderConfig = (
       activeSelection: config.active,
     };
   });
+
+/** 落库专用：不合并 models.dev，避免把同步来的模型写回用户配置（对比读路径 {@link materializeProviderConfig}）。 */
+export const materializeProviderConfigForStorage = async (
+  rawProviders: unknown,
+  rawActiveSelection: unknown,
+): Promise<{ providers: AIProvider[]; activeSelection: ActiveSelection }> => {
+  const manager = await createProviderManager(rawProviders, rawActiveSelection, {
+    syncModelsDev: false,
+  });
+  const catalog = await createProviderManager(undefined, undefined);
+  const config = manager.getConfig();
+
+  return {
+    providers: reduceProvidersToUserOverrides(config.providers, catalog.getConfig().providers),
+    activeSelection: config.active,
+  };
+};
 
 export const filterEnabledProviderConfig = ({
   providers,

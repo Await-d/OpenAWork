@@ -26,6 +26,7 @@ import {
   filterEnabledProviderConfig,
   imageGenerationDefaultsSchema,
   materializeProviderConfig,
+  materializeProviderConfigForStorage,
   normalizeSingleProviderForTest,
   parseStoredDefaultThinking,
   parseStoredImageGenerationDefaults,
@@ -268,6 +269,20 @@ function sanitizeAuditPayload(payload: unknown, depth = 0): unknown {
 
   return '[Unsupported payload]';
 }
+
+const providerIdsKey = (providers: unknown[]): string =>
+  providers
+    .map((provider) => {
+      const id = (provider as { id?: unknown } | null)?.id;
+      return typeof id === 'string' ? id : '';
+    })
+    .join('\u0000');
+
+const countProviderModels = (providers: unknown[]): number =>
+  providers.reduce<number>((sum, provider) => {
+    const models = (provider as { defaultModels?: unknown } | null)?.defaultModels;
+    return sum + (Array.isArray(models) ? models.length : 0);
+  }, 0);
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   const companionSettingsQuerySchema = z.object({
@@ -846,9 +861,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         incoming: parsed.activeSelection,
         stored: parseStoredJson(selectionRow?.value),
       });
-      const { providers, activeSelection } = await materializeProviderConfig(
+      const storageConfig = await materializeProviderConfigForStorage(
         parsed.providers,
         mergedActiveSelection,
+      );
+      const { providers, activeSelection } = await materializeProviderConfig(
+        storageConfig.providers,
+        storageConfig.activeSelection,
       );
       const defaultThinking = parsed.defaultThinking
         ? parsed.defaultThinking
@@ -863,7 +882,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(providers)],
+        [user.sub, JSON.stringify(storageConfig.providers)],
       );
       saveProvidersStep.succeed();
 
@@ -925,7 +944,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         // 新用户首次进入聊天时，GET /settings/providers 会从内置 catalog
         // 物化默认 Provider，但不会为了只读请求写回数据库。Fast 开关仍需
         // 以同一份默认 catalog 为基线保存，避免强制用户先去设置页点一次保存。
-        stored = (await materializeProviderConfig(stored, null)).providers;
+        stored = (await materializeProviderConfigForStorage(stored, null)).providers;
       }
       if (!Array.isArray(stored)) {
         step.fail('providers not configured');
@@ -1151,8 +1170,43 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       // models.dev 是全局数据源，刷新后所有用户的 catalog 都过期了，全部失效。
       invalidateAllCatalogs();
 
+      // 历史落库会把同步来的模型写进用户配置；这里借已刷新的 catalog 把当前用户的
+      // 存量清单收口为「仅覆盖项」，读取路径仍按最新 catalog 派生完整清单。
+      const compactStep = child('compact-stored-providers');
+      const user = request.user as JwtPayload;
+      const providerRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      const selectionRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [user.sub],
+      );
+      const storedProviders = parseStoredJson(providerRow?.value);
+      let removedModels = 0;
+      if (Array.isArray(storedProviders)) {
+        const storageConfig = await materializeProviderConfigForStorage(
+          storedProviders,
+          parseStoredJson(selectionRow?.value),
+        );
+        const providerIdentitiesPreserved =
+          providerIdsKey(storedProviders) === providerIdsKey(storageConfig.providers);
+        const removed =
+          countProviderModels(storedProviders) - countProviderModels(storageConfig.providers);
+        if (providerIdentitiesPreserved && removed > 0) {
+          removedModels = removed;
+          sqliteRun(
+            `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
+             ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+            [user.sub, JSON.stringify(storageConfig.providers)],
+          );
+          invalidateCatalog(user.sub);
+        }
+      }
+      compactStep.succeed(undefined, { removedModels });
+
       step.succeed(undefined, { providers: providerCount, models: modelCount });
-      return reply.send({ ok: true, providerCount, modelCount });
+      return reply.send({ ok: true, providerCount, modelCount, removedModels });
     },
   );
 
@@ -1267,9 +1321,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const mergedRaw = [...existingList, imported];
 
       const materializeStep = child('materialize');
-      const { providers, activeSelection } = await materializeProviderConfig(
+      const storageConfig = await materializeProviderConfigForStorage(
         mergedRaw,
         parseStoredJson(selectionRow?.value),
+      );
+      const { providers, activeSelection } = await materializeProviderConfig(
+        storageConfig.providers,
+        storageConfig.activeSelection,
       );
       materializeStep.succeed(undefined, { providers: providers.length });
 
@@ -1277,7 +1335,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(providers)],
+        [user.sub, JSON.stringify(storageConfig.providers)],
       );
       saveProvidersStep.succeed();
 

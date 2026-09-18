@@ -408,6 +408,7 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         ok: boolean;
         providerCount?: number;
         modelCount?: number;
+        removedModels?: number;
         message?: string;
       }>({
         actionLabel: '同步模型目录',
