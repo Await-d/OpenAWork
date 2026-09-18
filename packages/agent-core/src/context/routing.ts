@@ -67,50 +67,51 @@ const CLARIFICATION_ORDER: ClarificationDimension[] = [
   'acceptance',
 ];
 
+/**
+ * 澄清维度模板（中文）。每个维度的**首个选项即推荐答案**——调用方（reception / pm1 的
+ * grill 运行体）统一用「首项标 recommended」策略，两者保持一致，避免推荐位漂移。
+ */
 const CLARIFICATION_TEMPLATES: Record<
   ClarificationDimension,
   (input: string) => ClarificationQuestion
 > = {
   goal: (input) => ({
     dimension: 'goal',
-    question: `To clarify the scope: what is the primary outcome you want from "${input.slice(0, 60)}"?`,
+    question: `为确认范围：你希望从「${input.slice(0, 60)}」得到的主要结果是什么？`,
     options: [
       {
-        label: 'Specific file/location change',
-        description: 'I know exactly where the change should be',
+        label: '跨多个文件的功能改动',
+        description: '改动会横跨若干个模块',
       },
-      { label: 'Feature across multiple files', description: 'Changes span several modules' },
-      { label: 'Architecture-level decision', description: 'Affects system design or structure' },
+      { label: '具体文件/位置的改动', description: '我已经明确知道要改哪里' },
+      { label: '架构级决策', description: '会影响系统设计或整体结构' },
     ],
   }),
   constraint: () => ({
     dimension: 'constraint',
-    question:
-      'Are there any constraints I should be aware of? (e.g. must not change X, must stay backward-compatible, deadline)',
+    question: '有没有我必须知道的约束？（例如：不能改 X、必须保持向后兼容、截止时间）',
     options: [
-      { label: 'No constraints', description: 'Proceed with best approach' },
-      { label: 'Must not modify existing interfaces', description: 'Additive changes only' },
-      { label: 'Must stay in current tech stack', description: 'No new dependencies' },
+      { label: '暂无额外约束', description: '按最佳实践推进即可' },
+      { label: '不得修改既有接口', description: '只做增量改动' },
+      { label: '必须留在现有技术栈', description: '不引入新依赖' },
     ],
   }),
   deliverable: () => ({
     dimension: 'deliverable',
-    question:
-      'What should the deliverable look like? (e.g. new file, updated function, PR-ready change)',
+    question: '交付物应该是什么形态？（例如：新文件、修改现有函数、可直接合并的改动）',
     options: [
-      { label: 'Working code change', description: 'Ready to run/build' },
-      { label: 'Plan + code', description: 'Explain approach, then implement' },
-      { label: 'Plan only', description: 'Just the proposal, no code yet' },
+      { label: '可直接运行的代码改动', description: '改完即可构建/运行' },
+      { label: '方案 + 代码', description: '先说明思路，再实施' },
+      { label: '仅方案', description: '只要提案，暂不写代码' },
     ],
   }),
   acceptance: () => ({
     dimension: 'acceptance',
-    question:
-      'How will you know the result is correct? (e.g. tests pass, specific behavior, output format)',
+    question: '你根据什么判断结果是对的？（例如：测试通过、特定行为、输出格式）',
     options: [
-      { label: 'Existing tests pass', description: 'No new tests needed' },
-      { label: 'New tests required', description: 'Write tests as part of the task' },
-      { label: 'Manual verification', description: 'I will check the output myself' },
+      { label: '既有测试通过', description: '不需要额外新增测试' },
+      { label: '需要新增测试', description: '把测试作为任务的一部分' },
+      { label: '人工验证', description: '我会自己检查产出' },
     ],
   }),
 };
@@ -134,12 +135,12 @@ function inferDimensions(input: string): RoutingDimensions {
   const lower = input.toLowerCase();
 
   const needsAction =
-    /\b(add|implement|create|fix|update|refactor|delete|remove|build|write|change|move|rename|migrate)\b/.test(
+    /\b(add|implement|create|fix|update|refactor|delete|remove|build|write|change|move|rename|migrate)\b|(实现|修复|创建|新增|删除|移除|重构|迁移|修改|改成|部署|上线)/.test(
       lower,
     );
 
   const isArchitectural =
-    /\b(architect|design|system|microservice|database schema|migration|restructur|restructure|overhaul|rewrite|across|all|entire|every)\b/.test(
+    /\b(architect|design|system|microservice|database schema|migration|restructur|restructure|overhaul|rewrite|across|all|entire|every)\b|(架构|系统设计|整体改造|重写|跨系统|数据迁移)/.test(
       lower,
     );
 
@@ -151,7 +152,9 @@ function inferDimensions(input: string): RoutingDimensions {
   );
 
   const isHighRisk =
-    /\b(delete|drop|remove|destroy|truncate|production|prod|irreversible|breaking)\b/.test(lower);
+    /\b(delete|drop|remove|destroy|truncate|production|prod|irreversible|breaking)\b|(删除生产|删除线上|清空|不可逆|破坏性|线上环境|生产环境)/.test(
+      lower,
+    );
 
   const isModerate = /\b(update|change|modify|alter|rename|move)\b/.test(lower);
 
