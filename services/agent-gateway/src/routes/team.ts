@@ -1204,6 +1204,39 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }),
     ]);
 
+  const parseRuntimeClarificationOptions = (
+    value: unknown,
+  ): Array<{ label: string; description?: string; recommended?: boolean }> => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const options: Array<{ label: string; description?: string; recommended?: boolean }> = [];
+    for (const candidate of value) {
+      if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+        continue;
+      }
+      const record = candidate as Record<string, unknown>;
+      const label = record['label'];
+      if (typeof label !== 'string' || label.trim().length === 0) {
+        continue;
+      }
+      const description = record['description'];
+      if (description !== undefined && typeof description !== 'string') {
+        continue;
+      }
+      const recommended = record['recommended'];
+      if (recommended !== undefined && typeof recommended !== 'boolean') {
+        continue;
+      }
+      options.push({
+        label,
+        ...(typeof description === 'string' ? { description } : {}),
+        ...(typeof recommended === 'boolean' ? { recommended } : {}),
+      });
+    }
+    return options;
+  };
+
   const listRuntimeClarifications = (input: { sessionIds: string[]; userId: string }) => {
     if (input.sessionIds.length === 0) {
       return [];
@@ -1229,6 +1262,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       createdAt: number;
       fromSessionId: string;
       id: string;
+      options?: Array<{ label: string; description?: string; recommended?: boolean }>;
       question: string;
       sessionId: string;
       status: 'answered' | 'dismissed' | 'pending';
@@ -1266,6 +1300,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           record['status'] === 'answered' || record['status'] === 'dismissed'
             ? record['status']
             : 'pending';
+        const options = parseRuntimeClarificationOptions(record['options']);
         clarifications.push({
           ...(typeof record['answer'] === 'string' ? { answer: record['answer'] } : {}),
           ...(typeof record['answeredAt'] === 'number' ? { answeredAt: record['answeredAt'] } : {}),
@@ -1273,6 +1308,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           createdAt: Date.parse(row.created_at) || Date.now(),
           fromSessionId,
           id: record['id'],
+          ...(options.length > 0 ? { options } : {}),
           question: record['question'],
           sessionId: fromSessionId,
           status,
