@@ -194,7 +194,7 @@ function htmlToText(html: string): string {
   );
 }
 
-function normalizeText(text: string): string {
+export function normalizeText(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\u00a0/g, ' ')

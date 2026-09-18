@@ -157,7 +157,7 @@ async function executeFetchWeb(rawInput: Record<string, unknown>): Promise<MCPTo
     }
     return jsonResult(await fetchOpenWebSearchPage(parsed.data));
   } catch (error) {
-    return errorResult(`网页提取失败：${readErrorMessage(error)}`);
+    return errorResult(readFetchWebErrorMessage(error));
   }
 }
 
@@ -197,4 +197,69 @@ function errorResult(message: string): MCPToolResult {
 
 function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function readFetchWebErrorMessage(error: unknown): string {
+  const status = readHttpStatus(error);
+  if (status !== null) {
+    const statusMessage = describeHttpStatus(status);
+    if (statusMessage) {
+      return statusMessage;
+    }
+  }
+
+  const code = readErrorCode(error);
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return `请求超时（${code}），请稍后重试。`;
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return `域名解析失败（${code}），请检查 URL 是否正确。`;
+  }
+
+  return `网页提取失败：${readErrorMessage(error)}`;
+}
+
+function describeHttpStatus(status: number): string | null {
+  if (status === 401) {
+    return '需要登录后才能访问该网页（HTTP 401）。';
+  }
+  if (status === 403) {
+    return '目标站点拒绝访问（HTTP 403，可能触发反爬策略），请尝试其他来源。';
+  }
+  if (status === 404) {
+    return '目标网页不存在（HTTP 404），请检查 URL 是否正确。';
+  }
+  if (status === 408) {
+    return '目标站点响应超时（HTTP 408），请稍后重试。';
+  }
+  if (status === 429) {
+    return '请求过于频繁（HTTP 429），请稍后重试。';
+  }
+  if (status === 451) {
+    return '目标网页因法律原因不可访问（HTTP 451）。';
+  }
+  if (status >= 500 && status <= 599) {
+    return `目标站点服务器错误（HTTP ${status}），请稍后重试。`;
+  }
+  return null;
+}
+
+function readHttpStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return null;
+  }
+  const { response } = error;
+  if (typeof response !== 'object' || response === null || !('status' in response)) {
+    return null;
+  }
+  const { status } = response;
+  return typeof status === 'number' && Number.isFinite(status) ? status : null;
+}
+
+function readErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return null;
+  }
+  const { code } = error;
+  return typeof code === 'string' ? code : null;
 }
