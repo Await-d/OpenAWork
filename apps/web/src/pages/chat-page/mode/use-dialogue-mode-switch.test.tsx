@@ -56,9 +56,7 @@ describe('useDialogueModeSwitch — 确认转换', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `${GATEWAY_URL}/sessions/${SESSION_ID}/clarify/confirm`,
     );
-    expect(received).toEqual([
-      { dialogueMode: 'coding', sessionId: SESSION_ID, source: 'user' },
-    ]);
+    expect(received).toEqual([{ dialogueMode: 'coding', sessionId: SESSION_ID, source: 'user' }]);
     expect(toastMock).not.toHaveBeenCalled();
     expect(result.current.pending).toBe(false);
 

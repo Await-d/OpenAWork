@@ -60,4 +60,28 @@ describe('model-selection-source', () => {
     expect(shouldSendExplicitStreamModelSelection('defaults')).toBe(true);
     expect(shouldSendExplicitStreamModelSelection(null)).toBe(false);
   });
+
+  it('会话已水合且已解析出有效模型时，来源未知也显式透传', () => {
+    expect(
+      shouldSendExplicitStreamModelSelection(null, {
+        sessionModesHydrated: true,
+        effectiveModelId: 'gpt-5.4',
+      }),
+    ).toBe(true);
+  });
+
+  it('会话未水合或模型未解析时，来源未知不显式透传', () => {
+    expect(
+      shouldSendExplicitStreamModelSelection(null, {
+        sessionModesHydrated: false,
+        effectiveModelId: 'gpt-5.4',
+      }),
+    ).toBe(false);
+    expect(
+      shouldSendExplicitStreamModelSelection(null, {
+        sessionModesHydrated: true,
+        effectiveModelId: '   ',
+      }),
+    ).toBe(false);
+  });
 });

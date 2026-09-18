@@ -16,9 +16,28 @@ export function makeReviewPanelDiffEntry(
     deletions: 0,
     file,
     guaranteeLevel: 'strong',
+    requestId: `request:${file}`,
     sourceKind: 'structured_tool_diff',
     status: 'modified',
     toolName: 'hash_edit',
+    ...overrides,
+  };
+}
+
+export function makeReviewPanelSnapshot(
+  files: readonly SessionFileDiffEntry[],
+  overrides: Partial<SessionSnapshot> = {},
+): SessionSnapshot {
+  return {
+    createdAt: '2026-01-01T00:00:00.000Z',
+    files: [...files],
+    scopeKind: 'request',
+    snapshotRef: `request:snapshot-${files.length}`,
+    summary: {
+      additions: files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+      files: files.length,
+    },
     ...overrides,
   };
 }

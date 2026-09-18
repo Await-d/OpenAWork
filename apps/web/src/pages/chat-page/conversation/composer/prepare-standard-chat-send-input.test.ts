@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MAX_GATEWAY_IMAGE_URL_CHARS } from '../../../../hooks/gateway/sanitize-input-image-parts.js';
 import { prepareStandardChatSendInput } from './prepare-standard-chat-send-input.js';
 
 const uploadChatAttachments = vi.fn<(...args: unknown[]) => Promise<unknown[]>>();
@@ -77,5 +78,44 @@ describe('prepareStandardChatSendInput', () => {
       ],
       text: 'hello\n附件:doc.txt',
     });
+  });
+
+  it('无文件时超长 imageUrl 只从发给网关的 parts 中剥离，本地 parts 仍保留', async () => {
+    const imageUrl = `data:image/png;base64,${'A'.repeat(MAX_GATEWAY_IMAGE_URL_CHARS)}`;
+    const result = await prepareStandardChatSendInput({
+      existingInputParts: [
+        {
+          type: 'input_image',
+          artifactId: 'a1',
+          fileName: 'a.png',
+          mimeType: 'image/png',
+          imageUrl,
+        },
+      ],
+      files: [],
+      gatewayUrl: 'https://gw.test',
+      sessionId: 's1',
+      text: 'hello',
+      token: 'tok',
+    });
+
+    expect(result.requestInputParts).toEqual([
+      {
+        type: 'input_image',
+        artifactId: 'a1',
+        fileName: 'a.png',
+        mimeType: 'image/png',
+      },
+    ]);
+    expect(result.localRequestInputParts).toEqual([
+      {
+        type: 'input_image',
+        artifactId: 'a1',
+        fileName: 'a.png',
+        mimeType: 'image/png',
+        imageUrl,
+      },
+    ]);
+    expect(result.text).toBe('hello');
   });
 });

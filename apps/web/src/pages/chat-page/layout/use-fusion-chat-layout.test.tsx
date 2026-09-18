@@ -10,6 +10,8 @@ afterEach(() => {
 
 describe('useFusionChatLayout', () => {
   it('Fusion 终端不再自动展开，但自动打开的终端归零后会自动收起', async () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
     const setReviewPanelOpened = vi.fn();
     const setSidePanelActiveTab = vi.fn();
     const setTerminalPanelOpened = vi.fn();
@@ -24,6 +26,8 @@ describe('useFusionChatLayout', () => {
           enabled: true,
           isNarrowViewport: false,
           reviewPanelOpened: true,
+          setEditorFullScreen,
+          setEditorMode,
           setReviewPanelOpened,
           setSidePanelActiveTab,
           setTerminalPanelOpened,
@@ -55,6 +59,8 @@ describe('useFusionChatLayout', () => {
   });
 
   it('Fusion 审查面板未展开或不在 review tab 时强制切回 review 并展开', () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
     const setReviewPanelOpened = vi.fn();
     const setSidePanelActiveTab = vi.fn();
     const setTerminalPanelOpened = vi.fn();
@@ -68,6 +74,8 @@ describe('useFusionChatLayout', () => {
         enabled: true,
         isNarrowViewport: false,
         reviewPanelOpened: false,
+        setEditorFullScreen,
+        setEditorMode,
         setReviewPanelOpened,
         setSidePanelActiveTab,
         setTerminalPanelOpened,
@@ -84,6 +92,8 @@ describe('useFusionChatLayout', () => {
   });
 
   it('Fusion 审查面板已在 review tab 时再次触发会收起', () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
     const setReviewPanelOpened = vi.fn();
     const setSidePanelActiveTab = vi.fn();
     const setTerminalPanelOpened = vi.fn();
@@ -97,6 +107,8 @@ describe('useFusionChatLayout', () => {
         enabled: true,
         isNarrowViewport: false,
         reviewPanelOpened: true,
+        setEditorFullScreen,
+        setEditorMode,
         setReviewPanelOpened,
         setSidePanelActiveTab,
         setTerminalPanelOpened,
@@ -112,7 +124,44 @@ describe('useFusionChatLayout', () => {
     expect(setReviewPanelOpened).toHaveBeenCalledWith(false);
   });
 
+  it('放大态下触发审查入口会退出全屏并把内容收回到会话面板', () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
+    const setReviewPanelOpened = vi.fn();
+    const setSidePanelActiveTab = vi.fn();
+    const setTerminalPanelOpened = vi.fn();
+
+    const { result } = renderHook(() =>
+      useFusionChatLayout({
+        canDockSidePanel: true,
+        currentSessionId: 'session-1',
+        editorFullScreen: true,
+        editorMode: true,
+        enabled: true,
+        isNarrowViewport: false,
+        reviewPanelOpened: true,
+        setEditorFullScreen,
+        setEditorMode,
+        setReviewPanelOpened,
+        setSidePanelActiveTab,
+        setTerminalPanelOpened,
+        sidePanelActiveTab: 'code',
+        terminalPanelOpened: false,
+        terminalRunningCount: 0,
+      }),
+    );
+
+    result.current.toggleReviewPanel();
+
+    expect(setEditorFullScreen).toHaveBeenCalledWith(false);
+    expect(setEditorMode).toHaveBeenCalledWith(false);
+    expect(setSidePanelActiveTab).toHaveBeenCalledWith('review');
+    expect(setReviewPanelOpened).toHaveBeenCalledWith(true);
+  });
+
   it('禁用时仅关闭副作用，不回传 Classic 根布局', () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
     const setReviewPanelOpened = vi.fn();
     const setSidePanelActiveTab = vi.fn();
     const setTerminalPanelOpened = vi.fn();
@@ -126,6 +175,8 @@ describe('useFusionChatLayout', () => {
         enabled: false,
         isNarrowViewport: false,
         reviewPanelOpened: true,
+        setEditorFullScreen,
+        setEditorMode,
         setReviewPanelOpened,
         setSidePanelActiveTab,
         setTerminalPanelOpened,

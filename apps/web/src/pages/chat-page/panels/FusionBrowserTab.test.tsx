@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorBrowserWorkspace } from '../../../components/file-editor/EditorBrowserWorkspace.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionBrowserTab } from './FusionBrowserTab.js';
-import sidePanelCss from './FusionSessionSidePanel.css?raw';
+
+/**
+ * vitest 的 `css: false` 会把 `.css?raw` 也替换成空串（实测 length 0），
+ * `import.meta.url` 在 jsdom 下又不是 file: 协议，因此直读源文本（cwd = apps/web）。
+ */
+const sidePanelCss = readFileSync(
+  `${process.cwd()}/src/pages/chat-page/panels/FusionSessionSidePanel.css`,
+  'utf8',
+);
 
 vi.mock('../../../components/chat/misc/BuiltInBrowser.js', () => ({
   BuiltInBrowser: (props: { readonly hidden?: boolean }) => (
@@ -165,8 +174,7 @@ describe('FusionBrowserTab', () => {
 
     // jsdom 不应用样式表也不做布局，宿主能否让浏览器吃到剩余高度完全取决于这条
     // 真实 CSS 规则；直接对样式源文本断言，避免规则被改回 row 时测试仍然全绿。
-    const rule =
-      sidePanelCss.match(/\.fusion-side-panel__browser-host\s*\{([^}]*)\}/)?.[1] ?? '';
+    const rule = sidePanelCss.match(/\.fusion-side-panel__browser-host\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toMatch(/display:\s*flex/);
     expect(rule).toMatch(/flex-direction:\s*column/);
     expect(rule).toMatch(/flex:\s*1/);

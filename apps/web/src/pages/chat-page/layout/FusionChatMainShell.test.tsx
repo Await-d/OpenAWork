@@ -18,6 +18,8 @@ function renderShell(overrides: Partial<FusionChatMainShellProps> = {}) {
     splitContainerRef: createRef<HTMLDivElement>(),
     splitDragging,
     splitPos: 62,
+    terminalMaximized: false,
+    terminalPosition: 'bottom',
     terminal: <div data-testid="terminal-dock">terminal</div>,
   };
 
@@ -64,5 +66,50 @@ describe('FusionChatMainShell', () => {
     expect(screen.getByTestId('editor-pane')).toBeTruthy();
     expect(screen.queryByTestId('docked-side-panel')).toBeNull();
     expect(screen.queryByTestId('terminal-dock')).toBeNull();
+  });
+
+  it('terminalMaximized 时根节点加修饰类（工作台折叠由 CSS 承接）', () => {
+    renderShell({ terminalMaximized: true });
+
+    expect(screen.getByTestId('fusion-chat-main-shell').className).toContain(
+      'fusion-chat-main-shell--terminal-maximized',
+    );
+    // 折叠是 CSS 行为（jsdom 不加载外部样式表），这里锁的是类名契约与结构保留。
+    expect(screen.getByTestId('terminal-dock')).toBeTruthy();
+  });
+
+  it('非最大化时不加修饰类', () => {
+    renderShell();
+
+    expect(screen.getByTestId('fusion-chat-main-shell').className).not.toContain(
+      'fusion-chat-main-shell--terminal-maximized',
+    );
+  });
+
+  it('terminalPosition=left 时加左停靠修饰类，DOM 顺序保持不变（列序交给 CSS order）', () => {
+    renderShell({ terminalPosition: 'left' });
+
+    const root = screen.getByTestId('fusion-chat-main-shell');
+    expect(root.className).toContain('fusion-chat-main-shell--terminal-left');
+    expect(root.className).not.toContain('fusion-chat-main-shell--terminal-right');
+    // 终端仍排在 workbench 行之后：左停靠只改 flex order，不重排 JSX（避免终端重挂载）。
+    expect(root.firstElementChild?.className).toContain('fusion-chat-main-shell__workbench-row');
+    expect(screen.getByTestId('terminal-dock')).toBeTruthy();
+  });
+
+  it('terminalPosition=right 时只加右停靠修饰类', () => {
+    renderShell({ terminalPosition: 'right' });
+
+    const root = screen.getByTestId('fusion-chat-main-shell');
+    expect(root.className).toContain('fusion-chat-main-shell--terminal-right');
+    expect(root.className).not.toContain('fusion-chat-main-shell--terminal-left');
+  });
+
+  it('terminalPosition=bottom 时不加任何停靠修饰类', () => {
+    renderShell();
+
+    const root = screen.getByTestId('fusion-chat-main-shell');
+    expect(root.className).not.toContain('fusion-chat-main-shell--terminal-left');
+    expect(root.className).not.toContain('fusion-chat-main-shell--terminal-right');
   });
 });

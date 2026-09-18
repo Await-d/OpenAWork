@@ -18,6 +18,10 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { useChatRetryAndEdit } from './use-chat-retry-and-edit.js';
 import type { RetryPrompt } from './use-chat-message-actions.js';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
+import {
+  clearRollbackTombstones,
+  useRollbackTombstoneStore,
+} from '../../../stores/team/rollback-tombstones.js';
 
 const TOKEN = 'tok-fake';
 const GATEWAY = 'https://gw.test';
@@ -51,6 +55,7 @@ function makeOptions(overrides?: Partial<Parameters<typeof useChatRetryAndEdit>[
 }
 
 beforeEach(() => {
+  clearRollbackTombstones();
   vi.stubGlobal(
     'fetch',
     vi.fn(
@@ -113,6 +118,38 @@ describe('useChatRetryAndEdit — 工具回调', () => {
     });
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it('truncateSessionMessagesInPlace 登记网关回执的作废窗口', async () => {
+    const rollback = {
+      sessionId: SESSION_ID,
+      cutoffMessageId: 'm1',
+      cutoffTimeMs: 1_000,
+      tombstoneAtMs: 2_000,
+      removedMessageIds: ['m1'],
+      invalidatedClientRequestIds: [],
+      affectedSessionIds: [SESSION_ID],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ messages: [], rollback }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatRetryAndEdit(makeOptions()));
+
+    await act(async () => {
+      await result.current.truncateSessionMessagesInPlace(SESSION_ID, 'm1');
+    });
+
+    const windows = useRollbackTombstoneStore.getState().windows;
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.key).toBe('m1');
+  });
 });
 
 describe('useChatRetryAndEdit — handleRetryInCurrentSession', () => {
@@ -156,6 +193,39 @@ describe('useChatRetryAndEdit — handleRetryInCurrentSession', () => {
     ]);
     expect(sendMessage).toHaveBeenCalledWith('retry text', {});
     expect(setRetryPrompt).toHaveBeenCalledWith(null);
+  });
+
+  it('截断失败时中止重发、把错误送达 UI 且不产生未处理 rejection', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: '截断失败' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    const sendMessage = vi.fn(async () => undefined);
+    const setStreamError = vi.fn();
+    const retryPrompt: RetryPrompt = { sourceMessageId: 'm3', text: 'retry text' };
+
+    const { result } = renderHook(() =>
+      useChatRetryAndEdit(
+        makeOptions({
+          retryPrompt,
+          sendMessage: sendMessage as never,
+          setStreamError: setStreamError as never,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await expect(result.current.handleRetryInCurrentSession()).resolves.toBeUndefined();
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(setStreamError).toHaveBeenCalledWith(expect.stringContaining('回退失败'));
   });
 });
 

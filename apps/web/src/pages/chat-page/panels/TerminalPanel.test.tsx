@@ -2,12 +2,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPanel } from './TerminalPanel.js';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { resolveTerminalPanelHeightBounds, useUIStateStore } from '../../../stores/ui/uiState.js';
+import { makePane, makeSplit } from '../../../components/chat/terminal/layout/test-fixtures.js';
 import type { SessionTerminalView } from '../../../components/conversation-runtime/terminals/terminals-api.js';
 
 vi.mock('../../../components/chat/terminal/QuickTerminalPanel.js', () => ({
   QuickTerminalPanel: (props: {
     readonly height?: number;
+    readonly maximized?: boolean;
+    readonly position?: string;
     readonly onRequestClose: () => void;
     readonly open: boolean;
     readonly presentation?: 'overlay' | 'inline';
@@ -17,7 +20,9 @@ vi.mock('../../../components/chat/terminal/QuickTerminalPanel.js', () => ({
     <section
       aria-label="快捷终端面板 mock"
       data-height={props.height}
+      data-maximized={String(props.maximized)}
       data-open={String(props.open)}
+      data-position={props.position}
       data-presentation={props.presentation}
       data-session-id={props.sessionId ?? ''}
       data-terminal-count={props.terminals.length}
@@ -56,10 +61,53 @@ const DEFAULT_PROPS = {
   onReload: () => undefined,
 } as const;
 
+const ORIGINAL_INNER_HEIGHT = window.innerHeight;
+
+function setViewportHeight(height: number): void {
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    writable: true,
+    value: height,
+  });
+}
+
 function resetUiState(): void {
   useUIStateStore.setState({
+    lastChatPath: null,
+    terminalLayoutBySession: {},
     terminalPanelHeight: 260,
+    terminalPanelHeightCustomized: false,
+    terminalPanelMaximized: false,
     terminalPanelOpened: false,
+    terminalPanelPosition: 'bottom',
+  });
+}
+
+const NARROW_VIEWPORT_QUERY = '(max-width: 767px)';
+const ORIGINAL_MATCH_MEDIA: typeof window.matchMedia | undefined = window.matchMedia;
+
+function stubNarrowViewport(): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(() => ({
+      matches: true,
+      media: NARROW_VIEWPORT_QUERY,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+function restoreMatchMedia(): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: ORIGINAL_MATCH_MEDIA,
   });
 }
 
@@ -70,6 +118,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  setViewportHeight(ORIGINAL_INNER_HEIGHT);
+  restoreMatchMedia();
   resetUiState();
 });
 
@@ -103,6 +153,7 @@ describe('TerminalPanel', () => {
   it('展开态复用 inline QuickTerminalPanel 并传入 fusion 高度', () => {
     useUIStateStore.setState({
       terminalPanelHeight: 312,
+      terminalPanelHeightCustomized: true,
       terminalPanelOpened: true,
     });
 
@@ -211,5 +262,117 @@ describe('TerminalPanel', () => {
     await waitFor(() => {
       expect(useUIStateStore.getState().terminalPanelOpened).toBe(false);
     });
+  });
+});
+
+describe('终端面板高度（视口相对 + 用户自定义）', () => {
+  it('未自定义时按当前视口给默认高（800 → 280）', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({ terminalPanelOpened: true, terminalPanelHeight: 200 });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    const expected = resolveTerminalPanelHeightBounds(800).default;
+    expect(expected).toBe(280);
+    expect(screen.getByLabelText('快捷终端面板 mock').getAttribute('data-height')).toBe(
+      String(expected),
+    );
+  });
+
+  it('已自定义时用按视口钳制后的存储值（存 700 在 800 视口压到 576）', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+      terminalPanelHeight: 700,
+      terminalPanelHeightCustomized: true,
+    });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    expect(screen.getByLabelText('快捷终端面板 mock').getAttribute('data-height')).toBe('576');
+  });
+
+  it('分屏时按 paneCount 抬升下限，取消分屏后恢复用户原高度', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+      terminalPanelHeight: 200,
+      terminalPanelHeightCustomized: true,
+      lastChatPath: '/chat/session-1',
+      terminalLayoutBySession: {
+        '/chat/session-1': makeSplit('split-1', 'row', [
+          makePane('pane-1', ['terminal-a']),
+          makePane('pane-2', ['terminal-b']),
+        ]),
+      },
+    });
+
+    const { rerender } = render(<TerminalPanel {...DEFAULT_PROPS} />);
+    expect(screen.getByLabelText('快捷终端面板 mock').getAttribute('data-height')).toBe('280');
+
+    useUIStateStore.setState({ terminalLayoutBySession: {} });
+    rerender(<TerminalPanel {...DEFAULT_PROPS} />);
+    expect(screen.getByLabelText('快捷终端面板 mock').getAttribute('data-height')).toBe('200');
+  });
+
+  it('最大化时跳过像素高度求解，且不改写 store 里的高度偏好', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+      terminalPanelMaximized: true,
+      terminalPanelHeight: 312,
+      terminalPanelHeightCustomized: true,
+    });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    const panel = screen.getByLabelText('快捷终端面板 mock');
+    expect(panel.getAttribute('data-maximized')).toBe('true');
+    expect(panel.getAttribute('data-height')).toBeNull();
+    expect(useUIStateStore.getState().terminalPanelHeight).toBe(312);
+    expect(useUIStateStore.getState().terminalPanelHeightCustomized).toBe(true);
+  });
+});
+
+describe('终端面板停靠（有效位置）', () => {
+  it('侧停靠：跳过像素高度求解并把有效位置透传，store 高度偏好原样保留', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({
+      terminalPanelOpened: true,
+      terminalPanelPosition: 'left',
+      terminalPanelHeight: 312,
+      terminalPanelHeightCustomized: true,
+    });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    const panel = screen.getByLabelText('快捷终端面板 mock');
+    expect(panel.getAttribute('data-position')).toBe('left');
+    expect(panel.getAttribute('data-height')).toBeNull();
+    expect(useUIStateStore.getState().terminalPanelHeight).toBe(312);
+    expect(useUIStateStore.getState().terminalPanelHeightCustomized).toBe(true);
+  });
+
+  it('窄视口把持久化的侧停靠降级为底部并恢复像素高度', () => {
+    stubNarrowViewport();
+    setViewportHeight(800);
+    useUIStateStore.setState({ terminalPanelOpened: true, terminalPanelPosition: 'right' });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    const panel = screen.getByLabelText('快捷终端面板 mock');
+    expect(panel.getAttribute('data-position')).toBe('bottom');
+    expect(panel.getAttribute('data-height')).toBe('280');
+  });
+
+  it('默认（未停靠）：有效位置为 bottom，像素高度路径不变', () => {
+    setViewportHeight(800);
+    useUIStateStore.setState({ terminalPanelOpened: true });
+
+    render(<TerminalPanel {...DEFAULT_PROPS} />);
+
+    const panel = screen.getByLabelText('快捷终端面板 mock');
+    expect(panel.getAttribute('data-position')).toBe('bottom');
+    expect(panel.getAttribute('data-height')).toBe('280');
   });
 });

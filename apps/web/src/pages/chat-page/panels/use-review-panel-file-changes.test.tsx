@@ -17,12 +17,18 @@ interface Deferred<T> {
 }
 
 const getFileChangesMock = vi.fn<GetFileChanges>();
+const reviewFileChangeMock = vi.fn();
 
-vi.mock('@openAwork/web-client', () => ({
-  createSessionsClient: () => ({
-    getFileChanges: getFileChangesMock,
-  }),
-}));
+vi.mock('@openAwork/web-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@openAwork/web-client')>();
+  return {
+    ...actual,
+    createSessionsClient: () => ({
+      getFileChanges: getFileChangesMock,
+      reviewFileChange: reviewFileChangeMock,
+    }),
+  };
+});
 
 function createDeferred<T>(): Deferred<T> {
   let resolveDeferred: ((value: T) => void) | undefined;
@@ -82,6 +88,7 @@ function expectReadyProjection(
 
 beforeEach(() => {
   getFileChangesMock.mockReset();
+  reviewFileChangeMock.mockReset();
 });
 
 afterEach(() => {
@@ -198,5 +205,57 @@ describe('useReviewPanelFileChanges', () => {
       expect(getFileChangesMock).toHaveBeenCalledTimes(2);
       expect(result.current.kind).toBe('loading');
     });
+  });
+
+  it('revision 变化时重新拉取文件变更投影', async () => {
+    getFileChangesMock.mockResolvedValue(makeProjection('src/current.ts'));
+
+    const { rerender } = renderHook(
+      (props: { readonly revision: number }) =>
+        useReviewPanelFileChanges({
+          gatewayUrl: 'http://localhost:3000',
+          opened: true,
+          revision: props.revision,
+          sessionId: 'session-a',
+          token: 'token',
+        }),
+      { initialProps: { revision: 0 } },
+    );
+
+    await waitFor(() => {
+      expect(getFileChangesMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender({ revision: 1 });
+
+    await waitFor(() => {
+      expect(getFileChangesMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('revision 未变化时不重复拉取文件变更投影', async () => {
+    getFileChangesMock.mockResolvedValue(makeProjection('src/current.ts'));
+
+    const { rerender } = renderHook(
+      (props: { readonly revision: number }) =>
+        useReviewPanelFileChanges({
+          gatewayUrl: 'http://localhost:3000',
+          opened: true,
+          revision: props.revision,
+          sessionId: 'session-a',
+          token: 'token',
+        }),
+      { initialProps: { revision: 3 } },
+    );
+
+    await waitFor(() => {
+      expect(getFileChangesMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender({ revision: 3 });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getFileChangesMock).toHaveBeenCalledTimes(1);
   });
 });
