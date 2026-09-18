@@ -251,3 +251,185 @@ describe('createSessionsClient mutation error handling', () => {
     ).rejects.toThrow('workspace is immutable without force');
   });
 });
+
+describe('createSessionsClient.truncateMessages 回执解析', () => {
+  function stubTruncateResponse(rollback: unknown): void {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ messages: [], rollback }),
+      } as unknown as Response;
+    }) as typeof fetch;
+  }
+
+  it('透传 applied === false 的空操作标记', async () => {
+    stubTruncateResponse({
+      sessionId: 'session-1',
+      cutoffMessageId: 'msg-1',
+      cutoffTimeMs: 1_000,
+      tombstoneAtMs: 2_000,
+      removedMessageIds: [],
+      invalidatedClientRequestIds: [],
+      affectedSessionIds: ['session-1'],
+      applied: false,
+    });
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.truncateMessages('token-1', 'session-1', 'msg-1');
+
+    expect(result.rollback?.applied).toBe(false);
+  });
+
+  it('旧网关缺少 applied 字段时保持 undefined，而不是伪造布尔值', async () => {
+    stubTruncateResponse({
+      sessionId: 'session-1',
+      cutoffMessageId: 'msg-1',
+      cutoffTimeMs: 1_000,
+      tombstoneAtMs: 2_000,
+      removedMessageIds: ['msg-1'],
+      invalidatedClientRequestIds: [],
+      affectedSessionIds: ['session-1'],
+    });
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.truncateMessages('token-1', 'session-1', 'msg-1');
+
+    expect(result.rollback).not.toBeNull();
+    expect(result.rollback && 'applied' in result.rollback).toBe(false);
+  });
+
+  it('applied === true 的真实回执透传为 true', async () => {
+    stubTruncateResponse({
+      sessionId: 'session-1',
+      cutoffMessageId: 'msg-1',
+      cutoffTimeMs: 1_000,
+      tombstoneAtMs: 2_000,
+      removedMessageIds: ['msg-1'],
+      invalidatedClientRequestIds: ['req-1'],
+      affectedSessionIds: ['session-1'],
+      applied: true,
+    });
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.truncateMessages('token-1', 'session-1', 'msg-1');
+
+    expect(result.rollback?.applied).toBe(true);
+  });
+});
+
+describe('createSessionsClient reviewFileChange', () => {
+  it('reviewFileChange 使用 POST 提交审查决定并返回结果', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          decision: {
+            requestId: 'req-1',
+            filePath: 'src/index.ts',
+            decision: 'accepted',
+            createdAt: '2026-09-17T00:00:00.000Z',
+          },
+          revertClientRequestId: 'revert-1',
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.reviewFileChange('token-1', 'session-1', {
+      requestId: 'req-1',
+      filePath: 'src/index.ts',
+      decision: 'accepted',
+      forceConflicts: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://localhost:3000/sessions/session-1/file-changes/review');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer token-1',
+    });
+    expect(JSON.parse(init.body as string)).toEqual({
+      requestId: 'req-1',
+      filePath: 'src/index.ts',
+      decision: 'accepted',
+      forceConflicts: true,
+    });
+    expect(result).toMatchObject({
+      decision: {
+        requestId: 'req-1',
+        filePath: 'src/index.ts',
+        decision: 'accepted',
+        createdAt: '2026-09-17T00:00:00.000Z',
+      },
+      revertClientRequestId: 'revert-1',
+    });
+  });
+
+  it('reviewFileChange 拒绝时抛出带状态与 payload 的 HttpError', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: '无法提交审查决定' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+
+    try {
+      await client.reviewFileChange('token-1', 'session-1', {
+        requestId: 'req-1',
+        filePath: 'src/index.ts',
+        decision: 'rejected',
+      });
+      throw new Error('expected reviewFileChange to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError<{ error?: string }>).status).toBe(400);
+      expect((error as HttpError<{ error?: string }>).data?.error).toBe('无法提交审查决定');
+      expect((error as Error).message).toContain('无法提交审查决定');
+    }
+  });
+
+  it('reviewFileChange 冲突时 409 preview payload 可通过 HttpError.data 读取', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          name: 'Conflict',
+          data: {
+            message: '工作区存在冲突，需要确认。',
+            kind: 'WorkspaceConflict',
+            preview: {
+              conflicts: [{ filePath: 'src/index.ts' }],
+              dirtyCount: 1,
+            },
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+
+    try {
+      await client.reviewFileChange('token-1', 'session-1', {
+        requestId: 'req-1',
+        filePath: 'src/index.ts',
+        decision: 'accepted',
+      });
+      throw new Error('expected reviewFileChange to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      const httpError = error as HttpError<{
+        data?: { preview?: { conflicts?: { filePath?: string }[]; dirtyCount?: number } };
+      }>;
+      expect(httpError.status).toBe(409);
+      expect(httpError.data?.data?.preview?.dirtyCount).toBe(1);
+      expect(httpError.data?.data?.preview?.conflicts?.[0]?.filePath).toBe('src/index.ts');
+    }
+  });
+});

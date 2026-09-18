@@ -310,4 +310,58 @@ describe('createBrowserLiveClient REST', () => {
     await expect(client.getStatus('token-1')).rejects.toBeInstanceOf(HttpError);
     await expect(client.getStatus('token-1')).rejects.toMatchObject({ status: 503 });
   });
+
+  it('installBrowser 以 POST 打安装端点并发送合法 JSON body', async () => {
+    const fetchMock = stubFetch(async () => new Response(null, { status: 202 }));
+
+    const client = createBrowserLiveClient('http://localhost:3000');
+    await expect(client.installBrowser('token-1')).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/browser-live/install-browser',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { Authorization: 'Bearer token-1', 'Content-Type': 'application/json' },
+      }),
+    );
+    const body = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(JSON.parse(body as string)).toEqual({});
+  });
+
+  it('installBrowser 把 409 冲突映射为携带 status 与 code 的 HttpError', async () => {
+    stubFetch(async () =>
+      jsonResponse(
+        { error: '调试浏览器安装已在进行中，请稍候。', code: 'browser_install_in_progress' },
+        409,
+      ),
+    );
+
+    const client = createBrowserLiveClient('http://localhost:3000');
+
+    await expect(client.installBrowser('token-1')).rejects.toMatchObject({
+      status: 409,
+      data: { code: 'browser_install_in_progress' },
+    });
+  });
+
+  it('getInstallStatus 解析快照并携带 Bearer 鉴权头', async () => {
+    const snapshot = {
+      state: 'running',
+      startedAt: 1,
+      finishedAt: null,
+      tailLog: ['downloading 50%'],
+      error: null,
+      browsersPath: '/data/browsers',
+    };
+    const fetchMock = stubFetch(async () => jsonResponse(snapshot));
+
+    const client = createBrowserLiveClient('http://localhost:3000');
+    const status = await client.getInstallStatus('token-1');
+
+    expect(status).toEqual(snapshot);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/browser-live/install-browser/status',
+      expect.objectContaining({ headers: { Authorization: 'Bearer token-1' } }),
+    );
+  });
 });

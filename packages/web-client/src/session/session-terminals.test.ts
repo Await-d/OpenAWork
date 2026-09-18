@@ -163,4 +163,69 @@ describe('createSessionTerminalsClient', () => {
 
     await expect(client.create('token-1', 'session-1')).rejects.toThrow('请求体参数无效。');
   });
+
+  it('listShellProfiles 请求宿主级端点，载荷不含路径字段', async () => {
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => {
+      return {
+        ok: true,
+        json: async () => ({
+          profiles: [
+            { id: 'bash', label: 'Bash', isDefault: true },
+            { id: 'zsh', label: 'Zsh', isDefault: false },
+          ],
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createSessionTerminalsClient('http://localhost:3000');
+    const { profiles } = await client.listShellProfiles('token-1');
+
+    expect(profiles).toEqual([
+      { id: 'bash', label: 'Bash', isDefault: true },
+      { id: 'zsh', label: 'Zsh', isDefault: false },
+    ]);
+    const requestedUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(requestedUrl).toBe('http://localhost:3000/terminals/shell-profiles');
+    for (const profile of profiles) {
+      expect(profile).not.toHaveProperty('shell');
+    }
+  });
+
+  it('create 会把 shellProfileId 放进请求体，且缺省时不发送该字段', async () => {
+    const bodies: string[] = [];
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body ?? ''));
+      return {
+        ok: true,
+        json: async () => ({ terminal: { terminalId: 'term-1' } }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const client = createSessionTerminalsClient('http://localhost:3000');
+    await client.create('token-1', 'session-1', { shellProfileId: 'zsh' });
+    await client.create('token-1', 'session-1');
+
+    expect(JSON.parse(bodies[0] ?? '{}')).toMatchObject({ shellProfileId: 'zsh' });
+    expect(JSON.parse(bodies[1] ?? '{}')).not.toHaveProperty('shellProfileId');
+  });
+
+  it('create 在 invalid_shell_profile 时给出可操作的中文文案', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: 'invalid_shell_profile',
+          message: '指定的 Shell 配置不存在或不可用。',
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionTerminalsClient('http://localhost:3000');
+
+    await expect(
+      client.create('token-1', 'session-1', { shellProfileId: '/bin/evil' }),
+    ).rejects.toThrow('所选 Shell 配置在此机器上不可用，请重新选择。');
+  });
 });
