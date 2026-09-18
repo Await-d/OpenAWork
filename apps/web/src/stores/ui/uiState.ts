@@ -330,8 +330,13 @@ export interface UIStateStore {
    */
   fusionDockSplitPos: number;
   setFusionDockSplitPos: (percent: number) => void;
-  sidePanelActiveTab: 'review' | 'files' | 'context' | 'browser';
-  setSidePanelActiveTab: (tab: 'review' | 'files' | 'context' | 'browser') => void;
+  /**
+   * Fusion 布局下停靠会话面板（审查 / 代码 / 预览 / Context）当前一级 tab。
+   * 联合类型与 `SessionSidePanel` 的 `SidePanelTabId` 保持一致：`files` /
+   * `browser` 只属于移动端底部面板，桌面端会在渲染前收敛到 `code` / `preview`。
+   */
+  sidePanelActiveTab: SidePanelActiveTab;
+  setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
   /**
    * 单一浏览器互斥标记：`BuiltInBrowser` 持有网关实时会话，全应用同一时刻最多
    * 只能挂载一个实例。停靠面板的浏览器 tab 挂载时声明 'dock'，卸载时归还
@@ -354,7 +359,33 @@ export interface UIStateStore {
    */
   terminalPanelOpenedBySession: Record<string, boolean>;
   terminalPanelHeight: number;
+  /** 用户是否手动拖拽过高度：false 时渲染期按视口给默认高，true 时记住用户的值。 */
+  terminalPanelHeightCustomized: boolean;
   setTerminalPanelHeight: (height: number) => void;
+  /**
+   * 终端面板停靠位置：'bottom'（底部抽屉，默认）/ 'left' / 'right'（工作台侧列）。
+   *
+   * 与瞬态的 `terminalPanelMaximized` 不同，停靠位置是**用户布局偏好**，持久化；
+   * 但它只描述「停在哪里」，不携带任何像素几何 —— 侧列宽度由 CSS 的 clamp 决定
+   * （相对工作台的百分比决策），底栏高度才存 `terminalPanelHeight`。
+   * 窄视口下的降级不写回本字段：见 resolveEffectiveTerminalPanelPosition。
+   */
+  terminalPanelPosition: TerminalPanelPosition;
+  setTerminalPanelPosition: (position: TerminalPanelPosition) => void;
+  /**
+   * 终端面板最大化（对齐 VS Code「Toggle Maximized Panel」）。
+   *
+   * 设计取舍：
+   *  - **瞬态**：刷新后总是回到 false —— 最大化是「临时占满工作台」的视图模式，
+   *    持久化它只会在下次启动时留下一个用户早已忘记的占满态；
+   *  - **只提供还原路径**：最大化下不渲染拖拽手柄（见 QuickTerminalPanel），
+   *    不做 VS Code 的「拖动即还原」，避免与持久化高度域的 900px 上限产生钳制跳变；
+   *  - 高度偏好单独存在 `terminalPanelHeight` 里，最大化期间绝不改写它，
+   *    还原时据此精确回到用户此前的高度。
+   */
+  terminalPanelMaximized: boolean;
+  setTerminalPanelMaximized: (opened: boolean) => void;
+  toggleTerminalPanelMaximized: () => void;
   /**
    * 终端分屏布局按会话分桶，键与 terminalPanelOpenedBySession 同源（见
    * terminalPanelSessionKeyFor），避免同一会话出现两把钥匙。
@@ -438,6 +469,52 @@ export const DEFAULT_TERMINAL_PANEL_SESSION_KEY = '__default__';
 export function terminalPanelSessionKeyFor(lastChatPath: string | null): string {
   const normalized = lastChatPath?.trim() ?? '';
   return normalized.length > 0 ? normalized : DEFAULT_TERMINAL_PANEL_SESSION_KEY;
+}
+
+/** 终端面板停靠位置：底部抽屉 / 工作台左侧列 / 工作台右侧列。 */
+export type TerminalPanelPosition = 'bottom' | 'left' | 'right';
+
+/** 停靠位置的唯一事实来源：校验、菜单渲染都从这里取成员，禁止各处手写字面量。 */
+export const TERMINAL_PANEL_POSITIONS: readonly TerminalPanelPosition[] = [
+  'bottom',
+  'left',
+  'right',
+];
+
+/**
+ * 持久化数据（用户可手改 localStorage）里的任何非成员值都必须退回底部：
+ * 侧停靠会让外壳切到横向分栏，一个未知字符串穿到渲染期就是一处静默的布局错乱。
+ */
+function isTerminalPanelPosition(value: unknown): value is TerminalPanelPosition {
+  return TERMINAL_PANEL_POSITIONS.some((candidate) => candidate === value);
+}
+
+export const SIDE_PANEL_ACTIVE_TABS = [
+  'review',
+  'code',
+  'preview',
+  'context',
+  'files',
+  'browser',
+] as const;
+
+export type SidePanelActiveTab = (typeof SIDE_PANEL_ACTIVE_TABS)[number];
+
+/** 未知 tab id 会把面板渲染成一个没有选中项的空白壳，载入期直接判非法。 */
+function isSidePanelActiveTab(value: unknown): value is SidePanelActiveTab {
+  return SIDE_PANEL_ACTIVE_TABS.some((candidate) => candidate === value);
+}
+
+/**
+ * 「窄视口降级为底部」的**唯一实现**：<768px 时工作台自身已经没有可让出的宽度，
+ * 侧停靠会把对话区挤到不可用，因此面板与外壳共用这一条判据（两者各自只负责
+ * 用既有 hook 拿到 isNarrowViewport），避免同一规则出现两份可能漂移的写法。
+ */
+export function resolveEffectiveTerminalPanelPosition(
+  position: TerminalPanelPosition,
+  isNarrowViewport: boolean,
+): TerminalPanelPosition {
+  return isNarrowViewport ? 'bottom' : position;
 }
 
 /**
@@ -568,6 +645,16 @@ const FUSION_DOCK_SPLIT_DEFAULT_PERCENT = 35;
 const TERMINAL_PANEL_MIN_HEIGHT = 120;
 const TERMINAL_PANEL_MAX_HEIGHT = 360;
 const TERMINAL_PANEL_DEFAULT_HEIGHT = 160;
+/** 视口相对上限：面板最多占视口 72%，永远给聊天区留 ≥28%。 */
+const TERMINAL_PANEL_VIEWPORT_MAX_RATIO = 0.72;
+/** 视口相对默认高度：对齐 VS Code「面板约占编辑区 1/3」。 */
+const TERMINAL_PANEL_VIEWPORT_DEFAULT_RATIO = 0.35;
+/** 高度绝对上限：再高已接近全屏，拖拽与持久化共享同一个天花板。 */
+const TERMINAL_PANEL_ABSOLUTE_MAX_HEIGHT = 900;
+/** min 之上的最小 headroom，保证极矮视口下 max 仍高于 min。 */
+const TERMINAL_PANEL_MIN_HEADROOM = 120;
+/** default 相对 min 的最小 headroom，保证 default 与 min 不会挤在一起。 */
+const TERMINAL_PANEL_MIN_DEFAULT_HEADROOM = 40;
 
 function createTabId(prefix: SessionTabType): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -774,6 +861,87 @@ export const TERMINAL_PANEL_HEIGHT_BOUNDS = {
   max: TERMINAL_PANEL_MAX_HEIGHT,
   default: TERMINAL_PANEL_DEFAULT_HEIGHT,
 } as const;
+
+export interface TerminalPanelHeightBounds {
+  min: number;
+  max: number;
+  default: number;
+}
+
+/**
+ * 终端面板高度的单一事实来源：硬编码 px 在 768 与 1440 视口上不可能同时合理，
+ * 所以按视口算 bounds。视口不可用（非有限数 / ≤0）时回落到静态
+ * TERMINAL_PANEL_HEIGHT_BOUNDS，行为与升级前一致。
+ */
+export function resolveTerminalPanelHeightBounds(
+  viewportHeight: number,
+): TerminalPanelHeightBounds {
+  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+    return { ...TERMINAL_PANEL_HEIGHT_BOUNDS };
+  }
+
+  const max = Math.min(
+    TERMINAL_PANEL_ABSOLUTE_MAX_HEIGHT,
+    Math.max(
+      TERMINAL_PANEL_MIN_HEIGHT + TERMINAL_PANEL_MIN_HEADROOM,
+      Math.round(viewportHeight * TERMINAL_PANEL_VIEWPORT_MAX_RATIO),
+    ),
+  );
+  const defaultHeight = Math.min(
+    max,
+    Math.max(
+      TERMINAL_PANEL_MIN_HEIGHT + TERMINAL_PANEL_MIN_DEFAULT_HEADROOM,
+      Math.round(viewportHeight * TERMINAL_PANEL_VIEWPORT_DEFAULT_RATIO),
+    ),
+  );
+
+  return { min: TERMINAL_PANEL_MIN_HEIGHT, max, default: defaultHeight };
+}
+
+export function clampTerminalPanelHeightToBounds(
+  height: number,
+  bounds: TerminalPanelHeightBounds,
+): number {
+  if (!Number.isFinite(height)) {
+    return bounds.default;
+  }
+
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(height)));
+}
+
+/**
+ * 持久化域 bounds：上限取绝对上限而不是渲染域的视口相对 max。拖拽写入的值不随
+ * 视口裁剪——1440 屏拖到 700 的偏好在小窗口仍存着，换回大屏即恢复；渲染期再按
+ * 当前视口钳制（见 TerminalPanel）。若这里也用视口 max，高屏拉出的高度会被打回 360。
+ */
+export const TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS: TerminalPanelHeightBounds = {
+  min: TERMINAL_PANEL_MIN_HEIGHT,
+  max: TERMINAL_PANEL_ABSOLUTE_MAX_HEIGHT,
+  default: TERMINAL_PANEL_DEFAULT_HEIGHT,
+};
+
+/** 面板自身 chrome：32px 面板级页签行 + 1px 上边框 + 余量，向上取整 40；hint/error 是绝对定位浮层不占高度。 */
+export const TERMINAL_PANEL_CHROME_HEIGHT = 40;
+/** 单个 pane 可用下限：≈6 行输出 + 一条 pane 级 tab 条（30px）；低于此前分屏只剩 1–2 行（160/2 ≈ 65px/pane）。 */
+export const TERMINAL_MIN_PANE_HEIGHT = 120;
+
+/**
+ * 分屏下限抬升：paneCount 个 pane 各需 TERMINAL_MIN_PANE_HEIGHT，加上面板 chrome。
+ * 抬升是派生的、不落盘——取消拆分后 paneCount 回 1，用户原本记住的高度自然恢复。
+ */
+export function resolveTerminalPanelHeightWithPaneFloor(
+  height: number,
+  paneCount: number,
+  bounds: TerminalPanelHeightBounds,
+): number {
+  const resolved = clampTerminalPanelHeightToBounds(height, bounds);
+  if (!Number.isFinite(paneCount) || paneCount <= 1) {
+    return resolved;
+  }
+
+  const paneFloor = TERMINAL_PANEL_CHROME_HEIGHT + Math.ceil(paneCount) * TERMINAL_MIN_PANE_HEIGHT;
+  return clampTerminalPanelHeightToBounds(Math.max(resolved, paneFloor), bounds);
+}
 
 export const useUIStateStore = create<UIStateStore>()(
   persist(
@@ -1343,8 +1511,23 @@ export const useUIStateStore = create<UIStateStore>()(
           };
         }),
       terminalPanelHeight: TERMINAL_PANEL_HEIGHT_BOUNDS.default,
+      terminalPanelHeightCustomized: false,
       setTerminalPanelHeight: (height) =>
-        set({ terminalPanelHeight: clampTerminalPanelHeight(height) }),
+        set({
+          terminalPanelHeight: clampTerminalPanelHeightToBounds(
+            height,
+            TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS,
+          ),
+          terminalPanelHeightCustomized: true,
+        }),
+
+      terminalPanelPosition: 'bottom',
+      setTerminalPanelPosition: (position) => set({ terminalPanelPosition: position }),
+
+      terminalPanelMaximized: false,
+      setTerminalPanelMaximized: (opened) => set({ terminalPanelMaximized: opened }),
+      toggleTerminalPanelMaximized: () =>
+        set((state) => ({ terminalPanelMaximized: !state.terminalPanelMaximized })),
 
       terminalLayoutBySession: {},
       setTerminalLayoutForSession: (sessionKey, layout) =>
@@ -1393,30 +1576,59 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 25,
-      // reviewPanelOpened / editorMode 不持久化——每次启动默认关闭。
+      version: 26,
+      // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
+      // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
       partialize: (state) => {
         const {
-          reviewPanelOpened: _rp,
           editorMode: _em,
           closedSessionTabIds: _cs,
           browserPreviewSurface: _bps,
+          // 最大化是瞬态视图模式：高度偏好单独存在 terminalPanelHeight，
+          // 这个标记绝不能泄漏进存储（否则下次启动会直接回到占满态）。
+          terminalPanelMaximized: _tpm,
           ...rest
         } = state;
         return rest as typeof state;
       },
       merge: (persistedState, currentState) => {
-        const merged = { ...currentState, ...(persistedState as object) };
-        merged.reviewPanelOpened = false;
+        const merged: typeof currentState & { sidePanelWorkspaceTab?: unknown } = {
+          ...currentState,
+          ...(persistedState as object),
+        };
+        // 已移除的旧键「工作区子视图」（sidePanelWorkspaceTab）：旧持久化数据里可能
+        // 残留，显式丢弃，避免未知键回流存储；渲染端不再读取它，丢弃即可（无害化）。
+        delete merged.sidePanelWorkspaceTab;
+        // reviewPanelOpened 是持久化的布局偏好：保留存储值。旧版本未持久化该键时，
+        // spread 已让 currentState 的默认 false 生效；同版本手改出的非布尔脏数据
+        // 同样在载入期回落 false（不经 migrate 也不能穿到渲染期）。
+        if (typeof merged.reviewPanelOpened !== 'boolean') {
+          merged.reviewPanelOpened = false;
+        }
+        // 停靠面板 tab 是持久化偏好：只有已知成员才放行，手改 / 旧版本的未知
+        // 值一律回落审查，避免渲染期出现空面板或选不中的 tab。
+        if (!isSidePanelActiveTab(merged.sidePanelActiveTab)) {
+          merged.sidePanelActiveTab = 'review';
+        }
         merged.editorMode = false;
         merged.closedSessionTabIds = [];
+        // 瞬态模式：无论存储里出现什么（旧数据 / 手改），启动态一律 false。
+        merged.terminalPanelMaximized = false;
         // 覆盖方向是 persisted 盖 currentState，所以 currentState 的空桶不会冲掉已持久化的
         // 布局；但同 version 的脏数据不会走 migrate，这里再兜一次结构校验，保证任何来源的
         // 非法桶值都进不了 state（成本只有一次小块遍历）。
         merged.terminalLayoutBySession = normalizeTerminalLayoutBySession(
           merged.terminalLayoutBySession,
         );
+        // 同 v26 脏数据（手改存储）也不能让非布尔值穿到渲染期。
+        if (typeof merged.terminalPanelHeightCustomized !== 'boolean') {
+          merged.terminalPanelHeightCustomized = false;
+        }
+        // 停靠位置同源兜底：非成员值退回底部，避免未知字符串把外壳切进横向分栏。
+        if (!isTerminalPanelPosition(merged.terminalPanelPosition)) {
+          merged.terminalPanelPosition = 'bottom';
+        }
         return merged as typeof currentState;
       },
       // Throttle storage writes to avoid JSON.stringify+setItem on
@@ -1593,6 +1805,12 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.terminalLayoutBySession = {};
         }
 
+        // v26:终端面板高度改为「视口相对默认 + 用户自定义标记」。老数据一律视为未自定义,
+        // 让老用户也拿到按视口计算的合理默认高;高度值本身仍按持久化域 bounds 钳制。
+        if (version < 26) {
+          nextState.terminalPanelHeightCustomized = false;
+        }
+
         nextState.expandedDirsBySession = normalizeExpandedDirsBySession(
           nextState.expandedDirsBySession,
         );
@@ -1651,11 +1869,21 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.reviewPanelOpened = false;
         }
 
-        nextState.terminalPanelHeight = clampTerminalPanelHeight(
+        nextState.terminalPanelHeight = clampTerminalPanelHeightToBounds(
           typeof nextState.terminalPanelHeight === 'number'
             ? nextState.terminalPanelHeight
-            : TERMINAL_PANEL_HEIGHT_BOUNDS.default,
+            : TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.default,
+          TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS,
         );
+
+        if (typeof nextState.terminalPanelHeightCustomized !== 'boolean') {
+          nextState.terminalPanelHeightCustomized = false;
+        }
+
+        // 停靠位置是新增键（未提升 version，merge 的 spread 已兜住缺省），这里只做成员校验。
+        if (!isTerminalPanelPosition(nextState.terminalPanelPosition)) {
+          nextState.terminalPanelPosition = 'bottom' satisfies TerminalPanelPosition;
+        }
 
         if (typeof nextState.terminalPanelOpened !== 'boolean') {
           nextState.terminalPanelOpened = false;
