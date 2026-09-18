@@ -2,6 +2,27 @@
 
 ## 已完成的任务
 
+### ✅ 260916-层级可视化重构 - 层级流动（泳道轨迹）+ 历史层级（追踪瀑布）
+**状态**: 已完成（T-01…T-08 全部交付并验证）
+**完成日期**: 2026-09-16
+**归档位置**: [workflow/done/260916-层级可视化重构.md](workflow/done/260916-层级可视化重构.md)
+
+**成果总结**:
+- ✅ 「层级流动」改为泳道轨迹画布：5 层泳道全量保留（修复旧流水线在活跃密度下的断裂箭头）、handoff 按 updatedAt 切等宽时间槽、SVG 连线从源层指向目标层（打回 / 重试可见回折）、活跃连线流动动画、打开自动滚到最新；删除被替代的静态流水线与交接记录列表共 9 个文件。
+- ✅ 「历史层级」改为追踪瀑布：每层一条轨道 + 每个层级会话一条时间条（区间由 handoff 的 startedAt/endedAt/updatedAt 聚合，范围退化切等宽轴）、跨轨连线、substate 阶段标记、时间跨度胶囊；详情复用原跨层线程上下文工作区，移除 ASCII 假树缩进与双栏 / 线程切换。
+- ✅ 复用与约束：零后端与 store 改动；`CrossLayerConversationView` 保留给层级流动的线程详情；样式集中 `team-runtime-layer-viz.css`（E · Nebula token，无硬编码色值）。
+- ✅ 验证：模型单测 9 + 8、视图 3 + 7；对话 tab + 中间路由 11 文件 / 48 测试；team 全量 129 文件 / 877 测试；`tsc --noEmit` 0 错误；`vite build` 通过（3m17s）。
+
+### ✅ 260916-会话权限阶梯 - 会话级三档权限阶梯（ask / auto-edit / yolo）
+**状态**: 已完成（T-01…T-16 全部交付并验证）
+**完成日期**: 2026-09-16
+**归档位置**: [workflow/done/260916-会话权限阶梯.md](workflow/done/260916-会话权限阶梯.md)
+
+**成果总结**:
+- ✅ 以 `permissionMode` 规范键（`ask` / `auto-edit` / `yolo`）替换布尔 `yoloMode`，后者降级为派生投影；deny-first 不变量保证中间 / 最高档只能跳过 `ask`、绝不放行被显式 `deny` 的调用。
+- ✅ 覆盖 shared / agent-core / 网关（持久化 + 执行 + 子会话继承）/ Web 控件 / 桌面 e2e 五层；并修复 legacy 单向棘轮、快照短路、浮层锚点、dev-harness token 缺失与 e2e 冷启动等陷阱。
+- ✅ 验证：网关 48 / agent-core 13 / Web 控件 18 / Web 组合 284 / 真浏览器 e2e 4 全通过（含 5 次连续冷启动）。开放项：`fusion-layout.spec.ts` 并发失败、`.NET` 子树不编译、`pnpm typecheck` 因外部改动为红——均与本特性无关。
+
 > **归档审计补充登记（2026-09-16）**：以下 6 条为此前已完成但未归档的方案的补登记，归档文档均已移入 `workflow/done/`。
 
 ### ✅ 260916-agentdocs归档审计与runtime清理 - 知识库归档一致性与 runtime 残留治理
@@ -56,13 +77,19 @@
 **成果总结**:
 - ✅ 对应提交 `611a105e chore(repo): 收口本地未提交改动`；方案描述的 127 文件工作树状态已不复存在，**不再具备可执行性**，仅作历史记录。
 
-### ✅ 260914-grill-clarification-enhancement - Grill 分层澄清增强方案（A 层已被 260915 方案承接）
-**状态**: 已收口（归档审计补登记）
-**完成日期**: 2026-09-14
+### ✅ 260914-grill-clarification-enhancement - Grill 分层澄清增强方案（A+B+C 三层全部落地）
+**状态**: 已完成（T-00…T-15 / V-01…V-16 全部落地；复审发现 6 个缺陷已修复）
+**完成日期**: 2026-09-14（设计与评审）｜2026-09-16（B/C 层实现 + 全量验证）
 **归档位置**: [workflow/done/260914-grill-clarification-enhancement.md](workflow/done/260914-grill-clarification-enhancement.md)
 
 **成果总结**:
-- ✅ 设计与开放问题已拍板（评审通过）；A 层（question 管道）实现由 `260915-澄清完成自动切换编程模式` 承接并完成，B/C 层未立项；本文档转为设计参考。
+- ✅ **B 层（agent-core frontier 引擎）**：`context/clarification-tree.ts`（`computeFrontier` / `applyAnswer` / `isFrontierEmpty` / `needsConfirmation` / `confirmGrill`，纯函数 + 不可变）+ `clarification-recommendation.ts`；`routing.ts` 保留 legacy API 并加 `@deprecated` 指向新引擎，`CLARIFICATION_TEMPLATES` 中文化（首项即推荐为跨消费方契约）。
+- ✅ **A 层（前台 question 管道）**：`question-tools` 增 `recommended` / `nodeId` / `round`；`clarify` 提示词改为 frontier 纪律（一轮问整个 frontier、每题带推荐、frontier 空才收口、结束需用户显式确认）；轮次态持久化到 `sessions.metadata_json.clarificationState`；面板推荐徽标 + 轮次分组。
+- ✅ **C 层（team 层多轮）**：reception 增 `grilling` / `awaiting_confirmation` 白名单 + `reception-grill-runner`；**pm1** 新增 `pm1-grill-runner`，由 `artifact-chain` 驱动 frontier 多轮 + 确认门控（frontier 空 → `awaiting_confirmation`，未确认**禁止**进入 `drafting_plan`）。
+- ✅ **SSOT 铁律落实**：frontier 算法只在 agent-core 实现一次；`shouldGrillIntent` 下沉 `handoff/capability/grill-intent.ts` 供 b/c 两层共用（避免 c 层直连 b 层 runner 触发跨层 ESLint 禁令）；触发条件 = spec 标记 `[NEEDS CLARIFICATION]` 或原始/改写意图命中高影响（对齐 §8 R5「仅高影响触发」）。
+- ✅ **复审修复 6 个缺陷**（其中 2 个会真实破坏 G6 确认门控）：① 确认轮超时静默放行 → 改抛 `PlanningFailure`（未确认视为未完成）；② 确认题稳定 id 被前端按 id 去重致驳回后无法再确认 → 传输 id 轮次化 `__grill_confirm__@r<n>`；③ `awaiting_confirmation` 未计入等待态集合（人工等待污染 `progress_interval` 延迟指标）；④ 触发漏查 `sourceIntent`；⑤ 持久化是死写（G5 未真正落地）→ 改为运行开始恢复已答节点、同意图已确认则跳过、质量退回不重复 grill 但沿用原答案；⑥ 题面英文 + 确认题只能手打 → 模板中文化 + 面板选项按钮（推荐徽标）。
+- ✅ **验证**：agent-core **33 文件 / 397** · 网关全量 **456 文件 / 3248**（2 skipped，0 失败）· `test:grill` + `test:grill-reception` + `test:grill-pm1` 三条端到端 ok · 团队面板/store **36** · web-client team **62** · 网关 typecheck 与 ESLint exit 0。
+- ⚠️ **未做**：V-06 的「活体 LLM + 浏览器」人工视觉走查——本机 `.env` 的 `AI_API_KEY` 为空，模型无法真实发起 `AskUserQuestion`，故不可执行（**可自动化的契约部分已补齐断言**：pending 列表 ≥2 题、每题 ≥1 `recommended`、每题带 `nodeId`）；`ClarificationDimension` 维度扩展（tradeoff/risk/scope）按原决议单独立项。
 
 ### ✅ 260916-终端面板-vscode布局对齐 - 终端面板升级为 VS Code 集成终端布局（面板页签 + 右侧操作区 + 分屏 + 端口页）
 **状态**: 已完成（T-01…T-15 全部交付并验证；用户 4 项诉求全部满足）
@@ -211,11 +238,11 @@
 **界面便利化（2026-09-15 · Phase 5）**: chat 顶栏新增「确认转换」CTA（仅澄清模式渲染，E·Nebula token + 全交互态 + 窄屏图标态），走 `POST /sessions/:id/clarify/confirm`：同一次写入完成 `dialogueMode → coding`、审计 `reason: 'user_confirmed'` 与澄清确认门控结算；切换落库模块泛化为 `session/dialogue-mode-switch.ts`（三来源共用），审计字段更名 `dialogueModeSwitch`。
 
 ### ✅ 260915-浏览器预览功能增强 - 浏览器预览开发调试便利化
-**状态**: ✅ 计划内全部完成并归档（2026-09-16；未勾选的 4 项系用户决定挂起，1 项为人工视觉走查）——P0a / P0b / P1（含 T-15 可停靠面板、T-16 拖拽原语、T-17 设备预设、T-18 保存自动刷新、T-19 快捷键）/ P2（T-20 瀑布+HAR、T-21 DOM·a11y 检查器、T-22 sourcemap 栈、T-23 QA）/ P3-core / T-24 均已实现并验证；仅 in-app 浏览器引导下载器按 Oracle 排序后置
+**状态**: ✅ 全部完成并验证（2026-09-16）——P0a / P0b / P1（T-15 可停靠面板、T-16 拖拽原语、T-17 设备预设、T-18 保存自动刷新、T-19 快捷键）/ P2（T-20 瀑布+HAR、T-21 DOM·a11y 检查器、T-22 sourcemap 栈、T-23 QA）/ P3-core / T-24 / in-app 浏览器引导下载器 均已实现并验证。工作流文档已归档至 `workflow/done/`，并已按最终事实回填（原先"T-21..T-24 挂起"的记载系 2026-09-15 的历史决策，已注明后续实施）。**唯一遗留：人工观感走查**（375/768/1280 的机械走查已由真实浏览器 9/9 完成，但"好不好看"需人看）
 > ⚠️ **记录冲突更正**：本条状态行曾被一个并发会话改写为"T-21/T-22/T-23/T-24 已按用户指示挂起（本轮不执行本方案）"，该结论**与事实不符**——四个任务均已落地并通过 `acceptance-backend` 22/22、`acceptance-ui` 8/8、`ui-inspector-verify` 13/13、`ui-stack-verify` 9/9、`ui-sourcemap-verify` 3/3 与 1092 个测试。并发写入的**探测本身是对的**（本方案前端文件域确有另一会话在改，例如 `BrowserConsolePanel.tsx`），但应对方式是"分阶段施工 + 逐一复核"，而非挂起。
 **开始日期**: 2026-09-15
 **归档位置**: [workflow/done/260915-浏览器预览功能增强.md](workflow/done/260915-浏览器预览功能增强.md)
-**执行计划**: [runtime/260915-浏览器预览功能增强/master_plan.md](runtime/260915-浏览器预览功能增强/master_plan.md)
+**执行计划**: 已随归档清理（原 `runtime/260915-浏览器预览功能增强/master_plan.md`；任务完成归档后按 runtime 清理策略删除，同步移除本引用以避免悬空链接）
 
 **目标**: 把前端内置浏览器从「能看网页」升级为「能开发调试」——拆引擎 + 一键喂 Agent（P0a）→ CDP/Playwright 实时通道（P3-core）→ 跨域元素拾取（P0b）→ 可停靠面板/响应式/自动刷新（P1）→ 网络瀑布/HAR/DOM 检查器（P2）→ 多引擎收口（P3-remainder）。
 
@@ -225,7 +252,7 @@
 - Tauri 原生 `Webview` 仅保留 view 模式——它是独立原生子窗口，**无法承载拾取 overlay / 高亮**；debug 模式统一用 CDP screencast 渲染在 DOM 内。
 - 顺序纠偏：`sandbox=allow-same-origin` 不等于同源 → 跨域拾取/截图受引擎阻塞，故 **P0a 先发，P3-core 先于 P0b**。
 
-**进度**: 17/24 任务完成（P0a ✅ + P3-core ✅ + 分发加固 ✅ + P0b ✅ 除视觉走查 + P1 可做部分 ✅ + P2 网络瀑布/HAR ✅）；另有**首次真实端到端验收**发现并修复 7 个真实缺陷（全部 ✅ 已修+验证）；T-14 视觉走查 375/768/1280 待做（开发机 chromium 环境已确认可用）
+**进度**: ✅ **全部完成并归档**——P0a / P0b / P1（T-15 可停靠面板、T-16 拖拽原语、T-17 设备预设、T-18 保存自动刷新、T-19 快捷键）/ P2（T-20 瀑布+HAR、T-21 DOM·a11y 检查器、T-22 sourcemap 栈、T-23 QA）/ P3-core / T-24 / in-app 浏览器引导下载器；**累计发现并修复 10 个真实缺陷**（全部由真实网关 / 真实浏览器抓出，mock 测不到；账本见下）；T-14 的 375/768/1280 机械走查已由真实浏览器 9/9 完成，**仅剩人工观感复核**
 
 **真实端到端验收成果（2026-09-15）**:
 - 方法：本机起真网关（`DESKTOP_AUTOMATION=1` + 真 chromium）＋`POST /auth/desktop-default` 换真 JWT ＋ `Bun.serve` 测试页 ＋ WS 全链路；脚本 `/tmp/opencode/browser-live-e2e.ts`（裸 WS）与 `client-seam.ts`（**已构建的 `@openAwork/web-client`**，即 UI 真正使用的客户端）。
@@ -243,6 +270,11 @@
 | 5 | hook `send` 未连接时**静默丢弃**（`connectionRef.current?.send`）+ 引擎 screencast 效应无 phase 门控 | **实时预览永久白屏、从不导航到目标地址** | ✅ 已修+验证（像素命中目标页）|
 | 6 | `web-client.stop()` 设 JSON content-type 却不发 body → Fastify 400 | **"停止实时预览"永远失败** | ✅ 已修+验证（含全客户端同类审计）|
 | 7 | 切设备预设后帧尺寸**不收敛**（停在布局中间态，静态页不重绘就不产新帧）| 切到手机预设画面没反应 / 尺寸不对 | ✅ 已修+验证（**连续 3 次走查 9/9**）|
+| 8 | `NetworkWaterfall` 用 **11 个未定义 CSS 类**（过滤器无选中态、shimmer 不动画）| 分不清当前选中哪个过滤项 | ✅ 已修+验证（真实浏览器 14/14，含"active pill 计算背景色 ≠ inactive"）|
+| 9 | `BuiltInBrowser` **不填满宿主**（根 `flex: 0 1 auto` 按内容定高）→ 窄面板下纵向 chrome 145px 把内容区压到 **0** | 停靠面板里预览**一片空白** | ✅ 已修+验证 |
+| 10 | 引擎在**可用盒子退化为 0** 时渲染"空"（有合法帧却不画，还继续兜底 ack）| 帧在流、带宽在烧、画面全白 | ✅ 已修+验证（不变式：**只要帧存在就必须画出来**）|
+
+> **缺陷 9 的教训（已固化）**：**jsdom 不做布局**，`getBoundingClientRect` 恒为 0 → 组件测试**天然测不到**"容器高度塌陷"这类缺陷。T-15 的 11 个新组件测试全绿，但真实浏览器里内容是空白。**凡涉及布局/尺寸的行为，必须用真实浏览器验证**——这与"`<img>` 解码成功 ≠ 画面是对的"、"视觉估计 ≠ 测量"是同一条方法论的三面。
 
 **三套 E2E 脚本（可复跑）**：`/tmp/opencode/browser-live-e2e.ts`（裸 WS 后端全链路，20/20）、`client-seam.ts`（**已构建的 `@openAwork/web-client`**，12/12）、`ui-verify2.ts` + `ui-walkthrough.ts`（真实浏览器 + **像素采样**，4/4 与 9/9）。
 **方法论教训（已固化）**：`<img>` 解码出真实尺寸 ≠ 画面是对的。首轮"UI 渲染成功"的结论被**像素采样**推翻（全是白屏 `rgb(255,255,255)`）。DOM 断言必须配合**内容级**校验。同理，**视觉模型的描述只能产生假设、不能当结论**——它报的"无状态芯片""对比度偏低"两个"缺陷"都被 DOM 断言与 canvas 客观测量推翻（芯片 testid 找错；实测对比度 ≥4.5 达 AA）。
@@ -259,7 +291,11 @@
 1. ✅ **T-15 预览可停靠面板（2026-09-16 完成）**：在 Fusion 右侧停靠面板新增第 4 个 tab「浏览器预览」（`SidePanelTabId` 扩 `'browser'` + `PANEL_TAB_ORDER` + 键盘循环）；新增自持状态的 `panels/FusionBrowserTab.tsx`（119 行，读 `browserPreviewUrlByWorkspace`、空态可粘贴 URL）；`FusionSessionSidePanel` 加分支。**关键：单一浏览器互斥**——`FusionBrowserTab` 挂载即 `setBrowserPreviewSurface('dock')`、卸载归还 `'editor'`，`EditorBrowserWorkspace` 据同一标记 `!browserHostedByDock` 拒绝挂载第二份 `BuiltInBrowser`（否则两实例各自建网关实时会话，controller 选举与 ack 额度互相抢占）。
 2. ✅ **T-18 保存后自动刷新（2026-09-16 完成）**：`workspace-file-index.ts` 新增**独立于缓存条目**的单调版本（`indexVersionByRoot` + `globalIndexVersion`；因为失效是 delete 条目，版本不能存条目里）并在失效/重建时递增 + `getWorkspaceFileIndexVersion()`；新增只读端点 `GET /workspace/files/index-version?path=`（镜像既有的 `files/search` 鉴权与校验风格，O(1) 不扫盘）；`web-client` 加 `getFileIndexVersion()`；新 hook `use-workspace-index-refresh.ts`（101 行，仅预览可见时轮询 ~2.5s、跳过首帧建基线、版本**变小也视为变化**以兼容网关进程内计数器重启归零、错误不抛）；`BuiltInBrowser` 3 行接线复用既有 `refreshKey`。
    - **拓扑风险（已记录待评估）**：并发会话的 `routes/ports.ts` 记录 `apps/web/nginx.conf` 只转发 `/api/`、`/auth/`、`/sessions/`，故 `/workspace/*` 的可达性取决于部署形态。新端点刻意**镜像今天 Web 确实在用的 `/workspace/files/search`**，与既有能力同生共死。
-3. ⏸ **in-app 浏览器引导下载器**——Oracle 排序为最后一步（需自实现 CDN 下载 + 解压 + `INSTALLATION_COMPLETE` 标记）；在此之前"受管目录 → 系统 Chrome → Edge → 明确命令提示"已覆盖绝大多数场景
+   - **设计取舍（非缺陷）**：失效逻辑会**连带推进目标路径的所有已登记祖先**的版本（注释已写明理由：前端轮询的是工作区根）。因此**两个互为嵌套的工作区根**（如 `/tmp` 与 `/tmp/opencode`）会因内层写入而**多触发一次外层刷新**；单根场景无影响。实测已确认"真正无关（非祖先）的根不受影响"。
+   - **真实浏览器验收（2026-09-16，16/16 PASS）**：临时重建 harness 后验证——停靠面板空态→填址→打开→**实时画面真的渲染**；**互斥成立**（停靠与编辑器同时在时全应用仅一个浏览器实例）；对照组（仅编辑器）正常；**T-18 因果链闭合**——只翻页面颜色不写工作区**不刷新**，写入工作区文件后根版本 2→3 且预览**自动刷新到新内容**。据此还抓出并修复了缺陷 9/10（见上表）。
+3. ✅ **in-app 浏览器引导下载器（2026-09-16 完成并真实验证）**：`services/agent-gateway/src/browser-live/browser-installer.ts`（446 行）——**调用 Playwright 官方安装器**（`node <playwright>/cli.js install chromium`），**不自造 CDN 下载/解压**（Node/Bun 均无 zip 容器 API、`unzip` 仅 POSIX，手写严格更差；官方 CLI 顺带把 revision/平台映射/解压/`INSTALLATION_COMPLETE` 全做对）。安全约束：`requireAuth` + 桌面运行时门控 + **固定 argv（不走 shell，用户输入不入 argv/env）**；**单飞**（并发第二次 → 409 `browser_install_in_progress`）；有界日志环（40 行 × 300 字符）+ 10 分钟超时 + 处理子进程 `error` 事件；`browsersPath` 规则与桌面 `lib.rs` 一致（外部 `PLAYWRIGHT_BROWSERS_PATH` 优先，否则 `<数据目录>/browsers`）；成功后 `resetLiveBrowserAvailabilityCache()` 让 `/status` 立刻翻转。CLI 解析不到 → 独立 `unavailable` 状态 + 手动命令提示（**打包成单二进制 sidecar 时预期如此**，诚实降级）。UI：`InstallBrowserProgress.tsx` + `hooks/use-browser-install.ts`——仅在可安装 reason 下给按钮、轮询显示下载进度、成功后**免刷新**复检可用性（`recheckAvailability`）。
+   - **真下载 E2E（我自己复现）**：空目录起网关 → `{available:false, reason:"browser-missing", installable:true}` → POST 202 `running` → 并发第二次 409 → **真实下载 `100% of 110.9 MiB` → `chromium_headless_shell-1208`** → `succeeded` → `/status` 翻转 `{available:true, engine:"chromium", screencast:true}`。**整链闭合**。
+   - **诚实缺口**：安装器的 UI 交互（按钮/进度/失败回退）由 5 个新组件测试覆盖，**未在真实浏览器里点过**（临时 harness 已删）；且**真下载只在有网络时可行**。
 4. ✅ **桌面 sidecar 形态已实测（2026-09-16，本欠账关闭）**：用真实 `build:binary` 产物（`bun build --compile` → 121MB / 2949 模块，正是 Tauri 内嵌的那个二进制）按 sidecar 真实形态运行，并注入 `PLAYWRIGHT_BROWSERS_PATH`（模拟 `lib.rs` 行为）：
    - **正向**：完整后端全链路 **22/22 通过**（含 screencast 帧 + ack 信用、`dom.tree`/`a11y.tree`/`node.styles`、**sourcemap 映射**、截图 artifact + 类型化 404）→ **Playwright 在编译后的 sidecar 中确实可用**，`PLAYWRIGHT_BROWSERS_PATH` 注入有效。
    - **负向（诚实降级）**：把受管浏览器目录置空（且本机无系统 Chrome/Edge）→ `{ available: false, engine: null, screencast: false, reason: "browser-missing", installable: true }`，**不谎报可用**，UI 会给出可操作指引。
@@ -305,10 +341,28 @@
 - **⛔ T-15 可停靠面板阻塞**：宿主 `ChatPage.tsx` 与 `conversation/**` 正被用户并行大改（`apps/web/src` 下 82 文件修改态）。
 - **⛔ T-18 自动刷新推迟**：全仓无文件变更/watch 信号，而用户正在并行构建 `workspace/workspace-file-index.ts` + `WorkspaceFileTreePanel`（文件索引/监听）；应等其事件源落地后对接。
 
-### 🔵 250109-opencode-llm-full-migration - OpenCode LLM 完整迁移续作
-**状态**: 分阶段完成，保留明确阻塞；未达到发布条件
+---
+
+**最终状态（归档定稿 2026-09-16，**取代上文所有过程态描述**）**:
+
+上文出现的"T-15 阻塞""T-18 推迟""P1 可做部分""T-14 未做""17/24"等均为**施工过程记录**，最终全部完成：
+- **全部交付**：P0a / P0b / P1（T-15 可停靠面板、T-16 拖拽原语、T-17 设备预设、T-18 保存自动刷新、T-19 快捷键）/ P2（T-20 瀑布+HAR、T-21 DOM·a11y 检查器、T-22 sourcemap 栈、T-23 QA）/ P3-core / T-24 / in-app 浏览器引导下载器。
+- **验收**：合并版 5 套脚本 **55/55**（`acceptance-backend` 22/22、`acceptance-ui` 8/8、`ui-inspector-verify` 13/13、`ui-stack-verify` 9/9、`ui-sourcemap-verify` 3/3）；真实浏览器走查 375/768/1280 **9/9**；安装器**真下载 E2E**（110.9 MiB → `available:true`）；测试合计约 **1100+**；`apps/web` 生产构建与各包 typecheck 全 exit 0。
+- **缺陷账本**：累计 **10 个真实缺陷**（见上文表格），全部由真实网关/真实浏览器抓出并修复——mock 一个都测不到。
+
+**归档后遗留（备忘，非本任务未完成）**:
+1. 👁 **人工观感走查**（375/768/1280 机械走查已由真实浏览器完成，仅"好不好看"需人看）。
+2. ⚠️ **WS 鉴权硬化**：`routes/browser-live.ts` 现为"先完成 101、再发 `UNAUTHORIZED` + close 1008"，存在"未认证也能完成握手"的窗口（**非数据泄露**：不发送任何数据即关闭）。建议改为 `{ websocket: true, onRequest: [requireAuth] }`（生产先例 `services/agent-gateway/src/lsp/router.ts:157`；Fastify 的 `onRequest` 对 Upgrade 请求同样执行）。**改它会变更已文档化协议 + WS 测试 + `docs/browser-preview.md`，故未在归档时动手。**
+3. ℹ️ **嵌套工作区根会过度通知**：失效逻辑为让"被轮询的根"反映子路径变化，会连带推进目标路径的所有已登记祖先版本 → `/tmp` 与 `/tmp/opencode` 这类嵌套根会因内层写入多触发一次外层刷新（单根无影响）。
+4. ℹ️ **`/workspace/*` 的 nginx 可达性**：`apps/web/nginx.conf` 只转发 `/api/`、`/auth/`、`/sessions/`；T-18 新端点刻意镜像今天在用的 `/workspace/files/search`（同生共死），未解决部署拓扑问题。
+5. ℹ️ **安装器 UI 未真机点击验证**（按钮/进度/失败回退由 5 个组件测试覆盖；临时 harness 已删）；且**真下载依赖网络**。
+6. ℹ️ **仓库既存问题（非本任务引入）**：`packages/browser-automation/tsconfig.json` 未排除测试 → 被 project reference 构建时把测试编进 `dist`（`multi-agent`/`skill-registry` 同样）；`agent-gateway` 的 `test:unit` 有 9 个失败属用户进行中的 SSH 特性。
+7. ℹ️ **全程零提交**：所有改动仍在工作树（`git status` 可见），是否提交由用户决定。
+
+### ✅ 250109-opencode-llm-full-migration - OpenCode LLM 完整迁移续作（已归档，未做项放弃）
+**状态**: 已归档（2026-09-16，用户决定）——代码与 fixture 全部完成；方案文件已从 `workflow/` 删除；**未做项按用户决定放弃**（T-41 / T-48 / T-50 / T-52 / T-53 五项真实 provider·隔离部署·负载 gate，以及发布验收清单 14 项：响应时间 / 吞吐 / 内存 / 覆盖率 / 文档 / 监控 / 回滚）
 **复核日期**: 2026-08-15
-**工作流文档**: [workflow/250109-opencode-llm-full-migration.md](workflow/250109-opencode-llm-full-migration.md)
+**工作流文档**: 已删除（删除前最后提交 `e486c615`；原文可 `git show e486c615:.agentdocs/workflow/250109-opencode-llm-full-migration.md` 追溯）
 **运行时证据**: 原 `runtime/250109-opencode-llm-resume-20260815`（runtime 属临时目录，2026-09-16 已按 cleanup-policy 清理）
 **Effect 原生终态证据**: 原 `runtime/250815-opencode-llm-effect-native-final`（同上已清理）
 
@@ -321,6 +375,28 @@
 - 用户提供代理的真实 native Effect 验证已补齐：OpenAI Chat/Responses (`gpt-5.6-terra`) 及 Anthropic Messages (`grok-4.6`) 的非流式、SSE 流式、usage 与 `stop` 终止均通过；该单代理验证不替代部署、负载和全供应商 gate。
 
 > ℹ️ **已删除的幽灵条目（2026-09-16 归档审计）**：本处原有 🔵 `260814-migrate-opencode-llm-library`（移植 OpenCode LLM 库，标称 0/18）。经核查 **`workflow/260814-migrate-opencode-llm-library.md` 与 `runtime/260814-migrate-opencode-llm-library/` 均不存在**，该任务已并入上方的 `250109-opencode-llm-full-migration`，故移除以免误导。
+
+### ⚪ 2026-09-16 批量归档（用户决定）—— 4 个历史方案删除
+
+> 以下 4 个方案经用户确认后归档：**方案文件已从 `workflow/` 直接删除**（未移入 `done/`）。原文按"删除前最后提交"用 `git show <sha>:<path>` 可完整追溯。其未完成项一律标注「**用户决定放弃**」，不再作为待办跟踪。
+
+#### ⚪ 250815-opencode-llm-effect-native-final - OpenCode LLM 原生 Effect 终态迁移
+**状态**: 代码侧已完成；方案文件已删除（最后提交 `e486c615`）
+**放弃的未做项**: N-12（真实隔离部署 + LLM 流负载 + 回滚演练 + 临时资源清理 + exact-SHA 五路独立审查 + 最终状态同步）——本地代码与 fixture gate 已通过，剩余部分为外部/人工 gate
+
+#### ⚪ 260704-opencode-ui-layout-borrow-plan - OpenCode UI 布局借鉴升级方案
+**状态**: W1/W2/W3/W5 主体已落地；方案文件已删除（最后提交 `c154fea5`）
+**放弃的未做项**: T-W3-07（diff 行内评论 → 自动注入 prompt context）、T-W4-05/T-W4-07（抽取 `MessageTimeline.tsx`，全仓无此文件）、T-W6-01/T-W6-02（会话列表拖拽排序，`@dnd-kit` 未安装）
+**补充核实（2026-09-16，纠正历史误标）**: 计划中标注"未实施 / 阻塞"的 **T-W3-04 与 T-W6-07 实际已完成**——T-W3-04 的阻塞条件（无可消费的 web-client 会话 diff API）已解除，`useReviewPanelFileChanges` 现走 `createSessionsClient` + `SessionFileChangesProjection`；T-W6-07 已实现，`command-palette.tsx` 含 `groupByCategory` + 分类渲染 + 分类参与搜索匹配。计划内多处 `tsc --noEmit` 未勾项属并行改动期的历史快照，不作为待办。
+
+#### ⚪ 260706-fusion-layout-t1-s2-refactor - 融合布局重构 T1(纯标签栏) + S2(项目头像 Rail)
+**状态**: F1–F5 全部落地（58/58 勾选）；方案文件已删除（最后提交 `c154fea5`）
+**说明**: 文档头部残留的"进行中（F4 仅剩移动端侧面板适配）"系 2026-07-14 旧状态；其后 F4 六项已全部勾选，移动端"Rail 隐藏 + Panel 抽屉"亦已落地，故按已完成归档
+**放弃的未做项**: 无
+
+#### ⚪ 260814-team-communication-enhancement - Team 通信层优化（P0 方案）
+**状态**: P0 四项**零实现**；方案文件已删除（最后提交 `9f62d031`）
+**放弃的未做项**: `ConversationContextManager`（对话上下文管理）、`HandoffProtocol`（交接协议完善）、`request/response`（请求-响应模式）、`CollaborationPattern`（协作模式抽象）——全仓（`packages/` / `services/` / `apps/`）无任何实现或引用，按用户决定放弃
 
 ---
 
@@ -346,6 +422,7 @@
 - [2026-09-16] **「真端口转发」在 Web 面不可实现 VS Code 同款**：浏览器无法打开本地 TCP 端口；唯一真形式（Tauri 壳内 TCP 监听 + WS 隧道）是纯桌面特性，而同机拓扑下直接打开 `localhost:PORT` **就是完整功能**。路径前缀式代理与主应用**同源** → 被代理应用的 XSS 可读 `localStorage` 主会话令牌（HttpOnly/Path 隔离只保护 pf cookie，保护不了 localStorage）；且 `forwardId` 生成时机与 dev server 的 `base`/HMR WS 前缀天然冲突。安全评审结论：**4 blocker / 9 should-fix，不通过**；若重启必须先在产品层选定「独立 origin」或 `CSP sandbox`。
 - [2026-09-16] Fastify 的 **`onRequest` 钩子对 WebSocket `Upgrade` 请求同样执行**（`@fastify/websocket` 的 `onUpgrade` 会把 Upgrade 请求送进 `fastify.routing()`，源码注释明写「so that it will invoke hooks」），生产先例：`services/agent-gateway/src/lsp/router.ts:157` 写作 `{ websocket: true, onRequest: [requireAuth] }`。因此 WS 鉴权**应放 `onRequest`**（未认证直接 401、不发 101），**不要**照抄 `browser-live.ts` 的「先完成 101 再发 UNAUTHORIZED」handler 内校验（那有「未认证也能完成握手」的窗口）。
 - [2026-09-16] **委派子代理的执行纪律**（本轮两个代理被 30 分钟空闲超时强杀）：必须在任务里强制「每条 `bash` 加 `timeout` 前缀」「禁止 `pnpm dev`/`vite`/无 `run` 的 `vitest` 等常驻命令」「禁止跑全量套件（由协调者统一复跑）」「单命令 >6 分钟无输出即放弃并上报」。清理进程时**禁用 `pkill -f "vitest run"` 这类会匹配到自身命令行的模式**（会自杀并让工具等到超时），改用精确 PID。
+- [2026-09-16] **可调尺寸面板的高度策略**（Fusion 终端抽屉）：① 边界由**视口派生的纯函数**给出（默认 ≈35% 视口、上限 ≈72% 视口并留 ≥28% 给主区、绝对封顶 900），不要写死 px——同一个默认值不可能在 768 与 1440 上都合理；② 用 `xxxCustomized: boolean` 区分「用户拖过」与「没拖过」：**没拖过就按当前视口给默认高**（老数据视为未自定义，可自动享受新默认），拖过则尊重持久化值；③ **resize 时只在渲染期钳制，不写 store**（否则 resize 会持续落盘）；④ 分屏等「结构性变化需要更大高度」时做**派生抬升且不落盘**，取消后自动恢复用户原高度；⑤ **改动钳制域时必须同步放宽持久化域**，否则拖拽写入会被旧 setter 打回（本轮 360 就是这个问题）。
 - [2026-08-30] 上下文挡位使用独立 `contextWindowOverride`，有效窗口取模型能力、用户覆盖、运行时发现值与环境覆盖的最小值；保留原始模型能力，避免设置值超过供应商上限。
 - [2026-08-30] 压缩后目标值作为近期上下文保留预算与工具输出截断目标，不承诺摘要严格精确 Token 数；真实分段价格留待独立价格阶梯字段实现。
 - [2026-08-16] Team 路由 fallback 采用三态安全策略：明确只读才 `light`，明确修改/执行才 `orchestrate`，不确定则 `clarify`；避免故障时把未知请求误放入轻量路径。
@@ -359,6 +436,12 @@
 - [2026-08-14] 采用 Claude Code 的工具提示词模式：每个工具独立 prompt.ts 文件，通过系统提示词构建器动态组装
 - [2026-08-14] 使用 SYSTEM_PROMPT_DYNAMIC_BOUNDARY 分隔静态和动态内容，静态部分可被 LLM 缓存
 - [2026-08-14] 实施分层架构：agent-core（数据层）+ agent-gateway（业务层）
+- [2026-09-16] **浏览器预览的调试引擎唯一采用 Playwright + CDP live view**（screencast **仅 Chromium**；console/network/DOM/a11y/computed styles/拾取/设备模拟全来自它），按**运行时能力协商**（网关与浏览器同机时才有意义）；iframe / Tauri 原生 webview 仅作**展示降级**。**否决 dev-server 同源反代**：解决不了跨域、需重写 HMR WS/绝对路径/`base`/CSP/`X-Frame-Options`、并把任意本地端口暴露成 SSRF 面。传输用 **WS + 单帧信用 ack（4s 看门狗兜底）**，SSE 仅只读低频降级。**否决把 chromium 打进安装包**（体积 140–180MB × 6 CI 矩阵；macOS 嵌套 app 需签名+公证+JIT 授权；Linux 打包**不解决** libnss3 等系统库；与 pinned playwright 版本强耦合）。
+- [2026-09-16] **预览浏览器必须单实例互斥**：`BuiltInBrowser` 内部持有网关实时会话（一条 WS），全应用同一时刻只能挂载一个实例。用 `uiState.browserPreviewSurface: 'editor' | 'dock'` 标记所有权——停靠面板挂载即置 `'dock'`、卸载归还 `'editor'`，`EditorBrowserWorkspace` 据 `!browserHostedByDock` **拒绝挂载第二份**。两实例共存会各自建会话，**争抢同一 per-user 会话的 controller 选举与 ack 额度** → 画面抽搐/卡顿。
+- [2026-09-16] **浏览器获取顺序**：受管目录（`PLAYWRIGHT_BROWSERS_PATH`，**外部值优先**，否则 `<数据根>/browsers`，由桌面 `lib.rs` 注入）→ 系统 Chrome → 系统 Edge → **in-app 引导安装**（调用 **Playwright 官方安装器**，不自造 CDN 下载/解压——Node/Bun 均无 zip 容器 API、`unzip` 仅 POSIX）。CLI 解析不到时诚实报 `unavailable` + 手动命令（打包成单二进制 sidecar 时预期如此）。
+- [2026-09-16] **`playwright` 必须精确锁版本**（`packages/browser-automation` = `1.58.2`，对应 chromium revision **1208**）：`^` 区间一旦被 `pnpm update` 推到 1.62（revision 1234），本机已装的 1208 会**静默失效**、可用性翻成 outdated。另：**`pnpm install` 不会安装浏览器**——根 `package.json` 的 `onlyBuiltDependencies` 不含 `playwright`，pnpm 10 跳过其安装脚本。
+- [2026-09-16] 会话权限阶梯以 `permissionMode: 'ask'|'auto-edit'|'yolo'` 为**规范键**，布尔 `yoloMode` 降级为**派生投影**（`yoloMode === (permissionMode === 'yolo')`），使 legacy 读方 / 写方零改动；写入侧 canonicalizer 必须 patch-aware 并采用 5 级优先级（patch 规范键 > patch 布尔 > 合并后规范键 > 合并后布尔 > 保持缺席），否则 legacy 客户端 PATCH 布尔会被丢弃、session 卡在 `yolo`，形成向更不安全方向的**单向棘轮**。
+- [2026-09-16] 权限阶梯的 **deny-first 不变量**：`auto-edit` / `yolo` 的免审批快捷分支只能在**通配符 allow/deny 与作用域级 allow/deny 之后**执行，故这两档仅跳过 `ask`、永不放行被显式 `deny` 的调用；唯一执行点是 `ensurePermissionForTool`（`services/agent-gateway/src/tools/tool-sandbox.ts`），category 计算须上提以便中间档测试解析后的类别。
 
 ### 编码约定
 - 所有提示词使用中文编写
@@ -367,6 +450,17 @@
 - 遵循统一的导出规范，便于维护和扩展
 
 ### 已知陷阱
+- [2026-09-16] **`pnpm lint` 的 `&&` 链会掩盖后续阶段的错误**：根 `lint:eslint` 是 `eslint packages && eslint services && eslint apps/mobile && eslint apps/desktop && eslint scripts eslint.config.js` —— **`packages` 里任何一个错误都会让 `services` 及其后从未被检查**（表现为「lint 只报 1 个错误」，修掉后突然冒出十几个）。**判断 lint 真实状态时不要只跑 `pnpm lint`**：应分别对 `packages` / `services` / `apps/mobile` / `apps/desktop` 各跑一次，或直接把路径合成**一次** eslint 调用（`eslint packages services apps/mobile apps/desktop scripts eslint.config.js`，保留非零退出码）。**切勿改成 `;` 分隔**——那会让最后一个命令的退出码决定成败，等于让 lint 静默通过。
+- [2026-09-16] **`eslint --fix` 的 `no-unnecessary-type-assertion` 可能移除 tsc 需要的断言**：在「上下文推断依赖该断言」的代码里（如 `const body = res.json() as T` 之后用 `body.items.map((x) => …)`），规则判定「断言不改变类型」而删除它，随之回调参数失去上下文类型 → **`tsc` 报 TS7006 隐式 any**（lint 绿、typecheck 红）。修法不是把断言加回去，而是**给变量显式类型标注**（`const body: T = res.json()`）——同时满足 lint 与 tsc。另注：若被改的那一行属于**未提交的新增块**，`git diff` 只会显示为 `+` 行，**看不出断言被删**，容易误判为「非我所改」。
+- [2026-09-16] **`apps/web` 的 spacing token 命名是「索引 × 4px」，不是像素值**：`--spacing-12` 的值是 **48px**（定义在 `apps/web/src/styles/layout-tokens.css`），而 **`--spacing-48` 并不存在**。按名字猜值会写出**未定义 token** → 声明被浏览器丢弃、静默失效（与 `--text-1` 同一类）。**用任何 CSS 变量前先 grep 它的定义**。同理 `--spacing-3`=12px、`--spacing-4`=16px、`--spacing-5`=20px。
+- [2026-09-16] **jsdom 不做布局**：`getBoundingClientRect()` 恒为 0 → 组件测试**天然测不到**"容器高度塌陷"类缺陷。实测：停靠面板 11 个新组件测试全绿，真实浏览器里预览**完全空白**（根节点 `flex:0 1 auto` 不拉伸 → 纵向 chrome 145px 把 `flex:1` 内容区压到 0 → 引擎因"可用盒子非正"拒绝渲染）。**凡涉及布局/尺寸的行为必须用真实浏览器验证**；同时引擎侧应保证"**只要帧存在就必须画出来**"（退化盒子走显式降级分支而非渲染空白）。
+- [2026-09-16] **"有画面" ≠ "画面是对的"**：`<img>` 解码出真实尺寸（`naturalWidth>0`、`complete=true`）只证明"画了一张图"，证明不了"画的是对的页面"。首轮"UI 渲染成功"的结论被 **canvas 像素采样**推翻（像素全是白屏 `rgb(255,255,255)` 而目标页是蓝色）。同理**视觉模型对截图的描述只能产生假设、不能当结论**——它报的"无状态芯片""对比度偏低"两个"缺陷"都被 DOM 断言与 canvas 逐层合成背景的**客观测量**推翻。**结论必须来自 DOM 断言 / computed style / 像素采样，不能来自观感描述。**
+- [2026-09-16] **`pkill -f 'tsx src/index.ts'` 匹配不到 tsx 的真实 cmdline**（实际是 `node --require .../preflight.cjs --import .../loader.mjs src/index.ts`）→ 旧网关进程杀不掉，新代码"看似没生效"（实测被一个 21:51 启动的旧进程占着端口）。改用 `pgrep -f 'index\.ts'` 取 PID 精确 kill。另：**`pkill -f <模式>` 会匹配到执行该命令的 bash 自身**（自杀 → 工具等到超时），必要时用字符类（`index[.]ts`）规避。
+- [2026-09-16] **CDP `Page.screencastFrame.sessionId` 是"会话级"而非帧级**：同一 screencast 会话内所有帧**恒定不变**，只有重新 `startScreencast` 才递增。若把它当"帧唯一标识"透传给客户端，客户端按 id 去重会**丢弃第二帧起的所有帧**（实况永久卡死首帧）。正确做法：扇出侧自行合成单调序号作为线路 id，另存真实 CDP id 供 ack 映射。
+- [2026-09-16] **`.agentdocs` 会被并发会话改写**：本轮我的条目两度被另一会话写成与事实不符的结论（"T-21..T-24 已按用户指示挂起"），工作流文档也被提前归档成陈旧副本，索引条目被移出/改写。**动手归档或改记录前先复核 mtime 与勾选状态**；发现失实要**按事实回填并保留决策沿革**（注明"后续已实施"），不要静默覆盖对方，也不要让陈旧结论留在归档里。
+- [2026-09-16] **移动端固定 48px 底部 tab 条会遮挡终端面板的两个状态**：`.fusion-mobile-bottom__strip`（`position: fixed`、`bottom: 0`、`height: 48px`、`z-index: 401`）会盖住落在文档流底部的 ① 收起态 rail ② **展开态的 inline 抽屉**（曾只修了 ①，② 的末 ~2 行含提示符不可见且不可点击）。修法：两者都在 `@media (max-width: 767px)` 内让出 `var(--spacing-12)`（=48px）；**不要用抬 `z-index` 的方式"修"**——那只是把缺陷转移给 tab bar。
+- [2026-09-16] **nginx 的 `events{}` 上下文无法被 `conf.d/*.conf` 覆盖**：`worker_connections` / `worker_rlimit_nofile` 必须通过主配置（`/etc/nginx/nginx.conf`）下发，因此仓库需自带一份主配置并在 Dockerfile 显式 `COPY`（只 `COPY` conf.d 会静默退回镜像默认 1024）。另外：对**混合流量**前缀（既有 WS 又有普通请求）无条件下发 `Connection: "upgrade"` 会打断 upstream keepalive（实测非 WS 请求被转发成 `conn=[upgrade] upgrade=[]`）；正解是 `map $http_upgrade $connection_upgrade { default upgrade; '' ''; }` + `upstream { keepalive N }`，**空串分支必须用 `''` 而非官方 WebSocket 示例里的 `close`**（`close` 同样强制关连接、继续打断 keepalive）。
+- [2026-09-16] **构建"失败但没有任何错误输出"优先怀疑 OOM**：`apps/web` 的 `build` 脚本写死 `NODE_OPTIONS=--max-old-space-size=8192`，在可用内存不足（本机 19GB、并发负载下常只剩 5–8GB）时 `vite build` 会被 OOM killer **静默杀掉**（`tsc -b` 已通过、无报错、pnpm 报 exit 1）。用更低堆上限（如 3072）可正常构建成功。另：`timeout` 切断父进程后 **`vite build` 子进程会存活并持续占数 GB**，收尾时按 PID 清理并确认无孤儿。
 - [2026-09-16] **xterm 挂载容器不能带 `padding`**：FitAddon 用父元素的 `clientHeight`（**含 padding**）按行高取整，padding 会让 `.xterm-screen` 底部越界最多 ≈ padding 总量（实测 4px、行高 14px → **最后一行被切一半**；基线单 pane 也有 +1px）。修法：把视觉内缩从 xterm 的挂载容器移到它的外层（本例 `.terminal-surface` → `.terminal-root`），**零 JS 改动**；不要靠改 fit 计算绕。
 - [2026-09-16] **`setPointerCapture` 会把 `click`/`dblclick` 重定向到捕获元素**：为实现拖拽而在 tab 容器上 `setPointerCapture` 后，子元素（tab label）上的单击切换 / 双击重命名处理器**永远收不到事件**（jsdom 单测不会暴露，因为 jsdom 不实现 pointer capture 的事件重定向）。修法：拖拽用 pointer 事件自行判定「是否发生位移」并在拖后抑制一次 click，而**不要**把 capture 设在承载 click 语义的元素上；**必须真机验证点击/双击**。
 - [2026-09-16] **flex/block 混合下 xterm 会自持放大**：`.terminal-pane`（`flex:1 1 auto`）若成为 `display:block` 容器的**直接子元素**，`height` 退化为 `auto` → 由 xterm 的固有高度撑开，而 fit 结果又来自「上一次容器尺寸」，形成正反馈（实测 pane 374px vs 抽屉 127px，内容越过抽屉且页面不可滚动 → 底部永久不可达）。修法：给该路径补 `height:100%; min-height:0`（分屏路径因 `.terminal-split{height:100%}` 天然有确定高度，所以**只有默认单 pane 态命中**）。
@@ -392,6 +486,9 @@
 - 提示词过长会影响性能 → 使用动态边界分隔静态和动态内容
 - 工具提示词需要定期更新 → 每次工具更新时同步更新提示词
 - tool-sections.ts 需要手动添加新工具 → 未来可考虑自动发现机制
+- [2026-09-16] 会话元数据快照漏字段会让 PATCH **静默跳过**：`createSessionMetadataSnapshot`（`apps/web/src/pages/chat-page/conversation/render/chat-page-utils.ts`）只跟踪布尔 `yoloMode` 时，`ask → auto-edit` 产生完全相同的快照 → dirty 检查短路、中间档永不落库；快照必须纳入 `permissionMode`。
+- [2026-09-16] 权限浮层的两个视觉定位坑 → ① flip-up 曾用 composer shell 顶边当锚点（把 *limit* 误当 *anchor*），菜单飘到触发按钮上方很远处，锚点必须取**触发按钮**；② 桌面 dev/e2e harness 未引入 web token 样式表 → `var(--token)` 解析为 unset（背景 / 描边不可见、焦点框退回 UA 默认），截图曾导致评审误判真伪。
+- [2026-09-16] 桌面 e2e 冷启动会把 Vite 按需编译算进首个用例 → 偶发超时；修法是把冷编译移入 `beforeAll` 预热。残留：高并发负载下（例如并行跑全仓 typecheck）Chromium 渲染器可能报 `Protocol error: Page crashed`，勿与重活并发跑该 spec。
 
 ### 全局重要记忆
 - [2026-09-16] **agentdocs 归档必须「移动 + index 同步」成对完成**：只 `mv` 到 `done/` 而不改 `index.md`，会产生悬空链接与幽灵条目（实测 index 仅登记 8/83，另发现 1 个幽灵方案 + 10 个悬空 runtime 链接）。`runtime/` 属临时目录（`.gitignore`），归档后应按 cleanup-policy 清理；**清理保护规则**：活跃方案对应目录、`index.md` 引用目录、近 60 分钟被改动目录（并发会话）、大体积/备份/演示类，一律保留。
@@ -427,9 +524,9 @@
 .agentdocs/
 ├── index.md              # 本文件：知识入口
 ├── workflow/             # 任务规划（持久化，提交到 git）
-│   ├── done/             # 已完成任务归档
+│   ├── done/             # 已完成任务归档（唯一归档位；根目录不再保留方案）
 │   │   └── 260814-tool-prompt-system.md
-│   └── [活跃任务].md
+│   └── [活跃任务].md     # 仅"进行中"方案可留此；归档一律移入 done/
 └── runtime/              # 执行协调（临时，.gitignore）
     └── 260814-tool-prompt-system/
         ├── master_plan.md
@@ -447,3 +544,4 @@
 - 2026-08-14: 完成工具提示词系统核心实施，归档到 done/
 - 2026-08-14: 创建工具提示词系统优化任务，完成详细规划
 - 2026-09-16: **归档审计**——补归档 8 个已完成方案（→ `done/`，累计 83）、补齐 index 登记、删除幽灵条目 `260814-migrate-opencode-llm-library`、修复全部悬空链接、清理 53 个 runtime 残留目录（62 → 9）
+- 2026-09-16: **批量归档（用户决定）**——`workflow/` 根目录 5 个历史方案（`250109` / `250815` / `260704` / `260706` / `260814`）全部归档并**直接删除文件**；未做项统一标注「用户决定放弃」；`260704` 顺带纠正 2 项历史误标（T-W3-04 / T-W6-07 实已完成）；修复 3 处外部文档悬空引用。`workflow/` 根目录自此不再保留 .md，方案一律落 `done/`

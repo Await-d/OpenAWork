@@ -354,8 +354,8 @@ packages/opencode-llm/
 
 ### C. 相关文档
 
-- [完整迁移方案](./250109-opencode-llm-full-migration.md)
-- [OpenCode LLM 集成方案](./250109-opencode-llm-integration.md)
+- 完整迁移方案 `250109-opencode-llm-full-migration`：**已归档删除**（2026-09-16，按用户决定）。原文见 `git show e486c615:.agentdocs/workflow/250109-opencode-llm-full-migration.md`；未做项（真实 provider / 隔离部署 / 负载 / 发布验收清单）按用户决定放弃，详见 `index.md`
+- OpenCode LLM 集成方案 `250109-opencode-llm-integration`：本目录原链接 `./250109-opencode-llm-integration.md` 在任何提交中都不存在（历史遗留悬空链接），2026-09-16 一并移除以免误导
 - [Package README](../../packages/opencode-llm/README.md)
 
 ### D. 团队成员

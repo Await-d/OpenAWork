@@ -1,6 +1,6 @@
 # Grill 分层增强方案 — 把 grill-me 纪律注入 OpenAWork 澄清能力
 
-> **日期**：2026-09-14 ｜ **状态**：待评审 ｜ **范围**：A（question 管道）+ B（agent-core 引擎）+ C（team 层）
+> **日期**：2026-09-14 ｜ **状态**：已实现并全量验证（2026-09-16 补齐 T-12/V-13） ｜ **范围**：A（question 管道）+ B（agent-core 引擎）+ C（team 层）
 > **关联**：`docs/architecture/team-architecture-l1-baseline.md`、`docs/architecture/team-interaction-flow-v3.11.md`
 > **参考外部资产**：`mattpocock/skills` → `skills/productivity/grilling/SKILL.md`、`skills/productivity/grill-me/SKILL.md`（MIT）
 
@@ -415,7 +415,7 @@ Phase 1（B）frontier 引擎 + 单测 ─────────────�
 - ❌ 不做"技能 Manifest 自动生成 slash command"（现有 slash command 为静态注册表 `routes/command-descriptors.ts`）。
 - ❌ 不改 `question` 工具在 team session 的硬禁用（§3.5 是刻意设计）。
 
-## 10. 开放问题（待评审确认）
+## 10. 开放问题（已拍板，见 §11 审批门；「倾向」列为最终决议）
 
 | # | 问题 | 备选 | 倾向 |
 | --- | --- | --- | --- |
@@ -432,3 +432,168 @@ Phase 1（B）frontier 引擎 + 单测 ─────────────�
 - [x] §8 风险缓解被评审接受（Momus OKAY）
 - [x] T-00 特征化测试基线先落地（编码前）—— 已完成，21 例
 - [x] UI 相关任务加载 `frontend` skill 并附视觉自查（T-07/T-13 已加载 `frontend` skill，遵循 `--contrast`/`--accent` 等设计 token，未硬编码色值；组件测试覆盖）
+- [x] T-12 补齐（pm1 frontier 多轮 + 确认门控）—— 2026-09-16，见 §12.3
+- [x] V-13 验收脚本落地并实跑通过 —— 2026-09-16，见 §12.5
+- [~] V-06：**可自动化部分已闭环**（pending 列表契约断言已入 `verify-grill-end-to-end.ts`，见 §13.4）；「活体 LLM + 浏览器」人工视觉走查因本机 `AI_API_KEY` 为空而不可执行 —— 见 §12.6 L1 / §13.4
+
+---
+
+## 12. 完成核对附录（2026-09-16）
+
+> 目的：把「已完成 / 未完成」逐项对齐到代码证据，并记录 2026-09-16 补齐 T-12/V-13 时的实测结果与偏差。
+
+### 12.1 任务台账（T-00 … T-15）
+
+| ID | 状态 | 落地证据 |
+| --- | --- | --- |
+| T-00 | ✅ 完成 | `packages/agent-core/src/context/routing.test.ts`（特征化基线） |
+| T-01 | ✅ 完成 | `packages/agent-core/src/context/clarification-tree.ts` + `clarification-tree.test.ts` |
+| T-02 | ✅ 完成 | `packages/agent-core/src/context/clarification-recommendation.ts` + `.test.ts` |
+| T-03 | ✅ 完成 | `context/routing.ts:189 buildClarificationQuestions`、`:193 @deprecated` 委托注释 |
+| T-04 | ✅ 完成 | `services/agent-gateway/src/tools/question-tools.ts:9/17/18`（`recommended`/`nodeId`/`round`） |
+| T-05 | ✅ 完成 | `src/routes/stream-system-prompts.ts:82-123`（frontier 纪律 + `__grill_confirm__`） |
+| T-06 | ✅ 完成 | `src/session/session-workspace-metadata.ts:139-145`（`clarificationState` + zod refine） |
+| T-07 | ✅ 完成 | `apps/web/src/components/chat/misc/InlineQuestionPanel.tsx:480-495` + 组件测试 |
+| T-08 | ✅ 完成 | `src/infra/db.ts:728 ensureColumn('question_requests','round_number','INTEGER')` |
+| T-09 | ✅ 完成 | `src/handoff/capability/layer-capabilities.ts:107-108`（reception `grilling`/`awaiting_confirmation`）、`:143`（pm1 `awaiting_confirmation`） |
+| T-10 | ✅ 完成（本轮补齐消费者） | `src/handoff/store/inbound-store.ts:642-677` `parseGrillClarificationAnswerPayload`（`questionId` 复用为决策树节点 id + 可选 `roundNumber`）+ 9 例测试；**本轮**让生产消费者落地：`artifact-chain.ts` 的 `extractClarificationAnswer` 改走该解析器 |
+| T-11 | ✅ 完成（本轮解耦层级） | `src/handoff/runner/reception-router.ts` grill 分支 + `reception-grill-runner.ts` + `verify-team-grill-reception.ts`；**本轮**把 `shouldGrillIntent` 下沉到 `src/handoff/capability/grill-intent.ts`（c 层需要复用它，直连 b 层 runner 违反跨层禁令） |
+| T-12 | ✅ **本轮实现** | 新增 `src/handoff/runner/pm1-grill-runner.ts`；`artifact-chain.ts` Step 2 重写为「frontier 多轮 + 确认门控」 |
+| T-13 | ✅ 完成 | `apps/web/src/pages/team/runtime/tabs/tasks/ClarificationsPanel.tsx:195-204`（轮次分组）+ 测试 |
+| T-14 | ✅ 完成 | `src/verification/verify-grill-end-to-end.ts` |
+| T-15 | ✅ 完成（本轮补齐 pm1 段） | A 层：`src/routes/session-dialogue-mode.ts:85-102`（`confirmGrill` 合流写入）；C 层 reception：`reception-grill-runner.ts:106-133`；**本轮**补 C 层 pm1：`artifact-chain.ts` 在 frontier 空后进 `awaiting_confirmation`，仅 `confirmedAt` 落定才进 `drafting_plan` |
+
+### 12.2 验证项台账（V-01 … V-16）
+
+| 验证项 | 状态 | 实际落点（与 §6.3「建议命名」的差异见 §12.4） |
+| --- | --- | --- |
+| V-01 | ✅ | `packages/agent-core/src/context/routing.test.ts` |
+| V-02 | ✅ | `packages/agent-core/src/context/clarification-tree.test.ts` |
+| V-03 | ✅ | `packages/agent-core/src/context/clarification-recommendation.test.ts` |
+| V-04 | ✅ | agent-core 全量：33 文件 / 397 测试全绿；网关 `typecheck` exit 0 |
+| V-05 | ✅ | `services/agent-gateway/src/__tests__/tools/question-tools.test.ts` |
+| V-06 | ⚠️ 部分 | 自动化链路（`test:verification` / `test:grill`）全绿；**浏览器手工验收未执行**（见 §12.6） |
+| V-07 | ✅ | `src/__tests__/session/clarification-state-metadata.test.ts` |
+| V-08 | ✅ | `apps/web/src/components/chat/misc/InlineQuestionPanel.test.tsx` |
+| V-09 | ✅ | `src/__tests__/infra/question-requests-round-number.test.ts` |
+| V-10 | ✅ | `src/__tests__/handoff/layer-capabilities.test.ts` |
+| V-11 | ✅（由既有用例覆盖） | `src/__tests__/handoff/inbound-store.test.ts`：`submitInboundMessage` 幂等（`reused:true`）+ `parseGrillClarificationAnswerPayload` 9 例 |
+| V-12 | ✅ | `src/verification/verify-team-grill-reception.ts` |
+| V-13 | ✅ **本轮新增** | `src/verification/verify-team-pm1-multiround.ts`，脚本输出 `verify-team-pm1-multiround: ok` |
+| V-14 | ✅ | `apps/web/src/pages/team/runtime/tabs/tasks/ClarificationsPanel.test.tsx` |
+| V-15 | ✅ | `verify-grill-end-to-end.ts` + 网关全量单测 + `typecheck` + ESLint |
+| V-16 | ✅（落点不同） | 确认门控用例位于 `packages/agent-core/src/context/clarification-tree.test.ts:122-201`（`needsConfirmation` / `confirmGrill` / 肯定文案归一化） |
+
+### 12.3 本轮（2026-09-16）补齐的实现
+
+1. **新增 `src/handoff/capability/grill-intent.ts`**：`shouldGrillIntent` 从 `reception-router` 下沉，b/c 两层共用；`reception-router` 保留同名 re-export，既有调用方与测试无需改动。
+2. **新增 `src/handoff/runner/pm1-grill-runner.ts`**：`buildPm1GrillSeed` / `readPm1GrillTask` / `persistPm1Grill` / `clearPm1Grill` / `frontierToQuestions` / `applyPm1GrillAnswers` / `formatSettledAnswers` / `confirmTransportQuestionId` / `toEngineNodeId`。所有前沿/级联/确认判定均委托 agent-core 引擎，网关侧不实现澄清算法（§5.1 SSOT 铁律）。
+3. **重写 `artifact-chain.ts` Step 2**：由「解析 spec 的 `[NEEDS CLARIFICATION]` 后按 `answeredIds` 单轮认领」改为引擎驱动的 frontier 多轮 + 确认门控（详见 §12.7 复审修复）。
+4. **`extractClarificationAnswer` 接入 `parseGrillClarificationAnswerPayload`**：T-10 的解析器从「无生产消费者」变为真实链路消费者；旧的纯文本载荷（无 `questionId`）保留兜底分支。
+5. **新增 `src/verification/verify-team-pm1-multiround.ts`（V-13）** 并接入 `package.json` 的 `test:grill-pm1` 与 `test:verification` 链。
+6. **agent-core `CLARIFICATION_TEMPLATES` 中文化**（`context/routing.ts`）：4 个维度的题面/选项/描述由英文改为中文，供 reception grill 与 pm1 grill 共用；选项顺序语义（**首项即推荐**）在两个消费方保持一致。
+
+### 12.4 与计划的偏差（均已落地验证）
+
+| # | 偏差 | 原因 |
+| --- | --- | --- |
+| D1 | **grill 触发条件收窄**为「spec 标记了 `[NEEDS CLARIFICATION]` **或** 原始/改写意图命中高影响（`shouldGrillIntent`）」，而非「pm1 每次都 grill」 | 字面「always 4 维」会破坏 `team-b-c-integration.test.ts:413` 对无标记 spec 的精确 substate 序列契约（`drafting_spec→spec_ready→drafting_plan→…`），并使每个团队任务固定多 5 轮阻塞、与 reception 的 grill 叠加成双重拷问；且与本文档 §8 R5「仅高影响意图（R2/R3）触发 grill」冲突 |
+| D2 | `shouldGrillIntent` 下沉到 `handoff/capability/grill-intent.ts` | c 层（`artifact-chain`）直接 import b 层 runner（`reception-router`）会触发 `team-architecture/no-cross-layer-runner-import` |
+| D3 | 若干验证项实际文件路径 ≠ §6.3 的「建议命名」（V-07/V-09/V-11/V-16） | §6.3 已注明为建议命名，实现按同目录既有约定落地 |
+| D4 | T-10 的 `nodeId` 复用既有 `questionId` 字段承载，未新增独立字段 | 既有实现即如此设计（`inbound-store.ts:648-651` 注释："复用既有 `questionId` 字段作为决策树节点 id，仅新增 `roundNumber`，避免引入第二套 id"）；本轮沿用并在 §5.4 语义下补齐消费者 |
+| D5 | **确认轮超时语义收紧**：非确认轮超时仍「按保守默认继续」，确认轮超时改为**抛 `PlanningFailure`（不得产出 plan）** | §5.2 硬约束「`needsConfirmation === true` 时 A/C 不得产生任何执行副作用；未确认的 grill 视为未完成」；原实现会静默放行，构成 G6 违反 |
+| D6 | **确认题的传输 id 轮次化**（`__grill_confirm__@r<n>`，消费时归一化剥离后缀） | 前端 `useClarificationStore.push` / `replaceFromRuntime` 按 `id` 去重（历史实现每轮用随机 uuid 故不冲突）。稳定 id 会被去重 → 驳回后重提的确认题不渲染 → 用户无法再确认。普通节点只问一次（未答项在前端保持 pending），无需后缀 |
+| D7 | **轮次态改为「成功后保留」**（不再收口即清空），仅取消时清空 | G5「抗压缩/恢复」要求运行开始时可恢复已答节点；且质量评审退回的重规划需沿用原答案作为 plan 上下文。为避免重复提问，恢复以「意图一致」为门 |
+
+### 12.5 验证证据（2026-09-16 实跑）
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm --filter @openAwork/agent-core test` | 33 文件 / **397 通过**，0 失败 |
+| `pnpm --filter @openAwork/agent-gateway run test:unit --hookTimeout=90000 --testTimeout=60000` | 456 文件 / **3248 通过**（2 skipped），0 失败 |
+| `pnpm --filter @openAwork/agent-gateway run test:grill` | `verify-grill-end-to-end: ok` |
+| `pnpm --filter @openAwork/agent-gateway run test:grill-reception` | `verify-team-grill-reception: ok` |
+| `pnpm --filter @openAwork/agent-gateway run test:grill-pm1` | `verify-team-pm1-multiround: ok` |
+| `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/handoff/artifact-chain.test.ts` | **16 通过**（含 3 条本轮新增：确认轮超时必失败、同意图已确认不再提问、质量退回不再 grill） |
+| `pnpm --filter @openAwork/web exec vitest run src/pages/team/runtime/tabs/tasks/ClarificationsPanel.test.tsx src/stores/team/team-events.test.ts` | 2 文件 / **36 通过**（含 7 条结构化选项用例） |
+| `pnpm --filter @openAwork/agent-gateway run typecheck` | exit 0 |
+| `pnpm exec eslint <本轮全部改动文件>` | exit 0，无告警 |
+| `pnpm run lint:rules` | `no-cross-layer-runner-import: all RuleTester cases passed` |
+
+> 注 1：`test:unit` 与目录级批量运行建议带 `--hookTimeout=90000`——本机 `beforeAll` 内 `await import()` + `migrate()` 在并行负载下会超过 vitest 默认 10s，属环境耗时而非用例缺陷。
+> 注 2：另有 2 个与本改动无关的用例（`codegraph-e2e`、`feishu-channel-tools`）在**默认 5s `testTimeout`** 下会因本机负载超时；单独加长超时运行 `5/5 通过`，判定为环境抖动。
+
+### 12.6 未执行 / 遗留
+
+| # | 项 | 说明 |
+| --- | --- | --- |
+| L1 | **V-06 的「活体 LLM + 浏览器」实操** | 本环境 `.env` 的 `AI_API_KEY` 为空，**无法**让模型真实产出 `AskUserQuestion` 卡片，故这一段人工走查不可执行（详见 §13.4）。V-06 中可自动化的部分已补齐断言（§13.4） |
+| L2 | **§10 Q3 维度扩展** | 仍按原决议「单独立项」，本期保持 4 维 |
+| L3 | ~~`prefers-reduced-motion`~~ | **已关闭**（§13.4） |
+
+---
+
+## 13. 复审（2026-09-16）：对 §12 调整的独立复核与修复
+
+> 触发：用户要求「检查这个方案的调整」。方式：逐条复核代码路径（前端回传载荷、substate 语义、持久化消费者、触发 intent 来源），并核实测试隔离与失败语义。
+
+### 13.1 复核确认成立
+
+- 载荷契约兼容：前端读 `payload.clarifications[].{id,question,context}` + `payload.round`，面板回传 `questionId: item.id`，与生成结构一致。
+- 测试隔离：`PRAGMA foreign_keys=ON`（`db.ts:109`）+ `sessions.user_id ... ON DELETE CASCADE` ⇒ 测试间 `DELETE FROM users` 会级联清掉 session，恢复逻辑不会跨用例串味。
+- 失败语义：`planning-generation-failed:` 在 watcher（`:1283` / `:1420`）走**终态**分支（不触发降级 auto-chain），与「未确认 = 未完成」一致。
+- §12.4 的 D1–D4 论证成立。
+
+### 13.2 发现并已修复的问题
+
+| # | 问题 | 影响 | 修复 |
+| --- | --- | --- | --- |
+| F1 | 确认轮超时静默放行 | 用户不确认即生成 plan，**违反 §5.2 G6** | 确认轮超时抛 `PlanningFailure`（见 D5）；非确认轮保持既有「保守默认」契约 |
+| F2 | 确认题稳定 id 被前端去重 | 驳回后无法再确认 → 叠加 F1 直接放行 | 确认题传输 id 轮次化（见 D6） |
+| F3 | `awaiting_confirmation` 未列入 `WAITING_PROGRESS_SUBSTATES`（`store/substate-store.ts:63`） | 人工等待时长被计入 `progress_interval` 延迟指标（L1.6 p95 污染），与 `clarifying` 语义不一致 | 加入该集合 |
+| F4 | 触发只查 `rewrittenIntent` | 改写中性化后漏触发 grill | 同时查 `sourceIntent` |
+| F5 | 持久化是死写：`readPm1Grill` 无生产消费者 | G5「抗压缩/恢复」对 pm1 实际未交付 | 改为 `readPm1GrillTask` 并在运行开始恢复（见 D7）；同意图已确认则跳过 grill，质量退回则不重复 grill 但沿用原答案 |
+| F6 | 题面为英文模板 + 确认题只能手打 | 中文产品展示英文题；确认语义易误判 | 模板中文化；载荷携带结构化 `options`，前端渲染选项按钮 + 「推荐」徽标 |
+
+### 13.3 本轮（复审修复）变更清单
+
+| 层 | 文件 | 改动 |
+| --- | --- | --- |
+| agent-core | `src/context/routing.ts` | `CLARIFICATION_TEMPLATES` 中文化；注明「首项即推荐」的跨消费方契约 |
+| gateway | `src/handoff/runner/pm1-grill-runner.ts` | 新增 `readPm1GrillTask` / `confirmTransportQuestionId` / `toEngineNodeId`；`persistPm1Grill` 增 `intent` 参数；`frontierToQuestions` 输出 `options` 且确认题 id 轮次化；`applyPm1GrillAnswers` 归一化 |
+| gateway | `src/handoff/runner/artifact-chain.ts` | 触发增查 `sourceIntent`；恢复已持久化决策树；质量退回跳过 grill；确认轮超时抛 `PlanningFailure`；取消时清空状态 |
+| gateway | `src/handoff/store/substate-store.ts` | `awaiting_confirmation` 纳入等待态集合 |
+| gateway | `src/routes/team.ts` | `listRuntimeClarifications` 透传并校验 `options` |
+| gateway | `src/__tests__/handoff/artifact-chain.test.ts` | 新增 3 条用例（确认轮超时必失败 / 同意图已确认不提问 / 质量退回不 grill） |
+| gateway | `src/verification/verify-team-pm1-multiround.ts` | 适配新签名与轮次化 id；新增「驳回后重提使用新 id」「确认后状态保留」断言 |
+| web-client | `src/team/team.ts` | `TeamRuntimeClarificationRecord` 增 `options?` |
+| web | `src/stores/team/team-events.ts` | `ClarificationOption` / `ClarificationItem.options`；`push` 校验并携带；`hydrateClarificationStore` 透传 |
+| web | `src/pages/team/hooks/use-team-workspace-snapshot-state.ts` | 快照映射透传 `options` |
+| web | `src/pages/team/runtime/tabs/tasks/ClarificationsPanel.tsx` | 结构化选项按钮（推荐置首 + 徽标 + 描述）、完整交互态、纯 token（无硬编码色值）、无选项回退 textarea |
+| web | `ClarificationsPanel.test.tsx` / `team-events.test.ts` | 新增 7 条结构化选项用例 |
+
+### 13.4 收尾（2026-09-16 续）：V-06 契约自动化 + 动效无障碍
+
+**V-06 的分解与处置**——该验证项混了三类判定，逐类处置：
+
+| V-06 判定 | 类别 | 处置 |
+| --- | --- | --- |
+| 首轮返回问题卡片数 ≥2（frontier 批量）、每题含「推荐」项 | **API 契约** | ✅ 已自动化：`verify-grill-end-to-end.ts` 新增 `GET /sessions/:id/questions/pending` 断言——`requests[].questions` 扁平后 `>= 2`、每题 `options.some(recommended === true)`、每题带非空 `nodeId` |
+| 「不直接产出完整方案或代码」 | **提示词契约** | ✅ 已由 `__tests__/prompt/dialogue-mode-prompts.test.ts` 覆盖（断言 frontier 纪律与只读约定） |
+| 在浏览器里实操「选澄清模式 → 输入高影响需求 → 看首轮卡片」 | **活体 LLM + 人工视觉** | ❌ **本环境不可执行**：`.env` 的 `AI_API_KEY` 为空（`len=0`），模型无法真实发起 `AskUserQuestion`。需要凭据后执行：`pnpm --filter @openAwork/agent-gateway dev` + `pnpm --filter @openAwork/web dev` → `/chat` → 澄清模式 → 输入高影响需求 |
+
+> 结论：V-06 的**可自动化部分已全部落地**；残余仅为「活体 LLM 下的浏览器视觉走查」，缺凭据而非缺覆盖。
+
+**L3 动效无障碍（已关闭）**：`ClarificationsPanel.tsx` 的 `OPTION_STYLES`（第 265-274 行）新增 `@media (prefers-reduced-motion: reduce)`，对 `.clarification-option` 与 `.clarification-free-input-toggle` 置 `transition: none` 并把 `:active` 的 `transform` 复位为 `none`（保留 hover/active 配色），无硬编码色值。
+
+**本节验证**：
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm --filter @openAwork/agent-gateway run test:grill` | `verify-grill-end-to-end: ok`（含新增 pending 契约断言） |
+| `pnpm --filter @openAwork/agent-gateway run test:grill-reception` | `verify-team-grill-reception: ok` |
+| `pnpm --filter @openAwork/agent-gateway run test:grill-pm1` | `verify-team-pm1-multiround: ok` |
+| `pnpm --filter @openAwork/web exec vitest run <ClarificationsPanel + team-events 测试>` | 2 文件 / **36 通过** |
+| `pnpm --filter @openAwork/agent-gateway run typecheck` | exit 0 |
+| 硬编码色值自检（`ClarificationsPanel.tsx`） | 无命中 |
+

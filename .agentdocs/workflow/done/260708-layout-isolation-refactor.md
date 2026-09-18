@@ -4,6 +4,8 @@
 > 关联文档：
 > - `.agentdocs/workflow/260704-opencode-ui-layout-borrow-plan.md`（母方案，W1/W2 已完成）
 > - `.agentdocs/workflow/260706-fusion-layout-t1-s2-refactor.md`（融合布局重构，F1/F2 已完成）
+>
+> ℹ️ 以上两个关联方案已于 2026-09-16 归档删除（按用户决定从 `workflow/` 直接删除；原文见 `git show c154fea5:<path>`）。本文档保留为当时（2026-07-08）的记录，链接不再可达。
 > - `apps/web/src/components/Layout.tsx`（布局入口）
 > - `apps/web/src/components/layout/shared/useLayoutShared.ts`（共享 Hook，608 行）
 > - `apps/web/src/pages/chat-page/ChatPage.tsx`（会话页，25 处 isFusionLayout 分支）
@@ -333,4 +335,4 @@ Phase 2 内部：T-07 与 T-08 可分段推进，但不引入 Classic 对称改�
 - AppSidebar.tsx（1453 行）的内部拆分——旧版 Classic 冻结，不在本工作流处理
 - ChatPage.tsx 整体拆分——单独工作流处理
 - 任何要求继续演进 Classic 旧布局的任务——显式移出范围
-- Fusion 布局功能补齐（F3/F4/F5）——由 `260706-fusion-layout-t1-s2-refactor.md` 跟踪
+- Fusion 布局功能补齐（F3/F4/F5）——由 `260706-fusion-layout-t1-s2-refactor.md` 跟踪（该方案 2026-09-16 已归档删除；F3/F4/F5 均已落地）
