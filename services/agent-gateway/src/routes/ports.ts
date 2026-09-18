@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { listListeningPorts } from '../ports/listening-ports.js';
+import { listOwnedTerminalPids } from '../session/session-terminal-registry.js';
 
 export async function portsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -27,7 +28,12 @@ export async function portsRoutes(app: FastifyInstance): Promise<void> {
       if (!user?.sub) {
         return reply.code(401).send({ error: 'unauthorized', message: '未授权或登录已失效。' });
       }
-      const snapshot = await listListeningPorts();
+      const snapshot = await listListeningPorts({
+        userId: user.sub,
+        // 只读归属查询：registry 按 user_id 过滤，路由不提供任何按 pid 操作的入口；
+        // 「终止」仍然只能走既有的 /terminals/:terminalId/kill（双重所有权校验）。
+        listOwnedTerminalPids,
+      });
       return reply.send(snapshot);
     },
   );

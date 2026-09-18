@@ -517,11 +517,7 @@ export function appendTerminalOutput(terminalId: string, snapshot: string): void
     appendDeltaInternal(terminalId, state, Buffer.from(snapshot, 'utf-8'));
     return;
   }
-  appendDeltaInternal(
-    terminalId,
-    state,
-    Buffer.from(snapshot, 'utf-8').subarray(previousBytes),
-  );
+  appendDeltaInternal(terminalId, state, Buffer.from(snapshot, 'utf-8').subarray(previousBytes));
 }
 
 /**
@@ -643,6 +639,34 @@ export function listSessionTerminalSummaries(
   input: ListSessionTerminalsInput,
 ): SessionTerminalSummary[] {
   return listSessionTerminals(input).map(toSummary);
+}
+
+/**
+ * 该用户当前「活着且有 pid」的终端 —— 供只读端口枚举做归属匹配。
+ *
+ * 只取 `running` / `idle`：`markTerminalExited` 不会清掉 pid 列，已结束行的 pid
+ * 可能早被系统复用给无关进程，用陈旧 pid 匹配会给出错误归属（指向错误终端）。
+ * `tmux-spawned` 没有本网关持有的 pid，天然不会出现在结果里。
+ * 与 `ports/listening-ports.ts` 的注入契约结构同形（路由层接线，由 TS 校验）。
+ */
+export function listOwnedTerminalPids(userId: string): Array<{
+  pid: number;
+  sessionId: string;
+  terminalId: string;
+}> {
+  const rows = sqliteAll<{ pid: number | null; session_id: string; terminal_id: string }>(
+    `SELECT pid, session_id, terminal_id FROM session_terminals
+      WHERE user_id = ? AND pid IS NOT NULL AND pid > 0
+        AND status IN ('running', 'idle')
+      ORDER BY started_at_ms DESC`,
+    [userId],
+  );
+  const result: Array<{ pid: number; sessionId: string; terminalId: string }> = [];
+  for (const row of rows) {
+    if (row.pid === null || !Number.isInteger(row.pid) || row.pid <= 0) continue;
+    result.push({ pid: row.pid, sessionId: row.session_id, terminalId: row.terminal_id });
+  }
+  return result;
 }
 
 export function getTerminal(terminalId: string, userId: string): SessionTerminalRecord | null {

@@ -21,6 +21,12 @@ import {
 
 export type ListeningPortSource = 'procfs' | 'lsof' | 'powershell';
 
+/** 端口 → 终端归属引用；只有归属成功时才有值。 */
+export interface ListeningPortTerminalRef {
+  sessionId: string;
+  terminalId: string;
+}
+
 export interface ListeningPortView {
   port: number;
   protocol: 'tcp' | 'tcp6';
@@ -30,12 +36,40 @@ export interface ListeningPortView {
   pid: number | null;
   processName: string | null;
   source: ListeningPortSource;
+  /**
+   * 该监听端口的 ESTABLISHED 连接数；`null` = 当前策略无法统计（非 linux/procfs），
+   * **不是 0**。非 null 时也是网关最近一次快照（≤5s 缓存，与轮询间隔同源）的时点值，
+   * 不是实时值 —— UI 不得据此宣称「当前有 N 条连接」。
+   */
+  establishedConnections: number | null;
+  /**
+   * 监听进程是否仍存在；`null` = 无法判断（pid 未知 / 权限不足 / 瞬时 IO 失败），
+   * **不是 false**。消费方只在 `=== false` 时提示「已退出」，`null` 什么都不显示
+   * （原因放 title）—— 把活着的进程渲染成已退出比不显示更糟。
+   */
+  processAlive: boolean | null;
+  /**
+   * 该监听进程归属的终端；`null` = 「无法归属到你的终端」（不是错误）。
+   *
+   * 只有非 null 时才允许走既有的
+   * `POST /sessions/:sessionId/terminals/:terminalId/kill`（该路由自带用户与会话
+   * 双重校验）。`null` 的常见原因：进程不是本网关为当前用户拉起的终端的后代、
+   * pid 未知、平台不支持归属（非 linux/procfs）——消费方不得回退成「按 pid 终止」。
+   */
+  terminal: ListeningPortTerminalRef | null;
 }
 
 export interface ListeningPortsSnapshotView {
   ports: ListeningPortView[];
   /** 本次枚举实际使用的策略；不可用时为 null 并提供 reason。 */
   strategy: ListeningPortSource | null;
+  /**
+   * 服务端本次快照是否真的做过归属判定（仅 linux/procfs + 登录用户为 true）。
+   * 这是「`terminal === null` 能不能解读为外部进程」的唯一权威判据：**不得**用
+   * `strategy` 名称自行推断；为 false 时那些行只能显示「归属不可用」，绝不能说成
+   * 外部进程。
+   */
+  attributionSupported: boolean;
   /** 降级原因（超时 / 无权限 / 平台不支持），供 UI 说明。 */
   reason?: string;
   collectedAtMs: number;
