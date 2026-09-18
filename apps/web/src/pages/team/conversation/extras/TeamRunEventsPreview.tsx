@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { RunEvent } from '@openAwork/shared';
 import { getTeamRichTextPreviewText } from './team-message-content.js';
@@ -9,12 +10,95 @@ interface RunEventPreviewItem {
   title: string;
 }
 
+/**
+ * 折叠行只显示最新一条的标题。标题里可能带长工具名 / 错误码，先按字符截断，
+ * 余下宽度交给单行省略号兜底。
+ */
+const COLLAPSED_PREVIEW_MAX_LENGTH = 60;
+
+/**
+ * 折叠态固定 28px 单行 + flexShrink:0：它渲染在滚动区之外（beforeMessages 槽位），
+ * 高度必须收敛，否则展开态的兄弟节点会把 `chat-scroll-region` 压成 0 高。
+ */
 const CONTAINER_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  padding: '10px 12px',
+  display: 'flex',
+  flexDirection: 'column',
+  flexShrink: 0,
+  minWidth: 0,
+  padding: '0 10px',
   borderBottom: '1px solid color-mix(in srgb, var(--border-default) 24%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+};
+
+const HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  minHeight: 28,
+  minWidth: 0,
+};
+
+const TITLE_STYLE: CSSProperties = {
+  color: 'var(--fg-strong)',
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
+
+const COUNT_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 16,
+  height: 16,
+  padding: '0 5px',
+  borderRadius: 999,
+  border: '1px solid color-mix(in srgb, var(--border-default) 42%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+  color: 'var(--fg-strong)',
+  fontSize: 10,
+  fontWeight: 750,
+  fontVariantNumeric: 'tabular-nums',
+  flexShrink: 0,
+};
+
+const LATEST_PREVIEW_STYLE: CSSProperties = {
+  flex: '1 1 auto',
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  color: 'var(--fg-strong)',
+  fontSize: 11,
+  fontWeight: 650,
+};
+
+const LATEST_PREVIEW_DANGER_STYLE: CSSProperties = {
+  ...LATEST_PREVIEW_STYLE,
+  color: 'var(--danger)',
+};
+
+const TOGGLE_BUTTON_STYLE: CSSProperties = {
+  appearance: 'none',
+  border: '1px solid color-mix(in srgb, var(--border-default) 42%, transparent)',
+  color: 'var(--fg-strong)',
+  minHeight: 20,
+  padding: '0 8px',
+  fontSize: 10.5,
+  fontWeight: 700,
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const BODY_STYLE: CSSProperties = {
+  display: 'grid',
+  gap: 6,
+  maxHeight: 'min(40vh, 320px)',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+  minWidth: 0,
+  padding: '2px 0 8px',
 };
 
 const ITEM_STYLE: CSSProperties = {
@@ -24,6 +108,23 @@ const ITEM_STYLE: CSSProperties = {
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border-default) 36%, transparent)',
   background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+};
+
+const ITEM_TITLE_STYLE: CSSProperties = {
+  color: 'var(--fg-strong)',
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const ITEM_TITLE_DANGER_STYLE: CSSProperties = {
+  ...ITEM_TITLE_STYLE,
+  color: 'var(--danger)',
+};
+
+const ITEM_DETAIL_STYLE: CSSProperties = {
+  color: 'var(--fg-muted)',
+  fontSize: 11,
+  lineHeight: 1.55,
 };
 
 function truncate(value: string, max = 180): string {
@@ -123,30 +224,47 @@ function mergeTextEvents(events: RunEvent[]): RunEventPreviewItem[] {
 }
 
 export function TeamRunEventsPreview({ runEvents }: { runEvents: RunEvent[] }) {
+  const [expanded, setExpanded] = useState(false);
   const items = mergeTextEvents(runEvents);
-  if (items.length === 0) {
+  const latest = items[items.length - 1];
+  if (!latest) {
     return null;
   }
 
   return (
     <div style={CONTAINER_STYLE}>
-      <strong style={{ fontSize: 11, color: 'var(--fg-strong)' }}>过程时间线</strong>
-      {items.map((item) => (
-        <div key={item.id} style={ITEM_STYLE}>
-          <span
-            style={{
-              color: item.tone === 'danger' ? 'var(--danger)' : 'var(--fg-strong)',
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            {item.title}
-          </span>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.55 }}>
-            {item.detail}
-          </span>
+      <div style={HEADER_STYLE}>
+        <strong style={TITLE_STYLE}>过程时间线</strong>
+        <span style={COUNT_STYLE}>{items.length}</span>
+        <span
+          style={latest.tone === 'danger' ? LATEST_PREVIEW_DANGER_STYLE : LATEST_PREVIEW_STYLE}
+          title={latest.title}
+        >
+          {truncate(latest.title, COLLAPSED_PREVIEW_MAX_LENGTH)}
+        </span>
+        <button
+          type="button"
+          className="team-v2-control team-v2-control--surface"
+          style={TOGGLE_BUTTON_STYLE}
+          aria-expanded={expanded}
+          aria-label={expanded ? '收起过程时间线' : '展开过程时间线'}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+      </div>
+      {expanded ? (
+        <div style={BODY_STYLE}>
+          {items.map((item) => (
+            <div key={item.id} style={ITEM_STYLE}>
+              <span style={item.tone === 'danger' ? ITEM_TITLE_DANGER_STYLE : ITEM_TITLE_STYLE}>
+                {item.title}
+              </span>
+              <span style={ITEM_DETAIL_STYLE}>{item.detail}</span>
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }

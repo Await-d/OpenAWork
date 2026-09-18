@@ -2,180 +2,158 @@
 
 > 本文件是 `apps/web/src/pages/team/` 目录的 Agent 约束文档。
 > 所有在此目录下新增、修改、移动文件的操作必须遵循以下规则。
+>
+> **维护约定**：本文件只描述「目录职责 + 规则 + 依赖方向」，**不枚举具体文件清单**。
+> 文件会持续拆分/改名，枚举式清单必然过期（本文件曾因此严重失真）。
+> 需要文件清单时请看实际目录，或看 `conversation/AGENTS.md` 等就近文档。
 
 ---
 
-## 目录结构（强制）
+## 目录结构
+
+`team/` 根目录**只放 `AGENTS.md`**，所有源码按职责下沉到下列子目录：
 
 ```
 team/
-├── runtime/                    # 团队运行时 UI（核心功能区）
-│   ├── shell/                  # shell 框架 + 子区域
-│   │   ├── session-view/       # 五层架构 session 视图（新 UI）
-│   │   ├── sidebar/            # session 列表侧边栏
-│   │   ├── header/             # 顶部导航 + 工作区布局
-│   │   ├── controls/           # 交互控件（对话区 / 暂停 / 建议条）
-│   │   └── modals/             # 弹窗组件
-│   ├── data/                   # 数据流 + 类型 + mock
-│   ├── hooks/                  # 自定义 hooks
-│   ├── shared/                 # 跨 tab 共享组件
-│   ├── tabs/                   # 中间区 tab 页面
-│   │   ├── conversation/       # 对话 tab
-│   │   ├── tasks/              # 任务 tab
-│   │   ├── governance/         # 治理 tab（宪法 / 设置）
-│   │   ├── metrics/            # 指标 tab
-│   │   ├── office/             # 办公 tab
-│   │   └── overview/           # 概览 tab
-│   └── styles/                 # CSS 样式
-├── team-page-sections.tsx      # 页面级 section 组件
-├── use-team-collaboration.ts   # 协作 hook
-├── use-team-workspace-snapshot-state.ts
-└── use-team-workspace-state.ts
+├── AGENTS.md                # 本文件（根目录唯一文件）
+├── conversation/            # team 对话装配层（视图 / 状态机 / 提交路由 / ops）
+│   ├── extras/              #   对话视图的窗口墙、feed、消息卡片等展示单元
+│   ├── ops/                 #   对话区内联运维卡片
+│   └── submit/              #   提交路由（stream / inbound / handoff）
+├── hooks/                   # 页面级 hook（协作、工作区状态、视图状态持久化）
+├── views/                   # 页面级装配视图
+│   ├── templates/           #   模板管理页
+│   └── workbench/           #   层级 todo 工作台
+└── runtime/                 # 团队运行时 UI（核心功能区）
+    ├── shell/               # shell 框架 + 子区域
+    │   ├── session-view/    #   session 内部视图（层级对话抽屉）
+    │   ├── sidebar/         #   侧边栏（工作区文件树 / session 卡片）
+    │   ├── header/          #   顶部导航 + 工作区布局
+    │   ├── controls/        #   交互控件（对话区 / 暂停 / 建议条 / 动态条）
+    │   └── modals/          #   弹窗组件
+    ├── data/                # 数据流 + 类型 + 派生（纯逻辑为 .ts，React 上下文层为 .tsx）
+    ├── hooks/               # 运行时 hook
+    ├── shared/              # 跨 tab 共享组件（含 content-kit/ 基础件）
+    ├── tabs/                # 中间区 tab 页面
+    │   ├── conversation/    #   对话 tab
+    │   ├── tasks/           #   任务 tab
+    │   ├── governance/      #   治理 tab（宪法 / 设置 / 审计）
+    │   ├── metrics/         #   指标 tab
+    │   ├── office/          #   办公 tab
+    │   └── overview/        #   概览 tab
+    └── styles/              # CSS 样式
 ```
+
+`conversation/` 是本模块中约束最严的部分，有独立且**权威**的契约文档：
+**`conversation/AGENTS.md`**。改动对话层之前必须读它，且不得违反其中任何硬约束。
 
 ---
 
 ## shell/ 子目录职责边界
 
-### session-view/ — 五层架构 session 视图
+### session-view/ — session 内部视图
 
-**放什么**：
+**放什么**：点击某一层后展开该层 session 的对话抽屉等「session 内部」视图。
 
-- `TeamSessionView.tsx`：五层架构的 session 对话入口组件
-- `TeamSessionHeader.tsx`：session 头部（roleLayer / substate / metadata）
-- `TeamSessionEmptyState.tsx`：空态引导 + starter chips
-- `TeamSubstateProgressBar.tsx`：substate 进度条（drafting_spec → completed）
-- `LayerConversationDrawer.tsx`：层级对话抽屉（点击某层展开 session）
-- 未来：`TeamClarificationPanel.tsx`（澄清问题面板）
-
-**不放什么**：
-
-- 与 session 无关的全局 UI（属于 header/）
-- 列表/导航（属于 sidebar/）
+**不放什么**：与 session 无关的全局 UI（属 header/）；列表/导航（属 sidebar/）。
 
 **命名规范**：`Team*.tsx` / `Layer*.tsx`
 
-### sidebar/ — 团队页文件树侧边栏
+> 说明：历史上此处曾承载 session 头部 / 空态 / substate 进度条等组件，它们**已迁出**
+> 到 `conversation/extras/`（对话相关的 chrome 归对话层所有）。
 
-**放什么**：
+### sidebar/ — 团队页侧边栏
 
-- `TeamSidebarWithFileTree.tsx`：团队页左侧栏，仅渲染工作区文件树与「新建会话 / 工作区」入口。
-  会话列表已不再在此渲染（由全局侧栏 AppSidebar / FusionSidebar 承载），相关
-  `TeamSessionListSidebar.tsx` 组件已删除。
-- `TeamSessionSidebar.tsx`：侧边栏外壳（含搜索 / 过滤）
-- `SessionCard.tsx`：单条 session 卡片
+**放什么**：工作区文件树、session 卡片、文件预览、session 列表运行时状态与其 hook。
 
-**不放什么**：
+**不放什么**：session 内部视图（属 session-view/）；全局头部（属 header/）。
 
-- session 内部视图（属于 session-view/）
-- 全局头部（属于 header/）
+> 说明：**会话列表不在团队页侧边栏渲染**，由全局侧栏 `AppSidebar` / `FusionSidebar` 承载。
 
 ### header/ — 顶部导航 + 工作区布局
 
-**放什么**：
+**放什么**：统一 tab 栏（`TeamTabBar`，`variant="single"` 为 V2 默认单条超级栏：工作区切换 + 主 tab + 状态栏 + 3D 合并一行；主 tab 窄屏**横向滚动而非折叠**，两端渐隐 + 滚轮/触控/键盘翻页）、状态栏、顶部栏、工作区切换下拉及其布局辅助模块。
 
-- `TopTeamHeader.tsx`：顶部导航栏（仅 V1 旧布局 fallback 使用）
-- `TeamTabBar.tsx`：统一 tab 切换栏。`variant="single"` 为 V2 默认的单条超级栏
-  （工作区切换 + 主 tab + 状态栏 + 3D 合并为一行），子 tab 常驻第二行、
-  主 tab 窄屏横向滚动（不折叠，两端渐隐提示 + 滚轮/触控/键盘均可翻）
-- `TeamStatusBar.tsx`：全局状态栏（V2 作为超级栏 centerSlot 内嵌）
-- `MainWorkspace.tsx`：主内容区布局容器
-- `WorkspaceSwitcher.tsx`：工作区切换下拉
-
-**不放什么**：
-
-- 具体 tab 内容（属于 tabs/）
-- session 视图（属于 session-view/）
+**不放什么**：具体 tab 内容（属 tabs/）；session 视图（属 session-view/）。
 
 ### controls/ — 交互控件
 
-**放什么**：
+**放什么**：对话输入区及其状态视图、暂停/恢复、失败流指示器、建议条、子 tab 栏、动态条、欢迎屏、快捷概览、可resize分隔条等交互控件与其 hook。
 
-- `ConversationArea.tsx`：对话输入区域
-- `PauseResumeControls.tsx`：暂停/恢复按钮组
-- `FailureFlowIndicator.tsx`：失败流指示器
-- `SuggestionBar.tsx`：建议条（快捷操作）
-- `TabRow.tsx`：tab 切换行
-
-**不放什么**：
-
-- 完整页面布局（属于 header/）
-- 弹窗（属于 modals/）
+**不放什么**：完整页面布局（属 header/）；弹窗（属 modals/）。
 
 ### modals/ — 弹窗组件
 
-**放什么**：
+**放什么**：所有 Modal / Dialog 组件；确认对话框、创建表单弹窗及其配置/模板数据。
 
-- 所有 Modal / Dialog 组件
-- 确认对话框、创建表单弹窗
+**命名规范**：`*Modal.tsx`（例外：表单分片、配置与样式模块按职责命名）
 
-**命名规范**：`*Modal.tsx`
+### shell/ 根目录
+
+**只放 shell 框架自身的组合层与原子件**（如 `team-runtime-shell-primitives.tsx`）。
+一旦根目录文件接近体积上限，就把子组件提取到上面的对应子目录，
+保持根文件只做「组合 + 状态分发」，不做具体渲染。
 
 ---
 
-## 文件体积规则（继承根 AGENTS.md）
+## 文件体积规则（继承 apps/web/AGENTS.md）
 
-- **单文件上限 1500 行**，1300 行开始预警
+- **单文件上限 1500 行**：1300 行起预警，**超过 1500 行必须拆分，不得豁免**。
+  （注意：根 `AGENTS.md` 写的是「超过 2000 行必须拆分」，两处阈值不一致；
+  本目录按 **apps/web 的 1500 硬上限**执行。）
 - 超过 80 行的渲染块 → 提取为独立组件
 - 超过 3 层嵌套 JSX → 提取为独立组件
-- 拆分时按职责边界切分：
+- 拆分时按职责边界切分，而非按行数截断：
   - UI 渲染 → 独立子组件（放对应子目录）
-  - 数据获取 / 副作用 → `hooks/use-*.ts`
-  - 纯计算 / 格式化 → `data/*.ts`
+  - 数据获取 / 副作用 → `use*.ts`
+  - 纯计算 / 格式化 → 同级 `*.ts`
+  - 常量 / 类型 → 同级 `*.constants.ts` / `*.types.ts`
+- **禁止**用 `// ===== Section A =====` 之类的注释分隔充当拆分——那是拆分信号，不是解决方案
 
 ---
 
 ## 新组件归类决策树
 
-1. **是否是 session 内部视图？**（对话 / 进度 / 空态 / 层级抽屉）→ `session-view/`
-2. **是否是 session 列表 / 导航？** → `sidebar/`
-3. **是否是顶部 / 全局布局？** → `header/`
-4. **是否是交互控件？**（按钮组 / 输入区 / 指示器）→ `controls/`
-5. **是否是弹窗？** → `modals/`
-6. **是否是跨 tab 共享的非 shell 组件？** → `shared/`
-7. **是否是某个 tab 的专属内容？** → `tabs/<tab-name>/`
-8. **是否是数据类型 / mock / 配置？** → `data/`
-9. **是否是自定义 hook？** → `hooks/`
-
----
-
-## shell 根目录文件（仅保留 4 个）
-
-以下文件保留在 `shell/` 根目录，因为它们是 shell 框架本身：
-
-| 文件                                     | 职责                            | 预警              |
-| ---------------------------------------- | ------------------------------- | ----------------- |
-| `team-runtime-shell.tsx`                 | shell 主入口（状态管理 + 路由） | 1292 行，接近预警 |
-| `team-runtime-shell-frame.tsx`           | shell 框架布局（slot 组合）     | 1462 行，预警区间 |
-| `team-runtime-shell-primitives.tsx`      | 原子组件（ChromeBadge 等）      | 正常              |
-| `build-team-runtime-shell-view-model.ts` | view model 构建                 | 正常              |
-
-**当 `team-runtime-shell.tsx` 或 `team-runtime-shell-frame.tsx` 超过 1500 行时**：
-
-- 从中提取独立子组件到对应子目录
-- 保持 shell 根文件只做"组合 + 状态分发"，不做具体渲染
+1. **是否属于对话装配层？**（对话视图 / 状态机 / 提交路由 / op 卡片）→ `conversation/`
+2. **是否是 session 内部视图？**（层级抽屉等）→ `runtime/shell/session-view/`
+3. **是否是侧边栏 / 文件树 / session 卡片？** → `runtime/shell/sidebar/`
+4. **是否是顶部栏 / tab 栏 / 状态栏 / 全局布局？** → `runtime/shell/header/`
+5. **是否是交互控件？**（按钮组 / 输入区 / 指示器 / 动态条）→ `runtime/shell/controls/`
+6. **是否是弹窗？** → `runtime/shell/modals/`
+7. **是否是跨 tab 共享的非 shell 组件？** → `runtime/shared/`（基础展示件 → `runtime/shared/content-kit/`）
+8. **是否是某个 tab 的专属内容？** → `runtime/tabs/<tab-name>/`
+9. **是否是数据类型 / 派生 / mock / 配置？** → `runtime/data/`
+10. **是否是页面级装配视图？** → `views/`（模板页 → `templates/`，工作台 → `workbench/`）
+11. **是否是页面级 hook？** → `hooks/`；运行时 hook → `runtime/hooks/`
 
 ---
 
 ## 跨目录依赖方向
 
 ```
-session-view/ ──→ hooks/     ✅（视图消费 hook 数据）
-session-view/ ──→ data/      ✅（视图读取类型 / 配置）
-sidebar/      ──→ hooks/     ✅
-header/       ──→ hooks/     ✅
-controls/     ──→ hooks/     ✅
-tabs/         ──→ hooks/     ✅
-tabs/         ──→ shared/    ✅
-tabs/         ──→ data/      ✅
+conversation/ ──→ runtime/data/      ✅
+conversation/ ──→ runtime/shared/    ✅
+session-view/ ──→ hooks/             ✅（视图消费 hook 数据）
+session-view/ ──→ data/              ✅（视图读取类型 / 配置）
+sidebar/      ──→ hooks/             ✅
+header/       ──→ hooks/             ✅
+controls/     ──→ hooks/             ✅
+tabs/         ──→ hooks/             ✅
+tabs/         ──→ shared/            ✅
+tabs/         ──→ data/              ✅
+views/        ──→ hooks/             ✅
+views/        ──→ conversation/      ✅
 
-hooks/        ──→ data/      ✅（hook 消费类型定义）
-data/         ──→ (无依赖)   ✅（纯类型 / 配置 / mock）
+hooks/        ──→ data/              ✅（hook 消费类型定义）
+data/         ──→ (无 React 依赖)     ✅（纯类型 / 配置 / 派生；React 上下文层单独放 .tsx）
 
-session-view/ ──→ sidebar/   ❌ 禁止
-sidebar/      ──→ session-view/ ❌ 禁止
-controls/     ──→ session-view/ ❌ 禁止（通过 props 通信）
+session-view/ ──→ sidebar/           ❌ 禁止
+sidebar/      ──→ session-view/      ❌ 禁止
+controls/     ──→ session-view/      ❌ 禁止（通过 props 通信）
 ```
+
+`conversation/` 自带更严格的依赖约束（含对 `pages/chat-page/**` 的禁令与历史例外清单），
+以 `conversation/AGENTS.md` 为准。
 
 ---
 
@@ -183,4 +161,4 @@ controls/     ──→ session-view/ ❌ 禁止（通过 props 通信）
 
 - 测试文件与源文件**同目录**放置（前端约定）
 - 命名：`<ComponentName>.test.tsx`
-- 示例：`session-view/TeamSessionView.test.tsx`
+- 拆分产生的 hook / util 一律**同步补对应测试**；无测试覆盖的文件不允许作为拆分起点

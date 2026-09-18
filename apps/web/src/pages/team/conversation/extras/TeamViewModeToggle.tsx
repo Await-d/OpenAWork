@@ -39,11 +39,8 @@ const BTN_STYLE: CSSProperties = {
   borderRadius: 'var(--radius-sm, 6px)',
   borderWidth: 1,
   borderStyle: 'solid',
-  borderColor: 'transparent',
-  background: 'transparent',
   color: 'var(--fg-subtle)',
   cursor: 'pointer',
-  transition: 'all 100ms ease',
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1,
@@ -52,8 +49,6 @@ const BTN_STYLE: CSSProperties = {
 
 const BTN_ACTIVE_STYLE: CSSProperties = {
   ...BTN_STYLE,
-  borderColor: 'color-mix(in srgb, var(--accent) 36%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
   color: 'var(--fg-strong)',
 };
 
@@ -84,7 +79,11 @@ export function TeamViewModeToggle({
     <div style={CONTAINER_STYLE}>
       <button
         type="button"
-        className="team-v2-control"
+        className={
+          viewMode === 'single'
+            ? 'team-v2-control team-v2-control--accent-soft'
+            : 'team-v2-control team-v2-control--transparent'
+        }
         style={viewMode === 'single' ? BTN_ACTIVE_STYLE : BTN_STYLE}
         onClick={() => onViewModeChange('single')}
         aria-label="单栏视图"
@@ -97,7 +96,11 @@ export function TeamViewModeToggle({
       </button>
       <button
         type="button"
-        className="team-v2-control"
+        className={
+          viewMode === 'dual'
+            ? 'team-v2-control team-v2-control--accent-soft'
+            : 'team-v2-control team-v2-control--transparent'
+        }
         disabled={dualDisabled}
         style={{
           ...(viewMode === 'dual' ? BTN_ACTIVE_STYLE : BTN_STYLE),
@@ -120,7 +123,11 @@ export function TeamViewModeToggle({
             <button
               key={option.mode}
               type="button"
-              className="team-v2-control"
+              className={
+                multiLayerMode === option.mode
+                  ? 'team-v2-control team-v2-control--accent-soft'
+                  : 'team-v2-control team-v2-control--transparent'
+              }
               style={multiLayerMode === option.mode ? BTN_ACTIVE_STYLE : BTN_STYLE}
               onClick={() => onMultiLayerModeChange(option.mode)}
               aria-label={`切换到${option.title}`}

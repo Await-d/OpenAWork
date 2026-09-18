@@ -23,83 +23,75 @@
  * - `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react';
-import { canConfigureThinkingForModel, categorizeAlwaysPatterns } from '@openAwork/shared-ui';
-import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
-import type {
-  ChatRenderAction,
-  ChatRenderGroup,
-} from '../../../components/chat/message/chat-message-group-list.js';
+import type { ChatRenderGroup } from '../../../components/chat/message/chat-message-group-list.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
-import type { HistoryEditPromptInput, RetryPromptInput } from './TeamConversationLayout.js';
-import {
-  applyPermissionDecisionToLocalAssistantMessages,
-  dismissPermissionEventMessage,
-  hasActivePendingPermissionRequest,
-  normalizeChatMessages,
-} from '../../../components/conversation-runtime/messages/support.js';
+import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
-import { createSessionsClient, createSettingsClient } from '@openAwork/web-client';
-import type { PendingPermissionRequest, PermissionDecision } from '@openAwork/web-client';
-import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import type { InputImageContent } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useCurrentUserDisplayName } from '../../../stores/user-profile/current-user-profile.js';
-import { useChatKeyboardShortcuts } from '../../../hooks/chat/useChatKeyboardShortcuts.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useMessageMultiSelect } from '../../../components/chat/message/message-multi-select.js';
-import {
-  copyExportToClipboard,
-  downloadExport,
-  exportMessages,
-} from '../../../components/chat/message/message-export.js';
 import { PromptTemplatePanel } from '../../../components/chat/misc/prompt-template-panel.js';
-import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { TeamConversationLayout } from './TeamConversationLayout.js';
-import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
-import { TeamRunStateBanner } from './extras/TeamRunStateBanner.js';
 import { TeamSessionEmptyState } from './extras/TeamSessionEmptyState.js';
 import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
 import { TeamUserJumpRail } from './extras/TeamUserJumpRail.js';
 import { TeamRoleTypingIndicator } from './extras/TeamRoleTypingIndicator.js';
 import { TeamInitModal } from './extras/TeamInitModal.js';
-import { TeamPendingInteractionChip } from './extras/TeamPendingInteractionChip.js';
 import { TeamRunEventsPreview } from './extras/TeamRunEventsPreview.js';
-import {
-  TeamViewModeToggle,
-  type ViewMode,
-  type MultiLayerViewMode,
-} from './extras/TeamViewModeToggle.js';
-import {
-  buildLatestHandoffBySession,
-  resolveInstanceLifecycle,
-  type LayerMessages,
-} from './extras/team-layer-messages.js';
+import type { LayerMessages } from './extras/team-layer-messages.js';
+import type { MultiLayerViewMode, ViewMode } from './extras/TeamViewModeToggle.js';
 import { TeamConversationLayerSidePanel } from './TeamConversationLayerSidePanel.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
-import { resolveTeamSubmitStrategy } from './submit/team-submit-router.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
-import {
-  COMPOSER_REFERENCE_EVENT_NAME,
-  isComposerReferenceEvent,
-} from '../../../utils/chat/composer-reference-events.js';
-import {
-  getPermissionReplyStatusCode,
-  getPermissionReplySuccessMessage,
-} from '../../../utils/permission/permission-reply.js';
 import { useTeamRuntimeReferenceViewData } from '../runtime/data/team-runtime-reference-data.js';
-import { useHandoffStore, useLayerStore } from '../../../stores/team/team-events.js';
-import { extractInputImageParts } from './team-conversation-input-parts.js';
+import {
+  useClarificationStore,
+  useHandoffStore,
+  useLayerStore,
+} from '../../../stores/team/team-events.js';
+import {
+  createTeamMentionFileSearch,
+  readTeamMentionWorkspaceDirectory,
+} from './team-mention-file-search.js';
+import {
+  TEAM_CONVERSATION_COMPOSER_EXTRAS,
+  useTeamConversationViewComposerDispatch,
+  useTeamConversationViewEntryActions,
+  useTeamConversationViewRetryActions,
+} from './team-conversation-view-composer-actions.js';
+import {
+  buildTeamActiveModelTooltip,
+  buildTeamProviderCatalog,
+  countTeamUserMessages,
+  disabledComposerAction,
+  disabledComposerAsyncAction,
+  disabledComposerSubmitAction,
+  findTeamActiveModelOption,
+  findTeamActiveProvider,
+  findTeamLatestFinalizedAssistantId,
+  resolveTeamActiveModelCanConfigureThinking,
+  resolveTeamComposerPlaceholder,
+  resolveTeamConversationMainPanelStyle,
+  TEAM_CONVERSATION_DUAL_LAYOUT_STYLE,
+  TEAM_CONVERSATION_SOLO_LAYOUT_STYLE,
+  TEAM_CONVERSATION_SOLO_MAIN_PANEL_STYLE,
+} from './team-conversation-view-helpers.js';
+import {
+  useTeamConversationViewComposerBridge,
+  useTeamConversationViewInteractions,
+} from './team-conversation-view-host-interactions.js';
+import { useTeamConversationViewInlineInteractions } from './team-conversation-view-inline-interactions.js';
+import {
+  buildTeamConversationMultiLayerMessages,
+  hasTeamConversationLayerMessages,
+  resolveTeamDefaultDetailLayer,
+} from './team-conversation-view-multi-layer.js';
+import { TeamConversationViewTopBar } from './team-conversation-view-top-bar.js';
 
 export interface TeamConversationViewProps {
   /** 要渲染的 team session id。 */
@@ -162,48 +154,6 @@ export interface TeamConversationViewProps {
   onOpenSession?: (sessionId: string) => void;
 }
 
-const TEAM_CONVERSATION_LAYER_ORDER = [
-  'reception',
-  'pm1',
-  'pm2',
-  'executor',
-  'tester',
-  'reviewer',
-] as const;
-function escapeCssAttributeValue(value: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(value);
-  }
-  return value.replace(/["\\]/g, '\\$&');
-}
-
-async function disabledComposerSubmitAction(): Promise<boolean> {
-  return false;
-}
-
-function disabledComposerAction(): void {
-  return undefined;
-}
-
-async function disabledComposerAsyncAction(): Promise<void> {
-  return Promise.resolve();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readRoleInstanceDisplayName(metadata: Record<string, unknown> | null): string | null {
-  const roleInstance = metadata?.['teamRoleInstance'];
-  if (!isRecord(roleInstance)) {
-    return null;
-  }
-  const displayName = roleInstance['displayName'];
-  return typeof displayName === 'string' && displayName.trim().length > 0
-    ? displayName.trim()
-    : null;
-}
-
 export function TeamConversationView({
   sessionId,
   topBar,
@@ -226,6 +176,8 @@ export function TeamConversationView({
   const { diagnostics } = useTeamRuntimeReferenceViewData();
   const layerNodes = useLayerStore((s) => s.nodes);
   const handoffs = useHandoffStore((s) => s.handoffs);
+  // team 会话的「提问」计数唯一来源：澄清 store（可回答 pending，已被新一轮取代的不计）。
+  const clarificationPendingCount = useClarificationStore((s) => s.pendingCount);
 
   const [viewMode, setViewMode] = useState<ViewMode>('single');
   const [multiLayerMode, setMultiLayerMode] = useState<MultiLayerViewMode>('cards');
@@ -249,13 +201,28 @@ export function TeamConversationView({
     scrollRegionRef: state.scrollRegionRef,
   });
 
-  // Workspace catalog for @mention support — only fetched when composer is on.
+  // Composer 工作区目录（agents / tools / skills / MCP 能力清单），只随 composer 启用拉取。
+  // 注意：它不承载 @ 文件检索——@ 菜单的文件来源是下面的 searchMentionFiles。
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog({
     enabled: composerEnabled,
     gatewayUrl,
     sessionId,
     token,
   });
+
+  // team 会话的 @ 文件检索：检索根取 session metadata 的 workingDirectory，
+  // 缺失时回退为空结果（@ 菜单展示空状态，不报错）。
+  const mentionWorkspaceDirectory = readTeamMentionWorkspaceDirectory(state.sessionMetadata);
+  const searchMentionFiles = useMemo<MentionFileSearchFn>(
+    () =>
+      createTeamMentionFileSearch({
+        workspaceDirectory: mentionWorkspaceDirectory,
+        gatewayUrl,
+        // 与 useWorkspace.searchFileIndex 同口径：未登录时按空串交给客户端。
+        token: token ?? '',
+      }),
+    [mentionWorkspaceDirectory, gatewayUrl, token],
+  );
 
   // Multi-select state（共享 atom）。
   const multiSelect = useMessageMultiSelect();
@@ -286,366 +253,44 @@ export function TeamConversationView({
     chatSearch.close();
   }, [sessionId, focusedLayer, multiSelect, chatSearch]);
 
-  // Copy last assistant message helper.
-  const handleCopyLastAssistant = useCallback(() => {
-    const lastAssistant = [...state.messages].reverse().find((m) => m.role === 'assistant');
-    if (lastAssistant) {
-      void copyExportToClipboard([lastAssistant], 'text');
-    }
-  }, [state.messages]);
-
-  // Scroll to next/prev user message helpers.
-  const handleScrollToNextUser = useCallback(() => {
-    const region = state.scrollRegionRef.current;
-    if (!region) return;
-    const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
-    const regionRect = region.getBoundingClientRect();
-    for (const el of Array.from(userMessages)) {
-      const rect = el.getBoundingClientRect();
-      if (rect.top > regionRect.top + 60) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        break;
-      }
-    }
-  }, [state.scrollRegionRef]);
-
-  const handleScrollToPrevUser = useCallback(() => {
-    const region = state.scrollRegionRef.current;
-    if (!region) return;
-    const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
-    const regionRect = region.getBoundingClientRect();
-    const arr = Array.from(userMessages).reverse();
-    for (const el of arr) {
-      const rect = el.getBoundingClientRect();
-      if (rect.bottom < regionRect.top + 60) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        break;
-      }
-    }
-  }, [state.scrollRegionRef]);
-
-  // Keyboard shortcuts — wire all applicable handlers for team context.
-  // 与 chat 共享同一份 useChatKeyboardShortcuts；team 不接 command palette
-  // （需要 items 列表，留待后续 PR 从 composerCommandDescriptors 构建），
-  // 也不处理 sidebar / right panel / new session / dialogue mode 这些
-  // ChatPage 级别的 layout 操作（team 由 TeamPageV2 外壳控制）。
-  useChatKeyboardShortcuts(
-    {
-      onSearch: () => chatSearch.open(),
-      onCopyLastAssistant: handleCopyLastAssistant,
-      onToggleMultiSelect: () => {
-        if (multiSelect.multiSelect.enabled) {
-          multiSelect.disableMultiSelect();
-        } else {
-          multiSelect.enableMultiSelect();
-          requestAnimationFrame(() => multiSelect.selectAll(state.messages));
-        }
-      },
-      onOpenTemplates: () => setShowTemplatePanel(true),
-      onScrollToNextUser: handleScrollToNextUser,
-      onScrollToPrevUser: handleScrollToPrevUser,
-    },
+  const {
+    activePendingPermissionCount,
+    handleFocusPendingInteraction,
+    handleScrollToNextUser,
+    handleScrollToPrevUser,
+    handleViewModeChange,
+  } = useTeamConversationViewInteractions({
+    chatSearch,
+    clarificationPendingCount,
     composerEnabled,
-  );
+    isNarrowLayout,
+    multiSelect,
+    setShowTemplatePanel,
+    setViewMode,
+    state,
+  });
 
-  const handleViewModeChange = useCallback(
-    (mode: ViewMode) => {
-      setViewMode(mode === 'dual' && isNarrowLayout ? 'single' : mode);
-    },
-    [isNarrowLayout],
-  );
-
-  const handleFocusPendingInteraction = useCallback(() => {
-    const firstPendingPermissionRequestId = state.pendingPermissions.find(
-      (permission) => permission.status === 'pending',
-    )?.requestId;
-    if (firstPendingPermissionRequestId && typeof document !== 'undefined') {
-      const targetApprovalBar = document.querySelector<HTMLElement>(
-        `[data-permission-request-id="${escapeCssAttributeValue(firstPendingPermissionRequestId)}"]`,
-      );
-      if (targetApprovalBar) {
-        targetApprovalBar.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
-    }
-
-    if (
-      state.pendingQuestions.some((question) => question.status === 'pending') &&
-      typeof document !== 'undefined'
-    ) {
-      const firstPendingQuestionRequestId = state.pendingQuestions.find(
-        (question) => question.status === 'pending',
-      )?.requestId;
-      const questionPanel = firstPendingQuestionRequestId
-        ? document.querySelector<HTMLElement>(
-            `[data-question-request-id="${escapeCssAttributeValue(firstPendingQuestionRequestId)}"]`,
-          )
-        : document.querySelector<HTMLElement>('.inline-question-panel');
-      if (questionPanel) {
-        questionPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
-    }
-
-    state.scrollToBottom('smooth', 'latest-edge');
-  }, [state]);
-
-  const activePendingPermissionCount = useMemo(
-    () => state.pendingPermissions.filter((permission) => permission.status === 'pending').length,
-    [state.pendingPermissions],
-  );
-  const activePendingQuestionCount = useMemo(
-    () => state.pendingQuestions.filter((question) => question.status === 'pending').length,
-    [state.pendingQuestions],
-  );
-
-  // classic 工作台：弃用旧 topBar（RunStateBanner / SubstateProgress / ViewModeToggle）。
-  // 非 classic：保持原 reception 运行横幅 / 其它层 substate 进度条。
-  const effectiveTopBar = classicWorkbench ? (
-    (topBar ?? null)
-  ) : (
-    <>
-      {topBar ??
-        (state.roleLayer === 'reception' ? (
-          <TeamRunStateBanner
-            diagnostics={diagnostics}
-            receptionStateStatus={state.sessionStateStatus}
-            sessionId={sessionId}
-            rightSlot={
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <TeamPendingInteractionChip
-                  pendingPermissionCount={activePendingPermissionCount}
-                  pendingQuestionCount={activePendingQuestionCount}
-                  onClick={handleFocusPendingInteraction}
-                />
-                <TeamViewModeToggle
-                  viewMode={viewMode}
-                  multiLayerMode={multiLayerMode}
-                  dualDisabled={isNarrowLayout}
-                  onViewModeChange={handleViewModeChange}
-                  onMultiLayerModeChange={setMultiLayerMode}
-                />
-              </div>
-            }
-          />
-        ) : (
-          <TeamSubstateProgressBar
-            roleLayer={state.roleLayer}
-            substate={state.substate}
-            stateStatus={state.sessionStateStatus}
-            rightSlot={
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <TeamPendingInteractionChip
-                  pendingPermissionCount={activePendingPermissionCount}
-                  pendingQuestionCount={activePendingQuestionCount}
-                  onClick={handleFocusPendingInteraction}
-                />
-                <TeamViewModeToggle
-                  viewMode={viewMode}
-                  multiLayerMode={multiLayerMode}
-                  dualDisabled={isNarrowLayout}
-                  onViewModeChange={handleViewModeChange}
-                  onMultiLayerModeChange={setMultiLayerMode}
-                />
-              </div>
-            }
-          />
-        ))}
-    </>
-  );
-
-  // Starter chip 点击：把文本填入 composer（不发送），让用户编辑后再发出。
-  const handleSelectStarter = useCallback(
-    (text: string) => {
-      state.setInput(text);
-      const ta = state.textareaRef.current;
-      if (ta) {
-        ta.focus();
-        const len = text.length;
-        try {
-          ta.setSelectionRange(len, len);
-        } catch {
-          // 某些 textarea 可能不支持 setSelectionRange，忽略。
-        }
-      }
-    },
-    [state],
-  );
-
-  const appendTextToComposer = useCallback(
-    (text: string) => {
-      state.setInput((previous) => {
-        const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
-        return `${previous}${separator}${text}`;
-      });
-      requestAnimationFrame(() => {
-        const textarea = state.textareaRef.current;
-        if (!textarea) return;
-        textarea.focus();
-        const caret = textarea.value.length;
-        try {
-          textarea.setSelectionRange(caret, caret);
-        } catch {
-          // 某些 textarea 可能不支持 setSelectionRange，忽略。
-        }
-      });
-    },
-    [state],
-  );
-
-  useEffect(() => {
-    if (!composerEnabled) {
-      return;
-    }
-
-    const handleComposerReference = (event: Event) => {
-      if (!isComposerReferenceEvent(event)) {
-        return;
-      }
-
-      appendTextToComposer(event.detail.text);
-    };
-
-    window.addEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
-    return () => {
-      window.removeEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
-    };
-  }, [appendTextToComposer, composerEnabled]);
-
-  useEffect(() => {
-    if (!composerEnabled || typeof window === 'undefined') {
-      return;
-    }
-
-    const handleOpenTemplates = () => setShowTemplatePanel(true);
-    const handleExportChat = () => {
-      const content = exportMessages(messagesRef.current, 'markdown');
-      downloadExport(content, `team-chat-export-${Date.now()}.md`, 'text/markdown');
-    };
-
-    window.addEventListener('openAwork:open-templates', handleOpenTemplates);
-    window.addEventListener('openAwork:export-chat', handleExportChat);
-    return () => {
-      window.removeEventListener('openAwork:open-templates', handleOpenTemplates);
-      window.removeEventListener('openAwork:export-chat', handleExportChat);
-    };
-  }, [composerEnabled]);
-
-  useEffect(() => {
-    if (!composerEnabled || typeof window === 'undefined') {
-      return;
-    }
-
-    const handleComposerInsert = (event: Event) => {
-      const detail = (event as CustomEvent<{ mode?: 'append' | 'replace'; text?: string }>).detail;
-      const insertText = detail?.text;
-      if (typeof insertText !== 'string' || insertText.length === 0) {
-        return;
-      }
-
-      state.setInput((previous) => {
-        if (detail?.mode === 'replace') {
-          return insertText;
-        }
-        if (previous.trim().length === 0) {
-          return insertText;
-        }
-        return `${previous.trimEnd()}\n${insertText}`;
-      });
-      requestAnimationFrame(() => state.textareaRef.current?.focus());
-    };
-
-    window.addEventListener('openawork:composer:insert', handleComposerInsert);
-    return () => {
-      window.removeEventListener('openawork:composer:insert', handleComposerInsert);
-    };
-  }, [composerEnabled, state]);
+  const { handleSelectStarter } = useTeamConversationViewComposerBridge({
+    composerEnabled,
+    messagesRef,
+    setShowTemplatePanel,
+    state,
+  });
 
   // 默认 placeholder：根据 roleLayer + substate 给出更贴合团队语义的占位文案。
   // 与 D26（b 直答 vs 走 c 路由）对齐——告诉用户"输入需求会被派发给团队"。
-  const effectivePlaceholder = useMemo(() => {
-    if (composerPlaceholder) return composerPlaceholder;
-    // 流式进行中：明确提示当前不可发送（与 handleComposerSubmit 的 busy 守卫呼应）。
-    if (state.streaming) {
-      return '团队正在回复中，可点击停止后再发送…';
-    }
-    if (state.substate === 'clarifying') {
-      return '团队在等你回答澄清问题，直接输入答案后回车发送…';
-    }
-    if (state.roleLayer === 'reception') {
-      return '告诉团队你想做什么，回车发送 · Shift+Enter 换行';
-    }
-    if (state.roleLayer && state.roleLayer !== 'reception') {
-      return '与当前层对话，回车发送 · Shift+Enter 换行';
-    }
-    return '输入消息与团队对话，回车发送 · Shift+Enter 换行';
-  }, [composerPlaceholder, state.roleLayer, state.substate, state.streaming]);
-
-  // ─── 统一文本派发（提交路由 D5 决策：按 roleLayer/substate 选 inbound / stream）──
-  // 抽成可复用单元，让「正常提交 / 编辑重发 / 重试 / 追加」都走同一条路由，避免
-  // 编辑重试在 clarifying 环节误绕过 inbound 通道。
-  //   - clarifying → inbound:user_input（带 questionId 的 clarification_answer 由任务 tab 处理）
-  //   - reception → inbound:user_input（触发团队自动编排）
-  //   - 其它 → stream（普通 chat 风格 session）
-  const dispatchTeamText = useCallback(
-    async (text: string, inputParts?: InputImageContent[]): Promise<boolean> => {
-      // 每次新的派发尝试先清除上一轮的错误提示，避免旧错误遮挡新内容。
-      state.setStreamError(null);
-      const strategy = resolveTeamSubmitStrategy(state.roleLayer, state.substate);
-
-      if (strategy.kind === 'inbound') {
-        if (strategy.messageType === 'user_input') {
-          // user_input 对 reception 根会话必须走 inbound：这是团队自动派发链的入口。
-          // 若这里失败再偷偷回退到 stream，会把请求重新送回接待层自己回答，等于绕过
-          // team-inbound → reception-orchestrator → pm1/... 整条分层链路。
-          // clarifying 下的普通 composer 同样不应回退到 stream，否则会绕过 c runner。
-          try {
-            await state.submitInbound(strategy.messageType, { text } as never);
-            await state.reload();
-            // inbound 提交成功后，后端会 fire-and-forget 启动后台流
-            // （reception-orchestrator 的 direct 路径调用 runSessionInBackground）。
-            // 尝试 attach 到该后台流，以获取逐 token 的流式回复展示。
-            // attach 失败（如走了 orchestrate 路径无活跃流）不会影响流程，
-            // 前端仍会通过 team-events + 轮询刷新消息。
-            // 使用 await 而非 void：确保 streamingRef.current 在返回前被设置，
-            // 避免"快速双击回车→第二条消息绕过 streaming 守卫"的竞态。
-            await state.attachToSessionStream();
-            return true;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : '提交输入失败';
-            if (state.roleLayer === 'reception' || state.substate === 'clarifying') {
-              console.warn('[TeamConversationView] team inbound submit failed:', message);
-              state.setStreamError(
-                state.substate === 'clarifying'
-                  ? `输入提交失败，请重试：${message}`
-                  : `需求提交失败，请重试：${message}`,
-              );
-              return false;
-            }
-            console.warn(
-              '[TeamConversationView] user_input inbound submit failed, falling back to stream:',
-              message,
-            );
-          }
-        } else {
-          console.warn(
-            '[TeamConversationView] inbound messageType not yet supported:',
-            strategy.messageType,
-          );
-        }
-      }
-
-      try {
-        await state.startStream(text, inputParts ? { inputParts } : undefined);
-        return true;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'stream 请求失败';
-        state.setStreamError(message);
-        return false;
-      }
-    },
-    [state],
+  const effectivePlaceholder = useMemo(
+    () =>
+      resolveTeamComposerPlaceholder({
+        composerPlaceholder,
+        roleLayer: state.roleLayer,
+        streaming: state.streaming,
+        substate: state.substate,
+      }),
+    [composerPlaceholder, state.roleLayer, state.substate, state.streaming],
   );
+
+  const { dispatchTeamText } = useTeamConversationViewComposerDispatch({ state });
 
   const handleComposerSubmit = useCallback(
     async (payload: UnifiedComposerSubmitPayload): Promise<boolean> => {
@@ -699,362 +344,38 @@ export function TeamConversationView({
     [composerEnabled, state, gatewayUrl, sessionId, token, dispatchTeamText],
   );
 
-  const handleStopStream = useCallback(async () => {
-    if (!composerEnabled) return;
-    await state.stopStream();
-  }, [composerEnabled, state]);
+  const {
+    findRetrySource,
+    handleComposerModelSelect,
+    handleContextWindowOverrideChange,
+    handleContinueHistoryEdit,
+    handleResendHistoryEdit,
+    handleRetryCurrent,
+    handleStopStream,
+    historyEditPrompt,
+    retryPrompt,
+    setHistoryEditPrompt,
+    setRetryPrompt,
+  } = useTeamConversationViewRetryActions({
+    composerEnabled,
+    dispatchTeamText,
+    gatewayUrl,
+    sessionId,
+    state,
+    token,
+  });
 
-  // ─── 会话内容编辑 / 重试（对齐 chat）──────────────────────────────────
-  // team 之前把这些全接成 noop；这里补上真实实现：
-  //   - 编辑重发（user 消息）：截断到该消息之前 → 用新文本重新 startStream
-  //   - 重试（assistant 消息）：回溯到最近的 user 消息 → 截断 → 重发其文本
-  // 截断走 sessionsClient.truncateMessages（与 chat 同一后端端点）。
-  // team 暂不支持「新建会话重试 / 分支」（无分支会话概念），因此不再向弹窗暴露
-  // 对应入口，只保留「当前会话重发 / 追加到末尾」两种真实可用动作。
-  const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPromptInput | null>(null);
-  const [retryPrompt, setRetryPrompt] = useState<RetryPromptInput | null>(null);
-
-  const truncateAndResend = useCallback(
-    async (sourceMessageId: string, text: string, inputParts?: InputImageContent[]) => {
-      // 流式中不允许重试/编辑重发（与正常提交一致的 busy 保护）。
-      if (state.streaming) {
-        state.setStreamError('正在生成回复，请等待当前回复完成后再重试。');
-        return;
-      }
-      if (gatewayUrl && token) {
-        try {
-          const sessionsClient = createSessionsClient(gatewayUrl);
-          const remaining = await sessionsClient.truncateMessages(
-            token,
-            sessionId,
-            sourceMessageId,
-          );
-          state.setMessages(normalizeChatMessages(remaining));
-        } catch (err) {
-          console.warn(
-            '[TeamConversationView] truncate failed, resend without truncation:',
-            err instanceof Error ? err.message : err,
-          );
-        }
-      }
-      // 重发也走统一路由（与正常提交一致，避免在 clarifying 环节误绕过 inbound）。
-      await dispatchTeamText(text, inputParts);
-    },
-    [gatewayUrl, sessionId, state, token, dispatchTeamText],
-  );
-
-  const handleResendHistoryEdit = useCallback(
-    (text: string, editedInputParts?: InputImageContent[]) => {
-      if (!historyEditPrompt) return;
-      void truncateAndResend(historyEditPrompt.messageId, text, editedInputParts);
-      setHistoryEditPrompt(null);
-    },
-    [historyEditPrompt, truncateAndResend],
-  );
-
-  const handleContinueHistoryEdit = useCallback(
-    (text: string, editedInputParts?: InputImageContent[]) => {
-      // 「追加到末尾」：不截断，直接作为新一条发送（同样走统一路由）。
-      void dispatchTeamText(text, editedInputParts);
-      setHistoryEditPrompt(null);
-    },
-    [dispatchTeamText],
-  );
-
-  const handleRetryCurrent = useCallback(() => {
-    if (!retryPrompt) return;
-    void truncateAndResend(
-      retryPrompt.messageId,
-      retryPrompt.text,
-      retryPrompt.inputParts as InputImageContent[] | undefined,
-    );
-    setRetryPrompt(null);
-  }, [retryPrompt, truncateAndResend]);
-
-  const handleComposerModelSelect = useCallback(
-    async (providerId: string, modelId: string) => {
-      state.setActiveProviderId(providerId);
-      state.setActiveModelId(modelId);
-    },
-    [state],
-  );
-
-  const handleContextWindowOverrideChange = useCallback(
-    async (value: number | undefined) => {
-      if (!token || !state.activeProviderId || !state.activeModelId) {
-        throw new Error('当前模型尚未准备好，无法保存上下文挡位。');
-      }
-      const result = await createSettingsClient(gatewayUrl).putModelContext(token, {
-        providerId: state.activeProviderId,
-        modelId: state.activeModelId,
-        contextWindowOverride: value ?? null,
-      });
-      state.setProviders((previous) =>
-        previous.map((provider) => {
-          if (provider.id !== result.providerId) return provider;
-          return {
-            ...provider,
-            defaultModels: provider.defaultModels.map((model) => {
-              if (model.id !== result.modelId) return model;
-              if (result.contextWindowOverride === null) {
-                const { contextWindowOverride: _removed, ...rest } = model;
-                return rest;
-              }
-              return { ...model, contextWindowOverride: result.contextWindowOverride };
-            }),
-          };
-        }),
-      );
-    },
-    [gatewayUrl, state, token],
-  );
-
-  // 找某条消息对应的「重试源」：assistant 消息 → 向上回溯到最近 user 消息。
-  const findRetrySource = useCallback(
-    (messageId: string): { id: string; text: string; inputParts?: InputImageContent[] } | null => {
-      const idx = state.messages.findIndex((m) => m.id === messageId);
-      if (idx < 0) return null;
-      for (let i = idx; i >= 0; i--) {
-        const m = state.messages[i];
-        if (m && m.role === 'user') {
-          return { id: m.id, text: m.content };
-        }
-      }
-      return null;
-    },
-    [state.messages],
-  );
-
-  // ─── 行内 question / permission 回复 ────────────────────────────────
-  const [inlineQuestionAnswers, setInlineQuestionAnswers] = useState<string[][]>([]);
-  const [inlineQuestionCustomInputs, setInlineQuestionCustomInputs] = useState<string[]>([]);
-  const [inlineQuestionReplyStatus, setInlineQuestionReplyStatus] = useState<
-    'answered' | 'dismissed' | null
-  >(null);
-  const [inlineQuestionReplyError, setInlineQuestionReplyError] = useState<string | null>(null);
-  const [inlinePermissionPendingDecision, setInlinePermissionPendingDecision] = useState<{
-    decision: PermissionDecision;
-    requestId: string;
-  } | null>(null);
-  const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
-  const [selectedPermissionScopeLevels, setSelectedPermissionScopeLevels] = useState<
-    Record<string, AlwaysScopeLevel>
-  >({});
-  const activePendingQuestion = state.pendingQuestions[0] ?? null;
-  const activeQuestionIdRef = useRef<string | null>(null);
-  const pendingPermissionsById = useMemo(
-    () => new Map(state.pendingPermissions.map((permission) => [permission.requestId, permission])),
-    [state.pendingPermissions],
-  );
-
-  // Reset inline answers state when the active question changes.
-  useEffect(() => {
-    const nextId = activePendingQuestion?.requestId ?? null;
-    if (activeQuestionIdRef.current === nextId) return;
-    activeQuestionIdRef.current = nextId;
-    if (activePendingQuestion) {
-      setInlineQuestionAnswers(activePendingQuestion.questions.map(() => []));
-      setInlineQuestionCustomInputs(activePendingQuestion.questions.map(() => ''));
-    } else {
-      setInlineQuestionAnswers([]);
-      setInlineQuestionCustomInputs([]);
-    }
-    setInlineQuestionReplyStatus(null);
-    setInlineQuestionReplyError(null);
-  }, [activePendingQuestion]);
-
-  const onToggleInlineQuestionOption = useCallback(
-    (questionIndex: number, optionLabel: string, multiple: boolean) => {
-      setInlineQuestionAnswers((prev) => {
-        const next = prev.map((arr) => arr.slice());
-        const current = next[questionIndex] ?? [];
-        if (current.includes(optionLabel)) {
-          next[questionIndex] = current.filter((v) => v !== optionLabel);
-        } else if (multiple) {
-          next[questionIndex] = [...current, optionLabel];
-        } else {
-          next[questionIndex] = [optionLabel];
-        }
-        return next;
-      });
-    },
-    [],
-  );
-
-  const onChangeInlineQuestionCustomInput = useCallback((questionIndex: number, value: string) => {
-    setInlineQuestionCustomInputs((prev) => {
-      const next = prev.slice();
-      next[questionIndex] = value;
-      return next;
-    });
-  }, []);
-
-  const onReplyInlineQuestion = useCallback(
-    async (status: 'answered' | 'dismissed') => {
-      if (!activePendingQuestion) return;
-      setInlineQuestionReplyError(null);
-      try {
-        // Merge custom inputs into answers when present.
-        const mergedAnswers = inlineQuestionAnswers.map((answers, idx) => {
-          const custom = inlineQuestionCustomInputs[idx]?.trim();
-          if (status === 'answered' && custom) return [...answers, custom];
-          return answers;
-        });
-        await state.replyQuestion(
-          activePendingQuestion.requestId,
-          status,
-          status === 'answered' ? mergedAnswers : undefined,
-          { targetSessionId: activePendingQuestion.sessionId },
-        );
-        setInlineQuestionReplyStatus(status);
-      } catch (err) {
-        setInlineQuestionReplyError(err instanceof Error ? err.message : '回复失败');
-      }
-    },
-    [activePendingQuestion, inlineQuestionAnswers, inlineQuestionCustomInputs, state],
-  );
-
-  const handleInlinePermissionDecision = useCallback(
-    async (request: PendingPermissionRequest, decision: PermissionDecision) => {
-      setInlinePermissionPendingDecision({
-        decision,
-        requestId: request.requestId,
-      });
-      setInlinePermissionErrors((previous) => {
-        const next = { ...previous };
-        delete next[request.requestId];
-        return next;
-      });
-
-      const selectedScopeLevel =
-        selectedPermissionScopeLevels[request.requestId] ??
-        categorizeAlwaysPatterns(request.previewAction, request.scope, request.always).at(-1);
-      const alwaysOverride =
-        decision !== 'once' && decision !== 'reject' && selectedScopeLevel
-          ? [selectedScopeLevel.pattern]
-          : undefined;
-
-      try {
-        await state.replyPermission(request.requestId, decision, {
-          ...(alwaysOverride ? { alwaysOverride } : {}),
-          targetSessionId: request.sessionId,
-        });
-        setInlinePermissionErrors((previous) => {
-          const next = { ...previous };
-          delete next[request.requestId];
-          return next;
-        });
-        state.setMessages((previous) =>
-          dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(previous, request.requestId, decision),
-            request.requestId,
-          ),
-        );
-        toast(
-          getPermissionReplySuccessMessage(decision),
-          decision === 'reject' ? 'warning' : 'success',
-          2200,
-        );
-      } catch (error) {
-        const status = getPermissionReplyStatusCode(error);
-        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
-        if (status === 404 || status === 409) {
-          state.setPendingPermissions((previous) =>
-            previous.filter((permission) => permission.requestId !== request.requestId),
-          );
-          toast('该权限请求已被处理或已过期，已重新同步。', 'warning', 3000);
-          return;
-        }
-        setInlinePermissionErrors((previous) => ({
-          ...previous,
-          [request.requestId]: errorMessage,
-        }));
-      } finally {
-        setInlinePermissionPendingDecision((current) =>
-          current?.requestId === request.requestId ? null : current,
-        );
-      }
-    },
-    [selectedPermissionScopeLevels, state],
-  );
-
-  const resolveInlinePermissionActions = useCallback(
-    (requestId: string) => {
-      const request = pendingPermissionsById.get(requestId);
-      if (!request) {
-        return undefined;
-      }
-
-      const pendingDecision =
-        inlinePermissionPendingDecision?.requestId === requestId
-          ? inlinePermissionPendingDecision.decision
-          : null;
-      const disabled = pendingDecision !== null;
-      const scopeLevels = categorizeAlwaysPatterns(
-        request.previewAction,
-        request.scope,
-        request.always,
-      );
-      const selectedScopeLevel =
-        selectedPermissionScopeLevels[requestId] ?? scopeLevels[scopeLevels.length - 1];
-
-      return {
-        items: [
-          {
-            id: 'session',
-            label: pendingDecision === 'session' ? '处理中…' : '本会话允许',
-            disabled,
-            hint: '仅在当前会话内记住这次授权选择，适合继续当前任务。',
-            primary: true,
-            onClick: () => void handleInlinePermissionDecision(request, 'session'),
-          },
-          {
-            id: 'once',
-            label: pendingDecision === 'once' ? '处理中…' : '允许一次',
-            disabled,
-            hint: '只批准当前这一次工具调用，不保留后续授权。',
-            onClick: () => void handleInlinePermissionDecision(request, 'once'),
-          },
-          {
-            id: 'permanent',
-            label: pendingDecision === 'permanent' ? '处理中…' : '永久允许',
-            disabled,
-            hint: '会记住后续同类请求，请在充分确认风险后再使用。',
-            onClick: () => void handleInlinePermissionDecision(request, 'permanent'),
-          },
-          {
-            id: 'reject',
-            label: pendingDecision === 'reject' ? '处理中…' : '拒绝',
-            danger: true,
-            disabled,
-            hint: '阻止本次调用，工具不会继续执行。',
-            onClick: () => void handleInlinePermissionDecision(request, 'reject'),
-          },
-        ],
-        pendingLabel: pendingDecision
-          ? '正在提交审批结果…'
-          : '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
-        helperMessage: pendingDecision ? undefined : '永久允许会记住后续同类请求，请谨慎选择。',
-        errorMessage: inlinePermissionErrors[requestId],
-        scopeLevels,
-        selectedScopeCategory: selectedScopeLevel?.category,
-        selectedScopePattern: selectedScopeLevel?.pattern,
-        onSelectScopeLevel: (level: AlwaysScopeLevel) => {
-          setSelectedPermissionScopeLevels((previous) => ({
-            ...previous,
-            [requestId]: level,
-          }));
-        },
-      };
-    },
-    [
-      handleInlinePermissionDecision,
-      inlinePermissionErrors,
-      inlinePermissionPendingDecision,
-      pendingPermissionsById,
-      selectedPermissionScopeLevels,
-    ],
-  );
+  const {
+    activePendingQuestion,
+    inlineQuestionAnswers,
+    inlineQuestionCustomInputs,
+    inlineQuestionReplyError,
+    inlineQuestionReplyStatus,
+    onChangeInlineQuestionCustomInput,
+    onReplyInlineQuestion,
+    onToggleInlineQuestionOption,
+    resolveInlinePermissionActions,
+  } = useTeamConversationViewInlineInteractions({ state });
 
   // ─── 派生 props ─────────────────────────────────────────────────────
   /**
@@ -1066,59 +387,13 @@ export function TeamConversationView({
    *   2. 每条消息注入 hover actions：复制 / 编辑重试（user）/ 重试（assistant）。
    *      仅在 composerEnabled（可交互）时注入编辑/重试，避免只读视图出现无效按钮。
    */
-  const buildEntryActions = useCallback(
-    (message: ChatMessage): ChatRenderAction[] => {
-      if (readOnly) {
-        return [];
-      }
-      const actions: ChatRenderAction[] = [
-        {
-          id: 'copy',
-          label: '复制',
-          title: '复制此消息',
-          onClick: () => {
-            void copyExportToClipboard([message], 'text');
-          },
-        },
-      ];
-      if (composerEnabled) {
-        if (message.role === 'user') {
-          actions.push({
-            id: 'edit-retry',
-            label: '编辑重试',
-            title: '编辑这条消息并从此处重新发送',
-            onClick: () => {
-              const inputParts = extractInputImageParts(message.rawContent);
-              setRetryPrompt(null);
-              setHistoryEditPrompt({
-                messageId: message.id,
-                text: message.content,
-                ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
-              });
-            },
-          });
-        } else if (message.role === 'assistant') {
-          actions.push({
-            id: 'retry',
-            label: '重试',
-            title: '从最近一条用户消息重新生成',
-            onClick: () => {
-              const src = findRetrySource(message.id);
-              if (!src) return;
-              setHistoryEditPrompt(null);
-              setRetryPrompt({
-                messageId: src.id,
-                text: src.text,
-                ...(src.inputParts ? { inputParts: src.inputParts } : {}),
-              });
-            },
-          });
-        }
-      }
-      return actions;
-    },
-    [composerEnabled, findRetrySource, readOnly],
-  );
+  const { buildEntryActions } = useTeamConversationViewEntryActions({
+    composerEnabled,
+    findRetrySource,
+    readOnly,
+    setHistoryEditPrompt,
+    setRetryPrompt,
+  });
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     return buildTeamGroupedMessageEntries({
@@ -1141,51 +416,35 @@ export function TeamConversationView({
   ]);
 
   // Provider catalog for the model picker (composer header).
-  const providerCatalog = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; type: string }>();
-    for (const provider of state.providers) {
-      map.set(provider.id, { id: provider.id, name: provider.name, type: provider.type });
-    }
-    return map;
-  }, [state.providers]);
+  const providerCatalog = useMemo(
+    () => buildTeamProviderCatalog(state.providers),
+    [state.providers],
+  );
 
   const activeProvider = useMemo(
-    () => state.providers.find((provider) => provider.id === state.activeProviderId),
+    () => findTeamActiveProvider(state.providers, state.activeProviderId),
     [state.activeProviderId, state.providers],
   );
   const activeModelOption = useMemo(
-    () => activeProvider?.defaultModels.find((model) => model.id === state.activeModelId),
+    () => findTeamActiveModelOption(activeProvider, state.activeModelId),
     [activeProvider, state.activeModelId],
   );
-  const activeModelCanConfigureThinking = canConfigureThinkingForModel(
-    activeProvider?.type,
-    activeModelOption?.id ?? state.activeModelId,
-    activeModelOption?.supportsThinking === true,
-  );
-  const activeModelTooltip = activeModelOption?.label
-    ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}`
-    : activeProvider?.name
-      ? `当前使用提供商：${activeProvider.name}`
-      : '当前使用模型';
+  const activeModelCanConfigureThinking = resolveTeamActiveModelCanConfigureThinking({
+    activeModelId: state.activeModelId,
+    activeModelOption,
+    activeProvider,
+  });
+  const activeModelTooltip = buildTeamActiveModelTooltip(activeProvider, activeModelOption);
 
   // Latest finalized assistant message id —— 驱动 CollapsibleAssistantContent
   // 的"最新一条不折叠"行为。
-  const latestAssistantMessageId = useMemo(() => {
-    for (let i = state.messages.length - 1; i >= 0; i -= 1) {
-      const m = state.messages[i];
-      if (!m) continue;
-      if (m.role !== 'assistant') continue;
-      if (m.status === 'streaming') continue;
-      return m.id;
-    }
-    return null;
-  }, [state.messages]);
-
-  // 用户输入条数 —— 驱动右侧「用户输入快捷跳转」控件（<=1 条时控件自隐）。
-  const userMessageCount = useMemo(
-    () => state.messages.filter((m) => m.role === 'user').length,
+  const latestAssistantMessageId = useMemo(
+    () => findTeamLatestFinalizedAssistantId(state.messages),
     [state.messages],
   );
+
+  // 用户输入条数 —— 驱动右侧「用户输入快捷跳转」控件（<=1 条时控件自隐）。
+  const userMessageCount = useMemo(() => countTeamUserMessages(state.messages), [state.messages]);
 
   // canStopCurrentSessionStream: true while the user is actively streaming
   // through THIS hook (gatewayClient runs internally) — gives the composer a
@@ -1196,104 +455,43 @@ export function TeamConversationView({
     setSelectedLayer(focusedLayer);
   }, [focusedLayer, sessionId]);
 
-  const multiLayerMessages = useMemo<LayerMessages[]>(() => {
-    // 按角色实例（session）独立分组，不再把同层多个角色实例的消息合并。
-    // 每个角色实例（如"前端开发者"、"后端开发者"）各自成为一个 LayerMessages 条目，
-    // 用户可以在群聊汇总面板中分别看到每个角色的完整对话。
-    const entries: LayerMessages[] = [];
-
-    // ─── 实例生命周期（用于「已结束 / 已失败 / 已取消」展示）─────────────
-    // 判定规则与两个坑的成因都写在 team-layer-messages.ts 的纯函数里（可单测）：
-    //   - 权威来源是 handoff 记录，不是 sessions.state_status（后者表达不了「结束」）；
-    //   - 归属只能用 toSessionId，不能回落 sessionId（否则排队中取消的 handoff
-    //     会把上游接待层根会话误标成已取消）；
-    //   - 一个实例可能有多条 handoff（回收重试），只有最近一条是终态才算结束。
-    const latestHandoffBySession = buildLatestHandoffBySession(handoffs.values());
-
-    const readLifecycle = (ownerSessionId: string) =>
-      resolveInstanceLifecycle({ ownerSessionId, latestHandoffBySession, layerNodes });
-
-    // 当前 session 自身作为一个条目
-    const currentLayer = state.roleLayer?.trim() || 'reception';
-    const currentNode = layerNodes.get(sessionId);
-    const currentDisplayName =
-      currentNode?.displayName ?? readRoleInstanceDisplayName(state.sessionMetadata);
-    const currentParentNode = currentNode?.parentSessionId
-      ? layerNodes.get(currentNode.parentSessionId)
-      : undefined;
-    const currentSourceDisplayName = currentParentNode?.displayName ?? null;
-    const currentSourceLayer = currentParentNode?.roleLayer ?? null;
-
-    // 当主对话处于流式状态时，构建一条流式占位消息注入汇总面板，
-    // 让用户在群聊汇总中也能实时看到"正在输入"的流式回复。
-    let streamingMessage: ChatMessage | null = null;
-    if (state.visibleStreaming) {
-      streamingMessage = {
-        id: 'team-layer-streaming-assistant',
-        role: 'assistant',
-        content: state.streamBuffer.trim().length > 0 ? state.streamBuffer : '团队正在处理中…',
-        ...(state.streamingSegments.length > 0 ? { parts: state.streamingSegments } : {}),
-        ...(state.roleLayer ? { agentId: state.roleLayer } : {}),
-        createdAt: Date.now(),
-        status: 'streaming',
-      };
-    }
-
-    entries.push({
-      layer: currentLayer,
-      messages: [...state.messages],
-      sessionIds: [sessionId],
-      isActive: true,
-      displayName: currentDisplayName,
-      sourceLayer: currentSourceLayer,
-      sourceDisplayName: currentSourceDisplayName,
-      streamingMessage,
-    });
-
-    // soloMode 下不包含子 session，只展示当前角色自身的消息
-    if (!soloMode && Array.isArray(state.childSessions)) {
-      for (const child of state.childSessions) {
-        const childLayer = child.role_layer?.trim() || 'reception';
-        const childNode = layerNodes.get(child.id);
-        const parentNode = childNode?.parentSessionId
-          ? layerNodes.get(childNode.parentSessionId)
-          : currentNode;
-        entries.push({
-          layer: childLayer,
-          messages: [...child.messages],
-          sessionIds: [child.id],
-          isActive: false,
-          displayName: child.displayName ?? childNode?.displayName ?? null,
-          sourceLayer: parentNode?.roleLayer ?? currentLayer,
-          sourceDisplayName: parentNode?.displayName ?? currentDisplayName,
-        });
-      }
-    }
-
-    return entries;
-  }, [
-    sessionId,
-    layerNodes,
-    handoffs,
-    soloMode,
-    state.childSessions,
-    state.messages,
-    state.sessionMetadata,
-    state.roleLayer,
-    state.visibleStreaming,
-    state.streamBuffer,
-    state.streamingSegments,
-  ]);
+  const multiLayerMessages = useMemo<LayerMessages[]>(
+    () =>
+      buildTeamConversationMultiLayerMessages({
+        childSessions: state.childSessions,
+        handoffs: handoffs.values(),
+        layerNodes,
+        messages: state.messages,
+        roleLayer: state.roleLayer,
+        sessionId,
+        sessionMetadata: state.sessionMetadata,
+        soloMode,
+        streamBuffer: state.streamBuffer,
+        streamingSegments: state.streamingSegments,
+        visibleStreaming: state.visibleStreaming,
+      }),
+    [
+      sessionId,
+      layerNodes,
+      handoffs,
+      soloMode,
+      state.childSessions,
+      state.messages,
+      state.sessionMetadata,
+      state.roleLayer,
+      state.visibleStreaming,
+      state.streamBuffer,
+      state.streamingSegments,
+    ],
+  );
 
   /** 是否有任何消息（包括当前层级自身）—— 有消息就自动展开左侧群聊汇总面板。 */
   const hasAnyMessages = useMemo(
-    () => multiLayerMessages.some((layer) => layer.messages.length > 0),
+    () => hasTeamConversationLayerMessages(multiLayerMessages),
     [multiLayerMessages],
   );
   const defaultDetailLayer = useMemo(
-    () =>
-      multiLayerMessages.find((layer) => !layer.isActive && layer.messages.length > 0)?.layer ??
-      null,
+    () => resolveTeamDefaultDetailLayer(multiLayerMessages),
     [multiLayerMessages],
   );
 
@@ -1351,28 +549,12 @@ export function TeamConversationView({
     setSelectedLayer(layer);
   }, []);
 
-  const DUAL_LAYOUT_STYLE: CSSProperties = {
-    display: 'flex',
-    flex: 1,
-    minHeight: 0,
-    overflow: 'hidden',
-  };
-
   // 左侧：用户与接待的主对话区（dual 模式下占 55%）
   // 注意：TeamConversationLayout 返回的是 fragment（topBar / 滚动区 / bar / composer
   // 被拍平塞进本容器），本容器必须同时设 minHeight:0 + overflow:hidden —— 否则
   // 消息流变长时，column flex 子项总高溢出会把 composer / 底部状态栏推出可视区，
   // 表现为「输入框看不到 / 滚不到最底 / 底部被裁一截」三种同源症状。
   const effectiveViewMode: ViewMode = classicWorkbench || soloMode ? 'single' : viewMode;
-  const MAIN_PANEL_STYLE: CSSProperties = {
-    flex: effectiveViewMode === 'dual' ? '0 0 clamp(360px, 55%, 640px)' : '1 1 100%',
-    minWidth: 0,
-    minHeight: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    transition: 'flex 200ms ease',
-  };
 
   return (
     <>
@@ -1392,24 +574,16 @@ export function TeamConversationView({
       <div
         style={
           soloMode || classicWorkbench
-            ? { display: 'flex', flex: 1, minHeight: 0 }
-            : DUAL_LAYOUT_STYLE
+            ? TEAM_CONVERSATION_SOLO_LAYOUT_STYLE
+            : TEAM_CONVERSATION_DUAL_LAYOUT_STYLE
         }
       >
         {/* 左侧：用户与接待的对话 */}
         <div
           style={
             soloMode || classicWorkbench
-              ? {
-                  flex: 1,
-                  minWidth: 0,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  // 同 MAIN_PANEL_STYLE：fragment 拍平后必须 overflow:hidden 兜底
-                  overflow: 'hidden',
-                }
-              : MAIN_PANEL_STYLE
+              ? TEAM_CONVERSATION_SOLO_MAIN_PANEL_STYLE
+              : resolveTeamConversationMainPanelStyle(effectiveViewMode)
           }
         >
           <LatestAssistantMessageContext value={latestAssistantMessageId}>
@@ -1420,7 +594,25 @@ export function TeamConversationView({
               currentUserDisplayName={currentUserDisplayName}
               gatewayUrl={gatewayUrl}
               token={token}
-              topBar={effectiveTopBar}
+              topBar={
+                <TeamConversationViewTopBar
+                  activePendingPermissionCount={activePendingPermissionCount}
+                  clarificationPendingCount={clarificationPendingCount}
+                  classicWorkbench={classicWorkbench}
+                  diagnostics={diagnostics}
+                  dualDisabled={isNarrowLayout}
+                  multiLayerMode={multiLayerMode}
+                  onFocusPendingInteraction={handleFocusPendingInteraction}
+                  onMultiLayerModeChange={setMultiLayerMode}
+                  onViewModeChange={handleViewModeChange}
+                  roleLayer={state.roleLayer}
+                  sessionId={sessionId}
+                  sessionStateStatus={state.sessionStateStatus}
+                  substate={state.substate}
+                  topBar={topBar}
+                  viewMode={viewMode}
+                />
+              }
               beforeMessages={
                 <>
                   {/* classic 工作台弃用 SessionHeader / RunEventsPreview 等旧 chrome，
@@ -1469,22 +661,9 @@ export function TeamConversationView({
               anchorConversationToBottom
               composerDisabled={!composerEnabled}
               composerDisabledHint={composerDisabledHint}
-              composerExtras={{
-                // chat-only image / skill / yolo / dialogueMode 仍然关闭——这些功能
-                // 依赖 chat 专属管线（ChatPage 的 image-generation hook、skill
-                // drawer 等）。
-                imageGeneration: false,
-                skillRecommendation: false,
-                permissionMode: false,
-                dialogueModeToggle: false,
-                // v1.5：放开这些通用对话能力，与 chat 体验对齐。
-                multiSelect: true,
-                bookmarks: true,
-                promptTemplate: true,
-                commandPalette: true,
-                agentSwitch: true,
-              }}
+              composerExtras={TEAM_CONVERSATION_COMPOSER_EXTRAS}
               composerWorkspaceCatalog={composerWorkspaceCatalog}
+              searchMentionFiles={searchMentionFiles}
               messages={state.messages}
               groupedMessageEntries={groupedMessageEntries}
               visibleMessageCount={state.messages.length}

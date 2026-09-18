@@ -23,6 +23,7 @@ export interface ClassicTeamConversationOpsChromeProps {
   readonly onRetryFailed?: () => void;
   readonly onToggleFocus?: () => void;
   readonly onFocusFail?: () => void;
+  readonly onFocusClarifications?: () => void;
   readonly initialDecisions?: Array<{ id: string; label: string }>;
 }
 
@@ -38,13 +39,19 @@ export function ClassicTeamConversationOpsChrome({
   failedHandoffs = [],
   pendingClarifications = [],
   onFocusFail,
+  onFocusClarifications,
   initialDecisions = [],
 }: ClassicTeamConversationOpsChromeProps) {
   const [decisions, setDecisions] = useState(initialDecisions);
   const primaryFail = failedHandoffs[0] ?? null;
-  const primaryClarify = pendingClarifications[0] ?? null;
+  const clarifyCount = pendingClarifications.length;
 
-  const attention = useMemo(() => {
+  const attention = useMemo((): {
+    show: boolean;
+    title: string;
+    hint: string | undefined;
+    count: number | undefined;
+  } => {
     if (primaryFail) {
       const title =
         primaryFail.summary?.trim() ||
@@ -52,17 +59,18 @@ export function ClassicTeamConversationOpsChrome({
       const hint =
         primaryFail.failureReason?.trim() ||
         (primaryFail.recoverableFailure ? '可重试' : '查看右侧任务台定位');
-      return { show: true as const, title, hint };
+      return { show: true, title, hint, count: clarifyCount > 0 ? clarifyCount : undefined };
     }
-    if (primaryClarify) {
+    if (clarifyCount > 0) {
       return {
-        show: true as const,
-        title: primaryClarify.question,
-        hint: '待你确认后继续',
+        show: true,
+        title: `${clarifyCount} 项澄清待你回答`,
+        hint: '到「任务 → 待澄清」面板统一回答',
+        count: clarifyCount,
       };
     }
-    return { show: false as const, title: '', hint: undefined as string | undefined };
-  }, [primaryClarify, primaryFail]);
+    return { show: false, title: '', hint: undefined, count: undefined };
+  }, [clarifyCount, primaryFail]);
 
   const handleFocusFail = useCallback(() => {
     if (onFocusFail) {
@@ -74,6 +82,17 @@ export function ClassicTeamConversationOpsChrome({
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [onFocusFail]);
+
+  const handleFocusClarifications = useCallback(() => {
+    if (onFocusClarifications) {
+      onFocusClarifications();
+      return;
+    }
+    const target = document.querySelector('[data-team-clarification-anchor="true"]');
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [onFocusClarifications]);
 
   const handleRemoveDecision = useCallback((id: string) => {
     setDecisions((prev) => prev.filter((item) => item.id !== id));
@@ -91,7 +110,8 @@ export function ClassicTeamConversationOpsChrome({
             show
             title={attention.title}
             hint={attention.hint}
-            onJump={handleFocusFail}
+            count={attention.count}
+            onJump={primaryFail ? handleFocusFail : handleFocusClarifications}
           />
         </div>
       ) : null}

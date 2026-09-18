@@ -1,8 +1,9 @@
 /**
  * classic Team 对话内嵌运营卡
  *
- * 把失败 handoff / 待澄清 映射为 InlineOpsCard，挂在对话流 afterMessages。
- * 仅 classic 路径使用。
+ * 把失败 handoff / 进行中 handoff 映射为 InlineOpsCard，挂在对话流 afterMessages。
+ * 澄清不再逐条渲染（避免同一个确认在对话里和任务台重复出现）：只保留 1 张聚合卡，
+ * 指向唯一可交互面「任务 → 待澄清」面板。仅 classic 路径使用。
  */
 
 import { useMemo, type CSSProperties } from 'react';
@@ -16,7 +17,6 @@ export interface ClassicTeamConversationInlineCardsProps {
   readonly runningHandoffs?: readonly HandoffEntry[];
   readonly onRetryFailed?: () => void;
   readonly onFocusWorkbench?: () => void;
-  readonly onFillComposer?: (text: string) => void;
 }
 
 const LIST_STYLE: CSSProperties = {
@@ -24,7 +24,12 @@ const LIST_STYLE: CSSProperties = {
   flexDirection: 'column',
   gap: 8,
   padding: '4px 0 8px',
-  width: 'min(680px, 100%)',
+  // 渲染在对话流尾部（内容列内）：宽度对齐内容列（1080 上限）并居中，
+  // 与错误诊断简报 / 智能引导气泡同一约定。classic 对话区在宽屏下远宽于
+  // 卡片，只给 width 不给 alignSelf 会让卡片贴着内容列左侧、右侧空一大片。
+  width: '100%',
+  maxWidth: 1080,
+  alignSelf: 'center',
 };
 
 function formatTime(ts?: number): string | undefined {
@@ -41,7 +46,6 @@ export function ClassicTeamConversationInlineCards({
   runningHandoffs = [],
   onRetryFailed,
   onFocusWorkbench,
-  onFillComposer,
 }: ClassicTeamConversationInlineCardsProps) {
   const cards = useMemo(() => {
     const items: Array<{
@@ -59,28 +63,17 @@ export function ClassicTeamConversationInlineCards({
       }>;
     }> = [];
 
-    for (const item of pendingClarifications.slice(0, 3)) {
+    if (pendingClarifications.length > 0) {
       items.push({
-        id: `clarify-${item.id}`,
+        id: 'clarify-aggregate',
         tone: 'block',
-        title: '需要你确认',
-        body: item.question,
-        timeLabel: formatTime(item.createdAt),
-        code: item.context?.trim() || undefined,
+        title: `还有 ${pendingClarifications.length} 项澄清需要你确认`,
+        body: '为避免同一个确认在对话与任务台重复出现，请到「任务 → 待澄清」面板统一回答。',
         actions: [
-          ...(onFillComposer
-            ? [
-                {
-                  id: 'answer',
-                  label: '填入回复',
-                  variant: 'primary' as const,
-                  onClick: () => onFillComposer(item.question),
-                },
-              ]
-            : []),
           {
             id: 'open-workbench',
             label: '打开任务台',
+            variant: 'primary',
             onClick: onFocusWorkbench,
           },
         ],
@@ -141,14 +134,7 @@ export function ClassicTeamConversationInlineCards({
     }
 
     return items;
-  }, [
-    failedHandoffs,
-    onFillComposer,
-    onFocusWorkbench,
-    onRetryFailed,
-    pendingClarifications,
-    runningHandoffs,
-  ]);
+  }, [failedHandoffs, onFocusWorkbench, onRetryFailed, pendingClarifications, runningHandoffs]);
 
   if (cards.length === 0) return null;
 

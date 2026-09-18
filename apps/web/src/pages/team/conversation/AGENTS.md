@@ -64,6 +64,26 @@ team/conversation/
   实现为打开底部 `LayerConversationDrawer` 并聚焦该实例，刻意**不**切 `selectedTeamId` ——
   角色实例是子会话，通常不在 `workspaceGroups` 里，切过去会破坏整页 runtime 的作用域不变式。
 
+## 合并 feed（TeamMultiLayerFeed）的排序与渲染口径
+
+- **排序只有一处**：`extras/TeamMultiLayerFeed.tsx` 的 `resolveRawListOrdering(layers)`
+  （纯函数，导出仅供单测）。规则：**层内以数组下标为准**（时间戳不参与层内重排）；跨层按
+  _可比时间戳_ 交错（数字毫秒或 ISO 走 `conversation-runtime/messages/message-coercion.ts`
+  的 `getComparableCreatedAt`，不可比即 `undefined`）；缺失时间戳**继承本层前一条**有效值，
+  不得回落成 `0` 被顶到最前；平局用 `(layerIndex, inLayerIndex)` 给出全序。
+  ⚠️ 层与层之间**没有全局时间线**（`messages` 只保证层内有序），别把跨层顺序当因果或时序证据。
+- **直播占位钉在本层末尾**：流式占位消息的排序键取自本层末条的有效时间戳 + 层内下标排层尾，
+  **不要**用 `Date.now()`（那会让它在每次重算时都被顶到全列表最底，并让 `useMemo` 每帧失效）。
+- **侧栏「最新一条」与 feed 同序**：`TeamConversationLayerSidePanel.tsx` 的
+  `findLatestFinalizedAssistantId` 复用 `resolveRawListOrdering` 的结果倒扫，不要另写一套
+  "按 layers 数组顺序"的判定，否则侧栏豁免折叠的那条和 feed 显示的末条会不一致。
+- **直播消息必须走流式渲染分流**：`rawListToEntries` 对 `status === 'streaming'` 的消息用
+  `renderStreamingChatMessageContentWithOptions`（与 `build-team-grouped-message-entries.tsx`
+  同口径）。若统一走非流式分支，流式期间会重新命中围栏块折叠 → 卡片墙/feed 自己的贴底会停。
+- **折叠豁免**：流式期间与"最新一条已完成助手回复"都不折叠长内容（见
+  `components/chat/markdown/fold-policy.ts` 的 `FoldDisabledContext`）；team 主对话视图已通过
+  `LatestAssistantMessageContext` 获得同样豁免，侧栏 feed 由上面那条 provider 提供。
+
 ## 依赖约束（关键）
 
 - ❌ **禁止** import `pages/chat-page/**`（chat 是平级产品，不互引）
@@ -97,6 +117,5 @@ team/conversation/
 
 ## 关联文档
 
-- `.agentdocs/workflow/260518-team-conversation-decouple-plan.md` §6.4
-- `docs/chat-conversation-reuse-plan.md` v1.5 D5 决策
-- `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
+- `docs/chat/chat-conversation-reuse-plan.md` v1.5 D5 决策
+- `docs/architecture/team-architecture-l1-3-streaming-handoff-spec.md` §1.3

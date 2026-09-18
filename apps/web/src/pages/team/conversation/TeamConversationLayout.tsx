@@ -41,6 +41,7 @@ import type {
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
+import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
 import { WelcomeScreen } from '../../../components/chat/session/ChatPageSections.js';
 import type { DialogueMode } from '../../chat-page/mode/dialogue-mode.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
@@ -296,6 +297,8 @@ export interface TeamConversationLayoutProps {
   toggleImageGenerationMode?: () => void;
   updateImageGenerationDefaults?: (defaults: Partial<SavedChatImageDefaults>) => void;
   composerWorkspaceCatalog?: ComposerWorkspaceCatalog;
+  /** `@` 文件提及检索函数；不传时 @ 菜单恒为空状态（与 chat 同契约）。 */
+  searchMentionFiles?: MentionFileSearchFn;
   composerCommandDescriptors?: CommandDescriptor[];
   agentOptions?: Array<{ id: string; label: string }>;
   effectiveAgentId?: string;
@@ -523,6 +526,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     toggleImageGenerationMode,
     updateImageGenerationDefaults,
     composerWorkspaceCatalog,
+    searchMentionFiles,
     composerCommandDescriptors,
     agentOptions,
     effectiveAgentId,
@@ -865,6 +869,7 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
           toggleImageGenerationMode={toggleImageGenerationMode}
           updateImageGenerationDefaults={updateImageGenerationDefaults}
           composerWorkspaceCatalog={composerWorkspaceCatalog}
+          searchMentionFiles={searchMentionFiles}
           composerCommandDescriptors={composerCommandDescriptors}
           agentOptions={agentOptions}
           effectiveAgentId={effectiveAgentId}

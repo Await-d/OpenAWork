@@ -27,8 +27,12 @@ import type {
   ChatRenderGroup,
 } from '../../../../components/chat/message/chat-message-group-list.js';
 import { ChatMessageGroupList } from '../../../../components/chat/message/chat-message-group-list.js';
-import { renderChatMessageContentWithOptions } from '../../../../components/chat/session/ChatPageSections.js';
+import {
+  renderChatMessageContentWithOptions,
+  renderStreamingChatMessageContentWithOptions,
+} from '../../../../components/chat/session/ChatPageSections.js';
 import { groupChatRenderEntries } from '../../../../components/conversation-runtime/messages/group-render-entries.js';
+import { getComparableCreatedAt } from '../../../../components/conversation-runtime/messages/message-coercion.js';
 import {
   getRoleLayerIdentity,
   getRoleLayerIdentityFromAgentId,
@@ -310,15 +314,18 @@ const LOAD_MORE_SCROLL_THRESHOLD_PX = 48;
 
 // ─── 辅助函数 ───────────────────────────────────────────────────────
 
-interface RawMessageItem {
+export interface RawMessageItem {
   message: ChatMessage;
   layerData: LayerMessages;
-  timestamp: number;
-}
-
-function parseTimestamp(ts: number | string | undefined): number {
-  if (!ts) return 0;
-  return typeof ts === 'string' ? parseInt(ts, 10) : ts;
+  /**
+   * 跨层比较用的有效时间戳（毫秒）。无法得到可比时间戳时为 undefined ——
+   * 不用 0 兜底（0 会把缺失时间戳的消息顶到最前），也不对字符串做 parseInt。
+   */
+  timestamp: number | undefined;
+  /** 该条目所属层级在 layers 中的下标 —— 跨层缺失时间戳时的排序回落键。 */
+  layerIndex: number;
+  /** 该条目在其所属层级内的数组下标 —— 层内顺序的唯一权威，也是最终平局键。 */
+  inLayerIndex: number;
 }
 
 function buildLayerMessageIdentity(
@@ -357,67 +364,136 @@ function buildLayerMessageIdentity(
 }
 
 /**
- * 合并所有层级的消息为按时间排序的扁平列表。
+ * 多层级合并顺序 —— 唯一事实来源（纯函数，feed 与侧栏「最新一条」共用）。
+ *
+ * 排序规则：
+ *   1. 层内顺序绝对权威：同一层级内一律按数组下标排，时间戳不得重排层内消息。
+ *   2. 跨层按可比时间戳交错：双方都有可比时间戳且不同时小者在前 —— 保留跨层时间穿插，
+ *      而不是把各层首尾拼接。
+ *   3. 缺失 / 无法解析 / 相等：回落到 (layerIndex, inLayerIndex)。不用 0 哨兵，
+ *      因此缺失时间戳的消息不会被顶到最前；它继承所在层级的相对位置参与平局。
+ *   4. 最终平局键 (layerIndex, inLayerIndex) 保证结果是全序且稳定（同一输入恒同一输出）。
+ *
+ * 时间戳规范化：数字毫秒直接用；字符串用 Date.parse（ISO-8601 才能得到真实时刻，
+ * 绝不再对字符串做 parseInt —— 那会把 ISO 串解析成「年份」）；其余一律视为不可比。
+ * 层内缺失的时间戳向前继承前一条的有效时间戳（层首缺失则回填本层首个可比时间戳），
+ * 并对层内有效时间戳做单调钳制（取前缀最大值），使层内序列不减 —— 这样即使以时间戳
+ * 为主排序键，也不会破坏第 1 条的层内数组顺序。
+ *
+ * 流式占位消息：不使用其自身 createdAt（View 层每次重渲染都写入新的 Date.now()，
+ * 会让数组恒变且永远排到全局末尾），改用所属层级最后一条消息的有效时间戳，并置于该层
+ * 层内下标末尾 —— 它因此稳定停在「自己这一层的末尾」，既不受墙上时钟影响，也不跳到全局底部。
+ *
  * 仅收集数据 + 排序，不创建 renderContent 闭包 —— 闭包延迟到分页后才创建，
  * 避免对不渲染的消息创建闭包导致 React.memo 失效和 GC 压力。
  */
-function buildMergedRawList(layers: LayerMessages[]): RawMessageItem[] {
-  const allMessages: RawMessageItem[] = [];
+export function resolveRawListOrdering(layers: LayerMessages[]): RawMessageItem[] {
+  const items: RawMessageItem[] = [];
 
-  for (const layer of layers) {
+  layers.forEach((layer, layerIndex) => {
+    // 层首缺失时间戳时回填用：本层第一个可比时间戳。
+    let firstComparable: number | undefined;
     for (const message of layer.messages) {
-      allMessages.push({
-        layerData: layer,
-        message,
-        timestamp: parseTimestamp(message.createdAt),
-      });
+      const comparable = getComparableCreatedAt(message.createdAt) ?? undefined;
+      if (comparable !== undefined) {
+        firstComparable = comparable;
+        break;
+      }
     }
-    if (layer.streamingMessage) {
-      allMessages.push({
-        layerData: layer,
-        message: layer.streamingMessage,
-        timestamp: Date.now(),
-      });
-    }
-  }
 
-  allMessages.sort((a, b) => a.timestamp - b.timestamp);
-  return allMessages;
+    let previousEffective: number | undefined;
+    let lastEffective: number | undefined;
+
+    const append = (
+      message: ChatMessage,
+      inLayerIndex: number,
+      comparable: number | undefined,
+    ): void => {
+      let effective = comparable ?? previousEffective ?? firstComparable;
+      if (
+        effective !== undefined &&
+        previousEffective !== undefined &&
+        effective < previousEffective
+      ) {
+        // 单调钳制：层内有效时间戳不允许回退，保证全局排序不破坏层内数组顺序。
+        effective = previousEffective;
+      }
+      previousEffective = effective;
+      lastEffective = effective;
+      items.push({ layerData: layer, message, timestamp: effective, layerIndex, inLayerIndex });
+    };
+
+    layer.messages.forEach((message, inLayerIndex) => {
+      append(message, inLayerIndex, getComparableCreatedAt(message.createdAt) ?? undefined);
+    });
+
+    if (layer.streamingMessage) {
+      // 排序键取自本层（最后一条消息的有效时间戳），不用占位消息自身的 Date.now()。
+      append(layer.streamingMessage, layer.messages.length, lastEffective);
+    }
+  });
+
+  items.sort(compareRawMessageItems);
+  return items;
+}
+
+/**
+ * 与 resolveRawListOrdering 的注释一一对应的比较器：
+ * 同层 → 层内下标；跨层 → 可比时间戳；缺失 / 平局 → (层级下标, 层内下标)。
+ */
+function compareRawMessageItems(a: RawMessageItem, b: RawMessageItem): number {
+  if (a.layerIndex === b.layerIndex) {
+    return a.inLayerIndex - b.inLayerIndex;
+  }
+  if (a.timestamp !== undefined && b.timestamp !== undefined && a.timestamp !== b.timestamp) {
+    return a.timestamp - b.timestamp;
+  }
+  return a.layerIndex - b.layerIndex || a.inLayerIndex - b.inLayerIndex;
 }
 
 /**
  * 构建单层级的原始消息列表。
+ * 复用 resolveRawListOrdering：单层时比较器恒按层内下标，等价于保持数组顺序，
+ * 同时让流式占位消息的排序键与合并视图共用同一套规则。
  */
 function buildSingleLayerRawList(layer: LayerMessages): RawMessageItem[] {
-  const messages = [...layer.messages];
-  if (layer.streamingMessage) {
-    messages.push(layer.streamingMessage);
-  }
-  return messages.map((message) => ({
-    message,
-    layerData: layer,
-    timestamp: parseTimestamp(message.createdAt),
-  }));
+  return resolveRawListOrdering([layer]);
 }
 
 /**
  * 将原始消息列表转为 ChatRenderEntry[]（创建 renderContent 闭包）。
  * 只在分页后调用，仅对要渲染的消息创建闭包。
+ *
+ * 导出仅为单测直接验证 renderContent 的分流结果（流式 vs 已定稿），
+ * 生产消费方仍然只有本文件内的 TeamMultiLayerFeed。
  */
-function rawListToEntries(
+export function rawListToEntries(
   rawList: RawMessageItem[],
   resolveInlinePermissionActions?: TeamMultiLayerFeedProps['resolveInlinePermissionActions'],
 ): ChatRenderEntry[] {
   return rawList.map(({ message, layerData }) => {
     const identity = buildLayerMessageIdentity(message, layerData);
+    // 流式占位消息必须走流式渲染管线（StreamingMarkdownContent + 流式期间禁用围栏块
+    // 折叠），与主会话视图 build-team-grouped-message-entries 的分流一致。否则正文会被
+    // 折叠策略钳住高度：滚动容器不再随 token 增长，feed 的自动滚底随之停摆，同时丢掉
+    // 流式光标等呈现。判定依据：LayerMessages.streamingMessage 由 View 层注入，status
+    // 恒为 'streaming'（见 TeamConversationView 的构造处）；已定稿消息不会带该状态。
+    const renderContent =
+      message.status === 'streaming'
+        ? (m: ChatMessage) =>
+            renderStreamingChatMessageContentWithOptions(m, {
+              presentationMode: 'team',
+              resolveInlinePermissionActions,
+            })
+        : (m: ChatMessage) =>
+            renderChatMessageContentWithOptions(m, {
+              presentationMode: 'team',
+              resolveInlinePermissionActions,
+            });
 
     return {
       message,
-      renderContent: (m: ChatMessage) =>
-        renderChatMessageContentWithOptions(m, {
-          presentationMode: 'team',
-          resolveInlinePermissionActions,
-        }),
+      renderContent,
       ...(identity ?? {}),
       actions: [] as ChatRenderAction[],
     };
@@ -473,7 +549,7 @@ export function TeamMultiLayerFeed({
   // 先构建全部原始消息列表（轻量，不含 renderContent 闭包）
   const rawList = useMemo(() => {
     if (selectedTab === 'all') {
-      return buildMergedRawList(layers);
+      return resolveRawListOrdering(layers);
     }
     if (selectedLayer) {
       return buildSingleLayerRawList(selectedLayer);

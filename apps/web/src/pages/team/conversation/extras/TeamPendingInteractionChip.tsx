@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react';
 
 export interface TeamPendingInteractionChipProps {
   pendingPermissionCount: number;
-  pendingQuestionCount: number;
+  /** 待回答的 team 澄清数（来自 useClarificationStore，不再计 question_requests）。 */
+  pendingClarificationCount: number;
   onClick: () => void;
 }
 
@@ -12,15 +13,12 @@ const BUTTON_STYLE: CSSProperties = {
   gap: 6,
   padding: '6px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--warning) 42%, transparent)',
-  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
   color: 'var(--warning)',
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
-  boxShadow: '0 0 0 0 transparent',
 };
 
 const BADGE_STYLE: CSSProperties = {
@@ -38,10 +36,10 @@ const BADGE_STYLE: CSSProperties = {
 
 export function TeamPendingInteractionChip({
   pendingPermissionCount,
-  pendingQuestionCount,
+  pendingClarificationCount,
   onClick,
 }: TeamPendingInteractionChipProps) {
-  const totalCount = pendingPermissionCount + pendingQuestionCount;
+  const totalCount = pendingPermissionCount + pendingClarificationCount;
   if (totalCount <= 0) {
     return null;
   }
@@ -50,16 +48,17 @@ export function TeamPendingInteractionChip({
   if (pendingPermissionCount > 0) {
     labelParts.push(`审批 ${pendingPermissionCount}`);
   }
-  if (pendingQuestionCount > 0) {
-    labelParts.push(`提问 ${pendingQuestionCount}`);
+  if (pendingClarificationCount > 0) {
+    labelParts.push(`澄清 ${pendingClarificationCount}`);
   }
 
   return (
     <button
       type="button"
+      className="team-v2-control team-v2-control--warning-soft"
       onClick={onClick}
       style={BUTTON_STYLE}
-      title="查看当前会话里尚未处理的权限或提问"
+      title="查看当前会话里尚未处理的权限或澄清"
       aria-label="查看待处理交互"
     >
       <span aria-hidden>⚠</span>
