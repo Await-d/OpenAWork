@@ -151,23 +151,33 @@ const ERROR_PATTERNS: Array<{
 ];
 
 /**
- * 将技术性错误消息转换为用户友好的描述
+ * 将技术性错误消息转换为用户友好的描述。
+ *
+ * `code` 可选：传入网关错误码后，映射会同时看到 `[错误: CODE]` 前缀形态，
+ * 这样依赖前缀的规则（如带重试次数的 MODEL_ERROR）才能命中。
+ * 注意：默认兜底回显的是原始 message 本身，不会把 `[错误: …]` 前缀带进文案。
  */
-export function getFriendlyErrorMessage(errorMessage: string): FriendlyError {
+export function getFriendlyErrorMessage(errorMessage: string, code?: string): FriendlyError {
   const normalized = errorMessage.trim();
+  const matchTarget =
+    code !== undefined && code.trim().length > 0
+      ? `[错误: ${code.trim()}] ${normalized}`
+      : normalized;
 
   // 尝试匹配所有错误模式
   for (const { pattern, handler } of ERROR_PATTERNS) {
-    const match = normalized.match(pattern);
+    const match = matchTarget.match(pattern);
     if (match) {
       return handler(match, normalized);
     }
   }
 
   // 默认错误信息（当没有匹配到任何模式时）
+  // 不能用泛化模板覆盖原始原因：无法归类时原样保留服务端/上游给出的文案，
+  // 否则用户只能看到「处理您的请求时遇到了问题」，真正原因被吞掉。
   return {
     title: '请求失败',
-    message: '处理您的请求时遇到了问题',
+    message: normalized.length > 0 ? normalized : '处理您的请求时遇到了问题',
     suggestion: '请稍后重试，如问题持续请联系支持',
     canRetry: true,
   };

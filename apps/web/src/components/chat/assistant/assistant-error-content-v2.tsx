@@ -28,17 +28,35 @@ function parseAssistantErrorContent(content: string): {
       : baseMessage.slice(technicalDetailIndex + technicalDetailMarker.length).trim() || undefined;
 
   // 保留友好摘要，同时不再让错误映射吞掉上游/连接的原始上下文。
-  const friendlyError = getFriendlyErrorMessage(primaryMessage);
+  const friendlyError = getFriendlyErrorMessage(primaryMessage, code);
   const technicalDetail = explicitTechnicalDetail;
 
   return {
     code,
     headline: friendlyError.title,
-    detail: friendlyError.message,
+    detail: composeErrorDetail(friendlyError.message, primaryMessage, code),
     suggestion: friendlyError.suggestion,
     ...(technicalDetail ? { technicalDetail } : {}),
     canRetry: friendlyError.canRetry,
   };
+}
+
+/**
+ * 友好文案负责「可读的归纳」，原始原因负责「到底发生了什么」。
+ * 两者一致时不重复；不一致时把原文追加在同一个详情块内，
+ * 避免用户只能看到模板话术而看不到服务端给出的真实原因。
+ */
+function composeErrorDetail(curated: string, rawReason: string, code?: string): string {
+  const curatedText = curated.trim();
+  const rawText = rawReason.trim();
+
+  if (rawText.length === 0) return curatedText;
+  if (curatedText.length === 0) return rawText;
+  // 原文就是错误码时，头部 chip 已经展示，无需重复。
+  if (code !== undefined && rawText === code) return curatedText;
+  if (curatedText.includes(rawText) || rawText.includes(curatedText)) return curatedText;
+
+  return `${curatedText}\n${rawText}`;
 }
 
 function ErrorIcon({ size = 16 }: { size?: number }) {
@@ -49,7 +67,7 @@ function ErrorIcon({ size = 16 }: { size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -70,12 +88,11 @@ export function AssistantErrorContent({
   onRetry?: () => void;
 }) {
   const parsed = parseAssistantErrorContent(content);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  // 如果详情超过150字符，支持展开/折叠
   const detailNeedsCollapse = (parsed.detail?.length || 0) > 150;
   const displayDetail =
-    detailNeedsCollapse && !isExpanded ? parsed.detail?.slice(0, 150) + '...' : parsed.detail;
+    detailNeedsCollapse && !isExpanded ? (parsed.detail?.slice(0, 150) ?? '') + '…' : parsed.detail;
 
   // 如果错误不可重试，不显示重试按钮
   const shouldShowRetry = onRetry && parsed.canRetry;
@@ -87,18 +104,18 @@ export function AssistantErrorContent({
       role="alert"
       aria-live="assertive"
     >
-      <div className="chat-message-error-icon">
-        <ErrorIcon size={18} />
+      <div className="chat-message-error-icon" aria-hidden="true">
+        <ErrorIcon size={16} />
       </div>
 
       <div className="chat-message-error-content">
         <div className="chat-message-error-head">
+          <span className="chat-message-error-title">{parsed.headline || '请求失败'}</span>
           {parsed.code && (
             <span className="chat-message-error-label" aria-label={`错误代码: ${parsed.code}`}>
               {parsed.code}
             </span>
           )}
-          <span className="chat-message-error-title">{parsed.headline || '请求失败'}</span>
         </div>
 
         {parsed.detail && (
@@ -118,7 +135,7 @@ export function AssistantErrorContent({
         )}
 
         {parsed.technicalDetail && (
-          <details className="chat-message-error-technical-detail" open>
+          <details className="chat-message-error-technical-detail">
             <summary>技术详情</summary>
             <pre data-testid="chat-message-error-technical-detail">{parsed.technicalDetail}</pre>
           </details>
@@ -128,12 +145,12 @@ export function AssistantErrorContent({
         {parsed.suggestion && (
           <div className="chat-message-error-suggestion">
             <svg
-              width="14"
-              height="14"
+              width="16"
+              height="16"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"
@@ -155,12 +172,12 @@ export function AssistantErrorContent({
               onClick={onRetry}
             >
               <svg
-                width="12"
-                height="12"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="1.75"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 aria-hidden="true"
