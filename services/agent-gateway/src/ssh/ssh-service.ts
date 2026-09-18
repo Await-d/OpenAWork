@@ -337,7 +337,9 @@ export class SshService {
     }
     if (result.exitCode !== 0) {
       const detail = result.stderr.trim();
-      throw new Error(detail.length > 0 ? detail : `SSH mkdir failed with exit code ${result.exitCode}`);
+      throw new Error(
+        detail.length > 0 ? detail : `SSH mkdir failed with exit code ${result.exitCode}`,
+      );
     }
 
     upsertSshDialog({

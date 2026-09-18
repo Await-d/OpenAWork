@@ -30,10 +30,9 @@ export function getSessionOwnerUserId(sessionId: string): string | null {
     return cached.userId;
   }
 
-  const row = sqliteGet<{ user_id: string }>(
-    'SELECT user_id FROM sessions WHERE id = ? LIMIT 1',
-    [sessionId],
-  );
+  const row = sqliteGet<{ user_id: string }>('SELECT user_id FROM sessions WHERE id = ? LIMIT 1', [
+    sessionId,
+  ]);
   const userId = row?.user_id ?? null;
 
   if (cache.size >= CACHE_MAX_ENTRIES) {

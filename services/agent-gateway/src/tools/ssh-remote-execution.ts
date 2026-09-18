@@ -320,7 +320,8 @@ export function formatSshUnavailableToolMessage(
   toolName: string,
   resolution: Extract<SshRemoteResolution, { kind: 'unavailable' }>,
 ): string {
-  const statusLabel = resolution.reason === 'error' ? '连接失败（error）' : '未连接（disconnected）';
+  const statusLabel =
+    resolution.reason === 'error' ? '连接失败（error）' : '未连接（disconnected）';
   return [
     `会话绑定的 SSH 连接 ${resolution.hostLabel} 当前不可用：${statusLabel}。`,
     `为避免误操作 gateway 本地工作区，工具 "${toolName}" 已停止执行。`,
@@ -432,7 +433,9 @@ function formatRemoteValidationIssues(
   issues: ReadonlyArray<{ path: (string | number)[]; message: string }>,
 ): string {
   const details = issues
-    .map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
+    .map((issue) =>
+      issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message,
+    )
     .join('; ');
   return `工具 "${toolName}" 参数校验失败：${details}`;
 }
@@ -589,9 +592,7 @@ async function executeRemoteBash(
   const result = await context.proxy.execCommand(remoteCommand, { timeoutMs });
   const truncated = truncateRemoteBashOutput(mergeRemoteStreams(result.stdout, result.stderr));
 
-  const metadataLines = [
-    `[ssh] executed on ${formatRemoteTargetLabel(context)} (cwd: ${workdir})`,
-  ];
+  const metadataLines = [`[ssh] executed on ${formatRemoteTargetLabel(context)} (cwd: ${workdir})`];
   if (result.timedOut) {
     metadataLines.push(
       `bash tool terminated command after exceeding timeout ${timeoutMs} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
@@ -673,7 +674,9 @@ async function executeRemoteRead(
 
   const buffer = Buffer.from(content, 'utf8');
   const byteLimitReached = buffer.length > MAX_FILE_BYTES;
-  const effective = byteLimitReached ? buffer.subarray(0, MAX_FILE_BYTES).toString('utf8') : content;
+  const effective = byteLimitReached
+    ? buffer.subarray(0, MAX_FILE_BYTES).toString('utf8')
+    : content;
   const window = applyLineWindow(effective, byteLimitReached, input);
   return {
     output: {
@@ -852,8 +855,7 @@ async function executeRemoteGrep(
     flags.push(`--include=${shellQuote(input.include)}`);
   }
 
-  const headSuffix =
-    input.output_mode === 'count' ? '' : ` | head -n ${REMOTE_GREP_MAX_LINES}`;
+  const headSuffix = input.output_mode === 'count' ? '' : ` | head -n ${REMOTE_GREP_MAX_LINES}`;
   const command = `cd ${shellQuote(base)} && grep ${flags.join(' ')} -e ${shellQuote(pattern)} .${headSuffix}`;
 
   const result = await context.proxy.execCommand(command, { timeoutMs: REMOTE_SEARCH_TIMEOUT_MS });
@@ -870,9 +872,7 @@ async function executeRemoteGrep(
   const suffix = result.timedOut ? `\n${REMOTE_TRUNCATION_NOTICE}` : '';
 
   if (input.output_mode === 'files_with_matches') {
-    const files = [
-      ...new Set(lines.map((line) => joinRemote(base, stripRemoteFindPrefix(line)))),
-    ];
+    const files = [...new Set(lines.map((line) => joinRemote(base, stripRemoteFindPrefix(line))))];
     files.sort((left, right) => left.localeCompare(right));
     const body = files.length > 0 ? files.join('\n') : 'No files found';
     return { output: `${body}${suffix}` };
@@ -977,7 +977,11 @@ async function executeRemoteEdit(
       output: {
         before: loaded.content,
         after: input.newString,
-        filediff: buildFileDiff({ file: remotePath, before: loaded.content, after: input.newString }),
+        filediff: buildFileDiff({
+          file: remotePath,
+          before: loaded.content,
+          after: input.newString,
+        }),
         success: true,
         path: remotePath,
         replacements: 1,
@@ -1062,8 +1066,12 @@ async function executeRemoteMultiEdit(
     const normalizedNew = convertToLineEnding(normalizeLineEndings(edit.newString), ending);
 
     try {
-      currentContent = fuzzyReplace(currentContent, normalizedOld, normalizedNew, edit.replaceAll)
-        .content;
+      currentContent = fuzzyReplace(
+        currentContent,
+        normalizedOld,
+        normalizedNew,
+        edit.replaceAll,
+      ).content;
     } catch (error) {
       throw new Error(
         `Edit #${appliedCount + 1}: ${error instanceof Error ? error.message : String(error)} ${REMOTE_EDIT_ERROR_SUFFIX}`,

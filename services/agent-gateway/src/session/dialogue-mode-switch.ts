@@ -25,9 +25,7 @@ import { parseSessionMetadataJson } from './session-workspace-metadata.js';
  *     出现在 team 会话里，因此这里不需要为手动来源开口子。
  */
 export type DialogueModeSwitchReason =
-  | 'clarification_confirmed'
-  | 'plan_approved'
-  | 'user_confirmed';
+  'clarification_confirmed' | 'plan_approved' | 'user_confirmed';
 
 export const CLARIFY_COMPLETION_TARGET_MODE: DialogueMode = 'coding';
 
