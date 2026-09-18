@@ -25,35 +25,6 @@
   margin: 0;
 }
 
-.review-panel-stats {
-  display: grid;
-  flex-shrink: 0;
-  gap: var(--spacing-2, 8px);
-  grid-template-columns: 1fr 1fr;
-}
-
-.review-panel-stat-card {
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md, 8px);
-  min-height: 68px;
-  padding: var(--spacing-3, 12px);
-}
-
-.review-panel-stat-card__label {
-  color: var(--fg-subtle);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.review-panel-stat-card__value {
-  color: var(--fg-strong);
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  margin-top: var(--spacing-2, 8px);
-}
-
 .review-panel-file-list {
   background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
@@ -96,6 +67,14 @@
 }
 
 .review-panel-file-list__item {
+  align-items: center;
+  display: flex;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.review-panel-file-list__item .review-panel-file-button {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -173,12 +152,4 @@
   gap: var(--spacing-2, 8px);
   min-height: 0;
   padding: var(--spacing-3, 12px);
-}
-
-.review-panel-diff-preview__meta {
-  color: var(--fg-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 11px;
-  gap: var(--spacing-2, 8px);
 }

@@ -9,6 +9,7 @@ import {
 export interface UseReviewPanelFileChangesInput {
   readonly gatewayUrl: string;
   readonly opened: boolean;
+  readonly revision?: number;
   readonly sessionId: string | null;
   readonly token: string | null;
 }
@@ -16,6 +17,7 @@ export interface UseReviewPanelFileChangesInput {
 export function useReviewPanelFileChanges({
   gatewayUrl,
   opened,
+  revision = 0,
   sessionId,
   token,
 }: UseReviewPanelFileChangesInput): ReviewPanelContentState {
@@ -66,7 +68,7 @@ export function useReviewPanelFileChanges({
       });
 
     return () => controller.abort();
-  }, [opened, sessionId, sessionsClient, token]);
+  }, [opened, revision, sessionId, sessionsClient, token]);
 
   if (!token || !sessionId) {
     return { kind: 'waiting', message: '等待会话上下文' };

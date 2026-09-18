@@ -1,0 +1,93 @@
+.review-panel-review-badge {
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 650;
+  padding: var(--spacing-1) var(--spacing-2);
+  white-space: nowrap;
+}
+
+.review-panel-review-badge--accepted {
+  background: var(--success-muted);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.review-panel-review-badge--rejected {
+  background: var(--danger-muted);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.review-panel-review-badge--reverted {
+  background: var(--info-muted);
+  border-color: var(--info-border);
+  color: var(--info);
+}
+
+.review-panel-file-row-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--spacing-1);
+}
+
+.review-panel-file-row-actions__button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10.5px;
+  font-weight: 650;
+  height: 28px;
+  justify-content: center;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    opacity var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+  width: 28px;
+}
+
+.review-panel-file-row-actions__button--accept {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+
+.review-panel-file-row-actions__button--reject {
+  background: var(--danger);
+  color: var(--fg-on-complement);
+}
+
+.review-panel-file-row-actions__button--accept:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.review-panel-file-row-actions__button--reject:hover:not(:disabled) {
+  background: var(--complement-hover);
+}
+
+.review-panel-file-row-actions__button--accept:active:not(:disabled),
+.review-panel-file-row-actions__button--reject:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.review-panel-file-row-actions__button--accept:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.review-panel-file-row-actions__button--reject:focus-visible {
+  box-shadow: 0 0 0 4px var(--danger-muted);
+  outline-color: var(--danger);
+}
+
+.review-panel-file-row-actions__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}

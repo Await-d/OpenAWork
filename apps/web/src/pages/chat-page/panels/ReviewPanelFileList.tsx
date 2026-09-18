@@ -1,5 +1,10 @@
 import type { SessionFileDiffEntry } from '@openAwork/web-client';
-import { formatFileStatus, type ChangeScope } from './review-panel-model.js';
+import { ReviewPanelFileRowActions } from './ReviewPanelFileActions.js';
+import {
+  formatFileStatus,
+  getReviewPanelFileActionKey,
+  type ChangeScope,
+} from './review-panel-model.js';
 import { ReviewPanelEmptyState } from './ReviewPanelEmptyState.js';
 
 function formatScopeLabel(changeScope: ChangeScope): string {
@@ -43,13 +48,21 @@ function ReviewPanelFileButton({
 }
 
 export function ReviewPanelFileList({
+  actionsDisabled,
   changeScope,
   files,
+  isFilePending,
+  onAcceptFile,
+  onRejectFile,
   onSelectFilePath,
   selectedFile,
 }: {
+  readonly actionsDisabled: boolean;
   readonly changeScope: ChangeScope;
   readonly files: readonly SessionFileDiffEntry[];
+  readonly isFilePending: (file: SessionFileDiffEntry) => boolean;
+  readonly onAcceptFile: (file: SessionFileDiffEntry) => void;
+  readonly onRejectFile: (file: SessionFileDiffEntry) => void;
   readonly onSelectFilePath: (filePath: string) => void;
   readonly selectedFile: SessionFileDiffEntry | null;
 }) {
@@ -70,11 +83,18 @@ export function ReviewPanelFileList({
       ) : (
         <ul aria-label="文件变更列表" className="review-panel-file-list__items">
           {files.map((file) => (
-            <li className="review-panel-file-list__item" key={file.file}>
+            <li className="review-panel-file-list__item" key={getReviewPanelFileActionKey(file)}>
               <ReviewPanelFileButton
                 file={file}
                 selected={file.file === selectedFile?.file}
                 onSelect={() => onSelectFilePath(file.file)}
+              />
+              <ReviewPanelFileRowActions
+                busy={actionsDisabled}
+                file={file}
+                onAccept={onAcceptFile}
+                onReject={onRejectFile}
+                pending={isFilePending(file)}
               />
             </li>
           ))}

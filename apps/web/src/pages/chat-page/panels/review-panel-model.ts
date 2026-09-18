@@ -1,7 +1,22 @@
-import type { SessionFileChangesProjection, SessionFileDiffEntry } from '@openAwork/web-client';
+import {
+  HttpError,
+  type SessionFileChangesProjection,
+  type SessionFileDiffEntry,
+  type SessionFileReviewDecision,
+} from '@openAwork/web-client';
 
 export type ChangeScope = 'all' | 'current';
 export type DiffViewMode = 'unified' | 'split';
+
+export interface ReviewPanelReviewTarget {
+  readonly filePath: string;
+  readonly requestId: string;
+}
+
+export interface ReviewPanelConflictDetails {
+  readonly count: number;
+  readonly files: readonly string[];
+}
 
 export const CHANGE_SCOPE_OPTIONS: readonly {
   readonly label: string;
@@ -106,15 +121,6 @@ export function formatReviewPanelStatus(
   return `${files.length} 文件 · +${additions} / -${deletions} · ${guarantee}`;
 }
 
-export function formatSourceKind(sourceKind?: string): string {
-  if (sourceKind === 'structured_tool_diff') return '结构化工具';
-  if (sourceKind === 'session_snapshot') return '会话快照';
-  if (sourceKind === 'restore_replay') return '恢复回放';
-  if (sourceKind === 'workspace_reconcile') return '工作区校准';
-  if (sourceKind === 'manual_revert') return '手动回滚';
-  return sourceKind ?? '未知来源';
-}
-
 export function formatGuaranteeLevel(level?: string): string {
   if (level === 'strong') return '强保证';
   if (level === 'medium') return '中保证';
@@ -126,4 +132,78 @@ export function formatFileStatus(status?: string): string {
   if (status === 'added') return '新增';
   if (status === 'deleted') return '删除';
   return '修改';
+}
+
+export function formatReviewDecision(decision?: SessionFileReviewDecision): string {
+  if (decision === 'accepted') return '已接受';
+  if (decision === 'rejected') return '已拒绝';
+  return '待审查';
+}
+
+export function getReviewPanelFileActionKey(file: SessionFileDiffEntry): string {
+  return file.requestId ? `${file.requestId}\u0000${file.file}` : file.file;
+}
+
+export function isReviewPanelManualRevert(file: SessionFileDiffEntry): boolean {
+  return file.sourceKind === 'manual_revert';
+}
+
+export function isReviewPanelFileActionable(file: SessionFileDiffEntry): boolean {
+  return Boolean(file.requestId) && !file.reviewStatus && !isReviewPanelManualRevert(file);
+}
+
+export function selectReviewPanelReviewTarget(
+  file: SessionFileDiffEntry,
+): ReviewPanelReviewTarget | null {
+  // manual_revert 记录的是用户自己的回滚，再次审查会反向重放为 Agent 变更。
+  if (!file.requestId || isReviewPanelManualRevert(file)) {
+    return null;
+  }
+  return { filePath: file.file, requestId: file.requestId };
+}
+
+export function selectReviewPanelPendingFiles(
+  files: readonly SessionFileDiffEntry[],
+): readonly SessionFileDiffEntry[] {
+  return files.filter(isReviewPanelFileActionable);
+}
+
+export function getReviewPanelActionErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return fallback;
+}
+
+export function isReviewPanelConflictError(error: unknown): boolean {
+  return error instanceof HttpError && error.status === 409;
+}
+
+export function readReviewPanelConflictDetails(error: unknown): ReviewPanelConflictDetails | null {
+  if (!isReviewPanelConflictError(error)) {
+    return null;
+  }
+  const payload = (error as HttpError).data;
+  if (!isRecord(payload) || !isRecord(payload.workspaceReview)) {
+    return null;
+  }
+  const conflicts = payload.workspaceReview.conflicts;
+  if (!Array.isArray(conflicts)) {
+    return null;
+  }
+  const files: string[] = [];
+  for (const conflict of conflicts) {
+    if (
+      isRecord(conflict) &&
+      typeof conflict.filePath === 'string' &&
+      conflict.filePath.length > 0
+    ) {
+      files.push(conflict.filePath);
+    }
+  }
+  return { count: conflicts.length, files };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

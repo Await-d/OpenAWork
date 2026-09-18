@@ -1,3 +1,4 @@
+import type { SessionFileReviewDecision } from '@openAwork/web-client';
 import './ReviewPanelHeader.css';
 import {
   CHANGE_SCOPE_OPTIONS,
@@ -7,11 +8,15 @@ import {
 } from './review-panel-model.js';
 
 export interface ReviewPanelHeaderProps {
+  readonly bulkActionableCount: number;
+  readonly bulkPending: SessionFileReviewDecision | null;
   readonly changeScope: ChangeScope;
   readonly diffViewMode: DiffViewMode;
+  readonly onAcceptAll: () => void;
   readonly onChangeScope: (scope: ChangeScope) => void;
   readonly onChangeViewMode: (mode: DiffViewMode) => void;
   readonly onClose: () => void;
+  readonly onRejectAll: () => void;
   readonly status: string;
 }
 
@@ -87,12 +92,55 @@ function SegmentedButton({
   );
 }
 
+function BulkReviewButtons({
+  actionableCount,
+  onAcceptAll,
+  onRejectAll,
+  pending,
+}: {
+  readonly actionableCount: number;
+  readonly onAcceptAll: () => void;
+  readonly onRejectAll: () => void;
+  readonly pending: SessionFileReviewDecision | null;
+}) {
+  const disabled = actionableCount === 0 || pending !== null;
+
+  return (
+    <div role="group" aria-label="批量审查" className="review-panel-header__bulk-group">
+      <button
+        aria-label={`全部接受当前范围的 ${actionableCount} 个待审查文件`}
+        className="review-panel-header__bulk-button review-panel-header__bulk-button--accept"
+        disabled={disabled}
+        onClick={onAcceptAll}
+        title={`接受当前范围内 ${actionableCount} 个待审查文件`}
+        type="button"
+      >
+        {pending === 'accepted' ? '接受中…' : '全部接受'}
+      </button>
+      <button
+        aria-label={`全部拒绝当前范围的 ${actionableCount} 个待审查文件`}
+        className="review-panel-header__bulk-button review-panel-header__bulk-button--reject"
+        disabled={disabled}
+        onClick={onRejectAll}
+        title={`拒绝当前范围内 ${actionableCount} 个待审查文件`}
+        type="button"
+      >
+        {pending === 'rejected' ? '拒绝中…' : '全部拒绝'}
+      </button>
+    </div>
+  );
+}
+
 export function ReviewPanelHeader({
+  bulkActionableCount,
+  bulkPending,
   changeScope,
   diffViewMode,
+  onAcceptAll,
   onChangeScope,
   onChangeViewMode,
   onClose,
+  onRejectAll,
   status,
 }: ReviewPanelHeaderProps) {
   return (
@@ -137,6 +185,13 @@ export function ReviewPanelHeader({
             />
           ))}
         </div>
+
+        <BulkReviewButtons
+          actionableCount={bulkActionableCount}
+          onAcceptAll={onAcceptAll}
+          onRejectAll={onRejectAll}
+          pending={bulkPending}
+        />
       </div>
     </div>
   );
