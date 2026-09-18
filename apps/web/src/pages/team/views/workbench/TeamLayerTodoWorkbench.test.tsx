@@ -86,6 +86,102 @@ describe('TeamLayerTodoWorkbench', () => {
     expect(screen.getByText('TODO-002')).toBeTruthy();
   });
 
+  it('tasks tab 使用左右分栏：列表列在左、明细列在右', () => {
+    render(
+      <TeamLayerTodoWorkbench
+        tab="tasks"
+        onTabChange={vi.fn()}
+        layers={stubLayers}
+        activeLayerId="L1"
+        onSelectLayer={vi.fn()}
+        roles={stubRoles}
+        activeRoleId="all"
+        onSelectRole={vi.fn()}
+        todos={stubTodos}
+        activeTodoId="T1"
+        todoFilter="all"
+        onTodoFilterChange={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+
+    const listColumn = screen.getByLabelText('任务列表').parentElement;
+    const detailColumn = screen.getByLabelText('任务详情').parentElement;
+    const split = listColumn?.parentElement;
+
+    // 分栏容器标记存在，且两列同属该容器
+    expect(split?.getAttribute('data-team-workbench-split')).toBe('list-detail');
+    expect(detailColumn?.parentElement).toBe(split);
+    // DOM 顺序 = 视觉顺序：列表列在明细列之前（左右并排）
+    expect(listColumn?.nextElementSibling).toBe(detailColumn);
+    // 分栏使用列排列（不再用上下行排列）
+    expect(split?.getAttribute('style') ?? '').toContain('grid-template-columns');
+    expect(split?.getAttribute('style') ?? '').not.toContain('grid-template-rows');
+  });
+
+  it('点击主 tab 触发 onTabChange 回调', () => {
+    const onTabChange = vi.fn();
+
+    render(
+      <TeamLayerTodoWorkbench
+        tab="tasks"
+        onTabChange={onTabChange}
+        layers={stubLayers}
+        activeLayerId="L1"
+        onSelectLayer={vi.fn()}
+        roles={stubRoles}
+        activeRoleId="all"
+        onSelectRole={vi.fn()}
+        todos={stubTodos}
+        activeTodoId={null}
+        todoFilter="all"
+        onTodoFilterChange={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /概览/ }));
+    expect(onTabChange).toHaveBeenCalledWith('overview');
+  });
+
+  it('任务 tab 渲染 L2 过滤区（层级 / 角色）与 L3 列头筛选行', () => {
+    render(
+      <TeamLayerTodoWorkbench
+        tab="tasks"
+        onTabChange={vi.fn()}
+        layers={stubLayers}
+        activeLayerId="L1"
+        onSelectLayer={vi.fn()}
+        roles={stubRoles}
+        activeRoleId="all"
+        onSelectRole={vi.fn()}
+        todos={stubTodos}
+        activeTodoId={null}
+        todoFilter="all"
+        onTodoFilterChange={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+
+    // L2 过滤区：层级 / 角色标签 + 层导轨
+    const filterZone = document.querySelector('.team-wb-filter-zone');
+    expect(filterZone).toBeTruthy();
+    expect(screen.getByText('层级')).toBeTruthy();
+    expect(screen.getByText('角色')).toBeTruthy();
+    expect(filterZone?.querySelector('[aria-label="层列表"]')).toBeTruthy();
+    expect(filterZone?.querySelector('[aria-label="角色筛选"]')).toBeTruthy();
+    // 层概要降级为过滤区头部的一行弱信息
+    expect(screen.getByLabelText('层概要')).toBeTruthy();
+
+    // L3 列头筛选行：任务筛选（列表列）
+    const todoFilterRow = document.querySelector('.team-wb-filter-row');
+    expect(todoFilterRow?.getAttribute('aria-label')).toBe('任务筛选');
+
+    // 主 tab 导航与过滤区是两套控件语言
+    const navTabs = document.querySelectorAll('.team-wb-nav-tab');
+    expect(navTabs.length).toBe(4);
+  });
+
   it('点击 layer 按钮触发 onSelectLayer 回调', () => {
     const onSelectLayer = vi.fn();
 

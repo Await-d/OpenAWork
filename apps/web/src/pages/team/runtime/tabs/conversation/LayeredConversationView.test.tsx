@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 /**
- * 260517 · LayeredConversationView 双栏 Smoke 测试
+ * 260916-层级可视化重构 · LayeredConversationView（追踪瀑布版）行为测试
  *
- * 验收历史层级对话：点击层级会话行后右栏按普通对话渲染对应 session。
- * 再次点击同条层级行取消选中。
+ * 覆盖：空态、泳道与时间条渲染、默认自动选中子层、点击切换/取消、
+ * 聚焦层只降级不隐藏、角色提示词入口按层收敛。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { TeamRuntimeSessionRecord } from '@openAwork/web-client';
 import {
   useHandoffStore,
   useLayerStore,
@@ -16,48 +17,60 @@ import {
 } from '../../../../../stores/team/team-events.js';
 
 vi.mock('../../../conversation/TeamConversationView.js', () => ({
-  TeamConversationView: ({
-    compact,
-    focusedLayer,
-    sessionId,
-  }: {
-    compact?: boolean;
-    focusedLayer?: string | null;
-    sessionId: string;
-  }) => (
+  TeamConversationView: ({ compact, sessionId }: { compact?: boolean; sessionId: string }) => (
     <div
       data-compact={compact === true ? 'true' : 'false'}
-      data-focused-layer={focusedLayer ?? ''}
       data-session-id={sessionId}
       data-testid="team-session-view-mock"
     />
   ),
 }));
 
-vi.mock('./CrossLayerConversationView.js', () => ({
-  CrossLayerConversationView: ({
-    selectedTeam,
-  }: {
-    selectedTeam?: { id: string; title: string } | null;
-  }) => (
-    <div
-      data-selected-team-id={selectedTeam?.id ?? ''}
-      data-selected-team-title={selectedTeam?.title ?? ''}
-      data-testid="cross-layer-view-mock"
-    />
-  ),
+vi.mock('../tasks/use-team-artifact-data.js', () => ({
+  useTeamArtifactData: () => ({
+    artifactError: null,
+    artifactLoading: false,
+    planArtifact: null,
+    refreshArtifacts: () => undefined,
+    reviewArtifact: null,
+    specArtifact: null,
+    tasksArtifact: null,
+  }),
+}));
+
+vi.mock('../../hooks/use-session-handoffs.js', () => ({
+  useSessionHandoffs: () => ({
+    applyPreview: () => undefined,
+    error: null,
+    handoffs: [],
+    loading: false,
+    refresh: () => undefined,
+  }),
+}));
+
+const referenceState = vi.hoisted(() => ({ sessions: [] as TeamRuntimeSessionRecord[] }));
+
+vi.mock('../../data/team-runtime-reference-data.js', () => ({
+  // sessions 必须是稳定引用：否则每次渲染都会重建 rows，兜底选中 effect 反复覆盖用户操作。
+  useTeamRuntimeReferenceViewData: () => ({ sessions: referenceState.sessions }),
 }));
 
 import { LayeredConversationView } from './LayeredConversationView.js';
 
-function seedHandoff(entry: HandoffEntry) {
-  const map = new Map<string, HandoffEntry>([[entry.id, entry]]);
-  useHandoffStore.setState({ handoffs: map });
+function seedLayerNodes(nodes: LayerNode[]) {
+  useLayerStore.setState({ nodes: new Map(nodes.map((node) => [node.sessionId, node])) });
 }
 
-function seedLayerNodes(nodes: LayerNode[]) {
-  const map = new Map<string, LayerNode>(nodes.map((n) => [n.sessionId, n]));
-  useLayerStore.setState({ nodes: map });
+function seedHandoffs(entries: HandoffEntry[]) {
+  useHandoffStore.setState({ handoffs: new Map(entries.map((entry) => [entry.id, entry])) });
+}
+
+function traceBar(sessionId: string): HTMLElement {
+  const element = document.querySelector(`[data-trace-session="${sessionId}"]`);
+  if (!(element instanceof HTMLElement)) {
+    throw new Error(`未找到时间条：${sessionId}`);
+  }
+  return element;
 }
 
 beforeEach(() => {
@@ -72,520 +85,231 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('LayeredConversationView — 双栏交互', () => {
+describe('LayeredConversationView — 追踪瀑布', () => {
   it('无 handoff / 节点时显示空态', () => {
     render(<LayeredConversationView />);
     expect(screen.getByText('暂无层级对话数据')).toBeTruthy();
   });
 
-  it('有 handoff 时左栏渲染行，右栏默认欢迎面板', () => {
+  it('按层渲染泳道，并为每个层级会话渲染时间条', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-pm1-001',
-        roleLayer: 'pm1',
+        sessionId: 'sess-root',
+        roleLayer: 'reception',
         parentSessionId: null,
-        state: 'running',
-      },
-    ]);
-    seedHandoff({
-      id: 'handoff-001',
-      state: 'running',
-      fromRoleLayer: 'reception',
-      toRoleLayer: 'pm1',
-      sessionId: 'sess-pm1-001',
-      updatedAt: Date.now(),
-    });
-
-    render(<LayeredConversationView />);
-
-    expect(screen.getByText('选择左侧层级查看历史对话')).toBeTruthy();
-    expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
-  });
-
-  it('没有 handoff 但有历史层级节点时，仍可打开该层级会话', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-pm1-history-only',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-history-only',
         state: 'completed',
-        title: '历史 PM1 会话',
+        title: '根会话',
+      },
+      {
+        sessionId: 'sess-pm1',
+        roleLayer: 'pm1',
+        parentSessionId: 'sess-root',
+        state: 'completed',
+        title: 'PM1 历史会话',
       },
     ]);
 
     render(<LayeredConversationView />);
 
-    const view = screen.getByTestId('team-session-view-mock');
-    expect(view.getAttribute('data-session-id')).toBe('sess-pm1-history-only');
+    expect(screen.getByText('接待')).toBeTruthy();
+    expect(screen.getByText('规划')).toBeTruthy();
+    expect(traceBar('sess-root')).toBeTruthy();
+    expect(traceBar('sess-pm1')).toBeTruthy();
   });
 
-  it('点击层级行后右栏渲染对应 session 的 TeamConversationView', () => {
+  it('默认自动打开子层会话而不是根会话', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-pm1-002',
-        roleLayer: 'pm1',
+        sessionId: 'sess-root',
+        roleLayer: 'reception',
         parentSessionId: null,
-        state: 'running',
+        state: 'completed',
+        title: '根会话',
+      },
+      {
+        sessionId: 'sess-pm1',
+        roleLayer: 'pm1',
+        parentSessionId: 'sess-root',
+        state: 'completed',
+        title: 'PM1 历史会话',
       },
     ]);
-    seedHandoff({
-      id: 'handoff-002',
-      state: 'running',
-      fromRoleLayer: 'reception',
-      toRoleLayer: 'pm1',
-      sessionId: 'sess-pm1-002',
-      updatedAt: Date.now(),
-    });
 
     render(<LayeredConversationView />);
 
-    // timeline 行通过 sessionId 文案找
-    const row = screen.getByTitle('查看会话 sess-pm1-002');
-    fireEvent.click(row);
-
-    const view = screen.getByTestId('team-session-view-mock');
-    expect(view.getAttribute('data-session-id')).toBe('sess-pm1-002');
+    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
+      'sess-pm1',
+    );
+    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-compact')).toBe('true');
   });
 
-  it('存在子层历史时默认打开子层而不是主会话', () => {
+  it('点击时间条切换选中会话，再次点击取消选中回到引导态', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-root-history',
+        sessionId: 'sess-root',
         roleLayer: 'reception',
         parentSessionId: null,
         state: 'completed',
         title: '根会话',
       },
       {
-        sessionId: 'sess-pm1-history',
+        sessionId: 'sess-pm1',
         roleLayer: 'pm1',
-        parentSessionId: 'sess-root-history',
-        state: 'completed',
-        title: 'PM1 历史会话',
-      },
-    ]);
-
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-history',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
-    );
-
-    const view = screen.getByTestId('team-session-view-mock');
-    expect(view.getAttribute('data-session-id')).toBe('sess-pm1-history');
-    expect(view.getAttribute('data-compact')).toBe('false');
-  });
-
-  it('切换到跨层线程后会跟随当前选中的历史行，而不是固定父会话', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-root-thread',
-        roleLayer: 'reception',
-        parentSessionId: null,
-        state: 'completed',
-        title: '根会话',
-      },
-      {
-        sessionId: 'sess-pm1-thread',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-thread',
-        state: 'completed',
-        title: 'PM1 历史会话',
-      },
-    ]);
-
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-thread',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
-    );
-
-    fireEvent.click(screen.getByText('线程'));
-
-    expect(screen.getByTestId('cross-layer-view-mock').getAttribute('data-selected-team-id')).toBe(
-      'sess-pm1-thread',
-    );
-    expect(
-      screen.getByTestId('cross-layer-view-mock').getAttribute('data-selected-team-title'),
-    ).toBe('PM1 历史会话');
-  });
-
-  it('点击子层历史行时，右栏按普通对话直接打开该子层会话', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-root-tree',
-        roleLayer: 'reception',
-        parentSessionId: null,
-        state: 'completed',
-        title: '根会话',
-      },
-      {
-        sessionId: 'sess-pm1-tree',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-tree',
-        state: 'completed',
-        title: 'PM1 历史会话',
-      },
-    ]);
-
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-tree',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
-    );
-
-    const view = screen.getByTestId('team-session-view-mock');
-    expect(view.getAttribute('data-session-id')).toBe('sess-pm1-tree');
-    expect(view.getAttribute('data-focused-layer')).toBe('');
-  });
-
-  it('点击左侧不同层级行时，右侧切换到对应 session 而不是复用同一个会话内容', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-root-switch',
-        roleLayer: 'reception',
-        parentSessionId: null,
-        state: 'completed',
-        title: '根会话',
-      },
-      {
-        sessionId: 'sess-pm1-switch',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-switch',
+        parentSessionId: 'sess-root',
         state: 'completed',
         title: 'PM1 历史会话',
       },
       {
-        sessionId: 'sess-reviewer-switch',
+        sessionId: 'sess-reviewer',
         roleLayer: 'reviewer',
-        parentSessionId: 'sess-root-switch',
+        parentSessionId: 'sess-root',
         state: 'completed',
         title: '评审历史会话',
       },
     ]);
 
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-switch',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
-    );
+    render(<LayeredConversationView />);
 
+    fireEvent.click(traceBar('sess-reviewer'));
     expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-switch',
+      'sess-reviewer',
     );
 
-    fireEvent.click(screen.getByTitle('查看会话 sess-reviewer-switch'));
-
+    fireEvent.click(traceBar('sess-pm1'));
     expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-reviewer-switch',
+      'sess-pm1',
     );
 
-    fireEvent.click(screen.getByTitle('查看会话 sess-pm1-switch'));
-
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-switch',
-    );
+    fireEvent.click(traceBar('sess-pm1'));
+    expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
+    expect(screen.getByText('点击上方时间条查看该层级对话')).toBeTruthy();
   });
 
-  it('历史 handoff 只有上游 sessionId 时，点击目标层仍打开子层会话', () => {
+  it('聚焦某层只把其它层降级（dim），不隐藏时间条，也不影响已打开对话', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-root-upstream',
+        sessionId: 'sess-root',
         roleLayer: 'reception',
         parentSessionId: null,
         state: 'completed',
         title: '根会话',
       },
       {
-        sessionId: 'sess-pm1-upstream',
+        sessionId: 'sess-pm1',
         roleLayer: 'pm1',
-        parentSessionId: 'sess-root-upstream',
+        parentSessionId: 'sess-root',
         state: 'completed',
         title: 'PM1 历史会话',
       },
+      {
+        sessionId: 'sess-reviewer',
+        roleLayer: 'reviewer',
+        parentSessionId: 'sess-root',
+        state: 'completed',
+        title: '评审历史会话',
+      },
     ]);
-    seedHandoff({
-      id: 'handoff-upstream-session',
-      state: 'completed',
-      fromRoleLayer: 'reception',
-      toRoleLayer: 'pm1',
-      fromSessionId: 'sess-root-upstream',
-      sessionId: 'sess-root-upstream',
-      summary: '旧格式接待到 PM1',
-      updatedAt: Date.now(),
-    });
 
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-upstream',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
+    render(<LayeredConversationView />);
+    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
+      'sess-pm1',
     );
 
-    expect(screen.getByTitle('查看会话 sess-pm1-upstream')).toBeTruthy();
+    fireEvent.click(screen.getByText('评审 · 1'));
+
+    expect(traceBar('sess-reviewer').getAttribute('data-dim')).toBe('false');
+    expect(traceBar('sess-pm1').getAttribute('data-dim')).toBe('true');
     expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-upstream',
+      'sess-pm1',
     );
   });
 
-  it('tester 层历史节点可以筛选并按普通对话打开', () => {
+  it('角色提示词入口按层收敛：规划层可用，测试层不可用', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-root-with-tester',
+        sessionId: 'sess-root',
         roleLayer: 'reception',
         parentSessionId: null,
         state: 'completed',
         title: '根会话',
       },
       {
-        sessionId: 'sess-tester-history',
+        sessionId: 'sess-pm1',
+        roleLayer: 'pm1',
+        parentSessionId: 'sess-root',
+        state: 'completed',
+        title: 'PM1 历史会话',
+      },
+      {
+        sessionId: 'sess-tester',
         roleLayer: 'tester',
-        parentSessionId: 'sess-root-with-tester',
+        parentSessionId: 'sess-root',
         state: 'completed',
         title: '测试历史会话',
       },
     ]);
 
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-with-tester',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
+    render(<LayeredConversationView />);
+
+    // 默认选中规划层（子层优先），规划层支持角色提示词预览
+    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
+      'sess-pm1',
     );
+    expect(screen.getByText('🧬 角色提示词')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('测试 · 1'));
+    fireEvent.click(traceBar('sess-tester'));
+    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
+      'sess-tester',
+    );
     expect(screen.queryByText('🧬 角色提示词')).toBeNull();
-
-    const view = screen.getByTestId('team-session-view-mock');
-    expect(view.getAttribute('data-session-id')).toBe('sess-tester-history');
   });
 
-  it('切换层级筛选时保留右侧已打开的历史对话', () => {
+  it('交接与时间跨度进入统计胶囊', () => {
     seedLayerNodes([
       {
-        sessionId: 'sess-root-filter',
+        sessionId: 'sess-root',
         roleLayer: 'reception',
         parentSessionId: null,
         state: 'completed',
         title: '根会话',
       },
       {
-        sessionId: 'sess-pm1-filter',
+        sessionId: 'sess-pm1',
         roleLayer: 'pm1',
-        parentSessionId: 'sess-root-filter',
+        parentSessionId: 'sess-root',
         state: 'completed',
         title: 'PM1 历史会话',
       },
+    ]);
+    seedHandoffs([
       {
-        sessionId: 'sess-reviewer-filter',
-        roleLayer: 'reviewer',
-        parentSessionId: 'sess-root-filter',
+        endedAt: 20_000,
+        fromRoleLayer: 'user',
+        id: 'handoff-root',
+        startedAt: 5_000,
         state: 'completed',
-        title: '评审历史会话',
+        summary: '用户发起任务',
+        toRoleLayer: 'reception',
+        toSessionId: 'sess-root',
+        updatedAt: 20_000,
+      },
+      {
+        endedAt: 70_000,
+        fromRoleLayer: 'reception',
+        id: 'handoff-1',
+        startedAt: 10_000,
+        state: 'completed',
+        summary: '接待到规划',
+        toRoleLayer: 'pm1',
+        toSessionId: 'sess-pm1',
+        updatedAt: 70_000,
       },
     ]);
-
-    render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-filter',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话',
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-filter',
-    );
-
-    fireEvent.click(screen.getByText('评审 · 1'));
-
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-filter',
-    );
-  });
-
-  it('已完成任务的历史 handoff 仍可打开对应层级会话', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-reviewer-history',
-        roleLayer: 'reviewer',
-        parentSessionId: 'sess-root-history',
-        state: 'completed',
-      },
-    ]);
-    seedHandoff({
-      id: 'handoff-history-completed',
-      state: 'completed',
-      fromRoleLayer: 'pm2',
-      toRoleLayer: 'reviewer',
-      fromSessionId: 'sess-pm2-history',
-      toSessionId: 'sess-reviewer-history',
-      sessionId: 'sess-reviewer-history',
-      updatedAt: Date.now(),
-    });
 
     render(<LayeredConversationView />);
 
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-reviewer-history',
-    );
-  });
-
-  it('再次点击同条层级行取消选中，回到欢迎面板', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-pm1-003',
-        roleLayer: 'pm1',
-        parentSessionId: null,
-        state: 'running',
-      },
-    ]);
-    seedHandoff({
-      id: 'handoff-003',
-      state: 'running',
-      fromRoleLayer: 'reception',
-      toRoleLayer: 'pm1',
-      sessionId: 'sess-pm1-003',
-      updatedAt: Date.now(),
-    });
-
-    render(<LayeredConversationView />);
-
-    const row = screen.getByTitle('查看会话 sess-pm1-003');
-    fireEvent.click(row);
-    expect(screen.queryByTestId('team-session-view-mock')).toBeTruthy();
-
-    fireEvent.click(row);
-    expect(screen.queryByTestId('team-session-view-mock')).toBeNull();
-    expect(screen.getByText('选择左侧层级查看历史对话')).toBeTruthy();
-  });
-
-  it('切换 selectedTeam 时会重置旧的层级筛选，避免新会话沿用上一次的局部视图', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-root-a',
-        roleLayer: 'reception',
-        parentSessionId: null,
-        state: 'completed',
-        title: '根会话 A',
-      },
-      {
-        sessionId: 'sess-pm1-a',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-a',
-        state: 'completed',
-        title: 'PM1 A',
-      },
-      {
-        sessionId: 'sess-root-b',
-        roleLayer: 'reception',
-        parentSessionId: null,
-        state: 'completed',
-        title: '根会话 B',
-      },
-      {
-        sessionId: 'sess-pm1-b',
-        roleLayer: 'pm1',
-        parentSessionId: 'sess-root-b',
-        state: 'completed',
-        title: 'PM1 B',
-      },
-    ]);
-
-    const { rerender } = render(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-a',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话 A',
-        }}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'PM1 · 规划 · 1' }));
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-a',
-    );
-
-    rerender(
-      <LayeredConversationView
-        selectedTeam={{
-          id: 'sess-root-b',
-          status: 'completed',
-          subtitle: '已完成',
-          title: '根会话 B',
-        }}
-      />,
-    );
-
-    expect(screen.getByTitle('查看会话 sess-root-b')).toBeTruthy();
-    expect(screen.getByTestId('team-session-view-mock').getAttribute('data-session-id')).toBe(
-      'sess-pm1-b',
-    );
-  });
-
-  it('切到「线程」模式后渲染跨层线程视图', () => {
-    seedLayerNodes([
-      {
-        sessionId: 'sess-pm1-004',
-        roleLayer: 'pm1',
-        parentSessionId: null,
-        state: 'running',
-      },
-    ]);
-    seedHandoff({
-      id: 'handoff-004',
-      state: 'running',
-      fromRoleLayer: 'reception',
-      toRoleLayer: 'pm1',
-      sessionId: 'sess-pm1-004',
-      updatedAt: Date.now(),
-    });
-
-    render(<LayeredConversationView />);
-
-    // 默认双栏：右栏欢迎面板
-    expect(screen.getByText('选择左侧层级查看历史对话')).toBeTruthy();
-
-    fireEvent.click(screen.getByText('线程'));
-
-    // 线程模式下双栏欢迎面板消失，改由跨层线程视图接管
-    expect(screen.queryByText('选择左侧层级查看历史对话')).toBeNull();
-
-    // 切回双栏
-    fireEvent.click(screen.getByText('双栏'));
-    expect(screen.getByText('选择左侧层级查看历史对话')).toBeTruthy();
+    expect(screen.getByText('交接记录')).toBeTruthy();
+    expect(screen.getByText('时间跨度')).toBeTruthy();
+    expect(screen.getByText('1m 5s')).toBeTruthy();
   });
 });

@@ -289,4 +289,47 @@ describe('useTeamWorkspaceSnapshotState', () => {
       toRoleLayer: 'pm1',
     });
   });
+
+  it('切换到另一个工作区时先清空上一个工作区的快照，避免旧数据残留', async () => {
+    let resolveSecondRequest: ((response: Response) => void) | undefined;
+    const secondRequest = new Promise<Response>((resolve) => {
+      resolveSecondRequest = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input);
+        if (url === `${GATEWAY_URL}/team/workspaces/${WORKSPACE_ID}/runtime`) {
+          return jsonResponse(createWorkspaceSnapshot('session-a'));
+        }
+        if (url === `${GATEWAY_URL}/team/workspaces/tw-2/runtime`) {
+          return secondRequest;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useTeamWorkspaceSnapshotState(workspaceId),
+      { initialProps: { workspaceId: WORKSPACE_ID } },
+    );
+
+    await flushAsyncWork();
+    expect(result.current.snapshot?.sessions[0]?.id).toBe('session-a');
+
+    rerender({ workspaceId: 'tw-2' });
+    await flushAsyncWork();
+
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      resolveSecondRequest?.(jsonResponse(createWorkspaceSnapshot('session-b', 'Workspace B')));
+      await Promise.resolve();
+    });
+    await flushAsyncWork();
+
+    expect(result.current.snapshot?.sessions[0]?.id).toBe('session-b');
+    expect(result.current.error).toBeNull();
+  });
 });
