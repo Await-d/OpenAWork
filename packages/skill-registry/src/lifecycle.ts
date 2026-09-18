@@ -39,34 +39,43 @@ export interface SkillLifecycleOptions {
   now?: () => number;
 }
 
+/** 三个生命周期适配器的非空集合——仅由 requireLifecycleAdapters() 在守卫通过后返回。 */
+interface LifecycleAdapters {
+  toolRegistry: ToolRegistryAdapter;
+  secureStore: SecureStoreAdapter;
+  auditLog: AuditLogAdapter;
+}
+
 export class SkillLifecycle {
   private readonly installer: SkillInstaller;
   private readonly client: SkillRegistryClientImpl;
-  private readonly toolRegistry: ToolRegistryAdapter;
-  private readonly secureStore: SecureStoreAdapter;
-  private readonly auditLog: AuditLogAdapter;
+  private readonly toolRegistry?: ToolRegistryAdapter;
+  private readonly secureStore?: SecureStoreAdapter;
+  private readonly auditLog?: AuditLogAdapter;
   private readonly now: () => number;
 
   constructor(options: SkillLifecycleOptions = {}) {
     this.installer = options.installer ?? new SkillInstaller();
     this.client = options.client ?? new SkillRegistryClientImpl();
-    this.toolRegistry = options.toolRegistry ?? stubToolRegistry();
-    this.secureStore = options.secureStore ?? stubSecureStore();
-    this.auditLog = options.auditLog ?? stubAuditLog();
+    this.toolRegistry = options.toolRegistry;
+    this.secureStore = options.secureStore;
+    this.auditLog = options.auditLog;
     this.now = options.now ?? (() => Date.now());
   }
 
   async uninstall(skillId: string): Promise<void> {
+    const { toolRegistry, secureStore, auditLog } = this.requireLifecycleAdapters();
+
     const record = this.installer.getInstalled(skillId);
     if (!record) {
       throw new Error(`Skill not installed: ${skillId}`);
     }
 
-    this.toolRegistry.deregister(skillId);
-    await this.secureStore.clearPermissions(skillId);
+    toolRegistry.deregister(skillId);
+    await secureStore.clearPermissions(skillId);
     this.installer.uninstall(skillId);
 
-    this.auditLog.log({
+    auditLog.log({
       type: 'skill_uninstall',
       skillId,
       version: record.manifest.version,
@@ -76,6 +85,8 @@ export class SkillLifecycle {
   }
 
   async update(skillId: string): Promise<InstalledSkillRecord> {
+    const { toolRegistry, auditLog } = this.requireLifecycleAdapters();
+
     const record = this.installer.getInstalled(skillId);
     if (!record) {
       throw new Error(`Skill not installed: ${skillId}`);
@@ -86,13 +97,13 @@ export class SkillLifecycle {
       throw new Error(`Skill not found in source '${record.sourceId}': ${skillId}`);
     }
 
-    this.toolRegistry.deregister(skillId);
+    toolRegistry.deregister(skillId);
     const updated = await this.installer.update(detail, {
       sourceId: record.sourceId,
     });
-    this.toolRegistry.register(skillId, updated.manifest);
+    toolRegistry.register(skillId, updated.manifest);
 
-    this.auditLog.log({
+    auditLog.log({
       type: 'skill_update',
       skillId,
       version: updated.manifest.version,
@@ -138,23 +149,22 @@ export class SkillLifecycle {
     }
     return 0;
   }
-}
 
-function stubToolRegistry(): ToolRegistryAdapter {
-  return {
-    deregister: (_skillId: string) => undefined,
-    register: (_skillId: string, _manifest: InstalledSkillRecord['manifest']) => undefined,
-  };
-}
+  // 校验适配器齐备；缺失时抛错，避免调用方误以为注销 / 权限清理 / 审计已真实发生。
+  private requireLifecycleAdapters(): LifecycleAdapters {
+    const { toolRegistry, secureStore, auditLog } = this;
+    if (toolRegistry && secureStore && auditLog) {
+      return { toolRegistry, secureStore, auditLog };
+    }
 
-function stubSecureStore(): SecureStoreAdapter {
-  return {
-    clearPermissions: async (_skillId: string) => undefined,
-  };
-}
+    const missing = [
+      toolRegistry ? undefined : 'toolRegistry',
+      secureStore ? undefined : 'secureStore',
+      auditLog ? undefined : 'auditLog',
+    ].filter((name): name is string => name !== undefined);
 
-function stubAuditLog(): AuditLogAdapter {
-  return {
-    log: (_event: AuditEvent) => undefined,
-  };
+    throw new Error(
+      `SkillLifecycle 缺少必需适配器（${missing.join('/')}），拒绝在无审计、无权限清理的情况下静默执行卸载/更新`,
+    );
+  }
 }

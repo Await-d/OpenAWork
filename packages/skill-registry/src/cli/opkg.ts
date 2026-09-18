@@ -1,7 +1,13 @@
 import { SkillRegistryClientImpl } from '../client.js';
-import { RegistrySourceManager } from '../source.js';
+import type {
+  AuditEvent,
+  AuditLogAdapter,
+  SecureStoreAdapter,
+  ToolRegistryAdapter,
+} from '../lifecycle.js';
 import { SkillLifecycle } from '../lifecycle.js';
-import type { RegistrySource, RegistryTrustLevel } from '../types.js';
+import { RegistrySourceManager } from '../source.js';
+import type { InstalledSkillRecord, RegistrySource, RegistryTrustLevel } from '../types.js';
 
 const defaultStdout = (msg: string): void => {
   globalThis.console.log(msg);
@@ -28,11 +34,18 @@ export class OpkgCli {
   private readonly stderr: (msg: string) => void;
 
   constructor(options: OpkgCliOptions = {}) {
-    this.sourceManager = options.sourceManager ?? new RegistrySourceManager();
-    this.client = options.client ?? new SkillRegistryClientImpl(this.sourceManager);
-    this.lifecycle = options.lifecycle ?? new SkillLifecycle({ client: this.client });
     this.stdout = options.stdout ?? defaultStdout;
     this.stderr = options.stderr ?? defaultStderr;
+    this.sourceManager = options.sourceManager ?? new RegistrySourceManager();
+    this.client = options.client ?? new SkillRegistryClientImpl(this.sourceManager);
+    this.lifecycle =
+      options.lifecycle ??
+      new SkillLifecycle({
+        client: this.client,
+        toolRegistry: createCliNoopToolRegistryAdapter(),
+        secureStore: createCliNoopSecureStoreAdapter(),
+        auditLog: createCliAuditLogAdapter(this.stdout),
+      });
   }
 
   async run(argv: string[]): Promise<ExitCode> {
@@ -292,4 +305,29 @@ export async function runOpkgCli(argv?: string[]): Promise<void> {
   const code = await cli.run(args);
   const proc = (globalThis as unknown as { process?: { exitCode?: number } }).process;
   if (proc) proc.exitCode = code;
+}
+
+// 审计适配器：把 SkillLifecycle 的审计事件真实写入 CLI 输出流，使 remove/update 留下可观察的审计记录。
+function createCliAuditLogAdapter(write: (msg: string) => void): AuditLogAdapter {
+  return {
+    log: (event: AuditEvent) => {
+      write(`[audit] ${event.type} ${event.skillId}@${event.version} (source: ${event.sourceId})`);
+    },
+  };
+}
+
+// 具名空实现：CLI 进程内没有常驻工具注册表（技能工具由宿主运行时注册），此处刻意不做事，命名已显式标明。
+function createCliNoopToolRegistryAdapter(): ToolRegistryAdapter {
+  return {
+    deregister: (_skillId: string) => undefined,
+    register: (_skillId: string, _manifest: InstalledSkillRecord['manifest']) => undefined,
+  };
+}
+
+// 具名空实现：CLI 没有操作系统级安全存储（钥匙串等），技能权限仅存在于进程内 installer 记录中，
+// 卸载时随记录一并删除，因此此处刻意不做事，命名已显式标明。
+function createCliNoopSecureStoreAdapter(): SecureStoreAdapter {
+  return {
+    clearPermissions: async (_skillId: string) => undefined,
+  };
 }
