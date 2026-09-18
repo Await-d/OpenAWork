@@ -201,6 +201,8 @@ export async function getFastProvider(userId: string) {
 
 interface ProviderSelectionOptions {
   fallbackToChat?: boolean;
+  /** 用户显式选择时，provider 有效就按请求的 modelId 路由，不因 catalog 未收录而降级。 */
+  honorRequestedModel?: boolean;
 }
 
 /**
@@ -222,11 +224,26 @@ export async function getProviderForSelection(
   const provider = catalog.providers.find((p) => p.id === selection.providerId && p.enabled);
   const model = provider?.defaultModels.find((m) => m.id === selection.modelId && m.enabled);
 
-  if (!provider || !model) {
-    return fallbackToChat ? getChatProvider(userId) : null;
+  if (provider && model) {
+    return { provider, modelId: model.id };
   }
 
-  return { provider, modelId: model.id };
+  // 显式选择：provider 可用时按请求原样路由，避免被静默替换成另一个模型。
+  if (provider && options.honorRequestedModel === true) {
+    console.warn(
+      `[provider-catalog] 显式选择的模型未在 catalog 中匹配，按请求原样路由：provider=${provider.id} requestedModel=${selection.modelId}`,
+    );
+    return { provider, modelId: selection.modelId };
+  }
+
+  if (fallbackToChat) {
+    console.warn(
+      `[provider-catalog] 选择无法解析，回退到 chat：provider=${selection.providerId} model=${selection.modelId}`,
+    );
+    return getChatProvider(userId);
+  }
+
+  return null;
 }
 
 /**
