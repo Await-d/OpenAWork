@@ -4,6 +4,7 @@ import {
   buildUploadedAttachmentSummaryLine,
   uploadChatAttachments,
 } from '../../../../components/conversation-runtime/attachments/attachment-upload.js';
+import { stripOversizedInlineImageUrls } from '../../../../hooks/gateway/sanitize-input-image-parts.js';
 
 export interface PrepareStandardChatSendInputOptions {
   existingInputParts?: InputImageContent[];
@@ -29,7 +30,7 @@ export async function prepareStandardChatSendInput(
     return {
       ...(existingInputParts && existingInputParts.length > 0
         ? {
-            requestInputParts: existingInputParts,
+            requestInputParts: stripOversizedInlineImageUrls(existingInputParts),
             localRequestInputParts: existingInputParts,
           }
         : {}),
@@ -70,7 +71,7 @@ export async function prepareStandardChatSendInput(
   return {
     ...(imageInputParts.length > 0
       ? {
-          requestInputParts: imageInputParts,
+          requestInputParts: stripOversizedInlineImageUrls(imageInputParts),
           localRequestInputParts: localImageParts,
         }
       : {}),

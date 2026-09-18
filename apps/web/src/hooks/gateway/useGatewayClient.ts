@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
+import { stripOversizedInlineImageUrls } from './sanitize-input-image-parts.js';
 import type {
   DialogueMode,
   InputImageContent,
@@ -874,7 +875,9 @@ export function useGatewayClient(token: string | null): GatewayClient {
       const reasoningEffort = callbacks.reasoningEffort;
       const webSearchEnabled = callbacks.webSearchEnabled === true;
       const yoloMode = callbacks.yoloMode === true;
-      const inputParts = callbacks.inputParts;
+      const inputParts = callbacks.inputParts
+        ? stripOversizedInlineImageUrls(callbacks.inputParts)
+        : undefined;
       const wsBase = gatewayUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
       const wsUrl = `${wsBase}/sessions/${sessionId}/stream?token=${encodeURIComponent(token ?? '')}`;
 
