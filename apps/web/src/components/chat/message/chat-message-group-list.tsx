@@ -197,6 +197,7 @@ function VirtualizedChatGroupViewport({
   const [measuredVersion, setMeasuredVersion] = useState(0);
   const groupHeightsRef = useRef(new Map<string, number>());
   const groupSignaturesRef = useRef(new Map<string, string>());
+  const groupContentMetricsRef = useRef(new Map<string, GroupContentMetrics>());
   const nodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const nodeRefCallbackMapRef = useRef(new Map<string, (element: HTMLDivElement | null) => void>());
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -266,15 +267,31 @@ function VirtualizedChatGroupViewport({
   useEffect(() => {
     const validKeys = new Set(groups.map((group) => group.key));
     let changed = false;
+
     for (const group of groups) {
       const signature = getGroupLayoutSignature(group);
+      const metrics = readGroupContentMetrics(group);
       const previousSignature = groupSignaturesRef.current.get(group.key);
+
       if (previousSignature !== undefined && previousSignature !== signature) {
-        groupHeightsRef.current.delete(group.key);
+        const previousMetrics = groupContentMetricsRef.current.get(group.key);
+        const shrank =
+          previousMetrics !== undefined && metrics.contentWeight < previousMetrics.contentWeight;
+        const statusChanged =
+          previousMetrics !== undefined && metrics.statuses !== previousMetrics.statuses;
+
+        // 内容缩水或状态跃迁（流式结束、折叠生效、编辑截断）时旧实测可能偏大，必须丢弃重测；
+        // 仅内容增长时保留旧实测作为下界，供屏幕内的组继续沿用并由 RO 纠正。
+        if (shrank || statusChanged) {
+          groupHeightsRef.current.delete(group.key);
+        }
         changed = true;
       }
+
       groupSignaturesRef.current.set(group.key, signature);
+      groupContentMetricsRef.current.set(group.key, metrics);
     }
+
     for (const [key, element] of Array.from(nodeMapRef.current.entries())) {
       if (!validKeys.has(key)) {
         resizeObserverRef.current?.unobserve(element);
@@ -282,8 +299,10 @@ function VirtualizedChatGroupViewport({
         nodeRefCallbackMapRef.current.delete(key);
         groupHeightsRef.current.delete(key);
         groupSignaturesRef.current.delete(key);
+        groupContentMetricsRef.current.delete(key);
       }
     }
+
     if (changed) {
       setMeasuredVersion((value) => value + 1);
     }
@@ -300,11 +319,13 @@ function VirtualizedChatGroupViewport({
       offsets.push(totalHeight);
       const dividerExtra = dividerLabels[i] ? TIME_DIVIDER_HEIGHT_PX : 0;
       const signature = getGroupLayoutSignature(group);
-      const measuredHeight =
-        groupSignaturesRef.current.get(group.key) === signature
-          ? groupHeightsRef.current.get(group.key)
-          : undefined;
-      totalHeight += (measuredHeight ?? estimateGroupHeight(group)) + dividerExtra + GROUP_GAP_PX;
+      const height = resolveGroupHeight({
+        estimateHeight: estimateGroupHeight(group),
+        hasObservedNode: nodeMapRef.current.has(group.key),
+        measuredHeight: groupHeightsRef.current.get(group.key),
+        signatureMatches: groupSignaturesRef.current.get(group.key) === signature,
+      });
+      totalHeight += height + dividerExtra + GROUP_GAP_PX;
     });
 
     return {
@@ -322,11 +343,15 @@ function VirtualizedChatGroupViewport({
       const key = groups[startIndex]?.key;
       const group = groups[startIndex];
       const signature = group ? getGroupLayoutSignature(group) : '';
-      const measuredHeight =
-        key && groupSignaturesRef.current.get(key) === signature
-          ? groupHeightsRef.current.get(key)
-          : undefined;
-      const height = group ? (measuredHeight ?? estimateGroupHeight(group)) : 0;
+      const height = group
+        ? resolveGroupHeight({
+            estimateHeight: estimateGroupHeight(group),
+            hasObservedNode: key !== undefined && nodeMapRef.current.has(key),
+            measuredHeight: key === undefined ? undefined : groupHeightsRef.current.get(key),
+            signatureMatches:
+              key !== undefined && groupSignaturesRef.current.get(key) === signature,
+          })
+        : 0;
       if ((layout.offsets[startIndex] ?? 0) + height >= startBoundary) {
         break;
       }
@@ -502,6 +527,56 @@ function TimeDividerRow({ label }: { label: string }) {
       <span className="chat-time-divider-line" />
     </div>
   );
+}
+
+// 分组布局高度的解析输入：由布局 useMemo 组装，纯函数便于单测。
+export interface ResolveGroupHeightInput {
+  /** 该组当前是否有已挂载并纳入 ResizeObserver 观测的 DOM 节点。 */
+  hasObservedNode: boolean;
+  /** 当前内容签名是否与上一次一致（一致说明实测高度仍然可信）。 */
+  signatureMatches: boolean;
+  /** 上一次的实测高度，可能不存在。 */
+  measuredHeight: number | undefined;
+  /** 封顶估算高度，仅在实测不可信时使用。 */
+  estimateHeight: number;
+}
+
+export function resolveGroupHeight(input: ResolveGroupHeightInput): number {
+  const { estimateHeight, hasObservedNode, measuredHeight, signatureMatches } = input;
+
+  if (signatureMatches) {
+    return measuredHeight ?? estimateHeight;
+  }
+
+  // 签名不一致但该组当前有已挂载、被 RO 观测的节点时，仍然沿用上一次实测高度：
+  // 屏幕内的组永远有 DOM，ResizeObserver 会在任何真实尺寸变化时纠正它；
+  // 若此时退回封顶估算，后续所有组的偏移都会整体上移并发生重叠。
+  // 离屏组（无节点）仍然走签名门禁，因为其实测高度可能已经过期。
+  if (hasObservedNode && measuredHeight !== undefined) {
+    return measuredHeight;
+  }
+
+  return estimateHeight;
+}
+
+interface GroupContentMetrics {
+  contentWeight: number;
+  statuses: string;
+}
+
+function readGroupContentMetrics(group: ChatRenderGroup): GroupContentMetrics {
+  let contentWeight = 0;
+  const statuses: string[] = [];
+
+  for (const entry of group.entries) {
+    const message = entry.message;
+    contentWeight += message.content.length;
+    contentWeight += (message.parts?.length ?? 0) * 64;
+    contentWeight += (message.modifiedFilesSummary?.files.length ?? 0) * 16;
+    statuses.push(message.status ?? '');
+  }
+
+  return { contentWeight, statuses: statuses.join('|') };
 }
 
 function getGroupLayoutSignature(group: ChatRenderGroup): string {
