@@ -1,33 +1,18 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react';
-import type {
-  TeamRuntimeAlertControlRecord,
-  TeamMessageRecord,
-  TeamRuntimeSessionRecord,
-} from '@openAwork/web-client';
+import { useEffect, useMemo, useState } from 'react';
 import { createTeamClient } from '@openAwork/web-client';
-import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
-import type { CreateTeamSessionInput, SessionTask } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
-import { useTeamCollaboration } from '../../hooks/use-team-collaboration.js';
-import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
 import {
-  type AgentTeamsMetricCard,
-  type AgentTeamsOverviewCard,
-  type AgentTeamsReviewCard,
-  type AgentTeamsRoleChip,
-  type AgentTeamsTaskLane,
-} from './team-runtime-types.js';
+  useTeamCollaboration,
+  type TeamActionFeedback,
+} from '../../hooks/use-team-collaboration.js';
+import { useHandoffStore } from '../../../../stores/team/team-events.js';
+import {
+  filterActiveAuditEntries,
+  useRollbackVoidWindows,
+} from '../../../../stores/team/rollback-tombstones.js';
+import type { AgentTeamsMetricCard, AgentTeamsOverviewCard } from './team-runtime-types.js';
 import {
   collectRuntimeTasksForSession,
-  mapTaskToLaneId,
   resolveTaskRecordsForView,
 } from './team-runtime-task-lanes.js';
 import { collectSessionScope } from './team-runtime-session-scope.js';
@@ -37,37 +22,28 @@ import {
   resolveSelectedSharedSummary,
 } from './team-runtime-shared-context.js';
 import { resolveSelectedRuntimeScopeSessionId } from './team-runtime-selection-context.js';
-import {
-  buildFooterLead,
-  buildFooterStats,
-  buildMetricCards,
-} from './team-runtime-summary-metrics.js';
-import {
-  resolveTopSummaryAudience,
-  resolveTopSummaryDescription,
-  resolveTopSummaryStatus,
-  resolveTopSummaryTitle,
-} from './team-runtime-top-summary.js';
+import { buildMetricCards } from './team-runtime-summary-metrics.js';
 import { useTeamRuntimeProjection } from '../hooks/use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from '../hooks/use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from '../hooks/use-team-workflow-templates.js';
-import {
-  useHandoffStore,
-  useTeamEventsConnectionStore,
-} from '../../../../stores/team/team-events.js';
-import type { TeamSessionCreationDraft } from './team-session-creation.types.js';
 import { EMPTY_VIEW_DATA } from './team-runtime-reference-empty.js';
-import type {
-  TaskDraftInput,
-  TeamRuntimeReferenceDataOptions,
-  TeamRuntimeReferenceViewData,
-} from './team-runtime-reference-types.js';
-import { ROLE_SLOT_CONFIG } from './team-runtime-reference-config.js';
+import { useGlobalTeamRuntimeSessions } from './team-runtime-reference-global-sessions.js';
+import { buildLiveTeamRuntimeReferenceViewData } from './team-runtime-reference-live-view.js';
+import { useTeamRuntimeReferenceActions } from './team-runtime-reference-actions.js';
 import {
-  buildTaskUpdateStatus,
-  formatWorkspaceLabel,
-  mapMemberStatusLabel,
-} from './team-runtime-reference-formatters.js';
+  buildAccentByMemberId,
+  buildMemberNameById,
+  buildRuntimeRoleChips,
+  buildTaskLanes,
+} from './team-runtime-reference-card-derivations.js';
+import {
+  buildBaseSessions,
+  buildEffectiveSessions,
+  buildRuntimeSessionStatuses,
+  buildSharedSessionStatuses,
+  collectAllRuntimeTasksFromGroups,
+  mergeRuntimeTaskRecords,
+} from './team-runtime-reference-sessions.js';
 import {
   buildConversationCardsProjection,
   buildMessageCardsProjection,
@@ -78,28 +54,16 @@ import {
   buildTimelineProjection,
   buildWorkspaceGroupsProjection,
 } from './team-runtime-reference-projections.js';
+import type {
+  TeamRuntimeReferenceDataOptions,
+  TeamRuntimeReferenceViewData,
+} from './team-runtime-reference-types.js';
 import {
-  resolveSessionTreeTeamRuntimeStatus,
-  type TeamRuntimeSemanticStatus,
-} from './team-runtime-status.js';
+  TeamRuntimeReferenceDataProvider,
+  useTeamRuntimeReferenceViewData,
+} from './team-runtime-reference-context.js';
 
-const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewData | null>(null);
-
-export function TeamRuntimeReferenceDataProvider({
-  children,
-  value,
-}: {
-  children: ReactNode;
-  value: TeamRuntimeReferenceViewData;
-}) {
-  return (
-    <TeamRuntimeReferenceDataContext value={value}>{children}</TeamRuntimeReferenceDataContext>
-  );
-}
-
-export function useTeamRuntimeReferenceViewData(): TeamRuntimeReferenceViewData {
-  return useContext(TeamRuntimeReferenceDataContext) ?? EMPTY_VIEW_DATA;
-}
+export { TeamRuntimeReferenceDataProvider, useTeamRuntimeReferenceViewData };
 
 export function useResolvedTeamRuntimeReferenceData(
   options: TeamRuntimeReferenceDataOptions = {},
@@ -122,8 +86,6 @@ export function useResolvedTeamRuntimeReferenceData(
   const workflowTemplates = useTeamWorkflowTemplates();
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [localFeedback, setLocalFeedback] = useState<TeamActionFeedback | null>(null);
-  // 新建 session 后立刻记住 id + title，让 defaultReceptionSessionId 能在 refresh
-  // 完成前就指向它，同时把临时 session 注入 effectiveSessions 让侧边栏即时展示。
   const [createdSessionInfo, setCreatedSessionInfo] = useState<{
     id: string;
     title: string | null;
@@ -132,111 +94,24 @@ export function useResolvedTeamRuntimeReferenceData(
   const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
   const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
 
-  // 全局 sessions：不绑定到特定 teamWorkspaceId，用于侧边栏展示所有工作区的会话。
-  // collaboration 传入了 teamWorkspaceId，其 sessions 只包含当前工作区的数据；
-  // 这里额外用全局 runtime（不带过滤）拉取所有工作区的 sessions 做合并。
-  const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
-  const [globalSessions, setGlobalSessions] = useState<TeamRuntimeSessionRecord[]>([]);
-  useEffect(() => {
-    if (!accessToken) {
-      setGlobalSessions([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await teamClient.getRuntimeResult(accessToken);
-        if (cancelled) return;
-        if (result.ok && result.runtime) {
-          setGlobalSessions(result.runtime.sessions);
-        }
-      } catch {
-        // 全局 sessions 加载失败不影响主流程，侧边栏回退到当前工作区数据
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, teamClient, teamEventsRecoveredAt]);
+  const globalSessions = useGlobalTeamRuntimeSessions(accessToken, teamClient);
 
-  // 定期刷新全局 sessions，让侧边栏能及时看到其他工作区的新会话。
-  // 与 collaboration 的 20s 轮询独立，这里用 30s 降低网络开销。
-  const [globalSessionsTick, setGlobalSessionsTick] = useState(0);
-  useEffect(() => {
-    if (!accessToken) return undefined;
-    const intervalId = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      setGlobalSessionsTick((v) => v + 1);
-    }, 30_000);
-    return () => window.clearInterval(intervalId);
-  }, [accessToken]);
-
-  useEffect(() => {
-    if (!accessToken || globalSessionsTick === 0) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await teamClient.getRuntimeResult(accessToken);
-        if (cancelled) return;
-        if (result.ok && result.runtime) {
-          setGlobalSessions(result.runtime.sessions);
-        }
-      } catch {
-        // 轮询失败不影响已有数据
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, teamClient, globalSessionsTick]);
-
-  // 合并全局 sessions 和当前工作区 snapshot sessions：
-  // - 全局 sessions 提供所有工作区的会话列表（侧边栏展示用）
-  // - snapshot sessions 提供当前工作区的详细数据（状态、任务等更即时）
-  // - collaboration.sessions 作为最终 fallback
-  // 去重：以 session.id 为准，snapshot/collaboration 数据优先于全局数据
-  const baseSessions = useMemo(() => {
-    const merged = new Map<string, TeamRuntimeSessionRecord>();
-    // 先放全局 sessions（优先级最低）
-    for (const session of globalSessions) {
-      merged.set(session.id, session);
-    }
-    // 再放 snapshot sessions（覆盖全局同 id 数据，优先级更高）
-    for (const session of snapshotSessions) {
-      merged.set(session.id, session);
-    }
-    // 再放 collaboration sessions（优先级最高）
-    for (const session of collaboration.sessions) {
-      merged.set(session.id, session);
-    }
-    return Array.from(merged.values());
-  }, [collaboration.sessions, globalSessions, snapshotSessions]);
-  // 把刚创建但尚未被 snapshot/collaboration 刷新到的 session 注入到 effectiveSessions 中，
-  // 让侧边栏列表和选中态高亮在 refresh 完成前就能正确展示。
-  const effectiveSessions = useMemo(() => {
-    if (!createdSessionInfo) {
-      return baseSessions;
-    }
-    if (baseSessions.some((s) => s.id === createdSessionInfo.id)) {
-      return baseSessions;
-    }
-    const tempSession: TeamRuntimeSessionRecord = {
-      id: createdSessionInfo.id,
-      metadataJson: '',
-      parentSessionId: null,
-      roleLayer: null,
-      stateStatus: 'idle',
-      title: createdSessionInfo.title ?? '新会话',
-      updatedAt: new Date().toISOString(),
-      workspacePath: activeWorkspace?.defaultWorkingRoot ?? null,
-    };
-    return [tempSession, ...baseSessions];
-  }, [activeWorkspace?.defaultWorkingRoot, baseSessions, createdSessionInfo]);
+  const baseSessions = useMemo(
+    () => buildBaseSessions(globalSessions, snapshotSessions, collaboration.sessions),
+    [collaboration.sessions, globalSessions, snapshotSessions],
+  );
+  const effectiveSessions = useMemo(
+    () =>
+      buildEffectiveSessions(
+        baseSessions,
+        createdSessionInfo,
+        activeWorkspace?.defaultWorkingRoot ?? null,
+      ),
+    [activeWorkspace?.defaultWorkingRoot, baseSessions, createdSessionInfo],
+  );
   const effectiveSharedSessions =
     snapshotSharedSessions.length > 0 ? snapshotSharedSessions : collaboration.sharedSessions;
 
-  // 当 snapshot/collaboration 已包含创建的 session 后，清除临时记录，
-  // 避免临时 session 记录长期残留。
   useEffect(() => {
     if (createdSessionInfo && baseSessions.some((s) => s.id === createdSessionInfo.id)) {
       setCreatedSessionInfo(null);
@@ -255,11 +130,15 @@ export function useResolvedTeamRuntimeReferenceData(
     };
   }, [localFeedback]);
 
-  // 真实执行流的 handoff（reception→pm1→pm2→executor…）。概览的"团队活动"指标
-  // 必须基于它 + runtimeTasks + sessions，而不是 V1 的 team_messages/team_tasks
-  // 手动协作表——后者在团队自动执行时根本不写入，导致概览长期显示 0（用了却统计不到）。
   const handoffsMap = useHandoffStore((state) => state.handoffs);
+  const rollbackVoidWindows = useRollbackVoidWindows();
   const handoffEntries = useMemo(() => Array.from(handoffsMap.values()), [handoffsMap]);
+  // 回退回合的 handoff 不得进入概览 / 会话状态 / 交接摘要聚合，
+  // 与 TeamPageV2 / use-team-run-state / use-team-middle-area 的读取期过滤保持一致。
+  const activeHandoffEntries = useMemo(
+    () => filterActiveAuditEntries(handoffEntries, rollbackVoidWindows),
+    [handoffEntries, rollbackVoidWindows],
+  );
 
   const selectedSharedSummary = useMemo(
     () =>
@@ -322,583 +201,52 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const hasAuth = Boolean(accessToken && gatewayUrl);
 
-  const selectTeam = useCallback(
-    (teamId: string) => {
-      const isSharedSession = effectiveSharedSessions.some(
-        (session) => session.sessionId === teamId,
-      );
-      const isSession = effectiveSessions.some((session) => session.id === teamId);
-      if (!isSharedSession && !isSession) {
-        return;
-      }
-      collaboration.setSelectedSharedSessionId(isSharedSession ? teamId : null);
-    },
-    [collaboration.setSelectedSharedSessionId, effectiveSessions, effectiveSharedSessions],
-  );
-
-  const sendMessage = useCallback(
-    async (input: {
-      content: string;
-      recipientMemberId?: string | null;
-      replyToMessageId?: string | null;
-      sessionId?: string | null;
-      type?: TeamMessageRecord['type'];
-    }) => {
-      const content = input.content.trim();
-      if (!content) {
-        return false;
-      }
-
-      return collaboration.createMessage({
-        content,
-        recipientMemberId: input.recipientMemberId ?? null,
-        replyToMessageId: input.replyToMessageId ?? null,
-        senderId: collaboration.members[0]?.id,
-        sessionId: input.sessionId ?? selectedRuntimeScopeSessionId,
-        type: input.type ?? 'update',
-      });
-    },
-    [collaboration.createMessage, collaboration.members, selectedRuntimeScopeSessionId],
-  );
-
-  const createSession = useCallback(
-    async (draft: TeamSessionCreationDraft) => {
-      const targetWorkspace =
-        options.workspaces?.find((ws) => ws.id === draft.teamWorkspaceId) ??
-        activeWorkspace ??
-        options.workspaces?.[0] ??
-        null;
-      if (!accessToken || !targetWorkspace) {
-        setLocalFeedback({
-          message: '当前工作区不可用，无法创建团队会话',
-          tone: 'error',
-        });
-        return null;
-      }
-
-      // 把前端 draft 完整转成后端 createTeamSessionSchema 期望的 payload。
-      // 注意：draft.source.kind 仅有 'blank' | 'saved-template'（向导未暴露
-      // 'builtin-template'），后端 schema 兼容这两种。
-      const payload: CreateTeamSessionInput = {
-        ...(draft.title.trim() ? { title: draft.title.trim() } : {}),
-        source: { kind: draft.source.kind },
-        memberSlots: draft.memberSlots,
-        optionalAgentIds: draft.optionalAgentIds,
-        defaultProvider: draft.defaultProvider,
-        workingDirectory: draft.workingDirectory,
-      };
-      if (draft.source.kind === 'saved-template' && draft.source.templateId) {
-        payload.source = {
-          kind: 'saved-template',
-          templateId: draft.source.templateId,
-        };
-      }
-
-      setSessionActionBusy(true);
-      try {
-        const session = await teamClient.createSession(accessToken, targetWorkspace.id, payload);
-        if (!session.id) {
-          setLocalFeedback({
-            message: '创建团队会话失败，请稍后重试',
-            tone: 'error',
-          });
-          return null;
-        }
-        // 立刻把新建的 session 注入到 effectiveSessions 中，
-        // 避免等 refresh/snapshot 完成前侧边栏列表和选中态高亮缺失。
-        // snapshot 刷新完成后会由 useEffect 自动清除临时记录。
-        setCreatedSessionInfo({
-          id: session.id,
-          title: session.title ?? (draft.title.trim() || null),
-        });
-        const refreshed = await collaboration.refresh();
-        setLocalFeedback({
-          message: refreshed
-            ? '已创建团队会话'
-            : '已创建团队会话，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return session.id;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '创建团队会话失败',
-          tone: 'error',
-        });
-        return null;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, activeWorkspace, collaboration, options.workspaces, teamClient],
-  );
-
-  const createWorkspace = useCallback(
-    async (input: { name: string; description?: string; defaultWorkingRoot?: string }) => {
-      if (!accessToken) {
-        setLocalFeedback({
-          message: '当前未连接到网关，无法创建工作区',
-          tone: 'error',
-        });
-        return null;
-      }
-
-      setSessionActionBusy(true);
-      try {
-        const created = await teamClient.createWorkspace(accessToken, {
-          name: input.name,
-          description: input.description ?? null,
-          defaultWorkingRoot: input.defaultWorkingRoot ?? null,
-        });
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已创建工作区'
-            : '已创建工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return created.id;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '创建工作区失败',
-          tone: 'error',
-        });
-        return null;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
-  );
-
-  const renameWorkspace = useCallback(
-    async (workspaceId: string, name: string) => {
-      if (!accessToken || !workspaceId || !name.trim()) {
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        await teamClient.updateWorkspace(accessToken, workspaceId, { name: name.trim() });
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已重命名工作区'
-            : '已重命名工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '重命名工作区失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
-  );
-
-  const deleteWorkspace = useCallback(
-    async (workspaceId: string) => {
-      if (!accessToken || !workspaceId) {
-        setLocalFeedback({
-          message: '当前工作区不可用，无法删除',
-          tone: 'error',
-        });
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        await teamClient.deleteWorkspace(accessToken, workspaceId);
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已删除工作区'
-            : '已删除工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '删除工作区失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
-  );
-
-  const createTask = useCallback(
-    async (input: TaskDraftInput) => {
-      if (!input.title.trim()) {
-        return false;
-      }
-
-      return collaboration.createTask({
-        assigneeId: collaboration.members[0]?.id,
-        priority: input.priority,
-        status:
-          input.status === 'completed'
-            ? 'done'
-            : input.status === 'in_progress'
-              ? 'in_progress'
-              : 'pending',
-        title: input.title.trim(),
-      });
-    },
-    [collaboration.createTask, collaboration.members],
-  );
-
-  const acknowledgeRuntimeAlert = useCallback(
-    async (
-      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      note?: string,
-      callOptions?: { sessionId?: string },
-    ) => {
-      if (!accessToken) {
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.acknowledgeRuntimeAlert(accessToken, alertCode, {
-          ...(note ? { note } : {}),
-          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已确认当前告警'
-            : '已确认当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '确认告警失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, teamClient],
-  );
-
-  const clearRuntimeAlertControl = useCallback(
-    async (
-      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      callOptions?: { sessionId?: string },
-    ) => {
-      if (!accessToken) {
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.clearRuntimeAlertControl(accessToken, alertCode, {
-          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已清除告警控制'
-            : '已清除告警控制，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '清除告警控制失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, teamClient],
-  );
-
-  const suppressRuntimeAlert = useCallback(
-    async (
-      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      input?: { minutes?: number; note?: string; sessionId?: string },
-    ) => {
-      if (!accessToken) {
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.suppressRuntimeAlert(accessToken, alertCode, {
-          ...input,
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已静音当前告警'
-            : '已静音当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '静音告警失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, teamClient],
-  );
-
-  const reconcileStaleRuntimeThreads = useCallback(async () => {
-    if (!accessToken) {
-      return false;
-    }
-    setSessionActionBusy(true);
-    try {
-      const result = await teamClient.reconcileStaleRuntimeThreads(accessToken, {
-        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-      });
-      const refreshed = await collaboration.refresh();
-      if (!refreshed && result.runtime?.diagnostics) {
-        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-      }
-      setLocalFeedback({
-        message: refreshed
-          ? '已发起线程修复'
-          : '已发起线程修复，但最新运行时快照暂未刷新，系统会自动重试。',
-        tone: 'success',
-      });
-      return true;
-    } catch (reason) {
-      setLocalFeedback({
-        message: reason instanceof Error ? reason.message : '线程修复失败',
-        tone: 'error',
-      });
-      return false;
-    } finally {
-      setSessionActionBusy(false);
-    }
-  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
-
-  const reconcileStaleDecisions = useCallback(async () => {
-    if (!accessToken) {
-      return false;
-    }
-    setSessionActionBusy(true);
-    try {
-      const result = await teamClient.reconcileStaleDecisions(accessToken, {
-        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-      });
-      const refreshed = await collaboration.refresh();
-      if (!refreshed && result.runtime?.diagnostics) {
-        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-      }
-      setLocalFeedback({
-        message: refreshed
-          ? '已释放超时交互'
-          : '已释放超时交互，但最新运行时快照暂未刷新，系统会自动重试。',
-        tone: 'success',
-      });
-      return true;
-    } catch (reason) {
-      setLocalFeedback({
-        message: reason instanceof Error ? reason.message : '释放超时交互失败',
-        tone: 'error',
-      });
-      return false;
-    } finally {
-      setSessionActionBusy(false);
-    }
-  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
-
-  const runRuntimeAlertRemediation = useCallback(
-    async (
-      alertCode: TeamRuntimeAlertControlRecord['alertCode'],
-      remediationOptions?: { force?: boolean; handoffId?: string; sessionId?: string },
-    ) => {
-      if (!accessToken) {
-        return false;
-      }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.runRuntimeAlertRemediation(accessToken, alertCode, {
-          ...(remediationOptions?.force ? { force: remediationOptions.force } : {}),
-          ...(remediationOptions?.handoffId ? { handoffId: remediationOptions.handoffId } : {}),
-          ...(remediationOptions?.sessionId ? { sessionId: remediationOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已触发运行修复'
-            : '已触发运行修复，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '运行修复失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
-    },
-    [accessToken, collaboration, options.teamWorkspaceId, teamClient],
-  );
-
-  const moveTask = useCallback(
-    async (taskId: string, direction: 'left' | 'right') => {
-      const currentTask = collaboration.tasks.find((task) => task.id === taskId);
-      if (!currentTask) {
-        return false;
-      }
-
-      const nextStatus = buildTaskUpdateStatus(currentTask.status, direction);
-      if (!nextStatus) {
-        return false;
-      }
-
-      return collaboration.updateTask(taskId, { status: nextStatus });
-    },
-    [collaboration.tasks, collaboration.updateTask],
-  );
-
-  const replyReview = useCallback(
-    async (cardId: string, status: AgentTeamsReviewCard['status']) => {
-      const sessionId = activeSharedSession?.share.sessionId;
-      if (!sessionId || (status !== 'approved' && status !== 'rejected')) {
-        return false;
-      }
-
-      const permissionRequest = activeSharedSession?.pendingPermissions.find(
-        (request) => `permission-${request.requestId}` === cardId,
-      );
-      if (permissionRequest) {
-        const scopeLevel = categorizeAlwaysPatterns(
-          permissionRequest.previewAction,
-          permissionRequest.scope,
-          permissionRequest.always,
-        ).at(-1);
-        return collaboration.replySharedSessionPermission(sessionId, {
-          ...(status === 'approved' && scopeLevel ? { alwaysOverride: [scopeLevel.pattern] } : {}),
-          decision: status === 'approved' ? 'session' : 'reject',
-          requestId: permissionRequest.requestId,
-        });
-      }
-
-      const questionRequest = activeSharedSession?.pendingQuestions.find(
-        (request) => `question-${request.requestId}` === cardId,
-      );
-      if (questionRequest) {
-        return collaboration.replySharedQuestion(sessionId, {
-          answers: status === 'approved' ? [['已在 Team 页面完成处理。']] : undefined,
-          requestId: questionRequest.requestId,
-          status: status === 'approved' ? 'answered' : 'dismissed',
-        });
-      }
-
-      return false;
-    },
-    [
-      activeSharedSession,
-      collaboration.replySharedSessionPermission,
-      collaboration.replySharedQuestion,
-    ],
-  );
-
-  const submitReviewComment = useCallback(
-    async (cardId: string, content: string) => {
-      const sessionId = activeSharedSession?.share.sessionId;
-      const trimmed = content.trim();
-      if (!sessionId || !trimmed) {
-        return false;
-      }
-      return collaboration.createSharedSessionComment(sessionId, {
-        content: `[${cardId}] ${trimmed}`,
-      });
-    },
-    [activeSharedSession, collaboration.createSharedSessionComment],
-  );
-
-  const createSharedSessionComment = useCallback(
-    async (content: string) => {
-      const sessionId = activeSharedSession?.share.sessionId;
-      const trimmed = content.trim();
-      if (!sessionId || !trimmed) {
-        return false;
-      }
-      return collaboration.createSharedSessionComment(sessionId, {
-        content: trimmed,
-      });
-    },
-    [activeSharedSession, collaboration.createSharedSessionComment],
-  );
+  const {
+    acknowledgeRuntimeAlert,
+    clearRuntimeAlertControl,
+    createSession,
+    createSharedSessionComment,
+    createTask,
+    createWorkspace,
+    deleteWorkspace,
+    moveTask,
+    reconcileStaleDecisions,
+    reconcileStaleRuntimeThreads,
+    renameWorkspace,
+    replyReview,
+    runRuntimeAlertRemediation,
+    selectTeam,
+    sendMessage,
+    submitReviewComment,
+    suppressRuntimeAlert,
+  } = useTeamRuntimeReferenceActions({
+    accessToken,
+    activeSharedSession,
+    activeWorkspace,
+    collaboration,
+    effectiveSessions,
+    effectiveSharedSessions,
+    options,
+    selectedRuntimeScopeSessionId,
+    setCreatedSessionInfo,
+    setLocalFeedback,
+    setSessionActionBusy,
+    teamClient,
+  });
 
   // --- Split memos: shared intermediates ---
   const roleChips = useMemo(
-    () =>
-      ROLE_SLOT_CONFIG.map((slot, index) => {
-        const member = collaboration.members[index] ?? null;
-        const binding = roleBindings.roleCards[index] ?? null;
-        const boundAgent = binding?.selectedAgent ?? null;
-        return {
-          accent: slot.accent,
-          badge:
-            boundAgent?.label.slice(0, 1).toUpperCase() ??
-            member?.name.slice(0, 1).toUpperCase() ??
-            slot.badge,
-          id: boundAgent?.id ?? member?.id ?? slot.id,
-          leader: slot.leader || binding?.role === 'planner',
-          provider:
-            boundAgent?.label ?? boundAgent?.id ?? binding?.roleLabel ?? slot.fallbackProvider,
-          role: boundAgent?.label ?? member?.name ?? slot.fallbackLabel,
-          status: mapMemberStatusLabel(member?.status),
-        } satisfies AgentTeamsRoleChip;
-      }),
+    () => buildRuntimeRoleChips(collaboration.members, roleBindings.roleCards),
     [collaboration.members, roleBindings.roleCards],
   );
 
-  const accentByMemberId = useMemo(() => {
-    const map = new Map<string, string>();
-    roleChips.forEach((chip, index) => {
-      const memberId = collaboration.members[index]?.id;
-      if (memberId) {
-        map.set(memberId, chip.accent);
-      }
-    });
-    return map;
-  }, [collaboration.members, roleChips]);
+  const accentByMemberId = useMemo(
+    () => buildAccentByMemberId(collaboration.members, roleChips),
+    [collaboration.members, roleChips],
+  );
 
   const memberNameById = useMemo(
-    () => new Map(collaboration.members.map((member) => [member.id, member.name])),
+    () => buildMemberNameById(collaboration.members),
     [collaboration.members],
   );
 
@@ -923,35 +271,34 @@ export function useResolvedTeamRuntimeReferenceData(
   // 使用 runtimeTaskGroupsSource 与 selectedRuntimeTaskRecords 保持同源。
   const scopedRuntimeTasksFromGroups = useMemo(
     () =>
-      collectRuntimeTasksForSession(
-        runtimeTaskGroupsSource,
-        selectedRuntimeScopeSessionId,
-        selectedSessionScope,
+      filterActiveAuditEntries(
+        collectRuntimeTasksForSession(
+          runtimeTaskGroupsSource,
+          selectedRuntimeScopeSessionId,
+          selectedSessionScope,
+        ),
+        rollbackVoidWindows,
       ),
-    [runtimeTaskGroupsSource, selectedRuntimeScopeSessionId, selectedSessionScope],
+    [
+      rollbackVoidWindows,
+      runtimeTaskGroupsSource,
+      selectedRuntimeScopeSessionId,
+      selectedSessionScope,
+    ],
   );
 
   // 合并：优先用从 groups 按 scope 提取的任务（覆盖运行时会话场景），
   // 再补充 collaboration.runtimeTasks（共享会话场景下已按 selectedSharedSessionId 提取）。
-  const effectiveRuntimeTasksForScope = useMemo(() => {
-    const deduped = new Map<string, SessionTask>();
-    for (const task of scopedRuntimeTasksFromGroups) {
-      deduped.set(task.id, task);
-    }
-    for (const task of collaboration.runtimeTasks) {
-      const existing = deduped.get(task.id);
-      if (!existing || task.updatedAt > existing.updatedAt) {
-        deduped.set(task.id, task);
-      }
-    }
-    return Array.from(deduped.values());
-  }, [collaboration.runtimeTasks, scopedRuntimeTasksFromGroups]);
+  const effectiveRuntimeTasksForScope = useMemo(
+    () => mergeRuntimeTaskRecords(scopedRuntimeTasksFromGroups, collaboration.runtimeTasks),
+    [collaboration.runtimeTasks, scopedRuntimeTasksFromGroups],
+  );
 
   const scopedOverviewData = useMemo(
     () =>
       scopeTeamRuntimeOverviewData({
         selectedSessionId: selectedRuntimeScopeSessionId,
-        handoffs: handoffEntries,
+        handoffs: activeHandoffEntries,
         runtimeTasks: effectiveRuntimeTasksForScope,
         sessions: effectiveSessions,
         messages: collaboration.messages,
@@ -964,7 +311,7 @@ export function useResolvedTeamRuntimeReferenceData(
       effectiveRuntimeTasksForScope,
       effectiveSharedSessions,
       effectiveSessions,
-      handoffEntries,
+      activeHandoffEntries,
       selectedRuntimeScopeSessionId,
     ],
   );
@@ -972,68 +319,43 @@ export function useResolvedTeamRuntimeReferenceData(
   // 从 runtimeTaskGroups 展开全量任务列表（不按 session scope 过滤），
   // 供 runtimeSessionStatuses / sharedSessionStatuses 计算每个 session 的状态。
   // collaboration.runtimeTasks 只在共享会话选中时有数据，不能覆盖运行时会话场景。
-  const allRuntimeTasksFromGroups = useMemo(() => {
-    const deduped = new Map<string, SessionTask>();
-    for (const group of runtimeTaskGroupsSource) {
-      for (const task of group.tasks) {
-        const existing = deduped.get(task.id);
-        if (!existing || task.updatedAt > existing.updatedAt) {
-          deduped.set(task.id, task);
-        }
-      }
-    }
-    return Array.from(deduped.values());
-  }, [runtimeTaskGroupsSource]);
+  const allRuntimeTasksFromGroups = useMemo(
+    () => collectAllRuntimeTasksFromGroups(runtimeTaskGroupsSource),
+    [runtimeTaskGroupsSource],
+  );
 
   // 合并 groups 展开的任务和 collaboration.runtimeTasks，作为全量任务来源。
-  const effectiveAllRuntimeTasks = useMemo(() => {
-    const deduped = new Map<string, SessionTask>();
-    for (const task of allRuntimeTasksFromGroups) {
-      deduped.set(task.id, task);
-    }
-    for (const task of collaboration.runtimeTasks) {
-      const existing = deduped.get(task.id);
-      if (!existing || task.updatedAt > existing.updatedAt) {
-        deduped.set(task.id, task);
-      }
-    }
-    return Array.from(deduped.values());
-  }, [allRuntimeTasksFromGroups, collaboration.runtimeTasks]);
+  // 回退回合后，落进作废窗口的任务同样先在读取期过滤掉——`taskFailed` 是
+  // 从这里投影给 workspaceGroups 的（失败计数、会话卡红点）。
+  const effectiveAllRuntimeTasks = useMemo(
+    () =>
+      filterActiveAuditEntries(
+        mergeRuntimeTaskRecords(allRuntimeTasksFromGroups, collaboration.runtimeTasks),
+        rollbackVoidWindows,
+      ),
+    [allRuntimeTasksFromGroups, collaboration.runtimeTasks, rollbackVoidWindows],
+  );
 
-  const runtimeSessionStatuses = useMemo(() => {
-    const statuses = new Map<string, TeamRuntimeSemanticStatus>();
-    for (const session of effectiveSessions) {
-      statuses.set(
-        session.id,
-        resolveSessionTreeTeamRuntimeStatus({
-          rootSessionId: session.id,
-          paused: session.paused ?? false,
-          stateStatus: session.stateStatus,
-          sessions: effectiveSessions,
-          handoffs: handoffEntries,
-          runtimeTasks: effectiveAllRuntimeTasks,
-        }),
-      );
-    }
-    return statuses;
-  }, [effectiveAllRuntimeTasks, effectiveSessions, handoffEntries]);
+  const runtimeSessionStatuses = useMemo(
+    () =>
+      buildRuntimeSessionStatuses({
+        sessions: effectiveSessions,
+        handoffs: activeHandoffEntries,
+        runtimeTasks: effectiveAllRuntimeTasks,
+      }),
+    [effectiveAllRuntimeTasks, effectiveSessions, activeHandoffEntries],
+  );
 
-  const sharedSessionStatuses = useMemo(() => {
-    const statuses = new Map<string, TeamRuntimeSemanticStatus>();
-    for (const sharedSession of effectiveSharedSessions) {
-      statuses.set(
-        sharedSession.sessionId,
-        resolveSessionTreeTeamRuntimeStatus({
-          rootSessionId: sharedSession.sessionId,
-          stateStatus: sharedSession.stateStatus,
-          sessions: effectiveSessions,
-          handoffs: handoffEntries,
-          runtimeTasks: effectiveAllRuntimeTasks,
-        }),
-      );
-    }
-    return statuses;
-  }, [effectiveAllRuntimeTasks, effectiveSharedSessions, effectiveSessions, handoffEntries]);
+  const sharedSessionStatuses = useMemo(
+    () =>
+      buildSharedSessionStatuses({
+        sharedSessions: effectiveSharedSessions,
+        sessions: effectiveSessions,
+        handoffs: activeHandoffEntries,
+        runtimeTasks: effectiveAllRuntimeTasks,
+      }),
+    [effectiveAllRuntimeTasks, effectiveSharedSessions, effectiveSessions, activeHandoffEntries],
+  );
 
   const selectedRuntimeStatus = useMemo(
     () =>
@@ -1104,45 +426,16 @@ export function useResolvedTeamRuntimeReferenceData(
     ],
   );
 
-  const taskLanes = useMemo((): AgentTeamsTaskLane[] => {
-    const lanes: AgentTeamsTaskLane[] = [
-      { id: 'todo', title: '待办', cards: [] },
-      { id: 'doing', title: '进行中', cards: [] },
-      { id: 'review', title: '待评审', cards: [] },
-    ];
-
-    for (const task of selectedRuntimeTaskRecords) {
-      const assigneeName = task.assignedAgent
-        ? (memberNameById.get(task.assignedAgent) ?? task.assignedAgent)
-        : task.assigneeId
-          ? (memberNameById.get(task.assigneeId) ?? '未分配')
-          : '未分配';
-      const assigneeAccent =
-        (task.assignedAgent ? accentByMemberId.get(task.assignedAgent) : undefined) ??
-        (task.assigneeId ? accentByMemberId.get(task.assigneeId) : undefined) ??
-        ROLE_SLOT_CONFIG[1].accent;
-      lanes
-        .find((lane) => lane.id === mapTaskToLaneId(task.status))
-        ?.cards.push({
-          assignee: assigneeName,
-          assigneeAccent,
-          description: task.result ?? '等待进一步推进与同步。',
-          id: task.id,
-          mutable: collaboration.tasks.some((item) => item.id === task.id),
-          priority: task.priority,
-          tags:
-            task.status === 'failed'
-              ? ['阻塞']
-              : task.status === 'completed'
-                ? ['已完成']
-                : task.status === 'in_progress'
-                  ? ['推进中']
-                  : ['待认领'],
-          title: task.title,
-        });
-    }
-    return lanes;
-  }, [selectedRuntimeTaskRecords, memberNameById, accentByMemberId]);
+  const taskLanes = useMemo(
+    () =>
+      buildTaskLanes({
+        selectedRuntimeTaskRecords,
+        teamTasks: collaboration.tasks,
+        memberNameById,
+        accentByMemberId,
+      }),
+    [selectedRuntimeTaskRecords, memberNameById, accentByMemberId],
+  );
 
   // --- Split memos: conversation cards ---
   const conversationCards = useMemo(
@@ -1327,179 +620,68 @@ export function useResolvedTeamRuntimeReferenceData(
       return null;
     }
 
-    const activeViewerCount = sharedActiveViewerCount;
-    const workspaceOnlineCount = collaboration.members.filter(
-      (member) => member.status === 'working',
-    ).length;
-    const topSummaryAudience = resolveTopSummaryAudience({
-      sharedSelected: Boolean(selectedSharedSummary),
-      sharedPresenceCount: activeSharedSession?.presence.length ?? 0,
-      sharedActiveViewerCount: activeViewerCount,
-      workspaceMemberCount: collaboration.members.length,
-      workspaceOnlineCount,
-    });
-    // 运行/等待/异常计数：选中会话作用域时完全基于 scoped 数据，
-    // 不回退到全局 collaboration.tasks——否则切会话后仪表盘数字不联动。
-    // 仅在未选中会话（全局视图）时才用 V1 collaboration.tasks 做兼容回退。
-    const isScoped = Boolean(selectedSessionScope);
-    const failedTaskCount = isScoped
-      ? runtimeActivity.failedTasks
-      : runtimeActivity.failedTasks ||
-        collaboration.tasks.filter((task) => task.status === 'failed').length;
-    const pendingTaskCount = isScoped
-      ? selectedRuntimeTaskRecords.filter((task) => task.status === 'pending').length
-      : collaboration.tasks.filter((task) => task.status === 'pending').length;
-    const runningTaskCount = isScoped
-      ? runtimeActivity.runningTasks
-      : runtimeActivity.runningTasks ||
-        collaboration.tasks.filter((task) => task.status === 'in_progress').length;
-
-    return {
-      activeMode: 'live',
+    return buildLiveTeamRuntimeReferenceViewData({
+      acknowledgeRuntimeAlert,
+      activeSharedSession,
+      activeWorkspace,
       activityStats,
-      busy: collaboration.busy || sessionActionBusy,
-      canCreateSession: hasAuth && Boolean(activeWorkspace),
-      canCreateTemplate: workflowTemplates.canCreateTemplate,
-      canManageRuntime: hasAuth && Boolean(activeWorkspace),
-      canManageSessionEntries: hasAuth && Boolean(activeWorkspace),
+      clearRuntimeAlertControl,
+      collaboration,
       conversationCards,
       createSession,
-      createTemplate: workflowTemplates.createTemplate,
-      duplicateTemplate: workflowTemplates.duplicateTemplate,
-      createWorkspace,
-      createSessionShare: collaboration.createSessionShare,
-      renameWorkspace,
-      renameSession: collaboration.renameSession,
-      deleteWorkspace,
+      createSharedSessionComment,
       createTask,
-      defaultSelectedAgentId: roleChips[0]?.id ?? 'leader',
-      defaultSelectedTeamId,
+      createWorkspace,
       defaultReceptionSessionId,
-      error: workspaceError ?? workspaceSnapshotError ?? collaboration.error,
-      feedback: localFeedback ?? collaboration.feedback,
-      footerLead: buildFooterLead({
-        activeAgentCount: projection.buddyProjection.activeAgentCount,
-        totalMembers: collaboration.members.length,
-        scoped: Boolean(selectedSessionScope),
-        sharedSelected: Boolean(selectedSharedSummary),
-        sharedCommentCount,
-        sharedViewerCount: activeViewerCount,
-        participatingLayerCount: runtimeActivity.participatingLayerCount,
-        selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
-      }),
-      footerStats: buildFooterStats({
-        scoped: isScoped,
-        sharedSelected: Boolean(selectedSharedSummary),
-        membersCount: collaboration.members.length,
-        teamCompletedTaskCount: collaboration.tasks.filter((task) => task.status === 'completed')
-          .length,
-        teamTaskCount: collaboration.tasks.length,
-        teamMessageCount: isScoped
-          ? scopedOverviewData.messages.length
-          : collaboration.messages.length,
-        selectedSessionScopeSize: selectedSessionScope?.size ?? 0,
-        participatingLayerCount: runtimeActivity.participatingLayerCount,
-        runtimeTaskTotal:
-          runtimeActivity.runtimeTaskTotal > 0
-            ? runtimeActivity.runtimeTaskTotal
-            : selectedRuntimeTaskRecords.length,
-        completedRuntimeTasks: runtimeActivity.completedTasks,
-        failedRuntimeTasks: failedTaskCount,
-        runningRuntimeTasks: runningTaskCount,
-        pendingRuntimeTasks: pendingTaskCount,
-        handoffTotal: runtimeActivity.handoffTotal,
-        sharedSessionCount: effectiveSharedSessions.length,
-        pendingReviewCount,
-        sharedCommentCount,
-        sharedViewerCount: activeViewerCount,
-        sharedRunning: selectedSharedSummary?.stateStatus === 'running',
-        sharedFailed: selectedSharedSummary?.stateStatus === 'failed',
-      }),
+      defaultSelectedTeamId,
+      deleteWorkspace,
+      effectiveSessions,
+      effectiveSharedSessions,
+      effectiveWorkspaceGroups,
+      hasAuth,
       historyTeams,
-      loading:
-        collaboration.loading ||
-        roleBindings.loading ||
-        workspaceLoading ||
-        workspaceSnapshotLoading,
+      localFeedback,
       messageCards,
       metricCards,
       moveTask,
       officeAgents,
       overviewCards,
-      reviewCards,
-      reviewBusy: collaboration.sharedOperateBusy || collaboration.sharedCommentBusy,
-      replyReview,
-      roleChips,
-      runningTeams,
-      selectTeam,
-      sendMessage,
-      sidebarSections: workflowTemplates.sections,
-      submitReviewComment,
-      createSharedSessionComment,
-      toggleSessionState: collaboration.toggleSessionState,
-      deleteSession: collaboration.deleteSession,
-      updateSessionShare: collaboration.updateSessionShare,
-      deleteSessionShare: collaboration.deleteSessionShare,
-      templateCount: workflowTemplates.templateCount,
-      templateError: workflowTemplates.error,
-      templateLoading: workflowTemplates.loading,
-      refreshTemplates: workflowTemplates.refreshLatest,
-      templates: workflowTemplates.templateCards,
-      updateTemplate: workflowTemplates.updateTemplate,
-      removeTemplate: workflowTemplates.removeTemplate,
-      taskLanes,
-      timelineEvents,
-      topSummary: {
-        description: resolveTopSummaryDescription({
-          activeWorkspaceName: activeWorkspace?.name ?? null,
-          activeWorkspaceWorkingRoot: activeWorkspace?.defaultWorkingRoot ?? null,
-          selectedRuntimeSessionTitle: selectedRuntimeSession?.title ?? null,
-          selectedRuntimeSessionId: selectedRuntimeSession?.id ?? null,
-          selectedRuntimeStatus,
-          selectedSharedSessionTitle: selectedSharedSummary?.title ?? null,
-          selectedSharedSessionId: selectedSharedSummary?.sessionId ?? null,
-          selectedSharedStatus,
-          selectedSharedWorkspaceLabel: selectedSharedSummary
-            ? formatWorkspaceLabel(selectedSharedSummary.workspacePath)
-            : null,
-          workspaceOverviewLead: projection.workspaceOverviewLines[0] ?? null,
-        }),
-        memberCount: topSummaryAudience.memberCount,
-        onlineCount: topSummaryAudience.onlineCount,
-        status: resolveTopSummaryStatus({
-          hasPausedRuntimeSessions: Array.from(runtimeSessionStatuses.values()).some(
-            (status) => status === 'paused',
-          ),
-          selectedRuntimeStatus,
-          selectedSharedStatus,
-        }),
-        title: resolveTopSummaryTitle({
-          activeWorkspaceName: activeWorkspace?.name ?? null,
-          selectedRuntimeSessionTitle: selectedRuntimeSession?.title ?? null,
-          selectedRuntimeSessionId: selectedRuntimeSession?.id ?? null,
-          selectedSharedSessionTitle: selectedSharedSummary?.title ?? null,
-          selectedSharedSessionId: selectedSharedSummary?.sessionId ?? null,
-        }),
-      },
-      workspaceGroups: effectiveWorkspaceGroups,
-      workspaces: options.workspaces ?? [],
-      auditLogs: collaboration.auditLogs,
-      sessions: effectiveSessions,
-      sessionShares: collaboration.sessionShares,
-      sharedSessions: effectiveSharedSessions,
-      selectedSharedSession: collaboration.selectedSharedSession,
-      activeSharedSession,
-      sharedSessionLoading: collaboration.sharedSessionLoading,
-      setSelectedSharedSessionId: collaboration.setSelectedSharedSessionId,
-      members: collaboration.members,
-      diagnostics: collaboration.diagnostics,
-      acknowledgeRuntimeAlert,
-      clearRuntimeAlertControl,
-      suppressRuntimeAlert,
-      runRuntimeAlertRemediation,
+      pendingReviewCount,
+      projection,
       reconcileStaleDecisions,
       reconcileStaleRuntimeThreads,
-    } satisfies TeamRuntimeReferenceViewData;
+      renameWorkspace,
+      replyReview,
+      reviewCards,
+      roleBindingsLoading: roleBindings.loading,
+      roleChips,
+      runRuntimeAlertRemediation,
+      runningTeams,
+      runtimeActivity,
+      runtimeSessionStatuses,
+      scopedOverviewData,
+      selectTeam,
+      selectedRuntimeSession,
+      selectedRuntimeStatus,
+      selectedRuntimeTaskRecords,
+      selectedSessionScope,
+      selectedSharedStatus,
+      selectedSharedSummary,
+      sendMessage,
+      sessionActionBusy,
+      sharedActiveViewerCount,
+      sharedCommentCount,
+      submitReviewComment,
+      suppressRuntimeAlert,
+      taskLanes,
+      timelineEvents,
+      workflowTemplates,
+      workspaceError,
+      workspaceLoading,
+      workspaceSnapshotError,
+      workspaceSnapshotLoading,
+      workspaces: options.workspaces ?? [],
+    });
   }, [
     hasAuth,
     activeSharedSession,

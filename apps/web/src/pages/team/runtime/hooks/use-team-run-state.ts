@@ -23,6 +23,10 @@ import {
   useTeamEventsConnectionStore,
   useTeamNotificationStore,
 } from '../../../../stores/team/team-events.js';
+import {
+  filterActiveAuditEntries,
+  useRollbackVoidWindows,
+} from '../../../../stores/team/rollback-tombstones.js';
 import { useSessionPendingInteractionSnapshot } from '../../../../utils/session/use-session-pending-interaction-snapshot.js';
 import { collectSessionScope } from '../data/team-runtime-session-scope.js';
 import {
@@ -66,6 +70,7 @@ export function useTeamRunState(input?: {
   const clarifications = useClarificationStore((s) => s.items);
   const connectionState = useTeamEventsConnectionStore((s) => s.state);
   const events = useTeamNotificationStore((s) => s.events);
+  const rollbackVoidWindows = useRollbackVoidWindows();
   const pendingInteractionSnapshot = useSessionPendingInteractionSnapshot();
 
   // 每 5s 触发一次重算，让「最后活动 N 秒前」能随时间推进刷新，
@@ -78,7 +83,9 @@ export function useTeamRunState(input?: {
 
   return useMemo(() => {
     void tick;
-    const entries = Array.from(handoffs.values());
+    // 被回退回合的 handoff / 事件不再参与运行态聚合：否则失败横幅会停留在
+    // 已经回退掉的回合上，直到下一次全量快照才消失。
+    const entries = filterActiveAuditEntries(Array.from(handoffs.values()), rollbackVoidWindows);
     const nodeEntries = Array.from(nodes.values());
     const totalCount = entries.length;
     const activeEntries = entries.filter((h) => ACTIVE_STATES.has(h.state));
@@ -91,7 +98,7 @@ export function useTeamRunState(input?: {
       (max, h) => (h.updatedAt && h.updatedAt > max ? h.updatedAt : max),
       0,
     );
-    const eventLatest = events.reduce(
+    const eventLatest = filterActiveAuditEntries(events, rollbackVoidWindows).reduce(
       (max, event) => (event.timestamp > max ? event.timestamp : max),
       0,
     );
@@ -166,6 +173,7 @@ export function useTeamRunState(input?: {
     clarifications,
     connectionState,
     events,
+    rollbackVoidWindows,
     pendingInteractionSnapshot,
     tick,
     input?.pendingPermissionCount,

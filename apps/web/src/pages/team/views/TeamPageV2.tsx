@@ -51,8 +51,11 @@ import {
 } from '../runtime/data/team-runtime-reference-data.js';
 import { useTeamWorkspaceState } from '../hooks/use-team-workspace-state.js';
 import { useTeamWorkspaceSnapshotState } from '../hooks/use-team-workspace-snapshot-state.js';
-import { ConversationArea } from '../runtime/shell/controls/ConversationArea.js';
-import { TeamConversationView } from '../conversation/TeamConversationView.js';
+import { useTeamSessionViewState } from '../hooks/use-team-session-view-state.js';
+import { useTeamMiddleArea } from '../hooks/use-team-middle-area.js';
+import { useTeamEditorOverlay } from '../hooks/use-team-editor-overlay.js';
+import { useTeamOfficeScene } from '../hooks/use-team-office-scene.js';
+import { TeamSessionViewStateProvider } from '../hooks/team-session-view-state-context.js';
 import { useMultiSessionAttach } from '../../../stores/team/use-multi-session-attach.js';
 import { TeamStatusBar } from '../runtime/shell/header/TeamStatusBar.js';
 import {
@@ -64,17 +67,14 @@ import { useTeamSessionListRuntimeState } from '../runtime/shell/sidebar/use-tea
 import { NewTeamWorkspaceModal } from '../runtime/shell/modals/NewTeamWorkspaceModal.js';
 import { ConfirmDeleteWorkspaceModal } from '../runtime/shell/modals/ConfirmDeleteWorkspaceModal.js';
 import { NewTeamSessionModal } from '../runtime/shell/modals/NewTeamSessionModal.js';
-import { renderMiddleTabContent, type MiddleTabKey } from '../runtime/tabs/MiddleTabRouter.js';
+import type { MiddleTabKey } from '../runtime/tabs/MiddleTabRouter.js';
 import {
   extractTeamRuntimeHandoffContextFromEvent,
   type TeamRuntimeHandoffContextInput,
 } from '../runtime/tabs/team-runtime-navigation.js';
 import {
   LEAF_TO_PRIMARY,
-  MIDDLE_TAB_KEYS,
   getDefaultLeafFor,
-  readRememberedLeaf,
-  rememberLeaf,
   type PrimaryTabKey,
 } from '../runtime/tabs/team-page-v2-tabs.js';
 import { TeamTabBar } from '../runtime/shell/header/TeamTabBar.js';
@@ -90,12 +90,11 @@ import {
   useTeamNotificationStore,
   useClarificationStore,
 } from '../../../stores/team/team-events.js';
+import {
+  filterActiveAuditEntries,
+  useRollbackVoidWindows,
+} from '../../../stores/team/rollback-tombstones.js';
 import type { HandoffEvent } from '../../../stores/team/team-events.js';
-import { ClassicTeamLayerTodoSidePanel } from './workbench/ClassicTeamLayerTodoSidePanel.js';
-import { ClassicTeamConversationOpsChrome } from '../conversation/ops/ClassicTeamConversationOpsChrome.js';
-import { ClassicTeamConversationInlineCards } from '../conversation/ops/ClassicTeamConversationInlineCards.js';
-import { OfficeThreeCanvas } from '../runtime/tabs/office/OfficeThreeCanvas.js';
-import { useOfficeSceneState } from '../runtime/tabs/office/OfficeScene.js';
 import type { TeamSessionCreationDraft } from '../runtime/data/team-session-creation.types.js';
 import {
   createTeamClient,
@@ -110,26 +109,17 @@ import {
   collectSessionScope,
   countUnreadNotificationEventsInScope,
   isHandoffInSessionScope,
+  isSessionInScope,
 } from '../runtime/data/team-runtime-session-scope.js';
-import { useFileEditor } from '../../../hooks/editor/useFileEditor.js';
-import { WorkspaceEditorOverlay } from '../../../components/file-editor/WorkspaceEditorOverlay.js';
-import type { EditorPaneTab } from '../../../components/file-editor/EditorBrowserWorkspace.js';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { usePageActivation } from '../../../components/common/routing/CachedRouteOutlet.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
 import { isPathWithinRoot } from '../../../utils/workspace-path.js';
 import {
-  IdleHint,
   TeamFocusHandoffBanner,
   TeamPageSuperbarLeading,
   TeamPageSuperbarSummary,
-  TeamSharedConversationPanel,
 } from './team-page-v2-panels.js';
-import { ErrorDiagnosticsPanel } from '../runtime/shell/controls/ErrorDiagnosticsPanel.js';
-import {
-  SmartSuggestionBubble,
-  type SuggestionContext,
-} from '../runtime/shell/controls/SmartInputGuide.js';
 import {
   buildRuntimeResumeResumingNotice,
   buildRuntimeResumeSubmittedNotice,
@@ -137,10 +127,14 @@ import {
 } from './team-page-v2-runtime-resume-notice.js';
 import { resolveMatchedSharedSessionDetail } from '../runtime/data/team-runtime-shared-context.js';
 import { TeamPageV2RuntimeNotices } from './TeamPageV2RuntimeNotices.js';
+import { TeamPageMiddleArea } from './TeamPageMiddleArea.js';
+import { TeamPageOfficeScene } from './TeamPageOfficeScene.js';
 import { TeamFusionSuperbarSummary } from './TeamFusionSuperbarSummary.js';
 import {
   buildTeamSessionRoute,
   resolveTeamSessionFromRoute,
+  resolveTeamSessionWorkspacePath,
+  resolveTeamWorkspaceIdForWorkspacePath,
 } from '../../../utils/session/team-session-route.js';
 
 // ───── 尺寸常量 ─────
@@ -202,27 +196,6 @@ const MAIN_GRID_BASE_STYLE: CSSProperties = {
   transition: 'grid-template-columns 200ms ease',
 };
 
-const LEFT_AREA_STYLE: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  minWidth: 0,
-  minHeight: 0,
-  overflow: 'hidden',
-  isolation: 'isolate',
-};
-
-const DEFAULT_BROWSER_PREVIEW_URL = 'http://localhost:3000';
-
-function normalizeBrowserPreviewUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^[a-z0-9-]+\.[a-z]{2,}/i.test(trimmed)) return `https://${trimmed}`;
-  if (/^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/.*)?$/i.test(trimmed)) {
-    return `http://${trimmed}`;
-  }
-  return trimmed;
-}
-
 // ───── 入口组件 ─────
 
 export default function TeamPageV2() {
@@ -244,7 +217,28 @@ export default function TeamPageV2() {
     resolvedTeamWorkspaceId ?? undefined,
   );
   const [selectedTeamId, setSelectedTeamId] = useState('');
-  const [selectedAgentId, setSelectedAgentId] = useState('');
+  /**
+   * 会话视图 / tab 记忆（焦点模式、办公全屏、编辑器浮层、层级抽屉、选中角色、
+   * middleTab 与「主 tab → 叶子」记忆）现已按会话作用域由 useTeamSessionViewState
+   * 持有并写盘；TeamPageV2 本身不得再读写这些字段，也不得在切换会话 / 回欢迎页时
+   * 手动 reset——那样写入会落在「上一个会话」的条目里，抹掉它自己的记忆。
+   */
+  const viewState = useTeamSessionViewState({ sessionId: selectedTeamId || null });
+  const {
+    middleTab,
+    setMiddleTab,
+    readRememberedLeaf,
+    rememberLeaf,
+    selectedAgentId,
+    setSelectedAgentId,
+    drawerVisible,
+    setDrawerVisible,
+    drawerTarget,
+    setDrawerTarget,
+    focusMode,
+    setFocusMode,
+    setShowOfficeFullscreen,
+  } = viewState;
   /**
    * 标识用户是否主动从左栏 / TeamPageV2 自己的菜单选过具体 team session。
    * - false：自动填充的 selectedTeamId 视为「未选」，纠偏 effect 可覆盖
@@ -259,14 +253,8 @@ export default function TeamPageV2() {
    * 由恢复 effect 自动 setSelectedTeamId。
    */
   const pendingSelectedTeamIdRef = useRef<string | null>(null);
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  /**
-   * 底部「层级对话」抽屉要聚焦的角色实例。nonce 用于让「收起抽屉后再点同一张卡片」
-   * 也能重新展开（只比 sessionId 的话 props 不变、effect 不触发）。
-   */
-  const [drawerTarget, setDrawerTarget] = useState<{ sessionId: string; nonce: number } | null>(
-    null,
-  );
+  /** 跨会话跳转时，等目标会话装载完再应用一次的 tab 意图。 */
+  const pendingMiddleTabRef = useRef<{ sessionId: string; tab: MiddleTabKey } | null>(null);
   const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [initialTemplateId, setInitialTemplateId] = useState<string | null>(null);
@@ -289,19 +277,9 @@ export default function TeamPageV2() {
     }
     return SIDEBAR_WIDTH;
   });
-  const [focusMode, setFocusMode] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null);
-  const [showOfficeFullscreen, setShowOfficeFullscreen] = useState(false);
   const [focusedHandoffId, setFocusedHandoffId] = useState<string | null>(null);
-  const [middleTab, setMiddleTab] = useState<MiddleTabKey>(() => {
-    if (typeof window === 'undefined') return 'dashboard';
-    const saved = window.localStorage.getItem('teamV2.middleTab');
-    if (saved && MIDDLE_TAB_KEYS.has(saved as MiddleTabKey)) {
-      return saved as MiddleTabKey;
-    }
-    return 'dashboard';
-  });
   /**
    * 是否启用 team 端 composer 输入（L1.3 inbound 反向通道）。
    *
@@ -328,13 +306,16 @@ export default function TeamPageV2() {
   const mode = useTeamPageMode();
   const breakpoint = useBreakpoint();
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const rollbackVoidWindows = useRollbackVoidWindows();
   const layerNodesMap = useLayerStore((s) => s.nodes);
   const notificationEvents = useTeamNotificationStore((s) => s.events);
   const readEventKeys = useTeamNotificationStore((s) => s.readEventKeys);
   const globalUnreadCount = useTeamNotificationStore((s) => s.unreadCount);
   const clarificationPending = useClarificationStore((s) => s.pendingCount);
   const clarificationItems = useClarificationStore((s) => s.items);
-  const officeSceneState = useOfficeSceneState();
+  // 3D 场景状态 + 办公全屏开关（ESC 退出）收敛到 useTeamOfficeScene；
+  // officeSceneState 同时供中间区与全屏视图共享。
+  const officeScene = useTeamOfficeScene({ viewState });
   const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const [pauseResumeBusy, setPauseResumeBusy] = useState(false);
   const [runtimeControlError, setRuntimeControlError] = useState<string | null>(null);
@@ -375,13 +356,36 @@ export default function TeamPageV2() {
     }
   }, [data.workspaceGroups]);
 
+  // 跨会话跳转时（例如点开 handoff 卡片）记录下来的 tab 意图：要等目标会话真正装载完
+  // 再应用。立即 setMiddleTab 会写进旧会话作用域，并被目标会话的作用域装载覆盖。
   useEffect(() => {
-    if (!teamWorkspaceId || selectedTeamId || !data.workspaceGroups.length) {
+    const pending = pendingMiddleTabRef.current;
+    if (!pending || pending.sessionId !== selectedTeamId) {
+      return;
+    }
+    pendingMiddleTabRef.current = null;
+    setMiddleTab(pending.tab);
+  }, [selectedTeamId, setMiddleTab]);
+
+  // 抽屉目标归属守卫：恢复出来的 drawerTarget 是角色实例子会话，必须落在当前选中
+  // 会话的子树内。数据尚未加载完时保守等待，确认越界才关闭抽屉并清空目标。
+  useEffect(() => {
+    if (!drawerTarget) return;
+    if (data.sessions.length === 0) return; // 运行时会话尚未加载，等下一轮再判定
+    const scope = collectSessionScope(selectedTeamId || null, data.sessions);
+    if (scope.size <= 1) return; // 只有根会话，说明子树还没加载出来，保守等待
+    if (isSessionInScope(drawerTarget.sessionId, scope)) return;
+    setDrawerVisible(false);
+    setDrawerTarget(null);
+  }, [data.sessions, drawerTarget, selectedTeamId, setDrawerTarget, setDrawerVisible]);
+
+  useEffect(() => {
+    if (selectedTeamId || !data.workspaceGroups.length) {
       return;
     }
     const requestedSessionId = searchParams.get('sessionId');
     const routeSessionId = resolveTeamSessionFromRoute({
-      defaultSessionId: data.defaultSelectedTeamId,
+      defaultSessionId: teamWorkspaceId ? data.defaultSelectedTeamId : '',
       groups: data.workspaceGroups,
       requestedSessionId,
     });
@@ -391,6 +395,21 @@ export default function TeamPageV2() {
     userSelectedTeamRef.current = true;
     setSelectedTeamId(routeSessionId);
     data.selectTeam(routeSessionId);
+    if (!teamWorkspaceId) {
+      // /team 入口下 URL 缺少工作区 id：反推会话归属的工作区并写入路径，
+      // 否则刷新会退回到默认欢迎页。反推失败时退回只规范化 sessionId。
+      const derivedWorkspaceId = resolveTeamWorkspaceIdForWorkspacePath({
+        workspacePath: resolveTeamSessionWorkspacePath({
+          groups: data.workspaceGroups,
+          sessionId: routeSessionId,
+        }),
+        workspaces: workspaceState.workspaces,
+      });
+      if (derivedWorkspaceId) {
+        navigate(buildTeamSessionRoute(derivedWorkspaceId, routeSessionId), { replace: true });
+        return;
+      }
+    }
     if (requestedSessionId !== routeSessionId) {
       const nextSearchParams = new URLSearchParams(searchParams);
       nextSearchParams.set('sessionId', routeSessionId);
@@ -400,10 +419,12 @@ export default function TeamPageV2() {
     data.defaultSelectedTeamId,
     data.selectTeam,
     data.workspaceGroups,
+    navigate,
     searchParams,
     selectedTeamId,
     setSearchParams,
     teamWorkspaceId,
+    workspaceState.workspaces,
   ]);
 
   useEffect(() => {
@@ -540,15 +561,16 @@ export default function TeamPageV2() {
     selectedRuntimeSessionScope,
     selectedSharedSession,
   ]);
-  const scopedHandoffs = useMemo(
-    () =>
-      selectedRuntimeSessionScope
-        ? Array.from(handoffs.values()).filter((handoff) =>
-            isHandoffInSessionScope(handoff, selectedRuntimeSessionScope),
-          )
-        : [],
-    [handoffs, selectedRuntimeSessionScope],
-  );
+  const scopedHandoffs = useMemo(() => {
+    if (!selectedRuntimeSessionScope) {
+      return [];
+    }
+    const scoped = Array.from(handoffs.values()).filter((handoff) =>
+      isHandoffInSessionScope(handoff, selectedRuntimeSessionScope),
+    );
+    // 被回退回合的 handoff 不再参与任何派生态（失败计数 / 内联诊断卡 / 状态条）。
+    return filterActiveAuditEntries(scoped, rollbackVoidWindows);
+  }, [handoffs, rollbackVoidWindows, selectedRuntimeSessionScope]);
   const { activeCount: activeHandoffCount, staleCount: staleHandoffCount } = useMemo(
     () => countRuntimeTreeHandoffs(scopedHandoffs),
     [scopedHandoffs],
@@ -641,13 +663,9 @@ export default function TeamPageV2() {
       if (!options?.preserveFocus) {
         setFocusedHandoffId(null);
       }
-      // 点击会话 → 切回对话视图：关掉占据内容区的文件编辑器浮层，
-      // 让选中的会话对话流重新可见（与「点文件 = 预览」互为切换）。
-      setEditorOverlayOpen(false);
-      setMiddleTab('conversation');
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('teamV2.middleTab', 'conversation');
-      }
+      // 这里刻意不再强制 middleTab / 关闭浮层与抽屉：这些状态按会话记忆，由
+      // useTeamSessionViewState 在作用域切换时装载；此处写入会落在「上一个会话」的
+      // 条目里，抹掉它自己的记忆。没有记忆的新会话默认就是 conversation。
       if (isMobile) {
         setMobileSidebarOpen(false);
       }
@@ -656,30 +674,31 @@ export default function TeamPageV2() {
       // 自动切换 URL 到那个工作区，让 activeWorkspace / snapshot / 文件树
       // 全部跟随切换。跨工作区切换时先清空 selectedTeamId，避免新工作区
       // 数据加载完成前用旧工作区的 sessionId 去加载对话内容。
-      const sessionGroup = data.workspaceGroups.find((group) =>
-        group.sessions.some((s) => s.id === teamId),
-      );
+      const sessionWorkspaceId =
+        resolveTeamWorkspaceIdForWorkspacePath({
+          workspacePath: resolveTeamSessionWorkspacePath({
+            groups: data.workspaceGroups,
+            sessionId: teamId,
+          }),
+          workspaces: workspaceState.workspaces,
+        }) ?? resolvedTeamWorkspaceId;
       let isCrossWorkspaceNavigation = false;
-      if (sessionGroup?.workspacePath) {
-        const sessionPath = sessionGroup.workspacePath;
-        const targetWorkspace = workspaceState.workspaces.find(
-          (ws) =>
-            ws.defaultWorkingRoot != null && isPathWithinRoot(sessionPath, ws.defaultWorkingRoot),
-        );
-        if (targetWorkspace && targetWorkspace.id !== resolvedTeamWorkspaceId) {
-          navigate(buildTeamSessionRoute(targetWorkspace.id, teamId));
-          isCrossWorkspaceNavigation = true;
-          // 先记住用户想选的会话，等新工作区数据加载后再恢复
-          pendingSelectedTeamIdRef.current = teamId;
-          userSelectedTeamRef.current = true;
-          setSelectedTeamId('');
-        }
+      if (sessionWorkspaceId && sessionWorkspaceId !== resolvedTeamWorkspaceId) {
+        navigate(buildTeamSessionRoute(sessionWorkspaceId, teamId));
+        isCrossWorkspaceNavigation = true;
+        // 先记住用户想选的会话，等新工作区数据加载后再恢复
+        pendingSelectedTeamIdRef.current = teamId;
+        userSelectedTeamRef.current = true;
+        setSelectedTeamId('');
       }
 
       if (!isCrossWorkspaceNavigation) {
         setSelectedTeamId(teamId);
         data.selectTeam(teamId);
-        if (resolvedTeamWorkspaceId) {
+        if (!teamWorkspaceId && sessionWorkspaceId) {
+          // /team 入口下必须把工作区写进路径，刷新后才能恢复选中的会话。
+          navigate(buildTeamSessionRoute(sessionWorkspaceId, teamId), { replace: true });
+        } else if (sessionWorkspaceId) {
           const nextSearchParams = new URLSearchParams(searchParams);
           nextSearchParams.set('sessionId', teamId);
           setSearchParams(nextSearchParams, { replace: true });
@@ -693,6 +712,7 @@ export default function TeamPageV2() {
       resolvedTeamWorkspaceId,
       searchParams,
       setSearchParams,
+      teamWorkspaceId,
       workspaceState.workspaces,
     ],
   );
@@ -874,8 +894,9 @@ export default function TeamPageV2() {
   // 点击导航栏 Team 图标时（已在 /team 路由），清除会话选中回到欢迎页面。
   useEffect(() => {
     if (!resetToWelcomeSignal || resetToWelcomeSignal.route !== 'team') return;
+    // 回欢迎页要一并取消未完成的跨工作区恢复，否则它会把页面重新拉回刚才的会话。
+    pendingSelectedTeamIdRef.current = null;
     setSelectedTeamId('');
-    setEditorOverlayOpen(false);
     consumeResetToWelcomeSignal();
     navigate('/team', { replace: true });
   }, [resetToWelcomeSignal, consumeResetToWelcomeSignal, navigate]);
@@ -966,14 +987,13 @@ export default function TeamPageV2() {
     setSelectedWorkspacePath(workspacePath);
   }, []);
 
-  const handleMiddleTabChange = useCallback((next: MiddleTabKey) => {
-    setMiddleTab(next);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('teamV2.middleTab', next);
-    }
-    // 记住该子视图属于哪个主 tab 的最后位置，供主 tab 往返切换时恢复。
-    rememberLeaf(next);
-  }, []);
+  const handleMiddleTabChange = useCallback(
+    (next: MiddleTabKey) => {
+      // 只切换 tab；「主 tab → 叶子」记忆由 useTeamSessionViewState 的 setMiddleTab 记录。
+      setMiddleTab(next);
+    },
+    [setMiddleTab],
+  );
 
   const handleOpenHandoffContext = useCallback(
     ({ handoffId, preferredTab, sessionId }: TeamRuntimeHandoffContextInput) => {
@@ -986,9 +1006,15 @@ export default function TeamPageV2() {
       ) {
         selectTeamInternal(sessionId, { preserveFocus: true });
       }
+      if (sessionId && sessionId !== selectedTeamId) {
+        // 同一事件里既切会话又指定 tab：立即 setMiddleTab 会落到旧会话作用域，并被
+        // 目标会话的作用域装载覆盖，因此先记下意图，等 selectedTeamId 切换后再应用。
+        pendingMiddleTabRef.current = { sessionId, tab: preferredTab };
+        return;
+      }
       handleMiddleTabChange(preferredTab);
     },
-    [data.workspaceGroups, handleMiddleTabChange, selectTeamInternal],
+    [data.workspaceGroups, handleMiddleTabChange, selectTeamInternal, selectedTeamId],
   );
 
   const handleOpenBlockingTarget = useCallback(
@@ -1071,104 +1097,23 @@ export default function TeamPageV2() {
     setShowOfficeFullscreen(true);
   }, []);
 
-  // 文件目录点击 → 在全屏编辑器浮层中打开真正的编辑器(复用 chat 同款
-  // EditorBrowserWorkspace)。team 页没有内置分屏编辑器,因此自己持有一份
-  // useFileEditor 状态 + 一个铺满内容区的浮层,而不是依赖只有 ChatPage 才会
-  // 填充的全局 FileEditorContext(在 /team 路由下那个 ref 永远是 null,导致
-  // 之前点击文件「打开到编辑器」毫无反应)。
+  // 文件目录点击 → 编辑器浮层。文件状态 / 浮层开关 / pane / 预览地址的接线已收敛到
+  // useTeamEditorOverlay。viewState 显式注入：本组件自己渲染
+  // <TeamSessionViewStateProvider>，组件体不在该 Provider 内，读不到 context。
   const editorWorkspacePath = workspaceState.activeWorkspace?.defaultWorkingRoot ?? null;
-  const fileEditor = useFileEditor(editorWorkspacePath);
-  const [editorOverlayOpen, setEditorOverlayOpen] = useState(false);
-  const [browserPreviewUrl, setBrowserPreviewUrl] = useState<string | null>(null);
-  const [editorPaneTab, setEditorPaneTab] = useState<EditorPaneTab>('code');
-  const [savingFile, setSavingFile] = useState(false);
+  const editorOverlay = useTeamEditorOverlay({
+    workspacePath: editorWorkspacePath,
+    isMobile,
+    setMobileSidebarOpen,
+    viewState,
+  });
 
-  const teamEditorMode = useUIStateStore((s) => s.teamEditorMode);
-  const teamSplitPos = useUIStateStore((s) => s.teamSplitPos);
-  const setTeamSplitPos = useUIStateStore((s) => s.setTeamSplitPos);
-  const setTeamEditorMode = useUIStateStore((s) => s.setTeamEditorMode);
   const workbenchLayoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const isFusionWorkbench = workbenchLayoutMode === 'fusion';
   const isClassicWorkbench = workbenchLayoutMode === 'classic';
   // 全局侧栏（classic 的 AppSidebar / fusion 的 FusionSidebar）已承载「团队会话」段，
   // 团队页自己的左侧栏现仅渲染文件树（会话列表已从该栏彻底移除，而非隐藏）。
   const shellCollapsed = effectiveSidebarCollapsed;
-  const handleOpenFile = useCallback(
-    (path: string) => {
-      if (isMobile) {
-        setMobileSidebarOpen(false);
-      }
-      setEditorPaneTab('code');
-      setEditorOverlayOpen(true);
-      void fileEditor.openFile(path);
-    },
-    [fileEditor, isMobile],
-  );
-  const handleSaveFile = useCallback(
-    async (path: string) => {
-      setSavingFile(true);
-      try {
-        await fileEditor.saveFile(path);
-      } finally {
-        setSavingFile(false);
-      }
-    },
-    [fileEditor],
-  );
-
-  // 编辑器浮层打开时按 ESC 关闭。
-  useEffect(() => {
-    if (!editorOverlayOpen) return;
-    const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setEditorOverlayOpen(false);
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [editorOverlayOpen]);
-
-  useEffect(() => {
-    if (!showOfficeFullscreen) return;
-    const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowOfficeFullscreen(false);
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [showOfficeFullscreen]);
-
-  const openBrowserPreview = useCallback(
-    (rawUrl?: string | null) => {
-      const nextUrl = normalizeBrowserPreviewUrl(rawUrl?.trim() || DEFAULT_BROWSER_PREVIEW_URL);
-      if (isMobile) {
-        setMobileSidebarOpen(false);
-      }
-      setBrowserPreviewUrl(nextUrl);
-      setEditorPaneTab('browser');
-      setEditorOverlayOpen(true);
-    },
-    [isMobile],
-  );
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleOpenBrowser = () => {
-      openBrowserPreview(DEFAULT_BROWSER_PREVIEW_URL);
-    };
-    const handleOpenBrowserUrl = (event: Event) => {
-      const detail = (event as CustomEvent<{ url?: string }>).detail;
-      openBrowserPreview(detail?.url ?? DEFAULT_BROWSER_PREVIEW_URL);
-    };
-
-    window.addEventListener('openAwork:open-browser', handleOpenBrowser);
-    window.addEventListener('openawork:browser:open-url', handleOpenBrowserUrl as EventListener);
-    return () => {
-      window.removeEventListener('openAwork:open-browser', handleOpenBrowser);
-      window.removeEventListener(
-        'openawork:browser:open-url',
-        handleOpenBrowserUrl as EventListener,
-      );
-    };
-  }, [openBrowserPreview]);
 
   // grid template 列数（只在桌面/平板下生效）
   const gridTemplateColumns = '1fr';
@@ -1188,81 +1133,34 @@ export default function TeamPageV2() {
     mainGridStyle.position = 'relative';
   }
 
-  // 派生当前选中会话的失败任务数（用于标签页红点 + 错误面板）
-  const failedTaskCount = useMemo(() => {
-    return selectedTeam?.taskFailed ?? scopedHandoffs.filter((h) => h.state === 'failed').length;
-  }, [scopedHandoffs, selectedTeam?.taskFailed]);
-
-  // 当前输入建议上下文
-  const suggestionContext = useMemo<SuggestionContext>(() => {
-    if (failedTaskCount > 0) return 'failure';
-    if (effectiveMode === 'idle') return 'idle';
-    if (effectiveMode === 'paused') return 'clarifying';
-    if (effectiveMode === 'running') return 'running';
-    return 'default';
-  }, [effectiveMode, failedTaskCount]);
-
-  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
-
-  // 失败任务数变化时重置 dismiss 状态
-  useEffect(() => {
-    if (failedTaskCount > 0) {
-      setSuggestionDismissed(false);
-    }
-  }, [failedTaskCount]);
-
-  const [retryingFailed, setRetryingFailed] = useState(false);
-
-  const handleRetryFailed = useCallback(async () => {
-    if (
-      !accessToken ||
-      !teamClient ||
-      !selectedTeamId ||
-      isSelectedSharedSession ||
-      pauseResumeBusy
-    ) {
-      return;
-    }
-    setRetryingFailed(true);
-    try {
-      await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
-      refreshWorkspaceSnapshot();
-      toast('已提交失败任务重试请求，正在断点续传…', 'success');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '重试失败任务时发生错误';
-      toast(`重试失败：${message}`, 'error');
-    } finally {
-      setRetryingFailed(false);
-    }
-  }, [
+  // 中间区装配（数据 / 可见性 / 回调）收敛到 useTeamMiddleArea，节点组装见 TeamPageMiddleArea
+  const middleArea = useTeamMiddleArea({
     accessToken,
+    clarificationItems,
+    data,
+    effectiveFocusMode,
+    effectiveMode,
+    effectiveWorkspaceGroups,
+    isClassicWorkbench,
+    isMobile,
     isSelectedSharedSession,
+    layerNodesMap,
+    middleTab,
     pauseResumeBusy,
     refreshWorkspaceSnapshot,
+    scopedHandoffs,
+    selectedRuntimeSessionScope,
+    selectedTeam,
     selectedTeamId,
+    setFocusMode,
     teamClient,
-  ]);
+  });
+  const { failedTaskCount, retryingFailed, handleRetryFailed, handleClassicFocusFail } = middleArea;
 
   const focusedHandoffEntry = useMemo(
     () => (focusedHandoffId ? (handoffs.get(focusedHandoffId) ?? null) : null),
     [focusedHandoffId, handoffs],
   );
-  const conversationReceptionSessionId = useMemo(() => {
-    if (!data.defaultReceptionSessionId) {
-      return null;
-    }
-    const receptionSession = effectiveWorkspaceGroups
-      .flatMap((group) => group.sessions)
-      .find((session) => session.id === data.defaultReceptionSessionId);
-    return receptionSession?.isSharedSession ? null : data.defaultReceptionSessionId;
-  }, [data.defaultReceptionSessionId, effectiveWorkspaceGroups]);
-
-  // 没有选中会话时，自动切到「对话」tab 显示欢迎页面。
-  useEffect(() => {
-    if (!selectedTeamId && middleTab !== 'conversation') {
-      handleMiddleTabChange('conversation');
-    }
-  }, [handleMiddleTabChange, middleTab, selectedTeamId]);
 
   const focusSuggestedTab = useMemo<MiddleTabKey | null>(() => {
     if (!focusedHandoffEntry) return null;
@@ -1291,723 +1189,290 @@ export default function TeamPageV2() {
     toast(feedback.message, feedback.tone);
   }, [data.feedback]);
 
-  const renderTeamMiddleTabPanel = (targetMiddleTab: MiddleTabKey) => (
-    <div
-      key={`${targetMiddleTab}-${selectedTeamId}`}
-      id={`middle-panel-${targetMiddleTab}`}
-      role="tabpanel"
-      aria-labelledby={`middle-tab-${targetMiddleTab}`}
-      className="team-v2-panel-tab-content"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'stretch',
-        flex: 1,
-        minHeight: 0,
-        overflow: 'hidden',
-        background: 'var(--bg-base)',
-        isolation: 'isolate',
-      }}
-    >
-      {renderMiddleTabContent({
-        middleTab: targetMiddleTab,
-        selectedAgentId,
-        selectedTeamId,
-        selectedTeam,
-        focusHandoffId: focusedHandoffId,
-        officeSceneState,
-        onSelectTeam: handleSelectTeam,
-        onSelectAgent: handleSelectAgent,
-        onOpenFullscreen: handleOpenFullscreen,
-        onOpenClarifications: () => handleMiddleTabChange('artifacts'),
-        onOpenHandoffContext: handleOpenHandoffContext,
-        onOpenBlockingTarget: handleOpenBlockingTarget,
-        onClearFocusedHandoff: () => setFocusedHandoffId(null),
-        onSelectLayerSession: handleSelectLayerSession,
-        onCancelHandoff: handleCancelHandoff,
-        handoffs,
-        gatewayUrl,
-        accessToken,
-        activeWorkspaceName: fileTreeWorkspacePath ?? undefined,
-        onWorkspaceChanged: workspaceState.refresh,
-        teamWorkspaceId: resolvedTeamWorkspaceId,
-        onUseTemplate: handleOpenNewSessionModal,
-        fileEditor,
-        onSaveFile: handleSaveFile,
-      })}
-    </div>
-  );
-
-  const classicFailedHandoffs = useMemo(
-    () => scopedHandoffs.filter((h) => h.state === 'failed'),
-    [scopedHandoffs],
-  );
-  const classicRunningHandoffs = useMemo(
-    () => scopedHandoffs.filter((h) => h.state === 'running' || h.state === 'claimed'),
-    [scopedHandoffs],
-  );
-  const classicPendingClarifications = useMemo(() => {
-    const pending = (clarificationItems ?? []).filter((item) => item.status === 'pending');
-    if (!selectedRuntimeSessionScope) {
-      // 未选中本地运行树会话时，不跨会话展示澄清，避免脏状态
-      return selectedTeamId
-        ? pending.filter(
-            (item) => item.sessionId === selectedTeamId || item.fromSessionId === selectedTeamId,
-          )
-        : [];
-    }
-    return pending.filter(
-      (item) =>
-        selectedRuntimeSessionScope.has(item.sessionId) ||
-        selectedRuntimeSessionScope.has(item.fromSessionId),
-    );
-  }, [clarificationItems, selectedRuntimeSessionScope, selectedTeamId]);
-
-  const handleClassicFocusFail = useCallback(() => {
-    // 优先滚到对话内联失败/澄清卡，否则滚到运营条 attention 锚点
-    const inline = document.querySelector(
-      '[data-team-classic-inline-cards] [data-team-attention-anchor="true"]',
-    );
-    const target =
-      inline ??
-      document.querySelector('[data-team-classic-ops-chrome] [data-team-attention-anchor="true"]');
-    if (target instanceof HTMLElement) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, []);
-
-  const handleClassicFocusWorkbench = useCallback(() => {
-    if (effectiveFocusMode) {
-      setFocusMode(false);
-    }
-    // 右侧任务台默认在 tasks tab；若中间主 tab 不在对话，classic 仍保持对话在左
-  }, [effectiveFocusMode]);
-
-  const handleClassicFillComposer = useCallback((text: string) => {
-    // 与 TeamConversationView 监听的 composer-reference 事件对齐，填入输入框不直接发送
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(
-      new CustomEvent('openawork:composer-reference', {
-        detail: { text },
-      }),
-    );
-  }, []);
-
-  // 对话区只保留待处理/决策提示；状态与操作按钮统一在顶部 TeamStatusBar
-  const classicOpsChrome =
-    isClassicWorkbench && selectedTeamId && !isSelectedSharedSession ? (
-      <ClassicTeamConversationOpsChrome
-        failedHandoffs={classicFailedHandoffs}
-        pendingClarifications={classicPendingClarifications}
-        onFocusFail={handleClassicFocusFail}
-      />
-    ) : null;
-
-  const classicInlineCards =
-    isClassicWorkbench && selectedTeamId && !isSelectedSharedSession ? (
-      <ClassicTeamConversationInlineCards
-        failedHandoffs={classicFailedHandoffs}
-        pendingClarifications={classicPendingClarifications}
-        runningHandoffs={classicRunningHandoffs}
-        onRetryFailed={canManageSelectedRuntimeTree ? handleRetryFailed : undefined}
-        onFocusWorkbench={handleClassicFocusWorkbench}
-        onFillComposer={handleClassicFillComposer}
-      />
-    ) : null;
-
-  /**
-   * 错误诊断简报（非 classic）：注入对话流尾部的 afterMessages，
-   * 跟随对话流渲染在消息末尾、composer 上方——与 classic 的 InlineOpsCard
-   * 共用同一落点。不再挂在主面板最顶部（原先会压在顶栏 tab 栏之上并
-   * 挤占顶部空间）；失败提醒本身由「任务」主 tab 的红色徽标承担。
-   */
-  const errorDiagnosticsSlot =
-    !isClassicWorkbench && !isSelectedSharedSession && failedTaskCount > 0 ? (
-      <ErrorDiagnosticsPanel
-        failedHandoffs={scopedHandoffs}
-        selectedTeam={selectedTeam}
-        onRetryFailed={canManageSelectedRuntimeTree ? handleRetryFailed : undefined}
-        retrying={retryingFailed}
-      />
-    ) : null;
-
-  /**
-   * 智能输入引导气泡（非 classic）：失败态给出「改写需求 / 针对性修复 / 拆分任务」
-   * 等一键填入建议，空闲态提示 / 命令与 @ 引用。与错误诊断简报一样注入对话流尾部，
-   * 紧贴输入区上方（点击建议即填入 composer，越靠近输入框越顺手），
-   * 不再占用主面板顶部空间。
-   */
-  const smartSuggestionSlot =
-    !isClassicWorkbench &&
-    selectedTeamId &&
-    (suggestionContext === 'failure' || suggestionContext === 'idle') &&
-    !suggestionDismissed &&
-    !isMobile ? (
-      <SmartSuggestionBubble
-        context={suggestionContext}
-        failedCount={failedTaskCount}
-        onSelectSuggestion={data.canManageSessionEntries ? handleSubmitMessage : undefined}
-        onDismiss={() => setSuggestionDismissed(true)}
-      />
-    ) : null;
-
-  /**
-   * 对话流尾部的运行反馈卡：classic InlineOpsCard、非 classic 错误诊断简报
-   * 与智能输入引导气泡共用同一落点（自上而下：诊断 → 引导）。
-   */
-  const conversationTailCards =
-    classicInlineCards || errorDiagnosticsSlot || smartSuggestionSlot ? (
-      <>
-        {classicInlineCards}
-        {errorDiagnosticsSlot}
-        {smartSuggestionSlot}
-      </>
-    ) : null;
-
-  const conversationMessagesOverride = isSelectedSharedSession ? (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: isClassicWorkbench ? undefined : 1080,
-        margin: '0 auto',
-        minHeight: 0,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <TeamSharedConversationPanel
-        key={selectedTeamId}
-        selectedTeamTitle={selectedTeam?.title ?? null}
-        selectedTeamSubtitle={selectedTeam?.subtitle ?? null}
-        sharedSession={data.activeSharedSession}
-        sharedSessionLoading={data.sharedSessionLoading}
-        onOpenReview={() => handleMiddleTabChange('review')}
-        onOpenShares={() => handleMiddleTabChange('shares')}
-      />
-    </div>
-  ) : selectedTeamId && selectedTeamId !== conversationReceptionSessionId ? (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: isClassicWorkbench ? undefined : 1080,
-        margin: '0 auto',
-        minHeight: 0,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <TeamConversationView
-        key={selectedTeamId}
-        sessionId={selectedTeamId}
-        composerEnabled={inboundComposerEnabled}
-        classicWorkbench={isClassicWorkbench}
-        beforeMessages={classicOpsChrome}
-        afterMessages={conversationTailCards}
-        onOpenSession={handleOpenRoleSession}
-      />
-    </div>
-  ) : undefined;
-  // classic-only：右侧 layer/todo 工作台；fusion 保持无侧栏（内容仍走中间主 tab）
-  const classicLayerNodes = useMemo(() => Array.from(layerNodesMap.values()), [layerNodesMap]);
-  // 右侧 layer/todo 工作台只挂在「对话」相关中间区；其它主 tab 必须回到中间内容切换
-  const classicConversationSurface = middleTab === 'conversation' || middleTab === 'office';
-  const workbenchSidePanel =
-    isClassicWorkbench && classicConversationSurface && !effectiveFocusMode && !isMobile ? (
-      <ClassicTeamLayerTodoSidePanel
-        handoffs={scopedHandoffs}
-        layerNodes={classicLayerNodes}
-        taskLanes={data.taskLanes}
-        overviewSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('overview'))}
-        metricsSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('metrics'))}
-        governanceSlot={renderTeamMiddleTabPanel(getDefaultLeafFor('governance'))}
-      />
-    ) : undefined;
-  // 注意：不得因 classic 布局锁死对话区，否则顶部主 tab / 子 tab 会失效
-  const conversationAreaMessagesOverride =
-    middleTab === 'conversation' || middleTab === 'office'
-      ? conversationMessagesOverride
-      : renderTeamMiddleTabPanel(middleTab);
-
   return (
     <TeamRuntimeReferenceDataProvider value={data}>
-      <div
-        className="page-root team-v2-root"
-        aria-label="团队运行 V2"
-        data-mode={effectiveMode}
-        data-breakpoint={breakpoint}
-        data-workbench-layout={workbenchLayoutMode}
-        style={{ position: 'relative' }}
-      >
-        <TeamPageV2RuntimeNotices
-          canManageSelectedRuntimeTree={canManageSelectedRuntimeTree}
-          effectiveMode={effectiveMode}
-          isMobile={isMobile}
-          pauseResumeBusy={pauseResumeBusy}
-          runtimeControlError={runtimeControlError}
-          runtimeResumeNotice={runtimeResumeNotice}
-          onRequestResumeAll={handleRequestResumeAll}
-        />
+      <TeamSessionViewStateProvider value={viewState}>
+        <div
+          className="page-root team-v2-root"
+          aria-label="团队运行 V2"
+          data-mode={effectiveMode}
+          data-breakpoint={breakpoint}
+          data-workbench-layout={workbenchLayoutMode}
+          style={{ position: 'relative' }}
+        >
+          <TeamPageV2RuntimeNotices
+            canManageSelectedRuntimeTree={canManageSelectedRuntimeTree}
+            effectiveMode={effectiveMode}
+            isMobile={isMobile}
+            pauseResumeBusy={pauseResumeBusy}
+            runtimeControlError={runtimeControlError}
+            runtimeResumeNotice={runtimeResumeNotice}
+            onRequestResumeAll={handleRequestResumeAll}
+          />
 
-        <main className="team-v2-main-shell" style={mainGridStyle}>
-          {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
-          <section
-            className="team-v2-pane team-v2-pane--main"
-            style={{ ...LEFT_AREA_STYLE, position: 'relative' }}
-          >
-            {/* 失败诊断简报已迁至对话流尾部（afterMessages）；classic 的
-                失败/澄清/重试入口由左侧 ops chrome 与 InlineOpsCard 承载。 */}
-
-            {/* 专注模式切换按钮（classic 用 ChatOpsBar「专注对话」） */}
-            {!isClassicWorkbench && !isMobile ? (
-              <button
-                type="button"
-                onClick={handleToggleFocusMode}
-                title={effectiveFocusMode ? '退出专注模式' : '进入专注模式（收起侧栏）'}
-                aria-label={effectiveFocusMode ? '退出专注模式' : '进入专注模式'}
-                style={{
-                  position: 'absolute',
-                  bottom: 8,
-                  right: 8,
-                  zIndex: 10,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 28,
-                  height: 28,
-                  borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
-                  background: 'var(--bg-overlay)',
-                  color: 'var(--fg-muted)',
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  boxShadow: 'var(--shadow-sm)',
-                  transition: 'background 120ms ease, color 120ms ease',
-                }}
-              >
-                <svg
-                  aria-hidden="true"
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {effectiveFocusMode ? (
-                    <>
-                      <path d="M8 3v5H3" />
-                      <path d="M16 3v5h5" />
-                      <path d="M8 21v-5H3" />
-                      <path d="M16 21v-5h5" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M3 8V3h5" />
-                      <path d="M21 8V3h-5" />
-                      <path d="M3 16v5h5" />
-                      <path d="M21 16v5h-5" />
-                    </>
-                  )}
-                </svg>
-              </button>
-            ) : null}
-
-            {/* 智能输入引导气泡已迁至对话流尾部（afterMessages），紧贴输入区；
-                classic 由 ops/inline cards 替代，避免双套引导。 */}
-
-            <div
-              style={
-                teamEditorMode === 'split' && editorOverlayOpen
-                  ? {
-                      flex: 1,
-                      minHeight: 0,
-                      display: 'flex',
-                      flexDirection: 'row',
-                      overflow: 'hidden',
-                    }
-                  : {
-                      flex: 1,
-                      minHeight: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      // 必须 overflow:hidden —— 下层 ConversationArea 内部的
-                      // TeamConversationLayout 返回 fragment，内容直接拍平进本容器。
-                      // 若不设 overflow，column flex 子项的最小高度会取内容高度，
-                      // 导致滚动区不收缩、composer 被推出视口且无法滚动。
-                      overflow: 'hidden',
-                    }
-              }
-            >
-              <div
-                style={
-                  teamEditorMode === 'split' && editorOverlayOpen
-                    ? {
-                        flex: 1,
-                        minWidth: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'hidden',
-                      }
-                    : {
-                        flex: 1,
-                        minWidth: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'hidden',
-                      }
-                }
-              >
-                <ConversationArea
-                  canCreateSession={Boolean(
-                    data.canManageSessionEntries &&
-                    data.canCreateSession &&
-                    resolvedTeamWorkspaceId,
-                  )}
-                  canCreateWorkspace={canCreateWorkspace}
-                  workspaceLabel={selectedTeamId ? teamWorkspaceDisplayName : null}
-                  onCreateWorkspace={
-                    canCreateWorkspace ? () => setShowNewWorkspaceModal(true) : undefined
-                  }
-                  onNewSession={
-                    data.canManageSessionEntries ? () => handleOpenNewSessionModal() : undefined
-                  }
-                  onSelectSuggestion={
-                    data.canManageSessionEntries ? handleSubmitMessage : undefined
-                  }
-                  onSubmitMessage={data.canManageSessionEntries ? handleSubmitMessage : undefined}
-                  onRetryConnection={handleRetryConnection}
-                  receptionSessionId={selectedTeamId ? conversationReceptionSessionId : null}
-                  receptionComposerEnabled={true}
-                  classicWorkbench={isClassicWorkbench}
-                  onOpenSession={handleOpenRoleSession}
-                  conversationBeforeMessages={
-                    // reception 内嵌路径也挂 classic 运营条；子 session 覆盖路径在 messagesOverride 内已注入
-                    classicOpsChrome &&
-                    selectedTeamId &&
-                    selectedTeamId === conversationReceptionSessionId
-                      ? classicOpsChrome
-                      : undefined
-                  }
-                  conversationAfterMessages={
-                    selectedTeamId && selectedTeamId === conversationReceptionSessionId
-                      ? conversationTailCards
-                      : undefined
-                  }
-                  topBar={
-                    selectedTeamId ? (
-                      <>
-                        <TeamTabBar
-                          variant="single"
-                          activePrimary={activePrimary}
-                          middleTab={middleTab}
-                          onPrimaryChange={handlePrimaryTabChange}
-                          onMiddleChange={handleMiddleTabChange}
-                          unreadCount={scopedUnreadCount}
-                          clarificationPending={clarificationPending}
-                          failedTaskCount={failedTaskCount}
-                          showOffice={showOffice}
-                          officeActive={middleTab === 'office'}
-                          onOfficeClick={() => {
-                            if (middleTab === 'office') {
-                              handleOpenFullscreen();
-                            } else {
-                              handleMiddleTabChange('office');
+          <main className="team-v2-main-shell" style={mainGridStyle}>
+            {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
+            <TeamPageMiddleArea
+              accessToken={accessToken}
+              canCreateWorkspace={canCreateWorkspace}
+              canManageSelectedRuntimeTree={canManageSelectedRuntimeTree}
+              data={data}
+              editorOverlay={editorOverlay}
+              effectiveFocusMode={effectiveFocusMode}
+              effectiveMode={effectiveMode}
+              fileTreeWorkspacePath={fileTreeWorkspacePath}
+              focusedHandoffId={focusedHandoffId}
+              gatewayUrl={gatewayUrl}
+              handoffs={handoffs}
+              inboundComposerEnabled={inboundComposerEnabled}
+              isClassicWorkbench={isClassicWorkbench}
+              isMobile={isMobile}
+              middleArea={middleArea}
+              middleTab={middleTab}
+              officeSceneState={officeScene.officeSceneState}
+              onCancelHandoff={handleCancelHandoff}
+              onClearFocusedHandoff={() => setFocusedHandoffId(null)}
+              onMiddleTabChange={handleMiddleTabChange}
+              onOpenBlockingTarget={handleOpenBlockingTarget}
+              onOpenFullscreen={handleOpenFullscreen}
+              onOpenHandoffContext={handleOpenHandoffContext}
+              onOpenNewSessionModal={handleOpenNewSessionModal}
+              onOpenNewWorkspaceModal={() => setShowNewWorkspaceModal(true)}
+              onOpenSession={handleOpenRoleSession}
+              onRetryConnection={handleRetryConnection}
+              onSelectAgent={handleSelectAgent}
+              onSelectLayerSession={handleSelectLayerSession}
+              onSelectTeam={handleSelectTeam}
+              onSubmitMessage={handleSubmitMessage}
+              onToggleFocusMode={handleToggleFocusMode}
+              onWorkspaceChanged={workspaceState.refresh}
+              resolvedTeamWorkspaceId={resolvedTeamWorkspaceId}
+              scopedHandoffs={scopedHandoffs}
+              selectedAgentId={selectedAgentId}
+              selectedTeam={selectedTeam}
+              selectedTeamId={selectedTeamId}
+              teamWorkspaceDisplayName={teamWorkspaceDisplayName}
+              topBar={
+                selectedTeamId ? (
+                  <>
+                    <TeamTabBar
+                      variant="single"
+                      activePrimary={activePrimary}
+                      middleTab={middleTab}
+                      onPrimaryChange={handlePrimaryTabChange}
+                      onMiddleChange={handleMiddleTabChange}
+                      unreadCount={scopedUnreadCount}
+                      clarificationPending={clarificationPending}
+                      failedTaskCount={failedTaskCount}
+                      showOffice={showOffice}
+                      officeActive={middleTab === 'office'}
+                      onOfficeClick={() => {
+                        if (middleTab === 'office') {
+                          handleOpenFullscreen();
+                        } else {
+                          handleMiddleTabChange('office');
+                        }
+                      }}
+                      leadingSlot={
+                        !isMobile ? (
+                          <TeamPageSuperbarLeading
+                            activeWorkspaceId={resolvedTeamWorkspaceId}
+                            activeWorkspaceName={teamWorkspaceDisplayName}
+                            compact={
+                              isFusionWorkbench || isClassicWorkbench || breakpoint !== 'desktop'
                             }
-                          }}
-                          leadingSlot={
-                            !isMobile ? (
-                              <TeamPageSuperbarLeading
-                                activeWorkspaceId={resolvedTeamWorkspaceId}
-                                activeWorkspaceName={teamWorkspaceDisplayName}
-                                compact={
-                                  isFusionWorkbench ||
-                                  isClassicWorkbench ||
-                                  breakpoint !== 'desktop'
-                                }
-                                memberCount={data.topSummary.memberCount}
-                                onlineCount={data.topSummary.onlineCount}
-                                selectedTeam={selectedTeam}
-                                summaryDescription={data.topSummary.description}
-                                workspaces={workspaceState.workspaces}
-                              />
-                            ) : null
-                          }
-                          // classic：状态/操作按钮放最顶上下文行 trailing，避免第二行堆叠
-                          // fusion/其它：保持 centerSlot 状态栏 + trailing 摘要
-                          centerSlot={
-                            !isMobile && !isClassicWorkbench ? (
-                              <div
-                                className="team-v2-control team-v2-control--transparent"
-                                style={SUPERBAR_STATUS_TRIGGER_STYLE}
-                                onClick={handleStatusBarClick}
-                                role="button"
-                                tabIndex={0}
-                                aria-label="展开层级对话抽屉"
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    setDrawerVisible(true);
-                                  }
-                                }}
-                              >
-                                <TeamStatusBar
-                                  paused={effectiveMode === 'paused'}
-                                  busy={pauseResumeBusy}
-                                  selectedSessionId={selectedTeamId || null}
-                                  onPauseAll={
-                                    canManageSelectedRuntimeTree ? handlePauseAll : undefined
-                                  }
-                                  onResumeAll={
-                                    canManageSelectedRuntimeTree
-                                      ? handleRequestResumeAll
-                                      : undefined
-                                  }
-                                />
-                              </div>
-                            ) : null
-                          }
-                          stackCenterSlot={
-                            // desktop（含 fusion）优先把「运行状态 + 操作」合并进
-                            // 上下文行，与 leading/trailing 三栏同行，压缩顶部纵向占据；
-                            // 宽度不足时由 TeamTabBar 内部按实测宽度自动降级。
-                            // tablet 窄屏直接强制独立状态行。
-                            isTablet
-                          }
-                          hideRunStatePill={isClassicWorkbench}
-                          trailingSlot={
-                            !isMobile ? (
-                              isClassicWorkbench ? (
-                                <div
-                                  className="team-v2-classic-top-actions"
-                                  data-testid="team-classic-top-actions"
-                                >
-                                  <TeamStatusBar
-                                    paused={effectiveMode === 'paused'}
-                                    busy={pauseResumeBusy || retryingFailed}
-                                    selectedSessionId={selectedTeamId || null}
-                                    failCount={failedTaskCount}
-                                    focusMode={effectiveFocusMode}
-                                    onPauseAll={
-                                      canManageSelectedRuntimeTree ? handlePauseAll : undefined
-                                    }
-                                    onResumeAll={
-                                      canManageSelectedRuntimeTree
-                                        ? handleRequestResumeAll
-                                        : undefined
-                                    }
-                                    onRetryFailed={
-                                      canManageSelectedRuntimeTree ? handleRetryFailed : undefined
-                                    }
-                                    onFocusFail={handleClassicFocusFail}
-                                    onToggleFocus={handleToggleFocusMode}
-                                  />
-                                </div>
-                              ) : isFusionWorkbench ? (
-                                <TeamFusionSuperbarSummary
-                                  description={data.topSummary.description}
-                                  footerLead={data.footerLead}
-                                  footerStats={data.footerStats}
-                                />
-                              ) : (
-                                <TeamPageSuperbarSummary
-                                  description={data.topSummary.description}
-                                  footerLead={data.footerLead}
-                                  footerStats={data.footerStats}
-                                />
-                              )
-                            ) : null
-                          }
-                        />
-                        {focusedHandoffId ? (
-                          <TeamFocusHandoffBanner
-                            focusHandoffId={focusedHandoffId}
-                            entry={focusedHandoffEntry}
-                            suggestedTab={focusSuggestedTab}
-                            onSelectTab={handleMiddleTabChange}
-                            onClear={() => setFocusedHandoffId(null)}
+                            memberCount={data.topSummary.memberCount}
+                            onlineCount={data.topSummary.onlineCount}
+                            selectedTeam={selectedTeam}
+                            summaryDescription={data.topSummary.description}
+                            workspaces={workspaceState.workspaces}
                           />
-                        ) : null}
-                      </>
-                    ) : null
-                  }
-                  messagesOverride={conversationAreaMessagesOverride}
-                  sidePanel={workbenchSidePanel}
-                  fallbackContent={
-                    // 对话主 tab：依赖 chat 流自身的视觉，不再额外注入 IdleHint
-                    // 与 EmptyState（避免在已经有 composer / 接待对话流的页面下方
-                    // 再堆一段「团队待命中」的 hero 卡）。
-                    middleTab === 'conversation' ? null : effectiveMode === 'idle' ? (
-                      <IdleHint />
-                    ) : effectiveMode === 'paused' ? null : (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: 'var(--fg-muted)',
-                          padding: 12,
-                          fontStyle: 'italic',
-                        }}
-                      >
-                        暂无更多消息。任务执行中…
-                      </div>
-                    )
-                  }
-                />
-              </div>
-
-              <WorkspaceEditorOverlay
-                open={editorOverlayOpen}
-                onClose={() => setEditorOverlayOpen(false)}
-                workspacePath={editorWorkspacePath}
-                fileEditor={fileEditor}
-                saving={savingFile}
-                onSave={handleSaveFile}
-                browserPreviewUrl={browserPreviewUrl}
-                activeTab={editorPaneTab}
-                onTabChange={setEditorPaneTab}
-                mode={teamEditorMode}
-                splitPos={teamSplitPos}
-                onSplitPosChange={setTeamSplitPos}
-                onModeChange={setTeamEditorMode}
-              />
-            </div>
-          </section>
-        </main>
-
-        {/* classic 弃用底部「层级对话」面板；fusion 保留 */}
-        {!isClassicWorkbench ? (
-          <LayerConversationDrawer
-            visible={drawerVisible}
-            onClose={() => setDrawerVisible(false)}
-            target={drawerTarget}
-          />
-        ) : null}
-        <PauseConfirmDialog
-          open={showPauseConfirm}
-          activeCount={activeHandoffCount}
-          onConfirm={() => void handleConfirmPauseAll()}
-          onCancel={() => setShowPauseConfirm(false)}
-        />
-        <ResumeStaleDialog
-          open={showResumeStale}
-          staleCount={staleHandoffCount}
-          onResumeAll={() => void handleResumeAll()}
-          onDismiss={() => setShowResumeStale(false)}
-        />
-        {showNewSessionModal && resolvedTeamWorkspaceId ? (
-          <NewTeamSessionModal
-            onClose={() => {
-              setShowNewSessionModal(false);
-              setInitialTemplateId(null);
-              setInitialWorkingDirectory(null);
-            }}
-            onSubmitDraft={handleSubmitDraft}
-            workspaceLabel={teamWorkspaceDisplayName}
-            teamWorkspaceId={resolvedTeamWorkspaceId}
-            defaultMemberSlots={workspaceState.activeWorkspace?.defaultTeamRoster}
-            initialTemplateId={initialTemplateId}
-            initialWorkingDirectory={initialWorkingDirectory}
-          />
-        ) : null}
-
-        {showNewWorkspaceModal ? (
-          <NewTeamWorkspaceModal
-            onClose={() => {
-              setShowNewWorkspaceModal(false);
-              clearNewWorkspaceAction();
-            }}
-            onCreated={(newWorkspaceId) => {
-              workspaceState.refresh();
-              requestSessionListRefresh();
-              if (newWorkspaceId) {
-                navigate(`/team/${newWorkspaceId}`);
+                        ) : null
+                      }
+                      // classic：状态/操作按钮放最顶上下文行 trailing，避免第二行堆叠
+                      // fusion/其它：保持 centerSlot 状态栏 + trailing 摘要
+                      centerSlot={
+                        !isMobile && !isClassicWorkbench ? (
+                          <div
+                            className="team-v2-control team-v2-control--transparent"
+                            style={SUPERBAR_STATUS_TRIGGER_STYLE}
+                            onClick={handleStatusBarClick}
+                            role="button"
+                            tabIndex={0}
+                            aria-label="展开层级对话抽屉"
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setDrawerVisible(true);
+                              }
+                            }}
+                          >
+                            <TeamStatusBar
+                              paused={effectiveMode === 'paused'}
+                              busy={pauseResumeBusy}
+                              selectedSessionId={selectedTeamId || null}
+                              onPauseAll={canManageSelectedRuntimeTree ? handlePauseAll : undefined}
+                              onResumeAll={
+                                canManageSelectedRuntimeTree ? handleRequestResumeAll : undefined
+                              }
+                            />
+                          </div>
+                        ) : null
+                      }
+                      stackCenterSlot={
+                        // desktop（含 fusion）优先把「运行状态 + 操作」合并进
+                        // 上下文行，与 leading/trailing 三栏同行，压缩顶部纵向占据；
+                        // 宽度不足时由 TeamTabBar 内部按实测宽度自动降级。
+                        // tablet 窄屏直接强制独立状态行。
+                        isTablet
+                      }
+                      hideRunStatePill={isClassicWorkbench}
+                      trailingSlot={
+                        !isMobile ? (
+                          isClassicWorkbench ? (
+                            <div
+                              className="team-v2-classic-top-actions"
+                              data-testid="team-classic-top-actions"
+                            >
+                              <TeamStatusBar
+                                paused={effectiveMode === 'paused'}
+                                busy={pauseResumeBusy || retryingFailed}
+                                selectedSessionId={selectedTeamId || null}
+                                failCount={failedTaskCount}
+                                focusMode={effectiveFocusMode}
+                                onPauseAll={
+                                  canManageSelectedRuntimeTree ? handlePauseAll : undefined
+                                }
+                                onResumeAll={
+                                  canManageSelectedRuntimeTree ? handleRequestResumeAll : undefined
+                                }
+                                onRetryFailed={
+                                  canManageSelectedRuntimeTree ? handleRetryFailed : undefined
+                                }
+                                onFocusFail={handleClassicFocusFail}
+                                onToggleFocus={handleToggleFocusMode}
+                              />
+                            </div>
+                          ) : isFusionWorkbench ? (
+                            <TeamFusionSuperbarSummary
+                              description={data.topSummary.description}
+                              footerLead={data.footerLead}
+                              footerStats={data.footerStats}
+                            />
+                          ) : (
+                            <TeamPageSuperbarSummary
+                              description={data.topSummary.description}
+                              footerLead={data.footerLead}
+                              footerStats={data.footerStats}
+                            />
+                          )
+                        ) : null
+                      }
+                    />
+                    {focusedHandoffId ? (
+                      <TeamFocusHandoffBanner
+                        focusHandoffId={focusedHandoffId}
+                        entry={focusedHandoffEntry}
+                        suggestedTab={focusSuggestedTab}
+                        onSelectTab={handleMiddleTabChange}
+                        onClear={() => setFocusedHandoffId(null)}
+                      />
+                    ) : null}
+                  </>
+                ) : null
               }
-            }}
-          />
-        ) : null}
+            />
+          </main>
 
-        {deleteWorkspaceTarget ? (
-          <ConfirmDeleteWorkspaceModal
-            workspace={deleteWorkspaceTarget}
-            workspaceGroups={effectiveWorkspaceGroups}
-            onCancel={() => setDeleteWorkspaceTarget(null)}
-            onConfirm={async () => {
-              const target = deleteWorkspaceTarget;
-              if (!target) return false;
-              const ok = await data.deleteWorkspace(target.id);
-              if (!ok) return false;
-              setDeleteWorkspaceTarget(null);
-              // 若删除的是当前激活工作区，切换到第一个剩余工作区
-              if (target.id === resolvedTeamWorkspaceId) {
-                const next = workspaceState.workspaces.find((ws) => ws.id !== target.id);
-                if (next) {
-                  navigate(`/team/${next.id}`, { replace: true });
-                } else {
-                  navigate('/team', { replace: true });
-                }
-              }
-              return true;
-            }}
+          {/* classic 弃用底部「层级对话」面板；fusion 保留 */}
+          {!isClassicWorkbench ? (
+            <LayerConversationDrawer
+              visible={drawerVisible}
+              onClose={() => setDrawerVisible(false)}
+              target={drawerTarget}
+            />
+          ) : null}
+          <PauseConfirmDialog
+            open={showPauseConfirm}
+            activeCount={activeHandoffCount}
+            onConfirm={() => void handleConfirmPauseAll()}
+            onCancel={() => setShowPauseConfirm(false)}
           />
-        ) : null}
-
-        {showOfficeFullscreen ? (
-          <div
-            className="team-v2-fullscreen-shell"
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 100,
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-            role="dialog"
-            aria-label="3D 全屏视图"
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                padding: '8px 16px',
-                borderBottom: '1px solid var(--border-default)',
-                flexShrink: 0,
+          <ResumeStaleDialog
+            open={showResumeStale}
+            staleCount={staleHandoffCount}
+            onResumeAll={() => void handleResumeAll()}
+            onDismiss={() => setShowResumeStale(false)}
+          />
+          {showNewSessionModal && resolvedTeamWorkspaceId ? (
+            <NewTeamSessionModal
+              onClose={() => {
+                setShowNewSessionModal(false);
+                setInitialTemplateId(null);
+                setInitialWorkingDirectory(null);
               }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowOfficeFullscreen(false)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
-                  background: 'var(--bg-overlay)',
-                  color: 'var(--fg-strong)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-                aria-label="关闭全屏"
-              >
-                ESC 关闭
-              </button>
-            </div>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <OfficeThreeCanvas
-                selectedAgentId={selectedAgentId}
-                runtimeStatus={selectedTeam?.status ?? null}
-                selectedSessionTitle={selectedTeam?.title ?? null}
-                onSelectAgent={handleSelectAgent}
-                state={officeSceneState}
-              />
-            </div>
-          </div>
-        ) : null}
-      </div>
+              onSubmitDraft={handleSubmitDraft}
+              workspaceLabel={teamWorkspaceDisplayName}
+              teamWorkspaceId={resolvedTeamWorkspaceId}
+              defaultMemberSlots={workspaceState.activeWorkspace?.defaultTeamRoster}
+              initialTemplateId={initialTemplateId}
+              initialWorkingDirectory={initialWorkingDirectory}
+            />
+          ) : null}
+
+          {showNewWorkspaceModal ? (
+            <NewTeamWorkspaceModal
+              onClose={() => {
+                setShowNewWorkspaceModal(false);
+                clearNewWorkspaceAction();
+              }}
+              onCreated={(newWorkspaceId) => {
+                workspaceState.refresh();
+                requestSessionListRefresh();
+                if (newWorkspaceId) {
+                  navigate(`/team/${newWorkspaceId}`);
+                }
+              }}
+            />
+          ) : null}
+
+          {deleteWorkspaceTarget ? (
+            <ConfirmDeleteWorkspaceModal
+              workspace={deleteWorkspaceTarget}
+              workspaceGroups={effectiveWorkspaceGroups}
+              onCancel={() => setDeleteWorkspaceTarget(null)}
+              onConfirm={async () => {
+                const target = deleteWorkspaceTarget;
+                if (!target) return false;
+                const ok = await data.deleteWorkspace(target.id);
+                if (!ok) return false;
+                setDeleteWorkspaceTarget(null);
+                // 若删除的是当前激活工作区，切换到第一个剩余工作区
+                if (target.id === resolvedTeamWorkspaceId) {
+                  const next = workspaceState.workspaces.find((ws) => ws.id !== target.id);
+                  if (next) {
+                    navigate(`/team/${next.id}`, { replace: true });
+                  } else {
+                    navigate('/team', { replace: true });
+                  }
+                }
+                return true;
+              }}
+            />
+          ) : null}
+
+          {officeScene.showOfficeFullscreen ? (
+            <TeamPageOfficeScene
+              officeSceneState={officeScene.officeSceneState}
+              selectedAgentId={selectedAgentId}
+              runtimeStatus={selectedTeam?.status ?? null}
+              selectedSessionTitle={selectedTeam?.title ?? null}
+              onSelectAgent={handleSelectAgent}
+              onExitFullscreen={officeScene.exitOfficeFullscreen}
+            />
+          ) : null}
+        </div>
+      </TeamSessionViewStateProvider>
     </TeamRuntimeReferenceDataProvider>
   );
 }
