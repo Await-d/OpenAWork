@@ -12,7 +12,7 @@
  *   回 409。
  * - **有界日志**：下载进度合并进 ring buffer（最近 `INSTALL_TAIL_LOG_LIMIT` 行，每行
  *   截断 `INSTALL_TAIL_LOG_LINE_MAX` 字符），供 UI 展示。
- * - **超时**：默认 10 分钟；超时 abort 下载并标记 `failed`，避免永久 running。
+ * - **超时**：默认 20 分钟；超时 abort 下载并标记 `failed`，避免永久 running。
  * - **无可用目标**：当前宿主平台没有任何可下载目标时进入诚实的 `unavailable` 态并给出
  *   可手动执行的命令——绝不假装能装。
  *
@@ -62,7 +62,7 @@ export interface BrowserInstallerOptions {
   resolveBrowsersPath?: () => string;
   /** 测试注入点：安装成功后的探针缓存失效回调（缺省用真实实现）。 */
   resetAvailabilityCache?: () => void;
-  /** 安装墙钟上限，默认 10 分钟。 */
+  /** 安装墙钟上限，默认 20 分钟。 */
   timeoutMs?: number;
   /** 测试注入点：解析可下载的托管浏览器目标。 */
   resolveDownloadTargets?: (browsersPath: string) => Promise<ManagedBrowserTarget[]>;
@@ -80,8 +80,13 @@ export const INSTALL_TAIL_LOG_LIMIT = 40;
 /** 单行最大字符数，超出截断。 */
 export const INSTALL_TAIL_LOG_LINE_MAX = 300;
 
-/** 安装墙钟上限（10 分钟）。 */
-export const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * 安装墙钟上限（20 分钟）。
+ *
+ * 需要顺序下载 chromium 与 chromium-headless-shell 两个构建，合计约 270MB，
+ * 慢网下 10 分钟可能不足，因此放宽到 20 分钟。
+ */
+export const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** 供 UI / 路由错误信息复用的手动命令。 */
 export const MANUAL_INSTALL_COMMAND = 'npx playwright install chromium';
