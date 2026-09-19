@@ -970,32 +970,6 @@ fn resolve_gateway_resources_path(app: &tauri::AppHandle) -> Option<String> {
     None
 }
 
-#[cfg(target_os = "windows")]
-fn resolve_staged_windows_media_paths(media_dir: &Path) -> Option<(String, String)> {
-    let ffmpeg = media_dir.join("ffmpeg.exe");
-    let ffprobe = media_dir.join("ffprobe.exe");
-    if !ffmpeg.is_file() || !ffprobe.is_file() {
-        return None;
-    }
-
-    Some((
-        ffmpeg.to_string_lossy().to_string(),
-        ffprobe.to_string_lossy().to_string(),
-    ))
-}
-
-#[cfg(target_os = "windows")]
-fn resolve_packaged_windows_media_paths(app: &tauri::AppHandle) -> Option<(String, String)> {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        if let Some(paths) = resolve_staged_windows_media_paths(&resource_dir.join("media")) {
-            return Some(paths);
-        }
-    }
-
-    let source_media_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/media");
-    resolve_staged_windows_media_paths(&source_media_dir)
-}
-
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
 /// 幂等语义（重要）：本函数对「本实例已持有、且健康、且 bind host 未变」的 sidecar
@@ -1157,12 +1131,6 @@ async fn spawn_gateway_sidecar(
     // 同一个 sidecar 进程，这里统一注入；外部已提供该 env 时沿用外部值
     // （开发机常见），否则落到数据目录下的 browsers/。
     command = command.env("PLAYWRIGHT_BROWSERS_PATH", &playwright_browsers_dir);
-    #[cfg(target_os = "windows")]
-    if let Some((ffmpeg_path, ffprobe_path)) = resolve_packaged_windows_media_paths(&app) {
-        command = command
-            .env("FFMPEG_BIN", ffmpeg_path)
-            .env("FFPROBE_BIN", ffprobe_path);
-    }
     command = command.env("OPENAWORK_DESKTOP_CONTROL_URL", desktop_control_url);
 
     let (mut rx, child) = command.spawn().map_err(|e| e.to_string())?;

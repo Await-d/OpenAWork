@@ -243,11 +243,22 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm rebuild @sentry/cli better-sqlite3 esbuild koffi msw
           npm_config_arch=x64 pnpm rebuild ffmpeg-static
-          node apps/desktop/src-tauri/scripts/stage-windows-arm64-media.mjs
 
       - name: Install dependencies
         if: matrix.label != 'windows-aarch64'
         run: pnpm install --frozen-lockfile
+
+      # 媒体二进制暂存目前仅对 Windows 目标开启：
+      # - macOS 需要先决定嵌套 Mach-O 的签名/公证方案；
+      # - 每个平台会让安装包增大约 70–80MB。
+      # 脚本自身已按 TAURI_TARGET_TRIPLE 做目标感知（darwin/linux 分支已实现），
+      # 后续放开时只需扩展下面的条件，无需改动脚本。
+      - name: Stage media binaries (Windows)
+        if: startsWith(matrix.runner, 'windows-')
+        shell: bash
+        env:
+          TAURI_TARGET_TRIPLE: ${{ matrix.tauri_target_triple }}
+        run: node apps/desktop/src-tauri/scripts/stage-media-binaries.mjs
 
       - uses: oven-sh/setup-bun@v2
         with:
