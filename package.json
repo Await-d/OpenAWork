@@ -103,6 +103,9 @@
         "react-native>react": "19.2.4",
         "react-native>react-dom": "19.2.4"
       }
+    },
+    "patchedDependencies": {
+      "playwright-core@1.58.2": "patches/playwright-core@1.58.2.patch"
     }
   },
   "workspaces": [

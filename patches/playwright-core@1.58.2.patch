@@ -1,0 +1,52 @@
+diff --git a/lib/cli/program.js b/lib/cli/program.js
+index 560bf7fb276c06b1b85576c774ac0be1a391add8..eded715d0014c46f2a21afa29cbfc128cdac941c 100644
+--- a/lib/cli/program.js
++++ b/lib/cli/program.js
+@@ -43,7 +43,7 @@ var import_utils2 = require("../utils");
+ var import_ascii = require("../server/utils/ascii");
+ var import_utilsBundle = require("../utilsBundle");
+ var import_utilsBundle2 = require("../utilsBundle");
+-const packageJSON = require("../../package.json");
++const packageJSON = { version: "1.58.2" };
+ import_utilsBundle.program.version("Version " + (process.env.PW_CLI_DISPLAY_VERSION || packageJSON.version)).name(buildBasePlaywrightCLICommand(process.env.PW_LANG_NAME));
+ import_utilsBundle.program.command("mark-docker-image [dockerImageNameTemplate]", { hidden: true }).description("mark docker image").allowUnknownOption(true).action(function(dockerImageNameTemplate) {
+   (0, import_utils2.assert)(dockerImageNameTemplate, "dockerImageNameTemplate is required");
+diff --git a/lib/server/registry/dependencies.js b/lib/server/registry/dependencies.js
+index 6d24feae7024dd1d448e507d8dcb8a0ebb6a31c3..32779355b13790ed6065bfffd2063aa6599a9f43 100644
+--- a/lib/server/registry/dependencies.js
++++ b/lib/server/registry/dependencies.js
+@@ -49,7 +49,7 @@ var import_spawnAsync = require("../utils/spawnAsync");
+ var import_userAgent = require("../utils/userAgent");
+ var import__ = require(".");
+ const BIN_DIRECTORY = import_path.default.join(__dirname, "..", "..", "..", "bin");
+-const languageBindingVersion = process.env.PW_CLI_DISPLAY_VERSION || require("../../../package.json").version;
++const languageBindingVersion = process.env.PW_CLI_DISPLAY_VERSION || "1.58.2";
+ const dockerVersionFilePath = "/ms-playwright/.docker-info";
+ async function writeDockerVersion(dockerImageNameTemplate) {
+   await import_fs.default.promises.mkdir(import_path.default.dirname(dockerVersionFilePath), { recursive: true });
+diff --git a/lib/server/utils/nodePlatform.js b/lib/server/utils/nodePlatform.js
+index d42f60ce9213306fa97a88471aa7344ee7520b63..4576f622a574eb7edd27a1c8dadf548db2b2f488 100644
+--- a/lib/server/utils/nodePlatform.js
++++ b/lib/server/utils/nodePlatform.js
+@@ -65,7 +65,7 @@ let boxedStackPrefixes = [];
+ function setBoxedStackPrefixes(prefixes) {
+   boxedStackPrefixes = prefixes;
+ }
+-const coreDir = import_path.default.dirname(require.resolve("../../../package.json"));
++const coreDir = "";
+ const nodePlatform = {
+   name: "node",
+   boxedStackPrefixes: () => {
+diff --git a/lib/server/utils/userAgent.js b/lib/server/utils/userAgent.js
+index 66463a755f6bb4284f2203d32242b95cabd328b8..7d79b96faba48f82804bdb4bb7e5a287b2b403ff 100644
+--- a/lib/server/utils/userAgent.js
++++ b/lib/server/utils/userAgent.js
+@@ -87,7 +87,7 @@ function getEmbedderName() {
+   return { embedderName, embedderVersion };
+ }
+ function getPlaywrightVersion(majorMinorOnly = false) {
+-  const version = process.env.PW_VERSION_OVERRIDE || require("./../../../package.json").version;
++  const version = process.env.PW_VERSION_OVERRIDE || "1.58.2";
+   return majorMinorOnly ? version.split(".").slice(0, 2).join(".") : version;
+ }
+ // Annotate the CommonJS export names for ESM import in node:

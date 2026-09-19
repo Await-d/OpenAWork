@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  playwright-core@1.58.2:
+    hash: 2eb2c69ad0a98d2b50f3759e329cbd72f6a3c46de1f0e870c8c4de0a95e0f37f
+    path: patches/playwright-core@1.58.2.patch
+
 importers:
 
   .:
@@ -20021,13 +20026,13 @@ snapshots:
 
   pkce-challenge@5.0.1: {}
 
-  playwright-core@1.58.2: {}
+  playwright-core@1.58.2(patch_hash=2eb2c69ad0a98d2b50f3759e329cbd72f6a3c46de1f0e870c8c4de0a95e0f37f): {}
 
   playwright-core@1.62.0: {}
 
   playwright@1.58.2:
     dependencies:
-      playwright-core: 1.58.2
+      playwright-core: 1.58.2(patch_hash=2eb2c69ad0a98d2b50f3759e329cbd72f6a3c46de1f0e870c8c4de0a95e0f37f)
     optionalDependencies:
       fsevents: 2.3.2
 
