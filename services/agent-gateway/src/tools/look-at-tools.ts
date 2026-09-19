@@ -48,6 +48,15 @@ const LOOK_AT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
  */
 const DEFAULT_LOOK_AT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 
+/**
+ * `.svg` passes the generic `isImageMime` gate but is absent from the upstream
+ * protocol whitelist (`IMAGE_MIMES` in `@openAwork/opencode-llm`), so the
+ * provider would reject it with a cryptic error. Fail fast instead.
+ */
+const LOOK_AT_SVG_MIME = 'image/svg+xml';
+const LOOK_AT_SVG_UNSUPPORTED_MESSAGE =
+  'look_at 不支持 SVG（image/svg+xml）：上游多模态模型无法解析该格式，请先将 SVG 转换为 PNG/JPEG/WebP 后再分析。';
+
 function resolveLookAtMaxFileBytes(): number {
   const raw = globalThis.process?.env['OPENAWORK_LOOK_AT_MAX_FILE_BYTES'];
   if (raw === undefined || raw === null || raw.trim() === '') {
@@ -265,6 +274,16 @@ function isImageMime(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
 
+function isSvgMimeType(mimeType: string): boolean {
+  return mimeType.toLowerCase() === LOOK_AT_SVG_MIME;
+}
+
+function assertLookAtMimeTypeSupported(mimeType: string): void {
+  if (isSvgMimeType(mimeType)) {
+    throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
+  }
+}
+
 function stripDataUrlPrefix(value: string): string {
   const index = value.indexOf('base64,');
   return index >= 0 ? value.slice(index + 'base64,'.length) : value;
@@ -373,6 +392,10 @@ async function fetchRemoteImageAsDataUrl(imageUrl: string): Promise<ResolvedLook
       `look_at remote image did not return an image content-type: ${response.headers.get('content-type') ?? 'unknown'}`,
     );
   }
+  if (isSvgMimeType(mimeType)) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
+  }
 
   const buffer = await readResponseBufferWithLimit(response, resolveLookAtMaxFileBytes());
   return {
@@ -392,6 +415,7 @@ async function resolveLookAtImageSource(input: {
       return await fetchRemoteImageAsDataUrl(remoteUrl.toString());
     }
     const mimeType = inferMimeType(undefined, input.imageData);
+    assertLookAtMimeTypeSupported(mimeType);
     return {
       filename: buildClipboardFilename(mimeType),
       imageDataUrl: buildImageDataUrl(input.imageData, mimeType),
@@ -404,6 +428,7 @@ async function resolveLookAtImageSource(input: {
   }
 
   const mimeType = inferMimeType(input.filePath, undefined);
+  assertLookAtMimeTypeSupported(mimeType);
   if (!isImageMime(mimeType)) {
     return null;
   }
