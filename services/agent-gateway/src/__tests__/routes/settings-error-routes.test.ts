@@ -61,6 +61,7 @@ let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let settingsRoutes: typeof SettingsRoutesModule.settingsRoutes;
+let extractAuditSummaryForTesting: typeof SettingsRoutesModule.__extractAuditSummaryForTesting;
 
 const USER_ID = 'u-settings-routes';
 
@@ -91,7 +92,9 @@ beforeAll(async () => {
   await dbModule.migrate();
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
-  settingsRoutes = (await import('../../routes/settings.js')).settingsRoutes;
+  const settingsRoutesModule = await import('../../routes/settings.js');
+  settingsRoutes = settingsRoutesModule.settingsRoutes;
+  extractAuditSummaryForTesting = settingsRoutesModule.__extractAuditSummaryForTesting;
 });
 
 beforeEach(() => {
@@ -114,6 +117,35 @@ afterAll(async () => {
 });
 
 describe('settings routes error contracts', () => {
+  it('失败的 batch 输出派生出失败数量与首个错误摘要，而非裸 Tool error 兜底', () => {
+    const summary = extractAuditSummaryForTesting({
+      results: [
+        { tool: 'read', isError: false, output: 'ok' },
+        { tool: 'grep', isError: true, output: 'boom' },
+      ],
+      total: 2,
+    });
+
+    expect(summary).toBe('batch: 1/2 个子调用失败：boom');
+  });
+
+  it('全部成功的 batch 输出不派生摘要，保留原有兜底路径', () => {
+    const summary = extractAuditSummaryForTesting({
+      results: [
+        { tool: 'read', isError: false, output: 'ok' },
+        { tool: 'grep', isError: false, output: 'fine' },
+      ],
+      total: 2,
+    });
+
+    expect(summary).toBeNull();
+  });
+
+  it('既有候选字段提取行为保持不变', () => {
+    expect(extractAuditSummaryForTesting({ message: '  出错了  ' })).toBe('出错了');
+    expect(extractAuditSummaryForTesting({ data: { error: '深层错误' } })).toBe('深层错误');
+  });
+
   it('PUT /settings/plugins 保存 desktopControl 并由 GET 返回', async () => {
     const app = await buildApp();
     try {

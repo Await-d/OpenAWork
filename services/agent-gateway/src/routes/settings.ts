@@ -209,11 +209,63 @@ function extractAuditSummary(payload: unknown): string | null {
   }
 
   if (record['data']) {
-    return extractAuditSummary(record['data']);
+    const dataSummary = extractAuditSummary(record['data']);
+    if (dataSummary) {
+      return dataSummary;
+    }
   }
 
-  return null;
+  return summarizeBatchResults(record);
 }
+
+/**
+ * `batch` 的 output 只有 `{ results, total }`，失败细节藏在 `results[].output`，
+ * 需单独派生摘要；无失败子调用时返回 null，保持其他工具的既有提取行为。
+ */
+function summarizeBatchResults(record: Record<string, unknown>): string | null {
+  const results = record['results'];
+  if (!Array.isArray(results)) {
+    return null;
+  }
+
+  const errorOutputs: unknown[] = [];
+  for (const entry of results) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const entryRecord = entry as Record<string, unknown>;
+    if (entryRecord['isError'] === true) {
+      errorOutputs.push(entryRecord['output']);
+    }
+  }
+
+  if (errorOutputs.length === 0) {
+    return null;
+  }
+
+  const totalValue = record['total'];
+  const total =
+    typeof totalValue === 'number' && Number.isFinite(totalValue)
+      ? Math.max(totalValue, results.length)
+      : results.length;
+
+  let firstError: string | null = null;
+  for (const output of errorOutputs) {
+    const detail = extractAuditSummary(output);
+    if (detail) {
+      firstError = detail;
+      break;
+    }
+  }
+
+  const headline = `batch: ${errorOutputs.length}/${total} 个子调用失败`;
+  const summary = firstError ? `${headline}：${firstError.replace(/\s+/g, ' ').trim()}` : headline;
+
+  return truncateAuditString(summary);
+}
+
+/** 仅测试使用：暴露审计摘要提取逻辑，供 settings 路由测试断言。 */
+export { extractAuditSummary as __extractAuditSummaryForTesting };
 
 function truncateAuditString(value: string): string {
   if (value.length <= AUDIT_PAYLOAD_MAX_STRING_LENGTH) {
