@@ -436,6 +436,9 @@ importers:
       playwright:
         specifier: 1.58.2
         version: 1.58.2
+      playwright-core:
+        specifier: 1.58.2
+        version: 1.58.2(patch_hash=2eb2c69ad0a98d2b50f3759e329cbd72f6a3c46de1f0e870c8c4de0a95e0f37f)
     devDependencies:
       '@types/node':
         specifier: ^20.19.37

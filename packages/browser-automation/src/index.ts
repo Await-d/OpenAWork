@@ -488,3 +488,4 @@ export * from './live-session.js';
 export * from './live-session-types.js';
 export * from './live-browser-availability.js';
 export * from './source-map-resolver.js';
+export * from './managed-browser-install.js';
