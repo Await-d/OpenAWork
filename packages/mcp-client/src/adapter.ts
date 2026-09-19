@@ -204,11 +204,8 @@ type SDKClient = {
   }): Promise<MCPPromptResult>;
   callTool(
     params: { name: string; arguments: Record<string, unknown> },
-    opts?: {
-      timeout?: number;
-      resetTimeoutOnProgress?: boolean;
-      onprogress?: (p: { progress: number; total?: number }) => void;
-    },
+    resultSchema?: unknown,
+    options?: MCPCallOptions,
   ): Promise<{ content: MCPToolResult['content']; structuredContent?: unknown; isError?: boolean }>;
 };
 
@@ -535,6 +532,7 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
     const client = this.getClient(serverId);
     const result = await client.callTool(
       { name: toolName, arguments: args as Record<string, unknown> },
+      undefined,
       {
         timeout: options?.timeout ?? 30_000,
         resetTimeoutOnProgress: options?.resetTimeoutOnProgress,
