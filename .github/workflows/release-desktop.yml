@@ -270,6 +270,59 @@ jobs:
           TAURI_TARGET_TRIPLE: ${{ matrix.tauri_target_triple }}
         run: node apps/desktop/src-tauri/scripts/bundle-sidecar.mjs
 
+      - name: Smoke test browser plan (sidecar)
+        shell: bash
+        env:
+          TAURI_TARGET_TRIPLE: ${{ matrix.tauri_target_triple }}
+          JWT_SECRET: 0123456789012345678901234567890123456789
+          OPENAWORK_DATA_DIR: ${{ runner.temp }}/openawork-smoke
+        run: |
+          set -euo pipefail
+
+          # 多数 matrix 条目的 tauri_target_triple 为空：bundle-sidecar.mjs 此时回退到
+          # rustc 报告的 host triple，这里必须按同样的规则还原真实二进制名。
+          if [ -n "${TAURI_TARGET_TRIPLE}" ]; then
+            TARGET_TRIPLE="${TAURI_TARGET_TRIPLE}"
+          else
+            TARGET_TRIPLE="$(rustc -Vv | sed -n 's/^host: //p')"
+          fi
+          BINARY="apps/desktop/src-tauri/binaries/agent-gateway-${TARGET_TRIPLE}"
+          case "${TARGET_TRIPLE}" in
+            *windows*) BINARY="${BINARY}.exe" ;;
+          esac
+          if [ ! -f "${BINARY}" ]; then
+            echo "sidecar binary not found: ${BINARY}" >&2
+            ls -la apps/desktop/src-tauri/binaries >&2 || true
+            exit 1
+          fi
+
+          # 验证编译产物仍能解析 Playwright 内联的注册表元数据。
+          PLAN_LOG="${RUNNER_TEMP}/openawork-browser-plan.log"
+          "${BINARY}" --print-browser-plan 2>&1 | tee "${PLAN_LOG}"
+
+          node -e '
+            const fs = require("node:fs");
+            const raw = fs.readFileSync(process.argv[1], "utf8");
+            const start = raw.indexOf("{");
+            const end = raw.lastIndexOf("}");
+            if (start === -1 || end === -1) {
+              console.error("browser plan: no JSON object found in sidecar output");
+              process.exit(1);
+            }
+            let parsed;
+            try {
+              parsed = JSON.parse(raw.slice(start, end + 1));
+            } catch (error) {
+              console.error("browser plan: output is not valid JSON", error);
+              process.exit(1);
+            }
+            if (parsed.ok !== true || !Array.isArray(parsed.targets) || parsed.targets.length === 0) {
+              console.error("browser plan invalid:", parsed);
+              process.exit(1);
+            }
+            console.log(`browser plan OK: ${parsed.targets.length} target(s) on ${parsed.platform}-${parsed.arch}`);
+          ' "${PLAN_LOG}"
+
       - name: Import macOS signing cert
         if: startsWith(matrix.runner, 'macos-') && env.MACOS_CODESIGN_READY == 'true'
         uses: apple-actions/import-codesign-certs@v3
