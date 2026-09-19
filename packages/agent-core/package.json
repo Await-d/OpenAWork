@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.37",
+    "@types/ssh2": "^1.15.6",
     "@vitest/coverage-v8": "^4.1.10"
   },
   "dependencies": {

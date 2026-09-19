@@ -24,6 +24,7 @@ import {
 } from '../../../components/conversation-runtime/messages/support.js';
 import { useSubSessionDetail } from '../hooks/use-sub-session-detail.js';
 import { mergeOptimisticUserMessage } from './sub-session-message-state.js';
+import { SubSessionFailureBanner } from './SubSessionFailureBanner.js';
 import type { TaskToolRuntimeLookup } from '../conversation/render/task-tool-runtime.js';
 import { requestCurrentSessionRefresh } from '../../../utils/session/session-list-events.js';
 
@@ -279,10 +280,14 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     () => tasks.filter((task) => task.status === 'completed').length,
     [tasks],
   );
-  const failedTaskCount = useMemo(
-    () => tasks.filter((task) => task.status === 'failed').length,
+  const failedTasks = useMemo(
+    () =>
+      tasks
+        .filter((task) => task.status === 'failed')
+        .sort((left, right) => right.updatedAt - left.updatedAt),
     [tasks],
   );
+  const failedTaskCount = failedTasks.length;
 
   // 滚动协议层（components/conversation-runtime/scroll）是唯一事实来源：
   // 跟随由「显式输入意图 + 非程序化外部滚动」挂起、由「位置回到最新边缘」恢复，
@@ -595,6 +600,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           </button>
         </div>
       </div>
+
+      <SubSessionFailureBanner
+        childSessionId={childSessionId}
+        failedTasks={failedTasks}
+        onOpenFullSession={onOpenFullSession}
+        sessionStateStatus={session?.state_status}
+      />
 
       {pendingPermissions.some((permission) => permission.status === 'pending') && (
         <div

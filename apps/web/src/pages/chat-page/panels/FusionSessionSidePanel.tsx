@@ -16,10 +16,12 @@ import type {
   FusionContextRuntimeSummary,
 } from './FusionContextTab.js';
 import { FusionReviewTab } from './FusionReviewTab.js';
+import { FusionSubAgentSwitcher } from './FusionSubAgentSwitcher.js';
 import { FusionWorkspaceTab } from './FusionWorkspaceTab.js';
 import { SessionSidePanel } from './SessionSidePanel.js';
 import type { SidePanelTabId } from './SessionSidePanel.js';
 import type { ChangeScope, DiffViewMode } from './review-panel-model.js';
+import type { SubAgentRunItem } from './sub-agent-run-list.js';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { useReviewPanelFileChanges } from './use-review-panel-file-changes.js';
 
@@ -65,6 +67,8 @@ export interface FusionSessionSidePanelProps {
   readonly onCompactSession: () => void;
   /** 打开子代理完整会话（从子代理 tab 的「全屏」入口跳转）。 */
   readonly onOpenFullSession: (sessionId: string) => void;
+  /** 子代理 tab 切换器：选择某个子会话（通常由 ChatPage 写回 selectedChildSessionId）。 */
+  readonly onSelectChildSession: (sessionId: string) => void;
   /** 把工作区提升到主内容区（editorMode + editorFullScreen + 对应 tab）。 */
   readonly onPromoteToFullScreen: (tab: EditorPaneTab) => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
@@ -75,6 +79,8 @@ export interface FusionSessionSidePanelProps {
   readonly saving: boolean;
   /** 子代理 tab 当前选中的子会话（null 时面板自身渲染空态）。 */
   readonly selectedChildSessionId: string | null;
+  /** 子代理 tab 切换器用的运行列表（0/1 项时切换器不渲染）。 */
+  readonly subAgentItems?: readonly SubAgentRunItem[];
   /** 子代理 tab 的 tab 条数量徽章。 */
   readonly subAgentCount?: number;
   /** 子代理消息里父级 task 工具的运行态查找表。 */
@@ -103,6 +109,7 @@ export function FusionSessionSidePanel({
   onCompactSession,
   onOpenFullSession,
   onPromoteToFullScreen,
+  onSelectChildSession,
   onTabChange,
   overview,
   providerCatalog,
@@ -110,6 +117,7 @@ export function FusionSessionSidePanel({
   runtimeSummary,
   saving,
   selectedChildSessionId,
+  subAgentItems,
   subAgentCount,
   taskToolRuntimeLookup,
   token,
@@ -199,16 +207,23 @@ export function FusionSessionSidePanel({
         hidden={desktopTab !== 'agent'}
       >
         <div className="fusion-side-panel__agent-host">
-          <SubSessionDetailPanel
-            childSessionId={selectedChildSessionId}
-            currentUserEmail={currentUserEmail}
-            currentUserDisplayName={currentUserDisplayName}
-            gatewayUrl={gatewayUrl}
-            onOpenFullSession={onOpenFullSession}
-            parentTaskRuntimeLookup={taskToolRuntimeLookup}
-            providerCatalog={providerCatalog}
-            token={token}
+          <FusionSubAgentSwitcher
+            items={subAgentItems ?? []}
+            onSelectSession={onSelectChildSession}
+            selectedSessionId={selectedChildSessionId}
           />
+          <div className="fusion-side-panel__agent-preview">
+            <SubSessionDetailPanel
+              childSessionId={selectedChildSessionId}
+              currentUserEmail={currentUserEmail}
+              currentUserDisplayName={currentUserDisplayName}
+              gatewayUrl={gatewayUrl}
+              onOpenFullSession={onOpenFullSession}
+              parentTaskRuntimeLookup={taskToolRuntimeLookup}
+              providerCatalog={providerCatalog}
+              token={token}
+            />
+          </div>
         </div>
       </div>
       <div

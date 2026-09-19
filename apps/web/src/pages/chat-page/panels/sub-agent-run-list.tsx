@@ -18,7 +18,7 @@ export interface SubAgentRunItem {
   messageCount: number;
 }
 
-function formatTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSource']): string {
+export function formatTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSource']): string {
   return timeoutSource === 'first_response' ? '首响应未到' : '执行超时';
 }
 
@@ -62,7 +62,7 @@ function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
   };
 }
 
-function getStatusLabel(status: SubAgentDisplayStatus): string {
+export function getStatusLabel(status: SubAgentDisplayStatus): string {
   if (status === 'running') return '运行中';
   if (status === 'paused') return '等待处理';
   if (status === 'completed') return '已完成';

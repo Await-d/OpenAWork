@@ -14,6 +14,7 @@ import {
   makeReviewPanelProjection,
   makeReviewPanelSnapshot,
 } from './review-panel-test-fixtures.js';
+import type { SubAgentRunItem } from './sub-agent-run-list.js';
 
 const getFileChangesMock = vi.fn();
 const reviewFileChangeMock = vi.fn();
@@ -110,12 +111,28 @@ function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
     onCompactSession: () => undefined,
     onOpenFullSession: () => undefined,
     onPromoteToFullScreen: () => undefined,
+    onSelectChildSession: () => undefined,
     onTabChange: () => undefined,
     saving: false,
     selectedChildSessionId: null,
     token: 'token',
     workspaceFileItems: [],
     workspacePath: WORKSPACE_PATH,
+  };
+}
+
+function makeSubAgentItem(
+  sessionId: string,
+  title: string,
+  status: SubAgentRunItem['status'] = 'running',
+): SubAgentRunItem {
+  return {
+    sessionId,
+    shortSessionId: sessionId.slice(0, 8),
+    status,
+    taskLabel: title,
+    title,
+    messageCount: 0,
   };
 }
 
@@ -272,6 +289,58 @@ describe('FusionSessionSidePanel', () => {
     expect(screen.getByTestId('fusion-panel-pane-review').hasAttribute('hidden')).toBe(true);
     expect(screen.getByTestId('fusion-panel-pane-workspace').hasAttribute('hidden')).toBe(true);
     expect(screen.getByTestId('fusion-panel-pane-context').hasAttribute('hidden')).toBe(true);
+  });
+
+  it('子代理 tab：多个子代理时在 pane 内渲染切换器并回调选中；单个 / 空列表不渲染', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const onSelectChildSession = vi.fn();
+    const firstItem = makeSubAgentItem('child-session-1', '修复登录');
+    const secondItem = makeSubAgentItem('child-session-2', '补充测试', 'completed');
+
+    const view = render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="agent"
+        onSelectChildSession={onSelectChildSession}
+        selectedChildSessionId="child-session-1"
+        subAgentItems={[firstItem, secondItem]}
+      />,
+    );
+
+    const agentPane = screen.getByTestId('fusion-panel-pane-agent');
+    const switcher = screen.getByRole('tablist', { name: '子代理切换' });
+
+    expect(agentPane.contains(switcher)).toBe(true);
+
+    const selectedChip = screen.getByRole('tab', { name: /修复登录/ });
+    const nextChip = screen.getByRole('tab', { name: /补充测试/ });
+    expect(selectedChip.getAttribute('aria-selected')).toBe('true');
+    expect(nextChip.getAttribute('aria-selected')).toBe('false');
+    expect(nextChip.getAttribute('data-status')).toBe('completed');
+
+    fireEvent.click(nextChip);
+    expect(onSelectChildSession).toHaveBeenCalledWith('child-session-2');
+
+    view.rerender(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="agent"
+        onSelectChildSession={onSelectChildSession}
+        selectedChildSessionId="child-session-1"
+        subAgentItems={[firstItem]}
+      />,
+    );
+    expect(screen.queryByRole('tablist', { name: '子代理切换' })).toBeNull();
+
+    view.rerender(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="agent"
+        onSelectChildSession={onSelectChildSession}
+        selectedChildSessionId={null}
+      />,
+    );
+    expect(screen.queryByRole('tablist', { name: '子代理切换' })).toBeNull();
   });
 
   it('agent 已是桌面一级 tab：直接选中子代理，不触发 tab 收敛', () => {

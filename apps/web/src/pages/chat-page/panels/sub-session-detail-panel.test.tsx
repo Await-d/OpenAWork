@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import type { SessionTask } from '@openAwork/web-client';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 
@@ -327,5 +328,64 @@ describe('SubSessionDetailPanel 滚动协议', () => {
     harness.geometry.dispatchScroll();
 
     expect(screen.getByTestId('sub-session-scroll-bottom')).not.toBeNull();
+  });
+});
+
+function createFailedTask(): SessionTask {
+  return {
+    blockedBy: [],
+    completedSubtaskCount: 0,
+    createdAt: 1_700_000_000_000,
+    depth: 0,
+    errorMessage: '构建失败：TypeError: boom',
+    id: 'task-failed-1',
+    priority: 'medium',
+    readySubtaskCount: 0,
+    status: 'failed',
+    subtaskCount: 0,
+    tags: [],
+    title: '修复登录',
+    unmetDependencyCount: 0,
+    updatedAt: 1_700_000_000_000,
+  };
+}
+
+describe('SubSessionDetailPanel 失败横幅', () => {
+  it('失败的子任务会在详情面板内展示具体错误原因，且头部计数保留', () => {
+    useSubSessionDetailMock.mockReturnValue({
+      ...createDetailState([createUserMessage('message-1', '第一条')], SESSION_ID),
+      tasks: [createFailedTask()],
+    });
+
+    render(createPanelElement());
+
+    const alert = screen.getByRole('alert', { name: '子代理执行失败' });
+
+    expect(alert.textContent).toContain('修复登录');
+    expect(screen.getByText('构建失败：TypeError: boom')).not.toBeNull();
+    expect(screen.getByText('失败 1')).not.toBeNull();
+  });
+
+  it('会话级错误但无失败任务时展示会话级 fallback', () => {
+    useSubSessionDetailMock.mockReturnValue({
+      ...createDetailState([createUserMessage('message-1', '第一条')], SESSION_ID),
+      session: { id: SESSION_ID, state_status: 'error' },
+      tasks: [],
+    });
+
+    render(createPanelElement());
+
+    expect(screen.getByRole('alert', { name: '子代理执行失败' })).not.toBeNull();
+    expect(screen.getByText(/未记录任务级错误详情/)).not.toBeNull();
+  });
+
+  it('没有失败任务且会话状态正常时不展示失败横幅', () => {
+    useSubSessionDetailMock.mockReturnValue(
+      createDetailState([createUserMessage('message-1', '第一条')], SESSION_ID),
+    );
+
+    render(createPanelElement());
+
+    expect(screen.queryByRole('alert', { name: '子代理执行失败' })).toBeNull();
   });
 });

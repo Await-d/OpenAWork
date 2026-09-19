@@ -1,0 +1,129 @@
+/* 子代理 tab 顶部的紧凑切换器：横向滚动的 chip 行，选中态用 accent。 */
+
+.fusion-sub-agent-switcher {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--spacing-1);
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-top: var(--spacing-1);
+  padding-bottom: var(--spacing-2);
+  scrollbar-width: thin;
+}
+
+.fusion-sub-agent-switcher__chip {
+  align-items: center;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  gap: var(--spacing-1);
+  height: 28px;
+  max-width: 160px;
+  min-width: 0;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  padding: 0 var(--spacing-2);
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.fusion-sub-agent-switcher__chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-default);
+}
+
+.fusion-sub-agent-switcher__chip:active {
+  transform: translateY(1px);
+}
+
+.fusion-sub-agent-switcher__chip:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline-color: var(--accent);
+}
+
+.fusion-sub-agent-switcher__chip[data-active='true'],
+.fusion-sub-agent-switcher__chip[data-active='true']:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--fg-strong);
+}
+
+.fusion-sub-agent-switcher__dot {
+  border-radius: var(--radius-pill);
+  flex: 0 0 auto;
+  height: 6px;
+  width: 6px;
+}
+
+.fusion-sub-agent-switcher__chip[data-status='running'] .fusion-sub-agent-switcher__dot {
+  animation: fusion-sub-agent-switcher-pulse 1.5s ease-in-out infinite;
+  background: var(--accent);
+}
+
+.fusion-sub-agent-switcher__chip[data-status='completed'] .fusion-sub-agent-switcher__dot {
+  background: var(--success);
+}
+
+.fusion-sub-agent-switcher__chip[data-status='failed'] .fusion-sub-agent-switcher__dot,
+.fusion-sub-agent-switcher__chip[data-status='cancelled'] .fusion-sub-agent-switcher__dot {
+  background: var(--danger);
+}
+
+.fusion-sub-agent-switcher__chip[data-status='pending'] .fusion-sub-agent-switcher__dot,
+.fusion-sub-agent-switcher__chip[data-status='paused'] .fusion-sub-agent-switcher__dot {
+  background: var(--warning);
+}
+
+.fusion-sub-agent-switcher__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态文案只供读屏：视觉上的状态由 chip 左侧圆点承担。 */
+.fusion-sub-agent-switcher__status-sr {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@keyframes fusion-sub-agent-switcher-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fusion-sub-agent-switcher__chip[data-status='running'] .fusion-sub-agent-switcher__dot {
+    animation: none;
+  }
+
+  .fusion-sub-agent-switcher__chip:active {
+    transform: none;
+  }
+}

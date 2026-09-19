@@ -200,13 +200,11 @@ type SSHConnectOptions = {
 
 type SSH2Module = { Client: new () => SSHClient };
 
-// ssh2 is an optional dependency; loaded dynamically at runtime
+// ssh2 is an optional dependency; loaded lazily at runtime
 async function loadSSHClient(): Promise<SSHClient> {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const ssh2 = (await (Function(
-    'm',
-    'return import(m)',
-  )('ssh2') as Promise<unknown>)) as SSH2Module;
+  // 必须使用字面量动态 import：隐藏模块名会绕过 Bun --compile 的静态分析，
+  // 导致桌面 sidecar 二进制缺少 ssh2 而运行时报模块缺失。
+  const ssh2 = (await import('ssh2')) as unknown as SSH2Module;
   return new ssh2.Client();
 }
 

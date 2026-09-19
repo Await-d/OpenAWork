@@ -1229,11 +1229,13 @@ export default function ChatPage() {
       setSelectedChildSessionId(nextSessionId);
       setRightOpen(true);
       setRightTab('agent');
-      if (isFusionLayout) {
+      // 桌面 Fusion 停靠面板仅在 reviewPanelOpened 时渲染：只切 tab 不会展开面板。
+      if (isFusionLayout && !isMobileViewport) {
         setSidePanelActiveTab('agent');
+        setReviewPanelOpened(true);
       }
     },
-    [isFusionLayout, setSidePanelActiveTab],
+    [isFusionLayout, isMobileViewport, setReviewPanelOpened, setSidePanelActiveTab],
   );
 
   const loadSavedChatDefaults = useCallback(async () => {
@@ -1339,8 +1341,9 @@ export default function ChatPage() {
       setSelectedChildSessionId(nextItem.sessionId);
       setRightOpen(true);
       setRightTab('agent');
-      if (isFusionLayout) {
+      if (isFusionLayout && !isMobileViewport) {
         setSidePanelActiveTab('agent');
+        setReviewPanelOpened(true);
       }
     };
 
@@ -1348,7 +1351,14 @@ export default function ChatPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isFusionLayout, selectedChildSessionId, setSidePanelActiveTab, subAgentRunItems]);
+  }, [
+    isFusionLayout,
+    isMobileViewport,
+    selectedChildSessionId,
+    setReviewPanelOpened,
+    setSidePanelActiveTab,
+    subAgentRunItems,
+  ]);
 
   useEffect(() => {
     if (!token) return;
@@ -6094,6 +6104,7 @@ export default function ChatPage() {
                 void navigate(`/chat/${nextSessionId}`);
               }}
               onPromoteToFullScreen={promoteWorkspaceTab}
+              onSelectChildSession={(nextSessionId) => setSelectedChildSessionId(nextSessionId)}
               onTabChange={setSidePanelActiveTab}
               overview={fusionContextOverview}
               providerCatalog={providerCatalog}
@@ -6102,6 +6113,7 @@ export default function ChatPage() {
               saving={saving}
               selectedChildSessionId={selectedChildSessionId}
               subAgentCount={subAgentRunItems.length}
+              subAgentItems={subAgentRunItems}
               taskToolRuntimeLookup={taskToolRuntimeLookup}
               token={token}
               workspaceFileItems={workspaceFileItems}

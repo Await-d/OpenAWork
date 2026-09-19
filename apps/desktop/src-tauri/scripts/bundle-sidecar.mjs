@@ -419,6 +419,10 @@ const bunArgs = [
   'chromium-bidi',
   '--external',
   'electron',
+  // ssh2 的可选原生加速器（cpu-features）：缺失时 ssh2 会自动回退纯 JS 实现，
+  // 其 .node 产物无法打入单文件二进制，故与上面几项同样标记 external。
+  '--external',
+  'cpu-features',
 ];
 if (bunTarget) {
   bunArgs.push('--target', bunTarget);
