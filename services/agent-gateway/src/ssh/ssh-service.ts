@@ -57,6 +57,10 @@ export interface SshConnectionView {
   username: string;
   authType: PersistedSshConnection['authType'];
   privateKeyPath: string | null;
+  /** 是否已有粘贴式私钥。密钥原文绝不外泄。 */
+  hasPrivateKey: boolean;
+  /** 是否已有私钥口令。口令原文绝不外泄。 */
+  hasPassphrase: boolean;
   /** True iff a credential is on file. We never expose the secret itself. */
   hasPassword: boolean;
   autoReconnect: boolean;
@@ -110,6 +114,8 @@ function projectConnection(row: PersistedSshConnection): SshConnectionView {
     username: row.username,
     authType: row.authType,
     privateKeyPath: row.privateKeyPath,
+    hasPrivateKey: Boolean(row.privateKey),
+    hasPassphrase: Boolean(row.passphrase),
     hasPassword: Boolean(row.password) || row.authType === 'agent',
     autoReconnect: row.autoReconnect,
     status: row.status,
@@ -142,6 +148,8 @@ function toRuntimeConnection(row: PersistedSshConnection): RuntimeSshConnection 
     username: row.username,
     authType: row.authType,
     privateKeyPath: row.privateKeyPath ?? undefined,
+    privateKey: row.privateKey ?? undefined,
+    passphrase: row.passphrase ?? undefined,
     password: row.password ?? undefined,
     status: 'disconnected',
     createdAt: row.createdAt,

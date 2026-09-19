@@ -95,7 +95,11 @@ describe('createChromiumDownloader.ensureInstalled', () => {
       extractZip,
     });
 
-    await downloader.ensureInstalled(browsersPath, (line) => lines.push(line), new AbortController().signal);
+    await downloader.ensureInstalled(
+      browsersPath,
+      (line) => lines.push(line),
+      new AbortController().signal,
+    );
 
     expect(downloads).toEqual(['https://mirror-a.example/chromium.zip']);
     expect(await pathExists(join(target.directory, INSTALLATION_COMPLETE))).toBe(true);
@@ -123,7 +127,11 @@ describe('createChromiumDownloader.ensureInstalled', () => {
       extractZip: async () => undefined,
     });
 
-    await downloader.ensureInstalled(browsersPath, (line) => lines.push(line), new AbortController().signal);
+    await downloader.ensureInstalled(
+      browsersPath,
+      (line) => lines.push(line),
+      new AbortController().signal,
+    );
 
     expect(downloadCalled).toBe(false);
     expect(lines.some((line) => line.includes('已安装，跳过'))).toBe(true);
@@ -156,7 +164,11 @@ describe('createChromiumDownloader.ensureInstalled', () => {
       },
     });
 
-    await downloader.ensureInstalled(browsersPath, (line) => lines.push(line), new AbortController().signal);
+    await downloader.ensureInstalled(
+      browsersPath,
+      (line) => lines.push(line),
+      new AbortController().signal,
+    );
 
     expect(attempts).toEqual([
       'https://mirror-a.example/chromium.zip',
@@ -219,7 +231,11 @@ describe('createChromiumDownloader.ensureInstalled', () => {
       },
     });
 
-    await downloader.ensureInstalled(browsersPath, (line) => lines.push(line), new AbortController().signal);
+    await downloader.ensureInstalled(
+      browsersPath,
+      (line) => lines.push(line),
+      new AbortController().signal,
+    );
 
     const progressLines = lines.filter((line) => line.includes('下载进度'));
     // 0 / 7 / 50 / 100 触发，2 被节流。

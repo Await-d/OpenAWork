@@ -2,11 +2,11 @@
  * SshConnectionCreateForm — 在「选择 SSH 远端工作区」弹窗内新建 / 编辑 SSH 连接。
  *
  * 字段与网关的 `connectionCreateSchema` / `connectionUpdateSchema` 对齐：
- * name / host / port / username / authType / password / privateKeyPath。
+ * name / host / port / username / authType / password / privateKeyPath / privateKey / passphrase。
  * 提交后连接会持久化到网关的 SSH 连接表，下次打开弹窗或输入框上方的
  * 工作区菜单即可直接选择复用，无需再去设置页重复录入。
  *
- * 编辑模式下密码留空表示沿用已保存的凭据（网关 patch 语义：未提供的字段保持原值）。
+ * 编辑模式下密码 / 私钥 / 口令留空表示沿用已保存的凭据（网关 patch 语义：未提供的字段保持原值）。
  */
 
 import { useState } from 'react';
@@ -21,6 +21,8 @@ export interface SshConnectionDraft {
   authType: SSHAuthType;
   password?: string;
   privateKeyPath?: string;
+  privateKey?: string;
+  passphrase?: string;
 }
 
 export interface SshConnectionCreateFormProps {
@@ -38,6 +40,16 @@ export interface SshConnectionCreateFormProps {
    * 允许时留空表示沿用网关侧已保存的凭据，不会清空。
    */
   passwordOptional?: boolean;
+  /**
+   * 私钥留空是否允许提交（编辑且网关侧已保存私钥时为 true）：
+   * 允许时粘贴模式留空表示沿用网关侧已保存的私钥，不会清空。
+   */
+  privateKeyOptional?: boolean;
+  /**
+   * 私钥口令留空是否允许提交（编辑且网关侧已保存口令时为 true）：
+   * 仅影响标签文案；口令留空一律省略，网关按「未提供即保留」处理。
+   */
+  passphraseOptional?: boolean;
 }
 
 /** 表单原始输入（全部为字符串，便于做逐项校验）。 */
@@ -49,12 +61,21 @@ export interface SshConnectionFormValues {
   authType: SSHAuthType;
   password: string;
   privateKeyPath: string;
+  privateKey: string;
+  passphrase: string;
+  keySource: 'paste' | 'path';
 }
 
 const AUTH_TYPE_OPTIONS: Array<{ value: SSHAuthType; label: string }> = [
   { value: 'password', label: '密码' },
-  { value: 'key', label: '私钥文件' },
+  { value: 'key', label: '私钥' },
+  { value: 'key-password', label: '公钥 + 密码' },
   { value: 'agent', label: 'SSH Agent' },
+];
+
+const KEY_SOURCE_OPTIONS: Array<{ value: SshConnectionFormValues['keySource']; label: string }> = [
+  { value: 'paste', label: '粘贴私钥内容' },
+  { value: 'path', label: '私钥文件路径' },
 ];
 
 const INITIAL_VALUES: SshConnectionFormValues = {
@@ -65,17 +86,27 @@ const INITIAL_VALUES: SshConnectionFormValues = {
   authType: 'password',
   password: '',
   privateKeyPath: '',
+  privateKey: '',
+  passphrase: '',
+  keySource: 'paste',
 };
 
 /**
  * 校验并归一化表单输入。返回 `{ error }` 或 `{ draft }`，纯函数便于单测。
  * 名称留空时回落到主机地址——网关的 `name` 为必填且长度至少为 1。
- * `passwordOptional` 为 true（编辑且已保存凭据）时，密码留空返回不含 password
- * 的草稿，网关按「未提供即保留」处理，不会清空已保存的凭据。
+ * `passwordOptional` / `privateKeyOptional` / `passphraseOptional` 为 true（编辑且已保存凭据）时，
+ * 对应字段留空返回不含该字段的草稿，网关按「未提供即保留」处理，不会清空。
+ * `key-password` 为多因子认证：密码与私钥材料（路径或粘贴内容）必须同时提供。
+ * 私钥材料由 `keySource` 决定提交 `privateKeyPath` 还是 `privateKey`，两者互斥；
+ * 口令仅在有值时携带，留空一律省略（未加密私钥无需口令）。
  */
 export function resolveSshConnectionDraft(
   values: SshConnectionFormValues,
-  options: { passwordOptional?: boolean } = {},
+  options: {
+    passwordOptional?: boolean;
+    privateKeyOptional?: boolean;
+    passphraseOptional?: boolean;
+  } = {},
 ): { error: string } | { draft: SshConnectionDraft } {
   const host = values.host.trim();
   if (!host) {
@@ -93,28 +124,61 @@ export function resolveSshConnectionDraft(
   }
 
   const name = values.name.trim() || host;
+  const usesPassword = values.authType === 'password' || values.authType === 'key-password';
+  const usesKey = values.authType === 'key' || values.authType === 'key-password';
 
-  if (values.authType === 'password') {
+  if (!usesPassword && !usesKey) {
+    return { draft: { name, host, port, username, authType: 'agent' } };
+  }
+
+  const draft: SshConnectionDraft = {
+    name,
+    host,
+    port,
+    username,
+    authType: values.authType,
+  };
+
+  if (usesPassword) {
     if (!values.password) {
       if (!options.passwordOptional) {
-        return { error: '请填写密码，或改用私钥文件 / SSH Agent 认证' };
+        return {
+          error:
+            values.authType === 'key-password'
+              ? '请填写密码以完成公钥 + 密码认证'
+              : '请填写密码，或改用私钥 / SSH Agent 认证',
+        };
       }
-      return { draft: { name, host, port, username, authType: 'password' } };
+    } else {
+      draft.password = values.password;
     }
-    return {
-      draft: { name, host, port, username, authType: 'password', password: values.password },
-    };
   }
 
-  if (values.authType === 'key') {
-    const privateKeyPath = values.privateKeyPath.trim();
-    if (!privateKeyPath) {
-      return { error: '请填写私钥文件路径' };
+  if (usesKey) {
+    if (values.keySource === 'path') {
+      const privateKeyPath = values.privateKeyPath.trim();
+      if (!privateKeyPath) {
+        return { error: '请填写私钥文件路径' };
+      }
+      draft.privateKeyPath = privateKeyPath;
+    } else {
+      const privateKey = values.privateKey.trim();
+      if (!privateKey) {
+        if (!options.privateKeyOptional) {
+          return { error: '请粘贴私钥内容' };
+        }
+      } else {
+        draft.privateKey = privateKey;
+      }
     }
-    return { draft: { name, host, port, username, authType: 'key', privateKeyPath } };
+
+    const passphrase = values.passphrase.trim();
+    if (passphrase) {
+      draft.passphrase = passphrase;
+    }
   }
 
-  return { draft: { name, host, port, username, authType: 'agent' } };
+  return { draft };
 }
 
 const FIELD_STYLE: CSSProperties = {
@@ -136,6 +200,18 @@ const LABEL_TEXT_STYLE: CSSProperties = {
   fontWeight: 500,
 };
 
+/** 私钥内容粘贴框：等宽字体、可纵向拉伸，与其它输入框共用 `.ssh-picker-input` 焦点环。 */
+const TEXTAREA_STYLE: CSSProperties = {
+  ...FIELD_STYLE,
+  height: 'auto',
+  minHeight: 96,
+  minWidth: 0,
+  padding: '8px 10px',
+  fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
+  lineHeight: 1.5,
+  resize: 'vertical',
+};
+
 const FIELD_WRAP_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -150,6 +226,8 @@ export default function SshConnectionCreateForm({
   mode = 'create',
   initialValues,
   passwordOptional = false,
+  privateKeyOptional = false,
+  passphraseOptional = false,
 }: SshConnectionCreateFormProps) {
   const [values, setValues] = useState<SshConnectionFormValues>(() => ({
     ...INITIAL_VALUES,
@@ -160,6 +238,8 @@ export default function SshConnectionCreateForm({
   const isEdit = mode === 'edit';
 
   const disabled = busy || submitting;
+  const usesPassword = values.authType === 'password' || values.authType === 'key-password';
+  const usesKey = values.authType === 'key' || values.authType === 'key-password';
 
   function patchValues(patch: Partial<SshConnectionFormValues>): void {
     setValues((previous) => ({ ...previous, ...patch }));
@@ -167,7 +247,11 @@ export default function SshConnectionCreateForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const resolved = resolveSshConnectionDraft(values, { passwordOptional });
+    const resolved = resolveSshConnectionDraft(values, {
+      passwordOptional,
+      privateKeyOptional,
+      passphraseOptional,
+    });
     if ('error' in resolved) {
       setError(resolved.error);
       return;
@@ -209,7 +293,7 @@ export default function SshConnectionCreateForm({
         </span>
         <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           {isEdit
-            ? '修改会直接写回网关的 SSH 连接表；密码留空表示沿用已保存的凭据。'
+            ? '修改会直接写回网关的 SSH 连接表；密码 / 私钥 / 口令留空表示沿用已保存的凭据。'
             : '保存后会写入网关的 SSH 连接表，下次可直接选择使用，无需重复录入。'}
         </span>
       </div>
@@ -302,7 +386,7 @@ export default function SshConnectionCreateForm({
         </label>
       </div>
 
-      {values.authType === 'password' && (
+      {usesPassword && (
         <label style={FIELD_WRAP_STYLE}>
           <span style={LABEL_TEXT_STYLE}>
             {isEdit && passwordOptional ? '密码（留空则不修改）' : '密码 *'}
@@ -325,22 +409,102 @@ export default function SshConnectionCreateForm({
         </label>
       )}
 
-      {values.authType === 'key' && (
-        <label style={FIELD_WRAP_STYLE}>
-          <span style={LABEL_TEXT_STYLE}>私钥文件路径 *</span>
-          <input
-            type="text"
-            className="ssh-picker-input"
-            aria-label="私钥文件路径"
-            placeholder="例如：/home/you/.ssh/id_ed25519"
-            value={values.privateKeyPath}
-            onChange={(event) => patchValues({ privateKeyPath: event.currentTarget.value })}
-            disabled={disabled}
-            autoComplete="off"
-            spellCheck={false}
-            style={FIELD_STYLE}
-          />
-        </label>
+      {usesKey && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div
+            role="group"
+            aria-label="私钥来源"
+            style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
+          >
+            {KEY_SOURCE_OPTIONS.map((option) => {
+              const active = values.keySource === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="ssh-picker-action"
+                  aria-pressed={active}
+                  disabled={disabled}
+                  onClick={() => patchValues({ keySource: option.value })}
+                  style={{
+                    height: 28,
+                    padding: '0 10px',
+                    borderRadius: 8,
+                    border: `1px solid ${active ? 'var(--accent-border)' : 'var(--border-default)'}`,
+                    background: active ? 'var(--accent-subtle)' : 'transparent',
+                    color: active ? 'var(--accent)' : 'var(--fg-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {values.keySource === 'paste' ? (
+            <label style={FIELD_WRAP_STYLE}>
+              <span style={LABEL_TEXT_STYLE}>
+                {isEdit && privateKeyOptional ? '私钥内容（留空则不修改）' : '私钥内容 *'}
+              </span>
+              <textarea
+                className="ssh-picker-input"
+                aria-label="私钥内容"
+                rows={5}
+                placeholder="粘贴以 -----BEGIN 开头的私钥内容；仅在网关侧加密保存，前端不回显"
+                value={values.privateKey}
+                onChange={(event) => patchValues({ privateKey: event.currentTarget.value })}
+                disabled={disabled}
+                autoComplete="off"
+                spellCheck={false}
+                style={TEXTAREA_STYLE}
+              />
+            </label>
+          ) : (
+            <label style={FIELD_WRAP_STYLE}>
+              <span style={LABEL_TEXT_STYLE}>私钥文件路径 *</span>
+              <input
+                type="text"
+                className="ssh-picker-input"
+                aria-label="私钥文件路径"
+                placeholder="例如：/home/you/.ssh/id_ed25519"
+                value={values.privateKeyPath}
+                onChange={(event) => patchValues({ privateKeyPath: event.currentTarget.value })}
+                disabled={disabled}
+                autoComplete="off"
+                spellCheck={false}
+                style={FIELD_STYLE}
+              />
+            </label>
+          )}
+
+          <label style={FIELD_WRAP_STYLE}>
+            <span style={LABEL_TEXT_STYLE}>
+              {isEdit && passphraseOptional
+                ? '私钥口令（留空则不修改）'
+                : '私钥口令（加密私钥需要，可留空）'}
+            </span>
+            <input
+              type="password"
+              className="ssh-picker-input"
+              aria-label="私钥口令"
+              placeholder={
+                isEdit && passphraseOptional
+                  ? '留空表示沿用已保存的口令'
+                  : '加密私钥才需要，未加密可留空'
+              }
+              value={values.passphrase}
+              onChange={(event) => patchValues({ passphrase: event.currentTarget.value })}
+              disabled={disabled}
+              autoComplete="new-password"
+              spellCheck={false}
+              style={FIELD_STYLE}
+            />
+          </label>
+        </div>
       )}
 
       {values.authType === 'agent' && (

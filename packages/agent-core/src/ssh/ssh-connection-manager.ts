@@ -69,8 +69,12 @@ export interface SSHConnection {
   host: string;
   port: number;
   username: string;
-  authType: 'password' | 'key' | 'agent';
+  authType: 'password' | 'key' | 'key-password' | 'agent';
   privateKeyPath?: string;
+  /** 粘贴式私钥内容（明文，仅驻留内存）；非空时优先于 privateKeyPath。 */
+  privateKey?: string;
+  /** 加密私钥的口令（明文，仅驻留内存）；仅 key / key-password 使用。 */
+  passphrase?: string;
   password?: string;
   status: 'connected' | 'disconnected' | 'error';
   createdAt: number;
@@ -126,7 +130,7 @@ interface SSHConnectionManagerOptions {
   clients?: Map<string, SSHClient>;
   /**
    * Factory for a fresh SSH client. Defaults to dynamically importing the
-   * optional `ssh2` peer dependency. Injectable for tests and for runtimes
+   * optional `ssh2` dependency. Injectable for tests and for runtimes
    * that provide their own transport.
    */
   clientFactory?: () => Promise<SSHClient>;
@@ -180,6 +184,15 @@ type SSHConnectOptions = {
   username: string;
   password?: string;
   privateKey?: string;
+  /** 解密加密私钥所需的口令。 */
+  passphrase?: string;
+  /** 允许 keyboard-interactive 挑战，由已存储的密码逐条应答。 */
+  tryKeyboard?: boolean;
+  /**
+   * 显式认证方式顺序。仅多因子（publickey + password）需要覆盖 ssh2 默认
+   * 的 password-before-publickey 顺序，否则二次认证不会重试 password。
+   */
+  authHandler?: string[];
   agent?: string;
   /** ssh2 handshake timeout (ms). Bounds the connect attempt server-side. */
   readyTimeout?: number;
@@ -187,7 +200,7 @@ type SSHConnectOptions = {
 
 type SSH2Module = { Client: new () => SSHClient };
 
-// ssh2 is an optional peer dependency; loaded dynamically at runtime
+// ssh2 is an optional dependency; loaded dynamically at runtime
 async function loadSSHClient(): Promise<SSHClient> {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const ssh2 = (await (Function(
@@ -195,6 +208,22 @@ async function loadSSHClient(): Promise<SSHClient> {
     'return import(m)',
   )('ssh2') as Promise<unknown>)) as SSH2Module;
   return new ssh2.Client();
+}
+
+/**
+ * 解析 ssh-agent 地址：优先环境变量 `SSH_AUTH_SOCK`；Windows 上未设置时
+ * 回退到 OpenSSH 的命名管道；其余平台返回 undefined 由调用方报错。
+ */
+function resolveSshAgentAddress(): string | undefined {
+  const proc = (
+    globalThis as unknown as {
+      process?: { env?: Record<string, string>; platform?: string };
+    }
+  ).process;
+  const socketPath = proc?.env?.['SSH_AUTH_SOCK']?.trim();
+  if (socketPath) return socketPath;
+  if (proc?.platform === 'win32') return '\\\\.\\pipe\\openssh-ssh-agent';
+  return undefined;
 }
 
 /**
@@ -293,15 +322,66 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
           readyTimeout: SSH_CONNECT_TIMEOUT_MS,
         };
 
-        if (conn.authType === 'password' && conn.password) {
+        const passwordAuth = conn.authType === 'password' || conn.authType === 'key-password';
+        const keyAuth = conn.authType === 'key' || conn.authType === 'key-password';
+        const multiFactorAuth = conn.authType === 'key-password';
+
+        // 多因子缺一不可：静默降级为单因子会掩盖配置错误。
+        if (multiFactorAuth && !conn.password) {
+          throw new Error('SSH key+password auth requires both a private key and a password');
+        }
+
+        if (passwordAuth && conn.password) {
           opts.password = conn.password;
-        } else if (conn.authType === 'key' && conn.privateKeyPath) {
-          const keyContent = await readFile(conn.privateKeyPath, 'utf8');
-          opts.privateKey = keyContent;
-        } else if (conn.authType === 'agent') {
-          const proc = (globalThis as unknown as { process?: { env?: Record<string, string> } })
-            .process;
-          opts.agent = proc?.env?.['SSH_AUTH_SOCK'];
+          opts.tryKeyboard = true;
+        }
+
+        if (keyAuth) {
+          // 优先使用粘贴式私钥内容；内容为空时才回退到读取私钥文件。
+          const pastedKey = conn.privateKey?.trim();
+          if (pastedKey) {
+            opts.privateKey = pastedKey;
+          } else if (conn.privateKeyPath) {
+            const keyContent = await readFile(conn.privateKeyPath, 'utf8');
+            opts.privateKey = keyContent;
+          } else {
+            throw new Error('SSH key auth requires a private key or a private key path');
+          }
+          if (conn.passphrase) {
+            opts.passphrase = conn.passphrase;
+          }
+        }
+
+        if (multiFactorAuth) {
+          // ssh2 默认顺序是 password 先于 publickey，服务端要求
+          // `AuthenticationMethods publickey,password` 时 publickey 部分成功后
+          // 不会回头重试 password；显式指定顺序才能完成第二次认证。
+          opts.authHandler = ['publickey', 'password'];
+        }
+
+        if (conn.authType === 'agent') {
+          const agentAddress = resolveSshAgentAddress();
+          if (!agentAddress) {
+            throw new Error(
+              'SSH agent auth requires SSH_AUTH_SOCK (or a Windows ssh-agent named pipe)',
+            );
+          }
+          opts.agent = agentAddress;
+        }
+
+        // keyboard-interactive 密码挑战（部分 sshd 只开放该方式）：必须在
+        // connect() 之前注册；仅单条密码提示用已存密码应答，多提示（PAM/2FA）
+        // 一律回复空串，避免把账户密码泄露给 OTP 等无关因子。应答绝不落日志。
+        if (opts.tryKeyboard) {
+          client.on('keyboard-interactive', (...args: unknown[]) => {
+            const prompts = Array.isArray(args[3]) ? (args[3] as unknown[]) : [];
+            const finish = args[4];
+            if (typeof finish === 'function') {
+              const responses =
+                prompts.length === 1 ? [conn.password ?? ''] : prompts.map(() => '');
+              (finish as (responses: string[]) => void)(responses);
+            }
+          });
         }
 
         client
@@ -322,7 +402,16 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
       };
 
       void connectWithResolvedOptions().catch((err: unknown) => {
-        finish(() => reject(err instanceof Error ? err : new Error(String(err))));
+        finish(() => {
+          // 解析连接选项失败（如缺少密钥材料 / 读私钥文件失败）时，尽力回收
+          // 已创建但未使用的 client，避免泄漏。
+          try {
+            client.end();
+          } catch {
+            // 客户端回收本身失败时忽略，保持原始错误向上抛出
+          }
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
       });
     });
   }

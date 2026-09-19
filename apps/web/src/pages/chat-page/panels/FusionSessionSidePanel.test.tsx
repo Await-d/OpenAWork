@@ -52,6 +52,19 @@ vi.mock('../../../components/chat/misc/BuiltInBrowser.js', () => ({
   ),
 }));
 
+vi.mock('./sub-session-detail-panel.js', () => ({
+  SubSessionDetailPanel: (props: {
+    readonly childSessionId: string | null;
+    readonly currentUserEmail: string;
+  }) => (
+    <div
+      data-child-session-id={props.childSessionId ?? 'none'}
+      data-current-user-email={props.currentUserEmail}
+      data-testid="sub-session-detail-panel-mock"
+    />
+  ),
+}));
+
 function resetUiState(): void {
   useUIStateStore.setState({
     // 桌面 Fusion 下宿主面由 ChatPage 按「谁可见」派生：未提升时归停靠面板。
@@ -88,15 +101,18 @@ function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
   return {
     contextUsageSnapshot: null,
     currentSessionId: 'session-1',
+    currentUserEmail: 'user@example.com',
     effectiveWorkingDirectory: WORKSPACE_PATH,
     fileEditor: readFileEditor(),
     fileTree: <div data-testid="dock-file-tree" />,
     gatewayUrl: 'http://localhost:3000',
     handleSaveFile: async () => undefined,
     onCompactSession: () => undefined,
+    onOpenFullSession: () => undefined,
     onPromoteToFullScreen: () => undefined,
     onTabChange: () => undefined,
     saving: false,
+    selectedChildSessionId: null,
     token: 'token',
     workspaceFileItems: [],
     workspacePath: WORKSPACE_PATH,
@@ -169,7 +185,7 @@ describe('FusionSessionSidePanel', () => {
     expect(screen.getByText(/export const layout/)).not.toBeNull();
   });
 
-  it('桌面停靠面板提供 审查/代码/预览/Context 四个一级 tab 并上报切换动作', () => {
+  it('桌面停靠面板提供 审查/子代理/代码/预览/Context 五个一级 tab 并上报切换动作', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -183,6 +199,7 @@ describe('FusionSessionSidePanel', () => {
 
     const tablist = screen.getByRole('tablist', { name: '会话侧面板' });
     const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const agentTab = screen.getByRole('tab', { name: '子代理' });
     const codeTab = screen.getByRole('tab', { name: '代码' });
     const previewTab = screen.getByRole('tab', { name: '预览' });
     const contextTab = screen.getByRole('tab', { name: 'Context' });
@@ -190,17 +207,22 @@ describe('FusionSessionSidePanel', () => {
     expect(tablist).not.toBeNull();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '审查',
+      '子代理',
       '代码',
       '预览',
       'Context',
     ]);
     expect(reviewTab.getAttribute('aria-selected')).toBe('true');
+    expect(agentTab.getAttribute('aria-selected')).toBe('false');
     expect(codeTab.getAttribute('aria-selected')).toBe('false');
     expect(previewTab.getAttribute('aria-selected')).toBe('false');
     expect(contextTab.getAttribute('aria-selected')).toBe('false');
 
+    fireEvent.click(agentTab);
+    expect(onTabChange).toHaveBeenCalledWith('agent');
+
     fireEvent.click(codeTab);
-    expect(onTabChange).toHaveBeenCalledWith('code');
+    expect(onTabChange).toHaveBeenLastCalledWith('code');
 
     fireEvent.click(previewTab);
     expect(onTabChange).toHaveBeenLastCalledWith('preview');
@@ -209,7 +231,63 @@ describe('FusionSessionSidePanel', () => {
     expect(onTabChange).toHaveBeenLastCalledWith('context');
   });
 
-  it('侧栏 tab 支持方向键按 审查→代码→预览→Context 顺序切换焦点与激活目标', () => {
+  it('子代理 tab 展示 subAgentCount 徽章', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="review" subAgentCount={2} />);
+
+    expect(screen.getByRole('tab', { name: /子代理\s*2/ }).textContent).toContain('2');
+  });
+
+  it('子代理 tab 常驻挂载子会话详情面板，未激活时 hidden 且不打断其他 pane', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    const view = render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="review"
+        selectedChildSessionId="child-session-1"
+      />,
+    );
+
+    const agentPane = screen.getByTestId('fusion-panel-pane-agent');
+    const detailPanel = screen.getByTestId('sub-session-detail-panel-mock');
+
+    expect(agentPane.hasAttribute('hidden')).toBe(true);
+    expect(agentPane.contains(detailPanel)).toBe(true);
+    expect(detailPanel.getAttribute('data-child-session-id')).toBe('child-session-1');
+    expect(detailPanel.getAttribute('data-current-user-email')).toBe('user@example.com');
+    expect(screen.getByTestId('fusion-panel-pane-review').hasAttribute('hidden')).toBe(false);
+
+    view.rerender(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="agent"
+        selectedChildSessionId="child-session-1"
+      />,
+    );
+
+    expect(screen.getByTestId('sub-session-detail-panel-mock')).toBe(detailPanel);
+    expect(screen.getByTestId('fusion-panel-pane-agent').hasAttribute('hidden')).toBe(false);
+    expect(screen.getByTestId('fusion-panel-pane-review').hasAttribute('hidden')).toBe(true);
+    expect(screen.getByTestId('fusion-panel-pane-workspace').hasAttribute('hidden')).toBe(true);
+    expect(screen.getByTestId('fusion-panel-pane-context').hasAttribute('hidden')).toBe(true);
+  });
+
+  it('agent 已是桌面一级 tab：直接选中子代理，不触发 tab 收敛', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const onTabChange = vi.fn();
+
+    render(
+      <FusionSessionSidePanel {...createBaseProps()} activeTab="agent" onTabChange={onTabChange} />,
+    );
+
+    expect(screen.getByRole('tab', { name: '子代理' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('fusion-panel-pane-agent').hasAttribute('hidden')).toBe(false);
+    expect(onTabChange).not.toHaveBeenCalled();
+  });
+
+  it('侧栏 tab 支持方向键按 审查→子代理→代码→预览→Context 顺序切换焦点与激活目标', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -222,6 +300,7 @@ describe('FusionSessionSidePanel', () => {
     );
 
     const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const agentTab = screen.getByRole('tab', { name: '子代理' });
     const codeTab = screen.getByRole('tab', { name: '代码' });
     const previewTab = screen.getByRole('tab', { name: '预览' });
     const contextTab = screen.getByRole('tab', { name: 'Context' });
@@ -229,7 +308,11 @@ describe('FusionSessionSidePanel', () => {
     reviewTab.focus();
     fireEvent.keyDown(reviewTab, { key: 'ArrowRight' });
 
-    expect(onTabChange).toHaveBeenCalledWith('code');
+    expect(onTabChange).toHaveBeenCalledWith('agent');
+    expect(document.activeElement).toBe(agentTab);
+
+    fireEvent.keyDown(agentTab, { key: 'ArrowRight' });
+    expect(onTabChange).toHaveBeenLastCalledWith('code');
     expect(document.activeElement).toBe(codeTab);
 
     fireEvent.keyDown(codeTab, { key: 'ArrowRight' });
@@ -732,7 +815,7 @@ describe('FusionSessionSidePanel', () => {
     expect(useUIStateStore.getState().browserPreviewSurface).toBe('dock');
   });
 
-  it('融合停靠面板的 tab 清单为 审查/代码/预览/Context，残留 browser tab 收敛到预览', async () => {
+  it('融合停靠面板的 tab 清单为 审查/子代理/代码/预览/Context，残留 browser tab 收敛到预览', async () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -747,6 +830,7 @@ describe('FusionSessionSidePanel', () => {
     expect(screen.getByTestId('fusion-docked-side-panel')).not.toBeNull();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '审查',
+      '子代理',
       '代码',
       '预览',
       'Context',

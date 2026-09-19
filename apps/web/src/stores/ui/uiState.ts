@@ -331,9 +331,10 @@ export interface UIStateStore {
   fusionDockSplitPos: number;
   setFusionDockSplitPos: (percent: number) => void;
   /**
-   * Fusion 布局下停靠会话面板（审查 / 代码 / 预览 / Context）当前一级 tab。
+   * Fusion 布局下停靠会话面板（审查 / 子代理 / 代码 / 预览 / Context）当前一级 tab。
    * 联合类型与 `SessionSidePanel` 的 `SidePanelTabId` 保持一致：`files` /
-   * `browser` 只属于移动端底部面板，桌面端会在渲染前收敛到 `code` / `preview`。
+   * `browser` 只属于移动端底部面板，桌面端会在渲染前收敛到 `code` / `preview`；
+   * `agent` 只属于桌面停靠面板，移动端渲染前收敛回 `review`。
    */
   sidePanelActiveTab: SidePanelActiveTab;
   setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
@@ -491,6 +492,7 @@ function isTerminalPanelPosition(value: unknown): value is TerminalPanelPosition
 
 export const SIDE_PANEL_ACTIVE_TABS = [
   'review',
+  'agent',
   'code',
   'preview',
   'context',

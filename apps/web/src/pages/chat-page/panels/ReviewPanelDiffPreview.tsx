@@ -18,6 +18,7 @@ export function ReviewPanelDiffPreview({
           beforeText={selectedFile.before}
           chrome="minimal"
           maxHeight={320}
+          revealFirstChange
           viewMode={diffViewMode}
         />
       ) : (

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const FilePlusIcon = () => (
   <svg
@@ -204,6 +204,9 @@ export interface FileTreeContextMenuProps {
   onRename?: () => void;
 }
 
+// 视口内夹取时四边保留的最小边距，避免菜单贴边。
+const VIEWPORT_MARGIN = 8;
+
 const menuStyle: React.CSSProperties = {
   position: 'fixed',
   zIndex: 9999,
@@ -213,6 +216,9 @@ const menuStyle: React.CSSProperties = {
   padding: '6px 0',
   minWidth: 232,
   boxShadow: 'var(--shadow-lg)',
+  // 菜单高于视口时可滚动，保证所有菜单项仍然可达。
+  maxHeight: 'calc(100vh - 16px)',
+  overflowY: 'auto',
 };
 
 const dividerStyle: React.CSSProperties = {
@@ -303,6 +309,21 @@ export default function FileTreeContextMenu({
   onRename,
 }: FileTreeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState({ left: x, top: y });
+
+  // 菜单是 fixed 定位：先渲染到原始鼠标坐标，再按实际尺寸夹取回视口内。
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.width - VIEWPORT_MARGIN);
+    const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - rect.height - VIEWPORT_MARGIN);
+    setPosition({
+      left: Math.min(Math.max(x, VIEWPORT_MARGIN), maxLeft),
+      top: Math.min(Math.max(y, VIEWPORT_MARGIN), maxTop),
+    });
+  }, [x, y]);
+
   const baseLabel =
     targetType === 'root'
       ? '根目录'
@@ -339,7 +360,7 @@ export default function FileTreeContextMenu({
     <>
       <div
         ref={menuRef}
-        style={{ ...menuStyle, top: y, left: x }}
+        style={{ ...menuStyle, top: position.top, left: position.left }}
         role="menu"
         aria-label="文件树操作菜单"
       >

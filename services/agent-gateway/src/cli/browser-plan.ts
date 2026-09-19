@@ -50,7 +50,8 @@ export async function runPrintBrowserPlan(argv: readonly string[]): Promise<numb
     process.stdout.write(`${JSON.stringify({ ok: true, ...base, targets }, null, 2)}\n`);
     return targets.length > 0 ? 0 : 1;
   } catch (error) {
-    const message = error instanceof Error && error.message.length > 0 ? error.message : String(error);
+    const message =
+      error instanceof Error && error.message.length > 0 ? error.message : String(error);
     process.stdout.write(`${JSON.stringify({ ok: false, ...base, error: message }, null, 2)}\n`);
     return 1;
   }

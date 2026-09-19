@@ -37,7 +37,7 @@ const DIALOGUE_MODE_DEFINITIONS = [
       '修改后执行测试或构建验证',
       '说明尽量短，代码优先',
     ] as const,
-    defaultAgent: 'sisyphus-junior',
+    defaultAgent: 'sisyphus',
   },
   {
     value: 'programmer',

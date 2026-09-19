@@ -2128,6 +2128,41 @@ fn mark_dialog_host_ready(
     Ok(())
 }
 
+/// 按 label 关闭内置浏览器创建的原生子 webview（兜底回收）。
+///
+/// 预览浏览器由前端 `new Webview(...)` 创建，label 前缀固定为 `browser-`。若前端在
+/// webview 创建完成前卸载，JS 侧 `close()` 可能失败并丢掉句柄，原生表面会一直盖在
+/// HTML 之上（HTML 的 z-index 盖不住原生层），只能重启应用。此命令让前端即便只剩
+/// label 也能把它收掉。非 `browser-` 前缀一律拒绝，避免误伤主窗口或插件 webview。
+#[tauri::command]
+fn close_browser_webview(app: tauri::AppHandle, label: String) -> Result<bool, String> {
+    if !label.starts_with("browser-") {
+        return Err(format!("拒绝关闭非浏览器 webview：{label}"));
+    }
+    match app.get_webview(&label) {
+        Some(webview) => {
+            webview.close().map_err(|err| err.to_string())?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// 回收所有遗留的内置浏览器原生子 webview（label 前缀 `browser-`），返回关闭数量。
+///
+/// 作为最后的兜底：应用退出前统一清一次，避免任何漏关的原生表面跨越生命周期残留。
+/// 只按前缀筛选，绝不触碰主窗口与插件 webview。
+#[tauri::command]
+fn close_stale_browser_webviews(app: tauri::AppHandle) -> Result<usize, String> {
+    let mut closed = 0usize;
+    for (label, webview) in app.webviews() {
+        if label.starts_with("browser-") && webview.close().is_ok() {
+            closed += 1;
+        }
+    }
+    Ok(closed)
+}
+
 fn handle_window_close_request(window: &tauri::Window, api: &tauri::CloseRequestApi) {
     let app = window.app_handle();
     let behavior = app
@@ -2256,6 +2291,8 @@ pub fn run() {
             lock_desktop_now,
             resolve_close_request,
             mark_dialog_host_ready,
+            close_browser_webview,
+            close_stale_browser_webviews,
         ])
         .setup(|app| {
             // 先加载持久化设置并 manage 全局 state，setup_tray 会读取它来初始化菜单
@@ -2315,6 +2352,8 @@ pub fn run() {
     //   复用别的网关时不会误杀，符合"跨会话复用"语义。
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            // 退出前兜底回收漏关的浏览器子 webview，避免原生表面残留。
+            let _ = close_stale_browser_webviews(app_handle.clone());
             shutdown_gateway_child(app_handle);
         }
     });

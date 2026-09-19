@@ -14,10 +14,14 @@ export interface SshPickerConnection {
   username: string;
   status: 'connected' | 'disconnected' | 'connecting' | 'error';
   /** 以下字段用于「编辑配置」回填；连接列表端点会一并返回。 */
-  authType?: 'password' | 'key' | 'agent';
+  authType?: 'password' | 'key' | 'key-password' | 'agent';
   privateKeyPath?: string | null;
   /** 网关侧是否已保存凭据（密码或 agent）；决定编辑时密码能否留空沿用。 */
   hasPassword?: boolean;
+  /** 网关侧是否已保存私钥内容；决定编辑时「粘贴私钥」能否留空沿用。 */
+  hasPrivateKey?: boolean;
+  /** 网关侧是否已保存私钥口令；决定编辑时口令的标签文案。 */
+  hasPassphrase?: boolean;
 }
 
 export interface SshWorkspaceSelection {
@@ -88,6 +92,9 @@ export function buildSshConnectionFormValues(
     authType: connection.authType ?? 'password',
     password: '',
     privateKeyPath: connection.privateKeyPath ?? '',
+    privateKey: '',
+    passphrase: '',
+    keySource: connection.hasPrivateKey ? 'paste' : connection.privateKeyPath ? 'path' : 'paste',
   };
 }
 
@@ -678,6 +685,8 @@ export default function SshWorkspacePickerModal({
               mode="edit"
               initialValues={buildSshConnectionFormValues(selectedConnection)}
               passwordOptional={canReuseStoredPassword(selectedConnection)}
+              privateKeyOptional={selectedConnection.hasPrivateKey === true}
+              passphraseOptional={selectedConnection.hasPassphrase === true}
               onSubmit={handleUpdateConnection}
               onCancel={() => {
                 setEditingConnectionId(null);

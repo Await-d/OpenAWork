@@ -2,14 +2,14 @@
  * SessionSidePanel — 会话侧面板的 Tab 条（桌面停靠面板 + 键盘导航的唯一事实来源）。
  *
  * 信息架构（一级扁平化）：
- *   [审查 N] [代码] [预览] [Context]
+ *   [审查 N] [子代理 N] [代码] [预览] [Context]
  *
  * 桌面端不再有第二层「工作区」tab：代码编辑器与浏览器预览是一级 tab，共享同一个
  * 常驻工作区 pane（见 `FusionSessionSidePanel`）。
  *
  * `SidePanelTabId` 是桌面 / 移动端共享的联合类型：`files` / `browser` 只属于
- * 移动端底部面板（`FusionMobileBottomPanel`），桌面停靠面板会把它们收敛到
- * `code` / `preview`，保证联合类型始终自洽。
+ * 移动端底部面板（`FusionMobileBottomPanel`），`agent` 只属于桌面停靠面板的
+ * 子代理预览；两端在各自消费入口先收敛，保证联合类型始终自洽。
  */
 
 import {
@@ -22,10 +22,12 @@ import {
 } from 'react';
 import './SessionSidePanel.css';
 
-export type SidePanelTabId = 'review' | 'code' | 'preview' | 'context' | 'files' | 'browser';
+export type SidePanelTabId =
+  'review' | 'agent' | 'code' | 'preview' | 'context' | 'files' | 'browser';
 
 export interface SessionSidePanelProps {
   readonly reviewCount?: number;
+  readonly subAgentCount?: number;
   readonly activeTab: SidePanelTabId;
   readonly onTabChange: (tab: SidePanelTabId) => void;
   readonly children: ReactNode;
@@ -45,7 +47,13 @@ interface TabDef {
 type TabDirection = 'next' | 'previous';
 
 /** tab 顺序的唯一事实来源——键盘左右循环与 Home/End 都从它推导。 */
-const PANEL_TAB_ORDER: readonly SidePanelTabId[] = ['review', 'code', 'preview', 'context'];
+const PANEL_TAB_ORDER: readonly SidePanelTabId[] = [
+  'review',
+  'agent',
+  'code',
+  'preview',
+  'context',
+];
 
 function getAdjacentTabId(tabId: SidePanelTabId, direction: TabDirection): SidePanelTabId {
   const index = PANEL_TAB_ORDER.indexOf(tabId);
@@ -61,6 +69,7 @@ function getAdjacentTabId(tabId: SidePanelTabId, direction: TabDirection): SideP
 
 export function SessionSidePanel({
   reviewCount = 0,
+  subAgentCount = 0,
   activeTab,
   onTabChange,
   children,
@@ -69,6 +78,7 @@ export function SessionSidePanel({
 }: SessionSidePanelProps) {
   const panelInstanceId = useId();
   const tabButtonRefs = useRef<Record<SidePanelTabId, HTMLButtonElement | null>>({
+    agent: null,
     browser: null,
     code: null,
     context: null,
@@ -78,6 +88,7 @@ export function SessionSidePanel({
   });
   const tabs: TabDef[] = [
     { id: 'review', label: '审查', badge: reviewCount || undefined },
+    { id: 'agent', label: '子代理', badge: subAgentCount || undefined },
     { id: 'code', label: '代码' },
     { id: 'preview', label: '预览' },
     { id: 'context', label: 'Context' },

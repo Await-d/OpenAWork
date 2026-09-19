@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import type { ChatProviderDescriptor } from '../../../components/chat/message/chat-message-group-list.js';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type {
@@ -6,6 +7,7 @@ import type {
   EditorPaneTab,
 } from '../../../components/file-editor/EditorBrowserWorkspace.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import type { TaskToolRuntimeLookup } from '../conversation/render/task-tool-runtime.js';
 import { resolveChatUiWorkspaceScope, resolveWorkspaceKey } from '../hooks/use-chat-ui-state.js';
 import './FusionSessionSidePanel.css';
 import { FusionContextTab } from './FusionContextTab.js';
@@ -18,17 +20,21 @@ import { FusionWorkspaceTab } from './FusionWorkspaceTab.js';
 import { SessionSidePanel } from './SessionSidePanel.js';
 import type { SidePanelTabId } from './SessionSidePanel.js';
 import type { ChangeScope, DiffViewMode } from './review-panel-model.js';
+import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { useReviewPanelFileChanges } from './use-review-panel-file-changes.js';
 
-export type FusionDesktopPanelTab = 'review' | 'code' | 'preview' | 'context';
+export type FusionDesktopPanelTab = 'review' | 'agent' | 'code' | 'preview' | 'context';
 
 /**
- * 桌面停靠面板一级 tab（审查 / 代码 / 预览 / Context）；移动端专属 tab 收敛到
- * 桌面近义 tab：`files` → `code`、`browser` → `preview`（移动端「浏览器」与桌面
- * 「预览」是同一浏览器工作区），其余未知脏值 → `review`，保证永远有可渲染内容。
+ * 桌面停靠面板一级 tab（审查 / 子代理 / 代码 / 预览 / Context）；移动端专属 tab
+ * 收敛到桌面近义 tab：`files` → `code`、`browser` → `preview`（移动端「浏览器」
+ * 与桌面「预览」是同一浏览器工作区），其余未知脏值 → `review`，保证永远有可渲染
+ * 内容。
  */
 export function resolveFusionDesktopPanelTab(tab: SidePanelTabId): FusionDesktopPanelTab {
   switch (tab) {
+    case 'agent':
+      return 'agent';
     case 'code':
       return 'code';
     case 'preview':
@@ -47,6 +53,8 @@ export interface FusionSessionSidePanelProps {
   readonly activeTab: SidePanelTabId;
   readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
   readonly currentSessionId: string | null;
+  readonly currentUserDisplayName?: string;
+  readonly currentUserEmail: string;
   readonly effectiveWorkingDirectory: string | null;
   /** 代码 / 预览一级 tab 共享的文件编辑器状态（与主编辑器面板共用同一份）。 */
   readonly fileEditor: EditorBrowserWorkspaceProps['fileEditor'];
@@ -55,13 +63,22 @@ export interface FusionSessionSidePanelProps {
   readonly gatewayUrl: string;
   readonly handleSaveFile: (path: string) => Promise<void>;
   readonly onCompactSession: () => void;
+  /** 打开子代理完整会话（从子代理 tab 的「全屏」入口跳转）。 */
+  readonly onOpenFullSession: (sessionId: string) => void;
   /** 把工作区提升到主内容区（editorMode + editorFullScreen + 对应 tab）。 */
   readonly onPromoteToFullScreen: (tab: EditorPaneTab) => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
   readonly overview?: FusionContextOverviewProps;
+  readonly providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   readonly reviewRevision?: number;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
   readonly saving: boolean;
+  /** 子代理 tab 当前选中的子会话（null 时面板自身渲染空态）。 */
+  readonly selectedChildSessionId: string | null;
+  /** 子代理 tab 的 tab 条数量徽章。 */
+  readonly subAgentCount?: number;
+  /** 子代理消息里父级 task 工具的运行态查找表。 */
+  readonly taskToolRuntimeLookup?: TaskToolRuntimeLookup;
   readonly token: string | null;
   readonly workspaceFileItems: readonly WorkspaceFileMentionItem[];
   readonly workspacePath: string | null;
@@ -76,18 +93,25 @@ export function FusionSessionSidePanel({
   activeTab,
   contextUsageSnapshot,
   currentSessionId,
+  currentUserDisplayName,
+  currentUserEmail,
   effectiveWorkingDirectory,
   fileEditor,
   fileTree,
   gatewayUrl,
   handleSaveFile,
   onCompactSession,
+  onOpenFullSession,
   onPromoteToFullScreen,
   onTabChange,
   overview,
+  providerCatalog,
   reviewRevision,
   runtimeSummary,
   saving,
+  selectedChildSessionId,
+  subAgentCount,
+  taskToolRuntimeLookup,
   token,
   workspaceFileItems,
   workspacePath,
@@ -136,14 +160,15 @@ export function FusionSessionSidePanel({
   // 只在工作区 pane 可见且主内容区尚未接管时出现，屏幕上任何时刻恰好一个。
   const showWorkspaceFullScreenAction = workspacePaneVisible && !workspacePromoted;
 
-  // 三个 pane 常驻挂载、用 hidden 切换：工作区里的浏览器实时会话（以及审查 /
-  // Context 各自的滚动与展开状态）不会因切 tab 而重建。hidden 同时覆盖 a11y
-  // （不可聚焦、不进可访问性树），见 FusionSessionSidePanel.css。
+  // 四个 pane 常驻挂载、用 hidden 切换：工作区里的浏览器实时会话（以及审查 /
+  // 子代理 / Context 各自的滚动与展开状态）不会因切 tab 而重建。hidden 同时
+  // 覆盖 a11y（不可聚焦、不进可访问性树），见 FusionSessionSidePanel.css。
   return (
     <SessionSidePanel
       activeTab={desktopTab}
       onTabChange={onTabChange}
       reviewCount={reviewCount}
+      subAgentCount={subAgentCount}
       trailingAction={
         showWorkspaceFullScreenAction ? (
           <PanelFullScreenAction onClick={() => onPromoteToFullScreen(workspacePromoteTarget)} />
@@ -167,6 +192,24 @@ export function FusionSessionSidePanel({
           state={reviewState}
           token={token}
         />
+      </div>
+      <div
+        className="fusion-side-panel__pane"
+        data-testid="fusion-panel-pane-agent"
+        hidden={desktopTab !== 'agent'}
+      >
+        <div className="fusion-side-panel__agent-host">
+          <SubSessionDetailPanel
+            childSessionId={selectedChildSessionId}
+            currentUserEmail={currentUserEmail}
+            currentUserDisplayName={currentUserDisplayName}
+            gatewayUrl={gatewayUrl}
+            onOpenFullSession={onOpenFullSession}
+            parentTaskRuntimeLookup={taskToolRuntimeLookup}
+            providerCatalog={providerCatalog}
+            token={token}
+          />
+        </div>
       </div>
       <div
         className="fusion-side-panel__pane"

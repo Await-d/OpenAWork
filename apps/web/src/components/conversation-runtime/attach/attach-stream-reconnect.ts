@@ -1,5 +1,6 @@
 import type { ModifiedFilesSummaryContent } from '@openAwork/shared';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
+import type { AttachRetryVerdict } from './attach-stream-eligibility.js';
 import type { SessionStateStatus } from '../../conversation-runtime/session/session-runtime.js';
 import type { RecoveredActiveAssistantStream } from '../../conversation-runtime/stream/stream-recovery.js';
 import type { ChatBackendUsageSnapshot } from '../../conversation-runtime/stream/stream-usage.js';
@@ -26,6 +27,7 @@ export interface InterruptedAttachStreamActions {
   cancelPendingRevealAnimation: () => void;
   clearCurrentAssistantStreamMessageId: () => void;
   clearStreamingBuffers: () => void;
+  getActiveSessionId: () => string | null;
   isCurrentSessionRequest: (sessionId: string, expectedEpoch: number) => boolean;
   loadCurrentSessionSnapshot: (
     sessionId: string,
@@ -34,7 +36,11 @@ export interface InterruptedAttachStreamActions {
   requestSessionListRefresh: () => void;
   resetAttachAttempt: () => void;
   resetRevealState: () => void;
-  scheduleAttachRetry: (input: { beforeRetry?: () => boolean | void; delayMs: number }) => void;
+  scheduleAttachRetry: (input: {
+    beforeRetry?: () => AttachRetryVerdict | boolean | void;
+    delayMs: number;
+    sessionId: string;
+  }) => void;
   setActiveStreamFirstTokenLatencyMs: (value: number | null) => void;
   setActiveStreamStartedAt: (value: number | null) => void;
   setRecoveredStreamSnapshot: (value: RecoveredActiveAssistantStream) => void;
@@ -55,7 +61,9 @@ const INTERRUPTED_ATTACH_RETRY_DELAY_MS = 400;
 export function handleInterruptedAttachStream(input: InterruptedAttachStreamInput): void {
   const { actions, attachSessionViewEpoch, sessionId, state } = input;
 
-  if (!actions.isCurrentSessionRequest(sessionId, attachSessionViewEpoch)) {
+  // 只有关注点切到别的会话才放弃；同一会话但 epoch 已推进（重连自身的恢复
+  // 副作用会导致视图代次变化）必须继续重挂，epoch 由 attach effect 重新读取。
+  if (actions.getActiveSessionId() !== sessionId) {
     return;
   }
 
@@ -86,12 +94,14 @@ export function handleInterruptedAttachStream(input: InterruptedAttachStreamInpu
   actions.setSessionStateStatus('running');
   actions.scheduleAttachRetry({
     delayMs: INTERRUPTED_ATTACH_RETRY_DELAY_MS,
+    sessionId,
     beforeRetry: () => {
-      if (!actions.isCurrentSessionRequest(sessionId, attachSessionViewEpoch)) {
-        return false;
+      if (actions.getActiveSessionId() !== sessionId) {
+        return 'abort';
       }
 
       actions.resetAttachAttempt();
+      return 'proceed';
     },
   });
   void actions

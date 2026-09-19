@@ -11,15 +11,15 @@
  *    保存最近浏览路径、最近预览文件、最后激活时间。前端在重启后能直接
  *    打开上一次的对话窗口，而不是被甩回空白面板。
  *
- * 凭证（密码 / 私钥路径）写入前会经过 `ssh-secret-cipher`，杜绝
- * 明文落盘；read 时先解密再交给 ssh2 客户端。
+ * 凭证（密码 / 私钥路径 / 粘贴式私钥内容）写入前会经过 `ssh-secret-cipher`，
+ * 杜绝明文落盘；read 时先解密再交给 ssh2 客户端。
  */
 
 import { randomUUID } from 'node:crypto';
 import { db } from '../infra/db.js';
 import { decryptSecret, encryptSecret } from './ssh-secret-cipher.js';
 
-export type SshAuthType = 'password' | 'key' | 'agent';
+export type SshAuthType = 'password' | 'key' | 'key-password' | 'agent';
 export type SshConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'error';
 
 export interface PersistedSshConnection {
@@ -31,6 +31,10 @@ export interface PersistedSshConnection {
   username: string;
   authType: SshAuthType;
   privateKeyPath: string | null;
+  /** 解密后的粘贴式私钥内容；上层使用完毕后切勿写日志。 */
+  privateKey: string | null;
+  /** 解密后的私钥口令；上层使用完毕后切勿写日志。 */
+  passphrase: string | null;
   /** 解密后的密码；上层使用完毕后切勿写日志。 */
   password: string | null;
   /** 是否在 gateway 启动时自动 reconnect。默认 true。 */
@@ -79,6 +83,8 @@ interface SshConnectionRow {
   username: string;
   auth_type: SshAuthType;
   private_key_path: string | null;
+  private_key_cipher: string | null;
+  passphrase_cipher: string | null;
   password_cipher: string | null;
   auto_reconnect: number;
   status: SshConnectionStatus;
@@ -109,11 +115,10 @@ interface SshDialogRow {
   updated_at: number;
 }
 
-let migrated = false;
+let migratedFor: unknown = null;
 
 export function migrateSshTables(): void {
-  if (migrated) return;
-  migrated = true;
+  if (migratedFor === db) return;
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS ssh_connections (
@@ -125,6 +130,8 @@ export function migrateSshTables(): void {
       username TEXT NOT NULL,
       auth_type TEXT NOT NULL,
       private_key_path TEXT,
+      private_key_cipher TEXT,
+      passphrase_cipher TEXT,
       password_cipher TEXT,
       auto_reconnect INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'disconnected',
@@ -134,6 +141,19 @@ export function migrateSshTables(): void {
       updated_at INTEGER NOT NULL
     )
   `);
+  // 旧库兼容：`CREATE TABLE IF NOT EXISTS` 不会给已存在的表补列，因此显式
+  // 探测 `private_key_cipher`（粘贴式私钥）与 `passphrase_cipher`（私钥口令），
+  // 缺失时用 ALTER TABLE 补齐。
+  const connectionColumns = db.prepare('PRAGMA table_info(ssh_connections)').all() as Array<{
+    name: string;
+  }>;
+  const connectionColumnNames = new Set(connectionColumns.map((column) => column.name));
+  if (!connectionColumnNames.has('private_key_cipher')) {
+    db.exec('ALTER TABLE ssh_connections ADD COLUMN private_key_cipher TEXT');
+  }
+  if (!connectionColumnNames.has('passphrase_cipher')) {
+    db.exec('ALTER TABLE ssh_connections ADD COLUMN passphrase_cipher TEXT');
+  }
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_ssh_connections_user ON ssh_connections(user_id, updated_at DESC)',
   );
@@ -173,6 +193,9 @@ export function migrateSshTables(): void {
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_dialogs_user_connection ON ssh_dialogs(user_id, connection_id)',
   );
+  // 全部 DDL 成功后才登记迁移完成；中途抛错会在下次调用时重试，
+  // 而不是永久跳过导致后续语句报 "no such column"。
+  migratedFor = db;
 }
 
 function rowToConnection(row: SshConnectionRow): PersistedSshConnection {
@@ -185,6 +208,8 @@ function rowToConnection(row: SshConnectionRow): PersistedSshConnection {
     username: row.username,
     authType: row.auth_type,
     privateKeyPath: row.private_key_path,
+    privateKey: decryptSecret(row.private_key_cipher),
+    passphrase: decryptSecret(row.passphrase_cipher),
     password: decryptSecret(row.password_cipher),
     autoReconnect: row.auto_reconnect === 1,
     status: row.status,
@@ -228,6 +253,8 @@ export interface CreateSshConnectionInput {
   username: string;
   authType: SshAuthType;
   privateKeyPath?: string | null;
+  privateKey?: string | null;
+  passphrase?: string | null;
   password?: string | null;
   autoReconnect?: boolean;
 }
@@ -245,6 +272,8 @@ export function createSshConnection(input: CreateSshConnectionInput): PersistedS
     username: input.username,
     auth_type: input.authType,
     private_key_path: input.privateKeyPath ?? null,
+    private_key_cipher: encryptSecret(input.privateKey ?? null),
+    passphrase_cipher: encryptSecret(input.passphrase ?? null),
     password_cipher: encryptSecret(input.password ?? null),
     auto_reconnect: input.autoReconnect === false ? 0 : 1,
     status: 'disconnected',
@@ -256,9 +285,9 @@ export function createSshConnection(input: CreateSshConnectionInput): PersistedS
   db.prepare(
     `INSERT INTO ssh_connections (
        id, user_id, name, host, port, username, auth_type,
-       private_key_path, password_cipher, auto_reconnect,
+       private_key_path, private_key_cipher, passphrase_cipher, password_cipher, auto_reconnect,
        status, last_error, last_connected_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.id,
     row.user_id,
@@ -268,6 +297,8 @@ export function createSshConnection(input: CreateSshConnectionInput): PersistedS
     row.username,
     row.auth_type,
     row.private_key_path,
+    row.private_key_cipher,
+    row.passphrase_cipher,
     row.password_cipher,
     row.auto_reconnect,
     row.status,
@@ -286,6 +317,8 @@ export interface UpdateSshConnectionInput {
   username?: string;
   authType?: SshAuthType;
   privateKeyPath?: string | null;
+  privateKey?: string | null;
+  passphrase?: string | null;
   password?: string | null;
   autoReconnect?: boolean;
 }
@@ -300,6 +333,23 @@ export function updateSshConnection(
     .prepare('SELECT * FROM ssh_connections WHERE id = ? AND user_id = ?')
     .get(connectionId, userId) as SshConnectionRow | undefined;
   if (!existing) return null;
+
+  let nextPath: string | null =
+    patch.privateKeyPath === undefined ? existing.private_key_path : patch.privateKeyPath;
+  let nextKeyCipher: string | null =
+    patch.privateKey === undefined
+      ? existing.private_key_cipher
+      : encryptSecret(patch.privateKey ?? null);
+  // 路径与粘贴式私钥互斥：只显式更新一侧且提供了有效值、另一侧未随请求给出时，
+  // 清掉另一侧，避免 connect() 优先使用残留的粘贴内容而静默忽略新路径。
+  const providesKey = patch.privateKey != null && patch.privateKey.length > 0;
+  const providesPath = patch.privateKeyPath != null && patch.privateKeyPath.length > 0;
+  if (providesKey && patch.privateKeyPath === undefined) {
+    nextPath = null;
+  } else if (providesPath && patch.privateKey === undefined) {
+    nextKeyCipher = null;
+  }
+
   const next: SshConnectionRow = {
     ...existing,
     name: patch.name ?? existing.name,
@@ -307,8 +357,12 @@ export function updateSshConnection(
     port: patch.port ?? existing.port,
     username: patch.username ?? existing.username,
     auth_type: patch.authType ?? existing.auth_type,
-    private_key_path:
-      patch.privateKeyPath === undefined ? existing.private_key_path : patch.privateKeyPath,
+    private_key_path: nextPath,
+    private_key_cipher: nextKeyCipher,
+    passphrase_cipher:
+      patch.passphrase === undefined
+        ? existing.passphrase_cipher
+        : encryptSecret(patch.passphrase ?? null),
     password_cipher:
       patch.password === undefined
         ? existing.password_cipher
@@ -320,8 +374,8 @@ export function updateSshConnection(
   db.prepare(
     `UPDATE ssh_connections SET
        name = ?, host = ?, port = ?, username = ?, auth_type = ?,
-       private_key_path = ?, password_cipher = ?, auto_reconnect = ?,
-       updated_at = ?
+       private_key_path = ?, private_key_cipher = ?, passphrase_cipher = ?, password_cipher = ?,
+       auto_reconnect = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
   ).run(
     next.name,
@@ -330,6 +384,8 @@ export function updateSshConnection(
     next.username,
     next.auth_type,
     next.private_key_path,
+    next.private_key_cipher,
+    next.passphrase_cipher,
     next.password_cipher,
     next.auto_reconnect,
     next.updated_at,

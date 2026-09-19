@@ -80,6 +80,81 @@ describe('createSshClient', () => {
     });
   });
 
+  it('create 携带私钥内容时会把 privateKey 放进 JSON 请求体', async () => {
+    let capturedUrl = '';
+    let capturedBody = '';
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input);
+      capturedBody = typeof init?.body === 'string' ? init.body : '';
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          connection: { id: 'ssh-1', host: 'localhost', port: 22, username: 'root' },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSshClient('http://localhost:3000');
+    const privateKey =
+      '-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----';
+    await client.create('token-1', {
+      host: 'localhost',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKey,
+      privateKeyPath: null,
+    });
+
+    expect(capturedUrl).toBe('http://localhost:3000/ssh/connections');
+    expect(JSON.parse(capturedBody)).toEqual({
+      host: 'localhost',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKey,
+      privateKeyPath: null,
+    });
+  });
+
+  it('create 携带私钥口令时会把 passphrase 放进 JSON 请求体', async () => {
+    let capturedBody = '';
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = typeof init?.body === 'string' ? init.body : '';
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          connection: { id: 'ssh-1', host: 'localhost', port: 22, username: 'root' },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSshClient('http://localhost:3000');
+    await client.create('token-1', {
+      host: 'localhost',
+      port: 22,
+      username: 'root',
+      authType: 'key-password',
+      password: 'p@ss',
+      privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----',
+      privateKeyPath: null,
+      passphrase: 'key-pass',
+    });
+
+    expect(JSON.parse(capturedBody)).toEqual({
+      host: 'localhost',
+      port: 22,
+      username: 'root',
+      authType: 'key-password',
+      password: 'p@ss',
+      privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----',
+      privateKeyPath: null,
+      passphrase: 'key-pass',
+    });
+  });
+
   it('readFile 404 时会保留 HttpError 状态码', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

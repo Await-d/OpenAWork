@@ -4,7 +4,10 @@ import { useState } from 'react';
 import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import SshWorkspacePickerModal, { type SshPickerConnection } from './SshWorkspacePickerModal.js';
+import SshWorkspacePickerModal, {
+  buildSshConnectionFormValues,
+  type SshPickerConnection,
+} from './SshWorkspacePickerModal.js';
 import type { FileTreeNode } from './WorkspacePickerModal.js';
 import type { SshConnectionDraft } from './SshConnectionCreateForm.js';
 
@@ -252,6 +255,102 @@ describe('SshWorkspacePickerModal', () => {
       expect(screen.getByTestId('ssh-picker-connection-notice').textContent).toContain(
         '连接配置已更新',
       );
+    });
+  });
+
+  it('buildSshConnectionFormValues 按已保存凭据选择私钥来源', () => {
+    const keyConnection: SshPickerConnection = {
+      ...CONNECTED,
+      authType: 'key',
+      hasPassword: false,
+      privateKeyPath: null,
+    };
+
+    expect(buildSshConnectionFormValues({ ...keyConnection, hasPrivateKey: true }).keySource).toBe(
+      'paste',
+    );
+    expect(
+      buildSshConnectionFormValues({
+        ...keyConnection,
+        privateKeyPath: '/home/deploy/.ssh/id_ed25519',
+      }).keySource,
+    ).toBe('path');
+    expect(buildSshConnectionFormValues(keyConnection).keySource).toBe('paste');
+  });
+
+  it('编辑已保存私钥的连接时默认粘贴模式，留空提交沿用已保存凭据', async () => {
+    const keyConnection: SshPickerConnection = {
+      ...CONNECTED,
+      authType: 'key',
+      hasPassword: false,
+      hasPrivateKey: true,
+      privateKeyPath: null,
+    };
+    const onUpdateConnection = vi.fn(async (_connectionId: string, _draft: SshConnectionDraft) => ({
+      ...keyConnection,
+      host: '10.0.0.2',
+    }));
+    renderModal({
+      connections: [keyConnection],
+      onUpdateConnection,
+      fetchTree: vi.fn(async () => []),
+    });
+
+    await openEditForm();
+
+    expect(screen.getByLabelText('私钥来源')).toBeTruthy();
+    expect((screen.getByLabelText('私钥内容') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.getByText('私钥内容（留空则不修改）')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('ssh-connection-create-submit'));
+
+    await waitFor(() => {
+      expect(onUpdateConnection).toHaveBeenCalledWith('conn-1', {
+        name: 'alpha',
+        host: '10.0.0.1',
+        port: 22,
+        username: 'deploy',
+        authType: 'key',
+      });
+    });
+  });
+
+  it('编辑已保存口令的公钥 + 密码连接时各类凭据均可留空沿用', async () => {
+    const keyConnection: SshPickerConnection = {
+      ...CONNECTED,
+      authType: 'key-password',
+      hasPassword: true,
+      hasPrivateKey: true,
+      hasPassphrase: true,
+      privateKeyPath: null,
+    };
+    const onUpdateConnection = vi.fn(
+      async (_connectionId: string, _draft: SshConnectionDraft) => keyConnection,
+    );
+    renderModal({
+      connections: [keyConnection],
+      onUpdateConnection,
+      fetchTree: vi.fn(async () => []),
+    });
+
+    await openEditForm();
+
+    expect(screen.getByLabelText('密码')).toBeTruthy();
+    expect(screen.getByText('密码（留空则不修改）')).toBeTruthy();
+    expect(screen.getByLabelText('私钥内容')).toBeTruthy();
+    expect(screen.getByLabelText('私钥口令')).toBeTruthy();
+    expect(screen.getByText('私钥口令（留空则不修改）')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('ssh-connection-create-submit'));
+
+    await waitFor(() => {
+      expect(onUpdateConnection).toHaveBeenCalledWith('conn-1', {
+        name: 'alpha',
+        host: '10.0.0.1',
+        port: 22,
+        username: 'deploy',
+        authType: 'key-password',
+      });
     });
   });
 

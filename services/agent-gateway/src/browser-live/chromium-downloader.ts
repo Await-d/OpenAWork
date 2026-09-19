@@ -22,16 +22,7 @@
  */
 
 import { constants } from 'node:fs';
-import {
-  access,
-  chmod,
-  mkdir,
-  readdir,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { access, chmod, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { Agent } from 'node:http';
 import { basename, join } from 'node:path';
 

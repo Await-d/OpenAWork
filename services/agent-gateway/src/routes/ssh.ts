@@ -17,9 +17,11 @@ const connectionCreateSchema = z.object({
   host: z.string().min(1),
   port: z.number().int().positive().default(22),
   username: z.string().min(1),
-  authType: z.enum(['password', 'key', 'agent']),
+  authType: z.enum(['password', 'key', 'key-password', 'agent']),
   password: z.string().optional(),
-  privateKeyPath: z.string().optional(),
+  privateKeyPath: z.string().nullable().optional(),
+  privateKey: z.string().nullable().optional(),
+  passphrase: z.string().nullable().optional(),
   autoReconnect: z.boolean().optional(),
 });
 
@@ -28,9 +30,11 @@ const connectionUpdateSchema = z.object({
   host: z.string().min(1).optional(),
   port: z.number().int().positive().optional(),
   username: z.string().min(1).optional(),
-  authType: z.enum(['password', 'key', 'agent']).optional(),
+  authType: z.enum(['password', 'key', 'key-password', 'agent']).optional(),
   password: z.string().nullable().optional(),
   privateKeyPath: z.string().nullable().optional(),
+  privateKey: z.string().nullable().optional(),
+  passphrase: z.string().nullable().optional(),
   autoReconnect: z.boolean().optional(),
 });
 
@@ -134,6 +138,8 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
         username: parsed.username,
         authType: parsed.authType,
         privateKeyPath: parsed.privateKeyPath ?? null,
+        privateKey: parsed.privateKey ?? null,
+        passphrase: parsed.passphrase ?? null,
         password: parsed.password ?? null,
         autoReconnect: parsed.autoReconnect,
       });
@@ -154,8 +160,10 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       port: parsed.port,
       username: parsed.username,
       authType: parsed.authType,
-      privateKeyPath: parsed.privateKeyPath ?? undefined,
-      password: parsed.password ?? undefined,
+      privateKeyPath: parsed.privateKeyPath,
+      privateKey: parsed.privateKey,
+      passphrase: parsed.passphrase,
+      password: parsed.password,
       autoReconnect: parsed.autoReconnect,
     });
     if (!updated) {

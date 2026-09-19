@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe('SessionSidePanel', () => {
-  it('桌面停靠面板渲染 审查/代码/预览/Context 四个一级 tab', () => {
+  it('桌面停靠面板渲染 审查/子代理/代码/预览/Context 五个一级 tab', () => {
     const onTabChange = vi.fn();
 
     render(
@@ -19,6 +19,7 @@ describe('SessionSidePanel', () => {
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '审查',
+      '子代理',
       '代码',
       '预览',
       'Context',
@@ -39,7 +40,7 @@ describe('SessionSidePanel', () => {
     expect(onTabChange).toHaveBeenLastCalledWith('preview');
   });
 
-  it('键盘左右循环按 审查→代码→预览→Context 顺序移动', () => {
+  it('键盘左右循环按 审查→子代理→代码→预览→Context 顺序移动', () => {
     const onTabChange = vi.fn();
 
     render(
@@ -49,6 +50,7 @@ describe('SessionSidePanel', () => {
     );
 
     const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const agentTab = screen.getByRole('tab', { name: '子代理' });
     const codeTab = screen.getByRole('tab', { name: '代码' });
     const previewTab = screen.getByRole('tab', { name: '预览' });
     const contextTab = screen.getByRole('tab', { name: 'Context' });
@@ -65,6 +67,11 @@ describe('SessionSidePanel', () => {
 
     fireEvent.keyDown(reviewTab, { key: 'ArrowRight' });
 
+    expect(onTabChange).toHaveBeenLastCalledWith('agent');
+    expect(document.activeElement).toBe(agentTab);
+
+    fireEvent.keyDown(agentTab, { key: 'ArrowRight' });
+
     expect(onTabChange).toHaveBeenLastCalledWith('code');
     expect(document.activeElement).toBe(codeTab);
 
@@ -77,6 +84,27 @@ describe('SessionSidePanel', () => {
 
     expect(onTabChange).toHaveBeenLastCalledWith('context');
     expect(document.activeElement).toBe(contextTab);
+  });
+
+  it('子代理 tab 按 subAgentCount 渲染数量徽章，数量为 0 时不渲染', () => {
+    const view = render(
+      <SessionSidePanel activeTab="review" onTabChange={() => undefined} subAgentCount={3}>
+        <div>面板内容</div>
+      </SessionSidePanel>,
+    );
+
+    const agentTab = screen.getByRole('tab', { name: /子代理\s*3/ });
+    expect(agentTab.querySelector('.session-side-panel__tab-badge')?.textContent).toBe('3');
+
+    view.rerender(
+      <SessionSidePanel activeTab="review" onTabChange={() => undefined} subAgentCount={0}>
+        <div>面板内容</div>
+      </SessionSidePanel>,
+    );
+
+    expect(
+      screen.getByRole('tab', { name: '子代理' }).querySelector('.session-side-panel__tab-badge'),
+    ).toBeNull();
   });
 
   it('Home/End 聚焦首尾 tab（审查 / Context）', () => {

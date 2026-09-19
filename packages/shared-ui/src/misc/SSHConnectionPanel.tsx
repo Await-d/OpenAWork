@@ -1,7 +1,9 @@
 import { color } from '../tokens.js';
 import { useState } from 'react';
 
-export type SSHAuthType = 'password' | 'key' | 'agent';
+export type SSHAuthType = 'password' | 'key' | 'key-password' | 'agent';
+
+type SSHKeySource = 'paste' | 'path';
 
 export interface SSHConnectionEntry {
   id: string;
@@ -11,6 +13,8 @@ export interface SSHConnectionEntry {
   username: string;
   authType: SSHAuthType;
   privateKeyPath?: string;
+  privateKey?: string;
+  passphrase?: string;
   password?: string;
   status: 'connected' | 'disconnected' | 'error';
 }
@@ -36,7 +40,10 @@ const EMPTY_FORM = {
   port: 22,
   username: '',
   authType: 'password' as SSHAuthType,
+  keySource: 'paste' as SSHKeySource,
   privateKeyPath: '',
+  privateKey: '',
+  passphrase: '',
   password: '',
 };
 
@@ -53,7 +60,29 @@ export function SSHConnectionPanel({
 
   function handleSubmit() {
     if (!form.name || !form.host || !form.username) return;
-    onAdd?.(form);
+    const usesPassword = form.authType === 'password' || form.authType === 'key-password';
+    const usesKey = form.authType === 'key' || form.authType === 'key-password';
+    const entry: Omit<SSHConnectionEntry, 'id' | 'status'> = {
+      name: form.name,
+      host: form.host,
+      port: form.port,
+      username: form.username,
+      authType: form.authType,
+    };
+    if (usesPassword) {
+      entry.password = form.password;
+    }
+    if (usesKey) {
+      if (form.keySource === 'paste' && form.privateKey.trim()) {
+        entry.privateKey = form.privateKey;
+      } else if (form.keySource === 'path' && form.privateKeyPath.trim()) {
+        entry.privateKeyPath = form.privateKeyPath;
+      }
+      if (form.passphrase) {
+        entry.passphrase = form.passphrase;
+      }
+    }
+    onAdd?.(entry);
     setForm(EMPTY_FORM);
     setShowForm(false);
   }
@@ -138,10 +167,11 @@ export function SSHConnectionPanel({
             >
               <option value="password">密码</option>
               <option value="key">私钥</option>
+              <option value="key-password">公钥 + 密码</option>
               <option value="agent">SSH 代理</option>
             </select>
           </div>
-          {form.authType === 'password' && (
+          {(form.authType === 'password' || form.authType === 'key-password') && (
             <input
               type="password"
               placeholder="密码"
@@ -157,20 +187,74 @@ export function SSHConnectionPanel({
               }}
             />
           )}
-          {form.authType === 'key' && (
-            <input
-              placeholder="私钥路径"
-              value={form.privateKeyPath}
-              onChange={(e) => setForm((f) => ({ ...f, privateKeyPath: e.target.value }))}
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                borderRadius: 4,
-                padding: '3px 6px',
-                color: 'inherit',
-                fontSize: 12,
-              }}
-            />
+          {(form.authType === 'key' || form.authType === 'key-password') && (
+            <>
+              <select
+                aria-label="私钥来源"
+                value={form.keySource}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, keySource: e.target.value as SSHKeySource }))
+                }
+                style={{
+                  background: 'var(--bg-overlay)',
+                  border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderRadius: 4,
+                  padding: '3px 6px',
+                  color: 'inherit',
+                  fontSize: 12,
+                }}
+              >
+                <option value="paste">粘贴私钥内容</option>
+                <option value="path">私钥文件路径</option>
+              </select>
+              {form.keySource === 'paste' ? (
+                <textarea
+                  placeholder="粘贴私钥内容"
+                  value={form.privateKey}
+                  onChange={(e) => setForm((f) => ({ ...f, privateKey: e.target.value }))}
+                  rows={5}
+                  spellCheck={false}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderRadius: 4,
+                    padding: '3px 6px',
+                    color: 'inherit',
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    resize: 'vertical',
+                  }}
+                />
+              ) : (
+                <input
+                  placeholder="私钥路径"
+                  value={form.privateKeyPath}
+                  onChange={(e) => setForm((f) => ({ ...f, privateKeyPath: e.target.value }))}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderRadius: 4,
+                    padding: '3px 6px',
+                    color: 'inherit',
+                    fontSize: 12,
+                  }}
+                />
+              )}
+              <input
+                type="password"
+                placeholder="私钥口令（加密私钥需要）"
+                value={form.passphrase}
+                onChange={(e) => setForm((f) => ({ ...f, passphrase: e.target.value }))}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                  borderRadius: 4,
+                  padding: '3px 6px',
+                  color: 'inherit',
+                  fontSize: 12,
+                }}
+              />
+            </>
           )}
           <button
             type="button"

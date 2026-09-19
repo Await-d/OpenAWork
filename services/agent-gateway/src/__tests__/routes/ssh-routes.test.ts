@@ -20,8 +20,10 @@ interface FakeServiceState {
     host: string;
     port: number;
     username: string;
-    authType: 'password' | 'key' | 'agent';
+    authType: 'password' | 'key' | 'key-password' | 'agent';
     privateKeyPath: string | null;
+    hasPrivateKey: boolean;
+    hasPassphrase: boolean;
     hasPassword: boolean;
     autoReconnect: boolean;
     status: 'connected' | 'disconnected' | 'connecting' | 'error';
@@ -78,6 +80,30 @@ function buildFakeService(state: FakeServiceState): SshServiceModule.SshService 
     getLastOpenedDialog: () => null,
   } as unknown as SshServiceModule.SshService;
   return fake;
+}
+
+function connectionView(
+  overrides: Partial<FakeServiceState['connections'][number]> = {},
+): FakeServiceState['connections'][number] {
+  return {
+    id: 'c-1',
+    name: 'box',
+    host: 'h.example',
+    port: 22,
+    username: 'root',
+    authType: 'key',
+    privateKeyPath: null,
+    hasPrivateKey: true,
+    hasPassphrase: false,
+    hasPassword: false,
+    autoReconnect: true,
+    status: 'disconnected',
+    lastError: null,
+    lastConnectedAt: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  };
 }
 
 async function buildApp(): Promise<FastifyInstance> {
@@ -388,6 +414,272 @@ describe('ssh dialog routes', () => {
 
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ error: 'SSH 连接不存在。' });
+    await app.close();
+  });
+});
+
+describe('ssh connection credential routes', () => {
+  it('POST /ssh/connections 接受粘贴式 privateKey 并把内容透传给 service', async () => {
+    let captured: { userId: string; input: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        createConnection: (userId: string, input: Record<string, unknown>) => unknown;
+      }
+    ).createConnection = (userId, input) => {
+      captured = { userId, input };
+      return connectionView({ id: 'ssh-key-1' });
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/ssh/connections',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: {
+        name: 'paste',
+        host: 'h.example',
+        username: 'root',
+        authType: 'key',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toMatchObject({
+      userId: 'u-ssh-route',
+      input: {
+        authType: 'key',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+        privateKeyPath: null,
+      },
+    });
+    await app.close();
+  });
+
+  it('PATCH /ssh/connections/:id 透传 privateKey: null 与 privateKeyPath: null', async () => {
+    let captured: { id: string; patch: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        updateConnection: (userId: string, id: string, patch: Record<string, unknown>) => unknown;
+      }
+    ).updateConnection = (_userId, id, patch) => {
+      captured = { id, patch };
+      return connectionView();
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/ssh/connections/ssh-1',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { privateKey: null, privateKeyPath: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toEqual({ id: 'ssh-1', patch: { privateKey: null, privateKeyPath: null } });
+    await app.close();
+  });
+
+  it('PATCH /ssh/connections/:id 用粘贴式 privateKey 替换并同时清空 privateKeyPath', async () => {
+    let captured: { id: string; patch: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        updateConnection: (userId: string, id: string, patch: Record<string, unknown>) => unknown;
+      }
+    ).updateConnection = (_userId, id, patch) => {
+      captured = { id, patch };
+      return connectionView();
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/ssh/connections/ssh-1',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { privateKey: 'NEW-KEY-CONTENT', privateKeyPath: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toEqual({
+      id: 'ssh-1',
+      patch: { privateKey: 'NEW-KEY-CONTENT', privateKeyPath: null },
+    });
+    await app.close();
+  });
+
+  it('POST /ssh/connections 接受前端粘贴载荷（privateKey + privateKeyPath: null）而不是 400', async () => {
+    let captured: { userId: string; input: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        createConnection: (userId: string, input: Record<string, unknown>) => unknown;
+      }
+    ).createConnection = (userId, input) => {
+      captured = { userId, input };
+      return connectionView({ id: 'ssh-paste-1' });
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/ssh/connections',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: {
+        name: 'paste',
+        host: 'h.example',
+        port: 22,
+        username: 'root',
+        authType: 'key',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+        privateKeyPath: null,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toMatchObject({
+      userId: 'u-ssh-route',
+      input: {
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+        privateKeyPath: null,
+      },
+    });
+    await app.close();
+  });
+
+  it('POST /ssh/connections 接受路径载荷（privateKeyPath + privateKey: null）而不是 400', async () => {
+    let captured: { userId: string; input: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        createConnection: (userId: string, input: Record<string, unknown>) => unknown;
+      }
+    ).createConnection = (userId, input) => {
+      captured = { userId, input };
+      return connectionView({ id: 'ssh-path-1', privateKeyPath: '/home/u/.ssh/id_ed25519' });
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/ssh/connections',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: {
+        name: 'path',
+        host: 'h.example',
+        port: 22,
+        username: 'root',
+        authType: 'key',
+        privateKeyPath: '/home/u/.ssh/id_ed25519',
+        privateKey: null,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toMatchObject({
+      userId: 'u-ssh-route',
+      input: {
+        privateKeyPath: '/home/u/.ssh/id_ed25519',
+        privateKey: null,
+      },
+    });
+    await app.close();
+  });
+
+  it("POST /ssh/connections 接受 authType:'key-password' 的多因子载荷", async () => {
+    let captured: { userId: string; input: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        createConnection: (userId: string, input: Record<string, unknown>) => unknown;
+      }
+    ).createConnection = (userId, input) => {
+      captured = { userId, input };
+      return connectionView({ id: 'ssh-mfa-1', hasPassphrase: true, hasPassword: true });
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/ssh/connections',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: {
+        name: 'mfa',
+        host: 'mfa.example',
+        port: 22,
+        username: 'root',
+        authType: 'key-password',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+        passphrase: 'KEY-PASSPHRASE',
+        password: 'LOGIN-PASSWORD',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toMatchObject({
+      userId: 'u-ssh-route',
+      input: {
+        authType: 'key-password',
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----',
+        passphrase: 'KEY-PASSPHRASE',
+        password: 'LOGIN-PASSWORD',
+      },
+    });
+    await app.close();
+  });
+
+  it('PATCH /ssh/connections/:id 透传 passphrase: null 以清空口令', async () => {
+    let captured: { id: string; patch: Record<string, unknown> } | null = null;
+    const fake = buildFakeService({ connections: [] });
+    (
+      fake as unknown as {
+        updateConnection: (userId: string, id: string, patch: Record<string, unknown>) => unknown;
+      }
+    ).updateConnection = (_userId, id, patch) => {
+      captured = { id, patch };
+      return connectionView({ hasPassphrase: false });
+    };
+    sshServiceModule.__resetSshServiceForTests(fake);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/ssh/connections/ssh-1',
+      headers: {
+        authorization: bearer(app),
+        'content-type': 'application/json',
+      },
+      payload: { passphrase: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(captured).toEqual({ id: 'ssh-1', patch: { passphrase: null } });
     await app.close();
   });
 });

@@ -18,7 +18,7 @@ import {
   fetchWithTimeout,
 } from '../gateway/http.js';
 
-export type SSHAuthType = 'password' | 'key' | 'agent';
+export type SSHAuthType = 'password' | 'key' | 'key-password' | 'agent';
 
 export interface SSHConnectionEntry {
   id: string;
@@ -29,6 +29,10 @@ export interface SSHConnectionEntry {
   authType?: SSHAuthType;
   privateKeyPath?: string | null;
   hasPassword?: boolean;
+  /** 网关侧是否已保存私钥内容；接口不会回传私钥本身。 */
+  hasPrivateKey?: boolean;
+  /** 网关侧是否已保存私钥口令；接口不会回传口令本身。 */
+  hasPassphrase?: boolean;
   autoReconnect?: boolean;
   status: 'connected' | 'disconnected' | 'connecting' | 'error';
   lastError?: string | null;
@@ -70,8 +74,16 @@ export interface SSHDialogEntry {
 
 export type CreateSSHConnectionInput = Omit<
   SSHConnectionEntry,
-  'id' | 'status' | 'hasPassword' | 'lastError' | 'lastConnectedAt' | 'createdAt' | 'updatedAt'
-> & { password?: string };
+  | 'id'
+  | 'status'
+  | 'hasPassword'
+  | 'hasPrivateKey'
+  | 'hasPassphrase'
+  | 'lastError'
+  | 'lastConnectedAt'
+  | 'createdAt'
+  | 'updatedAt'
+> & { password?: string | null; privateKey?: string | null; passphrase?: string | null };
 
 export type UpdateSSHConnectionInput = Partial<CreateSSHConnectionInput>;
 

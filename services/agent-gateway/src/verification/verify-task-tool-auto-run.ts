@@ -90,16 +90,6 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'default_thinking', ?)`,
-              [
-                userId,
-                JSON.stringify({
-                  chat: { enabled: false, effort: 'medium' },
-                  fast: { enabled: true, effort: 'high' },
-                }),
-              ],
-            );
-            sqliteRun(
               `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
               [parentSessionId, userId],
             );
@@ -279,8 +269,8 @@ async function main(): Promise<void> {
                 tools?: Array<{ function?: { name?: string } }>;
               };
               assert(
-                extractUpstreamReasoningEffort(upstreamBody) === 'high',
-                'delegated child session should backfill the fast thinking default when the parent omitted it',
+                extractUpstreamReasoningEffort(upstreamBody) === 'medium',
+                'delegated child session should always carry a valid default thinking level',
               );
               const visibleToolNames = Array.isArray(upstreamBody.tools)
                 ? upstreamBody.tools
@@ -525,8 +515,8 @@ async function main(): Promise<void> {
                   toolCallId: 'task-call-3',
                   toolName: 'task',
                   rawInput: {
-                    description: '让子代理保留显式思考设置',
-                    prompt: '请给出保留后的最终结论',
+                    description: '让子代理自动确定思考档位',
+                    prompt: '请给出自动定档后的最终结论',
                     subagent_type: 'explore',
                     load_skills: [],
                     run_in_background: true,
@@ -565,8 +555,113 @@ async function main(): Promise<void> {
 
               const preservedUpstreamBody = JSON.parse(fetchCalls[2] ?? '{}');
               assert(
-                extractUpstreamReasoningEffort(preservedUpstreamBody) === 'low',
-                "delegated child session should preserve the parent's explicit thinking effort",
+                extractUpstreamReasoningEffort(preservedUpstreamBody) === 'medium',
+                'delegated child session should derive its thinking level independently of the parent',
+              );
+
+              const disabledThinkingResult = await sandbox.execute(
+                {
+                  toolCallId: 'task-call-4',
+                  toolName: 'task',
+                  rawInput: {
+                    description: '让子代理在父会话关闭思考时仍有思考档位',
+                    prompt: '请给出父会话关闭思考下的最终结论',
+                    subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
+                  },
+                },
+                new AbortController().signal,
+                parentSessionId,
+                {
+                  clientRequestId: 'parent-req-disabled-thinking',
+                  nextRound: 3,
+                  requestData: {
+                    clientRequestId: 'parent-req-disabled-thinking',
+                    message: '父会话模型不支持思考',
+                    model: 'gpt-4o',
+                    thinkingEnabled: false,
+                    upstreamRetryMaxRetries: 1,
+                    webSearchEnabled: false,
+                  },
+                },
+              );
+              assert(
+                disabledThinkingResult.isError === false,
+                'disabled-thinking parent task tool run should succeed',
+              );
+              if (!isTaskToolOutput(disabledThinkingResult.output)) {
+                throw new Error('disabled-thinking task tool run should return structured output');
+              }
+              const disabledThinkingOutput = disabledThinkingResult.output;
+              await waitFor(async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[disabledThinkingOutput.taskId]?.status === 'completed';
+              }, 'delegated child task should complete when the parent disabled thinking');
+              assert(
+                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[3] ?? '{}')) === 'medium',
+                'delegated child session should still carry a valid thinking level when the parent disabled thinking',
+              );
+
+              const categoryResult = await sandbox.execute(
+                {
+                  toolCallId: 'task-call-5',
+                  toolName: 'task',
+                  rawInput: {
+                    description: '让子代理按 deep 强度自动定档',
+                    prompt: '请给出高强度任务的最终结论',
+                    category: 'deep',
+                    load_skills: [],
+                    run_in_background: true,
+                  },
+                },
+                new AbortController().signal,
+                parentSessionId,
+              );
+              assert(categoryResult.isError === false, 'category task tool run should succeed');
+              if (!isTaskToolOutput(categoryResult.output)) {
+                throw new Error('category task tool run should return structured output');
+              }
+              const categoryOutput = categoryResult.output;
+              await waitFor(async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[categoryOutput.taskId]?.status === 'completed';
+              }, 'delegated child task should complete for a category run');
+              assert(
+                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[4] ?? '{}')) === 'high',
+                'delegated child session should derive its thinking level from the task category intensity',
+              );
+
+              const unmatchedCategoryResult = await sandbox.execute(
+                {
+                  toolCallId: 'task-call-6',
+                  toolName: 'task',
+                  rawInput: {
+                    description: '让子代理在未匹配分类时仍有默认档位',
+                    prompt: '请给出未匹配分类下的最终结论',
+                    category: 'not-a-known-category',
+                    load_skills: [],
+                    run_in_background: true,
+                  },
+                },
+                new AbortController().signal,
+                parentSessionId,
+              );
+              assert(
+                unmatchedCategoryResult.isError === false,
+                'unmatched-category task tool run should succeed',
+              );
+              if (!isTaskToolOutput(unmatchedCategoryResult.output)) {
+                throw new Error('unmatched-category task tool run should return structured output');
+              }
+              const unmatchedCategoryOutput = unmatchedCategoryResult.output;
+              await waitFor(async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[unmatchedCategoryOutput.taskId]?.status === 'completed';
+              }, 'delegated child task should complete for an unmatched category');
+              assert(
+                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[5] ?? '{}')) === 'medium',
+                'delegated child session should fall back to a default thinking level for an unmatched category',
               );
 
               console.log('verify-task-tool-auto-run: ok');

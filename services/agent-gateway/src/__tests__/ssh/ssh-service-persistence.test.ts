@@ -220,4 +220,149 @@ describe('SshService persistence', () => {
     expect(fresh.listDialogs(TEST_USER)).toHaveLength(0);
     expect(fresh.getBindings().getConnectionId('s')).toBeUndefined();
   });
+
+  it('createConnection 持久化粘贴式私钥：视图只暴露 hasPrivateKey，落盘为密文且重启后仍在', async () => {
+    const plaintextKey =
+      '-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET-KEY-BODY\n-----END OPENSSH PRIVATE KEY-----';
+    const svc = new SshService({ manager: createConnectingManager('ok') as never });
+    const created = svc.createConnection(TEST_USER, {
+      name: 'key-box',
+      host: 'key.example',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKey: plaintextKey,
+    });
+
+    expect(created.hasPrivateKey).toBe(true);
+    expect(created.privateKeyPath).toBeNull();
+    // 视图绝不回传私钥原文。
+    expect('privateKey' in created).toBe(false);
+
+    // 模拟进程重启：新 service 从 SQLite 重新解密读取。
+    const fresh = new SshService({ manager: createConnectingManager('ok') as never });
+    const persisted = fresh.getConnection(TEST_USER, created.id);
+    expect(persisted?.hasPrivateKey).toBe(true);
+    expect(persisted != null && 'privateKey' in persisted).toBe(false);
+
+    // 落盘的是密文，不是明文。
+    const { sqliteGet } = await import('../../infra/db.js');
+    const row = sqliteGet<{ private_key_cipher: string | null }>(
+      'SELECT private_key_cipher FROM ssh_connections WHERE id = ?',
+      [created.id],
+    );
+    expect(row?.private_key_cipher).toBeTruthy();
+    expect(row?.private_key_cipher).not.toBe(plaintextKey);
+    expect(row?.private_key_cipher?.startsWith('enc.v1.')).toBe(true);
+  });
+
+  it('updateConnection 支持保持 / 替换 / 清空粘贴式私钥', async () => {
+    const { lookupConnectionById } = await import('../../ssh/ssh-service.js');
+    const svc = new SshService({ manager: createConnectingManager('ok') as never });
+    const created = svc.createConnection(TEST_USER, {
+      name: 'key-box',
+      host: 'key.example',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKeyPath: '/home/root/.ssh/id_ed25519',
+      privateKey: 'OLD-KEY',
+    });
+    expect(created.hasPrivateKey).toBe(true);
+
+    // 省略 privateKey => 保持原值。
+    const kept = svc.updateConnection(TEST_USER, created.id, { name: 'renamed' });
+    expect(kept?.hasPrivateKey).toBe(true);
+    expect(lookupConnectionById(created.id)?.privateKey).toBe('OLD-KEY');
+
+    const replaced = svc.updateConnection(TEST_USER, created.id, { privateKey: 'NEW-KEY' });
+    expect(replaced?.hasPrivateKey).toBe(true);
+    expect(lookupConnectionById(created.id)?.privateKey).toBe('NEW-KEY');
+
+    const cleared = svc.updateConnection(TEST_USER, created.id, { privateKey: null });
+    expect(cleared?.hasPrivateKey).toBe(false);
+    expect(lookupConnectionById(created.id)?.privateKey).toBeNull();
+  });
+
+  it('updateConnection 在 privateKeyPath 与 privateKey 之间互斥切换', async () => {
+    const { lookupConnectionById } = await import('../../ssh/ssh-service.js');
+    const svc = new SshService({ manager: createConnectingManager('ok') as never });
+    const created = svc.createConnection(TEST_USER, {
+      name: 'key-box',
+      host: 'key.example',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKeyPath: '/home/root/.ssh/id_ed25519',
+      privateKey: 'INITIAL-KEY',
+    });
+
+    // 仅改无关字段 => 路径与粘贴内容都保留。
+    svc.updateConnection(TEST_USER, created.id, { name: 'renamed' });
+    let row = lookupConnectionById(created.id);
+    expect(row?.privateKeyPath).toBe('/home/root/.ssh/id_ed25519');
+    expect(row?.privateKey).toBe('INITIAL-KEY');
+
+    // 仅设置粘贴内容 => 旧路径被清空。
+    svc.updateConnection(TEST_USER, created.id, { privateKey: 'PASTED-ONLY' });
+    row = lookupConnectionById(created.id);
+    expect(row?.privateKey).toBe('PASTED-ONLY');
+    expect(row?.privateKeyPath).toBeNull();
+
+    // 仅设置路径 => 粘贴内容被清空。
+    svc.updateConnection(TEST_USER, created.id, { privateKeyPath: '/home/root/.ssh/id_ecdsa' });
+    row = lookupConnectionById(created.id);
+    expect(row?.privateKeyPath).toBe('/home/root/.ssh/id_ecdsa');
+    expect(row?.privateKey).toBeNull();
+
+    // 两侧同时显式给出 => 原样保留（前端会为另一侧配一个显式 null）。
+    svc.updateConnection(TEST_USER, created.id, {
+      privateKey: 'BOTH-KEY',
+      privateKeyPath: '/home/root/.ssh/id_rsa',
+    });
+    row = lookupConnectionById(created.id);
+    expect(row?.privateKeyPath).toBe('/home/root/.ssh/id_rsa');
+    expect(row?.privateKey).toBe('BOTH-KEY');
+  });
+
+  it('passphrase 加密持久化：落盘密文、重启后 hasPassphrase 为 true、keep / replace / clear', async () => {
+    const { lookupConnectionById } = await import('../../ssh/ssh-service.js');
+    const svc = new SshService({ manager: createConnectingManager('ok') as never });
+    const created = svc.createConnection(TEST_USER, {
+      name: 'enc-box',
+      host: 'enc.example',
+      port: 22,
+      username: 'root',
+      authType: 'key',
+      privateKey: 'ENCRYPTED-KEY',
+      passphrase: 'PASS-1',
+    });
+    expect(created.hasPassphrase).toBe(true);
+    // 视图绝不回传口令原文。
+    expect('passphrase' in created).toBe(false);
+
+    const { sqliteGet } = await import('../../infra/db.js');
+    const cipherRow = sqliteGet<{ passphrase_cipher: string | null }>(
+      'SELECT passphrase_cipher FROM ssh_connections WHERE id = ?',
+      [created.id],
+    );
+    expect(cipherRow?.passphrase_cipher).toBeTruthy();
+    expect(cipherRow?.passphrase_cipher).not.toBe('PASS-1');
+    expect(cipherRow?.passphrase_cipher?.startsWith('enc.v1.')).toBe(true);
+
+    // 模拟进程重启：新 service 从 SQLite 重新解密读取。
+    const fresh = new SshService({ manager: createConnectingManager('ok') as never });
+    expect(fresh.getConnection(TEST_USER, created.id)?.hasPassphrase).toBe(true);
+
+    // 省略 => 保留；传字符串 => 替换；传 null => 清空。
+    svc.updateConnection(TEST_USER, created.id, { name: 'renamed' });
+    expect(lookupConnectionById(created.id)?.passphrase).toBe('PASS-1');
+
+    svc.updateConnection(TEST_USER, created.id, { passphrase: 'PASS-2' });
+    expect(lookupConnectionById(created.id)?.passphrase).toBe('PASS-2');
+
+    const cleared = svc.updateConnection(TEST_USER, created.id, { passphrase: null });
+    expect(cleared?.hasPassphrase).toBe(false);
+    expect(lookupConnectionById(created.id)?.passphrase).toBeNull();
+  });
 });

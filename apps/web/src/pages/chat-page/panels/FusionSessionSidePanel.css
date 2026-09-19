@@ -558,6 +558,17 @@ button.fusion-side-panel__file-row:focus-visible {
   display: none;
 }
 
+/* 子代理 tab：复用子会话详情面板，外层只补内边距；滚动由面板自身接管。 */
+.fusion-side-panel__agent-host {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-3);
+}
+
 /* ─── 工作区 tab（停靠面板内复用完整编辑器工作区） ─────────────────── */
 
 .fusion-side-panel__workspace-host {

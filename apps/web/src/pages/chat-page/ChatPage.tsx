@@ -118,6 +118,7 @@ import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js
 import { getPathBasename } from '../../utils/workspace-path.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
 import {
+  resolveAttachEffectDisposition,
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
 } from '../../components/conversation-runtime/attach/attach-stream-eligibility.js';
@@ -774,8 +775,14 @@ export default function ChatPage() {
     consumeResetToWelcomeSignal();
   }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { attachRetryNonce, attachRetryProgress, cancelAttachRetry, scheduleAttachRetry } =
-    useStreamAttachRetry();
+  const {
+    attachRetryExhausted,
+    attachRetryNonce,
+    attachRetryProgress,
+    attachRetryScheduledSessionId,
+    cancelAttachRetry,
+    scheduleAttachRetry,
+  } = useStreamAttachRetry();
   useEffect(() => {
     return subscribeSessionStreamResumeAttach((sessionId) => {
       if (sessionId !== currentSessionId || !isPageActive) {
@@ -786,12 +793,14 @@ export default function ChatPage() {
       setSessionStateStatus('running');
       requestCurrentSessionRefresh(sessionId);
       scheduleAttachRetry({
+        sessionId,
         delayMs: 100,
         beforeRetry: () => {
           if (activeSessionRef.current !== sessionId) {
-            return false;
+            return 'abort';
           }
           attachAttemptedSessionRef.current = null;
+          return 'proceed';
         },
       });
     });
@@ -1215,11 +1224,17 @@ export default function ChatPage() {
     }
     return null;
   }, [messages]);
-  const openChildSessionInspector = useCallback((nextSessionId: string) => {
-    setSelectedChildSessionId(nextSessionId);
-    setRightOpen(true);
-    setRightTab('agent');
-  }, []);
+  const openChildSessionInspector = useCallback(
+    (nextSessionId: string) => {
+      setSelectedChildSessionId(nextSessionId);
+      setRightOpen(true);
+      setRightTab('agent');
+      if (isFusionLayout) {
+        setSidePanelActiveTab('agent');
+      }
+    },
+    [isFusionLayout, setSidePanelActiveTab],
+  );
 
   const loadSavedChatDefaults = useCallback(async () => {
     if (!token) {
@@ -1324,13 +1339,16 @@ export default function ChatPage() {
       setSelectedChildSessionId(nextItem.sessionId);
       setRightOpen(true);
       setRightTab('agent');
+      if (isFusionLayout) {
+        setSidePanelActiveTab('agent');
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [selectedChildSessionId, subAgentRunItems]);
+  }, [isFusionLayout, selectedChildSessionId, setSidePanelActiveTab, subAgentRunItems]);
 
   useEffect(() => {
     if (!token) return;
@@ -3924,35 +3942,52 @@ export default function ChatPage() {
       });
     }
 
-    if (!shouldAttemptAttach || !currentSessionId) {
-      cancelAttachRetry();
-      // 只在会话切换时重置 attach 标记，避免同一会话内重复触发 attach
-      // 额外保护：如果上次 attach 尝试在 10 秒内，不要重置（防止 attach 刚完成就被重置导致重复触发）
-      const timeSinceLastAttach = Date.now() - lastAttachAttemptTimestampRef.current;
-      if (
-        shouldResetAttachAttempt(attachEligibility) &&
-        attachAttemptedSessionRef.current !== currentSessionId &&
-        timeSinceLastAttach > 10000
-      ) {
-        attachAttemptedSessionRef.current = null;
+    switch (
+      resolveAttachEffectDisposition({
+        eligibility: attachEligibility,
+        retryScheduledSessionId: attachRetryScheduledSessionId,
+        retryExhausted: attachRetryExhausted,
+      })
+    ) {
+      case 'terminal': {
+        cancelAttachRetry();
+        setStreamError(null);
+        if (currentSessionId) {
+          void loadCurrentSessionSnapshot(currentSessionId, {
+            expectedSessionViewEpoch: currentSessionViewRef.current.epoch,
+            messageLimit: INITIAL_TURN_LIMIT,
+            replaceMessages: true,
+          }).catch(() => undefined);
+        }
+        return;
       }
-      return;
+
+      case 'cancel_retry': {
+        cancelAttachRetry();
+        attachAttemptedSessionRef.current = null;
+        return;
+      }
+
+      case 'skip': {
+        // 只在会话切换时重置 attach 标记，避免同一会话内重复触发 attach
+        // 额外保护：如果上次 attach 尝试在 10 秒内，不要重置（防止 attach 刚完成就被重置导致重复触发）
+        const timeSinceLastAttach = Date.now() - lastAttachAttemptTimestampRef.current;
+        if (
+          shouldResetAttachAttempt(attachEligibility) &&
+          attachAttemptedSessionRef.current !== currentSessionId &&
+          timeSinceLastAttach > 10000
+        ) {
+          attachAttemptedSessionRef.current = null;
+        }
+        return;
+      }
+
+      case 'proceed':
+        break;
     }
 
-    if (streamingRef.current) {
-      cancelAttachRetry();
-      return;
-    }
-
-    // 如果 sessionStateStatus 是 'idle'，说明对话已经完成
-    // 只有在有明确的 running 状态或 recovery stream 时才允许 attach
-    if (sessionStateStatus === 'idle' && !recoveryActiveStream) {
-      console.log('[ATTACH_ELIGIBILITY] 跳过 attach，会话已完成（idle）', {
-        currentSessionId,
-        sessionStateStatus,
-        recoveryActiveStream,
-        activeGatewayStreamSessionId,
-      });
+    // proceed 分支由 shouldAttemptAttachToSession 保证，此处仅为类型收窄。
+    if (!currentSessionId) {
       return;
     }
 
@@ -4187,6 +4222,8 @@ export default function ChatPage() {
       });
     };
 
+    const getActiveSessionId = () => activeSessionRef.current;
+
     const handleAttachReconnect = (technicalDetail?: string) => {
       if (technicalDetail) {
         setStreamError(
@@ -4214,6 +4251,7 @@ export default function ChatPage() {
             setStreamThinkingBlocks([]);
             setStreamingSegments([]);
           },
+          getActiveSessionId,
           isCurrentSessionRequest,
           loadCurrentSessionSnapshot,
           requestSessionListRefresh,
@@ -4896,12 +4934,15 @@ export default function ChatPage() {
         }
 
         scheduleAttachRetry({
+          sessionId: sid,
           delayMs: 1500,
           beforeRetry: () => {
-            if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
-              return false;
+            if (getActiveSessionId() !== sid) {
+              return 'abort';
             }
+
             attachAttemptedSessionRef.current = null;
+            return 'proceed';
           },
         });
 
@@ -4914,7 +4955,9 @@ export default function ChatPage() {
     activeGatewayStreamSessionId,
     activeModelId,
     activeProviderId,
+    attachRetryExhausted,
     attachRetryNonce,
+    attachRetryScheduledSessionId,
     client,
     cancelAttachRetry,
     currentSessionId,
@@ -5019,10 +5062,15 @@ export default function ChatPage() {
         port: draft.port,
         username: draft.username,
         authType: draft.authType,
-        ...(draft.authType === 'password' && draft.password ? { password: draft.password } : {}),
-        ...(draft.authType === 'key' && draft.privateKeyPath
-          ? { privateKeyPath: draft.privateKeyPath }
+        ...(draft.password ? { password: draft.password } : {}),
+        ...(draft.authType === 'key' || draft.authType === 'key-password'
+          ? draft.privateKey
+            ? { privateKey: draft.privateKey, privateKeyPath: null }
+            : draft.privateKeyPath
+              ? { privateKeyPath: draft.privateKeyPath, privateKey: null }
+              : {}
           : {}),
+        ...(draft.passphrase ? { passphrase: draft.passphrase } : {}),
       });
 
       let resolved: SshPickerConnection = created;
@@ -5062,9 +5110,14 @@ export default function ChatPage() {
         username: draft.username,
         authType: draft.authType,
         ...(draft.password !== undefined ? { password: draft.password } : {}),
-        ...(draft.authType === 'key' && draft.privateKeyPath
-          ? { privateKeyPath: draft.privateKeyPath }
+        ...(draft.authType === 'key' || draft.authType === 'key-password'
+          ? draft.privateKey
+            ? { privateKey: draft.privateKey, privateKeyPath: null }
+            : draft.privateKeyPath
+              ? { privateKeyPath: draft.privateKeyPath, privateKey: null }
+              : {}
           : {}),
+        ...(draft.passphrase ? { passphrase: draft.passphrase } : {}),
       });
 
       await loadSshPickerConnections();
@@ -6029,18 +6082,27 @@ export default function ChatPage() {
               activeTab={sidePanelActiveTab}
               contextUsageSnapshot={contextUsageSnapshot}
               currentSessionId={currentSessionId}
+              currentUserDisplayName={currentUserDisplayName}
+              currentUserEmail={currentUserEmail}
               effectiveWorkingDirectory={effectiveWorkingDirectory}
               fileEditor={fileEditor}
               fileTree={renderWorkspaceFileTree(true)}
               gatewayUrl={gatewayUrl}
               handleSaveFile={handleSaveFile}
               onCompactSession={() => void handleCompactCurrentSession()}
+              onOpenFullSession={(nextSessionId) => {
+                void navigate(`/chat/${nextSessionId}`);
+              }}
               onPromoteToFullScreen={promoteWorkspaceTab}
               onTabChange={setSidePanelActiveTab}
               overview={fusionContextOverview}
+              providerCatalog={providerCatalog}
               reviewRevision={reviewRefreshRevision}
               runtimeSummary={fusionContextRuntimeSummary}
               saving={saving}
+              selectedChildSessionId={selectedChildSessionId}
+              subAgentCount={subAgentRunItems.length}
+              taskToolRuntimeLookup={taskToolRuntimeLookup}
               token={token}
               workspaceFileItems={workspaceFileItems}
               workspacePath={uiWorkspaceScope}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { tokens } from '../tokens.js';
 
 type DiffSideKind = 'added' | 'context' | 'empty' | 'removed';
@@ -28,6 +28,7 @@ export interface UnifiedCodeDiffProps {
   diffText?: string;
   filePath?: string;
   maxHeight?: number;
+  revealFirstChange?: boolean;
   viewMode?: 'split' | 'unified';
 }
 
@@ -341,7 +342,17 @@ export function toUnifiedDisplayRows(rows: DiffRow[]): Array<{
   });
 }
 
-function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
+/**
+ * 返回第一处真实变更行的索引（无变更时返回 -1）。
+ * 变更行定义为 `type === 'change'` 且左右任一侧为 removed / added 的行。
+ */
+export function findFirstChangedRowIndex(rows: readonly DiffRow[]): number {
+  return rows.findIndex(
+    (row) => row.type === 'change' && (row.left.kind === 'removed' || row.right.kind === 'added'),
+  );
+}
+
+function UnifiedRowCell({ anchor, row }: { anchor?: boolean; row: UnifiedDisplayRow }) {
   if (row.kind === 'hunk') {
     return (
       <div
@@ -363,6 +374,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
 
   return (
     <div
+      data-diff-anchor={anchor ? 'true' : undefined}
       style={{
         display: 'grid',
         gridTemplateColumns: '44px 44px 18px minmax(0, 1fr)',
@@ -502,8 +514,10 @@ export function UnifiedCodeDiff({
   diffText,
   filePath,
   maxHeight = 360,
+  revealFirstChange = false,
   viewMode = 'unified',
 }: UnifiedCodeDiffProps) {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const isMinimalChrome = chrome === 'minimal';
   const usingSnapshot = typeof beforeText === 'string' || typeof afterText === 'string';
   const normalizedBefore = beforeText ?? '';
@@ -514,6 +528,60 @@ export function UnifiedCodeDiff({
   const summary = usingSnapshot
     ? summarizeSnapshotDiff(normalizedBefore, normalizedAfter)
     : summarizeUnifiedDiff(diffText ?? '');
+  const unifiedRows = viewMode === 'split' ? null : toUnifiedDisplayRows(rows);
+  const firstChangeIndex =
+    viewMode === 'split'
+      ? findFirstChangedRowIndex(rows)
+      : (unifiedRows?.findIndex((row) => row.kind === 'added' || row.kind === 'removed') ?? -1);
+  const anchorKey =
+    viewMode === 'split' ? rows[firstChangeIndex]?.key : unifiedRows?.[firstChangeIndex]?.key;
+  const anchorIndex = revealFirstChange ? firstChangeIndex : -1;
+
+  useLayoutEffect(() => {
+    if (!revealFirstChange) {
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | undefined;
+    let attempts = 0;
+
+    const revealAnchor = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const target = container.querySelector('[data-diff-anchor="true"]');
+      if (!target || container.clientHeight === 0) {
+        if (attempts < 30) {
+          attempts += 1;
+          frameId = requestAnimationFrame(revealAnchor);
+        }
+        return;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      container.scrollTop = Math.max(
+        0,
+        container.scrollTop + targetRect.top - containerRect.top - 8,
+      );
+    };
+
+    revealAnchor();
+
+    return () => {
+      cancelled = true;
+      if (frameId !== undefined) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [anchorKey, revealFirstChange, viewMode]);
 
   if (rows.length === 0) {
     return (
@@ -636,6 +704,7 @@ export function UnifiedCodeDiff({
       )}
 
       <div
+        ref={scrollContainerRef}
         style={{
           overflow: 'auto',
           maxHeight,
@@ -667,6 +736,7 @@ export function UnifiedCodeDiff({
                 return (
                   <div
                     key={row.key}
+                    data-diff-anchor={index === anchorIndex ? 'true' : undefined}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
@@ -678,7 +748,9 @@ export function UnifiedCodeDiff({
                   </div>
                 );
               })
-            : toUnifiedDisplayRows(rows).map((row) => <UnifiedRowCell key={row.key} row={row} />)}
+            : (unifiedRows ?? []).map((row, index) => (
+                <UnifiedRowCell key={row.key} row={row} anchor={index === anchorIndex} />
+              ))}
         </div>
       </div>
     </div>

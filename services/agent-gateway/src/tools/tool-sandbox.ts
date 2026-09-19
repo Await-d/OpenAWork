@@ -175,7 +175,7 @@ import {
   enterPlanModeToolDefinition,
   exitPlanModeToolDefinition,
 } from './plan-mode-tools.js';
-import { resolveStoredDefaultThinkingMode } from '../provider/provider-config.js';
+import { resolveDelegatedTaskReasoningEffort } from '../task/task-thinking-effort.js';
 import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
 import { stopAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 import { captureBeforeWriteBackup } from '../session/session-file-backup-store.js';
@@ -1220,34 +1220,9 @@ function findTeamRoleBindingForAgent(
   ) as TeamRoleBindingEntry | undefined;
 }
 
-function parseStoredSettingJson(value: string | undefined): unknown {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveDelegatedChildThinkingDefaults(userId: string): {
-  enabled: boolean;
-  effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-} {
-  const row = sqliteGet<{ value: string }>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
-    [userId],
-  );
-
-  // Delegated child sessions behave like fast-path helper runs when the parent
-  // request omitted an explicit thinking configuration.
-  return resolveStoredDefaultThinkingMode(parseStoredSettingJson(row?.value), 'fast');
-}
-
 function buildDelegatedChildRequestData(input: {
   agentId: string;
+  category?: string;
   childSessionId: string;
   executionContext?: SandboxExecutionContext;
   modelSelection?: {
@@ -1257,7 +1232,6 @@ function buildDelegatedChildRequestData(input: {
   };
   prompt: string;
   systemPrompt?: string;
-  userId: string;
 }): Record<string, unknown> | null {
   const baseRequestData =
     input.executionContext?.requestData && typeof input.executionContext.requestData === 'object'
@@ -1266,20 +1240,10 @@ function buildDelegatedChildRequestData(input: {
 
   const nextRequestData: Record<string, unknown> = {
     ...baseRequestData,
+    thinkingEnabled: true,
+    reasoningEffort: resolveDelegatedTaskReasoningEffort(input.category),
   };
-
-  const hasExplicitThinkingEnabled = Object.hasOwn(baseRequestData, 'thinkingEnabled');
-  const hasExplicitReasoningEffort = Object.hasOwn(baseRequestData, 'reasoningEffort');
-
-  if (!hasExplicitThinkingEnabled || !hasExplicitReasoningEffort) {
-    const defaultThinking = resolveDelegatedChildThinkingDefaults(input.userId);
-    if (!hasExplicitThinkingEnabled) {
-      nextRequestData.thinkingEnabled = defaultThinking.enabled;
-    }
-    if (!hasExplicitReasoningEffort) {
-      nextRequestData.reasoningEffort = defaultThinking.effort;
-    }
-  }
+  delete nextRequestData['thinking'];
 
   return {
     ...nextRequestData,
@@ -4183,12 +4147,12 @@ async function executeGatewayManagedToolImpl(
       const childSessionTitle = `${effectiveTaskDescription} (@${resolvedAgent.agentId})`;
       const childRequestData = buildDelegatedChildRequestData({
         agentId: resolvedAgent.agentId,
+        ...(category ? { category } : {}),
         childSessionId,
         executionContext,
         modelSelection: delegatedModel,
         prompt: parsed.data.prompt,
         systemPrompt: resolvedAgent.systemPrompt,
-        userId,
       });
       const canExecuteImmediately = childRequestData !== null;
       const shouldRunInBackground = canExecuteImmediately && parsed.data.run_in_background === true;
