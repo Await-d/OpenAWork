@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { getArtifactById } from '../session/artifact-content-store.js';
 import { probeMediaBuffer, probeMediaUrl, isFFprobeAvailable } from '../media/ffprobe-bridge.js';
 import { extractBufferFromDataUrl, fetchMediaFromUrl } from '../media/media-artifact.js';
@@ -49,7 +50,11 @@ export async function executeExtractMediaInfoTool(input: {
 
   if (!(await isFFprobeAvailable())) {
     return {
-      output: 'FFprobe 不可用。请确保服务器已安装 ffprobe-static 依赖。',
+      output: runtimeBinaryUnavailableMessage({
+        label: 'FFprobe',
+        binaryName: 'ffprobe',
+        envVar: 'FFPROBE_BIN',
+      }),
       isError: true,
     };
   }

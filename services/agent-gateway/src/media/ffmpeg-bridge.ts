@@ -1,8 +1,9 @@
 /**
  * FFmpeg 封装 —— 媒体格式转换、视频帧提取、缩略图生成。
  *
- * 使用 ffmpeg-static 提供的预编译二进制，通过 child_process.spawn
- * 执行 ffmpeg 命令行工具进行媒体处理。
+ * 通过 child_process.spawn 执行 ffmpeg 命令行工具进行媒体处理；
+ * 可执行文件由 `infra/runtime-binary` 按 env → 桌面资源目录 →
+ * 内嵌（ffmpeg-static）→ 系统 PATH 顺序解析，且每个候选都经过存在性校验。
  */
 
 import { spawn } from 'node:child_process';
@@ -11,10 +12,17 @@ import { readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as ffmpegStaticModule from 'ffmpeg-static';
+import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { MIME_TO_CODEC, FORMAT_TO_MIME } from './media-codec.js';
-import { resolveMediaBinaryPath } from './media-binary-path.js';
+import { resolveMediaBinaryPath, resolveMediaResourcePath } from './media-binary-path.js';
 
-const FFMPEG_PATH = resolveMediaBinaryPath(process.env.FFMPEG_BIN, ffmpegStaticModule.default);
+const FFMPEG_PATH =
+  resolveMediaBinaryPath({
+    envVar: 'FFMPEG_BIN',
+    name: 'ffmpeg',
+    resourcePath: resolveMediaResourcePath('ffmpeg'),
+    bundledPath: ffmpegStaticModule.default,
+  })?.path ?? null;
 
 export interface ConvertMediaOptions {
   targetFormat: string;
@@ -502,7 +510,15 @@ async function extractMultipleFrames(
 
 function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
   if (!FFMPEG_PATH) {
-    return Promise.reject(new Error('ffmpeg 不可用。请配置 FFMPEG_BIN 或安装 ffmpeg-static。'));
+    return Promise.reject(
+      new Error(
+        runtimeBinaryUnavailableMessage({
+          label: 'FFmpeg',
+          binaryName: 'ffmpeg',
+          envVar: 'FFMPEG_BIN',
+        }),
+      ),
+    );
   }
 
   return new Promise<void>((resolve, reject) => {

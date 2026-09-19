@@ -1,8 +1,9 @@
 /**
  * FFprobe 封装 —— 媒体元信息提取。
  *
- * 使用 ffprobe-static 提供的预编译二进制，通过 child_process.spawn
- * 执行 ffprobe 命令行工具获取媒体文件的元信息。
+ * 通过 child_process.spawn 执行 ffprobe 命令行工具获取媒体文件的元信息；
+ * 可执行文件由 `infra/runtime-binary` 按 env → 桌面资源目录 →
+ * 内嵌（ffprobe-static）→ 系统 PATH 顺序解析，且每个候选都经过存在性校验。
  */
 
 import { spawn } from 'node:child_process';
@@ -11,10 +12,17 @@ import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import ffprobePath from 'ffprobe-static';
+import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { getMediaCategory } from './media-codec.js';
-import { resolveMediaBinaryPath } from './media-binary-path.js';
+import { resolveMediaBinaryPath, resolveMediaResourcePath } from './media-binary-path.js';
 
-const FFPROBE_PATH = resolveMediaBinaryPath(process.env.FFPROBE_BIN, ffprobePath.path);
+const FFPROBE_PATH =
+  resolveMediaBinaryPath({
+    envVar: 'FFPROBE_BIN',
+    name: 'ffprobe',
+    resourcePath: resolveMediaResourcePath('ffprobe'),
+    bundledPath: ffprobePath.path,
+  })?.path ?? null;
 
 export interface MediaInfo {
   type: 'audio' | 'video' | 'image' | 'unknown';
@@ -99,7 +107,15 @@ export async function probeMediaFile(
   signal?: AbortSignal,
 ): Promise<MediaInfo> {
   if (!FFPROBE_PATH) {
-    return Promise.reject(new Error('ffprobe 不可用。请配置 FFPROBE_BIN 或安装 ffprobe-static。'));
+    return Promise.reject(
+      new Error(
+        runtimeBinaryUnavailableMessage({
+          label: 'FFprobe',
+          binaryName: 'ffprobe',
+          envVar: 'FFPROBE_BIN',
+        }),
+      ),
+    );
   }
 
   return new Promise<MediaInfo>((resolve, reject) => {

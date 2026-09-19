@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { getArtifactById } from '../session/artifact-content-store.js';
 import {
   convertMedia,
@@ -81,7 +82,11 @@ export async function executeConvertMediaTool(input: {
 
   if (!(await isFFmpegAvailable())) {
     return {
-      output: 'FFmpeg 不可用。请确保服务器已安装 ffmpeg-static 依赖。',
+      output: runtimeBinaryUnavailableMessage({
+        label: 'FFmpeg',
+        binaryName: 'ffmpeg',
+        envVar: 'FFMPEG_BIN',
+      }),
       isError: true,
     };
   }
