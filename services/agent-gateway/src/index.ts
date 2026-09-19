@@ -113,6 +113,15 @@ import { migrateTelemetryDb, cleanupStaleDedupEntries } from './telemetry/teleme
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
 
+// 发布 CI 冒烟：在 Fastify 创建、DB 连接与 listen 之前拦截 `--print-browser-plan`，
+// 验证编译产物仍能解析 Playwright 内联的浏览器注册表元数据。
+const cliArgv = globalThis.process?.argv ?? [];
+if (cliArgv.includes('--print-browser-plan')) {
+  const { runPrintBrowserPlan } = await import('./cli/browser-plan.js');
+  const exitCode = await runPrintBrowserPlan(cliArgv);
+  globalThis.process?.exit(exitCode);
+}
+
 const app = Fastify({
   logger: true,
   disableRequestLogging: true,
