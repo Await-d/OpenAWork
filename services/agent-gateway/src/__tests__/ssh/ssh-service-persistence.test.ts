@@ -33,8 +33,15 @@ beforeAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   __resetSshStoreForTests();
+  const { sqliteRun } = await import('../../infra/db.js');
+  for (const id of ['session-1', 's']) {
+    sqliteRun("INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, 'SSH')", [
+      id,
+      TEST_USER,
+    ]);
+  }
 });
 
 afterAll(async () => {
@@ -253,7 +260,7 @@ describe('SshService persistence', () => {
     );
     expect(row?.private_key_cipher).toBeTruthy();
     expect(row?.private_key_cipher).not.toBe(plaintextKey);
-    expect(row?.private_key_cipher?.startsWith('enc.v1.')).toBe(true);
+    expect(row?.private_key_cipher?.startsWith('enc.v2.')).toBe(true);
   });
 
   it('updateConnection 支持保持 / 替换 / 清空粘贴式私钥', async () => {
@@ -348,7 +355,7 @@ describe('SshService persistence', () => {
     );
     expect(cipherRow?.passphrase_cipher).toBeTruthy();
     expect(cipherRow?.passphrase_cipher).not.toBe('PASS-1');
-    expect(cipherRow?.passphrase_cipher?.startsWith('enc.v1.')).toBe(true);
+    expect(cipherRow?.passphrase_cipher?.startsWith('enc.v2.')).toBe(true);
 
     // 模拟进程重启：新 service 从 SQLite 重新解密读取。
     const fresh = new SshService({ manager: createConnectingManager('ok') as never });

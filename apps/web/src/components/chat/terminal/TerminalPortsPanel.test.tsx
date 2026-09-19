@@ -159,6 +159,24 @@ describe('四态', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('empty + reason：枚举降级时展示原因与重试，而不是「没有端口」', async () => {
+    portsClient.list.mockResolvedValue(
+      makeSnapshot({ ports: [], reason: '端口枚举超时（>3000ms），已降级为空列表。' }),
+    );
+    renderPanel();
+
+    const degraded = await screen.findByTestId('terminal-ports-degraded');
+    expect(degraded.textContent).toContain('端口枚举超时');
+    expect(screen.queryByTestId('terminal-ports-empty')).toBeNull();
+    expect(screen.queryByText('未发现监听端口')).toBeNull();
+    expect(screen.queryByText('网关所在环境当前没有监听中的 TCP 端口。')).toBeNull();
+
+    portsClient.list.mockResolvedValueOnce(makeSnapshot({ ports: [makePort()] }));
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    expect(await screen.findByTestId('terminal-ports-table')).toBeTruthy();
+  });
+
   it('error：请求失败显示错误 + 重试按钮；点击重试再次发起并进入有数据态', async () => {
     portsClient.list
       .mockRejectedValueOnce(new Error('网络异常，读取监听端口失败。'))

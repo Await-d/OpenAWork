@@ -1,3 +1,4 @@
+import SshHostKeyRecovery, { parseHostKeyMismatch } from './SshHostKeyRecovery.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from '../../file-editor/preview/FileIcon.js';
 import { getParentPath, joinDirectoryPath } from '../../../utils/workspace-path.js';
@@ -59,6 +60,10 @@ export interface SshWorkspacePickerModalProps {
   initialConnectionId?: string | null;
   initialPath?: string;
   loadingConnections?: boolean;
+}
+
+function isRemoteAbsolutePath(path: string): boolean {
+  return !/[\r\n\0]/.test(path) && /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(path);
 }
 
 function pickDefaultConnection(
@@ -247,7 +252,7 @@ export default function SshWorkspacePickerModal({
 
     initializedConnectionIdRef.current = nextConnection.id;
     setConnectionId(nextConnection.id);
-    const startPath = initialPath && initialPath.startsWith('/') ? initialPath : '/';
+    const startPath = initialPath && isRemoteAbsolutePath(initialPath) ? initialPath : '/';
     setCurrentPath(startPath);
     setPathInput(startPath);
     void openDirectory(nextConnection.id, startPath);
@@ -283,8 +288,8 @@ export default function SshWorkspacePickerModal({
       setError('请输入远端绝对路径');
       return;
     }
-    if (!candidatePath.startsWith('/')) {
-      setError('远端路径必须是绝对路径（以 / 开头）');
+    if (!isRemoteAbsolutePath(candidatePath)) {
+      setError('远端路径必须是绝对路径，例如 /srv/app 或 C:\\Projects');
       return;
     }
     await openDirectory(connectionId, candidatePath);
@@ -1030,6 +1035,18 @@ export default function SshWorkspacePickerModal({
               ))
           )}
         </div>
+
+        {connectionId && parseHostKeyMismatch(connectionNotice?.message ?? error ?? '') && (
+          <SshHostKeyRecovery
+            key={`${connectionId}:${connectionNotice?.message ?? error}`}
+            connectionId={connectionId}
+            message={connectionNotice?.message ?? error ?? ''}
+            onRecovered={async () => {
+              setConnectionNotice({ tone: 'success', message: '指纹已更新，连接已恢复。' });
+              await openDirectory(connectionId, currentPath ?? '/');
+            }}
+          />
+        )}
 
         {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
 

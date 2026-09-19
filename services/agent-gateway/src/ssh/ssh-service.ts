@@ -1,3 +1,9 @@
+import { sqliteRun } from '../infra/db.js';
+import { remoteMkdirCommand } from './ssh-directory.js';
+import { detectRemoteShell } from '../session/ssh-terminal-directory.js';
+import { verifySshHostKey } from './ssh-host-trust.js';
+import { requireSshCredentialAccess } from './ssh-credential-policy.js';
+import { SshReconnectScheduler } from './ssh-reconnect.js';
 /**
  * Per-user façade over the in-memory `SSHConnectionManager` + the persistent
  * SQLite store. The route layer talks exclusively to this service so it can:
@@ -13,6 +19,8 @@
  * client lifecycle — we don't try to persist live channels, only the metadata
  * needed to recreate them after a restart.
  */
+
+import { requireOwnedSshSession } from './ssh-session-ownership.js';
 
 import {
   SSHConnectionManagerImpl,
@@ -100,11 +108,6 @@ const NOOP_LOGGER: SshServiceLogger = {
   error: () => undefined,
 };
 
-/** POSIX shell 单引号转义（内嵌单引号改写为 `'\''`）。 */
-function shellQuoteSingle(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 function projectConnection(row: PersistedSshConnection): SshConnectionView {
   return {
     id: row.id,
@@ -179,13 +182,48 @@ export class SshService {
    * fail with `SSH connection not found:` if the metadata wasn't pushed in
    * since the last process restart.
    */
+  private readonly reconnect = new SshReconnectScheduler();
+  private readonly unsubscribe: (() => void) | undefined;
   private readonly hydratedConnections = new Set<string>();
 
   constructor(options: SshServiceOptions = {}) {
-    this.manager = options.manager ?? new SSHConnectionManagerImpl();
+    this.manager =
+      options.manager ?? new SSHConnectionManagerImpl({ verifyHostKey: verifySshHostKey });
     this.bindings = options.bindings ?? new SSHSessionBindingRegistry();
     this.logger = options.logger ?? NOOP_LOGGER;
     migrateSshTables();
+    this.unsubscribe = this.manager.subscribe?.((event) => {
+      const row = getSshConnectionUnscoped(event.connectionId);
+      if (!row) return;
+      updateSshConnectionStatus(row.id, event.status, event.error ?? null);
+      if (event.status === 'connected') this.reconnect.reset(row.id);
+      else if (event.intentional) this.reconnect.pause(row.id);
+      else if (row.autoReconnect) this.scheduleReconnect(row);
+    });
+  }
+
+  dispose(): void {
+    this.reconnect.dispose();
+    this.unsubscribe?.();
+  }
+
+  private scheduleReconnect(row: PersistedSshConnection): void {
+    this.reconnect.schedule(row.id, async () => {
+      const current = getSshConnection(row.userId, row.id);
+      if (!current?.autoReconnect) {
+        this.reconnect.pause(row.id);
+        return;
+      }
+      try {
+        await this.connect(row.userId, row.id);
+      } catch (error) {
+        this.logger.warn(
+          { connectionId: row.id, err: error instanceof Error ? error.message : String(error) },
+          'ssh auto-reconnect failed',
+        );
+        throw error;
+      }
+    });
   }
 
   getManager(): SSHConnectionManager {
@@ -221,18 +259,38 @@ export class SshService {
     connectionId: string,
     patch: UpdateSshConnectionInput,
   ): SshConnectionView | null {
+    const previous = getSshConnection(userId, connectionId);
     const row = updateSshConnection(userId, connectionId, patch);
     if (!row) return null;
+    const transportChanged =
+      !previous ||
+      (
+        [
+          'host',
+          'port',
+          'username',
+          'authType',
+          'privateKeyPath',
+          'privateKey',
+          'passphrase',
+          'password',
+        ] as const
+      ).some((field) => previous[field] !== row[field]);
+    if (!row.autoReconnect) this.reconnect.pause(connectionId);
+    if (!transportChanged) return projectConnection(row);
+    this.reconnect.pause(connectionId);
+    updateSshConnectionStatus(connectionId, 'disconnected');
     // Force re-hydration so subsequent connect() picks up the new password /
     // host / etc. instead of the previous in-memory snapshot.
     this.hydratedConnections.delete(connectionId);
     this.hydrateRuntimeConnection(row);
-    return projectConnection(row);
+    return projectConnection({ ...row, status: 'disconnected', lastError: null });
   }
 
   async deleteConnection(userId: string, connectionId: string): Promise<boolean> {
     const existing = getSshConnection(userId, connectionId);
     if (!existing) return false;
+    this.reconnect.pause(connectionId);
     try {
       await this.manager.disconnect(connectionId);
     } catch (err) {
@@ -252,14 +310,26 @@ export class SshService {
 
   async connect(userId: string, connectionId: string): Promise<SshConnectionView> {
     const row = this.requireOwnedConnection(userId, connectionId);
-    this.hydrateRuntimeConnection(row);
+    try {
+      requireSshCredentialAccess(row);
+    } catch (error) {
+      this.reconnect.pause(connectionId);
+      throw error;
+    }
+    this.reconnect.resume(connectionId);
     updateSshConnectionStatus(connectionId, 'connecting');
     try {
       await this.manager.connect(connectionId);
       updateSshConnectionStatus(connectionId, 'connected');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      updateSshConnectionStatus(connectionId, 'error', message);
+      const cancelled = message === 'SSH connection cancelled';
+      if (/host key mismatch/i.test(message)) this.reconnect.pause(connectionId);
+      updateSshConnectionStatus(
+        connectionId,
+        cancelled ? 'disconnected' : 'error',
+        cancelled ? null : message,
+      );
       throw err;
     }
     const refreshed = getSshConnection(userId, connectionId);
@@ -268,6 +338,7 @@ export class SshService {
 
   async disconnect(userId: string, connectionId: string): Promise<SshConnectionView> {
     const row = this.requireOwnedConnection(userId, connectionId);
+    this.reconnect.pause(connectionId);
     try {
       await this.manager.disconnect(connectionId);
     } finally {
@@ -328,16 +399,10 @@ export class SshService {
   async mkdir(userId: string, connectionId: string, path: string): Promise<void> {
     this.requireOwnedConnection(userId, connectionId);
     const trimmed = path.trim();
-    if (!trimmed.startsWith('/')) {
-      throw new Error('SSH mkdir requires an absolute remote path');
-    }
-    if (trimmed.includes('\n') || trimmed.includes('\r')) {
-      throw new Error('SSH mkdir path must not contain line breaks');
-    }
-
+    const shell = await detectRemoteShell(this.manager, connectionId);
     const result = await this.manager.execCommand(
       connectionId,
-      `mkdir -p ${shellQuoteSingle(trimmed)}`,
+      remoteMkdirCommand(shell, trimmed),
       { timeoutMs: 15_000 },
     );
     if (result.timedOut) {
@@ -361,7 +426,12 @@ export class SshService {
   // ─── Bindings ────────────────────────────────────────────────────────────
 
   bindSession(userId: string, sessionId: string, connectionId: string): SshBindingView {
+    requireOwnedSshSession(userId, sessionId);
     this.requireOwnedConnection(userId, connectionId);
+    sqliteRun(
+      "UPDATE sessions SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.sshConnectionId', ?) WHERE id = ? AND user_id = ?",
+      [connectionId, sessionId, userId],
+    );
     upsertSshBinding(userId, sessionId, connectionId);
     this.bindings.bind(sessionId, connectionId);
     upsertSshDialog({ userId, connectionId, touch: true });
@@ -373,6 +443,15 @@ export class SshService {
   }
 
   unbindSession(userId: string, sessionId: string): void {
+    requireOwnedSshSession(userId, sessionId);
+    sqliteRun(
+      `UPDATE sessions SET metadata_json = json_set(
+        CASE WHEN json_type(COALESCE(metadata_json, '{}'), '$.sshConnectionId') = 'text'
+          THEN json_remove(COALESCE(metadata_json, '{}'), '$.workingDirectory')
+          ELSE COALESCE(metadata_json, '{}') END, '$.sshConnectionId', NULL)
+       WHERE id = ? AND user_id = ?`,
+      [sessionId, userId],
+    );
     deleteSshBinding(userId, sessionId);
     this.bindings.unbind(sessionId);
   }
@@ -428,7 +507,20 @@ export class SshService {
 
     const allBindings = listAllSshBindings();
     for (const binding of allBindings) {
-      this.bindings.bind(binding.sessionId, binding.connectionId);
+      try {
+        requireOwnedSshSession(binding.userId, binding.sessionId);
+        this.requireOwnedConnection(binding.userId, binding.connectionId);
+        this.bindings.bind(binding.sessionId, binding.connectionId);
+      } catch (error) {
+        deleteSshBinding(binding.userId, binding.sessionId);
+        this.logger.warn(
+          {
+            sessionId: binding.sessionId,
+            err: error instanceof Error ? error.message : String(error),
+          },
+          'ssh stale binding removed',
+        );
+      }
     }
 
     const candidates = listAllAutoReconnectConnections();
@@ -437,25 +529,7 @@ export class SshService {
     }
     if (candidates.length === 0) return;
 
-    // Fire-and-forget each handshake. If a remote host is offline / creds
-    // are stale we want the rest of the gateway to keep booting; the row's
-    // `last_error` field captures the failure for the UI to surface later.
-    void Promise.allSettled(
-      candidates.map(async (row) => {
-        updateSshConnectionStatus(row.id, 'connecting');
-        try {
-          await this.manager.connect(row.id);
-          updateSshConnectionStatus(row.id, 'connected');
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          updateSshConnectionStatus(row.id, 'error', message);
-          this.logger.warn('ssh auto-reconnect failed', {
-            connectionId: row.id,
-            err: message,
-          });
-        }
-      }),
-    );
+    for (const row of candidates) this.scheduleReconnect(row);
   }
 
   // ─── Internals ───────────────────────────────────────────────────────────
@@ -481,6 +555,7 @@ export class SshService {
 let activeService: SshService | null = null;
 
 export function setSshService(service: SshService): void {
+  activeService?.dispose?.();
   activeService = service;
 }
 
@@ -515,5 +590,6 @@ export function lookupConnectionById(connectionId: string): PersistedSshConnecti
 
 /** Test helper. Reset module-level singletons. */
 export function __resetSshServiceForTests(service: SshService | null = null): void {
+  activeService?.dispose?.();
   activeService = service;
 }

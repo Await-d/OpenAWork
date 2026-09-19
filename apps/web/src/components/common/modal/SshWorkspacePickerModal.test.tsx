@@ -419,3 +419,15 @@ describe('SshWorkspacePickerModal', () => {
     expect(fetchTree.mock.calls.map(([, path]) => path)).toEqual(['/', '/srv', '/srv']);
   });
 });
+
+it('允许浏览 Windows 远程绝对路径', async () => {
+  const fetchTree = vi.fn(async () => []);
+  renderModal({ fetchTree, initialPath: 'C:\\Projects' });
+  await waitFor(() => expect(fetchTree).toHaveBeenCalledWith('conn-1', 'C:\\Projects'));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '打开路径' }).hasAttribute('disabled')).toBe(false),
+  );
+  fireEvent.change(screen.getByLabelText('远端路径输入'), { target: { value: 'D:\\Work Dir' } });
+  fireEvent.click(screen.getByRole('button', { name: '打开路径' }));
+  await waitFor(() => expect(fetchTree).toHaveBeenCalledWith('conn-1', 'D:\\Work Dir'));
+});

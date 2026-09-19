@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /**
  * Session terminal routes — REST surface for the
  * `session_terminals` registry. Powers the chat-page "running terminals"
@@ -15,6 +16,8 @@
  * so a session-id swap can't expose another user's terminals.
  */
 
+import { spawnSessionTerminal } from '../session/spawn-session-terminal.js';
+
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { RunEvent } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
@@ -24,7 +27,6 @@ import {
   closePersistentTerminal,
   isPersistentTerminal,
   resizeTerminal,
-  spawnPersistentTerminal,
   writeStdinToTerminal,
 } from '../session/persistent-terminals.js';
 import { detectTerminalBackend, type TerminalBackendKind } from '../session/pty-backend.js';
@@ -318,14 +320,17 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
       if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
         return reply.code(404).send(terminalErrorPayload('session_not_found'));
       }
-      const body = (request.body ?? {}) as {
-        cwd?: string;
-        initialCommand?: string;
-        description?: string;
-        shellProfileId?: unknown;
-      };
-      const cwd =
-        typeof body.cwd === 'string' && body.cwd.trim().length > 0 ? body.cwd : process.cwd();
+      const parsedBody = z
+        .object({
+          cwd: z.string().max(4096).optional(),
+          initialCommand: z.string().max(65536).optional(),
+          description: z.string().max(2048).optional(),
+          shellProfileId: z.unknown().optional(),
+        })
+        .safeParse(request.body ?? {});
+      if (!parsedBody.success) return reply.code(400).send(terminalErrorPayload('invalid_body'));
+      const body = parsedBody.data;
+      const cwd = typeof body.cwd === 'string' && body.cwd.trim().length > 0 ? body.cwd : '';
 
       // The client supplies ONLY an opaque id. We validate it against the live
       // allowlist and forward the server-canonical id onward — a path-like or
@@ -347,7 +352,7 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
       }
 
       try {
-        const result = spawnPersistentTerminal({
+        const result = await spawnSessionTerminal({
           sessionId,
           userId: user.sub,
           cwd,

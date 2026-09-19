@@ -1,8 +1,12 @@
+import { replaceSshHostKey, SshHostKeyError } from '../ssh/ssh-host-trust.js';
+import { SshCredentialPolicyError } from '../ssh/ssh-credential-policy.js';
 /**
  * SSH 路由：用户范围内的连接 CRUD、文件浏览、上传，以及面板恢复用的
  * 「SSH 对话」状态。所有持久化都委托给 `SshService`，进程重启时既能恢复
  * 列表，也能根据 auto-reconnect 标记自动重连最近活跃的连接。
  */
+
+import { SshSessionOwnershipError } from '../ssh/ssh-session-ownership.js';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -73,6 +77,11 @@ interface ClassifiedSshError {
 }
 
 function classifySshRouteError(error: unknown, actionLabel: string): ClassifiedSshError {
+  if (error instanceof SshHostKeyError) return { statusCode: 409, error: error.message };
+  if (error instanceof SshCredentialPolicyError) return { statusCode: 403, error: error.message };
+  if (error instanceof SshSessionOwnershipError) {
+    return { statusCode: 404, error: '目标会话不存在。' };
+  }
   const message = error instanceof Error ? error.message : String(error);
   const errno = (error as NodeJS.ErrnoException | undefined)?.code;
 
@@ -118,6 +127,25 @@ function userId(request: FastifyRequest): string {
 }
 
 export async function sshRoutes(app: FastifyInstance): Promise<void> {
+  app.put('/ssh/connections/:id/host-key', { onRequest: [requireAuth] }, async (request, reply) => {
+    const { step } = startRequestWorkflow(request, 'ssh.host-key.replace');
+    const fingerprint = z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/);
+    const input = parseBody(
+      z.object({ expectedFingerprint: fingerprint, fingerprint }),
+      request.body,
+    );
+    const connectionId = (request.params as { id: string }).id;
+    if (!service().getConnection(userId(request), connectionId))
+      return reply.code(404).send({ error: 'SSH 连接不存在。' });
+    try {
+      replaceSshHostKey({ userId: userId(request), connectionId, ...input });
+      await service().disconnect(userId(request), connectionId);
+      step.succeed();
+      return reply.send({ ok: true });
+    } catch (error) {
+      return failSshRoute(request, reply, step, '更新 SSH 主机指纹', error);
+    }
+  });
   const service = () => getSshService();
 
   app.get('/ssh/connections', { onRequest: [requireAuth] }, async (request, reply) => {
@@ -241,9 +269,13 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
   app.post('/ssh/bindings/unbind', { onRequest: [requireAuth] }, async (request, reply) => {
     const { step } = startRequestWorkflow(request, 'ssh.connections.unbind');
     const parsed = parseBody(unbindSchema, request.body);
-    service().unbindSession(userId(request), parsed.sessionId);
-    step.succeed(undefined, { sessionId: parsed.sessionId });
-    return reply.send({ ok: true });
+    try {
+      service().unbindSession(userId(request), parsed.sessionId);
+      step.succeed(undefined, { sessionId: parsed.sessionId });
+      return reply.send({ ok: true });
+    } catch (error) {
+      return failSshRoute(request, reply, step, '解绑 SSH 连接', error);
+    }
   });
 
   app.get('/ssh/bindings', { onRequest: [requireAuth] }, async (request, reply) => {

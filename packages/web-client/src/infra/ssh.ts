@@ -107,14 +107,14 @@ export interface SSHClient {
   ): Promise<SSHConnectionEntry>;
   remove(token: string, connectionId: string): Promise<void>;
   connect(token: string, connectionId: string): Promise<SSHConnectionEntry | void>;
+  trustHostKey(
+    token: string,
+    connectionId: string,
+    input: { expectedFingerprint: string; fingerprint: string },
+  ): Promise<void>;
   disconnect(token: string, connectionId: string): Promise<SSHConnectionEntry | void>;
-  /**
-   * Bind a chat session to an SSH connection. The legacy two-arg form
-   * `bind(token, connectionId)` is preserved for backward compatibility
-   * with consumers that don't yet have a session id; in that mode the
-   * gateway records a placeholder binding under the user.
-   */
-  bind(token: string, connectionId: string, sessionId?: string): Promise<void>;
+  /** 绑定当前用户的真实会话；旧两参数调用需先创建会话并传入其 ID。 */
+  bind(token: string, connectionId: string, sessionId: string): Promise<void>;
   unbindSession(token: string, sessionId: string): Promise<void>;
   listBindings(token: string, options?: { signal?: AbortSignal }): Promise<SSHBindingEntry[]>;
   listFiles(token: string, connectionId: string, path: string): Promise<SSHFileEntry[]>;
@@ -257,6 +257,18 @@ export function createSshClient(baseUrl: string): SSHClient {
       });
     },
 
+    async trustHostKey(token, connectionId, input) {
+      await performSshRequest<void>({
+        actionLabel: '更新 SSH 主机指纹',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${connectionEndpoint(connectionId)}/host-key`, {
+            method: 'PUT',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          }),
+      });
+    },
     async connect(token, connectionId) {
       const data = await performSshRequest<{ connection?: SSHConnectionEntry }>({
         actionLabel: '连接 SSH',
@@ -282,11 +294,9 @@ export function createSshClient(baseUrl: string): SSHClient {
     },
 
     async bind(token, connectionId, sessionId) {
-      // Backwards-compat: when no sessionId is supplied (legacy callers),
-      // synthesise a deterministic placeholder so the binding row exists
-      // and the panel can still surface a "session pinned" indicator after
-      // the gateway restart.
-      const effectiveSessionId = sessionId ?? `placeholder:${connectionId}`;
+      if (!sessionId?.trim()) {
+        throw new HttpError('绑定 SSH 连接需要真实的 sessionId，请先创建或选择会话。', 400);
+      }
       await performSshRequest({
         actionLabel: '绑定 SSH 连接',
         parseJson: false,
@@ -294,7 +304,7 @@ export function createSshClient(baseUrl: string): SSHClient {
           fetchWithTimeout(`${connectionEndpoint(connectionId)}/bind`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({ sessionId: effectiveSessionId }),
+            body: JSON.stringify({ sessionId }),
           }),
       });
     },

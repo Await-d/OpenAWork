@@ -603,6 +603,9 @@ try {
       },
     });
     setSshService(sshService);
+    app.addHook('onClose', async () => {
+      sshService.dispose();
+    });
     await sshService.reconcileOnBoot();
     bootLogger.succeed(step);
   } catch (err) {

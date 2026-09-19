@@ -197,6 +197,10 @@ export function extractSessionSshConnectionId(metadata: Record<string, unknown>)
  */
 export function normalizeSshRemoteWorkingDirectory(value: string): string | null {
   const trimmed = value.trim();
+  if (/[\r\n\0]/.test(trimmed)) return null;
+  if (/^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(trimmed)) {
+    return path.win32.normalize(trimmed);
+  }
   if (!trimmed.startsWith('/')) {
     return null;
   }

@@ -787,6 +787,21 @@ export function TerminalPortsPanel({ gatewayUrl, token }: TerminalPortsPanelProp
   const { snapshot } = state;
   const ports = sortPorts(snapshot.ports);
 
+  // 空列表 + reason = 枚举被降级（超时等），而不是「确实没有端口」。两者必须分开渲染：
+  // 把降级画成安抚性的空态，用户会以为端口真的不存在（strategy === null 的不支持文案另有分支）。
+  if (snapshot.strategy !== null && ports.length === 0 && snapshot.reason) {
+    return (
+      <div className="terminal-ports" data-testid="terminal-ports-panel">
+        <div className="terminal-ports__status" role="status" data-testid="terminal-ports-degraded">
+          <p className="terminal-ports__error">{snapshot.reason}</p>
+          <button type="button" className="terminal-ports__btn" onClick={retry}>
+            重试
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (snapshot.strategy === null || ports.length === 0) {
     const unsupported = snapshot.strategy === null;
     return (

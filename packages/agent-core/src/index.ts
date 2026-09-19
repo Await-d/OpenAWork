@@ -567,3 +567,5 @@ export {
   getDefaultShellType,
   resetProviderCache,
 } from './utils/shell/index.js';
+export { SSHTerminalError, type SSHTerminalOptions } from './ssh/ssh-terminal.js';
+export { SSHConnectionError, type SSHConnectionEvent } from './ssh/ssh-connection-events.js';

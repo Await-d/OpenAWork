@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SSHConnectionManagerImpl, type SSHConnection } from './ssh-connection-manager.js';
 
@@ -10,41 +11,23 @@ import { SSHConnectionManagerImpl, type SSHConnection } from './ssh-connection-m
  * and a per-stream byte cap that flags truncation.
  */
 
-type DataCb = (data: Buffer) => void;
-
 interface FakeStreamBehavior {
   stdoutChunks?: Buffer[];
   /** When false, the stream never calls its close callback (simulates a hang). */
   emitClose?: boolean;
   exitCode?: number;
+  /** When false, `exec` never calls its callback (simulates a hung channel open). */
+  openResponds?: boolean;
 }
 
 function makeExecClient(behavior: FakeStreamBehavior) {
   let destroyed = false;
-  const stream = {
-    _data: undefined as DataCb | undefined,
-    on(event: string, cb: DataCb) {
-      if (event === 'data') {
-        this._data = cb;
-        // Deliver queued stdout chunks synchronously on subscription.
-        for (const chunk of behavior.stdoutChunks ?? []) cb(chunk);
-      }
-      return this;
-    },
-    stderr: {
-      on(_event: string, _cb: DataCb) {
-        /* no stderr in these tests */
-      },
-    },
-    close(cb: (code: number) => void) {
-      if (behavior.emitClose !== false) {
-        queueMicrotask(() => cb(behavior.exitCode ?? 0));
-      }
-    },
+  const stream = Object.assign(new EventEmitter(), {
+    stderr: new EventEmitter(),
     destroy() {
       destroyed = true;
     },
-  };
+  });
   const client = {
     on() {
       return client;
@@ -53,7 +36,13 @@ function makeExecClient(behavior: FakeStreamBehavior) {
       return client;
     },
     exec(_cmd: string, cb: (err: Error | undefined, s: typeof stream) => void) {
-      cb(undefined, stream);
+      if (behavior.openResponds !== false) {
+        cb(undefined, stream);
+        queueMicrotask(() => {
+          for (const chunk of behavior.stdoutChunks ?? []) stream.emit('data', chunk);
+          if (behavior.emitClose !== false) stream.emit('close', behavior.exitCode ?? 0);
+        });
+      }
     },
     sftp() {},
     end() {},
@@ -98,6 +87,24 @@ describe('SSHConnectionManagerImpl.execCommand robustness', () => {
     expect(result.exitCode).toBe(-1);
     expect(result.stdout).toBe('partial');
     expect(fake.wasDestroyed()).toBe(true);
+  });
+
+  it('通道打开回调永不触发时，到达 deadline 后以 timedOut 解析而非永久挂起', async () => {
+    vi.useFakeTimers();
+    const fake = makeExecClient({ openResponds: false });
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['c4', fake.client as never]]),
+    });
+    mgr.addConnection(conn('c4'));
+
+    const p = mgr.execCommand('c4', 'pwd', { timeoutMs: 5_000 });
+    const assertion = p.then((r) => r);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await assertion;
+
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBe(-1);
+    expect(result.stdout).toBe('');
   });
 
   it('输出超过 maxOutputBytes 时截断并打 truncated 标记', async () => {

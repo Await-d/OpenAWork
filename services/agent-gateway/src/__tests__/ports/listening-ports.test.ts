@@ -335,6 +335,81 @@ describe('collectProcfsListeningPorts：processAlive 语义', () => {
   });
 });
 
+describe('collectProcfsListeningPorts：归属扫描的并发确定性与单操作超时', () => {
+  it('同一 inode 被多个 pid 命中时，无论 /proc 顺序如何都取最小 pid', async () => {
+    const io = createFakeProcfsIo({
+      files: {
+        '/proc/net/tcp': [
+          '  sl  local_address rem_address   st',
+          procNetTcpLine(0, '00000000:0FA0', '0A', 111),
+          '',
+        ].join('\n'),
+        '/proc/net/tcp6': '  sl  local_address rem_address   st\n',
+        '/proc/9000/comm': 'high\n',
+        '/proc/9000/stat': statLine(9000, 'high', 1),
+        '/proc/5000/comm': 'low\n',
+        '/proc/5000/stat': statLine(5000, 'low', 1),
+      },
+      // 高 pid 排在 /proc 前面：若按完成顺序取归属，会错拿 9000。
+      dirs: {
+        '/proc': ['9000', '5000', '1'],
+        '/proc/9000/fd': ['3'],
+        '/proc/5000/fd': ['3'],
+      },
+      links: {
+        '/proc/9000/fd/3': 'socket:[111]',
+        '/proc/5000/fd/3': 'socket:[111]',
+      },
+    });
+
+    const outcome = await collectProcfsListeningPorts(io);
+    expect(findPort(outcome.ports, 4000, 'tcp')).toMatchObject({
+      pid: 5000,
+      processName: 'low',
+    });
+  });
+
+  it('单个 fd 的 readlink 永不返回时，只丢失该 inode 的归属，其余端口照常解析', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = createFakeProcfsIo({
+        files: {
+          '/proc/net/tcp': [
+            '  sl  local_address rem_address   st',
+            procNetTcpLine(0, '00000000:0FA0', '0A', 111),
+            procNetTcpLine(1, '00000000:1388', '0A', 222),
+            '',
+          ].join('\n'),
+          '/proc/net/tcp6': '  sl  local_address rem_address   st\n',
+          '/proc/7777/comm': 'node\n',
+          '/proc/7777/stat': statLine(7777, 'node', 1),
+        },
+        dirs: { '/proc': ['7777', '1'], '/proc/7777/fd': ['3', '4'] },
+        links: {
+          '/proc/7777/fd/3': 'socket:[111]',
+          '/proc/7777/fd/4': 'socket:[222]',
+        },
+      });
+      const io: ProcfsIo = {
+        readTextFile: (path) => base.readTextFile(path),
+        readDirNames: (path) => base.readDirNames(path),
+        readLink: (path) =>
+          path === '/proc/7777/fd/4' ? new Promise<string>(() => undefined) : base.readLink(path),
+      };
+
+      const pending = collectProcfsListeningPorts(io);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const outcome = await pending;
+
+      expect(findPort(outcome.ports, 4000, 'tcp')).toMatchObject({ pid: 7777 });
+      // fd 4 的 readlink 卡住 → inode 222 归属缺失，但枚举整体仍完成。
+      expect(findPort(outcome.ports, 5000, 'tcp')).toMatchObject({ pid: null, processName: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('parseLsofOutput / parsePowerShellOutput', () => {
   it('lsof 行解析出 pid / 进程名 / 绑定地址；连接数与存活状态一律 null（平台不提供）', () => {
     const ports = parseLsofOutput(LSOF_OUTPUT);
@@ -780,6 +855,21 @@ describe('listListeningPorts', () => {
     expect(snapshot.ports).toEqual([]);
     expect(snapshot.strategy).toBe('lsof');
     expect(snapshot.reason).toContain('超时');
+  });
+
+  it('OPENAWORK_PORTS_ENUMERATION_TIMEOUT_MS 覆盖总超时预算', async () => {
+    vi.stubEnv('OPENAWORK_PORTS_ENUMERATION_TIMEOUT_MS', '5');
+    const hanging: ProcfsIo = {
+      readTextFile: () => new Promise<string>(() => undefined),
+      readDirNames: () => new Promise<string[]>(() => undefined),
+      readLink: () => new Promise<string>(() => undefined),
+    };
+
+    const snapshot = await listListeningPorts({ strategy: 'procfs', procfsIo: hanging });
+
+    expect(snapshot.ports).toEqual([]);
+    expect(snapshot.reason).toContain('超时');
+    expect(snapshot.reason).toContain('5ms');
   });
 
   it('exec 抛错 → 降级为空列表并带 reason', async () => {

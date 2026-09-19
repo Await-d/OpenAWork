@@ -195,3 +195,18 @@ describe('createSshClient', () => {
     ).rejects.toThrow('请求体参数无效。');
   });
 });
+
+it('绑定必须提供真实会话 ID，缺失时不发送占位请求', async () => {
+  const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+  globalThis.fetch = fetchMock;
+  const client = createSshClient('http://localhost:3000');
+  await expect(Reflect.apply(client.bind, client, ['token', 'connection'])).rejects.toThrow(
+    /sessionId/,
+  );
+  expect(fetchMock).not.toHaveBeenCalled();
+  await client.bind('token', 'connection', 'owned-session');
+  expect(fetchMock).toHaveBeenCalledWith(
+    'http://localhost:3000/ssh/connections/connection/bind',
+    expect.objectContaining({ body: JSON.stringify({ sessionId: 'owned-session' }) }),
+  );
+});

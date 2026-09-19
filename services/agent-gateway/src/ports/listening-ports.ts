@@ -142,6 +142,9 @@ const DEFAULT_GATEWAY_PORT = 3000;
 const DEFAULT_REDIS_PORT = 6379;
 const PROC_NET_TCP = '/proc/net/tcp';
 const PROC_NET_TCP6 = '/proc/net/tcp6';
+const TIMEOUT_ENV_KEY = 'OPENAWORK_PORTS_ENUMERATION_TIMEOUT_MS';
+const OWNER_SCAN_CONCURRENCY = 16;
+const OWNER_SCAN_IO_TIMEOUT_MS = 1_000;
 
 /**
  * 归属回溯的深度上限（从监听进程起最多向上检查 8 层祖先）。
@@ -358,9 +361,38 @@ function parseSocketInode(linkTarget: string): number | null {
 }
 
 /**
+ * One `/proc` read with a wall-clock ceiling. A stalled readdir/readlink (a
+ * D-state peer, a hung mount) resolves to `ok: false` instead of holding the
+ * scan, and callers treat that exactly like a failed read (skip this pid/fd).
+ */
+async function readProcfsOrTimeout<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })),
+      new Promise<{ ok: false }>((resolve) => {
+        timer = setTimeout(() => resolve({ ok: false }), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Best-effort inode → pid reverse lookup by walking `/proc/<pid>/fd/*`. A pid
  * we cannot read (EACCES for other users, already exited) is skipped, so the
  * caller keeps `pid: null` instead of failing the whole enumeration.
+ *
+ * Pids are scanned by {@link OWNER_SCAN_CONCURRENCY} workers instead of one
+ * sequential await-chain: the walk is O(pids + fds) and a serial chain pays
+ * event-loop latency per entry, which is what pushed the whole enumeration past
+ * its deadline on a busy gateway. Workers stop scheduling once every wanted
+ * inode is found; when two pids hold the same inode the lowest pid wins, so the
+ * result never depends on completion order.
  */
 async function resolveSocketOwners(
   io: ProcfsIo,
@@ -368,34 +400,64 @@ async function resolveSocketOwners(
 ): Promise<Map<number, SocketOwner>> {
   const owners = new Map<number, SocketOwner>();
   if (wantedInodes.size === 0) return owners;
-  let pidNames: string[];
-  try {
-    pidNames = await io.readDirNames('/proc');
-  } catch {
-    return owners;
-  }
-  for (const pidName of pidNames) {
-    if (!/^\d+$/.test(pidName)) continue;
-    const pid = Number.parseInt(pidName, 10);
-    let fdNames: string[];
-    try {
-      fdNames = await io.readDirNames(`/proc/${pidName}/fd`);
-    } catch {
-      continue;
-    }
-    for (const fdName of fdNames) {
-      let target: string;
-      try {
-        target = await io.readLink(`/proc/${pidName}/fd/${fdName}`);
-      } catch {
-        continue;
+  const proc = await readProcfsOrTimeout(io.readDirNames('/proc'), OWNER_SCAN_IO_TIMEOUT_MS);
+  if (!proc.ok) return owners;
+
+  const pids = proc.value
+    .filter((name) => /^\d+$/.test(name))
+    .map((name) => Number.parseInt(name, 10))
+    .sort((a, b) => a - b);
+
+  const scanPid = async (pid: number): Promise<void> => {
+    const pidName = String(pid);
+    const fdNames = await readProcfsOrTimeout(
+      io.readDirNames(`/proc/${pidName}/fd`),
+      OWNER_SCAN_IO_TIMEOUT_MS,
+    );
+    if (!fdNames.ok) return;
+    let processName: string | null | undefined;
+    for (const fdName of fdNames.value) {
+      // 不能在此按 owners.size 提前 return：一个仍在飞的更小 pid 需要跑完自己的
+      // fd 列表，才能用「最小 pid 胜出」覆盖掉更大的 pid。停止调度新 pid 由 worker
+      // 循环负责。
+      const target = await readProcfsOrTimeout(
+        io.readLink(`/proc/${pidName}/fd/${fdName}`),
+        OWNER_SCAN_IO_TIMEOUT_MS,
+      );
+      if (!target.ok) continue;
+      const inode = parseSocketInode(target.value);
+      if (inode === null || !wantedInodes.has(inode)) continue;
+      const existing = owners.get(inode);
+      if (existing !== undefined && existing.pid <= pid) continue;
+      // 先同步占位再异步读进程名：读名是一个 await，若等读完才写，两个 pid 会同时
+      // 通过上面的判重、由后写者胜出，结果不确定。占位后按「最小 pid 胜出」复核定名。
+      owners.set(inode, { pid, processName: null });
+      if (processName === undefined) {
+        const name = await readProcfsOrTimeout(
+          readProcessName(io, pidName),
+          OWNER_SCAN_IO_TIMEOUT_MS,
+        );
+        processName = name.ok ? name.value : null;
       }
-      const inode = parseSocketInode(target);
-      if (inode === null || !wantedInodes.has(inode) || owners.has(inode)) continue;
-      owners.set(inode, { pid, processName: await readProcessName(io, pidName) });
+      const claimed = owners.get(inode);
+      if (claimed === undefined || claimed.pid >= pid) {
+        owners.set(inode, { pid, processName });
+      }
     }
-    if (owners.size >= wantedInodes.size) break;
-  }
+  };
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (owners.size < wantedInodes.size) {
+      const pid = pids[next];
+      next += 1;
+      if (pid === undefined) return;
+      await scanPid(pid);
+    }
+  };
+
+  const workerCount = Math.min(OWNER_SCAN_CONCURRENCY, pids.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return owners;
 }
 
@@ -930,6 +992,14 @@ function resolveCacheTtlMs(): number {
   return parsed;
 }
 
+function resolveEnumerationTimeoutMs(): number {
+  const raw = globalThis.process?.env[TIMEOUT_ENV_KEY];
+  if (raw === undefined || raw.trim().length === 0) return DEFAULT_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_TIMEOUT_MS;
+  return parsed;
+}
+
 interface ListeningPortsCacheEntry {
   atMs: number;
   /**
@@ -998,7 +1068,7 @@ export async function listListeningPorts(
   }
   const exec = options.exec ?? defaultPortEnumerationExec;
   const io = options.procfsIo ?? defaultProcfsIo;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? resolveEnumerationTimeoutMs();
   const promise = enumerateListeningPorts(strategy, exec, io, timeoutMs, now, attribution)
     .then((snapshot) => {
       cachedSnapshot = { atMs: now(), userId, snapshot };

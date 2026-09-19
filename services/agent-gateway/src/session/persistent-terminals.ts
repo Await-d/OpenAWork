@@ -28,7 +28,11 @@ import {
   appendTerminalOutputDelta,
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
-import { spawnTerminalProcess, type TerminalProcess } from './pty-backend.js';
+import {
+  spawnTerminalProcess,
+  type TerminalProcess,
+  type SpawnTerminalProcessInput,
+} from './pty-backend.js';
 import { resolveShellChoiceForPlatform } from '../tools/shell-choice.js';
 import { resolveShellForSpawn } from './shell-profiles.js';
 
@@ -143,6 +147,8 @@ function terminalSnapshotText(terminalId: string): string {
 }
 
 export interface SpawnPersistentTerminalInput {
+  /** 仅由服务端注入；SSH 通道复用持久终端的注册、限额与输入输出生命周期。 */
+  processFactory?: (input: SpawnTerminalProcessInput) => TerminalProcess;
   sessionId: string;
   userId: string;
   cwd: string;
@@ -175,7 +181,9 @@ export function spawnPersistentTerminal(
     throw new PersistentTerminalLimitError(input.sessionId, maxPerSession);
   }
 
-  const resolvedShell = resolveSpawnShell(input.shellProfileId);
+  const resolvedShell = input.processFactory
+    ? { shell: '(remote default)', args: [], shellProfileId: undefined }
+    : resolveSpawnShell(input.shellProfileId);
   const { shell, args } = resolvedShell;
   const abortController = new AbortController();
   const decoder = new StringDecoder('utf8');
@@ -217,7 +225,7 @@ export function spawnPersistentTerminal(
 
   let terminalProcess: TerminalProcess;
   try {
-    terminalProcess = spawnTerminalProcess({
+    terminalProcess = (input.processFactory ?? spawnTerminalProcess)({
       shell,
       args,
       cwd: input.cwd,
@@ -278,6 +286,13 @@ export function spawnPersistentTerminal(
   };
   persistentByTerminalId.set(record.terminalId, entry);
 
+  abortController.signal.addEventListener(
+    'abort',
+    () => {
+      terminalProcess.kill();
+    },
+    { once: true },
+  );
   setTerminalPid(record.terminalId, terminalProcess.pid);
 
   if (initialCommand.length > 0) {
