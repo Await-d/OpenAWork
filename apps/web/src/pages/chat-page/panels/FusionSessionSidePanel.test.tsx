@@ -121,6 +121,10 @@ function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
   };
 }
 
+function getListedFilePathElements(filePath: string): HTMLElement[] {
+  return screen.getAllByText((_, element) => element?.textContent === filePath);
+}
+
 function makeSubAgentItem(
   sessionId: string,
   title: string,
@@ -194,7 +198,7 @@ describe('FusionSessionSidePanel', () => {
     render(<FusionSessionSidePanel {...createBaseProps()} activeTab="review" />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('src/app.ts').length).toBeGreaterThan(0);
+      expect(getListedFilePathElements('src/app.ts').length).toBeGreaterThan(0);
     });
 
     expect(screen.getAllByRole('tab', { name: /审查/ })[0]?.textContent).toContain('2');
@@ -947,7 +951,7 @@ describe('FusionSessionSidePanel 审查操作', () => {
 
   async function waitForFileListed(filePath: string): Promise<void> {
     await waitFor(() => {
-      expect(screen.getAllByText(filePath).length).toBeGreaterThan(0);
+      expect(getListedFilePathElements(filePath).length).toBeGreaterThan(0);
     });
   }
 

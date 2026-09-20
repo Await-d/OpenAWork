@@ -1,7 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+const SESSION_WORKSPACE_ID = 'session-with-workspace';
+let sessionWorkspaceDir = '';
 
 // `bash-tools.ts` transitively pulls in `db.ts` for `WORKSPACE_ROOT`, and
 // `db.ts` imports `node:sqlite` at module load. Vite (vitest's bundler)
@@ -15,7 +18,15 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_BROWSER_ROOT: '/',
   sqliteAll: vi.fn(() => []),
-  sqliteGet: vi.fn((query: string) => {
+  sqliteGet: vi.fn((query: string, params?: unknown[]) => {
+    if (params?.[0] === SESSION_WORKSPACE_ID) {
+      return {
+        metadata_json: JSON.stringify({ workingDirectory: sessionWorkspaceDir }),
+        role_layer: null,
+        team_parent_session_id: null,
+        user_id: 'test-user',
+      };
+    }
     if (query.includes('role_layer') && query.includes('team_parent_session_id')) {
       return {
         metadata_json: '{}',
@@ -55,13 +66,18 @@ const { listTruncationDirCandidates } = await import('../../tools/bash-output-tr
  */
 describe('bash-tools', () => {
   let workdir: string;
+  let sessionSubdir: string;
 
   beforeAll(async () => {
     workdir = await mkdtemp(path.join(tmpdir(), 'openAwork-bash-test-'));
+    sessionWorkspaceDir = await mkdtemp(path.join(tmpdir(), 'openAwork-bash-session-'));
+    sessionSubdir = path.join(sessionWorkspaceDir, 'nested');
+    await mkdir(sessionSubdir, { recursive: true });
   });
 
   afterAll(async () => {
     await rm(workdir, { recursive: true, force: true });
+    await rm(sessionWorkspaceDir, { recursive: true, force: true });
   });
 
   describe('inputSchema', () => {
@@ -446,6 +462,72 @@ describe('bash-tools', () => {
           workdir: file,
         }),
       ).rejects.toThrow(/not a directory/);
+    });
+
+    it('resolves workdir "." against the session working directory', async () => {
+      const result = await runBashCommand(
+        {
+          command: 'echo dot-workdir-probe',
+          description: 'resolve dot workdir',
+          workdir: '.',
+        },
+        { sessionId: SESSION_WORKSPACE_ID },
+      );
+      expect(result.kind).toBe('exit');
+      expect(result.exitCode).toBe(0);
+      expect(result.cwd).toBe(sessionWorkspaceDir);
+    });
+
+    it('resolves a relative subdirectory inside the session workspace', async () => {
+      const result = await runBashCommand(
+        {
+          command: 'echo nested-workdir-probe',
+          description: 'resolve nested workdir',
+          workdir: 'nested',
+        },
+        { sessionId: SESSION_WORKSPACE_ID },
+      );
+      expect(result.kind).toBe('exit');
+      expect(result.exitCode).toBe(0);
+      expect(result.cwd).toBe(sessionSubdir);
+    });
+
+    it('still rejects a relative workdir escaping the session workspace', async () => {
+      await expect(
+        runBashCommand(
+          {
+            command: 'echo escape-probe',
+            description: 'escape attempt',
+            workdir: '../..',
+          },
+          { sessionId: SESSION_WORKSPACE_ID },
+        ),
+      ).rejects.toThrow(/outside current session workspace/);
+    });
+
+    it('still rejects foreign absolute paths with the host/flavor error', async () => {
+      const foreignWorkdir = process.platform === 'win32' ? '/posix/outside' : 'C:\\Windows';
+      await expect(
+        runBashCommand(
+          {
+            command: 'echo foreign-probe',
+            description: 'foreign absolute path',
+            workdir: foreignWorkdir,
+          },
+          { sessionId: SESSION_WORKSPACE_ID },
+        ),
+      ).rejects.toThrow(/无法访问|Forbidden workspace path/);
+    });
+
+    it('resolves a relative workdir against WORKSPACE_ROOT without a session', async () => {
+      const result = await runBashCommand({
+        command: 'echo root-relative-probe',
+        description: 'resolve relative workdir',
+        workdir: '.',
+      });
+      expect(result.kind).toBe('exit');
+      expect(result.exitCode).toBe(0);
+      expect(result.cwd).toBe(path.resolve(tmpdir()));
     });
   });
 

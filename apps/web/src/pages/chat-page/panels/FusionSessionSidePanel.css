@@ -461,8 +461,10 @@ button.fusion-side-panel__file-row:focus-visible {
 }
 
 .fusion-side-panel__review-split .review-panel-file-list {
-  flex: 0 0 min(220px, 42%);
-  min-width: 0;
+  flex: 0 1 42%;
+  max-width: 380px;
+  min-height: 0;
+  min-width: 220px;
 }
 
 .fusion-side-panel__review-split .review-panel-diff-preview {
@@ -485,7 +487,9 @@ button.fusion-side-panel__file-row:focus-visible {
   }
 
   .fusion-side-panel__review-split .review-panel-file-list {
-    flex: 0 0 auto;
+    flex: 1 1 40%;
+    max-height: 45%;
+    min-height: 160px;
   }
 }
 
@@ -537,7 +541,13 @@ button.fusion-side-panel__file-row:focus-visible {
     gap: var(--spacing-2);
   }
 
-  .fusion-side-panel__review-split .review-panel-file-list,
+  .fusion-side-panel__review-split .review-panel-file-list {
+    flex: 0 1 auto;
+    max-height: 45%;
+    min-width: 0;
+    width: 100%;
+  }
+
   .fusion-side-panel__review-split .review-panel-diff-preview {
     flex: 0 0 auto;
     width: 100%;

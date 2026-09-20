@@ -49,9 +49,82 @@ interface BrowserAutomationRuntime {
   waitForTimeout(ms: number): Promise<void>;
 }
 
+interface BrowserAutomationLaunchOptions {
+  executablePath?: string;
+}
+
+interface BrowserAutomationStartOptions {
+  launchOptions?: BrowserAutomationLaunchOptions;
+}
+
+type BrowserAutomationProbeSource =
+  | 'managed'
+  | 'override'
+  | 'system-chrome'
+  | 'system-chromium'
+  | 'system-edge'
+  | 'system-brave'
+  | 'system-vivaldi'
+  | 'system-opera';
+
+interface BrowserAutomationProbeResult {
+  available: boolean;
+  source: BrowserAutomationProbeSource | null;
+  executablePath: string | null;
+  reason: string;
+  installable: boolean;
+}
+
+type BrowserAutomationProbe = () => Promise<BrowserAutomationProbeResult>;
+
 type BrowserAutomationModule = {
-  DesktopBrowserAutomation: new () => BrowserAutomationRuntime;
+  DesktopBrowserAutomation: new (
+    options?: BrowserAutomationStartOptions,
+  ) => BrowserAutomationRuntime;
+  probeLiveBrowserAvailability: BrowserAutomationProbe;
 };
+
+/**
+ * 与 `browser-live/manager.ts` 的 `buildSessionOptions` 保持同一来源不对称策略：
+ * - `override` / `system-*`：显式传 `executablePath`，让 Playwright 直接启动该二进制；
+ * - `managed`：省略 `executablePath`，交给 Playwright 按自身修订号解析与校验。
+ */
+function buildBrowserLaunchOptions(
+  probe: BrowserAutomationProbeResult,
+): BrowserAutomationStartOptions {
+  if (probe.source !== null && probe.source !== 'managed' && probe.executablePath) {
+    return { launchOptions: { executablePath: probe.executablePath } };
+  }
+  return {};
+}
+
+function buildBrowserUnavailableError(probe: BrowserAutomationProbeResult): Error {
+  return new Error(
+    `desktop_automation 无法启动：未找到可用的 Chromium 系浏览器（原因：${probe.reason}）。` +
+      '请在应用内「设置 → 浏览器」中安装托管 Playwright 浏览器后重试，' +
+      '或改用已安装 Google Chrome / Microsoft Edge 的机器。',
+  );
+}
+
+/** Playwright 托管浏览器缺失/残缺时抛出的原始错误特征。 */
+const PLAYWRIGHT_MISSING_BROWSER_PATTERN = /Executable doesn't exist|playwright install/i;
+
+/**
+ * 收口 `browserType.launch()` 的残留失败：把 Playwright 原始的
+ * “run npx playwright install” 文案替换为可操作的引导；其他错误保持原样。
+ */
+function wrapBrowserLaunchError(error: unknown): Error {
+  const cause = error instanceof Error ? error : new Error(String(error));
+  if (!PLAYWRIGHT_MISSING_BROWSER_PATTERN.test(cause.message)) {
+    return cause;
+  }
+  return new Error(
+    'desktop_automation 启动浏览器失败：托管 Playwright 浏览器缺失或安装不完整。' +
+      '请在应用内「设置 → 浏览器」中安装后重试，' +
+      '或改用已安装 Google Chrome / Microsoft Edge 的机器。' +
+      `原始错误：${cause.message}`,
+  );
+}
 
 export interface DesktopAutomationManager {
   status(): Promise<DesktopAutomationStatus>;
@@ -192,7 +265,13 @@ class DesktopAutomationDriverImpl implements DesktopAutomationDriver {
     if (!this.desktop) {
       const browserAutomation =
         (await import('@openAwork/browser-automation')) as BrowserAutomationModule;
-      this.desktop = new browserAutomation.DesktopBrowserAutomation();
+      const probe = await browserAutomation.probeLiveBrowserAvailability();
+      if (!probe.available) {
+        throw buildBrowserUnavailableError(probe);
+      }
+      this.desktop = new browserAutomation.DesktopBrowserAutomation(
+        buildBrowserLaunchOptions(probe),
+      );
     }
 
     return this.desktop;
@@ -201,7 +280,11 @@ class DesktopAutomationDriverImpl implements DesktopAutomationDriver {
   async start(startUrl?: string): Promise<void> {
     const desktop = await this.getDesktop();
     if (!desktop.isStarted()) {
-      await desktop.start(startUrl);
+      try {
+        await desktop.start(startUrl);
+      } catch (error) {
+        throw wrapBrowserLaunchError(error);
+      }
       return;
     }
     if (startUrl) {

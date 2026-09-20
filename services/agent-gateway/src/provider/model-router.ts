@@ -10,6 +10,13 @@ const BUILTIN_PRESETS = getAllBuiltinPresets();
 const DEFAULT_MODEL_SENTINEL = 'default';
 const DEFAULT_FALLBACK_MODEL = 'gpt-4o';
 
+/**
+ * Must stay large enough for server-assembled delegated prompts, which flow
+ * through `streamRequestSchema` too (see `buildDelegatedChildRequestData`).
+ * Aligned with the `message` / `displayMessage` limit in `streamRequestSchema`.
+ */
+export const MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS = 32768;
+
 export const SUPPORTED_MODELS = Object.freeze(
   BUILTIN_PRESETS.flatMap((provider) =>
     provider.defaultModels.filter((model) => model.enabled !== false).map((model) => model.id),
@@ -21,7 +28,7 @@ export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
 export const modelRequestSchema = z.object({
   model: z.string().min(1).max(200).optional().default(DEFAULT_MODEL_SENTINEL),
   variant: z.string().min(1).max(80).optional(),
-  systemPrompt: z.string().max(4000).optional(),
+  systemPrompt: z.string().max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).optional(),
   maxTokens: z.number().int().min(1).max(16384).optional().default(2048),
   temperature: z.number().min(0).max(2).optional().default(1),
 });

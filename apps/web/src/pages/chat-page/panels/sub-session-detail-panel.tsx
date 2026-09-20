@@ -824,16 +824,27 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           ) : (
             <div
               style={{
-                border: '1px dashed var(--border-subtle)',
-                borderRadius: 12,
-                background: 'var(--bg-overlay)',
-                padding: '14px 12px',
-                fontSize: 11,
-                color: 'var(--fg-muted)',
-                lineHeight: 1.7,
+                alignItems: 'center',
+                display: 'flex',
+                justifyContent: 'center',
+                minHeight: '100%',
               }}
             >
-              这个子代理还没有生成对话内容。你可以在下方直接发送一条消息进行干预。
+              <div
+                style={{
+                  border: '1px dashed var(--border-subtle)',
+                  borderRadius: 12,
+                  background: 'var(--bg-overlay)',
+                  padding: '14px 12px',
+                  fontSize: 11,
+                  color: 'var(--fg-muted)',
+                  lineHeight: 1.7,
+                  maxWidth: 400,
+                  width: '100%',
+                }}
+              >
+                这个子代理还没有生成对话内容。你可以在下方直接发送一条消息进行干预。
+              </div>
             </div>
           )}
         </div>
@@ -903,7 +914,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
       <div
         className="composer-shell"
         style={{
-          flexShrink: 0,
+          flex: '0 0 auto',
           padding: 6,
           display: 'flex',
           flexDirection: 'column',

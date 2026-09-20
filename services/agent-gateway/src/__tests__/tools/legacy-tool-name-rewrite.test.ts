@@ -96,6 +96,65 @@ describe('rewriteLegacyToolRequest', () => {
     expect(out.toolName).toBe('read');
     expect(out.rawInput).toBeNull();
   });
+
+  describe('functions. namespace prefix', () => {
+    it('rewrites functions.execute_shell to the canonical bash tool', () => {
+      const out = rewriteLegacyToolRequest('functions.execute_shell', {
+        command: 'node --version',
+        workdir: '/abs',
+        timeout: 120000,
+      });
+      expect(out.rewritten).toBe(true);
+      expect(out.toolName).toBe('bash');
+      expect(out.rawInput).toEqual({
+        command: 'node --version',
+        workdir: '/abs',
+        timeout: 120000,
+      });
+    });
+
+    it('rewrites other prefixed legacy names to their canonical forms', () => {
+      const out = rewriteLegacyToolRequest('functions.workspace_read_file', {
+        path: '/abs/file.txt',
+      });
+      expect(out.rewritten).toBe(true);
+      expect(out.toolName).toBe('read');
+      expect(out.rawInput).toEqual({ path: '/abs/file.txt' });
+    });
+
+    it('strips the prefix from non-legacy names so downstream dispatch sees the bare name', () => {
+      const out = rewriteLegacyToolRequest('functions.Agent', { description: 'subtask' });
+      expect(out.rewritten).toBe(true);
+      expect(out.toolName).toBe('Agent');
+      expect(out.rawInput).toEqual({ description: 'subtask' });
+    });
+
+    it('applies the workspace_search query → pattern remap to prefixed names', () => {
+      const out = rewriteLegacyToolRequest('functions.workspace_search', {
+        path: '/abs',
+        query: 'todo',
+      });
+      expect(out.rewritten).toBe(true);
+      expect(out.toolName).toBe('grep');
+      expect(out.rawInput).toEqual({ path: '/abs', pattern: 'todo', output_mode: 'content' });
+    });
+
+    it('leaves bare names untouched (rewritten false)', () => {
+      for (const name of ['read', 'bash', 'Agent', 'unknown_tool']) {
+        const out = rewriteLegacyToolRequest(name, { path: '/abs' });
+        expect(out.rewritten).toBe(false);
+        expect(out.toolName).toBe(name);
+        expect(out.rawInput).toEqual({ path: '/abs' });
+      }
+    });
+
+    it('strips only a single prefix (functions.functions.x → functions.x)', () => {
+      const out = rewriteLegacyToolRequest('functions.functions.execute_shell', {});
+      expect(out.rewritten).toBe(true);
+      expect(out.toolName).toBe('functions.execute_shell');
+      expect(out.rawInput).toEqual({});
+    });
+  });
 });
 
 describe('isLegacyToolName', () => {

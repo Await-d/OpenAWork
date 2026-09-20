@@ -13,11 +13,20 @@
  * are accepted by `read` / `write`), so the input object can be passed
  * through unchanged.
  *
+ * Legacy OpenAI function-calling payloads additionally namespace every tool
+ * name as `functions.<name>` (e.g. `functions.execute_shell`,
+ * `functions.Agent`). A single leading `functions.` prefix is stripped before
+ * the legacy lookup so those requests resolve to the same canonical names as
+ * their bare counterparts; the stripped name is returned even when it is not
+ * a legacy alias, letting downstream dispatch handle the rest.
+ *
  * NOTE: The mirror map `LEGACY_TOOL_NAME_TO_CANONICAL` deliberately repeats
  * the entries used by `routes/tool-name-compat.ts`. Centralising it here
  * keeps the sandbox import graph from reaching into `routes/`, which would
  * invert the layering.
  */
+
+const OPENAI_FUNCTIONS_PREFIX = 'functions.';
 
 const LEGACY_TOOL_NAME_TO_CANONICAL: Readonly<Record<string, string>> = {
   execute_shell: 'bash',
@@ -40,17 +49,36 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Remove a single leading `functions.` namespace prefix (legacy OpenAI
+ * function-calling payloads). Only the very first occurrence is stripped:
+ * `functions.functions.x` becomes `functions.x`, and names without the
+ * prefix pass through untouched.
+ */
+function stripFunctionsNamespacePrefix(toolName: string): string {
+  if (!toolName.startsWith(OPENAI_FUNCTIONS_PREFIX)) {
+    return toolName;
+  }
+  return toolName.slice(OPENAI_FUNCTIONS_PREFIX.length);
+}
+
+/**
  * Rewrite a legacy tool request (name + raw input) to its canonical form.
- * Returns the original request untouched when `toolName` is not a legacy
- * alias.
+ * A single leading `functions.` prefix is stripped first; when the stripped
+ * name is not a legacy alias it is still returned so downstream dispatch can
+ * resolve it (e.g. `functions.Agent` → `Agent`). Returns the original request
+ * untouched when no rewriting applies.
  */
 export function rewriteLegacyToolRequest(toolName: string, rawInput: unknown): LegacyRewriteResult {
-  const canonical = LEGACY_TOOL_NAME_TO_CANONICAL[toolName];
+  const unprefixedName = stripFunctionsNamespacePrefix(toolName);
+  const canonical = LEGACY_TOOL_NAME_TO_CANONICAL[unprefixedName];
   if (!canonical) {
-    return { toolName, rawInput, rewritten: false };
+    if (unprefixedName === toolName) {
+      return { toolName, rawInput, rewritten: false };
+    }
+    return { toolName: unprefixedName, rawInput, rewritten: true };
   }
 
-  if (toolName === 'workspace_search' && isPlainObject(rawInput)) {
+  if (unprefixedName === 'workspace_search' && isPlainObject(rawInput)) {
     // Old shape: { path, query, maxResults? }
     // grep shape: { pattern, path?, include?, output_mode?, head_limit? }
     const { path, query, maxResults, ...rest } = rawInput;

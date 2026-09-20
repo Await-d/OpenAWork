@@ -66,6 +66,8 @@ import {
 } from '../session/session-terminal-registry.js';
 import {
   assertWorkspacePathSupportedByCurrentHost,
+  isWorkspaceAbsolutePath,
+  resolveWorkspaceEntryPath,
   validateWorkspacePath,
 } from '../workspace/workspace-paths.js';
 import {
@@ -354,10 +356,29 @@ async function resolveBashWorkdir(
   if (sessionId) {
     const sessionWorkingDirectory = assertSessionWorkingDirectory(sessionId);
     // 未绑定 + 显式盘符根/占位路径：改写到桌面默认目录；已绑定绝不改写。
-    candidate = rewriteUnboundPlaceholderPath(sessionId, workdir ?? sessionWorkingDirectory);
+    const requested = rewriteUnboundPlaceholderPath(sessionId, workdir ?? sessionWorkingDirectory);
+    // 相对 workdir（"." / "sub/dir"）以会话工作目录为基准解析为绝对路径；
+    // 越界解析失败仍按既有的 outside-session-workspace 语义拒绝，绝不静默接受。
+    if (isWorkspaceAbsolutePath(requested)) {
+      candidate = requested;
+    } else {
+      const resolvedRelative = resolveWorkspaceEntryPath(requested, sessionWorkingDirectory);
+      if (!resolvedRelative) {
+        throw new Error(
+          `Workdir is outside current session workspace: ${requested} (session workspace: ${sessionWorkingDirectory})`,
+        );
+      }
+      candidate = resolvedRelative;
+    }
     validation = validateSessionWorkspacePath({ path: candidate, sessionId });
   } else {
-    candidate = workdir ?? WORKSPACE_ROOT;
+    // 无会话上下文时相对 workdir 以全局 WORKSPACE_ROOT 为基准解析，与
+    // `resolveUnscopedWorkspacePath` 保持一致；越界仍由下方 forbidden 分支拒绝。
+    candidate = workdir
+      ? isWorkspaceAbsolutePath(workdir)
+        ? workdir
+        : (resolveWorkspaceEntryPath(workdir, WORKSPACE_ROOT) ?? workdir)
+      : WORKSPACE_ROOT;
     validation = null;
   }
 
