@@ -61,6 +61,10 @@ export default defineConfig({
     // 遗留的跨文件污染会让并行运行偶发 401。关闭文件级并行让 DB 写入串行化，
     // 消除竞态（单文件内仍按原顺序执行）。
     fileParallelism: false,
+    // 实测：同一用例空闲 <1s、负载 20+ 时需 11s（冷 transform 约 8s）。默认 5s/10s 会产生
+    // 与代码无关的假红，故统一放宽；收紧前请先确认 CI 的并发负载水平。
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     server: {
       deps: {
         // `node:sqlite` is a Node 22+ built-in but vite tries to bundle the

@@ -240,6 +240,8 @@ export type {
   SessionTurnDiffReadModel,
   SessionsClient,
   SessionsListOptions,
+  StopChildrenResult,
+  StopChildrenSkipReason,
 } from './session/sessions.js';
 export { acquireRefresh, withTokenRefresh } from './gateway/token-refresh.js';
 export type { TokenStore } from './gateway/token-refresh.js';

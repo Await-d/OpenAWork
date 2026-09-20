@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
 import { readFile, stat } from 'node:fs/promises';
-import { isIP } from 'node:net';
 import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { Effect } from 'effect';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { readPublicUrlError } from '../security/public-url-guard.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
@@ -56,6 +55,7 @@ const DEFAULT_LOOK_AT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 const LOOK_AT_SVG_MIME = 'image/svg+xml';
 const LOOK_AT_SVG_UNSUPPORTED_MESSAGE =
   'look_at 不支持 SVG（image/svg+xml）：上游多模态模型无法解析该格式，请先将 SVG 转换为 PNG/JPEG/WebP 后再分析。';
+const LOOK_AT_REMOTE_IMAGE_MESSAGE = 'look_at remote image only supports public http(s) URLs';
 
 function resolveLookAtMaxFileBytes(): number {
   const raw = globalThis.process?.env['OPENAWORK_LOOK_AT_MAX_FILE_BYTES'];
@@ -187,80 +187,15 @@ function tryParseHttpUrl(value: string): URL | null {
   }
 }
 
-function normalizeHostname(hostname: string): string {
-  return hostname
-    .replace(/^\[|\]$/g, '')
-    .replace(/\.+$/u, '')
-    .toLowerCase();
-}
-
-function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map((segment) => Number(segment));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
-  const [first, second] = parts;
-  if (first === undefined || second === undefined) return false;
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function isPrivateIpv6(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return (
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
-  );
-}
-
-function isLocalOrPrivateHost(hostname: string): boolean {
-  const normalizedHostname = normalizeHostname(hostname);
-  if (
-    normalizedHostname === 'localhost' ||
-    normalizedHostname.endsWith('.localhost') ||
-    normalizedHostname === '0.0.0.0' ||
-    normalizedHostname === '::' ||
-    normalizedHostname === '::1'
-  ) {
-    return true;
-  }
-
-  const ipVersion = isIP(normalizedHostname);
-  if (ipVersion === 4) return isPrivateIpv4(normalizedHostname);
-  if (ipVersion === 6) return isPrivateIpv6(normalizedHostname);
-  return false;
-}
-
 async function assertPublicRemoteImageUrl(imageUrl: string): Promise<URL> {
   const url = tryParseHttpUrl(imageUrl);
   if (!url) {
-    throw new Error('look_at remote image only supports public http(s) URLs');
+    throw new Error(LOOK_AT_REMOTE_IMAGE_MESSAGE);
   }
 
-  const hostname = normalizeHostname(url.hostname);
-  if (!hostname || isLocalOrPrivateHost(hostname)) {
-    throw new Error('look_at remote image only supports public http(s) URLs');
-  }
-
-  if (isIP(hostname) !== 0) {
-    return url;
-  }
-
-  try {
-    const addresses = await lookup(hostname, { all: true, verbatim: true });
-    if (addresses.length === 0 || addresses.some((entry) => isLocalOrPrivateHost(entry.address))) {
-      throw new Error('look_at remote image only supports public http(s) URLs');
-    }
-  } catch {
-    throw new Error('look_at remote image only supports public http(s) URLs');
+  const urlError = await readPublicUrlError(imageUrl, LOOK_AT_REMOTE_IMAGE_MESSAGE);
+  if (urlError) {
+    throw new Error(urlError);
   }
 
   return url;
@@ -354,7 +289,9 @@ async function readResponseBufferWithLimit(response: Response, maxBytes: number)
   );
 }
 
-async function fetchLookAtRemoteImage(url: string): Promise<Response> {
+const LOOK_AT_MAX_REDIRECTS = 5;
+
+async function fetchLookAtRemoteImage(initialUrl: string): Promise<Response> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -364,7 +301,26 @@ async function fetchLookAtRemoteImage(url: string): Promise<Response> {
   timer.unref?.();
 
   try {
-    return await fetch(url, { signal: controller.signal });
+    let currentUrl = initialUrl;
+    for (let hop = 0; hop <= LOOK_AT_MAX_REDIRECTS; hop += 1) {
+      // 安全：逐跳校验重定向目标，防止 fetch 默认跟随重定向绕过 SSRF 预检。
+      const response = await fetch(currentUrl, {
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      const location = readRedirectLocation(response);
+      if (location === null) {
+        return response;
+      }
+      await response.body?.cancel().catch(() => undefined);
+      const nextUrl = new URL(location, currentUrl).toString();
+      const hopError = await readPublicUrlError(nextUrl, LOOK_AT_REMOTE_IMAGE_MESSAGE);
+      if (hopError) {
+        throw new Error(hopError);
+      }
+      currentUrl = nextUrl;
+    }
+    throw new Error(`look_at remote image exceeded ${LOOK_AT_MAX_REDIRECTS} redirects`);
   } catch (err) {
     if (timedOut) {
       throw new Error(`look_at remote image timeout (${LOOK_AT_REMOTE_FETCH_TIMEOUT_MS}ms)`);
@@ -373,6 +329,14 @@ async function fetchLookAtRemoteImage(url: string): Promise<Response> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function readRedirectLocation(response: Response): string | null {
+  if (response.status < 300 || response.status >= 400) {
+    return null;
+  }
+  const location = response.headers.get('location');
+  return location !== null && location.length > 0 ? location : null;
 }
 
 async function fetchRemoteImageAsDataUrl(imageUrl: string): Promise<ResolvedLookAtImageSource> {

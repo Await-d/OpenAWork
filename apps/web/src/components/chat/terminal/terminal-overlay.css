@@ -193,22 +193,6 @@
   background: var(--warning);
 }
 
-/* ── 非交互后端横幅（未启用 PTY，输入已禁用）──
-   排版 / 配色沿用 .terminal-notice，这里只补浮层定位与边框：横幅不能进
-   文档流（`.terminal-surface` 是 FitAddon 的测量父元素，占位会改变 fit 口径），
-   因此绝对定位覆盖在终端顶部；pointer-events 关闭，滚动 / 选择保持可用。 */
-.terminal-input-disabled-banner {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  z-index: 3;
-  border: 1px solid var(--warning-border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
-  pointer-events: none;
-}
-
 /* ── 右键菜单 ── */
 .terminal-context-menu {
   position: fixed;

@@ -9,6 +9,7 @@ import {
   ChatOverviewTabContent,
   type UpstreamSummaryItem,
 } from './right-panel-sections.js';
+import type { ChatOverviewTabContentProps } from './chat-overview-tab-content.js';
 
 const copyTextToClipboardMock = vi.hoisted(() =>
   vi.fn<(text: string) => Promise<void>>(async () => undefined),
@@ -67,6 +68,43 @@ const upstreamSummaries: UpstreamSummaryItem[] = [
   },
 ];
 
+function createOverviewProps(
+  overrides: Partial<ChatOverviewTabContentProps> = {},
+): ChatOverviewTabContentProps {
+  return {
+    attachmentItems: [],
+    artifactsWorkspaceHref: null,
+    childSessions: [],
+    compactions: [],
+    contextUsageSnapshot: null,
+    contentArtifactCount: 0,
+    contentArtifactCountStatus: 'ready',
+    currentSessionId: 'session-1',
+    dialogueMode: 'coding',
+    effectiveWorkingDirectory: '/workspace/demo',
+    messages: [],
+    onCompactSession: () => {},
+    onOpenRecoveryStrategy: () => {},
+    pendingPermissions: [],
+    pendingQuestionsCount: 0,
+    sessionStateStatus: 'running',
+    sessionTasks: [],
+    sessionTodos: [],
+    upstreamSummaries: [],
+    workspaceFileItems: [],
+    yoloMode: false,
+    ...overrides,
+  };
+}
+
+function renderOverview(overrides: Partial<ChatOverviewTabContentProps> = {}) {
+  return render(
+    <MemoryRouter>
+      <ChatOverviewTabContent {...createOverviewProps(overrides)} />
+    </MemoryRouter>,
+  );
+}
+
 describe('right-panel-sections UI', () => {
   it('history 分组头支持复制 request 级诊断上下文', async () => {
     render(
@@ -119,34 +157,13 @@ describe('right-panel-sections UI', () => {
   });
 
   it('overview 显式显示当前聚焦请求并支持复制上下文', async () => {
-    render(
-      <MemoryRouter>
-        <ChatOverviewTabContent
-          attachmentItems={[]}
-          artifactsWorkspaceHref={null}
-          childSessions={[]}
-          compactions={[]}
-          upstreamSummaries={upstreamSummaries}
-          focusedUpstreamGroupKey="request:req-ui-1"
-          contextUsageSnapshot={null}
-          contentArtifactCount={0}
-          contentArtifactCountStatus="ready"
-          currentSessionId="session-1"
-          dialogueMode="coding"
-          effectiveWorkingDirectory="/workspace/demo"
-          messages={[]}
-          pendingPermissions={[]}
-          pendingQuestionsCount={0}
-          sessionStateStatus="running"
-          sessionTodos={[]}
-          sessionTasks={[]}
-          workspaceFileItems={[]}
-          yoloMode={false}
-          onCompactSession={() => {}}
-          onOpenRecoveryStrategy={() => {}}
-        />
-      </MemoryRouter>,
-    );
+    renderOverview({
+      focusedUpstreamGroupKey: 'request:req-ui-1',
+      upstreamSummaries,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '诊断' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话元信息' }));
 
     expect(screen.getAllByText('当前聚焦请求').length).toBeGreaterThan(0);
     expect(screen.getAllByText('请求 req-ui-1').length).toBeGreaterThan(0);
@@ -162,46 +179,96 @@ describe('right-panel-sections UI', () => {
   });
 
   it('overview 按档位展示审批方式文案（每次询问 / 编辑自动 / 免审批）', () => {
-    const renderOverview = (permissionMode: 'ask' | 'auto-edit' | 'yolo', yoloMode: boolean) =>
-      render(
-        <MemoryRouter>
-          <ChatOverviewTabContent
-            attachmentItems={[]}
-            artifactsWorkspaceHref={null}
-            childSessions={[]}
-            compactions={[]}
-            contextUsageSnapshot={null}
-            contentArtifactCount={0}
-            contentArtifactCountStatus="ready"
-            currentSessionId="session-1"
-            dialogueMode="coding"
-            effectiveWorkingDirectory="/workspace/demo"
-            messages={[]}
-            pendingPermissions={[]}
-            pendingQuestionsCount={0}
-            permissionMode={permissionMode}
-            sessionStateStatus="running"
-            sessionTodos={[]}
-            sessionTasks={[]}
-            upstreamSummaries={[]}
-            workspaceFileItems={[]}
-            yoloMode={yoloMode}
-            onCompactSession={() => {}}
-            onOpenRecoveryStrategy={() => {}}
-          />
-        </MemoryRouter>,
-      );
+    const renderWithMode = (permissionMode: 'ask' | 'auto-edit' | 'yolo', yoloMode: boolean) => {
+      renderOverview({ permissionMode, yoloMode });
+      fireEvent.click(screen.getByRole('button', { name: '会话元信息' }));
+    };
 
-    renderOverview('ask', false);
+    renderWithMode('ask', false);
     expect(screen.getByText('审批方式')).toBeTruthy();
     expect(screen.getByText('每次询问')).toBeTruthy();
     cleanup();
 
-    renderOverview('auto-edit', false);
+    renderWithMode('auto-edit', false);
     expect(screen.getByText('编辑自动')).toBeTruthy();
     cleanup();
 
-    renderOverview('yolo', true);
+    renderWithMode('yolo', true);
     expect(screen.getByText('免审批（YOLO）')).toBeTruthy();
+  });
+
+  it('overview 合并 runtimeSummary 后每个 datum 只渲染一次（子会话 / 待处理审批以会话数据为准）', () => {
+    renderOverview({
+      childSessions: [{ id: 'child-session-1', title: '子代理会话' }],
+      pendingPermissions: [
+        {
+          createdAt: '2026-06-14T10:20:30.000Z',
+          reason: '需要写入工作区',
+          requestId: 'perm-1',
+          riskLevel: 'medium',
+          scope: 'write',
+          sessionId: 'session-1',
+          status: 'pending',
+          toolName: 'write_file',
+        },
+      ],
+      sessionTasks: [
+        {
+          blockedBy: [],
+          completedSubtaskCount: 0,
+          createdAt: 1,
+          depth: 0,
+          id: 'task-1',
+          priority: 'medium',
+          readySubtaskCount: 0,
+          status: 'running',
+          subtaskCount: 0,
+          tags: [],
+          title: '运行中的任务',
+          unmetDependencyCount: 0,
+          updatedAt: 1,
+        },
+      ],
+      runtimeSummary: {
+        activePlanTaskCount: 2,
+        childSessionCount: 9,
+        dagEdgeCount: 2,
+        dagNodeCount: 3,
+        failedToolCallCount: 1,
+        mcpServerCount: 4,
+        pendingPermissionCount: 7,
+        toolCallCount: 5,
+        totalPlanTaskCount: 6,
+      },
+    });
+
+    const metricTiles = screen.getAllByRole('listitem').map((tile) => tile.textContent);
+    expect(metricTiles.filter((tile) => tile?.startsWith('子会话'))).toEqual(['子会话1 个']);
+    expect(metricTiles.filter((tile) => tile?.startsWith('待处理审批'))).toEqual([
+      '待处理审批1 项',
+    ]);
+    expect(metricTiles.filter((tile) => tile?.startsWith('计划任务'))).toEqual([]);
+    expect(screen.queryByText('9 个')).toBeNull();
+    expect(screen.queryByText('待审批')).toBeNull();
+    expect(screen.getAllByText('计划任务')).toHaveLength(1);
+    expect(screen.getByText('2/6 项')).toBeTruthy();
+    expect(screen.getByText('任务状态')).toBeTruthy();
+    expect(screen.getByText('进行中 1')).toBeTruthy();
+  });
+
+  it('overview 折叠区块翻转 aria-expanded 并同步显隐 aria-controls 指向的正文', () => {
+    renderOverview();
+
+    const toggle = screen.getByRole('button', { name: '诊断' });
+    const contentId = toggle.getAttribute('aria-controls');
+    expect(contentId).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById(contentId ?? '')?.hasAttribute('hidden')).toBe(true);
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(contentId ?? '')?.hasAttribute('hidden')).toBe(false);
+    expect(screen.getByText('检查点与恢复')).toBeTruthy();
   });
 });

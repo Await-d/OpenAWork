@@ -20,21 +20,6 @@
   overflow: auto;
 }
 
-/* 顶部摘要行：原 section-head 的用量摘要 + 右侧操作按钮收成一行 */
-.fusion-side-panel__head-actions {
-  align-items: center;
-  display: flex;
-  gap: var(--spacing-2);
-  justify-content: space-between;
-}
-
-.fusion-side-panel__head-meta {
-  color: var(--fg-subtle);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-}
-
 .fusion-side-panel__action-row {
   display: flex;
   flex-wrap: wrap;
@@ -97,8 +82,6 @@
 }
 
 .fusion-side-panel__meta-card,
-.fusion-side-panel__usage-card,
-.fusion-side-panel__stat-grid > div,
 .fusion-side-panel__empty,
 .fusion-side-panel__file-row {
   background: var(--bg-overlay);
@@ -114,15 +97,13 @@
   padding: var(--spacing-3);
 }
 
-.fusion-side-panel__meta-card span,
-.fusion-side-panel__stat-grid span {
+.fusion-side-panel__meta-card span {
   color: var(--fg-subtle);
   font-size: 10px;
   font-weight: 650;
 }
 
-.fusion-side-panel__meta-card strong,
-.fusion-side-panel__stat-grid strong {
+.fusion-side-panel__meta-card strong {
   color: var(--fg-strong);
   font-size: 12px;
   font-weight: 700;
@@ -306,143 +287,6 @@ button.fusion-side-panel__file-row:focus-visible {
   font-size: 11px;
 }
 
-.fusion-side-panel__usage-card {
-  display: grid;
-  gap: var(--spacing-3);
-  padding: var(--spacing-3);
-}
-
-.fusion-side-panel__usage-head {
-  align-items: baseline;
-  display: flex;
-  gap: var(--spacing-3);
-  justify-content: space-between;
-}
-
-.fusion-side-panel__usage-head span {
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.fusion-side-panel__usage-head strong {
-  color: var(--fg-strong);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.fusion-side-panel__usage-meter {
-  background: var(--bg-base);
-  border-radius: var(--radius-pill);
-  height: 6px;
-  overflow: hidden;
-}
-
-.fusion-side-panel__usage-meter span {
-  background: var(--success);
-  border-radius: inherit;
-  display: block;
-  height: 100%;
-  transition:
-    background var(--dur-normal) var(--ease-normal),
-    width var(--dur-normal) var(--ease-normal);
-}
-
-.fusion-side-panel__usage-card[data-tone='warning'] .fusion-side-panel__usage-meter span {
-  background: var(--warning);
-}
-
-.fusion-side-panel__usage-card[data-tone='danger'] .fusion-side-panel__usage-meter span {
-  background: var(--danger);
-}
-
-.fusion-side-panel__usage-card[data-tone='muted'] .fusion-side-panel__usage-meter span {
-  background: var(--fg-subtle);
-}
-
-.fusion-side-panel__stat-grid {
-  display: grid;
-  gap: var(--spacing-2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.fusion-side-panel__runtime-summary {
-  display: grid;
-  gap: var(--spacing-2);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.fusion-side-panel__runtime-summary > div {
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  display: grid;
-  gap: var(--spacing-1);
-  min-width: 0;
-  padding: var(--spacing-2);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='accent'] {
-  border-color: var(--accent-border);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='aux'] {
-  border-color: var(--aux-border);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='warning'] {
-  border-color: var(--warning-border);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='danger'] {
-  border-color: var(--danger-border);
-}
-
-.fusion-side-panel__runtime-summary span {
-  color: var(--fg-subtle);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.fusion-side-panel__runtime-summary strong {
-  color: var(--fg-strong);
-  font-size: 13px;
-  font-weight: 760;
-  line-height: 1.1;
-}
-
-.fusion-side-panel__runtime-summary small {
-  color: var(--fg-muted);
-  font-size: 10px;
-  font-weight: 560;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='accent'] strong {
-  color: var(--accent);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='aux'] strong {
-  color: var(--aux);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='warning'] strong {
-  color: var(--warning);
-}
-
-.fusion-side-panel__runtime-summary > div[data-tone='danger'] strong {
-  color: var(--danger);
-}
-
-.fusion-side-panel__stat-grid > div {
-  display: grid;
-  gap: var(--spacing-1);
-  min-width: 0;
-  padding: var(--spacing-3);
-}
-
 .fusion-side-panel__review-body {
   display: flex;
   flex: 1;
@@ -478,10 +322,6 @@ button.fusion-side-panel__file-row:focus-visible {
     min-width: min(240px, 100%);
   }
 
-  .fusion-side-panel__runtime-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .fusion-side-panel__review-split {
     flex-direction: column;
   }
@@ -509,34 +349,12 @@ button.fusion-side-panel__file-row:focus-visible {
     padding: var(--spacing-2);
   }
 
-  .fusion-side-panel__head-actions {
-    align-items: stretch;
-    flex-direction: column;
-    gap: var(--spacing-2);
-  }
-
   .fusion-side-panel__ghost-button {
     width: 100%;
-  }
-
-  .fusion-side-panel__runtime-summary,
-  .fusion-side-panel__stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .fusion-side-panel__usage-head {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--spacing-1);
   }
 }
 
 @media (max-width: 520px) {
-  .fusion-side-panel__runtime-summary,
-  .fusion-side-panel__stat-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .fusion-side-panel__review-split {
     gap: var(--spacing-2);
   }

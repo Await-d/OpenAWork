@@ -624,6 +624,21 @@ function AssistantPartsContent({
   // 将 parts 转换为支持分组的渲染序列，连续的 tool parts 会被合并
   const groupedParts = React.useMemo(() => groupMessageParts(parts), [parts]);
 
+  // 一条消息可能被拆成多个文本段（text → tool → text）。光标只交给**最后一个
+  // 非空文本段**：工具卡不绘制光标，而推理块仅在没有正文时才绘制（见
+  // `shouldStreamLocalReasoningBlock` 的 `hasAssistantText` 分支），因此这样
+  // 恰好只有一个光标，且存在正文时不会退化为零。若给每个文本段都画，就会同时
+  // 出现多个闪烁光标。
+  const activeTextPartIndex = React.useMemo(() => {
+    for (let index = groupedParts.length - 1; index >= 0; index -= 1) {
+      const item = groupedParts[index];
+      if (item?.type === 'text' && item.part.text.trim().length > 0) {
+        return index;
+      }
+    }
+    return -1;
+  }, [groupedParts]);
+
   // 管理简化思考过程的展开/收起状态
   const [expandedReasoningIds, setExpandedReasoningIds] = useState<Set<string>>(new Set());
 
@@ -694,6 +709,7 @@ function AssistantPartsContent({
               key={part.id}
               content={part.text}
               streaming={streaming}
+              streamingCaret={streaming && idx === activeTextPartIndex}
               messageId={message.id}
             />
           );
@@ -1041,10 +1057,17 @@ const renderReasoningRichBody = (reasoningContent: string, isStreaming: boolean)
 function AssistantRichContentBody({
   content,
   streaming = false,
+  streamingCaret = streaming,
   messageId,
 }: {
   content: string;
   streaming?: boolean;
+  /**
+   * 是否在该 body 上绘制流式光标（`data-streaming`），默认为 `streaming`。
+   * 一条消息可能拆成多个文本段（如 text → tool → text），调用方应只把最后一个
+   * 非空文本段置为 true；若每个文本段都置 true，会同时出现多个闪烁光标。
+   */
+  streamingCaret?: boolean;
   messageId?: string;
 }) {
   if (streaming && content.trim().length === 0) {
@@ -1116,7 +1139,10 @@ function AssistantRichContentBody({
 
   if (streaming) {
     return (
-      <div className="assistant-rich-content-body" data-streaming="true">
+      <div
+        className="assistant-rich-content-body"
+        data-streaming={streamingCaret ? 'true' : undefined}
+      >
         <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
           <StreamingMarkdownContent content={content} />
         </React.Suspense>

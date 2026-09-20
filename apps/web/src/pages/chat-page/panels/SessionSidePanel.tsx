@@ -2,7 +2,7 @@
  * SessionSidePanel — 会话侧面板的 Tab 条（桌面停靠面板 + 键盘导航的唯一事实来源）。
  *
  * 信息架构（一级扁平化）：
- *   [审查 N] [子代理 N] [代码] [预览] [Context]
+ *   [代码] [预览] [审查 N] [子代理 N] [会话概览]
  *
  * 桌面端不再有第二层「工作区」tab：代码编辑器与浏览器预览是一级 tab，共享同一个
  * 常驻工作区 pane（见 `FusionSessionSidePanel`）。
@@ -48,10 +48,10 @@ type TabDirection = 'next' | 'previous';
 
 /** tab 顺序的唯一事实来源——键盘左右循环与 Home/End 都从它推导。 */
 const PANEL_TAB_ORDER: readonly SidePanelTabId[] = [
-  'review',
-  'agent',
   'code',
   'preview',
+  'review',
+  'agent',
   'context',
 ];
 
@@ -87,11 +87,11 @@ export function SessionSidePanel({
     review: null,
   });
   const tabs: TabDef[] = [
-    { id: 'review', label: '审查', badge: reviewCount || undefined },
-    { id: 'agent', label: '子代理', badge: subAgentCount || undefined },
     { id: 'code', label: '代码' },
     { id: 'preview', label: '预览' },
-    { id: 'context', label: 'Context' },
+    { id: 'review', label: '审查', badge: reviewCount || undefined },
+    { id: 'agent', label: '子代理', badge: subAgentCount || undefined },
+    { id: 'context', label: '会话概览' },
   ];
   const activePanelId = `${panelInstanceId}-${activeTab}-panel`;
   const activeTabId = `${panelInstanceId}-${activeTab}-tab`;

@@ -81,11 +81,6 @@ export interface TerminalSessionState {
   inputEnabled: boolean;
   /** 后端是否支持 resize；`false` 时 hook 会跳过 `/resize` 请求（pipe 后端 no-op）。 */
   resizeSupported: boolean;
-  /**
-   * 终端是否可交互（`terminal.interactive !== false`）。`false` 时视图应展示
-   * 禁用横幅，且 hook 已拦截输入（`onData` / 粘贴 / Ctrl+L 都不会送达 shell）。
-   */
-  interactive: boolean;
 }
 
 interface TerminalSessionActions {
@@ -132,12 +127,8 @@ export function useTerminalSession({
   const termRef = useRef<Terminal | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const actionsRef = useRef<TerminalSessionActions | null>(null);
-  // 能力未知（旧后端、或 `terminal_started` 事件本地构造的行）按可交互处理，
-  // 与升级前行为一致；只有显式 `interactive === false` 才拦截输入。
-  const interactive = terminal.interactive !== false;
-  const inputAllowed = inputEnabled && interactive;
-  const inputAllowedRef = useRef(inputAllowed);
-  inputAllowedRef.current = inputAllowed;
+  const inputEnabledRef = useRef(inputEnabled);
+  inputEnabledRef.current = inputEnabled;
   const copyOnSelectRef = useRef(readTerminalPreference('copyOnSelect'));
   const pasteResolveRef = useRef<((approved: boolean) => void) | null>(null);
   const onWriteErrorRef = useRef(onWriteError);
@@ -253,7 +244,7 @@ export function useTerminalSession({
      * 只有 'sse' 传输才进 `TerminalInputQueue`。
      */
     const sendInput = (data: string): void => {
-      if (data.length === 0 || !inputAllowedRef.current) return;
+      if (data.length === 0 || !inputEnabledRef.current) return;
       if (transport === 'ws') {
         const current = socket;
         if (current?.state === 'open') {
@@ -273,7 +264,7 @@ export function useTerminalSession({
     const injectAfterPasteGuard = async (data: string): Promise<void> => {
       if (data.length === 0) return;
       // 非交互后端不接受 stdin：在入口统一拦截，避免走到粘贴确认再被拒绝。
-      if (!inputAllowedRef.current) return;
+      if (!inputEnabledRef.current) return;
       const decision = evaluatePasteGuard(data);
       if (decision.needsConfirm && !readTerminalPreference('pasteGuardDisabled')) {
         const approved = await requestPasteConfirmation(decision.summary);
@@ -312,7 +303,7 @@ export function useTerminalSession({
     );
 
     const dataDisposable = term.onData((data) => {
-      if (!inputAllowedRef.current) return;
+      if (!inputEnabledRef.current) return;
       void injectAfterPasteGuard(data);
     });
 
@@ -660,7 +651,7 @@ export function useTerminalSession({
       id: 'paste',
       label: '粘贴',
       hint: 'Ctrl+Shift+V',
-      disabled: !inputAllowed,
+      disabled: !inputEnabled,
       onSelect: () => actionsRef.current?.requestPaste(),
     },
     {
@@ -725,6 +716,5 @@ export function useTerminalSession({
     dismissNotice: () => setNotice(null),
     inputEnabled,
     resizeSupported,
-    interactive,
   };
 }

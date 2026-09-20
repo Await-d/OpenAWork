@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenWebSearchRuntime } from 'open-websearch/build/runtime/createRuntime.js';
+import { config } from 'open-websearch/build/config.js';
+import {
+  assertPublicHttpUrlResolved,
+  __setDnsLookupForTests,
+} from 'open-websearch/build/utils/urlSafety.js';
 const {
   buildAxiosRequestOptionsMock,
   createOpenWebSearchRuntimeMock,
@@ -75,12 +80,39 @@ import {
   OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS,
 } from '../../mcp/virtual-open-websearch-mcp.js';
 
+// 上游 urlSafety.js 位于 node_modules，是 vitest 的外部依赖：对 node:dns/promises 的
+// vi.mock 不会穿透到它。改用上游为此导出的测试钩子，让预检走同一个 DNS mock。
+beforeEach(() => {
+  __setDnsLookupForTests(dnsLookupMock);
+});
+
+afterEach(() => {
+  __setDnsLookupForTests();
+});
+
 function readFirstText(result: Awaited<ReturnType<typeof executeOpenWebSearchTool>>): string {
   const firstContent = result.content[0];
   if (!firstContent || firstContent.type !== 'text' || typeof firstContent.text !== 'string') {
     throw new Error('expected first MCP content item to be text');
   }
   return firstContent.text;
+}
+
+function callFetchWeb(url = 'https://example.com/page') {
+  return callOpenWebSearchVirtualMcp('session-1', {
+    serverId: 'open_websearch',
+    toolName: 'fetch_web',
+    arguments: { url },
+  });
+}
+
+async function captureRejectionMessage(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('expected the call to reject');
 }
 
 function createRuntime(): OpenWebSearchRuntime {
@@ -135,12 +167,17 @@ describe('virtual open websearch mcp', () => {
     searchSogouMock.mockReset();
     searchStartpageMock.mockReset();
     searchServiceExecuteMock.mockReset();
-    dnsLookupMock.mockImplementation(async (hostname: string, options?: { all?: boolean }) => {
+    dnsLookupMock.mockImplementation(async (hostname: string) => {
+      // 上游仅按字符串匹配 localhost / *.localhost，`localhost.` 这种尾点写法会走到
+      // DNS 解析，这里按真实解析结果返回回环地址。
+      if (hostname === 'localhost.') {
+        return [{ address: '127.0.0.1', family: 4 }];
+      }
       const entries =
         hostname === 'github.com' || hostname === 'www.github.com'
           ? [{ address: '140.82.114.3', family: 4 }]
           : [{ address: '93.184.216.34', family: 4 }];
-      return options?.all ? entries : entries[0];
+      return entries;
     });
     createSearchServiceMock.mockReturnValue({
       execute: searchServiceExecuteMock,
@@ -427,5 +464,130 @@ describe('virtual open websearch mcp', () => {
 
     expect(result.isError).toBe(true);
     expect(readFirstText(result)).toContain('未知的 Open WebSearch 工具');
+  });
+
+  describe('fetch_web SSRF diagnostics', () => {
+    const originalFakeIpCidrs = [...config.fakeIpCidrs];
+
+    afterEach(() => {
+      config.fakeIpCidrs = [...originalFakeIpCidrs];
+    });
+
+    it('localizes the upstream resolved-private SSRF error for the request hop', async () => {
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(
+        new Error(
+          'Request URL resolves to a private or local network target, which is not allowed',
+        ),
+      );
+
+      const result = await callFetchWeb();
+
+      expect(result.isError).toBe(true);
+      const message = readFirstText(result);
+      expect(message).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(message).not.toContain('private or local');
+    });
+
+    it('localizes the upstream literal-private SSRF error', async () => {
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(
+        new Error('Request URL points to a private or local network target, which is not allowed'),
+      );
+
+      const result = await callFetchWeb();
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(readFirstText(result)).not.toContain('private or local');
+    });
+
+    it('localizes the upstream redirect-hop SSRF error', async () => {
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(
+        new Error(
+          'Redirect target resolves to a private or local network target, which is not allowed',
+        ),
+      );
+
+      const result = await callFetchWeb();
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(readFirstText(result)).not.toContain('private or local');
+    });
+
+    it('localizes the upstream unresolvable-host error', async () => {
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(
+        new Error('Request URL could not be resolved'),
+      );
+
+      const result = await callFetchWeb();
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('域名解析失败');
+    });
+
+    it('localizes the upstream non-http scheme error', async () => {
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(
+        new Error('Request URL must use HTTP or HTTPS'),
+      );
+
+      const result = await callFetchWeb();
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
+    });
+
+    it('allows DNS answers matching the configured fake-IP CIDRs', async () => {
+      config.fakeIpCidrs = ['198.18.0.0/15'];
+      dnsLookupMock.mockResolvedValueOnce([{ address: '198.18.0.2', family: 4 }]);
+
+      const result = await callFetchWeb();
+
+      expect(requestWithSafeRedirectsMock).toHaveBeenCalledTimes(1);
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('rejects a private DNS answer even when fake-IP CIDRs are configured', async () => {
+      config.fakeIpCidrs = ['198.18.0.0/15'];
+      dnsLookupMock.mockResolvedValueOnce([{ address: '10.0.0.8', family: 4 }]);
+
+      const result = await callFetchWeb('https://cluster.internal/page');
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(requestWithSafeRedirectsMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps literal fake-IP URLs blocked even when fake-IP CIDRs are configured', async () => {
+      config.fakeIpCidrs = ['198.18.0.0/15'];
+
+      const result = await callFetchWeb('http://198.18.0.1/');
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(requestWithSafeRedirectsMock).not.toHaveBeenCalled();
+    });
+
+    it('localizes the real upstream SSRF messages (contract binding)', async () => {
+      dnsLookupMock.mockResolvedValueOnce([{ address: '10.0.0.8', family: 4 }]);
+      const resolvedMessage = await captureRejectionMessage(() =>
+        assertPublicHttpUrlResolved('https://example.com/', 'Request URL'),
+      );
+      expect(resolvedMessage).toContain('private or local network');
+
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(new Error(resolvedMessage));
+      const resolvedResult = await callFetchWeb();
+      expect(readFirstText(resolvedResult)).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(readFirstText(resolvedResult)).not.toContain('private or local');
+
+      dnsLookupMock.mockRejectedValueOnce(new Error('ENOTFOUND'));
+      const unresolvedMessage = await captureRejectionMessage(() =>
+        assertPublicHttpUrlResolved('https://example.com/', 'Request URL'),
+      );
+      expect(unresolvedMessage).toContain('could not be resolved');
+
+      requestWithSafeRedirectsMock.mockRejectedValueOnce(new Error(unresolvedMessage));
+      const unresolvedResult = await callFetchWeb();
+      expect(readFirstText(unresolvedResult)).toContain('域名解析失败');
+    });
   });
 });

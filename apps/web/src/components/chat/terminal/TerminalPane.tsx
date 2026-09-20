@@ -14,11 +14,11 @@
  * 「拖拽中不落盘、drop 才落一次盘」与分隔条拖拽同一条纪律（见 TerminalSplitView）。
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import { resolveDropTarget, type PaneRect, type Rect } from './layout/drop-target.js';
 import { findPane, enumeratePanes } from './layout/queries.js';
-import type { TerminalDropTarget, TerminalSplitDirection } from './layout/types.js';
+import type { TerminalDropTarget, TerminalLayout, TerminalSplitDirection } from './layout/types.js';
 import { InteractiveTerminalView } from './InteractiveTerminalView.js';
 import { TerminalTabActions } from './TerminalTabActions.js';
 import {
@@ -26,7 +26,11 @@ import {
   terminalTabLabel,
   type TerminalTabDragBinding,
 } from './TerminalTabStrip.js';
-import { useTerminalLayoutContext, type TerminalTabDragState } from './TerminalLayoutContext.js';
+import {
+  useTerminalLayoutContext,
+  type TerminalPaneActions,
+  type TerminalTabDragState,
+} from './TerminalLayoutContext.js';
 import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu.js';
 import { buildTerminalCommandItems } from './terminal-pane-menu.js';
 import { paneLimitMessage } from './terminal-panel-shortcuts.js';
@@ -143,6 +147,26 @@ interface TabDragSession {
   active: boolean;
   resolution: TabDropResolution | null;
   rejected: boolean;
+  /**
+   * 命中判定的稳定锚点（面板内容区根节点）。
+   *
+   * move/up 挂在 window 上，事件到达时 `event.currentTarget` 已不是 tab 条，
+   * 且指针可能已经拖到别的 pane / 面板之外；锚点必须在起手时定下来。
+   */
+  anchor: HTMLElement;
+}
+
+/** 拖拽期间的最新闭包（window 监听只在起手时注册一次，落盘必须用最新 layout/actions）。 */
+interface TabDragLatest {
+  layout: TerminalLayout;
+  paneCount: number;
+  maxPanes: number;
+  /** 隐式单组判断「拆出去后源组是否还有终端」用；显式树不需要。 */
+  totalTerminalCount: number;
+  preferredSplitDirection: TerminalSplitDirection;
+  tabDrag: TerminalTabDragState | null;
+  setTabDrag(state: TerminalTabDragState | null): void;
+  actions: TerminalPaneActions;
 }
 
 interface TabDragGesture {
@@ -184,6 +208,41 @@ function sameDragPreview(a: TerminalTabDragState | null, b: TerminalTabDragState
 }
 
 /**
+ * <768px 只允许上下拆分（与 CSS / preferredSplitDirection 同源）：row 边落点回退 pane-center。
+ */
+function isDirectionAllowedFor(
+  preferred: TerminalSplitDirection,
+): (direction: 'row' | 'column') => boolean {
+  return preferred === 'column' ? (direction) => direction === 'column' : () => true;
+}
+
+/**
+ * 拒绝矩阵（详见 `t11-t12-drag.md` §3）。
+ *
+ * 单组隐式 pane（`layout === null`）：tab-strip 落回本组 = 组内重排；**四边落点**
+ * 可以物化出首个拆分树（`moveTerminalByDrop` 先建单 pane 树再 splitPane），
+ * 但源组只剩这一个终端时拒绝 —— 拆出去会让源组变空，违反「禁止空 pane」不变量。
+ * `pane-center` 在同一组里是 no-op，`detach` 没有别的去处，仍然拒绝。
+ *
+ * 「拖走某组最后一个终端」允许（对齐 VS Code 的源组折叠）：源组清空后由纯函数层
+ * 自然收敛（`removeTerminal` 在 pane 变空时等同 `removePane`，兄弟上提），
+ * 「不留空 pane / 不留零尺寸 pane」的不变量依然成立，结果是 pane 数 -1。
+ * 显式树剩下唯一的拒绝条件：pane 达上限时不允许产生新组（pane-edge 的语义就是新组）。
+ */
+function isDropRejected(
+  target: TerminalDropTarget,
+  tabStripPaneId: string | null,
+  paneId: string,
+  latest: Pick<TabDragLatest, 'layout' | 'paneCount' | 'maxPanes' | 'totalTerminalCount'>,
+): boolean {
+  if (latest.layout === null) {
+    if (target.kind === 'tab-strip') return tabStripPaneId !== paneId;
+    return target.kind !== 'pane-edge' || latest.totalTerminalCount < 2;
+  }
+  return target.kind === 'pane-edge' && latest.paneCount >= latest.maxPanes;
+}
+
+/**
  * T-12 tab 拖拽：pointerdown 起手 → pointermove 解析落点（只更新预览）→ pointerup 落一次盘。
  *
  * 选 pointer 事件而不是 HTML5 DnD 的理由见报告：命中判定必须复用 T-08 的
@@ -194,14 +253,18 @@ function useTabDragGesture(
   paneId: string,
   terminals: readonly SessionTerminalView[],
 ): TabDragGesture {
-  const { layout, paneCount, maxPanes, preferredSplitDirection, tabDrag, setTabDrag, actions } =
-    useTerminalLayoutContext();
+  const {
+    layout,
+    paneCount,
+    maxPanes,
+    totalTerminalCount,
+    preferredSplitDirection,
+    tabDrag,
+    setTabDrag,
+    actions,
+  } = useTerminalLayoutContext();
   const sessionRef = useRef<TabDragSession | null>(null);
   const suppressClickRef = useRef(false);
-
-  // <768px 只允许上下拆分（与 CSS / preferredSplitDirection 同源）：row 边落点回退 pane-center。
-  const isDirectionAllowed = (direction: 'row' | 'column'): boolean =>
-    preferredSplitDirection === 'column' ? direction === 'column' : true;
 
   // 拖拽期间的光标 / 文本选择锁：只有**发起拖拽的那个 pane**改 body —— 每个 pane 都挂着
   // 这个 effect，不限定 owner 时后来的实例会捕获已被改写的旧值，cleanup 时把光标
@@ -220,19 +283,53 @@ function useTabDragGesture(
     };
   }, [ownsDrag, rejectedPreview]);
 
-  const evaluateRejected = (target: TerminalDropTarget, tabStripPaneId: string | null): boolean => {
-    if (layout === null) {
-      // 单组隐式 pane：只有「落回本组 tab 条」（组内重排）有语义；唯一的一组之外
-      // 没有别的 pane，detach / 合并 / 拆分都无处可去，一律拒绝。
-      return !(target.kind === 'tab-strip' && tabStripPaneId === paneId);
-    }
-    // 「拖走某组最后一个终端」允许（协调者裁定，对齐 VS Code 的源组折叠）：
-    // 源组被清空后由纯函数层自然收敛 —— `removeTerminal` 在 pane 变空时等同
-    // `removePane`（兄弟上提，见 layout/mutations.ts），所以「不留空 pane /
-    // 不留零尺寸 pane」的不变量依然成立，结果是 pane 数 -1 而不是产生空组。
-    // 剩下唯一的拒绝条件：pane 达上限时不允许产生新组（pane-edge 的语义就是新组）。
-    return target.kind === 'pane-edge' && paneCount >= maxPanes;
+  // 拖拽期间的最新闭包：window 监听只在 pointerdown 注册一次，而拖拽中面板会因预览 /
+  // 终端输出重渲染；落盘必须用最新的 layout / sessionKey / actions。
+  //
+  // 只在**提交后**写入（useLayoutEffect），不能写成 render 期间的赋值：并发渲染下被
+  // 丢弃的那一次 render 仍会执行赋值，把 ref 覆盖成未提交的旧 layout，落盘就会写进
+  // 过期的会话桶 —— 表现是「刷新后第一次拖拽不生效，切几次标签才恢复」。
+  const latestRef = useRef<TabDragLatest>({
+    layout,
+    paneCount,
+    maxPanes,
+    totalTerminalCount,
+    preferredSplitDirection,
+    tabDrag,
+    setTabDrag,
+    actions,
+  });
+  useLayoutEffect(() => {
+    latestRef.current = {
+      layout,
+      paneCount,
+      maxPanes,
+      totalTerminalCount,
+      preferredSplitDirection,
+      tabDrag,
+      setTabDrag,
+      actions,
+    };
+  });
+
+  const detachRef = useRef<(() => void) | null>(null);
+  const detachWindowDrag = (): void => {
+    const detach = detachRef.current;
+    if (detach === null) return;
+    detachRef.current = null;
+    detach();
   };
+  // 卸载即收口：若拖拽仍在本 pane 手里（例如布局树重排导致 pane 重挂载），
+  // 必须同时清掉面板级预览，否则会留下「跟手停住 + grabbing 光标」的卡死态。
+  useEffect(
+    () => () => {
+      detachWindowDrag();
+      if (sessionRef.current === null) return;
+      sessionRef.current = null;
+      latestRef.current.setTabDrag(null);
+    },
+    [],
+  );
 
   /** 组内可重排的终端顺序：显式 pane 用树内顺序，隐式单组用上游可见顺序。 */
   const orderedTerminalIds = (): string[] => {
@@ -264,8 +361,59 @@ function useTabDragGesture(
     const neighbor = sourceIndex < 0 ? undefined : panes[sourceIndex + delta];
     if (neighbor === undefined) return;
     const target: TerminalDropTarget = { kind: 'pane-center', paneId: neighbor.id };
-    if (evaluateRejected(target, null)) return;
+    if (isDropRejected(target, null, paneId, latestRef.current)) return;
     actions.moveTerminalByDrop(terminalId, target);
+  };
+
+  const handleDragMove = (session: TabDragSession, clientX: number, clientY: number): void => {
+    if (sessionRef.current !== session) return;
+    if (!session.active) {
+      const moved = Math.hypot(clientX - session.startX, clientY - session.startY);
+      if (moved < TAB_DRAG_THRESHOLD_PX) return;
+      session.active = true;
+      suppressClickRef.current = true;
+    }
+    const latest = latestRef.current;
+    const resolution = resolveTabDrop(
+      session.anchor,
+      session.terminalId,
+      { x: clientX, y: clientY },
+      isDirectionAllowedFor(latest.preferredSplitDirection),
+    );
+    const rejected = isDropRejected(resolution.target, resolution.tabStripPaneId, paneId, latest);
+
+    session.resolution = resolution;
+    session.rejected = rejected;
+    // 只更新预览（瞬态）；**不落盘** —— 布局树的写路径只有 drop 一次。
+    const next: TerminalTabDragState = {
+      terminalId: session.terminalId,
+      sourcePaneId: paneId,
+      target: resolution.target,
+      tabStripPaneId: resolution.tabStripPaneId,
+      rejected,
+    };
+    if (!sameDragPreview(latest.tabDrag, next)) latest.setTabDrag(next);
+  };
+
+  const completeDrag = (session: TabDragSession): void => {
+    if (sessionRef.current !== session) return;
+    sessionRef.current = null;
+    detachWindowDrag();
+    const latest = latestRef.current;
+    latest.setTabDrag(null);
+    if (!session.active || session.resolution === null || session.rejected) return;
+    latest.actions.moveTerminalByDrop(
+      session.terminalId,
+      session.resolution.target,
+      session.resolution.tabStripPaneId ?? undefined,
+    );
+  };
+
+  const abortDrag = (session: TabDragSession): void => {
+    if (sessionRef.current !== session) return;
+    sessionRef.current = null;
+    detachWindowDrag();
+    latestRef.current.setTabDrag(null);
   };
 
   const binding: TerminalTabDragBinding = {
@@ -278,73 +426,43 @@ function useTabDragGesture(
     onTabKeyDown: handleTabKeyDown,
     onTabPointerDown: (terminalId, event) => {
       if (event.button !== 0) return;
+      // 必须阻断 pointerdown 的默认行为：不阻断时浏览器（尤其 Windows WebView2）
+      // 会启动**原生文本选择 / 拖拽**，后者优先级高于 pointer 事件流 —— 起手落在
+      // 标签文字上时指针移动会被原生拖拽吃掉，表现为「有时能拖、有时完全不动」。
+      event.preventDefault();
       suppressClickRef.current = false;
-      sessionRef.current = {
+      // 起手先清掉可能残留的预览（上一次手势异常收口时留下的卡死态）。
+      latestRef.current.setTabDrag(null);
+      const tabElement = event.currentTarget;
+      const session: TabDragSession = {
         terminalId,
         startX: event.clientX,
         startY: event.clientY,
         active: false,
         resolution: null,
         rejected: false,
+        anchor: tabElement.closest<HTMLElement>('.terminal-panel__body') ?? tabElement,
       };
-      // 捕获挂在 tab 上：指针离开命中区（甚至离开窗口）后 pointermove 仍回传到这里，
-      // 再冒泡到 tab 条容器上的 move/up 处理器；普通点击的 click 会被浏览器重定向到
-      // tab 容器（见 TerminalTabStrip 的容器级 onClick/onDoubleClick）。
-      event.currentTarget.setPointerCapture(event.pointerId);
-    },
-    onStripPointerMove: (event) => {
-      const session = sessionRef.current;
-      if (session === null) return;
-      if (!session.active) {
-        const moved = Math.hypot(event.clientX - session.startX, event.clientY - session.startY);
-        if (moved < TAB_DRAG_THRESHOLD_PX) return;
-        session.active = true;
-        suppressClickRef.current = true;
-      }
-      const resolution = resolveTabDrop(
-        event.currentTarget,
-        session.terminalId,
-        { x: event.clientX, y: event.clientY },
-        isDirectionAllowed,
-      );
-      const rejected = evaluateRejected(resolution.target, resolution.tabStripPaneId);
-      session.resolution = resolution;
-      session.rejected = rejected;
-      // 只更新预览（瞬态）；**不落盘** —— 布局树的写路径只有 drop 一次。
-      const next: TerminalTabDragState = {
-        terminalId: session.terminalId,
-        sourcePaneId: paneId,
-        target: resolution.target,
-        tabStripPaneId: resolution.tabStripPaneId,
-        rejected,
+      sessionRef.current = session;
+      // 刻意**不调用 setPointerCapture**：本手势完全不依赖事件重定向（move/up/cancel
+      // 都挂 document），而 capture 在 WebView2 上会在被捕获元素发生重排 / 重绘时
+      // 静默丢事件 —— 正是「偶尔拖不动」的来源。click / dblclick 的重定向需求已由
+      // TerminalTabStrip 的**容器级**处理器承担（见那里的说明），无需 capture。
+      detachWindowDrag();
+      const onMove = (moveEvent: PointerEvent): void =>
+        handleDragMove(session, moveEvent.clientX, moveEvent.clientY);
+      const onUp = (): void => completeDrag(session);
+      const onCancel = (): void => abortDrag(session);
+      // 挂 document 而不是 window：WebView2 下 window 级监听在指针离开窗口 /
+      // iframe 边界时可能收不到事件，document 覆盖整棵文档且冒泡链更短更稳。
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onCancel);
+      detachRef.current = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
       };
-      if (!sameDragPreview(tabDrag, next)) setTabDrag(next);
-    },
-    onStripPointerUp: (event) => {
-      const session = sessionRef.current;
-      sessionRef.current = null;
-      if (session === null) return;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // 浏览器在 pointerup 时会自动释放捕获；这里只兜住 jsdom 替身。
-      }
-      setTabDrag(null);
-      if (!session.active || session.resolution === null || session.rejected) return;
-      actions.moveTerminalByDrop(
-        session.terminalId,
-        session.resolution.target,
-        session.resolution.tabStripPaneId ?? undefined,
-      );
-    },
-    onStripPointerCancel: (event) => {
-      sessionRef.current = null;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // 同上：取消失败不影响状态收口。
-      }
-      setTabDrag(null);
     },
   };
 

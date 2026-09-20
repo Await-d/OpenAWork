@@ -252,3 +252,16 @@ export function categorizeAlwaysPatterns(
     },
   ];
 }
+
+export function resolveAlwaysScopeSelection(
+  previewAction: string | undefined,
+  scope: string,
+  always: string[] | undefined,
+  selectedCategory?: AlwaysScopeLevel['category'],
+): { levels: AlwaysScopeLevel[]; selectedLevel: AlwaysScopeLevel | undefined } {
+  const levels = categorizeAlwaysPatterns(previewAction, scope, always);
+  const selectedLevel =
+    (selectedCategory ? levels.find((level) => level.category === selectedCategory) : undefined) ??
+    levels[levels.length - 1];
+  return { levels, selectedLevel };
+}

@@ -31,7 +31,6 @@ afterEach(() => {
 function createMobileProps(): Omit<FusionMobileBottomPanelProps, 'activeTab'> {
   return {
     activeEditorFilePath: null,
-    contextUsageSnapshot: null,
     currentSessionId: 'session-1',
     editorMode: false,
     editorFileState: {
@@ -52,11 +51,33 @@ function createMobileProps(): Omit<FusionMobileBottomPanelProps, 'activeTab'> {
     isOpen: false,
     onClose: () => undefined,
     onOpen: () => undefined,
-    onCompactSession: () => undefined,
     onOpenFileInEditor: () => undefined,
     onOpenWorkspace: () => undefined,
     onShowEditor: () => undefined,
     onTabChange: () => undefined,
+    overview: {
+      attachmentItems: [],
+      artifactsWorkspaceHref: null,
+      childSessions: [],
+      compactions: [],
+      contextUsageSnapshot: null,
+      contentArtifactCount: 0,
+      contentArtifactCountStatus: 'ready',
+      currentSessionId: 'session-1',
+      dialogueMode: 'coding',
+      effectiveWorkingDirectory: '/home/await/project/OpenAWork',
+      messages: [],
+      onCompactSession: () => undefined,
+      onOpenRecoveryStrategy: () => undefined,
+      pendingPermissions: [],
+      pendingQuestionsCount: 0,
+      sessionStateStatus: 'running',
+      sessionTasks: [],
+      sessionTodos: [],
+      upstreamSummaries: [],
+      workspaceFileItems: [],
+      yoloMode: false,
+    },
     saving: false,
     token: 'token',
     workspaceFileItems: [],
@@ -64,14 +85,14 @@ function createMobileProps(): Omit<FusionMobileBottomPanelProps, 'activeTab'> {
 }
 
 describe('FusionMobileBottomPanel', () => {
-  it('移动端底部面板保留四个 tab：审查 / 文件 / Context / 浏览器', () => {
+  it('移动端底部面板保留四个 tab：文件 / 浏览器 / 审查 / 会话概览', () => {
     render(<FusionMobileBottomPanel {...createMobileProps()} activeTab="review" />);
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '审查',
       '文件',
-      'Context',
       '浏览器',
+      '审查',
+      '会话概览',
     ]);
   });
 
@@ -115,10 +136,10 @@ describe('FusionMobileBottomPanel', () => {
     render(<FusionMobileBottomPanel {...createMobileProps()} activeTab="code" isOpen />);
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '审查',
       '文件',
-      'Context',
       '浏览器',
+      '审查',
+      '会话概览',
     ]);
     expect(screen.getByTestId('review-tab-stub')).not.toBeNull();
     expect(screen.getByRole('tab', { name: '审查' }).getAttribute('aria-selected')).toBe('true');

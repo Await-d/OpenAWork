@@ -96,7 +96,7 @@ function truncateSummary(value: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
-function isActiveStatus(status: SubAgentRunStatus): boolean {
+export function isActiveStatus(status: SubAgentRunStatus): boolean {
   return status === 'running' || status === 'paused';
 }
 
@@ -220,10 +220,14 @@ function SubAgentItemCard({
   item,
   selected,
   onSelect,
+  onStop,
+  stopping,
 }: {
   item: SubAgentRunItem;
   selected: boolean;
   onSelect: () => void;
+  onStop?: () => void;
+  stopping: boolean;
 }) {
   const statusStyle = getStatusStyle(item.status);
   const summary = item.errorMessage
@@ -235,17 +239,16 @@ function SubAgentItemCard({
     item.terminalReason === 'timeout' && item.timeoutSource
       ? `超时原因：${formatTimeoutSourceLabel(item.timeoutSource)}`
       : undefined;
+  // 仅活跃（running / paused）行、且父级提供停止回调时才展示停止按钮
+  const showStop = isActiveStatus(item.status) && onStop !== undefined;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
+    // 外层用 div 承载选中态样式：停止按钮必须与选择控件同级，避免 button 嵌套。
+    <div
       style={{
         display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        padding: '6px 7px',
+        alignItems: 'flex-start',
+        width: '100%',
         borderRadius: 8,
         border: selected
           ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle))'
@@ -253,121 +256,155 @@ function SubAgentItemCard({
         background: selected
           ? 'color-mix(in oklch, var(--bg-overlay) 84%, var(--accent) 16%)'
           : 'transparent',
-        color: 'var(--fg-strong)',
-        boxShadow: 'none',
-        cursor: 'pointer',
-        textAlign: 'left',
-        width: '100%',
         transition: 'background 140ms ease, border-color 140ms ease',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span
-          aria-hidden="true"
+      <button
+        type="button"
+        className="sub-agent-run-item__select"
+        onClick={onSelect}
+        aria-pressed={selected}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 3,
+          padding: '6px 7px',
+          flex: 1,
+          minWidth: 0,
+          borderRadius: 8,
+          border: 'none',
+          background: 'transparent',
+          color: 'var(--fg-strong)',
+          boxShadow: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span
+            aria-hidden="true"
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              flexShrink: 0,
+              background:
+                item.status === 'running'
+                  ? 'var(--accent)'
+                  : item.status === 'completed'
+                    ? 'var(--success)'
+                    : item.status === 'failed'
+                      ? 'var(--danger)'
+                      : item.status === 'ended'
+                        ? 'var(--fg-muted)'
+                        : 'var(--warning)',
+              boxShadow:
+                item.status === 'running'
+                  ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
+                  : 'none',
+              animation:
+                item.status === 'running' ? 'sub-agent-pulse 1.5s ease-in-out infinite' : 'none',
+            }}
+          />
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: selected ? 'var(--fg-strong)' : 'var(--fg-default)',
+              lineHeight: 1.2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+              minWidth: 0,
+            }}
+            title={item.title}
+          >
+            {item.title}
+          </span>
+          <span
+            style={{
+              ...statusStyle,
+              fontSize: 7.5,
+              fontWeight: 700,
+              padding: '0 4px',
+              borderRadius: 999,
+              lineHeight: '14px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            {getStatusLabel(item.status)}
+          </span>
+        </div>
+        <div
           style={{
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background:
-              item.status === 'running'
-                ? 'var(--accent)'
-                : item.status === 'completed'
-                  ? 'var(--success)'
-                  : item.status === 'failed'
-                    ? 'var(--danger)'
-                    : item.status === 'ended'
-                      ? 'var(--fg-muted)'
-                      : 'var(--warning)',
-            boxShadow:
-              item.status === 'running'
-                ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
-                : 'none',
-            animation:
-              item.status === 'running' ? 'sub-agent-pulse 1.5s ease-in-out infinite' : 'none',
-          }}
-        />
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            color: selected ? 'var(--fg-strong)' : 'var(--fg-default)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            paddingLeft: 12,
+            fontSize: 8.5,
+            color: 'var(--fg-muted)',
             lineHeight: 1.2,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            flex: 1,
-            minWidth: 0,
-          }}
-          title={item.title}
-        >
-          {item.title}
-        </span>
-        <span
-          style={{
-            ...statusStyle,
-            fontSize: 7.5,
-            fontWeight: 700,
-            padding: '0 4px',
-            borderRadius: 999,
-            lineHeight: '14px',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
           }}
         >
-          {getStatusLabel(item.status)}
-        </span>
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          paddingLeft: 12,
-          fontSize: 8.5,
-          color: 'var(--fg-muted)',
-          lineHeight: 1.2,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {item.assignedAgent && <span>{item.assignedAgent}</span>}
-        {item.messageCount > 0 && <span>{item.messageCount} 条</span>}
-      </div>
-      {summary && (
-        <div
-          style={{
-            paddingLeft: 12,
-            fontSize: 8,
-            color: item.errorMessage ? 'var(--danger)' : 'var(--fg-muted)',
-            lineHeight: 1.3,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={item.errorMessage ?? item.result}
-        >
-          {summary}
+          {item.assignedAgent && <span>{item.assignedAgent}</span>}
+          {item.messageCount > 0 && <span>{item.messageCount} 条</span>}
         </div>
-      )}
-      {timeoutHint && (
-        <div
-          style={{
-            paddingLeft: 12,
-            fontSize: 8,
-            color: 'var(--warning)',
-            lineHeight: 1.25,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+        {summary && (
+          <div
+            style={{
+              paddingLeft: 12,
+              fontSize: 8,
+              color: item.errorMessage ? 'var(--danger)' : 'var(--fg-muted)',
+              lineHeight: 1.3,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={item.errorMessage ?? item.result}
+          >
+            {summary}
+          </div>
+        )}
+        {timeoutHint && (
+          <div
+            style={{
+              paddingLeft: 12,
+              fontSize: 8,
+              color: 'var(--warning)',
+              lineHeight: 1.25,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={timeoutHint}
+          >
+            {timeoutHint}
+          </div>
+        )}
+      </button>
+      {showStop && (
+        <button
+          type="button"
+          className="sub-agent-run-item__stop"
+          disabled={stopping}
+          aria-busy={stopping}
+          aria-label={`停止子代理 ${item.title}`}
+          title={stopping ? '正在停止该子代理' : '停止该子代理'}
+          onClick={(event) => {
+            // 阻止冒泡：点击停止不得触发行选中
+            event.stopPropagation();
+            onStop?.();
           }}
-          title={timeoutHint}
         >
-          {timeoutHint}
-        </div>
+          {stopping ? '停止中' : '停止'}
+        </button>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -375,10 +412,14 @@ export function SubAgentRunList({
   items,
   selectedSessionId,
   onSelectSession,
+  onStopSession,
+  stoppingSessionIds,
 }: {
   items: SubAgentRunItem[];
   onSelectSession: (sessionId: string) => void;
   selectedSessionId: string | null;
+  onStopSession?: (sessionId: string) => void;
+  stoppingSessionIds?: ReadonlySet<string>;
 }) {
   // 浮动栏的显示条件：只要有任何子代理（含已完成 / 失败 / 取消的历史子代理）
   // 就在主对话区左侧悬浮显示，方便随时跳查。判断已经在 `buildSubAgentRunItems`
@@ -409,7 +450,45 @@ export function SubAgentRunList({
         background: 'transparent',
       }}
     >
-      <style>{`@keyframes sub-agent-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }`}</style>
+      <style>{`
+        @keyframes sub-agent-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        .sub-agent-run-item__select:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          border-radius: 8px;
+        }
+        .sub-agent-run-item__stop {
+          flex-shrink: 0;
+          margin: 6px 7px 0 0;
+          padding: 1px 6px;
+          border-radius: 999px;
+          border: 1px solid var(--danger-border);
+          background: var(--danger-muted);
+          color: var(--danger);
+          font-size: 8.5px;
+          font-weight: 700;
+          line-height: 14px;
+          white-space: nowrap;
+          cursor: pointer;
+          transition: background 140ms ease, border-color 140ms ease;
+        }
+        .sub-agent-run-item__stop:hover:not(:disabled) {
+          background: color-mix(in oklch, var(--danger) 20%, transparent);
+          border-color: color-mix(in oklch, var(--danger) 45%, transparent);
+        }
+        .sub-agent-run-item__stop:active:not(:disabled) {
+          transform: translateY(1px);
+        }
+        .sub-agent-run-item__stop:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          box-shadow: 0 0 0 4px var(--accent-subtle);
+        }
+        .sub-agent-run-item__stop:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+      `}</style>
       <div
         style={{
           display: 'flex',
@@ -486,6 +565,8 @@ export function SubAgentRunList({
             item={item}
             selected={item.sessionId === selectedSessionId}
             onSelect={() => onSelectSession(item.sessionId)}
+            {...(onStopSession ? { onStop: () => onStopSession(item.sessionId) } : {})}
+            stopping={stoppingSessionIds?.has(item.sessionId) ?? false}
           />
         ))}
       </div>

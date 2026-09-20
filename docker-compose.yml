@@ -18,6 +18,9 @@ services:
       # OPENAWORK_BROWSER_LIVE: '1'
       # 若确实要连 Agent 的桌面自动化工具一起开（会多暴露 goto/click/type 等工具），再叠加：
       # DESKTOP_AUTOMATION: '1'
+      # 网关使用 fake-IP DNS（Clash/规则代理，域名解析到 198.18.0.0/15）时，
+      # open_websearch 抓取会被判为私有网络而拒绝；按需放开该段：
+      # FAKE_IP_CIDRS: '198.18.0.0/15'
     volumes:
       - gateway_data:/var/lib/openawork
     depends_on:

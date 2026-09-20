@@ -199,6 +199,8 @@ function readErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const DNS_RESOLUTION_HINT = '请检查 URL 是否正确。';
+
 function readFetchWebErrorMessage(error: unknown): string {
   const status = readHttpStatus(error);
   if (status !== null) {
@@ -213,10 +215,29 @@ function readFetchWebErrorMessage(error: unknown): string {
     return `请求超时（${code}），请稍后重试。`;
   }
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
-    return `域名解析失败（${code}），请检查 URL 是否正确。`;
+    return `域名解析失败（${code}），${DNS_RESOLUTION_HINT}`;
   }
 
-  return `网页提取失败：${readErrorMessage(error)}`;
+  const message = readErrorMessage(error);
+  const localized = localizeSsrfMessage(message);
+  if (localized) {
+    return localized;
+  }
+
+  return `网页提取失败：${message}`;
+}
+
+function localizeSsrfMessage(message: string): string | null {
+  if (message.includes('private or local network')) {
+    return PUBLIC_HTTP_URL_MESSAGE;
+  }
+  if (message.includes('must use HTTP or HTTPS')) {
+    return PUBLIC_HTTP_URL_MESSAGE;
+  }
+  if (message.includes('could not be resolved')) {
+    return `域名解析失败，${DNS_RESOLUTION_HINT}`;
+  }
+  return null;
 }
 
 function describeHttpStatus(status: number): string | null {

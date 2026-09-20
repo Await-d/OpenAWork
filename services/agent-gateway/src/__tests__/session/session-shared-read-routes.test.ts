@@ -74,6 +74,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM permission_grants', []);
   dbModule.sqliteRun('DELETE FROM permission_decision_logs', []);
   dbModule.sqliteRun('DELETE FROM shared_session_comments', []);
   dbModule.sqliteRun('DELETE FROM permission_requests', []);
@@ -171,6 +172,43 @@ describe('shared session action routes', () => {
           },
           pendingPermissions: [],
         },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('共享回复 session 时回溯放行同会话被 always 覆盖的 pending', async () => {
+    dbModule.sqliteRun(
+      `INSERT INTO permission_requests
+        (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
+       VALUES ('perm-primary', ?, 'bash', 'ls -la', 'need inspect', 'medium', 'ls -la', NULL, NULL, '["ls *"]', 'pending')`,
+      [SESSION_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO permission_requests
+        (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
+       VALUES ('perm-covered', ?, 'bash', 'ls /tmp', 'need inspect', 'medium', 'ls /tmp', NULL, NULL, NULL, 'pending')`,
+      [SESSION_ID],
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/shared-with-me/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'perm-primary', decision: 'session' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(
+        dbModule.sqliteGet<{ status: string; decision: string | null }>(
+          `SELECT status, decision FROM permission_requests WHERE id = 'perm-covered'`,
+        ),
+      ).toMatchObject({ status: 'approved', decision: 'session' });
+      expect(res.json()).toMatchObject({
+        detail: { pendingPermissions: [] },
       });
     } finally {
       await app.close();
@@ -283,6 +321,63 @@ describe('shared session action routes', () => {
       expect(res.json()).toMatchObject({
         error: '目标提问请求不存在。',
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('共享权限回复保留类别', () => {
+  it.each([
+    ['channel', 'session'],
+    ['channel', 'permanent'],
+    ['lsp', 'session'],
+    ['lsp', 'permanent'],
+  ] as const)('%s / %s 只授权原类别', async (category, decision) => {
+    for (const [id, toolName, scope] of [
+      ['primary', category, 'first'],
+      ['covered', category, 'second'],
+      ['unrelated', 'custom', 'media'],
+    ]) {
+      dbModule.sqliteRun(
+        `INSERT INTO permission_requests
+         (id, session_id, tool_name, scope, reason, risk_level, always_json, status)
+         VALUES (?, ?, ?, ?, 'test', 'medium', '["*"]', 'pending')`,
+        [id, SESSION_ID, toolName, scope],
+      );
+    }
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/shared-with-me/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'primary', decision },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(
+        dbModule.sqliteGet<{ status: string }>(
+          "SELECT status FROM permission_requests WHERE id = 'covered'",
+          [],
+        ),
+      ).toEqual({ status: 'approved' });
+      expect(
+        dbModule.sqliteGet<{ status: string }>(
+          "SELECT status FROM permission_requests WHERE id = 'unrelated'",
+          [],
+        ),
+      ).toEqual({ status: 'pending' });
+      const grants =
+        decision === 'permanent'
+          ? dbModule.sqliteAll<{ tool_name: string }>(
+              'SELECT tool_name FROM permission_grants WHERE user_id = ?',
+              [OWNER_ID],
+            )
+          : dbModule.sqliteAll<{ tool_name: string }>(
+              "SELECT tool_name FROM permission_requests WHERE scope = '*' AND status = 'approved'",
+              [],
+            );
+      expect(grants).toEqual([{ tool_name: category }]);
     } finally {
       await app.close();
     }

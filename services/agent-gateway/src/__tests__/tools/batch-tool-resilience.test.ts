@@ -20,9 +20,19 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],
   sqliteAll: vi.fn(() => []),
-  sqliteGet: vi.fn((query: string) =>
-    query.includes('SELECT user_id FROM sessions') ? { user_id: 'user-1' } : undefined,
-  ),
+  sqliteGet: vi.fn((query: string) => {
+    if (query.includes('SELECT user_id FROM sessions')) {
+      return { user_id: 'user-1' };
+    }
+    // 权限回归修复：子工具 unit_tool 没有注册权限类别，fail-closed 后落到 'custom'
+    //（默认 ask），会先进入 pending 审批链路并在权限层抛错，掩盖本用例关注的
+    // 「单个子调用抛错不影响整批」场景。这里把会话声明为 yolo 档位，让权限层返回
+    // not_needed，使子调用按用例本意继续走到 transitionToolToRunning / 工具执行。
+    if (query.includes('SELECT metadata_json FROM sessions')) {
+      return { metadata_json: '{"permissionMode":"yolo"}' };
+    }
+    return undefined;
+  }),
   sqliteRun: vi.fn(() => undefined),
 }));
 

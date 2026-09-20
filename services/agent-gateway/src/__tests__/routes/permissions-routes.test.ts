@@ -96,6 +96,43 @@ function seedPendingPermissionRequest(
   );
 }
 
+function seedPermissionRequestRow(input: {
+  id: string;
+  scope: string;
+  toolName?: string;
+  always?: string[];
+  requestPayload?: Record<string, unknown>;
+}): void {
+  dbModule.sqliteRun(
+    `INSERT INTO permission_requests
+      (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
+     VALUES (?, ?, ?, ?, 'reason', 'medium', NULL, ?, NULL, ?, 'pending')`,
+    [
+      input.id,
+      SESSION_ID,
+      input.toolName ?? 'bash',
+      input.scope,
+      JSON.stringify(input.requestPayload ?? {}),
+      input.always ? JSON.stringify(input.always) : null,
+    ],
+  );
+}
+
+function readPermissionRow(id: string): { status: string; decision: string | null } | undefined {
+  return dbModule.sqliteGet<{ status: string; decision: string | null }>(
+    `SELECT status, decision FROM permission_requests WHERE id = ?`,
+    [id],
+  );
+}
+
+function repliedRequestIds(): string[] {
+  const calls = mocks.publishSessionRunEvent.mock.calls as unknown[][];
+  return calls
+    .map((call) => call[1] as { type?: string; requestId?: string } | undefined)
+    .filter((event) => event?.type === 'permission_replied')
+    .map((event) => event?.requestId ?? '');
+}
+
 function buildPermissionResumePayload(clientRequestId: string): Record<string, unknown> {
   return {
     clientRequestId,
@@ -120,6 +157,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM permission_grants', []);
   dbModule.sqliteRun('DELETE FROM permission_decision_logs', []);
   dbModule.sqliteRun('DELETE FROM permission_requests', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
@@ -231,6 +269,155 @@ describe('permissions routes error contracts', () => {
     } finally {
       teamResumeContext.clearInternalTeamResumeRequest(clientRequestId);
       delete process.env['OPENAWORK_CONTINUE_ON_DENY'];
+      await app.close();
+    }
+  });
+});
+
+describe('permission reply · always 回溯放行', () => {
+  it('permanent：放行同会话同类别中已被 always 模式覆盖的 pending，未覆盖的保持 pending', async () => {
+    seedPermissionRequestRow({ id: 'p-primary', scope: 'ls -la', always: ['ls *'] });
+    seedPermissionRequestRow({ id: 'p-covered', scope: 'ls /tmp' });
+    seedPermissionRequestRow({ id: 'p-unrelated', scope: 'git status' });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: { requestId: 'p-primary', decision: 'permanent' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('p-primary')).toMatchObject({
+        status: 'approved',
+        decision: 'permanent',
+      });
+      expect(readPermissionRow('p-covered')).toMatchObject({
+        status: 'approved',
+        decision: 'permanent',
+      });
+      expect(readPermissionRow('p-unrelated')).toMatchObject({ status: 'pending', decision: null });
+      expect(repliedRequestIds()).toContain('p-covered');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('session：回溯放行同会话被覆盖的 pending（decision=session）', async () => {
+    seedPermissionRequestRow({ id: 's-primary', scope: 'ls -la', always: ['ls *'] });
+    seedPermissionRequestRow({ id: 's-covered', scope: 'ls -a' });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: { requestId: 's-primary', decision: 'session' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('s-covered')).toMatchObject({
+        status: 'approved',
+        decision: 'session',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reject：不触发放行级联，被覆盖的 pending 一并拒绝', async () => {
+    seedPermissionRequestRow({ id: 'r-primary', scope: 'ls -la', always: ['ls *'] });
+    seedPermissionRequestRow({ id: 'r-covered', scope: 'ls /tmp' });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: { requestId: 'r-primary', decision: 'reject' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('r-covered')).toMatchObject({
+        status: 'rejected',
+        decision: 'reject',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('alwaysOverride 收窄授权范围：未被收窄模式覆盖的 pending 不级联放行', async () => {
+    seedPermissionRequestRow({ id: 'o-primary', scope: 'ls -la', always: ['ls *'] });
+    seedPermissionRequestRow({ id: 'o-covered', scope: 'ls /tmp' });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload: { requestId: 'o-primary', decision: 'permanent', alwaysOverride: ['ls -la'] },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('o-primary')).toMatchObject({
+        status: 'approved',
+        decision: 'permanent',
+      });
+      expect(readPermissionRow('o-covered')).toMatchObject({ status: 'pending', decision: null });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('权限回复保留持久化类别', () => {
+  it.each([
+    ['channel', 'session'],
+    ['channel', 'permanent'],
+    ['lsp', 'session'],
+    ['lsp', 'permanent'],
+    ['task', 'session'],
+  ] as const)('%s / %s 不扩大到其它类别', async (category, decision) => {
+    seedPermissionRequestRow({
+      id: 'category-primary',
+      toolName: category,
+      scope: 'first',
+      always: ['*'],
+    });
+    seedPermissionRequestRow({ id: 'category-covered', toolName: category, scope: 'second' });
+    seedPermissionRequestRow({ id: 'custom-unrelated', toolName: 'custom', scope: 'media' });
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'category-primary', decision },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('category-covered')).toMatchObject({ status: 'approved', decision });
+      expect(readPermissionRow('custom-unrelated')).toMatchObject({ status: 'pending' });
+      if (decision === 'permanent') {
+        expect(mocks.persistWorkspacePermanentPermission).toHaveBeenCalledWith({
+          sessionId: SESSION_ID,
+          toolName: category,
+          scope: '*',
+        });
+      } else {
+        expect(
+          dbModule.sqliteAll<{ tool_name: string }>(
+            "SELECT tool_name FROM permission_requests WHERE scope = '*' AND status = 'approved'",
+            [],
+          ),
+        ).toEqual([{ tool_name: category }]);
+      }
+    } finally {
       await app.close();
     }
   });

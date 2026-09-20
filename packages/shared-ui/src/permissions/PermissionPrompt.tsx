@@ -313,6 +313,24 @@ export function categorizeAlwaysPatterns(
   ];
 }
 
+/**
+ * Effective "always" scope level: the user-picked category when present,
+ * otherwise the broadest level (last). Single implementation shared by all
+ * permission surfaces so the default selection cannot drift between them.
+ */
+export function resolveAlwaysScopeSelection(
+  previewAction: string | undefined,
+  scope: string,
+  always: string[] | undefined,
+  selectedCategory?: AlwaysScopeLevel['category'],
+): { levels: AlwaysScopeLevel[]; selectedLevel: AlwaysScopeLevel | undefined } {
+  const levels = categorizeAlwaysPatterns(previewAction, scope, always);
+  const selectedLevel =
+    (selectedCategory ? levels.find((level) => level.category === selectedCategory) : undefined) ??
+    levels[levels.length - 1];
+  return { levels, selectedLevel };
+}
+
 export interface PermissionPromptProps {
   requestId: string;
   toolName: string;

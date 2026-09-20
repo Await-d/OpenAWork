@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { buildAxiosRequestOptionsMock, dnsLookupMock, requestWithSafeRedirectsMock } = vi.hoisted(
   () => ({
@@ -21,6 +21,17 @@ import { fetchOpenWebSearchPage } from '../../mcp/open-websearch-fetch-web.js';
 import { extractReadableContent, extractTitle } from '../../mcp/open-websearch-html.js';
 import type { MCPToolResult } from '@openAwork/mcp-client';
 import { callOpenWebSearchVirtualMcp } from '../../mcp/virtual-open-websearch-mcp.js';
+import { __setDnsLookupForTests } from 'open-websearch/build/utils/urlSafety.js';
+
+// 上游 urlSafety.js 位于 node_modules，是 vitest 的外部依赖：对 node:dns/promises 的
+// vi.mock 不会穿透到它。改用上游为此导出的测试钩子，让预检走同一个 DNS mock。
+beforeEach(() => {
+  __setDnsLookupForTests(dnsLookupMock);
+});
+
+afterEach(() => {
+  __setDnsLookupForTests();
+});
 
 const NAV_MARKER = '站点导航链接入口';
 const FOOTER_MARKER = '版权页脚标记文本';

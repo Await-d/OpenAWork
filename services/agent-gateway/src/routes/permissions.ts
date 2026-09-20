@@ -4,7 +4,6 @@ import { z } from 'zod';
 import {
   mapPermissionRequestRow,
   parseApprovedPermissionResumePayload,
-  parsePermissionAlwaysJson,
   parsePermissionRequestClientRequestId,
   type PermissionDecision,
   type PermissionRequestStatus,
@@ -15,7 +14,7 @@ import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody } from '../infra/parse-request.js';
 import { clearInternalTeamResumeRequest } from '../team/team-resume-context.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import {
   createPermissionAskedEvent,
   createPermissionRepliedEvent,
@@ -31,7 +30,11 @@ import {
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
 import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
 import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
-import { resolvePermissionCategory } from '@openAwork/agent-core';
+import {
+  cascadeApproveCoveredPendingPermissions,
+  resolveAlwaysPatterns,
+  resolvePermissionReplyCategory,
+} from '../permission/permission-reply-always.js';
 
 const permissionRouteRiskLevelSchema = z.enum(['low', 'medium', 'high']);
 const permissionRouteDecisionSchema = z.enum(['once', 'session', 'permanent', 'reject']);
@@ -158,6 +161,58 @@ export function cancelPendingPermissionRequestsByClientRequest(input: {
   }
 
   return requests.length;
+}
+
+/**
+ * 按会话把 pending/deciding 权限请求置为终态（rejected）——快速停止子代理专用原语。
+ *
+ * 与 `cancelPendingPermissionRequestsByClientRequest` 的区别（因此不可复用）：
+ *   - 不做回合筛选，直接清扫该会话全部待处理权限请求；
+ *   - `deciding`（父代理自动决策进行中）也必须一并作废，否则被停止的子会话会永远停在 paused；
+ *   - 不触碰 team resume 注册（停止子代理不等价于回退回合）。
+ *
+ * 返回被置终态的请求数；无匹配行时返回 0（重复调用幂等）。
+ */
+export function cancelPendingPermissionRequestsForSession(input: {
+  sessionId: string;
+  userId: string;
+}): number {
+  if (!ownsSession(input.sessionId, input.userId)) {
+    return 0;
+  }
+
+  const requests = sqliteAll<PermissionRequestRow>(
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
+     FROM permission_requests
+     WHERE session_id = ? AND status IN ('pending', 'deciding')
+     ORDER BY created_at ASC`,
+    [input.sessionId],
+  );
+
+  let transitionedCount = 0;
+  for (const request of requests) {
+    const changes = sqliteRunWithChanges(
+      `UPDATE permission_requests
+       SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status IN ('pending', 'deciding')`,
+      [request.id, input.sessionId],
+    );
+    if (changes === 0) {
+      continue;
+    }
+
+    transitionedCount += changes;
+    const requestClientRequestId = parsePermissionRequestClientRequestId(
+      request.request_payload_json,
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createPermissionRepliedEvent({ requestId: request.id, decision: 'reject' }),
+      requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
+    );
+  }
+
+  return transitionedCount;
 }
 
 export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
@@ -335,14 +390,8 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         // permanent grant to "*" just because the column was missing.
         // If the client provides `alwaysOverride`, use that instead — this
         // allows the UI to let users pick a narrower or broader scope.
-        const category = resolvePermissionCategory(permissionRequest.tool_name);
-        const alwaysPatterns =
-          body.alwaysOverride && body.alwaysOverride.length > 0
-            ? body.alwaysOverride
-            : (() => {
-                const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
-                return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
-              })();
+        const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
+        const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
         for (const pattern of alwaysPatterns) {
           // Durable, user-scoped grant first: this is the source of truth for
           // cross-session permanent approval and must not depend on the
@@ -375,14 +424,8 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         // matches via wildcard. Synthetic rows are keyed by (tool_name, scope)
         // to stay idempotent if the same broad approval is granted twice.
         // If the client provides `alwaysOverride`, use that instead.
-        const category = resolvePermissionCategory(permissionRequest.tool_name);
-        const alwaysPatterns =
-          body.alwaysOverride && body.alwaysOverride.length > 0
-            ? body.alwaysOverride
-            : (() => {
-                const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
-                return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
-              })();
+        const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
+        const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
         for (const pattern of alwaysPatterns) {
           const existing = sqliteGet<{ id: string }>(
             `SELECT id FROM permission_requests
@@ -420,6 +463,28 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       const resumePayload = parseApprovedPermissionResumePayload(
         permissionRequest.request_payload_json,
       );
+
+      // Cascade approve（对齐 opencode 的 always 回溯放行，permission.ts:250-283）：
+      // 授予「本会话允许 / 永久允许」后，同会话同类别中已被新规则覆盖的其它 pending
+      // 请求一并自动放行，避免用户对同一批调用逐个点击。
+      //
+      // 有意不自动 resume：每次 resume 都会启动一次完整 LLM 续跑，并发续跑同一会话
+      // 不安全；已作答请求的 resume 会驱动本回合，而被放行的请求是持久审批行，后续
+      // 重试会直接命中。范围限定同会话——跨会话 pending 属罕见场景，且其它会话的新
+      // 请求已由 user 级 grant 自动放行。
+      const cascadedRequestIds: string[] = [];
+      if (body.decision === 'permanent' || body.decision === 'session') {
+        cascadedRequestIds.push(
+          ...cascadeApproveCoveredPendingPermissions({
+            sessionId,
+            excludeRequestId: body.requestId,
+            category: resolvePermissionReplyCategory(permissionRequest.tool_name),
+            patterns: resolveAlwaysPatterns(permissionRequest, body.alwaysOverride),
+            decision: body.decision,
+          }),
+        );
+      }
+
       // Continue-on-deny: when enabled, feed the rejection as a tool error and
       // resume the LLM loop so it can try a different approach.
       const continueOnDeny =
@@ -429,7 +494,6 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       // Cascade reject: when rejecting, also reject all other pending requests in the same session.
       // This mirrors opencode's behavior where rejecting one permission cascades to all pending.
-      const cascadedRequestIds: string[] = [];
       if (body.decision === 'reject') {
         const otherPending = sqliteAll<PermissionRequestRow>(
           `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at

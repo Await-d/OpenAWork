@@ -6,7 +6,7 @@
  *  - `onData` 经 16ms 合并成一次 `/stdin` POST 且保序；
  *  - 快捷键接进搜索条 / 剪贴板的判定；
  *  - 写入失败有可见反馈；
- *  - `interactive` 驱动 convertEol / 首次 resize 时序 / 输入门控与禁用横幅。
+ *  - `interactive` 驱动 convertEol（真 PTY 关、管道开）；不再拦截输入、不再有禁用横幅。
  *
  * xterm 本体在 jsdom 里跑不起来（需要 canvas / matchMedia），所以把
  * `@xterm/*` 全部换成可观测的替身 —— 我们要验证的是**接线语义**，
@@ -509,13 +509,11 @@ describe('InteractiveTerminalView', () => {
     expect(screen.queryByTestId('terminal-input-disabled-banner')).toBeNull();
   });
 
-  it('interactive=false 时渲染禁用横幅，且不向 shell 转发输入', async () => {
+  it('interactive=false（管道后端）仍向 shell 转发输入，且不渲染禁用横幅', async () => {
     vi.useFakeTimers();
     renderView(makeTerminalView({ interactive: false }));
 
-    expect(screen.getByTestId('terminal-input-disabled-banner').textContent).toContain(
-      '输入已禁用',
-    );
+    expect(screen.queryByTestId('terminal-input-disabled-banner')).toBeNull();
     // 非交互后端仍保留 convertEol=true（原有 pipe 行为）。
     expect(hoisted.terminalOptions.at(-1)?.convertEol).toBe(true);
 
@@ -525,9 +523,9 @@ describe('InteractiveTerminalView', () => {
       await vi.advanceTimersByTimeAsync(50);
     });
 
-    expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/stdin'))).toHaveLength(
-      0,
-    );
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/stdin')).length,
+    ).toBeGreaterThan(0);
   });
 
   describe('内容区右键菜单的面板命令段', () => {

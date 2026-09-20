@@ -6,7 +6,7 @@ import {
   createPermissionsClient,
   createSessionsClient,
 } from '@openAwork/web-client';
-import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
+import { resolveAlwaysScopeSelection } from '@openAwork/shared-ui';
 import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import type {
   NotificationPreferenceEventType,
@@ -458,14 +458,12 @@ export default function NotificationCenter({
         }
         let alwaysOverride: string[] | undefined;
         if (decision !== 'once' && decision !== 'reject' && details) {
-          const levels = categorizeAlwaysPatterns(
+          const { selectedLevel } = resolveAlwaysScopeSelection(
             details.previewAction,
             details.scope,
             details.always,
+            selectedScopes[notification.id] ?? 'base',
           );
-          const scopeCategory = selectedScopes[notification.id] ?? 'base';
-          const selectedLevel =
-            levels.find((level) => level.category === scopeCategory) ?? levels[levels.length - 1];
           if (selectedLevel) {
             alwaysOverride = [selectedLevel.pattern];
           }

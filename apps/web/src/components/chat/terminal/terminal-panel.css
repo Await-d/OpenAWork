@@ -321,6 +321,10 @@
   border: none;
   background: transparent;
   color: var(--fg-muted);
+  /* 触摸 / 触控笔下 tab 是拖拽抓手：不写 touch-action 时浏览器会把移动判成滚动，
+     发 pointercancel 掐断手势（表现 = 拖不动）；user-select 防拖拽起手选中标签文字。 */
+  touch-action: none;
+  user-select: none;
   transition:
     background var(--dur-micro) var(--ease-micro),
     color var(--dur-micro) var(--ease-micro);

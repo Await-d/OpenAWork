@@ -86,6 +86,7 @@ vi.mock('../../v2-runtime/upstream/index.js', async (orig) => {
 
 import { runLookAtTool } from '../../tools/look-at-tools.js';
 import type * as UpstreamActual from '../../v2-runtime/upstream/index.js';
+import { __setDnsLookupForTests } from 'open-websearch/build/utils/urlSafety.js';
 
 function createRoute(overrides?: Partial<ModelRouteConfig>): ModelRouteConfig {
   return {
@@ -113,6 +114,9 @@ describe('runLookAtTool — file size guard', () => {
     mocks.validateWorkspacePath.mockImplementation((p: string) => p);
     mocks.resolveModelRoute.mockReturnValue(createRoute());
     mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    // 上游 urlSafety.js 位于 node_modules，是 vitest 的外部依赖：对 node:dns/promises 的
+    // vi.mock 不会穿透到它。改用上游为此导出的测试钩子，让预检走同一个 DNS mock。
+    __setDnsLookupForTests(mocks.lookup);
     mocks.runUpstreamGenerate.mockReturnValue(
       Effect.succeed({
         text: 'ok',
@@ -125,6 +129,7 @@ describe('runLookAtTool — file size guard', () => {
   });
 
   afterEach(() => {
+    __setDnsLookupForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

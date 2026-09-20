@@ -150,6 +150,8 @@ export interface ChatConversationViewProps {
   visibleStreaming: boolean;
   showSessionSwitchSkeleton: boolean;
   remoteSessionBusyState: 'running' | 'paused' | null;
+  /** 客户端是否正在重新接入（attach 重试待触发）；透传给 SessionRunStateBar。 */
+  reconnecting?: boolean;
   pendingPermissions: PendingPermissionRequest[];
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
@@ -451,6 +453,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     visibleStreaming,
     showSessionSwitchSkeleton,
     remoteSessionBusyState,
+    reconnecting,
     pendingPermissions,
     resolveInlinePermissionActions,
     providerCatalog,
@@ -796,6 +799,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onOpenRecovery={onOpenRecovery}
           pendingPermissionsCount={pendingPermissions.length}
           pendingQuestionsCount={pendingQuestionsCount}
+          reconnecting={reconnecting}
           status={remoteSessionBusyState}
           stopCapability={stopCapability}
         />

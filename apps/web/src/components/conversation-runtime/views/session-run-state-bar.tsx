@@ -4,29 +4,120 @@ import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
 
 type StopCapability = 'none' | 'precise' | 'best_effort' | 'observe_only';
 
-function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 'paused'>): {
-  badge: string;
-  description: string;
+/** 运行状态条相位：待办交互优先于 status，其余按重连、权限续跑、status 依次收敛。 */
+type SessionRunStatePhase =
+  'awaiting_permission' | 'awaiting_question' | 'continuing' | 'resuming' | 'running' | 'paused';
+
+interface SessionRunStateTone {
   dotColor: string;
   panelBackground: string;
   panelBorder: string;
-} {
-  if (status === 'paused') {
+}
+
+interface SessionRunStateMeta extends SessionRunStateTone {
+  badge: string;
+  description: string;
+}
+
+/** 警示色调：待审批 / 待回答 / 恢复中 / paused 共用，避免样式对象散落多处。 */
+const WARNING_TONE: SessionRunStateTone = {
+  dotColor: 'var(--warning)',
+  panelBackground: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+  panelBorder: '1px solid color-mix(in srgb, var(--warning) 26%, var(--border-default))',
+};
+
+/** 强调色调：继续中 / running 共用（与既有 running 样式逐字节一致）。 */
+const ACCENT_TONE: SessionRunStateTone = {
+  dotColor: 'var(--accent)',
+  panelBackground: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--accent) 14%)',
+  panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
+};
+
+/**
+ * 把「待办交互 / 重连 / 权限续跑 / 服务端状态」收敛成唯一相位。
+ * 优先级：待审批 > 待回答 > 恢复中(重连) > 继续中(权限续跑) > status。
+ */
+function resolveSessionRunStatePhase({
+  latestUpstreamSummary,
+  pendingPermissionsCount,
+  pendingQuestionsCount,
+  reconnecting,
+  status,
+}: {
+  latestUpstreamSummary: UpstreamStreamSummary | null;
+  pendingPermissionsCount: number;
+  pendingQuestionsCount: number;
+  reconnecting: boolean;
+  status: Extract<SessionStateStatus, 'running' | 'paused'>;
+}): SessionRunStatePhase {
+  if (pendingPermissionsCount > 0) {
+    return 'awaiting_permission';
+  }
+
+  if (pendingQuestionsCount > 0) {
+    return 'awaiting_question';
+  }
+
+  // 传输出错后 attach 重试期间才算「重新接入」，与正常的「审批 → 续跑」happy path 无关。
+  if (reconnecting) {
+    return 'resuming';
+  }
+
+  // `tool_permission` 表示上一轮因权限暂停收尾；在恢复轮次产出新 summary 之前，
+  // 回答仍是同一次，因此只表示「继续中」而非重连。
+  if (latestUpstreamSummary?.stopReason === 'tool_permission') {
+    return 'continuing';
+  }
+
+  return status;
+}
+
+/** 相位 → 文案 / 色调的唯一纯函数映射；调用方不得复制分支内样式对象。 */
+function getSessionRunStateMeta(phase: SessionRunStatePhase): SessionRunStateMeta {
+  if (phase === 'awaiting_permission') {
+    return {
+      badge: '等待审批',
+      description: '当前会话已暂停，等待你批准或拒绝授权后会继续同步最新结果。',
+      ...WARNING_TONE,
+    };
+  }
+
+  if (phase === 'awaiting_question') {
+    return {
+      badge: '等待回答',
+      description: '当前会话已暂停，等待你回答问题后会继续同步最新结果。',
+      ...WARNING_TONE,
+    };
+  }
+
+  if (phase === 'continuing') {
+    return {
+      badge: '继续中',
+      description: '已处理授权，助手正在继续本次回答并同步最新输出。',
+      ...ACCENT_TONE,
+    };
+  }
+
+  if (phase === 'resuming') {
+    return {
+      badge: '恢复中',
+      description: '实时连接中断，正在重新接入并同步最新输出。',
+      ...WARNING_TONE,
+    };
+  }
+
+  if (phase === 'paused') {
     return {
       badge: '等待处理',
       description: '当前会话已暂停，处理权限或问题后会继续同步最新结果。',
-      dotColor: 'var(--warning)',
-      panelBackground: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
-      panelBorder: '1px solid color-mix(in srgb, var(--warning) 26%, var(--border-default))',
+      ...WARNING_TONE,
     };
   }
 
   return {
     badge: '持续运行中',
     description: '你切回当前会话后，页面会继续自动同步最新消息和状态。',
-    dotColor: 'var(--accent)',
-    panelBackground: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--accent) 14%)',
-    panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
+    ...ACCENT_TONE,
   };
 }
 
@@ -125,6 +216,7 @@ export function SessionRunStateBar({
   onOpenRecovery,
   pendingPermissionsCount = 0,
   pendingQuestionsCount = 0,
+  reconnecting = false,
   status,
   stopCapability = 'observe_only',
 }: {
@@ -140,10 +232,19 @@ export function SessionRunStateBar({
   onOpenRecovery?: () => void;
   pendingPermissionsCount?: number;
   pendingQuestionsCount?: number;
+  /** 客户端是否正在重新接入（attach 重试待触发）；为 true 且无待办交互时展示「恢复中」。 */
+  reconnecting?: boolean;
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
   stopCapability?: StopCapability;
 }) {
-  const meta = getSessionRunStateMeta(status);
+  const phase = resolveSessionRunStatePhase({
+    latestUpstreamSummary,
+    pendingPermissionsCount,
+    pendingQuestionsCount,
+    reconnecting,
+    status,
+  });
+  const meta = getSessionRunStateMeta(phase);
   const capabilityCopy = getStopCapabilityCopy(stopCapability);
   const capabilityTone = getStopCapabilityTone(stopCapability);
 
@@ -302,7 +403,16 @@ export function SessionRunStatePlaceholder({
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
   stopCapability?: StopCapability;
 }) {
-  const meta = getSessionRunStateMeta(status);
+  // 占位符不携带待办计数与重连标记，走同一相位解析器以保持行为不变。
+  const meta = getSessionRunStateMeta(
+    resolveSessionRunStatePhase({
+      latestUpstreamSummary: null,
+      pendingPermissionsCount: 0,
+      pendingQuestionsCount: 0,
+      reconnecting: false,
+      status,
+    }),
+  );
   const capabilityCopy = getStopCapabilityCopy(stopCapability);
   const capabilityTone = getStopCapabilityTone(stopCapability);
 

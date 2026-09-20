@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
 import {
   AgentTaskManagerImpl,
@@ -18,11 +17,7 @@ import {
 } from '@openAwork/agent-core';
 import type { BatchSubToolProgress, RunEvent } from '@openAwork/shared';
 import type { ZodTypeAny } from 'zod';
-import {
-  applyPatchToolDefinition,
-  buildApplyPatchPermissionScope,
-  executeApplyPatch,
-} from './apply-patch-tools.js';
+import { applyPatchToolDefinition, executeApplyPatch } from './apply-patch-tools.js';
 import {
   astGrepReplaceToolDefinition,
   astGrepSearchToolDefinition,
@@ -34,7 +29,6 @@ import {
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import { bashToolDefinition, deriveBashDescription, runBashCommand } from './bash-tools.js';
-import { buildBashApprovalPatterns, tokenizeCommand } from './bash-arity.js';
 import {
   bashKillToolDefinition,
   bashOutputToolDefinition,
@@ -63,7 +57,7 @@ import {
 } from './codegraph-tools.js';
 import { dispatchClaudeCodeTool } from '../claude-code/claude-code-tool-dispatch.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
-import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { isTeamRoleLayer } from '../handoff/capability/apply-team-layer-tools.js';
 import { resolveSessionTurnClientRequestId } from '../handoff/store/handoff-store.js';
 import {
@@ -137,12 +131,7 @@ import {
   resolveSshRemoteExecutionContext,
   type SshRemoteResolution,
 } from './ssh-remote-execution.js';
-import {
-  callMcpToolForSession,
-  getConfiguredMcpServerForSession,
-  getMcpServerFingerprint,
-  listMcpToolsForSession,
-} from '../mcp/mcp-runtime.js';
+import { callMcpToolForSession, listMcpToolsForSession } from '../mcp/mcp-runtime.js';
 import { parseMcpCallRawInput, parseMcpListToolsRawInput } from '../mcp/mcp-tool-input.js';
 import { transitionToolToRunning } from '../message/message-store-v2.js';
 import {
@@ -162,7 +151,6 @@ import {
 import { findMatchingPermissionGrant } from '../permission/permission-grants-store.js';
 import {
   type PermissionDecision,
-  type PermissionRiskLevel,
   resolvePermissionRequestTimeoutMs,
 } from '../permission/permission-contract.js';
 import {
@@ -171,6 +159,10 @@ import {
   type PermissionAction,
   type PermissionRule,
 } from '../permission/permission-rules.js';
+import {
+  buildToolPermissionRequestContext,
+  type PermissionRequestContext,
+} from '../permission/tool-permission-derivers.js';
 import {
   buildExitPlanModeQuestionInput,
   enterPlanModeToolDefinition,
@@ -285,7 +277,6 @@ import {
   grepTool,
   listTool,
   readTool,
-  resolveWorkspaceReviewFilePath,
   WORKSPACE_TOOL_NAMES,
   workspaceCreateDirectoryTool,
   workspaceReviewDiffTool,
@@ -457,7 +448,7 @@ const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
   })),
 ];
 
-const TOOL_WHITELIST = new Set<string>([
+export const TOOL_WHITELIST = new Set<string>([
   'apply_patch',
   'bash',
   runBashInBackgroundToolDefinition.name,
@@ -540,15 +531,6 @@ interface PermissionPendingRow {
 
 interface QuestionPendingRow {
   id: string;
-}
-
-interface PermissionRequestContext {
-  scope: string;
-  reason: string;
-  riskLevel: PermissionRiskLevel;
-  previewAction: string;
-  /** Patterns to auto-approve when user selects "always" (matches opencode ctx.ask always). */
-  always: string[];
 }
 
 type PermissionState =
@@ -642,7 +624,7 @@ export type ChildSessionTerminalReason = 'timeout' | 'cancelled';
 /** The only timeout source still emitted automatically by the current runtime. */
 export type ChildSessionTimeoutSource = 'first_response';
 
-const CHILD_SESSION_TERMINAL_REASON_KEY = 'terminalReason';
+export const CHILD_SESSION_TERMINAL_REASON_KEY = 'terminalReason';
 const CHILD_SESSION_TIMEOUT_SOURCE_KEY = 'timeoutSource';
 const DEFAULT_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS = 30_000;
 
@@ -1523,19 +1505,6 @@ const gatewayLspTouchTool: ToolDefinition<
   },
 };
 
-/**
- * Convert an absolute workspace path to a relative scope string.
- * Matches opencode's `path.relative(worktree, filePath)` pattern so that
- * permission rules are portable and don't depend on the host's absolute path.
- */
-function toRelativeScope(absolutePath: string): string {
-  if (absolutePath.startsWith(WORKSPACE_ROOT)) {
-    const rel = absolutePath.slice(WORKSPACE_ROOT.length).replace(/^\//, '');
-    return rel || '.';
-  }
-  return absolutePath;
-}
-
 function formatSessionWorkspaceViolation(
   sessionId: string,
   path: string,
@@ -1587,510 +1556,19 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
   }
 }
 
-function parseReadOnlyGitBashCatCommand(command: string): string | null {
-  if (/[;&|<>`$()]/.test(command)) {
-    return null;
-  }
-  const tokens = tokenizeCommand(command.trim());
-  if (tokens.length === 2 && tokens[0] === 'cat') {
-    return tokens[1] ?? null;
-  }
-  if (tokens.length === 3 && tokens[0] === 'cat' && tokens[1] === '--') {
-    return tokens[2] ?? null;
-  }
-  return null;
-}
-
-function isAutoAllowedGitBashRead(input: {
-  rawInput: Record<string, unknown>;
-  sessionId: string;
-}): boolean {
-  const command = typeof input.rawInput.command === 'string' ? input.rawInput.command.trim() : '';
-  const filePath = command ? parseReadOnlyGitBashCatCommand(command) : null;
-  if (!filePath) {
-    return false;
-  }
-  return validateSessionWorkspacePath({
-    path: rewriteUnboundPlaceholderPath(input.sessionId, filePath),
-    sessionId: input.sessionId,
-  }).ok;
-}
-
-/**
- * Threshold (in characters) beyond which a bash command is considered "long"
- * and should be summarised in the permission prompt instead of shown verbatim.
- */
-const BASH_COMMAND_SUMMARY_THRESHOLD = 120;
-
-/**
- * Produce a human-friendly summary of a bash command for use in the permission
- * prompt's `previewAction` field.
- *
- * The `scope` field is kept as the full original command (needed for correct
- * permission matching on the gateway side), but `previewAction` only shows a
- * summary so the permission popup stays compact.
- *
- * When the command is short (≤ threshold chars, single line), it is returned
- * as-is. When it is long or multi-line, only the first meaningful line is kept
- * and a `…(共 N 行)` suffix is appended so the user can immediately tell that
- * the full command is larger than what is shown.
- *
- * Examples:
- *   "ls -la"                              → "ls -la"
- *   "python script.py\nimport os\n..."    → "python script.py …(共 15 行)"
- *   "@'...big script...'@ | python x.py"  → "@'...big script...'@ | python x.py …(共 3 行)"
- */
-function summarizeBashCommand(command: string): string {
-  const trimmed = command.trim();
-  const lines = trimmed.split('\n');
-
-  if (lines.length <= 1 && trimmed.length <= BASH_COMMAND_SUMMARY_THRESHOLD) {
-    return trimmed;
-  }
-
-  const firstLine = (lines[0] ?? '').trim();
-  const firstLineClipped =
-    firstLine.length > BASH_COMMAND_SUMMARY_THRESHOLD
-      ? `${firstLine.slice(0, BASH_COMMAND_SUMMARY_THRESHOLD)}…`
-      : firstLine;
-
-  if (lines.length > 1) {
-    return `${firstLineClipped} …(共 ${lines.length} 行)`;
-  }
-
-  return `${firstLineClipped}…`;
-}
-
-/**
- * 文件类工具（write / edit / multi_edit）的权限作用域构造。
- *
- * 本地路径校验失败时：若会话运行在 SSH 远程模式，则用远端路径原文作为
- * 作用域，保证远端编辑同样受可配置的 'ask' 规则管辖；否则返回 null
- * （与既有行为一致 —— 无有效路径时不要求审批）。
- */
-function buildFileToolPermissionContext(input: {
-  sessionId: string;
-  pathValue: string | undefined;
-  sshManaged: boolean;
-  reason: string;
-  remoteReason: string;
-  previewVerb: string;
-}): PermissionRequestContext | null {
-  const effectivePath = input.pathValue
-    ? rewriteUnboundPlaceholderPath(input.sessionId, input.pathValue)
-    : null;
-  const validation = effectivePath
-    ? validateSessionWorkspacePath({ path: effectivePath, sessionId: input.sessionId })
-    : null;
-  const safePath = validation?.ok ? validation.safePath : null;
-
-  if (!safePath) {
-    const remotePath = input.pathValue?.trim();
-    if (input.sshManaged && remotePath && remotePath.length > 0) {
-      return {
-        scope: remotePath,
-        reason: input.remoteReason,
-        riskLevel: 'medium',
-        previewAction: `${input.previewVerb} SSH 远端 ${remotePath}`,
-        always: ['*'],
-      };
-    }
-    return null;
-  }
-
-  return {
-    scope: toRelativeScope(safePath),
-    reason: input.reason,
-    riskLevel: 'medium',
-    previewAction: `${input.previewVerb} ${safePath}`,
-    always: ['*'],
-  };
-}
-
 function buildPermissionRequestContext(
   sessionId: string,
   request: ToolCallRequest,
   sshManaged = false,
 ): PermissionRequestContext | null {
-  const rawInput = request.rawInput as Record<string, unknown>;
-  const pathValue = readToolPathInput(rawInput);
-
-  // Flat MCP tools (PR-C): `mcp__<serverId>__<toolName>` is dynamic and
-  // cannot be matched by the static `switch` below, so we intercept it
-  // up front. The permission scope mirrors the legacy `mcp_call` path
-  // (`serverId:toolName:fingerprint`) so users who already granted
-  // "always allow serverId:*" in the legacy UI don't see a second
-  // prompt after the flattening rollout.
-  const flatMcp = parseFlatMcpToolName(request.toolName);
-  if (flatMcp) {
-    if (
-      flatMcp.serverId === 'git_bash' &&
-      flatMcp.toolName === 'run' &&
-      isAutoAllowedGitBashRead({ rawInput, sessionId })
-    ) {
-      return null;
-    }
-    try {
-      const server = getConfiguredMcpServerForSession(sessionId, flatMcp.serverId);
-      const serverFingerprint = getMcpServerFingerprint(server);
-      const previewArguments = JSON.stringify(rawInput).slice(0, 240);
-      return {
-        scope: `${flatMcp.serverId}:${flatMcp.toolName}:${serverFingerprint}`,
-        reason: '需要调用 MCP 工具',
-        riskLevel: 'high',
-        previewAction: `调用 ${flatMcp.serverId}/${flatMcp.toolName} ${previewArguments}`,
-        always: [`${flatMcp.serverId}:${flatMcp.toolName}:*`, `${flatMcp.serverId}:*`],
-      };
-    } catch {
-      // If the server is no longer configured (user removed it mid-turn),
-      // fall through to the generic permission prompt so the LLM gets a
-      // deterministic error rather than a silent null.
-      return null;
-    }
-  }
-
-  switch (request.toolName) {
-    case 'write': {
-      return buildFileToolPermissionContext({
-        sessionId,
-        pathValue,
-        sshManaged,
-        reason: '需要写入工作区文件',
-        remoteReason: '需要写入 SSH 远端文件',
-        previewVerb: '写入',
-      });
-    }
-    case 'edit': {
-      return buildFileToolPermissionContext({
-        sessionId,
-        pathValue,
-        sshManaged,
-        reason: '需要编辑工作区文件',
-        remoteReason: '需要编辑 SSH 远端文件',
-        previewVerb: '编辑',
-      });
-    }
-    case 'multi_edit': {
-      return buildFileToolPermissionContext({
-        sessionId,
-        pathValue,
-        sshManaged,
-        reason: '需要批量编辑工作区文件',
-        remoteReason: '需要批量编辑 SSH 远端文件',
-        previewVerb: '批量编辑',
-      });
-    }
-    case 'task_create': {
-      const subject = typeof rawInput.subject === 'string' ? rawInput.subject.trim() : '';
-      return {
-        scope: subject ? `task:${subject}` : 'task:*',
-        reason: '需要创建子任务',
-        riskLevel: 'medium',
-        previewAction: subject ? `创建子任务: ${subject}` : '创建子任务',
-        always: ['*'],
-      };
-    }
-    case 'task_update': {
-      const id = typeof rawInput.id === 'string' ? rawInput.id.trim() : '';
-      return {
-        scope: id ? `task:${id}` : 'task:*',
-        reason: '需要更新子任务',
-        riskLevel: 'low',
-        previewAction: id ? `更新子任务 ${id}` : '更新子任务',
-        always: ['*'],
-      };
-    }
-    case 'call_omo_agent': {
-      const agentDesc = typeof rawInput.description === 'string' ? rawInput.description.trim() : '';
-      return {
-        scope: agentDesc ? `agent:${agentDesc}` : 'agent:*',
-        reason: '需要调用子 Agent',
-        riskLevel: 'high',
-        previewAction: agentDesc ? `调用子 Agent: ${agentDesc}` : '调用子 Agent',
-        always: ['*'],
-      };
-    }
-    case 'PluginSendMessage':
-    case 'PluginSendImage':
-    case 'WeixinSendImage':
-    case 'WeixinSendFile':
-    case 'FeishuSendImage':
-    case 'FeishuSendFile':
-    case 'FeishuAtMember':
-    case 'FeishuSendUrgent':
-    case 'FeishuBitableCreateRecords':
-    case 'FeishuBitableUpdateRecords':
-    case 'FeishuBitableDeleteRecords': {
-      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
-      const chatId = typeof rawInput.chat_id === 'string' ? rawInput.chat_id.trim() : '';
-      return {
-        scope: `channel:${pluginId || '*'}:${chatId || '*'}:send`,
-        reason: '需要向消息渠道发送内容',
-        riskLevel: 'high',
-        previewAction: `向消息渠道发送 ${request.toolName}`,
-        always: ['*'],
-      };
-    }
-    case 'PluginReplyMessage': {
-      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
-      const messageId = typeof rawInput.message_id === 'string' ? rawInput.message_id.trim() : '';
-      return {
-        scope: `channel:${pluginId || '*'}:reply:${messageId || '*'}`,
-        reason: '需要回复消息渠道中的指定消息',
-        riskLevel: 'high',
-        previewAction: `回复消息渠道消息 ${messageId || '*'}`,
-        always: ['*'],
-      };
-    }
-    case 'PluginGetGroupMessages':
-    case 'PluginListGroups':
-    case 'PluginSummarizeGroup':
-    case 'PluginGetCurrentChatMessages':
-    case 'FeishuListChatMembers':
-    case 'FeishuBitableListApps':
-    case 'FeishuBitableListTables':
-    case 'FeishuBitableListFields':
-    case 'FeishuBitableGetRecords': {
-      const pluginId = typeof rawInput.plugin_id === 'string' ? rawInput.plugin_id.trim() : '';
-      const chatId = typeof rawInput.chat_id === 'string' ? rawInput.chat_id.trim() : '';
-      return {
-        scope: `channel:${pluginId || '*'}:${chatId || '*'}:read`,
-        reason: '需要读取消息渠道会话信息',
-        riskLevel: 'medium',
-        previewAction: `读取消息渠道 ${request.toolName}`,
-        always: ['*'],
-      };
-    }
-    case 'skill': {
-      const name = typeof rawInput.name === 'string' ? rawInput.name.trim() : '';
-      if (!name) return null;
-      return {
-        scope: name,
-        reason: '需要加载技能内容并注入会话上下文',
-        riskLevel: 'medium',
-        previewAction: `加载技能 ${name}`,
-        always: [name],
-      };
-    }
-    case 'skill_mcp': {
-      const mcpName = typeof rawInput.mcp_name === 'string' ? rawInput.mcp_name.trim() : '';
-      const operation =
-        typeof rawInput.tool_name === 'string'
-          ? rawInput.tool_name.trim()
-          : typeof rawInput.resource_name === 'string'
-            ? rawInput.resource_name.trim()
-            : typeof rawInput.prompt_name === 'string'
-              ? rawInput.prompt_name.trim()
-              : '';
-      if (!mcpName || !operation) return null;
-      return {
-        scope: `${mcpName}:${operation}`,
-        reason: '需要调用技能内嵌的 MCP 能力',
-        riskLevel: 'high',
-        previewAction: `调用 skill MCP ${mcpName}/${operation}`,
-        always: ['*'],
-      };
-    }
-    case 'bash': {
-      const command = typeof rawInput.command === 'string' ? rawInput.command.trim() : '';
-      const sessionWorkingDirectory = getSessionWorkingDirectory(sessionId);
-      if (!sessionWorkingDirectory && requiresBoundSessionWorkspace(sessionId)) return null;
-      // 未绑定：回退桌面端默认目录；已绑定：只用会话路径。禁止静默落到盘符根。
-      const rawWorkdir =
-        typeof rawInput.workdir === 'string'
-          ? rawInput.workdir
-          : (sessionWorkingDirectory ?? assertSessionWorkingDirectory(sessionId));
-      const workdirValue = rewriteUnboundPlaceholderPath(sessionId, rawWorkdir);
-      const validation = validateSessionWorkspacePath({ path: workdirValue, sessionId });
-      const safeWorkdir = validation.ok ? validation.safePath : null;
-      if (!command || !safeWorkdir) return null;
-      const previewSummary = summarizeBashCommand(command);
-      return {
-        scope: command,
-        reason: '需要执行工作区命令',
-        riskLevel: 'high',
-        previewAction: `执行命令: ${previewSummary}`,
-        always: buildBashApprovalPatterns(command),
-      };
-    }
-    case 'interactive_bash': {
-      const tmuxCommand =
-        typeof rawInput.tmux_command === 'string' ? rawInput.tmux_command.trim() : '';
-      if (!tmuxCommand) return null;
-      const previewSummary = summarizeBashCommand(tmuxCommand);
-      return {
-        scope: tmuxCommand,
-        reason: '需要执行 tmux 交互式命令',
-        riskLevel: 'high',
-        previewAction: `执行 tmux 命令: ${previewSummary}`,
-        always: buildBashApprovalPatterns(tmuxCommand),
-      };
-    }
-    case 'ast_grep_replace': {
-      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
-        return null;
-      }
-      const pattern = typeof rawInput.pattern === 'string' ? rawInput.pattern.trim() : '';
-      const lang = typeof rawInput.lang === 'string' ? rawInput.lang.trim() : '';
-      if (!pattern) return null;
-      return {
-        scope: `ast:${lang}:${pattern}`.slice(0, 200),
-        reason: '需要执行 AST 级代码重写',
-        riskLevel: 'high',
-        previewAction: `AST 替换 ${lang} "${pattern}"`,
-        always: ['*'],
-      };
-    }
-    case 'apply_patch': {
-      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
-        return null;
-      }
-      const patchText = typeof rawInput.patchText === 'string' ? rawInput.patchText : '';
-      if (!patchText.trim()) return null;
-      return {
-        scope: buildApplyPatchPermissionScope(patchText),
-        reason: '需要批量修改工作区文件',
-        riskLevel: 'high',
-        previewAction: '应用结构化补丁到工作区文件',
-        always: ['*'],
-      };
-    }
-    case 'task': {
-      const description =
-        typeof rawInput.description === 'string' ? rawInput.description.trim() : '';
-      if (!description) return null;
-      return {
-        scope: `task:${description}`,
-        reason: '需要创建子任务和子会话',
-        riskLevel: 'high',
-        previewAction: `创建子任务 ${description}`,
-        always: ['*'],
-      };
-    }
-    case 'workspace_create_directory': {
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safePath = validation?.ok ? validation.safePath : null;
-      if (!safePath) return null;
-      const rel = toRelativeScope(safePath);
-      return {
-        scope: rel,
-        reason: '需要在工作区中新建目录',
-        riskLevel: 'medium',
-        previewAction: `创建目录 ${safePath}`,
-        always: ['*'],
-      };
-    }
-    case 'workspace_review_revert': {
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safeWorkspacePath = validation?.ok ? validation.safePath : null;
-      const filePath = typeof rawInput.filePath === 'string' ? rawInput.filePath : null;
-      if (!safeWorkspacePath || !filePath) return null;
-      const relativeFilePath = resolveWorkspaceReviewFilePath(safeWorkspacePath, filePath);
-      const absoluteFilePath = join(safeWorkspacePath, relativeFilePath);
-      return {
-        scope: toRelativeScope(absoluteFilePath),
-        reason: '需要回滚工作区文件改动',
-        riskLevel: 'high',
-        previewAction: `回滚 ${absoluteFilePath}`,
-        always: ['*'],
-      };
-    }
-    case 'lsp_rename': {
-      if (!getSessionWorkingDirectory(sessionId) && requiresBoundSessionWorkspace(sessionId)) {
-        return null;
-      }
-      const effectivePath = pathValue ? rewriteUnboundPlaceholderPath(sessionId, pathValue) : null;
-      const validation = effectivePath
-        ? validateSessionWorkspacePath({ path: effectivePath, sessionId })
-        : null;
-      const safePath = validation?.ok ? validation.safePath : null;
-      const newName = typeof rawInput.newName === 'string' ? rawInput.newName.trim() : '';
-      if (!safePath || !newName) return null;
-      return {
-        scope: `${toRelativeScope(safePath)}:${newName}`,
-        reason: '需要通过 LSP 跨文件重命名符号',
-        riskLevel: 'high',
-        previewAction: `LSP 重命名 ${safePath} → ${newName}`,
-        always: ['*'],
-      };
-    }
-    case 'mcp_call': {
-      const parsed = parseMcpCallRawInput(rawInput);
-      if (!parsed.ok) {
-        return null;
-      }
-      const server = getConfiguredMcpServerForSession(sessionId, parsed.serverId);
-      const serverFingerprint = getMcpServerFingerprint(server);
-      const previewArguments = JSON.stringify(parsed.arguments).slice(0, 240);
-      return {
-        scope: `${parsed.serverId}:${parsed.toolName}:${serverFingerprint}`,
-        reason: '需要调用 MCP 工具',
-        riskLevel: 'high',
-        previewAction: `调用 ${parsed.serverId}/${parsed.toolName} ${previewArguments}`,
-        always: [`${parsed.serverId}:${parsed.toolName}:*`, `${parsed.serverId}:*`],
-      };
-    }
-    case 'desktop_automation': {
-      const action =
-        typeof rawInput.action === 'string' ? rawInput.action.trim().toLowerCase() : '';
-      if (!action) {
-        return null;
-      }
-      const target =
-        typeof rawInput.url === 'string'
-          ? rawInput.url.trim()
-          : typeof rawInput.selector === 'string'
-            ? rawInput.selector.trim()
-            : '';
-      return {
-        scope: target ? `${action}:${target}` : action,
-        reason: '需要操作桌面 sidecar 的浏览器自动化能力',
-        riskLevel: 'high',
-        previewAction: target ? `桌面自动化 ${action}: ${target}` : `桌面自动化 ${action}`,
-        always: ['*'],
-      };
-    }
-    case 'desktop_control': {
-      const action =
-        typeof rawInput.action === 'string' ? rawInput.action.trim().toLowerCase() : '';
-      if (!action) {
-        return null;
-      }
-      const target =
-        typeof rawInput.x === 'number' && typeof rawInput.y === 'number'
-          ? `${rawInput.x},${rawInput.y}`
-          : typeof rawInput.key === 'string'
-            ? rawInput.key.trim()
-            : Array.isArray(rawInput.keys)
-              ? rawInput.keys.join('+')
-              : '';
-      return {
-        scope: target ? `${action}:${target}` : action,
-        reason: '需要控制本机系统桌面',
-        riskLevel: 'high',
-        previewAction: target ? `系统桌面控制 ${action}: ${target}` : `系统桌面控制 ${action}`,
-        always: ['*'],
-      };
-    }
-    default: {
-      // Generic fallback: tools without explicit context builders can still
-      // request permission when configured via workspace rules.
-      const genericScope = `${request.toolName}:${JSON.stringify(rawInput).slice(0, 200)}`;
-      return {
-        scope: genericScope,
-        reason: `需要执行工具 "${request.toolName}"`,
-        riskLevel: 'medium',
-        previewAction: `执行 ${request.toolName}`,
-        always: ['*'],
-      };
-    }
-  }
+  // 派生逻辑已下沉到 permission/tool-permission-derivers.ts：
+  // 本函数只负责构造上下文并委托注册表，保留 flat-MCP 拦截与 default 兜底。
+  return buildToolPermissionRequestContext({
+    sessionId,
+    toolName: request.toolName,
+    rawInput: request.rawInput as Record<string, unknown>,
+    sshManaged,
+  });
 }
 
 /**
@@ -6156,6 +5634,13 @@ function consumeOncePermission(requestId: string): void {
 }
 
 function resolveEffectivePermissionCategory(toolName: string): string {
+  // 内置团队指令（reply_direct / route_to_orchestrate / dispatch_package ...）不是
+  // 普通工具：它们由 apply-team-layer-tools 按层注入，真正的「能不能调」由下游
+  // invokeInstruction → assertInstructionOwnedByLayer 按层把关（与本文件 whitelist /
+  // session-enabled 门控处的同款豁免一致）。这里返回原始工具名，使其命中
+  // DEFAULT_PERMISSION_RULES 的通配符 allow，保持 fail-closed 改造前的语义；
+  // 否则未登记的指令会落到 custom(ask)，后台 team 会话无人可审批而被卡死。
+  if (isBuiltinInstructionName(toolName)) return toolName;
   // Map raw tool name to permission category (e.g. 'workspace_write_file' → 'write').
   return parseFlatMcpToolName(toolName) ? 'mcp_call' : resolvePermissionCategory(toolName);
 }

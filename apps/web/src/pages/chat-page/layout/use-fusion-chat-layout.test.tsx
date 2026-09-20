@@ -124,6 +124,40 @@ describe('useFusionChatLayout', () => {
     expect(setReviewPanelOpened).toHaveBeenCalledWith(false);
   });
 
+  it('Fusion 审查面板已展开但停在其他 tab 时，一次点击直接收起且不改 tab', () => {
+    const setEditorFullScreen = vi.fn();
+    const setEditorMode = vi.fn();
+    const setReviewPanelOpened = vi.fn();
+    const setSidePanelActiveTab = vi.fn();
+    const setTerminalPanelOpened = vi.fn();
+
+    const { result } = renderHook(() =>
+      useFusionChatLayout({
+        canDockSidePanel: true,
+        currentSessionId: 'session-1',
+        editorFullScreen: false,
+        editorMode: false,
+        enabled: true,
+        isNarrowViewport: false,
+        reviewPanelOpened: true,
+        setEditorFullScreen,
+        setEditorMode,
+        setReviewPanelOpened,
+        setSidePanelActiveTab,
+        setTerminalPanelOpened,
+        sidePanelActiveTab: 'code',
+        terminalPanelOpened: false,
+        terminalRunningCount: 0,
+      }),
+    );
+
+    result.current.toggleReviewPanel();
+
+    expect(setSidePanelActiveTab).not.toHaveBeenCalled();
+    expect(setReviewPanelOpened).toHaveBeenCalledWith(false);
+    expect(setReviewPanelOpened).not.toHaveBeenCalledWith(true);
+  });
+
   it('放大态下触发审查入口会退出全屏并把内容收回到会话面板', () => {
     const setEditorFullScreen = vi.fn();
     const setEditorMode = vi.fn();

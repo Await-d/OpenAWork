@@ -7,7 +7,10 @@ import {
   type ChatMessage,
 } from '../../conversation-runtime/messages/support.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
-import { renderChatMessageContentWithOptions } from './ChatPageSections.js';
+import {
+  renderChatMessageContentWithOptions,
+  renderStreamingChatMessageContentWithOptions,
+} from './ChatPageSections.js';
 
 afterEach(() => {
   cleanup();
@@ -95,5 +98,56 @@ describe('renderChatMessageContentWithOptions', () => {
     expect(blocks[0]?.getAttribute('data-duration-ms')).toBe('400');
     expect(blocks[0]?.textContent).toContain('trace 第一段');
     expect(blocks[0]?.textContent).toContain('trace 第二段');
+  });
+
+  it('流式 parts 路径只在活动尾部文本段绘制一个光标', () => {
+    const message: ChatMessage = {
+      id: 'assistant-interleaved-parts',
+      role: 'assistant',
+      content: '',
+      parts: [
+        { id: 'text-1', type: 'text', text: '前一段正文。' },
+        { id: 'reasoning-1', type: 'reasoning', text: '中途再想一下。' },
+        { id: 'text-2', type: 'text', text: '后一段正文。' },
+      ],
+      reasoningBlocksEndedFlags: [false],
+    };
+
+    render(
+      <>{renderStreamingChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>,
+    );
+
+    const bodies = document.querySelectorAll('.assistant-rich-content-body');
+    const cursorOwners = document.querySelectorAll(
+      '.assistant-rich-content-body[data-streaming="true"]',
+    );
+    // 只有一个光标，且挂在 DOM 顺序里的最后一个文本段（text-2）上。
+    expect(cursorOwners).toHaveLength(1);
+    expect(cursorOwners[0]).toBe(bodies[bodies.length - 1]);
+  });
+
+  it('流式 parts 路径在尾部为非文本段时仍保留单个光标', () => {
+    const message: ChatMessage = {
+      id: 'assistant-trailing-reasoning-parts',
+      role: 'assistant',
+      content: '',
+      parts: [
+        { id: 'text-1', type: 'text', text: '先给出的正文。' },
+        { id: 'reasoning-1', type: 'reasoning', text: '随后继续思考。' },
+      ],
+      reasoningBlocksEndedFlags: [false],
+    };
+
+    render(
+      <>{renderStreamingChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>,
+    );
+
+    const bodies = document.querySelectorAll('.assistant-rich-content-body');
+    const cursorOwners = document.querySelectorAll(
+      '.assistant-rich-content-body[data-streaming="true"]',
+    );
+    // 尾部是推理块（不绘制光标），光标仍落在最后一个非空文本段（text-1）上，不退化为零。
+    expect(cursorOwners).toHaveLength(1);
+    expect(cursorOwners[0]).toBe(bodies[0]);
   });
 });

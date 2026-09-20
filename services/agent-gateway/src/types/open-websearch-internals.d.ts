@@ -93,6 +93,18 @@ declare module 'open-websearch/build/engines/github/index.js' {
   export function fetchGithubReadme(url: string): Promise<string | null>;
 }
 
+declare module 'open-websearch/build/utils/urlSafety.js' {
+  export function isPublicHttpUrl(url: string): boolean;
+  export function assertPublicHttpUrlResolved(url: string | URL, label?: string): Promise<void>;
+  export function __setDnsLookupForTests(
+    lookup?: (hostname: string) => Promise<readonly { address: string; family: number }[]>,
+  ): void;
+}
+
+declare module 'open-websearch/build/config.js' {
+  export const config: { fakeIpCidrs: string[] };
+}
+
 declare module 'open-websearch/build/utils/httpRequest.js' {
   export interface OpenWebSearchAxiosResponse {
     readonly data: unknown;

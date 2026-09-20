@@ -247,6 +247,40 @@ export function clearPendingTaskParentAutoResumesForSession(input: {
   }
 }
 
+/**
+ * 只摘掉某个 taskId 的待回流条目——快速停止子代理专用原语。
+ *
+ * 与 `clearPendingTaskParentAutoResumesForSession` 的区别（因此不可复用）：
+ *   - 同会话其它仍存活的子代理结果必须继续回流，不能用会话级清空把它们一起丢掉；
+ *   - 只有该会话最后一个待回流条目被摘除后，才清理定时器并重置连续回流计数。
+ *
+ * 无匹配条目时为无副作用空操作（重复调用幂等）。
+ */
+export function clearPendingTaskParentAutoResumeForTask(input: {
+  parentSessionId: string;
+  userId: string;
+  taskId: string;
+}): void {
+  const sessionKey = buildSessionKey(input.parentSessionId, input.userId);
+  const pendingItems = pendingTaskParentAutoResumes.get(sessionKey);
+  if (!pendingItems) {
+    return;
+  }
+
+  pendingItems.delete(input.taskId);
+  if (pendingItems.size > 0) {
+    return;
+  }
+
+  pendingTaskParentAutoResumes.delete(sessionKey);
+  consecutiveTaskParentAutoResumeCounts.delete(sessionKey);
+  const timer = taskParentAutoResumeTimers.get(sessionKey);
+  if (timer) {
+    clearTimeout(timer);
+    taskParentAutoResumeTimers.delete(sessionKey);
+  }
+}
+
 export function upsertTaskParentAutoResumeContext(input: {
   childSessionId: string;
   parentSessionId: string;

@@ -497,48 +497,6 @@ export function ChatTopBar({
         }}
       >
         {showTerminalButton && terminalsChip}
-        {/* 审查面板切换 */}
-        {onToggleReviewPanel && (
-          <button
-            type="button"
-            onClick={onToggleReviewPanel}
-            title={reviewPanelOpened ? '收起审查面板' : '展开审查面板'}
-            className={`icon-btn${reviewPanelOpened ? ' active' : ''}`}
-            style={{
-              height: 26,
-              padding: '0 7px',
-              borderRadius: 5,
-              border: 'none',
-              background: reviewPanelOpened
-                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
-                : 'transparent',
-              color: reviewPanelOpened ? 'var(--accent)' : 'var(--fg-muted)',
-              fontSize: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-              flexShrink: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-            }}
-          >
-            <svg
-              aria-hidden="true"
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <line x1="15" y1="3" x2="15" y2="21" />
-            </svg>
-            审查
-          </button>
-        )}
         {/* 终端面板切换 */}
         {onToggleTerminalPanel && (
           <button
@@ -579,6 +537,48 @@ export function ChatTopBar({
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
             终端
+          </button>
+        )}
+        {/* 会话面板切换 */}
+        {onToggleReviewPanel && (
+          <button
+            type="button"
+            onClick={onToggleReviewPanel}
+            title={reviewPanelOpened ? '收起会话面板' : '展开会话面板'}
+            className={`icon-btn${reviewPanelOpened ? ' active' : ''}`}
+            style={{
+              height: 26,
+              padding: '0 7px',
+              borderRadius: 5,
+              border: 'none',
+              background: reviewPanelOpened
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+              color: reviewPanelOpened ? 'var(--accent)' : 'var(--fg-muted)',
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            会话面板
           </button>
         )}
         {permissionMode === 'auto-edit' && <ReadonlyAutoEditChip />}

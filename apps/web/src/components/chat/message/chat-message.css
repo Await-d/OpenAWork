@@ -2739,7 +2739,12 @@
   display: contents;
 }
 
-.assistant-rich-content-body[data-streaming='true'] .chat-markdown > :last-child::after {
+/*
+ * 选择器必须是**直接子代**（`>`）：`MarkdownPreviewCodeBlock` 在 ```markdown
+ * 围栏内部还会再渲染一个嵌套的 `.chat-markdown`，若用后代选择器，内外两层都会
+ * 命中 `:last-child::after`，于是预览区里会多出一个闪烁光标。
+ */
+.assistant-rich-content-body[data-streaming='true'] > .chat-markdown > :last-child::after {
   content: '';
   display: inline-block;
   width: 2px;
@@ -2764,7 +2769,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-rich-content-body[data-streaming='true'] .chat-markdown > :last-child::after {
+  .assistant-rich-content-body[data-streaming='true'] > .chat-markdown > :last-child::after {
     animation: none;
     opacity: 0.72;
   }

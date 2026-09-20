@@ -16,6 +16,7 @@ import {
   categorizeAlwaysPatterns,
   getPermissionDecisionOptions,
   PermissionPrompt,
+  resolveAlwaysScopeSelection,
 } from './PermissionPrompt.js';
 
 describe('getPermissionDecisionOptions', () => {
@@ -53,6 +54,29 @@ describe('getPermissionDecisionOptions', () => {
     for (const option of options) {
       expect(option.hint.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('resolveAlwaysScopeSelection', () => {
+  it('未指定 category 时默认取最后一个（最宽）档位', () => {
+    const { levels, selectedLevel } = resolveAlwaysScopeSelection(
+      '执行命令: npm run build',
+      'npm run build',
+      ['npm run build *', 'npm *'],
+    );
+    expect(levels).toHaveLength(3);
+    expect(selectedLevel).toBe(levels[levels.length - 1]);
+  });
+
+  it('指定 category 时命中对应档位', () => {
+    const { selectedLevel } = resolveAlwaysScopeSelection(
+      '执行命令: npm run build',
+      'npm run build',
+      ['npm run build *', 'npm *'],
+      'full',
+    );
+    expect(selectedLevel?.category).toBe('full');
+    expect(selectedLevel?.pattern).toBe('npm run build');
   });
 });
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorBrowserWorkspace } from '../../../components/file-editor/EditorBrowserWorkspace.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionDockedSidePanel } from './FusionDockedSidePanel.js';
+import type { FusionContextOverviewProps } from './FusionContextTab.js';
 import {
   FusionSessionSidePanel,
   type FusionSessionSidePanelProps,
@@ -98,9 +99,37 @@ function readFileEditor() {
   };
 }
 
+function createOverview(
+  overrides: Partial<FusionContextOverviewProps> = {},
+): FusionContextOverviewProps {
+  return {
+    attachmentItems: [],
+    artifactsWorkspaceHref: null,
+    childSessions: [],
+    compactions: [],
+    contextUsageSnapshot: null,
+    contentArtifactCount: 0,
+    contentArtifactCountStatus: 'ready',
+    currentSessionId: 'session-1',
+    dialogueMode: 'coding',
+    effectiveWorkingDirectory: WORKSPACE_PATH,
+    messages: [],
+    onCompactSession: () => undefined,
+    onOpenRecoveryStrategy: () => undefined,
+    pendingPermissions: [],
+    pendingQuestionsCount: 0,
+    sessionStateStatus: 'running',
+    sessionTasks: [],
+    sessionTodos: [],
+    upstreamSummaries: [],
+    workspaceFileItems: [],
+    yoloMode: false,
+    ...overrides,
+  };
+}
+
 function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
   return {
-    contextUsageSnapshot: null,
     currentSessionId: 'session-1',
     currentUserEmail: 'user@example.com',
     effectiveWorkingDirectory: WORKSPACE_PATH,
@@ -108,15 +137,14 @@ function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
     fileTree: <div data-testid="dock-file-tree" />,
     gatewayUrl: 'http://localhost:3000',
     handleSaveFile: async () => undefined,
-    onCompactSession: () => undefined,
     onOpenFullSession: () => undefined,
     onPromoteToFullScreen: () => undefined,
     onSelectChildSession: () => undefined,
     onTabChange: () => undefined,
+    overview: createOverview(),
     saving: false,
     selectedChildSessionId: null,
     token: 'token',
-    workspaceFileItems: [],
     workspacePath: WORKSPACE_PATH,
   };
 }
@@ -206,7 +234,7 @@ describe('FusionSessionSidePanel', () => {
     expect(screen.getByText(/export const layout/)).not.toBeNull();
   });
 
-  it('桌面停靠面板提供 审查/子代理/代码/预览/Context 五个一级 tab 并上报切换动作', () => {
+  it('桌面停靠面板提供 代码/预览/审查/子代理/会话概览 五个一级 tab 并上报切换动作', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -223,15 +251,15 @@ describe('FusionSessionSidePanel', () => {
     const agentTab = screen.getByRole('tab', { name: '子代理' });
     const codeTab = screen.getByRole('tab', { name: '代码' });
     const previewTab = screen.getByRole('tab', { name: '预览' });
-    const contextTab = screen.getByRole('tab', { name: 'Context' });
+    const contextTab = screen.getByRole('tab', { name: '会话概览' });
 
     expect(tablist).not.toBeNull();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '审查',
-      '子代理',
       '代码',
       '预览',
-      'Context',
+      '审查',
+      '子代理',
+      '会话概览',
     ]);
     expect(reviewTab.getAttribute('aria-selected')).toBe('true');
     expect(agentTab.getAttribute('aria-selected')).toBe('false');
@@ -360,7 +388,7 @@ describe('FusionSessionSidePanel', () => {
     expect(onTabChange).not.toHaveBeenCalled();
   });
 
-  it('侧栏 tab 支持方向键按 审查→子代理→代码→预览→Context 顺序切换焦点与激活目标', () => {
+  it('侧栏 tab 支持方向键按 代码→预览→审查→子代理→会话概览 顺序切换焦点与激活目标', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -372,11 +400,11 @@ describe('FusionSessionSidePanel', () => {
       />,
     );
 
-    const reviewTab = screen.getByRole('tab', { name: '审查' });
-    const agentTab = screen.getByRole('tab', { name: '子代理' });
     const codeTab = screen.getByRole('tab', { name: '代码' });
     const previewTab = screen.getByRole('tab', { name: '预览' });
-    const contextTab = screen.getByRole('tab', { name: 'Context' });
+    const reviewTab = screen.getByRole('tab', { name: '审查' });
+    const agentTab = screen.getByRole('tab', { name: '子代理' });
+    const contextTab = screen.getByRole('tab', { name: '会话概览' });
 
     reviewTab.focus();
     fireEvent.keyDown(reviewTab, { key: 'ArrowRight' });
@@ -385,14 +413,6 @@ describe('FusionSessionSidePanel', () => {
     expect(document.activeElement).toBe(agentTab);
 
     fireEvent.keyDown(agentTab, { key: 'ArrowRight' });
-    expect(onTabChange).toHaveBeenLastCalledWith('code');
-    expect(document.activeElement).toBe(codeTab);
-
-    fireEvent.keyDown(codeTab, { key: 'ArrowRight' });
-    expect(onTabChange).toHaveBeenLastCalledWith('preview');
-    expect(document.activeElement).toBe(previewTab);
-
-    fireEvent.keyDown(previewTab, { key: 'ArrowRight' });
     expect(onTabChange).toHaveBeenLastCalledWith('context');
     expect(document.activeElement).toBe(contextTab);
 
@@ -401,10 +421,19 @@ describe('FusionSessionSidePanel', () => {
     expect(document.activeElement).toBe(contextTab);
 
     fireEvent.keyDown(contextTab, { key: 'ArrowRight' });
+    expect(onTabChange).toHaveBeenLastCalledWith('code');
+    expect(document.activeElement).toBe(codeTab);
+
+    fireEvent.keyDown(codeTab, { key: 'ArrowRight' });
+    expect(onTabChange).toHaveBeenLastCalledWith('preview');
+    expect(document.activeElement).toBe(previewTab);
+
+    fireEvent.keyDown(previewTab, { key: 'ArrowRight' });
     expect(onTabChange).toHaveBeenLastCalledWith('review');
+    expect(document.activeElement).toBe(reviewTab);
 
     fireEvent.keyDown(reviewTab, { key: 'ArrowLeft' });
-    expect(onTabChange).toHaveBeenLastCalledWith('context');
+    expect(onTabChange).toHaveBeenLastCalledWith('preview');
   });
 
   it('代码一级 tab：唯一工作区实例 + 文件树，无内部工具条空行，全屏入口位于面板 tab 条', () => {
@@ -711,7 +740,7 @@ describe('FusionSessionSidePanel', () => {
     });
   });
 
-  it('在 Context tab 展示 token 用量并保留压缩入口', () => {
+  it('在 Context tab 展示 token 用量并保留唯一的压缩入口', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const compactSession = vi.fn();
 
@@ -719,45 +748,111 @@ describe('FusionSessionSidePanel', () => {
       <FusionSessionSidePanel
         {...createBaseProps()}
         activeTab="context"
-        contextUsageSnapshot={{ estimated: false, maxTokens: 4000, usedTokens: 2000 }}
-        onCompactSession={compactSession}
+        overview={createOverview({
+          contextUsageSnapshot: { estimated: false, maxTokens: 4000, usedTokens: 2000 },
+          onCompactSession: compactSession,
+        })}
       />,
     );
 
-    expect(screen.getByText('50% 已用')).not.toBeNull();
-    expect(screen.getByRole('meter', { name: '上下文用量' }).getAttribute('aria-valuenow')).toBe(
-      '2000',
-    );
+    const meter = screen.getByRole('meter', { name: '上下文用量' });
+    expect(meter.getAttribute('aria-valuenow')).toBe('2000');
+    expect(meter.getAttribute('aria-valuemin')).toBe('0');
+    expect(meter.getAttribute('aria-valuemax')).toBe('4000');
+    expect(screen.getByText('2k / 4k')).not.toBeNull();
+    // 用量摘要与压缩入口都只有概览正文一处：wrapper 不再重复渲染「X% 已用」。
+    expect(screen.queryByText('50% 已用')).toBeNull();
+    expect(screen.getAllByText('压缩会话')).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: '压缩会话' }));
 
     expect(compactSession).toHaveBeenCalledTimes(1);
   });
 
-  it('在 Context tab 展示 Fusion 运行摘要，覆盖工具、计划、DAG、MCP 和审批信号', () => {
+  it('在 Context tab 展示运行摘要并与概览指标去重（每个 datum 只出现一次）', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
 
     render(
       <FusionSessionSidePanel
         {...createBaseProps()}
         activeTab="context"
+        overview={createOverview({
+          childSessions: [{ id: 'child-session-1', title: '子代理会话' }],
+          pendingPermissions: [
+            {
+              createdAt: '2026-06-14T10:20:30.000Z',
+              reason: '需要写入工作区',
+              requestId: 'perm-1',
+              riskLevel: 'medium',
+              scope: 'write',
+              sessionId: 'session-1',
+              status: 'pending',
+              toolName: 'write_file',
+            },
+          ],
+        })}
         runtimeSummary={RUNTIME_SUMMARY}
       />,
     );
 
+    // 工具调用 / DAG / MCP：只有 runtimeSummary 一个来源。
     expect(screen.getByText('工具调用')).not.toBeNull();
     expect(screen.getByText('5 次')).not.toBeNull();
     expect(screen.getByText('1 个失败')).not.toBeNull();
-    expect(screen.getByText('计划任务')).not.toBeNull();
-    expect(screen.getByText('2/6 进行中')).not.toBeNull();
     expect(screen.getByText('DAG')).not.toBeNull();
     expect(screen.getByText('3 节点 / 2 边')).not.toBeNull();
     expect(screen.getByText('MCP')).not.toBeNull();
     expect(screen.getByText('4 个服务')).not.toBeNull();
-    expect(screen.getByText('待审批')).not.toBeNull();
-    expect(screen.getByText('1 项')).not.toBeNull();
-    expect(screen.getByText('子会话')).not.toBeNull();
+
+    // 子会话 / 待处理审批：owner 是会话数据，runtimeSummary 不再重复渲染同一 datum。
+    expect(screen.getAllByText('子会话')).toHaveLength(1);
     expect(screen.getByText('1 个')).not.toBeNull();
+    expect(screen.getAllByText('待处理审批')).toHaveLength(1);
+    expect(screen.getByText('1 项')).not.toBeNull();
+    expect(screen.queryByText('待审批')).toBeNull();
+
+    // 计划任务只在「待办与任务」区块里出现一次（不再同时占用指标行）。
+    expect(screen.getAllByText('计划任务')).toHaveLength(1);
+    expect(screen.getByText('2/6 项')).not.toBeNull();
+  });
+
+  it('会话概览折叠区块：aria-expanded 翻转、aria-controls 指向的正文同步显隐', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="context" />);
+
+    const toggle = screen.getByRole('button', { name: '会话元信息' });
+    const contentId = toggle.getAttribute('aria-controls');
+    expect(contentId).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById(contentId ?? '')?.hasAttribute('hidden')).toBe(true);
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(contentId ?? '')?.hasAttribute('hidden')).toBe(false);
+    expect(screen.getByText('有效上下文')).not.toBeNull();
+  });
+
+  it('会话概览已删除 fallback 分支：不再渲染「剩余 Token」统计格', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="context"
+        overview={createOverview({
+          contextUsageSnapshot: { estimated: false, maxTokens: 4000, usedTokens: 2000 },
+          effectiveContextMessageCount: 3,
+        })}
+      />,
+    );
+
+    expect(screen.queryByText('剩余 Token')).toBeNull();
+    expect(screen.queryByText('文件上下文')).toBeNull();
+    expect(screen.queryByText('50% 已用')).toBeNull();
+    // 用量仍在，只是由概览正文的 hero meter 承担。
+    expect(screen.getByRole('meter', { name: '上下文用量' })).not.toBeNull();
   });
 
   it('在 Context tab 融合旧版概览信息并避免重复 fallback 小卡', () => {
@@ -768,35 +863,24 @@ describe('FusionSessionSidePanel', () => {
       <FusionSessionSidePanel
         {...createBaseProps()}
         activeTab="context"
-        overview={{
-          attachmentItems: [],
-          artifactsWorkspaceHref: null,
-          childSessions: [],
-          compactions: [],
-          contextUsageSnapshot: null,
+        overview={createOverview({
           contentArtifactCount: 2,
           contentArtifactCountStatus: 'ready',
-          currentSessionId: 'session-1',
-          dialogueMode: 'coding',
-          effectiveWorkingDirectory: '/home/await/project/OpenAWork',
-          messages: [],
-          onCompactSession: () => undefined,
           onOpenRecoveryStrategy: openRecoveryStrategy,
-          pendingPermissions: [],
           pendingQuestionsCount: 1,
           sessionStateStatus: 'paused',
-          sessionTasks: [],
-          sessionTodos: [],
-          upstreamSummaries: [],
-          workspaceFileItems: [],
-          yoloMode: false,
-        }}
+        })}
       />,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: '会话元信息' }));
 
     expect(screen.getByText('有效上下文')).not.toBeNull();
     expect(screen.getByText('会话消息')).not.toBeNull();
     expect(screen.getAllByText('0 条')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: '诊断' }));
+
     expect(screen.getByText('产物工作区')).not.toBeNull();
     expect(screen.getByText('2 个')).not.toBeNull();
     expect(screen.queryByText('剩余 Token')).toBeNull();
@@ -888,7 +972,7 @@ describe('FusionSessionSidePanel', () => {
     expect(useUIStateStore.getState().browserPreviewSurface).toBe('dock');
   });
 
-  it('融合停靠面板的 tab 清单为 审查/子代理/代码/预览/Context，残留 browser tab 收敛到预览', async () => {
+  it('融合停靠面板的 tab 清单为 代码/预览/审查/子代理/会话概览，残留 browser tab 收敛到预览', async () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -902,11 +986,11 @@ describe('FusionSessionSidePanel', () => {
 
     expect(screen.getByTestId('fusion-docked-side-panel')).not.toBeNull();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '审查',
-      '子代理',
       '代码',
       '预览',
-      'Context',
+      '审查',
+      '子代理',
+      '会话概览',
     ]);
 
     await waitFor(() => {

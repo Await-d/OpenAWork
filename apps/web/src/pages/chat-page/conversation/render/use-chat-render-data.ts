@@ -492,7 +492,19 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       return true;
     });
 
-    return deduplicatedMessages.map((message) => ({
+    // 没有 live overlay 时（例如刷新后尚未 attach、或 observe_only），历史上仍
+    // 标记为 streaming 的助手消息需要继续绘制流式光标，否则用户看不到"仍在进行"。
+    // 有 overlay 时由 merge 负责替换，这里不做兜底；且只对最后一条这样的消息生效，
+    // 保证页面上最多只有一个光标。
+    const lastStreamingHistoricalIndex = visibleStreaming
+      ? -1
+      : deduplicatedMessages.reduce(
+          (lastIndex, message, index) =>
+            message.role === 'assistant' && message.status === 'streaming' ? index : lastIndex,
+          -1,
+        );
+
+    return deduplicatedMessages.map((message, index) => ({
       message,
       actions: buildMessageActions(message),
       // Keep compaction markers as their own visual group so they don't
@@ -500,13 +512,22 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       ...(isTranscriptCompactionMessage(message)
         ? { groupIdentityKey: `compaction:${message.id}` }
         : {}),
-      renderContent: (currentMessage: ChatMessage) =>
-        renderChatMessageContentWithOptions(currentMessage, {
-          onOpenChildSession: openChildSessionInspector,
-          resolveInlinePermissionActions,
-          selectedChildSessionId,
-          taskRuntimeLookup: taskToolRuntimeLookup,
-        }),
+      renderContent:
+        index === lastStreamingHistoricalIndex
+          ? (currentMessage: ChatMessage) =>
+              renderStreamingChatMessageContentWithOptions(currentMessage, {
+                onOpenChildSession: openChildSessionInspector,
+                resolveInlinePermissionActions,
+                selectedChildSessionId,
+                taskRuntimeLookup: taskToolRuntimeLookup,
+              })
+          : (currentMessage: ChatMessage) =>
+              renderChatMessageContentWithOptions(currentMessage, {
+                onOpenChildSession: openChildSessionInspector,
+                resolveInlinePermissionActions,
+                selectedChildSessionId,
+                taskRuntimeLookup: taskToolRuntimeLookup,
+              }),
       usageDetails: assistantUsageDetails.get(message.id),
     }));
   }, [
@@ -516,6 +537,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     resolveInlinePermissionActions,
     selectedChildSessionId,
     visibleMessages,
+    visibleStreaming,
     taskToolRuntimeLookup,
   ]);
 

@@ -5,7 +5,7 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody } from '../infra/parse-request.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
 import {
@@ -128,6 +128,54 @@ export function cancelPendingQuestionRequestsByClientRequest(input: {
   }
 
   return requests.length;
+}
+
+/**
+ * 按会话把 pending/deciding 提问请求置为终态（dismissed）——快速停止子代理专用原语。
+ *
+ * 与 `cancelPendingQuestionRequestsByClientRequest` 的区别（因此不可复用）：
+ *   - 不做回合筛选，直接清扫该会话全部待处理提问请求；
+ *   - `deciding`（父代理自动决策进行中）也必须一并作废，否则被停止的子会话会永远停在 paused；
+ *   - 不触动 team resume 注册（停止子代理不等价于回退回合）。
+ *
+ * 返回被置终态的请求数；无匹配行时返回 0（重复调用幂等）。
+ */
+export function cancelPendingQuestionRequestsForSession(input: {
+  sessionId: string;
+  userId: string;
+}): number {
+  const requests = sqliteAll<QuestionRequestRow>(
+    `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
+     FROM question_requests
+     WHERE session_id = ? AND user_id = ? AND status IN ('pending', 'deciding')
+     ORDER BY created_at ASC`,
+    [input.sessionId, input.userId],
+  );
+
+  let transitionedCount = 0;
+  for (const request of requests) {
+    const changes = sqliteRunWithChanges(
+      `UPDATE question_requests
+       SET status = 'dismissed', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status IN ('pending', 'deciding')`,
+      [request.id, input.sessionId],
+    );
+    if (changes === 0) {
+      continue;
+    }
+
+    transitionedCount += changes;
+    const requestClientRequestId = parseQuestionRequestClientRequestId(
+      request.request_payload_json,
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createQuestionRepliedEvent({ requestId: request.id, status: 'dismissed' }),
+      requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
+    );
+  }
+
+  return transitionedCount;
 }
 
 // Corrupt-row tolerance (§0.89 class): `questions_json` is persisted via

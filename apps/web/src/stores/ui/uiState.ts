@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
@@ -975,6 +976,31 @@ export function resolveTerminalPanelHeightWithPaneFloor(
 
   const paneFloor = TERMINAL_PANEL_CHROME_HEIGHT + Math.ceil(paneCount) * TERMINAL_MIN_PANE_HEIGHT;
   return clampTerminalPanelHeightToBounds(Math.max(resolved, paneFloor), bounds);
+}
+
+export function uiStateHasHydrated(): boolean {
+  return useUIStateStore.persist.hasHydrated();
+}
+
+/**
+ * 终端面板的渲染门（与 `App.tsx` 的 `useHasHydrated` 同一模式）。
+ *
+ * 为什么终端面板必须等：`uiState` 走的是自定义节流 storage，Zustand 在自定义 storage
+ * 下的水合是**异步**的（microtask），而 auth store 用的同步 localStorage 水合早已完成 ——
+ * 于是刷新后会出现一帧「auth 已就绪、uiState 还没水合」的窗口：此帧渲染的终端面板
+ * `lastChatPath` 是默认 null（会话键 `__default__`），水合完成后才切到真实会话键，
+ * `TerminalSplitView` 的两条分支因此换 key、panes 整棵重挂载。若用户在这一帧按下 tab
+ * 起拖，手势会随卸载一起作废 —— 表现就是「刷新后第一次拖不动，切几次标签才恢复」。
+ * 等水合完成再渲染，会话键从第一帧起就是最终值。
+ */
+export function useUIStateHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => uiStateHasHydrated());
+  useEffect(() => {
+    const unsub = useUIStateStore.persist.onFinishHydration(() => setHydrated(true));
+    setHydrated(uiStateHasHydrated());
+    return unsub;
+  }, []);
+  return hydrated;
 }
 
 export const useUIStateStore = create<UIStateStore>()(

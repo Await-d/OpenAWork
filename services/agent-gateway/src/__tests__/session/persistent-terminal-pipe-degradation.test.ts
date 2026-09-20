@@ -4,9 +4,10 @@
  * Under Node there is no built-in PTY, so `detectTerminalBackend()` must
  * report `kind: 'pipe'` with a reason and the persistent-terminal API must
  * keep working over piped stdio. The non-interactive contract is explicit:
- * the probe reports `interactive: false`, the spawned shell gets no `-i`,
- * the spawn env carries COLUMNS / LINES, and the initial command is
- * ready-gated instead of written before the shell can consume it.
+ * the probe reports `interactive: false`, the shell keeps `-i` (pipe stdin
+ * still executes commands and preserves line editing / echo), the spawn env
+ * carries COLUMNS / LINES, and the initial command is ready-gated instead of
+ * written before the shell can consume it.
  *
  * Cases are skipped by the *detected backend kind* (not by a hand-rolled
  * Bun probe), so the same skip logic holds for any future runtime split.
@@ -137,7 +138,7 @@ describe('Node pipe degradation', () => {
     expect((capabilities.reason ?? '').length).toBeGreaterThan(0);
   });
 
-  it('pipe-degenerate spawn: COLUMNS/LINES env, no -i, metadata.interactive=false', async () => {
+  it('pipe-degenerate spawn: COLUMNS/LINES env, metadata.interactive=false', async () => {
     const { calls, factory } = createCapturingProcessFactory();
     const { terminal } = persistent.spawnPersistentTerminal({
       sessionId: SESSION_ID,
@@ -150,7 +151,8 @@ describe('Node pipe degradation', () => {
     try {
       expect(calls).toHaveLength(1);
       const { input } = calls[0]!;
-      expect(input.args).not.toContain('-i');
+      // 注入 processFactory 时 argv 由该通道决定（恒为空）；本地 shell 的 -i 不在此断言。
+      expect(input.args).toEqual([]);
       expect(input.env['COLUMNS']).toBe('80');
       expect(input.env['LINES']).toBe('24');
       expect(input.env['TERM']).toBe('xterm-256color');

@@ -7,6 +7,7 @@ import {
   filterEnabledGatewayToolsForSession,
 } from '../session/session-tool-visibility.js';
 import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
+import { isTerminatedChildSession } from '../session/child-session-terminal-guard.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import {
@@ -773,6 +774,16 @@ export async function resumeApprovedPermissionRequest(input: {
   sessionId: string;
   userId: string;
 }): Promise<void> {
+  if (isTerminatedChildSession(input.sessionId)) {
+    // 子会话已被停止/超时终止：拒绝复活，避免已取消的子代理重新执行工具。
+    setPersistedSessionStateStatus({
+      sessionId: input.sessionId,
+      status: 'idle',
+      userId: input.userId,
+    });
+    return;
+  }
+
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
     // V2: Transition ToolPart from pending → running before executing
@@ -849,6 +860,16 @@ export async function resumeRejectedPermissionRequest(input: {
   sessionId: string;
   userId: string;
 }): Promise<void> {
+  if (isTerminatedChildSession(input.sessionId)) {
+    // 子会话已被停止/超时终止：拒绝复活，避免已取消的子代理重新执行工具。
+    setPersistedSessionStateStatus({
+      sessionId: input.sessionId,
+      status: 'idle',
+      userId: input.userId,
+    });
+    return;
+  }
+
   try {
     // V2: Transition ToolPart to error state for the rejection
     rejectToolPermission({
@@ -967,6 +988,16 @@ export async function resumeAnsweredQuestionRequest(input: {
   sessionId: string;
   userId: string;
 }): Promise<void> {
+  if (isTerminatedChildSession(input.sessionId)) {
+    // 子会话已被停止/超时终止：拒绝复活，避免已取消的子代理重新执行工具。
+    setPersistedSessionStateStatus({
+      sessionId: input.sessionId,
+      status: 'idle',
+      userId: input.userId,
+    });
+    return;
+  }
+
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
     resumeResult = await continueFromApprovedToolResult({

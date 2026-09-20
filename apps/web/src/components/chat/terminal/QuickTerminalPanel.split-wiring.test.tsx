@@ -299,10 +299,39 @@ describe('T-12：drop 的落盘接线（panel 层 commit）', () => {
     element.getBoundingClientRect = () => domRect;
   }
 
+  function stubImplicitPaneGeometry(container: HTMLElement, tabIds: readonly string[]): void {
+    stubRect(container.querySelector('.terminal-pane[data-pane-id="pane-implicit"]'), {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+    });
+    stubRect(
+      container.querySelector('[data-testid="terminal-tab-strip"][data-pane-id="pane-implicit"]'),
+      { x: 0, y: 0, width: 400, height: 28 },
+    );
+    tabIds.forEach((terminalId, index) => {
+      stubRect(container.querySelector(`[data-terminal-id="${terminalId}"]`), {
+        x: 4 + index * 100,
+        y: 3,
+        width: 96,
+        height: 22,
+      });
+    });
+  }
+
   function dragTab(tabEl: Element, to: { x: number; y: number }): void {
+    pressDrag(tabEl, to);
+    releaseDrag(tabEl, to);
+  }
+
+  function pressDrag(tabEl: Element, to: { x: number; y: number }): void {
     fireEvent.pointerDown(tabEl, { button: 0, clientX: 50, clientY: 14, pointerId: 1 });
     fireEvent.pointerMove(tabEl, { clientX: (50 + to.x) / 2, clientY: 14, pointerId: 1 });
     fireEvent.pointerMove(tabEl, { clientX: to.x, clientY: to.y, pointerId: 1 });
+  }
+
+  function releaseDrag(tabEl: Element, to: { x: number; y: number }): void {
     fireEvent.pointerUp(tabEl, { clientX: to.x, clientY: to.y, pointerId: 1 });
   }
 
@@ -414,5 +443,121 @@ describe('T-12：drop 的落盘接线（panel 层 commit）', () => {
     );
     expect(hook.moveTerminal).not.toHaveBeenCalled();
     expect(hook.insertTerminal).not.toHaveBeenCalled();
+  });
+
+  it('隐式单组的 index 与已物化路径同口径：拖到末个 tab 右半 → 顺序与「移除后再插入」一致', () => {
+    hook.layout = null;
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    const implicitPane = container.querySelector('.terminal-pane[data-pane-id="pane-implicit"]');
+    const strip = container.querySelector(
+      '[data-testid="terminal-tab-strip"][data-pane-id="pane-implicit"]',
+    );
+    stubRect(implicitPane, { x: 0, y: 0, width: 400, height: 300 });
+    stubRect(strip, { x: 0, y: 0, width: 400, height: 28 });
+    stubRect(container.querySelector('[data-terminal-id="t1"]'), {
+      x: 4,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+    stubRect(container.querySelector('[data-terminal-id="t2"]'), {
+      x: 104,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    // 指针落在 t2 中点（152）右侧 → refineTabIndex 按「移除 t1 后」的槽位算出 index=1。
+    dragTab(tabEl, { x: 190, y: 14 });
+
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toEqual(
+      makePane(IMPLICIT_PANE_ID, ['t2', 't1'], 't1'),
+    );
+  });
+
+  it('隐式单组 + 左边落点：物化首个 row 拆分，被拖终端进新 pane，其余终端留在原组', () => {
+    hook.layout = null;
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    stubImplicitPaneGeometry(container, ['t1', 't2']);
+
+    const tabEl = container.querySelector('[data-terminal-id="t2"]');
+    if (!tabEl) throw new Error('t2 tab 未渲染');
+    // 左边带宽度 = 0.25 * min(400, 300) = 75：x=10 命中 left。
+    dragTab(tabEl, { x: 10, y: 150 });
+
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toEqual(
+      makeSplit('split-pane-t2', 'row', [
+        makePane('pane-t2', ['t2']),
+        makePane(IMPLICIT_PANE_ID, ['t1']),
+      ]),
+    );
+    expect(hook.moveTerminal).not.toHaveBeenCalled();
+    expect(hook.insertTerminal).not.toHaveBeenCalled();
+  });
+
+  it('隐式单组 + 下边落点：物化首个 column 拆分，被拖终端在新 pane 保持 active', () => {
+    hook.layout = null;
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    stubImplicitPaneGeometry(container, ['t1', 't2']);
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    // 下边带起点 = 300 - 75 = 225：y=280 命中 bottom；拖走的是原组 active(t1)，
+    // 源组 active 于是回落到剩余首个终端 t2。
+    dragTab(tabEl, { x: 200, y: 280 });
+
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toEqual(
+      makeSplit('split-pane-t1', 'column', [
+        makePane(IMPLICIT_PANE_ID, ['t2']),
+        makePane('pane-t1', ['t1']),
+      ]),
+    );
+  });
+
+  it('隐式单组 + 仅一个终端：边落点仍被拒绝，不物化任何布局', () => {
+    hook.layout = null;
+    const { container } = renderPanel([makeTerminal({ terminalId: 't1' })]);
+    stubImplicitPaneGeometry(container, ['t1']);
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    pressDrag(tabEl, { x: 10, y: 150 });
+
+    expect(document.body.style.cursor).toBe('not-allowed');
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toBeUndefined();
+
+    releaseDrag(tabEl, { x: 10, y: 150 });
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toBeUndefined();
+    expect(hook.moveTerminal).not.toHaveBeenCalled();
+  });
+
+  it('隐式单组 + pane-center：保持拒绝（同组合并是 no-op，不伪装成成功移动）', () => {
+    hook.layout = null;
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    stubImplicitPaneGeometry(container, ['t1', 't2']);
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    pressDrag(tabEl, { x: 200, y: 150 });
+
+    expect(document.body.style.cursor).toBe('not-allowed');
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toBeUndefined();
+
+    releaseDrag(tabEl, { x: 200, y: 150 });
+    expect(hook.moveTerminal).not.toHaveBeenCalled();
   });
 });

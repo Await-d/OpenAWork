@@ -28,7 +28,7 @@ import {
   type TerminalPaneActions,
   type TerminalTabDragState,
 } from './TerminalLayoutContext.js';
-import { TerminalSplitView } from './TerminalSplitView.js';
+import { TerminalSplitView, IMPLICIT_PANE_ID } from './TerminalSplitView.js';
 
 vi.mock('./InteractiveTerminalView.js', () => ({
   InteractiveTerminalView: (props: { terminal: SessionTerminalView }) => (
@@ -370,6 +370,103 @@ describe('<768px（只允许上下拆分）', () => {
   });
 });
 
+describe('隐式单组（layout === null）的首个拆分', () => {
+  function renderImplicit(terminals: SessionTerminalView[]) {
+    const h = renderHarness({ layout: null, terminals, paneCount: 1 });
+    stubRect(h.pane(IMPLICIT_PANE_ID), { x: 0, y: 0, width: 400, height: 300 });
+    stubRect(h.strip(IMPLICIT_PANE_ID), { x: 0, y: 0, width: 400, height: 28 });
+    terminals.forEach((terminal, index) => {
+      stubRect(h.tab(terminal.terminalId), { x: 4 + index * 100, y: 3, width: 96, height: 22 });
+    });
+    return h;
+  }
+
+  it('pane-edge(left)：两个终端时接受 → 左插入条预览 + drop 落盘 pane-edge', () => {
+    const h = renderImplicit([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    const tabEl = h.tab('t2');
+    drag(tabEl, { x: 50, y: 14 }, { x: 10, y: 150 });
+
+    const preview = h.pane(IMPLICIT_PANE_ID).querySelector('.terminal-pane__drop-edge');
+    expect(preview?.getAttribute('data-edge')).toBe('left');
+    expect(document.body.style.cursor).toBe('grabbing');
+    expect(h.actions.moveTerminalByDrop).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(tabEl, { clientX: 10, clientY: 150, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).toHaveBeenCalledWith(
+      't2',
+      { kind: 'pane-edge', paneId: IMPLICIT_PANE_ID, edge: 'left' },
+      undefined,
+    );
+  });
+
+  it('pane-edge(top)：上下边（column）同样接受并预览', () => {
+    const h = renderImplicit([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    const tabEl = h.tab('t2');
+    drag(tabEl, { x: 50, y: 14 }, { x: 200, y: 40 });
+
+    const preview = h.pane(IMPLICIT_PANE_ID).querySelector('.terminal-pane__drop-edge');
+    expect(preview?.getAttribute('data-edge')).toBe('top');
+
+    fireEvent.pointerUp(tabEl, { clientX: 200, clientY: 40, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).toHaveBeenCalledWith(
+      't2',
+      { kind: 'pane-edge', paneId: IMPLICIT_PANE_ID, edge: 'top' },
+      undefined,
+    );
+  });
+
+  it('仅一个终端：边落点拒绝（拆出去会让源组变空），不预览、不落盘', () => {
+    const h = renderImplicit([makeTerminal({ terminalId: 't1' })]);
+    const tabEl = h.tab('t1');
+    drag(tabEl, { x: 50, y: 14 }, { x: 10, y: 150 });
+
+    expect(h.view.container.querySelector('.terminal-pane__drop-edge')).toBeNull();
+    expect(document.body.style.cursor).toBe('not-allowed');
+
+    fireEvent.pointerUp(tabEl, { clientX: 10, clientY: 150, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).not.toHaveBeenCalled();
+  });
+
+  it('pane-center：同组合并是 no-op，保持拒绝语义', () => {
+    const h = renderImplicit([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    const tabEl = h.tab('t1');
+    drag(tabEl, { x: 50, y: 14 }, { x: 200, y: 150 });
+
+    expect(h.pane(IMPLICIT_PANE_ID).getAttribute('data-drop-center')).toBeNull();
+    expect(document.body.style.cursor).toBe('not-allowed');
+
+    fireEvent.pointerUp(tabEl, { clientX: 200, clientY: 150, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).not.toHaveBeenCalled();
+  });
+
+  it('tab-strip：组内重排仍然接受（首个拆分不改变这条语义）', () => {
+    const h = renderImplicit([
+      makeTerminal({ terminalId: 't1' }),
+      makeTerminal({ terminalId: 't2' }),
+    ]);
+    const tabEl = h.tab('t1');
+    drag(tabEl, { x: 50, y: 14 }, { x: 190, y: 14 });
+
+    expect(h.strip(IMPLICIT_PANE_ID).getAttribute('data-drop-strip')).toBe('true');
+
+    fireEvent.pointerUp(tabEl, { clientX: 190, clientY: 14, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).toHaveBeenCalledWith(
+      't1',
+      { kind: 'tab-strip', index: 1 },
+      IMPLICIT_PANE_ID,
+    );
+  });
+});
+
 describe('拒绝矩阵', () => {
   /** 两 pane 各一个终端：用于「拖走某组最后一个终端」的语义回归。 */
   function renderSingleTerminalPanes(limits: { paneCount?: number; maxPanes?: number } = {}) {
@@ -528,6 +625,75 @@ describe('手势收口', () => {
     // 下一次真实点击恢复正常。
     fireEvent.click(label);
     expect(h.actions.selectTerminal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('引擎无关的手势（document 级监听）', () => {
+  it('pointerdown 必须 preventDefault（阻断 WebView2 原生拖拽抢占指针流）', () => {
+    const h = renderHarness({ layout: TWO_PANE_LAYOUT, terminals: THREE_TERMINALS });
+    stubStandardGeometry(h, ['t3']);
+
+    const tabEl = h.tab('t1');
+    const down = new Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.assign(down, { button: 0, clientX: 50, clientY: 14, pointerId: 1 });
+    const notCancelled = tabEl.dispatchEvent(down);
+
+    expect(notCancelled).toBe(false);
+  });
+
+  it('不得调用 setPointerCapture（capture 在 WebView2 上会因重排静默丢事件）', () => {
+    const h = renderHarness({ layout: TWO_PANE_LAYOUT, terminals: THREE_TERMINALS });
+    stubStandardGeometry(h, ['t3']);
+    pointerCapture.setCapture.mockClear();
+
+    fireEvent.pointerDown(h.tab('t1'), { button: 0, clientX: 50, clientY: 14, pointerId: 1 });
+
+    expect(pointerCapture.setCapture).not.toHaveBeenCalled();
+  });
+
+  it('pointer capture 抛错时拖拽仍生效（跟手 + 落一次盘）', () => {
+    const h = renderHarness({ layout: TWO_PANE_LAYOUT, terminals: THREE_TERMINALS });
+    stubStandardGeometry(h, ['t3']);
+    Object.defineProperty(Element.prototype, 'setPointerCapture', {
+      configurable: true,
+      writable: true,
+      value: () => {
+        throw new Error('capture unsupported');
+      },
+    });
+
+    const tabEl = h.tab('t1');
+    fireEvent.pointerDown(tabEl, { button: 0, clientX: 50, clientY: 14, pointerId: 1 });
+    fireEvent.pointerMove(document.body, { clientX: 600, clientY: 150, pointerId: 1 });
+
+    expect(h.pane('p2').getAttribute('data-drop-center')).toBe('true');
+    fireEvent.pointerUp(document.body, { clientX: 600, clientY: 150, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).toHaveBeenCalledWith(
+      't1',
+      { kind: 'pane-center', paneId: 'p2' },
+      undefined,
+    );
+  });
+
+  it('指针离开 tab 条（事件落在 document.body）后仍持续跟随并落盘', () => {
+    const h = renderHarness({ layout: TWO_PANE_LAYOUT, terminals: THREE_TERMINALS });
+    stubStandardGeometry(h, ['t3']);
+
+    const tabEl = h.tab('t1');
+    fireEvent.pointerDown(tabEl, { button: 0, clientX: 50, clientY: 14, pointerId: 1 });
+    fireEvent.pointerMove(document.body, { clientX: 90, clientY: 14, pointerId: 1 });
+    expect(h.tab('t1').getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.pointerMove(document.body, { clientX: 410, clientY: 150, pointerId: 1 });
+    const preview = h.pane('p2').querySelector('.terminal-pane__drop-edge');
+    expect(preview?.getAttribute('data-edge')).toBe('left');
+
+    fireEvent.pointerUp(document.body, { clientX: 410, clientY: 150, pointerId: 1 });
+    expect(h.actions.moveTerminalByDrop).toHaveBeenCalledWith(
+      't1',
+      { kind: 'pane-edge', paneId: 'p2', edge: 'left' },
+      undefined,
+    );
   });
 });
 

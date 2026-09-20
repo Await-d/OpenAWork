@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TERMINAL_SCOPE_ATTR, isEditableTarget, isWithinTerminalScope } from './terminal-scope.js';
+import { TERMINAL_SCOPE_ATTR, isWithinTerminalScope } from './terminal-scope.js';
 
 describe('terminal-scope', () => {
   it('位于 [data-terminal-scope] 内的元素返回 true', () => {
@@ -31,30 +31,5 @@ describe('terminal-scope', () => {
 
   it('作用域外的元素返回 false', () => {
     expect(isWithinTerminalScope(document.createElement('div'))).toBe(false);
-  });
-
-  it('input / textarea 判定为可编辑', () => {
-    expect(isEditableTarget(document.createElement('input'))).toBe(true);
-    expect(isEditableTarget(document.createElement('textarea'))).toBe(true);
-  });
-
-  it('contentEditable 元素判定为可编辑', () => {
-    const attributeTrue = document.createElement('div');
-    attributeTrue.setAttribute('contenteditable', 'true');
-    expect(isEditableTarget(attributeTrue)).toBe(true);
-
-    const attributeEmpty = document.createElement('div');
-    attributeEmpty.setAttribute('contenteditable', '');
-    expect(isEditableTarget(attributeEmpty)).toBe(true);
-
-    const viaDomApi = document.createElement('div');
-    Object.defineProperty(viaDomApi, 'isContentEditable', { value: true });
-    expect(isEditableTarget(viaDomApi)).toBe(true);
-  });
-
-  it('普通 div 与非 Element 目标判定为不可编辑', () => {
-    expect(isEditableTarget(document.createElement('div'))).toBe(false);
-    expect(isEditableTarget(null)).toBe(false);
-    expect(isEditableTarget(window)).toBe(false);
   });
 });

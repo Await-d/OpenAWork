@@ -5,7 +5,8 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-width: 280px;
+  /* 底限：200px 封顶 + 24vw 随窗口收窄 + 100% 防溢出；cqw 会被分栏百分比恒覆盖，故不用。 */
+  min-width: min(200px, 24vw, 100%);
   overflow: hidden;
 }
 

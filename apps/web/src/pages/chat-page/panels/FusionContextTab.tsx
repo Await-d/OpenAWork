@@ -1,192 +1,30 @@
-import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
-import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
-import { getPathBasename } from '../../../utils/workspace-path.js';
-import { ChatOverviewTabContent } from './right-panel-sections.js';
+import { ChatOverviewTabContent } from './chat-overview-tab-content.js';
+import type {
+  ChatOverviewRuntimeSummary,
+  ChatOverviewTabContentProps,
+} from './chat-overview-tab-content.js';
 
-export type FusionContextOverviewProps = Parameters<typeof ChatOverviewTabContent>[0];
+export type FusionContextOverviewProps = ChatOverviewTabContentProps;
 
-export interface FusionContextRuntimeSummary {
-  readonly activePlanTaskCount: number;
-  readonly childSessionCount: number;
-  readonly dagEdgeCount: number;
-  readonly dagNodeCount: number;
-  readonly failedToolCallCount: number;
-  readonly mcpServerCount: number;
-  readonly pendingPermissionCount: number;
-  readonly toolCallCount: number;
-  readonly totalPlanTaskCount: number;
-}
+export type FusionContextRuntimeSummary = ChatOverviewRuntimeSummary;
 
 export interface FusionContextTabProps {
-  readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
-  readonly currentSessionId: string | null;
-  readonly effectiveWorkingDirectory: string | null;
-  readonly onCompactSession: () => void;
-  readonly overview?: FusionContextOverviewProps;
+  readonly overview: FusionContextOverviewProps;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
-  readonly workspaceFileItems: readonly WorkspaceFileMentionItem[];
 }
 
-function formatTokenCount(value: number | null): string {
-  if (value === null) return '-';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toLocaleString();
-}
-
-function basename(path: string): string {
-  return getPathBasename(path, path);
-}
-
-function renderRuntimeSummary(summary: FusionContextRuntimeSummary) {
-  const items = [
-    {
-      description:
-        summary.failedToolCallCount > 0 ? `${summary.failedToolCallCount} 个失败` : '全部正常',
-      label: '工具调用',
-      tone: summary.failedToolCallCount > 0 ? 'danger' : 'default',
-      value: `${summary.toolCallCount} 次`,
-    },
-    {
-      description:
-        summary.totalPlanTaskCount > 0
-          ? `${summary.activePlanTaskCount}/${summary.totalPlanTaskCount} 进行中`
-          : '暂无计划',
-      label: '计划任务',
-      tone: summary.activePlanTaskCount > 0 ? 'accent' : 'default',
-      value: `${summary.totalPlanTaskCount} 项`,
-    },
-    {
-      description: `${summary.dagNodeCount} 节点 / ${summary.dagEdgeCount} 边`,
-      label: 'DAG',
-      tone: summary.dagNodeCount > 0 ? 'aux' : 'default',
-      value: `${summary.dagNodeCount}`,
-    },
-    {
-      description: `${summary.mcpServerCount} 个服务`,
-      label: 'MCP',
-      tone: summary.mcpServerCount > 0 ? 'aux' : 'default',
-      value: `${summary.mcpServerCount}`,
-    },
-    {
-      description: `${summary.pendingPermissionCount} 项`,
-      label: '待审批',
-      tone: summary.pendingPermissionCount > 0 ? 'warning' : 'default',
-      value: `${summary.pendingPermissionCount}`,
-    },
-    {
-      description: `${summary.childSessionCount} 个`,
-      label: '子会话',
-      tone: summary.childSessionCount > 0 ? 'accent' : 'default',
-      value: `${summary.childSessionCount}`,
-    },
-  ] as const;
-
-  return (
-    <section className="fusion-side-panel__runtime-summary" aria-label="Fusion 运行摘要">
-      {items.map((item) => (
-        <div key={item.label} data-tone={item.tone}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-          <small>{item.description}</small>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-export function FusionContextTab({
-  contextUsageSnapshot,
-  currentSessionId,
-  effectiveWorkingDirectory,
-  onCompactSession,
-  overview,
-  runtimeSummary,
-  workspaceFileItems,
-}: FusionContextTabProps) {
-  const usedTokens = contextUsageSnapshot?.usedTokens ?? null;
-  const maxTokens = contextUsageSnapshot?.maxTokens ?? null;
-  const rawPercent =
-    usedTokens !== null && maxTokens !== null
-      ? Math.round((usedTokens / Math.max(1, maxTokens)) * 100)
-      : null;
-  const displayPercent = rawPercent === null ? 0 : Math.min(100, rawPercent);
-  const usageTone =
-    rawPercent === null
-      ? 'muted'
-      : rawPercent >= 90
-        ? 'danger'
-        : rawPercent >= 70
-          ? 'warning'
-          : 'ok';
-
+/**
+ * Fusion「会话概览」tab 的 wrapper。
+ *
+ * 所有权（改动前请先读）：上下文用量 meter 与「压缩会话」入口的唯一 owner 是
+ * `ChatOverviewTabContent`（经典右栏与 Fusion 共用同一实现）。这里不得再渲染
+ * 用量文案 / usage-card / runtime-summary 指标块——它们曾与概览正文重复表达
+ * 同一批 datum（用量、压缩、子会话、待审批、计划任务、流诊断）。
+ */
+export function FusionContextTab({ overview, runtimeSummary }: FusionContextTabProps) {
   return (
     <div className="fusion-side-panel__scroll">
-      {/* section-head 已移除：标题由面板 Tab 承担，这里只保留用量摘要与压缩入口 */}
-      <div className="fusion-side-panel__head-actions">
-        <span className="fusion-side-panel__head-meta">
-          {rawPercent === null ? '等待上下文窗口' : `${rawPercent}% 已用`}
-        </span>
-        <button
-          type="button"
-          className="fusion-side-panel__ghost-button"
-          onClick={onCompactSession}
-        >
-          压缩会话
-        </button>
-      </div>
-
-      {runtimeSummary ? renderRuntimeSummary(runtimeSummary) : null}
-
-      {overview ? (
-        <ChatOverviewTabContent {...overview} />
-      ) : (
-        <>
-          <div className="fusion-side-panel__usage-card" data-tone={usageTone}>
-            <div className="fusion-side-panel__usage-head">
-              <span>{contextUsageSnapshot?.estimated ? '估算用量' : '上下文用量'}</span>
-              <strong>
-                {formatTokenCount(usedTokens)} / {formatTokenCount(maxTokens)}
-              </strong>
-            </div>
-            <div
-              className="fusion-side-panel__usage-meter"
-              role="meter"
-              aria-label="上下文用量"
-              aria-valuemin={0}
-              aria-valuemax={maxTokens ?? 100}
-              aria-valuenow={usedTokens ?? 0}
-            >
-              <span style={{ width: `${displayPercent}%` }} />
-            </div>
-          </div>
-
-          <div className="fusion-side-panel__stat-grid">
-            <div>
-              <span>会话</span>
-              <strong>{currentSessionId ? `${currentSessionId.slice(0, 8)}...` : '-'}</strong>
-            </div>
-            <div>
-              <span>工作区</span>
-              <strong title={effectiveWorkingDirectory ?? undefined}>
-                {effectiveWorkingDirectory ? basename(effectiveWorkingDirectory) : '-'}
-              </strong>
-            </div>
-            <div>
-              <span>文件上下文</span>
-              <strong>{workspaceFileItems.length}</strong>
-            </div>
-            <div>
-              <span>剩余 Token</span>
-              <strong>
-                {usedTokens !== null && maxTokens !== null
-                  ? formatTokenCount(Math.max(0, maxTokens - usedTokens))
-                  : '-'}
-              </strong>
-            </div>
-          </div>
-        </>
-      )}
+      <ChatOverviewTabContent {...overview} runtimeSummary={runtimeSummary} />
     </div>
   );
 }

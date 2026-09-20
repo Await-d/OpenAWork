@@ -146,6 +146,11 @@ export {
   writeWorkspacePermissionConfig,
 } from './permission/workspace-permission-config.js';
 
+export {
+  ALLOW_BY_DEFAULT_TOOL_NAMES,
+  TOOL_TO_PERMISSION_CATEGORY,
+} from './permission/tool-category-map.js';
+
 export type { SessionPermissionMode } from './permission/session-permission-mode.js';
 export {
   AUTO_EDIT_EXCLUDED_TOOLS,

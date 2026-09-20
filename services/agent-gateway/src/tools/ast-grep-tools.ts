@@ -92,7 +92,11 @@ function buildCommonArgs(
   paths: string[],
   globs: string[],
 ): string[] {
-  const args = ['scan', '--json=stream', '--pattern', pattern, '--lang', lang];
+  // 必须使用 run 子命令，不能用 scan：ast-grep 0.44 实测 `scan --pattern ...` 直接以退出码 2
+  // 报 "unexpected argument '--pattern' found"（scan 只接受 `--json[=<STYLE>] --after <NUM> [PATHS]...`），
+  // 只有 run（主命令，版本间稳定）接受 --pattern/--rewrite。
+  // 公共参数刻意不含 --json：写盘路径带了它会静默丢弃 --update-all（原因见 executeAstGrepReplace）。
+  const args = ['run', '--pattern', pattern, '--lang', lang];
   globs.forEach((glob) => {
     args.push('--globs', glob);
   });
@@ -132,6 +136,14 @@ function formatAstGrepSearchResults(results: AstGrepResultItem[], context: numbe
   ].join('\n\n');
 }
 
+function formatAstGrepAppliedOutput(stdout: string): string {
+  const summary = stdout.trim();
+  if (summary.length === 0) {
+    return '无任何替换被应用。';
+  }
+  return `已应用替换：${summary}`;
+}
+
 function formatAstGrepReplaceResults(results: AstGrepResultItem[], dryRun: boolean): string {
   if (results.length === 0) {
     return dryRun ? '试运行：无可应用的改动。' : '无任何替换被应用。';
@@ -148,22 +160,48 @@ function formatAstGrepReplaceResults(results: AstGrepResultItem[], dryRun: boole
   ].join('\n\n');
 }
 
-async function runAstGrep(
-  args: string[],
-  options?: { cwd?: string },
-): Promise<AstGrepResultItem[]> {
+function isAstGrepNoMatchFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const code = 'code' in error ? error.code : undefined;
+  if (code !== 1) {
+    return false;
+  }
+  const stdout = 'stdout' in error && typeof error.stdout === 'string' ? error.stdout : '';
+  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
+  // ast-grep 在“无任何匹配”时以退出码 1 且 stdout/stderr 均为空结束（0.44 实测）；
+  // 缺文件等真实错误会往 stderr 写内容，必须继续抛出，不能一并吞掉。
+  return stdout.trim() === '' && stderr.trim() === '';
+}
+
+async function runAstGrepRaw(args: string[], options?: { cwd?: string }): Promise<string> {
   const binary = await resolveAstGrepBinary();
   if (!binary) {
     throw new Error(
       'ast-grep binary not found. Set AST_GREP_BIN or install ast-grep in PATH as "ast-grep".',
     );
   }
-  const { stdout } = await execFileAsync(binary, args, {
-    ...(options?.cwd ? { cwd: options.cwd } : {}),
-    timeout: 60000,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  return parseAstGrepStdout(stdout);
+  try {
+    const { stdout } = await execFileAsync(binary, args, {
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+      timeout: 60000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    if (isAstGrepNoMatchFailure(error)) {
+      return '';
+    }
+    throw error;
+  }
+}
+
+async function runAstGrep(
+  args: string[],
+  options?: { cwd?: string },
+): Promise<AstGrepResultItem[]> {
+  return parseAstGrepStdout(await runAstGrepRaw(args, options));
 }
 
 function normalizeAstGrepPaths(paths: string[], workspaceRoot?: string): string[] {
@@ -187,11 +225,18 @@ export async function executeAstGrepReplace(
   const normalizedPaths = normalizeAstGrepPaths(input.paths, workspaceRoot);
   const args = buildCommonArgs(input.pattern, input.lang, normalizedPaths, input.globs);
   args.push('--rewrite', input.rewrite);
-  if (!input.dryRun) {
-    args.push('--update-all');
+  if (input.dryRun) {
+    // 试运行不写盘，可以带 --json 拿结构化匹配（含 replacement 字段）做预览。
+    args.push('--json=stream');
+    const preview = await runAstGrep(args, workspaceRoot ? { cwd: workspaceRoot } : undefined);
+    return formatAstGrepReplaceResults(preview, true);
   }
-  const results = await runAstGrep(args, workspaceRoot ? { cwd: workspaceRoot } : undefined);
-  return formatAstGrepReplaceResults(results, input.dryRun);
+  // 写盘模式绝对不能带 --json：ast-grep 0.44 实测 --json 与 --update-all 同时出现时，
+  // 命令只打印 JSON 并以退出码 0 结束，但不会改写任何文件（静默丢写）。
+  // 因此这里只保留 --rewrite + --update-all，结果以此命令自身的 "Applied N changes" 摘要为准。
+  args.push('--update-all');
+  const stdout = await runAstGrepRaw(args, workspaceRoot ? { cwd: workspaceRoot } : undefined);
+  return formatAstGrepAppliedOutput(stdout);
 }
 
 export const astGrepSearchToolDefinition: ToolDefinition<
@@ -208,6 +253,9 @@ export const astGrepSearchToolDefinition: ToolDefinition<
     if (input.context > 0) {
       args.push('--context', String(input.context));
     }
+    // 检索只读、不落盘，保留 JSON 流以复用 parseAstGrepStdout：
+    // 0.44 实测 `run --json=stream` 的字段（file/range.start/lines）与既有解析器一致。
+    args.push('--json=stream');
     const results = await runAstGrep(args);
     return formatAstGrepSearchResults(results, input.context);
   },

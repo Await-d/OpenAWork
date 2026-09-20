@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { categorizeAlwaysPatterns, type AlwaysScopeLevel } from '@openAwork/shared-ui';
+import { resolveAlwaysScopeSelection, type AlwaysScopeLevel } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PermissionDecision } from '@openAwork/web-client';
 import {
   applyPermissionDecisionToLocalAssistantMessages,
@@ -124,7 +124,8 @@ export function useTeamConversationViewInlineInteractions(input: { state: TeamCo
 
       const selectedScopeLevel =
         selectedPermissionScopeLevels[request.requestId] ??
-        categorizeAlwaysPatterns(request.previewAction, request.scope, request.always).at(-1);
+        resolveAlwaysScopeSelection(request.previewAction, request.scope, request.always)
+          .selectedLevel;
       const alwaysOverride =
         decision !== 'once' && decision !== 'reject' && selectedScopeLevel
           ? [selectedScopeLevel.pattern]
@@ -186,13 +187,12 @@ export function useTeamConversationViewInlineInteractions(input: { state: TeamCo
           ? inlinePermissionPendingDecision.decision
           : null;
       const disabled = pendingDecision !== null;
-      const scopeLevels = categorizeAlwaysPatterns(
+      const { levels: scopeLevels, selectedLevel } = resolveAlwaysScopeSelection(
         request.previewAction,
         request.scope,
         request.always,
       );
-      const selectedScopeLevel =
-        selectedPermissionScopeLevels[requestId] ?? scopeLevels[scopeLevels.length - 1];
+      const selectedScopeLevel = selectedPermissionScopeLevels[requestId] ?? selectedLevel;
 
       return {
         items: [

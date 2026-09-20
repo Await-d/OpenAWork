@@ -43,8 +43,11 @@ export function terminalTabLabel(term: SessionTerminalView, index: number): stri
 /**
  * T-12 tab 拖拽绑定（由 `TerminalPane` 注入）。
  *
- * pointer capture 挂在**被按下的 tab** 上：指针离开 tab 条后事件仍回传给该 tab，
- * 再冒泡到 tab 条容器上的 move/up 处理器，因此拖到别的 pane 上也能持续跟随。
+ * `pointerdown` 在**被按下的 tab** 上起手；后续的 `pointermove` / `pointerup` /
+ * `pointercancel` 由持有者 `TerminalPane` 挂到 **window** 上，而不是挂在 tab 条容器
+ * 上等 pointer capture 重定向后再冒泡：capture 的重定向语义在部分 WebView / 非
+ * Chromium 引擎上并不可靠，一旦不生效就会表现为「按下无跟手、无预览」。挂 window
+ * 与引擎无关，且指针拖出面板（detach）时也能持续跟随。
  */
 export interface TerminalTabDragBinding {
   /** 当前正在拖拽的终端（跨组共享，用于 tab 的弱化样式与点击抑制）。 */
@@ -54,9 +57,6 @@ export interface TerminalTabDragBinding {
   onTabPointerDown(terminalId: string, event: ReactPointerEvent<HTMLDivElement>): void;
   /** Tab 聚焦在 tab 上时的键盘替代：Alt+←/→ 组内重排、Alt+Shift+←/→ 移到相邻组。 */
   onTabKeyDown(terminalId: string, event: ReactKeyboardEvent<HTMLDivElement>): void;
-  onStripPointerMove(event: ReactPointerEvent<HTMLDivElement>): void;
-  onStripPointerUp(event: ReactPointerEvent<HTMLDivElement>): void;
-  onStripPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void;
 }
 
 export interface TerminalTabStripProps {
@@ -117,9 +117,6 @@ export function TerminalTabStrip({
       data-testid="terminal-tab-strip"
       data-pane-id={paneId}
       data-drop-strip={drag?.dropOnStrip ? 'true' : undefined}
-      onPointerMove={drag?.onStripPointerMove}
-      onPointerUp={drag?.onStripPointerUp}
-      onPointerCancel={drag?.onStripPointerCancel}
     >
       {terminals.length === 0 ? (
         <span className="terminal-tab-strip__empty">暂无运行中的终端 · 点击 ＋ 新建</span>
@@ -168,14 +165,11 @@ export function TerminalTabStrip({
                     }
               }
               /**
-               * 点选 / 双击重命名挂在**容器**上，而不是 label 按钮上：T-12 的拖拽在
-               * pointerdown 时对被按下的 tab 调了 `setPointerCapture`，浏览器随后会把
-               * `mouseup` / `click` / `dblclick` 重定向到捕获元素（真实浏览器实测事件目标
-               * 链：`pointerdown@label → mouseup@terminal-tab → click@terminal-tab`），
-               * label 自己的 onClick / onDoubleClick 因此永远收不到 —— 表现就是
-               * 「点 tab 不切换、双击不重命名」。容器在 jsdom 与真实浏览器下都能拿到
-               * 这条事件（jsdom 里普通冒泡即可），且仍与拖拽后的 click 抑制（onSelect
-               * 内的 takeClickSuppression）串在同一条链上。
+               * 点选 / 双击重命名挂在**容器**上，而不是 label 按钮上：
+               * 拖拽的 `pointerdown` 调了 `preventDefault()`（阻断原生拖拽），
+               * 且 tab 内还有独立的关闭按钮 —— 容器级处理能让「点空白处」也不落空，
+               * 并与拖拽后的 click 抑制（onSelect 内的 takeClickSuppression）串在同一条链上。
+               * jsdom 与真实浏览器下都能拿到这条事件。
                */
               onClick={(event) => {
                 if (isRenaming) return;

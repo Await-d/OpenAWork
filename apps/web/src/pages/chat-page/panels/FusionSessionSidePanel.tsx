@@ -1,7 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ChatProviderDescriptor } from '../../../components/chat/message/chat-message-group-list.js';
-import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
-import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type {
   EditorBrowserWorkspaceProps,
   EditorPaneTab,
@@ -53,7 +51,6 @@ export function resolveFusionDesktopPanelTab(tab: SidePanelTabId): FusionDesktop
 
 export interface FusionSessionSidePanelProps {
   readonly activeTab: SidePanelTabId;
-  readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
   readonly currentSessionId: string | null;
   readonly currentUserDisplayName?: string;
   readonly currentUserEmail: string;
@@ -64,7 +61,6 @@ export interface FusionSessionSidePanelProps {
   readonly fileTree: ReactNode;
   readonly gatewayUrl: string;
   readonly handleSaveFile: (path: string) => Promise<void>;
-  readonly onCompactSession: () => void;
   /** 打开子代理完整会话（从子代理 tab 的「全屏」入口跳转）。 */
   readonly onOpenFullSession: (sessionId: string) => void;
   /** 子代理 tab 切换器：选择某个子会话（通常由 ChatPage 写回 selectedChildSessionId）。 */
@@ -72,7 +68,8 @@ export interface FusionSessionSidePanelProps {
   /** 把工作区提升到主内容区（editorMode + editorFullScreen + 对应 tab）。 */
   readonly onPromoteToFullScreen: (tab: EditorPaneTab) => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
-  readonly overview?: FusionContextOverviewProps;
+  /** 会话概览正文数据（必填）：用量、压缩入口、指标、诊断全部由它承载。 */
+  readonly overview: FusionContextOverviewProps;
   readonly providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   readonly reviewRevision?: number;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
@@ -86,7 +83,6 @@ export interface FusionSessionSidePanelProps {
   /** 子代理消息里父级 task 工具的运行态查找表。 */
   readonly taskToolRuntimeLookup?: TaskToolRuntimeLookup;
   readonly token: string | null;
-  readonly workspaceFileItems: readonly WorkspaceFileMentionItem[];
   readonly workspacePath: string | null;
   /**
    * 主内容区工作区已处于提升 / 分屏态：全屏入口由主内容区内建按钮承担，
@@ -97,7 +93,6 @@ export interface FusionSessionSidePanelProps {
 
 export function FusionSessionSidePanel({
   activeTab,
-  contextUsageSnapshot,
   currentSessionId,
   currentUserDisplayName,
   currentUserEmail,
@@ -106,7 +101,6 @@ export function FusionSessionSidePanel({
   fileTree,
   gatewayUrl,
   handleSaveFile,
-  onCompactSession,
   onOpenFullSession,
   onPromoteToFullScreen,
   onSelectChildSession,
@@ -121,7 +115,6 @@ export function FusionSessionSidePanel({
   subAgentCount,
   taskToolRuntimeLookup,
   token,
-  workspaceFileItems,
   workspacePath,
   workspacePromoted = false,
 }: FusionSessionSidePanelProps) {
@@ -258,15 +251,7 @@ export function FusionSessionSidePanel({
         data-testid="fusion-panel-pane-context"
         hidden={desktopTab !== 'context'}
       >
-        <FusionContextTab
-          contextUsageSnapshot={contextUsageSnapshot}
-          currentSessionId={currentSessionId}
-          effectiveWorkingDirectory={effectiveWorkingDirectory}
-          onCompactSession={onCompactSession}
-          overview={overview}
-          runtimeSummary={runtimeSummary}
-          workspaceFileItems={workspaceFileItems}
-        />
+        <FusionContextTab overview={overview} runtimeSummary={runtimeSummary} />
       </div>
     </SessionSidePanel>
   );

@@ -84,7 +84,7 @@ describe('ComposerPermissionModeSelect', () => {
 
     // 非选中档：说明不渲染成行（列表保持紧凑），只挂在 title 上供 hover 查看。
     const otherRows = [
-      { label: /每次询问/, description: '工具调用前先征求你的确认' },
+      { label: /每次询问/, description: '文件与命令等工具调用前先征求确认（只读检索类默认放行）' },
       { label: /免审批/, description: '跳过审批、直达结果；显式禁止的规则仍然生效' },
     ];
     for (const row of otherRows) {

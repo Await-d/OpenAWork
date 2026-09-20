@@ -22,11 +22,15 @@ export const COMPOSER_PERMISSION_MODE_OPTIONS: readonly [
   ComposerPermissionModeOption,
   ...ComposerPermissionModeOption[],
 ] = [
-  { value: 'ask', label: '每次询问', description: '工具调用前先征求你的确认' },
+  {
+    value: 'ask',
+    label: '每次询问',
+    description: '文件与命令等工具调用前先征求确认（只读检索类默认放行）',
+  },
   {
     value: 'auto-edit',
     label: '编辑自动',
-    description: '文件编辑与写入自动执行；命令执行及其余工具仍需确认',
+    description: '文件编辑与写入自动执行；命令执行等仍需确认',
   },
   {
     value: 'yolo',

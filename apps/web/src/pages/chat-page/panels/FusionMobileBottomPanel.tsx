@@ -10,7 +10,6 @@
 
 import { useState } from 'react';
 import type { WorkspaceFileTreePanelProps } from '../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
-import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import { FusionContextTab } from './FusionContextTab.js';
 import type {
@@ -29,7 +28,6 @@ import './FusionMobileBottomPanel.css';
 export interface FusionMobileBottomPanelProps {
   readonly activeEditorFilePath: string | null;
   readonly activeTab: SidePanelTabId;
-  readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
   readonly currentSessionId: string | null;
   readonly editorMode: boolean;
   readonly editorFileState: FusionFilesEditorState;
@@ -44,12 +42,12 @@ export interface FusionMobileBottomPanelProps {
   readonly onClose: () => void;
   /** 打开面板内容 */
   readonly onOpen: () => void;
-  readonly onCompactSession: () => void;
   readonly onOpenFileInEditor: (path: string) => void;
   readonly onOpenWorkspace: () => void;
   readonly onShowEditor: () => void;
   readonly onTabChange: (tab: SidePanelTabId) => void;
-  readonly overview?: FusionContextOverviewProps;
+  /** 会话概览正文数据（必填）：用量、压缩入口、指标、诊断全部由它承载。 */
+  readonly overview: FusionContextOverviewProps;
   readonly reviewRevision?: number;
   readonly runtimeSummary?: FusionContextRuntimeSummary;
   readonly saving: boolean;
@@ -162,7 +160,7 @@ interface TabDef {
   readonly badge?: number;
 }
 
-const MOBILE_PANEL_TAB_IDS: readonly SidePanelTabId[] = ['review', 'files', 'context', 'browser'];
+const MOBILE_PANEL_TAB_IDS: readonly SidePanelTabId[] = ['files', 'browser', 'review', 'context'];
 
 /** 共享 store 在跨断点 / 布局切换后可能残留桌面 tab；渲染前收敛到审查，避免空面板。 */
 export function resolveMobilePanelTab(tab: SidePanelTabId): SidePanelTabId {
@@ -172,7 +170,6 @@ export function resolveMobilePanelTab(tab: SidePanelTabId): SidePanelTabId {
 export function FusionMobileBottomPanel({
   activeEditorFilePath,
   activeTab,
-  contextUsageSnapshot,
   currentSessionId,
   editorMode,
   editorFileState,
@@ -184,7 +181,6 @@ export function FusionMobileBottomPanel({
   isOpen,
   onClose,
   onOpen,
-  onCompactSession,
   onOpenFileInEditor,
   onOpenWorkspace,
   onShowEditor,
@@ -211,10 +207,10 @@ export function FusionMobileBottomPanel({
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>('unified');
 
   const tabs: readonly TabDef[] = [
-    { id: 'review', label: '审查', icon: <ReviewIcon />, badge: reviewCount || undefined },
     { id: 'files', label: '文件', icon: <FilesIcon /> },
-    { id: 'context', label: 'Context', icon: <ContextIcon /> },
     { id: 'browser', label: '浏览器', icon: <BrowserIcon /> },
+    { id: 'review', label: '审查', icon: <ReviewIcon />, badge: reviewCount || undefined },
+    { id: 'context', label: '会话概览', icon: <ContextIcon /> },
   ];
 
   const handleTabClick = (tabId: SidePanelTabId) => {
@@ -282,15 +278,7 @@ export function FusionMobileBottomPanel({
                   effectiveWorkingDirectory={effectiveWorkingDirectory}
                 />
               ) : (
-                <FusionContextTab
-                  contextUsageSnapshot={contextUsageSnapshot}
-                  currentSessionId={currentSessionId}
-                  effectiveWorkingDirectory={effectiveWorkingDirectory}
-                  onCompactSession={onCompactSession}
-                  overview={overview}
-                  runtimeSummary={runtimeSummary}
-                  workspaceFileItems={workspaceFileItems}
-                />
+                <FusionContextTab overview={overview} runtimeSummary={runtimeSummary} />
               )}
             </div>
           </div>

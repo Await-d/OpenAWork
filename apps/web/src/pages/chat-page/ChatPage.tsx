@@ -210,7 +210,12 @@ import {
   markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
 } from '../../components/conversation-runtime/stream/streaming-thinking.js';
-import { buildSubAgentRunItems, SubAgentRunList } from './panels/sub-agent-run-list.js';
+import {
+  buildSubAgentRunItems,
+  isActiveStatus,
+  SubAgentRunList,
+} from './panels/sub-agent-run-list.js';
+import { BatchStopSubAgentsControl } from './panels/batch-stop-sub-agents-control.js';
 import { WorkflowRuntimeStatusStrip } from './panels/WorkflowRuntimeStatusStrip.js';
 import { SubSessionDetailPanel } from './panels/sub-session-detail-panel.js';
 import {
@@ -275,6 +280,7 @@ import { useChatPendingActions } from './hooks/use-chat-pending-actions.js';
 import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
 import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
+import { useChatStopChildSessions } from './hooks/use-chat-stop-child-sessions.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
 import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui-state.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
@@ -589,6 +595,17 @@ export default function ChatPage() {
   const todoController = useChatTodoController(sessionTodos);
   const todoDetailsId = useId();
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
+  const {
+    stoppingSubAgentIds,
+    stoppingAllSubAgents,
+    handleStopChildSession,
+    handleStopAllChildSessions,
+  } = useChatStopChildSessions({
+    currentSessionId,
+    gatewayUrl,
+    token,
+    requestSessionListRefresh,
+  });
   const [workflowRuntime, setWorkflowRuntime] = useState<WorkflowRuntimeState | null>(null);
   const [latestGeneratedImageResult, setLatestGeneratedImageResult] = useState<{
     artifactId: string;
@@ -1584,6 +1601,11 @@ export default function ChatPage() {
     sessionStateStatus,
     streaming,
   ]);
+  // 有 attach 重试待触发且归属当前会话 = 客户端正在重新接入；用于状态条显示「恢复中」。
+  const sessionReconnecting =
+    currentSessionId !== null &&
+    attachRetryScheduledSessionId !== null &&
+    attachRetryScheduledSessionId === currentSessionId;
   const activeGatewayStreamClientRequestId = client.getActiveStreamClientRequestId();
   const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
   const isCurrentSessionRunning = sessionStateStatus === 'running';
@@ -5414,6 +5436,21 @@ export default function ChatPage() {
       currentSshConnection={composerSshConnection}
     />
   ) : null;
+  const activeSubAgentCount = subAgentRunItems.filter((item) => isActiveStatus(item.status)).length;
+  /** 输入框上方的 footer slot：工作空间选择 + 有活跃子代理时的批量停止入口。 */
+  const composerFooterSlot =
+    composerWorkspaceSlot || activeSubAgentCount > 0 ? (
+      <>
+        {composerWorkspaceSlot}
+        {activeSubAgentCount > 0 ? (
+          <BatchStopSubAgentsControl
+            activeCount={activeSubAgentCount}
+            stopping={stoppingAllSubAgents}
+            onConfirm={handleStopAllChildSessions}
+          />
+        ) : null}
+      </>
+    ) : null;
   const {
     activeProvider,
     providerCatalog,
@@ -6131,7 +6168,6 @@ export default function ChatPage() {
               <FusionMobileBottomPanel
                 activeEditorFilePath={fileEditor.activeFilePath}
                 activeTab={sidePanelActiveTab}
-                contextUsageSnapshot={contextUsageSnapshot}
                 currentSessionId={currentSessionId}
                 editorMode={editorMode}
                 editorFileState={fileEditor}
@@ -6147,7 +6183,6 @@ export default function ChatPage() {
                 onOpen={() => {
                   setReviewPanelOpened(true);
                 }}
-                onCompactSession={() => void handleCompactCurrentSession()}
                 onOpenFileInEditor={handleOpenFusionEditorFile}
                 onOpenWorkspace={requestWorkspaceBindingChange}
                 onShowEditor={handleShowFusionEditor}
@@ -6165,7 +6200,6 @@ export default function ChatPage() {
           sidePanel={
             <FusionDockedSidePanel
               activeTab={sidePanelActiveTab}
-              contextUsageSnapshot={contextUsageSnapshot}
               currentSessionId={currentSessionId}
               currentUserDisplayName={currentUserDisplayName}
               currentUserEmail={currentUserEmail}
@@ -6174,7 +6208,6 @@ export default function ChatPage() {
               fileTree={renderWorkspaceFileTree(true)}
               gatewayUrl={gatewayUrl}
               handleSaveFile={handleSaveFile}
-              onCompactSession={() => void handleCompactCurrentSession()}
               onOpenFullSession={(nextSessionId) => {
                 void navigate(`/chat/${nextSessionId}`);
               }}
@@ -6191,7 +6224,6 @@ export default function ChatPage() {
               subAgentItems={subAgentRunItems}
               taskToolRuntimeLookup={taskToolRuntimeLookup}
               token={token}
-              workspaceFileItems={workspaceFileItems}
               workspacePath={uiWorkspaceScope}
               workspacePromoted={editorMode}
             />
@@ -6389,6 +6421,8 @@ export default function ChatPage() {
                       items={subAgentRunItems}
                       selectedSessionId={selectedChildSessionId}
                       onSelectSession={openChildSessionInspector}
+                      onStopSession={handleStopChildSession}
+                      stoppingSessionIds={stoppingSubAgentIds}
                     />
                     <UserHistoryJumpList
                       items={userHistoryJumpItems}
@@ -6451,6 +6485,7 @@ export default function ChatPage() {
                 visibleStreaming={visibleStreaming}
                 showSessionSwitchSkeleton={showSessionSwitchSkeleton}
                 remoteSessionBusyState={remoteSessionBusyState}
+                reconnecting={sessionReconnecting}
                 pendingPermissions={pendingPermissions}
                 resolveInlinePermissionActions={resolveInlinePermissionActions}
                 providerCatalog={providerCatalog}
@@ -6636,7 +6671,7 @@ export default function ChatPage() {
                 onCompanionActivityChange={setCompanionComposerActivity}
                 markSessionMetadataDirty={markSessionMetadataDirty}
                 statsData={composerStatsData}
-                composerFooterSlot={composerWorkspaceSlot}
+                composerFooterSlot={composerFooterSlot}
               />
             </LatestAssistantMessageContext>
           </SessionPanelFrame>
@@ -6893,6 +6928,8 @@ export default function ChatPage() {
                         items={subAgentRunItems}
                         selectedSessionId={selectedChildSessionId}
                         onSelectSession={openChildSessionInspector}
+                        onStopSession={handleStopChildSession}
+                        stoppingSessionIds={stoppingSubAgentIds}
                       />
                       <UserHistoryJumpList
                         items={userHistoryJumpItems}
@@ -6955,6 +6992,7 @@ export default function ChatPage() {
                   visibleStreaming={visibleStreaming}
                   showSessionSwitchSkeleton={showSessionSwitchSkeleton}
                   remoteSessionBusyState={remoteSessionBusyState}
+                  reconnecting={sessionReconnecting}
                   pendingPermissions={pendingPermissions}
                   resolveInlinePermissionActions={resolveInlinePermissionActions}
                   providerCatalog={providerCatalog}
@@ -7140,7 +7178,7 @@ export default function ChatPage() {
                   onCompanionActivityChange={setCompanionComposerActivity}
                   markSessionMetadataDirty={markSessionMetadataDirty}
                   statsData={composerStatsData}
-                  composerFooterSlot={composerWorkspaceSlot}
+                  composerFooterSlot={composerFooterSlot}
                 />
                 {currentSessionId && !isFusionLayout ? (
                   // classic overlay 不显式接线最大化：QuickTerminalPanel 缺省回落 store 的

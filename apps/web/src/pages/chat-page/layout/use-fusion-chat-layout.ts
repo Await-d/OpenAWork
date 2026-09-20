@@ -96,13 +96,16 @@ export function useFusionChatLayout({
       return;
     }
 
-    if (!reviewPanelOpened || sidePanelActiveTab !== 'review') {
-      setSidePanelActiveTab('review');
-      setReviewPanelOpened(true);
+    // 收起判据只看 reviewPanelOpened：顶栏按钮的 title / 高亮态都由它决定，
+    // 因此「面板已展开」时任意一次点击都必须直接收起——即便用户此刻停在
+    // 代码 / 预览 / Context 等其他 tab（否则会先被切回审查，形成要点两次才关的错觉）。
+    if (reviewPanelOpened) {
+      setReviewPanelOpened(false);
       return;
     }
 
-    setReviewPanelOpened(false);
+    setSidePanelActiveTab('review');
+    setReviewPanelOpened(true);
   }, [
     editorFullScreen,
     editorMode,
@@ -111,7 +114,6 @@ export function useFusionChatLayout({
     setEditorMode,
     setReviewPanelOpened,
     setSidePanelActiveTab,
-    sidePanelActiveTab,
   ]);
 
   const showDockedSidePanel =
@@ -146,7 +148,7 @@ export function useFusionChatLayout({
     conversationLayoutState,
     pageRootClassName: 'page-root page-root-fusion-col',
     pageRootStyle,
-    rightPanelCommandDescription: '审查 / 代码 / 预览 / Context 停靠侧栏',
+    rightPanelCommandDescription: '代码 / 预览 / 审查 / 子代理 / 会话概览 停靠侧栏',
     rightPanelCommandLabel: reviewPanelOpened ? '收起会话面板' : '展开会话面板',
     showDockedSidePanel,
     toggleReviewPanel,

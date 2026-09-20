@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   resolveEffectiveTerminalPanelPosition,
+  useUIStateHydrated,
   useUIStateStore,
   type TerminalPanelPosition,
 } from '../../../stores/ui/uiState.js';
@@ -38,6 +39,7 @@ import {
 } from '../../conversation-runtime/terminals/terminals-api.js';
 import {
   insertTerminalIntoPane,
+  moveTerminal as applyMoveTerminal,
   removeTerminal as applyRemoveTerminal,
   setPaneActiveTerminal,
   splitPane as applySplitPane,
@@ -319,10 +321,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   }, [hint]);
 
   const inputEnabled = (terminal: SessionTerminalView): boolean =>
-    ACTIVE_STATUSES.has(terminal.status) &&
-    terminal.kind === 'foreground' &&
-    // 非交互后端（未启用 PTY）不接受 stdin：清屏 / 面板动作也不该发字节。
-    terminal.interactive !== false;
+    ACTIVE_STATUSES.has(terminal.status) && terminal.kind === 'foreground';
 
   /**
    * 一次性落盘布局（**只允许用户主动操作**调用）。
@@ -431,8 +430,9 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   /**
    * T-12 drop 的唯一落盘入口（一次）。
    *
-   * - 隐式单组（layout === null）：只有「落回本组 tab 条」（组内重排）有语义；物化
-   *   单 pane 树把顺序持久化，pane id 仍是 IMPLICIT_PANE_ID，渲染不变。
+   * - 隐式单组（`layout === null`）：tab-strip 落回本组 = 组内重排，物化单 pane 树把
+   *   顺序持久化（pane id 仍是 IMPLICIT_PANE_ID，渲染不变）；四边落点物化单 pane 树
+   *   后走纯函数层拆分，产出首个分屏树；`pane-center` / `detach` 没有语义，静默返回。
    * - `tab-strip`：纯函数层的 `moveTerminal` 对该落点只做「移出树」，插入位与目标组
    *   都要调用方给（见 mutations.ts 注释），因此这里直接走 `insertTerminalIntoPane`，
    *   同时覆盖组内重排与跨组移入。
@@ -444,14 +444,38 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     tabStripPaneId?: string,
   ): void => {
     if (layout === null) {
-      if (target.kind !== 'tab-strip' || tabStripPaneId === undefined) return;
+      if (target.kind !== 'tab-strip') {
+        if (target.kind !== 'pane-edge' || target.paneId !== IMPLICIT_PANE_ID) return;
+        const edgeIds = activeTerminals.map((terminal) => terminal.terminalId);
+        // 源组只剩一个终端时拆出去会让它变空（禁止空 pane 不变量），保持拒绝语义。
+        if (edgeIds.length < 2 || !edgeIds.includes(terminalId)) return;
+        // 隐式 pane 尚未物化：先按当前全部终端建组（保留原 active），再交给纯函数层
+        // 拆分 —— 与 ⊟ 拆分同一条「先物化再 splitPane」路径。
+        const materialized = createPane(edgeIds, IMPLICIT_PANE_ID);
+        const oriented =
+          implicitActiveId !== null
+            ? setPaneActiveTerminal(materialized, IMPLICIT_PANE_ID, implicitActiveId)
+            : materialized;
+        const next = applyMoveTerminal(oriented, terminalId, target, {
+          newPaneId: nextUniquePaneId(oriented, terminalId),
+          maxPanes: MAX_PANES,
+        });
+        if (next !== oriented) commitLayout(next);
+        return;
+      }
+      if (tabStripPaneId === undefined) return;
       const ids = activeTerminals.map((terminal) => terminal.terminalId);
       if (!ids.includes(terminalId)) return;
       const without = ids.filter((id) => id !== terminalId);
+      // index 语义 = **移除被拖终端之后**的槽位（与 refineTabIndex / withTerminalAt 同口径）。
+      // 隐式单组这条路径自己完成了移除，因此直接按该语义插入即可；若再按「未移除的数组」
+      // 位置插入，会整体偏移一位 —— 表现是第一次拖拽「落到错误槽位」，物化后重拖才到位。
       const at = Math.min(Math.max(target.index, 0), without.length);
       without.splice(at, 0, terminalId);
       const [first] = without;
       if (first === undefined) return;
+      // createPane 把 active 硬编码为首个终端；用户当下选中的 tab 必须保留，
+      // 否则拖动一次就会把 active 换到别的终端上。
       const materialized = createPane(without, IMPLICIT_PANE_ID);
       const next =
         implicitActiveId !== null
@@ -631,6 +655,17 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
       setReviewPanelOpened(false);
     }
   };
+
+  /**
+   * 渲染门：等 `uiState` 水合完成再渲染面板。
+   *
+   * `uiState` 的自定义节流 storage 让水合变成异步 microtask，而 auth store 的同步
+   * 水合早已完成 —— 两者之间那一帧里 `lastChatPath` 还是默认 null（会话键 `__default__`），
+   * 水合后切到真实会话键会让 pane 整棵重挂载，落在这一帧的拖拽手势随之作废
+   * （表现：刷新后第一次拖不动，切几次标签才恢复）。见 `useUIStateHydrated` 的说明。
+   */
+  const uiStateHydrated = useUIStateHydrated();
+  if (!uiStateHydrated) return null;
 
   if (!open) return null;
 

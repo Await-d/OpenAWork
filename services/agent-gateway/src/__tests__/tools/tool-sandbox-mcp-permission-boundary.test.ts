@@ -318,3 +318,71 @@ describe('tool-sandbox flat MCP permission boundary', () => {
     expect(permissionInsertParams()).toEqual(expect.arrayContaining(['bash', command]));
   });
 });
+
+describe('tool-sandbox mcp_call permission boundary for removed servers', () => {
+  const defaultSqliteGetImplementation = mocks.sqliteGetMock.getMockImplementation();
+  const defaultConfiguredMcpServerImplementation =
+    mocks.getConfiguredMcpServerForSessionMock.getMockImplementation();
+
+  beforeEach(() => {
+    // yolo 档位：权限阶梯本应完全跳过审批，但 buildPermissionRequestContext
+    // 在阶梯快捷分支之前执行，因此这个用例专门锚定「即使 yolo 也不能抛异常」。
+    mocks.sqliteGetMock.mockImplementation((query: string): SqliteGetMockRow | undefined => {
+      if (query.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
+      if (query.includes('SELECT role_layer, team_parent_session_id, handoff_state')) {
+        return { role_layer: null, team_parent_session_id: null, handoff_state: null };
+      }
+      if (query.includes('SELECT metadata_json')) {
+        return { metadata_json: '{"permissionMode":"yolo"}' };
+      }
+      return undefined;
+    });
+    // 模拟用户在回合中途删除 / 禁用 MCP server：mcp-runtime 的查询直接抛错。
+    mocks.getConfiguredMcpServerForSessionMock.mockImplementation(
+      (_sessionId: string, serverId: string) => {
+        throw new Error(`Configured MCP server not found: ${serverId}`);
+      },
+    );
+    // 执行路径重新解析 server 时同样失败，产出确定性工具错误。
+    mocks.callMcpToolForSessionMock.mockRejectedValue(
+      new Error('Configured MCP server not found: removed-server'),
+    );
+  });
+
+  afterEach(() => {
+    if (defaultSqliteGetImplementation) {
+      mocks.sqliteGetMock.mockImplementation(defaultSqliteGetImplementation);
+    }
+    if (defaultConfiguredMcpServerImplementation) {
+      mocks.getConfiguredMcpServerForSessionMock.mockImplementation(
+        defaultConfiguredMcpServerImplementation,
+      );
+    }
+  });
+
+  it('surfaces the tool error instead of rejecting when the server is no longer configured', async () => {
+    const execution = createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-mcp-removed-yolo',
+        toolName: 'mcp_call',
+        rawInput: {
+          serverId: 'removed-server',
+          toolName: 'create_issue',
+          arguments: { title: 'Bug' },
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+      executionContext('req-mcp-removed-yolo'),
+    );
+
+    // 权限阶段必须放行（context 为 null → not_needed），而不是把异常抛出沙箱。
+    await expect(execution).resolves.toMatchObject({ isError: true });
+    const result = await execution;
+    expect(String(result.output)).toContain('Configured MCP server not found: removed-server');
+    expect(permissionInsertParams()).toBeUndefined();
+    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledTimes(1);
+  });
+});

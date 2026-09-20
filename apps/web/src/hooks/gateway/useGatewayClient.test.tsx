@@ -151,6 +151,13 @@ describe('formatGatewayStreamErrorMessage', () => {
     expect(formatGatewayStreamErrorMessage('SSE_INVALID_PAYLOAD')).toBe('SSE 数据解析失败。');
     expect(formatGatewayStreamErrorMessage('WS_INVALID_PAYLOAD')).toBe('WebSocket 数据解析失败。');
   });
+
+  it('ABORTED 取消码返回中文取消文案，不透传英文 message', () => {
+    expect(formatGatewayStreamErrorMessage('ABORTED', 'upstream stream aborted')).toBe(
+      '本次生成已取消。',
+    );
+    expect(formatGatewayStreamErrorMessage('ABORTED')).toBe('本次生成已取消。');
+  });
 });
 
 describe('connectAttachEventSource', () => {
@@ -690,6 +697,59 @@ describe('useGatewayClient', () => {
     expect(onDelta).toHaveBeenCalledWith('hello');
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('WS 收到 ABORTED 取消码时走 onDone(cancelled)，不触发 onError', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onEvent = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-abort', 'hello', {
+        onDelta: vi.fn(),
+        onDone,
+        onError,
+        onEvent,
+      });
+    });
+
+    const ws = MockWebSocket.instances[0];
+    act(() => {
+      ws?.onopen?.();
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'error',
+          code: 'ABORTED',
+          message: 'upstream stream aborted',
+        }),
+      } as MessageEvent);
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone.mock.calls[0]?.[0]).toBe('cancelled');
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'done', stopReason: 'cancelled' }),
+    );
   });
 
   it('WS 已消费部分事件后回退 SSE 会携带当前 afterSeq 游标', () => {

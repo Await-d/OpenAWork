@@ -29,7 +29,6 @@ import {
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
 import {
-  detectTerminalBackend,
   spawnTerminalProcess,
   type TerminalProcess,
   type SpawnTerminalProcessInput,
@@ -115,16 +114,14 @@ function countLivePersistentTerminals(sessionId: string): number {
   return count;
 }
 
-function getShell(interactive: boolean): { shell: string; args: string[] } {
+function getShell(): { shell: string; args: string[] } {
   const choice = resolveShellChoiceForPlatform(process.platform, process.env);
   if (choice.isPowerShell) {
     return { shell: choice.shell, args: ['-NoLogo', '-NoProfile'] };
   }
-  // Interactive backend: a non-login interactive shell (we lose .bashrc
-  // aliases for login-only setup, a fair trade for predictable behaviour).
-  // Non-interactive backend: `-i` would only make the shell *claim* a tty it
-  // does not have, so spawn a plain shell that still reads piped stdin.
-  return { shell: choice.shell, args: interactive ? ['-i'] : [] };
+  // Non-login shell — `-i` is kept even on the pipe backend: it preserves line
+  // editing / echo, and the shell still reads piped stdin.
+  return { shell: choice.shell, args: ['-i'] };
 }
 
 /**
@@ -133,15 +130,12 @@ function getShell(interactive: boolean): { shell: string; args: string[] } {
  * allowlist (`shell-profiles.ts`). `resolveShellForSpawn` throws a typed
  * `InvalidShellProfileError` for an unknown id, so spawn is never reached.
  */
-function resolveSpawnShell(
-  shellProfileId: string | undefined,
-  interactive: boolean,
-): {
+function resolveSpawnShell(shellProfileId: string | undefined): {
   shell: string;
   args: string[];
   shellProfileId?: string;
 } {
-  const fallback = getShell(interactive);
+  const fallback = getShell();
   return resolveShellForSpawn({
     ...(shellProfileId !== undefined ? { shellProfileId } : {}),
     platform: process.platform,
@@ -195,10 +189,9 @@ export function spawnPersistentTerminal(
     throw new PersistentTerminalLimitError(input.sessionId, maxPerSession);
   }
 
-  const capabilities = detectTerminalBackend();
   const resolvedShell = input.processFactory
     ? { shell: '(remote default)', args: [], shellProfileId: undefined }
-    : resolveSpawnShell(input.shellProfileId, capabilities.interactive);
+    : resolveSpawnShell(input.shellProfileId);
   const { shell, args } = resolvedShell;
   const abortController = new AbortController();
   const decoder = new StringDecoder('utf8');

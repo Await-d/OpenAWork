@@ -56,12 +56,23 @@ interface UserSettingRow {
 
 const trigger = new GitHubTriggerImpl();
 
-function buildGitHubSessionMetadata(ctx: { eventType: string; repoFullName: string }): string {
+function buildGitHubSessionMetadata(ctx: {
+  eventType: string;
+  repoFullName: string;
+  autoApprove: boolean;
+}): string {
   return JSON.stringify({
     githubTrigger: {
       eventType: ctx.eventType,
       repoFullName: ctx.repoFullName,
     },
+    // autoApprove 必须写入会话 metadata 的规范键 `permissionMode`：工具审批的
+    // 强制执行只读会话 metadata（tool-sandbox.ensurePermissionForTool →
+    // resolveSessionPermissionMode），请求级 yoloMode 仅投影系统提示词、不参与
+    // 放行决策。autoApprove 为 false 时不写任何档位键（permissionMode / yoloMode
+    // 一并缺席），由 resolveSessionPermissionMode 兜底为保守的 `ask`——不凭空写入
+    // `ask`，避免把「从未表达过档位」的会话钉死成显式档位。
+    ...(ctx.autoApprove ? { permissionMode: 'yolo' } : {}),
   });
 }
 
@@ -236,7 +247,11 @@ trigger.setRouteHandler(async (ctx) => {
       `GitHub: ${ctx.eventType} on ${ctx.repoFullName}`,
       '[]',
       'idle',
-      buildGitHubSessionMetadata({ eventType: ctx.eventType, repoFullName: ctx.repoFullName }),
+      buildGitHubSessionMetadata({
+        eventType: ctx.eventType,
+        repoFullName: ctx.repoFullName,
+        autoApprove: ctx.autoApprove,
+      }),
     ],
   );
 

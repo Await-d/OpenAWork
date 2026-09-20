@@ -36,7 +36,11 @@ export type {
   Diagnostic,
   DiagnosticSeverity,
 } from './agent/DiagnosticCard.js';
-export { PermissionPrompt, categorizeAlwaysPatterns } from './permissions/PermissionPrompt.js';
+export {
+  PermissionPrompt,
+  categorizeAlwaysPatterns,
+  resolveAlwaysScopeSelection,
+} from './permissions/PermissionPrompt.js';
 export type {
   PermissionPromptProps,
   PermissionDecision,

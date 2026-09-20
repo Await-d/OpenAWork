@@ -5,7 +5,6 @@ import { parseQuery } from '../infra/parse-request.js';
 import {
   mapPermissionRequestRow,
   parseApprovedPermissionResumePayload,
-  parsePermissionAlwaysJson,
   type PermissionDecision,
   type PermissionRequestStatus,
   type PermissionRiskLevel,
@@ -56,7 +55,11 @@ import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
 import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
-import { resolvePermissionCategory } from '@openAwork/agent-core';
+import {
+  cascadeApproveCoveredPendingPermissions,
+  resolveAlwaysPatterns,
+  resolvePermissionReplyCategory,
+} from '../permission/permission-reply-always.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
@@ -624,14 +627,8 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         decision: body.decision,
       });
 
-      const permissionCategory = resolvePermissionCategory(permissionRequest.tool_name);
-      const alwaysPatterns =
-        body.alwaysOverride && body.alwaysOverride.length > 0
-          ? body.alwaysOverride
-          : (() => {
-              const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
-              return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
-            })();
+      const permissionCategory = resolvePermissionReplyCategory(permissionRequest.tool_name);
+      const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
 
       if (body.decision === 'permanent') {
         for (const pattern of alwaysPatterns) {
@@ -683,6 +680,19 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         }
       }
 
+      const cascadedRequestIds: string[] = [];
+      if (body.decision === 'permanent' || body.decision === 'session') {
+        cascadedRequestIds.push(
+          ...cascadeApproveCoveredPendingPermissions({
+            sessionId,
+            excludeRequestId: body.requestId,
+            category: permissionCategory,
+            patterns: alwaysPatterns,
+            decision: body.decision,
+          }),
+        );
+      }
+
       const requestClientRequestId = (() => {
         if (!permissionRequest.request_payload_json) {
           return null;
@@ -710,7 +720,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
       markPermissionNotificationsReadByRequestIds({
-        requestIds: [body.requestId],
+        requestIds: [body.requestId, ...cascadedRequestIds],
         sessionId,
         userId: sharedAccess.ownerUserId,
       });

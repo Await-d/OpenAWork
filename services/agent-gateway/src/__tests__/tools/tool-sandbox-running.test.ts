@@ -12,9 +12,19 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],
   sqliteAll: vi.fn(() => []),
-  sqliteGet: vi.fn((query: string) =>
-    query.includes('SELECT user_id FROM sessions') ? { user_id: 'user-1' } : undefined,
-  ),
+  sqliteGet: vi.fn((query: string) => {
+    if (query.includes('SELECT user_id FROM sessions')) {
+      return { user_id: 'user-1' };
+    }
+    // 权限回归修复：unit_tool 没有注册权限类别，fail-closed 后落到 'custom'（默认 ask），
+    // 会进入 pending 审批链路，从而把本用例的关注点（running 状态迁移与执行的先后顺序）
+    // 淹没在审批 mock 里。这里把会话声明为 yolo 档位，让权限层返回 not_needed，
+    // 使场景按用例本意继续执行；权限层本身的阶梯行为由 permissionMode 专项用例覆盖。
+    if (query.includes('SELECT metadata_json FROM sessions')) {
+      return { metadata_json: '{"permissionMode":"yolo"}' };
+    }
+    return undefined;
+  }),
   sqliteRun: vi.fn(() => undefined),
 }));
 
@@ -94,7 +104,7 @@ describe('ToolSandbox.execute', () => {
     const transitionOrder = mocks.transitionToolToRunningMock.mock.invocationCallOrder[0] ?? 0;
     const executeOrder = toolExecute.mock.invocationCallOrder[0] ?? 0;
     expect(transitionOrder).toBeLessThan(executeOrder);
-  }, 15_000);
+  }, 30_000);
 
   it('keeps ToolRegistry timeout protection for gateway-managed workspace tools', async () => {
     const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
@@ -112,7 +122,7 @@ describe('ToolSandbox.execute', () => {
 
     expect(result.isError).toBe(true);
     expect(String(result.output)).toContain('Tool timed out after 10000ms');
-  }, 15_000);
+  }, 30_000);
 
   it('Windows 会话带有 POSIX 工作区路径时将工具失败返回给调用方', async () => {
     const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');

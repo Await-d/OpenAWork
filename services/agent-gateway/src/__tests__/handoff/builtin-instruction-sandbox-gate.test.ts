@@ -48,7 +48,7 @@ beforeAll(async () => {
   toolSandboxModule = await import('../../tools/tool-sandbox.js');
   // 确保内置指令已注册（registry 被填充）。
   await import('../../handoff/capability/builtin-instructions-impl.js');
-});
+}, 60_000);
 
 beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM message_v2', []);
@@ -87,6 +87,12 @@ describe('ToolSandbox 门控放行团队层内置指令', () => {
       [SESSION_ID],
     );
     expect(msgCount?.c).toBeGreaterThanOrEqual(1);
+
+    const permissionCount = dbModule.sqliteGet<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM permission_requests WHERE session_id = ?`,
+      [SESSION_ID],
+    );
+    expect(permissionCount?.c).toBe(0);
   }, 15_000);
 
   it('未注册的工具名仍被 whitelist 门控拒绝（防回归过度放行）', async () => {

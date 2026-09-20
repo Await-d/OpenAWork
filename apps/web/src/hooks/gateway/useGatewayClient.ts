@@ -71,6 +71,19 @@ export const STREAM_CLIENT_ERROR_MESSAGES = {
   wsInvalidPayload: 'WebSocket 数据解析失败。',
 } as const;
 
+/**
+ * 取消码判定。网关在“取消”场景（用户停止 / 父会话级联中断 / 连接被新请求顶替）
+ * 也会下发 `code: 'ABORTED'` 的 error chunk；它语义上是取消而不是失败。
+ * 客户端必须把它归入 `done('cancelled')` 通道，否则页面会误报红色错误条、
+ * 落一条 `[错误: ABORTED]` 气泡，并吞掉网关随后补发的取消摘要。
+ */
+export function isCancellationStreamCode(code: string): boolean {
+  return code === 'ABORTED';
+}
+
+/** 取消态统一用户文案，避免把上游英文原始 message（如 `upstream stream aborted`）透传到界面。 */
+export const CANCELLATION_STREAM_MESSAGE = '本次生成已取消。';
+
 export function formatGatewayStreamErrorMessage(
   code: string,
   message?: string,
@@ -82,6 +95,10 @@ export function formatGatewayStreamErrorMessage(
     normalizedTechnicalDetail && normalizedTechnicalDetail !== baseMessage
       ? `${baseMessage}\n\n技术详情：${normalizedTechnicalDetail}`
       : baseMessage;
+
+  if (isCancellationStreamCode(code)) {
+    return appendTechnicalDetail(CANCELLATION_STREAM_MESSAGE);
+  }
 
   if (normalizedMessage) {
     return appendTechnicalDetail(normalizedMessage);
@@ -333,6 +350,16 @@ export function connectAttachEventSource(
       onErrorChunk: (chunk) => {
         settled = true;
         cleanup(true, eventSource);
+        if (isCancellationStreamCode(chunk.code)) {
+          const cancelledChunk: StreamDoneChunk = {
+            type: 'done',
+            stopReason: 'cancelled',
+            ...(chunk.upstreamSummary ? { upstreamSummary: chunk.upstreamSummary } : {}),
+          };
+          callbacks.onEvent?.(cancelledChunk);
+          callbacks.onDone('cancelled', undefined, undefined, chunk.upstreamSummary);
+          return;
+        }
         callbacks.onEvent?.(chunk);
         callbacks.onError(chunk.code, chunk.message, chunk.technicalDetail);
       },
@@ -947,6 +974,16 @@ export function useGatewayClient(token: string | null): GatewayClient {
         onErrorChunk: (chunk) => {
           settled = true;
           cleanup();
+          if (isCancellationStreamCode(chunk.code)) {
+            const cancelledChunk: StreamDoneChunk = {
+              type: 'done',
+              stopReason: 'cancelled',
+              ...(chunk.upstreamSummary ? { upstreamSummary: chunk.upstreamSummary } : {}),
+            };
+            callbacks.onEvent?.(cancelledChunk);
+            callbacks.onDone('cancelled', undefined, undefined, chunk.upstreamSummary);
+            return;
+          }
           callbacks.onEvent?.(chunk);
           callbacks.onError(chunk.code, chunk.message, chunk.technicalDetail);
         },

@@ -523,6 +523,15 @@ export interface SessionTruncateMessagesResult {
   rollback: RollbackReceipt | null;
 }
 
+export type StopChildrenSkipReason = 'not_found' | 'not_direct_child' | 'already_terminal';
+
+export interface StopChildrenResult {
+  stopped: string[];
+  skipped: Array<{ childSessionId: string; reason: StopChildrenSkipReason }>;
+  failed: Array<{ childSessionId: string; error: string }>;
+  interactions: { permissions: number; questions: number };
+}
+
 export interface SessionsClient {
   list(token: string, options?: SessionsListOptions): Promise<Session[]>;
   listSharedWithMe(
@@ -678,6 +687,11 @@ export interface SessionsClient {
     sessionId: string,
     taskId: string,
   ): Promise<{ cancelled: boolean; stopped: boolean }>;
+  stopChildren(
+    token: string,
+    sessionId: string,
+    input: { childSessionIds?: string[]; all?: boolean },
+  ): Promise<StopChildrenResult>;
   stopActiveStream(token: string, sessionId: string): Promise<boolean>;
   stopStream(token: string, sessionId: string, clientRequestId: string): Promise<boolean>;
   importSession(token: string, data: SessionImportInput): Promise<SessionImportResult>;
@@ -1520,6 +1534,21 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
           }),
       });
       return { cancelled: data.cancelled === true, stopped: data.stopped === true };
+    },
+
+    async stopChildren(token, sessionId, input) {
+      return performSessionRequest<StopChildrenResult>({
+        actionLabel: '停止子代理',
+        request: () =>
+          fetchWithTimeout(
+            `${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/children/stop`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+              body: JSON.stringify(input),
+            },
+          ),
+      });
     },
 
     async importSession(token, data) {

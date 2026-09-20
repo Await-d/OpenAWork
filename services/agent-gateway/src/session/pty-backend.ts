@@ -7,9 +7,9 @@
  * built-in PTY, so on Node (and on Windows under Bun) we degrade to piped
  * stdio: input/output still flow, but `isatty()` is false, resize is a
  * no-op signalled by a `false` return, and the capability probe reports
- * `interactive: false` so callers spawn a plain shell instead of `bash -i`.
- * That piped path is an explicit, honest non-interactive degradation — not a
- * fake terminal.
+ * `interactive: false` so callers and clients know TUI / resize support is
+ * absent. That piped path still executes commands — it is an explicit
+ * degradation, not a fake terminal.
  *
  * Bun exposes no ambient TypeScript types, and this repo forbids `any` /
  * `@ts-ignore`, so the runtime handle is narrowed through minimal local
@@ -27,8 +27,8 @@ export interface TerminalBackendCapabilities {
   supportsResize: boolean;
   /**
    * True only for a real PTY backend. When false the shell has no terminal
-   * (`isatty()` is false), so callers must not force `-i` — that would fake
-   * job control / prompts without a tty to back them.
+   * (`isatty()` is false): resize is a no-op and TUI / full-screen programs
+   * are unsupported, though piped stdin still executes commands.
    */
   interactive: boolean;
   reason?: string;

@@ -80,6 +80,7 @@ import { filterSessionsByPath } from '../session/session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
+import { stopDirectChildSessions } from '../session/stop-child-sessions.js';
 import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
 import { clearSubstateTrackingForSession } from '../handoff/store/substate-store.js';
@@ -3528,6 +3529,47 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, { cancelled: true, stopped: false });
       return reply.send({ cancelled: true, stopped: false });
+    },
+  );
+
+  const stopChildSessionsSchema = z
+    .object({
+      childSessionIds: z.array(z.string().min(1)).min(1).max(100).optional(),
+      all: z.boolean().optional(),
+    })
+    .strict()
+    .refine((value) => value.all === true || (value.childSessionIds?.length ?? 0) > 0, {
+      message: '必须提供 childSessionIds 或 all=true。',
+      path: ['childSessionIds'],
+    });
+
+  app.post(
+    '/sessions/:sessionId/children/stop',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.children.stop', undefined, {
+        sessionId,
+      });
+      const body = parseBody(stopChildSessionsSchema, request.body);
+
+      const result = await stopDirectChildSessions({
+        parentSessionId: sessionId,
+        userId: user.sub,
+        ...(body.childSessionIds !== undefined ? { childSessionIds: body.childSessionIds } : {}),
+        ...(body.all !== undefined ? { all: body.all } : {}),
+      });
+      if (!result) {
+        step.fail('session not found');
+        return reply.status(404).send({ error: '目标会话不存在。' });
+      }
+
+      step.succeed(undefined, {
+        stopped: result.stopped.length,
+        failed: result.failed.length,
+      });
+      return reply.send(result);
     },
   );
 

@@ -9,7 +9,7 @@ import type {
   TeamRuntimeSessionRecord,
   TeamWorkspaceDetail,
 } from '@openAwork/web-client';
-import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
+import { resolveAlwaysScopeSelection } from '@openAwork/shared-ui';
 import type {
   TeamActionFeedback,
   useTeamCollaboration,
@@ -532,11 +532,11 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         (request) => `permission-${request.requestId}` === cardId,
       );
       if (permissionRequest) {
-        const scopeLevel = categorizeAlwaysPatterns(
+        const { selectedLevel: scopeLevel } = resolveAlwaysScopeSelection(
           permissionRequest.previewAction,
           permissionRequest.scope,
           permissionRequest.always,
-        ).at(-1);
+        );
         return collaboration.replySharedSessionPermission(sessionId, {
           ...(status === 'approved' && scopeLevel ? { alwaysOverride: [scopeLevel.pattern] } : {}),
           decision: status === 'approved' ? 'session' : 'reject',

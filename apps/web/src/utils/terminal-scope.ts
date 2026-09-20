@@ -17,23 +17,3 @@ export const TERMINAL_SCOPE_ATTR = 'data-terminal-scope';
 export function isWithinTerminalScope(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(`[${TERMINAL_SCOPE_ATTR}]`) !== null;
 }
-
-/**
- * 事件目标是否为可编辑控件（INPUT / TEXTAREA / contentEditable）。
- * 与 `useChatKeyboardShortcuts` 既有判定语义保持一致，供需要「用户在正常输入」
- * 语义的调用方复用。
- */
-export function isEditableTarget(target: EventTarget | null): boolean {
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-    return true;
-  }
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  if (target.isContentEditable === true) {
-    return true;
-  }
-  // 部分 DOM 实现（jsdom）未提供 isContentEditable，退回 contenteditable 属性判定。
-  const contentEditable = target.getAttribute('contenteditable');
-  return contentEditable === '' || contentEditable === 'true';
-}

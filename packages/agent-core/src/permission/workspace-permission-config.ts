@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { GrantedPermission } from './index.js';
-import { TOOL_TO_PERMISSION_CATEGORY } from './tool-category-map.js';
+import { ALLOW_BY_DEFAULT_TOOL_NAMES, TOOL_TO_PERMISSION_CATEGORY } from './tool-category-map.js';
 
 export const WORKSPACE_PERMISSION_FILE = '.openawork.permissions.json';
 
@@ -153,9 +153,16 @@ export { PERMISSION_CATEGORIES, type PermissionCategoryMeta } from './permission
 
 /** Map a tool name to its permission category (like opencode's ctx.ask permission field). */
 export function resolvePermissionCategory(toolName: string): string {
-  if (toolName in TOOL_TO_PERMISSION_CATEGORY) return TOOL_TO_PERMISSION_CATEGORY[toolName]!;
+  const mapped = TOOL_TO_PERMISSION_CATEGORY[toolName];
+  if (mapped !== undefined) return mapped;
   if (toolName.startsWith('custom_')) return 'custom';
-  return toolName;
+  // 安全不变量（fail-closed）：未映射工具一律返回 'custom'（默认 ask）。
+  // 历史实现返回原始工具名，而 DEFAULT_PERMISSION_RULES 的首条通配符 allow 会
+  // 匹配任意 category，导致任何漏注册的工具（如 run_bash_in_background）在
+  // ask 档位下静默免审批。只有 ALLOW_BY_DEFAULT_TOOL_NAMES 显式枚举的只读/
+  // 会话状态类工具保留“原始工具名”路径（它们同样只命中通配符 allow）。
+  if (ALLOW_BY_DEFAULT_TOOL_NAMES.has(toolName)) return toolName;
+  return 'custom';
 }
 
 function dedupeWorkspacePermissionRules(
