@@ -7,6 +7,8 @@
  * long structure list and we want the user to skim it quickly.
  */
 
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
+
 export interface RepoOverviewOutputShape {
   path: string;
   repository?: string;
@@ -88,12 +90,15 @@ function ChipRow({ label, items }: { label: string; items: string[] }) {
 }
 
 export function RepoOverviewPreview({ data }: { data: RepoOverviewOutputShape }) {
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
   // Cap the visible structure block — the gateway already truncates
   // server-side based on depth, but the array can still be long; we
   // surface a "+N more" tail rather than rendering hundreds of rows
   // (the full payload is still in the raw expandable view).
   const STRUCTURE_VISIBLE_LIMIT = 80;
-  const visibleStructure = data.structure.slice(0, STRUCTURE_VISIBLE_LIMIT);
+  const visibleStructure = isInsideExpandedCard
+    ? data.structure
+    : data.structure.slice(0, STRUCTURE_VISIBLE_LIMIT);
   const hiddenCount = data.structure.length - visibleStructure.length;
 
   return (

@@ -5,7 +5,8 @@
  *  - output 按 `seq` 去重并按增量写入，缺省字段回退旧 tail-diff；
  *  - `onData` 经 16ms 合并成一次 `/stdin` POST 且保序；
  *  - 快捷键接进搜索条 / 剪贴板的判定；
- *  - 写入失败有可见反馈。
+ *  - 写入失败有可见反馈；
+ *  - `interactive` 驱动 convertEol / 首次 resize 时序 / 输入门控与禁用横幅。
  *
  * xterm 本体在 jsdom 里跑不起来（需要 canvas / matchMedia），所以把
  * `@xterm/*` 全部换成可观测的替身 —— 我们要验证的是**接线语义**，
@@ -27,12 +28,16 @@ interface FakeTerminalState {
   selection: string;
   keyHandler: ((event: KeyboardEvent) => boolean) | null;
   disposeCount: number;
+  /** `refreshTerminal()` 的调用记录（fit 之后必须重绘新网格）。 */
+  refreshCalls: Array<[number, number]>;
 }
 
 const hoisted = vi.hoisted(() => ({
   terminals: [] as FakeTerminalState[],
   /** 供测试直接改写 cols/rows（jsdom 没有真实布局，fit() 是 try/catch 空操作）。 */
   instances: [] as Array<{ cols: number; rows: number }>,
+  /** `new Terminal(options)` 的构造参数，用于断言 convertEol 映射。 */
+  terminalOptions: [] as Array<Record<string, unknown>>,
   initialCols: 80,
   initialRows: 24,
   searchAddon: {
@@ -58,11 +63,13 @@ vi.mock('@xterm/xterm', () => {
       selection: '',
       keyHandler: null,
       disposeCount: 0,
+      refreshCalls: [],
     };
 
-    constructor() {
+    constructor(options: Record<string, unknown> = {}) {
       this.cols = hoisted.initialCols;
       this.rows = hoisted.initialRows;
+      hoisted.terminalOptions.push(options);
       hoisted.terminals.push(this.state);
       hoisted.instances.push(this);
     }
@@ -74,6 +81,9 @@ vi.mock('@xterm/xterm', () => {
       this.state.selection = 'all';
     }
     scrollToBottom(): void {}
+    refresh(start: number, end: number): void {
+      this.state.refreshCalls.push([start, end]);
+    }
     clear(): void {
       this.state.written.push('<clear>');
     }
@@ -128,6 +138,18 @@ vi.mock('@xterm/addon-webgl', () => ({
     clearTextureAtlas(): void {}
   },
 }));
+
+/**
+ * Phase B：本文件覆盖的是 SSE + HTTP 路径。挂载时 hook 会先尝试 WS，这里用
+ * 「构造即抛出」的 WebSocket 替身模拟运行时不可用，让它同步回退到 SSE 分支
+ * （回退链路本身也被这些用例顺带覆盖）。WS 优先 / 重连等用例在
+ * `InteractiveTerminalView.ws-transport.test.tsx`。
+ */
+class UnavailableWebSocket {
+  constructor() {
+    throw new Error('WebSocket unavailable in this test env');
+  }
+}
 
 const { InteractiveTerminalView } = await import('./InteractiveTerminalView.js');
 
@@ -213,6 +235,7 @@ describe('InteractiveTerminalView', () => {
   beforeEach(() => {
     hoisted.terminals.length = 0;
     hoisted.instances.length = 0;
+    hoisted.terminalOptions.length = 0;
     hoisted.initialCols = 80;
     hoisted.initialRows = 24;
     MockEventSource.instances = [];
@@ -228,6 +251,7 @@ describe('InteractiveTerminalView', () => {
     vi.stubGlobal('EventSource', MockEventSource);
     vi.stubGlobal('ResizeObserver', MockResizeObserver);
     vi.stubGlobal('navigator', { clipboard: undefined, userAgent: 'vitest' });
+    vi.stubGlobal('WebSocket', UnavailableWebSocket);
   });
 
   afterEach(() => {
@@ -401,14 +425,26 @@ describe('InteractiveTerminalView', () => {
     expect(resizeCalls()).toHaveLength(0);
   });
 
-  it('连续 fit 合并成一次 trailing /resize POST（160ms）', async () => {
+  it('首次尺寸同步立即发出（不等防抖），后续连续 fit 合并成一次 trailing POST', async () => {
     vi.useFakeTimers();
     renderView();
-    const instance = lastTerminalInstance();
 
+    // 首次同步是立即的：未推进任何定时器就应该已经发出真实尺寸，
+    // 否则 shell 的首个提示符会按默认 80x24 落格。
+    const first = resizeCalls();
+    expect(first).toHaveLength(1);
+    expect(JSON.parse(String((first[0]?.[1] as RequestInit).body))).toEqual({
+      cols: 80,
+      rows: 24,
+    });
+    // 没有顺带排一个 trailing 防抖：推进整个窗口也不会出现第二次同尺寸请求。
     await act(async () => {
-      // 挂载时的首次 fit 已排期但未到窗口，不应该立刻发请求。
-      expect(resizeCalls()).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(160);
+    });
+    expect(resizeCalls()).toHaveLength(1);
+
+    const instance = lastTerminalInstance();
+    await act(async () => {
       for (const [cols, rows] of [
         [100, 30],
         [120, 40],
@@ -419,13 +455,13 @@ describe('InteractiveTerminalView', () => {
         MockResizeObserver.fire();
       }
       // trailing：拖拽期间不发，只有停顿后的一次。
-      expect(resizeCalls()).toHaveLength(0);
+      expect(resizeCalls()).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(160);
     });
 
     const calls = resizeCalls();
-    expect(calls).toHaveLength(1);
-    expect(JSON.parse(String((calls[0]?.[1] as RequestInit).body))).toEqual({
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String((calls[1]?.[1] as RequestInit).body))).toEqual({
       cols: 140,
       rows: 45,
     });
@@ -435,6 +471,8 @@ describe('InteractiveTerminalView', () => {
     vi.useFakeTimers();
     renderView();
     const instance = lastTerminalInstance();
+    // 首次同步立即发出、不在 pending 定时器里；这里只观察后续 trailing POST。
+    const settledCalls = resizeCalls().length;
 
     await act(async () => {
       instance.cols = 100;
@@ -448,7 +486,48 @@ describe('InteractiveTerminalView', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500);
     });
-    expect(resizeCalls()).toHaveLength(0);
+    expect(resizeCalls()).toHaveLength(settledCalls);
+  });
+
+  it('fit() 之后刷新整个网格（WebGL 画布不会自己感知新尺寸）', () => {
+    renderView();
+
+    expect(lastTerminal().refreshCalls).toContainEqual([0, 23]);
+  });
+
+  it('interactive 缺省（旧后端 / 本地构造行）时 convertEol=true 且无禁用横幅', () => {
+    renderView();
+
+    expect(hoisted.terminalOptions.at(-1)?.convertEol).toBe(true);
+    expect(screen.queryByTestId('terminal-input-disabled-banner')).toBeNull();
+  });
+
+  it('interactive=true（真实 PTY）时 convertEol=false，且无禁用横幅', () => {
+    renderView(makeTerminalView({ interactive: true }));
+
+    expect(hoisted.terminalOptions.at(-1)?.convertEol).toBe(false);
+    expect(screen.queryByTestId('terminal-input-disabled-banner')).toBeNull();
+  });
+
+  it('interactive=false 时渲染禁用横幅，且不向 shell 转发输入', async () => {
+    vi.useFakeTimers();
+    renderView(makeTerminalView({ interactive: false }));
+
+    expect(screen.getByTestId('terminal-input-disabled-banner').textContent).toContain(
+      '输入已禁用',
+    );
+    // 非交互后端仍保留 convertEol=true（原有 pipe 行为）。
+    expect(hoisted.terminalOptions.at(-1)?.convertEol).toBe(true);
+
+    const state = lastTerminal();
+    await act(async () => {
+      for (const handler of state.dataHandlers) handler('l');
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/stdin'))).toHaveLength(
+      0,
+    );
   });
 
   describe('内容区右键菜单的面板命令段', () => {

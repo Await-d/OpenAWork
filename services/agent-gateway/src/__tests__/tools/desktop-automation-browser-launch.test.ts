@@ -98,7 +98,7 @@ describe('desktop_automation browser availability guard', () => {
   it('完全无可用浏览器时抛出可操作的引导错误，且不构造也不启动', async () => {
     mocks.probeMock.mockResolvedValue(MISSING_PROBE);
 
-    await expect(createManager().start()).rejects.toThrow(/安装托管 Playwright 浏览器/);
+    await expect(createManager().start()).rejects.toThrow(/安装调试浏览器/);
 
     expect(mocks.constructedOptions).toHaveLength(0);
     expect(mocks.startMock).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe('desktop_automation browser availability guard', () => {
       ),
     );
 
-    await expect(createManager().start()).rejects.toThrow(/安装后重试/);
+    await expect(createManager().start()).rejects.toThrow(/安装调试浏览器/);
   });
 
   it('非托管缺失类启动错误保持原样抛出', async () => {

@@ -87,6 +87,10 @@
   background: var(--warning);
 }
 
+.fusion-sub-agent-switcher__chip[data-status='ended'] .fusion-sub-agent-switcher__dot {
+  background: var(--fg-muted);
+}
+
 .fusion-sub-agent-switcher__label {
   min-width: 0;
   overflow: hidden;

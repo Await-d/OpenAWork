@@ -7,6 +7,7 @@ import { formatElapsed } from '../shared/format.js';
 import { extractFilePath } from '../shared/input-paths.js';
 import { buildGenericInputSummary, summarizeMcpCallInput } from '../shared/input-summary.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
+import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 
 /* ── BatchToolCallCard ── */
 
@@ -26,7 +27,47 @@ export interface BatchSubResultLike {
   durationMs?: number;
 }
 
-export type BatchSubVisualState = 'running' | 'completed' | 'failed' | 'skipped';
+export type BatchSubVisualState = 'running' | 'completed' | 'failed' | 'pending' | 'skipped';
+
+/**
+ * Output substrings the gateway emits when a sub-tool is paused waiting for
+ * the user to approve its permission request. Mirrors the markers recognized
+ * by `conversation-runtime/messages/copied-tool-card.ts`.
+ */
+const PENDING_PERMISSION_OUTPUT_MARKERS = [
+  'waiting for approval',
+  'requires approval',
+  'permission request',
+  'waiting for answer',
+  'waiting for confirmation',
+  '等待权限',
+  '等待审批',
+  '等待回答',
+  '等待确认',
+] as const;
+
+/**
+ * A pending-permission sub-call surfaces as an `isError` tool result whose
+ * output text asks the user to approve a permission request — it is paused,
+ * not failed. Non-string outputs are stringified defensively (circular
+ * structures fall back to `String(output)`) before substring matching.
+ */
+function looksLikePendingPermissionOutput(output: unknown): boolean {
+  const serialized =
+    typeof output === 'string'
+      ? output
+      : (() => {
+          if (output === undefined || output === null) return '';
+          try {
+            return JSON.stringify(output) ?? '';
+          } catch {
+            return String(output);
+          }
+        })();
+  const normalized = serialized.trim().toLowerCase();
+  if (normalized.length === 0) return false;
+  return PENDING_PERMISSION_OUTPUT_MARKERS.some((marker) => normalized.includes(marker));
+}
 
 export function batchSubVisualState(
   result: BatchSubResultLike | undefined,
@@ -39,6 +80,9 @@ export function batchSubVisualState(
   // batch. Only default to `running` when the parent itself is still running.
   if (!result) return parentTerminalState ?? 'running';
   if (result.status === 'skipped') return 'skipped';
+  // Checked before the failure branch: a pending-permission "error" means the
+  // sub-call is waiting for approval, not that it failed.
+  if (result.isError === true && looksLikePendingPermissionOutput(result.output)) return 'pending';
   if (result.status === 'error' || result.isError === true) return 'failed';
   if (result.status === 'completed') return 'completed';
   return 'running';
@@ -154,9 +198,8 @@ function BatchSubCallRow({
 }) {
   const shouldExpandByDefault = useToolExpandDefault()(tool);
   const visualState = batchSubVisualState(result, parentTerminalState);
-  const shouldAutoExpand = shouldExpandByDefault || visualState === 'running';
   const [open, toggleOpen] = useToolCallExpandState({
-    shouldAutoExpand,
+    shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
   const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
@@ -195,9 +238,18 @@ function BatchSubCallRow({
           {visualState === 'completed' && '✓'}
           {visualState === 'failed' && '✗'}
           {visualState === 'skipped' && '⊘'}
+          {visualState === 'pending' && '⏸'}
         </span>
-        <ToolIcon kind={kind} toolName={tool} status={childStatus} size={12} />
+        <ToolIcon
+          kind={kind}
+          toolName={tool}
+          status={visualState === 'pending' ? 'pending' : childStatus}
+          size={12}
+        />
         <span className="tool-call-batch-child-tool">{tool}</span>
+        {visualState === 'pending' && (
+          <span className="tool-call-batch-child-pending-badge">待审批</span>
+        )}
         {summary && <span className="tool-call-batch-child-summary">{summary}</span>}
         {result?.durationMs != null && result.durationMs > 0 && (
           <span className="tool-call-batch-child-duration">{formatElapsed(result.durationMs)}</span>
@@ -207,17 +259,19 @@ function BatchSubCallRow({
         </span>
       </button>
       {open && (
-        <div className="tool-call-batch-child-detail">
-          {renderToolCallDisplay({
-            toolName: tool,
-            input,
-            output: effectiveOutput,
-            status: childStatus,
-            isError: childIsError,
-            kind,
-            ...(result?.durationMs != null ? { durationMs: result.durationMs } : {}),
-          })}
-        </div>
+        <ToolCardExpansionProvider>
+          <div className="tool-call-batch-child-detail">
+            {renderToolCallDisplay({
+              toolName: tool,
+              input,
+              output: effectiveOutput,
+              status: childStatus,
+              isError: childIsError,
+              kind,
+              ...(result?.durationMs != null ? { durationMs: result.durationMs } : {}),
+            })}
+          </div>
+        </ToolCardExpansionProvider>
       )}
     </div>
   );

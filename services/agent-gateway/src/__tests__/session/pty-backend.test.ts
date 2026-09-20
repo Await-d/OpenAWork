@@ -62,6 +62,7 @@ describe('detectTerminalBackend', () => {
       runtime: 'bun',
       platform: 'linux',
       supportsResize: true,
+      interactive: true,
     });
   });
 
@@ -70,6 +71,7 @@ describe('detectTerminalBackend', () => {
     expect(capabilities.kind).toBe('pipe');
     expect(capabilities.runtime).toBe('bun');
     expect(capabilities.supportsResize).toBe(false);
+    expect(capabilities.interactive).toBe(false);
     expect(capabilities.reason).toBeTruthy();
   });
 
@@ -78,6 +80,7 @@ describe('detectTerminalBackend', () => {
     expect(capabilities.kind).toBe('pipe');
     expect(capabilities.runtime).toBe('node');
     expect(capabilities.supportsResize).toBe(false);
+    expect(capabilities.interactive).toBe(false);
     expect(capabilities.reason).toBeTruthy();
   });
 
@@ -86,6 +89,7 @@ describe('detectTerminalBackend', () => {
     expect(capabilities.kind).toBe('pipe');
     expect(capabilities.runtime).toBe('node');
     expect(capabilities.supportsResize).toBe(false);
+    expect(capabilities.interactive).toBe(false);
     expect(capabilities.reason).toBeTruthy();
   });
 
@@ -93,6 +97,7 @@ describe('detectTerminalBackend', () => {
     const capabilities = detectTerminalBackend();
     expect(capabilities.kind).toBe(ptySupported ? 'pty' : 'pipe');
     expect(capabilities.runtime).toBe(bunAvailable ? 'bun' : 'node');
+    expect(capabilities.interactive).toBe(ptySupported);
   });
 });
 

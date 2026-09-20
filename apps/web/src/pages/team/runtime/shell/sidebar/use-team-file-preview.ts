@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
+import { useWorkspaceReadIdentity } from '../../../../../stores/ui/uiState.js';
 import { getFilePreviewKind, isBinaryPreviewKind } from '../../../../../utils/file/file-preview.js';
 import { loadPreviewContent } from '../../../../../utils/file/load-preview-content.js';
 
@@ -30,6 +31,7 @@ const MAX_PREVIEW_BYTES = 2 * 1024 * 1024; // 2MB 文本上限，超过给提示
 export function useTeamFilePreview(workspacePath?: string | null): TeamFilePreviewState {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const readIdentity = useWorkspaceReadIdentity();
   const [path, setPath] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -78,6 +80,7 @@ export function useTeamFilePreview(workspacePath?: string | null): TeamFilePrevi
         token,
         path: target,
         workspaceRoot: workspacePath,
+        identity: readIdentity,
       })
         .then((loaded) => {
           if (reqIdRef.current !== reqId) {
@@ -108,7 +111,7 @@ export function useTeamFilePreview(workspacePath?: string | null): TeamFilePrevi
           setLoading(false);
         });
     },
-    [token, gatewayUrl, workspacePath, resetContent],
+    [token, gatewayUrl, workspacePath, readIdentity, resetContent],
   );
 
   useEffect(() => {

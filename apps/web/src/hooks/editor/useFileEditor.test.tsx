@@ -3,11 +3,12 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { EMPTY_READ_IDENTITY, useUIStateStore } from '../../stores/ui/uiState.js';
 
 const workspaceClientMocks = vi.hoisted(() => ({
   findByName: vi.fn(),
   readFile: vi.fn(),
+  writeFile: vi.fn(),
 }));
 
 vi.mock('@openAwork/web-client', () => ({
@@ -39,6 +40,7 @@ beforeEach(() => {
   });
   useUIStateStore.setState((state) => ({
     ...state,
+    readIdentity: EMPTY_READ_IDENTITY,
     openFilePathsByWorkspace: {
       [WORKSPACE_ROOT]: [VALID_PATH, STALE_PATH],
     },
@@ -73,6 +75,31 @@ describe('useFileEditor', () => {
       VALID_PATH,
     ]);
     expect(useUIStateStore.getState().activeFilePathByWorkspace[WORKSPACE_ROOT]).toBeUndefined();
+
+    act(() => {
+      useUIStateStore.getState().setOpenFilePathsForWorkspace(WORKSPACE_ROOT, []);
+    });
+  });
+
+  it('SSH 远端身份下 saveFile 不调用本地写入，只设置错误提示', async () => {
+    useUIStateStore.getState().setReadIdentity({
+      sessionId: 'sess-ssh-1',
+      sshConnectionId: null,
+      remote: true,
+    });
+
+    const { result } = renderHook(() => useFileEditor(WORKSPACE_ROOT));
+
+    await waitFor(() => {
+      expect(result.current.openFiles.map((file) => file.path)).toEqual([VALID_PATH]);
+    });
+
+    await act(async () => {
+      await result.current.saveFile(VALID_PATH);
+    });
+
+    expect(workspaceClientMocks.writeFile).not.toHaveBeenCalled();
+    expect(result.current.saveError).toBe('SSH 远程会话暂不支持在工作区内保存文件。');
 
     act(() => {
       useUIStateStore.getState().setOpenFilePathsForWorkspace(WORKSPACE_ROOT, []);

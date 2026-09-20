@@ -6,7 +6,7 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
-import { defaultIgnoreManager } from '@openAwork/agent-core';
+import { createSSHToolProxy, defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   WORKSPACE_ACCESS_MODE,
   WORKSPACE_ACCESS_RESTRICTED,
@@ -40,6 +40,24 @@ import {
   WORKSPACE_FILE_SEARCH_DEFAULT_LIMIT,
   WORKSPACE_FILE_SEARCH_MAX_LIMIT,
 } from '../workspace/workspace-file-search.js';
+import {
+  resolveRemotePath,
+  resolveSshRemoteExecutionContext,
+  type SshRemoteExecutionContext,
+} from '../tools/ssh-remote-execution.js';
+import { searchSshWorkspaceFileIndex } from '../workspace/ssh-workspace-file-index.js';
+import {
+  classifySshPreviewError,
+  contentTypeForPath,
+  isRemotePathWithinRoot,
+  readRemoteBinaryFile,
+  readRemoteTextFile,
+  resolveSshPreviewContext,
+  type SshPreviewResolution,
+} from '../workspace/ssh-workspace-preview.js';
+import { getSshService } from '../ssh/ssh-service.js';
+import { requireOwnedSshSession } from '../ssh/ssh-session-ownership.js';
+import { normalizeSshRemoteWorkingDirectory } from '../session/session-workspace-metadata.js';
 import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
 import { createWorkspaceRequestThrottle } from '../workspace/workspace-request-throttle.js';
 import {
@@ -416,6 +434,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         path: z.string(),
         q: z.string().max(200).optional(),
         limit: z.coerce.number().int().min(1).max(WORKSPACE_FILE_SEARCH_MAX_LIMIT).optional(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
       });
 
       const parseStep = child('parse-query');
@@ -423,6 +443,161 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const query = parsed.q ?? '';
       const limit = parsed.limit ?? WORKSPACE_FILE_SEARCH_DEFAULT_LIMIT;
       parseStep.succeed(undefined, { query, limit });
+
+      // SSH 绑定会话：在远端索引上检索，必须早于任何本地路径校验返回，否则
+      // Windows 网关会把远端 POSIX 工作区误判为跨主机路径而抛错。
+      if (parsed.sessionId) {
+        // 先解析 SSH 绑定：客户端现在对每个会话都带 sessionId（含本地会话）。
+        // 只有确认是 SSH 绑定会话时做归属校验；未绑定的（unbound）他人 / 本地
+        // 会话继续走本地逻辑，不再被误判为越权 SSH 会话。
+        const resolution = await resolveSshRemoteExecutionContext(parsed.sessionId);
+        if (resolution.kind !== 'unbound') {
+          // sessionId 完全由客户端提供，而远端解析器读 `sessions` 行时不带用户
+          // 过滤、绑定注册表又是全局的：不先做归属校验，任何登录用户都能借他人
+          // 的 SSH 绑定会话读到对方的远端工作区列表。
+          try {
+            requireOwnedSshSession(user.sub, parsed.sessionId);
+          } catch {
+            step.fail('session forbidden');
+            return reply.status(404).send({
+              files: [],
+              directories: [],
+              truncated: false,
+              error: '会话不存在或无权访问。',
+            });
+          }
+          if (resolution.kind === 'unavailable') {
+            const reasonLabel =
+              resolution.reason === 'error' ? '连接失败（error）' : '未连接（disconnected）';
+            step.fail('ssh unavailable');
+            return reply.status(409).send({
+              files: [],
+              directories: [],
+              truncated: false,
+              error: `会话绑定的 SSH 连接 ${resolution.hostLabel} 当前不可用：${reasonLabel}，无法检索远程工作区文件。请先在设置 → 开发者工具 → SSH 远程连接中恢复该连接后重试。`,
+            });
+          }
+          // 远端索引构建前先扣限流预算：冷启动会执行一次远端 find，被拒绝的
+          // 请求绝不能触发它。键按连接 + 远端根隔离，与本地根互不干扰。
+          const sshStep = child('ssh-search', undefined, {
+            connectionId: resolution.context.connectionId,
+          });
+          const sshThrottleKey = `${user.sub}::ssh:${resolution.context.connectionId}:${resolution.context.baseDir}`;
+          const decision = workspaceFileSearchThrottle.tryConsume(sshThrottleKey);
+          if (!decision.allowed) {
+            sshStep.fail('rate limited');
+            step.fail('rate limited');
+            return reply
+              .status(429)
+              .header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)))
+              .send({
+                files: [],
+                directories: [],
+                truncated: false,
+                error: WORKSPACE_ERROR_MESSAGES.searchRateLimited,
+              });
+          }
+
+          // 忽略客户端 path：远端检索根一律取服务端解析出的 baseDir。
+          const result = await searchSshWorkspaceFileIndex({
+            context: resolution.context,
+            query,
+            limit,
+          });
+          sshStep.succeed(undefined, {
+            returnedFiles: result.files.length,
+            returnedDirectories: result.directories.length,
+          });
+          step.succeed(undefined, {
+            returnedFiles: result.files.length,
+            returnedDirectories: result.directories.length,
+          });
+          return reply.send({
+            root: result.root,
+            query,
+            files: result.files,
+            directories: result.directories,
+            truncated: result.truncated,
+            count: result.count,
+          });
+        }
+        // `unbound`：会话未绑定 SSH，继续走本地逻辑。
+      }
+
+      // 草稿会话（尚无 sessionId）直接指定 SSH 连接 + 远端绝对路径检索。
+      if (!parsed.sessionId && parsed.sshConnectionId) {
+        const service = getSshService();
+        const connection = service.getConnection(user.sub, parsed.sshConnectionId);
+        if (!connection) {
+          throw ApiError.badRequest('SSH 连接不存在或无权访问。');
+        }
+        // 草稿会话没有 sessionId，连接状态只能直接读连接本身；断线/连接中时
+        // 若静默返回空 200，前端会误以为「远端工作区就是空的」。
+        if (connection.status !== 'connected') {
+          const statusLabel =
+            connection.status === 'error'
+              ? '连接失败（error）'
+              : connection.status === 'connecting'
+                ? '连接中（connecting）'
+                : '未连接（disconnected）';
+          step.fail('ssh unavailable');
+          return reply.status(409).send({
+            files: [],
+            directories: [],
+            truncated: false,
+            error: `SSH 连接 ${connection.username}@${connection.host}:${connection.port} 当前不可用：${statusLabel}，无法检索远程工作区文件。请先在设置 → 开发者工具 → SSH 远程连接中恢复该连接后重试。`,
+          });
+        }
+        const remotePath = normalizeSshRemoteWorkingDirectory(parsed.path);
+        if (!remotePath || !remotePath.startsWith('/')) {
+          throw ApiError.badRequest('SSH 远程工作区路径必须是绝对 POSIX 路径。');
+        }
+
+        const sshStep = child('ssh-search', undefined, { connectionId: parsed.sshConnectionId });
+        const sshThrottleKey = `${user.sub}::ssh:${parsed.sshConnectionId}:${remotePath}`;
+        const decision = workspaceFileSearchThrottle.tryConsume(sshThrottleKey);
+        if (!decision.allowed) {
+          sshStep.fail('rate limited');
+          step.fail('rate limited');
+          return reply
+            .status(429)
+            .header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)))
+            .send({
+              files: [],
+              directories: [],
+              truncated: false,
+              error: WORKSPACE_ERROR_MESSAGES.searchRateLimited,
+            });
+        }
+
+        const context: SshRemoteExecutionContext = {
+          sessionId: '',
+          boundSessionId: '',
+          connectionId: parsed.sshConnectionId,
+          host: connection.host,
+          username: connection.username,
+          port: connection.port,
+          baseDir: remotePath,
+          proxy: createSSHToolProxy(service.getManager(), parsed.sshConnectionId),
+        };
+        const result = await searchSshWorkspaceFileIndex({ context, query, limit });
+        sshStep.succeed(undefined, {
+          returnedFiles: result.files.length,
+          returnedDirectories: result.directories.length,
+        });
+        step.succeed(undefined, {
+          returnedFiles: result.files.length,
+          returnedDirectories: result.directories.length,
+        });
+        return reply.send({
+          root: result.root,
+          query,
+          files: result.files,
+          directories: result.directories,
+          truncated: result.truncated,
+          count: result.count,
+        });
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -557,6 +732,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.file.get');
+      const user = request.user as JwtPayload;
       const schema = z.object({
         path: z.string(),
         // Optional caller-supplied workspace boundary. When present
@@ -569,11 +745,66 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         // safety check on top, so a client that omits this parameter
         // (e.g. legacy code paths) keeps working.
         workspaceRoot: z.string().optional(),
+        // SSH 远端读取标识：任一存在时在本地路径校验之前解析远端上下文并
+        // 直接返回，避免 Windows 网关把远端 POSIX 路径误判为跨主机路径。
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
       });
 
       const parseStep = child('parse-query');
       const parsed = parseQuery(schema, request.query);
       parseStep.succeed();
+
+      // SSH 绑定会话（sessionId）或草稿会话（sshConnectionId + 远端根）：
+      // 必须早于任何本地路径校验返回，本分支不触碰 checkUserWorkspaceAccess /
+      // ignore 规则 / validateWorkspacePathForRequest。
+      if (parsed.sessionId !== undefined || parsed.sshConnectionId !== undefined) {
+        const sshStep = child('ssh-preview', undefined, {
+          hasSession: parsed.sessionId !== undefined,
+          hasConnection: parsed.sshConnectionId !== undefined,
+        });
+        let resolution: SshPreviewResolution;
+        try {
+          resolution = await resolveSshPreviewContext({
+            user: user.sub,
+            ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+            ...(parsed.sshConnectionId !== undefined
+              ? { sshConnectionId: parsed.sshConnectionId }
+              : {}),
+            ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+          });
+        } catch (error) {
+          const previewError = classifySshPreviewError(error);
+          sshStep.fail(previewError.message);
+          step.fail(previewError.message);
+          return reply.status(previewError.statusCode).send({ error: previewError.message });
+        }
+
+        if (resolution.kind === 'ready') {
+          const remotePath = resolveRemotePath(resolution.context, parsed.path);
+          if (!isRemotePathWithinRoot(remotePath, resolution.context.baseDir)) {
+            sshStep.fail('path outside remote workspace');
+            step.fail('path outside remote workspace');
+            return reply.status(403).send({ error: '目标路径超出当前工作区范围。' });
+          }
+          try {
+            const file = await readRemoteTextFile(resolution.context, remotePath, MAX_FILE_BYTES);
+            sshStep.succeed(undefined, { truncated: file.truncated });
+            step.succeed(undefined, { truncated: file.truncated });
+            return reply.send({
+              path: file.path,
+              content: file.content,
+              truncated: file.truncated,
+            });
+          } catch (error) {
+            const previewError = classifySshPreviewError(error);
+            sshStep.fail(previewError.message);
+            step.fail(previewError.message);
+            return reply.status(previewError.statusCode).send({ error: previewError.message });
+          }
+        }
+        // `local`：会话未绑定 SSH，继续走本地逻辑。
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -656,12 +887,62 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     '/workspace/file/binary',
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step } = startRequestWorkflow(request, 'workspace.file.get-binary');
+      const { step, child } = startRequestWorkflow(request, 'workspace.file.get-binary');
+      const user = request.user as JwtPayload;
       const schema = z.object({
         path: z.string(),
         workspaceRoot: z.string().optional(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
       });
       const parsed = parseQuery(schema, request.query);
+
+      if (parsed.sessionId !== undefined || parsed.sshConnectionId !== undefined) {
+        const sshStep = child('ssh-preview', undefined, {
+          hasSession: parsed.sessionId !== undefined,
+          hasConnection: parsed.sshConnectionId !== undefined,
+        });
+        let resolution: SshPreviewResolution;
+        try {
+          resolution = await resolveSshPreviewContext({
+            user: user.sub,
+            ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+            ...(parsed.sshConnectionId !== undefined
+              ? { sshConnectionId: parsed.sshConnectionId }
+              : {}),
+            ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+          });
+        } catch (error) {
+          const previewError = classifySshPreviewError(error);
+          sshStep.fail(previewError.message);
+          step.fail(previewError.message);
+          return reply.status(previewError.statusCode).send({ error: previewError.message });
+        }
+
+        if (resolution.kind === 'ready') {
+          const remotePath = resolveRemotePath(resolution.context, parsed.path);
+          if (!isRemotePathWithinRoot(remotePath, resolution.context.baseDir)) {
+            sshStep.fail('path outside remote workspace');
+            step.fail('path outside remote workspace');
+            return reply.status(403).send({ error: '目标路径超出当前工作区范围。' });
+          }
+          try {
+            const file = await readRemoteBinaryFile(resolution.context, remotePath, MAX_FILE_BYTES);
+            sshStep.succeed(undefined, { bytesRead: file.data.length });
+            step.succeed(undefined, { bytesRead: file.data.length, contentType: file.contentType });
+            reply.header('Content-Type', file.contentType);
+            reply.header('Content-Length', String(file.data.length));
+            reply.header('Cache-Control', 'private, max-age=30');
+            return reply.send(file.data);
+          } catch (error) {
+            const previewError = classifySshPreviewError(error);
+            sshStep.fail(previewError.message);
+            step.fail(previewError.message);
+            return reply.status(previewError.statusCode).send({ error: previewError.message });
+          }
+        }
+        // `local`：会话未绑定 SSH，继续走本地逻辑。
+      }
 
       const safePath = validateWorkspacePathForRequest(parsed.path);
       if (!safePath) {
@@ -698,21 +979,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(413).send({ error: WORKSPACE_ERROR_MESSAGES.fileTooLargeForPreview });
       }
 
-      const ext = (safePath.split('.').pop() ?? '').toLowerCase();
-      const contentType =
-        ext === 'docx'
-          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          : ext === 'xlsx'
-            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            : ext === 'pptx'
-              ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-              : ext === 'pdf'
-                ? 'application/pdf'
-                : ext === 'doc'
-                  ? 'application/msword'
-                  : ext === 'xls'
-                    ? 'application/vnd.ms-excel'
-                    : 'application/octet-stream';
+      const contentType = contentTypeForPath(safePath);
 
       const fd = await fsp.open(safePath, 'r');
       try {

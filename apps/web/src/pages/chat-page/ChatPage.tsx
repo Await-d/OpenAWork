@@ -651,6 +651,9 @@ export default function ChatPage() {
   const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
   const setSelectedSshConnectionId = useUIStateStore((s) => s.setSelectedSshConnectionId);
   const setActiveSessionWorkspace = useUIStateStore((s) => s.setActiveSessionWorkspace);
+  // 工作区文件读取身份（瞬态 slice）：会话切换时写入，卸载时清空。
+  const setReadIdentity = useUIStateStore((s) => s.setReadIdentity);
+  const clearReadIdentity = useUIStateStore((s) => s.clearReadIdentity);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
   const resetToWelcomeSignal = useUIStateStore((s) => s.resetToWelcomeSignal);
   const consumeResetToWelcomeSignal = useUIStateStore((s) => s.consumeResetToWelcomeSignal);
@@ -678,11 +681,44 @@ export default function ChatPage() {
             query,
             limit: MENTION_SEARCH_LIMIT,
             signal,
+            // SSH 会话必须带上身份，网关才能解析远端工作区，否则 Windows 网关
+            // 会直接拒绝 POSIX 路径。已有会话传当前会话 id（网关沿父会话链找
+            // 连接）；草稿态尚无会话，只能传草稿选中的 SSH 连接 id。
+            ...(currentSessionId
+              ? { sessionId: currentSessionId }
+              : { sshConnectionId: selectedSshConnectionId }),
           })
         : Promise.resolve({ files: [], directories: [] }),
-    [effectiveWorkingDirectory, workspace.searchFileIndex],
+    [
+      currentSessionId,
+      effectiveWorkingDirectory,
+      selectedSshConnectionId,
+      workspace.searchFileIndex,
+    ],
   );
   const uiWorkspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
+
+  // SSH 工作区文件读取身份：读取消费方（文件编辑器 / 预览）不带会话上下文，
+  // 只能从这里读瞬态身份，所以会话 / 草稿远程选择一变就同步写入。
+  // - 已有会话：传 sessionId，网关沿父会话链解析 SSH 绑定；
+  // - 草稿态：传草稿选中的 sshConnectionId；
+  // - remote 只是提示位，不参与请求参数。
+  useEffect(() => {
+    setReadIdentity({
+      sessionId: currentSessionId ?? null,
+      sshConnectionId: currentSessionId ? null : (selectedSshConnectionId ?? null),
+      remote:
+        Boolean(workspace.sshConnectionId) || Boolean(!currentSessionId && selectedSshConnectionId),
+    });
+  }, [currentSessionId, selectedSshConnectionId, workspace.sshConnectionId, setReadIdentity]);
+
+  // 卸载（离开 ChatPage）时清空身份：它是会话级瞬态状态，不能留给下一个页面。
+  useEffect(
+    () => () => {
+      clearReadIdentity();
+    },
+    [clearReadIdentity],
+  );
   // useFileEditor 按 workspace 隔离打开的文件:跨 workspace 切换时自动加载对应 workspace
   // 上次留下的文件,而不是共享一个全局文件列表。
   const fileEditor = useFileEditor(effectiveWorkingDirectory, uiWorkspaceScope);
@@ -1518,6 +1554,14 @@ export default function ChatPage() {
       return null;
     }
 
+    // 有待处理交互（权限/提问）时，会话实质处于 paused；必须在这里返回，
+    // 否则下面的 idle 提前返回会让 remoteSessionBusyState 变成 null，
+    // 进而关闭 /recovery 轮询（见下方 useEffect 的门控），前端就再也学不到
+    // 服务端的 paused 状态，只能整页刷新。
+    if (pendingPermissions.length > 0 || pendingQuestions.length > 0) {
+      return 'paused';
+    }
+
     // 如果会话状态是 idle 且没有 active stream，不应该显示忙碌状态
     if (sessionStateStatus === 'idle' && recoveryActiveStream === null) {
       return null;
@@ -1532,7 +1576,14 @@ export default function ChatPage() {
     }
 
     return null;
-  }, [recoveryActiveStream, sessionStateStatus, streaming, activeStreamStartedAt]);
+  }, [
+    activeStreamStartedAt,
+    pendingPermissions,
+    pendingQuestions,
+    recoveryActiveStream,
+    sessionStateStatus,
+    streaming,
+  ]);
   const activeGatewayStreamClientRequestId = client.getActiveStreamClientRequestId();
   const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
   const isCurrentSessionRunning = sessionStateStatus === 'running';
@@ -4930,36 +4981,60 @@ export default function ChatPage() {
           attachReconnectWiring.handleReconnectRequired(technicalDetail);
         },
       })
-      .then((attached) => {
+      .then((attachResult) => {
         if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
           return;
         }
-        if (attached) {
-          attachStreamClientRequestId = client.getActiveStreamClientRequestId();
-          cancelAttachRetry();
-          setStreamError(null);
-          // 标记这个会话的 attach 已成功完成，防止后续重复触发
-          console.log('[ATTACH_ELIGIBILITY] attach succeeded for', sid);
-          return;
+        switch (attachResult.status) {
+          case 'attached': {
+            attachStreamClientRequestId = client.getActiveStreamClientRequestId();
+            cancelAttachRetry();
+            setStreamError(null);
+            // 标记这个会话的 attach 已成功完成，防止后续重复触发
+            console.log('[ATTACH_ELIGIBILITY] attach succeeded for', sid);
+            return;
+          }
+
+          case 'no_active_stream': {
+            // 网关已权威确认「没有活跃流」：这是正常终态而非断连，绝不能弹出
+            // 「自动重连中」横幅。保留 attachAttemptedSessionRef 标记（attach 调用前
+            // 已设置），避免 effect 立即重复 attach。
+            cancelAttachRetry();
+            setStreamError(null);
+            void loadCurrentSessionSnapshot(sid, {
+              expectedSessionViewEpoch: attachSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
+            }).catch(() => undefined);
+            return;
+          }
+
+          case 'stale': {
+            // 归属已变化（会话已切换或更新的请求已接管），本次 attach 作废、不重试。
+            cancelAttachRetry();
+            return;
+          }
+
+          case 'transport_failed': {
+            scheduleAttachRetry({
+              sessionId: sid,
+              delayMs: 1500,
+              beforeRetry: () => {
+                if (getActiveSessionId() !== sid) {
+                  return 'abort';
+                }
+
+                attachAttemptedSessionRef.current = null;
+                return 'proceed';
+              },
+            });
+
+            void loadCurrentSessionSnapshot(sid, {
+              expectedSessionViewEpoch: attachSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
+            }).catch(() => undefined);
+            return;
+          }
         }
-
-        scheduleAttachRetry({
-          sessionId: sid,
-          delayMs: 1500,
-          beforeRetry: () => {
-            if (getActiveSessionId() !== sid) {
-              return 'abort';
-            }
-
-            attachAttemptedSessionRef.current = null;
-            return 'proceed';
-          },
-        });
-
-        void loadCurrentSessionSnapshot(sid, {
-          expectedSessionViewEpoch: attachSessionViewEpoch,
-          messageLimit: INITIAL_TURN_LIMIT,
-        }).catch(() => undefined);
       });
   }, [
     activeGatewayStreamSessionId,

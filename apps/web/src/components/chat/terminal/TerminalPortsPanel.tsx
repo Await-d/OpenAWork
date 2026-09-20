@@ -231,7 +231,7 @@ function portStatusTitle(port: ListeningPortView): string {
   const parts: string[] = [
     port.establishedConnections === null
       ? '连接数：当前平台无法统计（非 linux/procfs），不代表为 0'
-      : `连接数：最近一次快照统计到 ${port.establishedConnections} 条 ESTABLISHED 连接（≤5 秒缓存，非实时）`,
+      : `连接数：最近一次快照统计到 ${port.establishedConnections} 条 ESTABLISHED 连接（≤6 秒缓存，非实时）`,
   ];
   if (port.processAlive === null) {
     parts.push('进程存活：无法判断（pid 未知或读取受限），不代表进程已退出');

@@ -1694,9 +1694,12 @@ export {
   extractReasoningPreview,
   getReasoningHint,
   getReasoningLabel,
+  mergeReasoningDisplayBlocks,
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
 } from './reasoning-ui.js';
+
+export type { MergedReasoningDisplayBlock, ReasoningDisplayBlock } from './reasoning-ui.js';
 
 export type {
   BrowserLiveAckMessage,

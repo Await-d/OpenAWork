@@ -15,6 +15,7 @@ import {
 } from '../previews/todo-list-preview.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
+import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 
 /* ── InlineToolCall ── */
 
@@ -77,10 +78,9 @@ export function InlineToolCall({
   const hasOutput = output !== undefined;
   const canExpand = !isLsp && (hasInput || hasOutput);
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
-  const shouldAutoExpand = shouldExpandByDefault || visualState === 'running';
   const [expanded, toggleExpanded] = useToolCallExpandState({
     canExpand,
-    shouldAutoExpand,
+    shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
 
@@ -142,30 +142,32 @@ export function InlineToolCall({
         {canExpand && <span className="tool-call-inline-chevron">{expanded ? '▾' : '▸'}</span>}
       </div>
       {expanded && canExpand && (
-        <div className="tool-call-inline-output">
-          {isTodoFamily && todoFamilyTodos !== null ? (
-            todoFamilyTodos.length === 0 ? (
-              <div className="tool-call-inline-empty">（暂无待办项）</div>
+        <ToolCardExpansionProvider>
+          <div className="tool-call-inline-output">
+            {isTodoFamily && todoFamilyTodos !== null ? (
+              todoFamilyTodos.length === 0 ? (
+                <div className="tool-call-inline-empty">（暂无待办项）</div>
+              ) : (
+                <TodoListPreview todos={todoFamilyTodos} />
+              )
             ) : (
-              <TodoListPreview todos={todoFamilyTodos} />
-            )
-          ) : (
-            <>
-              {hasInput && (
-                <div className="tool-call-inline-section" data-inline-row="true">
-                  <div className="tool-call-inline-section-label">参数</div>
-                  <ToolInputPreview toolName={toolName} input={input} kind={kind} />
-                </div>
-              )}
-              {hasOutput && (
-                <div className="tool-call-inline-section">
-                  <div className="tool-call-inline-section-label">输出</div>
-                  <ToolOutputPreview toolName={toolName} output={output} />
-                </div>
-              )}
-            </>
-          )}
-        </div>
+              <>
+                {hasInput && (
+                  <div className="tool-call-inline-section" data-inline-row="true">
+                    <div className="tool-call-inline-section-label">参数</div>
+                    <ToolInputPreview toolName={toolName} input={input} kind={kind} />
+                  </div>
+                )}
+                {hasOutput && (
+                  <div className="tool-call-inline-section">
+                    <div className="tool-call-inline-section-label">输出</div>
+                    <ToolOutputPreview toolName={toolName} output={output} />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </ToolCardExpansionProvider>
       )}
       <ToolApprovalActions
         approvalActions={approvalActions}

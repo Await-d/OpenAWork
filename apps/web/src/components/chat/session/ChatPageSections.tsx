@@ -4,6 +4,7 @@ import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import { mergeReasoningDisplayBlocks } from '@openAwork/shared';
 import { renderMediaContent } from '../media/media-renderer.js';
 import {
   type AssistantTracePayload,
@@ -28,10 +29,7 @@ import {
 } from '../assistant/assistant-error-content.js';
 import { AssistantEventRow } from '../assistant/assistant-event-row.js';
 import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasoning-block.helpers.js';
-import {
-  AssistantReasoningBlock,
-  buildReasoningBlockKey,
-} from '../assistant/assistant-reasoning-block.js';
+import { AssistantReasoningBlock } from '../assistant/assistant-reasoning-block.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
 import { ImageLightbox } from '../image/image-lightbox.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
@@ -592,6 +590,29 @@ function AssistantPartsContent({
   const reasoningDurations = message.reasoningBlocksDurationsMs;
   const reasoningFlagsMatchParts = reasoningEndedFlags?.length === totalReasoning;
   const reasoningDurationsMatchParts = reasoningDurations?.length === totalReasoning;
+  // 展示层投影：把一条消息内的多个思考块合并为单个展示块，只在首个思考块位置渲染。
+  // 这里只派生新数组，不修改 message.parts / reasoningBlocksEndedFlags / reasoningBlocksDurationsMs。
+  const mergedReasoning = mergeReasoningDisplayBlocks(
+    reasoningParts.map((part, index) => {
+      // Default to "ended" when no streaming flag list is supplied
+      // (i.e. message is finalized / loaded from history). While
+      // streaming, prefer the per-block flag, then fall back to
+      // segment-level endedAt set by `markStreamingReasoningSegmentEnded`.
+      const ended = reasoningFlagsMatchParts
+        ? reasoningEndedFlags[index] === true
+        : !streaming || part.endedAt !== undefined;
+      const rawDuration = reasoningDurationsMatchParts ? reasoningDurations?.[index] : undefined;
+      const persistedDuration =
+        typeof part.startedAt === 'number' &&
+        typeof part.endedAt === 'number' &&
+        part.endedAt >= part.startedAt
+          ? part.endedAt - part.startedAt
+          : undefined;
+      const durationMs =
+        typeof rawDuration === 'number' && rawDuration >= 0 ? rawDuration : persistedDuration;
+      return { id: part.id, text: part.text, ended, durationMs };
+    }),
+  );
   const hasActiveToolCall = parts.some(
     (part): part is ChatToolPart =>
       part.type === 'tool' && (part.status === 'running' || part.status === 'paused'),
@@ -618,67 +639,50 @@ function AssistantPartsContent({
     });
   };
 
-  let reasoningCursor = 0;
-
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {groupedParts.map((item, idx) => {
         if (item.type === 'reasoning') {
           const part = item.part;
-          const myIndex = reasoningCursor++;
+          // 展示层合并：同一条消息的所有思考块只在首个思考块位置渲染。
+          if (!mergedReasoning || part.id !== mergedReasoning.id) {
+            return null;
+          }
           if (!showReasoningBlock) {
             if (options?.presentationMode === 'team') {
               return null;
             }
             return (
               <HiddenReasoningNotice
-                key={part.id}
-                index={myIndex}
+                key={mergedReasoning.id}
+                index={0}
                 streaming={streaming}
-                total={totalReasoning}
-                content={part.text}
-                onToggle={() => toggleReasoning(part.id)}
-                expanded={expandedReasoningIds.has(part.id)}
+                total={1}
+                content={mergedReasoning.text}
+                onToggle={() => toggleReasoning(mergedReasoning.id)}
+                expanded={expandedReasoningIds.has(mergedReasoning.id)}
               />
             );
           }
-          // Default to "ended" when no streaming flag list is supplied
-          // (i.e. message is finalized / loaded from history). While
-          // streaming, prefer the per-block flag, then fall back to
-          // segment-level endedAt set by `markStreamingReasoningSegmentEnded`.
-          const ended = reasoningFlagsMatchParts
-            ? reasoningEndedFlags[myIndex] === true
-            : !streaming || part.endedAt !== undefined;
-          const rawDuration = reasoningDurationsMatchParts
-            ? reasoningDurations?.[myIndex]
-            : undefined;
-          const persistedDuration =
-            typeof part.startedAt === 'number' &&
-            typeof part.endedAt === 'number' &&
-            part.endedAt >= part.startedAt
-              ? part.endedAt - part.startedAt
-              : undefined;
-          const durationMs =
-            typeof rawDuration === 'number' && rawDuration >= 0 ? rawDuration : persistedDuration;
           return (
             <AssistantReasoningBlock
-              key={part.id}
-              content={part.text}
+              key={mergedReasoning.id}
+              content={mergedReasoning.text}
               defaultExpanded={reasoningExpandedByDefault}
-              durationMs={durationMs}
-              ended={ended}
-              index={myIndex}
+              durationMs={mergedReasoning.durationMs}
+              ended={mergedReasoning.ended}
+              index={0}
               messageStreaming={streaming}
               renderBody={renderReasoningRichBody}
               streaming={shouldStreamLocalReasoningBlock({
-                ended,
+                ended: mergedReasoning.ended,
                 hasActiveToolCall,
                 hasAssistantText,
-                index: myIndex,
+                index: 0,
                 streaming,
-                total: totalReasoning,
+                total: 1,
               })}
-              total={totalReasoning}
+              total={1}
             />
           );
         }
@@ -823,74 +827,77 @@ function AssistantTraceContent({
     });
   };
 
+  const reasoningBlocks = payload.reasoningBlocks ?? [];
+  // 展示层投影：把 payload 中的多个思考块合并为单个展示块，只派生新数组，不修改 payload。
+  const mergedReasoning = mergeReasoningDisplayBlocks(
+    reasoningBlocks.map((reasoning, index) => {
+      // Default: when no explicit ended-flag list is supplied (i.e. the
+      // message is finalized / loaded from history), treat every reasoning
+      // block as ended. While streaming, use the per-block flag from the
+      // upstream `thinking_end` event.
+      const ended = reasoningBlocksEndedFlags
+        ? reasoningBlocksEndedFlags[index] === true
+        : !streaming;
+      const rawDuration = reasoningBlocksDurationsMs?.[index];
+      const persistedTiming = payload.reasoningBlocksTimings?.[index];
+      const persistedDuration =
+        persistedTiming &&
+        typeof persistedTiming.startedAt === 'number' &&
+        typeof persistedTiming.endedAt === 'number' &&
+        persistedTiming.endedAt >= persistedTiming.startedAt
+          ? persistedTiming.endedAt - persistedTiming.startedAt
+          : undefined;
+      const durationMs =
+        typeof rawDuration === 'number' && rawDuration >= 0
+          ? rawDuration
+          : typeof persistedDuration === 'number'
+            ? persistedDuration
+            : undefined;
+      return {
+        id: `reasoning-${index}`,
+        text: reasoning,
+        startedAt: persistedTiming?.startedAt,
+        endedAt: persistedTiming?.endedAt,
+        ended,
+        durationMs,
+      };
+    }),
+  );
+
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
-      {(payload.reasoningBlocks ?? []).map((reasoning, index) => {
-        if (!showReasoningBlockStreaming) {
-          if (presentationMode === 'team') {
-            return null;
-          }
-          const reasoningId = streaming
-            ? `streaming-hidden-reasoning-${index}`
-            : buildReasoningBlockKey(reasoning, index);
-          return (
-            <HiddenReasoningNotice
-              key={reasoningId}
-              index={index}
-              streaming={streaming}
-              total={payload.reasoningBlocks?.length ?? 0}
-              content={reasoning}
-              onToggle={() => toggleReasoning(reasoningId)}
-              expanded={expandedReasoningIds.has(reasoningId)}
-            />
-          );
-        }
-        // Default: when no explicit ended-flag list is supplied (i.e. the
-        // message is finalized / loaded from history), treat every reasoning
-        // block as ended. While streaming, use the per-block flag from the
-        // upstream `thinking_end` event.
-        const ended = reasoningBlocksEndedFlags
-          ? reasoningBlocksEndedFlags[index] === true
-          : !streaming;
-        const rawDuration = reasoningBlocksDurationsMs?.[index];
-        const persistedTiming = payload.reasoningBlocksTimings?.[index];
-        const persistedDuration =
-          persistedTiming &&
-          typeof persistedTiming.startedAt === 'number' &&
-          typeof persistedTiming.endedAt === 'number' &&
-          persistedTiming.endedAt >= persistedTiming.startedAt
-            ? persistedTiming.endedAt - persistedTiming.startedAt
-            : undefined;
-        const durationMs =
-          typeof rawDuration === 'number' && rawDuration >= 0
-            ? rawDuration
-            : typeof persistedDuration === 'number'
-              ? persistedDuration
-              : undefined;
-        return (
+      {mergedReasoning !== null &&
+        (showReasoningBlockStreaming ? (
           <AssistantReasoningBlock
-            key={
-              streaming ? `streaming-reasoning-${index}` : buildReasoningBlockKey(reasoning, index)
-            }
-            content={reasoning}
+            key={mergedReasoning.id}
+            content={mergedReasoning.text}
             defaultExpanded={reasoningExpandedByDefaultStreaming}
-            durationMs={durationMs}
-            ended={ended}
-            index={index}
+            durationMs={mergedReasoning.durationMs}
+            ended={mergedReasoning.ended}
+            index={0}
             messageStreaming={streaming}
             renderBody={renderReasoningRichBody}
             streaming={shouldStreamLocalReasoningBlock({
-              ended,
+              ended: mergedReasoning.ended,
               hasActiveToolCall,
               hasAssistantText,
-              index,
+              index: 0,
               streaming,
-              total: payload.reasoningBlocks?.length ?? 0,
+              total: 1,
             })}
-            total={payload.reasoningBlocks?.length ?? 0}
+            total={1}
           />
-        );
-      })}
+        ) : presentationMode === 'team' ? null : (
+          <HiddenReasoningNotice
+            key={mergedReasoning.id}
+            index={0}
+            streaming={streaming}
+            total={1}
+            content={mergedReasoning.text}
+            onToggle={() => toggleReasoning(mergedReasoning.id)}
+            expanded={expandedReasoningIds.has(mergedReasoning.id)}
+          />
+        ))}
       {payload.text.length > 0 && (
         <AssistantRichContentBody
           content={payload.text}
@@ -1044,7 +1051,7 @@ function AssistantRichContentBody({
     return <AssistantPendingBubble />;
   }
 
-  if (!streaming && looksLikeAssistantErrorContent(content)) {
+  if (looksLikeAssistantErrorContent(content)) {
     return <AssistantErrorContent content={content} />;
   }
 
@@ -1109,11 +1116,11 @@ function AssistantRichContentBody({
 
   if (streaming) {
     return (
-      <>
+      <div className="assistant-rich-content-body" data-streaming="true">
         <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
           <StreamingMarkdownContent content={content} />
         </React.Suspense>
-      </>
+      </div>
     );
   }
 

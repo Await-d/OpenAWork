@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
 import {
   DEFAULT_EXPANDED_DIRS_SESSION_KEY,
   DEFAULT_TERMINAL_PANEL_SESSION_KEY,
   EMPTY_EXPANDED_DIRS,
+  EMPTY_READ_IDENTITY,
   REVIEW_PANEL_WIDTH_BOUNDS,
   SIDEBAR_PANEL_WIDTH_BOUNDS,
   TERMINAL_LAYOUT_MAX_DEPTH,
@@ -22,6 +24,8 @@ import {
   resolveTerminalPanelHeightWithPaneFloor,
   terminalPanelSessionKeyFor,
   useUIStateStore,
+  useWorkspaceReadIdentity,
+  type WorkspaceReadIdentity,
 } from './uiState.js';
 import type {
   TerminalLayout,
@@ -49,6 +53,7 @@ function resetLayoutState(): void {
     terminalPanelOpened: false,
     terminalPanelOpenedBySession: {},
     terminalPanelPosition: 'bottom',
+    readIdentity: EMPTY_READ_IDENTITY,
     workbenchLayoutMode: 'fusion',
   });
 }
@@ -1098,6 +1103,71 @@ describe('terminalPanelMaximized 瞬态契约（不落盘 + 启动强制 false�
     );
 
     expect(merged.terminalPanelMaximized).toBe(false);
+  });
+});
+
+describe('readIdentity 瞬态契约（不落盘 + merge 强制空身份）', () => {
+  it('默认空身份，setter / clear 只改瞬态字段', () => {
+    expect(useUIStateStore.getState().readIdentity).toEqual(EMPTY_READ_IDENTITY);
+
+    useUIStateStore.getState().setReadIdentity({
+      sessionId: 'session-1',
+      sshConnectionId: null,
+      remote: true,
+    });
+    expect(useUIStateStore.getState().readIdentity).toEqual({
+      sessionId: 'session-1',
+      sshConnectionId: null,
+      remote: true,
+    });
+
+    useUIStateStore.getState().clearReadIdentity();
+    expect(useUIStateStore.getState().readIdentity).toEqual(EMPTY_READ_IDENTITY);
+  });
+
+  it('useWorkspaceReadIdentity 选择器跟随 store 的 setter / clear', () => {
+    const { result } = renderHook(() => useWorkspaceReadIdentity());
+    expect(result.current).toEqual(EMPTY_READ_IDENTITY);
+
+    act(() => {
+      useUIStateStore
+        .getState()
+        .setReadIdentity({ sessionId: 'session-9', sshConnectionId: null, remote: true });
+    });
+    expect(result.current).toEqual({ sessionId: 'session-9', sshConnectionId: null, remote: true });
+
+    act(() => {
+      useUIStateStore.getState().clearReadIdentity();
+    });
+    expect(result.current).toEqual(EMPTY_READ_IDENTITY);
+  });
+
+  it('partialize 把 readIdentity 排除在持久化之外', () => {
+    const partialize = useUIStateStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('useUIStateStore.persist 未配置 partialize');
+    }
+
+    const partial = partialize({
+      ...useUIStateStore.getState(),
+      readIdentity: { sessionId: 'session-1', sshConnectionId: 'conn-1', remote: true },
+    }) as { readIdentity?: WorkspaceReadIdentity };
+
+    expect(partial.readIdentity).toBeUndefined();
+  });
+
+  it('merge 强制空身份：存储里的跨会话身份不得带进启动态', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+
+    const merged = merge(
+      { readIdentity: { sessionId: 'session-old', sshConnectionId: 'conn-old', remote: true } },
+      useUIStateStore.getState(),
+    );
+
+    expect(merged.readIdentity).toEqual(EMPTY_READ_IDENTITY);
   });
 });
 

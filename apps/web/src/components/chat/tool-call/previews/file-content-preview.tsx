@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useFileEditorContext } from '../../../../App.js';
 import { CopyBtn } from '../shared/copy-btn.js';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── FileContentPreview (workspace_read_file / read) ── */
 
@@ -50,11 +51,14 @@ export function FileContentPreview({
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
   const fileEditorRef = useFileEditorContext();
   const lines = useMemo(() => data.content.split('\n'), [data.content]);
   const start = data.lineStart ?? 1;
   const isLong = lines.length > FILE_CONTENT_PREVIEW_LINES;
-  const visibleLines = isLong && !expanded ? lines.slice(0, FILE_CONTENT_PREVIEW_LINES) : lines;
+  const visibleLines =
+    isLong && !effectiveExpanded ? lines.slice(0, FILE_CONTENT_PREVIEW_LINES) : lines;
   // Pad line-number gutter wide enough for the largest line number we'll show.
   const lastNumber = start + lines.length - 1;
   const padWidth = String(lastNumber).length;
@@ -145,9 +149,9 @@ export function FileContentPreview({
           );
         })}
       </div>
-      {isLong && (
+      {isLong && !isInsideExpandedCard && (
         <button type="button" className="tool-output-toggle" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `显示全部 (${lines.length} 行)`}
+          {effectiveExpanded ? '收起' : `显示全部 (${lines.length} 行)`}
         </button>
       )}
     </div>

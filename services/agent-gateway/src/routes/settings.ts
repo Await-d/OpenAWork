@@ -17,6 +17,10 @@ import {
 import { invalidateCatalog, invalidateAllCatalogs } from '../provider/provider-catalog.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
+  listPermissionGrantsForUser,
+  reconcilePermissionGrants,
+} from '../permission/permission-grants-store.js';
+import {
   COMPACTION_SETTINGS_KEY,
   compactionSettingsSchema,
   readCompactionSettings,
@@ -220,8 +224,19 @@ function extractAuditSummary(payload: unknown): string | null {
 
 /**
  * `batch` 的 output 只有 `{ results, total }`，失败细节藏在 `results[].output`，
- * 需单独派生摘要；无失败子调用时返回 null，保持其他工具的既有提取行为。
+ * 需单独派生摘要；无失败/待审批子调用时返回 null，保持其他工具的既有提取行为。
+ *
+ * 待审批（pending permission）不是失败：子调用返回的 `isError: true` 只是"等待
+ * 用户批准"的占位结果，不能计入失败数。这里按 `tool-sandbox.ts` 的两条待审批
+ * 文案单独归类，避免把"1/2 待审批"误报成"1/2 失败"。
  */
+const BATCH_PENDING_PERMISSION_PATTERN =
+  /requires approval before it can run|is waiting for approval/;
+
+function isPendingPermissionOutput(output: unknown): boolean {
+  return typeof output === 'string' && BATCH_PENDING_PERMISSION_PATTERN.test(output);
+}
+
 function summarizeBatchResults(record: Record<string, unknown>): string | null {
   const results = record['results'];
   if (!Array.isArray(results)) {
@@ -229,17 +244,24 @@ function summarizeBatchResults(record: Record<string, unknown>): string | null {
   }
 
   const errorOutputs: unknown[] = [];
+  const pendingOutputs: unknown[] = [];
   for (const entry of results) {
     if (!entry || typeof entry !== 'object') {
       continue;
     }
     const entryRecord = entry as Record<string, unknown>;
-    if (entryRecord['isError'] === true) {
-      errorOutputs.push(entryRecord['output']);
+    if (entryRecord['isError'] !== true) {
+      continue;
+    }
+    const output = entryRecord['output'];
+    if (isPendingPermissionOutput(output)) {
+      pendingOutputs.push(output);
+    } else {
+      errorOutputs.push(output);
     }
   }
 
-  if (errorOutputs.length === 0) {
+  if (errorOutputs.length === 0 && pendingOutputs.length === 0) {
     return null;
   }
 
@@ -249,17 +271,27 @@ function summarizeBatchResults(record: Record<string, unknown>): string | null {
       ? Math.max(totalValue, results.length)
       : results.length;
 
-  let firstError: string | null = null;
+  const segments: string[] = [];
+  if (errorOutputs.length > 0) {
+    segments.push(`${errorOutputs.length}/${total} 个子调用失败`);
+  }
+  if (pendingOutputs.length > 0) {
+    segments.push(`${pendingOutputs.length}/${total} 个子调用待审批`);
+  }
+  const headline = `batch: ${segments.join('，')}`;
+
+  let firstDetail: string | null = null;
   for (const output of errorOutputs) {
     const detail = extractAuditSummary(output);
     if (detail) {
-      firstError = detail;
+      firstDetail = detail;
       break;
     }
   }
 
-  const headline = `batch: ${errorOutputs.length}/${total} 个子调用失败`;
-  const summary = firstError ? `${headline}：${firstError.replace(/\s+/g, ' ').trim()}` : headline;
+  const summary = firstDetail
+    ? `${headline}：${firstDetail.replace(/\s+/g, ' ').trim()}`
+    : headline;
 
   return truncateAuditString(summary);
 }
@@ -649,13 +681,24 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'settings.permission-rules.list');
+      const user = request.user as JwtPayload;
       const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
       // Return the merged effective view so legacy `permanentGrants`
-      // entries (from before permanent grants were stored as `rules`)
-      // are visible and editable from the settings panel.
+      // entries (from before permanent grants were stored as `rules`) and the
+      // user's durable `permission_grants` are visible and editable here.
       const rules = listEffectiveWorkspacePermissionRules(config);
-      step.succeed(undefined, { count: rules.length });
-      return reply.send({ rules, categories: PERMISSION_CATEGORIES });
+      const grantRules = listPermissionGrantsForUser(user.sub).map((grant) => ({
+        permission: grant.tool_name,
+        pattern: grant.scope,
+        action: 'allow' as const,
+      }));
+      const byKey = new Map<string, (typeof rules)[number]>();
+      for (const rule of [...rules, ...grantRules]) {
+        byKey.set(`${rule.permission}\u0000${rule.pattern}\u0000${rule.action}`, rule);
+      }
+      const mergedRules = [...byKey.values()];
+      step.succeed(undefined, { count: mergedRules.length });
+      return reply.send({ rules: mergedRules, categories: PERMISSION_CATEGORIES });
     },
   );
 
@@ -674,6 +717,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         ),
       });
       const parsed = parseBody(bodySchema, request.body);
+      const user = request.user as JwtPayload;
       const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
       // Clear legacy `permanentGrants` on save so deletions from the
       // settings panel actually take effect. The GET handler already
@@ -681,6 +725,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       // to keep is round-tripped through `parsed.rules`.
       const next = { ...config, rules: parsed.rules, permanentGrants: [] };
       writeWorkspacePermissionConfig(WORKSPACE_ROOT, next);
+      // Revoke any durable user-scoped grant the user removed in this panel.
+      // Grants are never created here.
+      reconcilePermissionGrants(user.sub, parsed.rules);
       step.succeed(undefined, { count: parsed.rules.length });
       return reply.send({ ok: true, rules: parsed.rules });
     },

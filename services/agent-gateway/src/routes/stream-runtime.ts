@@ -38,6 +38,7 @@ import { buildCapabilityContext } from './capabilities.js';
 import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import {
   type ApprovedPermissionResumePayload,
+  buildRouteOnlyUpstreamSummary,
   buildWorkspaceContext,
   createRunEventMeta,
   buildStreamToolObservability,
@@ -695,6 +696,8 @@ async function continueFromApprovedToolResult(input: {
           writeChunk({
             type: 'done',
             stopReason: 'tool_permission',
+            // 权限暂停也必须携带 upstreamSummary，否则前端会沿用上一轮的终态标签（如「已停止」）。
+            upstreamSummary: buildRouteOnlyUpstreamSummary(route, 'tool_permission'),
             ...createRunEventMeta(runId, eventSequence),
           });
           setPersistedSessionStateStatus({

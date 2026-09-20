@@ -119,3 +119,78 @@ export function getReasoningLabel(options: {
       ? '思考中'
       : '思考内容';
 }
+
+/** 单个思考块的展示态输入（展示层合并前的规范化形状）。 */
+export interface ReasoningDisplayBlock {
+  id: string;
+  text: string;
+  startedAt?: number;
+  endedAt?: number;
+  /** 该块是否已结束（thinking_end 已到）。展示层必须传已解析后的布尔值。 */
+  ended?: boolean;
+  durationMs?: number;
+}
+
+/** 一条消息内所有思考块合并后的展示形状。 */
+export interface MergedReasoningDisplayBlock {
+  id: string;
+  text: string;
+  /** 被合并的原始块数量。 */
+  count: number;
+  startedAt?: number;
+  endedAt?: number;
+  /** 仅当所有被合并块都已结束才为 true。 */
+  ended: boolean;
+  durationMs?: number;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * 展示层专用：把一条消息内的多个思考块合并为一个展示块。
+ * 纯函数，不修改入参，不影响消息本体 / 持久化 / 协议。
+ * - text：非空文本按出现顺序用 '\n\n' 拼接
+ * - ended：所有块 ended !== false 时为 true
+ * - startedAt/endedAt：分别为最早 / 最晚的已知值
+ * - durationMs：所有块都带已知 durationMs 时求和；否则回退到 endedAt - startedAt
+ */
+export function mergeReasoningDisplayBlocks(
+  blocks: readonly ReasoningDisplayBlock[],
+): MergedReasoningDisplayBlock | null {
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  const first = blocks[0]!;
+  const texts = blocks.map((block) => block.text).filter((text) => text.trim().length > 0);
+  const startedCandidates = blocks
+    .map((block) => block.startedAt)
+    .filter((value): value is number => isFiniteNumber(value));
+  const endedCandidates = blocks
+    .map((block) => block.endedAt)
+    .filter((value): value is number => isFiniteNumber(value));
+  const durations = blocks
+    .map((block) => block.durationMs)
+    .filter((value): value is number => isFiniteNumber(value));
+
+  const startedAt = startedCandidates.length > 0 ? Math.min(...startedCandidates) : undefined;
+  const endedAt = endedCandidates.length > 0 ? Math.max(...endedCandidates) : undefined;
+  const allDurationsKnown = durations.length === blocks.length;
+  const durationMs = allDurationsKnown
+    ? durations.reduce((sum, value) => sum + value, 0)
+    : isFiniteNumber(startedAt) && isFiniteNumber(endedAt) && endedAt >= startedAt
+      ? endedAt - startedAt
+      : undefined;
+
+  return {
+    id: first.id,
+    text: texts.join('\n\n'),
+    count: blocks.length,
+    ...(isFiniteNumber(startedAt) ? { startedAt } : {}),
+    ...(isFiniteNumber(endedAt) ? { endedAt } : {}),
+    ended: blocks.every((block) => block.ended !== false),
+    ...(isFiniteNumber(durationMs) ? { durationMs } : {}),
+  };
+}

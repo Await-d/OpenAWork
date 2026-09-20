@@ -129,6 +129,40 @@ describe('settings routes error contracts', () => {
     expect(summary).toBe('batch: 1/2 个子调用失败：boom');
   });
 
+  it('待审批的 batch 子调用不计入失败，单独归类为待审批', () => {
+    const summary = extractAuditSummaryForTesting({
+      results: [
+        { tool: 'execute_shell', isError: false, output: 'ok' },
+        {
+          tool: 'execute_shell',
+          isError: true,
+          output:
+            'Tool "execute_shell" requires approval before it can run. Permission request abc-123 has been created. Ask the user to approve it, then retry.',
+        },
+      ],
+      total: 2,
+    });
+
+    expect(summary).toBe('batch: 1/2 个子调用待审批');
+  });
+
+  it('失败与待审批并存时分别计数，详情取首个真实失败', () => {
+    const summary = extractAuditSummaryForTesting({
+      results: [
+        { tool: 'read', isError: true, output: 'boom' },
+        {
+          tool: 'execute_shell',
+          isError: true,
+          output:
+            'Tool "execute_shell" is waiting for approval. Permission request abc-123 is still pending. Ask the user to approve it, then retry.',
+        },
+      ],
+      total: 2,
+    });
+
+    expect(summary).toBe('batch: 1/2 个子调用失败，1/2 个子调用待审批：boom');
+  });
+
   it('全部成功的 batch 输出不派生摘要，保留原有兜底路径', () => {
     const summary = extractAuditSummaryForTesting({
       results: [

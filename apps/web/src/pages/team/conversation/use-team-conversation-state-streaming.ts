@@ -457,7 +457,7 @@ export function useTeamConversationStreaming(
       setActiveStreamFirstTokenLatencyMs(null);
       setSessionStateStatus('running');
 
-      const attached = await gatewayClient.attachToActiveStream(sessionId, {
+      const attachResult = await gatewayClient.attachToActiveStream(sessionId, {
         onDelta: () => {
           // useConversationStream consumes `text_delta` via onEvent; this
           // legacy hook is unused but required by the StreamCallbacks shape.
@@ -514,7 +514,7 @@ export function useTeamConversationStreaming(
         },
       });
       // attach 成功：重置重试计数。
-      if (attached) {
+      if (attachResult.status === 'attached') {
         attachRetryCountRef.current = 0;
         streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
       }
@@ -522,7 +522,7 @@ export function useTeamConversationStreaming(
       // "streaming" 模式。onError 回调已处理错误场景的清理。
       // 不回滚 sessionStateStatus——后端可能在短时间内将状态从 running 切到
       // 其它值，下一次 reload() 会同步真实状态。
-      if (!attached) {
+      if (attachResult.status !== 'attached') {
         streamingRef.current = false;
         setStreaming(false);
         setActiveStreamStartedAt(null);
@@ -532,7 +532,7 @@ export function useTeamConversationStreaming(
         // 触发 reload 同步真实 session 状态，避免 attach 失败后状态不一致。
         void reload();
       }
-      return attached;
+      return attachResult.status === 'attached';
     }, [
       sessionId,
       token,

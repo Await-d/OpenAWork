@@ -2,12 +2,16 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SSHConnection, SSHConnectionManager } from '@openAwork/agent-core';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
+import type * as SshServiceModule from '../../ssh/ssh-service.js';
+import type * as SshStoreModule from '../../ssh/ssh-store.js';
 import type * as WorkspaceRoutesModule from '../../routes/workspace.js';
+import type * as SshWorkspaceFileIndexModule from '../../workspace/ssh-workspace-file-index.js';
 import type * as UserWorkspaceAllowlistModule from '../../workspace/user-workspace-allowlist.js';
 import type * as WorkspaceFileIndexModule from '../../workspace/workspace-file-index.js';
 
@@ -30,9 +34,18 @@ let invalidateWorkspaceFileIndex: typeof WorkspaceFileIndexModule.invalidateWork
 let workspaceRoutes: typeof WorkspaceRoutesModule.workspaceRoutes;
 let workspaceFileSearchThrottle: typeof WorkspaceRoutesModule.workspaceFileSearchThrottle;
 let workspaceFileSearchRateLimit: typeof WorkspaceRoutesModule.WORKSPACE_FILE_SEARCH_RATE_LIMIT;
+let setSshService: typeof SshServiceModule.setSshService;
+let resetSshServiceForTests: typeof SshServiceModule.__resetSshServiceForTests;
+let SshServiceCtor: typeof SshServiceModule.SshService;
+let createSshConnection: typeof SshStoreModule.createSshConnection;
+let migrateSshTables: typeof SshStoreModule.migrateSshTables;
+let resetSshWorkspaceFileIndexCacheForTest: typeof SshWorkspaceFileIndexModule.resetSshWorkspaceFileIndexCacheForTest;
 
 const USER_ID = 'u-workspace-routes';
 const SESSION_ID = 's-workspace-routes';
+const SSH_SESSION_ID = 's-workspace-routes-ssh';
+const SSH_CONNECTION_ID = 'conn-workspace-routes';
+const SSH_REMOTE_ROOT = '/home/dev/remote-project';
 const testOnNonWindows = process.platform === 'win32' ? it.skip : it;
 
 async function buildApp(): Promise<FastifyInstance> {
@@ -64,6 +77,95 @@ function seedWorkspaceSession(rootPath: string): void {
   );
 }
 
+function seedSshWorkspaceSession(): void {
+  dbModule.sqliteRun(
+    `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES (?, ?, 'ssh', ?, 'idle')`,
+    [
+      SSH_SESSION_ID,
+      USER_ID,
+      JSON.stringify({
+        sshConnectionId: SSH_CONNECTION_ID,
+        workingDirectory: SSH_REMOTE_ROOT,
+      }),
+    ],
+  );
+}
+
+/** 为任意用户播种一个 SSH 绑定会话（用于跨用户归属校验）。 */
+function seedSshSessionForUser(sessionId: string, userId: string): void {
+  dbModule.sqliteRun(
+    `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES (?, ?, 'ssh', ?, 'idle')`,
+    [
+      sessionId,
+      userId,
+      JSON.stringify({
+        sshConnectionId: SSH_CONNECTION_ID,
+        workingDirectory: SSH_REMOTE_ROOT,
+      }),
+    ],
+  );
+}
+
+/** 假 SSH 连接管理器：只提供路由解析与远端 find 所需的最小子集，不建立真实连接。 */
+function createFakeSshManager(status: SSHConnection['status']): {
+  manager: SSHConnectionManager;
+  execCommand: ReturnType<typeof vi.fn>;
+} {
+  const execCommand = vi.fn(async () => ({
+    stdout: './src/App.tsx\n./src/utils/format.ts\n',
+    stderr: '',
+    exitCode: 0,
+  }));
+  const connection: SSHConnection = {
+    id: SSH_CONNECTION_ID,
+    name: 'test',
+    host: 'example.com',
+    port: 22,
+    username: 'dev',
+    authType: 'password',
+    status,
+    createdAt: Date.now(),
+  };
+  const manager: SSHConnectionManager = {
+    addConnection: vi.fn(),
+    getConnection: vi.fn(() => connection),
+    listConnections: vi.fn(() => [connection]),
+    connect: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    execCommand,
+    readFile: vi.fn(async () => ({
+      path: '',
+      content: '',
+      encoding: 'utf8' as const,
+      truncated: false,
+    })),
+    readFileBytes: vi.fn(async () => ({
+      data: Buffer.alloc(0),
+      size: 0,
+      truncated: false,
+      isDirectory: false,
+    })),
+    writeFile: vi.fn(async () => undefined),
+    listFiles: vi.fn(async () => []),
+    getStatus: vi.fn(() => status),
+  };
+  return { manager, execCommand };
+}
+
+/** 注册假 SshService 并把指定会话绑定到 SSH_CONNECTION_ID。 */
+function registerSshService(
+  status: SSHConnection['status'],
+  sessionId: string = SSH_SESSION_ID,
+): ReturnType<typeof vi.fn> {
+  const { manager, execCommand } = createFakeSshManager(status);
+  const service = new SshServiceCtor({ manager });
+  service.getBindings().bind(sessionId, SSH_CONNECTION_ID);
+  setSshService(service);
+  return execCommand;
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
@@ -79,15 +181,34 @@ beforeAll(async () => {
   const workspaceFileIndexModule = await import('../../workspace/workspace-file-index.js');
   resetWorkspaceFileIndexCache = workspaceFileIndexModule.__resetWorkspaceFileIndexCacheForTest;
   invalidateWorkspaceFileIndex = workspaceFileIndexModule.invalidateWorkspaceFileIndex;
+  const sshServiceModule = await import('../../ssh/ssh-service.js');
+  setSshService = sshServiceModule.setSshService;
+  resetSshServiceForTests = sshServiceModule.__resetSshServiceForTests;
+  SshServiceCtor = sshServiceModule.SshService;
+  const sshStoreModule = await import('../../ssh/ssh-store.js');
+  createSshConnection = sshStoreModule.createSshConnection;
+  migrateSshTables = sshStoreModule.migrateSshTables;
+  // 提前建表，保证每个 beforeEach 都能安全清理 SSH 表（外键 ON）。
+  migrateSshTables();
+  resetSshWorkspaceFileIndexCacheForTest = (
+    await import('../../workspace/ssh-workspace-file-index.js')
+  ).resetSshWorkspaceFileIndexCacheForTest;
 });
 
 beforeEach(() => {
   rmSync(projectRoot, { recursive: true, force: true });
   mkdirSync(projectRoot, { recursive: true });
+  // 外键 ON：SSH 子表先于 users 删除，避免清理 users 时触发约束失败。
+  dbModule.sqliteRun('DELETE FROM ssh_dialogs', []);
+  dbModule.sqliteRun('DELETE FROM ssh_session_bindings', []);
+  dbModule.sqliteRun('DELETE FROM ssh_connections', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   resetUserWorkspaceAllowlistCache();
   resetWorkspaceFileIndexCache();
+  resetSshWorkspaceFileIndexCacheForTest();
+  resetSshServiceForTests(null);
+  workspaceFileSearchThrottle.reset();
   seedUser(USER_ID);
   seedWorkspaceSession(projectRoot);
 });
@@ -626,6 +747,192 @@ describe('workspace routes', () => {
         name: 'BadRequest',
         data: { message: '查询参数无效。' },
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('workspace routes — SSH 远程文件检索', () => {
+  it('SSH 绑定会话返回远端结果，且不触碰本地路径校验', async () => {
+    seedSshWorkspaceSession();
+    const execCommand = registerSshService('connected');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          // path 是 Windows 路径：本地分支必然 400，SSH 分支在本地校验前返回。
+          `/workspace/files/search?path=${encodeURIComponent('E:\\remote\\ignored')}` +
+          `&q=App&sessionId=${encodeURIComponent(SSH_SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        root: SSH_REMOTE_ROOT,
+        query: 'App',
+        files: ['src/App.tsx'],
+        directories: [],
+        truncated: false,
+        count: 1,
+      });
+      expect(execCommand).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('SSH 连接不可用时返回中文 409 与主机标签', async () => {
+    seedSshWorkspaceSession();
+    registerSshService('error');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(SSH_REMOTE_ROOT)}` +
+          `&q=App&sessionId=${encodeURIComponent(SSH_SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(409);
+      const body = response.json() as { files: string[]; error: string };
+      expect(body.files).toEqual([]);
+      expect(body.error).toContain('dev@example.com:22');
+      expect(body.error).toContain('连接失败');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('未绑定 SSH 的会话继续走本地检索', async () => {
+    // 注册 service 但不建立绑定：证明 `unbound` 回退到本地逻辑。
+    const { manager } = createFakeSshManager('connected');
+    setSshService(new SshServiceCtor({ manager }));
+    const filePath = join(projectRoot, 'src', 'local.ts');
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` +
+          `&q=local&sessionId=${encodeURIComponent(SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        root: projectRoot,
+        files: ['src/local.ts'],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('借用他人「非 SSH 绑定」会话不再 404，而是回退本地检索', async () => {
+    const otherUserId = 'u-workspace-routes-other-local';
+    const otherSessionId = 's-workspace-routes-other-local';
+    seedUser(otherUserId);
+    // 他人会话：纯本地工作区，未绑定任何 SSH 连接。
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+       VALUES (?, ?, 'local', ?, 'idle')`,
+      [otherSessionId, otherUserId, JSON.stringify({ workingDirectory: projectRoot })],
+    );
+    const { manager, execCommand } = createFakeSshManager('connected');
+    setSshService(new SshServiceCtor({ manager }));
+    const filePath = join(projectRoot, 'src', 'other-local.ts');
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, 'export {};\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(projectRoot)}` +
+          `&q=local&sessionId=${encodeURIComponent(otherSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { root: string; files: string[]; error?: string };
+      expect(body.error).toBeUndefined();
+      expect(body.root).toBe(projectRoot);
+      expect(body.files).toContain('src/other-local.ts');
+      expect(execCommand).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('借用他人 SSH 绑定会话返回 404，且绝不触发远端 find', async () => {
+    const otherUserId = 'u-workspace-routes-other';
+    const otherSessionId = 's-workspace-routes-other-ssh';
+    seedUser(otherUserId);
+    seedSshSessionForUser(otherSessionId, otherUserId);
+    // 全局绑定注册表把「他人会话」绑定到连接：证明拦截只靠归属校验。
+    const execCommand = registerSshService('connected', otherSessionId);
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(SSH_REMOTE_ROOT)}` +
+          `&q=App&sessionId=${encodeURIComponent(otherSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        files: [],
+        directories: [],
+        truncated: false,
+        error: '会话不存在或无权访问。',
+      });
+      // 归属校验必须早于任何 SSH 解析：不得发生远端 find（无越权读取）。
+      expect(execCommand).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('草稿会话的 SSH 连接未连接时返回 409，而非空 200', async () => {
+    const { manager } = createFakeSshManager('connected');
+    setSshService(new SshServiceCtor({ manager }));
+    const connectionId = createSshConnection({
+      userId: USER_ID,
+      name: 'draft',
+      host: 'example.com',
+      port: 22,
+      username: 'dev',
+      authType: 'agent',
+    }).id;
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent(SSH_REMOTE_ROOT)}` +
+          `&q=App&sshConnectionId=${encodeURIComponent(connectionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(409);
+      const body = response.json() as { files: string[]; directories: string[]; error: string };
+      expect(body.files).toEqual([]);
+      expect(body.directories).toEqual([]);
+      expect(body.error).toContain('example.com:22');
+      expect(body.error).toContain('未连接');
     } finally {
       await app.close();
     }

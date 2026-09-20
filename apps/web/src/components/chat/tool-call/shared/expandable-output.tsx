@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CopyBtn } from './copy-btn.js';
+import { useIsInsideExpandedToolCard } from './tool-card-expansion.js';
 
 /**
  * Generic monospace output block with line-count + copy button + truncation
@@ -8,7 +9,8 @@ import { CopyBtn } from './copy-btn.js';
  *
  * Outputs longer than `maxChars` are collapsed by default with a gradient
  * fade-out and an expand button. This prevents long shell outputs or JSON
- * dumps from dominating the chat viewport.
+ * dumps from dominating the chat viewport. Inside an expanded tool card the
+ * output renders in full — no secondary expand step.
  */
 export function ExpandableOutput({
   text,
@@ -31,9 +33,11 @@ export function ExpandableOutput({
   const isLong = isLongByChars || isLongByLines;
 
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
 
   const displayed = (() => {
-    if (!isLong || expanded) return text;
+    if (!isLong || effectiveExpanded) return text;
     // Truncate by lines first (more readable), then by chars as fallback
     if (isLongByLines) {
       const truncated = lines.slice(0, maxLines).join('\n');
@@ -53,7 +57,7 @@ export function ExpandableOutput({
       <div style={{ position: 'relative', overflow: 'hidden' }}>
         <pre className={compact ? 'tool-output-pre-compact' : 'tool-output-pre'}>{displayed}</pre>
         {/* Gradient fade when collapsed */}
-        {isLong && !expanded && (
+        {isLong && !effectiveExpanded && (
           <div
             aria-hidden="true"
             className="tool-output-fade"
@@ -68,9 +72,9 @@ export function ExpandableOutput({
           />
         )}
       </div>
-      {isLong && (
+      {isLong && !isInsideExpandedCard && (
         <button type="button" className="tool-output-toggle" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `展开全部 (${lineCount} 行, ${formatSize(charCount)})`}
+          {effectiveExpanded ? '收起' : `展开全部 (${lineCount} 行, ${formatSize(charCount)})`}
         </button>
       )}
     </div>

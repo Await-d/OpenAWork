@@ -11,6 +11,7 @@ import {
   resetManagedAgentForUser,
   updateManagedAgentForUser,
 } from '../agent/agent-catalog.js';
+import { MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS } from '../provider/model-router.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
 const AGENT_ROUTE_ERROR_MESSAGES = {
@@ -74,7 +75,7 @@ const createManagedAgentSchema = z.object({
   model: z.string().trim().min(1).max(200).optional(),
   variant: z.string().trim().min(1).max(80).optional(),
   fallbackModels: z.array(z.string().trim().min(1).max(200)).optional(),
-  systemPrompt: z.string().trim().min(1).max(4000),
+  systemPrompt: z.string().trim().min(1).max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS),
   note: z.string().trim().max(400).optional(),
   enabled: z.boolean().optional().default(true),
 });
@@ -88,7 +89,7 @@ const updateManagedAgentSchema = z
     model: z.string().trim().min(1).max(200).optional(),
     variant: z.string().trim().min(1).max(80).optional(),
     fallbackModels: z.array(z.string().trim().min(1).max(200)).optional(),
-    systemPrompt: z.string().trim().max(4000).optional(),
+    systemPrompt: z.string().trim().max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).optional(),
     note: z.string().trim().max(400).optional(),
     enabled: z.boolean().optional(),
   })

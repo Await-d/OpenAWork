@@ -1,6 +1,7 @@
 import { REFERENCE_AGENT_ROLE_METADATA, type ManagedAgentRecord } from '@openAwork/shared';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
+import { MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS } from '../provider/model-router.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
 import {
   getTaskCategoryDescription,
@@ -141,6 +142,26 @@ function getManagedAgentModelEntries(agent: ManagedAgentRecord | undefined): Ref
   }));
 }
 
+const DELEGATED_PROMPT_TRUNCATION_SUFFIX =
+  '\n\n[delegated system prompt truncated to fit the model request cap]';
+
+/**
+ * An agent's stored prompt may be as long as the model request cap, and the
+ * delegation contract / skill blocks are appended on top — without this clamp
+ * the composed prompt could exceed `streamRequestSchema`'s cap and fail the
+ * child request with `too_big`.
+ */
+function clampDelegatedSystemPrompt(prompt: string): string {
+  if (prompt.length <= MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS) {
+    return prompt;
+  }
+  const keep = Math.max(
+    0,
+    MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS - DELEGATED_PROMPT_TRUNCATION_SUFFIX.length,
+  );
+  return `${prompt.slice(0, keep)}${DELEGATED_PROMPT_TRUNCATION_SUFFIX}`;
+}
+
 function buildDelegatedSystemPrompt(input: {
   agentPrompt?: string;
   category?: string;
@@ -206,7 +227,7 @@ function buildDelegatedSystemPrompt(input: {
     return undefined;
   }
 
-  return sections.join('\n\n');
+  return clampDelegatedSystemPrompt(sections.join('\n\n'));
 }
 
 /**

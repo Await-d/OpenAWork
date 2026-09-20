@@ -21,8 +21,15 @@
  *
  * Nothing here may throw or hang: every exec failure, parse error or timeout
  * degrades to `{ ports: [], strategy, reason }`. A `Promise.race` timeout
- * guards the subprocess strategies (PowerShell cold start is 1–2s, `lsof` can
- * stall). Results are cached with a short TTL (env-overridable) and
+ * guards the subprocess strategies; the budget is per strategy because the two
+ * have different cost profiles — procfs is a kernel-memory read (ms), while
+ * `lsof` / PowerShell pay process startup plus a first-call CIM query on
+ * Windows that routinely lands in the 2–5s range (see
+ * {@link defaultEnumerationTimeoutMs}). On procfs, the best-effort enrichment
+ * (owner scan / liveness / attribution) runs under a slightly tighter internal
+ * deadline so a stalled `/proc` walk degrades *enrichment* (pid: null) instead
+ * of discarding the already-read LISTEN list — see {@link ENRICHMENT_RESERVE_MS}.
+ * Results are cached with a short TTL (env-overridable) and
  * single-flighted so concurrent callers share one probe instead of spawning a
  * process each.
  *
@@ -72,7 +79,7 @@ export interface ListeningPort {
    * 该监听端口的 ESTABLISHED 连接数。
    * `null` = 当前策略无法统计（lsof / powershell 的输出里没有连接状态），
    * **不是 0** —— 消费方不得把 null 显示成「无连接」。
-   * 非 null 时也只是本次快照（≤5s 缓存）的时点值，不是实时值。
+   * 非 null 时也只是本次快照（≤6s 缓存）的时点值，不是实时值。
    */
   establishedConnections: number | null;
   /**
@@ -110,12 +117,14 @@ export interface ListeningPortsSnapshot {
 export type PortEnumerationExec = (
   cmd: string,
   args: string[],
+  /** 子进程预算；实现方据此在超时后杀掉子进程，避免留下仍在跑的死循环。 */
+  options?: { timeoutMs?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export interface ListListeningPortsOptions {
   /** 覆盖策略，供单测注入；默认按 platform 探测 */
   strategy?: ListeningPort['source'] | 'auto';
-  /** 默认 3000ms；超时必须返回降级结果而非抛错或挂起 */
+  /** 覆盖总预算；缺省按策略取（procfs 3000ms，lsof / powershell 10000ms）。超时必须返回降级结果而非抛错或挂起 */
   timeoutMs?: number;
   /** 覆盖执行器，供单测注入（禁止在单测里真的起进程） */
   exec?: PortEnumerationExec;
@@ -136,7 +145,37 @@ export interface ListListeningPortsOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 3_000;
-const DEFAULT_CACHE_TTL_MS = 3_000;
+/**
+ * 子进程策略（lsof / powershell）的默认预算。
+ *
+ * 3s 是按 procfs 定的——那是内核态读取，毫秒级。Windows 上一次枚举要冷启动
+ * PowerShell 进程，且 `Get-NetTCPConnection` 首次调用走 CIM 查询（常见 2–5s），
+ * macOS 的 `lsof` 在繁忙机器上也会 stall；用 3s 会**稳定**顶穿并整份降级为空列表，
+ * 这正是「端口页一直显示超时」的根因。给子进程策略更宽的预算，procfs 维持 3s。
+ */
+const DEFAULT_SUBPROCESS_TIMEOUT_MS = 10_000;
+/**
+ * 富化（owner 扫描 / 存活 / 归属）停手点与外层 `Promise.race` 超时之间预留的
+ * 收尾时间。富化必须在**外层超时触发之前**主动停手，否则超时会连已经毫秒级读到
+ * 的 LISTEN 列表一起丢掉——「富化慢」不应等于「端口列表为空」。
+ */
+const ENRICHMENT_RESERVE_MS = 500;
+/**
+ * 子进程被杀对外层超时的宽限：先让外层 `Promise.race` 用「超时」降级（用户看到的是
+ * 干净的降级文案），再晚一点点杀进程 —— 否则 `execFile` 的 timeout 会先抛
+ * `Command failed: powershell …`，把一句可读的超时提示换成一段命令报错。
+ */
+const SUBPROCESS_KILL_GRACE_MS = 1_000;
+/**
+ * 快照缓存 TTL。必须**严格大于**前端 5s 轮询间隔：快照按「枚举完成时刻」入缓存，
+ * 下一拍请求到达时年龄已是 5s + ε，而命中判定是严格 `<` —— 设成 5000 会每次都
+ * miss，等于没缓存。
+ *
+ * 轮询间隔固定 5s，所以 TTL 落在 (5s, 10s] 内冷启动频率完全相同（miss 后重新入缓存
+ * → 每 ~10s 才真正枚举一次）；区间内取最小值最省陈旧窗口，故取 6s（留 ~1s 抖动余量）。
+ * 代价：自动刷新下最多 ~6s 陈旧，面板有「更新于 N 秒前」提示。
+ */
+const DEFAULT_CACHE_TTL_MS = 6_000;
 const CACHE_TTL_ENV_KEY = 'OPENAWORK_PORTS_ENUMERATION_TTL_MS';
 const DEFAULT_GATEWAY_PORT = 3000;
 const DEFAULT_REDIS_PORT = 6379;
@@ -382,6 +421,17 @@ async function readProcfsOrTimeout<T>(
   }
 }
 
+/** 富化 deadline 已过？`null` 表示不设 deadline（直接调用内部函数时的默认）。 */
+function isPastDeadline(deadlineMs: number | null): boolean {
+  return deadlineMs !== null && Date.now() >= deadlineMs;
+}
+
+/** 单次 `/proc` IO 的预算：既不超过固定上限，也不越过 deadline，避免在收尾前起一个 1s 的读。 */
+function ioBudgetMs(deadlineMs: number | null): number {
+  if (deadlineMs === null) return OWNER_SCAN_IO_TIMEOUT_MS;
+  return Math.max(1, Math.min(OWNER_SCAN_IO_TIMEOUT_MS, deadlineMs - Date.now()));
+}
+
 /**
  * Best-effort inode → pid reverse lookup by walking `/proc/<pid>/fd/*`. A pid
  * we cannot read (EACCES for other users, already exited) is skipped, so the
@@ -393,14 +443,19 @@ async function readProcfsOrTimeout<T>(
  * its deadline on a busy gateway. Workers stop scheduling once every wanted
  * inode is found; when two pids hold the same inode the lowest pid wins, so the
  * result never depends on completion order.
+ *
+ * `deadlineMs` bounds the walk: once passed, workers stop scheduling new pids
+ * and return whatever was resolved so far. Owner resolution is enrichment — a
+ * slow `/proc` must cost `pid: null` on some rows, never the whole LISTEN list.
  */
 async function resolveSocketOwners(
   io: ProcfsIo,
   wantedInodes: Set<number>,
+  deadlineMs: number | null = null,
 ): Promise<Map<number, SocketOwner>> {
   const owners = new Map<number, SocketOwner>();
   if (wantedInodes.size === 0) return owners;
-  const proc = await readProcfsOrTimeout(io.readDirNames('/proc'), OWNER_SCAN_IO_TIMEOUT_MS);
+  const proc = await readProcfsOrTimeout(io.readDirNames('/proc'), ioBudgetMs(deadlineMs));
   if (!proc.ok) return owners;
 
   const pids = proc.value
@@ -409,20 +464,24 @@ async function resolveSocketOwners(
     .sort((a, b) => a - b);
 
   const scanPid = async (pid: number): Promise<void> => {
+    if (isPastDeadline(deadlineMs)) return;
     const pidName = String(pid);
     const fdNames = await readProcfsOrTimeout(
       io.readDirNames(`/proc/${pidName}/fd`),
-      OWNER_SCAN_IO_TIMEOUT_MS,
+      ioBudgetMs(deadlineMs),
     );
     if (!fdNames.ok) return;
     let processName: string | null | undefined;
     for (const fdName of fdNames.value) {
+      // 每读一个 fd 前重新看 deadline：卡住的 /proc 可能已经很接近预算上限，
+      // 这时必须停手把「已解析到的归属」交出去，而不是被外层超时整份丢弃。
+      if (isPastDeadline(deadlineMs)) return;
       // 不能在此按 owners.size 提前 return：一个仍在飞的更小 pid 需要跑完自己的
       // fd 列表，才能用「最小 pid 胜出」覆盖掉更大的 pid。停止调度新 pid 由 worker
       // 循环负责。
       const target = await readProcfsOrTimeout(
         io.readLink(`/proc/${pidName}/fd/${fdName}`),
-        OWNER_SCAN_IO_TIMEOUT_MS,
+        ioBudgetMs(deadlineMs),
       );
       if (!target.ok) continue;
       const inode = parseSocketInode(target.value);
@@ -435,7 +494,7 @@ async function resolveSocketOwners(
       if (processName === undefined) {
         const name = await readProcfsOrTimeout(
           readProcessName(io, pidName),
-          OWNER_SCAN_IO_TIMEOUT_MS,
+          ioBudgetMs(deadlineMs),
         );
         processName = name.ok ? name.value : null;
       }
@@ -449,6 +508,7 @@ async function resolveSocketOwners(
   let next = 0;
   const worker = async (): Promise<void> => {
     while (owners.size < wantedInodes.size) {
+      if (isPastDeadline(deadlineMs)) return;
       const pid = pids[next];
       next += 1;
       if (pid === undefined) return;
@@ -500,10 +560,16 @@ async function readProcessAlive(io: ProcfsIo, pid: number): Promise<boolean | nu
 async function attachProcessLiveness(
   ports: ListeningPort[],
   io: ProcfsIo,
+  deadlineMs: number | null = null,
 ): Promise<ListeningPort[]> {
   const aliveByPid = new Map<number, boolean | null>();
   const result: ListeningPort[] = [];
   for (const port of ports) {
+    if (isPastDeadline(deadlineMs)) {
+      // 预算耗尽：剩余行保留 pid 但存活状态未知 —— 未知不是错误，不因此丢端口。
+      result.push({ ...port, processAlive: null });
+      continue;
+    }
     const pid = port.pid;
     if (pid === null || !Number.isInteger(pid) || pid <= 0) {
       result.push({ ...port, processAlive: null });
@@ -521,6 +587,7 @@ async function attachProcessLiveness(
 
 export async function collectProcfsListeningPorts(
   io: ProcfsIo = defaultProcfsIo,
+  deadlineMs: number | null = null,
 ): Promise<StrategyOutcome> {
   const [ipv4, ipv6] = await Promise.all([
     readProcNetTcpFile(io, PROC_NET_TCP, 'tcp'),
@@ -537,7 +604,7 @@ export async function collectProcfsListeningPorts(
     tcp6: ipv6.establishedCountByPort,
   };
   const wantedInodes = new Set(entries.map((entry) => entry.inode).filter((inode) => inode > 0));
-  const owners = await resolveSocketOwners(io, wantedInodes);
+  const owners = await resolveSocketOwners(io, wantedInodes, deadlineMs);
   const ports = await attachProcessLiveness(
     dedupePorts(
       entries.map((entry) => {
@@ -557,6 +624,7 @@ export async function collectProcfsListeningPorts(
       }),
     ),
     io,
+    deadlineMs,
   );
   // IPv6 can legitimately be absent in a container; surface it as a partial
   // degradation instead of silently pretending the namespace has no v6 stack.
@@ -649,11 +717,17 @@ interface AttributionContext {
 async function attachTerminalAttribution(
   ports: ListeningPort[],
   attribution: AttributionContext,
+  deadlineMs: number | null = null,
 ): Promise<ListeningPort[]> {
   const ownedByPid = buildOwnedPidIndex(attribution.ownedTerminals);
   if (ownedByPid.size === 0) return ports;
   const attributed: ListeningPort[] = [];
   for (const port of ports) {
+    if (isPastDeadline(deadlineMs)) {
+      // 预算耗尽：剩余行保持 terminal: null（归属不可用，不是「外部进程」）。
+      attributed.push(port);
+      continue;
+    }
     attributed.push({
       ...port,
       terminal: await resolveOwnedTerminalForPid({
@@ -720,8 +794,11 @@ export function parseLsofOutput(output: string): ListeningPort[] {
   return ports;
 }
 
-async function collectLsofListeningPorts(exec: PortEnumerationExec): Promise<StrategyOutcome> {
-  const { stdout } = await exec('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']);
+async function collectLsofListeningPorts(
+  exec: PortEnumerationExec,
+  timeoutMs?: number,
+): Promise<StrategyOutcome> {
+  const { stdout } = await exec('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN'], { timeoutMs });
   return { ports: dedupePorts(parseLsofOutput(stdout)) };
 }
 
@@ -796,8 +873,15 @@ export function parsePowerShellOutput(output: string): ListeningPort[] {
 
 async function collectPowerShellListeningPorts(
   exec: PortEnumerationExec,
+  timeoutMs?: number,
 ): Promise<StrategyOutcome> {
-  const { stdout } = await exec('powershell', ['-NoProfile', '-Command', POWERSHELL_LISTEN_SCRIPT]);
+  const { stdout } = await exec(
+    'powershell',
+    ['-NoProfile', '-Command', POWERSHELL_LISTEN_SCRIPT],
+    {
+      timeoutMs,
+    },
+  );
   return { ports: dedupePorts(parsePowerShellOutput(stdout)) };
 }
 
@@ -874,12 +958,24 @@ function resolveRedisPort(): number {
 function defaultPortEnumerationExec(
   cmd: string,
   args: string[],
+  options?: { timeoutMs?: number },
 ): Promise<{ stdout: string; stderr: string }> {
+  const timeoutMs = options?.timeoutMs;
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
       args,
-      { encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      {
+        encoding: 'utf-8',
+        maxBuffer: 8 * 1024 * 1024,
+        windowsHide: true,
+        // 到点由 Node 直接杀掉子进程：外层 Promise.race 只是让请求降级，不会终止
+        // 已经起的 PowerShell / lsof。若不自带 timeout，一次卡死的枚举会在每轮
+        // 轮询里再起一个孤儿进程，持续消耗 CPU —— 这才是「超时后仍在后台跑」的根因。
+        ...(timeoutMs !== undefined && timeoutMs > 0
+          ? { timeout: timeoutMs + SUBPROCESS_KILL_GRACE_MS, killSignal: 'SIGKILL' as const }
+          : {}),
+      },
       (error, stdout, stderr) => {
         if (error) {
           reject(error instanceof Error ? error : new Error('port enumeration exec failed'));
@@ -896,32 +992,41 @@ function runStrategy(
   exec: PortEnumerationExec,
   io: ProcfsIo,
   attribution: AttributionContext | null,
+  timeoutMs: number,
+  procfsDeadlineMs: number | null,
 ): Promise<StrategyOutcome> {
-  if (strategy === 'procfs') return collectProcfsListeningPortsWithAttribution(io, attribution);
+  if (strategy === 'procfs') {
+    return collectProcfsListeningPortsWithAttribution(io, attribution, procfsDeadlineMs);
+  }
   // 归属本轮只在 linux/procfs 实现：lsof / powershell 拿不到「本网关终端 pid 的
   // 进程树」，一律 terminal: null、快照级 attributionSupported 为 false —— 这是
   // 平台能力限制，不是失败：不要据此以为归属在其他平台也可用，也不要把它修成
   // 「这些端口属于外部进程」。
-  if (strategy === 'lsof') return collectLsofListeningPorts(exec);
-  return collectPowerShellListeningPorts(exec);
+  if (strategy === 'lsof') return collectLsofListeningPorts(exec, timeoutMs);
+  return collectPowerShellListeningPorts(exec, timeoutMs);
 }
 
 async function collectProcfsListeningPortsWithAttribution(
   io: ProcfsIo,
   attribution: AttributionContext | null,
+  deadlineMs: number | null,
 ): Promise<StrategyOutcome> {
-  const outcome = await collectProcfsListeningPorts(io);
+  // 主数据（LISTEN 列表）与富化共用同一段预算，但富化有一个更早的停手点：
+  // 卡住的 /proc 只会让某些行缺 pid / 归属，不会把整份列表打成空。
+  const outcome = await collectProcfsListeningPorts(io, deadlineMs);
   if (attribution === null || outcome.ports.length === 0) return outcome;
-  // 归属与枚举共用同一段超时预算：卡住的 /proc 读取会降级为整份快照超时（带 reason），
-  // 而不是让请求无限挂起。
-  return { ...outcome, ports: await attachTerminalAttribution(outcome.ports, attribution) };
+  return {
+    ...outcome,
+    ports: await attachTerminalAttribution(outcome.ports, attribution, deadlineMs),
+  };
 }
 
 /**
  * `Promise.race` returns the degraded value on timeout instead of rejecting, so
- * a stalled `lsof`/`powershell` can never wedge a request. The losing promise
- * keeps running (it holds no resources beyond a short-lived child process that
- * the runtime reaps) — acceptable for a read-only probe.
+ * a stalled `lsof`/`powershell` can never wedge a request. The losing work does
+ * not outlive the response indefinitely: subprocess strategies pass `timeoutMs`
+ * down to `exec`, which kills the child; the procfs walk stops at
+ * `procfsDeadlineMs` (tighter than `timeoutMs`).
  */
 async function runStrategyWithTimeout(
   strategy: ListeningPort['source'],
@@ -929,8 +1034,9 @@ async function runStrategyWithTimeout(
   io: ProcfsIo,
   timeoutMs: number,
   attribution: AttributionContext | null,
+  procfsDeadlineMs: number | null,
 ): Promise<StrategyOutcome | null> {
-  const work = runStrategy(strategy, exec, io, attribution);
+  const work = runStrategy(strategy, exec, io, attribution, timeoutMs, procfsDeadlineMs);
   if (!(timeoutMs > 0)) return work;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -953,8 +1059,21 @@ async function enumerateListeningPorts(
   now: () => number,
   attribution: AttributionContext | null,
 ): Promise<ListeningPortsSnapshot> {
+  // 富化（owner 扫描 / 存活 / 归属）的停手点。用真实挂钟而不是注入的 `now`：
+  // 预算按墙钟计，`now` 是给快照缓存用的时点函数（单测会把固定住）。
+  const procfsDeadlineMs =
+    strategy === 'procfs' && timeoutMs > 0
+      ? Date.now() + Math.max(1, timeoutMs - ENRICHMENT_RESERVE_MS)
+      : null;
   try {
-    const outcome = await runStrategyWithTimeout(strategy, exec, io, timeoutMs, attribution);
+    const outcome = await runStrategyWithTimeout(
+      strategy,
+      exec,
+      io,
+      timeoutMs,
+      attribution,
+      procfsDeadlineMs,
+    );
     if (outcome === null) {
       return {
         ports: [],
@@ -992,11 +1111,21 @@ function resolveCacheTtlMs(): number {
   return parsed;
 }
 
-function resolveEnumerationTimeoutMs(): number {
+/**
+ * 各策略的默认超时预算。procfs 是内核态读取（毫秒级），3s 足够；lsof / powershell
+ * 需要冷启动子进程（Windows 上首次 `Get-NetTCPConnection` 走 CIM 查询常见 2–5s），
+ * 沿用 procfs 的 3s 会稳定顶穿并整份降级为空列表。
+ */
+export function defaultEnumerationTimeoutMs(strategy: ListeningPort['source']): number {
+  return strategy === 'procfs' ? DEFAULT_TIMEOUT_MS : DEFAULT_SUBPROCESS_TIMEOUT_MS;
+}
+
+function resolveEnumerationTimeoutMs(strategy: ListeningPort['source']): number {
+  const fallback = defaultEnumerationTimeoutMs(strategy);
   const raw = globalThis.process?.env[TIMEOUT_ENV_KEY];
-  if (raw === undefined || raw.trim().length === 0) return DEFAULT_TIMEOUT_MS;
+  if (raw === undefined || raw.trim().length === 0) return fallback;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_TIMEOUT_MS;
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
 
@@ -1068,7 +1197,7 @@ export async function listListeningPorts(
   }
   const exec = options.exec ?? defaultPortEnumerationExec;
   const io = options.procfsIo ?? defaultProcfsIo;
-  const timeoutMs = options.timeoutMs ?? resolveEnumerationTimeoutMs();
+  const timeoutMs = options.timeoutMs ?? resolveEnumerationTimeoutMs(strategy);
   const promise = enumerateListeningPorts(strategy, exec, io, timeoutMs, now, attribution)
     .then((snapshot) => {
       cachedSnapshot = { atMs: now(), userId, snapshot };

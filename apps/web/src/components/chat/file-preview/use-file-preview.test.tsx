@@ -3,7 +3,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../../stores/auth/auth.js';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { EMPTY_READ_IDENTITY, useUIStateStore } from '../../../stores/ui/uiState.js';
 import { __clearBareFilenameResolutionCacheForTest } from './resolve-bare-filename.js';
 import { invalidateFilePreviewCache } from './use-file-preview.js';
 import { useFilePreview } from './use-file-preview.js';
@@ -51,6 +51,7 @@ beforeEach(() => {
     ...useUIStateStore.getState(),
     selectedWorkspacePath: '/workspace/demo',
     fileTreeRootPath: '/workspace/demo',
+    readIdentity: EMPTY_READ_IDENTITY,
   });
 });
 
@@ -59,6 +60,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   setNavigatorOnline(true);
+  useUIStateStore.getState().clearReadIdentity();
   __clearBareFilenameResolutionCacheForTest();
 });
 
@@ -132,5 +134,59 @@ describe('useFilePreview', () => {
     if (result.current.status === 'ready') {
       expect(result.current.snippet.highlightLine).toBe(4);
     }
+  });
+
+  it('SSH 身份下读取 URL 携带 sessionId，且缓存不跨身份共享', async () => {
+    const requestedUrls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        requestedUrls.push(resolveRequestUrl(input));
+        return new Response(JSON.stringify({ content: 'line1\nline2\nline3' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+
+    act(() => {
+      useUIStateStore.getState().setReadIdentity({
+        sessionId: 'sess-ssh-1',
+        sshConnectionId: null,
+        remote: true,
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ targetPath, line }: { targetPath: string; line: number | null }) =>
+        useFilePreview(targetPath, line),
+      {
+        initialProps: { targetPath: FILE_PATH, line: 1 },
+      },
+    );
+
+    await flushAsyncWork();
+    expect(result.current.status).toBe('ready');
+    const readUrls = (): string[] =>
+      requestedUrls.filter((url) => url.includes('/workspace/file?'));
+    expect(readUrls()).toHaveLength(1);
+    expect(readUrls()[0]).toContain('sessionId=sess-ssh-1');
+
+    // 同一身份下重复 hover 命中缓存，不再发请求。
+    rerender({ targetPath: FILE_PATH, line: 3 });
+    await flushAsyncWork();
+    expect(readUrls()).toHaveLength(1);
+
+    // 切换到另一个身份：同一路径必须重新读取（本地与远端路径可能同形）。
+    act(() => {
+      useUIStateStore.getState().setReadIdentity({
+        sessionId: 'sess-ssh-2',
+        sshConnectionId: null,
+        remote: true,
+      });
+    });
+    await flushAsyncWork();
+    expect(readUrls()).toHaveLength(2);
+    expect(readUrls()[1]).toContain('sessionId=sess-ssh-2');
   });
 });

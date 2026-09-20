@@ -1,6 +1,8 @@
 import { PRESENTED_TO_CANONICAL } from '../claude-code/claude-code-tool-surface-profiles.js';
+import { stripFunctionsNamespacePrefix } from '../tools/legacy-tool-name-rewrite.js';
 
 const LEGACY_ENABLED_TOOL_NAME_MAP = {
+  execute_shell: 'bash',
   web_search: 'websearch',
   workspace_tree: 'list',
   workspace_read_file: 'read',
@@ -10,7 +12,10 @@ const LEGACY_ENABLED_TOOL_NAME_MAP = {
 } as const;
 
 export function normalizeToolNameForEnablement(toolName: string): string {
-  const canonicalName = PRESENTED_TO_CANONICAL[toolName] ?? toolName;
+  // Legacy OpenAI function-calling payloads namespace names as `functions.<name>`;
+  // mirror the sandbox rewrite here so the enablement gate accepts them too.
+  const unprefixedName = stripFunctionsNamespacePrefix(toolName);
+  const canonicalName = PRESENTED_TO_CANONICAL[unprefixedName] ?? unprefixedName;
   return (
     LEGACY_ENABLED_TOOL_NAME_MAP[canonicalName as keyof typeof LEGACY_ENABLED_TOOL_NAME_MAP] ??
     canonicalName

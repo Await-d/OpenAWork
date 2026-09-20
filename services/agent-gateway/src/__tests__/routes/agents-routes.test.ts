@@ -5,6 +5,7 @@ import type * as DbModule from '../../infra/db.js';
 import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as AgentsRoutesModule from '../../routes/agents.js';
+import type * as ModelRouterModule from '../../provider/model-router.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['JWT_SECRET'] = 'agents-routes-test-secret-1234567890';
@@ -14,6 +15,7 @@ let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let agentsRoutes: typeof AgentsRoutesModule.agentsRoutes;
+let modelRouterModule: typeof ModelRouterModule;
 
 const USER_ID = 'u-agents-routes';
 
@@ -59,6 +61,7 @@ beforeAll(async () => {
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   agentsRoutes = (await import('../../routes/agents.js')).agentsRoutes;
+  modelRouterModule = await import('../../provider/model-router.js');
 });
 
 beforeEach(() => {
@@ -241,6 +244,45 @@ describe('agents routes error contracts', () => {
       expect(response.json()).toMatchObject({
         error: '目标 Agent 不存在。',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /agents 接受等于上限的 systemPrompt，拒绝超出一字符的', async () => {
+    const app = await buildApp();
+    try {
+      const max = modelRouterModule.MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS;
+
+      const atCap = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          id: 'at-cap-agent',
+          label: 'At Cap Agent',
+          systemPrompt: 'x'.repeat(max),
+        },
+      });
+      expect(atCap.statusCode).toBe(201);
+
+      const overCap = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          id: 'over-cap-agent',
+          label: 'Over Cap Agent',
+          systemPrompt: 'x'.repeat(max + 1),
+        },
+      });
+      expect(overCap.statusCode).toBe(400);
     } finally {
       await app.close();
     }

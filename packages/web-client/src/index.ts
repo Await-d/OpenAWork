@@ -252,6 +252,7 @@ export type {
   FileTreeNode,
   WorkspaceClient,
   WorkspaceFileContent,
+  WorkspaceFileReadOptions,
   WorkspaceFileSearch,
   WorkspaceFileSearchLoadResult,
   WorkspaceRootsLoadResult,
@@ -372,12 +373,17 @@ export type {
   UploadSessionArtifactInput,
 } from './infra/artifacts.js';
 
-export { createSessionTerminalsClient } from './session/session-terminals.js';
+export { createSessionTerminalsClient, openTerminalSocket } from './session/session-terminals.js';
 export type {
   ListSessionTerminalsOptions,
   SessionTerminalView,
   SessionTerminalsClient,
   ShellProfileOption,
+  TerminalSocket,
+  TerminalSocketExit,
+  TerminalSocketHandlers,
+  TerminalSocketOutput,
+  TerminalSocketSnapshot,
 } from './session/session-terminals.js';
 
 export { createTeamRuntimeClient } from './team/team-runtime.js';

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpError } from '../gateway/http.js';
-import { createSessionTerminalsClient } from './session-terminals.js';
+import type { TerminalSocketHandlers } from './session-terminals.js';
+import { createSessionTerminalsClient, openTerminalSocket } from './session-terminals.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -227,5 +228,314 @@ describe('createSessionTerminalsClient', () => {
     await expect(
       client.create('token-1', 'session-1', { shellProfileId: '/bin/evil' }),
     ).rejects.toThrow('所选 Shell 配置在此机器上不可用，请重新选择。');
+  });
+});
+
+// ─── 终端 WebSocket ──────────────────────────────────────────────────────
+
+class MockTerminalWebSocket {
+  static instances: MockTerminalWebSocket[] = [];
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  readyState = MockTerminalWebSocket.OPEN;
+  sentPayloads: string[] = [];
+  closeCalls = 0;
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    MockTerminalWebSocket.instances.push(this);
+  }
+
+  send(payload: string) {
+    this.sentPayloads.push(payload);
+  }
+
+  close() {
+    this.closeCalls += 1;
+    this.readyState = MockTerminalWebSocket.CLOSED;
+  }
+}
+
+function installMockWebSocket(): void {
+  vi.stubGlobal('WebSocket', MockTerminalWebSocket as unknown as typeof WebSocket);
+}
+
+function createSocketHandlers() {
+  return {
+    onOpen: vi.fn(),
+    onSnapshot: vi.fn(),
+    onOutput: vi.fn(),
+    onExit: vi.fn(),
+    onError: vi.fn(),
+    onClose: vi.fn(),
+  };
+}
+
+function openSocket(
+  handlers: TerminalSocketHandlers,
+  overrides: {
+    gatewayUrl?: string;
+    accessToken?: string;
+    sessionId?: string;
+    terminalId?: string;
+    afterSeq?: number;
+  } = {},
+) {
+  return openTerminalSocket({
+    gatewayUrl: overrides.gatewayUrl ?? 'http://localhost:3000',
+    accessToken: overrides.accessToken ?? 'token-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    terminalId: overrides.terminalId ?? 'term-1',
+    ...(overrides.afterSeq !== undefined ? { afterSeq: overrides.afterSeq } : {}),
+    handlers,
+  });
+}
+
+function emitFrame(ws: MockTerminalWebSocket, frame: unknown): void {
+  ws.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent);
+}
+
+afterEach(() => {
+  MockTerminalWebSocket.instances.length = 0;
+  vi.unstubAllGlobals();
+});
+
+describe('openTerminalSocket URL 构造', () => {
+  it('拼接 ws 地址并携带 token 查询参数', () => {
+    installMockWebSocket();
+    const socket = openSocket(createSocketHandlers());
+
+    expect(socket.state).toBe('connecting');
+    expect(MockTerminalWebSocket.instances[0]?.url).toBe(
+      'ws://localhost:3000/sessions/session-1/terminals/term-1/ws?token=token-1',
+    );
+  });
+
+  it('https 升级为 wss，afterSeq 存在时追加为查询参数', () => {
+    installMockWebSocket();
+    openSocket(createSocketHandlers(), {
+      gatewayUrl: 'https://gateway.example.com',
+      accessToken: 'token-2',
+      afterSeq: 7,
+    });
+
+    expect(MockTerminalWebSocket.instances[0]?.url).toBe(
+      'wss://gateway.example.com/sessions/session-1/terminals/term-1/ws?token=token-2&afterSeq=7',
+    );
+  });
+
+  it('sessionId / terminalId 会被 URL 编码', () => {
+    installMockWebSocket();
+    openSocket(createSocketHandlers(), { sessionId: 'session/1', terminalId: 'term 1' });
+
+    expect(MockTerminalWebSocket.instances[0]?.url).toBe(
+      'ws://localhost:3000/sessions/session%2F1/terminals/term%201/ws?token=token-1',
+    );
+  });
+});
+
+describe('openTerminalSocket 帧分发', () => {
+  it('snapshot 帧按协议载荷分发（含 interactive）', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    emitFrame(ws, {
+      type: 'snapshot',
+      terminalId: 'term-1',
+      seq: 3,
+      data: 'hello',
+      outputBytesTotal: 5,
+      status: 'running',
+      interactive: true,
+    });
+
+    expect(handlers.onSnapshot).toHaveBeenCalledWith({
+      terminalId: 'term-1',
+      seq: 3,
+      data: 'hello',
+      outputBytesTotal: 5,
+      status: 'running',
+      interactive: true,
+    });
+  });
+
+  it('snapshot 缺省 interactive 时不下发该字段', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    emitFrame(ws, {
+      type: 'snapshot',
+      terminalId: 'term-1',
+      seq: 0,
+      data: '',
+      outputBytesTotal: 0,
+      status: 'idle',
+    });
+
+    const payload = handlers.onSnapshot.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('interactive');
+    expect(handlers.onSnapshot).toHaveBeenCalledWith({
+      terminalId: 'term-1',
+      seq: 0,
+      data: '',
+      outputBytesTotal: 0,
+      status: 'idle',
+    });
+  });
+
+  it('output 帧分发增量输出', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    emitFrame(ws, {
+      type: 'output',
+      terminalId: 'term-1',
+      seq: 12,
+      data: 'world',
+      outputBytesTotal: 17,
+    });
+
+    expect(handlers.onOutput).toHaveBeenCalledWith({
+      terminalId: 'term-1',
+      seq: 12,
+      data: 'world',
+      outputBytesTotal: 17,
+    });
+  });
+
+  it('exit 帧分发 status / exitCode（缺省归一化为 null）', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    emitFrame(ws, { type: 'exit', terminalId: 'term-1', status: 'exited', exitCode: 0 });
+    emitFrame(ws, { type: 'exit', terminalId: 'term-1', status: 'killed' });
+
+    expect(handlers.onExit).toHaveBeenNthCalledWith(1, { status: 'exited', exitCode: 0 });
+    expect(handlers.onExit).toHaveBeenNthCalledWith(2, { status: 'killed', exitCode: null });
+  });
+
+  it('error 帧把 code / message 装进 Error', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    emitFrame(ws, { type: 'error', code: 'terminal_not_found', message: '终端不存在。' });
+
+    const error = handlers.onError.mock.calls[0]?.[0] as (Error & { code?: string }) | undefined;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe('终端不存在。');
+    expect(error?.code).toBe('terminal_not_found');
+  });
+
+  it('pong / 未知帧 / 畸形 JSON / 缺字段帧都被静默忽略', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    expect(() => {
+      emitFrame(ws, { type: 'pong' });
+      emitFrame(ws, { type: 'future-frame', payload: 1 });
+      ws.onmessage?.({ data: '{broken-json' } as MessageEvent);
+      emitFrame(ws, { type: 'snapshot', terminalId: 'term-1' });
+      emitFrame(ws, { type: 'output', terminalId: 'term-1', seq: 'nope' });
+    }).not.toThrow();
+
+    expect(handlers.onSnapshot).not.toHaveBeenCalled();
+    expect(handlers.onOutput).not.toHaveBeenCalled();
+    expect(handlers.onExit).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('openTerminalSocket 发送与关闭语义', () => {
+  it('open 后 sendInput / sendResize 序列化为协议帧', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    const socket = openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    ws.onopen?.();
+    expect(socket.state).toBe('open');
+    expect(handlers.onOpen).toHaveBeenCalledTimes(1);
+
+    socket.sendInput('ls\n');
+    socket.sendResize(120, 40);
+
+    expect(ws.sentPayloads).toHaveLength(2);
+    expect(JSON.parse(ws.sentPayloads[0] ?? '{}')).toEqual({ type: 'input', data: 'ls\n' });
+    expect(JSON.parse(ws.sentPayloads[1] ?? '{}')).toEqual({
+      type: 'resize',
+      cols: 120,
+      rows: 40,
+    });
+  });
+
+  it('未 open 时 sendInput / sendResize 是 no-op 且不抛错', () => {
+    installMockWebSocket();
+    const socket = openSocket(createSocketHandlers());
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    expect(socket.state).toBe('connecting');
+    expect(() => {
+      socket.sendInput('ls\n');
+      socket.sendResize(80, 24);
+    }).not.toThrow();
+    expect(ws.sentPayloads).toHaveLength(0);
+  });
+
+  it('close() 幂等，关闭后发送是 no-op', () => {
+    installMockWebSocket();
+    const socket = openSocket(createSocketHandlers());
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    ws.onopen?.();
+    socket.close();
+    socket.close();
+
+    expect(socket.state).toBe('closed');
+    expect(ws.closeCalls).toBe(1);
+    expect(() => socket.sendInput('ls\n')).not.toThrow();
+    expect(ws.sentPayloads).toHaveLength(0);
+  });
+
+  it('服务端关闭时转发 {code, reason}', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    const socket = openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    ws.onopen?.();
+    ws.onclose?.({ code: 1006, reason: 'abnormal closure' } as CloseEvent);
+
+    expect(socket.state).toBe('closed');
+    expect(handlers.onClose).toHaveBeenCalledWith({ code: 1006, reason: 'abnormal closure' });
+  });
+
+  it('传输层 onerror 上报 Error', () => {
+    installMockWebSocket();
+    const handlers = createSocketHandlers();
+    openSocket(handlers);
+    const ws = MockTerminalWebSocket.instances[0]!;
+
+    expect(() => ws.onerror?.()).not.toThrow();
+    expect(handlers.onError).toHaveBeenCalledTimes(1);
+    expect(handlers.onError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
   });
 });

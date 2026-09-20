@@ -19,7 +19,8 @@ import { z } from 'zod';
 import { spawnSessionTerminal } from '../session/spawn-session-terminal.js';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { RunEvent } from '@openAwork/shared';
+import type { WebSocket } from '@fastify/websocket';
+import type { RunEvent, SessionTerminalStatus } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
@@ -38,6 +39,8 @@ import {
 } from '../session/shell-profiles.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { createSseClientChannel } from './sse-client-channel.js';
+import { installWsHeartbeat } from './ws-heartbeat.js';
+import type { TerminalOutputChunk } from '../session/session-terminal-registry.js';
 import {
   deleteTerminalRecord,
   getTerminal,
@@ -45,6 +48,7 @@ import {
   killTerminal,
   listSessionTerminals,
   renameTerminal,
+  subscribeTerminalOutputImmediate,
 } from '../session/session-terminal-registry.js';
 
 interface SessionOwnerRow {
@@ -112,6 +116,20 @@ function resolvePublicBackend(record: { metadata: Record<string, unknown> }): Te
 }
 
 /**
+ * Resolve whether the terminal has a real interactive backend (PTY).
+ *
+ * Newer rows record `metadata.interactive` at spawn time (the per-process
+ * backend, so SSH channels stay `true` even on a pipe-degraded gateway).
+ * Rows without it fall back to the same rule the capability probe uses:
+ * `pty ⇒ interactive`, `pipe (or probe) ⇒ not interactive`.
+ */
+function resolvePublicInteractive(record: { metadata: Record<string, unknown> }): boolean {
+  const fromMetadata = record.metadata['interactive'];
+  if (typeof fromMetadata === 'boolean') return fromMetadata;
+  return resolvePublicBackend(record) === 'pty';
+}
+
+/**
  * Project the persisted `shellProfileId` into a path-free `{ id, label }`.
  * The label is derived purely from the opaque id, so no `metadata` (which may
  * hold the server-only shell path) is ever exposed.
@@ -128,7 +146,10 @@ function resolvePublicShell(record: {
 function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
   // 加法扩展（D7）：前端需要 `supportsResize` 才能知道 pipe 后端下 resize
   // 是 no-op，从而跳过无意义请求并提示「当前运行时不支持调整尺寸」。
+  // `interactive` 同步暴露后端是否具备真实 PTY，前端据此决定要不要伪装
+  // 交互式提示符（pipe 后端只能执行命令，不提供行编辑 / TUI）。
   const backend = resolvePublicBackend(record);
+  const interactive = resolvePublicInteractive(record);
   const shell = resolvePublicShell(record);
   return {
     terminalId: record.terminalId,
@@ -151,9 +172,104 @@ function toPublicTerminal(record: ReturnType<typeof getTerminal> & object) {
     ...(record.outputPath ? { outputPath: record.outputPath } : {}),
     backend,
     supportsResize: backend === 'pty',
+    interactive,
     ...(shell ? { shell } : {}),
   };
 }
+
+/** WS close code for auth / ownership failures on the terminal transport. */
+const WS_TERMINAL_UNAUTHORIZED_CLOSE_CODE = 4401;
+
+/** Parse the optional client cursor from the query string; 0 when absent/invalid. */
+function parseAfterSeq(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/** Best-effort text-frame send; never throws on a dead / closing socket. */
+function sendWsFrame(socket: WebSocket, payload: unknown): void {
+  if (socket.readyState !== socket.OPEN) return;
+  try {
+    socket.send(JSON.stringify(payload));
+  } catch {
+    // Socket died between the readyState check and send. The 'close' / 'error'
+    // handler runs the teardown.
+  }
+}
+
+function closeWsSocket(socket: WebSocket, code: number, reason?: string): void {
+  try {
+    socket.close(code, reason);
+  } catch {
+    // Already closing / destroyed — nothing to do.
+  }
+}
+
+interface TerminalWsClientFrame {
+  type?: unknown;
+  data?: unknown;
+  cols?: unknown;
+  rows?: unknown;
+}
+
+/**
+ * Client→server frames. Malformed / unknown frames are ignored (the frozen
+ * protocol is strict). `input` reuses the HTTP stdin-write path and `resize`
+ * the resize path, so both transports share one implementation.
+ */
+function handleTerminalWsClientFrame(raw: string, socket: WebSocket, terminalId: string): void {
+  const text = raw.trim();
+  if (text.length === 0) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    sendWsFrame(socket, { type: 'error', code: 'invalid_frame', message: '无法解析客户端帧。' });
+    return;
+  }
+  if (parsed === null || typeof parsed !== 'object') return;
+  const frame = parsed as TerminalWsClientFrame;
+
+  if (frame.type === 'input') {
+    if (typeof frame.data !== 'string') return;
+    const result = writeStdinToTerminal(terminalId, frame.data);
+    if (!result.ok) {
+      sendWsFrame(socket, {
+        type: 'error',
+        code: result.error ?? 'stdin_failed',
+        message:
+          result.error === 'terminal_not_persistent'
+            ? SESSION_TERMINAL_ERROR_MESSAGES.terminal_not_persistent
+            : '写入终端失败。',
+      });
+    }
+    return;
+  }
+
+  if (frame.type === 'resize') {
+    const cols =
+      typeof frame.cols === 'number' && Number.isFinite(frame.cols)
+        ? Math.max(1, Math.floor(frame.cols))
+        : 80;
+    const rows =
+      typeof frame.rows === 'number' && Number.isFinite(frame.rows)
+        ? Math.max(1, Math.floor(frame.rows))
+        : 24;
+    resizeTerminal({ terminalId, cols, rows });
+    return;
+  }
+
+  if (frame.type === 'ping') {
+    sendWsFrame(socket, { type: 'pong' });
+    return;
+  }
+  // Unknown frame types are ignored.
+}
+
+type TerminalWsBufferedFrame =
+  | { kind: 'output'; chunk: TerminalOutputChunk }
+  | { kind: 'exit'; status: SessionTerminalStatus; exitCode?: number };
 
 export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -595,6 +711,165 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
 
         request.raw.on('close', onClose);
       });
+    },
+  );
+
+  /**
+   * GET /sessions/:sessionId/terminals/:terminalId/ws
+   *
+   * ADDITIVE per-terminal WebSocket transport: input and output share one
+   * connection. Output is pushed from the registry's synchronous immediate
+   * channel (no 100ms output throttle / ~50ms run-event batching), so keystroke
+   * echo is not batched. Auth mirrors the SSE route via `?token=` (a WS client
+   * cannot set an Authorization header); any auth / ownership failure closes
+   * with 4401 before subscribing. The SSE route and POST stdin/resize remain
+   * the untouched fallback.
+   */
+  app.get(
+    '/sessions/:sessionId/terminals/:terminalId/ws',
+    { websocket: true },
+    async (socket: WebSocket, request: FastifyRequest) => {
+      const rawQuery = (request.query as Record<string, string | undefined>) ?? {};
+      const authHeader = request.headers['authorization'];
+      const headerToken =
+        typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+          ? authHeader.slice('Bearer '.length).trim()
+          : undefined;
+      const authToken = headerToken || rawQuery['token'];
+
+      let user: JwtPayload;
+      try {
+        user = request.server.jwt.verify<JwtPayload>(authToken ?? '');
+      } catch {
+        sendWsFrame(socket, {
+          type: 'error',
+          code: 'unauthorized',
+          message: SESSION_TERMINAL_ERROR_MESSAGES.unauthorized,
+        });
+        closeWsSocket(socket, WS_TERMINAL_UNAUTHORIZED_CLOSE_CODE, 'unauthorized');
+        return;
+      }
+
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        sendWsFrame(socket, {
+          type: 'error',
+          code: 'session_not_found',
+          message: SESSION_TERMINAL_ERROR_MESSAGES.session_not_found,
+        });
+        closeWsSocket(socket, WS_TERMINAL_UNAUTHORIZED_CLOSE_CODE, 'session_not_found');
+        return;
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        sendWsFrame(socket, {
+          type: 'error',
+          code: 'terminal_not_found',
+          message: SESSION_TERMINAL_ERROR_MESSAGES.terminal_not_found,
+        });
+        closeWsSocket(socket, WS_TERMINAL_UNAUTHORIZED_CLOSE_CODE, 'terminal_not_found');
+        return;
+      }
+
+      const stopHeartbeat = installWsHeartbeat(socket);
+      let closed = false;
+      let snapshotSent = false;
+      // Highest `seq` already written to the socket; bounds the snapshot flush.
+      let lastSentSeq = 0;
+      const buffered: TerminalWsBufferedFrame[] = [];
+
+      const sendOutput = (chunk: TerminalOutputChunk): void => {
+        if (chunk.seq <= lastSentSeq) return; // already covered by the snapshot
+        lastSentSeq = chunk.seq;
+        sendWsFrame(socket, {
+          type: 'output',
+          terminalId,
+          seq: chunk.seq,
+          data: chunk.data,
+          outputBytesTotal: chunk.outputBytesTotal,
+        });
+      };
+
+      const sendExit = (status: SessionTerminalStatus, exitCode: number | undefined): void => {
+        sendWsFrame(socket, {
+          type: 'exit',
+          terminalId,
+          status,
+          ...(exitCode !== undefined ? { exitCode } : {}),
+        });
+      };
+
+      // Subscribe to the immediate channel BEFORE reading the snapshot so no
+      // delta produced in the gap is lost. Events arriving first are buffered
+      // in arrival order and flushed after the snapshot; chunks with
+      // `seq <= snapshot.seq` are dropped as duplicates.
+      const unsubscribeOutput = subscribeTerminalOutputImmediate(terminalId, (chunk) => {
+        if (!snapshotSent) {
+          buffered.push({ kind: 'output', chunk });
+          return;
+        }
+        sendOutput(chunk);
+      });
+
+      // Exit arrives on the run-event channel (the immediate channel carries
+      // output only), mirroring the SSE route.
+      const unsubscribeExit = subscribeSessionRunEvents(sessionId, (event) => {
+        if (event.type !== 'terminal_exited' || event.terminalId !== terminalId) return;
+        if (!snapshotSent) {
+          buffered.push({
+            kind: 'exit',
+            status: event.status,
+            ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+          });
+          return;
+        }
+        sendExit(event.status, event.exitCode);
+        closeWsSocket(socket, 1000, 'terminal exited');
+      });
+
+      const cleanup = (): void => {
+        if (closed) return;
+        closed = true;
+        stopHeartbeat();
+        unsubscribeOutput();
+        unsubscribeExit();
+      };
+
+      socket.on('message', (data: Buffer) => {
+        handleTerminalWsClientFrame(data.toString(), socket, terminalId);
+      });
+      socket.on('close', () => cleanup());
+      socket.on('error', () => cleanup());
+
+      const snapshot = getTerminalOutputSnapshot(terminalId);
+      // The client may report a cursor it has already rendered (`afterSeq`);
+      // combined with the snapshot cursor, anything at or below this watermark
+      // is a duplicate. Under normal reconnect behavior `afterSeq <= snapshot.seq`,
+      // so this reduces to the snapshot's own `seq`.
+      lastSentSeq = Math.max(snapshot?.seq ?? 0, parseAfterSeq(rawQuery['afterSeq']));
+      sendWsFrame(socket, {
+        type: 'snapshot',
+        terminalId: record.terminalId,
+        seq: snapshot?.seq ?? 0,
+        data: snapshot?.data ?? record.outputTail,
+        outputBytesTotal: snapshot?.outputBytesTotal ?? record.outputBytesTotal,
+        status: record.status,
+        interactive: resolvePublicInteractive(record),
+      });
+      snapshotSent = true;
+
+      for (const frame of buffered) {
+        if (frame.kind === 'output') {
+          sendOutput(frame.chunk);
+          continue;
+        }
+        sendExit(frame.status, frame.exitCode);
+        closeWsSocket(socket, 1000, 'terminal exited');
+      }
+      buffered.length = 0;
     },
   );
 }

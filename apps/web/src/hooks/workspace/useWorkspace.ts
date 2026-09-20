@@ -15,9 +15,10 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
 }
 
-interface SessionWorkingDirectoryState {
+interface SessionWorkspaceState {
   path: string | null;
   sessionId: string | null;
+  sshConnectionId: string | null;
 }
 
 function parseSessionWorkingDirectory(
@@ -40,6 +41,34 @@ function parseSessionWorkingDirectory(
 
   return typeof session.metadata?.workingDirectory === 'string'
     ? session.metadata.workingDirectory.trim() || null
+    : null;
+}
+
+/**
+ * 解析会话元数据里的 SSH 连接 id（网关绑定 SSH 工作区时写入的键名是
+ * `sshConnectionId`）。与 workingDirectory 同源同口径：metadata_json 优先，
+ * 缺失 / 类型不符 / 空串一律返回 null（本地会话）。
+ */
+function parseSessionSshConnectionId(
+  session: Session & {
+    metadata?: { sshConnectionId?: string | null };
+  },
+): string | null {
+  if (typeof session.metadata_json === 'string') {
+    try {
+      const parsed = JSON.parse(session.metadata_json) as {
+        sshConnectionId?: string | null;
+      };
+      return typeof parsed.sshConnectionId === 'string'
+        ? parsed.sshConnectionId.trim() || null
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof session.metadata?.sshConnectionId === 'string'
+    ? session.metadata.sshConnectionId.trim() || null
     : null;
 }
 
@@ -80,13 +109,14 @@ type SessionWorkspaceLookupResult =
   | {
       kind: 'resolved';
       path: string | null;
+      sshConnectionId: string | null;
     }
   | {
       errorMessage: string;
       kind: 'unavailable';
     };
 
-async function resolveSessionWorkingDirectoryWithParentFallback(input: {
+async function resolveSessionWorkspaceWithParentFallback(input: {
   sessionId: string;
   sessionsClient: ReturnType<typeof createSessionsClient>;
   signal: AbortSignal;
@@ -95,6 +125,8 @@ async function resolveSessionWorkingDirectoryWithParentFallback(input: {
   const seenSessionIds = new Set<string>();
   let currentSessionId: string | null = input.sessionId;
   let isRootSession = true;
+  let resolvedPath: string | null = null;
+  let resolvedSshConnectionId: string | null = null;
 
   while (currentSessionId && !seenSessionIds.has(currentSessionId)) {
     seenSessionIds.add(currentSessionId);
@@ -109,25 +141,30 @@ async function resolveSessionWorkingDirectoryWithParentFallback(input: {
           errorMessage: result.errorMessage ?? '加载会话失败',
         };
       }
-      return { kind: 'resolved', path: null };
+      return { kind: 'resolved', path: resolvedPath, sshConnectionId: resolvedSshConnectionId };
     }
 
-    const workingDirectory = parseSessionWorkingDirectory(result.session);
-    if (workingDirectory) {
-      return { kind: 'resolved', path: workingDirectory };
+    // 两个字段各自沿父链继承：workingDirectory 与 sshConnectionId 可能落在
+    // 不同层级（例如子会话只带 parentSessionId），任一未解析出就继续向上找。
+    resolvedPath = resolvedPath ?? parseSessionWorkingDirectory(result.session);
+    resolvedSshConnectionId =
+      resolvedSshConnectionId ?? parseSessionSshConnectionId(result.session);
+    if (resolvedPath && resolvedSshConnectionId) {
+      break;
     }
 
     currentSessionId = parseSessionParentSessionId(result.session);
     isRootSession = false;
   }
 
-  return { kind: 'resolved', path: null };
+  return { kind: 'resolved', path: resolvedPath, sshConnectionId: resolvedSshConnectionId };
 }
 
 export function useWorkspace(sessionId: string | null) {
-  const [workingDirectoryState, setWorkingDirectoryState] = useState<SessionWorkingDirectoryState>({
+  const [workspaceState, setWorkspaceState] = useState<SessionWorkspaceState>({
     path: null,
     sessionId: null,
+    sshConnectionId: null,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,10 +181,11 @@ export function useWorkspace(sessionId: string | null) {
 
   const hasActiveSessionWorkspace =
     sessionId !== null && activeSessionWorkspace?.sessionId === sessionId;
-  const retainedWorkingDirectory =
-    sessionId !== null && workingDirectoryState.sessionId === sessionId
-      ? workingDirectoryState.path
-      : null;
+  const retainedWorkspaceState = sessionId !== null && workspaceState.sessionId === sessionId;
+  const retainedWorkingDirectory = retainedWorkspaceState ? workspaceState.path : null;
+  // SSH 连接 id 没有 activeSessionWorkspace 那层 store 缓存，只能取本 hook
+  // 为同一会话解析出的值；切到别的会话时立刻回落 null，避免身份串味。
+  const retainedSshConnectionId = retainedWorkspaceState ? workspaceState.sshConnectionId : null;
 
   const resolvedWorkingDirectory = hasActiveSessionWorkspace
     ? activeSessionWorkspace.path
@@ -156,9 +194,10 @@ export function useWorkspace(sessionId: string | null) {
   useEffect(() => {
     if (!sessionId) {
       requestIdRef.current += 1;
-      setWorkingDirectoryState({
+      setWorkspaceState({
         path: null,
         sessionId: null,
+        sshConnectionId: null,
       });
       setLoading(false);
       setError(null);
@@ -174,7 +213,7 @@ export function useWorkspace(sessionId: string | null) {
         : 0;
 
     setLoading(true);
-    void resolveSessionWorkingDirectoryWithParentFallback({
+    void resolveSessionWorkspaceWithParentFallback({
       sessionId,
       sessionsClient,
       signal: controller.signal,
@@ -198,9 +237,10 @@ export function useWorkspace(sessionId: string | null) {
           return;
         }
 
-        setWorkingDirectoryState({
+        setWorkspaceState({
           path: result.path,
           sessionId,
+          sshConnectionId: result.sshConnectionId,
         });
         setActiveSessionWorkspace(sessionId, result.path);
         setError(null);
@@ -232,10 +272,12 @@ export function useWorkspace(sessionId: string | null) {
       setLoading(true);
       try {
         await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, normalizedPath);
-        setWorkingDirectoryState({
+        setWorkspaceState((previous) => ({
           path: normalizedPath || null,
           sessionId,
-        });
+          // 改工作区路径不改会话的 SSH 绑定：同一会话保留已解析的远端连接 id。
+          sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
+        }));
         setActiveSessionWorkspace(sessionId, normalizedPath || null);
         setError(null);
       } catch (err: unknown) {
@@ -254,10 +296,11 @@ export function useWorkspace(sessionId: string | null) {
     setLoading(true);
     try {
       await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, null);
-      setWorkingDirectoryState({
+      setWorkspaceState((previous) => ({
         path: null,
         sessionId,
-      });
+        sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
+      }));
       setActiveSessionWorkspace(sessionId, null);
       setError(null);
     } catch (err: unknown) {
@@ -310,7 +353,14 @@ export function useWorkspace(sessionId: string | null) {
   const searchFileIndex = useCallback(
     async (
       path: string,
-      options: { query: string; limit?: number; signal?: AbortSignal },
+      options: {
+        query: string;
+        limit?: number;
+        signal?: AbortSignal;
+        /** SSH 会话定位：已有会话传当前会话 id，草稿态传所选 SSH 连接 id。 */
+        sessionId?: string | null;
+        sshConnectionId?: string | null;
+      },
     ): Promise<{ files: string[]; directories: string[] }> => {
       const result = await workspaceClient.searchFileIndexResult(accessToken ?? '', path, options);
       if (!result.ok) {
@@ -332,6 +382,12 @@ export function useWorkspace(sessionId: string | null) {
     async (path: string): Promise<{ content: string; truncated: boolean }> => {
       const result = await workspaceClient.readFileResult(accessToken ?? '', path, {
         workspaceRoot: resolvedWorkingDirectory ?? undefined,
+        // 身份映射：已有会话传 sessionId，草稿态退而传 sshConnectionId；两者
+        // 都无则为纯本地读取。未绑定 SSH 的会话仍由网关回退本地逻辑。
+        ...(sessionId ? { sessionId } : {}),
+        ...(!sessionId && retainedSshConnectionId
+          ? { sshConnectionId: retainedSshConnectionId }
+          : {}),
       });
       if (!result.ok || !result.file) {
         throw new Error(result.errorMessage ?? '读取文件失败。');
@@ -341,7 +397,7 @@ export function useWorkspace(sessionId: string | null) {
         truncated: result.file.truncated ?? false,
       };
     },
-    [accessToken, resolvedWorkingDirectory, workspaceClient],
+    [accessToken, resolvedWorkingDirectory, retainedSshConnectionId, sessionId, workspaceClient],
   );
 
   const searchFiles = useCallback(
@@ -385,6 +441,11 @@ export function useWorkspace(sessionId: string | null) {
 
   return {
     workingDirectory: resolvedWorkingDirectory,
+    /**
+     * 当前会话的 SSH 连接 id（本地会话为 null）。读取身份消费方据此判断
+     * 会话是否绑定远端工作区；无活动的会话工作区时为 null。
+     */
+    sshConnectionId: retainedSshConnectionId,
     loading,
     error,
     setWorkspace,

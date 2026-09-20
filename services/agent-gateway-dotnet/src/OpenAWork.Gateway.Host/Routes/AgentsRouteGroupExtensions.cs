@@ -10,6 +10,8 @@ public static class AgentsRouteGroupExtensions
     private const int MaxAliasesPerAgent = 32;
     private const int MaxFallbackModelsPerAgent = 32;
     private const int MaxOverlaysPerRole = 4;
+    // Must mirror the TS /agents systemPrompt cap (MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).
+    private const int MaxSystemPromptLength = 32768;
     private static readonly HashSet<string> ValidCoreRoles = ["general", "researcher", "planner", "executor", "reviewer"];
     private static readonly HashSet<string> ValidPresets = ["default", "explore", "analyst", "librarian", "architect", "debugger", "critic", "code-review", "test", "verifier"];
     private static readonly HashSet<string> ValidOverlays = ["writer", "multimodal"];
@@ -141,7 +143,7 @@ public static class AgentsRouteGroupExtensions
         var model = ReadOptionalString(body, "model", 200, issues, minimumLength: 1, trim: true);
         var variant = ReadOptionalString(body, "variant", 80, issues, minimumLength: 1, trim: true);
         var fallbackModels = ReadOptionalStringArray(body, "fallbackModels", 200, MaxFallbackModelsPerAgent, issues) ?? [];
-        var systemPrompt = ReadRequiredString(body, "systemPrompt", 4000, issues, minimumLength: 1, trim: true);
+        var systemPrompt = ReadRequiredString(body, "systemPrompt", MaxSystemPromptLength, issues, minimumLength: 1, trim: true);
         var note = ReadOptionalString(body, "note", 400, issues);
         var enabled = ReadOptionalBoolean(body, "enabled", issues);
 
@@ -185,7 +187,7 @@ public static class AgentsRouteGroupExtensions
         seenKnownField |= hasVariant;
         var fallbackModels = ReadOptionalStringArray(body, "fallbackModels", 200, MaxFallbackModelsPerAgent, issues, out var hasFallbackModels);
         seenKnownField |= hasFallbackModels;
-        var systemPrompt = ReadOptionalString(body, "systemPrompt", 4000, issues, minimumLength: 0, trim: true, out var hasSystemPrompt);
+        var systemPrompt = ReadOptionalString(body, "systemPrompt", MaxSystemPromptLength, issues, minimumLength: 0, trim: true, out var hasSystemPrompt);
         seenKnownField |= hasSystemPrompt;
         var note = ReadOptionalString(body, "note", 400, issues, out var hasNote);
         seenKnownField |= hasNote;

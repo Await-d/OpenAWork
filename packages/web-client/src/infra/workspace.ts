@@ -37,6 +37,20 @@ export interface WorkspaceFileContent {
   truncated?: boolean;
 }
 
+/**
+ * `/workspace/file` 与 `/workspace/file/binary` 的读取选项。
+ *
+ * `sessionId` / `sshConnectionId` 用于 SSH 工作区读取：已有会话传 `sessionId`，
+ * 由网关沿父会话链解析远端连接；草稿态（尚无会话 id）传 `sshConnectionId`。
+ * 二者均为 nullish 时不追加任何额外查询参数，请求与本地工作区逐字节一致。
+ */
+export interface WorkspaceFileReadOptions {
+  signal?: AbortSignal;
+  workspaceRoot?: string;
+  sessionId?: string;
+  sshConnectionId?: string;
+}
+
 export interface WorkspaceValidateResult {
   valid: boolean;
   error?: string;
@@ -138,11 +152,21 @@ export interface WorkspaceClient {
    * GET `/workspace/files/search?path=&q=&limit=`，在网关侧索引上检索工作区文件。
    * 这是唯一的索引端点（返回 `{ root, query, files, directories, truncated, count }`），
    * `@` 文件提及与全量列表都走它，不再有单独的清单下载接口。
+   *
+   * `sessionId` / `sshConnectionId` 可选：SSH 绑定会话传 `sessionId`，由网关沿
+   * 父会话链解析远端连接；草稿会话（尚无会话 id）传 `sshConnectionId`。二者均缺省
+   * 时请求与本地工作区完全一致。
    */
   searchFileIndexResult(
     token: string,
     path: string,
-    options: { query: string; limit?: number; signal?: AbortSignal },
+    options: {
+      query: string;
+      limit?: number;
+      signal?: AbortSignal;
+      sessionId?: string | null;
+      sshConnectionId?: string | null;
+    },
   ): Promise<WorkspaceFileSearchLoadResult>;
   /**
    * GET `/workspace/files/index-version?path=`，读取工作区文件索引的进程内版本号。
@@ -172,27 +196,30 @@ export interface WorkspaceClient {
    * 当 `workspaceRoot` 提供时,后端会校验目标路径必须在该 root 之下,
    * 阻止跨工作区读取。前端常规调用应当总是带上当前会话的 workspace
    * root,默认情况下后端只会校验全局 WORKSPACE_ROOTS 白名单 — 不够严格。
+   *
+   * SSH 会话另可传 `sessionId`（已有会话）或 `sshConnectionId`（草稿态），
+   * 网关据此把 POSIX 远端路径解析到对应连接。
    */
   readFile(
     token: string,
     path: string,
-    options?: { signal?: AbortSignal; workspaceRoot?: string },
+    options?: WorkspaceFileReadOptions,
   ): Promise<WorkspaceFileContent>;
   readFileResult(
     token: string,
     path: string,
-    options?: { signal?: AbortSignal; workspaceRoot?: string },
+    options?: WorkspaceFileReadOptions,
   ): Promise<WorkspaceFileLoadResult>;
   /**
    * GET `/workspace/file/binary?path=&workspaceRoot=`,读取文件原始字节。
    *
    * 用于 docx / xlsx / pdf 等二进制预览。返回 ArrayBuffer + 推断
-   * 的 Content-Type。复用 readFile 同款的 workspaceRoot 校验。
+   * 的 Content-Type。复用 readFile 同款的 workspaceRoot / SSH 身份校验。
    */
   readFileBinary(
     token: string,
     path: string,
-    options?: { signal?: AbortSignal; workspaceRoot?: string },
+    options?: WorkspaceFileReadOptions,
   ): Promise<{ buffer: ArrayBuffer; contentType: string }>;
   /** PUT `/workspace/file`，按 `path` 覆盖写入。 */
   writeFile(token: string, path: string, content: string): Promise<void>;
@@ -514,9 +541,20 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
   const searchFileIndexResult = async (
     token: string,
     path: string,
-    options: { query: string; limit?: number; signal?: AbortSignal },
+    options: {
+      query: string;
+      limit?: number;
+      signal?: AbortSignal;
+      sessionId?: string | null;
+      sshConnectionId?: string | null;
+    },
   ): Promise<WorkspaceFileSearchLoadResult> => {
-    const params = buildPathParams(path, { q: options.query, limit: options.limit });
+    const params = buildPathParams(path, {
+      q: options.query,
+      limit: options.limit,
+      sessionId: options.sessionId ?? undefined,
+      sshConnectionId: options.sshConnectionId ?? undefined,
+    });
     try {
       const response = await fetchWithTimeout(
         withQuery(`${baseUrl}/workspace/files/search`, params),
@@ -636,12 +674,13 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
   const readFileResult = async (
     token: string,
     path: string,
-    options?: { signal?: AbortSignal; workspaceRoot?: string },
+    options?: WorkspaceFileReadOptions,
   ): Promise<WorkspaceFileLoadResult> => {
-    const params = buildPathParams(path);
-    if (options?.workspaceRoot) {
-      params.set('workspaceRoot', options.workspaceRoot);
-    }
+    const params = buildPathParams(path, {
+      workspaceRoot: options?.workspaceRoot ?? undefined,
+      sessionId: options?.sessionId ?? undefined,
+      sshConnectionId: options?.sshConnectionId ?? undefined,
+    });
     try {
       const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/file`, params), {
         headers: authHeader(token),
@@ -708,10 +747,11 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     readFileResult,
 
     async readFileBinary(token, path, options) {
-      const params = buildPathParams(path);
-      if (options?.workspaceRoot) {
-        params.set('workspaceRoot', options.workspaceRoot);
-      }
+      const params = buildPathParams(path, {
+        workspaceRoot: options?.workspaceRoot ?? undefined,
+        sessionId: options?.sessionId ?? undefined,
+        sshConnectionId: options?.sshConnectionId ?? undefined,
+      });
       try {
         const response = await fetchWithTimeout(
           withQuery(`${baseUrl}/workspace/file/binary`, params),

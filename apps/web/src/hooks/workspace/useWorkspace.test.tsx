@@ -166,7 +166,10 @@ describe('useWorkspace', () => {
           JSON.stringify({
             session: {
               id: 'session-parent',
-              metadata_json: JSON.stringify({ workingDirectory: '/workspace/inherited' }),
+              metadata_json: JSON.stringify({
+                workingDirectory: '/workspace/inherited',
+                sshConnectionId: 'conn-inherited',
+              }),
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -182,10 +185,67 @@ describe('useWorkspace', () => {
       expect(result.current.workingDirectory).toBe('/workspace/inherited');
     });
 
+    expect(result.current.sshConnectionId).toBe('conn-inherited');
     expect(useUIStateStore.getState().activeSessionWorkspace).toMatchObject({
       sessionId: 'session-child',
       path: '/workspace/inherited',
     });
+  });
+
+  it('从 session metadata 解析 SSH 连接 id，本地会话回落 null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/sessions/session-remote')) {
+          return new Response(
+            JSON.stringify({
+              session: {
+                id: 'session-remote',
+                metadata_json: JSON.stringify({
+                  workingDirectory: '/home/await/projects/demo',
+                  sshConnectionId: 'conn-1',
+                }),
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.includes('/sessions/session-local')) {
+          return new Response(
+            JSON.stringify({
+              session: {
+                id: 'session-local',
+                metadata_json: JSON.stringify({ workingDirectory: '/workspace/demo' }),
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ currentSessionId }: { currentSessionId: string | null }) => useWorkspace(currentSessionId),
+      {
+        initialProps: {
+          currentSessionId: 'session-remote',
+        },
+      },
+    );
+
+    await waitFor(() => {
+      expect(result.current.sshConnectionId).toBe('conn-1');
+    });
+    expect(result.current.workingDirectory).toBe('/home/await/projects/demo');
+
+    rerender({ currentSessionId: 'session-local' });
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/workspace/demo');
+    });
+    expect(result.current.sshConnectionId).toBeNull();
   });
 
   it('fetchFile 会读取结构化结果并带上当前 workspaceRoot', async () => {
@@ -240,6 +300,50 @@ describe('useWorkspace', () => {
         }),
       }),
     );
+  });
+
+  it('fetchFile 会转发当前会话的 SSH 身份（远端会话带 sessionId）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-remote')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: 'session-remote',
+              metadata_json: JSON.stringify({
+                workingDirectory: '/home/await/projects/demo',
+                sshConnectionId: 'conn-1',
+              }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/workspace/file')) {
+        return new Response(JSON.stringify({ content: 'remote', truncated: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-remote'));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/home/await/projects/demo');
+    });
+
+    await act(async () => {
+      await result.current.fetchFile('src/app.ts');
+    });
+
+    const fileCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/workspace/file'),
+    );
+    expect(String(fileCall?.[0])).toContain('sessionId=session-remote');
+    expect(String(fileCall?.[0])).toContain('workspaceRoot=%2Fhome%2Fawait%2Fprojects%2Fdemo');
   });
 
   it('fetchWorkspaceRoots 在无可用根目录时抛中文错误', async () => {

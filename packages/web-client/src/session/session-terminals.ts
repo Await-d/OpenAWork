@@ -333,3 +333,237 @@ export function createSessionTerminalsClient(baseUrl: string): SessionTerminalsC
     },
   };
 }
+
+// ─── 终端 WebSocket ──────────────────────────────────────────────────────
+
+/**
+ * S→C `snapshot` 帧：连接建立时下发的滚动缓冲快照。`seq` 是快照末字节的
+ * 游标，调用方据此丢弃重连后重复的增量输出；`interactive` 表示后端是否
+ * 具备真实 PTY（缺省视为未知，前端不应伪装交互式提示符）。
+ */
+export interface TerminalSocketSnapshot {
+  terminalId: string;
+  seq: number;
+  data: string;
+  outputBytesTotal: number;
+  status: string;
+  interactive?: boolean;
+}
+
+/** S→C `output` 帧：增量输出（**非**累计）。 */
+export interface TerminalSocketOutput {
+  terminalId: string;
+  seq: number;
+  data: string;
+  outputBytesTotal: number;
+}
+
+/** S→C `exit` 帧：终端进程退出。 */
+export interface TerminalSocketExit {
+  status: string;
+  exitCode: number | null;
+}
+
+/**
+ * 终端 WebSocket 回调。`onSnapshot` / `onOutput` 必填——缺了调用方就收不到
+ * 任何输出；其余是可选的生命周期钩子。
+ */
+export interface TerminalSocketHandlers {
+  onOpen?: () => void;
+  onSnapshot: (payload: TerminalSocketSnapshot) => void;
+  onOutput: (payload: TerminalSocketOutput) => void;
+  onExit?: (payload: TerminalSocketExit) => void;
+  onError?: (error: Error) => void;
+  onClose?: (info: { code: number; reason: string }) => void;
+}
+
+/**
+ * 终端 WebSocket 句柄。只负责单次连接：重连 / 退避由调用方根据
+ * `onClose` / `onError` 自行决定。
+ */
+export interface TerminalSocket {
+  readonly state: 'connecting' | 'open' | 'closed';
+  sendInput(data: string): void;
+  sendResize(cols: number, rows: number): void;
+  close(): void;
+}
+
+/** 服务端 `error` 帧的错误：`message` 面向用户，`code` 供调用方分支判断。 */
+class TerminalSocketFrameError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message.length > 0 ? message : `终端 WebSocket 错误：${code}`);
+    this.name = 'TerminalSocketFrameError';
+    this.code = code;
+  }
+}
+
+type TerminalSocketFrame = Record<string, unknown>;
+
+function parseTerminalSocketFrame(raw: unknown): TerminalSocketFrame | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    return parsed as TerminalSocketFrame;
+  } catch {
+    // 畸形帧直接忽略——一条坏消息不该打断整个连接。
+    return null;
+  }
+}
+
+function readTerminalSocketString(frame: TerminalSocketFrame, key: string): string | null {
+  const value = frame[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function readTerminalSocketNumber(frame: TerminalSocketFrame, key: string): number | null {
+  const value = frame[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readTerminalSocketSnapshot(frame: TerminalSocketFrame): TerminalSocketSnapshot | null {
+  const terminalId = readTerminalSocketString(frame, 'terminalId');
+  const seq = readTerminalSocketNumber(frame, 'seq');
+  const data = readTerminalSocketString(frame, 'data');
+  const outputBytesTotal = readTerminalSocketNumber(frame, 'outputBytesTotal');
+  const status = readTerminalSocketString(frame, 'status');
+  if (
+    terminalId === null ||
+    seq === null ||
+    data === null ||
+    outputBytesTotal === null ||
+    status === null
+  ) {
+    return null;
+  }
+  const interactive = frame['interactive'];
+  return {
+    terminalId,
+    seq,
+    data,
+    outputBytesTotal,
+    status,
+    ...(typeof interactive === 'boolean' ? { interactive } : {}),
+  };
+}
+
+function readTerminalSocketOutput(frame: TerminalSocketFrame): TerminalSocketOutput | null {
+  const terminalId = readTerminalSocketString(frame, 'terminalId');
+  const seq = readTerminalSocketNumber(frame, 'seq');
+  const data = readTerminalSocketString(frame, 'data');
+  const outputBytesTotal = readTerminalSocketNumber(frame, 'outputBytesTotal');
+  if (terminalId === null || seq === null || data === null || outputBytesTotal === null) {
+    return null;
+  }
+  return { terminalId, seq, data, outputBytesTotal };
+}
+
+function readTerminalSocketExit(frame: TerminalSocketFrame): TerminalSocketExit | null {
+  const status = readTerminalSocketString(frame, 'status');
+  if (status === null) return null;
+  return { status, exitCode: readTerminalSocketNumber(frame, 'exitCode') };
+}
+
+function dispatchTerminalSocketFrame(
+  frame: TerminalSocketFrame,
+  handlers: TerminalSocketHandlers,
+): void {
+  const type = readTerminalSocketString(frame, 'type');
+  if (type === 'snapshot') {
+    const snapshot = readTerminalSocketSnapshot(frame);
+    if (snapshot) handlers.onSnapshot(snapshot);
+    return;
+  }
+  if (type === 'output') {
+    const output = readTerminalSocketOutput(frame);
+    if (output) handlers.onOutput(output);
+    return;
+  }
+  if (type === 'exit') {
+    const exit = readTerminalSocketExit(frame);
+    if (exit) handlers.onExit?.(exit);
+    return;
+  }
+  if (type === 'error') {
+    const code = readTerminalSocketString(frame, 'code') ?? 'TERMINAL_SOCKET_ERROR';
+    const message = readTerminalSocketString(frame, 'message') ?? '';
+    handlers.onError?.(new TerminalSocketFrameError(code, message));
+  }
+  // `pong` 心跳应答与未知帧类型一律静默忽略（前向兼容）。
+}
+
+/**
+ * 打开终端 WebSocket：`GET {gatewayUrl}/sessions/:sessionId/terminals/:terminalId/ws`。
+ *
+ * 与终端 HTTP 客户端同址；token 走查询参数（浏览器 WebSocket 无法自定义
+ * 请求头），`afterSeq` 为增量回放游标（独占）。`sendInput` / `sendResize` 在
+ * 连接未 OPEN 时是 no-op，`close()` 幂等。
+ */
+export function openTerminalSocket(options: {
+  gatewayUrl: string;
+  accessToken: string;
+  sessionId: string;
+  terminalId: string;
+  afterSeq?: number;
+  handlers: TerminalSocketHandlers;
+}): TerminalSocket {
+  const { handlers } = options;
+  // `http(s)://` → `ws(s)://`；已经是 ws/wss 的地址保持不变。
+  const socketBase = options.gatewayUrl.replace(/^http/, 'ws');
+  const sessionPath = encodeURIComponent(options.sessionId);
+  const terminalPath = encodeURIComponent(options.terminalId);
+  const url = new URL(`${socketBase}/sessions/${sessionPath}/terminals/${terminalPath}/ws`);
+  url.searchParams.set('token', options.accessToken);
+  if (options.afterSeq !== undefined) {
+    url.searchParams.set('afterSeq', String(options.afterSeq));
+  }
+
+  const ws = new WebSocket(url.toString());
+  let state: TerminalSocket['state'] = 'connecting';
+
+  ws.onopen = () => {
+    // close() during CONNECTING already settled the handle; ignore a late open.
+    if (state === 'closed') return;
+    state = 'open';
+    handlers.onOpen?.();
+  };
+
+  ws.onmessage = (event) => {
+    const frame = parseTerminalSocketFrame(event.data);
+    if (!frame) return;
+    dispatchTerminalSocketFrame(frame, handlers);
+  };
+
+  ws.onerror = () => {
+    handlers.onError?.(new Error('终端 WebSocket 连接异常。'));
+  };
+
+  ws.onclose = (event) => {
+    state = 'closed';
+    // 浏览器一定带 CloseEvent；兜底只服务于省略参数的 mock。
+    const code = typeof event?.code === 'number' ? event.code : 1005;
+    const reason = typeof event?.reason === 'string' ? event.reason : '';
+    handlers.onClose?.({ code, reason });
+  };
+
+  return {
+    get state() {
+      return state;
+    },
+    sendInput(data) {
+      if (state !== 'open') return;
+      ws.send(JSON.stringify({ type: 'input', data }));
+    },
+    sendResize(cols, rows) {
+      if (state !== 'open') return;
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    },
+    close() {
+      if (state === 'closed') return;
+      state = 'closed';
+      ws.close();
+    },
+  };
+}

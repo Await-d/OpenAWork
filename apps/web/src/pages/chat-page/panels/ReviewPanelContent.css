@@ -61,6 +61,11 @@
 }
 
 .review-panel-file-list__items {
+  /* 行高必须贴合内容：grid 容器有确定高度（flex:1）时，默认 align-content:normal
+     等价于 stretch，会把剩余高度均摊到各 auto 行上，导致行间距随文件数量变化
+     （9 行时每行被撑高约 6px，视觉间距 8px→14px）。显式 start 后行高恒为卡片高度，
+     行间距恒等于 gap。 */
+  align-content: start;
   display: grid;
   flex: 1 1 auto;
   gap: var(--spacing-2, 8px);
@@ -69,7 +74,7 @@
   min-height: 0;
   overscroll-behavior: contain;
   overflow-y: auto;
-  padding: 0 var(--spacing-1, 4px) 0 0;
+  padding: 0;
 }
 
 .review-panel-file-list__item {

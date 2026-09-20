@@ -46,6 +46,17 @@ export function applyTaskUpdateRuntimeEvent(
   event: TaskUpdateRuntimeEventLike,
 ): SessionTask[] {
   const existingTask = previous.find((task) => task.id === event.taskId);
+
+  // 迟到的旧事件不得回退更新：父任务可能已进入终态，而旧的 in_progress 事件在事件流中落后到达。
+  // occurredAt 缺失时无法判定新旧，仍按到达顺序合并。
+  if (
+    existingTask !== undefined &&
+    event.occurredAt !== undefined &&
+    existingTask.updatedAt > event.occurredAt
+  ) {
+    return previous;
+  }
+
   const nextTask: SessionTask = {
     assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
     blockedBy: existingTask?.blockedBy ?? [],

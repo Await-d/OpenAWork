@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "dev:node": "tsx watch src/index.ts",
     "build": "tsc -b tsconfig.build.json --force",
     "build:binary": "bun build src/index.ts --compile --outfile dist/agent-gateway --external chromium-bidi --external electron --external cpu-features",
     "sync-souls": "node scripts/sync-souls.mjs",

@@ -7,6 +7,7 @@ import { getToolCategory } from '../shared/colorize-summary.js';
 import { extractFilePath, trimPath } from '../shared/input-paths.js';
 import { naturalLanguageGroupSummary } from '../shared/natural-language-summary.js';
 import { ToolCallDisplay, type ToolCallDisplayProps } from '../display/tool-call-display.js';
+import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 
 /**
  * Truncate a bash-style command string for inline preview.
@@ -93,14 +94,9 @@ export function GroupedToolCallPill({
     () => calls.filter((c) => c.isError === true || c.status === 'failed').length,
     [calls],
   );
-  const hasActiveCalls = useMemo(
-    () => calls.some((c) => c.status === 'running' || c.status === 'paused'),
-    [calls],
-  );
   const visualState: 'completed' | 'failed' = errorCount > 0 ? 'failed' : 'completed';
-  const shouldAutoExpand = shouldExpandByDefault || hasActiveCalls;
   const [expanded, toggleExpanded] = useToolCallExpandState({
-    shouldAutoExpand,
+    shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
 
@@ -119,23 +115,25 @@ export function GroupedToolCallPill({
         {errorCount > 0 && <span className="tool-call-grouped-errors">{errorCount} 失败</span>}
       </button>
       {expanded && (
-        <div className="tool-call-grouped-children">
-          {calls.map((c, idx) => {
-            const props: ToolCallDisplayProps = {
-              toolName: c.toolName,
-              input: c.input,
-            };
-            if (c.kind !== undefined) props.kind = c.kind;
-            if (c.output !== undefined) props.output = c.output;
-            if (c.status !== undefined) props.status = c.status;
-            if (c.isError !== undefined) props.isError = c.isError;
-            if (c.durationMs !== undefined) props.durationMs = c.durationMs;
-            if (c.toolCallId !== undefined) props.toolCallId = c.toolCallId;
-            if (c.resumedAfterApproval !== undefined)
-              props.resumedAfterApproval = c.resumedAfterApproval;
-            return <ToolCallDisplay key={c.toolCallId ?? `${idx}`} {...props} />;
-          })}
-        </div>
+        <ToolCardExpansionProvider>
+          <div className="tool-call-grouped-children">
+            {calls.map((c, idx) => {
+              const props: ToolCallDisplayProps = {
+                toolName: c.toolName,
+                input: c.input,
+              };
+              if (c.kind !== undefined) props.kind = c.kind;
+              if (c.output !== undefined) props.output = c.output;
+              if (c.status !== undefined) props.status = c.status;
+              if (c.isError !== undefined) props.isError = c.isError;
+              if (c.durationMs !== undefined) props.durationMs = c.durationMs;
+              if (c.toolCallId !== undefined) props.toolCallId = c.toolCallId;
+              if (c.resumedAfterApproval !== undefined)
+                props.resumedAfterApproval = c.resumedAfterApproval;
+              return <ToolCallDisplay key={c.toolCallId ?? `${idx}`} {...props} />;
+            })}
+          </div>
+        </ToolCardExpansionProvider>
       )}
     </div>
   );

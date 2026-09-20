@@ -222,7 +222,12 @@ export function getWorkspaceFileIndexVersion(rootPath?: string): number {
   return globalIndexVersion;
 }
 
-function buildWorkspaceFileIndexEntries(relativePaths: readonly string[]): {
+/**
+ * 把扁平相对路径列表构建成检索条目：文件条目 + 去重排序后的目录集合。
+ *
+ * 同时被本地索引与 SSH 远端索引复用，保证两端 `@` 检索的条目结构与排序一致。
+ */
+export function buildWorkspaceFileIndexEntries(relativePaths: readonly string[]): {
   files: WorkspaceFileIndexEntry[];
   directories: string[];
 } {

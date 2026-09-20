@@ -296,7 +296,7 @@ describe('GET /sessions/:sessionId/terminals/:terminalId', () => {
     await app.close();
   });
 
-  it('公共载荷加法暴露 backend/supportsResize，且不泄漏 metadata', async () => {
+  it('公共载荷加法暴露 backend/supportsResize/interactive，且不泄漏 metadata', async () => {
     const ptyRow = registry.registerTerminal({
       sessionId: SESSION_ID,
       userId: USER_ID,
@@ -323,7 +323,7 @@ describe('GET /sessions/:sessionId/terminals/:terminalId', () => {
     });
     expect(ptyRes.statusCode).toBe(200);
     const ptyTerminal = (ptyRes.json() as { terminal: Record<string, unknown> }).terminal;
-    // 既有字段保持不变 + 两个加法字段存在。
+    // 既有字段保持不变 + 三个加法字段存在。
     expect(ptyTerminal).toMatchObject({
       terminalId: ptyRow.terminalId,
       sessionId: SESSION_ID,
@@ -336,6 +336,7 @@ describe('GET /sessions/:sessionId/terminals/:terminalId', () => {
       outputTail: '',
       backend: 'pty',
       supportsResize: true,
+      interactive: true,
     });
     expect(ptyTerminal).not.toHaveProperty('metadata');
 
@@ -349,6 +350,7 @@ describe('GET /sessions/:sessionId/terminals/:terminalId', () => {
     // 没有 metadata.backend 的存量行按运行时探测兜底（vitest/Node → pipe）。
     expect(legacyTerminal['backend']).toBe(detectTerminalBackend().kind);
     expect(legacyTerminal['supportsResize']).toBe(detectTerminalBackend().kind === 'pty');
+    expect(legacyTerminal['interactive']).toBe(detectTerminalBackend().kind === 'pty');
     await app.close();
   });
 });
@@ -589,6 +591,8 @@ describe('POST /sessions/:sessionId/terminals（shell profile）', () => {
     const terminal = (res.json() as { terminal: Record<string, unknown> }).terminal;
     expect(terminal).not.toHaveProperty('shell');
     expect(terminal).not.toHaveProperty('metadata');
+    // spawnSpy 的记录带 metadata.backend='pty' → 公共载荷 interactive=true。
+    expect(terminal['interactive']).toBe(true);
     expect(spawnSpy.calls).toHaveLength(1);
     expect(spawnSpy.calls[0]).toMatchObject({
       sessionId: SESSION_ID,

@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from 'react';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── workspace_tree / list nodes preview (indented file tree) ── */
 
@@ -43,15 +44,17 @@ function TreeNodeRow({
   const isDir = isDirectoryNode(node);
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
   const toggle = () => setExpanded((prev) => !prev);
-  const interactive = isDir && hasChildren;
+  const interactive = isDir && hasChildren && !isInsideExpandedCard;
 
   return (
     <>
       <div
         className="tool-call-tree-row"
         data-kind={isDir ? 'dir' : 'file'}
-        data-expanded={interactive ? (expanded ? 'true' : 'false') : undefined}
+        data-expanded={isDir && hasChildren ? (effectiveExpanded ? 'true' : 'false') : undefined}
         style={{
           paddingLeft: depth * 12 + 6,
           cursor: interactive ? 'pointer' : 'default',
@@ -60,7 +63,7 @@ function TreeNodeRow({
           ? {
               role: 'button',
               tabIndex: 0,
-              'aria-expanded': expanded,
+              'aria-expanded': effectiveExpanded,
               onClick: toggle,
               onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -72,14 +75,14 @@ function TreeNodeRow({
           : {})}
       >
         <span className="tool-call-tree-glyph" aria-hidden="true">
-          {isDir ? (interactive ? (expanded ? '▾' : '▸') : '▸') : '·'}
+          {isDir ? (interactive ? (effectiveExpanded ? '▾' : '▸') : '▸') : '·'}
         </span>
         <span className="tool-call-tree-name">{node.name}</span>
         {isDir && node.children && (
           <span className="tool-call-tree-count">({node.children.length})</span>
         )}
       </div>
-      {expanded &&
+      {effectiveExpanded &&
         Array.isArray(node.children) &&
         node.children.map((child, idx) => (
           <TreeNodeRow

@@ -1,13 +1,15 @@
 import React from 'react';
 import type { Session, SessionTask } from '@openAwork/web-client';
-
-type SubAgentStatus = SessionTask['status'];
-type SubAgentDisplayStatus = SubAgentStatus | 'paused';
+import {
+  aggregateSubAgentTask,
+  resolveSubAgentRunStatus,
+  type SubAgentRunStatus,
+} from './sub-agent-status.js';
 
 export interface SubAgentRunItem {
   sessionId: string;
   shortSessionId: string;
-  status: SubAgentDisplayStatus;
+  status: SubAgentRunStatus;
   taskLabel: string;
   title: string;
   assignedAgent?: string;
@@ -22,7 +24,7 @@ export function formatTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSour
   return timeoutSource === 'first_response' ? '首响应未到' : '执行超时';
 }
 
-function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
+function getStatusStyle(status: SubAgentRunStatus): React.CSSProperties {
   if (status === 'running') {
     return {
       background: 'color-mix(in oklch, var(--accent) 18%, var(--bg-overlay))',
@@ -55,6 +57,14 @@ function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
     };
   }
 
+  if (status === 'ended') {
+    return {
+      background: 'var(--bg-overlay)',
+      border: '1px solid var(--border-subtle)',
+      color: 'var(--fg-muted)',
+    };
+  }
+
   return {
     background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
     border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
@@ -62,12 +72,13 @@ function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
   };
 }
 
-export function getStatusLabel(status: SubAgentDisplayStatus): string {
+export function getStatusLabel(status: SubAgentRunStatus): string {
   if (status === 'running') return '运行中';
   if (status === 'paused') return '等待处理';
   if (status === 'completed') return '已完成';
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
+  if (status === 'ended') return '已结束';
   return '待执行';
 }
 
@@ -85,50 +96,17 @@ function truncateSummary(value: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
-function isActiveStatus(status: SubAgentDisplayStatus): boolean {
+function isActiveStatus(status: SubAgentRunStatus): boolean {
   return status === 'running' || status === 'paused';
 }
 
-function statusSortBucket(status: SubAgentDisplayStatus): number {
-  // Active (running/paused) = 0, failed/cancelled = 1, completed = 2, pending = 3
+function statusSortBucket(status: SubAgentRunStatus): number {
+  // Active (running/paused) = 0, failed/cancelled = 1, 终态 completed/ended = 2, pending = 3
   if (status === 'running') return 0;
   if (status === 'paused') return 0;
   if (status === 'failed' || status === 'cancelled') return 1;
-  if (status === 'completed') return 2;
+  if (status === 'completed' || status === 'ended') return 2;
   return 3;
-}
-
-function mapSessionStateToSubAgentStatus(
-  stateStatus: Session['state_status'],
-): SubAgentDisplayStatus {
-  if (stateStatus === 'running') {
-    return 'running';
-  }
-
-  if (stateStatus === 'paused') {
-    return 'paused';
-  }
-
-  return 'pending';
-}
-
-function resolveExistingItemStatus(
-  existingStatus: SubAgentDisplayStatus | undefined,
-  sessionStateStatus: Session['state_status'],
-): SubAgentDisplayStatus | undefined {
-  if (sessionStateStatus !== 'paused') {
-    return existingStatus;
-  }
-
-  if (
-    existingStatus === 'completed' ||
-    existingStatus === 'failed' ||
-    existingStatus === 'cancelled'
-  ) {
-    return existingStatus;
-  }
-
-  return 'paused';
 }
 
 export function buildSubAgentRunItems(
@@ -142,8 +120,8 @@ export function buildSubAgentRunItems(
    */
   currentSessionId?: string | null,
 ): SubAgentRunItem[] {
-  const itemsBySessionId = new Map<string, SubAgentRunItem>();
   const childSessionsById = new Map(childSessions.map((session) => [session.id, session]));
+  const tasksBySessionId = new Map<string, SessionTask[]>();
 
   for (const task of sessionTasks) {
     if (!task.sessionId) {
@@ -154,22 +132,47 @@ export function buildSubAgentRunItems(
       continue;
     }
 
-    const childSession = childSessionsById.get(task.sessionId);
-    const shortSessionId = task.sessionId.slice(0, 8);
-    itemsBySessionId.set(task.sessionId, {
-      sessionId: task.sessionId,
+    const groupedTasks = tasksBySessionId.get(task.sessionId);
+    if (groupedTasks) {
+      groupedTasks.push(task);
+    } else {
+      tasksBySessionId.set(task.sessionId, [task]);
+    }
+  }
+
+  const itemsBySessionId = new Map<string, SubAgentRunItem>();
+  // 同一次构建共用一个时钟：宽限期判断不应随每个 item 的遍历时刻漂移。
+  const nowMs = Date.now();
+
+  for (const [sessionId, groupedTasks] of tasksBySessionId) {
+    // 同一子代理可能有多条任务（重启 / 重派），必须以最新一条为准，不能依赖遍历顺序。
+    const aggregatedTask = aggregateSubAgentTask(groupedTasks);
+    const childSession = childSessionsById.get(sessionId);
+    const shortSessionId = sessionId.slice(0, 8);
+    const fallbackLabel = `子代理 ${shortSessionId}`;
+
+    if (aggregatedTask === null) {
+      continue;
+    }
+
+    itemsBySessionId.set(sessionId, {
+      sessionId,
       shortSessionId,
-      status: resolveExistingItemStatus(task.status, childSession?.state_status) ?? task.status,
-      taskLabel: normalizeTitle(task.title, `子代理 ${shortSessionId}`),
+      status: resolveSubAgentRunStatus({
+        task: aggregatedTask,
+        childStateStatus: childSession?.state_status,
+        nowMs,
+      }),
+      taskLabel: normalizeTitle(aggregatedTask.title, fallbackLabel),
       title: normalizeTitle(
         childSession?.title,
-        normalizeTitle(task.title, `子代理 ${shortSessionId}`),
+        normalizeTitle(aggregatedTask.title, fallbackLabel),
       ),
-      assignedAgent: task.assignedAgent,
-      result: task.result,
-      errorMessage: task.errorMessage,
-      terminalReason: task.terminalReason,
-      timeoutSource: task.timeoutSource,
+      assignedAgent: aggregatedTask.assignedAgent,
+      result: aggregatedTask.result,
+      errorMessage: aggregatedTask.errorMessage,
+      terminalReason: aggregatedTask.terminalReason,
+      timeoutSource: aggregatedTask.timeoutSource,
       messageCount: childSession?.messages?.length ?? 0,
     });
   }
@@ -179,21 +182,23 @@ export function buildSubAgentRunItems(
       continue;
     }
 
-    const existing = itemsBySessionId.get(session.id);
+    if (itemsBySessionId.has(session.id)) {
+      continue;
+    }
+
     const shortSessionId = session.id.slice(0, 8);
-    const existingStatus = resolveExistingItemStatus(existing?.status, session.state_status);
+    const fallbackLabel = normalizeTitle(session.title, `子代理 ${shortSessionId}`);
     itemsBySessionId.set(session.id, {
       sessionId: session.id,
       shortSessionId,
-      status: existingStatus ?? mapSessionStateToSubAgentStatus(session.state_status),
-      taskLabel: existing?.taskLabel ?? normalizeTitle(session.title, `子代理 ${shortSessionId}`),
-      title: normalizeTitle(session.title, existing?.title ?? `子代理 ${shortSessionId}`),
-      assignedAgent: existing?.assignedAgent,
-      result: existing?.result,
-      errorMessage: existing?.errorMessage,
-      terminalReason: existing?.terminalReason,
-      timeoutSource: existing?.timeoutSource,
-      messageCount: session.messages?.length ?? existing?.messageCount ?? 0,
+      status: resolveSubAgentRunStatus({
+        task: null,
+        childStateStatus: session.state_status,
+        nowMs,
+      }),
+      taskLabel: fallbackLabel,
+      title: fallbackLabel,
+      messageCount: session.messages?.length ?? 0,
     });
   }
 
@@ -271,7 +276,9 @@ function SubAgentItemCard({
                   ? 'var(--success)'
                   : item.status === 'failed'
                     ? 'var(--danger)'
-                    : 'var(--warning)',
+                    : item.status === 'ended'
+                      ? 'var(--fg-muted)'
+                      : 'var(--warning)',
             boxShadow:
               item.status === 'running'
                 ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'

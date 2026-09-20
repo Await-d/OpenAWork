@@ -89,7 +89,7 @@ type BrowserAutomationModule = {
  * - `override` / `system-*`：显式传 `executablePath`，让 Playwright 直接启动该二进制；
  * - `managed`：省略 `executablePath`，交给 Playwright 按自身修订号解析与校验。
  */
-function buildBrowserLaunchOptions(
+function buildBrowserStartOptions(
   probe: BrowserAutomationProbeResult,
 ): BrowserAutomationStartOptions {
   if (probe.source !== null && probe.source !== 'managed' && probe.executablePath) {
@@ -101,8 +101,8 @@ function buildBrowserLaunchOptions(
 function buildBrowserUnavailableError(probe: BrowserAutomationProbeResult): Error {
   return new Error(
     `desktop_automation 无法启动：未找到可用的 Chromium 系浏览器（原因：${probe.reason}）。` +
-      '请在应用内「设置 → 浏览器」中安装托管 Playwright 浏览器后重试，' +
-      '或改用已安装 Google Chrome / Microsoft Edge 的机器。',
+      '请在聊天浏览器预览面板点击「安装调试浏览器」完成安装，' +
+      '或安装 Google Chrome / Microsoft Edge，或在终端执行 npx playwright install chromium。',
   );
 }
 
@@ -120,8 +120,8 @@ function wrapBrowserLaunchError(error: unknown): Error {
   }
   return new Error(
     'desktop_automation 启动浏览器失败：托管 Playwright 浏览器缺失或安装不完整。' +
-      '请在应用内「设置 → 浏览器」中安装后重试，' +
-      '或改用已安装 Google Chrome / Microsoft Edge 的机器。' +
+      '请在聊天浏览器预览面板点击「安装调试浏览器」重新安装，' +
+      '或安装 Google Chrome / Microsoft Edge，或在终端执行 npx playwright install chromium。' +
       `原始错误：${cause.message}`,
   );
 }
@@ -270,7 +270,7 @@ class DesktopAutomationDriverImpl implements DesktopAutomationDriver {
         throw buildBrowserUnavailableError(probe);
       }
       this.desktop = new browserAutomation.DesktopBrowserAutomation(
-        buildBrowserLaunchOptions(probe),
+        buildBrowserStartOptions(probe),
       );
     }
 

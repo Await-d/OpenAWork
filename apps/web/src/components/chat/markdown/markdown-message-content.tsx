@@ -18,12 +18,12 @@ import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import { MarkdownPathRef } from './markdown-path-ref.js';
 import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
-import { normalizeMathMarkdown } from './normalize-math-markdown.js';
-import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
+import { normalizeAssistantMarkdown } from './normalize-markdown.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
 import { useFoldDisabled } from './fold-policy.js';
+import { isFullHtmlDocument } from './markdown-html-document.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -51,52 +51,54 @@ const REHYPE_KATEX_OPTIONS = {
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
 
-// Memoized: props are primitives (content / streaming) and shallow comparison
+/**
+ * Markdown 正文核心渲染器：只输出 `<ReactMarkdown>` 的渲染树（或裸 HTML 文档的
+ * 预览块），不附加 `.chat-markdown` 外层，也不做内容归一化。
+ *
+ * 流式与静态两条管线必须共用它，并且 `rehypePlugins` 恒定（永远带
+ * `rehypeHighlight`）——否则同一段文本在「流式尾部」与「已落定块」之间会出现
+ * 高亮开关导致的视觉跳变。内容归一化统一由调用方走
+ * `normalizeAssistantMarkdown`。
+ */
+export function MarkdownCore({ content }: { content: string }) {
+  const isBareHtmlDocument = useMemo(() => isFullHtmlDocument(content), [content]);
+  if (isBareHtmlDocument) {
+    // 裸 HTML 文档走沙箱预览；外层 `.chat-markdown` 由调用方提供，这里不重复包裹。
+    return (
+      <StaticPreviewCodeBlock
+        codeContent={content}
+        codeProps={{}}
+        language="HTML"
+        previewKind="html"
+        initiallyOpen
+      />
+    );
+  }
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
+      components={markdownComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+// Memoized: props are primitives (content) and shallow comparison
 // hits 100% when the message content has not changed. Without this, every
 // recovery commit triggers full remark/rehype + react-markdown re-parse for
 // every message in the list, which is the dominant cost of the
 // `'message' handler took N ms` violation surfaced after recovery payloads.
 const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content,
-  streaming = false,
 }: {
   content: string;
-  streaming?: boolean;
 }) {
-  const normalizedContent = useMemo(
-    () => stripStandaloneBreakLines(normalizeMathMarkdown(transformInlineReasoningTags(content))),
-    [content],
-  );
-  const isBareHtmlDocument = useMemo(
-    () => isFullHtmlDocument(normalizedContent),
-    [normalizedContent],
-  );
-  if (isBareHtmlDocument) {
-    return (
-      <div className="chat-markdown">
-        <StaticPreviewCodeBlock
-          codeContent={normalizedContent}
-          codeProps={{}}
-          language="HTML"
-          previewKind="html"
-          initiallyOpen
-        />
-      </div>
-    );
-  }
+  const normalizedContent = useMemo(() => normalizeAssistantMarkdown(content), [content]);
   return (
     <div className="chat-markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={
-          streaming
-            ? [[rehypeKatex, REHYPE_KATEX_OPTIONS]]
-            : [[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]
-        }
-        components={markdownComponents}
-      >
-        {normalizedContent}
-      </ReactMarkdown>
+      <MarkdownCore content={normalizedContent} />
     </div>
   );
 });
@@ -111,20 +113,6 @@ export default MarkdownMessageContent;
  * our element, producing a blank line.
  */
 const HARD_BREAK_TAG = /[ \t]*(?:\r?\n[ \t]*)?<br\s*\/?>[ \t]*(?:\r?\n[ \t]*)?/giu;
-
-/**
- * A `<br>` that sits alone on its own line is parsed as *block-level* HTML
- * instead of inline HTML, so it never reaches the inline components that
- * `renderTextWithPaths` walks — it would keep rendering as a literal
- * `<br>` in the message body. Such a tag is only asking for a blank line,
- * which markdown already provides, so drop the tag and let the surrounding
- * blank lines handle the spacing.
- */
-const STANDALONE_BREAK_LINE = /^[ \t]*<br\s*\/?>[ \t]*\r?$/gimu;
-
-function stripStandaloneBreakLines(markdown: string): string {
-  return markdown.replace(STANDALONE_BREAK_LINE, '');
-}
 
 interface TextRenderOptions {
   allowBareFilename?: boolean;
@@ -346,6 +334,7 @@ const markdownComponents: Components = {
           className={className}
           language={language}
           previewKind={previewKind}
+          initiallyOpen={shouldOpenStaticPreview(previewKind, rawLanguage)}
         />
       );
     }
@@ -404,6 +393,7 @@ const noMarkdownPreviewComponents: Components = {
           className={className}
           language={language}
           previewKind={previewKind}
+          initiallyOpen={shouldOpenStaticPreview(previewKind, rawLanguage)}
         />
       );
     }
@@ -619,6 +609,21 @@ function getStaticPreviewKind(language: string | undefined): StaticPreviewKind |
   return null;
 }
 
+const DEFAULT_OPEN_STATIC_PREVIEW_KINDS: ReadonlySet<StaticPreviewKind> = new Set([
+  'html',
+  'css',
+  'svg',
+]);
+
+function shouldOpenStaticPreview(kind: StaticPreviewKind, language: string | undefined): boolean {
+  // `xml` 与 `svg` 共用同一个 preview kind，但 xml 只是普通标记文本 —— 直接塞进
+  // SVG 预览沙箱只会渲染出无意义内容，因此只有显式 ```svg 才默认展开预览。
+  if (kind === 'svg' && language !== 'svg') {
+    return false;
+  }
+  return DEFAULT_OPEN_STATIC_PREVIEW_KINDS.has(kind);
+}
+
 type TableCellAlign = 'left' | 'center' | 'right' | 'justify';
 
 /**
@@ -669,11 +674,6 @@ const RESIZE_SCRIPT = `<script>
 })();
 </script>`;
 
-function isFullHtmlDocument(code: string): boolean {
-  const trimmed = code.trimStart().slice(0, 200).toLowerCase();
-  return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html');
-}
-
 function buildFullPagePreview(code: string): string {
   const safe = stripScriptTags(code);
   const baseTag = '<base href="about:srcdoc" target="_blank">';
@@ -698,7 +698,7 @@ function buildPreviewDocument(previewKind: StaticPreviewKind, code: string): str
     return buildFullPagePreview(code);
   }
 
-  const safeCode = previewKind === 'html' ? stripScriptTags(code) : code;
+  const safeCode = previewKind === 'html' || previewKind === 'svg' ? stripScriptTags(code) : code;
   const previewBody =
     previewKind === 'css'
       ? buildCssPreviewBody()
@@ -922,7 +922,11 @@ function MarkdownPreviewCodeBlock({
   const shouldCollapse = isLong && !expanded && !foldDisabled;
 
   return (
-    <div className="chat-markdown-code-block" data-preview-open={previewOpen ? 'true' : undefined}>
+    <div
+      className="chat-markdown-code-block"
+      data-markdown-preview="true"
+      data-preview-open={previewOpen ? 'true' : undefined}
+    >
       <div className="chat-markdown-code-toolbar">
         <div className="chat-markdown-code-toolbar-meta">
           <div className="chat-markdown-code-label">{language ?? 'MARKDOWN'}</div>
@@ -1096,7 +1100,11 @@ function StaticPreviewCodeBlock({
   }, [previewOpen]);
 
   return (
-    <div className="chat-markdown-code-block" data-preview-open={previewOpen ? 'true' : undefined}>
+    <div
+      className="chat-markdown-code-block"
+      data-static-preview="true"
+      data-preview-open={previewOpen ? 'true' : undefined}
+    >
       <div className="chat-markdown-code-toolbar">
         <div className="chat-markdown-code-toolbar-meta">
           <div className="chat-markdown-code-label">{language ?? 'CODE'}</div>

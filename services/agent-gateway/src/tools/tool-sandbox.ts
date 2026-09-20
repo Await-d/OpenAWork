@@ -159,6 +159,7 @@ import {
   approvalCoversScope,
   type PermissionApprovalCandidateRow,
 } from '../permission/permission-approval-match.js';
+import { findMatchingPermissionGrant } from '../permission/permission-grants-store.js';
 import {
   type PermissionDecision,
   type PermissionRiskLevel,
@@ -5960,6 +5961,15 @@ function findApprovedPermission(
   scope: string,
 ): PermissionApprovalRow | null {
   const userId = getSessionOwnerUserId(sessionId);
+  // User-scoped durable permanent grants first: these survive the granting
+  // session (unlike the session-owned `permission_requests` rows below), so a
+  // brand-new session of the same user is still auto-approved.
+  if (userId) {
+    const grant = findMatchingPermissionGrant(userId, toolName, scope);
+    if (grant) {
+      return { id: grant.id, decision: 'permanent' };
+    }
+  }
   // Pull every still-approved row for this category visible to this session.
   // `findApprovedPermission` runs once per tool call; the per-session row
   // count is bounded by user prompts so a full scan + JS-side wildcard

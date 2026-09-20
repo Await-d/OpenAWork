@@ -319,7 +319,10 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   }, [hint]);
 
   const inputEnabled = (terminal: SessionTerminalView): boolean =>
-    ACTIVE_STATUSES.has(terminal.status) && terminal.kind === 'foreground';
+    ACTIVE_STATUSES.has(terminal.status) &&
+    terminal.kind === 'foreground' &&
+    // 非交互后端（未启用 PTY）不接受 stdin：清屏 / 面板动作也不该发字节。
+    terminal.interactive !== false;
 
   /**
    * 一次性落盘布局（**只允许用户主动操作**调用）。
@@ -735,6 +738,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
       role="region"
       aria-label="快捷终端面板"
       className="terminal-panel"
+      data-terminal-scope=""
       data-presentation={inlinePresentation ? 'inline' : 'overlay'}
       data-docked={docked ? effectivePosition : undefined}
       data-maximized={maximized ? 'true' : undefined}

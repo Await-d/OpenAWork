@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react';
+import { isWithinTerminalScope } from '../../utils/terminal-scope.js';
 
 export interface ChatKeyboardShortcutHandlers {
   onCommandPalette?: () => void;
@@ -55,6 +56,8 @@ export function useChatKeyboardShortcuts(
 
       // Cmd+K — always works, even in inputs
       if (mod && e.key === 'k') {
+        // 终端面板内放行：Ctrl/⌘+K 是 xterm 的 clear-buffer。
+        if (isWithinTerminalScope(e.target)) return;
         e.preventDefault();
         handlers.onCommandPalette?.();
         return;

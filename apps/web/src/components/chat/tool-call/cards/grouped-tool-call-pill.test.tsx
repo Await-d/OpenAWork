@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
@@ -85,8 +85,8 @@ describe('GroupedToolCallPill', () => {
     expect(screen.getAllByTestId('grouped-tool-child')).toHaveLength(2);
   });
 
-  it('运行期间自动展开的分组详情在完成后按默认折叠设置收起', () => {
-    const view = render(
+  it('运行期间不再自动展开，点击后才展示分组详情', () => {
+    render(
       <GroupedToolCallPill
         toolName="read"
         calls={[
@@ -104,26 +104,12 @@ describe('GroupedToolCallPill', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
-    view.rerender(
-      <GroupedToolCallPill
-        toolName="read"
-        calls={[
-          {
-            toolName: 'read',
-            input: { file_path: 'src/a.ts' },
-            status: 'completed',
-          },
-          {
-            toolName: 'read',
-            input: { file_path: 'src/b.ts' },
-            status: 'completed',
-          },
-        ]}
-      />,
-    );
-
     expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
     expect(screen.queryAllByTestId('grouped-tool-child')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
+    expect(screen.getAllByTestId('grouped-tool-child')).toHaveLength(2);
   });
 });

@@ -1,8 +1,9 @@
 /**
  * team 会话 `@` 文件提及检索装配。
  *
- * 网关的 `/workspace/files/search` 只接受绝对工作区根路径（不认 sessionId），
- * 所以 team 端必须自己从 session metadata 的 `workingDirectory` 取出检索根。
+ * 检索根取 session metadata 的 `workingDirectory`（SSH 会话下即远端绝对路径）；
+ * 已建立的 team 会话同时把 `sessionId` 透传给网关，由网关沿父会话链解析 SSH
+ * 绑定，避免 Windows 网关把远端 POSIX 路径当本地路径校验。
  * chat 端由 `useWorkspace().searchFileIndex` 提供同等能力，但 team 组件树里没有
  * `useWorkspace`，因此这里走 `@openAwork/web-client` 的工作区客户端（唯一合法通道）。
  */
@@ -30,11 +31,26 @@ export function readTeamMentionWorkspaceDirectory(
     : null;
 }
 
+/**
+ * 从已解析的 session metadata 中读取 SSH 连接 id（网关写入的键名是
+ * `sshConnectionId`）。缺失 / 类型不符 / 空串返回 null（本地会话）。
+ */
+export function readTeamMentionSshConnectionId(
+  sessionMetadata: Record<string, unknown> | null,
+): string | null {
+  const sshConnectionId = sessionMetadata?.['sshConnectionId'];
+  return typeof sshConnectionId === 'string' && sshConnectionId.trim().length > 0
+    ? sshConnectionId.trim()
+    : null;
+}
+
 export interface TeamMentionFileSearchInput {
   /** 检索根目录；为 null 时返回恒空结果。 */
   workspaceDirectory: string | null;
   gatewayUrl: string;
   token: string;
+  /** 当前 team 会话 id：SSH 绑定会话必须携带，网关据此解析远端连接。 */
+  sessionId: string | null;
 }
 
 /**
@@ -47,7 +63,7 @@ export interface TeamMentionFileSearchInput {
 export function createTeamMentionFileSearch(
   input: TeamMentionFileSearchInput,
 ): MentionFileSearchFn {
-  const { workspaceDirectory, gatewayUrl, token } = input;
+  const { workspaceDirectory, gatewayUrl, token, sessionId } = input;
   if (!workspaceDirectory) {
     return () => Promise.resolve(EMPTY_MENTION_SEARCH_RESULT);
   }
@@ -58,6 +74,7 @@ export function createTeamMentionFileSearch(
       query,
       limit: MENTION_SEARCH_LIMIT,
       signal,
+      ...(sessionId ? { sessionId } : {}),
     });
     if (!result.ok) {
       throw new Error(result.errorMessage ?? '检索工作区文件索引失败。');

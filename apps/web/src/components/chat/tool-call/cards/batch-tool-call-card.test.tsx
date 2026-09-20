@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
@@ -85,8 +85,8 @@ describe('BatchToolCallCard', () => {
     expect(screen.getByTestId('batch-detail')).toBeTruthy();
   });
 
-  it('运行期间自动展开的批量子工具详情在完成后按默认折叠设置收起', () => {
-    const view = render(
+  it('运行期间不再自动展开，点击行后才展示子工具详情', () => {
+    render(
       <BatchToolCallCard
         input={{
           tool_calls: [{ tool: 'read', parameters: { file_path: 'src/a.ts' } }],
@@ -104,18 +104,29 @@ describe('BatchToolCallCard', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
+    expect(screen.queryByTestId('batch-detail')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy();
-    view.rerender(
+    expect(screen.getByTestId('batch-detail')).toBeTruthy();
+  });
+
+  it('等待权限的子调用渲染为待审批而不是失败', () => {
+    const view = render(
       <BatchToolCallCard
         input={{
-          tool_calls: [{ tool: 'read', parameters: { file_path: 'src/a.ts' } }],
+          tool_calls: [{ tool: 'bash', parameters: { command: 'rm -rf /tmp/demo' } }],
         }}
         output={{
           results: [
             {
-              tool: 'read',
-              status: 'completed',
-              output: 'file content',
+              tool: 'bash',
+              status: 'error',
+              isError: true,
+              output:
+                'Tool "bash" requires approval before it can run. Permission request req-1 has been created. Ask the user to approve it, then retry.',
             },
           ],
         }}
@@ -123,7 +134,9 @@ describe('BatchToolCallCard', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy();
-    expect(screen.queryByTestId('batch-detail')).toBeNull();
+    const row = view.container.querySelector('[data-batch-sub-status="pending"]');
+    expect(row).not.toBeNull();
+    expect(screen.getByText('待审批')).toBeTruthy();
+    expect(view.container.querySelector('[data-batch-sub-status="failed"]')).toBeNull();
   });
 });

@@ -229,12 +229,23 @@ function DesktopGatewayRecovery({
   );
 }
 
+/**
+ * 桌面端本地网关的启动阶段：
+ * - `idle`：尚未开始（认证状态还没水合，或首次引导弹窗仍开着）；
+ * - `starting`：正在拉起 sidecar 并等待健康检查；
+ * - `ready`：网关已就绪，可以安全渲染业务页面；
+ * - `error`：启动失败，交由 `DesktopGatewayRecovery` 处理。
+ */
+type DesktopGatewayPhase = 'idle' | 'starting' | 'ready' | 'error';
+
 function useDesktopGatewayBootstrap(
   enabled: boolean,
   accessToken: string | null,
   retryKey: number,
   setBootstrapError: (message: string | null) => void,
-) {
+): DesktopGatewayPhase {
+  const [phase, setPhase] = useState<DesktopGatewayPhase>('idle');
+
   useEffect(() => {
     if (!enabled || !isTauriRuntime()) {
       return;
@@ -243,17 +254,27 @@ function useDesktopGatewayBootstrap(
     let cancelled = false;
 
     async function bootstrap() {
-      const mode = readDesktopGatewayMode();
-      const { setAuth, setGatewayUrl, setWebAccess, webPort } = useAuthStore.getState();
-      const port = webPort;
-      const localUrl = localGatewayUrl(port);
+      // accessToken 写入后会触发本 effect 重跑；已就绪时不回退到 starting，
+      // 否则启动遮罩会重新闪出。
+      setPhase((current) => (current === 'ready' ? current : 'starting'));
 
+      // 所有可能抛错的语句（含 localStorage / store 读取）都放在 try 内：
+      // 任何异常都必须落到 error 阶段，否则遮罩会永久停在 starting 无法撤除。
       try {
         setBootstrapError(null);
+
+        const mode = readDesktopGatewayMode();
+        const { setAuth, setGatewayUrl, setWebAccess, webPort, webExposeLan } =
+          useAuthStore.getState();
+        const port = webPort;
+        const localUrl = localGatewayUrl(port);
+
         if (mode === 'local') {
           setGatewayUrl(localUrl);
           setWebAccess(true, port);
-          await startDesktopGateway(port);
+          // bind host 必须与用户选择一致：LAN 模式下若仍以 127.0.0.1 启动，
+          // 原生侧幂等短路会因 host 变化而反复重启 sidecar 并静默关闭 LAN 共享。
+          await startDesktopGateway(port, webExposeLan ? 'lan' : 'localhost');
           if (!(await waitForGatewayHealth(localUrl))) {
             throw new Error('本地 Gateway 健康检查失败');
           }
@@ -274,8 +295,15 @@ function useDesktopGatewayBootstrap(
             );
           }
         }
+
+        if (!cancelled) {
+          setPhase('ready');
+        }
       } catch (error: unknown) {
-        setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
+        if (!cancelled) {
+          setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
+          setPhase('error');
+        }
         console.warn('Failed to bootstrap desktop gateway session', error);
       }
     }
@@ -286,6 +314,8 @@ function useDesktopGatewayBootstrap(
       cancelled = true;
     };
   }, [accessToken, enabled, retryKey, setBootstrapError]);
+
+  return phase;
 }
 
 export default function App() {
@@ -317,6 +347,20 @@ export default function App() {
     () => localStorage.getItem('onboarded') !== '1',
   );
 
+  const desktopGatewayPhase = useDesktopGatewayBootstrap(
+    authHydrated && !showOnboarding,
+    accessToken,
+    desktopBootstrapRetry,
+    setDesktopBootstrapError,
+  );
+
+  // 桌面端必须先等本地网关就绪再渲染业务路由，否则页面会在 sidecar 启动完成前
+  // 发出请求，表现为空数据与加载失败。Web 端 desktopRuntime 为 false，此遮罩
+  // 不会出现，行为完全不变。
+  const desktopGatewayBlocking =
+    desktopRuntime && !showOnboarding && desktopGatewayPhase !== 'ready';
+  const desktopGatewayReady = !desktopGatewayBlocking;
+
   useLayoutEffect(() => {
     migrateDesktopWorkbenchLayout({
       isDesktopRuntime: desktopRuntime,
@@ -324,7 +368,7 @@ export default function App() {
     });
   }, [desktopRuntime]);
 
-  useCurrentUserProfileBootstrap(authHydrated);
+  useCurrentUserProfileBootstrap(authHydrated && desktopGatewayReady);
 
   useEffect(() => {
     if (effectiveFileIconTheme !== 'material') return;
@@ -387,13 +431,6 @@ export default function App() {
       }
     }
   }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
-
-  useDesktopGatewayBootstrap(
-    authHydrated && !showOnboarding,
-    accessToken,
-    desktopBootstrapRetry,
-    setDesktopBootstrapError,
-  );
 
   // C-9 系统主题跟随：监听 Rust 端 emit 的 'theme-changed'，自动切换 dark/light。
   useEffect(() => {
@@ -617,6 +654,38 @@ export default function App() {
     );
   }
 
+  // 网关未就绪前只渲染启动遮罩 / 恢复界面，不挂载业务路由，避免 sidecar 启动
+  // 期间页面发出请求导致空数据与加载失败。就绪后自动落入下方正常渲染。
+  if (desktopGatewayBlocking) {
+    return (
+      <FileIconThemeProvider theme={effectiveFileIconTheme} mode={theme}>
+        <CloseConfirmDialog />
+        <AboutDialog />
+        {desktopBootstrapError ? (
+          <DesktopGatewayRecovery
+            error={desktopBootstrapError}
+            onRetry={() => setDesktopBootstrapRetry((value) => value + 1)}
+            onReconfigure={() => {
+              clearAuth();
+              localStorage.removeItem('onboarded');
+              localStorage.removeItem(DESKTOP_GATEWAY_MODE_KEY);
+              setDesktopBootstrapError(null);
+              setShowOnboarding(true);
+            }}
+          />
+        ) : (
+          <PageTransitionLoader
+            variant="fullscreen"
+            caption="启动本地网关"
+            title="正在启动桌面网关"
+            description="正在等待本地 Gateway 就绪，就绪后会自动进入工作台。"
+            prefersReducedMotion={prefersReducedMotion}
+          />
+        )}
+      </FileIconThemeProvider>
+    );
+  }
+
   return (
     <FileIconThemeProvider theme={effectiveFileIconTheme} mode={theme}>
       <CloseConfirmDialog />
@@ -642,23 +711,6 @@ export default function App() {
       />
       <ToastContainer />
       <UpdateBanner />
-      {desktopRuntime &&
-      authHydrated &&
-      !showOnboarding &&
-      !accessToken &&
-      desktopBootstrapError ? (
-        <DesktopGatewayRecovery
-          error={desktopBootstrapError}
-          onRetry={() => setDesktopBootstrapRetry((value) => value + 1)}
-          onReconfigure={() => {
-            clearAuth();
-            localStorage.removeItem('onboarded');
-            localStorage.removeItem(DESKTOP_GATEWAY_MODE_KEY);
-            setDesktopBootstrapError(null);
-            setShowOnboarding(true);
-          }}
-        />
-      ) : null}
       <Routes>
         <Route
           path="/"

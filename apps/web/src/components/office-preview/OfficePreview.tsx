@@ -17,8 +17,9 @@
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
+import type { WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore, useWorkspaceReadIdentity } from '../../stores/ui/uiState.js';
 
 const DocxPreview = lazy(() => import('./DocxPreview.js'));
 const XlsxPreview = lazy(() => import('./XlsxPreview.js'));
@@ -59,6 +60,7 @@ function useOfficeFile(path: string): OfficePreviewState {
   const selectedRoot = useUIStateStore((s) => s.selectedWorkspacePath);
   const treeRoot = useUIStateStore((s) => s.fileTreeRootPath);
   const workspaceRoot = selectedRoot ?? treeRoot ?? null;
+  const identity = useWorkspaceReadIdentity();
 
   useEffect(() => {
     let cancelled = false;
@@ -69,8 +71,13 @@ function useOfficeFile(path: string): OfficePreviewState {
     }
     void (async () => {
       try {
-        const options: { workspaceRoot?: string } = {};
+        const options: WorkspaceFileReadOptions = {};
         if (workspaceRoot) options.workspaceRoot = workspaceRoot;
+        if (identity.sessionId) {
+          options.sessionId = identity.sessionId;
+        } else if (identity.sshConnectionId) {
+          options.sshConnectionId = identity.sshConnectionId;
+        }
         const data = await createWorkspaceClient(gatewayUrl).readFileBinary(token, path, options);
         if (cancelled) return;
         setState({ status: 'ready', buffer: data.buffer, contentType: data.contentType });
@@ -85,7 +92,7 @@ function useOfficeFile(path: string): OfficePreviewState {
     return () => {
       cancelled = true;
     };
-  }, [path, token, gatewayUrl, workspaceRoot]);
+  }, [path, token, gatewayUrl, workspaceRoot, identity]);
 
   return state;
 }

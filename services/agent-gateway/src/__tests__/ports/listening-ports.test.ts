@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   collectProcfsListeningPorts,
+  defaultEnumerationTimeoutMs,
   detectPortEnumerationStrategy,
   listListeningPorts,
   parseLsofOutput,
@@ -872,6 +873,89 @@ describe('listListeningPorts', () => {
     expect(snapshot.reason).toContain('5ms');
   });
 
+  const hangingExec = (): Promise<{ stdout: string; stderr: string }> =>
+    new Promise<{ stdout: string; stderr: string }>(() => undefined);
+
+  it('默认预算按策略区分：procfs 3s，lsof / powershell 10s（Windows 冷启动不被 3s 顶穿）', async () => {
+    expect(defaultEnumerationTimeoutMs('procfs')).toBe(3_000);
+    expect(defaultEnumerationTimeoutMs('lsof')).toBe(10_000);
+    expect(defaultEnumerationTimeoutMs('powershell')).toBe(10_000);
+
+    vi.useFakeTimers();
+    try {
+      const pending = listListeningPorts({ strategy: 'powershell', exec: hangingExec });
+
+      // 3s 是 procfs 的预算，不能拿来卡子进程策略：此处不应提前降级。
+      await vi.advanceTimersByTimeAsync(3_000);
+      // 推进到 10s 才到子进程策略的预算上限，此时才允许降级为空列表。
+      await vi.advanceTimersByTimeAsync(7_000);
+      const snapshot = await pending;
+
+      expect(snapshot.ports).toEqual([]);
+      expect(snapshot.reason).toContain('10000ms');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('OPENAWORK_PORTS_ENUMERATION_TIMEOUT_MS 对子进程策略同样是绝对值覆盖', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv('OPENAWORK_PORTS_ENUMERATION_TIMEOUT_MS', '5');
+      const pending = listListeningPorts({ strategy: 'lsof', exec: hangingExec });
+
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await pending).reason).toContain('5ms');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('子进程策略把超时预算透传给 exec（到点可杀，不留孤儿进程）', async () => {
+    const powershellExec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await listListeningPorts({ strategy: 'powershell', exec: powershellExec, timeoutMs: 1234 });
+    expect(powershellExec).toHaveBeenCalledWith('powershell', expect.any(Array), {
+      timeoutMs: 1234,
+    });
+
+    const lsofExec = vi.fn(async () => ({ stdout: LSOF_OUTPUT, stderr: '' }));
+    await listListeningPorts({ strategy: 'lsof', exec: lsofExec, timeoutMs: 4321 });
+    expect(lsofExec).toHaveBeenCalledWith('lsof', expect.any(Array), { timeoutMs: 4321 });
+  });
+
+  it('procfs 归属反查卡死时只丢 pid / 归属，仍返回已读到的 LISTEN 列表（不整份降级）', async () => {
+    const hangingOwnerScanIo: ProcfsIo = {
+      readTextFile: async (path) => {
+        if (path === '/proc/net/tcp') {
+          return [
+            '  sl  local_address rem_address   st',
+            procNetTcpLine(0, '00000000:0FA0', '0A', 111),
+            '',
+          ].join('\n');
+        }
+        if (path === '/proc/net/tcp6') return '  sl  local_address rem_address   st\n';
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      },
+      readDirNames: async (path) => {
+        if (path === '/proc') return ['4321'];
+        // /proc/<pid>/fd 永久挂起：模拟 D-state / 卡住的挂载点。
+        return new Promise<string[]>(() => undefined);
+      },
+      readLink: () => new Promise<string>(() => undefined),
+    };
+
+    const snapshot = await listListeningPorts({
+      strategy: 'procfs',
+      procfsIo: hangingOwnerScanIo,
+      timeoutMs: 700,
+    });
+
+    // 富化停手点（早于外层超时）已到：端口列表照常返回，仅 pid / 进程名缺失。
+    expect(snapshot.ports).toHaveLength(1);
+    expect(findPort(snapshot.ports, 4000, 'tcp')).toMatchObject({ pid: null, processName: null });
+    expect(snapshot.reason).toBeUndefined();
+  });
+
   it('exec 抛错 → 降级为空列表并带 reason', async () => {
     const failing = vi.fn(async () => {
       throw new Error('lsof: command not found');
@@ -899,6 +983,29 @@ describe('listListeningPorts', () => {
     clock.value += 2;
     await listListeningPorts({ strategy: 'lsof', exec, now });
     expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('默认缓存 TTL 严格大于 5s 轮询间隔：下一拍命中缓存而不是再起一次进程', async () => {
+    vi.useFakeTimers();
+    try {
+      const exec = vi.fn(async () => ({ stdout: LSOF_OUTPUT, stderr: '' }));
+
+      await listListeningPorts({ strategy: 'lsof', exec });
+      expect(exec).toHaveBeenCalledTimes(1);
+
+      // 快照按「枚举完成时刻」入缓存，下一拍请求到达时年龄已是 5s + ε；
+      // TTL 若等于 5000 会因命中判定是严格 `<` 而每次都 miss —— 这里锁死必须真正复用。
+      await vi.advanceTimersByTimeAsync(5_000);
+      await listListeningPorts({ strategy: 'lsof', exec });
+      expect(exec).toHaveBeenCalledTimes(1);
+
+      // 超过 TTL 之后才允许重新枚举。
+      await vi.advanceTimersByTimeAsync(3_000);
+      await listListeningPorts({ strategy: 'lsof', exec });
+      expect(exec).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('并发调用共享同一次枚举（单飞）', async () => {

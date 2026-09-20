@@ -170,3 +170,38 @@ describe('MarkdownMessageContent mermaid fences', () => {
     expect(block?.hasAttribute('data-diagram-kind')).toBe(false);
   });
 });
+
+describe('MarkdownMessageContent static preview fences', () => {
+  it('```html / ```css / ```svg 默认展开预览', () => {
+    for (const language of ['html', 'css', 'svg']) {
+      const content = ['```' + language, '<div></div>', '```'].join('\n');
+      const { container, unmount } = render(<MarkdownMessageContent content={content} />);
+
+      const block = container.querySelector('.chat-markdown-code-block');
+      expect(block?.getAttribute('data-static-preview')).toBe('true');
+      expect(block?.getAttribute('data-preview-open')).toBe('true');
+      expect(container.querySelector('[data-testid="chat-markdown-html-preview"]')).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it('```xml 不默认预览，保持源码视图', () => {
+    const content = ['```xml', '<project></project>', '```'].join('\n');
+    const { container } = render(<MarkdownMessageContent content={content} />);
+
+    const block = container.querySelector('.chat-markdown-code-block');
+    expect(block?.getAttribute('data-static-preview')).toBe('true');
+    expect(block?.hasAttribute('data-preview-open')).toBe(false);
+    expect(container.querySelector('[data-testid="chat-markdown-html-preview"]')).toBeNull();
+    expect(container.querySelector('pre.chat-markdown-pre')).toBeTruthy();
+  });
+
+  it('```js 不默认预览，保持源码视图', () => {
+    const content = ['```js', 'const a = 1;', '```'].join('\n');
+    const { container } = render(<MarkdownMessageContent content={content} />);
+
+    const block = container.querySelector('.chat-markdown-code-block');
+    expect(block?.hasAttribute('data-preview-open')).toBe(false);
+    expect(container.querySelector('pre.chat-markdown-pre')).toBeTruthy();
+  });
+});

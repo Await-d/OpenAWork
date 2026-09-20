@@ -1,4 +1,5 @@
 import { JsonPreview } from './json-preview.js';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /**
  * Generic renderer for tool outputs that are arrays. A JSON dump of `[{"…"},
@@ -51,12 +52,16 @@ function itemTitle(value: unknown, index: number): string {
 }
 
 export function ArrayOutputPreview({ data }: { data: unknown[] }) {
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
   if (data.length === 0) {
     return <div className="param-list-empty">（空数组）</div>;
   }
 
+  const visibleCount = isInsideExpandedCard ? data.length : MAX_ROWS;
+  const hiddenCount = data.length - visibleCount;
+
   if (data.every(isPrimitive)) {
-    const shown = data.slice(0, MAX_ROWS);
+    const shown = data.slice(0, visibleCount);
     return (
       <ul className="array-output">
         {shown.map((item, index) => (
@@ -64,25 +69,21 @@ export function ArrayOutputPreview({ data }: { data: unknown[] }) {
             {primitiveText(item)}
           </li>
         ))}
-        {data.length > MAX_ROWS && (
-          <li className="array-output-more">还有 {data.length - MAX_ROWS} 项…</li>
-        )}
+        {hiddenCount > 0 && <li className="array-output-more">还有 {hiddenCount} 项…</li>}
       </ul>
     );
   }
 
-  const shown = data.slice(0, MAX_ROWS);
+  const shown = data.slice(0, visibleCount);
   return (
     <div className="array-output-objects">
       {shown.map((item, index) => (
-        <details className="array-output-obj" key={index}>
+        <details className="array-output-obj" key={index} open={isInsideExpandedCard || undefined}>
           <summary title={itemTitle(item, index)}>{itemTitle(item, index)}</summary>
           <JsonPreview data={item} maxLines={14} />
         </details>
       ))}
-      {data.length > MAX_ROWS && (
-        <div className="array-output-more">还有 {data.length - MAX_ROWS} 项…</div>
-      )}
+      {hiddenCount > 0 && <div className="array-output-more">还有 {hiddenCount} 项…</div>}
     </div>
   );
 }

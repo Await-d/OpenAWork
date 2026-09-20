@@ -32,6 +32,7 @@ import type { MentionFileSearchFn } from '../../../components/chat/composer/use-
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
 import type { InputImageContent } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth/auth.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { useCurrentUserDisplayName } from '../../../stores/user-profile/current-user-profile.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useMessageMultiSelect } from '../../../components/chat/message/message-multi-select.js';
@@ -56,6 +57,7 @@ import {
 } from '../../../stores/team/team-events.js';
 import {
   createTeamMentionFileSearch,
+  readTeamMentionSshConnectionId,
   readTeamMentionWorkspaceDirectory,
 } from './team-mention-file-search.js';
 import {
@@ -213,6 +215,7 @@ export function TeamConversationView({
   // team 会话的 @ 文件检索：检索根取 session metadata 的 workingDirectory，
   // 缺失时回退为空结果（@ 菜单展示空状态，不报错）。
   const mentionWorkspaceDirectory = readTeamMentionWorkspaceDirectory(state.sessionMetadata);
+  const mentionSshConnectionId = readTeamMentionSshConnectionId(state.sessionMetadata);
   const searchMentionFiles = useMemo<MentionFileSearchFn>(
     () =>
       createTeamMentionFileSearch({
@@ -220,8 +223,29 @@ export function TeamConversationView({
         gatewayUrl,
         // 与 useWorkspace.searchFileIndex 同口径：未登录时按空串交给客户端。
         token: token ?? '',
+        // team 会话一定已有 id，SSH 绑定交给网关沿父会话链解析。
+        sessionId,
       }),
-    [mentionWorkspaceDirectory, gatewayUrl, token],
+    [mentionWorkspaceDirectory, gatewayUrl, token, sessionId],
+  );
+
+  // 工作区文件读取身份（瞬态 slice）：team 侧同样按 session 写入 / 卸载清空，
+  // 读取消费方才能把 sessionId 带到 `/workspace/file` 上。
+  const setReadIdentity = useUIStateStore((s) => s.setReadIdentity);
+  const clearReadIdentity = useUIStateStore((s) => s.clearReadIdentity);
+  useEffect(() => {
+    setReadIdentity({
+      sessionId,
+      sshConnectionId: null,
+      remote: Boolean(mentionSshConnectionId),
+    });
+  }, [sessionId, mentionSshConnectionId, setReadIdentity]);
+
+  useEffect(
+    () => () => {
+      clearReadIdentity();
+    },
+    [clearReadIdentity],
   );
 
   // Multi-select state（共享 atom）。

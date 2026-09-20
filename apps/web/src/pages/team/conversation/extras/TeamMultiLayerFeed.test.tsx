@@ -21,7 +21,9 @@ import {
 } from './TeamMultiLayerFeed.js';
 
 vi.mock('../../../../components/chat/markdown/markdown-message-content.js', () => ({
+  // 流式管线走 MarkdownCore，静态管线走默认导出，两个出口都必须桩。
   default: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+  MarkdownCore: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
 }));
 
 afterEach(() => {

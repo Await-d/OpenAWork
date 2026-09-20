@@ -98,7 +98,7 @@ import {
   type DynamicToolEntry,
 } from '../tools/dynamic-tool-loader.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
-import { isEnabledToolName } from './tool-name-compat.js';
+import { isEnabledToolName, normalizeToolNameForEnablement } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
@@ -920,7 +920,7 @@ export function createStreamUpstreamRouteChunk(
   };
 }
 
-function buildRouteOnlyUpstreamSummary(
+export function buildRouteOnlyUpstreamSummary(
   route: ModelRouteConfig,
   stopReason: UpstreamStreamSummary['stopReason'],
 ): UpstreamStreamSummary {
@@ -1600,9 +1600,13 @@ export async function executeToolCalls(input: {
     }
 
     const normalizedInputText = toolCall.inputText.trim();
+    // Canonicalize once so every pre-dispatch guard/injection/reminder keys off
+    // the resolved tool identity (`functions.write` / `Write` / `workspace_write_file`
+    // all resolve to `write`) instead of the raw model-emitted name.
+    const canonicalToolName = normalizeToolNameForEnablement(toolCall.toolName);
     recordTaskToolCallOrThrow(
       input.taskRuntimeGuardContext,
-      toolCall.toolName,
+      canonicalToolName,
       normalizedInputText,
     );
     const parsedInput = parseToolInput(toolCall.inputText);
@@ -1621,7 +1625,7 @@ export async function executeToolCalls(input: {
       input.workspaceRoot ?? workingDirectory ?? resolveUnboundSessionWorkspaceFallback();
     const prometheusGuard = checkPrometheusToolGuard({
       agentId: currentAgentId,
-      toolName: toolCall.toolName,
+      toolName: canonicalToolName,
       filePath: (parsedInput['filePath'] ??
         parsedInput['path'] ??
         parsedInput['file'] ??
@@ -1639,7 +1643,7 @@ export async function executeToolCalls(input: {
       // Orchestrator agents must delegate, not implement directly.
       const atlasGuard = checkAtlasGuard({
         agentId: currentAgentId,
-        toolName: toolCall.toolName,
+        toolName: canonicalToolName,
         filePath: (parsedInput['filePath'] ??
           parsedInput['path'] ??
           parsedInput['file'] ??
@@ -1660,7 +1664,7 @@ export async function executeToolCalls(input: {
       // Sisyphus Junior notepad directive (oh-my-opencode sisyphus-junior-notepad pattern):
       // When orchestrator delegates tasks, inject notepad location and plan read-only directive.
       if (
-        (toolCall.toolName === 'task' || toolCall.toolName === 'delegate_task') &&
+        (canonicalToolName === 'task' || canonicalToolName === 'delegate_task') &&
         typeof parsedInput['prompt'] === 'string' &&
         shouldInjectNotepadDirective(currentAgentId, parsedInput['prompt'])
       ) {
@@ -1669,10 +1673,7 @@ export async function executeToolCalls(input: {
 
       // Non-interactive env (oh-my-opencode non-interactive-env pattern):
       // Prepend env vars to git commands in non-interactive environments.
-      if (
-        toolCall.toolName.toLowerCase() === 'bash' &&
-        typeof parsedInput['command'] === 'string'
-      ) {
+      if (canonicalToolName === 'bash' && typeof parsedInput['command'] === 'string') {
         const niCheck = checkNonInteractiveBash(parsedInput['command']);
         if (niCheck.modifiedCommand) {
           parsedInput['command'] = niCheck.modifiedCommand;
@@ -1693,12 +1694,12 @@ export async function executeToolCalls(input: {
     // even though each retry is a different attempt to fix the schema).
     const willDispatch =
       !prometheusGuard.blocked &&
-      !isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput) &&
-      isEnabledToolName(toolCall.toolName, input.enabledToolNames);
+      !isMissingRequiredToolArguments(canonicalToolName, normalizedInputText, parsedInput) &&
+      isEnabledToolName(canonicalToolName, input.enabledToolNames);
     const isDoomLoop =
-      willDispatch && peekDoomLoop(input.sessionId, toolCall.toolName, parsedInput);
+      willDispatch && peekDoomLoop(input.sessionId, canonicalToolName, parsedInput);
     if (willDispatch && !isDoomLoop) {
-      recordDoomLoopEntry(input.sessionId, toolCall.toolName, parsedInput);
+      recordDoomLoopEntry(input.sessionId, canonicalToolName, parsedInput);
     }
 
     const result = isDoomLoop
@@ -1717,7 +1718,7 @@ export async function executeToolCalls(input: {
             isError: true,
             durationMs: 0,
           }
-        : isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput)
+        : isMissingRequiredToolArguments(canonicalToolName, normalizedInputText, parsedInput)
           ? {
               toolCallId,
               toolName: toolCall.toolName,
@@ -1725,7 +1726,7 @@ export async function executeToolCalls(input: {
               isError: true,
               durationMs: 0,
             }
-          : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
+          : isEnabledToolName(canonicalToolName, input.enabledToolNames)
             ? await sandbox.execute(request, input.signal, input.sessionId, {
                 ...input.executionContext,
                 onBatchProgress: (subTools, completedCount, totalCount) => {
@@ -1752,14 +1753,13 @@ export async function executeToolCalls(input: {
     // Agent usage reminder (oh-my-opencode agentUsageReminder pattern):
     // When search/read tools are called directly without using task delegation,
     // append a reminder to encourage using task tools for better results.
-    const toolLower = toolCall.toolName.toLowerCase();
-    if (AGENT_DELEGATION_TOOLS.has(toolLower)) {
+    if (AGENT_DELEGATION_TOOLS.has(canonicalToolName)) {
       taskToolUsedInTurn = true;
     } else if (
       !result.isError &&
       !taskToolUsedInTurn &&
       agentUsageReminderCount < MAX_AGENT_USAGE_REMINDERS &&
-      SEARCH_READ_TOOLS.has(toolLower) &&
+      SEARCH_READ_TOOLS.has(canonicalToolName) &&
       !(typeof result.output === 'string' && /no files? found/i.test(result.output.trim()))
     ) {
       if (typeof result.output === 'string') {
@@ -1782,7 +1782,7 @@ export async function executeToolCalls(input: {
     // retry guidance so the LLM can self-correct on the next turn.
     if (
       typeof result.output === 'string' &&
-      (toolCall.toolName === 'task' || toolCall.toolName === 'delegate_task')
+      (canonicalToolName === 'task' || canonicalToolName === 'delegate_task')
     ) {
       const delegateError = detectDelegateTaskError(result.output);
       if (delegateError) {
@@ -1796,7 +1796,7 @@ export async function executeToolCalls(input: {
     if (typeof result.output === 'string' && ORCHESTRATOR_AGENT_IDS.has(currentAgentId)) {
       const atlasReminder = await buildAtlasPostProcessReminder({
         agentId: currentAgentId,
-        toolName: toolCall.toolName,
+        toolName: canonicalToolName,
         sessionId: input.sessionId,
         workspaceRoot,
       });
@@ -3089,6 +3089,8 @@ export async function handleStreamRequest(input: {
           emitChunk({
             type: 'done',
             stopReason: 'tool_permission',
+            // 权限暂停也必须携带 upstreamSummary，否则前端会沿用上一轮的终态标签（如「已停止」）。
+            upstreamSummary: buildRouteOnlyUpstreamSummary(route, 'tool_permission'),
             ...createRunEventMeta(runId, eventSequence),
           });
           setPersistedSessionStateStatus({

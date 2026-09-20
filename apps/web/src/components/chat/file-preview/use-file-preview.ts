@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
+import type { WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { useUIStateStore, useWorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
+import type { WorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
 import { getFilePreviewKind, isNonTextPreviewKind } from '../../../utils/file/file-preview.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
 import { resolveBareFilename } from './resolve-bare-filename.js';
@@ -21,9 +23,22 @@ const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, { content: string; ts: number }>();
 const inflight = new Map<string, Promise<string>>();
 
-/** Drop a path from the cache (used when an edit is observed). */
+/**
+ * 缓存键带身份命名空间：本地与远端工作区可能给出同形路径
+ * （如 `/home/x/a.ts`），不隔离会读到另一侧的内容。
+ */
+function previewCacheKey(identity: WorkspaceReadIdentity, path: string): string {
+  const identityKey = identity.sessionId ?? identity.sshConnectionId ?? 'local';
+  return `${identityKey}::${path}`;
+}
+
+/** Drop a path from the cache across every identity namespace (used when an edit is observed). */
 export function invalidateFilePreviewCache(path: string): void {
-  cache.delete(path);
+  for (const key of [...cache.keys()]) {
+    if (key.endsWith(`::${path}`)) {
+      cache.delete(key);
+    }
+  }
 }
 
 async function fetchFileContent(
@@ -31,28 +46,35 @@ async function fetchFileContent(
   token: string,
   path: string,
   workspaceRoot: string | null,
+  identity: WorkspaceReadIdentity,
 ): Promise<string> {
-  const cached = cache.get(path);
+  const key = previewCacheKey(identity, path);
+  const cached = cache.get(key);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return cached.content;
   }
-  const existing = inflight.get(path);
+  const existing = inflight.get(key);
   if (existing) return existing;
 
   const promise = (async () => {
     try {
-      const readOptions: { workspaceRoot?: string } = {};
+      const readOptions: WorkspaceFileReadOptions = {};
       if (workspaceRoot && workspaceRoot.trim().length > 0) {
         readOptions.workspaceRoot = workspaceRoot;
       }
+      if (identity.sessionId) {
+        readOptions.sessionId = identity.sessionId;
+      } else if (identity.sshConnectionId) {
+        readOptions.sshConnectionId = identity.sshConnectionId;
+      }
       const data = await createWorkspaceClient(gatewayUrl).readFile(token, path, readOptions);
-      cache.set(path, { content: data.content, ts: Date.now() });
+      cache.set(key, { content: data.content, ts: Date.now() });
       return data.content;
     } finally {
-      inflight.delete(path);
+      inflight.delete(key);
     }
   })();
-  inflight.set(path, promise);
+  inflight.set(key, promise);
   return promise;
 }
 
@@ -88,6 +110,7 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const workspaceRoot = useActiveWorkspaceRoot();
+  const identity = useWorkspaceReadIdentity();
   const [state, setState] = useState<FilePreviewState>({ status: 'loading' });
   const [retryTick, setRetryTick] = useState(0);
   const lastSuccessfulSnippetsRef = useRef<Map<string, FileSnippet>>(new Map());
@@ -114,6 +137,7 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
           token,
           workspaceRoot,
           rawPath: path,
+          identity,
         });
         // Binary file kinds (Office docs, PDFs, archives) — surface
         // a "binary, no text preview" message instead of fetching
@@ -128,7 +152,13 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
           });
           return;
         }
-        const content = await fetchFileContent(gatewayUrl, token, resolvedPath, workspaceRoot);
+        const content = await fetchFileContent(
+          gatewayUrl,
+          token,
+          resolvedPath,
+          workspaceRoot,
+          identity,
+        );
         if (cancelled) return;
         const snippet = extractSnippet(content, line);
         lastSuccessfulSnippetsRef.current.set(resolvedPath, snippet);
@@ -150,7 +180,7 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
     return () => {
       cancelled = true;
     };
-  }, [path, line, token, gatewayUrl, workspaceRoot, retryTick]);
+  }, [path, line, token, gatewayUrl, workspaceRoot, identity, retryTick]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

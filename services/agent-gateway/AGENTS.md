@@ -84,7 +84,8 @@ DESKTOP_AUTOMATION=         # 1 = 桌面自动化工具；同时兼容开启浏�
 ## 常用命令
 
 ```bash
-pnpm --filter @openAwork/agent-gateway dev          # tsx watch 热重载
+pnpm --filter @openAwork/agent-gateway dev          # bun --watch 热重载（真 PTY）
+pnpm --filter @openAwork/agent-gateway dev:node     # tsx watch 热重载（Node 运行时 / 无 PTY 兜底）
 pnpm --filter @openAwork/agent-gateway build        # tsc 编译
 pnpm --filter @openAwork/agent-gateway build:binary # bun 编译 → Tauri sidecar 二进制
 pnpm --filter @openAwork/agent-gateway test         # 单测 + verification 验收脚本
@@ -114,7 +115,7 @@ pnpm --filter @openAwork/agent-gateway run test:task-tool    # 仅跑 task 默�
 
 ## 禁止事项
 
-- 禁止本地开发使用 `build` 二进制，应使用 `dev`（tsx watch）。
+- 禁止本地开发使用 `build` 二进制，应使用 `dev`（bun --watch，可获真 PTY）；需要 Node 运行时则用 `dev:node`（tsx watch，显式管道降级）。
 - 禁止在 `db.ts` 外添加同步阻塞代码——Fastify 是异步框架。
 - 新增渠道必须完整实现 `MessagingChannelService` 接口。
 - 禁止从 `dist/` 导入——`@openAwork/*` 包使用 `workspace:*`。

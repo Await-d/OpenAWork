@@ -74,6 +74,17 @@ export function InteractiveTerminalView({
         aria-label="终端输入区"
         onClick={session.focusTerminal}
       />
+      {/* 非交互后端（未启用 PTY）：输入在 hook 层被拦截，这里给出一条常驻说明。
+          浮层不进文档流，`.terminal-surface` 的 fit 测量口径不受影响。 */}
+      {session.interactive ? null : (
+        <div
+          className="terminal-notice terminal-input-disabled-banner"
+          role="status"
+          data-testid="terminal-input-disabled-banner"
+        >
+          当前网关运行时不支持交互式终端（未启用 PTY），输入已禁用
+        </div>
+      )}
       {/* 搜索条在 375px 下会占满顶部，重连提示这时让位，避免两块浮层相撞。 */}
       {streamHint && !session.searchOpen ? (
         <span className="terminal-stream-chip" role="status" data-testid="terminal-stream-chip">

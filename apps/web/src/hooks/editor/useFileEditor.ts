@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { useUIStateStore, useWorkspaceReadIdentity } from '../../stores/ui/uiState.js';
 import { resolveBareFilename } from '../../components/chat/file-preview/resolve-bare-filename.js';
 import { getFilePreviewKind, isBinaryPreviewKind } from '../../utils/file/file-preview.js';
 import { loadPreviewContent } from '../../utils/file/load-preview-content.js';
@@ -95,6 +95,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+  const readIdentity = useWorkspaceReadIdentity();
 
   const persistenceWorkspaceScope = uiWorkspaceScope ?? workspacePath ?? null;
   const wsKey = workspaceKey(persistenceWorkspaceScope);
@@ -222,6 +223,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         token: token ?? '',
         workspaceRoot: workspacePath ?? null,
         rawPath: path,
+        identity: readIdentity,
       });
       // If resolution gave us a path we already have open, just activate it.
       const existingResolved = openFiles.find((f) => f.path === resolvedPath);
@@ -256,6 +258,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
           token: token ?? '',
           path: resolvedPath,
           workspaceRoot: workspacePath ?? null,
+          identity: readIdentity,
         });
         const name = resolvedPath.split('/').pop() ?? resolvedPath;
         const file: OpenFile = {
@@ -275,7 +278,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         setLoading(false);
       }
     },
-    [openFiles, token, workspaceClient, workspacePath, setActiveFilePath],
+    [openFiles, readIdentity, token, workspaceClient, workspacePath, setActiveFilePath],
   );
 
   // workspace 切换或 persistedPaths 变化时,把 persisted 路径加载成 openFiles。
@@ -305,6 +308,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
             token: token ?? '',
             path,
             workspaceRoot: workspacePath ?? null,
+            identity: readIdentity,
           });
           loaded.push({
             path,
@@ -330,6 +334,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
     hasInvalidPersistedPaths,
     restorablePaths,
     openFiles.length,
+    readIdentity,
     token,
     workspaceClient,
     workspacePath,
@@ -393,6 +398,11 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
     async (path: string) => {
       const file = openFiles.find((f) => f.path === path);
       if (!file) return;
+      // SSH 远端工作区的写回尚未打通：客户端兜底拦截，避免把本地路径写请求发给网关。
+      if (readIdentity.remote) {
+        setSaveError('SSH 远程会话暂不支持在工作区内保存文件。');
+        return;
+      }
       setSaveError(null);
       try {
         await workspaceClient.writeFile(token ?? '', path, file.content);
@@ -403,7 +413,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         setSaveError(err instanceof Error ? err.message : '保存失败');
       }
     },
-    [openFiles, token, workspaceClient],
+    [openFiles, readIdentity, token, workspaceClient],
   );
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath) ?? null;

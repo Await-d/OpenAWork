@@ -45,6 +45,9 @@ export interface ComposerQueueOptions {
     value: QueuedComposerMessage[] | ((prev: QueuedComposerMessage[]) => QueuedComposerMessage[]),
   ) => void;
   queuedComposerScope: string | null;
+  queuedComposerScopeRef: React.RefObject<string | null>;
+  queueHydratingRef: React.RefObject<boolean>;
+  queueDeletedWhileHydratingRef: React.RefObject<Set<string>>;
   setComposerMenu: (
     value:
       ComposerMenuState | null | ((prev: ComposerMenuState | null) => ComposerMenuState | null),
@@ -80,6 +83,9 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
     queuedComposerMessages,
     setQueuedComposerMessages,
     queuedComposerScope,
+    queuedComposerScopeRef,
+    queueHydratingRef,
+    queueDeletedWhileHydratingRef,
     setComposerMenu,
     setStreamError,
     textareaRef,
@@ -157,11 +163,13 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
           scope: queuedComposerScope,
         });
         if (!persisted) {
-          setQueuedComposerMessages((previous) =>
-            previous.map((item) =>
-              item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
-            ),
-          );
+          if (queuedComposerScope === queuedComposerScopeRef.current) {
+            setQueuedComposerMessages((previous) =>
+              previous.map((item) =>
+                item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
+              ),
+            );
+          }
         }
       }
       return true;
@@ -172,6 +180,7 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
       clearComposerDraft,
       input,
       queuedComposerScope,
+      queuedComposerScopeRef,
       setQueuedComposerMessages,
     ],
   );
@@ -181,9 +190,17 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
       if (queuedComposerScope) {
         void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
       }
+      if (queueHydratingRef.current) {
+        queueDeletedWhileHydratingRef.current.add(messageId);
+      }
       setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
     },
-    [queuedComposerScope, setQueuedComposerMessages],
+    [
+      queuedComposerScope,
+      queueDeletedWhileHydratingRef,
+      queueHydratingRef,
+      setQueuedComposerMessages,
+    ],
   );
 
   const restoreQueuedComposerMessage = useCallback(
@@ -193,6 +210,9 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
 
       if (queuedComposerScope) {
         void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
+      }
+      if (queueHydratingRef.current) {
+        queueDeletedWhileHydratingRef.current.add(messageId);
       }
       setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
       setInput((previous) =>
@@ -213,6 +233,8 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
     [
       queuedComposerMessages,
       queuedComposerScope,
+      queueDeletedWhileHydratingRef,
+      queueHydratingRef,
       setInput,
       setAttachedFiles,
       setAttachmentItems,

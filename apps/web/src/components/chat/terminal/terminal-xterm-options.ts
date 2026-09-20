@@ -41,19 +41,39 @@ export interface TerminalRuntime {
   disposeExtras: () => void;
 }
 
-export function createTerminalOptions(): ITerminalOptions {
+export interface TerminalOptionsInput {
+  /**
+   * 是否把裸 `\n` 改写成 `\r\n`。
+   *
+   * 交互式 PTY（raw-mode TUI）必须传 `false`：改写会破坏全屏程序的
+   * 光标定位，表现为「输入的文字和光标/渲染位置对不上」。缺省 `true`
+   * 保留 pipe 后端的历史行为。
+   */
+  convertEol?: boolean;
+}
+
+export function createTerminalOptions(opts: TerminalOptionsInput = {}): ITerminalOptions {
   return {
     cursorBlink: true,
     fontSize: 12,
     fontFamily: TERMINAL_FONT_FAMILY,
     // Unicode11Addon 的 activeVersion 属于 proposed API，必须显式放行。
     allowProposedApi: true,
-    convertEol: true,
+    convertEol: opts.convertEol ?? true,
     scrollback: TERMINAL_SCROLLBACK_LINES,
     // 右键选中单词（VS Code 同款手感）；我们仍会用自己的菜单接管右键弹层。
     rightClickSelectsWord: true,
     theme: readTerminalTheme(createDocumentThemeVarReader()),
   };
+}
+
+/**
+ * `fit()` 只改网格尺寸，WebGL renderer 不会自己重绘画布 —— 不刷新的话
+ * 画布会停在旧尺寸，文字/光标与真实网格错位。零/负行（隐藏容器）跳过。
+ */
+export function refreshTerminal(terminal: Terminal): void {
+  if (terminal.rows <= 0) return;
+  terminal.refresh(0, terminal.rows - 1);
 }
 
 /** 兜底路径上的回收：addon 可能刚构造出来就失败，`dispose` 未必可用。 */
@@ -96,8 +116,11 @@ export function attachWebglRenderer(terminal: Terminal): () => void {
 }
 
 /** 构造并装配完整终端（fit + search + web-links + unicode11 + webgl）。 */
-export function createInteractiveTerminal(container: HTMLElement): TerminalRuntime {
-  const terminal = new Terminal(createTerminalOptions());
+export function createInteractiveTerminal(
+  container: HTMLElement,
+  opts: TerminalOptionsInput = {},
+): TerminalRuntime {
+  const terminal = new Terminal(createTerminalOptions(opts));
   const fitAddon = new FitAddon();
   const searchAddon = new SearchAddon();
 

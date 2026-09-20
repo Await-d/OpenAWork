@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
@@ -86,8 +86,8 @@ describe('InlineToolCall', () => {
     expect(screen.getByTestId('inline-output-preview')).toBeTruthy();
   });
 
-  it('运行期间自动展开的详情在完成后按默认折叠设置收起', () => {
-    const view = render(
+  it('运行期间不再自动展开，点击后才展示详情', () => {
+    render(
       <InlineToolCall
         toolName="skill"
         input={{ skillId: 'frontend', prompt: '整理展示逻辑' }}
@@ -96,17 +96,12 @@ describe('InlineToolCall', () => {
       />,
     );
 
-    expect(screen.getByTestId('inline-input-preview')).toBeTruthy();
-    view.rerender(
-      <InlineToolCall
-        toolName="skill"
-        input={{ skillId: 'frontend', prompt: '整理展示逻辑' }}
-        output={{ ok: true }}
-        status="completed"
-      />,
-    );
-
     expect(screen.queryByTestId('inline-input-preview')).toBeNull();
     expect(screen.queryByTestId('inline-output-preview')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(screen.getByTestId('inline-input-preview')).toBeTruthy();
+    expect(screen.getByTestId('inline-output-preview')).toBeTruthy();
   });
 });

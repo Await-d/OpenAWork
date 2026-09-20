@@ -367,7 +367,7 @@ function decodeRemoteFilePreview(preview: SSHFilePreview): string {
   return preview.content;
 }
 
-function isRemoteNotFoundError(error: unknown): boolean {
+export function isRemoteNotFoundError(error: unknown): boolean {
   const code = (error as { code?: unknown } | null | undefined)?.code;
   if (code === 2 || code === 'ENOENT' || code === 'SSH_FX_NO_SUCH_FILE') return true;
   const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';

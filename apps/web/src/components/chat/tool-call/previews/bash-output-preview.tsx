@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { CopyBtn } from '../shared/copy-btn.js';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /**
  * Bash 命令输出专门预览组件
@@ -43,6 +44,8 @@ export function BashOutputPreview({
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
 
   const hasStdout = data.stdout && data.stdout.length > 0;
   const hasStderr = data.stderr && data.stderr.length > 0;
@@ -57,7 +60,7 @@ export function BashOutputPreview({
 
   const lines = fullOutput.split('\n');
   const shouldCollapse = lines.length > MAX_LINES;
-  const displayLines = expanded || !shouldCollapse ? lines : lines.slice(0, MAX_LINES);
+  const displayLines = effectiveExpanded || !shouldCollapse ? lines : lines.slice(0, MAX_LINES);
 
   // 检测错误关键词
   const hasErrors = /error|failed|exception|fatal/i.test(fullOutput);
@@ -86,7 +89,7 @@ export function BashOutputPreview({
       <div className="bash-output-content">
         {hasStdout && data.stdout && (
           <pre className="bash-output-stdout">
-            {expanded ? data.stdout : displayLines.join('\n')}
+            {effectiveExpanded ? data.stdout : displayLines.join('\n')}
           </pre>
         )}
         {hasStderr && data.stderr && (
@@ -98,9 +101,9 @@ export function BashOutputPreview({
         )}
       </div>
 
-      {shouldCollapse && (
+      {shouldCollapse && !isInsideExpandedCard && (
         <button type="button" className="bash-output-toggle" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `展开全部 (${lines.length} 行)`}
+          {effectiveExpanded ? '收起' : `展开全部 (${lines.length} 行)`}
         </button>
       )}
     </div>

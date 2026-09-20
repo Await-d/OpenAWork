@@ -20,7 +20,7 @@ describe('listSessionTerminals', () => {
     vi.unstubAllGlobals();
   });
 
-  it('list 载荷原样透传 backend / supportsResize（缺失时保持 undefined）', async () => {
+  it('list 载荷原样透传 backend / supportsResize / interactive（缺失时保持 undefined）', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -40,6 +40,7 @@ describe('listSessionTerminals', () => {
                 outputTail: '',
                 backend: 'pty',
                 supportsResize: true,
+                interactive: true,
               },
               {
                 terminalId: 'term_legacy',
@@ -69,9 +70,11 @@ describe('listSessionTerminals', () => {
 
     expect(result.terminals[0]?.backend).toBe('pty');
     expect(result.terminals[0]?.supportsResize).toBe(true);
+    expect(result.terminals[0]?.interactive).toBe(true);
     // 旧网关不带能力字段：消费方按「未知 = 维持原行为」处理，不能被解析层改写成 false。
     expect(result.terminals[1]?.backend).toBeUndefined();
     expect(result.terminals[1]?.supportsResize).toBeUndefined();
+    expect(result.terminals[1]?.interactive).toBeUndefined();
   });
 });
 
@@ -106,6 +109,19 @@ describe('parseTerminalSnapshotPayload', () => {
     expect(parsed.data).toBe('legacy tail');
     expect(parsed.seq).toBe(0);
     expect(parsed.outputBytesTotal).toBe(7);
+  });
+
+  it('interactive 仅在载荷里是布尔值时写入，缺省 / 非法值不写入', () => {
+    const withFlag = parseTerminalSnapshotPayload({ seq: 1, interactive: true }, 'term');
+    expect(withFlag.interactive).toBe(true);
+    expect(parseTerminalSnapshotPayload({ seq: 1, interactive: false }, 'term').interactive).toBe(
+      false,
+    );
+    // 缺省不能变成 false：旧后端会被消费方误判成非交互。
+    expect(parseTerminalSnapshotPayload({ seq: 1 }, 'term')).not.toHaveProperty('interactive');
+    expect(
+      parseTerminalSnapshotPayload({ seq: 1, interactive: 'yes' }, 'term').interactive,
+    ).toBeUndefined();
   });
 
   it('缺失 terminalId 时使用事件绑定的兜底 id', () => {

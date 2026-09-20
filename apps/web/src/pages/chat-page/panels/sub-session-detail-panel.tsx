@@ -25,6 +25,7 @@ import {
 import { useSubSessionDetail } from '../hooks/use-sub-session-detail.js';
 import { mergeOptimisticUserMessage } from './sub-session-message-state.js';
 import { SubSessionFailureBanner } from './SubSessionFailureBanner.js';
+import { aggregateSubAgentTask, resolveSubAgentRunStatus } from './sub-agent-status.js';
 import type { TaskToolRuntimeLookup } from '../conversation/render/task-tool-runtime.js';
 import { requestCurrentSessionRefresh } from '../../../utils/session/session-list-events.js';
 
@@ -41,6 +42,7 @@ function formatTaskStatus(status: string | undefined): string {
   if (status === 'completed') return '已完成';
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
+  if (status === 'ended') return '已结束';
   return '待执行';
 }
 
@@ -69,20 +71,19 @@ function getTaskStatusStyle(status: string | undefined): React.CSSProperties {
     };
   }
 
+  if (status === 'ended') {
+    return {
+      background: 'var(--bg-overlay)',
+      border: '1px solid var(--border-subtle)',
+      color: 'var(--fg-muted)',
+    };
+  }
+
   return {
     background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
     border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-subtle))',
     color: 'var(--warning)',
   };
-}
-
-function getHeadlineStatus(tasks: AssistantTraceToolCall[] | { status?: string }[]): string {
-  if (tasks.some((task) => task.status === 'running')) return 'running';
-  if (tasks.some((task) => task.status === 'failed')) return 'failed';
-  if (tasks.some((task) => task.status === 'pending')) return 'pending';
-  if (tasks.some((task) => task.status === 'completed')) return 'completed';
-  if (tasks.some((task) => task.status === 'cancelled')) return 'cancelled';
-  return 'pending';
 }
 
 function compactSessionId(sessionId: string): string {
@@ -255,15 +256,19 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     streaming,
   ]);
 
-  const headlineStatus = useMemo(() => getHeadlineStatus(tasks), [tasks]);
+  const resolvedChildStatus = useMemo(
+    () =>
+      resolveSubAgentRunStatus({
+        childStateStatus: session?.state_status,
+        task: aggregateSubAgentTask(tasks.filter((task) => task.sessionId === childSessionId)),
+        internalTasks: tasks.filter((task) => task.sessionId !== childSessionId),
+      }),
+    [childSessionId, session?.state_status, tasks],
+  );
   const currentTaskSelection = useMemo(
     () =>
       tasks
-        .filter(
-          (task) =>
-            task.sessionId === childSessionId &&
-            (task.status === 'pending' || task.status === 'running'),
-        )
+        .filter((task) => task.sessionId === childSessionId && task.status === 'running')
         .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null,
     [childSessionId, tasks],
   );
@@ -271,7 +276,8 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     () => parseModelSelectionFromMetadataJson(session?.metadata_json),
     [session?.metadata_json],
   );
-  const isChildSessionBusy = streaming || session?.state_status === 'running';
+  const isChildSessionPaused = resolvedChildStatus === 'paused';
+  const isChildSessionBusy = streaming || isChildSessionPaused || resolvedChildStatus === 'running';
   const runningTaskCount = useMemo(
     () => tasks.filter((task) => task.status === 'running').length,
     [tasks],
@@ -552,10 +558,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               fontSize: 9,
               fontWeight: 700,
               flexShrink: 0,
-              ...getTaskStatusStyle(headlineStatus),
+              ...getTaskStatusStyle(resolvedChildStatus),
             }}
           >
-            {formatTaskStatus(headlineStatus)}
+            {formatTaskStatus(resolvedChildStatus)}
           </span>
         </div>
         <div
@@ -1004,7 +1010,11 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             }}
             rows={1}
             placeholder={
-              isChildSessionBusy ? '子代理运行中…' : '发送消息…（Enter 发送，Shift+Enter 换行）'
+              isChildSessionPaused
+                ? '等待处理…'
+                : isChildSessionBusy
+                  ? '子代理运行中…'
+                  : '发送消息…（Enter 发送，Shift+Enter 换行）'
             }
             style={{
               width: '100%',
@@ -1042,9 +1052,11 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             >
               {cancellingTask
                 ? '正在停止…'
-                : isChildSessionBusy
-                  ? '子代理运行中 · 可先追加指令'
-                  : 'Enter 发送'}
+                : isChildSessionPaused
+                  ? '等待处理…'
+                  : isChildSessionBusy
+                    ? '子代理运行中 · 可先追加指令'
+                    : 'Enter 发送'}
             </span>
             <button
               type="button"

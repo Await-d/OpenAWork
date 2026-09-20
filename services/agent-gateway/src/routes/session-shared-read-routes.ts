@@ -55,6 +55,7 @@ import { type ApprovedPermissionResumePayload } from './stream.js';
 import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
+import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
 import { resolvePermissionCategory } from '@openAwork/agent-core';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
@@ -634,6 +635,14 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
 
       if (body.decision === 'permanent') {
         for (const pattern of alwaysPatterns) {
+          // Durable, user-scoped grant (owner of the shared session) so the
+          // permanent approval survives this session and applies to the
+          // owner's newly created sessions.
+          upsertPermissionGrant({
+            userId: sharedAccess.ownerUserId,
+            toolName: permissionCategory,
+            scope: pattern,
+          });
           persistWorkspacePermanentPermission({
             sessionId,
             toolName: permissionCategory,

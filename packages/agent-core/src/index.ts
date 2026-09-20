@@ -486,6 +486,7 @@ export {
   type SSHConnection,
   type ExecResult,
   type SSHExecOptions,
+  type SSHFileBytes,
   type SSHFileEntry,
   type SSHFilePreview,
   type SSHConnectionManager,

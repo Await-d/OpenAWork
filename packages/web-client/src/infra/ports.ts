@@ -38,7 +38,7 @@ export interface ListeningPortView {
   source: ListeningPortSource;
   /**
    * 该监听端口的 ESTABLISHED 连接数；`null` = 当前策略无法统计（非 linux/procfs），
-   * **不是 0**。非 null 时也是网关最近一次快照（≤5s 缓存，与轮询间隔同源）的时点值，
+   * **不是 0**。非 null 时也是网关最近一次快照（≤6s 服务端缓存）的时点值，
    * 不是实时值 —— UI 不得据此宣称「当前有 N 条连接」。
    */
   establishedConnections: number | null;

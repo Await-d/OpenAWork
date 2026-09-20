@@ -5,6 +5,7 @@ import {
 } from './ssh-terminal.js';
 import type { ClientChannel } from 'ssh2';
 import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { resolveSshConnectOptions, type SSHConnectOptions } from './ssh-connect-options.js';
 import { SSHConnectionError, type SSHConnectionEvent } from './ssh-connection-events.js';
 
@@ -121,6 +122,14 @@ export interface SSHFilePreview {
   truncated: boolean;
 }
 
+/** 远端文件的原始字节读取结果（二进制安全，供预览下载 / 图片 / Office 使用）。 */
+export interface SSHFileBytes {
+  data: Buffer;
+  size: number;
+  truncated: boolean;
+  isDirectory: boolean;
+}
+
 export interface SSHConnectionManager {
   addConnection(conn: SSHConnection): void;
   getConnection(id: string): SSHConnection | undefined;
@@ -130,6 +139,11 @@ export interface SSHConnectionManager {
   openTerminal?(id: string, options: SSHTerminalOptions): Promise<ClientChannel>;
   execCommand(id: string, command: string, options?: SSHExecOptions): Promise<ExecResult>;
   readFile(id: string, remotePath: string): Promise<SSHFilePreview>;
+  readFileBytes(
+    id: string,
+    remotePath: string,
+    options?: { maxBytes?: number },
+  ): Promise<SSHFileBytes>;
   writeFile(id: string, remotePath: string, content: string | Uint8Array): Promise<void>;
   listFiles(id: string, remotePath: string): Promise<SSHFileEntry[]>;
   subscribe?(listener: (event: SSHConnectionEvent) => void): () => void;
@@ -189,7 +203,11 @@ type SFTPWrapper = {
       }>,
     ) => void,
   ) => void;
-  stat?: (path: string, cb: (err: Error | undefined, stats: { size?: number }) => void) => void;
+  stat?: (
+    path: string,
+    cb: (err: Error | undefined, stats: { size?: number; isDirectory?: () => boolean }) => void,
+  ) => void;
+  createReadStream?: (path: string, opts: { start: number; end: number }) => Readable;
 };
 
 type SSH2Module = { Client: new () => SSHClient };
@@ -593,6 +611,80 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
         });
       });
     });
+  }
+
+  async readFileBytes(
+    id: string,
+    remotePath: string,
+    options?: { maxBytes?: number },
+  ): Promise<SSHFileBytes> {
+    const sftp = await this.getSftp(id);
+
+    // 与 readFile 不同：这里既要 size，也要目录标记，且 ENOENT 必须冒泡给
+    // 调用方（路由据此映射 404）。因此 stat 失败直接 reject，不做降级。
+    const stat = await withSftpTimeout<{ size: number; isDirectory: boolean }>(
+      'stat',
+      (resolve, reject) => {
+        if (typeof sftp.stat !== 'function') {
+          reject(new Error('SSH SFTP stat unavailable'));
+          return;
+        }
+        const statFn = sftp.stat.bind(sftp);
+        statFn(remotePath, (err, stats) => {
+          if (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
+            return;
+          }
+          resolve({
+            size: typeof stats?.size === 'number' ? stats.size : 0,
+            isDirectory: stats?.isDirectory?.() === true,
+          });
+        });
+      },
+    );
+
+    if (stat.isDirectory) {
+      return { data: Buffer.alloc(0), size: 0, truncated: false, isDirectory: true };
+    }
+
+    const requestedMax = options?.maxBytes ?? stat.size;
+    const readBytes = Math.min(stat.size, requestedMax);
+    // 未显式指定 maxBytes 时才套用绝对上限（16MB），保持既有超限报错文案。
+    if (options?.maxBytes === undefined) {
+      const absoluteMax = resolveSshReadMaxBytes();
+      if (absoluteMax > 0 && stat.size > absoluteMax) {
+        throw new Error(
+          `SSH file too large to preview: ${stat.size} bytes exceeds limit ${absoluteMax} bytes`,
+        );
+      }
+    }
+
+    if (readBytes === 0) {
+      return {
+        data: Buffer.alloc(0),
+        size: stat.size,
+        truncated: stat.size > 0,
+        isDirectory: false,
+      };
+    }
+
+    const data = await withSftpTimeout<Buffer>('createReadStream', (resolve, reject) => {
+      if (typeof sftp.createReadStream !== 'function') {
+        reject(new Error('SSH SFTP createReadStream unavailable'));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      const stream = sftp.createReadStream(remotePath, { start: 0, end: readBytes - 1 });
+      stream.on('data', (chunk: Buffer) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      stream.on('error', (error: Error) => {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    return { data, size: stat.size, truncated: stat.size > readBytes, isDirectory: false };
   }
 
   async writeFile(id: string, remotePath: string, content: string | Uint8Array): Promise<void> {

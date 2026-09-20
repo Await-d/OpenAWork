@@ -468,7 +468,7 @@ describe('attachActiveStreamSession', () => {
       startedAtMs: 2,
     });
 
-    await expect(resultPromise).resolves.toBe(false);
+    await expect(resultPromise).resolves.toEqual({ status: 'stale' });
     expect(closeExistingTransports).not.toHaveBeenCalled();
     expect(connectEventSource).not.toHaveBeenCalled();
     expect(clearCallbacks).toHaveBeenCalledTimes(1);
@@ -489,7 +489,7 @@ describe('attachActiveStreamSession', () => {
       transport: 'attach-sse',
     };
 
-    const attached = await attachActiveStreamSession({
+    const attachResult = await attachActiveStreamSession({
       callbacks: {
         onDelta: vi.fn(),
         onDone: vi.fn(),
@@ -521,7 +521,7 @@ describe('attachActiveStreamSession', () => {
       token: 'token-test',
     });
 
-    expect(attached).toBe(true);
+    expect(attachResult).toEqual({ status: 'attached' });
     expect(connectEventSource).toHaveBeenCalledWith(
       expect.objectContaining({
         requestedAfterSeq: 7,
@@ -537,6 +537,47 @@ describe('attachActiveStreamSession', () => {
     expect(closeExistingTransports).toHaveBeenCalledTimes(1);
     expect(resetStopRequested).toHaveBeenCalledTimes(1);
     expect(clearCallbacks).not.toHaveBeenCalled();
+  });
+
+  it('网关权威确认无活跃流时清理陈旧快照且不重连', async () => {
+    const connectEventSource = vi.fn(async () => true);
+    const closeExistingTransports = vi.fn();
+    const clearCallbacks = vi.fn();
+    const syncActiveRequest = vi.fn();
+    const existingSnapshot: TestActiveStreamSnapshot = {
+      clientRequestId: 'req-idle',
+      lastSeq: 3,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse',
+    };
+
+    const result = await attachActiveStreamSession({
+      callbacks: { onDelta: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+      clearCallbacks,
+      closeExistingTransports,
+      connectEventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => existingSnapshot,
+      getCurrentEventSource: () => null,
+      hasOpenTransports: () => true,
+      isStopRequested: () => false,
+      resetStopRequested: vi.fn(),
+      sessionId: 'session-1',
+      sessionsClient: {
+        getActiveStream: vi.fn(async () => null),
+      },
+      setCallbacks: vi.fn(),
+      setCurrentEventSource: vi.fn(),
+      syncActiveRequest,
+      token: 'token-test',
+    });
+
+    expect(result).toEqual({ status: 'no_active_stream' });
+    expect(syncActiveRequest).toHaveBeenCalledWith(null);
+    expect(connectEventSource).not.toHaveBeenCalled();
+    expect(closeExistingTransports).not.toHaveBeenCalled();
+    expect(clearCallbacks).toHaveBeenCalledTimes(1);
   });
 });
 

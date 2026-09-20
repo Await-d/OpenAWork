@@ -30,6 +30,7 @@ import {
 } from './stream-runtime.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
 import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
+import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
 import { resolvePermissionCategory } from '@openAwork/agent-core';
 
 const permissionRouteRiskLevelSchema = z.enum(['low', 'medium', 'high']);
@@ -343,6 +344,10 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
                 return parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
               })();
         for (const pattern of alwaysPatterns) {
+          // Durable, user-scoped grant first: this is the source of truth for
+          // cross-session permanent approval and must not depend on the
+          // (best-effort) workspace config file write below.
+          upsertPermissionGrant({ userId: user.sub, toolName: category, scope: pattern });
           try {
             persistWorkspacePermanentPermission({
               sessionId,

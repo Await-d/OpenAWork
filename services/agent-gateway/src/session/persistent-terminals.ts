@@ -1,8 +1,8 @@
 /**
- * Persistent terminal manager — runs long-lived `bash -i` (or PowerShell
- * on Windows) child processes that the user can keep typing into after
- * the agent finished its initial command. Sits next to
- * `bash-tools.ts` (one-shot agent commands) and
+ * Persistent terminal manager — runs long-lived shells (`bash -i` on the PTY
+ * backend, a plain shell on the non-interactive pipe backend, or PowerShell
+ * on Windows) that the user can keep typing into after the agent finished its
+ * initial command. Sits next to `bash-tools.ts` (one-shot agent commands) and
  * `interactive-bash-tools.ts` (tmux-only) but solves a different need:
  * an editor-style integrated terminal.
  *
@@ -29,6 +29,7 @@ import {
   type SessionTerminalRecord,
 } from './session-terminal-registry.js';
 import {
+  detectTerminalBackend,
   spawnTerminalProcess,
   type TerminalProcess,
   type SpawnTerminalProcessInput,
@@ -59,6 +60,14 @@ const persistentByTerminalId = new Map<string, PersistentEntry>();
 /** Initial PTY geometry; the frontend immediately sends a fit-resize. */
 const DEFAULT_TERMINAL_COLS = 80;
 const DEFAULT_TERMINAL_ROWS = 24;
+
+/**
+ * Upper bound on how long `initialCommand` waits for the shell to become
+ * ready. The first output chunk flushes it earlier; a plain non-interactive
+ * shell prints no prompt, so without this fallback the command would never
+ * run on the pipe backend.
+ */
+const INITIAL_COMMAND_READY_TIMEOUT_MS = 150;
 
 /**
  * Per-session cap on concurrently-live persistent terminals. Each spawn holds
@@ -106,14 +115,16 @@ function countLivePersistentTerminals(sessionId: string): number {
   return count;
 }
 
-function getShell(): { shell: string; args: string[] } {
+function getShell(interactive: boolean): { shell: string; args: string[] } {
   const choice = resolveShellChoiceForPlatform(process.platform, process.env);
   if (choice.isPowerShell) {
     return { shell: choice.shell, args: ['-NoLogo', '-NoProfile'] };
   }
-  // Use a non-login interactive shell. We lose .bashrc aliases for
-  // login-only setup but that's a fair trade for predictable behaviour.
-  return { shell: choice.shell, args: ['-i'] };
+  // Interactive backend: a non-login interactive shell (we lose .bashrc
+  // aliases for login-only setup, a fair trade for predictable behaviour).
+  // Non-interactive backend: `-i` would only make the shell *claim* a tty it
+  // does not have, so spawn a plain shell that still reads piped stdin.
+  return { shell: choice.shell, args: interactive ? ['-i'] : [] };
 }
 
 /**
@@ -122,12 +133,15 @@ function getShell(): { shell: string; args: string[] } {
  * allowlist (`shell-profiles.ts`). `resolveShellForSpawn` throws a typed
  * `InvalidShellProfileError` for an unknown id, so spawn is never reached.
  */
-function resolveSpawnShell(shellProfileId: string | undefined): {
+function resolveSpawnShell(
+  shellProfileId: string | undefined,
+  interactive: boolean,
+): {
   shell: string;
   args: string[];
   shellProfileId?: string;
 } {
-  const fallback = getShell();
+  const fallback = getShell(interactive);
   return resolveShellForSpawn({
     ...(shellProfileId !== undefined ? { shellProfileId } : {}),
     platform: process.platform,
@@ -181,21 +195,50 @@ export function spawnPersistentTerminal(
     throw new PersistentTerminalLimitError(input.sessionId, maxPerSession);
   }
 
+  const capabilities = detectTerminalBackend();
   const resolvedShell = input.processFactory
     ? { shell: '(remote default)', args: [], shellProfileId: undefined }
-    : resolveSpawnShell(input.shellProfileId);
+    : resolveSpawnShell(input.shellProfileId, capabilities.interactive);
   const { shell, args } = resolvedShell;
   const abortController = new AbortController();
   const decoder = new StringDecoder('utf8');
+  const initialCommand = input.initialCommand?.trim() ?? '';
   let entry: PersistentEntry | undefined;
 
+  // Shell-ready gate for `initialCommand`: writing it synchronously races the
+  // shell's own startup (and a plain shell may not have consumed any input
+  // yet). Flush on the first output chunk, with a bounded fallback timer for
+  // shells that print no prompt — exactly once, cleared on exit/error.
+  let initialCommandWritten = false;
+  let initialCommandTimer: NodeJS.Timeout | undefined;
+  let terminalProcess: TerminalProcess | undefined;
+
+  const clearInitialCommandTimer = (): void => {
+    if (initialCommandTimer !== undefined) {
+      clearTimeout(initialCommandTimer);
+      initialCommandTimer = undefined;
+    }
+  };
+
+  const flushInitialCommandOnce = (): void => {
+    if (initialCommandWritten || initialCommand.length === 0 || terminalProcess === undefined) {
+      return;
+    }
+    initialCommandWritten = true;
+    clearInitialCommandTimer();
+    // Append a newline so the shell actually executes it.
+    terminalProcess.write(`${initialCommand}\n`);
+  };
+
   const onData = (chunk: Uint8Array): void => {
+    flushInitialCommandOnce();
     if (entry === undefined) return;
     const text = entry.decoder.write(Buffer.from(chunk));
     if (text.length > 0) appendTerminalOutputDelta(entry.terminalId, text);
   };
 
   const onError = (error: Error): void => {
+    clearInitialCommandTimer();
     if (entry === undefined || entry.closed) return;
     entry.closed = true;
     persistentByTerminalId.delete(entry.terminalId);
@@ -207,6 +250,7 @@ export function spawnPersistentTerminal(
   };
 
   const onExit = (code: number | null, signal: string | null): void => {
+    clearInitialCommandTimer();
     if (entry === undefined || entry.closed) return;
     entry.closed = true;
     persistentByTerminalId.delete(entry.terminalId);
@@ -223,13 +267,17 @@ export function spawnPersistentTerminal(
     });
   };
 
-  let terminalProcess: TerminalProcess;
   try {
     terminalProcess = (input.processFactory ?? spawnTerminalProcess)({
       shell,
       args,
       cwd: input.cwd,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        COLUMNS: String(DEFAULT_TERMINAL_COLS),
+        LINES: String(DEFAULT_TERMINAL_ROWS),
+      },
       cols: DEFAULT_TERMINAL_COLS,
       rows: DEFAULT_TERMINAL_ROWS,
       onData,
@@ -246,8 +294,8 @@ export function spawnPersistentTerminal(
       }`,
     );
   }
+  const spawnedProcess = terminalProcess;
 
-  const initialCommand = input.initialCommand?.trim() ?? '';
   const labelCommand =
     initialCommand.length > 0
       ? initialCommand
@@ -270,7 +318,11 @@ export function spawnPersistentTerminal(
       source: input.source,
       shell,
       ...(resolvedShell.shellProfileId ? { shellProfileId: resolvedShell.shellProfileId } : {}),
-      backend: terminalProcess.backend,
+      backend: spawnedProcess.backend,
+      // SSH channels report `pty` (a real remote PTY) even when the local
+      // probe degraded to pipes, so the per-process backend is the honest
+      // source for interactivity.
+      interactive: spawnedProcess.backend === 'pty',
     },
   });
 
@@ -278,7 +330,7 @@ export function spawnPersistentTerminal(
     terminalId: record.terminalId,
     sessionId: input.sessionId,
     userId: input.userId,
-    process: terminalProcess,
+    process: spawnedProcess,
     cwd: input.cwd,
     decoder,
     closed: false,
@@ -289,15 +341,17 @@ export function spawnPersistentTerminal(
   abortController.signal.addEventListener(
     'abort',
     () => {
-      terminalProcess.kill();
+      spawnedProcess.kill();
     },
     { once: true },
   );
-  setTerminalPid(record.terminalId, terminalProcess.pid);
+  setTerminalPid(record.terminalId, spawnedProcess.pid);
 
   if (initialCommand.length > 0) {
-    // Append a newline so the shell actually executes it.
-    terminalProcess.write(`${initialCommand}\n`);
+    initialCommandTimer = setTimeout(() => {
+      initialCommandTimer = undefined;
+      flushInitialCommandOnce();
+    }, INITIAL_COMMAND_READY_TIMEOUT_MS);
   }
 
   return { terminal: record };

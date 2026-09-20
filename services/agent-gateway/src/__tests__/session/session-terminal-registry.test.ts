@@ -484,4 +484,123 @@ describe('terminal output ring buffer and seq', () => {
     expect(snapshot?.data).toBe('abcdefxy');
     expect(snapshot?.seq).toBe(Buffer.byteLength('abcdefxy', 'utf-8'));
   });
+
+  it('forwards only the appended text for a multibyte cumulative extension', async () => {
+    const record = registerProbe();
+    registry.appendTerminalOutput(record.terminalId, '中文');
+    await delay(160);
+    registry.appendTerminalOutput(record.terminalId, '中文abc');
+    await delay(160);
+
+    const chunks = outputChunks();
+    expect(chunks).toHaveLength(2);
+    expect(chunks[chunks.length - 1]?.data).toBe('abc');
+    const joined = chunks.map((chunk) => chunk.data ?? '').join('');
+    expect(joined).toBe('中文abc');
+    expect(joined).not.toContain('\uFFFD');
+
+    const snapshot = registry.getTerminalOutputSnapshot(record.terminalId);
+    expect(snapshot?.data).toBe('中文abc');
+    expect(snapshot?.seq).toBe(Buffer.byteLength('中文abc', 'utf-8'));
+  });
+
+  it('re-sends the whole snapshot when the prefix diverges across a multibyte boundary', async () => {
+    const record = registerProbe();
+    registry.appendTerminalOutput(record.terminalId, 'a');
+    await delay(160);
+    registry.appendTerminalOutput(record.terminalId, '中');
+    await delay(160);
+
+    const chunks = outputChunks();
+    expect(chunks).toHaveLength(2);
+    expect(chunks[chunks.length - 1]?.data).toBe('中');
+    const joined = chunks.map((chunk) => chunk.data ?? '').join('');
+    expect(joined).toBe('a中');
+    expect(joined).not.toContain('\uFFFD');
+
+    const snapshot = registry.getTerminalOutputSnapshot(record.terminalId);
+    expect(snapshot?.data).toBe('a中');
+    expect(snapshot?.seq).toBe(Buffer.byteLength('a中', 'utf-8'));
+  });
+});
+
+describe('subscribeTerminalOutputImmediate', () => {
+  it('fires synchronously per delta with seq === outputBytesTotal and exact appended text', () => {
+    const record = registerProbe();
+    const chunks: RegistryModule.TerminalOutputChunk[] = [];
+    registry.subscribeTerminalOutputImmediate(record.terminalId, (chunk) => chunks.push(chunk));
+
+    registry.appendTerminalOutputDelta(record.terminalId, 'abc');
+    // No timers advanced — the immediate branch must have fired already.
+    expect(chunks).toEqual([{ seq: 3, data: 'abc', outputBytesTotal: 3 }]);
+
+    registry.appendTerminalOutputDelta(record.terminalId, '中');
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]).toEqual({ seq: 3 + 3, data: '中', outputBytesTotal: 6 });
+    // Both transports agree on the cursor: the run-event seq is the same value.
+    expect(chunks[1]?.seq).toBe(registry.getTerminalOutputSnapshot(record.terminalId)?.seq);
+  });
+
+  it('fires the appended text only for the legacy cumulative path', () => {
+    const record = registerProbe();
+    const chunks: RegistryModule.TerminalOutputChunk[] = [];
+    registry.subscribeTerminalOutputImmediate(record.terminalId, (chunk) => chunks.push(chunk));
+
+    registry.appendTerminalOutput(record.terminalId, 'one\n');
+    registry.appendTerminalOutput(record.terminalId, 'one\ntwo\n');
+    expect(chunks.map((chunk) => chunk.data)).toEqual(['one\n', 'two\n']);
+    expect(chunks[1]).toEqual({ seq: 8, data: 'two\n', outputBytesTotal: 8 });
+  });
+
+  it('unsubscribe thunk stops delivery and is idempotent', () => {
+    const record = registerProbe();
+    const chunks: RegistryModule.TerminalOutputChunk[] = [];
+    const unsubscribe = registry.subscribeTerminalOutputImmediate(record.terminalId, (chunk) =>
+      chunks.push(chunk),
+    );
+    registry.appendTerminalOutputDelta(record.terminalId, 'a');
+    unsubscribe();
+    unsubscribe();
+    registry.appendTerminalOutputDelta(record.terminalId, 'b');
+    expect(chunks.map((chunk) => chunk.data)).toEqual(['a']);
+    expect(registry.__immediateOutputListenerCountForTest(record.terminalId)).toBe(0);
+  });
+
+  it('clears listeners when the terminal exits', () => {
+    const record = registerProbe();
+    const chunks: RegistryModule.TerminalOutputChunk[] = [];
+    registry.subscribeTerminalOutputImmediate(record.terminalId, (chunk) => chunks.push(chunk));
+    expect(registry.__immediateOutputListenerCountForTest(record.terminalId)).toBe(1);
+
+    registry.markTerminalExited({ terminalId: record.terminalId, status: 'exited', exitCode: 0 });
+    expect(registry.__immediateOutputListenerCountForTest(record.terminalId)).toBe(0);
+    registry.appendTerminalOutputDelta(record.terminalId, 'late');
+    expect(chunks.map((chunk) => chunk.data)).toEqual([]);
+  });
+
+  it('clears listeners when a closed terminal is deleted and on reset', () => {
+    const deleted = registerProbe('delete-me');
+    registry.subscribeTerminalOutputImmediate(deleted.terminalId, () => undefined);
+    registry.markTerminalExited({ terminalId: deleted.terminalId, status: 'exited', exitCode: 0 });
+    registry.deleteTerminalRecord({ terminalId: deleted.terminalId, userId: USER_ID });
+
+    const leftover = registerProbe('leftover');
+    registry.subscribeTerminalOutputImmediate(leftover.terminalId, () => undefined);
+    expect(registry.__immediateOutputListenerCountForTest()).toBe(1);
+    registry.__resetSessionTerminalsForTest();
+    expect(registry.__immediateOutputListenerCountForTest()).toBe(0);
+  });
+
+  it('isolates a throwing listener so other subscribers still receive the chunk', () => {
+    const record = registerProbe();
+    const received: string[] = [];
+    registry.subscribeTerminalOutputImmediate(record.terminalId, () => {
+      throw new Error('boom');
+    });
+    registry.subscribeTerminalOutputImmediate(record.terminalId, (chunk) =>
+      received.push(chunk.data),
+    );
+    expect(() => registry.appendTerminalOutputDelta(record.terminalId, 'ok')).not.toThrow();
+    expect(received).toEqual(['ok']);
+  });
 });

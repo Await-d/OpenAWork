@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { computeCommonPathPrefix, PathPrefixBadge, StyledPath } from '../shared/path-display.js';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── FilePathListPreview (grep files_with_matches / glob) ── */
 
@@ -34,9 +35,11 @@ export function FilePathListPreview({
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
   const VISIBLE = 30;
   const isLong = paths.length > VISIBLE;
-  const visible = isLong && !expanded ? paths.slice(0, VISIBLE) : paths;
+  const visible = isLong && !effectiveExpanded ? paths.slice(0, VISIBLE) : paths;
   // Hoist the shared root once so each row can drop the repeated prefix —
   // otherwise long monorepo paths spend ~70% of the row on identical text.
   const commonPrefix = useMemo(() => computeCommonPathPrefix(paths), [paths]);
@@ -53,9 +56,9 @@ export function FilePathListPreview({
           </li>
         ))}
       </ul>
-      {isLong && (
+      {isLong && !isInsideExpandedCard && (
         <button type="button" className="tool-output-toggle" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `显示全部 (${paths.length} 个)`}
+          {effectiveExpanded ? '收起' : `显示全部 (${paths.length} 个)`}
         </button>
       )}
     </div>

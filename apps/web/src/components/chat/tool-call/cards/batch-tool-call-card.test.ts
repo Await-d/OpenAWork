@@ -71,4 +71,82 @@ describe('batchSubVisualState', () => {
     // (live-stream correctness — parent fallback only applies to missing data)
     expect(batchSubVisualState(running, 'completed')).toBe('running');
   });
+
+  it('keeps the four existing states unchanged', () => {
+    expect(batchSubVisualState(undefined)).toBe('running');
+    expect(batchSubVisualState({ index: 0, tool: 'bash', status: 'running' })).toBe('running');
+    expect(batchSubVisualState({ index: 0, tool: 'bash', status: 'completed' })).toBe('completed');
+    expect(batchSubVisualState({ index: 0, tool: 'bash', status: 'error' })).toBe('failed');
+    expect(batchSubVisualState({ index: 0, tool: 'edit', status: 'skipped' })).toBe('skipped');
+  });
+});
+
+describe('batchSubVisualState pending-permission classification', () => {
+  const pendingPermissionOutputs = [
+    'Tool "bash" requires approval before it can run. Permission request req-1 has been created. Ask the user to approve it, then retry.',
+    'Tool "bash" is waiting for approval. Permission request req-1 is still pending. Ask the user to approve it, then retry.',
+    '等待审批：bash 需要用户授权后重试',
+  ];
+
+  it.each(pendingPermissionOutputs)('classifies %s as pending', (output) => {
+    const result: BatchSubResultLike = {
+      index: 0,
+      tool: 'bash',
+      status: 'error',
+      isError: true,
+      output,
+    };
+    expect(batchSubVisualState(result)).toBe('pending');
+  });
+
+  it('keeps a plain error output as failed', () => {
+    const result: BatchSubResultLike = {
+      index: 0,
+      tool: 'bash',
+      status: 'error',
+      isError: true,
+      output: 'command not found: pnpm',
+    };
+    expect(batchSubVisualState(result)).toBe('failed');
+  });
+
+  it('does not fire pending detection for non-error results', () => {
+    const completed: BatchSubResultLike = {
+      index: 0,
+      tool: 'bash',
+      status: 'completed',
+      isError: false,
+      output: 'waiting for approval',
+    };
+    const running: BatchSubResultLike = {
+      index: 1,
+      tool: 'bash',
+      status: 'running',
+      output: 'waiting for approval',
+    };
+    expect(batchSubVisualState(completed)).toBe('completed');
+    expect(batchSubVisualState(running)).toBe('running');
+  });
+
+  it('stringifies non-string outputs safely before matching', () => {
+    const structured: BatchSubResultLike = {
+      index: 0,
+      tool: 'bash',
+      status: 'error',
+      isError: true,
+      output: { message: 'requires approval', requestId: 'req-9' },
+    };
+    expect(batchSubVisualState(structured)).toBe('pending');
+
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const circularResult: BatchSubResultLike = {
+      index: 1,
+      tool: 'bash',
+      status: 'error',
+      isError: true,
+      output: circular,
+    };
+    expect(batchSubVisualState(circularResult)).toBe('failed');
+  });
 });

@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { CopyBtn } from '../shared/copy-btn.js';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /**
  * JSON 输出预览组件，带语法高亮
@@ -20,6 +21,9 @@ export function JsonPreview({
 
   const lines = jsonString.split('\n');
   const shouldCollapse = lines.length > maxLines;
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
+  const effectiveExpanded = expanded || isInsideExpandedCard;
 
   return (
     <div className="json-preview">
@@ -27,11 +31,16 @@ export function JsonPreview({
         <span className="json-preview-meta">{lines.length} 行</span>
         <CopyBtn text={jsonString} />
       </div>
-      <div className="json-preview-content" data-collapsed={shouldCollapse && !defaultExpanded}>
+      <div className="json-preview-content" data-collapsed={shouldCollapse && !effectiveExpanded}>
         <pre className="json-preview-code">
           <code dangerouslySetInnerHTML={{ __html: highlightJson(jsonString) }} />
         </pre>
       </div>
+      {shouldCollapse && !isInsideExpandedCard && (
+        <button type="button" className="tool-output-toggle" onClick={() => setExpanded((v) => !v)}>
+          {effectiveExpanded ? '收起' : `展开全部 (${lines.length} 行)`}
+        </button>
+      )}
     </div>
   );
 }

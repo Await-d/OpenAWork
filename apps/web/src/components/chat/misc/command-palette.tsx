@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import fuzzysort from 'fuzzysort';
+import { isWithinTerminalScope } from '../../../utils/terminal-scope.js';
 
 export interface CommandPaletteItem {
   id: string;
@@ -369,6 +370,8 @@ export function useCommandPalette({
     if (!enabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 终端面板内放行：Ctrl/⌘+K 是 xterm 的 clear-buffer，不能被命令面板劫持。
+      if (isWithinTerminalScope(e.target)) return;
       // Cmd+K / Ctrl+K
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();

@@ -30,6 +30,21 @@ import type { UnifiedComposerFeatures, UnifiedComposerSubmitPayload } from './Un
 import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/conversation/render/image-edit-reference-artifacts.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 
+/**
+ * 共享的空队列常量：内存队列在"不属于当前 scope"时必须复用同一引用，
+ * 否则每次 render 产生的全新空数组会让 flush / 持久化 effect 空转。
+ */
+const EMPTY_QUEUED_COMPOSER_MESSAGES: QueuedComposerMessage[] = [];
+
+/**
+ * 内存待发队列始终携带它所属的 scope，避免切换会话时与 `queuedComposerScope`
+ * 脱节——否则旧会话的队列会在异步水合完成前被 flush 到新会话或写入新 scope。
+ */
+interface QueuedComposerState {
+  scope: string | null;
+  items: QueuedComposerMessage[];
+}
+
 export interface UseUnifiedComposerStateOptions {
   sessionId: string | null;
   gatewayUrl: string;
@@ -151,15 +166,19 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   const [showVoice, setShowVoice] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showModelSettings, setShowModelSettings] = useState(false);
-  const [queuedComposerMessages, setQueuedComposerMessages] = useState<QueuedComposerMessage[]>([]);
+  const [queuedComposerState, setQueuedComposerState] = useState<QueuedComposerState>({
+    scope: null,
+    items: EMPTY_QUEUED_COMPOSER_MESSAGES,
+  });
   const [streamError, setStreamError] = useState<string | null>(null);
 
   // ─── Refs ─────────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelPickerBtnRef = useRef<HTMLButtonElement>(null);
   const modelSettingsBtnRef = useRef<HTMLButtonElement>(null);
-  const queueFlushInFlightRef = useRef(false);
+  const queueFlushInFlightScopesRef = useRef<Set<string>>(new Set());
   const queueHydratingRef = useRef(false);
+  const queueDeletedWhileHydratingRef = useRef<Set<string>>(new Set());
 
   // ─── Fallback callbacks for optional props ────────────────────────────────
   const toggleImageGenerationMode: () => void = toggleImageGenerationModeProp ?? (() => undefined);
@@ -171,6 +190,29 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     if (!sessionId) return null;
     return buildQueuedComposerScopeKey(currentUserEmail, sessionId);
   }, [sessionId, currentUserEmail]);
+  const queuedComposerScopeRef = useRef<string | null>(queuedComposerScope);
+  useLayoutEffect(() => {
+    queuedComposerScopeRef.current = queuedComposerScope;
+  }, [queuedComposerScope]);
+  const queueInScope = queuedComposerState.scope === queuedComposerScope;
+  const queuedComposerMessages = queueInScope
+    ? queuedComposerState.items
+    : EMPTY_QUEUED_COMPOSER_MESSAGES;
+  const setQueuedComposerMessages = useCallback<
+    React.Dispatch<React.SetStateAction<QueuedComposerMessage[]>>
+  >(
+    (value) => {
+      setQueuedComposerState((previous) => {
+        const base =
+          previous.scope === queuedComposerScope ? previous.items : EMPTY_QUEUED_COMPOSER_MESSAGES;
+        return {
+          scope: queuedComposerScope,
+          items: typeof value === 'function' ? value(base) : value,
+        };
+      });
+    },
+    [queuedComposerScope],
+  );
   const inputHistoryIdentity = useMemo(() => {
     if (!token) return null;
     const normalizedEmail = currentUserEmail.trim().toLowerCase();
@@ -229,6 +271,9 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     queuedComposerMessages,
     setQueuedComposerMessages,
     queuedComposerScope,
+    queuedComposerScopeRef,
+    queueHydratingRef,
+    queueDeletedWhileHydratingRef,
     setComposerMenu,
     setStreamError,
     textareaRef,
@@ -369,16 +414,36 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   useEffect(() => {
     let cancelled = false;
     queueHydratingRef.current = true;
-    queueFlushInFlightRef.current = false;
+    queueDeletedWhileHydratingRef.current = new Set();
+    if (queuedComposerScope !== null) {
+      queueFlushInFlightScopesRef.current.delete(queuedComposerScope);
+    }
 
     const persistedQueue = queuedComposerScope
       ? (useChatQueueStore.getState().queuesByScope[queuedComposerScope] ?? [])
       : [];
+    const persistedIds = new Set(persistedQueue.map((item) => item.id));
 
     const finishHydration = (items: QueuedComposerMessage[]) => {
       if (cancelled) return;
-      setQueuedComposerMessages(items);
       queueHydratingRef.current = false;
+      setQueuedComposerState((previous) => {
+        const deletedIds = queueDeletedWhileHydratingRef.current;
+        const hydrationIds = new Set(items.map((item) => item.id));
+        // 水合是异步的：期间用户可能已向当前 scope 追加了新条目（不在持久化快照里，
+        // 须保留，否则会被水合结果覆盖丢失）；也可能删除了快照里的旧条目（须尊重
+        // 删除，否则会被水合结果复活）。
+        const appended =
+          previous.scope === queuedComposerScope
+            ? previous.items.filter(
+                (item) => !persistedIds.has(item.id) && !hydrationIds.has(item.id),
+              )
+            : [];
+        return {
+          scope: queuedComposerScope,
+          items: [...items.filter((item) => !deletedIds.has(item.id)), ...appended],
+        };
+      });
     };
 
     if (!queuedComposerScope || persistedQueue.length === 0) {
@@ -432,16 +497,13 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
 
   // ─── Queue persistence effect ─────────────────────────────────────────────
   useEffect(() => {
-    if (!queuedComposerScope) return;
-    if (queueHydratingRef.current) {
-      queueHydratingRef.current = false;
-      return;
-    }
+    if (!queuedComposerScope || !queueInScope) return;
+    if (queueHydratingRef.current) return;
     replacePersistedQueue(
       queuedComposerScope,
       queuedComposerMessages.map((item) => toPersistedQueuedComposerMessage(item)),
     );
-  }, [queuedComposerMessages, queuedComposerScope, replacePersistedQueue]);
+  }, [queuedComposerMessages, queuedComposerScope, queueInScope, replacePersistedQueue]);
 
   // ─── Queue flush effect ───────────────────────────────────────────────────
   const sendMessageRef = useRef<
@@ -501,7 +563,8 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       stoppingStream ||
       canStopSession ||
       sessionBusyState !== null ||
-      queueFlushInFlightRef.current
+      queuedComposerScope === null ||
+      queueFlushInFlightScopesRef.current.has(queuedComposerScope)
     ) {
       return;
     }
@@ -509,8 +572,21 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     const [nextQueuedMessage] = queuedComposerMessages;
     if (!nextQueuedMessage || nextQueuedMessage.requiresAttachmentRebind) return;
 
-    queueFlushInFlightRef.current = true;
+    const flushScope = queuedComposerScope;
+    queueFlushInFlightScopesRef.current.add(flushScope);
     setQueuedComposerMessages((previous) => previous.slice(1));
+
+    const requeue = () => {
+      if (flushScope === queuedComposerScopeRef.current) {
+        setQueuedComposerMessages((previous) => [nextQueuedMessage, ...previous]);
+        return;
+      }
+      const store = useChatQueueStore.getState();
+      store.replaceQueue(flushScope, [
+        toPersistedQueuedComposerMessage(nextQueuedMessage),
+        ...(store.queuesByScope[flushScope] ?? []),
+      ]);
+    };
 
     void sendMessageRef
       .current(nextQueuedMessage.text, {
@@ -520,16 +596,23 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       })
       .then((sent) => {
         if (!sent) {
-          setQueuedComposerMessages((previous) => [nextQueuedMessage, ...previous]);
+          requeue();
         }
       })
       .catch(() => {
-        setQueuedComposerMessages((previous) => [nextQueuedMessage, ...previous]);
+        requeue();
       })
       .finally(() => {
-        queueFlushInFlightRef.current = false;
+        queueFlushInFlightScopesRef.current.delete(flushScope);
       });
-  }, [canStopSession, queuedComposerMessages, sessionBusyState, stoppingStream, streaming]);
+  }, [
+    canStopSession,
+    queuedComposerMessages,
+    queuedComposerScope,
+    sessionBusyState,
+    stoppingStream,
+    streaming,
+  ]);
 
   // ─── Queued composer previews ─────────────────────────────────────────────
   const queuedComposerPreviews = useMemo(

@@ -324,7 +324,9 @@ export function FileEditorPanel({
     if (
       activePreviewKind === 'markdown' ||
       activePreviewKind === 'svg' ||
-      activePreviewKind === 'image'
+      activePreviewKind === 'image' ||
+      activePreviewKind === 'html' ||
+      activePreviewKind === 'css'
     ) {
       setPanelMode('preview');
     } else {

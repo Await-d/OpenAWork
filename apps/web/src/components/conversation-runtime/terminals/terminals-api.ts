@@ -5,11 +5,18 @@
  * the shared types in `@openAwork/shared`.
  */
 
-import { createSessionTerminalsClient } from '@openAwork/web-client';
+import {
+  createSessionTerminalsClient,
+  openTerminalSocket,
+  type TerminalSocket,
+  type TerminalSocketHandlers,
+} from '@openAwork/web-client';
 import type {
   SessionTerminalView as GatewaySessionTerminalView,
   ShellProfileOption,
 } from '@openAwork/web-client';
+
+export type { TerminalSocket, TerminalSocketHandlers };
 
 export type { ShellProfileOption };
 
@@ -20,10 +27,14 @@ export type { ShellProfileOption };
  * 两个字段都保持可选 —— 旧网关，以及由 `terminal_started` 事件本地构造的行
  * 不携带能力信息；此时消费方维持原行为（继续尝试 resize），不会因为字段缺失
  * 而静默降级。`list` 与 SSE 载荷均为原始 JSON 透传，字段不会被解析层丢弃。
+ *
+ * `interactive`（加法扩展）：后端是否为交互式 PTY。同样保持可选 —— 缺失时
+ * 消费方必须按「与升级前一致」处理（`!== false` / `!== true` 双向守卫）。
  */
 export interface SessionTerminalView extends GatewaySessionTerminalView {
   backend?: 'pty' | 'pipe';
   supportsResize?: boolean;
+  interactive?: boolean;
 }
 
 export interface ListSessionTerminalsParams {
@@ -237,6 +248,8 @@ export interface TerminalStreamSnapshotPayload {
   data: string;
   outputBytesTotal: number;
   status: string;
+  /** 交互式 PTY 时后端会带上；缺省（旧网关）不写入，消费方按旧行为处理。 */
+  interactive?: boolean;
 }
 
 /**
@@ -282,6 +295,12 @@ function readJsonNumber(source: unknown, key: string): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** 可选布尔字段：只有真正的布尔值才算命中，字符串 / 缺省一律返回 null。 */
+function readJsonBoolean(source: unknown, key: string): boolean | null {
+  const value = readJsonField(source, key);
+  return typeof value === 'boolean' ? value : null;
+}
+
 /**
  * 解析 `snapshot` 事件。`fallbackTerminalId` 用于后端漏发 `terminalId`
  * 的兜底（事件本身已绑定到唯一终端）。
@@ -294,7 +313,7 @@ export function parseTerminalSnapshotPayload(
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('terminal snapshot payload is not an object');
   }
-  return {
+  const payload: TerminalStreamSnapshotPayload = {
     terminalId: readJsonString(raw, 'terminalId') ?? fallbackTerminalId,
     seq: readJsonNumber(raw, 'seq') ?? 0,
     // 旧后端没有 `data`，此时 snapshot 的 `outputTail` 就是它能给到的全部历史。
@@ -302,6 +321,10 @@ export function parseTerminalSnapshotPayload(
     outputBytesTotal: readJsonNumber(raw, 'outputBytesTotal') ?? 0,
     status: readJsonString(raw, 'status') ?? 'unknown',
   };
+  // 可选字段只在载荷里真实存在时写入：缺省不能变成 `false`（会把旧后端误判成非交互）。
+  const interactive = readJsonBoolean(raw, 'interactive');
+  if (interactive !== null) payload.interactive = interactive;
+  return payload;
 }
 
 /**
@@ -382,4 +405,43 @@ export function openTerminalStream(params: OpenTerminalStreamParams): EventSourc
     }
   });
   return source;
+}
+
+/* ---------------------------------------------------------------------- */
+/* WebSocket 传输（Phase B：输入 + 输出 + resize 单连接）                   */
+/* ---------------------------------------------------------------------- */
+
+/** `TerminalSocket` 的连接状态（与 web-client 冻结契约一致）。 */
+export type TerminalSocketState = TerminalSocket['state'];
+
+/**
+ * 单连接句柄别名：内容与 web-client 的 `TerminalSocket` 完全相同，别名只是
+ * 为了让 `use-terminal-session` 经由本文件拿类型（传输边界集中在这里）。
+ */
+export type TerminalSocketLike = TerminalSocket;
+
+export interface OpenTerminalSocketForParams {
+  gatewayUrl: string;
+  sessionId: string;
+  terminalId: string;
+  token: string;
+  /** 只想补发某个序号之后的输出时传入；重连场景靠全新 snapshot，当前不传。 */
+  afterSeq?: number;
+  handlers: TerminalSocketHandlers;
+}
+
+/**
+ * `openTerminalSocket` 的会话终端专用薄封装：与同文件的 SSE / HTTP 辅助函数
+ * 使用同一组 `gatewayUrl` + `token` 入参。`apps/web` 侧不得直接触碰
+ * `WebSocket`，所有连接都必须经 `@openAwork/web-client` 建立。
+ */
+export function openTerminalSocketFor(params: OpenTerminalSocketForParams): TerminalSocketLike {
+  return openTerminalSocket({
+    gatewayUrl: params.gatewayUrl,
+    accessToken: params.token,
+    sessionId: params.sessionId,
+    terminalId: params.terminalId,
+    ...(params.afterSeq !== undefined ? { afterSeq: params.afterSeq } : {}),
+    handlers: params.handlers,
+  });
 }

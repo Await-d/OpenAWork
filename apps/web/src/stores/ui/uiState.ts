@@ -93,6 +93,29 @@ export interface SessionTab {
   readonly streaming?: boolean;
 }
 
+/**
+ * 工作区文件读取身份：SSH 会话 / 草稿远程工作区在读取文件时必须把身份带给网关，
+ * 网关才能把（远端 POSIX）路径解析到对应连接，而不是按本地工作区校验。
+ *
+ * - `sessionId`：已有会话的 id（网关沿父会话链解析 SSH 绑定）；
+ * - `sshConnectionId`：草稿态（还没有会话 id）选中的 SSH 连接 id；
+ * - `remote`：当前身份是否指向远端工作区（仅作提示，不参与请求参数）。
+ *
+ * 这是**瞬态** slice：不持久化，且在 merge 阶段强制重置，避免跨会话串味。
+ */
+export interface WorkspaceReadIdentity {
+  readonly sessionId: string | null;
+  readonly sshConnectionId: string | null;
+  readonly remote: boolean;
+}
+
+/** 空身份：本地工作区读取路径的默认值。 */
+export const EMPTY_READ_IDENTITY: WorkspaceReadIdentity = {
+  sessionId: null,
+  sshConnectionId: null,
+  remote: false,
+};
+
 export interface UIStateStore {
   // Sidebar
   leftSidebarOpen: boolean;
@@ -221,6 +244,15 @@ export interface UIStateStore {
   } | null;
   setActiveSessionWorkspace: (sessionId: string, path: string | null) => void;
   clearActiveSessionWorkspace: (sessionId?: string) => void;
+
+  /**
+   * 当前页面的工作区文件读取身份（瞬态，不持久化）。
+   * 由 ChatPage / TeamConversationView 在会话切换时写入，卸载时清空；
+   * 读取消费方（文件编辑器 / 预览）据此给 `/workspace/file` 附加 SSH 身份。
+   */
+  readIdentity: WorkspaceReadIdentity;
+  setReadIdentity: (identity: WorkspaceReadIdentity) => void;
+  clearReadIdentity: () => void;
 
   /**
    * P3-PATH: when on, the sessions sidebar list is scoped to the
@@ -1370,6 +1402,9 @@ export const useUIStateStore = create<UIStateStore>()(
 
           return { activeSessionWorkspace: null };
         }),
+      readIdentity: EMPTY_READ_IDENTITY,
+      setReadIdentity: (identity) => set({ readIdentity: identity }),
+      clearReadIdentity: () => set({ readIdentity: EMPTY_READ_IDENTITY }),
 
       // P3-PATH session list scoping
       sessionListPathFilterEnabled: false,
@@ -1582,11 +1617,13 @@ export const useUIStateStore = create<UIStateStore>()(
       // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
       // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
+      // readIdentity 属于会话瞬态身份（SSH 绑定），绝不能落盘。
       partialize: (state) => {
         const {
           editorMode: _em,
           closedSessionTabIds: _cs,
           browserPreviewSurface: _bps,
+          readIdentity: _ri,
           // 最大化是瞬态视图模式：高度偏好单独存在 terminalPanelHeight，
           // 这个标记绝不能泄漏进存储（否则下次启动会直接回到占满态）。
           terminalPanelMaximized: _tpm,
@@ -1615,6 +1652,9 @@ export const useUIStateStore = create<UIStateStore>()(
         }
         merged.editorMode = false;
         merged.closedSessionTabIds = [];
+        // 瞬态身份：无论存储里出现什么（旧数据 / 手改 / 上一个标签页残留），
+        // 启动态一律回到空身份，避免跨会话把上一会话的 SSH 绑定带进来。
+        merged.readIdentity = EMPTY_READ_IDENTITY;
         // 瞬态模式：无论存储里出现什么（旧数据 / 手改），启动态一律 false。
         merged.terminalPanelMaximized = false;
         // 覆盖方向是 persisted 盖 currentState，所以 currentState 的空桶不会冲掉已持久化的
@@ -1938,3 +1978,13 @@ export const useUIStateStore = create<UIStateStore>()(
     },
   ),
 );
+
+/**
+ * 读取当前工作区文件读取身份（瞬态 slice）。
+ *
+ * 直接返回 store 中的不可变对象引用；写入方通过 `setReadIdentity` 整体替换，
+ * 因此引用变化即「身份发生变化」，不会出现就地修改导致的漏更新。
+ */
+export function useWorkspaceReadIdentity(): WorkspaceReadIdentity {
+  return useUIStateStore((s) => s.readIdentity);
+}

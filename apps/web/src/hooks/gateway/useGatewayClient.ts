@@ -55,7 +55,10 @@ interface ThinkingChunkDispatchCallbacks {
 type GatewayErrorChunk = Extract<StreamChunk | RunEvent, { type: 'error' }>;
 
 interface GatewayClient {
-  attachToActiveStream: (sessionId: string, callbacks: StreamCallbacks) => Promise<boolean>;
+  attachToActiveStream: (
+    sessionId: string,
+    callbacks: StreamCallbacks,
+  ) => Promise<AttachActiveStreamResult>;
   getActiveStreamClientRequestId: () => string | null;
   getActiveStreamSessionId: () => string | null;
   stream: (sessionId: string, message: string, callbacks: StreamCallbacks) => void;
@@ -423,9 +426,22 @@ export function connectAttachEventSource(
   });
 }
 
+/**
+ * attach 的终态契约。四种结果语义不同，调用方必须按状态分派：
+ * - `attached`：已接上活跃流。
+ * - `no_active_stream`：网关权威确认当前没有活跃流，是正常终态，不得触发重连提示。
+ * - `stale`：归属已变化（会话已切换或更新的请求已接管），本次 attach 作废。
+ * - `transport_failed`：真实的传输失败（查询活跃流异常 / SSE 打开失败），可走可见退避重试。
+ */
+export type AttachActiveStreamResult =
+  | { status: 'attached' }
+  | { status: 'no_active_stream' }
+  | { status: 'stale' }
+  | { status: 'transport_failed' };
+
 export async function attachActiveStreamSession(
   options: AttachActiveStreamSessionOptions,
-): Promise<boolean> {
+): Promise<AttachActiveStreamResult> {
   const {
     callbacks,
     clearCallbacks,
@@ -434,7 +450,6 @@ export async function attachActiveStreamSession(
     gatewayUrl,
     getCurrentActiveRequest,
     getCurrentEventSource,
-    hasOpenTransports,
     isStopRequested,
     resetStopRequested,
     sessionId,
@@ -451,19 +466,22 @@ export async function attachActiveStreamSession(
     activeStream = await sessionsClient.getActiveStream(token, sessionId);
   } catch {
     clearCallbacks();
-    return false;
+    return { status: 'transport_failed' };
   }
 
   if (!activeStream) {
+    // 网关已权威确认「没有活跃流」：陈旧快照必须无条件丢弃，否则
+    // activeGatewayStreamSessionId 会一直指向当前会话，使 attach 判定永不进入终态。
+    // `getCurrentActiveRequest() === existingSnapshot` 身份校验是竞态保护：若
+    // getActiveStream 等待期间同一会话已由更新的 stream() 建立了新快照，则不能清除它。
     if (
-      getCurrentActiveRequest()?.sessionId === sessionId &&
-      !hasOpenTransports() &&
-      getCurrentEventSource() === null
+      existingSnapshot?.sessionId === sessionId &&
+      getCurrentActiveRequest() === existingSnapshot
     ) {
       syncActiveRequest(null);
     }
     clearCallbacks();
-    return false;
+    return { status: 'no_active_stream' };
   }
 
   const currentAfterGet = getCurrentActiveRequest();
@@ -473,7 +491,7 @@ export async function attachActiveStreamSession(
       currentAfterGet.clientRequestId !== activeStream.clientRequestId)
   ) {
     clearCallbacks();
-    return false;
+    return { status: 'stale' };
   }
 
   const requestedAfterSeq =
@@ -493,7 +511,7 @@ export async function attachActiveStreamSession(
     transport: 'attach-sse',
   });
 
-  return await connectEventSource({
+  const attached = await connectEventSource({
     activeStream,
     callbacks,
     gatewayUrl,
@@ -508,6 +526,7 @@ export async function attachActiveStreamSession(
     clearCallbacks,
     resetStopRequested,
   });
+  return attached ? { status: 'attached' } : { status: 'transport_failed' };
 }
 
 function isRunEventEnvelope(value: unknown): value is RunEventEnvelope {
@@ -771,9 +790,9 @@ export function useGatewayClient(token: string | null): GatewayClient {
   }, []);
 
   const attachToActiveStream = useCallback(
-    async (sessionId: string, callbacks: StreamCallbacks): Promise<boolean> => {
+    async (sessionId: string, callbacks: StreamCallbacks): Promise<AttachActiveStreamResult> => {
       if (!token) {
-        return false;
+        return { status: 'transport_failed' };
       }
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
@@ -788,6 +807,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
           console.log('[ATTACH] closeExistingTransports gen:', streamGenerationRef.current);
           wsRef.current?.close();
           sseRef.current?.close();
+          wsRef.current = null;
+          sseRef.current = null;
         },
         gatewayUrl,
         getCurrentActiveRequest: () => activeRequestRef.current,

@@ -135,6 +135,21 @@ export function hasPendingSessionInteraction(sessionId: string): boolean {
   );
 }
 
+function resolveLiveSessionStateStatus(
+  previousStatus: PersistedSessionStateStatus,
+  sessionId: string,
+): PersistedSessionStateStatus {
+  if (hasPendingSessionInteraction(sessionId)) {
+    return 'paused';
+  }
+
+  if (previousStatus === 'idle') {
+    return 'running';
+  }
+
+  return previousStatus;
+}
+
 export function reconcileSessionStateStatus(input: {
   nowMs?: number;
   sessionId: string;
@@ -155,32 +170,36 @@ export function reconcileSessionStateStatus(input: {
 
   const previousStatus = normalizePersistedSessionStateStatus(row.state_status);
 
-  if (getAnyInFlightStreamRequestForSession({ sessionId: input.sessionId, userId: input.userId })) {
-    return {
-      previousStatus,
-      sessionContext: buildSessionContextRecord({
-        sessionId: input.sessionId,
-        status: previousStatus,
-      }),
-      status: previousStatus,
-      wasReset: false,
-    };
-  }
-
-  if (
+  // 说明：子任务取消链路（tool-sandbox.ts:5335-5343）会先写入 state_status='idle'
+  // 再中止仍在内存中的流，导致「持久化 idle」与「活跃流」自相矛盾。只要存在在途流或
+  // 新鲜的运行时心跳，就以实时状态为准，并在与持久值不一致时立即回写，避免返回过期 idle。
+  const hasLiveSignal =
+    getAnyInFlightStreamRequestForSession({
+      sessionId: input.sessionId,
+      userId: input.userId,
+    }) !== undefined ||
     hasFreshSessionRuntimeThread({
       nowMs: input.nowMs,
       sessionId: input.sessionId,
       userId: input.userId,
-    })
-  ) {
+    });
+
+  if (hasLiveSignal) {
+    const desiredStatus = resolveLiveSessionStateStatus(previousStatus, input.sessionId);
+    if (desiredStatus !== previousStatus) {
+      sqliteRun(
+        "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        [desiredStatus, input.sessionId, input.userId],
+      );
+    }
+
     return {
       previousStatus,
       sessionContext: buildSessionContextRecord({
         sessionId: input.sessionId,
-        status: previousStatus,
+        status: desiredStatus,
       }),
-      status: previousStatus,
+      status: desiredStatus,
       wasReset: false,
     };
   }

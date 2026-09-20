@@ -34,6 +34,7 @@ import {
 } from '../../../utils/permission/pending-permission-state.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { getRecoveryPendingInteractions } from '../../conversation-runtime/session/recovery-read-model.js';
+import { isWithinTerminalScope } from '../../../utils/terminal-scope.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 
@@ -429,6 +430,9 @@ export function useLayoutShared(
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // 焦点在终端面板内时全部放行：这些键位归 xterm 的按键矩阵管
+      // （Ctrl/⌘+K = clear-buffer 等，见 terminal-key-handlers.ts）。
+      if (isWithinTerminalScope(e.target)) return;
       const ctrl = e.metaKey || e.ctrlKey;
       if (ctrl && e.key === 'k') {
         e.preventDefault();
@@ -451,11 +455,6 @@ export function useLayoutShared(
         e.preventDefault();
         preloadRoute('/settings');
         void navigate('/settings');
-        return;
-      }
-      if (ctrl && e.key === 'd') {
-        e.preventDefault();
-        alert('复制会话功能开发中');
         return;
       }
       if (ctrl && e.shiftKey && e.key === 'C') {

@@ -5,8 +5,11 @@
  * PTY support comes from Bun's native `Bun.spawn(cmd, { terminal })`; we
  * deliberately avoid `node-pty` / `bun-pty` native addons. Node has no
  * built-in PTY, so on Node (and on Windows under Bun) we degrade to piped
- * stdio: input/output still flow, but `isatty()` is false and resize is a
- * no-op signalled by a `false` return.
+ * stdio: input/output still flow, but `isatty()` is false, resize is a
+ * no-op signalled by a `false` return, and the capability probe reports
+ * `interactive: false` so callers spawn a plain shell instead of `bash -i`.
+ * That piped path is an explicit, honest non-interactive degradation — not a
+ * fake terminal.
  *
  * Bun exposes no ambient TypeScript types, and this repo forbids `any` /
  * `@ts-ignore`, so the runtime handle is narrowed through minimal local
@@ -22,6 +25,12 @@ export interface TerminalBackendCapabilities {
   runtime: 'bun' | 'node';
   platform: NodeJS.Platform;
   supportsResize: boolean;
+  /**
+   * True only for a real PTY backend. When false the shell has no terminal
+   * (`isatty()` is false), so callers must not force `-i` — that would fake
+   * job control / prompts without a tty to back them.
+   */
+  interactive: boolean;
   reason?: string;
 }
 
@@ -102,12 +111,12 @@ export function detectTerminalBackend(env?: {
   const isBun = env?.isBun ?? isBunRuntime();
   const runtime: 'bun' | 'node' = isBun ? 'bun' : 'node';
   if (isBun && platform !== 'win32') {
-    return { kind: 'pty', runtime, platform, supportsResize: true };
+    return { kind: 'pty', runtime, platform, supportsResize: true, interactive: true };
   }
   const reason = isBun
     ? `bun runtime on ${platform} has no supported PTY`
     : 'node runtime has no built-in PTY; falling back to pipes';
-  return { kind: 'pipe', runtime, platform, supportsResize: false, reason };
+  return { kind: 'pipe', runtime, platform, supportsResize: false, interactive: false, reason };
 }
 
 let pipeFallbackLogged = false;
@@ -175,12 +184,22 @@ function spawnBunPty(input: SpawnTerminalProcessInput, bun: BunRuntimeLike): Ter
     pid,
     backend: 'pty',
     write(data) {
-      terminal?.write(data);
+      // 就绪门控的 `initialCommand` 可能由定时器在 terminal 关闭后写入，不能抛出。
+      try {
+        terminal?.write(data);
+      } catch {
+        /* terminal already closed — the exit handler surfaces the outcome */
+      }
     },
     resize(cols, rows) {
       if (terminal === undefined) return false;
-      terminal.resize(cols, rows);
-      return true;
+      try {
+        terminal.resize(cols, rows);
+        return true;
+      } catch {
+        /* terminal already closed — resize is a no-op from here on */
+        return false;
+      }
     },
     close() {
       try {

@@ -24,6 +24,7 @@ import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
+import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 
 /* ── BlockToolCall (write / edit / bash / web / apply_patch / multi_edit) ── */
 
@@ -63,16 +64,6 @@ export function BlockToolCall({
   // `<toolName> <generic>` title + JSON output dump.
   const isBashLike = normalized === 'bash' || normalized === 'interactive_bash';
 
-  // Auto-expand block tools when they have meaningful content to show.
-  // However, for completed tools with very large output, default to collapsed
-  // to prevent long outputs from dominating the viewport. The user can always
-  // click to expand.
-  const hasLargeOutput = (() => {
-    if (output === undefined) return false;
-    const outStr = typeof output === 'string' ? output : JSON.stringify(output);
-    return outStr.length > 2000;
-  })();
-
   const webSummary = useMemo(
     () => (isWebTool && visualState === 'completed' ? extractWebSummary(output) : null),
     [isWebTool, visualState, output],
@@ -91,26 +82,13 @@ export function BlockToolCall({
 
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
 
-  const isWebEmptyResult = isWebTool && searchVisualState === 'empty';
-
-  const shouldAutoExpand =
-    visualState !== 'pending' &&
-    !isWebEmptyResult &&
-    (shouldExpandByDefault || visualState === 'running');
-
   const [open, toggleOpen] = useToolCallExpandState({
-    shouldAutoExpand,
+    shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
-  const [webResultsExpanded, setWebResultsExpanded] = useState(false);
   const [webImageLightboxOpen, setWebImageLightboxOpen] = useState(false);
 
   const webResults = webSummary?.searchResults ?? [];
-  const MAX_VISIBLE_RESULTS = 3;
-  const hasMoreResults = webResults.length > MAX_VISIBLE_RESULTS;
-  const visibleWebResults = webResultsExpanded
-    ? webResults
-    : webResults.slice(0, MAX_VISIBLE_RESULTS);
 
   const filePath = extractFilePath(input);
   // filePath is kept for potential future use and passed to diff views
@@ -210,187 +188,173 @@ export function BlockToolCall({
 
       {/* Expanded details */}
       {open && (
-        <div className="tool-call-block-body">
-          {/* Diff view */}
-          {hasDiff && (
-            <div className="tool-call-block-diff">
-              {displayData.diffView?.files && displayData.diffView?.files.length > 1 ? (
-                <div className="tool-call-block-diff-multi">
-                  {displayData.diffView?.files.map((file, i) => (
-                    <UnifiedCodeDiff
-                      key={i}
-                      beforeText={file.beforeText}
-                      afterText={file.afterText}
-                      chrome="minimal"
-                      filePath={file.filePath}
-                      maxHeight={240}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <UnifiedCodeDiff
-                  beforeText={displayData.diffView?.beforeText}
-                  afterText={displayData.diffView?.afterText}
-                  chrome="minimal"
-                  diffText={displayData.diffView?.diffText}
-                  filePath={displayData.diffView?.filePath}
-                  maxHeight={320}
-                />
-              )}
-            </div>
-          )}
-
-          {/* Bash terminal output */}
-          {hasBashOutput && displayData.bashView && (
-            <BashTerminalCard compact={!open} view={displayData.bashView} />
-          )}
-
-          {/* Web tool output */}
-          {isWebTool &&
-            webSummary &&
-            (webSummary.imageUrl || webSummary.cleanedContent || webSummary.searchResults) && (
-              <div className="tool-call-block-output">
-                {/* Meta row: status + URL + line count + copy */}
-                <div className="tool-call-block-web-meta">
-                  {webSummary.status !== undefined && (
-                    <span
-                      className="tool-call-block-web-status"
-                      data-status-ok={
-                        webSummary.status >= 200 && webSummary.status < 300 ? 'true' : undefined
-                      }
-                    >
-                      {webSummary.status}
-                    </span>
-                  )}
-                  {webSummary.url && (
-                    <span className="tool-call-block-web-url" title={webSummary.url}>
-                      {webSummary.url.length > 80
-                        ? `${webSummary.url.slice(0, 77)}…`
-                        : webSummary.url}
-                    </span>
-                  )}
-                  <CopyBtn
-                    text={
-                      webSummary.imageUrl
-                        ? webSummary.imageUrl
-                        : webSummary.searchResults
-                          ? webSummary.searchResults
-                              .map(
-                                (r, idx) =>
-                                  `${idx + 1}. ${r.title}${r.url ? `\n   ${r.url}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`,
-                              )
-                              .join('\n')
-                          : webSummary.cleanedContent
-                    }
-                    title="Copy content"
-                  />
-                </div>
-
-                {webSummary.imageUrl && (
-                  <>
-                    <button
-                      type="button"
-                      className="tool-call-block-web-image"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setWebImageLightboxOpen(true);
-                      }}
-                      title="打开图片预览"
-                    >
-                      <img
-                        src={webSummary.imageUrl}
-                        alt="抓取到的网络图片"
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
+        <ToolCardExpansionProvider>
+          <div className="tool-call-block-body">
+            {/* Diff view */}
+            {hasDiff && (
+              <div className="tool-call-block-diff">
+                {displayData.diffView?.files && displayData.diffView?.files.length > 1 ? (
+                  <div className="tool-call-block-diff-multi">
+                    {displayData.diffView?.files.map((file, i) => (
+                      <UnifiedCodeDiff
+                        key={i}
+                        beforeText={file.beforeText}
+                        afterText={file.afterText}
+                        chrome="minimal"
+                        filePath={file.filePath}
+                        maxHeight={240}
                       />
-                    </button>
-                    <ImageLightbox
-                      src={webSummary.imageUrl}
-                      open={webImageLightboxOpen}
-                      onClose={() => setWebImageLightboxOpen(false)}
-                      alt="抓取到的网络图片"
-                      caption={webSummary.url}
-                    />
-                  </>
-                )}
-
-                {/* Search results — compact list, no raw content duplication */}
-                {webSummary.searchResults && webSummary.searchResults.length > 0 && (
-                  <div className="tool-call-block-search-results">
-                    {visibleWebResults.map((r, idx) => (
-                      <div key={idx} className="tool-call-block-search-item">
-                        <div className="tool-call-block-search-title">
-                          <span className="tool-call-block-search-idx">{idx + 1}</span>
-                          {r.title}
-                        </div>
-                        {r.url && (
-                          <div className="tool-call-block-search-url" title={r.url}>
-                            {r.url.length > 70 ? `${r.url.slice(0, 67)}…` : r.url}
-                          </div>
-                        )}
-                        {r.snippet && (
-                          <div className="tool-call-block-search-snippet">{r.snippet}</div>
-                        )}
-                      </div>
                     ))}
-                    {hasMoreResults && (
-                      <button
-                        type="button"
-                        className="tool-output-toggle tool-search-results-toggle"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setWebResultsExpanded((v) => !v);
-                        }}
-                      >
-                        {webResultsExpanded
-                          ? '收起结果'
-                          : `展开其余 ${webResults.length - MAX_VISIBLE_RESULTS} 个结果`}
-                      </button>
-                    )}
                   </div>
-                )}
-
-                {/* Markdown content */}
-                {!webSummary.imageUrl && !webSummary.searchResults && webSummary.isMarkdown && (
-                  <div className="tool-call-block-web-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {webSummary.cleanedContent}
-                    </ReactMarkdown>
-                  </div>
-                )}
-
-                {/* Plain text with expand/collapse; for empty search results keep it compact */}
-                {!webSummary.imageUrl && !webSummary.searchResults && !webSummary.isMarkdown && (
-                  <ExpandableOutput
-                    text={webSummary.cleanedContent}
-                    maxChars={600}
-                    compact={searchVisualState === 'empty'}
-                    defaultExpanded={shouldExpandByDefault}
+                ) : (
+                  <UnifiedCodeDiff
+                    beforeText={displayData.diffView?.beforeText}
+                    afterText={displayData.diffView?.afterText}
+                    chrome="minimal"
+                    diffText={displayData.diffView?.diffText}
+                    filePath={displayData.diffView?.filePath}
+                    maxHeight={320}
                   />
                 )}
               </div>
             )}
 
-          {/* Generic output fallback */}
-          {!hasDiff && !hasBashOutput && !isWebTool && output !== undefined && (
-            <div className="tool-call-block-output">
-              <ToolOutputPreview toolName={toolName} output={output} />
-            </div>
-          )}
+            {/* Bash terminal output */}
+            {hasBashOutput && displayData.bashView && (
+              <BashTerminalCard compact={!open} view={displayData.bashView} />
+            )}
 
-          {/* Raw parameters — collapsed by default. Critical for tools whose
-              specialised renderers (bash command, batch progress, mcp_call
-              header) summarise input but don't expose every field. Users
-              who need to see the exact JSON the model emitted can drill in. */}
-          {Object.keys(input).length > 0 && (
-            <details className="tool-call-block-params">
-              <summary>参数 ({Object.keys(input).length})</summary>
-              <div className="tool-call-block-params-body">
-                <ToolInputPreview toolName={toolName} input={input} kind={kind} />
+            {/* Web tool output */}
+            {isWebTool &&
+              webSummary &&
+              (webSummary.imageUrl || webSummary.cleanedContent || webSummary.searchResults) && (
+                <div className="tool-call-block-output">
+                  {/* Meta row: status + URL + line count + copy */}
+                  <div className="tool-call-block-web-meta">
+                    {webSummary.status !== undefined && (
+                      <span
+                        className="tool-call-block-web-status"
+                        data-status-ok={
+                          webSummary.status >= 200 && webSummary.status < 300 ? 'true' : undefined
+                        }
+                      >
+                        {webSummary.status}
+                      </span>
+                    )}
+                    {webSummary.url && (
+                      <span className="tool-call-block-web-url" title={webSummary.url}>
+                        {webSummary.url.length > 80
+                          ? `${webSummary.url.slice(0, 77)}…`
+                          : webSummary.url}
+                      </span>
+                    )}
+                    <CopyBtn
+                      text={
+                        webSummary.imageUrl
+                          ? webSummary.imageUrl
+                          : webSummary.searchResults
+                            ? webSummary.searchResults
+                                .map(
+                                  (r, idx) =>
+                                    `${idx + 1}. ${r.title}${r.url ? `\n   ${r.url}` : ''}${r.snippet ? `\n   ${r.snippet}` : ''}`,
+                                )
+                                .join('\n')
+                            : webSummary.cleanedContent
+                      }
+                      title="Copy content"
+                    />
+                  </div>
+
+                  {webSummary.imageUrl && (
+                    <>
+                      <button
+                        type="button"
+                        className="tool-call-block-web-image"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setWebImageLightboxOpen(true);
+                        }}
+                        title="打开图片预览"
+                      >
+                        <img
+                          src={webSummary.imageUrl}
+                          alt="抓取到的网络图片"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      </button>
+                      <ImageLightbox
+                        src={webSummary.imageUrl}
+                        open={webImageLightboxOpen}
+                        onClose={() => setWebImageLightboxOpen(false)}
+                        alt="抓取到的网络图片"
+                        caption={webSummary.url}
+                      />
+                    </>
+                  )}
+
+                  {/* Search results — full list, the card itself is the disclosure */}
+                  {webSummary.searchResults && webSummary.searchResults.length > 0 && (
+                    <div className="tool-call-block-search-results">
+                      {webResults.map((r, idx) => (
+                        <div key={idx} className="tool-call-block-search-item">
+                          <div className="tool-call-block-search-title">
+                            <span className="tool-call-block-search-idx">{idx + 1}</span>
+                            {r.title}
+                          </div>
+                          {r.url && (
+                            <div className="tool-call-block-search-url" title={r.url}>
+                              {r.url.length > 70 ? `${r.url.slice(0, 67)}…` : r.url}
+                            </div>
+                          )}
+                          {r.snippet && (
+                            <div className="tool-call-block-search-snippet">{r.snippet}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Markdown content */}
+                  {!webSummary.imageUrl && !webSummary.searchResults && webSummary.isMarkdown && (
+                    <div className="tool-call-block-web-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {webSummary.cleanedContent}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+
+                  {/* Plain text with expand/collapse; for empty search results keep it compact */}
+                  {!webSummary.imageUrl && !webSummary.searchResults && !webSummary.isMarkdown && (
+                    <ExpandableOutput
+                      text={webSummary.cleanedContent}
+                      maxChars={600}
+                      compact={searchVisualState === 'empty'}
+                      defaultExpanded={shouldExpandByDefault}
+                    />
+                  )}
+                </div>
+              )}
+
+            {/* Generic output fallback */}
+            {!hasDiff && !hasBashOutput && !isWebTool && output !== undefined && (
+              <div className="tool-call-block-output">
+                <ToolOutputPreview toolName={toolName} output={output} />
               </div>
-            </details>
-          )}
-        </div>
+            )}
+
+            {/* Raw parameters — open with the card so a single click reveals
+              everything; still manually collapsible via the summary. */}
+            {Object.keys(input).length > 0 && (
+              <details className="tool-call-block-params" open>
+                <summary>参数 ({Object.keys(input).length})</summary>
+                <div className="tool-call-block-params-body">
+                  <ToolInputPreview toolName={toolName} input={input} kind={kind} />
+                </div>
+              </details>
+            )}
+          </div>
+        </ToolCardExpansionProvider>
       )}
       <ToolApprovalActions
         approvalActions={approvalActions}

@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── ParameterListPreview (universal input panel) ── */
 
@@ -34,6 +35,7 @@ function flattenWhitespace(value: string): string {
  *   - object            → "对象 · N 键" with details drill-down
  */
 export function ParamValue({ value }: { value: unknown }): ReactElement {
+  const isInsideExpandedCard = useIsInsideExpandedToolCard();
   if (value === null) {
     return <span className="param-list-null">null</span>;
   }
@@ -58,7 +60,7 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
       const preview =
         flat.length > INLINE_PREVIEW_LIMIT ? `${flat.slice(0, INLINE_PREVIEW_LIMIT - 1)}…` : flat;
       return (
-        <details className="param-list-nested">
+        <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
           <summary title={value}>
             <span className="param-list-str">{preview}</span>
           </summary>
@@ -96,7 +98,7 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
       );
     }
     return (
-      <details className="param-list-nested">
+      <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
         <summary>{value.length} 项</summary>
         <pre className="param-list-json">{JSON.stringify(value, null, 2)}</pre>
       </details>
@@ -105,7 +107,7 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
   if (typeof value === 'object') {
     const keys = Object.keys(value as Record<string, unknown>);
     return (
-      <details className="param-list-nested">
+      <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
         <summary>对象 · {keys.length} 键</summary>
         <pre className="param-list-json">{JSON.stringify(value, null, 2)}</pre>
       </details>

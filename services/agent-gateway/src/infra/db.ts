@@ -752,6 +752,29 @@ export async function migrate(): Promise<void> {
   ensureColumn('permission_requests', 'expires_at', 'INTEGER');
   ensureColumn('permission_requests', 'always_json', 'TEXT');
 
+  // User-scoped durable store for `permanent` permission grants. Unlike
+  // `permission_requests` (session-owned, `ON DELETE CASCADE`) this survives
+  // session deletion, so a newly created session of the same user is still
+  // auto-approved. No FK on `user_id` on purpose: the startup backfill must
+  // never fail on legacy/orphan user ids.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS permission_grants (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_permission_grants_user_tool_scope ON permission_grants(user_id, tool_name, scope)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_permission_grants_user_tool ON permission_grants(user_id, tool_name)',
+  );
+  migratePermanentPermissionGrants();
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS question_requests (
       id TEXT PRIMARY KEY,
@@ -1891,6 +1914,55 @@ export function setAppMetaValue(key: string, value: string): void {
     `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
   ).run(key, value);
+}
+
+/**
+ * Backfill user-scoped permanent grants from legacy session-owned permanent
+ * rows. Idempotent via an `app_meta` marker; safe to re-run.
+ *
+ * Mirrors what the reply route persists: the recorded `always_json` patterns
+ * when present, otherwise the original request scope — never a silent `*`.
+ */
+export function migratePermanentPermissionGrants(): void {
+  if (getAppMetaValue('permission_grants_backfill_v1') === '1') {
+    return;
+  }
+  const rows = sqliteAll<{
+    user_id: string;
+    tool_name: string;
+    scope: string;
+    always_json: string | null;
+  }>(
+    `SELECT s.user_id AS user_id, pr.tool_name AS tool_name, pr.scope AS scope, pr.always_json AS always_json
+       FROM permission_requests pr
+       JOIN sessions s ON s.id = pr.session_id
+      WHERE pr.decision = 'permanent' AND pr.status = 'approved'`,
+  );
+  sqliteTransaction(() => {
+    for (const row of rows) {
+      const patterns = parsePermissionAlwaysPatterns(row.always_json);
+      const effective = patterns.length > 0 ? patterns : [row.scope];
+      for (const pattern of effective) {
+        sqliteRun(
+          `INSERT OR IGNORE INTO permission_grants (id, user_id, tool_name, scope)
+           VALUES (?, ?, ?, ?)`,
+          [randomUUID(), row.user_id, row.tool_name, pattern],
+        );
+      }
+    }
+    setAppMetaValue('permission_grants_backfill_v1', '1');
+  });
+}
+
+function parsePermissionAlwaysPatterns(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 const APP_META_KEY_APP_VERSION = 'app_version';

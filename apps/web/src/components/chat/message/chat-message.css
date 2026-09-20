@@ -1891,6 +1891,15 @@
   color: var(--fg-default);
 }
 
+/* 带预览切换的代码块在「源码 / 源文本」视图下的限高：
+   防止长文件把消息区无限撑开，超出即内部滚动。必须用直接子选择器，
+   否则会误伤预览态内部嵌套代码块的 .chat-markdown-pre。 */
+.chat-markdown-code-block[data-static-preview='true'] > .chat-markdown-pre,
+.chat-markdown-code-block[data-markdown-preview='true'] > .chat-markdown-pre {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 /* Two-column body: line-number gutter + code. */
 .chat-markdown-code-body {
   display: grid;
@@ -2720,7 +2729,18 @@
   font-style: italic;
 }
 
+/*
+ * 光标占位元素：流式期间必须留在 DOM 里（有测试断言其存在 / 缺席），但不再占
+ * 任何布局位置——真正的插入符是在「最后一个已渲染块」上用伪元素画的，见下方
+ * `[data-streaming='true']` 规则。`display: contents` 让这个 span 自身不生成
+ * flex 行，避免它在块之间挤出多余的行间距。
+ */
 .assistant-rich-content-cursor {
+  display: contents;
+}
+
+.assistant-rich-content-body[data-streaming='true'] .chat-markdown > :last-child::after {
+  content: '';
   display: inline-block;
   width: 2px;
   height: 1.08em;
@@ -2744,7 +2764,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-rich-content-cursor {
+  .assistant-rich-content-body[data-streaming='true'] .chat-markdown > :last-child::after {
     animation: none;
     opacity: 0.72;
   }

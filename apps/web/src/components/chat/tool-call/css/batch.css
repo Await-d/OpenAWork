@@ -80,6 +80,11 @@
   background: color-mix(in oklch, var(--danger) 5%, transparent);
 }
 
+/* Pending permission: paused awaiting approval, not an error — muted. */
+.tool-call-batch-child[data-batch-sub-status='pending'] {
+  background: var(--bg-overlay);
+}
+
 /* Disclosure row: compact one-line summary, click to expand. */
 .tool-call-batch-child-row {
   display: flex;
@@ -131,6 +136,23 @@
 
 .tool-call-batch-child[data-batch-sub-status='skipped'] .tool-call-batch-child-status {
   color: var(--fg-muted);
+}
+
+.tool-call-batch-child[data-batch-sub-status='pending'] .tool-call-batch-child-status {
+  color: var(--fg-muted);
+}
+
+.tool-call-batch-child-pending-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
 }
 
 .tool-call-batch-spinner {

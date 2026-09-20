@@ -12,6 +12,7 @@
 
 import { getSessionWorkspaceRoot } from './workspace-safety.js';
 import { invalidateWorkspaceFileIndex } from './workspace-file-index.js';
+import { invalidateSshWorkspaceFileIndexForSession } from './ssh-workspace-file-index.js';
 
 /**
  * 可能改动工作区文件系统的 canonical 工具名。
@@ -41,22 +42,22 @@ export const WORKSPACE_FILE_INDEX_WRITE_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * 若 `toolName` 可写工作区，则失效 `sessionId` 对应工作区根的文件索引。
- * 无法解析工作区根时静默跳过。
+ * 无法解析工作区根时静默跳过；SSH 绑定会话额外失效其远端索引。
  */
 export function invalidateWorkspaceFileIndexForToolCall(sessionId: string, toolName: string): void {
   if (!WORKSPACE_FILE_INDEX_WRITE_TOOLS.has(toolName)) {
     return;
   }
   // 运行在工具执行的 finally 中，任何失败都不能覆盖工具本身的结果。
-  let workspaceRoot: string | null;
   try {
-    workspaceRoot = getSessionWorkspaceRoot(sessionId);
+    const workspaceRoot = getSessionWorkspaceRoot(sessionId);
+    if (workspaceRoot) {
+      invalidateWorkspaceFileIndex(workspaceRoot);
+    }
   } catch (error) {
     console.warn('[workspace-file-index] 解析会话工作区根失败，跳过索引失效：', String(error));
-    return;
   }
-  if (!workspaceRoot) {
-    return;
-  }
-  invalidateWorkspaceFileIndex(workspaceRoot);
+  // SSH 会话的远端工作目录无法解析成本地根（本地校验必然失败），因此独立
+  // 失效远端索引；未绑定 / 无 service 时内部静默跳过。
+  invalidateSshWorkspaceFileIndexForSession(sessionId);
 }

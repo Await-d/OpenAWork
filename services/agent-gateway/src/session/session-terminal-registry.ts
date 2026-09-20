@@ -108,8 +108,8 @@ interface LiveTerminalState {
   pendingDelta: string;
   /** Monotonic byte counter for the whole terminal lifetime (the `seq`). */
   totalBytes: number;
-  /** Byte length of the last legacy cumulative snapshot; drives delta extraction. */
-  lastCumulativeBytes: number;
+  /** Last legacy cumulative snapshot text; drives prefix-based delta extraction. */
+  lastCumulativeText: string;
   /** Replay buffer holding the last TERMINAL_OUTPUT_RING_BYTES bytes. */
   ring: ByteChunkBuffer;
   /** Small buffer holding the last TERMINAL_OUTPUT_TAIL_BYTES bytes. */
@@ -122,6 +122,70 @@ interface LiveTerminalState {
 }
 
 const liveTerminals = new Map<string, LiveTerminalState>();
+
+/**
+ * One synchronously-dispatched output chunk on the low-latency branch.
+ * `seq`/`outputBytesTotal` are `state.totalBytes` after this delta was
+ * appended — the exact same cursor the throttled `terminal_output` RunEvent
+ * carries, so both transports agree on ordering.
+ */
+export interface TerminalOutputChunk {
+  seq: number;
+  data: string;
+  outputBytesTotal: number;
+}
+
+/**
+ * Per-terminal in-process listeners that fire SYNCHRONOUSLY on every PTY
+ * delta, bypassing the 100ms run-event throttle. This is the low-latency
+ * branch used by the per-terminal WebSocket transport; RunEvents continue to
+ * feed the drawer on their own schedule. The immediate channel exists ONLY to
+ * bypass the throttle — it never replaces run-event emission.
+ */
+const immediateOutputListeners = new Map<string, Set<(chunk: TerminalOutputChunk) => void>>();
+
+/**
+ * Subscribe to a terminal's synchronous output channel. The returned thunk
+ * removes the listener (idempotent). Listeners are also cleared when the
+ * terminal exits / is deleted, so a subscriber that never unsubscribes still
+ * cannot outlive the terminal.
+ */
+export function subscribeTerminalOutputImmediate(
+  terminalId: string,
+  listener: (chunk: TerminalOutputChunk) => void,
+): () => void {
+  const listeners = immediateOutputListeners.get(terminalId) ?? new Set();
+  listeners.add(listener);
+  immediateOutputListeners.set(terminalId, listeners);
+  return () => {
+    const current = immediateOutputListeners.get(terminalId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) immediateOutputListeners.delete(terminalId);
+  };
+}
+
+function notifyImmediateOutput(terminalId: string, chunk: TerminalOutputChunk): void {
+  const listeners = immediateOutputListeners.get(terminalId);
+  if (!listeners || listeners.size === 0) return;
+  // Snapshot before dispatch: a listener may unsubscribe itself mid-dispatch
+  // (the WS teardown path), and iterating the live Set would then skip peers.
+  for (const listener of [...listeners]) {
+    try {
+      listener(chunk);
+    } catch (error) {
+      // A listener failure must never break the PTY hot path.
+      console.warn(
+        '[session-terminal-registry] immediate output listener failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}
+
+function clearImmediateOutputListeners(terminalId: string): void {
+  immediateOutputListeners.delete(terminalId);
+}
 
 function createByteChunkBuffer(): ByteChunkBuffer {
   return { chunks: [], bytes: 0 };
@@ -347,7 +411,7 @@ export function registerTerminal(input: RegisterTerminalInput): SessionTerminalR
     lastEmittedBytes: 0,
     pendingDelta: '',
     totalBytes: 0,
-    lastCumulativeBytes: 0,
+    lastCumulativeText: '',
     ring: createByteChunkBuffer(),
     tail: createByteChunkBuffer(),
     trailingTimer: null,
@@ -440,6 +504,15 @@ function appendDeltaInternal(terminalId: string, state: LiveTerminalState, delta
   state.pendingDelta =
     state.pendingDelta.length === 0 ? deltaText : `${state.pendingDelta}${deltaText}`;
 
+  // Fire the synchronous (unthrottled) branch AFTER `totalBytes` advanced so
+  // `seq` matches the run-event cursor exactly. `data` is precisely the text
+  // appended to `pendingDelta` for this delta.
+  notifyImmediateOutput(terminalId, {
+    seq: state.totalBytes,
+    data: deltaText,
+    outputBytesTotal: state.totalBytes,
+  });
+
   const now = Date.now();
   sqliteRun(
     `UPDATE session_terminals
@@ -502,22 +575,24 @@ export function appendTerminalOutputDelta(terminalId: string, delta: string): vo
 /**
  * Legacy cumulative path (still called by bash-tools). `snapshot` is the
  * cumulative stdout+stderr text since process start; we internally diff it
- * against the previous snapshot to obtain a delta and route it through the
- * incremental path above. If the snapshot shrinks (new process / reset) the
- * whole snapshot is re-sent.
+ * against the previous snapshot by string prefix to obtain the appended text
+ * and route it through the incremental path above. If the snapshot does not
+ * extend the previous one (new process / reset / divergent prefix) the whole
+ * snapshot is re-sent.
  */
 export function appendTerminalOutput(terminalId: string, snapshot: string): void {
   const state = liveTerminals.get(terminalId);
   if (!state || state.closed) return;
-  const snapshotBytes = Buffer.byteLength(snapshot, 'utf-8');
-  const previousBytes = state.lastCumulativeBytes;
-  state.lastCumulativeBytes = snapshotBytes;
-  if (snapshotBytes === previousBytes) return;
-  if (snapshotBytes < previousBytes) {
+  const previous = state.lastCumulativeText;
+  if (snapshot === previous) return;
+  state.lastCumulativeText = snapshot;
+  if (!snapshot.startsWith(previous)) {
     appendDeltaInternal(terminalId, state, Buffer.from(snapshot, 'utf-8'));
     return;
   }
-  appendDeltaInternal(terminalId, state, Buffer.from(snapshot, 'utf-8').subarray(previousBytes));
+  const delta = snapshot.slice(previous.length);
+  if (delta.length === 0) return;
+  appendDeltaInternal(terminalId, state, Buffer.from(delta, 'utf-8'));
 }
 
 /**
@@ -553,6 +628,9 @@ export interface MarkTerminalExitedInput {
 export function markTerminalExited(input: MarkTerminalExitedInput): void {
   const state = liveTerminals.get(input.terminalId);
   const now = Date.now();
+  // No output can follow an exit, so drop the low-latency subscribers here
+  // rather than waiting for their own teardown to run.
+  clearImmediateOutputListeners(input.terminalId);
   let finalTail: string | undefined;
   let finalBytes: number | undefined;
   if (input.finalSnapshot !== undefined) {
@@ -801,6 +879,9 @@ export function deleteTerminalRecord(input: { terminalId: string; userId: string
     input.terminalId,
     input.userId,
   ]);
+  // The row is gone, so no further output will be produced — release any
+  // low-latency subscribers that outlived the teardown.
+  clearImmediateOutputListeners(input.terminalId);
   return { found: true, deleted: true, refusedRunning: false };
 }
 
@@ -831,6 +912,7 @@ export function __resetSessionTerminalsForTest(): void {
     if (state.trailingTimer) clearTimeout(state.trailingTimer);
   }
   liveTerminals.clear();
+  immediateOutputListeners.clear();
   try {
     sqliteRun('DELETE FROM session_terminals');
   } catch {
@@ -841,4 +923,18 @@ export function __resetSessionTerminalsForTest(): void {
 /** Test hook — exposes the in-memory map size. */
 export function __liveTerminalCountForTest(): number {
   return liveTerminals.size;
+}
+
+/**
+ * Test hook — number of live immediate-output listeners, either for one
+ * terminal or summed across all terminals. Proves the WS route releases its
+ * subscription on close.
+ */
+export function __immediateOutputListenerCountForTest(terminalId?: string): number {
+  if (terminalId !== undefined) {
+    return immediateOutputListeners.get(terminalId)?.size ?? 0;
+  }
+  let total = 0;
+  for (const listeners of immediateOutputListeners.values()) total += listeners.size;
+  return total;
 }

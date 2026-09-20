@@ -9,7 +9,19 @@ import type {
 } from '../../conversation-runtime/messages/support.js';
 import type { UnifiedComposerFeatures } from './UnifiedComposer.js';
 import { useComposerInputHistoryStore } from '../../../stores/chat/composer-input-history.js';
+import { useChatQueueStore } from '../../../stores/chat/chat-queue.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
+
+let hydrationGate: { promise: Promise<void>; resolve: () => void } | null = null;
+
+vi.mock('../../../pages/chat-page/conversation/composer/queued-composer-file-store.js', () => ({
+  restoreQueuedComposerFiles: async () => {
+    if (hydrationGate) await hydrationGate.promise;
+    return { files: [], restored: false };
+  },
+  persistQueuedComposerFiles: async () => false,
+  deleteQueuedComposerFiles: async () => undefined,
+}));
 
 const TEST_FEATURES = {
   attachments: false,
@@ -30,6 +42,7 @@ interface HarnessProps {
   readonly initialInput: string;
   readonly sessionId: string | null;
   readonly sessionBusyState?: 'running' | 'paused' | null;
+  readonly streaming?: boolean;
   readonly onSubmit?: () => boolean | Promise<boolean>;
 }
 
@@ -46,7 +59,13 @@ function createDeferred<T>() {
 }
 
 function UnifiedComposerStateHarness(props: HarnessProps) {
-  const { initialInput, sessionId, sessionBusyState = null, onSubmit = async () => true } = props;
+  const {
+    initialInput,
+    sessionId,
+    sessionBusyState = null,
+    streaming = false,
+    onSubmit = async () => true,
+  } = props;
   const [input, setInput] = useState(initialInput);
   const [attachmentItems, setAttachmentItems] = useState<AttachmentItem[]>([]);
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
@@ -57,7 +76,7 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
     gatewayUrl: 'http://gateway.test',
     token: 'token-1',
     currentUserEmail: 'user@example.com',
-    streaming: false,
+    streaming,
     stoppingStream: false,
     canStopSession: false,
     stopCapability: 'none',
@@ -111,17 +130,31 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
       >
         send-override
       </button>
+      {state.queuedComposerPreviews.map((preview) => (
+        <span key={preview.id}>
+          {preview.title}
+          <button
+            type="button"
+            onClick={() => state.removeQueuedComposerMessage(preview.id)}
+          >{`remove:${preview.id}`}</button>
+        </span>
+      ))}
     </div>
   );
 }
 
 afterEach(() => {
   cleanup();
+  hydrationGate = null;
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
+  useChatQueueStore.setState({ queuesByScope: {} });
   vi.restoreAllMocks();
 });
 
 describe('useUnifiedComposerState', () => {
+  const SCOPE_A = 'user@example.com:session-1';
+  const SCOPE_B = 'user@example.com:session-2';
+
   function getComposer(view: ReturnType<typeof render>) {
     const composer = view.getByLabelText('composer');
     if (!(composer instanceof HTMLTextAreaElement)) {
@@ -308,5 +341,253 @@ describe('useUnifiedComposerState', () => {
     fireEvent.change(getComposer(view), { target: { value: '' } });
     fireEvent.keyDown(getComposer(view), { key: 'ArrowUp' });
     expect(getComposer(view).value).toBe('');
+  });
+
+  it('会话 A 流式中入队后切到空闲会话 B，不会把队列消息发送到 B', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="追加到 A 的消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // 切到空闲的 B：旧会话队列不得被 flush 到 B
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]).toBeUndefined();
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('从 A 切到已有持久化队列的 B 时，不会用 A 的陈旧队列覆盖 B', async () => {
+    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+      {
+        attachmentItems: [],
+        enqueuedAt: 1,
+        id: 'persisted-b',
+        requiresAttachmentRebind: false,
+        text: 'B 原有的排队消息',
+      },
+    ]);
+
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="A 的排队消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+    });
+
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]?.map((item) => item.id)).toEqual([
+        'persisted-b',
+      ]);
+    });
+
+    // B 空闲，flush 只应发送 B 自己的队列消息（A 的陈旧队列不得被发送）
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: 'B 原有的排队消息' }));
+    expect(
+      useChatQueueStore.getState().queuesByScope[SCOPE_A]?.map((item) => item.id),
+    ).toHaveLength(1);
+  });
+
+  it('切到已有持久化队列的 B 后，在水合完成前入队的新消息不会被水合结果覆盖', async () => {
+    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+      {
+        attachmentItems: [],
+        enqueuedAt: 1,
+        id: 'persisted-b1',
+        requiresAttachmentRebind: false,
+        text: 'B 原有 1',
+      },
+      {
+        attachmentItems: [],
+        enqueuedAt: 2,
+        id: 'persisted-b2',
+        requiresAttachmentRebind: false,
+        text: 'B 原有 2',
+      },
+    ]);
+
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="A 的排队消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+    });
+
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    // hydration 尚未完成，立即入队新消息
+    fireEvent.change(getComposer(view), { target: { value: 'B 新入队消息' } });
+    fireEvent.click(view.getByText('queue'));
+
+    await waitFor(() => {
+      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]?.map((item) => item.text)).toEqual(
+        ['B 原有 1', 'B 原有 2', 'B 新入队消息'],
+      );
+    });
+    expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]?.map((item) => item.text)).toEqual([
+      'A 的排队消息',
+    ]);
+  });
+
+  it('flush 发送期间切走且 onSubmit 返回 false 时，消息回填到原会话而不是新会话', async () => {
+    const deferredSend = createDeferred<boolean>();
+    const onSubmit = vi.fn(() => deferredSend.promise);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="会被回填的消息"
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    // flush 条件满足（非流式），onSubmit 挂起
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    // 切到 B 后再让发送失败
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+    deferredSend.resolve(false);
+
+    await waitFor(() => {
+      expect(
+        useChatQueueStore.getState().queuesByScope[SCOPE_A]?.map((item) => item.text),
+      ).toContain('会被回填的消息');
+    });
+    expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]).toBeUndefined();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('A 的在途 flush 结算后，不会清掉 B 的在途 flush 标记', async () => {
+    const deferredA = createDeferred<boolean>();
+    const onSubmit = vi.fn((payload: { text: string }) =>
+      payload.text === 'A 在途消息' ? deferredA.promise : Promise.resolve(true),
+    );
+
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="A 在途消息"
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit as unknown as () => boolean | Promise<boolean>}
+      />,
+    );
+
+    // A 队列 flush 启动，onSubmit 挂起
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    // 切到 B，B 立即 flush 自己的队列
+    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+      {
+        attachmentItems: [],
+        enqueuedAt: 1,
+        id: 'b-inflight',
+        requiresAttachmentRebind: false,
+        text: 'B 在途消息',
+      },
+    ]);
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming={false}
+        onSubmit={onSubmit as unknown as () => boolean | Promise<boolean>}
+      />,
+    );
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(2);
+    });
+
+    // A 的挂起发送此刻才结算：不得干扰 B 的在途标记
+    deferredA.resolve(true);
+
+    // 触发一次 B 的 flush 依赖变化（重新挂载同一 session 触发 re-render 不够，直接改 streaming）
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming
+        onSubmit={onSubmit as unknown as () => boolean | Promise<boolean>}
+      />,
+    );
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-2"
+        streaming={false}
+        onSubmit={onSubmit as unknown as () => boolean | Promise<boolean>}
+      />,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // B 的每条消息只发送一次，未因 A 结算而被重复启动
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit.mock.calls.filter((call) => call[0]?.text === 'B 在途消息')).toHaveLength(1);
   });
 });

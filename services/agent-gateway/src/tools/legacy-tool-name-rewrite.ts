@@ -54,7 +54,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `functions.functions.x` becomes `functions.x`, and names without the
  * prefix pass through untouched.
  */
-function stripFunctionsNamespacePrefix(toolName: string): string {
+export function stripFunctionsNamespacePrefix(toolName: string): string {
   if (!toolName.startsWith(OPENAI_FUNCTIONS_PREFIX)) {
     return toolName;
   }

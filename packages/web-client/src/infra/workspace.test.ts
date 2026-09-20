@@ -297,6 +297,92 @@ describe('createWorkspaceClient mutation error handling', () => {
   });
 });
 
+describe('createWorkspaceClient readFile SSH 身份', () => {
+  it('readFileResult 未传身份时请求与本地读取完全一致（不追加身份参数）', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ content: 'demo', truncated: false }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.readFileResult('token-1', '/workspace/demo/a.ts', {
+      workspaceRoot: '/workspace/demo',
+      sessionId: undefined,
+      sshConnectionId: undefined,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      retryable: false,
+      file: { content: 'demo', truncated: false },
+    });
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const requestUrl = String(firstCall[0]);
+    expect(requestUrl).toContain('/workspace/file?');
+    expect(requestUrl).toContain('path=%2Fworkspace%2Fdemo%2Fa.ts');
+    expect(requestUrl).toContain('workspaceRoot=%2Fworkspace%2Fdemo');
+    expect(requestUrl).not.toContain('sessionId=');
+    expect(requestUrl).not.toContain('sshConnectionId=');
+  });
+
+  it('readFileResult 会附带 sessionId 与 sshConnectionId 查询参数', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ content: 'remote' }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    await client.readFileResult('token-1', '/home/await/projects/demo/a.ts', {
+      workspaceRoot: '/home/await/projects/demo',
+      sessionId: 'session-1',
+      sshConnectionId: 'conn-1',
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const requestUrl = String(firstCall[0]);
+    expect(requestUrl).toContain('sessionId=session-1');
+    expect(requestUrl).toContain('sshConnectionId=conn-1');
+  });
+
+  it('readFileBinary 会转发身份查询参数', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(4),
+        headers: new Headers({ 'content-type': 'application/pdf' }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.readFileBinary('token-1', '/home/await/projects/demo/a.pdf', {
+      sessionId: 'session-1',
+    });
+
+    expect(result.contentType).toBe('application/pdf');
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const requestUrl = String(firstCall[0]);
+    expect(requestUrl).toContain('/workspace/file/binary?');
+    expect(requestUrl).toContain('sessionId=session-1');
+    expect(requestUrl).not.toContain('sshConnectionId=');
+  });
+});
+
 describe('createWorkspaceClient getFileIndexVersion', () => {
   it('携带 path 查询参数与 Authorization 头，并返回 root/version', async () => {
     const fetchMock = vi.fn(async () => {

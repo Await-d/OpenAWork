@@ -1,3 +1,9 @@
+// ---------------------------------------------------------------------------
+// OpenAWork Gateway (.NET) — 未启用 / 不在维护范围。
+// 本网关不参与仓库构建、类型检查、测试与 CI；产品侧决定「.NET 版本不需要管理」。
+// 后续所有功能改动只需在 TypeScript 网关 services/agent-gateway 内进行，
+// 本目录无需同步调整。详见 services/agent-gateway-dotnet/README.md。
+// ---------------------------------------------------------------------------
 using System.Text.Json;
 using System.Text;
 using System.Net.WebSockets;
