@@ -114,12 +114,21 @@
 - **实测行数：7347 → 6854（净 −493）**，低于预计 −700~−900。原因：两分支 `topBar` 确已外移，但公共块（`beforeMessages`/`afterMessages`/`composerRightSlot` 等）只省一份，且页内包装 JSX（`SessionPanelFrame`/workbench div）仍留在 ChatPage。**去重目标已达成（单一来源），行数下降为次要收益。**
 - **偏差记录（须保留）**：① `chrome.workflowRuntime` 类型由非空放宽为 `WorkflowRuntimeState | null`（对齐 `WorkflowRuntimeStatusStrip` 契约，否则 `tsc` 失败）；② 清理 8 个因 `topBar` 外移而失效的 import。
 
-### Phase 2：会话作用域 hook（原样搬家，不解耦）
-- [ ] T-12 新建 `hooks/use-chat-session-runtime.ts`，**原样**搬入 C5+C8 状态
-- [ ] T-13 **原样**搬入 `:1817` 巨型 effect（保留 `eslint-disable` 与全部 setter 入参）
-- [ ] T-14 **原样**搬入 `:809` / `:1140` reset effect
-- [ ] T-15 镜像 ref 与所属 state **同 hook 迁移并导出**（`rightPanelStateRef`、stream 镜像 5 个、`devServerDetectedTerminalIdsRef`、`sessionMetadataDirtyRef`）；核对 `useEffect` vs `useLayoutEffect` 时序**不得改变**
-- [ ] T-16 新 hook 测试 + 门禁
+### Phase 2：会话切换 effect 搬家（原样，零顺序变化）—— ✅ **已完成 2026-09-21（方案有偏差，见下）**
+- [x] T-12 ⛔ **未执行（有意偏差）**：未把 C5+C8 状态搬进 hook。原因：搬迁 state 需重写 ChatPage 内约 28 个状态域的**所有读写点**（blast radius 大），属方案里更危险的 B 路线。改为先搬 effect，收益相近、风险更低。
+- [x] T-13 ✅ 巨型 effect（原 `:1807–2265`，**459 行**）逻辑体已搬至 `hooks/run-chat-session-switch-effect.ts`（619 行）。**关键设计偏差**：不是搬进一个 `use*` hook，而是**保留 ChatPage 原位的 `useEffect`**，只把逻辑提为纯函数 `runChatSessionSwitchEffect(deps)` 由该 effect 调用。
+  - 为什么：依赖对象若在组件体（`:1807`）急切构造，会触发 `restoreScrollTop` 的 **TDZ**（`used before declaration`）；且若改为在组件末尾构造，会**改变 effect 执行顺序**。改为在 **effect 回调内部**构造依赖对象 → 延迟求值（无 TDZ）且 **effect 顺序零变化**。
+- [x] T-14 ⛔ **未执行**：`:809` resetToWelcome 与 `:1140` 按会话 reset 两个小 effect 未搬（收益小，留待后续）。
+- [x] T-15 ⛔ **N/A**：状态未搬，镜像 ref 未迁移。
+- [x] T-16 ✅ **门禁全绿**：scoped **82 文件 / 537 例**；`apps/web` 全量 **508 文件 / 4890 例**；`tsc --noEmit` **EXIT=0**。专用单测未新增（该函数为薄透传，逻辑已由 P0 `ChatPage.session-switch.test.tsx` 端到端覆盖）。
+- **实测行数：6854 → 6484（ChatPage 净 −370）**；新增依赖接口 **69 字段**（由 TypeScript Compiler API 从 ChatPage 真实类型**代码生成**，非手写）。
+- **未达成**：ChatPage 仍 **6484 行**（超上限 4.3 倍），目标 <1500 需 P3–P6 继续。
+
+### Phase 2 原始计划（保留沿革）
+- ~~T-12 新建 `hooks/use-chat-session-runtime.ts`，原样搬入 C5+C8 状态~~（见上，未执行）
+- ~~T-13 原样搬入 `:1817` 巨型 effect~~（已以纯函数形式完成）
+- ~~T-14 原样搬入 `:809` / `:1140` reset effect~~（未执行）
+- ~~T-15 镜像 ref 同 hook 迁移~~（N/A）
 
 ### Phase 3：reset 解耦（默认不重写，只下放所有权）
 - [ ] T-17 新建 `state/use-session-reset.ts`（`useSessionReset(scopeKey, resetFn)`）+ session epoch（`sessionId` + 单调递增）
@@ -194,6 +203,7 @@ P0(tripwire) ─> P1(props-builder/区域) ─> P2(会话 hook 搬家) ─> P3(r
 
 - ✅ **Gate 0 四项决策 + Gate 1 已批准**（用户 2026-09-21）。
 - ✅ **P0 tripwire 已完成并提交**：`fe0b5cf2 test(web): 新增ChatPage组装层回归护栏与mock接线`（3 文件 / 22 例）。
-- ✅ **P1 已完成（未提交）**：净 **−493 行**（7347 → 6854）；新增 4 文件（props hook + 2 区域容器 + 契约测试）；门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
-- ⏸️ **P2 未开始**（会话作用域 hook 原样搬家）。
-- **未提交**：`ChatPage.tsx` + 4 个新文件仍在工作树（按约定待用户指示提交）。
+- ✅ **P1 已完成并提交**：`230a649a refactor(web): ChatPage 组装层 P1 收敛双分支 prop 面`（净 −493 行：7347 → 6854；新增 4 文件）。
+- ✅ **P2 已完成（未提交）**：ChatPage 6854 → **6484（净 −370）**；新增 `hooks/run-chat-session-switch-effect.ts`（619 行，含 69 字段依赖接口，由 Compiler API 代码生成）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
+- ⏸️ **P3 未开始**（reset 解耦 / 引入 `useSessionReset` + epoch）。
+- **未提交**：P2 的 `ChatPage.tsx` + `run-chat-session-switch-effect.ts` 在工作树。
