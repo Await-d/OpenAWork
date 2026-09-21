@@ -16,7 +16,7 @@ import type { ChatMessage, WorkspaceFileMentionItem } from '../../../components/
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import { WorkspaceFileTreePanel } from '../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
 import type { OpenFile, OpenFileOptions, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
-import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
+
 import { useBookmarkStore } from '../../../stores/chat/bookmarks.js';
 import type { ChatEditorPaneTab } from '.././hooks/use-chat-ui-state.js';
 import type { FusionChatLayoutState } from '.././layout/use-fusion-chat-layout.js';

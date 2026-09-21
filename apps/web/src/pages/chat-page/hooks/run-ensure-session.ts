@@ -4,10 +4,9 @@
  * `ChatPage` 保留原位 `async function ensureSession` 声明；deps 在函数体内构造，
  * 调用时才求值，无 TDZ、无顺序变化。
  */
-import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
-import type { AssistantTraceToolCall, ReasoningEffort } from '../../../components/conversation-runtime/messages/support.js';
-import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
-import { useBookmarkStore } from '../../../stores/chat/bookmarks.js';
+
+import type { ReasoningEffort } from '../../../components/conversation-runtime/messages/support.js';
+
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { ChatSettingsProvider, SavedChatDefaults, SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
@@ -16,7 +15,7 @@ import { resolveModelSelectionSourceFromMetadata } from '.././conversation/setti
 import type { ModelSelectionSource } from '.././conversation/settings/model-selection-source.js';
 import { normalizeChatThinkingState } from '.././conversation/settings/resolve-chat-thinking-request.js';
 import { createSessionsClient } from '@openAwork/web-client';
-import { useCallback, useMemo } from 'react';
+
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 import type { NavigateFunction } from 'react-router';
 

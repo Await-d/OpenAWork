@@ -1,278 +1,87 @@
-import type {
-  CommandResultCard,
-  InputImageContent,
-  Message,
-  RunEvent,
-  StreamThinkingChunk,
-  UpstreamRouteDescriptor,
-  UpstreamStreamSummary,
-  WorkflowRuntimeState,
-} from '@openAwork/shared';
+import type { InputImageContent, WorkflowRuntimeState } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type {
-  Session,
-  SessionActiveStream,
-  SessionMessageRatingRecord,
-  SessionRecoveryReadModel,
-  SessionTask,
-} from '@openAwork/web-client';
-import {
-  createArtifactsClient,
-  createPendingPermissionRequestSnapshot,
-  createQuestionsClient,
-  createSessionsClient,
-  createSettingsClient,
-  createSshClient,
-  createWorkflowsClient,
-  dedupePendingPermissionRequests,
-} from '@openAwork/web-client';
+import type { Session, SessionTask } from '@openAwork/web-client';
+import { createArtifactsClient, createQuestionsClient, createSessionsClient, createSettingsClient, createSshClient } from '@openAwork/web-client';
 import type { CSSProperties } from 'react';
-import React, {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useFileEditorContext } from '../../App.js';
 import { usePageActivation } from '../../components/common/routing/CachedRouteOutlet.js';
 
 import { ChatImageGenerationResultStrip } from '../../components/chat/image/ChatImageGenerationResultStrip.js';
-import {
-  ModelPicker,
-  ModelSettingsPopover,
-  renderChatMessageContentWithOptions,
-  renderStreamingChatMessageContentWithOptions,
-  sharedUiThemeVars,
-  WelcomeScreen,
-} from '../../components/chat/session/ChatPageSections.js';
-import {
-  UnifiedComposer,
-  type UnifiedComposerActivity,
-} from '../../components/chat/composer/UnifiedComposer.js';
+import { sharedUiThemeVars } from '../../components/chat/session/ChatPageSections.js';
+import { type UnifiedComposerActivity } from '../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../components/chat/composer/use-mention-file-search.js';
-import {
-  ComposerWorkspaceMenu,
-  type ComposerSshConnectionSummary,
-} from '../../components/chat/composer/ComposerWorkspaceMenu.js';
+import { ComposerWorkspaceMenu, type ComposerSshConnectionSummary } from '../../components/chat/composer/ComposerWorkspaceMenu.js';
 import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
 import type { ComposerPermissionMode } from '../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
 import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminalPanel.js';
-import {
-  ChatMessageGroupList,
-  type ChatRenderEntry,
-  type ChatRenderGroup,
-} from '../../components/chat/message/chat-message-group-list.js';
-import { ChatRemoteStreamPlaceholder } from '../../components/chat/session/chat-remote-stream-placeholder.js';
-import {
-  ChatSearchOverlay,
-  useChatSearch,
-} from '../../components/chat/search/chat-search-overlay.js';
-import { ChatSessionSkeleton } from '../../components/chat/session/chat-session-skeleton.js';
+
+import { useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
+
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
 import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-idle-detector.js';
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
-import SshWorkspacePickerModal, {
-  type SshPickerConnection,
-  type SshWorkspaceSelection,
-} from '../../components/common/modal/SshWorkspacePickerModal.js';
+import SshWorkspacePickerModal, { type SshPickerConnection, type SshWorkspaceSelection } from '../../components/common/modal/SshWorkspacePickerModal.js';
 import type { SshConnectionDraft } from '../../components/common/modal/SshConnectionCreateForm.js';
 import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
-import {
-  formatGatewayStreamErrorMessage,
-  useGatewayClient,
-} from '../../hooks/gateway/useGatewayClient.js';
+import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useCurrentUserDisplayName } from '../../stores/user-profile/current-user-profile.js';
 import { resolveEffectiveTerminalPanelPosition, useUIStateStore } from '../../stores/ui/uiState.js';
-import {
-  type ChatSettingsProvider,
-  loadSavedChatSessionDefaults,
-} from '../../utils/chat/chat-session-defaults.js';
-import {
-  COMPOSER_REFERENCE_EVENT_NAME,
-  isComposerReferenceEvent,
-} from '../../utils/chat/composer-reference-events.js';
+import { type ChatSettingsProvider, loadSavedChatSessionDefaults } from '../../utils/chat/chat-session-defaults.js';
+import { COMPOSER_REFERENCE_EVENT_NAME, isComposerReferenceEvent } from '../../utils/chat/composer-reference-events.js';
 import { logger } from '../../utils/log/logger.js';
-import { replyPermissionRequest } from '../../utils/permission/permission-reply.js';
-import {
-  requestCurrentSessionRefresh,
-  requestSessionListRefresh,
-} from '../../utils/session/session-list-events.js';
+
+import { requestCurrentSessionRefresh, requestSessionListRefresh } from '../../utils/session/session-list-events.js';
 import { subscribeSessionDialogueModeSwitch } from '../../utils/session/dialogue-mode-events.js';
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
-import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
+
 import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
 import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-request.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
-import {
-  resolveAttachEffectDisposition,
-  shouldAttemptAttachToSession,
-  shouldResetAttachAttempt,
-} from '../../components/conversation-runtime/attach/attach-stream-eligibility.js';
-import { handleInterruptedAttachStream } from '../../components/conversation-runtime/attach/attach-stream-reconnect.js';
-import { createAttachStreamReconnectWiring } from '../../components/conversation-runtime/attach/attach-stream-reconnect-wiring.js';
-import {
-  appendAttachmentSummary,
-  buildUploadedAttachmentSummaryLine,
-  isImageFile,
-  uploadChatAttachments,
-} from '../../components/conversation-runtime/attachments/attachment-upload.js';
+
 import { ChatEditorPane } from './panels/chat-editor-pane.js';
-import {
-  collapseFusionWorkspaceToPanel,
-  promoteFusionWorkspaceTab,
-} from './panels/fusion-workspace-promotion.js';
+import { collapseFusionWorkspaceToPanel, promoteFusionWorkspaceTab } from './panels/fusion-workspace-promotion.js';
 import { WorkspaceFileTreePanel } from '../../components/layout/sidebar/WorkspaceFileTreePanel.js';
-import {
-  buildQueuedComposerScopeKey,
-  buildRightPanelStateFromSessionSnapshot,
-  CHAT_SCROLL_BOTTOM_PADDING,
-  CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
-  createSessionMetadataSnapshot,
-  deriveLatestUserGoal,
-  isImmediatelyRenderableStructuredContent,
-  type LiveToolCallState,
-  normalizeModelLookupKey,
-  type PreparedSessionRecoveryState,
-  prepareSessionRecoveryState,
-  REMOTE_STREAM_RECOVERY_POLL_MS,
-  SESSION_SWITCH_DEFER_THRESHOLD,
-} from './conversation/render/chat-page-utils.js';
+import { buildQueuedComposerScopeKey, buildRightPanelStateFromSessionSnapshot, createSessionMetadataSnapshot, isImmediatelyRenderableStructuredContent, prepareSessionRecoveryState, REMOTE_STREAM_RECOVERY_POLL_MS } from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
-import type { RightPanelTabId } from './panels/right-panel-tabs.js';
-import { ChatScrollBottomButton } from '../../components/conversation-runtime/views/scroll-bottom-button.js';
-import { ChatStreamErrorBarV2 as ChatStreamErrorBar } from '../../components/conversation-runtime/views/stream-error-bar-v2.js';
-import {
-  type ImageEditReferenceArtifact,
-  toImageEditReferenceArtifacts,
-} from './conversation/render/image-edit-reference-artifacts.js';
+
+import { type ImageEditReferenceArtifact, toImageEditReferenceArtifacts } from './conversation/render/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from '../../components/conversation-runtime/messages/ordered-id.js';
-import { isAutoAcceptEnabled } from '../../components/conversation-runtime/session/permission-auto-respond.js';
-import { deleteQueuedComposerFiles } from './conversation/composer/queued-composer-file-store.js';
-import RetryModeDialog from './conversation/views/retry-mode-dialog.js';
+
 import { startSequentialPolling } from '../../components/conversation-runtime/session/sequential-polling.js';
-import { executeServerCommand } from './conversation/composer/server-command-item.js';
-import { prepareImageGenerationInput } from './conversation/composer/prepare-image-generation-input.js';
-import { prepareStandardChatSendInput } from './conversation/composer/prepare-standard-chat-send-input.js';
-import { startStandardChatStream } from './conversation/composer/start-standard-chat-stream.js';
-import { submitImageGeneration } from './conversation/composer/submit-image-generation.js';
-import {
-  SessionRunStateBar,
-  SessionRunStatePlaceholder,
-} from '../../components/conversation-runtime/views/session-run-state-bar.js';
-import {
-  flattenSessionTodoLanes,
-  type SessionStateStatus,
-  type SessionTodoItem,
-  shouldPollSessionRuntime,
-} from '../../components/conversation-runtime/session/session-runtime.js';
-import {
-  type RecoveredActiveAssistantStream,
-  recoverActiveAssistantStream,
-} from '../../components/conversation-runtime/stream/stream-recovery.js';
-import {
-  type ChatBackendUsageSnapshot,
-  mergeChatBackendUsageSnapshot,
-} from '../../components/conversation-runtime/stream/stream-usage.js';
-import {
-  appendStreamingTextDelta,
-  appendStreamingThinkingDelta,
-  applyToolResultToStreamingSegment,
-  markStreamingReasoningSegmentEnded,
-  upsertStreamingToolSegment,
-} from '../../components/conversation-runtime/stream/streaming-segments.js';
-import {
-  hasGatewayAdvancedRound,
-  resolveNextRoundIndex,
-  shouldStartNewRound,
-} from '../../components/conversation-runtime/stream/stream-round-boundary.js';
-import { createRoundAssistantRequestId } from '../../components/conversation-runtime/stream/round-request-id.js';
-import {
-  appendStreamingThinkingChunk,
-  buildStreamingThinkingChunkDeliveryKey,
-  extractStreamingThinkingDurations,
-  extractStreamingThinkingEndedFlags,
-  extractStreamingThinkingTexts,
-  joinStreamingThinkingTexts,
-  markStreamingThinkingChunkEnded,
-  type StreamingThinkingBlock,
-} from '../../components/conversation-runtime/stream/streaming-thinking.js';
-import {
-  buildSubAgentRunItems,
-  isActiveStatus,
-  SubAgentRunList,
-} from './panels/sub-agent-run-list.js';
+
+import { type SessionStateStatus, type SessionTodoItem, shouldPollSessionRuntime } from '../../components/conversation-runtime/session/session-runtime.js';
+
+import { type ChatBackendUsageSnapshot } from '../../components/conversation-runtime/stream/stream-usage.js';
+
+import { extractStreamingThinkingTexts, joinStreamingThinkingTexts, type StreamingThinkingBlock } from '../../components/conversation-runtime/stream/streaming-thinking.js';
+import { buildSubAgentRunItems, isActiveStatus, SubAgentRunList } from './panels/sub-agent-run-list.js';
 import { BatchStopSubAgentsControl } from './panels/batch-stop-sub-agents-control.js';
-import { SubSessionDetailPanel } from './panels/sub-session-detail-panel.js';
-import {
-  buildUserHistoryJumpItems,
-  UserHistoryJumpList,
-} from './history/user-history-jump-list.js';
-import {
-  type AssistantTraceToolCall,
-  applyPermissionDecisionToLocalAssistantMessages,
-  applyToolResultToLocalAssistantMessages,
-  type ChatMessage,
-  type ChatMessagePart,
-  type ComposerMenuState,
-  createAssistantTraceContent,
-  detectComposerTrigger,
-  dismissPermissionEventMessage,
-  estimateTokenCount,
-  hasActivePendingPermissionRequest,
-  MENTION_SEARCH_LIMIT,
-  matchClientSlashCommand,
-  matchServerSlashCommand,
-  normalizeChatMessages,
-  parseAssistantTraceContent,
-  parseSessionModeMetadata,
-  parseToolCallInputText,
-  partsFromAssistantTrace,
-  type ReasoningEffort,
-  reconcileSnapshotChatMessages,
-  replaceOrAppendStreamedAssistantMessage,
-  sanitizeComposerPlainText,
-  upsertPermissionEventMessage,
-  type WorkspaceFileMentionItem,
-} from '../../components/conversation-runtime/messages/support.js';
-import {
-  buildTaskToolRuntimeLookup,
-  buildTerminalTaskSyncMarker,
-  resolveTaskToolRuntimeSnapshot,
-} from './conversation/render/task-tool-runtime.js';
-import {
-  mergePendingQuestion,
-  selectPendingQuestionForRequest,
-} from './conversation/render/select-pending-question.js';
+
+import { buildUserHistoryJumpItems, UserHistoryJumpList } from './history/user-history-jump-list.js';
+import { type ChatMessagePart, estimateTokenCount, MENTION_SEARCH_LIMIT, type ReasoningEffort, reconcileSnapshotChatMessages, type WorkspaceFileMentionItem } from '../../components/conversation-runtime/messages/support.js';
+import { buildTaskToolRuntimeLookup, buildTerminalTaskSyncMarker, resolveTaskToolRuntimeSnapshot } from './conversation/render/task-tool-runtime.js';
+import { mergePendingQuestion, selectPendingQuestionForRequest } from './conversation/render/select-pending-question.js';
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
-import {
-  filterTranscriptMessages,
-  shouldShowRunEventInTranscript,
-} from '../../components/conversation-runtime/messages/transcript-visibility.js';
+
 import { useAssistantMessageProcessing } from './conversation/snapshot/use-assistant-message-processing.js';
 import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js';
-import type { SessionImageGenerationResponse } from './hooks/use-chat-image-generation.js';
+
 import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
 import { useWebSearchAvailable } from './hooks/use-web-search-available.js';
-import {
-  type HistoryEditPrompt,
-  type RetryPrompt,
-  useChatMessageActions,
-} from './hooks/use-chat-message-actions.js';
+import { type HistoryEditPrompt, type RetryPrompt, useChatMessageActions } from './hooks/use-chat-message-actions.js';
 import { useChatBranchSession } from './hooks/use-chat-branch-session.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
-import type { ComposerStatsData } from '../../components/chat/composer/ComposerStatsBar.js';
+
 import { useChatPendingActions } from './hooks/use-chat-pending-actions.js';
 import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
@@ -290,60 +99,24 @@ import { useProviderModelInfo } from './conversation/settings/use-provider-model
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './conversation/snapshot/use-session-content-artifact-count.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
-import { detectTerminalDevServer } from './conversation/render/detect-terminal-dev-server.js';
+
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
-import {
-  resolveModelSelectionSourceFromMetadata,
-  shouldAdoptSessionModelSelectionDefaults,
-  shouldSendExplicitStreamModelSelection,
-  type ModelSelectionSource,
-} from './conversation/settings/model-selection-source.js';
+import { resolveModelSelectionSourceFromMetadata, shouldAdoptSessionModelSelectionDefaults, type ModelSelectionSource } from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
-import { shouldPreserveActiveLocalStream } from './conversation/snapshot/session-reload-transition.js';
+
 import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
-import { type SessionViewStreamingSnapshot } from './conversation/snapshot/use-session-view-cache.js';
+
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
-import {
-  normalizeChatThinkingState,
-  resolveChatThinkingRequest,
-} from './conversation/settings/resolve-chat-thinking-request.js';
-import {
-  applyChatRightPanelChunk,
-  applyChatRightPanelEvent,
-  buildChatRightPanelStateFromRunEvents,
-  type ChatRightPanelState,
-  clearResolvedPendingPermissionToolCalls,
-  createInitialChatRightPanelState,
-  getToolCallCards,
-  startChatRightPanelRun,
-} from './state/chat-stream-state.js';
-import {
-  DIALOGUE_MODE_OPTIONS,
-  type DialogueMode,
-  getDefaultAgentForDialogueMode,
-} from './mode/dialogue-mode.js';
+import { normalizeChatThinkingState } from './conversation/settings/resolve-chat-thinking-request.js';
+import { type ChatRightPanelState, createInitialChatRightPanelState, getToolCallCards } from './state/chat-stream-state.js';
+import { DIALOGUE_MODE_OPTIONS, type DialogueMode, getDefaultAgentForDialogueMode } from './mode/dialogue-mode.js';
 import { useDialogueModeSwitch } from './mode/use-dialogue-mode-switch.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
 import { usePersistedStreamError } from './hooks/use-persisted-stream-error.js';
-import { buildStreamAssistantTrace } from './conversation/render/build-stream-assistant-trace.js';
-import { commitStreamingRound } from './conversation/render/commit-streaming-round.js';
-import {
-  applyStreamToolProgress,
-  applyStreamToolResult,
-} from './conversation/render/apply-stream-tool-event.js';
-import { handlePendingInteractionEvent } from './conversation/render/handle-pending-interaction-event.js';
-import {
-  applySessionChildRuntimeEvent,
-  applyTaskUpdateRuntimeEvent,
-} from './conversation/render/apply-session-runtime-event.js';
-import { finalizeStreamMessage } from './conversation/render/finalize-stream-message.js';
-import {
-  CommandPalette,
-  useCommandPalette,
-  type CommandPaletteItem,
-} from '../../components/chat/misc/command-palette.js';
+
+import { CommandPalette, useCommandPalette } from '../../components/chat/misc/command-palette.js';
 import { PromptTemplatePanel } from '../../components/chat/misc/prompt-template-panel.js';
 import { useMessageMultiSelect } from '../../components/chat/message/message-multi-select.js';
 import { exportMessages, downloadExport } from '../../components/chat/message/message-export.js';
@@ -355,10 +128,7 @@ import { FusionChatRegion } from './layout/FusionChatRegion.js';
 import { TerminalPanel } from './panels/TerminalPanel.js';
 import { SessionPanelFrame } from './panels/SessionPanelFrame.js';
 import { FusionDockedSidePanel } from './panels/FusionDockedSidePanel.js';
-import type {
-  FusionContextOverviewProps,
-  FusionContextRuntimeSummary,
-} from './panels/FusionContextTab.js';
+import type { FusionContextRuntimeSummary } from './panels/FusionContextTab.js';
 import { FusionChatMainShell } from './layout/FusionChatMainShell.js';
 import { useFusionChatLayout } from './layout/use-fusion-chat-layout.js';
 import { useFusionDockedPanelViewport } from './layout/use-fusion-docked-panel-viewport.js';

@@ -4,7 +4,7 @@
  * `ChatPage` 保留原位 `async function sendMessage` 声明（维持函数提升，供其前的
  * 依赖数组引用），并在函数体内构造 deps —— 调用时才求值，无 TDZ、无顺序变化。
  */
-import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
+
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { isImageFile } from '../../../components/conversation-runtime/attachments/attachment-upload.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
@@ -21,7 +21,7 @@ import { appendStreamingThinkingChunk, buildStreamingThinkingChunkDeliveryKey, j
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import type { UseSessionTerminalsResult } from '../../../components/conversation-runtime/terminals/use-session-terminals.js';
 import { formatGatewayStreamErrorMessage, useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
-import { useBookmarkStore } from '../../../stores/chat/bookmarks.js';
+
 import type { ChatSettingsModel, ChatSettingsProvider } from '../../../utils/chat/chat-session-defaults.js';
 import { logger } from '../../../utils/log/logger.js';
 import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
@@ -49,11 +49,11 @@ import type { SessionImageGenerationResponse } from '.././hooks/use-chat-image-g
 import type { DialogueMode } from '.././mode/dialogue-mode.js';
 import { applyChatRightPanelChunk, applyChatRightPanelEvent, clearResolvedPendingPermissionToolCalls, startChatRightPanelRun } from '.././state/chat-stream-state.js';
 import type { ChatRightPanelState } from '.././state/chat-stream-state.js';
-import type { CapabilityKind, CommandDescriptor, CommandResultCard, InputImageContent, PendingPermissionRequest, RunEvent, StreamThinkingChunk, UpstreamRouteDescriptor, UpstreamStreamSummary } from '@openAwork/shared';
+import type { CommandDescriptor, CommandResultCard, InputImageContent, PendingPermissionRequest, RunEvent, StreamThinkingChunk, UpstreamRouteDescriptor, UpstreamStreamSummary } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import { createPendingPermissionRequestSnapshot, dedupePendingPermissionRequests } from '@openAwork/web-client';
 import type { PendingQuestionRequest, Session, SessionTask } from '@openAwork/web-client';
-import { useCallback, useMemo } from 'react';
+
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 
 export interface SendMessageDeps {

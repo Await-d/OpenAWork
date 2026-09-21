@@ -38,7 +38,7 @@ import { finalizeStreamMessage } from '.././conversation/render/finalize-stream-
 import { handlePendingInteractionEvent } from '.././conversation/render/handle-pending-interaction-event.js';
 import { applyChatRightPanelChunk, applyChatRightPanelEvent, clearResolvedPendingPermissionToolCalls } from '.././state/chat-stream-state.js';
 import type { ChatRightPanelState } from '.././state/chat-stream-state.js';
-import type { CapabilityKind, PendingPermissionRequest, RunEvent, UpstreamRouteDescriptor, UpstreamStreamSummary } from '@openAwork/shared';
+import type { PendingPermissionRequest, RunEvent, UpstreamRouteDescriptor, UpstreamStreamSummary } from '@openAwork/shared';
 import { createPendingPermissionRequestSnapshot, dedupePendingPermissionRequests } from '@openAwork/web-client';
 import type { PendingQuestionRequest, Session, SessionActiveStream, SessionTask } from '@openAwork/web-client';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
