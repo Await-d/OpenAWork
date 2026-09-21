@@ -143,9 +143,17 @@
 - [ ] T-19 保留**极小** `useSessionSwitchCoordinator()`，仅承载跨 hook 的真实顺序/前置依赖
 - [ ] T-20 删空 coordinator 残留；切换测试 + PATCH 调用次数断言
 
-### Phase 4：composer + 弹窗簇（可与 P1 并行）
-- [ ] T-21 新建 `hooks/use-chat-composer-state.ts`（C2 + C7）
-- [ ] T-22 门禁：P0 + 新 hook 单测
+### Phase 4：派生数据 + 融合上下文 handler 簇（**重排后的 P4a**）—— ✅ **已完成 2026-09-21**
+- [x] 连续区间 `:4267–4628`（**362 行**）整体提为自定义 hook `hooks/use-chat-page-derivations.tsx`（**514 行**）：含 `composerStatsData`(77) / `fusionContextOverview`(50) / `commandPaletteItems`(193) 三个 memo、4 个融合上下文 useCallback、1 个 JSX render 函数 `renderWorkspaceFileTree`。
+  - 安全性依据：memo/callback 的依赖**必然在其之前声明**，同位置搬迁**无 TDZ、无 effect 顺序变化**；区间内 hook 调用整体内聚进 `useChatPageDerivations`，hook 顺序不变。
+  - 依赖接口 **56 字段**；**5 处类型覆盖**（源类型未导出或需窄化）：`client`、`resolveAssistantCapabilityKind`、`bookmarkStore`、`chatSearch`、`contentArtifactCountStatus`。
+- **实测行数：5501 → 5198（净 −303）**；门禁 scoped **82/537** + 全量 **508/4890** + `tsc --noEmit` **EXIT=0**。
+- **未提交**。
+
+### Phase 4 原始计划（**部分完成 / 部分推迟**）
+- [x] T-21 派生数据与融合 handler 簇已抽出（见上；原计划写作 `use-chat-composer-state.ts`）
+- [ ] T-22 门禁已过；**专用单测未新增**（该 hook 为原样搬家，行为由既有 508 文件回归网覆盖）
+- [ ] 剩余：`sendMessage`（1034 行，**顺序约束**：声明式函数被后置引用，搬迁需谨慎）→ 记为 P4b
 
 ### Phase 5：`sendMessage` / `ensureSession`（最高风险，必须最后）
 - [ ] T-23 新建 `hooks/use-chat-send-pipeline.ts`；与 attach effect 经 streaming refs 交织，**不得与 P2 同期**
@@ -212,7 +220,8 @@ P0(tripwire) ─> P1(props-builder/区域) ─> P2(会话 hook 搬家) ─> P3(r
 - ✅ **P0 tripwire 已完成并提交**：`fe0b5cf2 test(web): 新增ChatPage组装层回归护栏与mock接线`（3 文件 / 22 例）。
 - ✅ **P1 已完成并提交**：`230a649a refactor(web): ChatPage 组装层 P1 收敛双分支 prop 面`（净 −493 行：7347 → 6854；新增 4 文件）。
 - ✅ **P2 已完成并提交**：`46410a10 refactor(web): ChatPage 组装层 P2 抽出会话切换effect逻辑体`（6854 → 6484，净 −370）。
-- ✅ **P3 已完成（未提交）**：ChatPage 6484 → **5501（净 −983）**；新增 `hooks/run-session-attach-effect.ts`（1258 行 / 73 字段接口）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
-- 🎯 **目标务实化**：**先到 <2000**（原 <1500 需额外搬迁状态域与组装层，量级远超原估计）。
-- ⏸️ **P4 未开始**（候选：`sendMessage` 1033 行 / handler 簇 / 原 P3 reset 解耦）。
-- **未提交**：P3 的 `ChatPage.tsx` + `run-session-attach-effect.ts` 在工作树。
+- ✅ **P3 已完成并提交**：`749ea77b`（6484 → 5501，净 −983）。
+- ✅ **P4a 已完成（未提交）**：ChatPage 5501 → **5198（净 −303）**；新增 `hooks/use-chat-page-derivations.tsx`（514 行 / 56 字段）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
+- 🎯 **目标务实化**：**先到 <2000**。
+- ⏸️ **P4b 未开始**：`sendMessage`（1034 行，顺序约束，风险较高）。
+- **未提交**：P4a 的 `ChatPage.tsx` + `use-chat-page-derivations.tsx` 在工作树。
