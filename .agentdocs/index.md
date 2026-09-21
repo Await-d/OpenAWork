@@ -230,6 +230,30 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
+### 🟡 260921-ChatPage组装层瘦身方案 - 把 7347 行的 ChatPage 降到 1500 硬上限内
+**状态**: **执行中** — P0 tripwire 已完成并提交（`fe0b5cf2`）；**P1 已完成（未提交）**；P2 未开始（用户 2026-09-21 批准 Gate 0 + Gate 1）
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-ChatPage组装层瘦身方案.md](workflow/260921-ChatPage组装层瘦身方案.md)
+
+**目标**: `apps/web/src/pages/chat-page/ChatPage.tsx` **7347 行**（超 AGENTS.md 1500 硬上限 **4.9 倍**）→ 压至硬上限内（目标 600–900），并消灭「双份 150+ prop surface」，**零行为变更**。
+
+**关键前提纠正**: `docs/architecture/chat-page-split-plan.md` 的**域抽取阶段（D/A/C/B/E）已全部完成**（B = `conversation/render/use-chat-streaming.ts` :474 接线、E = `hooks/use-chat-retry-and-edit.ts` :4011 接线）——该旧计划的序列已走完，本方案针对**残留组装层**，非其续作（旧文档状态已按事实修正）。
+
+**实测事实（一手核实）**:
+- 残余 hook：**34 `useState` / 33 `useEffect` / 34 `useCallback` / 26 `useMemo` / 25 `useRef`**（常引用的 35/36/36/27/26 是含 import/注释的裸 token 计数，已校准）
+- 最大耦合块：**会话切换巨型 effect `:1817`**（重置几乎每个簇）+ `:809` resetToWelcome + `:1140` 按会话重置 + `:4026` 附着 effect（26 deps）+ `sendMessage`（约 :2806–3805）
+- 双份 prop 面：`<ChatConversationView` 于 **`:6318`（融合）/ `:6774`（经典）**，prop 行数 **218 / 234**
+- **无任何 ChatPage 级回归测试**（`ChatPage.test.tsx` 不存在；仅 `desktop/src/App.tsx:22` 与 `preloadable-route-modules.ts:64` import）→ 纯 rewiring 回归会整包静默通过
+
+**主策略（Oracle 定）**: 分层组合——**粗粒度「会话作用域编排 hook」+ 单一 props-builder + 区域容器（Fusion/Classic）**，页面退化为薄 JSX。**否决**：单个 `useChatPageAssembly`（只是搬成 god hook）、纯渲染区域拆分（命中不了 1500）、继续加细粒度 domain hook、`ChatConversationView` 的 "Step 4d 状态下移"。
+
+**分阶段（每阶段一 PR、单一提交边界）**: P0 tripwire（**必须先建**，否则无守卫）→ P1 props-builder+区域容器（预期 −700~−900 行）→ P2 会话 hook 原样搬家 → P3 reset 解耦（`use-session-reset` + epoch）→ P4 composer/弹窗 → P5 `sendMessage`/`ensureSession`（最高风险，必须最后）→ P6 收尾至 <1500。
+
+**投资估算**: Large（3d+），含测试约 2–4 周。
+
+**范围边界**: 只动 `ChatPage.tsx` + `chat-page/{hooks,conversation,layout,state}` 新文件；`panels/` 三大文件（1219 / 1166 / 1099）当前**均未违规**，本轮只读。
+
 ### 🟡 260921-GUI-Agent集成方案 - 借鉴 UI-TARS 为 OpenAWork 补齐 GUI Agent（computer-use）闭环
 **状态**: **方案完成，暂缓开发**（Gate 0 已定 4/5，模型路径待选；用户 2026-09-21 指示先调整方案决策）
 **复杂度**: Full orchestration（score +6）
@@ -300,6 +324,8 @@
 **待用户拍板（Gate 0）**: D-1 手势依赖路线（**A 零依赖 · 推荐** / B 引入 gesture-handler+reanimated）；D-2 覆盖范围（**1 仅聊天 · 推荐** / 2 +产物页 / 3 +图片工作台）；D-3 取数策略（**落盘临时文件+LRU · 推荐** / `data:` URI 直显）；D-4 是否顺带修正 `apps/mobile/AGENTS.md` 导航漂移（**建议是**）。
 
 **范围红线**: 移动端文档内嵌图、HTML/CSV/SVG 产物预览、图片编辑、网关新缩略图端点**均不在本方案**，需另行立项。
+
+- **独立待办（本方案承诺记录，原先缺跟踪）**: `apps/mobile` **无 `@testing-library/react-native`、无 jest** → 全部 UI/手势接线**无自动化回归**，正确性只能靠真机走查（方案 T-20 明确要求"记为独立待办"，此前仅在「现状核实」记了事实、未列为待办）。若要补：须先做**原生/构建链探针**（`apps/mobile` 目前**无 `babel.config.js`**，引测试库会牵动 Metro/babel → 可能需原生重建）；风险与取舍见方案文档 §验证策略 + R4。
 
 ### ✅ 260915-澄清完成自动切换编程模式 - 澄清模式设计完成后自动切到编程模式（+ 方案文档对齐 agentdocs 规范）
 **状态**: 已完成并归档（2026-09-16）——T-01…T-15 全部完成并验证；**代码变更仍在工作树中待提交**
