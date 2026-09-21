@@ -160,6 +160,12 @@
 - **实测行数：5198 → 4296（净 −902）**；门禁 scoped **82/537** + 全量 **508/4890** + `tsc --noEmit` **EXIT=0**。
 - ⚠️ **诚实记录**：全量测试首次运行出现 1 次失败，**随后连续两次全绿（508/4890）**，判定为偶发（并发会话当时正在改写 `markdown-image`/`block-tool-call`）。已如实记录，未做掩盖。
 
+### Phase 4c：`ensureSession` 搬家 —— ✅ **已完成 2026-09-21**
+- [x] `async function ensureSession`（`:2268–2394`，**127 行**）逻辑体已搬至 `hooks/run-ensure-session.ts`（**213 行**）。
+  - 同 P4b wrapper 手法：保留原位声明，deps 在函数体内构造。仅 1 处引用（其后），无提升依赖。
+  - 依赖接口 **29 字段**；新增 2 个类型来源（`SavedChatDefaults` / `SavedChatImageDefaults`）。
+- **实测行数：4296 → 4203（净 −93）**；门禁 scoped **82/537** + 全量 **508/4890** + `tsc --noEmit` **EXIT=0**。
+
 ### Phase 5：`sendMessage` / `ensureSession`（最高风险，必须最后）
 - [ ] T-23 新建 `hooks/use-chat-send-pipeline.ts`；与 attach effect 经 streaming refs 交织，**不得与 P2 同期**
 - [ ] T-24 门禁：P0 + 新单测 + 桌面 E2E
@@ -227,6 +233,7 @@ P0(tripwire) ─> P1(props-builder/区域) ─> P2(会话 hook 搬家) ─> P3(r
 - ✅ **P2 已完成并提交**：`46410a10 refactor(web): ChatPage 组装层 P2 抽出会话切换effect逻辑体`（6854 → 6484，净 −370）。
 - ✅ **P3 已完成并提交**：`749ea77b`（6484 → 5501，净 −983）。
 - ✅ **P4a 已完成并提交**：`8dc6b2be`（5501 → 5198，净 −303）。
-- ✅ **P4b 已完成（未提交）**：ChatPage 5198 → **4296（净 −902）**；新增 `hooks/run-send-message.ts`（1225 行 / 80 字段）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
-- 🎯 **目标务实化**：**先到 <2000**（当前 4296，还差 2296）。
-- **未提交**：P4b 的 `ChatPage.tsx` + `run-send-message.ts` 在工作树。
+- ✅ **P4b 已完成并提交**：`1cdfccbb`（5198 → 4296，净 −902）。
+- ✅ **P4c 已完成（未提交）**：ChatPage 4296 → **4203（净 −93）**；新增 `hooks/run-ensure-session.ts`（213 行 / 29 字段）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
+- 🎯 **目标务实化**：**先到 <2000**（当前 4203，还差 2203）。
+- **未提交**：P4c 的 `ChatPage.tsx` + `run-ensure-session.ts` 在工作树。
