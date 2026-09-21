@@ -278,6 +278,7 @@ import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
 import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
 import { useChatStopChildSessions } from './hooks/use-chat-stop-child-sessions.js';
+import { useChatPageDerivations } from './hooks/use-chat-page-derivations.js';
 import { runSessionAttachEffect } from './hooks/run-session-attach-effect.js';
 import { runChatSessionSwitchEffect } from './hooks/run-chat-session-switch-effect.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
@@ -4264,368 +4265,64 @@ export default function ChatPage() {
   const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
   // ─── 输入框下方统计栏数据 ──────────────────────────────────────────────
-  const composerStatsData = useMemo<ComposerStatsData | null>(() => {
-    const usageDetails = assistantUsageDetails;
-    if (usageDetails.size === 0 && !visibleStreaming) {
-      return null;
-    }
-
-    let totalCostUsd = 0;
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
-    let totalDurationMs = 0;
-
-    for (const details of usageDetails.values()) {
-      totalCostUsd += details.estimatedCostUsd ?? 0;
-      totalInputTokens += details.inputTokens;
-      totalOutputTokens += details.outputTokens;
-      totalDurationMs += details.durationMs ?? 0;
-    }
-
-    // 流式中的实时数据叠加
-    let currentRoundCostUsd = 0;
-    if (streamingUsageDetails) {
-      const streamingNotCounted = streamingUsageDetails.requestIndex > usageDetails.size;
-      if (streamingNotCounted) {
-        totalCostUsd += streamingUsageDetails.estimatedCostUsd ?? 0;
-        totalInputTokens += streamingUsageDetails.inputTokens;
-        totalOutputTokens += streamingUsageDetails.outputTokens;
-      }
-      currentRoundCostUsd = streamingUsageDetails.estimatedCostUsd ?? 0;
-    } else {
-      // 非流式时，取最后一轮的费用作为"本轮"
-      const lastDetails = Array.from(usageDetails.values()).pop();
-      currentRoundCostUsd = lastDetails?.estimatedCostUsd ?? 0;
-    }
-
-    const contextUsedTokens = contextUsageSnapshot?.usedTokens ?? 0;
-    const contextMaxTokens = contextUsageSnapshot?.maxTokens ?? 0;
-    const contextIsEstimated = contextUsageSnapshot?.estimated ?? false;
-    const latestCompaction = compactions[0];
-
-    return {
-      totalCostUsd,
-      currentRoundCostUsd,
-      totalInputTokens,
-      totalOutputTokens,
-      reasoningTokens: effectiveReportedStreamUsage?.reasoningTokens,
-      cacheReadTokens: effectiveReportedStreamUsage?.cacheReadTokens,
-      cacheWriteTokens: effectiveReportedStreamUsage?.cacheWriteTokens,
-      contextUsedTokens,
-      contextMaxTokens,
-      contextIsEstimated,
-      messageTurns: usageDetails.size,
-      hiddenMessageCount: hiddenMessageCount ?? 0,
-      serverTotalTurnCount: serverTotalTurnCount ?? null,
-      compactionCount: compactions.length,
-      latestCompactionTrigger: latestCompaction?.trigger,
-      latestCompactionRepresentedMessages: latestCompaction?.representedMessages,
-      latestCompactionCompactedMessages: latestCompaction?.compactedMessages,
-      childSessionCount: childSessions.length,
-      sessionTaskCount: sessionTasks.length,
-      tokensPerSecond: streamingUsageDetails?.tokensPerSecond,
-      firstTokenLatencyMs: streamingUsageDetails?.firstTokenLatencyMs,
-      currentRoundDurationMs: streamingUsageDetails?.durationMs,
-      totalDurationMs,
-      streaming: visibleStreaming,
-    };
-  }, [
+  const { composerStatsData, handleFusionContextCompactSession, handleFusionContextOpenRecoveryStrategy, fusionContextSessionStateStatus, fusionContextOverview, handleOpenFusionEditorFile, handleShowFusionEditor, renderWorkspaceFileTree, commandPaletteItems } = useChatPageDerivations({
+    artifactsWorkspaceHref,
     assistantUsageDetails,
-    contextUsageSnapshot,
-    streamingUsageDetails,
-    effectiveReportedStreamUsage,
-    visibleStreaming,
-    hiddenMessageCount,
-    serverTotalTurnCount,
+    bookmarkStore,
+    browserPreviewUrl,
+    canAdjustWorkspaceBinding,
+    chatSearch,
+    childSessions,
+    collapseWorkspaceToPanel,
     compactions,
-    childSessions.length,
-    sessionTasks.length,
-  ]);
-  const handleFusionContextCompactSession = useCallback(() => {
-    void handleCompactCurrentSession();
-  }, [handleCompactCurrentSession]);
-  const handleFusionContextOpenRecoveryStrategy = useCallback(() => {
-    setRightOpen(true);
-    setRightTab('history');
-  }, [setRightOpen, setRightTab]);
-  const fusionContextSessionStateStatus: FusionContextOverviewProps['sessionStateStatus'] =
-    sessionStateStatus === undefined ? null : sessionStateStatus;
-  const fusionContextOverview = useMemo<FusionContextOverviewProps>(
-    () => ({
-      attachmentItems: [],
-      artifactsWorkspaceHref,
-      childSessions,
-      compactions,
-      contextUsageSnapshot,
-      contentArtifactCount,
-      contentArtifactCountStatus,
-      currentSessionId,
-      dialogueMode,
-      effectiveWorkingDirectory,
-      messages,
-      effectiveContextMessageCount,
-      onCompactSession: handleFusionContextCompactSession,
-      onOpenRecoveryStrategy: handleFusionContextOpenRecoveryStrategy,
-      pendingPermissions,
-      pendingQuestionsCount: pendingQuestions.length,
-      permissionMode,
-      sessionStateStatus: fusionContextSessionStateStatus,
-      sessionTasks,
-      sessionTodos,
-      upstreamSummaries: rightPanelState.upstreamSummaries,
-      workspaceFileItems,
-      yoloMode,
-    }),
-    [
-      artifactsWorkspaceHref,
-      childSessions,
-      compactions,
-      contextUsageSnapshot,
-      contentArtifactCount,
-      contentArtifactCountStatus,
-      currentSessionId,
-      dialogueMode,
-      effectiveWorkingDirectory,
-      handleFusionContextCompactSession,
-      handleFusionContextOpenRecoveryStrategy,
-      messages,
-      pendingPermissions,
-      pendingQuestions.length,
-      permissionMode,
-      rightPanelState.upstreamSummaries,
-      fusionContextSessionStateStatus,
-      sessionTasks,
-      sessionTodos,
-      workspaceFileItems,
-      yoloMode,
-    ],
-  );
-  const handleOpenFusionEditorFile = useCallback(
-    (path: string) => {
-      void fileEditor.openFile(path);
-    },
-    [fileEditor],
-  );
-  const handleShowFusionEditor = useCallback(() => {
-    startSessionSwitchTransition(() => {
-      setEditorMode(true);
-      setEditorPaneTab('code');
-    });
-  }, [setEditorMode, setEditorPaneTab]);
-
-  // 主编辑器面板与停靠面板「代码」tab 共用同一份文件树配置，避免两处漂移；
-  // 只有当前可见的那份 active=true，避免两份树同时拉取数据。
-  const renderWorkspaceFileTree = (active: boolean) => (
-    <WorkspaceFileTreePanel
-      workspacePath={effectiveWorkingDirectory}
-      sessionId={currentSessionId}
-      onOpenFile={(path) => void fileEditor.openFile(path)}
-      fetchTree={workspace.fetchTree}
-      active={active}
-      variant="embedded"
-      onSwitchWorkspace={canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined}
-      style={{
-        flex: 1,
-        minHeight: 0,
-        background: 'var(--bg-surface)',
-        overflow: 'hidden',
-      }}
-    />
-  );
-
-  // ─── Command Palette items ──────────────────────────────────────────────
-  const commandPaletteItems = useMemo<CommandPaletteItem[]>(
-    () => [
-      {
-        id: 'search',
-        label: '在对话中查找',
-        description: '搜索当前会话的消息内容',
-        category: '导航',
-        shortcut: '⌘F',
-        icon: '🔍',
-        onExecute: () => chatSearch.open(),
-      },
-      {
-        id: 'templates',
-        label: '提示词模板',
-        description: '打开模板库，快速插入常用提示词',
-        category: '输入',
-        shortcut: '⌘⇧T',
-        icon: '📋',
-        onExecute: () => setShowTemplatePanel(true),
-      },
-      {
-        id: 'multi-select',
-        label: multiSelect.multiSelect.enabled ? '退出多选模式' : '多选消息',
-        description: '批量选择消息进行复制、导出或收藏',
-        category: '操作',
-        shortcut: '⌘⇧M',
-        icon: '☑',
-        onExecute: () => {
-          if (multiSelect.multiSelect.enabled) {
-            multiSelect.disableMultiSelect();
-          } else {
-            multiSelect.enableMultiSelect();
-            // 默认全选,避免空选导致用户以为操作失效。
-            // 用户随后用 toolbar 的"全选/取消"或单条菜单的"☐ 选择"调整。
-            requestAnimationFrame(() => multiSelect.selectAll(messages));
-          }
-        },
-      },
-      {
-        id: 'export-markdown',
-        label: '导出对话为 Markdown',
-        description: '将当前会话导出为 Markdown 文件',
-        category: '导出',
-        icon: '📤',
-        onExecute: () => {
-          const content = exportMessages(messages, 'markdown');
-          downloadExport(content, `chat-export-${Date.now()}.md`, 'text/markdown');
-        },
-      },
-      {
-        id: 'export-json',
-        label: '导出对话为 JSON',
-        description: '将当前会话导出为 JSON 文件',
-        category: '导出',
-        icon: '📦',
-        onExecute: () => {
-          const content = exportMessages(messages, 'json');
-          downloadExport(content, `chat-export-${Date.now()}.json`, 'application/json');
-        },
-      },
-      {
-        id: 'copy-last-assistant',
-        label: '复制最后一条助手消息',
-        description: '将最近的助手回复复制到剪贴板',
-        category: '操作',
-        shortcut: '⌘⇧C',
-        icon: '📋',
-        onExecute: () => {
-          const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-          if (lastAssistant) {
-            handleCopyMessage(lastAssistant);
-            toast('已复制最后一条助手消息', 'success');
-          }
-        },
-      },
-      {
-        id: 'open-workspace-code-panel',
-        label: '打开代码面板',
-        description: '在会话面板中打开文件代码编辑器',
-        category: '视图',
-        icon: '💻',
-        onExecute: () => openWorkspacePanelTab('code'),
-      },
-      {
-        id: 'promote-workspace-panel',
-        label: editorFullScreen ? '退出放大（回到会话面板）' : '放大代码 / 预览面板',
-        description: '让代码编辑器或浏览器预览占据整个内容区；再次执行收回到会话面板',
-        category: '视图',
-        icon: '🖥',
-        onExecute: () => {
-          if (editorFullScreen) {
-            collapseWorkspaceToPanel();
-            return;
-          }
-          promoteWorkspaceTab(editorPaneTab);
-        },
-      },
-      {
-        id: 'open-browser-preview',
-        label: '打开浏览器预览',
-        description: '在会话面板中打开内置浏览器预览（输入 URL 或自动检测 dev server）',
-        category: '视图',
-        icon: '🌐',
-        onExecute: () => openBrowserPreview(),
-      },
-      {
-        id: 'toggle-right-panel',
-        label: isFusionLayout
-          ? fusionChatLayout.rightPanelCommandLabel
-          : rightOpen
-            ? '收起右侧面板'
-            : '展开右侧面板',
-        description: isFusionLayout
-          ? fusionChatLayout.rightPanelCommandDescription
-          : '切换计划/工具/概览面板',
-        category: '视图',
-        shortcut: '⌘\\',
-        icon: '📊',
-        onExecute: () => {
-          if (isFusionLayout) {
-            fusionChatLayout.toggleReviewPanel();
-            return;
-          }
-          setRightOpen((v) => !v);
-        },
-      },
-      {
-        id: 'compact-session',
-        label: '压缩当前会话',
-        description: '压缩对话历史以释放上下文空间',
-        category: '会话',
-        icon: '🗜',
-        onExecute: () => void handleCompactCurrentSession(),
-      },
-      {
-        id: 'new-session',
-        label: '新建会话',
-        description: '创建一个新的对话会话',
-        category: '会话',
-        shortcut: '⌘N',
-        icon: '✨',
-        onExecute: () => {
-          navigate('/chat');
-          navigateToHome();
-        },
-      },
-      {
-        id: 'toggle-yolo',
-        label: yoloMode ? '关闭 YOLO 模式' : '开启 YOLO 模式',
-        description: '切换自动审批模式',
-        category: '设置',
-        icon: '⚡',
-        onExecute: () => handleToggleYolo(),
-      },
-      {
-        id: 'view-bookmarks',
-        label: '查看收藏消息',
-        description: `当前会话有 ${bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length} 条收藏`,
-        category: '操作',
-        icon: '⭐',
-        onExecute: () => {
-          setRightOpen(true);
-          setRightTab('overview');
-        },
-      },
-    ],
-    [
-      chatSearch,
-      messages,
-      multiSelect,
-      editorPaneTab,
-      editorFullScreen,
-      browserPreviewUrl,
-      dockOwnsWorkspacePanels,
-      reviewPanelOpened,
-      rightOpen,
-      yoloMode,
-      currentSessionId,
-      bookmarkStore,
-      handleCopyMessage,
-      handleCompactCurrentSession,
-      fusionChatLayout.rightPanelCommandDescription,
-      fusionChatLayout.rightPanelCommandLabel,
-      fusionChatLayout.toggleReviewPanel,
-      isFusionLayout,
-      navigate,
-      navigateToHome,
-      setRightOpen,
-      setRightTab,
-      handleToggleYolo,
-    ],
-  );
+    contentArtifactCount,
+    contentArtifactCountStatus,
+    contextUsageSnapshot,
+    currentSessionId,
+    dialogueMode,
+    dockOwnsWorkspacePanels,
+    editorFullScreen,
+    editorPaneTab,
+    effectiveContextMessageCount,
+    effectiveReportedStreamUsage,
+    effectiveWorkingDirectory,
+    fileEditor,
+    fusionChatLayout,
+    handleCompactCurrentSession,
+    handleCopyMessage,
+    handleToggleYolo,
+    hiddenMessageCount,
+    isFusionLayout,
+    messages,
+    multiSelect,
+    navigate,
+    navigateToHome,
+    openBrowserPreview,
+    openWorkspacePanelTab,
+    pendingPermissions,
+    pendingQuestions,
+    permissionMode,
+    promoteWorkspaceTab,
+    requestWorkspaceBindingChange,
+    reviewPanelOpened,
+    rightOpen,
+    rightPanelState,
+    serverTotalTurnCount,
+    sessionStateStatus,
+    sessionTasks,
+    sessionTodos,
+    setEditorMode,
+    setEditorPaneTab,
+    setRightOpen,
+    setRightTab,
+    setShowTemplatePanel,
+    startSessionSwitchTransition,
+    streamingUsageDetails,
+    visibleStreaming,
+    workspace,
+    workspaceFileItems,
+    yoloMode,
+  });
 
   const commandPalette = useCommandPalette({
     items: commandPaletteItems,
