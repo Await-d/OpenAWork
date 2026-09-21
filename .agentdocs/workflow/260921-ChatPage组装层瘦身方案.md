@@ -130,11 +130,18 @@
 - ~~T-14 原样搬入 `:809` / `:1140` reset effect~~（未执行）
 - ~~T-15 镜像 ref 同 hook 迁移~~（N/A）
 
-### Phase 3：reset 解耦（默认不重写，只下放所有权）
-- [ ] T-17 新建 `state/use-session-reset.ts`（`useSessionReset(scopeKey, resetFn)`）+ session epoch（`sessionId` + 单调递增）
+### Phase 3：附着/恢复 effect 搬家（**重排后的 P3**）—— ✅ **已完成 2026-09-21**
+- [x] 巨型附着/恢复 effect（原 `:3646–4732`，**1087 行**）逻辑体已搬至 `hooks/run-session-attach-effect.ts`（**1258 行**）。
+  - 技术同 P2：**保留原位 `useEffect`** + 逻辑提为纯函数 `runSessionAttachEffect(deps)`；依赖对象在 effect 回调**内部**构造（effect 顺序零变化、无 TDZ）。
+  - 依赖接口 **73 字段**（Compiler API 从真实类型生成）。**2 处类型覆盖**：`client → ReturnType<typeof useGatewayClient>`（源 interface 未导出）、`resolveAssistantCapabilityKind → (toolName: string) => AssistantTraceToolCall['kind']`（用法所需的窄类型，宽 `CapabilityKind` 含 `'command'` 会失配）。
+- **实测行数：6484 → 5501（净 −983）**；门禁 scoped **82/537** + 全量 **508/4890** + `tsc --noEmit` **EXIT=0**。
+- ⚠️ **重排说明（2026-09-21 复盘结论）**：原计划的 P3「reset 解耦」**推迟**。实测两个巨块为「附着/恢复 effect 1087 行」与「`sendMessage` 1033 行」，effect 抽取收益更大且技术已在 P2 验证 → 优先执行。**目标同时务实化为「先到 <2000」**（原 <1500 需额外搬迁状态域 + 组装层，量级远超原 6 阶段估计）。
+
+### Phase 3 原始计划（**推迟**）
+- [ ] T-17 新建 `state/use-session-reset.ts`（`useSessionReset(scopeKey, resetFn)`）+ session epoch
 - [ ] T-18 逐簇把 reset 所有权下放到持有该 state 的 hook
-- [ ] T-19 保留**极小** `useSessionSwitchCoordinator()`，仅承载跨 hook 的**真实顺序/前置依赖**（如 `sessionMetadataDirty` → `:2363` PATCH、`snapshotReady`）
-- [ ] T-20 删空 coordinator 残留；切换测试 + **PATCH 调用次数断言**（防重复触发）
+- [ ] T-19 保留**极小** `useSessionSwitchCoordinator()`，仅承载跨 hook 的真实顺序/前置依赖
+- [ ] T-20 删空 coordinator 残留；切换测试 + PATCH 调用次数断言
 
 ### Phase 4：composer + 弹窗簇（可与 P1 并行）
 - [ ] T-21 新建 `hooks/use-chat-composer-state.ts`（C2 + C7）
@@ -204,6 +211,8 @@ P0(tripwire) ─> P1(props-builder/区域) ─> P2(会话 hook 搬家) ─> P3(r
 - ✅ **Gate 0 四项决策 + Gate 1 已批准**（用户 2026-09-21）。
 - ✅ **P0 tripwire 已完成并提交**：`fe0b5cf2 test(web): 新增ChatPage组装层回归护栏与mock接线`（3 文件 / 22 例）。
 - ✅ **P1 已完成并提交**：`230a649a refactor(web): ChatPage 组装层 P1 收敛双分支 prop 面`（净 −493 行：7347 → 6854；新增 4 文件）。
-- ✅ **P2 已完成（未提交）**：ChatPage 6854 → **6484（净 −370）**；新增 `hooks/run-chat-session-switch-effect.ts`（619 行，含 69 字段依赖接口，由 Compiler API 代码生成）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
-- ⏸️ **P3 未开始**（reset 解耦 / 引入 `useSessionReset` + epoch）。
-- **未提交**：P2 的 `ChatPage.tsx` + `run-chat-session-switch-effect.ts` 在工作树。
+- ✅ **P2 已完成并提交**：`46410a10 refactor(web): ChatPage 组装层 P2 抽出会话切换effect逻辑体`（6854 → 6484，净 −370）。
+- ✅ **P3 已完成（未提交）**：ChatPage 6484 → **5501（净 −983）**；新增 `hooks/run-session-attach-effect.ts`（1258 行 / 73 字段接口）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
+- 🎯 **目标务实化**：**先到 <2000**（原 <1500 需额外搬迁状态域与组装层，量级远超原估计）。
+- ⏸️ **P4 未开始**（候选：`sendMessage` 1033 行 / handler 簇 / 原 P3 reset 解耦）。
+- **未提交**：P3 的 `ChatPage.tsx` + `run-session-attach-effect.ts` 在工作树。
