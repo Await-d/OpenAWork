@@ -153,7 +153,12 @@
 ### Phase 4 原始计划（**部分完成 / 部分推迟**）
 - [x] T-21 派生数据与融合 handler 簇已抽出（见上；原计划写作 `use-chat-composer-state.ts`）
 - [ ] T-22 门禁已过；**专用单测未新增**（该 hook 为原样搬家，行为由既有 508 文件回归网覆盖）
-- [ ] 剩余：`sendMessage`（1034 行，**顺序约束**：声明式函数被后置引用，搬迁需谨慎）→ 记为 P4b
+### Phase 4b：`sendMessage` 搬家（**重排后的 P4b**）—— ✅ **已完成 2026-09-21**
+- [x] `async function sendMessage`（`:2428–3427`，**1000 行**）逻辑体已搬至 `hooks/run-send-message.ts`（**1225 行**）。
+  - **关键顺序处理**：`sendMessage` 在 **`:2264`（其声明之前）** 被依赖数组引用 → 依赖**函数声明的提升**。故**保留原位 `async function sendMessage` 声明**，只把函数体换成对 `runSendMessage(deps, overrideText, options)` 的委派，且 **deps 在函数体内部构造**（调用时才求值）→ **无 TDZ、无顺序变化**。
+  - 依赖接口 **80 字段**；类型覆盖 5 处（同 P4a）+ 强制导入 `AssistantTraceToolCall`（仅用于类型覆盖）。
+- **实测行数：5198 → 4296（净 −902）**；门禁 scoped **82/537** + 全量 **508/4890** + `tsc --noEmit` **EXIT=0**。
+- ⚠️ **诚实记录**：全量测试首次运行出现 1 次失败，**随后连续两次全绿（508/4890）**，判定为偶发（并发会话当时正在改写 `markdown-image`/`block-tool-call`）。已如实记录，未做掩盖。
 
 ### Phase 5：`sendMessage` / `ensureSession`（最高风险，必须最后）
 - [ ] T-23 新建 `hooks/use-chat-send-pipeline.ts`；与 attach effect 经 streaming refs 交织，**不得与 P2 同期**
@@ -221,7 +226,7 @@ P0(tripwire) ─> P1(props-builder/区域) ─> P2(会话 hook 搬家) ─> P3(r
 - ✅ **P1 已完成并提交**：`230a649a refactor(web): ChatPage 组装层 P1 收敛双分支 prop 面`（净 −493 行：7347 → 6854；新增 4 文件）。
 - ✅ **P2 已完成并提交**：`46410a10 refactor(web): ChatPage 组装层 P2 抽出会话切换effect逻辑体`（6854 → 6484，净 −370）。
 - ✅ **P3 已完成并提交**：`749ea77b`（6484 → 5501，净 −983）。
-- ✅ **P4a 已完成（未提交）**：ChatPage 5501 → **5198（净 −303）**；新增 `hooks/use-chat-page-derivations.tsx`（514 行 / 56 字段）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
-- 🎯 **目标务实化**：**先到 <2000**。
-- ⏸️ **P4b 未开始**：`sendMessage`（1034 行，顺序约束，风险较高）。
-- **未提交**：P4a 的 `ChatPage.tsx` + `use-chat-page-derivations.tsx` 在工作树。
+- ✅ **P4a 已完成并提交**：`8dc6b2be`（5501 → 5198，净 −303）。
+- ✅ **P4b 已完成（未提交）**：ChatPage 5198 → **4296（净 −902）**；新增 `hooks/run-send-message.ts`（1225 行 / 80 字段）。门禁 scoped 82/537 + 全量 508/4890 + typecheck EXIT=0。
+- 🎯 **目标务实化**：**先到 <2000**（当前 4296，还差 2296）。
+- **未提交**：P4b 的 `ChatPage.tsx` + `run-send-message.ts` 在工作树。

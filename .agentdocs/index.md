@@ -230,8 +230,28 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
+### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
+**状态**: **方案完成，等待 Gate 0 决策与执行批准**（未开始编码）
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-opencode-v2能力对齐.md](workflow/260921-opencode-v2能力对齐.md)
+**运行计划**: `.agentdocs/runtime/260921-opencode-v2能力对齐/master_plan.md`（临时目录）
+
+**目标**: 以 `@temp/opencode`（tag `v2.0.12`，commit `2670273`）为基线，补齐本仓在工具面与设计面上的缺口，分三阶段交付。
+
+**关键结论（已双向核实）**:
+- **完全缺失**：`execute`（CodeMode 受限 JS 运行时 + 目录预算 + `search` + 资源限额）。
+- **有机器未接线**：`read` 读时注入最近 AGENTS.md（`DirectoryAgentsInjectorImpl` 仅被 `/init-deep` 调用）；`browser` 的 `evaluate`/`console`/`network` 底层已有但未暴露为工具动作。
+- **无模型可见工具**：`opencode.models` / `session_rename`（仅 HTTP 路由）；`session_move` 本仓无对应语义（待决策）。
+- **缺中间层**：`ToolInputRepairPlugin`（本仓已有 `tool.execute.before` 钩子总线，缺内置 schema 修复层）；`webfetch` 缺 Cloudflare 挑战换 UA 重试。
+- **明确不落后（勿误判为缺口）**：`edit` 多级模糊匹配本仓 6 级 > 上游 3 级；模型自适应工具裁剪、输出截断+引用回读均已具备；本仓另有桌面控制/媒体生成/21 渠道/codegraph/LSP 套件等上游没有的能力。
+
+**分阶段路线**: Phase 0 Gate 0 决策（D-1 CodeMode 立项 / D-2 browser 形态 / D-3 session_move / D-4 AGENTS.md 去重）→ Phase 1 低成本高收益（T-01 `models` / T-02 read 注入 AGENTS.md / T-03 webfetch 重试 / T-04 `session_rename`，可独立发版）→ Phase 2 中间层与检查面（T-05 输入修复 / T-06 browser 动作 / T-07 目录增量指令化）→ Phase 3 CodeMode 立项（T-08…T-12）。
+
+**范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
+
 ### 🟡 260921-ChatPage组装层瘦身方案 - 把 7347 行的 ChatPage 降到 1500 硬上限内
-**状态**: **执行中** — P0（`fe0b5cf2`）、P1（`230a649a`）、P2（`46410a10`）、P3（`749ea77b`）已提交；**P4a 已完成（未提交，ChatPage 5501→5198）**；目标务实化为**先到 <2000**；P4b（sendMessage）未开始
+**状态**: **执行中** — P0/P1/P2/P3/P4a 已提交（`8dc6b2be`）；**P4b 已完成（未提交，ChatPage 5198→4296）**；目标务实化为**先到 <2000**（还差 2296）
 **复杂度**: Full orchestration（score +6）
 **开始日期**: 2026-09-21
 **方案文档**: [workflow/260921-ChatPage组装层瘦身方案.md](workflow/260921-ChatPage组装层瘦身方案.md)
