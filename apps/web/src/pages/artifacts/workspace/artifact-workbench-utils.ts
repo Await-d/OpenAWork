@@ -117,10 +117,12 @@ export function buildSvgPreviewDocument(content: string): string {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
+      /* 沙箱文档不继承宿主 token，故用字面色 */
       html, body {
         margin: 0;
         min-height: 100%;
-        background: var(--fg-on-accent);
+        background: #ffffff;
+        color: #1a1a1a;
       }
       body {
         display: flex;

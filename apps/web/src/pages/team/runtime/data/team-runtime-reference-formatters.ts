@@ -236,7 +236,8 @@ function tryExtractJsonSummary(text: string, maxLen: number): string | null {
           const summary = buildObjectSummary(first as Record<string, unknown>, maxLen);
           if (summary) return summary;
         }
-        return null;
+        // 数组元素无可读字段：给出项数摘要，避免调用方退回到首行的 "["。
+        return truncateText(`数组（${parsed.length} 项）`, maxLen);
       }
 
       // 对象：组合字段生成摘要
@@ -331,6 +332,13 @@ function buildObjectSummary(record: Record<string, unknown>, maxLen: number): st
     if (typeof value === 'string' && value.trim() && !looksLikeIdOrPath(value)) {
       return truncateText(value.trim(), maxLen);
     }
+  }
+
+  // 结构化对象但无任何可读字段（嵌套对象 / 纯数字等）：给出键名摘要，
+  // 避免调用方退回到首行的 "{"。
+  const keys = Object.keys(record);
+  if (keys.length > 0) {
+    return truncateText(`字段：${keys.slice(0, 4).join('、')}`, maxLen);
   }
 
   return null;

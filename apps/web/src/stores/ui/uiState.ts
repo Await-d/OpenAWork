@@ -215,6 +215,16 @@ export interface UIStateStore {
   collapsedSessionGroups: string[];
   toggleSessionGroupCollapsed: (groupKey: string) => void;
 
+  /** 会话侧栏中被折叠子代理列表的父会话 ID（持久化，跨刷新保留折叠状态）。 */
+  collapsedSubagentParentIds: string[];
+  toggleSubagentCollapsed: (parentSessionId: string) => void;
+  /**
+   * 仅保留仍作为父会话存在的 ID，剪除已删除 / 不再有子代理的残留项。
+   * 仅应在调用方确认会话列表完整时使用；无变化时返回原 state，
+   * 避免多余的订阅通知与渲染。
+   */
+  retainSubagentCollapsed: (keepParentSessionIds: readonly string[]) => void;
+
   // File tree
   /** 文件树已展开目录，按会话分桶持久化；无会话时落到 `__default__` 桶。 */
   expandedDirsBySession: Record<string, string[]>;
@@ -1323,6 +1333,26 @@ export const useUIStateStore = create<UIStateStore>()(
             : [...s.collapsedSessionGroups, groupKey],
         })),
 
+      // 会话列表子代理折叠：按父会话 ID 记录
+      collapsedSubagentParentIds: [],
+      toggleSubagentCollapsed: (parentSessionId) =>
+        set((s) => ({
+          collapsedSubagentParentIds: s.collapsedSubagentParentIds.includes(parentSessionId)
+            ? s.collapsedSubagentParentIds.filter((id) => id !== parentSessionId)
+            : [...s.collapsedSubagentParentIds, parentSessionId],
+        })),
+      retainSubagentCollapsed: (keepParentSessionIds) =>
+        set((s) => {
+          if (s.collapsedSubagentParentIds.length === 0) {
+            return s;
+          }
+          const keep = new Set(keepParentSessionIds);
+          const next = s.collapsedSubagentParentIds.filter((id) => keep.has(id));
+          return next.length === s.collapsedSubagentParentIds.length
+            ? s
+            : { collapsedSubagentParentIds: next };
+        }),
+
       // File tree
       expandedDirsBySession: {},
       setExpandedDirsForSession: (sessionKey, dirs) =>
@@ -1639,7 +1669,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 26,
+      version: 27,
       // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
       // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
@@ -1879,12 +1909,21 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.terminalPanelHeightCustomized = false;
         }
 
+        // v27:会话侧栏新增「按父会话折叠子代理列表」状态,首次引入无旧值可迁移,只初始化空数组。
+        if (version < 27) {
+          nextState.collapsedSubagentParentIds = [];
+        }
+
         nextState.expandedDirsBySession = normalizeExpandedDirsBySession(
           nextState.expandedDirsBySession,
         );
 
         if (!isStringArray(nextState.collapsedSessionGroups)) {
           nextState.collapsedSessionGroups = [];
+        }
+
+        if (!isStringArray(nextState.collapsedSubagentParentIds)) {
+          nextState.collapsedSubagentParentIds = [];
         }
 
         if (!isStringArray(nextState.savedWorkspacePaths)) {

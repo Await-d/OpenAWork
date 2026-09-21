@@ -115,6 +115,7 @@ import { toast } from '../../../components/common/feedback/ToastNotification.js'
 import { usePageActivation } from '../../../components/common/routing/CachedRouteOutlet.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
 import { isPathWithinRoot } from '../../../utils/workspace-path.js';
+import { useLinkPreviewRequest } from '../../../utils/preview/use-link-preview-request.js';
 import {
   TeamFocusHandoffBanner,
   TeamPageSuperbarLeading,
@@ -280,6 +281,9 @@ export default function TeamPageV2() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null);
   const [focusedHandoffId, setFocusedHandoffId] = useState<string | null>(null);
+  const [dismissingFailedHandoffIds, setDismissingFailedHandoffIds] = useState<readonly string[]>(
+    [],
+  );
   /**
    * 是否启用 team 端 composer 输入（L1.3 inbound 反向通道）。
    *
@@ -586,6 +590,13 @@ export default function TeamPageV2() {
     Boolean(accessToken && selectedTeamId && !isSelectedSharedSession) &&
     selectedTeam?.status !== 'completed' &&
     selectedTeam?.status !== 'failed';
+  /**
+   * 失败项的处置权限（重试 / 关闭）：只反映归属与权限，**不含**会话运行状态。
+   * failed 态恰恰是最需要「关闭」入口的场景，不能再被 canManageSelectedRuntimeTree
+   * 的 completed/failed 排除条件挡住。
+   */
+  const canActOnRuntimeFailures =
+    data.canManageRuntime && Boolean(accessToken && selectedTeamId && !isSelectedSharedSession);
 
   // 连接 team-events WS
   useEffect(() => {
@@ -1093,6 +1104,39 @@ export default function TeamPageV2() {
     [handoffsClient, accessToken, refreshWorkspaceSnapshot],
   );
 
+  const handleDismissFailedHandoffs = useCallback(
+    (handoffIds: readonly string[]) => {
+      if (!handoffsClient || !accessToken || handoffIds.length === 0) return;
+      setDismissingFailedHandoffIds(handoffIds);
+      void Promise.all(handoffIds.map((id) => handoffsClient.dismissFailedHandoff(accessToken, id)))
+        .then((results) => {
+          const failedResult = results.find((result) => !result.ok);
+          if (!failedResult) {
+            toast(
+              handoffIds.length > 1 ? `已关闭 ${handoffIds.length} 条失败项` : '已关闭失败项',
+              'success',
+            );
+            return;
+          }
+          const message =
+            failedResult.errorMessage ??
+            (failedResult.state ? `当前状态：${failedResult.state}` : '未知错误');
+          console.error('[TeamPageV2] dismiss failed handoff failed:', handoffIds, message);
+          toast(`关闭失败项失败：${message}`, 'error');
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : '未知错误';
+          console.error('[TeamPageV2] dismiss failed handoff request failed:', handoffIds, message);
+          toast(`关闭失败项失败：${message}`, 'error');
+        })
+        .finally(() => {
+          setDismissingFailedHandoffIds([]);
+          refreshWorkspaceSnapshot();
+        });
+    },
+    [handoffsClient, accessToken, refreshWorkspaceSnapshot],
+  );
+
   const handleOpenFullscreen = useCallback(() => {
     setShowOfficeFullscreen(true);
   }, []);
@@ -1107,6 +1151,10 @@ export default function TeamPageV2() {
     setMobileSidebarOpen,
     viewState,
   });
+
+  // 团队页 markdown 链接点击 → 打开编辑器浮层的浏览器预览（与既有
+  // `openawork:browser:open-url` 行为一致，但只在本页激活时认领）。
+  useLinkPreviewRequest(pageActive, editorOverlay.openBrowserPreview);
 
   const workbenchLayoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const isFusionWorkbench = workbenchLayoutMode === 'fusion';
@@ -1214,9 +1262,11 @@ export default function TeamPageV2() {
             {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
             <TeamPageMiddleArea
               accessToken={accessToken}
+              canActOnRuntimeFailures={canActOnRuntimeFailures}
               canCreateWorkspace={canCreateWorkspace}
               canManageSelectedRuntimeTree={canManageSelectedRuntimeTree}
               data={data}
+              dismissingHandoffIds={dismissingFailedHandoffIds}
               editorOverlay={editorOverlay}
               effectiveFocusMode={effectiveFocusMode}
               effectiveMode={effectiveMode}
@@ -1232,6 +1282,7 @@ export default function TeamPageV2() {
               officeSceneState={officeScene.officeSceneState}
               onCancelHandoff={handleCancelHandoff}
               onClearFocusedHandoff={() => setFocusedHandoffId(null)}
+              onDismissFailed={handleDismissFailedHandoffs}
               onMiddleTabChange={handleMiddleTabChange}
               onOpenBlockingTarget={handleOpenBlockingTarget}
               onOpenFullscreen={handleOpenFullscreen}

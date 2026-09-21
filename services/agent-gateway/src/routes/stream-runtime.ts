@@ -12,8 +12,8 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
-  truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
   approveToolPermission,
+  listSessionMessagesV2 as listSessionMessages,
   rejectToolPermission,
 } from '../message/message-v2-adapter.js';
 import {
@@ -26,7 +26,11 @@ import {
   mergeFileDiffs,
   traceFileDiffs,
 } from '../tools/modified-files-summary.js';
-import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tools/tool-sandbox.js';
+import {
+  createDefaultSandbox,
+  recordBlockedToolCallsForPendingRequest,
+  reconcileResumedTaskChildSession,
+} from '../tools/tool-sandbox.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
 import {
   CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
@@ -39,6 +43,7 @@ import { buildCapabilityContext } from './capabilities.js';
 import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import {
   type ApprovedPermissionResumePayload,
+  type BlockedToolCallResumeEntry,
   buildRouteOnlyUpstreamSummary,
   buildWorkspaceContext,
   createRunEventMeta,
@@ -109,14 +114,96 @@ import {
 } from '../workspace/companion-settings.js';
 import type { InputImageContent } from '@openAwork/shared';
 
+export function resolveBlockedCalls(
+  payload: ApprovedPermissionResumePayload,
+): BlockedToolCallResumeEntry[] {
+  if (payload.blockedToolCalls && payload.blockedToolCalls.length > 0) {
+    return payload.blockedToolCalls;
+  }
+  return [
+    {
+      toolCallId: payload.toolCallId,
+      toolName: payload.toolName,
+      rawInput: payload.rawInput,
+    },
+  ];
+}
+
+function hasResidualPendingPermissionRequests(sessionId: string): boolean {
+  const row = sqliteGet<{ id: string }>(
+    `SELECT id FROM permission_requests WHERE session_id = ? AND status = 'pending' LIMIT 1`,
+    [sessionId],
+  );
+  return Boolean(row);
+}
+
+/**
+ * True when the paused turn already produced a continuation (a later message
+ * exists after the assistant message that owns `anchorCallId`).
+ *
+ * Tool results attach as parts of that assistant message, so appending a resumed
+ * result does not itself create a newer message — only a real follow-up round
+ * does. This is the opencode-aligned "never replay a round that already ran"
+ * guard: a late sibling approval must append in place instead of re-running the
+ * model round from `nextRound`, which could leave stale rounds in the transcript.
+ */
+function hasTurnContinuationAfterPause(input: {
+  anchorCallId: string;
+  sessionId: string;
+  userId: string;
+}): boolean {
+  const messages = listSessionMessages({ sessionId: input.sessionId, userId: input.userId });
+  const anchorIndex = messages.findIndex(
+    (message) =>
+      Array.isArray(message.content) &&
+      message.content.some(
+        (part) => (part as { toolCallId?: string }).toolCallId === input.anchorCallId,
+      ),
+  );
+  return anchorIndex !== -1 && anchorIndex < messages.length - 1;
+}
+
+/**
+ * Derive the next model round from the persisted transcript instead of trusting
+ * the round stored on the pending payload.
+ *
+ * Intermediate assistant messages are keyed `${clientRequestId}:assistant:<n>`
+ * (`createIntermediateAssistantRequestId`), so the next round is `max(n) + 1`.
+ * `fallbackRound` (the payload's `nextRound`, captured as `round + 1` at pause
+ * time) is only used when no intermediate round is recoverable, which keeps the
+ * behaviour identical on the normal path while removing the round-replay class
+ * of bug when a continuation already exists.
+ */
+export function deriveResumeRound(input: {
+  clientRequestId: string;
+  fallbackRound: number;
+  sessionId: string;
+  userId: string;
+}): number {
+  const prefix = `${input.clientRequestId}:assistant:`;
+  let maxRound = 0;
+  for (const message of listSessionMessages({
+    sessionId: input.sessionId,
+    userId: input.userId,
+  })) {
+    const value = (message as { clientRequestId?: string }).clientRequestId;
+    if (typeof value !== 'string' || !value.startsWith(prefix)) continue;
+    const parsed = Number.parseInt(value.slice(prefix.length), 10);
+    if (Number.isFinite(parsed) && parsed > maxRound) {
+      maxRound = parsed;
+    }
+  }
+  return maxRound > 0 ? maxRound + 1 : input.fallbackRound;
+}
+
 async function continueFromApprovedToolResult(input: {
-  initialToolResult: {
+  initialToolResults: Array<{
     attachments?: InputImageContent[];
     isError: boolean;
     output: unknown;
     toolCallId: string;
     toolName: string;
-  };
+  }>;
   payload: ApprovedPermissionResumePayload;
   resumedAfterApproval?: boolean;
   sessionId: string;
@@ -366,121 +453,176 @@ async function continueFromApprovedToolResult(input: {
       }
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
 
-    if (
-      getAnyInFlightStreamRequestForSession({
-        excludeClientRequestId: input.payload.clientRequestId,
-        sessionId: input.sessionId,
-        userId: input.userId,
-      })
-    ) {
-      throw new Error('Another request is already running for this session.');
-    }
-
-    const observability =
-      input.payload.observability ??
-      buildStreamToolObservability({
-        metadataJson: sessionContext.metadataJson,
-        presentedToolName: input.initialToolResult.toolName,
-      });
-    const resumedFileDiffs = traceFileDiffs({
-      clientRequestId: input.payload.clientRequestId,
-      diffs: collectFileDiffsFromToolOutput(input.initialToolResult.output),
-      observability,
-      requestId: createToolResultRequestId(
-        input.payload.clientRequestId,
-        input.initialToolResult.toolCallId,
-      ),
-      toolCallId: input.initialToolResult.toolCallId,
-      toolName: input.initialToolResult.toolName,
-    });
-
-    const toolResultMessage = appendSessionMessage({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      role: 'tool',
-      content: [
-        buildToolResultContent({
-          toolCallId: input.initialToolResult.toolCallId,
-          toolName: input.initialToolResult.toolName,
-          clientRequestId: input.payload.clientRequestId,
-          output: input.initialToolResult.output,
-          isError: input.initialToolResult.isError,
-          ...(input.initialToolResult.attachments
-            ? { attachments: input.initialToolResult.attachments }
-            : {}),
-          fileDiffs: resumedFileDiffs,
-          resumedAfterApproval: input.resumedAfterApproval === true,
-          observability,
-        }),
-      ],
-      clientRequestId: createToolResultRequestId(
-        input.payload.clientRequestId,
-        input.initialToolResult.toolCallId,
-      ),
-      replaceExisting: true,
-    });
-
-    truncateSessionMessagesAfter({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      messageId: toolResultMessage.id,
-      inclusive: false,
-    });
-
-    writeChunk(
-      buildToolResultRunEvent({
-        toolCallId: input.initialToolResult.toolCallId,
-        toolName: input.initialToolResult.toolName,
-        clientRequestId: input.payload.clientRequestId,
-        output: input.initialToolResult.output,
-        isError: input.initialToolResult.isError,
-        ...(input.initialToolResult.attachments
-          ? { attachments: input.initialToolResult.attachments }
-          : {}),
-        fileDiffs: resumedFileDiffs,
-        resumedAfterApproval: input.resumedAfterApproval === true,
-        observability,
-        eventMeta: createRunEventMeta(runId, eventSequence),
-      }),
-    );
-    mergeFileDiffs(turnFileDiffs, resumedFileDiffs);
-    if (resumedFileDiffs.length > 0) {
-      await persistSessionFileDiffs({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        clientRequestId: input.payload.clientRequestId,
-        requestId: createToolResultRequestId(
-          input.payload.clientRequestId,
-          input.initialToolResult.toolCallId,
-        ),
-        toolName: input.initialToolResult.toolName,
-        toolCallId: input.initialToolResult.toolCallId,
-        observability,
-        diffs: resumedFileDiffs,
-      });
-    }
-
-    const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
+    // Every exit path between here and the `finally` below must run the runtime
+    // thread teardown: two early returns (residual pending gate / turn-continuation
+    // guard) used to sit outside the try, leaking the heartbeat interval and
+    // leaving a stale `session_runtime_thread` row behind.
+    let unsubscribeSessionEvents: (() => void) | undefined;
+    try {
       if (
-        event.type === 'question_asked' ||
-        event.type === 'permission_asked' ||
-        event.type === 'permission_replied' ||
-        event.type === 'question_replied'
+        getAnyInFlightStreamRequestForSession({
+          excludeClientRequestId: input.payload.clientRequestId,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        })
       ) {
-        const stateUpdate = resolveSessionInteractionStateUpdate(event);
-        shouldKeepPausedState = stateUpdate.shouldKeepPausedState;
+        throw new Error('Another request is already running for this session.');
+      }
+
+      // Append every resumed tool result (the blocked call plus any held-back
+      // siblings), in `tool_use` order.
+      //
+      // We intentionally DO NOT truncate messages after these results: sibling
+      // results produced during the pause turn were written earlier in the
+      // transcript, while the resumed call's own result message already exists
+      // (deterministic `createToolResultRequestId` + `replaceExisting`). Truncating
+      // after that (older) message id would silently delete the siblings' results.
+      // Idempotency for retried resumes comes from the deterministic
+      // clientRequestId keying instead of transcript truncation.
+      for (const initialToolResult of input.initialToolResults) {
+        const observability =
+          input.payload.observability ??
+          buildStreamToolObservability({
+            metadataJson: sessionContext.metadataJson,
+            presentedToolName: initialToolResult.toolName,
+          });
+        const resumedFileDiffs = traceFileDiffs({
+          clientRequestId: input.payload.clientRequestId,
+          diffs: collectFileDiffsFromToolOutput(initialToolResult.output),
+          observability,
+          requestId: createToolResultRequestId(
+            input.payload.clientRequestId,
+            initialToolResult.toolCallId,
+          ),
+          toolCallId: initialToolResult.toolCallId,
+          toolName: initialToolResult.toolName,
+        });
+
+        appendSessionMessage({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          role: 'tool',
+          content: [
+            buildToolResultContent({
+              toolCallId: initialToolResult.toolCallId,
+              toolName: initialToolResult.toolName,
+              clientRequestId: input.payload.clientRequestId,
+              output: initialToolResult.output,
+              isError: initialToolResult.isError,
+              ...(initialToolResult.attachments
+                ? { attachments: initialToolResult.attachments }
+                : {}),
+              fileDiffs: resumedFileDiffs,
+              resumedAfterApproval: input.resumedAfterApproval === true,
+              observability,
+            }),
+          ],
+          clientRequestId: createToolResultRequestId(
+            input.payload.clientRequestId,
+            initialToolResult.toolCallId,
+          ),
+          replaceExisting: true,
+        });
+
+        writeChunk(
+          buildToolResultRunEvent({
+            toolCallId: initialToolResult.toolCallId,
+            toolName: initialToolResult.toolName,
+            clientRequestId: input.payload.clientRequestId,
+            output: initialToolResult.output,
+            isError: initialToolResult.isError,
+            ...(initialToolResult.attachments
+              ? { attachments: initialToolResult.attachments }
+              : {}),
+            fileDiffs: resumedFileDiffs,
+            resumedAfterApproval: input.resumedAfterApproval === true,
+            observability,
+            eventMeta: createRunEventMeta(runId, eventSequence),
+          }),
+        );
+        mergeFileDiffs(turnFileDiffs, resumedFileDiffs);
+        if (resumedFileDiffs.length > 0) {
+          await persistSessionFileDiffs({
+            sessionId: input.sessionId,
+            userId: input.userId,
+            clientRequestId: input.payload.clientRequestId,
+            requestId: createToolResultRequestId(
+              input.payload.clientRequestId,
+              initialToolResult.toolCallId,
+            ),
+            toolName: initialToolResult.toolName,
+            toolCallId: initialToolResult.toolCallId,
+            observability,
+            diffs: resumedFileDiffs,
+          });
+        }
+      }
+
+      // D-6 gate: if other permission requests for this session are still pending
+      // (e.g. a held-back sibling needed its own approval), hold the turn instead of
+      // sending a partial tool_result set upstream.
+      if (hasResidualPendingPermissionRequests(input.sessionId)) {
+        writeChunk({
+          type: 'done',
+          stopReason: 'tool_permission',
+          upstreamSummary: buildRouteOnlyUpstreamSummary(route, 'tool_permission'),
+          ...createRunEventMeta(runId, eventSequence),
+        });
         setPersistedSessionStateStatus({
           sessionId: input.sessionId,
-          status: stateUpdate.status,
+          status: 'paused',
           userId: input.userId,
         });
+        wl.flush(ctx, 200);
+        return { pendingInteraction: true, statusCode: 200 };
       }
-    });
 
-    try {
+      // opencode-aligned: if this turn already continued past the pause, a late
+      // sibling approval only appends its result in place. Re-running the model
+      // round from `nextRound` would replay rounds that already ran and could
+      // leave stale transcript entries behind.
+      if (
+        hasTurnContinuationAfterPause({
+          anchorCallId: input.payload.toolCallId,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        })
+      ) {
+        setPersistedSessionStateStatus({
+          sessionId: input.sessionId,
+          status: 'idle',
+          userId: input.userId,
+        });
+        wl.flush(ctx, 200);
+        return { pendingInteraction: false, statusCode: 200 };
+      }
+
+      unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
+        if (
+          event.type === 'question_asked' ||
+          event.type === 'permission_asked' ||
+          event.type === 'permission_replied' ||
+          event.type === 'question_replied'
+        ) {
+          const stateUpdate = resolveSessionInteractionStateUpdate(event);
+          shouldKeepPausedState = stateUpdate.shouldKeepPausedState;
+          setPersistedSessionStateStatus({
+            sessionId: input.sessionId,
+            status: stateUpdate.status,
+            userId: input.userId,
+          });
+        }
+      });
+
       let syntheticContinuationPrompt: string | undefined;
       let previousRoundUsedTools = false;
-      for (let round = input.payload.nextRound; ; round += 1) {
+      const resumeStartRound = deriveResumeRound({
+        clientRequestId: input.payload.clientRequestId,
+        fallbackRound: input.payload.nextRound,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
+      for (let round = resumeStartRound; ; round += 1) {
         const result = await runModelRound({
           clientRequestId: input.payload.clientRequestId,
           enabledTools,
@@ -511,7 +653,7 @@ async function continueFromApprovedToolResult(input: {
           teamInstructionStack,
           teamResumePrompt,
           teamStatusPrompt,
-          ...(round === input.payload.nextRound || previousRoundUsedTools
+          ...(round === resumeStartRound || previousRoundUsedTools
             ? {
                 beforeUpstreamCall: async (renderedMessageTokens: number) => {
                   const proactiveResult = await triggerProactiveCompaction({
@@ -717,7 +859,7 @@ async function continueFromApprovedToolResult(input: {
         sessionId: input.sessionId,
         userId: input.userId,
       });
-      unsubscribeSessionEvents();
+      unsubscribeSessionEvents?.();
     }
   })().catch((err) => {
     if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
@@ -785,40 +927,65 @@ export async function resumeApprovedPermissionRequest(input: {
   }
 
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
+  const blockedCalls = resolveBlockedCalls(input.payload);
   try {
-    // V2: Transition ToolPart from pending → running before executing
-    approveToolPermission({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      callID: input.payload.toolCallId,
-      title: input.payload.toolName,
-    });
-
     const sandbox = createDefaultSandbox([], { userId: input.userId });
-    const toolResult = await sandbox.execute(
-      {
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-        rawInput: input.payload.rawInput,
-      },
-      new AbortController().signal,
-      input.sessionId,
-      createStreamExecutionContext(
-        input.payload.clientRequestId,
-        input.payload.nextRound,
-        streamRequestSchema.parse(input.payload.requestData),
-        input.userId,
-      ),
+    const executionContext = createStreamExecutionContext(
+      input.payload.clientRequestId,
+      input.payload.nextRound,
+      streamRequestSchema.parse(input.payload.requestData),
+      input.userId,
     );
+    const initialToolResults: Array<{
+      attachments?: InputImageContent[];
+      isError: boolean;
+      output: unknown;
+      toolCallId: string;
+      toolName: string;
+    }> = [];
 
-    resumeResult = await continueFromApprovedToolResult({
-      initialToolResult: {
+    for (const [index, call] of blockedCalls.entries()) {
+      // V2: Transition ToolPart from pending → running before executing
+      approveToolPermission({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        callID: call.toolCallId,
+        title: call.toolName,
+      });
+
+      const toolResult = await sandbox.execute(
+        {
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          rawInput: call.rawInput,
+        },
+        new AbortController().signal,
+        input.sessionId,
+        executionContext,
+      );
+
+      if (toolResult.pendingPermissionRequestId) {
+        // A held-back sibling still needs its own approval: keep this call and
+        // everything after it with the new pending request. The residual-pending
+        // gate inside continueFromApprovedToolResult then holds the turn.
+        recordBlockedToolCallsForPendingRequest(
+          toolResult.pendingPermissionRequestId,
+          blockedCalls.slice(index),
+        );
+        break;
+      }
+
+      initialToolResults.push({
         ...(toolResult.attachments ? { attachments: toolResult.attachments } : {}),
         isError: toolResult.isError,
         output: toolResult.output,
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-      },
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+      });
+    }
+
+    resumeResult = await continueFromApprovedToolResult({
+      initialToolResults,
       payload: input.payload,
       resumedAfterApproval: true,
       sessionId: input.sessionId,
@@ -833,12 +1000,14 @@ export async function resumeApprovedPermissionRequest(input: {
   } catch (error) {
     clearInternalTeamResumeRequest(input.payload.clientRequestId);
     // V2: Transition ToolPart to error state on failure
-    rejectToolPermission({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      callID: input.payload.toolCallId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    for (const call of blockedCalls) {
+      rejectToolPermission({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        callID: call.toolCallId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await reconcileResumedTaskChildSession({
       childSessionId: input.sessionId,
       pendingInteraction: false,
@@ -871,26 +1040,32 @@ export async function resumeRejectedPermissionRequest(input: {
   }
 
   try {
-    // V2: Transition ToolPart to error state for the rejection
-    rejectToolPermission({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      callID: input.payload.toolCallId,
-      error: input.feedback
-        ? `权限已拒绝。用户反馈: ${input.feedback}`
-        : '权限已拒绝，工具未执行。',
-    });
+    const blockedCalls = resolveBlockedCalls(input.payload);
+    const rejectionError = input.feedback
+      ? `权限已拒绝。用户反馈: ${input.feedback}`
+      : '权限已拒绝，工具未执行。';
+    const rejectionOutput = input.feedback
+      ? `权限已拒绝。用户反馈: ${input.feedback}。请尝试其他方法。`
+      : '权限已拒绝，工具未执行。请尝试其他方法。';
+
+    // V2: Transition every blocked ToolPart to error state for the rejection
+    for (const call of blockedCalls) {
+      rejectToolPermission({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        callID: call.toolCallId,
+        error: rejectionError,
+      });
+    }
 
     // Continue the stream loop with the rejection as a tool error
     const resumeResult = await continueFromApprovedToolResult({
-      initialToolResult: {
+      initialToolResults: blockedCalls.map((call) => ({
         isError: true,
-        output: input.feedback
-          ? `权限已拒绝。用户反馈: ${input.feedback}。请尝试其他方法。`
-          : '权限已拒绝，工具未执行。请尝试其他方法。',
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-      },
+        output: rejectionOutput,
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+      })),
       payload: input.payload,
       resumedAfterApproval: false,
       sessionId: input.sessionId,
@@ -1001,12 +1176,14 @@ export async function resumeAnsweredQuestionRequest(input: {
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
     resumeResult = await continueFromApprovedToolResult({
-      initialToolResult: {
-        isError: false,
-        output: input.answerOutput,
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-      },
+      initialToolResults: [
+        {
+          isError: false,
+          output: input.answerOutput,
+          toolCallId: input.payload.toolCallId,
+          toolName: input.payload.toolName,
+        },
+      ],
       payload: input.payload,
       sessionId: input.sessionId,
       userId: input.userId,

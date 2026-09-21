@@ -20,6 +20,8 @@ import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { SearchStateBadge, type SearchVisualState } from '../shared/search-state-badge.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { extractWebSummary } from '../shared/web-helpers.js';
+import { resolveToolCallImageSource } from '../shared/tool-call-image-source.js';
+import { ToolCallImagePreview } from '../io/ToolCallImagePreview.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
@@ -106,19 +108,17 @@ export function BlockToolCall({
 
   const title = useMemo(() => naturalLanguageSummary(toolName, input), [toolName, input]);
 
+  // 折叠态只解析来源不取图：真正的请求发生在 open === true 时渲染的预览组件里。
+  const imageSource = useMemo(
+    () => resolveToolCallImageSource(toolName, input, output),
+    [toolName, input, output],
+  );
+
   // Collapsed summary (shown when not expanded)
   const collapsedSummary = useMemo(() => {
-    if (isBashLike && output !== undefined) {
-      const outStr = typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
-      if (outStr) {
-        const first = outStr
-          .split('\n')
-          .map((l: string) => l.trim())
-          .find((l: string) => l.length > 0);
-        if (first) return first.length > 80 ? `${first.slice(0, 77)}…` : first;
-      }
-    }
-    return undefined;
+    if (!isBashLike || output === undefined) return undefined;
+    const text = resolveBashOutputText(output);
+    return text ? firstNonEmptySummaryLine(text) : undefined;
   }, [isBashLike, output]);
 
   const hasDiff = displayData.diffView !== undefined;
@@ -336,6 +336,8 @@ export function BlockToolCall({
                 </div>
               )}
 
+            {imageSource && <ToolCallImagePreview source={imageSource} />}
+
             {/* Generic output fallback */}
             {!hasDiff && !hasBashOutput && !isWebTool && output !== undefined && (
               <div className="tool-call-block-output">
@@ -362,4 +364,31 @@ export function BlockToolCall({
       />
     </div>
   );
+}
+
+/** First non-empty, trimmed line of `text`, capped at 80 chars for the header. */
+function firstNonEmptySummaryLine(text: string): string | undefined {
+  const line = text
+    .split('\n')
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+  if (!line) return undefined;
+  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+}
+
+/**
+ * Pull the readable shell text out of a bash-like tool output. The bash tool
+ * returns `{ command, exitCode, output, ... }` where `output` holds the
+ * combined stdout/stderr text; never stringify the whole envelope, because the
+ * first pretty-printed line is just `{`.
+ */
+function resolveBashOutputText(output: unknown): string | undefined {
+  if (typeof output === 'string') return output;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return undefined;
+  const record = output as Record<string, unknown>;
+  for (const key of ['stdout', 'output', 'stderr'] as const) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return undefined;
 }

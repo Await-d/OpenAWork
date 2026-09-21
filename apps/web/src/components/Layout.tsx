@@ -3,6 +3,7 @@ import QuestionPromptCard from './common/display/QuestionPromptCard.js';
 import { FloatingPermissionPrompt } from './layout/shared/FloatingPermissionPrompt.js';
 import { LayoutTransitionOverlay } from './layout/shared/LayoutTransitionOverlay.js';
 import { useLayoutShared } from './layout/shared/useLayoutShared.js';
+import { useSessionListRevalidation } from './layout/shared/use-session-list-revalidation.js';
 import { LayoutFusion } from './layout/fusion/LayoutFusion.js';
 import { LayoutClassic } from './layout/LayoutClassic.js';
 
@@ -14,6 +15,9 @@ export interface LayoutProps {
 
 export default function Layout({ theme = 'dark', onToggleTheme }: LayoutProps = {}) {
   const shared = useLayoutShared(theme, onToggleTheme);
+  useSessionListRevalidation(
+    Boolean(shared.accessToken) && Boolean(shared.gatewayUrl) && !shared.hideGlobalSidebar,
+  );
 
   return (
     <>

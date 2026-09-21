@@ -37,6 +37,7 @@ function resetLayoutState(): void {
   useUIStateStore.setState({
     activeTabId: null,
     closedSessionTabIds: [],
+    collapsedSubagentParentIds: [],
     expandedDirsBySession: {},
     lastChatPath: null,
     reviewPanelOpened: false,
@@ -793,8 +794,8 @@ function fullBinaryLayout(depth: number): unknown {
 }
 
 describe('terminalLayoutBySession v24 → v25 迁移', () => {
-  it('persist 版本已提升到 26', () => {
-    expect(useUIStateStore.persist.getOptions().version).toBe(26);
+  it('persist 版本已提升到 27', () => {
+    expect(useUIStateStore.persist.getOptions().version).toBe(27);
   });
 
   it('v24 快照迁移得到空桶（分屏能力本轮才引入，无历史值可迁移）', () => {
@@ -1237,5 +1238,73 @@ describe('resolveEffectiveTerminalPanelPosition（窄视口降级）', () => {
     expect(resolveEffectiveTerminalPanelPosition('left', true)).toBe('bottom');
     expect(resolveEffectiveTerminalPanelPosition('right', true)).toBe('bottom');
     expect(resolveEffectiveTerminalPanelPosition('bottom', true)).toBe('bottom');
+  });
+});
+
+describe('collapsedSubagentParentIds 子代理列表折叠', () => {
+  it('toggleSubagentCollapsed 为纯切换：首次加入父会话 ID，再次调用移除', () => {
+    const store = useUIStateStore.getState();
+    expect(store.collapsedSubagentParentIds).toEqual([]);
+
+    store.toggleSubagentCollapsed('parent-a');
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['parent-a']);
+
+    store.toggleSubagentCollapsed('parent-a');
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual([]);
+  });
+
+  it('折叠某个父会话不影响工作区分组折叠状态', () => {
+    useUIStateStore.setState({ collapsedSessionGroups: ['ws-a'] });
+
+    useUIStateStore.getState().toggleSubagentCollapsed('parent-a');
+
+    const state = useUIStateStore.getState();
+    expect(state.collapsedSessionGroups).toEqual(['ws-a']);
+    expect(state.collapsedSubagentParentIds).toEqual(['parent-a']);
+  });
+
+  it('v27 迁移初始化空数组，且不覆盖既有分组折叠值', () => {
+    const migrated = runPersistMigration({ collapsedSessionGroups: ['ws-a'] }, 26);
+
+    expect(migrated.collapsedSubagentParentIds).toEqual([]);
+    expect(migrated.collapsedSessionGroups).toEqual(['ws-a']);
+  });
+
+  it.each([
+    ['字符串', 'x'],
+    ['数字', 42],
+    ['null', null],
+  ] as ReadonlyArray<[string, unknown]>)(
+    '同版本脏数据（%s）在迁移尾部归一为空数组',
+    (_label, value) => {
+      expect(
+        runPersistMigration({ collapsedSubagentParentIds: value }, 27).collapsedSubagentParentIds,
+      ).toEqual([]);
+    },
+  );
+
+  it('retainSubagentCollapsed 仅保留仍存在的父会话 ID', () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['a', 'b', 'c'] });
+
+    useUIStateStore.getState().retainSubagentCollapsed(['a', 'c']);
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['a', 'c']);
+  });
+
+  it('retainSubagentCollapsed 在无项可剪除时不更新 state', () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['a'] });
+    const before = useUIStateStore.getState();
+
+    useUIStateStore.getState().retainSubagentCollapsed(['a', 'b']);
+
+    expect(useUIStateStore.getState()).toBe(before);
+  });
+
+  it('retainSubagentCollapsed 传入空集合时清空全部残留', () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['a', 'b'] });
+
+    useUIStateStore.getState().retainSubagentCollapsed([]);
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual([]);
   });
 });

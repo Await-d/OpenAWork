@@ -218,3 +218,11 @@ export const LIST_CONTAINER: CSSProperties = {
   overflowY: 'auto',
   padding: '4px',
 };
+
+// Ghost 次级按钮：透明背景 + default 边框，用于卡片行右侧的次要动作
+export const BS_GHOST: CSSProperties = {
+  ...BS,
+  background: 'transparent',
+  border: '1px solid var(--border-default)',
+  color: 'var(--fg-default)',
+};

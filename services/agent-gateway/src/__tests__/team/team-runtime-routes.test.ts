@@ -182,6 +182,24 @@ describe('GET /team/runtime', () => {
       toSessionId: SESSION_STALE_ID,
     });
 
+    const failedExecutor = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: failedExecutor.id, claimToken: 'tok-runtime-executor' });
+    store.startHandoff({
+      handoffId: failedExecutor.id,
+      claimToken: 'tok-runtime-executor',
+      toSessionId: SESSION_STALE_ID,
+    });
+    store.failHandoff({
+      handoffId: failedExecutor.id,
+      claimToken: 'tok-runtime-executor',
+      reason: 'Spec Review 未通过：遗漏验收场景',
+    });
+
     const app = await buildApp();
     try {
       const res = await app.inject({
@@ -193,6 +211,7 @@ describe('GET /team/runtime', () => {
       expect(res.statusCode).toBe(200);
       const data = res.json() as {
         handoffs?: Array<{
+          dismissableFailure?: boolean;
           fromRoleLayer: string;
           fromSessionId: string;
           id: string;
@@ -227,6 +246,14 @@ describe('GET /team/runtime', () => {
             toRoleLayer: 'pm1',
             toSessionId: SESSION_STALE_ID,
           }),
+          expect.objectContaining({
+            dismissableFailure: true,
+            fromRoleLayer: 'pm2',
+            fromSessionId: SESSION_ACTIVE_ID,
+            id: failedExecutor.id,
+            state: 'failed',
+            toRoleLayer: 'executor',
+          }),
         ]),
       );
       expect(data.sessions).toEqual(
@@ -249,6 +276,85 @@ describe('GET /team/runtime', () => {
           }),
         ]),
       );
+
+      const runningPm2Handoff = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: SESSION_STALE_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: runningPm2Handoff.id, claimToken: 'tok-runtime-pm2' });
+      store.startHandoff({
+        handoffId: runningPm2Handoff.id,
+        claimToken: 'tok-runtime-pm2',
+        toSessionId: SESSION_ACTIVE_ID,
+      });
+
+      const adjudicatedRes = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+      expect(adjudicatedRes.statusCode).toBe(200);
+      const adjudicatedHandoffs = (
+        adjudicatedRes.json() as {
+          handoffs?: Array<{ dismissableFailure?: boolean; id: string }>;
+        }
+      ).handoffs;
+      expect(
+        adjudicatedHandoffs?.find((row) => row.id === failedExecutor.id)?.dismissableFailure,
+      ).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('可恢复失败的 dismissableFailure 随重试预算耗尽翻转', async () => {
+    const store = await import('../../handoff/store/handoff-store.js');
+    dbModule.sqliteRun(`UPDATE sessions SET role_layer = 'reception' WHERE id = ?`, [
+      SESSION_ACTIVE_ID,
+    ]);
+    const reason = 'planning-generation-failed: 项目调查返回无效 JSON：(空响应)';
+
+    const withRemainingBudget = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records SET state = 'failed', failure_reason = ? WHERE id = ?`,
+      [reason, withRemainingBudget.id],
+    );
+
+    const exhaustedBudget = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: SESSION_ACTIVE_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = ?, failed_retry_count = ?
+        WHERE id = ?`,
+      [reason, store.MAX_FAILED_HANDOFF_RETRY_COUNT, exhaustedBudget.id],
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/team/runtime',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const handoffs =
+        (res.json() as { handoffs?: Array<{ dismissableFailure?: boolean; id: string }> })
+          .handoffs ?? [];
+      expect(handoffs.find((row) => row.id === withRemainingBudget.id)?.dismissableFailure).toBe(
+        false,
+      );
+      expect(handoffs.find((row) => row.id === exhaustedBudget.id)?.dismissableFailure).toBe(true);
     } finally {
       await app.close();
     }

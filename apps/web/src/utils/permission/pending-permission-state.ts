@@ -34,3 +34,35 @@ export function toSessionPendingPermissionState(
 ): SessionPendingPermissionState | null {
   return toSessionPendingPermissionStateFromRequest(findFirstPendingPermission(pendingPermissions));
 }
+
+// Single source of truth for "this tool output means waiting for approval".
+// Duplicated marker lists drifted between the batch card and the copied-tool
+// card before; both now import from here.
+export const PENDING_PERMISSION_OUTPUT_MARKERS = [
+  'waiting for approval',
+  'requires approval',
+  'permission request',
+  'waiting for answer',
+  'waiting for confirmation',
+  '等待权限',
+  '等待审批',
+  '等待回答',
+  '等待确认',
+] as const;
+
+export function looksLikePendingPermissionOutput(output: unknown): boolean {
+  const serialized =
+    typeof output === 'string'
+      ? output
+      : (() => {
+          if (output === undefined || output === null) return '';
+          try {
+            return JSON.stringify(output) ?? '';
+          } catch {
+            return String(output);
+          }
+        })();
+  const normalized = serialized.trim().toLowerCase();
+  if (normalized.length === 0) return false;
+  return PENDING_PERMISSION_OUTPUT_MARKERS.some((marker) => normalized.includes(marker));
+}

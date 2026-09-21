@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import '../message/chat-message.css';
+import './ChatPageSections.css';
 import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
@@ -31,7 +32,7 @@ import { AssistantEventRow } from '../assistant/assistant-event-row.js';
 import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasoning-block.helpers.js';
 import { AssistantReasoningBlock } from '../assistant/assistant-reasoning-block.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
-import { ImageLightbox } from '../image/image-lightbox.js';
+import { ImageLightbox, type ImageLightboxItem } from '../image/image-lightbox.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
 import { TaskToolInline } from '../tool-call/display/task-tool-inline.js';
@@ -108,14 +109,35 @@ export interface ChatToolRenderOptions {
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }
 
+/**
+ * 用户消息附件图集。
+ *
+ * 无障碍：可预览附件的文件名标签是一个真实控件，由原生 `<button type="button">`
+ * 承担，与缩略图按钮同级（同一 tile 内并列，不互相嵌套），键盘 Enter / Space 交给
+ * 浏览器原生按钮语义，不再使用无角色、不可聚焦的 `<span onClick>`。没有可预览图源时
+ * 文件名退化为纯文本标签（`--static`），不产生任何交互语义。
+ */
 function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extractInputImages> }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const activeImage = openIndex !== null ? images[openIndex] : undefined;
-  const activeSrc = activeImage?.imageUrl;
-  const activeLabel =
-    activeImage?.fileName ?? (openIndex !== null ? `图片 ${openIndex + 1}` : '图片');
+  const viewableImages = images.flatMap((image, imageIndex) =>
+    image.imageUrl ? [{ image, imageIndex }] : [],
+  );
+  const lightboxItems: ImageLightboxItem[] = viewableImages.flatMap(({ image, imageIndex }) => {
+    if (!image.imageUrl) return [];
+    const label = image.fileName ?? `图片 ${imageIndex + 1}`;
+    return [
+      {
+        src: image.imageUrl,
+        alt: label,
+        caption: label,
+        ...(image.fileName ? { fileName: image.fileName } : {}),
+      },
+    ];
+  });
+  // openIndex 是 images 下标；图集索引用可预览图片的位置，两者互转。
+  const openPosition = viewableImages.findIndex((entry) => entry.imageIndex === openIndex);
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
@@ -175,22 +197,7 @@ function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extra
                     pointerEvents: 'none',
                   }}
                 >
-                  <span
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 999,
-                      background: 'rgba(0,0,0,0.55)',
-                      backdropFilter: 'blur(6px)',
-                      color: 'var(--fg-on-accent)',
-                      fontSize: 16,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    ⤢
-                  </span>
+                  <span className="chat-attachment-thumbnail__zoom-badge">⤢</span>
                 </div>
               </button>
             ) : (
@@ -210,30 +217,35 @@ function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extra
                 图片已附加
               </div>
             )}
-            <span
-              style={{
-                fontSize: 11,
-                color: 'var(--fg-muted)',
-                lineHeight: 1.4,
-                cursor: clickable ? 'zoom-in' : 'default',
-              }}
-              onClick={clickable ? () => setOpenIndex(index) : undefined}
-              title={label}
-            >
-              {label}
-            </span>
+            {clickable ? (
+              <button
+                type="button"
+                className="chat-attachment-file-name"
+                aria-label={`放大查看 ${label}`}
+                title={label}
+                onClick={() => setOpenIndex(index)}
+              >
+                {label}
+              </button>
+            ) : (
+              <span
+                className="chat-attachment-file-name chat-attachment-file-name--static"
+                title={label}
+              >
+                {label}
+              </span>
+            )}
           </div>
         );
       })}
 
-      {activeSrc && (
+      {openIndex !== null && openPosition >= 0 && (
         <ImageLightbox
-          src={activeSrc}
-          open={openIndex !== null}
+          open
+          items={lightboxItems}
+          index={openPosition}
+          onIndexChange={(next) => setOpenIndex(viewableImages[next]?.imageIndex ?? null)}
           onClose={() => setOpenIndex(null)}
-          alt={activeLabel}
-          caption={activeLabel}
-          fileName={activeImage?.fileName ?? 'image.png'}
         />
       )}
     </div>

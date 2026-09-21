@@ -31,7 +31,7 @@ export type BrowserProxyCommand =
   | { type: 'dblClick'; selector: string; options?: Omit<ClickOptions, 'clickCount'> }
   | { type: 'fill'; selector: string; value: string; options?: FillOptions }
   | { type: 'type'; selector: string; value: string; options?: TypeTextOptions }
-  | { type: 'press'; selector: string; key: string; options?: TypeTextOptions }
+  | { type: 'press'; selector?: string; key: string; options?: TypeTextOptions }
   | { type: 'check'; selector: string; options?: ClickOptions }
   | { type: 'uncheck'; selector: string; options?: ClickOptions }
   | {
@@ -132,7 +132,7 @@ export class MobileBrowserAutomationProxy {
     await this.transport.execute({ type: 'type', selector, value, options });
   }
 
-  async press(selector: string, key: string, options?: TypeTextOptions): Promise<void> {
+  async press(selector: string | undefined, key: string, options?: TypeTextOptions): Promise<void> {
     await this.transport.execute({ type: 'press', selector, key, options });
   }
 

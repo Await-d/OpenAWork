@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ArtifactRecord, ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { exportFile } from '../../../utils/export-file.js';
 import { TrashIcon } from '../../team/runtime/shared/TeamIcons.js';
 import { ArtifactCodeEditor } from '../views/artifact-code-editor.js';
+import { buildArtifactImageGallery } from '../views/artifact-image-gallery.js';
 import { ArtifactPreviewSurface } from '../views/artifact-preview-surface.js';
 import {
   buildArtifactDownloadName,
@@ -17,27 +18,41 @@ import { ArtifactVersionTimeline } from '../views/artifact-version-timeline.js';
 interface ArtifactWorkbenchProps {
   artifact: ArtifactRecord | null;
   deleting: boolean;
+  /** 当前会话的图片类产物（`type === 'image'`），用于预览面的图集左右切换 */
+  imageArtifacts?: readonly ArtifactRecord[];
   revertingVersionId: string | null;
   saving: boolean;
   versions: ArtifactVersionRecord[];
   onDelete: () => void;
   onRevert: (versionId: string) => void;
   onSave: (draft: { content: string; title: string }) => void;
+  /** 预览面切换图片时回写选中产物，保持与列表选中态一致 */
+  onSelectArtifactId?: (artifactId: string) => void;
 }
 
 export function ArtifactWorkbench({
   artifact,
   deleting,
+  imageArtifacts,
   revertingVersionId,
   saving,
   versions,
   onDelete,
   onRevert,
   onSave,
+  onSelectArtifactId,
 }: ArtifactWorkbenchProps) {
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [mode, setMode] = useState<'code' | 'preview'>('code');
+
+  const imageGallery = useMemo(
+    () =>
+      onSelectArtifactId
+        ? buildArtifactImageGallery(imageArtifacts ?? [], artifact, onSelectArtifactId)
+        : undefined,
+    [artifact, imageArtifacts, onSelectArtifactId],
+  );
 
   useEffect(() => {
     setDraftTitle(artifact?.title ?? '');
@@ -233,7 +248,11 @@ export function ArtifactWorkbench({
             <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>内容</span>
           </label>
           {mode === 'preview' && previewable ? (
-            <ArtifactPreviewSurface artifact={artifact} content={draftContent} />
+            <ArtifactPreviewSurface
+              artifact={artifact}
+              content={draftContent}
+              imageGallery={imageGallery}
+            />
           ) : (
             <ArtifactCodeEditor
               content={draftContent}

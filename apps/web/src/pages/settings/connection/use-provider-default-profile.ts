@@ -1,10 +1,12 @@
 import React from 'react';
 import type { ActiveSelectionRef, ImageGenerationDefaultsRef } from '@openAwork/shared-ui';
-import type { ThinkingDefaultsRef } from '../state/settings-types.js';
+import type { SubagentModelPolicyRef, ThinkingDefaultsRef } from '../state/settings-types.js';
 import {
   DEFAULT_IMAGE_GENERATION_DEFAULTS,
+  DEFAULT_SUBAGENT_MODEL_POLICY,
   DEFAULT_THINKING_DEFAULTS,
   normalizeImageGenerationDefaults,
+  normalizeSubagentModelPolicy,
   normalizeThinkingDefaults,
 } from '../shared/settings-page-helpers.js';
 
@@ -39,6 +41,15 @@ export function useProviderDefaultProfile({
     React.useState<ImageGenerationDefaultsRef>({
       ...DEFAULT_IMAGE_GENERATION_DEFAULTS,
     });
+  const [subagentModelPolicy, setSubagentModelPolicyState] = React.useState<SubagentModelPolicyRef>(
+    {
+      ...DEFAULT_SUBAGENT_MODEL_POLICY,
+    },
+  );
+  const [savedSubagentModelPolicy, setSavedSubagentModelPolicyState] =
+    React.useState<SubagentModelPolicyRef>({
+      ...DEFAULT_SUBAGENT_MODEL_POLICY,
+    });
   const [savingDefaultModelSettings, setSavingDefaultModelSettings] = React.useState(false);
 
   const activeSelectionRef = React.useRef<ActiveSelectionRef>(activeSelection);
@@ -50,6 +61,9 @@ export function useProviderDefaultProfile({
   const savedImageGenerationDefaultsRef = React.useRef<ImageGenerationDefaultsRef>(
     savedImageGenerationDefaults,
   );
+  const subagentModelPolicyRef = React.useRef<SubagentModelPolicyRef>(subagentModelPolicy);
+  const savedSubagentModelPolicyRef =
+    React.useRef<SubagentModelPolicyRef>(savedSubagentModelPolicy);
 
   React.useEffect(() => {
     activeSelectionRef.current = activeSelection;
@@ -75,11 +89,20 @@ export function useProviderDefaultProfile({
     savedImageGenerationDefaultsRef.current = savedImageGenerationDefaults;
   }, [savedImageGenerationDefaults]);
 
+  React.useEffect(() => {
+    subagentModelPolicyRef.current = subagentModelPolicy;
+  }, [subagentModelPolicy]);
+
+  React.useEffect(() => {
+    savedSubagentModelPolicyRef.current = savedSubagentModelPolicy;
+  }, [savedSubagentModelPolicy]);
+
   const hasUnsavedDefaultModelChanges = React.useMemo(
     () =>
       JSON.stringify(activeSelection) !== JSON.stringify(savedActiveSelection) ||
       JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking) ||
-      JSON.stringify(imageGenerationDefaults) !== JSON.stringify(savedImageGenerationDefaults),
+      JSON.stringify(imageGenerationDefaults) !== JSON.stringify(savedImageGenerationDefaults) ||
+      JSON.stringify(subagentModelPolicy) !== JSON.stringify(savedSubagentModelPolicy),
     [
       activeSelection,
       savedActiveSelection,
@@ -87,6 +110,8 @@ export function useProviderDefaultProfile({
       savedDefaultThinking,
       imageGenerationDefaults,
       savedImageGenerationDefaults,
+      subagentModelPolicy,
+      savedSubagentModelPolicy,
     ],
   );
 
@@ -133,12 +158,24 @@ export function useProviderDefaultProfile({
     [],
   );
 
+  const setSubagentModelPolicy = React.useCallback(
+    (updater: React.SetStateAction<SubagentModelPolicyRef>) => {
+      setSubagentModelPolicyState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        subagentModelPolicyRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
   const applyServerDefaults = React.useCallback(
     (
       input: {
         activeSelection?: ActiveSelectionRef | null;
         defaultThinking?: ThinkingDefaultsRef | null;
         imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
+        subagentModelPolicy?: SubagentModelPolicyRef | null;
       },
       options?: {
         syncDraft?: boolean;
@@ -181,6 +218,23 @@ export function useProviderDefaultProfile({
         savedImageGenerationDefaultsRef.current = normalizedImageGenerationDefaults;
         setSavedImageGenerationDefaultsState(normalizedImageGenerationDefaults);
       }
+
+      // 与 imageGenerationDefaults 的「缺省即重置」不同：subagentModelPolicy 字段缺失（旧版网关
+      // 未返回该字段）时表示「未变更」，应保持 draft/saved/ref 原值，而不是重置为 auto。
+      // 否则缺失字段的 GET 响应会把本地 inherit-main 拉回 auto，并在下一次 provider 变更保存时写回服务端。
+      if (input.subagentModelPolicy !== undefined && input.subagentModelPolicy !== null) {
+        const normalizedSubagentModelPolicy = normalizeSubagentModelPolicy(
+          input.subagentModelPolicy,
+        );
+        if (syncDraft) {
+          subagentModelPolicyRef.current = normalizedSubagentModelPolicy;
+          setSubagentModelPolicyState(normalizedSubagentModelPolicy);
+        }
+        if (syncSaved) {
+          savedSubagentModelPolicyRef.current = normalizedSubagentModelPolicy;
+          setSavedSubagentModelPolicyState(normalizedSubagentModelPolicy);
+        }
+      }
     },
     [normalizeSelection],
   );
@@ -197,11 +251,15 @@ export function useProviderDefaultProfile({
     savedActiveSelectionRef,
     savedDefaultThinkingRef,
     savedImageGenerationDefaultsRef,
+    savedSubagentModelPolicyRef,
     savingDefaultModelSettings,
     setActiveSelection,
     setSavedActiveSelection,
     setImageGenerationDefaults,
     setSavingDefaultModelSettings,
     setDefaultThinking,
+    setSubagentModelPolicy,
+    subagentModelPolicy,
+    subagentModelPolicyRef,
   };
 }

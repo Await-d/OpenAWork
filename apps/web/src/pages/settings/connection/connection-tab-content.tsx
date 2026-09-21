@@ -10,11 +10,13 @@ import {
 } from '@openAwork/shared-ui';
 import type {
   ProviderEditData,
+  SubagentModelPolicyRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
 } from '../state/settings-types.js';
 import { BP, IS, SS, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
+import { SubagentModelPolicySection } from './SubagentModelPolicySection.js';
 
 /** 区域分组标题——比 ST 更大，用于二级信息架构 */
 const GROUP_TITLE: CSSProperties = {
@@ -48,6 +50,16 @@ const GROUP_HEADER: CSSProperties = {
   padding: '0 2px',
 };
 
+/** 分组内的未保存提示——不提供按钮，保存入口统一在「模型与提供商」分组。 */
+const GROUP_HINT: CSSProperties = {
+  margin: 0,
+  paddingTop: 12,
+  borderTop: '1px solid var(--border-subtle)',
+  color: 'var(--fg-muted)',
+  fontSize: 11,
+  lineHeight: 1.5,
+};
+
 /** 紧凑版 section——覆盖 SS 的 padding 和 gap */
 const SS_TIGHT: CSSProperties = {
   ...SS,
@@ -61,11 +73,13 @@ interface ConnectionTabContentProps {
   activeSelection: ActiveSelectionRef;
   defaultThinking: ThinkingDefaultsRef;
   imageGenerationDefaults: ImageGenerationDefaultsRef;
+  subagentModelPolicy: SubagentModelPolicyRef;
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
   setImageGenerationDefaults: React.Dispatch<React.SetStateAction<ImageGenerationDefaultsRef>>;
+  setSubagentModelPolicy: React.Dispatch<React.SetStateAction<SubagentModelPolicyRef>>;
   saveDefaultModelSettings: () => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
@@ -133,11 +147,13 @@ export function ConnectionTabContent({
   activeSelection,
   defaultThinking,
   imageGenerationDefaults,
+  subagentModelPolicy,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
   setImageGenerationDefaults,
+  setSubagentModelPolicy,
   saveDefaultModelSettings,
   handleAddModel,
   handleRemoveModel,
@@ -251,7 +267,13 @@ export function ConnectionTabContent({
             </p>
           ) : null}
           {isTauri ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 8,
+              }}
+            >
               <label
                 style={{
                   display: 'flex',
@@ -410,6 +432,26 @@ export function ConnectionTabContent({
             {...(onImportDiscoveredProvider ? { onImportDiscoveredProvider } : {})}
           />
         </div>
+      </div>
+
+      {/* ───── 区域四：子代理 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>子代理</h3>
+          <p style={GROUP_DESC}>
+            控制 task 工具派生的子代理使用哪个模型；思考强度始终按任务自动决定。
+          </p>
+        </div>
+        <section style={SS_TIGHT}>
+          <SubagentModelPolicySection
+            policy={subagentModelPolicy}
+            onChange={setSubagentModelPolicy}
+            disabled={isSavingDefaultChanges}
+          />
+          {hasUnsavedDefaultChanges ? (
+            <p style={GROUP_HINT}>子代理设置有未保存更改，将随上方「保存默认值」一并提交。</p>
+          ) : null}
+        </section>
       </div>
     </div>
   );

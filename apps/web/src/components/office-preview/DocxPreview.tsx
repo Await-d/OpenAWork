@@ -111,8 +111,9 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
           maxWidth: 760,
           margin: '0 auto',
           padding: 24,
-          background: 'var(--fg-on-accent)',
-          color: 'var(--bg-overlay)',
+          // 纸=中性表面、墨=正文色；--fg-on-accent 只用于 accent 实色填充之上。
+          background: 'var(--bg-surface)',
+          color: 'var(--fg-default)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 8,
           boxShadow: 'var(--shadow-sm)',

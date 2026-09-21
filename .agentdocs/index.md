@@ -2,6 +2,19 @@
 
 ## 已完成的任务
 
+### ✅ 260921-权限暂停全批收集改造 - 批量工具权限暂停不再丢失兄弟调用
+**状态**: 已完成（2026-09-21）——T-01…T-18 全部交付并验证；复杂度 **Full orchestration**（score +6）
+**归档位置**: [workflow/done/260921-权限暂停全批收集改造.md](workflow/done/260921-权限暂停全批收集改造.md)
+
+**成果总结**:
+- ✅ 批量工具权限暂停语义改为「**只读兄弟放行 + 整批收集 + 批末统一 pause**」：`isPermissionSafeSiblingTool` 白名单内的只读工具在待批期间继续执行；其余兄弟被扣住并入 pending payload 的 `blockedToolCalls`；批准后按 `tool_use` 顺序整批恢复，仅当无残留 pending 才续轮。
+- ✅ 修掉三个硬阻塞：① 移除 `continueFromApprovedToolResult` 的 `truncateSessionMessagesAfter`（原先会删除暂停轮写入的兄弟结果，幂等改由确定性 `clientRequestId`+`replaceExisting` 承担）；② pending payload 由单 `toolCallId` 升级为 `blockedToolCalls[]`（向后兼容旧 payload）；③ 多 pending 用残余闸门收口（级联 reject 裁决为无需收窄）。
+- ✅ 前端：`utils/permission/pending-permission-state.ts` 收口「等待审批」marker；批次卡聚合计数排除 pending 并显示「N 待审批…」；`copied-tool-card.ts` 同源引用。
+- ✅ 验证：新增 `verify-batch-permission-collect.ts`（真实 `executeToolCalls` + 真实 resume：门控兄弟未执行 → 批准后整批按序恢复且只跑一轮上游）；新增单测 8 例；既有 4 文件 27 例 + 权限目录 35 例 + R7 清单 12 例全绿；改动文件 ESLint 0 error。
+- ℹ️ 裁决记录：`.NET` 网关官方声明不维护、无需同步；opencode 的阻塞 await 模型因 run/请求承载不同而未照抄。
+- 🔧 修复轮次（潜在问题 1–4，2026-09-21）：① 按 opencode 式加「**已续写则不再重跑模型轮**」守卫（`hasTurnContinuationAfterPause`），晚到审批只就地追加结果；**拒绝**「定向 truncate」方案（仍保留按轮次重放且会删数据）。② 门控先于 doom-loop guard 为**有意设计**，补注释不改行为。③ 新增 `verify-batch-permission-multi-pending.ts` 覆盖**多 pending 顺序审批**（两次暂停、0/0/1 次上游）。④ 导出 `resolveBlockedCalls` 并补真实工具名/legacy 回退两条单测。验证：`test:batch-permission` 2 脚本 ok、单测 10/10、R7 27/27、ESLint 0 error。
+- 🧭 深对齐（轮次重放降级为历史驱动，2026-09-21）：新增 `deriveResumeRound()` 从持久化投影推导下一轮（`${clientRequestId}:assistant:<n>` → `max+1`），`payload.nextRound` 降级为**兜底**（正常路径值相同、行为不变；异常路径不再复用已存在轮次 id）。修正认知：`payload.nextRound` 实为暂停时的 `round + 1`（`stream.ts:3115`），并非重放点。验证：单测 12/12、2 验收脚本 ok、R7 六套件 39/39、ESLint 0 error。
+
 ### ✅ 260916-层级可视化重构 - 层级流动（泳道轨迹）+ 历史层级（追踪瀑布）
 **状态**: 已完成（T-01…T-08 全部交付并验证）
 **完成日期**: 2026-09-16
@@ -217,6 +230,77 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
+### 🟡 260921-GUI-Agent集成方案 - 借鉴 UI-TARS 为 OpenAWork 补齐 GUI Agent（computer-use）闭环
+**状态**: **方案完成，暂缓开发**（Gate 0 已定 4/5，模型路径待选；用户 2026-09-21 指示先调整方案决策）
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-GUI-Agent集成方案.md](workflow/260921-GUI-Agent集成方案.md)
+**运行计划**: `.agentdocs/runtime/260921-GUI-Agent集成方案/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
+
+**目标**: 借鉴 `bytedance/UI-TARS-desktop`（Apache-2.0，已 sparse checkout 至 `temp/UI-TARS-desktop/`）的 GUI Agent 能力，补齐「自然语言 → 视觉决策 → 多步操作 → 结果」闭环。
+
+**关键结论**:
+- **控制层不换**：UI-TARS 用 nut.js 原生插件进程内直调；OpenAWork 的 Tauri loopback 桥 + 系统命令在 Linux 覆盖、零第三方依赖、安全边界上更优。
+- **借鉴三件套**：动作解析器（纯逻辑零依赖）+ 坐标归一化数学（0–1000 → 0–1 → 像素）+ GUI 主循环骨架（**须去 `globalThis` 单例**）。
+- **移植基线取旧代** `packages/ui-tars/sdk`（自包含）；新代 `multimodal/gui-agent/*` 依赖 `@tarko/agent`，与自有状态机/网关冲突，仅抄其动作别名归一化表。
+- **核心障碍**：模型层 `supportsVision` ≠ grounding 能力，需新增 `supportsGuiGrounding` 能力位；GUI 内循环与 `runModelRound` 轮次模型语义冲突，必须封装。
+- **动作面差距**：`desktop_control` 缺 `drag` / `mouse_move` / `press` / `release` / `long_press`，且不支持归一化坐标输入。
+
+**分阶段路线**: Phase 0 能力补齐（T-01…T-07，低风险可独立发版）→ Phase 1 `computer_use` 工具（T-08…T-16，内嵌循环）→ Phase 2 GUI Runner 子会话（T-17…T-21，事件流 + 可视化）。
+
+**Gate 0 决策记录（2026-09-21）**:
+- ✅ **② 目标环境 = 本地桌面优先**：复用现有 Tauri 桥；远端沙箱列为后续独立立项（不在本方案范围）。
+- ✅ **③ 权限 = 沿用现有权限体系**：复用 `permissionMode`（默认 `ask`）+ 现有插件门控，**不新增权限机制**。
+- ✅ **④ 依赖 = 复用现有图像库**，不新增 `jimp` 等依赖。
+- ✅ **⑤ Phase 0 先行独立交付**（低风险、可独立验证）。
+- ⏸️ **① GUI 模型路径待选**（三路径，均**不需自建部署**、均**不改架构**）：
+  - **A 复用现有 Provider**：用 GPT-4o/Claude 等按 UI-TARS prompt 格式约束输出 → 精度低-中、零成本、零部署（**推荐起步**）
+  - **B 接云端 GUI 模型 API**：配置 OpenAI 兼容 grounding endpoint（如 Doubao-UI-TARS）→ 精度高、按调用计费、零部署（**精度不足时切**）
+  - **C 本地部署开源权重**：UI-TARS-1.5-7B + vLLM/Ollama → 精度高、需 GPU、复杂度高（**仅离线场景**）
+  - 关键：`supportsVision` ≠ grounding 能力；UI-TARS 新代 SDK 本身即支持 prompt-engineering 路线，证明不接专用模型亦可运行（仅精度打折）。真正难点在模型质量与截图成本/延迟，不在代码。
+- ⏸️ **开发时机**：暂不开发（用户指示先调整方案决策）。
+
+### ⛔ 260921-多模态媒体引用通路 - 为图片补齐官方协议的「引用通路」（provider file_id）——**已终止**
+**状态**: **已终止（2026-09-21，用户决策）**。原因：平台上游多为第三方中转/自建，**不保证实现 Files API**，引用通路在中转场景不可靠。已写代码**手工回退**（禁止 git 回滚指令），仅保留与功能解耦的 `protocols/index.ts` 常量命名导出；回退验证：`opencode-llm` 488/488、`agent-gateway` typecheck EXIT=0、全仓无残留引用
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-多模态媒体引用通路.md](workflow/260921-多模态媒体引用通路.md)
+**运行计划**: `.agentdocs/runtime/260921-多模态媒体引用通路/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
+
+**目标**: 在现有「一律 base64 内联」之外补引用通路——OpenAI Responses `input_image.file_id` / Anthropic `source.type='file'`（Files API）——使长多轮对话不再每轮重传图片字节，并让超过内联上限的图片可用而非必然失败。
+
+**范围红线**: 文档（非图片）通路、Gemini/Bedrock 引用路径、S3 上传器**均不在本方案**，需另行立项。
+
+**关键前置结论（已核实）**:
+- 网关协议可达面仅 `chat_completions | responses | anthropic_messages`（`routes/upstream-protocol.ts:1`）；`opencode-llm` 内的 `gemini.ts` / `bedrock-converse.ts` **未接线**，其引用路径今日不可达。
+- 官方核对：OpenAI Chat Completions 的图片 part **没有 `file_id`**（仅 Responses 有）；Anthropic 官方**明确推荐**大文件 / 长多轮走 Files API，且已转正、无需 beta header。
+- schema 内已有 `fileId` 字段但全链路无生产者也无解析者（死字段）→ 复用它承载「网关生成的 provider 文件 id」属**加法扩展**，客户端协议无需改动。
+- 协议适配器为 `if (part.type === …)` 顺序链、**无 `assertNever`**，新增 part 变体不会触发编译错误；靠 `shared.ts:355-368` 的 `supportsContent`/`unsupportedContent` 白名单兜底（T-02 逐协议核对）。
+
+**安全硬约束**: Anthropic 上传文件对整个 workspace 可见、不按用户隔离 → **绝不接受客户端传入的 `file_id`**，只由网关上传产生；`provider_files` 表带 `user_id`，默认不跨用户复用。
+
+### 🟢 260921-移动端图片查看器方案 - 移动端自建图片查看器（可点击放大 + 图集左右切换 + 缩放旋转）
+**状态**: **代码层完成，待真机验收**（Gate 0/1 已放行并实施完毕；23 个 T-XX 中 T-12 取消、T-18/19 未纳入、**T-13/T-17 待用户真机走查**；**未归档**，TODO 未全勾）
+**门禁**: `mobile typecheck` exit 0 ｜ `mobile test` **12 文件 / 252 例全绿**（基线 7/35）｜ ESLint 0 ｜ **两道静态审查 PASS/PASS** ｜ **零新增依赖**（`package.json`/锁文件未改）｜ 范围红线 PASS（`app/**` 未触碰）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-移动端图片查看器方案.md](workflow/260921-移动端图片查看器方案.md)（文末含**交付状态 + 9 条真机走查清单 + 跨会话沉淀**）
+**运行计划**: `.agentdocs/runtime/260921-移动端图片查看器方案/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
+
+**目标**: 让 `apps/mobile` 能点击图片放大（含缩放/旋转/下载/关闭），并在**同一条消息的多张图片**之间左右切换。Web 端同名能力已交付，但实现基于 DOM（`createPortal`/CSS/键盘/`getBoundingClientRect`），**RN 无法复用**，故单独立项——只复用其**行为契约**（A/B 组共 40 条对齐条目）与 3 个测试基线。
+
+**现状核实（已确认，含两个"看不见图"的根因）**:
+- 全应用**唯一光栅图片渲染点**是 `src/components/chat-message-bubble.tsx:73` 的 `<Image>`（180×180，**无点击处理**）。
+- 根因①：`imageUrl` 唯一来源是本地 `file://`（`attachment.localUri`）；**从网关历史加载的消息只有 `artifactId`** → 气泡永远只显示占位符「图片已附加」。
+- 根因②：assistant 生成的图片产物**不进气泡**，只进文字 chip；`app/artifacts.tsx` 只用 Ionicons 图标，不加载图片内容。
+- 按 artifactId 取内容的客户端能力**已存在但从未被调用**：`web-client` 的 `createArtifactsClient().get(token, artifactId)`（`GET /artifacts/:id`，图片含 base64）。
+- **零手势依赖**：无 `gesture-handler`/`reanimated`/`expo-image`/`image-viewing`；且 `apps/mobile` **无 `babel.config.js`** → 引依赖需 babel 插件 + 原生重建（高风险）。
+- 图集数据前提**已满足**：`collectInputImages()` 保序、不去重、不限量；气泡按数组顺序渲染。
+- 测试基建：`vitest run --passWithNoTests`，7 个**纯逻辑**测试；**无 `@testing-library/react-native`** → 组件级测试今日不可用，UI 须真机/EAS preview 走查。
+- 文档漂移：实际活路由是 **Expo Router**（`app/_layout.tsx`），而 `src/navigation/AppNavigator.tsx` 与 `src/utils/artifact-platform-adapter.ts` 均为**孤儿代码**，但 `apps/mobile/AGENTS.md` 仍声称使用手动状态机。
+
+**待用户拍板（Gate 0）**: D-1 手势依赖路线（**A 零依赖 · 推荐** / B 引入 gesture-handler+reanimated）；D-2 覆盖范围（**1 仅聊天 · 推荐** / 2 +产物页 / 3 +图片工作台）；D-3 取数策略（**落盘临时文件+LRU · 推荐** / `data:` URI 直显）；D-4 是否顺带修正 `apps/mobile/AGENTS.md` 导航漂移（**建议是**）。
+
+**范围红线**: 移动端文档内嵌图、HTML/CSV/SVG 产物预览、图片编辑、网关新缩略图端点**均不在本方案**，需另行立项。
+
 ### ✅ 260915-澄清完成自动切换编程模式 - 澄清模式设计完成后自动切到编程模式（+ 方案文档对齐 agentdocs 规范）
 **状态**: 已完成并归档（2026-09-16）——T-01…T-15 全部完成并验证；**代码变更仍在工作树中待提交**
 **开始日期**: 2026-09-15
@@ -403,9 +487,12 @@
 ## 项目记忆
 
 ### 已知陷阱补充
+- [2026-09-21] **批量工具权限暂停的 resume 会「删兄弟结果」** → `continueFromApprovedToolResult` 的 `truncateSessionMessagesAfter(messageId=本工具结果, inclusive:false)` 会连带删除暂停轮已写入的兄弟 tool_result（因本工具结果消息 id 更早），且 pending payload 只存单个 `toolCallId` → 修复：payload 增 `blockedToolCalls[]` 整批保序恢复 + 移除该 truncate（幂等改由确定性 `clientRequestId`+`replaceExisting` 承担）。
 - [2026-09-06] 实时聊天重复/Thinking 错位 → 标准 WS/SSE 只保存 `lastSeq:0`，重挂载 attach 从头 replay → Gateway 在持久化事件后附加 `clientRequestId + seq`，Web 分发前推进并持久化游标；文本内容指纹不应替代协议游标。
+- [2026-09-21] **切勿据「源码 TODO/FIXME 字面量」给缺口定级** → 扫标记会得出错误的 P0。实证两项均为误判，**不要重复当待办**：① `packages/opencode-llm/src/index.ts:42` 的 `TODO: 错误处理模块需要更新以适配 Effect 4.0 API` 是**过期注释**——仓库依赖本就是 `effect@4.0.0-beta.83`（`pnpm-lock.yaml` 唯一版本，无 stable 4.0），`tsc --noEmit` **EXIT=0**、`vitest run src/error` **4 文件 38 例全绿**，且**零生产消费者**（唯一引用者是包内集成测试 `src/__tests__/integration/e2e-simple.test.ts`），子路径 `./error` 仍经 `package.json` exports 可用；② `packages/skill-registry/src/installer.ts:130` 的 `Signature verification not implemented in MVP` 属**不可适用控制**——全仓无签名产物/公钥/`cosign`/`gpg`/`createSign`（`SkillManifest` 无 signature 字段），`skipSignatureVerification` 7 处调用点**全为 `true`/`?? true`**，抛错分支运行时不可达。**判缺口必须先验证前提（版本/消费者/可复现失败），再定级。**
 
 ### 架构决策
+- [2026-09-21] **批量工具权限暂停语义 = 只读兄弟放行 + 整批收集 + 批末统一 pause**：`isPermissionSafeSiblingTool` 白名单（read/list/glob/grep/webfetch/websearch/look_at/lsp）内的只读工具在待批期间继续执行；其余兄弟被扣住并入 pending payload 的 `blockedToolCalls`；批准后按 `tool_use` 顺序整批恢复，且仅当无残留 pending 才续轮。理由：上游 `tool_result` 顺序 + 整批 barrier 保证 prompt cache 前缀稳定，同时不丢只读兄弟。落点：`services/agent-gateway`（`routes/stream.ts` / `routes/stream-runtime.ts` / `tools/tool-sandbox.ts` / `permission/permission-contract.ts`）。**不照抄 opencode 的阻塞 await**——其 run 与请求解耦（durable drain），OpenAWork 的 run 绑在 SSE 请求上。
 - [2026-09-15] `@` 文件提及的**索引与检索放在网关**：BFS 递归扁平索引（无层数限制）+ 进程内缓存（15s TTL / 16 根上限 / 写路径失效），检索排序（目录逐级 / 相关性）也在服务端，前端只渲染命中小结果集、不做全量加载与本地匹配；全量清单端点因零生产消费者被删除。理由：本仓约 1.28 万文件，全量扁平清单 301KB，单次查询命中仅 68B–1.3KB。
 - [2026-09-15] 工作区忽略规则必须**按工作区根隔离**（`getWorkspaceIgnoreManager(root)` 的 per-root 实例），不能依赖 `defaultIgnoreManager`：它把 `projectRoot` 存为进程全局单值，多根并发时后服务的根会顶掉先前根的规则，锚定 `.gitignore` 项静默失效（实测泄漏 1007 条 → 修复后 0）。同一缺陷也存在于 `/workspace/tree` 等既有消费方。
 - [2026-09-15] 澄清模式"设计已完成"由两个机器门控判定（grill 确认节点 `confirmedAt` 首次落库 / `ExitPlanMode` 批准），另有手动逃生口（顶栏「确认转换」按钮 → `POST /sessions/:id/clarify/confirm`）；三条来源都走 `switchSessionDialogueModeToCoding()` 在响应前同步把 `sessions.metadata_json.dialogueMode` 切到 `coding` 并写审计字段 `dialogueModeSwitch`（reason 区分来源）；前端只同步展示（回复响应字段 + window 事件），元数据为 SSOT。
@@ -442,6 +529,16 @@
 - [2026-09-16] **`playwright` 必须精确锁版本**（`packages/browser-automation` = `1.58.2`，对应 chromium revision **1208**）：`^` 区间一旦被 `pnpm update` 推到 1.62（revision 1234），本机已装的 1208 会**静默失效**、可用性翻成 outdated。另：**`pnpm install` 不会安装浏览器**——根 `package.json` 的 `onlyBuiltDependencies` 不含 `playwright`，pnpm 10 跳过其安装脚本。
 - [2026-09-16] 会话权限阶梯以 `permissionMode: 'ask'|'auto-edit'|'yolo'` 为**规范键**，布尔 `yoloMode` 降级为**派生投影**（`yoloMode === (permissionMode === 'yolo')`），使 legacy 读方 / 写方零改动；写入侧 canonicalizer 必须 patch-aware 并采用 5 级优先级（patch 规范键 > patch 布尔 > 合并后规范键 > 合并后布尔 > 保持缺席），否则 legacy 客户端 PATCH 布尔会被丢弃、session 卡在 `yolo`，形成向更不安全方向的**单向棘轮**。
 - [2026-09-16] 权限阶梯的 **deny-first 不变量**：`auto-edit` / `yolo` 的免审批快捷分支只能在**通配符 allow/deny 与作用域级 allow/deny 之后**执行，故这两档仅跳过 `ask`、永不放行被显式 `deny` 的调用；唯一执行点是 `ensurePermissionForTool`（`services/agent-gateway/src/tools/tool-sandbox.ts`），category 计算须上提以便中间档测试解析后的类别。
+
+- [2026-09-21] **不做「提供商文件引用（Files API / file_id）」通路**：上游多为第三方中转/自建，不保证实现 Files API；且该通路会把用户图片**持久化到第三方服务端**（OpenAI 默认长期保留、Anthropic 对整个 workspace 可见），与「内联 base64、请求即走」是本质不同的数据姿态。已对照 `temp/opencode`（github-v1.2.25-2014）验证：其原生协议层**零上传、零 file_id、100% 内联 base64**，且**刻意不支持公网 URL 图片**（`validateMedia` 只收 base64；session 入口 switch 只处理 `data:`/`file:`）——无 URL 抓取即无 SSRF 面。
+- [2026-09-21] **opencode 媒体上行基线（可对齐目标）**：图片=data URL 内联 + 服务端缩放(5MiB/2000×2000)；文本文件=经 `read` 工具**内联正文**(2000 行/50KB/单行 2000 字符)，不是只发路径；PDF=**不抽文本**、整份 base64 交给原生支持 `pdf` 模态的模型，不支持则降级为「让模型转告用户」的文本；docx/xlsx/pptx=**明确拒绝**(binary)；能力位 `modalities.input` 含 `image`/`pdf`，自定义/openai-compatible provider **默认 image/pdf=false、text=true**。**差距在非图片文件（文本内联 / PDF 直传 / 二进制明确拒绝），不在图片引用。**
+
+- [2026-09-21] **GUI Agent 集成：控制层保留自研 Tauri loopback 桥 + 系统命令，不采用 UI-TARS 的 nut.js 原生插件**（方案结论，待 Gate 0 批准）。理由：UI-TARS 走 `@computer-use/nut-js` → `libnut` 原生 N-API 进程内直调（macOS CGEvent / Windows SendInput / Linux XTest），OpenAWork 现有 Tauri 桥 + 系统命令（`osascript` / PowerShell / `xdotool`）在 Linux 覆盖、零第三方依赖、安全边界与可审计性上更优；且其官方桌面产物不含 Linux。落点：`apps/desktop/src-tauri/src/desktop_control_*.rs`。参考实现 `temp/UI-TARS-desktop/`（`.gitignore` 忽略）。
+- [2026-09-21] **GUI Agent 移植基线取 UI-TARS 旧代 `packages/ui-tars/sdk`，不取新代 `multimodal/gui-agent/*`**（方案结论，待 Gate 0 批准）。理由：旧代自包含（依赖仅 `openai`/`jimp`/`async-retry` + 同仓 shared/action-parser），`while(true)` 循环可整体嵌入 OpenAWork 工具执行层；新代建在 `@tarko/agent` 框架上（事件流/会话/ToolCallEngine），会与 OpenAWork 自有状态机 + 网关 + SSE 体系形成双真相。仅单独抄录新代的**动作别名归一化表**（`multimodal/gui-agent/shared/src/utils/actions.ts:46-137`）。
+- [2026-09-21] **GUI Agent 借鉴范围 = 动作协议 + 坐标归一化 + 视觉闭环循环三件套**（方案结论，待 Gate 0 批准）。核心可移植资产：① `action-parser`（通用 `^(\w+)\((.*)\)$` 语法解析，**无动作枚举**，词表由 prompt/operator 决定）；② 坐标数学 `0–1000 → 0–1 → 像素中心`（`DEFAULT_FACTOR=1000`、`IMAGE_FACTOR=28`、`MAX_IMAGE_LENGTH=5`、`MAX_LOOP_COUNT=100`）；③ `GUIAgent` 主循环（**移植时必须去除 `globalThis` 单例**，否则并发多任务互相覆盖）。核心障碍：模型层 `supportsVision` ≠ grounding 能力，需新增 `supportsGuiGrounding` 能力位。方案文档 `.agentdocs/workflow/260921-GUI-Agent集成方案.md`。
+
+- [2026-09-21] **不为 `opencode-llm` error 模块做 Effect 迁移，也不实现技能签名校验**（2026-09-21 用户确认，作为纠正记录）：前者前提不成立（已通过编译 + 38 例测试，无消费者）；后者**无信任根可锚定**——`docs/development/SKILL_DEVELOPMENT.md` 描述的 `opkg pack` / `opkg publish` / `.agentskill` 在 `packages/skill-registry/src/cli/opkg.ts` 中**根本不存在**（仅 registry/install/update/remove/search/info/list），官方源 `https://registry.openwork.ai/v1` 只是 `source.ts` 里的硬编码字符串 → 单独实现 `verifySignature()` 是安全表演。**签名流水线仅在「上线公共市场并分发可执行产物」时再立项。**
+- [2026-09-21] **技能安装链路的真实短板不是签名，是「校验未接线 + 进程无约束」**（若将来加固，按此顺序，属低优先级非签名）：① `packages/skill-registry/src/security/manifest-validator.ts` 的强校验器**从未被 import、也未从 index 导出**，实际走 `installer.ts:230` 的弱校验；② 技能 manifest 可声明 `mcp:{transport:'stdio',command,args}`，`services/agent-gateway/src/skill/skill-mcp-connection-pool.ts` 会**直接 spawn 本地进程**且只剔除 npm/pnpm/yarn 变量（其余环境继承），无 OS 级隔离、无命令白名单——唯一门控是 `tools/tool-sandbox.ts` 的权限阶梯（非隔离）；③ gateway 安装路径把 `granted_permissions_json` 硬编码 `'[]'`，使「安装时展示权限并授权」模型**空转**；④ `packages/skill-registry/AGENTS.md` 宣称的「`src/security/` 强制沙箱」与代码不符（该目录仅有上述未接线的校验文件），需随加固一并修正文档。
 
 ### 编码约定
 - 所有提示词使用中文编写
@@ -489,6 +586,9 @@
 - [2026-09-16] 会话元数据快照漏字段会让 PATCH **静默跳过**：`createSessionMetadataSnapshot`（`apps/web/src/pages/chat-page/conversation/render/chat-page-utils.ts`）只跟踪布尔 `yoloMode` 时，`ask → auto-edit` 产生完全相同的快照 → dirty 检查短路、中间档永不落库；快照必须纳入 `permissionMode`。
 - [2026-09-16] 权限浮层的两个视觉定位坑 → ① flip-up 曾用 composer shell 顶边当锚点（把 *limit* 误当 *anchor*），菜单飘到触发按钮上方很远处，锚点必须取**触发按钮**；② 桌面 dev/e2e harness 未引入 web token 样式表 → `var(--token)` 解析为 unset（背景 / 描边不可见、焦点框退回 UA 默认），截图曾导致评审误判真伪。
 - [2026-09-16] 桌面 e2e 冷启动会把 Vite 按需编译算进首个用例 → 偶发超时；修法是把冷编译移入 `beforeAll` 预热。残留：高并发负载下（例如并行跑全仓 typecheck）Chromium 渲染器可能报 `Protocol error: Page crashed`，勿与重活并发跑该 spec。
+
+- [2026-09-21] **`opencode-llm` 的性能计时断言在高并发下必然假失败**：`packages/opencode-llm/src/stream/__tests__/integration.test.ts:227`（1000 事件 <1000ms）单独复跑 3/3 通过、`vitest run --no-file-parallelism` 全量 495/495 通过，但与其他测试文件并行时测出 1087ms / 2923ms 而失败。**判断该包改动是否引入回归必须串行复跑**，不要据并行失败下结论。
+- [2026-09-21] **网关消费 `@openAwork/opencode-llm` 的 `dist/` 而非 `src`**：`services/agent-gateway/tsconfig.json` 里没有该包的 `paths` 别名，只有 `tsconfig.build.json` 指向 `dist/index.d.ts`，运行时经 `workspace:*` → 包 `exports` → `dist/`。因此改完 `packages/opencode-llm/src` 必须 `pnpm --filter @openAwork/opencode-llm build`，否则网关与 dev 仍用旧产物，表现为「改了没生效」。
 
 ### 全局重要记忆
 - [2026-09-16] **agentdocs 归档必须「移动 + index 同步」成对完成**：只 `mv` 到 `done/` 而不改 `index.md`，会产生悬空链接与幽灵条目（实测 index 仅登记 8/83，另发现 1 个幽灵方案 + 10 个悬空 runtime 链接）。`runtime/` 属临时目录（`.gitignore`），归档后应按 cleanup-policy 清理；**清理保护规则**：活跃方案对应目录、`index.md` 引用目录、近 60 分钟被改动目录（并发会话）、大体积/备份/演示类，一律保留。
@@ -545,3 +645,4 @@
 - 2026-08-14: 创建工具提示词系统优化任务，完成详细规划
 - 2026-09-16: **归档审计**——补归档 8 个已完成方案（→ `done/`，累计 83）、补齐 index 登记、删除幽灵条目 `260814-migrate-opencode-llm-library`、修复全部悬空链接、清理 53 个 runtime 残留目录（62 → 9）
 - 2026-09-16: **批量归档（用户决定）**——`workflow/` 根目录 5 个历史方案（`250109` / `250815` / `260704` / `260706` / `260814`）全部归档并**直接删除文件**；未做项统一标注「用户决定放弃」；`260704` 顺带纠正 2 项历史误标（T-W3-04 / T-W6-07 实已完成）；修复 3 处外部文档悬空引用。`workflow/` 根目录自此不再保留 .md，方案一律落 `done/`
+- 2026-09-21: **纠正两处待办误判并沉淀记忆**——经实证，`opencode-llm` error 模块「Effect 4.0 迁移」与 `skill-registry` 「签名校验」**均不是待办**（详见「已知陷阱补充」2026-09-21 条）；据此在「架构决策」新增 2 条（放弃/延后签名流水线 + 记录技能安装链路的真实短板），避免后续会话据 TODO 字面量再次将其列为 P0

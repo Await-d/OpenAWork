@@ -239,8 +239,14 @@ ${escapeForInlineScript(code)}
       body {
         margin: 0;
         min-height: 100%;
-        background: var(--fg-on-accent);
-        color: var(--bg-base);
+        /*
+         * 沙箱文档是独立文档，不继承宿主的 CSS 变量：这里必须是字面色值，
+         * 引用 var(--*) 会在 iframe 内解析失败并退化为透明底 + 初始黑字
+         * （暗色主题下即「近黑底黑字」）。预览画布固定为浅色纸面 + 深色正文，
+         * 在全部主题下都稳定可读。
+         */
+        background: #ffffff;
+        color: #1a1a1a;
       }
 
       body {

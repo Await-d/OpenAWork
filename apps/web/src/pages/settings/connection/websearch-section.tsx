@@ -11,6 +11,10 @@
 import React from 'react';
 import type { CSSProperties } from 'react';
 import { BP, SS } from '../shared/settings-section-styles.js';
+import {
+  SettingsSegmentedRow,
+  type SettingsSegmentedOption,
+} from '../shared/settings-segmented-row.js';
 import type {
   WebsearchPolicy,
   WebsearchProvider,
@@ -22,6 +26,7 @@ interface WebsearchSectionProps {
   isSaving: boolean;
   policy: WebsearchPolicy;
   savedPolicy: WebsearchPolicy;
+  saveError: string | null;
   setPolicy: React.Dispatch<React.SetStateAction<WebsearchPolicy>>;
   onSave: () => void;
 }
@@ -56,6 +61,9 @@ const ROLLOUT_MODES: ReadonlyArray<{ id: WebsearchRolloutMode; label: string; hi
     hint: '并行调用并按 URL 去重，按权重合并标题/摘要',
   },
 ];
+
+const ROLLOUT_SEGMENT_OPTIONS: ReadonlyArray<SettingsSegmentedOption<WebsearchRolloutMode>> =
+  ROLLOUT_MODES.map((mode) => ({ value: mode.id, label: mode.label, title: mode.hint }));
 
 // ── 样式常量 ──────────────────────────────────────────────────
 
@@ -132,6 +140,7 @@ const INPUT_STYLE: CSSProperties = {
 
 const PROVIDER_ROW: CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   gap: 8,
   alignItems: 'center',
   padding: '8px 10px',
@@ -168,9 +177,10 @@ const PROVIDER_INDEX: CSSProperties = {
 
 const PROVIDER_INPUTS: CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   gap: 6,
   alignItems: 'center',
-  flex: 1,
+  flex: '1 1 240px',
   minWidth: 0,
 };
 
@@ -244,6 +254,7 @@ export function WebsearchSection({
   isSaving,
   policy,
   savedPolicy,
+  saveError,
   setPolicy,
   onSave,
 }: WebsearchSectionProps) {
@@ -350,30 +361,12 @@ export function WebsearchSection({
         <div style={SUBGROUP_LABEL}>
           <span>Rollout 模式</span>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {ROLLOUT_MODES.map((mode) => {
-            const selected = mode.id === policy.rolloutMode;
-            return (
-              <button
-                key={mode.id}
-                type="button"
-                aria-pressed={selected}
-                title={mode.hint}
-                onClick={() => setPolicy((prev) => ({ ...prev, rolloutMode: mode.id }))}
-                style={{
-                  ...PILL_BUTTON,
-                  background: selected ? 'var(--accent-muted)' : 'var(--bg-overlay)',
-                  borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
-                  color: selected ? 'var(--accent)' : 'var(--fg-default)',
-                  boxShadow: selected ? '0 0 0 3px var(--accent-subtle)' : 'none',
-                  padding: '6px 14px',
-                }}
-              >
-                {mode.label}
-              </button>
-            );
-          })}
-        </div>
+        <SettingsSegmentedRow<WebsearchRolloutMode>
+          ariaLabel="Rollout 模式"
+          options={ROLLOUT_SEGMENT_OPTIONS}
+          value={policy.rolloutMode}
+          onChange={(mode) => setPolicy((prev) => ({ ...prev, rolloutMode: mode }))}
+        />
         <span style={ROLLOUT_HINT}>
           <svg
             width="12"
@@ -610,6 +603,12 @@ export function WebsearchSection({
           {isSaving ? '保存中…' : isDirty ? '应用策略' : '已应用'}
         </button>
       </div>
+
+      {saveError ? (
+        <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
+          {saveError}
+        </div>
+      ) : null}
     </section>
   );
 }

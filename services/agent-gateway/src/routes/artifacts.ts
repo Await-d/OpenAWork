@@ -8,6 +8,7 @@ import type { ArtifactMetadata, ArtifactVersionActor } from '@openAwork/artifact
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteGet } from '../infra/db.js';
+import { formatTextReadOutput } from '../artifacts/text-read-output.js';
 import {
   resolveGatewayArtifactsDir,
   resolveGatewayArtifactsIndexPath,
@@ -287,6 +288,9 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       const targetPath = join(targetDir, `${artifactId}${extname(safeName) || '.bin'}`);
       const buffer = Buffer.from(contentBase64, 'base64');
       const preview = buildPreview(safeName, mimeType, buffer);
+      // 供模型读取的文本正文（opencode 风格、带上限）。刻意**不落盘**：
+      // 它只随本次上传响应回传，否则 artifact 索引会被大段正文撑爆。
+      const textContent = formatTextReadOutput({ buffer, displayPath: safeName })?.text;
 
       await mkdir(targetDir, { recursive: true });
       await writeFile(targetPath, buffer);
@@ -301,7 +305,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
         preview,
       });
 
-      return reply.status(201).send({ artifact });
+      return reply.status(201).send({ artifact, ...(textContent ? { textContent } : {}) });
     },
   );
 }

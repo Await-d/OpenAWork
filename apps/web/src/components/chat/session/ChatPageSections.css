@@ -1,0 +1,71 @@
+/*
+ * ChatPageSections —— 附件缩略图（UserAttachedImagesGallery）hover 放大徽标。
+ *
+ * 色彩全部引用 E·Nebula token（色板见 src/index.css 的 16 套主题，
+ * 组件规范见 packages/shared-ui/DESIGN-TOKENS.md）。
+ *
+ * ⚠️ 该徽标叠在图片遮罩之上，属于「中性浮层」而不是 accent 实色填充，因此：
+ *      背景 = --bg-elevated，文字 / 图标 = --fg-strong，描边 = --border-emphasis。
+ *    禁止使用 --fg-on-accent：它只服务于 accent 实色填充，在暗色主题下接近黑色
+ *    （nebula #052e22 / carbon #08090a / aurora #0a0c1f），压在深色遮罩徽标上会直接
+ *    看不见（与 image-lightbox 浮层按钮同类的历史 bug 根因）。
+ *    --bg-elevated / --fg-strong 在每套主题里互为反色配对，深色遮罩上恒可读。
+ */
+
+.chat-attachment-thumbnail__zoom-badge {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  color: var(--fg-strong);
+  display: flex;
+  font-size: 16px;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  width: 32px;
+}
+
+/*
+ * 附件文件名：有可预览图源时由原生 <button> 承担（键盘 Enter / Space 走浏览器原生
+ * 按钮语义，不手写 onKeyDown），无图源时退化为纯文本 <span>（--static，不可聚焦）。
+ * hover / active / focus-visible 等交互态下沉到 CSS，颜色只走 E·Nebula token。
+ */
+.chat-attachment-file-name {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--fg-muted);
+  cursor: zoom-in;
+  display: block;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  transition: color var(--dur-micro) var(--ease-micro);
+  width: 100%;
+}
+
+button.chat-attachment-file-name:hover {
+  color: var(--fg-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.chat-attachment-file-name:active {
+  color: var(--accent);
+}
+
+button.chat-attachment-file-name:focus-visible {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-attachment-file-name--static {
+  cursor: default;
+}

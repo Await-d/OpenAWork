@@ -21,6 +21,9 @@ interface WebsearchPluginPanelProps {
   onRetryMcp: (serverId: string) => void;
   onSave: () => void;
   onUpdateMcp: (id: string, entry: MCPServerEntry) => void;
+  loadError: string | null;
+  mcpLoadError: string | null;
+  saveError: string | null;
 }
 
 const HEADER_COPY = {
@@ -161,6 +164,9 @@ export function WebsearchPluginPanel({
   onRetryMcp,
   onSave,
   onUpdateMcp,
+  loadError,
+  mcpLoadError,
+  saveError,
 }: WebsearchPluginPanelProps): React.ReactElement {
   const enabledCount = searchServers.filter((server) => server.enabled !== false).length;
   const connectedCount = searchStatuses.filter((server) => server.status === 'connected').length;
@@ -177,6 +183,12 @@ export function WebsearchPluginPanel({
           {HEADER_COPY.description}
         </div>
       </div>
+
+      {loadError ? (
+        <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
+          {loadError}
+        </div>
+      ) : null}
 
       {/* ── KPI 统计卡片行 ── */}
       <div style={OVERVIEW_STYLE}>
@@ -349,6 +361,11 @@ export function WebsearchPluginPanel({
           </span>
           <span style={SECTION_TITLE_TEXT}>搜索 MCP 配置</span>
         </div>
+        {mcpLoadError ? (
+          <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
+            {mcpLoadError}
+          </div>
+        ) : null}
         <div style={UV}>
           <MCPServerConfig
             title="搜索 MCP 配置"
@@ -399,6 +416,7 @@ export function WebsearchPluginPanel({
         savedPolicy={savedPolicy}
         setPolicy={setPolicy}
         onSave={onSave}
+        saveError={saveError}
       />
     </div>
   );

@@ -1,13 +1,35 @@
+import { createHash } from 'node:crypto';
+
 import type { Message } from '@openAwork/shared';
 import { compareOrderedIds } from '../infra/ordered-id.js';
 import { buildTaskToolTerminalMessage } from '../task/delegated-task-display.js';
 import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
+const MAX_CLIENT_REQUEST_ID_LENGTH = 128;
+const DIGEST_LENGTH = 32;
+
+function digestPrefix(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, DIGEST_LENGTH);
+}
+
 export function buildDelegatedChildClientRequestId(input: {
   childSessionId: string;
   parentClientRequestId?: string;
 }): string {
-  return `task:${input.parentClientRequestId ?? 'child'}:child:${input.childSessionId}`;
+  const parentClientRequestId = input.parentClientRequestId ?? 'child';
+  const legacyId = `task:${parentClientRequestId}:child:${input.childSessionId}`;
+  if (legacyId.length <= MAX_CLIENT_REQUEST_ID_LENGTH) {
+    return legacyId;
+  }
+
+  const parentDigest = digestPrefix(`${parentClientRequestId}\u0000${input.childSessionId}`);
+  const hashedParentId = `task:${parentDigest}:child:${input.childSessionId}`;
+  if (hashedParentId.length <= MAX_CLIENT_REQUEST_ID_LENGTH) {
+    return hashedParentId;
+  }
+
+  // 最终兜底：childSessionId 本身超长时同样收敛为摘要，保证结果恒 <= 128。
+  return `task:${parentDigest}:child:${digestPrefix(input.childSessionId)}`;
 }
 
 export function buildCallOmoAgentBackgroundOutput(input: {

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import type { Components } from 'react-markdown';
 import {
   buildPreviewDocument,
   getFilePreviewKind,
@@ -8,6 +9,15 @@ import {
   isBinaryPreviewKind,
   type FilePreviewKind,
 } from '../../../utils/file/file-preview.js';
+import { ImageZoomTrigger } from '../../common/display/ImageZoomTrigger.js';
+import { ImageLightbox } from '../../chat/image/image-lightbox.js';
+import {
+  MarkdownImage,
+  MarkdownImageInsideLinkContext,
+  MarkdownImageProvider,
+} from '../../chat/markdown/markdown-image.js';
+import { extractMarkdownImageUrls } from '../../chat/markdown/markdown-image-urls.js';
+import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
 import { OfficePreview } from '../../office-preview/OfficePreview.js';
 import '../../office-preview/office-preview.css';
 
@@ -173,7 +183,9 @@ export function FilePreviewPane({ content, path }: { content: string; path: stri
               width: '100%',
               border: '1px solid var(--border-subtle)',
               borderRadius: 14,
-              background: 'var(--fg-on-accent)',
+              // 沙箱 srcdoc 不继承宿主 CSS 变量：iframe 元素本身也用字面浅色纸底，
+              // 避免暗色主题下「近黑底 + 初始黑字」。
+              background: '#ffffff',
               display: 'block',
               boxShadow: '0 18px 36px var(--bg-base)',
             }}
@@ -230,6 +242,167 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
+const markdownPreviewComponents: Components = {
+  h1: ({ children }) => (
+    <h1
+      style={{
+        fontSize: 24,
+        fontWeight: 700,
+        margin: '24px 0 12px',
+        borderBottom: '1px solid var(--border-subtle)',
+        paddingBottom: 8,
+      }}
+    >
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2
+      style={{
+        fontSize: 20,
+        fontWeight: 600,
+        margin: '20px 0 10px',
+        borderBottom: '1px solid var(--border-subtle)',
+        paddingBottom: 6,
+      }}
+    >
+      {children}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3 style={{ fontSize: 16, fontWeight: 600, margin: '16px 0 8px' }}>{children}</h3>
+  ),
+  h4: ({ children }) => (
+    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '12px 0 6px' }}>{children}</h4>
+  ),
+  p: ({ children }) => <p style={{ margin: '8px 0', lineHeight: 1.7 }}>{children}</p>,
+  ul: ({ children }) => <ul style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ol>,
+  li: ({ children }) => <li style={{ margin: '4px 0', lineHeight: 1.6 }}>{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote
+      style={{
+        margin: '12px 0',
+        padding: '12px 16px',
+        border: '1px solid var(--border-default)',
+        background: 'var(--bg-raised)',
+        borderRadius: '6px',
+        boxShadow: 'var(--shadow-sm)',
+        color: 'var(--fg-strong)',
+      }}
+    >
+      {children}
+    </blockquote>
+  ),
+  code: ({ className, children, ...props }) => {
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code
+          style={{
+            padding: '2px 5px',
+            borderRadius: 4,
+            background: 'color-mix(in oklch, var(--text-1) 8%, transparent)',
+            fontSize: '0.88em',
+            fontFamily: 'var(--font-mono, monospace)',
+          }}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre
+      style={{
+        margin: '12px 0',
+        padding: '14px 16px',
+        borderRadius: 8,
+        background: 'var(--bg-base)',
+        border: '1px solid var(--border-subtle)',
+        overflow: 'auto',
+        fontSize: 12,
+        lineHeight: 1.5,
+        fontFamily: 'var(--font-mono, monospace)',
+      }}
+    >
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <div style={{ overflowX: 'auto', margin: '12px 0' }}>
+      <table
+        style={{
+          borderCollapse: 'collapse',
+          width: '100%',
+          fontSize: 13,
+        }}
+      >
+        {children}
+      </table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th
+      style={{
+        padding: '8px 12px',
+        borderBottom: '2px solid var(--border-default)',
+        textAlign: 'left',
+        fontWeight: 600,
+        fontSize: 12,
+        background: 'var(--bg-overlay)',
+      }}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td
+      style={{
+        padding: '6px 12px',
+        borderBottom: '1px solid var(--border-subtle)',
+        fontSize: 12,
+      }}
+    >
+      {children}
+    </td>
+  ),
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+      onClick={(event) => tryOpenLinkPreview(event, href)}
+    >
+      <MarkdownImageInsideLinkContext value={true}>{children}</MarkdownImageInsideLinkContext>
+    </a>
+  ),
+  hr: () => (
+    <hr
+      style={{
+        border: 'none',
+        borderTop: '1px solid var(--border-subtle)',
+        margin: '16px 0',
+      }}
+    />
+  ),
+  img: ({ src, alt, title }) => (
+    <MarkdownImage
+      src={src}
+      alt={alt}
+      title={title}
+      imageStyle={{ maxWidth: '100%', borderRadius: 8, margin: '8px 0' }}
+    />
+  ),
+};
+
 // Lazy inner component that actually imports and renders markdown
 const MarkdownRendererInner = lazy(async () => {
   const [{ default: ReactMarkdownComp }, { default: remarkGfm }, { default: rehypeHighlight }] =
@@ -237,170 +410,15 @@ const MarkdownRendererInner = lazy(async () => {
 
   function MarkdownRendererInnerComponent({ content }: { content: string }) {
     return (
-      <ReactMarkdownComp
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={{
-          h1: ({ children }) => (
-            <h1
-              style={{
-                fontSize: 24,
-                fontWeight: 700,
-                margin: '24px 0 12px',
-                borderBottom: '1px solid var(--border-subtle)',
-                paddingBottom: 8,
-              }}
-            >
-              {children}
-            </h1>
-          ),
-          h2: ({ children }) => (
-            <h2
-              style={{
-                fontSize: 20,
-                fontWeight: 600,
-                margin: '20px 0 10px',
-                borderBottom: '1px solid var(--border-subtle)',
-                paddingBottom: 6,
-              }}
-            >
-              {children}
-            </h2>
-          ),
-          h3: ({ children }) => (
-            <h3 style={{ fontSize: 16, fontWeight: 600, margin: '16px 0 8px' }}>{children}</h3>
-          ),
-          h4: ({ children }) => (
-            <h4 style={{ fontSize: 14, fontWeight: 600, margin: '12px 0 6px' }}>{children}</h4>
-          ),
-          p: ({ children }) => <p style={{ margin: '8px 0', lineHeight: 1.7 }}>{children}</p>,
-          ul: ({ children }) => <ul style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ul>,
-          ol: ({ children }) => <ol style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ol>,
-          li: ({ children }) => <li style={{ margin: '4px 0', lineHeight: 1.6 }}>{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote
-              style={{
-                margin: '12px 0',
-                padding: '12px 16px',
-                border: '1px solid var(--border-default)',
-                background: 'var(--bg-raised)',
-                borderRadius: '6px',
-                boxShadow: 'var(--shadow-sm)',
-                color: 'var(--fg-strong)',
-              }}
-            >
-              {children}
-            </blockquote>
-          ),
-          code: ({ className, children, ...props }) => {
-            const isInline = !className;
-            if (isInline) {
-              return (
-                <code
-                  style={{
-                    padding: '2px 5px',
-                    borderRadius: 4,
-                    background: 'color-mix(in oklch, var(--text-1) 8%, transparent)',
-                    fontSize: '0.88em',
-                    fontFamily: 'var(--font-mono, monospace)',
-                  }}
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
-          pre: ({ children }) => (
-            <pre
-              style={{
-                margin: '12px 0',
-                padding: '14px 16px',
-                borderRadius: 8,
-                background: 'var(--bg-base)',
-                border: '1px solid var(--border-subtle)',
-                overflow: 'auto',
-                fontSize: 12,
-                lineHeight: 1.5,
-                fontFamily: 'var(--font-mono, monospace)',
-              }}
-            >
-              {children}
-            </pre>
-          ),
-          table: ({ children }) => (
-            <div style={{ overflowX: 'auto', margin: '12px 0' }}>
-              <table
-                style={{
-                  borderCollapse: 'collapse',
-                  width: '100%',
-                  fontSize: 13,
-                }}
-              >
-                {children}
-              </table>
-            </div>
-          ),
-          th: ({ children }) => (
-            <th
-              style={{
-                padding: '8px 12px',
-                borderBottom: '2px solid var(--border-default)',
-                textAlign: 'left',
-                fontWeight: 600,
-                fontSize: 12,
-                background: 'var(--bg-overlay)',
-              }}
-            >
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td
-              style={{
-                padding: '6px 12px',
-                borderBottom: '1px solid var(--border-subtle)',
-                fontSize: 12,
-              }}
-            >
-              {children}
-            </td>
-          ),
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-            >
-              {children}
-            </a>
-          ),
-          hr: () => (
-            <hr
-              style={{
-                border: 'none',
-                borderTop: '1px solid var(--border-subtle)',
-                margin: '16px 0',
-              }}
-            />
-          ),
-          img: ({ src, alt }) => (
-            <img
-              src={src}
-              alt={alt ?? ''}
-              style={{ maxWidth: '100%', borderRadius: 8, margin: '8px 0' }}
-            />
-          ),
-        }}
-      >
-        {content}
-      </ReactMarkdownComp>
+      <MarkdownImageProvider urls={extractMarkdownImageUrls(content)}>
+        <ReactMarkdownComp
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeHighlight]}
+          components={markdownPreviewComponents}
+        >
+          {content}
+        </ReactMarkdownComp>
+      </MarkdownImageProvider>
     );
   }
 
@@ -510,6 +528,8 @@ function ImagePreviewPane({ path, content }: { path: string; content: string }) 
   const ext = path.split('.').pop()?.toLowerCase() ?? 'png';
   const mimeType = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
   const src = resolveImagePreviewSrc(content, mimeType);
+  const fileName = path.split('/').pop() ?? 'preview';
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   return (
     <div
@@ -555,15 +575,26 @@ function ImagePreviewPane({ path, content }: { path: string; content: string }) 
             'repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px 16px',
         }}
       >
-        <img
+        <ImageZoomTrigger
           src={src}
-          alt={path.split('/').pop() ?? 'preview'}
-          style={{
+          alt={fileName}
+          label={`放大查看图片：${fileName}`}
+          style={{ maxWidth: '100%', maxHeight: '100%' }}
+          imageStyle={{
             maxWidth: '100%',
             maxHeight: '100%',
             objectFit: 'contain',
             borderRadius: 4,
           }}
+          onOpen={() => setLightboxOpen(true)}
+        />
+        <ImageLightbox
+          open={lightboxOpen}
+          src={src}
+          alt={fileName}
+          caption={fileName}
+          fileName={fileName}
+          onClose={() => setLightboxOpen(false)}
         />
       </div>
     </div>

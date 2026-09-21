@@ -50,3 +50,34 @@
   outline-offset: 1px;
   box-shadow: 0 0 0 4px var(--accent-muted);
 }
+
+/* 子代理折叠箭头（会话行 leadingSlot） */
+.session-subagent-toggle {
+  background: transparent;
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.session-subagent-toggle:hover {
+  background: color-mix(in srgb, var(--fg-muted) 14%, transparent);
+  color: var(--fg-strong);
+}
+
+.session-subagent-toggle:active {
+  background: color-mix(in srgb, var(--fg-muted) 20%, transparent);
+}
+
+.session-subagent-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-muted);
+}
+
+/* 箭头旋转 transition 写在组件内联样式里，需 !important 才能被减少动效偏好覆盖 */
+@media (prefers-reduced-motion: reduce) {
+  .session-subagent-toggle,
+  .session-subagent-toggle svg {
+    transition: none !important;
+  }
+}

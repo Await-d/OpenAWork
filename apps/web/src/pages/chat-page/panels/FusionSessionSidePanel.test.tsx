@@ -19,6 +19,8 @@ import type { SubAgentRunItem } from './sub-agent-run-list.js';
 
 const getFileChangesMock = vi.fn();
 const reviewFileChangeMock = vi.fn();
+const artifactsListForSessionMock = vi.fn();
+const artifactsGetMock = vi.fn();
 const toastMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@openAwork/web-client', async (importOriginal) => {
@@ -29,6 +31,10 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
       getFileChanges: getFileChangesMock,
       reviewFileChange: reviewFileChangeMock,
     }),
+    createArtifactsClient: () => ({
+      get: artifactsGetMock,
+      listForSession: artifactsListForSessionMock,
+    }),
   };
 });
 
@@ -36,13 +42,17 @@ vi.mock('../../../components/common/feedback/ToastNotification.js', () => ({
   toast: toastMock,
 }));
 
-vi.mock('@openAwork/shared-ui', () => ({
-  ContextPanel: () => <div data-testid="context-panel-mock" />,
-  PlanHistoryPanel: () => <div data-testid="plan-history-panel-mock" />,
-  UnifiedCodeDiff: (props: { readonly afterText?: string; readonly beforeText?: string }) => (
-    <pre>{props.afterText ?? props.beforeText ?? ''}</pre>
-  ),
-}));
+vi.mock('@openAwork/shared-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@openAwork/shared-ui')>();
+  return {
+    ...actual,
+    ContextPanel: () => <div data-testid="context-panel-mock" />,
+    PlanHistoryPanel: () => <div data-testid="plan-history-panel-mock" />,
+    UnifiedCodeDiff: (props: { readonly afterText?: string; readonly beforeText?: string }) => (
+      <pre>{props.afterText ?? props.beforeText ?? ''}</pre>
+    ),
+  };
+});
 
 vi.mock('../../../components/file-editor/editor/FileEditorPanel.js', () => ({
   FileEditorPanel: () => <div data-testid="file-editor-panel-mock" />,
@@ -186,6 +196,10 @@ beforeEach(() => {
   cleanup();
   getFileChangesMock.mockReset();
   reviewFileChangeMock.mockReset();
+  artifactsListForSessionMock.mockReset();
+  artifactsListForSessionMock.mockResolvedValue({ contentArtifacts: [] });
+  artifactsGetMock.mockReset();
+  artifactsGetMock.mockResolvedValue({ artifact: null });
   toastMock.mockReset();
   confirmMock.mockReset();
   confirmMock.mockReturnValue(false);
@@ -228,6 +242,13 @@ describe('FusionSessionSidePanel', () => {
     await waitFor(() => {
       expect(getListedFilePathElements('src/app.ts').length).toBeGreaterThan(0);
     });
+
+    // 产物列表走 mock：审查 tab 不再对真实网关发起产物请求。
+    expect(artifactsListForSessionMock).toHaveBeenCalledWith(
+      'token',
+      'session-1',
+      expect.anything(),
+    );
 
     expect(screen.getAllByRole('tab', { name: /审查/ })[0]?.textContent).toContain('2');
     expect(screen.getByText('2 文件 · +4 / -1 · 强保证')).not.toBeNull();

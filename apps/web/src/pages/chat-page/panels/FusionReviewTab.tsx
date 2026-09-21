@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { ReviewPanelArtifactSection } from './ReviewPanelArtifactSection.js';
 import { ReviewPanelDiffPreview } from './ReviewPanelDiffPreview.js';
 import './ReviewPanelContent.css';
 import { ReviewPanelEmptyState } from './ReviewPanelEmptyState.js';
 import { ReviewPanelFileList } from './ReviewPanelFileList.js';
 import { ReviewPanelHeader } from './ReviewPanelHeader.js';
 import { ReviewPanelMutationFeedback } from './ReviewPanelMutationFeedback.js';
+import {
+  REVIEW_PANEL_SECTION_OPTIONS,
+  formatReviewPanelArtifactsStatus,
+  formatReviewPanelSectionLabel,
+  type ReviewPanelSection,
+} from './review-panel-artifact-model.js';
 import {
   type ChangeScope,
   type DiffViewMode,
@@ -14,6 +21,7 @@ import {
   selectReviewPanelFiles,
   selectReviewPanelPendingFiles,
 } from './review-panel-model.js';
+import { useReviewPanelArtifacts } from './useReviewPanelArtifacts.js';
 import { useReviewPanelFileActions } from './use-review-panel-file-actions.js';
 
 export interface FusionReviewTabProps {
@@ -54,6 +62,7 @@ export function FusionReviewTab({
     [activeState, changeScope],
   );
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [reviewSection, setReviewSection] = useState<ReviewPanelSection>('files');
 
   useEffect(() => {
     setSelectedFilePath((previous) =>
@@ -72,9 +81,48 @@ export function FusionReviewTab({
     token,
   });
 
+  const artifacts = useReviewPanelArtifacts({
+    gatewayUrl,
+    opened: reviewPanelOpened,
+    revision,
+    sessionId,
+    token,
+  });
+
   const selectedFile = files.find((file) => file.file === selectedFilePath) ?? files[0] ?? null;
-  const status = formatReviewPanelStatus(activeState, changeScope);
+  const status =
+    reviewSection === 'artifacts'
+      ? formatReviewPanelArtifactsStatus(artifacts.artifactsState)
+      : formatReviewPanelStatus(activeState, changeScope);
   const actionableCount = selectReviewPanelPendingFiles(files).length;
+
+  const sectionCounts: Record<ReviewPanelSection, number | null> = {
+    artifacts:
+      artifacts.artifactsState.kind === 'ready' ? artifacts.artifactsState.artifacts.length : null,
+    files: activeState.kind === 'ready' ? files.length : null,
+  };
+  const sectionSwitcher = (
+    <div role="group" aria-label="审查分区" className="review-panel-header__segmented-group">
+      {REVIEW_PANEL_SECTION_OPTIONS.map((option) => {
+        const active = reviewSection === option.value;
+        const className = active
+          ? 'review-panel-header__segmented-button review-panel-header__segmented-button--active'
+          : 'review-panel-header__segmented-button';
+
+        return (
+          <button
+            key={option.value}
+            aria-pressed={active}
+            className={className}
+            onClick={() => setReviewSection(option.value)}
+            type="button"
+          >
+            {formatReviewPanelSectionLabel(option.label, sectionCounts[option.value])}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <>
@@ -88,10 +136,21 @@ export function FusionReviewTab({
         onChangeViewMode={onChangeViewMode}
         onClose={toggleReviewPanelOpened}
         onRejectAll={actions.rejectAll}
+        sectionSwitcher={sectionSwitcher}
+        showDiffControls={reviewSection === 'files'}
         status={status}
       />
       <div className="fusion-side-panel__review-body">
-        {activeState.kind === 'ready' ? (
+        {reviewSection === 'artifacts' ? (
+          <ReviewPanelArtifactSection
+            artifactsState={artifacts.artifactsState}
+            onReload={artifacts.reload}
+            onSelectArtifact={artifacts.selectArtifact}
+            preview={artifacts.preview}
+            selectedArtifact={artifacts.selectedArtifact}
+            sessionId={sessionId}
+          />
+        ) : activeState.kind === 'ready' ? (
           <>
             {actions.feedback ? (
               <ReviewPanelMutationFeedback

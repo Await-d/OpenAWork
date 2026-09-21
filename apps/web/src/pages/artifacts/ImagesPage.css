@@ -1,0 +1,49 @@
+/*
+ * 图片工作台自身的浮层样式。
+ *
+ * 历史缩略图是「选中参考图」的按钮，不能整块变成查看器触发器，因此把「放大查看」
+ * 做成叠加在右上角的小按钮（与选中按钮同级，避免按钮嵌套）。
+ * 色彩 / 圆角 / 动效沿用 E·Nebula token（src/index.css + src/styles/layout-tokens.css）。
+ */
+
+.images-page-thumb-zoom {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-sm);
+  color: var(--fg-strong);
+  cursor: zoom-in;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: var(--spacing-1);
+  top: var(--spacing-1);
+  transition:
+    background-color var(--dur-micro, 120ms) var(--ease-micro, ease),
+    border-color var(--dur-micro, 120ms) var(--ease-micro, ease);
+  width: 24px;
+  z-index: 1;
+}
+
+.images-page-thumb-zoom:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+}
+
+.images-page-thumb-zoom:active {
+  background: var(--accent-muted);
+}
+
+.images-page-thumb-zoom:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .images-page-thumb-zoom {
+    transition: none;
+  }
+}

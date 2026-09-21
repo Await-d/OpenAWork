@@ -1,7 +1,11 @@
 import type { CompanionThemeVariant } from '@openAwork/shared';
 import { CompanionVisualShowcase } from '../../../components/chat/companion/companion-visual-showcase.js';
 import type { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
-import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
+import {
+  SettingsOptionCardRow,
+  type SettingsOptionCard,
+} from '../shared/settings-option-card-row.js';
+import { BP, SS, ST } from '../shared/settings-section-styles.js';
 
 type BuddyState = ReturnType<typeof useBuddyVoicePreferences>;
 
@@ -10,7 +14,7 @@ interface CompanionDefaultPersonaSectionProps {
   email: string;
 }
 
-const THEME_OPTIONS: Array<{ label: string; value: CompanionThemeVariant }> = [
+const THEME_OPTIONS: SettingsOptionCard<CompanionThemeVariant>[] = [
   { label: '默认主题', value: 'default' },
   { label: '活泼主题', value: 'playful' },
 ];
@@ -32,25 +36,18 @@ export function CompanionDefaultPersonaSection({
 
   return (
     <section style={SS} aria-labelledby="buddy-default-persona-title">
-      <div id="buddy-default-persona-title" style={ST}>
+      {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+      <h3 id="buddy-default-persona-title" style={{ ...ST, marginTop: 0 }}>
         默认 Persona
-      </div>
+      </h3>
 
-      <label style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>默认主题</span>
-        <select
-          aria-label="Buddy 默认主题"
-          value={themeVariant}
-          onChange={(event) => setThemeVariant(event.target.value as CompanionThemeVariant)}
-          style={IS}
-        >
-          {THEME_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SettingsOptionCardRow
+        title="默认主题"
+        options={THEME_OPTIONS}
+        value={themeVariant}
+        onChange={setThemeVariant}
+        minCardWidth={220}
+      />
       <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         全局物种与名称由账号自动派生，不在这里手动编辑。如果想为某个 Agent
         指定专属物种或自定义名称，请在下方「Agent 绑定」面板里设置。

@@ -81,10 +81,22 @@
 
 ### CI 与发布包的区别
 
-- `CI` workflow 只负责质量检查、测试和常规构建验证，**不会自动发布桌面/移动端安装包**。
+- `CI` workflow 只负责质量检查、测试和常规构建验证，**不会自动发布桌面/移动端安装包**，也不会触发任何 preview 构建。
+- 自动预览流水线 `auto-release.yml` 与 `CI` 相互独立：它按触发提交的 scope 决定构建目标，现在也能构建移动端 preview（见下方「自动触发的 scope 路由」）。
 - 桌面安装包由 `release-desktop.yml` 在 tag / 手动触发时生成，并发布到 GitHub Release。
 - `release-desktop.yml` 也会把安装包目录上传为 workflow artifacts，便于在 Actions 页面直接下载。
 - 移动端安装包由 `release-mobile.yml` 触发 EAS 云构建，workflow 中保存的是构建结果 JSON 与产物链接，而不是仓库本地文件。
+
+### 自动触发的 scope 路由
+
+`auto-release.yml` 在检测到 `release(<scope>):` 提交后，会根据触发提交的 scope 决定自动构建目标：
+
+- `release(desktop):`：只构建桌面端
+- `release(mobile):`：只构建手机端（EAS preview 构建 + preview 通道 OTA）
+- `release(all):`：桌面端 + 手机端都构建
+- 其他 scope（如 `release(preview):`、`release(auto):`、`release(gateway):`）：维持现状，只构建桌面端
+
+手机端自动构建由 `auto-release.yml` 通过 `workflow_dispatch` 调用 `release-mobile.yml`（`profile=preview`），**不会创建 `mobile-v*` tag**；`mobile-v*` tag 仍严格表示正式 mobile release。若 `EXPO_TOKEN` 未配置，`auto-release.yml` 会跳过手机端 dispatch 并在 workflow summary 中说明原因，自动发布流程仍会成功结束。
 
 当前**暂不纳入**发布门禁的项目：
 
@@ -144,6 +156,7 @@ pnpm package:desktop
 ## 注意事项
 
 - `mobile-v*` tag 仍然表示正式 mobile release，不要用它承载 preview 流。
-- mobile preview 通过 `workflow_dispatch` 触发，OTA message 可由 `prepare-release.yml` 自动传入。
+- mobile preview 通过 `workflow_dispatch` 触发，OTA message 可由 `prepare-release.yml` 自动传入；`auto-release.yml` 也会按触发提交的 scope 自动 dispatch mobile preview（不创建 `mobile-v*` tag）。
+- 若 `EXPO_TOKEN` 未配置，`auto-release.yml` 会优雅跳过手机端 dispatch，并在 workflow summary 中说明原因，而不是让自动发布流程失败。
 - Desktop Rust crate 版本已经纳入同步范围，避免桌面打包元数据与 JS 侧版本脱节。
 - 发布稿不再落库存储；如果 annotated tag 或 workflow input 没有携带有效中文发布稿，desktop/mobile 发布 workflow 会直接失败。

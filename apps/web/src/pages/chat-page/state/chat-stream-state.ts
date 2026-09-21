@@ -732,11 +732,11 @@ function applyToolResultEvent(
         event.clientRequestId,
         isPendingPermission || event.isError
           ? event.reason === 'timeout'
-            ? `原因：超时 · ${stringifyToolOutput(event.output)}`
+            ? `原因：超时 · ${describeToolOutput(event.output)}`
             : resumedAfterApproval
               ? `审批已通过并恢复执行。
-${stringifyToolOutput(event.output)}`
-              : stringifyToolOutput(event.output)
+${describeToolOutput(event.output)}`
+              : describeToolOutput(event.output)
           : undefined,
       ),
     ],
@@ -909,11 +909,36 @@ function formatPermissionDecision(
   }
 }
 
-function stringifyToolOutput(output: unknown): string {
+const TOOL_OUTPUT_TEXT_KEYS = [
+  'error',
+  'errorMessage',
+  'message',
+  'stderr',
+  'output',
+  'stdout',
+  'detail',
+  'reason',
+  'result',
+] as const;
+
+/**
+ * 从工具输出中提取可读的失败/结果描述。此前直接 `JSON.stringify(output)`，
+ * 会让右栏 Agent 活动把整个信封以原始 JSON 展示，而不是人能读的原因。
+ */
+function describeToolOutput(output: unknown): string {
   if (typeof output === 'string') return output;
-  try {
-    return JSON.stringify(output);
-  } catch {
-    return '工具输出不可序列化';
+  if (typeof output === 'number' || typeof output === 'boolean') return String(output);
+  if (Array.isArray(output)) {
+    return output.length > 0 ? `数组（${output.length} 项）` : '无输出';
   }
+  if (!output || typeof output !== 'object') return '无输出';
+
+  const record = output as Record<string, unknown>;
+  for (const key of TOOL_OUTPUT_TEXT_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+
+  const keys = Object.keys(record);
+  return keys.length > 0 ? `字段：${keys.slice(0, 4).join('、')}` : '无输出';
 }

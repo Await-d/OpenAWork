@@ -9,6 +9,11 @@ import {
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { ChatImageGenerationControls } from '../../components/chat/image/ChatImageGenerationControls.js';
+import {
+  ImageLightbox,
+  type ImageLightboxItem,
+} from '../../components/chat/image/image-lightbox.js';
+import { ImageZoomTrigger } from '../../components/common/display/ImageZoomTrigger.js';
 import { useChatImageGeneration } from '../chat-page/hooks/use-chat-image-generation.js';
 import {
   toImageEditReferenceArtifacts,
@@ -23,6 +28,8 @@ import {
   type ChatSettingsProvider,
 } from '../../utils/chat/chat-session-defaults.js';
 import { logger } from '../../utils/log/logger.js';
+import { buildArtifactVirtualPath } from './workspace/artifact-workbench-utils.js';
+import './ImagesPage.css';
 
 interface SessionArtifactsResponse {
   contentArtifacts?: ArtifactRecord[];
@@ -160,6 +167,27 @@ interface LatestResult {
   outputFormat: string;
 }
 
+type GalleryImageArtifact = ImageEditReferenceArtifact & { imageUrl: string };
+
+const canvasImageStyle: CSSProperties = {
+  maxWidth: '100%',
+  maxHeight: '100%',
+  objectFit: 'contain',
+  borderRadius: 4,
+  boxShadow: 'var(--shadow-lg)',
+};
+
+const referenceImageStyle: CSSProperties = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain',
+};
+
+const referenceTriggerStyle: CSSProperties = {
+  width: '100%',
+  height: '100%',
+};
+
 export default function ImagesPage() {
   const navigate = useNavigate();
   const params = useParams<{ sessionId?: string }>();
@@ -177,6 +205,10 @@ export default function ImagesPage() {
   const [error, setError] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
+  const [lightbox, setLightbox] = useState<{
+    readonly index: number;
+    readonly items: readonly ImageLightboxItem[];
+  } | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -298,6 +330,34 @@ export default function ImagesPage() {
   const selectedReferenceArtifact = useMemo(
     () => sessionArtifacts.find((artifact) => artifact.artifactId === selectedReferenceId) ?? null,
     [sessionArtifacts, selectedReferenceId],
+  );
+
+  const galleryImages = useMemo(
+    () =>
+      sessionArtifacts.filter((artifact): artifact is GalleryImageArtifact =>
+        Boolean(artifact.imageUrl),
+      ),
+    [sessionArtifacts],
+  );
+
+  const galleryItems = useMemo<ImageLightboxItem[]>(
+    () =>
+      galleryImages.map((artifact) => ({
+        src: artifact.imageUrl,
+        alt: artifact.title,
+        caption: artifact.title,
+        fileName:
+          artifact.fileName ?? buildArtifactVirtualPath({ title: artifact.title, type: 'image' }),
+      })),
+    [galleryImages],
+  );
+
+  const openImageViewer = useCallback(
+    (artifactId: string, fallback: ImageLightboxItem) => {
+      const index = galleryImages.findIndex((artifact) => artifact.artifactId === artifactId);
+      setLightbox(index >= 0 ? { items: galleryItems, index } : { items: [fallback], index: 0 });
+    },
+    [galleryImages, galleryItems],
   );
 
   const submitDisabled =
@@ -673,10 +733,20 @@ export default function ImagesPage() {
                   }}
                 >
                   {selectedReferenceArtifact?.imageUrl ? (
-                    <img
-                      src={selectedReferenceArtifact.imageUrl}
+                    <ImageZoomTrigger
                       alt={selectedReferenceArtifact.title}
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      imageStyle={referenceImageStyle}
+                      label={`放大查看图片：${selectedReferenceArtifact.title}`}
+                      onOpen={() => {
+                        if (!selectedReferenceArtifact?.imageUrl) return;
+                        openImageViewer(selectedReferenceArtifact.artifactId, {
+                          src: selectedReferenceArtifact.imageUrl,
+                          alt: selectedReferenceArtifact.title,
+                          caption: selectedReferenceArtifact.title,
+                        });
+                      }}
+                      src={selectedReferenceArtifact.imageUrl}
+                      style={referenceTriggerStyle}
                     />
                   ) : pendingFilePreview ? (
                     <img
@@ -776,16 +846,18 @@ export default function ImagesPage() {
             {latestResult ? (
               latestResult.imageUrl ? (
                 <>
-                  <img
-                    src={latestResult.imageUrl}
+                  <ImageZoomTrigger
                     alt={latestResult.prompt}
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                      borderRadius: 4,
-                      boxShadow: 'var(--shadow-lg)',
+                    imageStyle={canvasImageStyle}
+                    onOpen={() => {
+                      if (!latestResult.imageUrl) return;
+                      openImageViewer(latestResult.artifactId, {
+                        src: latestResult.imageUrl,
+                        alt: latestResult.prompt,
+                        caption: latestResult.prompt,
+                      });
                     }}
+                    src={latestResult.imageUrl}
                   />
                   <div
                     style={{
@@ -989,55 +1061,91 @@ export default function ImagesPage() {
                 {sessionArtifacts.map((artifact) => {
                   const isSelected = artifact.artifactId === selectedReferenceId;
                   return (
-                    <button
+                    <div
                       key={artifact.artifactId}
-                      type="button"
-                      onClick={() => handleSelectHistoryReference(artifact.artifactId)}
-                      title={artifact.title}
-                      style={{
-                        flex: '0 0 auto',
-                        width: 108,
-                        border: isSelected
-                          ? '2px solid var(--accent)'
-                          : '1px solid var(--border-subtle)',
-                        borderRadius: 8,
-                        padding: 0,
-                        background: 'var(--bg-base)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'hidden',
-                      }}
+                      style={{ position: 'relative', flex: '0 0 auto', width: 108 }}
                     >
-                      <div
+                      <button
+                        type="button"
+                        onClick={() => handleSelectHistoryReference(artifact.artifactId)}
+                        title={artifact.title}
                         style={{
                           width: '100%',
-                          aspectRatio: '1 / 1',
-                          background: 'var(--bg-overlay)',
-                        }}
-                      >
-                        {artifact.imageUrl && (
-                          <img
-                            src={artifact.imageUrl}
-                            alt={artifact.title}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        )}
-                      </div>
-                      <div
-                        style={{
-                          padding: '6px 8px',
-                          fontSize: 11,
-                          color: 'var(--fg-default)',
-                          textAlign: 'left',
-                          whiteSpace: 'nowrap',
+                          border: isSelected
+                            ? '2px solid var(--accent)'
+                            : '1px solid var(--border-subtle)',
+                          borderRadius: 8,
+                          padding: 0,
+                          background: 'var(--bg-base)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
                           overflow: 'hidden',
-                          textOverflow: 'ellipsis',
                         }}
                       >
-                        {artifact.title}
-                      </div>
-                    </button>
+                        <div
+                          style={{
+                            width: '100%',
+                            aspectRatio: '1 / 1',
+                            background: 'var(--bg-overlay)',
+                          }}
+                        >
+                          {artifact.imageUrl && (
+                            <img
+                              src={artifact.imageUrl}
+                              alt={artifact.title}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            padding: '6px 8px',
+                            fontSize: 11,
+                            color: 'var(--fg-default)',
+                            textAlign: 'left',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {artifact.title}
+                        </div>
+                      </button>
+                      {artifact.imageUrl ? (
+                        <button
+                          type="button"
+                          className="images-page-thumb-zoom"
+                          aria-label={`放大查看图片：${artifact.title}`}
+                          title="放大查看"
+                          onClick={() => {
+                            if (!artifact.imageUrl) return;
+                            openImageViewer(artifact.artifactId, {
+                              src: artifact.imageUrl,
+                              alt: artifact.title,
+                              caption: artifact.title,
+                            });
+                          }}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="15 3 21 3 21 9" />
+                            <polyline points="9 21 3 21 3 15" />
+                            <line x1="21" y1="3" x2="14" y2="10" />
+                            <line x1="3" y1="21" x2="10" y2="14" />
+                          </svg>
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -1045,6 +1153,17 @@ export default function ImagesPage() {
           </section>
         </main>
       </div>
+      {lightbox ? (
+        <ImageLightbox
+          index={lightbox.index}
+          items={lightbox.items}
+          onClose={() => setLightbox(null)}
+          onIndexChange={(index) =>
+            setLightbox((current) => (current ? { ...current, index } : current))
+          }
+          open
+        />
+      ) : null}
     </div>
   );
 }

@@ -190,4 +190,38 @@ describe('runLookAtTool — file size guard', () => {
 
     expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
   });
+
+  // 回归：图片原样内联上送，必须受上游 MAX_MEDIA_DECODED_BYTES（20 MiB）约束。
+  // 旧的 64 MiB 文件闸门只防 OOM，会把 20–64 MiB 的图片放行到上游再抛出难懂的协议错误。
+  it('图片文件超过上游 20MiB 媒体上限时提前拒绝（仍低于 64MiB 闸门）', async () => {
+    mocks.stat.mockResolvedValue({ size: 30 * 1024 * 1024 } as never);
+
+    await expect(
+      runLookAtTool({
+        filePath: '/tmp/workspace/big.png',
+        goal: 'describe',
+        parentSessionId: 'parent',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/look_at image file too large/);
+
+    expect(mocks.readFile).not.toHaveBeenCalled();
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
+  });
+
+  it('内联 image_data 解码后超过上游 20MiB 媒体上限时提前拒绝', async () => {
+    mocks.stat.mockResolvedValue({ size: 1024 } as never);
+    const oversizedBase64 = Buffer.alloc(21 * 1024 * 1024, 1).toString('base64');
+
+    await expect(
+      runLookAtTool({
+        imageData: oversizedBase64,
+        goal: 'describe',
+        parentSessionId: 'parent',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/look_at inline image_data too large/);
+
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
+  });
 });

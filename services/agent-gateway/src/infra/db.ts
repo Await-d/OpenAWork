@@ -1508,6 +1508,7 @@ export async function migrate(): Promise<void> {
   ensureColumn('handoff_records', 'paused', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('handoff_records', 'crash_retry_count', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('handoff_records', 'available_at_ms', 'INTEGER DEFAULT NULL');
+  ensureColumn('handoff_records', 'failed_retry_count', 'INTEGER NOT NULL DEFAULT 0');
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_handoff_records_state ON handoff_records(state, created_at)',
   );
@@ -1737,6 +1738,9 @@ function ensureTeamSchemaSafe(): void {
   );
   safe('handoff_records.available_at_ms', () =>
     ensureColumn('handoff_records', 'available_at_ms', 'INTEGER DEFAULT NULL'),
+  );
+  safe('handoff_records.failed_retry_count', () =>
+    ensureColumn('handoff_records', 'failed_retry_count', 'INTEGER NOT NULL DEFAULT 0'),
   );
   safe('handoff_records.idempotency_key', () =>
     ensureColumn('handoff_records', 'idempotency_key', 'TEXT DEFAULT NULL'),
@@ -2334,6 +2338,7 @@ function migrateHandoffRecordsToSessionForeignKey(): void {
       completed_at TEXT,
       failure_reason TEXT,
       retry_count INTEGER NOT NULL DEFAULT 0,
+      failed_retry_count INTEGER NOT NULL DEFAULT 0,
       escalation_round INTEGER NOT NULL DEFAULT 0,
       cancel_requested INTEGER NOT NULL DEFAULT 0,
       paused INTEGER NOT NULL DEFAULT 0,
@@ -2352,16 +2357,16 @@ function migrateHandoffRecordsToSessionForeignKey(): void {
     INSERT INTO handoff_records (
       id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id,
       payload_json, available_at_ms, state, claim_token, claimed_at, started_at,
-      completed_at, failure_reason, retry_count, escalation_round, cancel_requested,
-      paused, crash_retry_count, idempotency_key, paused_at, paused_by_user_id,
-      pause_reason, client_request_id, result_json, created_at, updated_at
+      completed_at, failure_reason, retry_count, failed_retry_count, escalation_round,
+      cancel_requested, paused, crash_retry_count, idempotency_key, paused_at,
+      paused_by_user_id, pause_reason, client_request_id, result_json, created_at, updated_at
     )
     SELECT
       id, user_id, from_session_id, from_role_layer, to_role_layer, to_session_id,
       payload_json, available_at_ms, state, claim_token, claimed_at, started_at,
-      completed_at, failure_reason, retry_count, escalation_round, cancel_requested,
-      paused, crash_retry_count, idempotency_key, paused_at, paused_by_user_id,
-      pause_reason, client_request_id, result_json, created_at, updated_at
+      completed_at, failure_reason, retry_count, failed_retry_count, escalation_round,
+      cancel_requested, paused, crash_retry_count, idempotency_key, paused_at,
+      paused_by_user_id, pause_reason, client_request_id, result_json, created_at, updated_at
     FROM handoff_records_legacy
   `);
   db.exec('DROP TABLE handoff_records_legacy');

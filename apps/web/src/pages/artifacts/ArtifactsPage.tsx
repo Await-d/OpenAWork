@@ -143,12 +143,14 @@ export default function ArtifactsPage() {
             <ArtifactWorkbench
               artifact={selectedArtifact}
               deleting={selectedArtifact ? deletingArtifactId === selectedArtifact.id : false}
+              imageArtifacts={sessionArtifacts.filter((artifact) => artifact.type === 'image')}
               revertingVersionId={revertingVersionId}
               saving={saving}
               versions={versions}
               onDelete={() => void removeArtifact()}
               onRevert={(versionId) => void revertArtifact(versionId)}
               onSave={(draft) => void saveArtifact(draft)}
+              onSelectArtifactId={setSelectedArtifactId}
             />
           </div>
         </div>

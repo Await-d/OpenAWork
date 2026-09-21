@@ -285,8 +285,16 @@ export class DesktopBrowserAutomation {
     await this.requirePage().type(selector, value, options);
   }
 
-  async press(selector: string, key: string, options: TypeTextOptions = {}): Promise<void> {
-    await this.requirePage().press(selector, key, options);
+  async press(
+    selector: string | undefined,
+    key: string,
+    options: TypeTextOptions = {},
+  ): Promise<void> {
+    if (selector) {
+      await this.requirePage().press(selector, key, options);
+      return;
+    }
+    await this.requirePage().keyboard.press(key, options);
   }
 
   async check(selector: string, options: ClickOptions = {}): Promise<void> {

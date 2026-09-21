@@ -68,8 +68,10 @@ import { createTeamSession } from '../handoff/bus/team-session-create.js';
 import { getChatProvider } from '../provider/provider-catalog.js';
 import {
   getEffectiveReviewDispositionFromPayloadJson,
+  isDismissableFailedHandoff,
   isHandledReviewFailurePayloadJson,
   isRecoverableFailedHandoff,
+  listRunningPm2AdjudicatorSessionIds,
 } from '../handoff/store/handoff-store.js';
 import { teamCrudRoutes } from './team-crud.js';
 
@@ -440,6 +442,7 @@ interface RuntimeHandoffRow {
   pause_reason: string | null;
   payload_json: string;
   retry_count: number;
+  failed_retry_count: number;
   started_at: string | null;
   state: string;
   to_role_layer: string;
@@ -917,6 +920,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
          completed_at,
          failure_reason,
          retry_count,
+         failed_retry_count,
          created_at,
          updated_at
        FROM handoff_records
@@ -928,6 +932,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         right.updated_at.localeCompare(left.updated_at) ||
         right.created_at.localeCompare(left.created_at),
     );
+
+    const runningPm2SessionIds = listRunningPm2AdjudicatorSessionIds(input.userId);
 
     return rows.slice(0, 200).map((row) => ({
       claimToken: row.claim_token,
@@ -957,6 +963,15 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               toRoleLayer: row.to_role_layer,
             })
           : undefined,
+      dismissableFailure: isDismissableFailedHandoff({
+        state: row.state,
+        toRoleLayer: row.to_role_layer,
+        failureReason: row.failure_reason,
+        payloadJson: row.payload_json,
+        fromSessionId: row.from_session_id,
+        runningPm2SessionIds,
+        failedRetryCount: row.failed_retry_count,
+      }),
       retryCount: row.retry_count,
       startedAt: row.started_at,
       state: row.state,

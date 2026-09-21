@@ -9,6 +9,10 @@ import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { readPublicUrlError } from '../security/public-url-guard.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { sniffImageMediaType } from '../media/image-signature.js';
+import { formatTextReadOutput } from '../artifacts/text-read-output.js';
+import { extractBufferFromDataUrl } from '../media/media-artifact.js';
+import { getArtifactById } from '../session/artifact-content-store.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
 import type { UpstreamProtocol } from '../routes/upstream-protocol.js';
@@ -43,9 +47,19 @@ const LOOK_AT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
  * fully buffered for parsing. Without a ceiling a multi-GB workspace file (the
  * path is user-supplied) would OOM the gateway. We `stat` first and reject
  * oversized files before reading a single byte. Override via
- * `OPENAWORK_LOOK_AT_MAX_FILE_BYTES`; <=0 disables the guard.
+ * `OPENAWORK_LOOK_AT_MAX_FILE_BYTES`; <=0 disables the guard. Images are
+ * additionally capped by `LOOK_AT_MAX_IMAGE_BYTES` (the upstream media limit).
  */
 const DEFAULT_LOOK_AT_MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+/** 镜像 `IMAGE_MIMES`（packages/opencode-llm/src/protocols/shared.ts）——包外不可导入，改协议白名单时须同步。 */
+const LOOK_AT_SUPPORTED_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+/**
+ * 图片专用上限：镜像上游 `validateMedia` 的 `MAX_MEDIA_DECODED_BYTES`（20 MiB）。
+ * 图片原样内联上送（文本/PDF 会先截断），故必须受此约束；64 MiB 的文件闸门只防 OOM。
+ */
+const LOOK_AT_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /**
  * `.svg` passes the generic `isImageMime` gate but is absent from the upstream
@@ -56,6 +70,15 @@ const LOOK_AT_SVG_MIME = 'image/svg+xml';
 const LOOK_AT_SVG_UNSUPPORTED_MESSAGE =
   'look_at 不支持 SVG（image/svg+xml）：上游多模态模型无法解析该格式，请先将 SVG 转换为 PNG/JPEG/WebP 后再分析。';
 const LOOK_AT_REMOTE_IMAGE_MESSAGE = 'look_at remote image only supports public http(s) URLs';
+const LOOK_AT_ARTIFACT_PREFIX = 'artifact:';
+
+/**
+ * 上游多模态模型不接受 `application/octet-stream`。旧实现会把无法识别的来源
+ * 推成该类型，再被 provider 以难懂的协议错误拒绝。此消息在打上游前失败，
+ * 并给出可执行的修复路径。
+ */
+const LOOK_AT_OCTET_STREAM_MESSAGE =
+  'look_at 无法识别图片格式（application/octet-stream）：请提供 data:image/png|jpeg|gif|webp;base64,... 形式的 data URL、对应格式的裸 base64、带正确扩展名的文件路径、公网 http(s) 图片地址，或有效的 artifact:<id>。';
 
 function resolveLookAtMaxFileBytes(): number {
   const raw = globalThis.process?.env['OPENAWORK_LOOK_AT_MAX_FILE_BYTES'];
@@ -110,6 +133,7 @@ const lookAtInputSchema = z
     file_path: z.string().min(1).optional(),
     image_data: z.string().min(1).optional(),
     goal: z.string().min(1).optional(),
+    offset: z.number().int().min(1).optional(),
   })
   .superRefine((value, context) => {
     if (!value.file_path && !value.image_data) {
@@ -213,10 +237,17 @@ function isSvgMimeType(mimeType: string): boolean {
   return mimeType.toLowerCase() === LOOK_AT_SVG_MIME;
 }
 
+function assertLookAtMimeTypeNotOctetStream(mimeType: string): void {
+  if (mimeType.toLowerCase() === 'application/octet-stream') {
+    throw new Error(LOOK_AT_OCTET_STREAM_MESSAGE);
+  }
+}
+
 function assertLookAtMimeTypeSupported(mimeType: string): void {
   if (isSvgMimeType(mimeType)) {
     throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
   }
+  assertLookAtMimeTypeNotOctetStream(mimeType);
 }
 
 function stripDataUrlPrefix(value: string): string {
@@ -226,6 +257,60 @@ function stripDataUrlPrefix(value: string): string {
 
 function buildImageDataUrl(value: string, mimeType: string): string {
   return `data:${mimeType};base64,${stripDataUrlPrefix(value)}`;
+}
+
+function isSupportedImageMime(mimeType: string): boolean {
+  return LOOK_AT_SUPPORTED_IMAGE_MIMES.includes(mimeType.toLowerCase());
+}
+
+/** 剥掉 data URL 前缀并剔除空白，得到上游 `validateMedia` 要求的规范 base64。 */
+function normalizeBase64Payload(value: string): string {
+  return stripDataUrlPrefix(value).replace(/\s+/g, '');
+}
+
+/**
+ * `image_data` 的 MIME：data URL 用声明值，裸 base64 靠魔数嗅探。嗅不出、
+ * 或嗅出上游白名单外的格式（如 BMP）时抛可读错误，避免留个
+ * `application/octet-stream` 让上游抛出难懂的协议拒绝。
+ */
+function resolveInlineImageMimeType(rawImageData: string): string {
+  const declared = inferMimeType(undefined, rawImageData);
+  if (isSvgMimeType(declared)) {
+    throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
+  }
+  if (isSupportedImageMime(declared)) {
+    return declared.toLowerCase();
+  }
+
+  const sniffed = sniffImageMediaType(Buffer.from(normalizeBase64Payload(rawImageData), 'base64'));
+  if (sniffed && isSupportedImageMime(sniffed)) {
+    return sniffed;
+  }
+  if (sniffed) {
+    throw new Error(
+      `look_at 不支持 ${sniffed} 图片：上游多模态模型只支持 PNG / JPEG / GIF / WebP。`,
+    );
+  }
+  throw new Error(LOOK_AT_OCTET_STREAM_MESSAGE);
+}
+
+function assertLookAtImageBytesWithinLimit(byteLength: number, source: string): void {
+  if (byteLength > LOOK_AT_MAX_IMAGE_BYTES) {
+    throw new Error(
+      `look_at ${source} too large: ${byteLength} bytes exceeds the multimodal image limit ${LOOK_AT_MAX_IMAGE_BYTES} bytes`,
+    );
+  }
+}
+
+async function assertLookAtImageFileWithinLimit(filePath: string): Promise<void> {
+  let size: number;
+  try {
+    size = (await stat(filePath)).size;
+  } catch {
+    // Defer to the read for a precise ENOENT/EACCES error.
+    return;
+  }
+  assertLookAtImageBytesWithinLimit(size, 'image file');
 }
 
 function extractMimeTypeFromContentType(contentType: string | null): string | undefined {
@@ -361,7 +446,7 @@ async function fetchRemoteImageAsDataUrl(imageUrl: string): Promise<ResolvedLook
     throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
   }
 
-  const buffer = await readResponseBufferWithLimit(response, resolveLookAtMaxFileBytes());
+  const buffer = await readResponseBufferWithLimit(response, LOOK_AT_MAX_IMAGE_BYTES);
   return {
     filename: buildRemoteImageFilename(url, mimeType),
     imageDataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
@@ -369,20 +454,62 @@ async function fetchRemoteImageAsDataUrl(imageUrl: string): Promise<ResolvedLook
   };
 }
 
+function resolveLookAtArtifactSource(
+  userId: string,
+  artifactId: string,
+): ResolvedLookAtImageSource {
+  const artifact = getArtifactById(userId, artifactId);
+  if (!artifact) {
+    throw new Error(`找不到 artifact: ${artifactId}`);
+  }
+
+  let extracted: { buffer: Buffer; mimeType: string };
+  try {
+    extracted = extractBufferFromDataUrl(artifact.content);
+  } catch {
+    throw new Error(
+      `look_at 无法读取 artifact ${artifactId} 的媒体内容：artifact 内容不是有效的 data URL（data:<mime>;base64,<data>）。`,
+    );
+  }
+
+  const mimeType = normalizeImageMimeType(extracted.mimeType);
+  if (isSvgMimeType(mimeType)) {
+    throw new Error(LOOK_AT_SVG_UNSUPPORTED_MESSAGE);
+  }
+  if (!isImageMime(mimeType)) {
+    throw new Error(`look_at 不支持该 artifact 的 MIME 类型：${mimeType}`);
+  }
+  assertLookAtMimeTypeNotOctetStream(mimeType);
+
+  return {
+    filename: buildClipboardFilename(mimeType),
+    imageDataUrl: `data:${mimeType};base64,${extracted.buffer.toString('base64')}`,
+    mimeType,
+  };
+}
+
 async function resolveLookAtImageSource(input: {
   filePath?: string;
   imageData?: string;
+  userId: string;
 }): Promise<ResolvedLookAtImageSource | null> {
   if (input.imageData) {
     const remoteUrl = tryParseHttpUrl(input.imageData);
     if (remoteUrl) {
       return await fetchRemoteImageAsDataUrl(remoteUrl.toString());
     }
-    const mimeType = inferMimeType(undefined, input.imageData);
-    assertLookAtMimeTypeSupported(mimeType);
+    if (input.imageData.startsWith(LOOK_AT_ARTIFACT_PREFIX)) {
+      return resolveLookAtArtifactSource(
+        input.userId,
+        input.imageData.slice(LOOK_AT_ARTIFACT_PREFIX.length),
+      );
+    }
+    const base64 = normalizeBase64Payload(input.imageData);
+    assertLookAtImageBytesWithinLimit(Buffer.byteLength(base64, 'base64'), 'inline image_data');
+    const mimeType = resolveInlineImageMimeType(input.imageData);
     return {
       filename: buildClipboardFilename(mimeType),
-      imageDataUrl: buildImageDataUrl(input.imageData, mimeType),
+      imageDataUrl: buildImageDataUrl(base64, mimeType),
       mimeType,
     };
   }
@@ -396,6 +523,7 @@ async function resolveLookAtImageSource(input: {
   if (!isImageMime(mimeType)) {
     return null;
   }
+  await assertLookAtImageFileWithinLimit(input.filePath);
 
   return {
     filename: basename(input.filePath),
@@ -581,6 +709,7 @@ export async function runLookAtTool(input: {
   filePath?: string;
   goal: string;
   imageData?: string;
+  offset?: number;
   parentSessionId: string;
   userId: string;
 }): Promise<string> {
@@ -598,6 +727,7 @@ export async function runLookAtTool(input: {
   const resolvedImageSource = await resolveLookAtImageSource({
     filePath,
     imageData: input.imageData,
+    userId: input.userId,
   });
   const mimeType = resolvedImageSource?.mimeType ?? inferMimeType(filePath, undefined);
   const agentPrompt = listManagedAgentsForUser(input.userId).find(
@@ -658,7 +788,14 @@ export async function runLookAtTool(input: {
       textContent: `File content:\n${textContent}`,
     });
   } else if (filePath && mimeType === 'application/pdf') {
-    const textContent = (await readPdfAsText(filePath)).slice(0, 20000);
+    const pdfText = await readPdfAsText(filePath);
+    // 与文本文件同一套语义（行号 + 2000 行 / 50KB 上限 + 可执行的续读提示），
+    // 避免旧实现「静默截断到 2 万字符、模型无从得知还有内容」。
+    const readOutput = formatTextReadOutput({
+      buffer: Buffer.from(pdfText, 'utf-8'),
+      displayPath: filePath,
+      ...(input.offset !== undefined ? { offset: input.offset } : {}),
+    });
     analysisText = await requestLookAtText({
       apiBaseUrl: routeConfig.route.apiBaseUrl,
       apiKey: routeConfig.route.apiKey,
@@ -672,7 +809,7 @@ export async function runLookAtTool(input: {
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
-      textContent: `PDF text:\n${textContent}`,
+      textContent: `PDF text:\n${readOutput?.text ?? '（该 PDF 未提取到可读文本，可能是扫描件或纯图片页）'}`,
     });
   } else {
     throw new Error(`Unsupported look_at mime type in this runtime: ${mimeType}`);

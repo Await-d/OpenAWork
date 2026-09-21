@@ -117,6 +117,15 @@ export interface TeamHandoffsClient {
    *          ok=false 时附带当前 state（通常是已完成/已失败这类终态）。
    */
   cancelHandoff(token: string | null, handoffId: string): Promise<HandoffCancelResult>;
+
+  /**
+   * 关闭一条已失败且无自动恢复路径的 handoff（failed → cancelled）。
+   *
+   * @returns ok=true 表示后端已转入 cancelled；
+   *          ok=false 时附带当前 state（非 failed 状态或 executor/reviewer 派发不可关闭）。
+   */
+  dismissFailedHandoff(token: string | null, handoffId: string): Promise<HandoffCancelResult>;
+
   pauseHandoff(
     token: string | null,
     handoffId: string,
@@ -463,6 +472,57 @@ export function createTeamHandoffsClient(baseUrl: string): TeamHandoffsClient {
           ok: false,
           retryable: true,
           errorMessage: normalizeTeamHandoffsNetworkMessage('取消派发任务', error),
+        };
+      }
+    },
+
+    async dismissFailedHandoff(token, handoffId) {
+      if (!token) {
+        return {
+          ok: false,
+          retryable: false,
+          errorMessage: '未登录，无法关闭该失败任务。',
+        };
+      }
+      try {
+        const response = await fetchWithTimeout(
+          `${trimmed}/team/handoffs/${encodeURIComponent(handoffId)}/dismiss`,
+          {
+            method: 'POST',
+            headers: authHeader(token),
+          },
+        );
+        const data = await readJsonErrorData<
+          JsonErrorData & {
+            handoff?: HandoffRecord;
+            paused?: boolean;
+            state?: HandoffState;
+          }
+        >(response);
+        if (response.ok) {
+          return {
+            ok: true,
+            handoff: data?.handoff ?? null,
+            retryable: false,
+          };
+        }
+        return {
+          ok: false,
+          retryable: isRetryableHandoffControlStatus(response.status),
+          errorMessage: buildHandoffControlHttpErrorMessage({
+            actionLabel: '关闭失败任务',
+            data,
+            status: response.status,
+          }),
+          status: response.status,
+          state: data?.state,
+          paused: data?.paused,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          retryable: true,
+          errorMessage: normalizeTeamHandoffsNetworkMessage('关闭失败任务', error),
         };
       }
     },

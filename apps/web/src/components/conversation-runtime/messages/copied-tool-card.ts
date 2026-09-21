@@ -1,6 +1,7 @@
 import type { AssistantTracePayload, AssistantTraceToolCall } from '@openAwork/shared';
 import type { ChatMessage, ChatToolPart } from './message-model.js';
 import { hasActivePendingPermissionRequest } from './message-coercion.js';
+import { PENDING_PERMISSION_OUTPUT_MARKERS } from '../../../utils/permission/pending-permission-state.js';
 import { createAssistantTraceContent, readAssistantTracePayload } from './trace-codec.js';
 
 interface CopiedToolCardSections {
@@ -61,17 +62,7 @@ function looksLikeWaitingStateOutput(value: unknown): boolean {
     return true;
   }
 
-  return (
-    normalized.includes('waiting for approval') ||
-    normalized.includes('requires approval') ||
-    normalized.includes('permission request') ||
-    normalized.includes('waiting for answer') ||
-    normalized.includes('waiting for confirmation') ||
-    normalized.includes('等待权限') ||
-    normalized.includes('等待审批') ||
-    normalized.includes('等待回答') ||
-    normalized.includes('等待确认')
-  );
+  return PENDING_PERMISSION_OUTPUT_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 function shouldPreservePausedToolState(input: {

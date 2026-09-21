@@ -1,4 +1,6 @@
 import type { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
+import { SettingsCardRow } from '../shared/settings-row.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
 import { SS, ST } from '../shared/settings-section-styles.js';
 
 type BuddyState = ReturnType<typeof useBuddyVoicePreferences>;
@@ -15,62 +17,14 @@ interface ToggleRowProps {
 }
 
 /**
- * 单行 toggle，把 label/description/开关样式收敛在一处。仅 main-controls
- * section 内部使用，不导出；如果将来其他 section 需要相同布局可以考虑提升到
- * shared/。
+ * 单行 toggle，组合 shared/settings-row.tsx 的卡片式行容器与 shared/settings-toggle.tsx
+ * 的统一开关。仅 main-controls section 内部使用，不导出。
  */
 function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 10,
-        padding: '10px 12px',
-        background: 'var(--bg-overlay)',
-      }}
-    >
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{label}</div>
-        <div style={{ marginTop: 3, fontSize: 11, lineHeight: 1.5, color: 'var(--fg-muted)' }}>
-          {description}
-        </div>
-      </div>
-      <button
-        type="button"
-        aria-label={label}
-        aria-pressed={checked}
-        onClick={onToggle}
-        style={{
-          position: 'relative',
-          width: 42,
-          height: 24,
-          borderRadius: 999,
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            top: 2,
-            left: checked ? 20 : 2,
-            width: 20,
-            height: 20,
-            borderRadius: '50%',
-            background: 'var(--bg-overlay)',
-            boxShadow: 'var(--shadow-sm)',
-            transition: 'left 180ms ease',
-          }}
-        />
-      </button>
-    </div>
+    <SettingsCardRow title={label} description={description}>
+      <SettingsToggle checked={checked} onChange={onToggle} ariaLabel={label} />
+    </SettingsCardRow>
   );
 }
 
@@ -115,9 +69,10 @@ export function CompanionMainControlsSection({ buddy }: CompanionMainControlsSec
 
   return (
     <section style={SS} aria-labelledby="buddy-main-controls-title">
-      <div id="buddy-main-controls-title" style={ST}>
+      {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+      <h3 id="buddy-main-controls-title" style={{ ...ST, marginTop: 0 }}>
         主控制
-      </div>
+      </h3>
       <ToggleRow
         checked={enabled}
         label="启用 Buddy 伴侣"

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
+import { ImageLightbox } from '../../../components/chat/image/image-lightbox.js';
 import MarkdownMessageContent from '../../../components/chat/markdown/markdown-message-content.js';
 import {
   ContextMenu,
@@ -11,10 +12,12 @@ import {
   type ContentContextMenuTrigger,
 } from '../../../components/common/display/ContentContextMenuHost.js';
 import { buildContentContextMenuItems } from '../../../components/common/display/content-context-menu-items.js';
+import { ImageZoomTrigger } from '../../../components/common/display/ImageZoomTrigger.js';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import { FilePreviewPane } from '../../../components/file-editor/preview/FilePreviewPane.js';
 import { tryFormatJson } from '../../../utils/format-json.js';
+import { resolveArtifactImageSrc, type ArtifactImageGallery } from './artifact-image-gallery.js';
 import {
   buildArtifactVirtualPath,
   buildSvgPreviewDocument,
@@ -25,6 +28,11 @@ import {
 interface ArtifactPreviewSurfaceProps {
   artifact: ArtifactRecord;
   content: string;
+  /**
+   * 图集模式数据（由父组件提供）。缺省时图片仍可点击放大，但只在当前产物内
+   * 查看，不提供左右切换——保证既有调用点无需改动。
+   */
+  imageGallery?: ArtifactImageGallery;
 }
 
 /**
@@ -35,7 +43,11 @@ interface ArtifactPreviewSurfaceProps {
  * composer 可以接收引用——因此 `path` 与 `referenceToChat` 都不传，
  * 菜单自然收敛成「复制全部内容 / 复制选中内容」，不留点了没反应的项。
  */
-export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSurfaceProps) {
+export function ArtifactPreviewSurface({
+  artifact,
+  content,
+  imageGallery,
+}: ArtifactPreviewSurfaceProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
 
   const handleOpenMenu = useCallback((trigger: ContentContextMenuTrigger) => {
@@ -69,14 +81,14 @@ export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSur
   return (
     <>
       <ContentContextMenuHost testId="artifact-preview-host" onOpen={handleOpenMenu}>
-        <ArtifactPreviewBody artifact={artifact} content={content} />
+        <ArtifactPreviewBody artifact={artifact} content={content} imageGallery={imageGallery} />
       </ContentContextMenuHost>
       {menu ? <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} /> : null}
     </>
   );
 }
 
-function ArtifactPreviewBody({ artifact, content }: ArtifactPreviewSurfaceProps) {
+function ArtifactPreviewBody({ artifact, content, imageGallery }: ArtifactPreviewSurfaceProps) {
   if (!canPreviewArtifact(artifact.type)) {
     return (
       <PreviewShell
@@ -134,35 +146,8 @@ function ArtifactPreviewBody({ artifact, content }: ArtifactPreviewSurfaceProps)
   }
 
   if (artifact.type === 'image') {
-    const metadataMimeType =
-      artifact.metadata && typeof artifact.metadata['mimeType'] === 'string'
-        ? artifact.metadata['mimeType']
-        : 'image/png';
-    const src = content.startsWith('data:')
-      ? content
-      : `data:${metadataMimeType};base64,${content}`;
-
     return (
-      <PreviewShell title="图片预览" note="直接渲染内容型图片产物，便于确认生成结果与尺寸方向。">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 280,
-            padding: tokens.spacing.lg,
-            borderRadius: tokens.radius.lg,
-            border: `1px solid ${tokens.color.borderSubtle}`,
-            background: 'var(--bg-overlay)',
-          }}
-        >
-          <img
-            src={src}
-            alt={artifact.title}
-            style={{ maxWidth: '100%', maxHeight: 420, borderRadius: tokens.radius.md }}
-          />
-        </div>
-      </PreviewShell>
+      <ArtifactImagePreview artifact={artifact} content={content} imageGallery={imageGallery} />
     );
   }
 
@@ -223,6 +208,46 @@ function ArtifactPreviewBody({ artifact, content }: ArtifactPreviewSurfaceProps)
             </tbody>
           </table>
         </div>
+      )}
+    </PreviewShell>
+  );
+}
+
+function ArtifactImagePreview({ artifact, content, imageGallery }: ArtifactPreviewSurfaceProps) {
+  const [open, setOpen] = useState(false);
+  const src = resolveArtifactImageSrc(artifact, content);
+
+  return (
+    <PreviewShell
+      title="图片预览"
+      note="直接渲染内容型图片产物，点击图片可放大查看；多张图片时支持左右切换。"
+    >
+      <div style={imageStageStyle}>
+        <ImageZoomTrigger
+          alt={artifact.title}
+          imageStyle={imageThumbnailStyle}
+          label={`放大查看图片：${artifact.title}`}
+          onOpen={() => setOpen(true)}
+          src={src}
+        />
+      </div>
+      {imageGallery ? (
+        <ImageLightbox
+          index={imageGallery.index}
+          items={imageGallery.items}
+          onClose={() => setOpen(false)}
+          onIndexChange={imageGallery.onIndexChange}
+          open={open}
+        />
+      ) : (
+        <ImageLightbox
+          alt={artifact.title}
+          caption={artifact.title}
+          fileName={buildArtifactVirtualPath(artifact)}
+          onClose={() => setOpen(false)}
+          open={open}
+          src={src}
+        />
       )}
     </PreviewShell>
   );
@@ -305,5 +330,22 @@ const previewFrameStyle: React.CSSProperties = {
   minHeight: 380,
   border: `1px solid ${tokens.color.borderSubtle}`,
   borderRadius: tokens.radius.lg,
-  background: 'var(--fg-on-accent)',
+  // 内容由独立文档（srcdoc）渲染，宿主 token 不跨文档继承；这里用字面浅色纸底，
+  // 暗色主题下才不会出现「容器近黑 + 文档透明/初始黑字」。
+  background: '#ffffff',
+};
+
+const imageStageStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: 280,
+  padding: tokens.spacing.lg,
+  borderRadius: tokens.radius.lg,
+  border: `1px solid ${tokens.color.borderSubtle}`,
+  background: 'var(--bg-overlay)',
+};
+
+const imageThumbnailStyle: React.CSSProperties = {
+  maxHeight: 420,
 };

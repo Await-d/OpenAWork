@@ -11,6 +11,8 @@ import { resolvePersistableMcpServerSource } from '../connection/mcp-server-sour
 import { useSettingsWebsearch } from '../connection/use-settings-websearch.js';
 import { useMcpServers } from '../connection/use-mcp-servers.js';
 import { SS, ST, UV } from '../shared/settings-section-styles.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
+import { useCompactSettingsLayout } from '../shared/use-compact-settings-layout.js';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -121,45 +123,6 @@ const PARAM_CHIP: CSSProperties = {
   padding: '2px 8px',
 };
 
-// ── Toggle Switch ─────────────────────────────────────────────
-
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      style={{
-        position: 'relative',
-        width: 44,
-        height: 24,
-        borderRadius: 999,
-        border: 'none',
-        padding: 0,
-        cursor: 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
-        flexShrink: 0,
-        transition: 'background 180ms ease',
-      }}
-    >
-      <span
-        style={{
-          position: 'absolute',
-          top: 2,
-          left: checked ? 22 : 2,
-          width: 20,
-          height: 20,
-          borderRadius: '50%',
-          background: 'var(--bg-overlay)',
-          boxShadow: 'var(--shadow-sm)',
-          transition: 'left 180ms ease',
-        }}
-      />
-    </button>
-  );
-}
-
 // ── Main Component ────────────────────────────────────────────
 
 export function PluginsTabContent({
@@ -188,14 +151,24 @@ export function PluginsTabContent({
     saving: websearchSaving,
     setPolicy: setWebsearchPolicy,
     policy: websearchPolicy,
+    loadError: websearchLoadError,
+    saveError: websearchSaveError,
   } = useSettingsWebsearch({ gatewayUrl, token });
 
   // MCP 服务器——独立加载/保存/重试
-  const { mcpServers, setMcpServers, mcpStatuses, onRetryMcp } = useMcpServers({
+  const {
+    mcpServers,
+    setMcpServers,
+    mcpStatuses,
+    onRetryMcp,
+    loadError: mcpLoadError,
+  } = useMcpServers({
     gatewayUrl,
     token,
     active: true,
   });
+
+  const isCompactSettingsLayout = useCompactSettingsLayout();
 
   useEffect(() => {
     void loadWebsearchPolicy().catch(() => undefined);
@@ -475,7 +448,14 @@ export function PluginsTabContent({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 24, minHeight: 400 }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: isCompactSettingsLayout ? 'minmax(0, 1fr)' : '240px 1fr',
+        gap: 24,
+        minHeight: 400,
+      }}
+    >
       {/* ── Left: Plugin list ── */}
       <div>
         <div style={{ marginBottom: 12 }}>
@@ -566,19 +546,20 @@ export function PluginsTabContent({
               }}
             >
               <div>
-                <div style={SECTION_TITLE}>启用插件</div>
+                <h3 style={{ ...SECTION_TITLE, margin: 0 }}>启用插件</h3>
                 <div style={SECTION_DESC}>启用并配置完成后，Agent 才会获得对应 Tool</div>
               </div>
-              <ToggleSwitch
+              <SettingsToggle
                 checked={imgPlugin.enabled}
                 onChange={(v) => updateImagePlugin({ enabled: v })}
+                ariaLabel="启用插件"
               />
             </div>
 
             {/* Model source */}
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
-                <div style={SECTION_TITLE}>图片模型来源</div>
+                <h3 style={{ ...SECTION_TITLE, margin: 0 }}>图片模型来源</h3>
                 <div style={SECTION_DESC}>你可以置用全局绘图模型，或为该插件单独指定图片模型</div>
               </div>
               <select
@@ -683,7 +664,7 @@ export function PluginsTabContent({
 
             {/* Tool status */}
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={SECTION_TITLE}>Tool 状态</div>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>Tool 状态</h3>
               <div
                 style={{
                   border: '1px solid var(--border-subtle)',
@@ -731,7 +712,7 @@ export function PluginsTabContent({
 
             {/* Tool usage constraints */}
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={SECTION_TITLE}>Tool 使用约束</div>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>Tool 使用约束</h3>
               <div style={SECTION_DESC}>
                 仅当你希望 Agent 直接生成图片时启用。Tool 只接受 prompt、size 和 quality
                 参数，并使用当前配置的图片模型执行生成。
@@ -769,17 +750,18 @@ export function PluginsTabContent({
               }}
             >
               <div>
-                <div style={SECTION_TITLE}>启用插件</div>
+                <h3 style={{ ...SECTION_TITLE, margin: 0 }}>启用插件</h3>
                 <div style={SECTION_DESC}>启用后才会把 desktop_control 注入 Agent 工具列表</div>
               </div>
-              <ToggleSwitch
+              <SettingsToggle
                 checked={desktopControlPlugin.enabled}
                 onChange={(v) => updateDesktopControlPlugin({ enabled: v })}
+                ariaLabel="启用插件"
               />
             </div>
 
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={SECTION_TITLE}>Tool 状态</div>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>Tool 状态</h3>
               <div
                 style={{
                   border: '1px solid var(--border-subtle)',
@@ -826,7 +808,7 @@ export function PluginsTabContent({
             </div>
 
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={SECTION_TITLE}>执行边界</div>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>执行边界</h3>
               <div style={SECTION_DESC}>
                 插件开关只决定 Agent 工具是否注入和是否允许执行；实际截图、点击、输入、按键、
                 滚动等动作仍会继续走权限审批与运行环境能力检查。
@@ -855,6 +837,9 @@ export function PluginsTabContent({
               void saveWebsearchPolicy();
             }}
             onUpdateMcp={handleUpdateMcpServer}
+            loadError={websearchLoadError}
+            mcpLoadError={mcpLoadError}
+            saveError={websearchSaveError}
           />
         )}
 
@@ -869,6 +854,11 @@ export function PluginsTabContent({
                 SSE / stdio MCP，并对同 id 内置项做禁用或覆盖。
               </div>
             </div>
+            {mcpLoadError ? (
+              <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
+                {mcpLoadError}
+              </div>
+            ) : null}
             <section style={{ ...SS, marginBottom: 0, padding: '10px 12px', gap: '0.5rem' }}>
               <h3 style={ST}>服务器配置</h3>
               <div style={UV}>

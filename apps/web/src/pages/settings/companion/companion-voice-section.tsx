@@ -1,5 +1,5 @@
-import type { CompanionVoiceOutputMode, CompanionVoiceVariant } from '@openAwork/shared';
 import type { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
+import { SettingsOptionCardRow } from '../shared/settings-option-card-row.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
 import {
   OUTPUT_MODE_OPTIONS,
@@ -23,6 +23,9 @@ const RATE_OUTPUT_ID = 'buddy-voice-rate-output';
  * 控件：播报模式 / 语音变体 / 语速（slider + number 双绑定 + 试听）。
  * 这里只调 hook 暴露的 setter，hook 已包含 normalize、clamp、debounce 写
  * 远端的全部逻辑。试听完全在前端调用 speechSynthesis，不经过后端。
+ *
+ * 播报模式与语音变体改为卡片行：两者都是「语音变体」这类需要并列比较的
+ * 单选项，卡片能同时展示每个选项（变体还带 hint 说明），比下拉更直观。
  */
 export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
   const {
@@ -46,9 +49,10 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
 
   return (
     <section style={SS} aria-labelledby="buddy-voice-section-title">
-      <div id="buddy-voice-section-title" style={ST}>
+      {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+      <h3 id="buddy-voice-section-title" style={{ ...ST, marginTop: 0 }}>
         全局语音偏好
-      </div>
+      </h3>
       <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         这里设置的是没有专属 Agent 绑定时 Buddy 的默认播报方式。Agent 绑定面板里的语音覆盖优先生效。
       </div>
@@ -57,45 +61,35 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
         aria-disabled={!voiceOutputEnabled}
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 10,
           opacity: voiceOutputEnabled ? 1 : 0.6,
           transition: 'opacity 150ms ease',
         }}
       >
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>播报模式</span>
-          <select
-            aria-label="Buddy 播报模式"
-            disabled={!voiceOutputEnabled}
-            onChange={(event) => setVoiceOutputMode(event.target.value as CompanionVoiceOutputMode)}
-            style={IS}
-            value={voiceOutputMode}
-          >
-            {OUTPUT_MODE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SettingsOptionCardRow
+          title="播报模式"
+          options={OUTPUT_MODE_OPTIONS.map((option) => ({
+            label: option.label,
+            value: option.value,
+            disabled: !voiceOutputEnabled,
+          }))}
+          value={voiceOutputMode}
+          onChange={setVoiceOutputMode}
+          minCardWidth={180}
+        />
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>语音变体</span>
-          <select
-            aria-label="Buddy 语音变体"
-            disabled={!voiceOutputEnabled}
-            onChange={(event) => setVoiceVariant(event.target.value as CompanionVoiceVariant)}
-            style={IS}
-            value={voiceVariant}
-          >
-            {VOICE_VARIANT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value} title={option.hint}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SettingsOptionCardRow
+          title="语音变体"
+          options={VOICE_VARIANT_OPTIONS.map((option) => ({
+            label: option.label,
+            value: option.value,
+            description: option.hint,
+            disabled: !voiceOutputEnabled,
+          }))}
+          value={voiceVariant}
+          onChange={setVoiceVariant}
+          minCardWidth={180}
+        />
 
         <div style={{ display: 'grid', gap: 6 }}>
           <span

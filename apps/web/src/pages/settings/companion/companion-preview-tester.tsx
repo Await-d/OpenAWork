@@ -99,9 +99,10 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
 
   return (
     <section style={SS} aria-labelledby="buddy-preview-tester-title">
-      <div id="buddy-preview-tester-title" style={ST}>
+      {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+      <h3 id="buddy-preview-tester-title" style={{ ...ST, marginTop: 0 }}>
         试聊预览
-      </div>
+      </h3>
       <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         发一句话，让当前 Persona 用它的口吻回你一条。这里走的是 companion chat
         路由，不会写到任何会话里；用于在保存设置前感受 Buddy 风格。

@@ -90,6 +90,33 @@ function buildWorkspaceGroups(
   return groups;
 }
 
+function buildTeamSidebarSignature(
+  sessions: readonly TeamSidebarSession[],
+  workspaces: readonly TeamWorkspaceSummary[],
+): string {
+  const sessionParts = sessions.map((session) =>
+    [
+      session.id,
+      session.title,
+      session.updatedAt,
+      session.stateStatus,
+      session.workspacePath ?? '',
+      session.teamWorkspaceId ?? '',
+    ].join('\u0001'),
+  );
+  const workspaceParts = workspaces.map((workspace) =>
+    [
+      workspace.id,
+      workspace.name,
+      workspace.description ?? '',
+      workspace.visibility,
+      workspace.defaultWorkingRoot ?? '',
+      workspace.updatedAt,
+    ].join('\u0001'),
+  );
+  return `${sessionParts.join('\u0002')}\u0003${workspaceParts.join('\u0002')}`;
+}
+
 export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -100,6 +127,14 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const mountedRef = useRef(false);
+  const listSignatureRef = useRef('');
+  const listScopeRef = useRef('');
+
+  const listScope = `${accessToken ?? ''}:${gatewayUrl}`;
+  if (listScopeRef.current !== listScope) {
+    listScopeRef.current = listScope;
+    listSignatureRef.current = '';
+  }
 
   const refresh = useCallback(() => {
     setRefreshTick((value) => value + 1);
@@ -114,6 +149,7 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
 
   useEffect(() => {
     if (!accessToken || !gatewayUrl) {
+      listSignatureRef.current = '';
       setSessions([]);
       setWorkspaceGroups([]);
       setWorkspaces([]);
@@ -124,7 +160,9 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
 
     let cancelled = false;
     const client = createTeamClient(gatewayUrl);
-    setLoading(true);
+    if (listSignatureRef.current === '') {
+      setLoading(true);
+    }
     setError(null);
 
     void Promise.all([
@@ -138,9 +176,10 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
 
         const nextWorkspaces =
           workspaceResult.ok && workspaceResult.workspaces ? workspaceResult.workspaces : [];
-        setWorkspaces(nextWorkspaces);
 
         if (!runtimeResult.ok || !runtimeResult.runtime) {
+          listSignatureRef.current = '';
+          setWorkspaces(nextWorkspaces);
           setError(runtimeResult.errorMessage ?? '加载团队会话失败');
           setSessions([]);
           setWorkspaceGroups(buildWorkspaceGroups([], nextWorkspaces));
@@ -164,14 +203,20 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
             return rightTime - leftTime;
           });
 
-        setSessions(nextSessions);
-        setWorkspaceGroups(buildWorkspaceGroups(nextSessions, nextWorkspaces));
+        const nextSignature = buildTeamSidebarSignature(nextSessions, nextWorkspaces);
+        if (nextSignature !== listSignatureRef.current) {
+          listSignatureRef.current = nextSignature;
+          setWorkspaces(nextWorkspaces);
+          setSessions(nextSessions);
+          setWorkspaceGroups(buildWorkspaceGroups(nextSessions, nextWorkspaces));
+        }
         setLoading(false);
       })
       .catch((caught: unknown) => {
         if (cancelled || !mountedRef.current) {
           return;
         }
+        listSignatureRef.current = '';
         setError(caught instanceof Error ? caught.message : '网络异常，加载团队会话失败。');
         setSessions([]);
         setWorkspaceGroups([]);

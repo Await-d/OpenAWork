@@ -54,6 +54,32 @@ team 对话中，用户回退上一条消息（消息 hover 的「重试 / 编�
 - 负面：审计与用量数据可被用户按回合删除，治理视图会出现缺口；任务图节点的清理因文件 API 为异步、SQLite 事务为同步，**无法与 DB 删除共享原子性**，失败时只能告警（残留可由 `turn_rollback` 审计行的 `detail` 人工修复）。
 - 待跟踪：`team_usage_records` 补齐保留裁剪；子树的递归遍历需要上限（超限应显式失败而非部分删除）。
 
+## 附：新增的「关闭失败派发」（dismiss）语义（2026-09-21）
+
+本 ADR 正文的三条不变量（「取消 handoff 不删审计」「只增表有保留裁剪」「回退按回合硬删」）**均未被本次改动触碰**。登记于此的原因与上方那条例外相同：本文档是「取消 / 审计保留」语义的权威落点，新增动词若不登记，读者会据规范判定实现违规。
+
+**新增动词**：`dismiss`（用户主动「关闭失败项」），把一条**不可自动恢复**的 `failed` handoff 收敛为 `cancelled`。
+
+- 入口：`POST /team/handoffs/:handoffId/dismiss`（`services/agent-gateway/src/routes/team-handoffs.ts`）→ `dismissFailedHandoff`（`services/agent-gateway/src/handoff/store/handoff-store.ts`）。
+- 判定：**唯一事实来源**是 `isDismissableFailedHandoff`（同文件）；运行时投影把同一判定以 `dismissableFailure` 下发给前端，避免前后端各存一份规则而静默漂移。规则：
+  1. 仅 `state = 'failed'`；
+  2. **仍可重试的失败不可关闭**——`isRecoverableFailedHandoff` 判定「原因层面可恢复」**且**失败重试预算 `failed_retry_count` 未达 `MAX_FAILED_HANDOFF_RETRY_COUNT`（3）时才拒绝关闭（它们归补救重试 `services/agent-gateway/src/team/team-runtime-remediation-policy.ts` 所有，用户提前关闭会抢走重试机会）；**预算耗尽后即视为「无自动恢复路径」，转为可关闭**；
+  3. `executor` / `reviewer` 层级**仅在 PM2 已无法裁决时**（其父会话上不存在 `state = 'running'` 的 pm2 派发；判定口径与 `handoff/runner/watcher.ts` 的评审裁决门一致）才可关闭，否则一律拒绝；
+  4. 其余层级（典型：pm1 的 `planning-generation-failed: …；需要用户介入`）只要不可恢复即可关闭。
+- 状态转移：`failed → cancelled`，由带守卫的原子 UPDATE 完成（`WHERE id = ? AND user_id = ? AND state = 'failed'`），并以 `changes > 0` 判定是否真正命中——并发下（已被 `retryFailedHandoff` 翻回 `pending`、或重复关闭）返回 false，调用方不得据此发布 `handoff.cancelled` 事件。
+- **审计保留不变量仍然成立**：dismiss **不删除任何行**。`failure_reason` 与 `completed_at` 原样保留，另写入一条 `logHandoffControl({ action: 'cancel', reason: 'user-dismissed-failure' })` 审计行并广播 `handoff.cancelled` 事件。因此「cancelled handoff 不删除，留作 audit log」依旧为真。
+- **为什么需要它**：`capability/planning-failure.ts` 曾给**所有** `PlanningFailure` 强制追加 `；需要用户介入`，命中 `UNRECOVERABLE_FAILED_HANDOFF_REASON_SUBSTRINGS` 使 `retryFailedHandoff` 恒拒绝；`watcher.ts` 又把 `planning-generation-failed:` 前缀显式排除出 PM1→PM2 降级链，且 `cancelHandoff` 明确拒绝 `failed`。这条终态原本**没有任何用户出口**，失败诊断会永久挂在错误简报上。dismiss 补上该出口。
+
+  后续（2026-09-21）已把该尾注改为**按处置分级**：`PlanningFailure(reason, 'recoverable')` 用于瞬时失败（模型输出形状畸形、未交付完整正文），不追加尾注因而可重试；默认为 `'requires-user'`，仍会产生 `requires-user` 终态（grill 轮次耗尽、自动规划返工上限、调查证据不足、规划校验失败等）——**dismiss 是这些终态的唯一用户出口**。
+
+- **失败重试预算**：`handoff_records.failed_retry_count` + `MAX_FAILED_HANDOFF_RETRY_COUNT = 3`。它**刻意独立于 `retry_count`**（后者由 `nextPlanningRound` 与 PM1 自动规划返工上限消费，不能挪用）。存在意义：给「原因层面可恢复、但实际注定失败」的派发一个有界终点——否则 `retryFailedHandoff` 会无限把它重置为 `pending`，持续消耗额度且永不收敛（此前 `heartbeat-timeout-max-retry-exceeded` 因不递增 `retry_count` 而无限空转，现已归入不可恢复前缀）。预算耗尽 ⇒ 不可重试 ⇒ 可关闭，保证任何终态失败都仍有用户出口。
+- 与「回合回退」的区别：回退是**按回合硬删**（正文记录的例外）；dismiss 是**单条终态收敛，永不删除**。二者不冲突。
+
 ## 一致性要求
 
 任何后续修改「取消 / 回退 / 审计保留」语义的改动，必须先更新本 ADR，再更新上述三篇规范，避免规范与实现再次背离。
+
+已登记的语义变更：
+
+1. 回合回退按回合硬删审计行（2026-09-18，正文与其「为什么这是一个需要显式记录的例外」）。
+2. 新增 `dismiss` 动词，把不可自动恢复的失败派发收敛为 `cancelled`，**不删除任何行**（2026-09-21，见上节「附」）。

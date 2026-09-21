@@ -1,4 +1,5 @@
-import { dirname, resolve } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   hasWorkspacePersistentPermission,
@@ -6,6 +7,7 @@ import {
   upsertWorkspacePermanentPermission,
   writeWorkspacePermissionConfig,
 } from '@openAwork/agent-core';
+import { createPlatformAdapter } from '@openAwork/platform-adapter';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
@@ -121,17 +123,34 @@ export function requiresBoundSessionWorkspace(sessionId: string): boolean {
   );
 }
 
+const UNBOUND_WORKSPACE_DIR_NAME = 'OpenAWork';
+
 /**
- * 未绑定工作区会话的运行时回退目录：各系统桌面端默认数据目录
- *（Windows: %LOCALAPPDATA%/OpenAWork/agent-gateway，
- *  macOS: ~/Library/Application Support/OpenAWork/data/agent-gateway，
- *  Linux: ~/.local/share/OpenAWork/agent-gateway）。
+ * 未绑定工作区会话的运行时回退目录：各操作系统的「文档目录」下的 OpenAWork 子目录
+ *（Windows: %USERPROFILE%\Documents\OpenAWork，
+ *  macOS: ~/Documents/OpenAWork，
+ *  Linux: $XDG_DOCUMENTS_DIR 或 ~/Documents 下的 OpenAWork）。
  *
- * 仅未绑定会话可回退；已绑定 workingDirectory 的会话必须使用自身路径，
- * 不允许静默改写到其它目录。
+ * 该目录与网关数据目录（OPENAWORK_DATA_DIR / platform data dir）完全隔离，
+ * 不受 OPENAWORK_DATA_DIR 影响。Android 无标准公共文档目录，保持网关数据目录回退。
+ *
+ * 仅未绑定会话可回退；已绑定 workingDirectory 的会话必须使用自身路径，不允许静默改写。
  */
 export function resolveUnboundSessionWorkspaceFallback(): string {
-  return resolveGatewayDataDir();
+  const adapter = createPlatformAdapter();
+  if (adapter.getPlatform() === 'android') {
+    return resolveGatewayDataDir();
+  }
+  return join(adapter.getDocumentsDir(), UNBOUND_WORKSPACE_DIR_NAME);
+}
+
+/**
+ * 解析并确保未绑定会话回退目录存在（幂等），供真实文件系统入口使用。
+ */
+export function ensureUnboundSessionWorkspaceDirectory(): string {
+  const fallbackDir = resolveUnboundSessionWorkspaceFallback();
+  mkdirSync(fallbackDir, { recursive: true });
+  return fallbackDir;
 }
 
 /**
@@ -186,7 +205,7 @@ export function rewriteUnboundPlaceholderPath(sessionId: string, path: string): 
   if (!isFilesystemRootOrPlaceholderPath(path)) {
     return path;
   }
-  return resolveUnboundSessionWorkspaceFallback();
+  return ensureUnboundSessionWorkspaceDirectory();
 }
 
 export function assertSessionWorkingDirectory(sessionId: string): string {
@@ -195,9 +214,9 @@ export function assertSessionWorkingDirectory(sessionId: string): string {
     if (requiresBoundSessionWorkspace(sessionId)) {
       throw new Error('当前会话未绑定工作区，请先设置 workingDirectory。');
     }
-    // 普通 chat 未绑定工作区：回退到当前主机桌面端默认数据目录，
+    // 普通 chat 未绑定工作区：回退到当前主机系统文档目录，
     // 避免落到盘符根（/ 或 C:\）触发跨平台路径错误。
-    return resolveUnboundSessionWorkspaceFallback();
+    return ensureUnboundSessionWorkspaceDirectory();
   }
   // 已绑定：原样返回，不做任何回退。
   return workingDirectory;

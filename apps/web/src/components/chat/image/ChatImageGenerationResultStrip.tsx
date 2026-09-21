@@ -1,6 +1,8 @@
 import React from 'react';
+import { ChatImageGenerationResultThumbnail } from './ChatImageGenerationResultThumbnail.js';
 
 export interface ChatImageGenerationResultStripProps {
+  artifactId?: string;
   artifactTitle: string;
   modelLabel: string;
   onContinueEditing?: () => void;
@@ -8,6 +10,7 @@ export interface ChatImageGenerationResultStripProps {
 }
 
 export function ChatImageGenerationResultStrip({
+  artifactId,
   artifactTitle,
   modelLabel,
   onContinueEditing,
@@ -31,7 +34,18 @@ export function ChatImageGenerationResultStrip({
         flexWrap: 'wrap',
       }}
     >
-      <div style={{ minWidth: 0, display: 'grid', gap: 3 }}>
+      {artifactId && (
+        <ChatImageGenerationResultThumbnail artifactId={artifactId} artifactTitle={artifactTitle} />
+      )}
+
+      <div
+        style={{
+          minWidth: 0,
+          display: 'grid',
+          gap: 3,
+          ...(artifactId ? { flex: '1 1 200px' } : {}),
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span
             style={{

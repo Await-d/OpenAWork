@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  desktopAutomationToolDefinition,
   type DesktopAutomationManager,
   runDesktopAutomationTool,
 } from '../../tools/desktop-automation.js';
@@ -13,7 +14,7 @@ class FakeDesktopAutomationManager implements DesktopAutomationManager {
   readonly reload = vi.fn(async () => {});
   readonly click = vi.fn(async (_selector: string) => {});
   readonly type = vi.fn(async (_selector: string, _text: string) => {});
-  readonly press = vi.fn(async (_selector: string, _key: string) => {});
+  readonly press = vi.fn(async (_selector: string | undefined, _key: string) => {});
   readonly scroll = vi.fn(async (_direction: 'up' | 'down', _amount?: number) => {});
   readonly wait = vi.fn(async (_input: { readonly ms?: number; readonly selector?: string }) => {});
   readonly content = vi.fn(async () => '<html><body>ready</body></html>');
@@ -62,5 +63,31 @@ describe('runDesktopAutomationTool', () => {
         },
       }),
     );
+  });
+
+  it('press 输入允许省略 selector 并转发为全局按键', async () => {
+    const manager = new FakeDesktopAutomationManager();
+    const parsed = desktopAutomationToolDefinition.inputSchema.parse({ action: 'press', key: 'l' });
+
+    await expect(runDesktopAutomationTool(parsed, manager)).resolves.toBe(
+      JSON.stringify({ ok: true }),
+    );
+
+    expect(manager.press).toHaveBeenCalledWith(undefined, 'l');
+  });
+
+  it('press 提供 selector 时仍转发元素级按键', async () => {
+    const manager = new FakeDesktopAutomationManager();
+    const parsed = desktopAutomationToolDefinition.inputSchema.parse({
+      action: 'press',
+      selector: '#x',
+      key: 'Enter',
+    });
+
+    await expect(runDesktopAutomationTool(parsed, manager)).resolves.toBe(
+      JSON.stringify({ ok: true }),
+    );
+
+    expect(manager.press).toHaveBeenCalledWith('#x', 'Enter');
   });
 });

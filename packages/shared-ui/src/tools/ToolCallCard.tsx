@@ -776,6 +776,14 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
     return `${firstKey}：${firstValue.slice(0, 120)}`;
   }
 
+  if (firstValue !== null && typeof firstValue === 'object') {
+    // 对象 / 数组不要序列化成 JSON 提示，改用键名或项数概述。
+    const overview = Array.isArray(firstValue)
+      ? `${firstValue.length} 项`
+      : Object.keys(firstValue).slice(0, 4).join('、');
+    return overview ? `${firstKey}：${overview}` : firstKey;
+  }
+
   return `${firstKey}：${stringifyValue(firstValue).slice(0, 120)}`;
 }
 
@@ -812,8 +820,22 @@ function summarizeOutputPreview(output: unknown): string | undefined {
     }
   }
 
-  const serialized = stringifyValue(output).replace(/\s+/g, ' ').trim();
-  return serialized.length > 0 ? truncateText(serialized, 120) : undefined;
+  if (typeof output === 'number' || typeof output === 'boolean') {
+    return String(output);
+  }
+
+  if (Array.isArray(output)) {
+    return output.length > 0 ? `${output.length} 项` : undefined;
+  }
+
+  if (record) {
+    const keys = Object.keys(record);
+    if (keys.length > 0) {
+      return truncateText(`字段：${keys.slice(0, 4).join('、')}`, 120);
+    }
+  }
+
+  return undefined;
 }
 
 function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] | undefined {

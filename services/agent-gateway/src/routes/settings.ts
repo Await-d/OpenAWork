@@ -34,6 +34,7 @@ import {
   normalizeSingleProviderForTest,
   parseStoredDefaultThinking,
   parseStoredImageGenerationDefaults,
+  parseStoredSubagentModelPolicy,
   providerConnectivityTestBodySchema,
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
@@ -903,6 +904,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'image_generation_defaults'`,
         [user.sub],
       );
+      const subagentPolicyRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'subagent_model_policy'`,
+        [user.sub],
+      );
       loadStep.succeed();
 
       const materializeStep = child('materialize');
@@ -917,6 +922,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const imageGenerationDefaults = parseStoredImageGenerationDefaults(
         parseStoredJson(imageDefaultsRow?.value),
       );
+      const subagentModelPolicy = parseStoredSubagentModelPolicy(
+        parseStoredJson(subagentPolicyRow?.value),
+      );
       materializeStep.succeed(undefined, { providers: providers.length });
       step.succeed(undefined, { providers: providers.length });
 
@@ -925,6 +933,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         activeSelection,
         defaultThinking,
         imageGenerationDefaults,
+        subagentModelPolicy,
       });
     },
   );
@@ -949,11 +958,20 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'image_generation_defaults'`,
         [user.sub],
       );
+      const subagentPolicyRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'subagent_model_policy'`,
+        [user.sub],
+      );
       loadSelectionStep.succeed(undefined, { found: selectionRow !== undefined });
 
       const parseStep = child('parse-body');
       const parsed = parseBody(providerSettingsBodySchema, request.body);
       parseStep.succeed();
+
+      const storedSubagentPolicy = parseStoredSubagentModelPolicy(
+        parseStoredJson(subagentPolicyRow?.value),
+      );
+      const subagentModelPolicy = parsed.subagentModelPolicy ?? storedSubagentPolicy;
 
       const materializeStep = child('materialize');
       const mergedActiveSelection = mergeActiveSelectionPreservingStored({
@@ -1007,6 +1025,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       );
       saveImageDefaultsStep.succeed();
 
+      const saveSubagentPolicyStep = child('save-subagent-model-policy');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'subagent_model_policy', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(subagentModelPolicy)],
+      );
+      saveSubagentPolicyStep.succeed();
+
       // 方案 3：配置变更后 invalidate catalog 缓存
       invalidateCatalog(user.sub);
 
@@ -1017,6 +1043,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         activeSelection,
         defaultThinking,
         imageGenerationDefaults,
+        subagentModelPolicy,
       });
     },
   );

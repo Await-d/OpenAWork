@@ -58,6 +58,7 @@ interface HandoffRow {
   completed_at: string | null;
   failure_reason: string | null;
   retry_count: number;
+  failed_retry_count: number;
   idempotency_key: string | null;
   client_request_id: string | null;
   paused: number;
@@ -114,11 +115,15 @@ const UNRECOVERABLE_FAILED_HANDOFF_REASON_PREFIXES = [
   'Constitution Check 硬门禁未通过',
   'Spec Review 未通过',
   'quality-review-degraded-summary-failed:',
+  'heartbeat-timeout-max-retry-exceeded',
 ] as const;
 
 const UNRECOVERABLE_FAILED_HANDOFF_REASON_SUBSTRINGS = ['需要用户介入'] as const;
 const AUTO_RETRY_BASE_DELAY_MS = 10_000;
 const AUTO_RETRY_MAX_DELAY_MS = 60_000;
+
+/** 失败派发的重试预算：原因层面可恢复、但实际注定失败的派发必须在有限次重试后收敛，否则会无限重试并持续消耗额度。 */
+export const MAX_FAILED_HANDOFF_RETRY_COUNT = 3;
 
 function normalizeAvailableAtMs(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -870,6 +875,7 @@ export function retryRunningHandoffById(handoffId: string): boolean {
 
 /**
  * 用户主动 cancel：从任意非终止状态都允许过渡到 cancelled。
+ * 终态失败（failed）不走本函数——由 dismissFailedHandoff 关闭。
  */
 export function cancelHandoff(input: { userId: string; handoffId: string }): boolean {
   const row = sqliteGet<HandoffRow>(
@@ -889,6 +895,108 @@ export function cancelHandoff(input: { userId: string; handoffId: string }): boo
     [input.handoffId, input.userId],
   );
   return true;
+}
+
+/**
+ * 该用户当前仍有 PM2 裁决者的 pm2 会话集合：这些会话上存在 state='running' 的 pm2 派发，
+ * executor / reviewer 的失败会由 PM2 质量评审统一处置，用户不得抢先关闭。
+ * 判定口径与 watcher 的评审裁决门保持一致（仅 'running'）；按 user_id 限定，
+ * 避免把其它用户的 pm2 会话当成自己的裁决者（会话 id 虽为 UUID，但不应依赖其唯一性）。
+ */
+export function listRunningPm2AdjudicatorSessionIds(userId: string): ReadonlySet<string> {
+  const rows = sqliteAll<{ to_session_id: string | null }>(
+    `SELECT DISTINCT to_session_id FROM handoff_records
+      WHERE user_id = ? AND to_role_layer = 'pm2' AND state = 'running'
+        AND to_session_id IS NOT NULL`,
+    [userId],
+  );
+  return new Set(rows.flatMap((row) => (row.to_session_id ? [row.to_session_id] : [])));
+}
+
+/**
+ * 失败派发是否可由用户「关闭」。这是唯一判定源：
+ * dismissFailedHandoff 与运行时投影 / 事件下发必须都走它，避免前后端两份规则漂移。
+ *
+ * 规则：
+ * 1. 仅 state='failed'；
+ * 2. 仍可重试的失败不可关闭 —— 原因层面可恢复且重试预算（failed_retry_count）尚未耗尽时，
+ *    关闭会抢走重试机会；一旦原因不可恢复或预算耗尽，失败就收敛为可关闭的终态；
+ * 3. executor / reviewer 仅在 PM2 已无法裁决（其父会话上没有 running 的 pm2 派发）时才可关闭；
+ * 4. 其余层级（如 pm1 规划失败）只要不可再重试即可关闭。
+ */
+export function isDismissableFailedHandoff(input: {
+  state: string;
+  toRoleLayer: string;
+  failureReason?: string | null;
+  payloadJson?: string | null;
+  fromSessionId?: string | null;
+  runningPm2SessionIds: ReadonlySet<string>;
+  failedRetryCount: number;
+  maxRetry?: number;
+}): boolean {
+  if (input.state !== 'failed') return false;
+  if (
+    isRecoverableFailedHandoff({
+      failureReason: input.failureReason,
+      payloadJson: input.payloadJson,
+      toRoleLayer: input.toRoleLayer,
+    }) &&
+    input.failedRetryCount < (input.maxRetry ?? MAX_FAILED_HANDOFF_RETRY_COUNT)
+  ) {
+    return false; // 仍可重试 → 不允许提前关闭（重试机会不该被用户或系统抢走）
+  }
+  if (input.toRoleLayer === 'executor' || input.toRoleLayer === 'reviewer') {
+    const orphaned = !input.fromSessionId || !input.runningPm2SessionIds.has(input.fromSessionId);
+    return orphaned;
+  }
+  return true;
+}
+
+/**
+ * 用户主动「关闭」一条已失败且无自动恢复路径的派发：failed → cancelled。
+ *
+ * 与 cancelHandoff 的区别：cancelHandoff 面向非终止态（运行中的派发），本函数专门
+ * 处理终态失败（例如 pm1 `planning-generation-failed: …；需要用户介入` 这类被
+ * 判定不可自动恢复的失败），让用户能清掉永久挂着的失败诊断。
+ *
+ * 仍可重试的失败（原因层面可恢复且重试预算未耗尽）由自动补救重试
+ * （team-runtime-remediation-policy）接管，用户提前关闭会抢走重试机会，因此显式拒绝；
+ * 预算耗尽后失败不再可重试，转为可关闭终态。
+ *
+ * executor / reviewer 子派发的失败由 PM2 质量评审统一决策（重派 / 退回 PM1 / 接管），
+ * 仅当 PM2 已无法裁决——其父会话上没有 state='running' 的 pm2 派发（判定口径与
+ * watcher 的评审裁决门一致），即子派发已「孤立」时才允许用户关闭。判定统一走
+ * isDismissableFailedHandoff，保证与运行时投影给出的可关闭状态一致。
+ *
+ * 返回值反映 UPDATE 是否真正命中并修改了行：并发场景下（例如同时 retry 把状态
+ * 翻回 pending，或重复 dismiss 已 cancelled 的记录）返回 false，调用方不应据此
+ * 发布 handoff.cancelled 事件。
+ */
+export function dismissFailedHandoff(input: { userId: string; handoffId: string }): boolean {
+  const row = sqliteGet<HandoffRow>(
+    `SELECT state, to_role_layer, failure_reason, payload_json, from_session_id, failed_retry_count
+       FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    [input.handoffId, input.userId],
+  );
+  if (!row) return false;
+  const dismissable = isDismissableFailedHandoff({
+    state: row.state,
+    toRoleLayer: row.to_role_layer,
+    failureReason: row.failure_reason,
+    payloadJson: row.payload_json,
+    fromSessionId: row.from_session_id,
+    runningPm2SessionIds: listRunningPm2AdjudicatorSessionIds(input.userId),
+    failedRetryCount: row.failed_retry_count,
+  });
+  if (!dismissable) return false;
+  const changed = sqliteRunWithChanges(
+    `UPDATE handoff_records
+        SET state = 'cancelled',
+            updated_at = datetime('now')
+      WHERE id = ? AND user_id = ? AND state = 'failed'`,
+    [input.handoffId, input.userId],
+  );
+  return changed > 0;
 }
 
 export function pauseHandoff(input: {
@@ -945,13 +1053,25 @@ export function resumeHandoff(input: { userId: string; handoffId: string }): boo
   return true;
 }
 
+/**
+ * 把一条原因层面可恢复的 failed 派发退回 pending，供用户 / 客户端补救重试。
+ *
+ * 重试预算：failed_retry_count 是独立于 retry_count 的失败重试计数器。retry_count 由
+ * nextPlanningRound / PM1 自动规划返工上限消费，不能挪作他用；本函数用 failed_retry_count
+ * 给「原因可恢复但实际注定失败」的派发设上限，达到 MAX_FAILED_HANDOFF_RETRY_COUNT 后
+ * 返回 false，让失败收敛为可关闭的终态，避免无限重试持续消耗额度。
+ */
 export function retryFailedHandoff(input: { userId: string; handoffId: string }): boolean {
   const row = sqliteGet<HandoffRow>(
-    `SELECT * FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
+    `SELECT state, to_role_layer, failure_reason, payload_json, failed_retry_count
+       FROM handoff_records WHERE id = ? AND user_id = ? LIMIT 1`,
     [input.handoffId, input.userId],
   );
   if (!row) return false;
   if (row.state !== 'failed') {
+    return false;
+  }
+  if (row.failed_retry_count >= MAX_FAILED_HANDOFF_RETRY_COUNT) {
     return false;
   }
   if (
@@ -977,6 +1097,7 @@ export function retryFailedHandoff(input: { userId: string; handoffId: string })
            to_session_id = NULL,
            payload_json = ?,
            available_at_ms = NULL,
+           failed_retry_count = failed_retry_count + 1,
            updated_at = datetime('now')
      WHERE id = ? AND user_id = ? AND state = 'failed'`,
     [payloadJson, input.handoffId, input.userId],

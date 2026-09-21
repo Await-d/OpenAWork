@@ -329,6 +329,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_idempotency
               （由 target session 主动检查）
 ```
 
+**终态收敛补充（2026-09-21）**：除上述转移外，另允许一条 **`failed → cancelled`** 的「用户关闭失败项」（dismiss）。它**只对已无自动恢复路径的失败开放**（`isDismissableFailedHandoff` 判定：仅 `failed`；若 `isRecoverableFailedHandoff` 为真**且**失败重试预算 `failed_retry_count` 未耗尽（`MAX_FAILED_HANDOFF_RETRY_COUNT = 3`）则拒绝——仍可重试者不许提前关闭，预算耗尽后转为可关闭；`executor`/`reviewer` 仅在其父会话上不存在 `state='running'` 的 pm2 派发时才允许），用于消除原本没有任何用户出口的终态失败——典型是 pm1 的 `planning-generation-failed: …；需要用户介入`。`PlanningFailure` 支持 `'recoverable'` 处置：瞬时失败（模型输出形状畸形 / 未交付完整正文）不追加 `；需要用户介入`，因而可被补救重试。该 dismiss 路径**不删除任何行**，语义登记见 `adr-turn-rollback-hard-delete.md` 的「附」节。
+
 **状态转移规则**（必须由原子 SQL 完成，不允许应用层判断）：
 
 ```sql
@@ -357,6 +359,15 @@ WHERE id = :id AND state = 'running';
 UPDATE handoff_records
 SET state = 'cancelled', completed_at = :now
 WHERE id = :id AND cancel_requested = 1 AND state IN ('pending', 'claimed', 'running');
+
+-- failed → cancelled（用户「关闭失败项」/ dismiss；2026-09-21 新增）
+-- 只允许不可自动恢复的失败：isRecoverableFailedHandoff 为真时必须在应用层先拒绝，
+-- executor/reviewer 还要求其父会话上不存在 state='running' 的 pm2 派发（PM2 仍在裁决则拒绝）。
+UPDATE handoff_records
+SET state = 'cancelled', updated_at = :now
+WHERE id = :id AND user_id = :uid AND state = 'failed';
+-- 必须检查 changes() = 1：并发下可能已被 retryFailedHandoff 翻回 pending，或已被重复关闭；
+-- 未命中时调用方不得发布 handoff.cancelled、不得写 substate='cancelled'。
 ```
 
 #### 1.1.3 payload_json 标准结构
@@ -915,7 +926,7 @@ T+10s  Watcher 检测到 handoff completed → 触发后续 d 层 handoff
 
 - spec/plan/tasks 等 markdown：**保留**（用户可参考）
 - e/f/g 已写入的代码 patch：**不自动回滚**（需用户手动 git revert）
-- audit log：cancelled handoff 不删除（**例外**：回合回退会按回合删除审计行，见 `adr-turn-rollback-hard-delete.md`）
+- audit log：cancelled handoff 不删除（**例外**：回合回退会按回合删除审计行，见 `adr-turn-rollback-hard-delete.md`）。`cancelled` 有两个来源——运行中的 cancel，以及用户对不可自动恢复的失败派发执行 dismiss（`failed → cancelled`，同样不删行，另写一条 `logHandoffControl(action:'cancel', reason:'user-dismissed-failure')` 审计行）。
 
 ### 3.2 pause 级联流程
 

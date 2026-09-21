@@ -14,6 +14,7 @@
  */
 
 import { create } from 'zustand';
+import { isHandledReviewDispositionPayload } from '@openAwork/web-client';
 import type { RollbackReceipt } from '@openAwork/web-client';
 import { useTeamUsageStore, useTeamToolCallStore } from './team-usage.js';
 import { applyRollbackReceipt } from './rollback-tombstones.js';
@@ -58,6 +59,10 @@ export interface HandoffEntry {
   retryCount?: number;
   /** 后端判定的可恢复失败标记。 */
   recoverableFailure?: boolean;
+  /** 后端判定的「可由用户关闭」标记（不可恢复、且非 PM2 仍在裁决的 executor/reviewer 失败）。 */
+  dismissableFailure?: boolean;
+  /** PM2 评审处置已被用户确认（redispatch / 退回 PM1 / 接管），该失败项不应再出现在错误简报中。 */
+  reviewDispositionHandled?: boolean;
   /** 该 handoff 的请求载荷摘要（来自事件 payload 的意图/下一步文案，可选）。 */
   summary?: string;
   updatedAt: number;
@@ -84,6 +89,7 @@ export type TeamEventsConnectionState =
 interface TeamRuntimeSnapshotHandoffRecord {
   claimedAt?: string | null;
   completedAt?: string | null;
+  dismissableFailure?: boolean;
   failureReason?: string | null;
   fromRoleLayer: string;
   fromSessionId: string;
@@ -236,6 +242,12 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
         typeof event.payload['recoverableFailure'] === 'boolean'
           ? event.payload['recoverableFailure']
           : existing.recoverableFailure;
+      // dismissableFailure 只随快照下发（事件总线不携带）：事件缺省时保留已水合的值，
+      // 仅当事件显式携带 boolean 时才覆盖。
+      const nextDismissableFailure =
+        typeof event.payload['dismissableFailure'] === 'boolean'
+          ? event.payload['dismissableFailure']
+          : existing.dismissableFailure;
 
       // 派生 startedAt：第一次进入 running/claimed 时记录
       const isStartingNow =
@@ -263,6 +275,9 @@ export const useHandoffStore = create<HandoffStoreState>((set) => ({
         ...(nextRetryCount !== undefined ? { retryCount: nextRetryCount } : {}),
         ...(nextRecoverableFailure !== undefined
           ? { recoverableFailure: nextRecoverableFailure }
+          : {}),
+        ...(nextDismissableFailure !== undefined
+          ? { dismissableFailure: nextDismissableFailure }
           : {}),
         ...(existing.summary === undefined && incomingSummary ? { summary: incomingSummary } : {}),
       });
@@ -994,6 +1009,12 @@ export function hydrateTeamRuntimeStores(input: {
         ...(typeof record.retryCount === 'number' ? { retryCount: record.retryCount } : {}),
         ...(typeof record.recoverableFailure === 'boolean'
           ? { recoverableFailure: record.recoverableFailure }
+          : {}),
+        ...(typeof record.dismissableFailure === 'boolean'
+          ? { dismissableFailure: record.dismissableFailure }
+          : {}),
+        ...(isHandledReviewDispositionPayload(record.payload)
+          ? { reviewDispositionHandled: true }
           : {}),
         ...(summaryFromSnapshot ? { summary: summaryFromSnapshot } : {}),
         updatedAt,

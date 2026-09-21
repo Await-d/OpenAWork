@@ -10,6 +10,8 @@ import {
 import { SS, ST } from '../shared/settings-section-styles.js';
 import { SettingsOptionCardRow } from '../shared/settings-option-card-row.js';
 import type { SettingsOptionCard } from '../shared/settings-option-card-row.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
+import { SettingsListRow } from '../shared/settings-row.js';
 import {
   useDisplayPreferencesStore,
   type ThemeMode,
@@ -23,49 +25,6 @@ import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 import { CurrentUserProfileSection } from './current-user-profile-section.js';
 
-// ── Toggle 开关组件 ─────────────────────────────────────────
-
-interface ToggleProps {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}
-
-const Toggle: React.FC<ToggleProps> = ({ checked, onChange, label }) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    aria-label={label}
-    onClick={() => onChange(!checked)}
-    style={{
-      position: 'relative',
-      width: 38,
-      height: 22,
-      borderRadius: 999,
-      border: 'none',
-      background: checked ? 'var(--accent)' : 'var(--bg-surface)',
-      cursor: 'pointer',
-      flexShrink: 0,
-      transition: 'background 180ms ease',
-      boxShadow: checked ? 'none' : 'inset 0 0 0 1px var(--border-default)',
-    }}
-  >
-    <span
-      style={{
-        position: 'absolute',
-        top: 3,
-        left: checked ? 19 : 3,
-        width: 16,
-        height: 16,
-        borderRadius: '50%',
-        background: checked ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
-        transition: 'left 180ms ease, background 180ms ease',
-      }}
-    />
-  </button>
-);
-
 // ── 设置行组件 ──────────────────────────────────────────────
 
 interface SettingRowProps {
@@ -76,22 +35,9 @@ interface SettingRowProps {
 }
 
 const SettingRow: React.FC<SettingRowProps> = ({ title, description, checked, onChange }) => (
-  <div
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 16,
-      padding: '10px 0',
-      borderBottom: '1px solid var(--border-subtle)',
-    }}
-  >
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{description}</span>
-    </div>
-    <Toggle checked={checked} onChange={onChange} label={title} />
-  </div>
+  <SettingsListRow title={title} description={description}>
+    <SettingsToggle checked={checked} onChange={onChange} ariaLabel={title} />
+  </SettingsListRow>
 );
 
 // ── Section 容器 ────────────────────────────────────────────
@@ -183,55 +129,6 @@ const THEME_STYLE_OPTIONS: {
     swatches: ['#050e12', '#22d3ee', '#fb923c'],
   },
 ];
-
-const THEME_SELECT: React.CSSProperties = {
-  background: 'var(--bg-overlay)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 6,
-  padding: '6px 10px',
-  fontSize: 13,
-  color: 'var(--fg-strong)',
-  cursor: 'pointer',
-  outline: 'none',
-};
-
-interface SelectRowProps {
-  title: string;
-  description: string;
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-}
-
-const SelectRow: React.FC<SelectRowProps> = ({ title, description, value, options, onChange }) => (
-  <div
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 16,
-      padding: '10px 0',
-      borderBottom: '1px solid var(--border-subtle)',
-    }}
-  >
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{description}</span>
-    </div>
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      style={THEME_SELECT}
-      aria-label={title}
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  </div>
-);
 
 // ── 主组件 ──────────────────────────────────────────────────
 
@@ -365,17 +262,17 @@ export function DisplayTabContent() {
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)' }}>
                 消息统计信息
-              </span>
+              </div>
               <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                 消息底部的请求序号、耗时、Token 用量等统计信息
               </span>
             </div>
-            <Toggle
+            <SettingsToggle
               checked={store.showMetaLine}
               onChange={store.setShowMetaLine}
-              label="消息统计信息"
+              ariaLabel="消息统计信息"
             />
           </div>
           {store.showMetaLine && (
@@ -410,18 +307,19 @@ export function DisplayTabContent() {
       <section style={SS}>
         <h3 style={ST}>外观</h3>
         <ThemeStyleRow />
-        <SelectRow
+        <SettingsOptionCardRow
           title="主题模式"
           description="选择界面的明暗模式（跟随系统 / 浅色 / 深色）"
-          value={store.themeMode}
           options={THEME_OPTIONS}
-          onChange={(v) => store.setThemeMode(v as ThemeMode)}
+          value={store.themeMode}
+          onChange={store.setThemeMode}
         />
         <FileIconThemeRow />
         <LayoutModeRow />
       </section>
 
       <section style={SS}>
+        <h3 style={ST}>恢复默认</h3>
         <div
           style={{
             display: 'flex',
@@ -430,14 +328,7 @@ export function DisplayTabContent() {
             gap: 16,
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-strong)' }}>
-              恢复默认
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-              将全部显示设置重置为初始值
-            </span>
-          </div>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>将全部显示设置重置为初始值</span>
           <button type="button" style={RESET_BUTTON} onClick={() => store.resetToDefaults()}>
             重置全部
           </button>
@@ -462,13 +353,19 @@ function LayoutModeRow() {
   const layoutMode = useUIStateStore((s) => s.workbenchLayoutMode);
   const setLayoutMode = useUIStateStore((s) => s.setWorkbenchLayoutMode);
 
+  const options: SettingsOptionCard<WorkbenchLayoutMode>[] = LAYOUT_OPTIONS.map((opt) => ({
+    value: opt.value,
+    label: opt.label,
+    description: opt.description,
+  }));
+
   return (
-    <SelectRow
+    <SettingsOptionCardRow
       title="工作台布局"
       description="切换界面布局模式（融合 / 经典），切换后即时生效"
+      options={options}
       value={layoutMode}
-      options={LAYOUT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
-      onChange={(v) => setLayoutMode(v as WorkbenchLayoutMode)}
+      onChange={setLayoutMode}
     />
   );
 }
@@ -658,7 +555,7 @@ const TOOL_EXPAND_DESCRIPTIONS: Record<ToolExpandCategory, string> = {
 };
 
 /**
- * 工具类别折叠行——与通用 SettingRow 不同，右侧除了 Toggle 还附带
+ * 工具类别折叠行——与通用 SettingRow 不同，右侧除了开关还附带
  * 明确的文字标签（"默认展开" / "默认折叠"），消除开/关语义歧义。
  */
 function ToolExpandRow({
@@ -706,10 +603,10 @@ function ToolExpandRow({
         >
           {expanded ? '默认展开' : '默认折叠'}
         </span>
-        <Toggle
+        <SettingsToggle
           checked={expanded}
-          onChange={disabled ? () => {} : onChange}
-          label={`${title} ${expanded ? '默认展开' : '默认折叠'}`}
+          onChange={disabled ? () => undefined : onChange}
+          ariaLabel={`${title} ${expanded ? '默认展开' : '默认折叠'}`}
         />
       </div>
     </div>
@@ -753,10 +650,10 @@ function ReasoningToolSection() {
               AI 思考过程超过 3 行时默认展开，而非折叠
             </span>
           </div>
-          <Toggle
+          <SettingsToggle
             checked={store.reasoningExpandedByDefault}
             onChange={store.setReasoningExpandedByDefault}
-            label="推理过程默认展开"
+            ariaLabel="推理过程默认展开"
           />
         </div>
       </div>
@@ -781,14 +678,18 @@ function ReasoningToolSection() {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)' }}>
               工具调用默认展开
-            </span>
+            </div>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
               开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。运行中和失败的工具始终自动展开。
             </span>
           </div>
-          <Toggle checked={globalExpand} onChange={setGlobalExpand} label="工具调用默认展开" />
+          <SettingsToggle
+            checked={globalExpand}
+            onChange={setGlobalExpand}
+            ariaLabel="工具调用默认展开"
+          />
         </div>
         {globalExpand && (
           <div
@@ -823,96 +724,70 @@ function DialogueModeSection() {
   const defaultDialogueMode = useDisplayPreferencesStore((s) => s.defaultDialogueMode);
   const setDefaultDialogueMode = useDisplayPreferencesStore((s) => s.setDefaultDialogueMode);
 
+  const options: SettingsOptionCard<DialogueMode>[] = DIALOGUE_MODE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.label,
+    description: option.description,
+  }));
+  const selected = DIALOGUE_MODE_OPTIONS.find((option) => option.value === defaultDialogueMode);
+
   return (
     <section style={SS}>
       <h3 style={ST}>默认对话模式</h3>
-      <p
-        style={{
-          fontSize: 13,
-          color: 'var(--fg-muted)',
-          lineHeight: 1.6,
-          marginBottom: 8,
-        }}
-      >
-        新建会话时使用的默认对话模式。已有会话从其元数据恢复，不受此项影响。
-      </p>
-      <div style={SECTION_LIST}>
-        {DIALOGUE_MODE_OPTIONS.map((option, i) => {
-          const active = defaultDialogueMode === option.value;
-          const isLast = i === DIALOGUE_MODE_OPTIONS.length - 1;
-          return (
-            <div
-              key={option.value}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 20,
-                padding: '12px 0',
-                borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
-              }}
-            >
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}
-              >
+      <SettingsOptionCardRow
+        description="新建会话时使用的默认对话模式。已有会话从其元数据恢复，不受此项影响。"
+        options={options}
+        value={defaultDialogueMode}
+        onChange={setDefaultDialogueMode}
+        minCardWidth={200}
+      />
+      {selected && (
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            background: 'var(--bg-overlay)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 8,
+            padding: '12px 14px',
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+            {selected.label} · 工作规则
+          </span>
+          <ul
+            style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            {selected.details.map((detail) => (
+              <li key={detail} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 <span
+                  aria-hidden
                   style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: active ? 'var(--accent)' : 'var(--fg-strong)',
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: 'var(--accent)',
+                    flexShrink: 0,
+                    marginTop: 6,
                   }}
-                >
-                  {option.label} — {option.description}
-                </span>
+                />
                 <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                  {option.details.join(' · ')}
+                  {detail}
                 </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDefaultDialogueMode(option.value as DialogueMode)}
-                aria-pressed={active}
-                aria-label={option.label}
-                style={{
-                  position: 'relative',
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
-                  padding: 0,
-                  outline: 'none',
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-muted)';
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                {active && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: 'var(--accent)',
-                      transition: 'opacity 200ms ease',
-                    }}
-                  />
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -936,89 +811,119 @@ const MESSAGE_LAYOUT_OPTIONS: {
   },
 ];
 
+/** 线框行：统一模式两行都在左，分列模式用户行整体靠右且内容条用 accent 色。 */
+const MESSAGE_LAYOUT_PREVIEW_ROWS: Record<
+  MessageLayoutMode,
+  readonly { avatarSide: 'left' | 'right'; widths: readonly number[]; user: boolean }[]
+> = {
+  unified: [
+    { avatarSide: 'left', widths: [70, 46], user: false },
+    { avatarSide: 'left', widths: [56, 36], user: false },
+  ],
+  split: [
+    { avatarSide: 'left', widths: [70, 46], user: false },
+    { avatarSide: 'right', widths: [56, 36], user: true },
+  ],
+};
+
+function PreviewRow({
+  avatarSide,
+  widths,
+  user = false,
+}: {
+  avatarSide: 'left' | 'right';
+  widths: readonly number[];
+  user?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
+        flexDirection: avatarSide === 'right' ? 'row-reverse' : 'row',
+      }}
+    >
+      <span
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background: 'var(--fg-subtle)',
+          flexShrink: 0,
+        }}
+      />
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          alignItems: user ? 'flex-end' : 'flex-start',
+        }}
+      >
+        {widths.map((width, index) => (
+          <span
+            key={index}
+            style={{
+              width: `${width}%`,
+              height: 5,
+              borderRadius: 3,
+              background: user ? 'var(--accent)' : 'var(--border-strong)',
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 纯装饰的迷你布局线框图，差异一眼可辨；`aria-hidden` 避免污染卡片的可访问名。 */
+function MessageLayoutPreview({ mode }: { mode: MessageLayoutMode }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '10px 12px',
+        borderRadius: 6,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        minHeight: 56,
+        justifyContent: 'center',
+      }}
+    >
+      {MESSAGE_LAYOUT_PREVIEW_ROWS[mode].map((row, index) => (
+        <PreviewRow key={index} avatarSide={row.avatarSide} widths={row.widths} user={row.user} />
+      ))}
+    </div>
+  );
+}
+
 function MessageLayoutSection() {
   const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
   const setMessageLayout = useDisplayPreferencesStore((s) => s.setMessageLayout);
 
+  const options: SettingsOptionCard<MessageLayoutMode>[] = MESSAGE_LAYOUT_OPTIONS.map((opt) => ({
+    value: opt.value,
+    label: opt.label,
+    description: opt.description,
+    preview: <MessageLayoutPreview mode={opt.value} />,
+  }));
+
   return (
     <section style={SS}>
       <h3 style={ST}>消息布局</h3>
-      <div style={SECTION_LIST}>
-        {MESSAGE_LAYOUT_OPTIONS.map((opt, i) => {
-          const active = messageLayout === opt.value;
-          const isLast = i === MESSAGE_LAYOUT_OPTIONS.length - 1;
-          return (
-            <div
-              key={opt.value}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 20,
-                padding: '12px 0',
-                borderBottom: isLast ? 'none' : '1px solid var(--border-subtle)',
-              }}
-            >
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}
-              >
-                <span
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: active ? 'var(--accent)' : 'var(--fg-strong)',
-                  }}
-                >
-                  {opt.label}
-                </span>
-                <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                  {opt.description}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMessageLayout(opt.value)}
-                aria-pressed={active}
-                aria-label={opt.label}
-                style={{
-                  position: 'relative',
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
-                  padding: 0,
-                  outline: 'none',
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-muted)';
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                {active && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: 'var(--accent)',
-                    }}
-                  />
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+      <SettingsOptionCardRow
+        description="选择消息流的排列方式，切换后即时生效"
+        options={options}
+        value={messageLayout}
+        onChange={setMessageLayout}
+        minCardWidth={180}
+      />
     </section>
   );
 }

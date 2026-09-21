@@ -1231,6 +1231,11 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             type: 'string',
             description: '简明指出希望从输入中提取什么。',
           },
+          offset: {
+            type: 'number',
+            description:
+              'PDF 文本的起始行号（从 1 开始，默认 1）。仅当上一次结果被截断并提示 Use offset=... 时用于续读。',
+          },
         },
         required: [],
         additionalProperties: false,

@@ -1,5 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   buildReasoningBlockKey,
   extractReasoningHeading,
@@ -9,11 +18,12 @@ import {
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
 } from '@openAwork/shared';
-import type { MobileChatMessage } from '../chat/chat-message-content';
+import type { MobileChatMessage, MobileInputImage } from '../chat/chat-message-content';
 import {
   parseMobileMessageSegments,
   summarizeMobileCodeBlock,
 } from '../screens/chat-message-actions';
+import { useArtifactImageSource } from '../hooks/use-artifact-image-source';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 
@@ -22,11 +32,14 @@ export function ChatMessageBubble({
   isStreaming = false,
   message,
   onLongPress,
+  onPressImage,
 }: {
   highlighted?: boolean;
   isStreaming?: boolean;
   message: MobileChatMessage;
   onLongPress?: () => void;
+  /** 点击图片：上层据此映射查看器下标并打开（未传入时图片不可点击）。 */
+  onPressImage?: (image: MobileInputImage) => void;
 }) {
   const isUser = message.role === 'user';
   const segments = useMemo(() => parseMobileMessageSegments(message.content), [message.content]);
@@ -65,27 +78,87 @@ export function ChatMessageBubble({
         ) : null,
       )}
       {(message.inputImages ?? []).map((image, index) => (
-        <View
+        <ChatMessageImage
           key={`${image.imageUrl ?? image.artifactId ?? image.fileName ?? 'image'}-${index}`}
-          style={styles.imageWrap}
-        >
-          {image.imageUrl ? (
-            <Image
-              source={{ uri: image.imageUrl }}
-              style={styles.imagePreview}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Text style={styles.imagePlaceholderText}>图片已附加</Text>
-            </View>
-          )}
-          <Text style={[styles.imageLabel, isUser && styles.userBubbleText]}>
-            {image.fileName ?? `图片 ${index + 1}`}
-          </Text>
-        </View>
+          image={image}
+          index={index}
+          isUser={isUser}
+          onLongPress={onLongPress}
+          onPressImage={onPressImage}
+        />
       ))}
     </Pressable>
+  );
+}
+
+/**
+ * 气泡内单张图片。
+ *
+ * - `imageUrl`（本地文件地址）直用；否则按 `artifactId` 走 W1 取数层解析——
+ *   历史消息只有 `artifactId`，接上这条链路后不再永远停留在「图片已附加」占位符；
+ * - 内层 `Pressable` 同时接 `onPress`（放大查看）与 `onLongPress`（转发外层消息操作
+ *   菜单）：内层成为触摸 responder 后外层 `Pressable` 不会再收到长按，必须转发；
+ * - 既无 `imageUrl` 也无有效 `artifactId` 的条目**不包 Pressable**：保持不可点击、
+ *   外观与改造前完全一致。
+ */
+function ChatMessageImage({
+  image,
+  index,
+  isUser,
+  onLongPress,
+  onPressImage,
+}: {
+  image: MobileInputImage;
+  index: number;
+  isUser: boolean;
+  onLongPress?: () => void;
+  onPressImage?: (image: MobileInputImage) => void;
+}) {
+  const hasImageUrl = typeof image.imageUrl === 'string' && image.imageUrl.length > 0;
+  const hasArtifactId = typeof image.artifactId === 'string' && image.artifactId.length > 0;
+  // 已有 imageUrl 时不触发 artifact 请求（传 null 让取数 hook 停在 idle）。
+  const artifactSource = useArtifactImageSource(hasImageUrl ? null : image.artifactId);
+  const resolvedUri = hasImageUrl
+    ? image.imageUrl
+    : artifactSource.status === 'ready'
+      ? artifactSource.uri
+      : undefined;
+  const loading = !resolvedUri && artifactSource.status === 'loading';
+  const canPreview = Boolean(resolvedUri) || hasArtifactId;
+  const label = image.fileName ?? `图片 ${index + 1}`;
+
+  const preview = resolvedUri ? (
+    <Image source={{ uri: resolvedUri }} style={styles.imagePreview} resizeMode="cover" />
+  ) : (
+    <View style={styles.imagePlaceholder}>
+      {loading ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+      <Text style={styles.imagePlaceholderText}>{loading ? '正在加载…' : '图片已附加'}</Text>
+    </View>
+  );
+
+  return (
+    <View style={styles.imageWrap}>
+      {canPreview ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`放大查看图片：${label}`}
+          delayLongPress={260}
+          onLongPress={onLongPress}
+          onPress={onPressImage ? () => onPressImage(image) : undefined}
+          style={styles.imagePressable}
+        >
+          {({ pressed }) => (
+            <>
+              {preview}
+              {pressed ? <View pointerEvents="none" style={styles.imagePressedOverlay} /> : null}
+            </>
+          )}
+        </Pressable>
+      ) : (
+        preview
+      )}
+      <Text style={[styles.imageLabel, isUser && styles.userBubbleText]}>{label}</Text>
+    </View>
   );
 }
 
@@ -252,6 +325,14 @@ const styles = StyleSheet.create({
   imageWrap: {
     marginTop: 8,
     gap: 6,
+  },
+  imagePressable: {
+    alignSelf: 'flex-start',
+  },
+  imagePressedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: radii.lg,
+    backgroundColor: colors.accentMuted,
   },
   imagePreview: {
     width: 180,

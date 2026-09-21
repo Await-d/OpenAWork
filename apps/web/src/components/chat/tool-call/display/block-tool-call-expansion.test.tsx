@@ -88,4 +88,25 @@ describe('BlockToolCall 展开行为', () => {
     expect(container.querySelectorAll('.file-content-line')).toHaveLength(FILE_LINES.length);
     expect(screen.queryByRole('button', { name: /显示全部/ })).toBeNull();
   });
+
+  it('bash 折叠摘要取 shell 文本首行而非 JSON 包裹的首个字符', () => {
+    const { container } = render(
+      <BlockToolCall
+        toolName="bash"
+        input={{ command: 'ls' }}
+        output={{
+          command: 'ls',
+          cwd: '/tmp',
+          exitCode: 0,
+          output: 'file-a.txt\nfile-b.txt',
+          truncated: false,
+        }}
+        status="completed"
+      />,
+    );
+
+    const summary = container.querySelector('.tool-call-block-collapsed-summary')?.textContent;
+    expect(summary).toContain('file-a.txt');
+    expect(summary).not.toContain('{');
+  });
 });

@@ -181,7 +181,11 @@ export type {
 } from './session/questions.js';
 export { createDialogueModeClient } from './session/dialogue-mode.js';
 export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/dialogue-mode.js';
-export { createSessionsClient, createMultiAttachStream } from './session/sessions.js';
+export {
+  createSessionsClient,
+  createMultiAttachStream,
+  SESSIONS_LIST_PAGE_LIMIT,
+} from './session/sessions.js';
 export { getSessionWorkflowRuntime } from './session/workflow-runtime.js';
 export type { SessionWorkflowRuntimeSource } from './session/workflow-runtime.js';
 export type {

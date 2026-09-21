@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS } from '../infra/db.js';
-import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import {
   assertWorkspacePathSupportedByCurrentHost,
   isPathWithinRoot,
 } from '../workspace/workspace-paths.js';
-import { getSessionWorkingDirectory } from '../workspace/workspace-safety.js';
+import {
+  ensureUnboundSessionWorkspaceDirectory,
+  getSessionWorkingDirectory,
+} from '../workspace/workspace-safety.js';
 
 function isRepositoryWorkspaceRoot(rootPath: string): boolean {
   return existsSync(join(rootPath, 'pnpm-workspace.yaml')) || existsSync(join(rootPath, '.git'));
@@ -28,10 +30,10 @@ export function resolveTaskGraphProjectRoot(sessionId: string): string {
     return resolveWorkspaceRootForWorkingDirectory(sessionWorkingDirectory);
   }
 
-  // 未绑定工作区：回退到当前主机桌面端默认数据目录（或看起来像仓库的全局根）。
+  // 未绑定工作区：回退到当前主机系统文档目录（或看起来像仓库的全局根）。
   if (isRepositoryWorkspaceRoot(WORKSPACE_ROOT)) {
     return WORKSPACE_ROOT;
   }
 
-  return resolveGatewayDataDir();
+  return ensureUnboundSessionWorkspaceDirectory();
 }

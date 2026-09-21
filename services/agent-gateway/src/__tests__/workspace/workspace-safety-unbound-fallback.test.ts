@@ -1,4 +1,7 @@
+import type * as NodeFs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const platformMocks = vi.hoisted(() => ({ platform: 'linux' as string }));
 
 const mocks = vi.hoisted(() => ({
   resolveGatewayDataDir: vi.fn(() => '/gateway/data/agent-gateway'),
@@ -22,6 +25,18 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 
+vi.mock('@openAwork/platform-adapter', () => ({
+  createPlatformAdapter: () => ({
+    getPlatform: () => platformMocks.platform,
+    getDocumentsDir: () => '/home/tester/Documents',
+  }),
+}));
+
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof NodeFs>()),
+  mkdirSync: vi.fn(),
+}));
+
 vi.mock('../../infra/storage-paths.js', () => ({
   resolveGatewayDataDir: mocks.resolveGatewayDataDir,
 }));
@@ -43,12 +58,33 @@ vi.mock('../../session/session-workspace-metadata.js', () => ({
 
 describe('assertSessionWorkingDirectory unbound fallback', () => {
   beforeEach(() => {
+    platformMocks.platform = 'linux';
     mocks.resolveGatewayDataDir.mockClear();
     mocks.sqliteGet.mockReset();
     mocks.resolveSessionWorkspacePath.mockClear();
   });
 
-  it('未绑定工作区时回退到桌面端默认数据目录，而不是盘符根 /', async () => {
+  it('未绑定工作区时回退到系统文档目录下的 OpenAWork，而不是盘符根 /', async () => {
+    mocks.sqliteGet.mockReturnValue({
+      metadata_json: '{}',
+      user_id: 'user-1',
+      role_layer: null,
+      team_parent_session_id: null,
+    });
+    mocks.resolveSessionWorkspacePath.mockReturnValue(null);
+
+    const { assertSessionWorkingDirectory, resolveUnboundSessionWorkspaceFallback } =
+      await import('../../workspace/workspace-safety.js');
+
+    expect(resolveUnboundSessionWorkspaceFallback()).toBe('/home/tester/Documents/OpenAWork');
+    expect(assertSessionWorkingDirectory('plain-chat-session')).toBe(
+      '/home/tester/Documents/OpenAWork',
+    );
+    expect(mocks.resolveGatewayDataDir).not.toHaveBeenCalled();
+  });
+
+  it('android 平台未绑定会话仍回退到网关数据目录', async () => {
+    platformMocks.platform = 'android';
     mocks.sqliteGet.mockReturnValue({
       metadata_json: '{}',
       user_id: 'user-1',
@@ -103,7 +139,7 @@ describe('assertSessionWorkingDirectory unbound fallback', () => {
     expect(mocks.resolveGatewayDataDir).not.toHaveBeenCalled();
   });
 
-  it('未绑定会话显式传入 / 或占位路径时改写为桌面默认目录', async () => {
+  it('未绑定会话显式传入 / 或占位路径时改写为系统文档目录', async () => {
     mocks.sqliteGet.mockReturnValue({
       metadata_json: '{}',
       user_id: 'user-1',
@@ -121,10 +157,10 @@ describe('assertSessionWorkingDirectory unbound fallback', () => {
     expect(isFilesystemRootOrPlaceholderPath('/home/await/project')).toBe(false);
 
     expect(rewriteUnboundPlaceholderPath('plain-chat-session', '/')).toBe(
-      '/gateway/data/agent-gateway',
+      '/home/tester/Documents/OpenAWork',
     );
     expect(rewriteUnboundPlaceholderPath('plain-chat-session', '/absolute/workspace/path')).toBe(
-      '/gateway/data/agent-gateway',
+      '/home/tester/Documents/OpenAWork',
     );
     expect(rewriteUnboundPlaceholderPath('plain-chat-session', '/home/await/project')).toBe(
       '/home/await/project',
@@ -163,7 +199,7 @@ describe('assertSessionWorkingDirectory unbound fallback', () => {
       path: '/',
       sessionId: 'plain-chat-session',
     });
-    expect(safePath).toBe('/gateway/data/agent-gateway');
+    expect(safePath).toBe('/home/tester/Documents/OpenAWork');
   });
 
   it('已绑定会话将相对路径解析到会话工作区', async () => {

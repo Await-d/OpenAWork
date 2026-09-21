@@ -76,7 +76,11 @@ import {
 } from '../session/session-file-diff-store.js';
 import { deleteRequestSnapshots } from '../session/session-snapshot-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
-import { createDefaultSandbox } from '../tools/tool-sandbox.js';
+import {
+  createDefaultSandbox,
+  isPermissionSafeSiblingTool,
+  recordBlockedToolCallsForPendingRequest,
+} from '../tools/tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tools/tool-sandbox.js';
 import { cancelDescendantSessionStreams } from '../session/cancel-descendant-streams.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
@@ -682,6 +686,12 @@ export function resolveStreamRequestUpstreamRetry(input: {
   };
 }
 
+export interface BlockedToolCallResumeEntry {
+  toolCallId: string;
+  toolName: string;
+  rawInput: Record<string, unknown>;
+}
+
 export interface ApprovedPermissionResumePayload {
   clientRequestId: string;
   nextRound: number;
@@ -689,6 +699,12 @@ export interface ApprovedPermissionResumePayload {
   toolCallId: string;
   toolName: string;
   rawInput: Record<string, unknown>;
+  /**
+   * Every call blocked by the permission pause, in `tool_use` order
+   * (`[0]` === the call that owns the pending request). When absent the
+   * resume falls back to the single legacy `toolCallId`/`rawInput` pair.
+   */
+  blockedToolCalls?: BlockedToolCallResumeEntry[];
   observability?: ToolCallObservabilityAnnotation;
 }
 
@@ -1545,7 +1561,7 @@ export async function executeToolCalls(input: {
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
   workspaceRoot?: string;
-}): Promise<{ hasPendingPermission: boolean }> {
+}): Promise<{ hasPendingPermission: boolean; pendingToolCallIds: string[] }> {
   const sandbox = createDefaultSandbox([], { userId: input.userId });
   const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
   // 递归解析 workingDirectory：team 子 session 可能没有直接设置，
@@ -1586,6 +1602,14 @@ export async function executeToolCalls(input: {
   }
 
   let hasPendingPermission = false;
+  // Calls blocked by the current pause, in `tool_use` order. `[0]` is the call
+  // that owns the pending permission request; the rest are held-back siblings.
+  const blockedToolCalls: Array<{
+    toolCallId: string;
+    toolName: string;
+    rawInput: Record<string, unknown>;
+  }> = [];
+  let blockingPermissionRequestId: string | undefined;
 
   // Agent usage reminder state (oh-my-opencode agentUsageReminder pattern)
   // Track whether task/delegation tools have been used in this turn's tool call batch.
@@ -1604,6 +1628,24 @@ export async function executeToolCalls(input: {
     // the resolved tool identity (`functions.write` / `Write` / `workspace_write_file`
     // all resolve to `write`) instead of the raw model-emitted name.
     const canonicalToolName = normalizeToolNameForEnablement(toolCall.toolName);
+
+    // Batch permission gate (route B): once a sibling is awaiting approval, only
+    // side-effect-free read tools may keep running. Everything else is held back
+    // and resumed together after approval, so the next upstream request still
+    // carries the whole batch's tool_results in `tool_use` order.
+    //
+    // Deliberately placed BEFORE `recordTaskToolCallOrThrow`: a held-back call is
+    // never executed, so it must not feed the doom-loop counter (recording it
+    // could trip the guard and fail the whole turn for a call that never ran).
+    if (hasPendingPermission && !isPermissionSafeSiblingTool(canonicalToolName)) {
+      blockedToolCalls.push({
+        toolCallId,
+        toolName: toolCall.toolName,
+        rawInput: parseToolInput(toolCall.inputText),
+      });
+      continue;
+    }
+
     recordTaskToolCallOrThrow(
       input.taskRuntimeGuardContext,
       canonicalToolName,
@@ -1939,14 +1981,28 @@ export async function executeToolCalls(input: {
         toolCall.toolName,
         'requestId=',
         result.pendingPermissionRequestId,
-        'breaking tool call loop',
+        'continuing with read-only siblings',
       );
       hasPendingPermission = true;
-      break;
+      blockingPermissionRequestId ??= result.pendingPermissionRequestId;
+      // The blocked call itself is part of the batch that resumes after approval.
+      blockedToolCalls.push({
+        toolCallId,
+        toolName: toolCall.toolName,
+        rawInput: parsedInput,
+      });
+      continue;
     }
   }
 
-  return { hasPendingPermission };
+  if (hasPendingPermission && blockingPermissionRequestId) {
+    recordBlockedToolCallsForPendingRequest(blockingPermissionRequestId, blockedToolCalls);
+  }
+
+  return {
+    hasPendingPermission,
+    pendingToolCallIds: blockedToolCalls.map((call) => call.toolCallId),
+  };
 }
 
 export function createStreamExecutionContext(

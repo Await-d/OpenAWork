@@ -49,6 +49,8 @@ export interface UseSettingsWebsearchResult {
   saving: boolean;
   setPolicy: React.Dispatch<React.SetStateAction<WebsearchPolicy>>;
   policy: WebsearchPolicy;
+  loadError: string | null;
+  saveError: string | null;
 }
 
 function clonePolicy(p: WebsearchPolicy): WebsearchPolicy {
@@ -63,6 +65,8 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
   const [policy, setPolicy] = React.useState<WebsearchPolicy>(DEFAULT_POLICY);
   const [savedPolicy, setSavedPolicy] = React.useState<WebsearchPolicy>(DEFAULT_POLICY);
   const [saving, setSaving] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
 
   const loadWebsearchPolicy = React.useCallback(async () => {
     if (!input.token) return;
@@ -79,16 +83,19 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
       };
       setPolicy(clonePolicy(next));
       setSavedPolicy(clonePolicy(next));
+      setLoadError(null);
     } catch (err: unknown) {
       logger.error('failed to load websearch policy', err);
       setPolicy(DEFAULT_POLICY);
       setSavedPolicy(DEFAULT_POLICY);
+      setLoadError(err instanceof Error ? err.message : '加载 Web 搜索策略失败');
     }
   }, [input.gatewayUrl, input.token]);
 
   const saveWebsearchPolicy = React.useCallback(async () => {
     if (!input.token || saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       // Strip empty optional strings so the gateway's strict schema
       // does not reject them — `apiKey: ''` would fail `min(1)`.
@@ -114,8 +121,10 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
       };
       setPolicy(clonePolicy(next));
       setSavedPolicy(clonePolicy(next));
+      setSaveError(null);
     } catch (err: unknown) {
       logger.error('failed to save websearch policy', err);
+      setSaveError(err instanceof Error ? err.message : '保存 Web 搜索策略失败');
     } finally {
       setSaving(false);
     }
@@ -128,5 +137,7 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
     saving,
     setPolicy,
     policy,
+    loadError,
+    saveError,
   };
 }

@@ -39,9 +39,11 @@ const LEFT_AREA_STYLE: CSSProperties = {
 
 export interface TeamPageMiddleAreaProps {
   readonly accessToken: string | null;
+  readonly canActOnRuntimeFailures: boolean;
   readonly canCreateWorkspace: boolean;
   readonly canManageSelectedRuntimeTree: boolean;
   readonly data: TeamRuntimeReferenceViewData;
+  readonly dismissingHandoffIds?: readonly string[];
   readonly editorOverlay: TeamEditorOverlayControls;
   readonly effectiveFocusMode: boolean;
   readonly effectiveMode: TeamPageMode;
@@ -57,6 +59,7 @@ export interface TeamPageMiddleAreaProps {
   readonly officeSceneState: OfficeSceneState;
   readonly onCancelHandoff: (handoffId: string) => void;
   readonly onClearFocusedHandoff: () => void;
+  readonly onDismissFailed?: (handoffIds: readonly string[]) => void;
   readonly onMiddleTabChange: (next: MiddleTabKey) => void;
   readonly onOpenBlockingTarget: (event: HandoffEvent) => void;
   readonly onOpenFullscreen: () => void;
@@ -85,9 +88,11 @@ export interface TeamPageMiddleAreaProps {
 
 export function TeamPageMiddleArea({
   accessToken,
+  canActOnRuntimeFailures,
   canCreateWorkspace,
   canManageSelectedRuntimeTree,
   data,
+  dismissingHandoffIds,
   editorOverlay,
   effectiveFocusMode,
   effectiveMode,
@@ -103,6 +108,7 @@ export function TeamPageMiddleArea({
   officeSceneState,
   onCancelHandoff,
   onClearFocusedHandoff,
+  onDismissFailed,
   onMiddleTabChange,
   onOpenBlockingTarget,
   onOpenFullscreen,
@@ -184,9 +190,12 @@ export function TeamPageMiddleArea({
 
   const classicInlineCards = middleArea.classicConversationChromeActive ? (
     <ClassicTeamConversationInlineCards
+      canActOnRuntimeFailures={canActOnRuntimeFailures}
       failedHandoffs={middleArea.classicFailedHandoffs}
       pendingClarifications={middleArea.classicPendingClarifications}
       runningHandoffs={middleArea.classicRunningHandoffs}
+      dismissingHandoffIds={dismissingHandoffIds}
+      onDismissFailed={onDismissFailed}
       onRetryFailed={canManageSelectedRuntimeTree ? middleArea.handleRetryFailed : undefined}
       onFocusWorkbench={middleArea.handleClassicFocusWorkbench}
     />
@@ -202,8 +211,10 @@ export function TeamPageMiddleArea({
     <ErrorDiagnosticsPanel
       failedHandoffs={scopedHandoffs}
       selectedTeam={selectedTeam}
-      onRetryFailed={canManageSelectedRuntimeTree ? middleArea.handleRetryFailed : undefined}
+      onRetryFailed={canActOnRuntimeFailures ? middleArea.handleRetryFailed : undefined}
       retrying={middleArea.retryingFailed}
+      onDismissFailed={canActOnRuntimeFailures ? onDismissFailed : undefined}
+      dismissingHandoffIds={canActOnRuntimeFailures ? dismissingHandoffIds : []}
     />
   ) : null;
 

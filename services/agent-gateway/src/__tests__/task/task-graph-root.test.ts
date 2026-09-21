@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertWorkspacePathSupportedByCurrentHost: vi.fn(),
+  ensureUnboundSessionWorkspaceDirectory: vi.fn(() => '/gateway/data'),
   existsSync: vi.fn<(path: string) => boolean>(() => false),
   getSessionWorkingDirectory: vi.fn<(sessionId: string) => string | null>(() => null),
   isPathWithinRoot: vi.fn<(path: string, rootPath: string) => boolean>(
     (path: string, rootPath: string) => path === rootPath || path.startsWith(`${rootPath}/`),
   ),
-  resolveGatewayDataDir: vi.fn(() => '/gateway/data'),
 }));
 
 vi.mock('node:fs', () => ({
@@ -20,11 +20,8 @@ vi.mock('../../workspace/workspace-paths.js', () => ({
 }));
 
 vi.mock('../../workspace/workspace-safety.js', () => ({
+  ensureUnboundSessionWorkspaceDirectory: mocks.ensureUnboundSessionWorkspaceDirectory,
   getSessionWorkingDirectory: mocks.getSessionWorkingDirectory,
-}));
-
-vi.mock('../../infra/storage-paths.js', () => ({
-  resolveGatewayDataDir: mocks.resolveGatewayDataDir,
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -35,6 +32,7 @@ vi.mock('../../infra/db.js', () => ({
 describe('resolveTaskGraphProjectRoot', () => {
   beforeEach(() => {
     mocks.assertWorkspacePathSupportedByCurrentHost.mockReset();
+    mocks.ensureUnboundSessionWorkspaceDirectory.mockClear();
     mocks.existsSync.mockReset();
     mocks.existsSync.mockReturnValue(false);
     mocks.getSessionWorkingDirectory.mockReset();
@@ -43,7 +41,6 @@ describe('resolveTaskGraphProjectRoot', () => {
     mocks.isPathWithinRoot.mockImplementation(
       (path: string, rootPath: string) => path === rootPath || path.startsWith(`${rootPath}/`),
     );
-    mocks.resolveGatewayDataDir.mockClear();
   });
 
   it('优先使用会话 workingDirectory，避免回落到错误的全局 cwd', async () => {
@@ -65,13 +62,14 @@ describe('resolveTaskGraphProjectRoot', () => {
     expect(() => resolveTaskGraphProjectRoot('session-1')).toThrow(
       /当前网关运行在 Linux，无法访问 Windows 路径/,
     );
-    expect(mocks.resolveGatewayDataDir).not.toHaveBeenCalled();
+    expect(mocks.ensureUnboundSessionWorkspaceDirectory).not.toHaveBeenCalled();
   });
 
-  it('未绑定 workingDirectory 且全局根不是仓库时回落到桌面端默认目录', async () => {
+  it('未绑定 workingDirectory 且全局根不是仓库时回落到系统文档目录', async () => {
     const { resolveTaskGraphProjectRoot } = await import('../../task/task-graph-root.js');
 
     expect(resolveTaskGraphProjectRoot('session-1')).toBe('/gateway/data');
+    expect(mocks.ensureUnboundSessionWorkspaceDirectory).toHaveBeenCalled();
   });
 
   it('未绑定 workingDirectory 但全局根看起来是仓库时保留 WORKSPACE_ROOT', async () => {

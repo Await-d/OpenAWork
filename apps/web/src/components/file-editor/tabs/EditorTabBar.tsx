@@ -1,5 +1,6 @@
 import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenFile } from '../../../hooks/editor/useFileEditor.js';
+import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
 import { isContextMenuKey } from '../../common/display/context-menu-keyboard.js';
 import { FileIcon } from '../preview/FileIcon.js';
 
@@ -26,37 +27,12 @@ export function EditorTabBar({
   onReorder?: (fromIndex: number, toIndex: number) => void;
   previewFilePath: string | null;
 }) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const { ref: scrollRef, attachRef: attachScrollRef } = useHorizontalWheelScroll<HTMLDivElement>();
   const dragSrcIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null);
   const autoScrollRafRef = useRef<number | null>(null);
   const autoScrollDirRef = useRef<-1 | 0 | 1>(0);
-
-  // ─────────── Wheel: vertical deltaY → horizontal scroll ───────────
-  // Only intercept when the bar is actually overflowing horizontally,
-  // and only translate vertical wheel events (mouse wheel) — touchpad
-  // horizontal swipes already work natively via deltaX.
-  //
-  // Re-attach when `files.length` changes because the early `return null`
-  // path unmounts the container; the ref needs to be re-bound after
-  // remount. Also using `passive: false` so we can preventDefault.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const handleWheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return;
-      // Mouse wheel: deltaY != 0, deltaX == 0. Translate to horizontal.
-      // Touchpads with horizontal swipes set deltaX directly — let those
-      // through unchanged.
-      if (e.deltaY !== 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
-  }, [files.length]);
 
   // ─────────── Auto-scroll while dragging near edges ───────────
   const stopAutoScroll = useCallback(() => {
@@ -172,7 +148,7 @@ export function EditorTabBar({
 
   return (
     <div
-      ref={scrollRef}
+      ref={attachScrollRef}
       style={{
         display: 'flex',
         alignItems: 'stretch',

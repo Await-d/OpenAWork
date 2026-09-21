@@ -16,6 +16,10 @@ import {
 } from '../../../components/chat/companion/companion-sprite-model.js';
 import type { BuddyAgentBindings } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
 import type { BuddyAgentOption } from './use-buddy-agent-binding-manager.js';
+import {
+  SettingsOptionCardRow,
+  type SettingsOptionCard,
+} from '../shared/settings-option-card-row.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
 
 interface BuddyAgentBindingPanelProps {
@@ -31,38 +35,38 @@ interface BuddyAgentBindingPanelProps {
   onSelectAgentId: (agentId: string) => void;
 }
 
-const THEME_OPTIONS: Array<{ label: string; value: CompanionThemeVariant }> = [
+const THEME_OPTIONS: SettingsOptionCard<CompanionThemeVariant>[] = [
   { label: '默认主题', value: 'default' },
   { label: '活泼主题', value: 'playful' },
 ];
 
-const TONE_OPTIONS: Array<{ label: string; value: CompanionBehaviorTone }> = [
+const TONE_OPTIONS: SettingsOptionCard<CompanionBehaviorTone>[] = [
   { label: '支持型', value: 'supportive' },
   { label: '聚焦型', value: 'focused' },
   { label: '轻快型', value: 'playful' },
 ];
 
-const INJECTION_OPTIONS: Array<{ label: string; value: '' | CompanionInjectionMode }> = [
+const INJECTION_OPTIONS: SettingsOptionCard<'' | CompanionInjectionMode>[] = [
   { label: '继承全局', value: '' },
   { label: '关闭注入', value: 'off' },
   { label: '仅 /buddy 点名', value: 'mention_only' },
   { label: '始终注入', value: 'always' },
 ];
 
-const VERBOSITY_OPTIONS: Array<{ label: string; value: '' | CompanionVerbosity }> = [
+const VERBOSITY_OPTIONS: SettingsOptionCard<'' | CompanionVerbosity>[] = [
   { label: '继承全局', value: '' },
   { label: '极简', value: 'minimal' },
   { label: '正常', value: 'normal' },
 ];
 
-const VOICE_MODE_OPTIONS: Array<{ label: string; value: '' | CompanionVoiceOutputMode }> = [
+const VOICE_MODE_OPTIONS: SettingsOptionCard<'' | CompanionVoiceOutputMode>[] = [
   { label: '继承全局', value: '' },
   { label: '关闭播报', value: 'off' },
   { label: '正常播报', value: 'buddy_only' },
   { label: '仅重点提醒', value: 'important_only' },
 ];
 
-const VOICE_VARIANT_OPTIONS: Array<{ label: string; value: '' | CompanionVoiceVariant }> = [
+const VOICE_VARIANT_OPTIONS: SettingsOptionCard<'' | CompanionVoiceVariant>[] = [
   { label: '继承全局', value: '' },
   { label: '系统默认', value: 'system' },
   { label: '明亮', value: 'bright' },
@@ -89,6 +93,13 @@ const FIELD_GROUP: CSSProperties = {
   padding: '14px 16px',
   background: 'var(--bg-overlay)',
 };
+
+const FIELD_STACK: CSSProperties = {
+  display: 'grid',
+  gap: 10,
+};
+
+const FIELD_CONTROL_MAX_WIDTH = 320;
 
 const SUMMARY_PILL: CSSProperties = {
   display: 'inline-flex',
@@ -308,7 +319,8 @@ export function BuddyAgentBindingPanel({
 
   return (
     <section style={SS}>
-      <div style={ST}>Agent 绑定</div>
+      {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+      <h3 style={{ ...ST, marginTop: 0 }}>Agent 绑定</h3>
       <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--fg-default)' }}>
         为某个 Agent 指定专属 Buddy。聊天时 Buddy 会跟着当前 effective agent
         自动切换；未绑定时仍回退到默认 companion。
@@ -442,14 +454,8 @@ export function BuddyAgentBindingPanel({
                 这些字段决定当前 Agent 在 Chat 页看到的是谁、叫什么、呈现什么气质。
               </div>
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 10,
-              }}
-            >
-              <label style={{ display: 'grid', gap: 6 }}>
+            <div style={FIELD_STACK}>
+              <label style={{ display: 'grid', gap: 6, maxWidth: FIELD_CONTROL_MAX_WIDTH }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   绑定物种
                 </span>
@@ -467,25 +473,15 @@ export function BuddyAgentBindingPanel({
                 </select>
               </label>
 
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  绑定主题
-                </span>
-                <select
-                  aria-label="Buddy 绑定主题"
-                  value={themeVariant}
-                  onChange={(event) => setThemeVariant(event.target.value as CompanionThemeVariant)}
-                  style={IS}
-                >
-                  {THEME_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SettingsOptionCardRow
+                title="绑定主题"
+                options={THEME_OPTIONS}
+                value={themeVariant}
+                onChange={setThemeVariant}
+                minCardWidth={220}
+              />
 
-              <label style={{ display: 'grid', gap: 6 }}>
+              <label style={{ display: 'grid', gap: 6, maxWidth: FIELD_CONTROL_MAX_WIDTH }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   Buddy 名称
                 </span>
@@ -512,68 +508,30 @@ export function BuddyAgentBindingPanel({
                 用来控制这个 Agent 下的陪跑风格；留空时会继续继承上方全局主控制。
               </div>
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 10,
-              }}
-            >
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  行为语气
-                </span>
-                <select
-                  aria-label="Buddy 行为语气"
-                  value={behaviorTone}
-                  onChange={(event) => setBehaviorTone(event.target.value as CompanionBehaviorTone)}
-                  style={IS}
-                >
-                  {TONE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div style={FIELD_STACK}>
+              <SettingsOptionCardRow
+                title="行为语气"
+                options={TONE_OPTIONS}
+                value={behaviorTone}
+                onChange={setBehaviorTone}
+                minCardWidth={200}
+              />
 
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  注入模式覆盖
-                </span>
-                <select
-                  aria-label="Buddy 注入覆盖"
-                  value={injectionMode}
-                  onChange={(event) =>
-                    setInjectionMode(event.target.value as '' | CompanionInjectionMode)
-                  }
-                  style={IS}
-                >
-                  {INJECTION_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SettingsOptionCardRow
+                title="注入模式覆盖"
+                options={INJECTION_OPTIONS}
+                value={injectionMode}
+                onChange={setInjectionMode}
+                minCardWidth={180}
+              />
 
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  输出简洁度覆盖
-                </span>
-                <select
-                  aria-label="Buddy 简洁度覆盖"
-                  value={verbosity}
-                  onChange={(event) => setVerbosity(event.target.value as '' | CompanionVerbosity)}
-                  style={IS}
-                >
-                  {VERBOSITY_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SettingsOptionCardRow
+                title="输出简洁度覆盖"
+                options={VERBOSITY_OPTIONS}
+                value={verbosity}
+                onChange={setVerbosity}
+                minCardWidth={200}
+              />
             </div>
           </div>
 
@@ -586,54 +544,24 @@ export function BuddyAgentBindingPanel({
                 只覆盖这个 Agent 的播报方式；不填时会继承当前账号的 Buddy 语音偏好。
               </div>
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 10,
-              }}
-            >
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  播报模式覆盖
-                </span>
-                <select
-                  aria-label="Buddy 播报模式覆盖"
-                  value={voiceOutputMode}
-                  onChange={(event) =>
-                    setVoiceOutputMode(event.target.value as '' | CompanionVoiceOutputMode)
-                  }
-                  style={IS}
-                >
-                  {VOICE_MODE_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div style={FIELD_STACK}>
+              <SettingsOptionCardRow
+                title="播报模式覆盖"
+                options={VOICE_MODE_OPTIONS}
+                value={voiceOutputMode}
+                onChange={setVoiceOutputMode}
+                minCardWidth={180}
+              />
 
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  语音变体覆盖
-                </span>
-                <select
-                  aria-label="Buddy 语音变体覆盖"
-                  value={voiceVariant}
-                  onChange={(event) =>
-                    setVoiceVariant(event.target.value as '' | CompanionVoiceVariant)
-                  }
-                  style={IS}
-                >
-                  {VOICE_VARIANT_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SettingsOptionCardRow
+                title="语音变体覆盖"
+                options={VOICE_VARIANT_OPTIONS}
+                value={voiceVariant}
+                onChange={setVoiceVariant}
+                minCardWidth={180}
+              />
 
-              <label style={{ display: 'grid', gap: 6 }}>
+              <label style={{ display: 'grid', gap: 6, maxWidth: FIELD_CONTROL_MAX_WIDTH }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   语速覆盖
                 </span>

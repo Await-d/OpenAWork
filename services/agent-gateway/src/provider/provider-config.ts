@@ -51,6 +51,11 @@ export const defaultThinkingSettingsSchema = z.object({
 
 export type DefaultThinkingSettings = z.infer<typeof defaultThinkingSettingsSchema>;
 
+const subagentModelModeSchema = z.enum(['auto', 'inherit-main']);
+export const subagentModelPolicySchema = z.object({ modelMode: subagentModelModeSchema });
+export type SubagentModelPolicy = z.infer<typeof subagentModelPolicySchema>;
+export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicy = { modelMode: 'auto' };
+
 const imageGenerationSizeSchema = z
   .string()
   .trim()
@@ -221,6 +226,7 @@ export const providerSettingsBodySchema = z.object({
   activeSelection: activeSelectionSchema.optional(),
   defaultThinking: defaultThinkingSettingsSchema.optional(),
   imageGenerationDefaults: imageGenerationDefaultsSchema.optional(),
+  subagentModelPolicy: subagentModelPolicySchema.optional(),
 });
 
 export const providerSettingsQuerySchema = z.object({
@@ -344,6 +350,13 @@ export const parseStoredImageGenerationDefaults = (
   }
 
   return { ...DEFAULT_IMAGE_GENERATION_DEFAULTS };
+};
+
+export const parseStoredSubagentModelPolicy = (raw: unknown): SubagentModelPolicy => {
+  const parsed = subagentModelPolicySchema.safeParse(raw);
+  return parsed.success
+    ? { modelMode: parsed.data.modelMode }
+    : { ...DEFAULT_SUBAGENT_MODEL_POLICY };
 };
 
 export const resolveStoredDefaultThinkingMode = (

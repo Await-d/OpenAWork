@@ -915,6 +915,7 @@ export function SessionSidebar({
                       quickExportSession={quickExportSession}
                       renameValue={renameValue}
                       renamingSessionId={renamingSessionId}
+                      searchQuery={sessionSearch}
                       setRenameValue={setRenameValue}
                       startRename={startRename}
                     />

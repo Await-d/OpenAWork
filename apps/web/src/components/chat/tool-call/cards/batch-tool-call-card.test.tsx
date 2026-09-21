@@ -138,5 +138,10 @@ describe('BatchToolCallCard', () => {
     expect(row).not.toBeNull();
     expect(screen.getByText('待审批')).toBeTruthy();
     expect(view.container.querySelector('[data-batch-sub-status="failed"]')).toBeNull();
+    // 聚合计数必须把待审批排除在「完成 / 失败」之外，否则批次头部会错报
+    // 「1/1 完成 · 1 失败」，让用户以为工具已经失败而不是在等审批。
+    expect(screen.getByText('1 待审批…')).toBeTruthy();
+    expect(screen.queryByText('1 失败')).toBeNull();
+    expect(screen.queryByText('1/1 完成')).toBeNull();
   });
 });

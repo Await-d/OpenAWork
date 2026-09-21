@@ -101,6 +101,8 @@ pnpm --filter @openAwork/agent-gateway run test:task-tool    # 仅跑 task 默�
 - `src/verification/verify-message-v2-deep-conversation.ts`：覆盖 message-v2 在 10+ 轮对话历史下的投影完整性、事件顺序与 transcript 读取一致性。
 - `src/verification/verify-task-tool-no-permission.ts`：覆盖 task 子代理默认免审批，不会创建 `permission_requests`，也不会出现在 pending permissions 列表中的回归链。
 - `src/verification/verify-task-tool-auto-run.ts`：覆盖 task 工具拿到执行上下文后，子会话会自动后台执行并回写父任务状态。
+- `src/verification/verify-batch-permission-collect.ts`：覆盖**批量工具权限暂停**——只读兄弟在待批期间继续执行、被门控/待批准的兄弟写入 pending payload 的 `blockedToolCalls`（按 `tool_use` 顺序）、批准后整批按序恢复且只跑一轮上游。已接入 `test:batch-permission` 与 `test:verification`。
+- `src/verification/verify-batch-permission-multi-pending.ts`：覆盖**多 pending 顺序审批**——第一个被批准后，被扣住的兄弟会升起自己的 pending 并使回合再次暂停（**不向上游发任何请求**）；逐个批准直至全部落定后**恰好一次**上游调用，结果保持 `tool_use` 顺序。同属 `test:batch-permission`。
 - CI 无需单独新增步骤：`.github/workflows/ci.yml` 已通过 `pnpm --filter "@openAwork/agent-gateway" test` 间接覆盖上述脚本。
 
 ## 测试分层说明

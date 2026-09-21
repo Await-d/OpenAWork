@@ -505,6 +505,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     <>
       {latestGeneratedImageResult && artifactsWorkspaceHref && (
         <ChatImageGenerationResultStrip
+          artifactId={latestGeneratedImageResult.artifactId}
           artifactTitle={latestGeneratedImageResult.artifactTitle}
           modelLabel={latestGeneratedImageResult.modelLabel}
           onContinueEditing={onContinueEditingImage ?? (() => undefined)}

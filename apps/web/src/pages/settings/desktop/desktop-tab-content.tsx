@@ -13,7 +13,14 @@ import {
 } from '../../../utils/gateway/desktop-gateway.js';
 import { DesktopWebAccessSection } from './desktop-web-access-section.js';
 import { isTauri, tauriInvoke } from '../shared/settings-page-helpers.js';
-import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
+import { SettingsOptionCardRow } from '../shared/settings-option-card-row.js';
+import { SETTINGS_CARD_ROW_STYLE } from '../shared/settings-row.js';
+import { BP, BS_GHOST, IS, SS, ST } from '../shared/settings-section-styles.js';
+import {
+  SettingsSegmentedRow,
+  type SettingsSegmentedOption,
+} from '../shared/settings-segmented-row.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
 
 /**
  * 分阶段 busy 状态。
@@ -62,10 +69,26 @@ interface DesktopSettingsView {
 }
 
 /** 关闭行为选项预设列表。 */
-const CLOSE_BEHAVIOR_OPTIONS: ReadonlyArray<{ label: string; value: CloseBehaviorValue }> = [
-  { label: '每次询问', value: 'ask' },
-  { label: '最小化到托盘', value: 'minimize' },
-  { label: '直接退出', value: 'exit' },
+const CLOSE_BEHAVIOR_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: CloseBehaviorValue;
+  description: string;
+}> = [
+  {
+    label: '每次询问',
+    value: 'ask',
+    description: '每次关闭时弹出应用内确认弹窗，可选择退出或最小化到托盘。',
+  },
+  {
+    label: '最小化到托盘',
+    value: 'minimize',
+    description: '关闭窗口时最小化到系统托盘，后台继续运行。',
+  },
+  {
+    label: '直接退出',
+    value: 'exit',
+    description: '关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。',
+  },
 ];
 
 /** 空闲自动锁预设分钟选项。`null` 表示禁用。 */
@@ -77,19 +100,22 @@ const IDLE_LOCK_PRESETS: ReadonlyArray<{ label: string; value: number | null }> 
   { label: '60 分钟', value: 60 },
 ];
 
+/** 更新渠道分段选项。 */
+const CHANNEL_SEGMENT_OPTIONS: readonly SettingsSegmentedOption<'preview' | 'stable'>[] = [
+  { label: '预览版', value: 'preview' },
+  { label: '发行版', value: 'stable' },
+];
+
+/** 空闲自动锁分段选项：`number | null` 的 `null` 编码为字面量 `'none'`。 */
+const IDLE_LOCK_SEGMENT_OPTIONS: readonly SettingsSegmentedOption<string>[] = IDLE_LOCK_PRESETS.map(
+  (preset) => ({
+    value: preset.value === null ? 'none' : String(preset.value),
+    label: preset.label,
+  }),
+);
+
 /** PIN 管理面板的交互阶段。 */
 type PinPanelMode = 'idle' | 'set' | 'change' | 'remove';
-
-const ROW_STYLE: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 12,
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 10,
-  padding: '10px 12px',
-  background: 'var(--bg-overlay)',
-};
 
 const PATH_BOX: React.CSSProperties = {
   ...IS,
@@ -101,66 +127,11 @@ const PATH_BOX: React.CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
-const SECONDARY_BTN: React.CSSProperties = {
-  ...BP,
-  background: 'transparent',
-  border: '1px solid var(--border-default)',
-  color: 'var(--fg-default)',
-};
-
 const DANGER_BTN: React.CSSProperties = {
-  ...SECONDARY_BTN,
+  ...BS_GHOST,
   color: 'var(--danger)',
   borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
 };
-
-function ToggleSwitch({
-  checked,
-  disabled,
-  onChange,
-  ariaLabel,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  onChange: () => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      aria-pressed={checked}
-      disabled={disabled}
-      onClick={onChange}
-      style={{
-        position: 'relative',
-        width: 42,
-        height: 24,
-        borderRadius: 999,
-        border: 'none',
-        padding: 0,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
-        flexShrink: 0,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <span
-        style={{
-          position: 'absolute',
-          top: 2,
-          left: checked ? 20 : 2,
-          width: 20,
-          height: 20,
-          borderRadius: '50%',
-          background: 'var(--bg-overlay)',
-          boxShadow: 'var(--shadow-sm)',
-          transition: 'left 180ms ease',
-        }}
-      />
-    </button>
-  );
-}
 
 /** 仅在 Tauri 运行时渲染——非桌面端时显示一个降级提示。 */
 export function DesktopTabContent() {
@@ -626,115 +597,34 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>关闭行为</h3>
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5, marginBottom: 8 }}>
-          设置点击主窗口右上角 X 时的行为。修改即时生效。
-        </div>
-        {CLOSE_BEHAVIOR_OPTIONS.map((opt) => {
-          const selected = view.closeBehavior === opt.value;
-          return (
-            <div
-              key={opt.value}
-              onClick={() => handleSetCloseBehavior(opt.value)}
-              style={{
-                ...ROW_STYLE,
-                cursor: 'pointer',
-                borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
-                background: selected
-                  ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-                  : 'var(--bg-overlay)',
-              }}
-            >
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                  {opt.label}
-                </div>
-                <div
-                  style={{
-                    marginTop: 3,
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: 'var(--fg-muted)',
-                  }}
-                >
-                  {opt.value === 'ask'
-                    ? '每次关闭时弹出应用内确认弹窗，可选择退出或最小化到托盘。'
-                    : opt.value === 'minimize'
-                      ? '关闭窗口时最小化到系统托盘，后台继续运行。'
-                      : '关闭主窗口时会结束桌面程序，并停止本会话启动的本地 gateway sidecar。'}
-                </div>
-              </div>
-              {selected && (
-                <div
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: 999,
-                    border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-                    color: 'var(--accent)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    flexShrink: 0,
-                  }}
-                >
-                  已选中
-                </div>
-              )}
-            </div>
-          );
-        })}
+        <SettingsOptionCardRow
+          description="设置点击主窗口右上角 X 时的行为。修改即时生效。"
+          options={CLOSE_BEHAVIOR_OPTIONS.map((opt) => ({
+            value: opt.value,
+            label: opt.label,
+            description: opt.description,
+          }))}
+          value={view.closeBehavior}
+          onChange={(next) => handleSetCloseBehavior(next)}
+          minCardWidth={180}
+        />
       </section>
 
       <section style={SS}>
         <h3 style={ST}>更新渠道</h3>
-        <div style={ROW_STYLE}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-              选择更新渠道
-            </div>
-            <div
-              style={{
-                marginTop: 3,
-                fontSize: 11,
-                lineHeight: 1.5,
-                color: 'var(--fg-muted)',
-              }}
-            >
-              预览版可抢先体验最新功能，发行版经过更充分的测试。切换后下次检查更新将使用新渠道。
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-            {[
-              { label: '预览版', value: 'preview' as const },
-              { label: '发行版', value: 'stable' as const },
-            ].map((opt) => {
-              const active = view.updateChannel === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => void updateChannel(opt.value)}
-                  style={{
-                    borderRadius: 6,
-                    border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                    background: active
-                      ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
-                      : 'var(--bg-overlay)',
-                    color: active ? 'var(--accent)' : 'var(--fg-default)',
-                    padding: '4px 10px',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <SettingsSegmentedRow
+          title="选择更新渠道"
+          description="预览版可抢先体验最新功能，发行版经过更充分的测试。切换后下次检查更新将使用新渠道。"
+          options={CHANNEL_SEGMENT_OPTIONS}
+          value={view.updateChannel}
+          onChange={(next) => void updateChannel(next)}
+          ariaLabel="选择更新渠道"
+        />
       </section>
 
       <section style={SS}>
         <h3 style={ST}>开机自启</h3>
-        <div style={ROW_STYLE}>
+        <div style={SETTINGS_CARD_ROW_STYLE}>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
               开机时自动启动 OpenAWork
@@ -765,7 +655,7 @@ export function DesktopTabContent() {
                 }}
               />
             ) : null}
-            <ToggleSwitch
+            <SettingsToggle
               ariaLabel="开机自启"
               checked={view.autostartEnabled}
               disabled={busy === 'autostart' || migrationInFlight}
@@ -874,7 +764,7 @@ export function DesktopTabContent() {
             </code>
             <button
               type="button"
-              style={SECONDARY_BTN}
+              style={BS_GHOST}
               onClick={() => void openSettingsFile()}
               disabled={migrationInFlight}
             >
@@ -921,60 +811,22 @@ export function DesktopTabContent() {
         </div>
 
         {pinMode === 'idle' && view.hasPin ? (
-          <div
-            style={{
-              ...ROW_STYLE,
-              flexWrap: 'wrap',
-              gap: 12,
-            }}
-          >
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
-                空闲自动锁
-              </div>
-              <div
-                style={{
-                  marginTop: 3,
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  color: 'var(--fg-muted)',
-                }}
-              >
-                超过设定时长无键鼠活动时自动锁定。选「禁用」则仅启动和从托盘唤醒时要求 PIN。
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {IDLE_LOCK_PRESETS.map((opt) => {
-                const active = (view.idleLockMinutes ?? null) === opt.value;
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => void updateIdleLockMinutes(opt.value)}
-                    disabled={migrationInFlight}
-                    style={{
-                      borderRadius: 6,
-                      border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-                      background: active
-                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
-                        : 'var(--bg-overlay)',
-                      color: active ? 'var(--accent)' : 'var(--fg-default)',
-                      padding: '4px 10px',
-                      fontSize: 11,
-                      cursor: migrationInFlight ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SettingsSegmentedRow
+            title="空闲自动锁"
+            description="超过设定时长无键鼠活动时自动锁定。选「禁用」则仅启动和从托盘唤醒时要求 PIN。"
+            options={IDLE_LOCK_SEGMENT_OPTIONS.map((option) => ({
+              ...option,
+              disabled: migrationInFlight,
+            }))}
+            value={view.idleLockMinutes === null ? 'none' : String(view.idleLockMinutes)}
+            onChange={(next) => void updateIdleLockMinutes(next === 'none' ? null : Number(next))}
+            ariaLabel="空闲自动锁"
+          />
         ) : null}
 
         {pinMode === 'idle' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={ROW_STYLE}>
+            <div style={{ ...SETTINGS_CARD_ROW_STYLE, flexWrap: 'wrap' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   {view.hasPin ? '已启用 PIN 锁屏' : '当前未设置 PIN'}
@@ -992,12 +844,12 @@ export function DesktopTabContent() {
                     : '建议为桌面端配置 PIN，特别是开启了「开机自启」时。'}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                 {view.hasPin ? (
                   <>
                     <button
                       type="button"
-                      style={SECONDARY_BTN}
+                      style={BS_GHOST}
                       onClick={() => {
                         resetPinForm();
                         setPinMode('change');
@@ -1133,7 +985,7 @@ export function DesktopTabContent() {
               </button>
               <button
                 type="button"
-                style={SECONDARY_BTN}
+                style={BS_GHOST}
                 onClick={() => {
                   setPinMode('idle');
                   resetPinForm();
@@ -1238,7 +1090,7 @@ export function DesktopTabContent() {
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                     <button
                       type="button"
-                      style={SECONDARY_BTN}
+                      style={BS_GHOST}
                       onClick={() => void refreshPairingQr()}
                       disabled={pairingLoading}
                     >
@@ -1246,16 +1098,12 @@ export function DesktopTabContent() {
                     </button>
                     <button
                       type="button"
-                      style={SECONDARY_BTN}
+                      style={BS_GHOST}
                       onClick={() => void copyPairingPayload()}
                     >
                       复制配对 JSON
                     </button>
-                    <button
-                      type="button"
-                      style={SECONDARY_BTN}
-                      onClick={() => setPairingVisible(false)}
-                    >
+                    <button type="button" style={BS_GHOST} onClick={() => setPairingVisible(false)}>
                       隐藏
                     </button>
                   </div>

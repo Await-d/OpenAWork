@@ -113,6 +113,20 @@ function btnStyle(variant?: string): CSSProperties {
       borderColor: 'color-mix(in srgb, var(--color-danger, #ef4444) 25%, transparent)',
     };
   }
+  // ghost：颜色 / 边框 / 背景 / 光标与 :hover / :active / :focus-visible 状态交给
+  // 外部 className 的 CSS（内联声明会压过伪类规则），这里只保留几何与排版。
+  if (variant === 'ghost') {
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '2px 8px',
+      borderRadius: 6,
+      fontSize: 10.5,
+      fontWeight: 500,
+      lineHeight: '18px',
+      transition: 'background 160ms ease, color 120ms ease, border-color 160ms ease',
+    };
+  }
   return base;
 }
 
@@ -146,8 +160,14 @@ const DONE_NOTE_STYLE: CSSProperties = {
 export interface InlineOpsAction {
   id: string;
   label: string;
-  variant?: 'primary' | 'danger' | 'default';
+  variant?: 'primary' | 'danger' | 'default' | 'ghost';
   onClick?: () => void;
+  /** 忙碌 / 不可用态：按钮禁用，样式见 btnStyle 的 disabled 内联补充。 */
+  disabled?: boolean;
+  /** 覆盖按钮可读名称（如「关闭失败项 <handoffId>」这类需要上下文的动作）。 */
+  ariaLabel?: string;
+  /** 伪类状态由外部 CSS 提供时使用（配合 ghost 变体）。 */
+  className?: string;
 }
 
 export interface InlineOpsArtifact {
@@ -205,7 +225,18 @@ export function TeamInlineOpsCard({
           (artifacts != null && artifacts.length > 0)) && (
           <div style={ACTIONS_STYLE}>
             {actions?.map((a) => (
-              <button key={a.id} type="button" style={btnStyle(a.variant)} onClick={a.onClick}>
+              <button
+                key={a.id}
+                type="button"
+                className={a.className}
+                style={{
+                  ...btnStyle(a.variant),
+                  ...(a.disabled ? { opacity: 0.55, cursor: 'not-allowed' } : {}),
+                }}
+                onClick={a.onClick}
+                disabled={a.disabled}
+                aria-label={a.ariaLabel}
+              >
                 {a.label}
               </button>
             ))}

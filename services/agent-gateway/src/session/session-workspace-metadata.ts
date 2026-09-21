@@ -278,6 +278,11 @@ export function parseSessionMetadataJson(metadataJson: string): Record<string, u
   }
 }
 
+export function hasTeamDefinition(metadata: Record<string, unknown>): boolean {
+  const teamDefinition = metadata['teamDefinition'];
+  return typeof teamDefinition === 'object' && teamDefinition !== null;
+}
+
 export function normalizeIncomingSessionMetadata(metadata: Record<string, unknown>): {
   metadata: Record<string, unknown>;
   workingDirectory?: string | null;

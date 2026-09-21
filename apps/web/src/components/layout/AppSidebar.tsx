@@ -850,6 +850,7 @@ export default function AppSidebar({
                           quickExportSession={quickExportSession}
                           renameValue={renameValue}
                           renamingSessionId={renamingSessionId}
+                          searchQuery={sessionSearch}
                           setRenameValue={setRenameValue}
                           startRename={startRename}
                         />

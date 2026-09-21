@@ -8,13 +8,19 @@
 
 import { useMemo, type CSSProperties } from 'react';
 import type { ClarificationItem, HandoffEntry } from '../../../../stores/team/team-events.js';
+import { isHandoffDismissable } from '../../runtime/data/team-handoff-dismissability.js';
 import { getRoleLayerIdentity } from '../../runtime/data/role-layer-identity.js';
-import { TeamInlineOpsCard } from './TeamInlineOpsCard.js';
+import { TeamInlineOpsCard, type InlineOpsAction } from './TeamInlineOpsCard.js';
+import './classic-team-conversation-inline-cards.css';
 
 export interface ClassicTeamConversationInlineCardsProps {
+  /** 是否有权限处置运行树失败项（决定「关闭」入口是否可出现）。 */
+  readonly canActOnRuntimeFailures?: boolean;
+  readonly dismissingHandoffIds?: readonly string[];
   readonly failedHandoffs?: readonly HandoffEntry[];
   readonly pendingClarifications?: readonly ClarificationItem[];
   readonly runningHandoffs?: readonly HandoffEntry[];
+  readonly onDismissFailed?: (handoffIds: readonly string[]) => void;
   readonly onRetryFailed?: () => void;
   readonly onFocusWorkbench?: () => void;
 }
@@ -41,9 +47,12 @@ function formatTime(ts?: number): string | undefined {
 }
 
 export function ClassicTeamConversationInlineCards({
+  canActOnRuntimeFailures = false,
+  dismissingHandoffIds = [],
   failedHandoffs = [],
   pendingClarifications = [],
   runningHandoffs = [],
+  onDismissFailed,
   onRetryFailed,
   onFocusWorkbench,
 }: ClassicTeamConversationInlineCardsProps) {
@@ -55,12 +64,7 @@ export function ClassicTeamConversationInlineCards({
       body?: string;
       timeLabel?: string;
       code?: string;
-      actions?: Array<{
-        id: string;
-        label: string;
-        variant?: 'primary' | 'danger' | 'default';
-        onClick?: () => void;
-      }>;
+      actions?: InlineOpsAction[];
     }> = [];
 
     if (pendingClarifications.length > 0) {
@@ -84,6 +88,19 @@ export function ClassicTeamConversationInlineCards({
       const from = getRoleLayerIdentity(handoff.fromRoleLayer).short;
       const to = getRoleLayerIdentity(handoff.toRoleLayer).short;
       const title = handoff.summary?.trim() || `${from} → ${to} 失败`;
+      const dismissing = dismissingHandoffIds.includes(handoff.id);
+      const dismissAction: InlineOpsAction | null =
+        canActOnRuntimeFailures && onDismissFailed && isHandoffDismissable(handoff)
+          ? {
+              id: 'dismiss',
+              label: dismissing ? '关闭中…' : '关闭',
+              variant: 'ghost',
+              className: 'team-classic-inline-cards__dismiss',
+              ariaLabel: `关闭失败项 ${handoff.id}`,
+              disabled: dismissing,
+              onClick: () => onDismissFailed([handoff.id]),
+            }
+          : null;
       items.push({
         id: `fail-${handoff.id}`,
         tone: 'fail',
@@ -108,6 +125,7 @@ export function ClassicTeamConversationInlineCards({
             label: '查看任务台',
             onClick: onFocusWorkbench,
           },
+          ...(dismissAction ? [dismissAction] : []),
         ],
       });
     }
@@ -134,7 +152,16 @@ export function ClassicTeamConversationInlineCards({
     }
 
     return items;
-  }, [failedHandoffs, onFocusWorkbench, onRetryFailed, pendingClarifications, runningHandoffs]);
+  }, [
+    canActOnRuntimeFailures,
+    dismissingHandoffIds,
+    failedHandoffs,
+    onDismissFailed,
+    onFocusWorkbench,
+    onRetryFailed,
+    pendingClarifications,
+    runningHandoffs,
+  ]);
 
   if (cards.length === 0) return null;
 

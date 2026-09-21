@@ -10,6 +10,7 @@ import {
   providerSettingsQuerySchema,
   defaultThinkingSettingsSchema,
   imageGenerationDefaultsSchema,
+  subagentModelPolicySchema,
   aiProviderSchema,
   activeSelectionSchema,
 } from '../../provider/provider-config.js';
@@ -22,6 +23,7 @@ export const getProvidersSchema = {
       activeSelection: activeSelectionSchema,
       defaultThinking: defaultThinkingSettingsSchema,
       imageGenerationDefaults: imageGenerationDefaultsSchema,
+      subagentModelPolicy: subagentModelPolicySchema,
     }),
   },
 } as const;
@@ -34,6 +36,7 @@ export const putProvidersSchema = {
       activeSelection: activeSelectionSchema,
       defaultThinking: defaultThinkingSettingsSchema,
       imageGenerationDefaults: imageGenerationDefaultsSchema,
+      subagentModelPolicy: subagentModelPolicySchema,
     }),
   },
 } as const;

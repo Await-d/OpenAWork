@@ -1,6 +1,6 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
-import { useMemo, useState } from 'react';
-import { ImageLightbox } from '../../image/image-lightbox.js';
+import { useEffect, useMemo, useState } from 'react';
+import { ImageLightbox, type ImageLightboxItem } from '../../image/image-lightbox.js';
 import { ToolIcon } from '../display/tool-icon.js';
 import { useMediaArtifact } from '../../media/use-media-artifact.js';
 import { formatElapsed } from '../shared/format.js';
@@ -52,6 +52,55 @@ export function ExtractVideoFrameToolCard({
   const result = useMemo(() => parseExtractVideoFrameOutput(output), [output]);
   const frames = result?.frames ?? [];
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // 缩略图各自解析 artifact → src，这里按产物 id（而不是帧下标）汇总给图集查看器复用：
+  // output/frames 重排或刷新时不会把旧帧的 src 错配到新帧，避免重复拉取。
+  const [frameSrcByArtifactId, setFrameSrcByArtifactId] = useState<Record<string, string>>({});
+
+  const handleFrameSrcResolved = (artifactId: string, src: string) => {
+    setFrameSrcByArtifactId((previous) =>
+      previous[artifactId] === src ? previous : { ...previous, [artifactId]: src },
+    );
+  };
+
+  const frameArtifactIds = useMemo(
+    () => (result?.frames ?? []).flatMap((frame) => (frame.artifactId ? [frame.artifactId] : [])),
+    [result],
+  );
+
+  useEffect(() => {
+    // frames 变化后清掉已不存在的产物条目；当前帧的 src 由各自缩略图重新上报。
+    setFrameSrcByArtifactId((previous) => {
+      const liveIds = new Set(frameArtifactIds);
+      const staleIds = Object.keys(previous).filter((artifactId) => !liveIds.has(artifactId));
+      if (staleIds.length === 0) return previous;
+      const next = { ...previous };
+      for (const artifactId of staleIds) {
+        delete next[artifactId];
+      }
+      return next;
+    });
+  }, [frameArtifactIds]);
+
+  const resolvedFrames: ResolvedFrameEntry[] = frames.flatMap((frame, frameIndex) => {
+    const src = frame.artifactId ? frameSrcByArtifactId[frame.artifactId] : undefined;
+    if (!src) return [];
+    const label = frame.fileName ?? `帧 ${frameIndex + 1}`;
+    return [
+      {
+        frameIndex,
+        src,
+        label,
+        ...(frame.fileName ? { fileName: frame.fileName } : {}),
+      },
+    ];
+  });
+
+  useEffect(() => {
+    // frames 变化导致当前帧不再可解析时收起查看器，避免留下不可见 / 错位的打开态。
+    if (lightboxIndex === null) return;
+    if (resolvedFrames.some((entry) => entry.frameIndex === lightboxIndex)) return;
+    setLightboxIndex(null);
+  }, [lightboxIndex, resolvedFrames]);
 
   return (
     <div
@@ -100,7 +149,9 @@ export function ExtractVideoFrameToolCard({
                   key={i}
                   frame={frame}
                   index={i}
+                  ready={Boolean(frame.artifactId && frameSrcByArtifactId[frame.artifactId])}
                   onClick={() => setLightboxIndex(i)}
+                  onSrcResolved={handleFrameSrcResolved}
                 />
               ))}
             </div>
@@ -110,12 +161,12 @@ export function ExtractVideoFrameToolCard({
           )}
 
           {/* Lightbox */}
-          {lightboxIndex !== null && frames[lightboxIndex]?.artifactId && (
+          {lightboxIndex !== null && (
             <FrameLightbox
-              artifactId={frames[lightboxIndex].artifactId!}
-              open={lightboxIndex !== null}
+              entries={resolvedFrames}
+              index={lightboxIndex}
+              onIndexChange={setLightboxIndex}
               onClose={() => setLightboxIndex(null)}
-              fileName={frames[lightboxIndex]?.fileName}
             />
           )}
         </div>
@@ -127,17 +178,29 @@ export function ExtractVideoFrameToolCard({
 function FrameThumbnail({
   frame,
   index,
+  ready,
   onClick,
+  onSrcResolved,
 }: {
   frame: ExtractedFrameItem;
   index: number;
+  ready: boolean;
   onClick: () => void;
+  onSrcResolved: (artifactId: string, src: string) => void;
 }) {
   const { mediaSrc, loading, error } = useMediaArtifact(frame.artifactId);
+  const artifactId = frame.artifactId;
+
+  useEffect(() => {
+    if (!artifactId || !mediaSrc) return;
+    onSrcResolved(artifactId, mediaSrc);
+  }, [artifactId, mediaSrc, onSrcResolved]);
 
   return (
     <div
-      onClick={onClick}
+      aria-disabled={ready ? undefined : true}
+      data-frame-index={index}
+      onClick={ready ? onClick : undefined}
       style={{
         position: 'relative',
         width: 120,
@@ -145,7 +208,7 @@ function FrameThumbnail({
         borderRadius: 8,
         overflow: 'hidden',
         border: '1px solid var(--border-subtle)',
-        cursor: 'pointer',
+        cursor: ready ? 'pointer' : 'progress',
         background: 'var(--bg-overlay)',
       }}
     >
@@ -170,6 +233,21 @@ function FrameThumbnail({
           alt={`帧 ${index + 1}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
+      )}
+      {!loading && !error && !mediaSrc && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%',
+            color: 'var(--fg-muted)',
+            fontSize: 10,
+          }}
+        >
+          准备中…
+        </div>
       )}
       {error && (
         <div
@@ -206,28 +284,44 @@ function FrameThumbnail({
   );
 }
 
-function FrameLightbox({
-  artifactId,
-  open,
-  onClose,
-  fileName,
-}: {
-  artifactId: string;
-  open: boolean;
-  onClose: () => void;
+interface ResolvedFrameEntry {
+  frameIndex: number;
+  src: string;
+  label: string;
   fileName?: string;
-}) {
-  const { mediaSrc } = useMediaArtifact(artifactId);
+}
 
-  if (!mediaSrc) return null;
+function FrameLightbox({
+  entries,
+  index,
+  onIndexChange,
+  onClose,
+}: {
+  entries: readonly ResolvedFrameEntry[];
+  index: number;
+  onIndexChange: (frameIndex: number) => void;
+  onClose: () => void;
+}) {
+  const activePosition = entries.findIndex((entry) => entry.frameIndex === index);
+  if (activePosition < 0) return null;
+
+  const items: ImageLightboxItem[] = entries.map((entry) => ({
+    src: entry.src,
+    alt: entry.label,
+    caption: entry.label,
+    ...(entry.fileName ? { fileName: entry.fileName } : {}),
+  }));
 
   return (
     <ImageLightbox
-      src={mediaSrc}
-      open={open}
+      open
+      items={items}
+      index={activePosition}
+      onIndexChange={(next) => {
+        const nextFrame = entries[next];
+        if (nextFrame) onIndexChange(nextFrame.frameIndex);
+      }}
       onClose={onClose}
-      alt={fileName ?? '视频帧'}
-      {...(fileName ? { fileName } : {})}
     />
   );
 }

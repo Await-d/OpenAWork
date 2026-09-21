@@ -1,0 +1,215 @@
+/*
+ * 全屏图片查看器（单图 / 图集模式）。
+ *
+ * 色彩 / 间距 / 圆角 / 动效全部引用 E·Nebula token：
+ *   - 色板与状态色：packages/shared-ui/DESIGN-TOKENS.md + src/index.css（16 套主题）
+ *   - 间距 / 圆角：src/styles/layout-tokens.css（--spacing-* / --radius-*）
+ * 唯一允许的硬编码是遮罩底色 rgba(0, 0, 0, 0.82)——token 表没有专用遮罩变量。
+ *
+ * ⚠️ 工具栏 / 图集导航 / caption 叠在深色遮罩之上，是「中性浮层」而不是 accent
+ *    实色填充，因此：
+ *      文字 = --fg-strong，背景 = --bg-elevated，描边 = --border-emphasis。
+ *    禁止使用 --fg-on-accent：它只服务于 accent 实色填充，在暗色主题下是近黑色
+ *    （如 #0a0c1f），叠在浮层按钮上会直接看不见（历史 bug 根因）。
+ */
+
+.image-lightbox {
+  align-items: center;
+  animation: fade-in 150ms ease-out;
+  background: rgba(0, 0, 0, 0.82);
+  cursor: zoom-out;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 9999;
+}
+
+.image-lightbox__toolbar {
+  display: flex;
+  gap: var(--spacing-1);
+  position: absolute;
+  right: var(--spacing-4);
+  top: var(--spacing-4);
+  z-index: 2;
+}
+
+.image-lightbox__divider {
+  align-self: center;
+  background: var(--border-emphasis);
+  height: 20px;
+  width: 1px;
+}
+
+.image-lightbox__tool-btn {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  color: var(--fg-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 15px;
+  gap: var(--spacing-1);
+  height: 36px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 36px;
+  padding: 0 var(--spacing-2);
+  transition:
+    background-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.image-lightbox__tool-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.image-lightbox__tool-btn:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.image-lightbox__tool-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.image-lightbox__tool-btn:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 带文字标签的按钮（缩放百分比 / 下载）：字号与 btn-ghost-sm 风格统一 */
+.image-lightbox__tool-btn--label {
+  font-size: 11.5px;
+  font-weight: 600;
+  min-width: 44px;
+}
+
+.image-lightbox__tool-btn--close {
+  font-size: 18px;
+}
+
+.image-lightbox__nav {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-pill);
+  color: var(--fg-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  height: 44px;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition:
+    background-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+  width: 44px;
+  z-index: 2;
+}
+
+.image-lightbox__nav--prev {
+  left: var(--spacing-4);
+}
+
+.image-lightbox__nav--next {
+  right: var(--spacing-4);
+}
+
+.image-lightbox__nav:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.image-lightbox__nav:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.image-lightbox__nav:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.image-lightbox__nav:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.image-lightbox__image {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+  max-height: calc(100vh - 80px);
+  max-width: calc(100vw - 80px);
+  object-fit: contain;
+  transition: transform var(--dur-normal, 200ms) var(--ease-normal, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+.image-lightbox__caption {
+  align-items: center;
+  backdrop-filter: blur(6px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  bottom: var(--spacing-4);
+  color: var(--fg-strong);
+  display: flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: var(--spacing-2);
+  left: 50%;
+  max-width: 80vw;
+  padding: var(--spacing-1) var(--spacing-3);
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.image-lightbox__caption-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-lightbox__counter {
+  color: var(--fg-default);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 窄屏（最低 375px）：收窄按钮与图片留白，避免工具栏挤出屏幕 */
+@media (max-width: 480px) {
+  .image-lightbox__tool-btn {
+    height: 32px;
+    min-width: 32px;
+  }
+
+  .image-lightbox__nav {
+    font-size: 16px;
+    height: 36px;
+    width: 36px;
+  }
+
+  .image-lightbox__image {
+    max-height: calc(100vh - 96px);
+    max-width: calc(100vw - 32px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-lightbox {
+    animation: none;
+  }
+
+  .image-lightbox__image {
+    transition: none;
+  }
+}

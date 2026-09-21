@@ -1,0 +1,49 @@
+/* 错误诊断简报 —— 逐项「关闭」按钮的默认态与交互状态。
+ *
+ * 面板整体走 inline CSSProperties（见 ErrorDiagnosticsPanel.tsx），但按钮的
+ * 颜色 / 边框 / 背景与状态机收敛在本文件，避免 inline 声明压过 :hover。
+ * 语义：次要 / 幽灵操作 —— 默认弱文字 + 线，hover 提亮为 fg-strong + bg-hover，
+ * 绝不使用 danger（complement）语义。
+ */
+
+.team-error-diagnostics-panel__dismiss {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.team-error-diagnostics-panel__dismiss:hover:not(:disabled) {
+  color: var(--fg-strong);
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+}
+
+.team-error-diagnostics-panel__dismiss:active:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-hover) 80%, var(--border-emphasis));
+  transform: translateY(1px);
+}
+
+.team-error-diagnostics-panel__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.team-error-diagnostics-panel__dismiss:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 折叠行：被 DIAGNOSTIC_ITEM_LIMIT 截断的条目摘要 + 可选的批量关闭入口。
+ * 只定义布局与排版（颜色仍走 token）；批量按钮复用 __dismiss 的交互状态。 */
+.team-error-diagnostics-panel__overflow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 2px 18px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}

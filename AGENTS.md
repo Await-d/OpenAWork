@@ -100,6 +100,13 @@ OpenAWork/
 
 - **默认普通提交不触发自动构建**：`feat / fix / docs / style / refactor / perf / test / build / chore / ci / revert` 提交只跑 CI（lint + typecheck + test），不会自动 bump 版本、不会自动打 tag、不会触发桌面端发布。
 - **只有 `release(<scope>):` 提交会触发自动构建**：自上次 `desktop-v*` tag 以来，存在至少一条形如 `release(<scope>): <中文描述>` 的提交时，`auto-release.yml` 才会执行版本提升、打 tag 与触发 `release-desktop.yml`。
+- **scope 决定构建哪些平台**：触发提交的 scope 会路由自动构建目标，`desktop-v*` 锚点 tag 仍照常推送（用于终止触发检测循环），但桌面端构建只在 scope 命中时才触发：
+  - `release(desktop):` → 只构建桌面端
+  - `release(mobile):` → 只构建手机端（EAS preview 构建 + preview 通道 OTA）
+  - `release(all):` → 桌面端 + 手机端都构建（需要两端同时发布时的推荐写法）
+  - 其他 scope（如 `release(preview):`、`release(auto):`、`release(gateway):`）→ 维持现状，只构建桌面端
+- **手机端自动构建不产生 tag**：手机端由 `auto-release.yml` 通过 `workflow_dispatch` 调用 `release-mobile.yml`（`profile=preview`），**不会打 `mobile-v*` tag**；`mobile-v*` tag 仍严格表示正式 mobile release。
+- **`EXPO_TOKEN` 未配置时手机端自动跳过**：`auto-release.yml` 会跳过手机端 dispatch 并在 workflow summary 中说明原因，不会导致自动发布流程失败。
 - **推荐写法**：
   - `release(all): 准备发布预览版`
   - `release(preview): 触发自动构建并发布桌面预览版`
@@ -294,6 +301,7 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 - 若 `agent-gateway` 或 Fastify 插件类型突然出现 `app.jwt`、`request.user`、`request.jwtVerify`、`injectWS`、`websocket`、`hide` 等属性缺失，优先排查 **Fastify 依赖是否分叉**，先运行 `pnpm check:fastify-alignment`；这类问题常由 `pnpm-lock.yaml` 中同时解析出多份 `fastify` / `fastify-plugin` 版本引起，表现会像“类型增强失效”而非业务代码直接报错。
 - `pnpm check:fastify-alignment` 已接入根 `package.json` 的 `lint-staged`，凡是改动 `package.json` / `pnpm-lock.yaml` / workspace 子包清单后，提交前都应以它为首要排查入口；如果它失败，先修依赖对齐，再看后续 lint / typecheck。
 - `.husky/` 当前被 `.gitignore` 忽略，仓库里的 Husky hook 属于**本地机器状态**，不会随 Git 提交共享；因此排查“本地能拦、远端没拦”或“我改了 pre-push 但别人没生效”时，应先确认规则是否真正落在受版本控制的 `package.json`、`scripts/` 或 `.github/workflows/` 中。
+- 手机端云端自动构建依赖 GitHub Secret `EXPO_TOKEN`（EAS 云构建凭证）。未配置时 `auto-release.yml` 会**自动跳过**手机端 dispatch，并在 workflow summary 中说明原因，自动发布流程仍会成功结束；需要启用手机端自动构建时，先在仓库 Secrets 中配置 `EXPO_TOKEN` 即可，无需改动任何 workflow。
 - `packages/agent-core/src/catwalk/` — 模型评测/对比模块
 - `packages/agent-core/src/crush-ignore/` — 文件排除规则（Agent 上下文的 .gitignore）
 - `.agentdocs/` — AI 工作流规划文档，非运行时代码

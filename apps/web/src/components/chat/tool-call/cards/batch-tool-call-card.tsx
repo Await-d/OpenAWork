@@ -8,6 +8,7 @@ import { extractFilePath } from '../shared/input-paths.js';
 import { buildGenericInputSummary, summarizeMcpCallInput } from '../shared/input-summary.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
+import { looksLikePendingPermissionOutput } from '../../../../utils/permission/pending-permission-state.js';
 
 /* ── BatchToolCallCard ── */
 
@@ -29,44 +30,8 @@ export interface BatchSubResultLike {
 
 export type BatchSubVisualState = 'running' | 'completed' | 'failed' | 'pending' | 'skipped';
 
-/**
- * Output substrings the gateway emits when a sub-tool is paused waiting for
- * the user to approve its permission request. Mirrors the markers recognized
- * by `conversation-runtime/messages/copied-tool-card.ts`.
- */
-const PENDING_PERMISSION_OUTPUT_MARKERS = [
-  'waiting for approval',
-  'requires approval',
-  'permission request',
-  'waiting for answer',
-  'waiting for confirmation',
-  '等待权限',
-  '等待审批',
-  '等待回答',
-  '等待确认',
-] as const;
-
-/**
- * A pending-permission sub-call surfaces as an `isError` tool result whose
- * output text asks the user to approve a permission request — it is paused,
- * not failed. Non-string outputs are stringified defensively (circular
- * structures fall back to `String(output)`) before substring matching.
- */
-function looksLikePendingPermissionOutput(output: unknown): boolean {
-  const serialized =
-    typeof output === 'string'
-      ? output
-      : (() => {
-          if (output === undefined || output === null) return '';
-          try {
-            return JSON.stringify(output) ?? '';
-          } catch {
-            return String(output);
-          }
-        })();
-  const normalized = serialized.trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  return PENDING_PERMISSION_OUTPUT_MARKERS.some((marker) => normalized.includes(marker));
+function isPendingPermissionSubResult(result: BatchSubResultLike): boolean {
+  return result.isError === true && looksLikePendingPermissionOutput(result.output);
 }
 
 export function batchSubVisualState(
@@ -82,7 +47,7 @@ export function batchSubVisualState(
   if (result.status === 'skipped') return 'skipped';
   // Checked before the failure branch: a pending-permission "error" means the
   // sub-call is waiting for approval, not that it failed.
-  if (result.isError === true && looksLikePendingPermissionOutput(result.output)) return 'pending';
+  if (isPendingPermissionSubResult(result)) return 'pending';
   if (result.status === 'error' || result.isError === true) return 'failed';
   if (result.status === 'completed') return 'completed';
   return 'running';
@@ -407,11 +372,16 @@ export function BatchToolCallCard({
     return merged;
   }, [toolCalls, subResults]);
 
+  const pendingPermissionCount = subResults.filter(isPendingPermissionSubResult).length;
   const completedCount = subResults.filter(
-    (r) => r.status === 'completed' || r.status === 'error' || r.status === 'skipped',
+    (r) =>
+      !isPendingPermissionSubResult(r) &&
+      (r.status === 'completed' || r.status === 'error' || r.status === 'skipped'),
   ).length;
   const totalCount = Math.max(toolCalls.length, subResults.length);
-  const errorCount = subResults.filter((r) => r.status === 'error' || r.isError === true).length;
+  const errorCount = subResults.filter(
+    (r) => !isPendingPermissionSubResult(r) && (r.status === 'error' || r.isError === true),
+  ).length;
 
   // The parent batch tool's own terminal state. When the batch tool result
   // is itself completed/failed (e.g. after a refresh) but we have no per-sub
@@ -450,9 +420,11 @@ export function BatchToolCallCard({
         <span className="tool-call-batch-progress">
           {totalCount === 0
             ? '准备中…'
-            : allDone
-              ? `${progressCompleted}/${totalCount} 完成`
-              : `${completedCount}/${totalCount} 进行中…`}
+            : pendingPermissionCount > 0
+              ? `${pendingPermissionCount} 待审批…`
+              : allDone
+                ? `${progressCompleted}/${totalCount} 完成`
+                : `${completedCount}/${totalCount} 进行中…`}
         </span>
         {allDone && errorCount > 0 && (
           <span className="tool-call-batch-errors">{errorCount} 失败</span>

@@ -1,0 +1,67 @@
+/*
+ * 可点击放大的图片触发器（产物预览面 / 图片工作台共用）。
+ *
+ * 色彩 / 圆角 / 动效沿用 E·Nebula token（色板见 src/index.css，
+ * 间距与圆角见 src/styles/layout-tokens.css）。hover / active / focus-visible
+ * 是「这张图可以点开放大」的可见反馈，不是装饰动效。
+ */
+
+.image-zoom-trigger {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: zoom-in;
+  display: inline-flex;
+  justify-content: center;
+  max-width: 100%;
+  padding: 0;
+  transition: background-color var(--dur-micro, 120ms) var(--ease-micro, ease);
+}
+
+.image-zoom-trigger:hover {
+  background: var(--accent-subtle);
+}
+
+.image-zoom-trigger:active {
+  background: var(--accent-muted);
+}
+
+.image-zoom-trigger:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.image-zoom-trigger__image {
+  border-radius: inherit;
+  display: block;
+  max-width: 100%;
+  transition: transform var(--dur-micro, 120ms) var(--ease-micro, ease);
+}
+
+/*
+ * 无内禀尺寸的图片（只有 viewBox 的 SVG 等）没有内容基准，作为 flex 子项会被压到
+ * 0×0 / 2×2；组件按**渲染尺寸**判定并打上该标记（自然尺寸在 Chromium 中会返回
+ * 150×150 的默认对象尺寸，无法用于判定）。给一个可读的最小尺寸兜底；有内禀尺寸的
+ * 图片不命中该选择器，尺寸一律维持原样。
+ */
+.image-zoom-trigger__image[data-intrinsic-size='none'] {
+  min-height: var(--spacing-12, 48px);
+  min-width: var(--spacing-12, 48px);
+}
+
+.image-zoom-trigger:hover .image-zoom-trigger__image {
+  transform: scale(1.01);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-zoom-trigger,
+  .image-zoom-trigger__image {
+    transition: none;
+  }
+
+  .image-zoom-trigger:hover .image-zoom-trigger__image {
+    transform: none;
+  }
+}

@@ -62,7 +62,8 @@ function resolveInputImageContent(
   sessionId: string,
   item: Extract<MessageContent, { type: 'input_image' }>,
 ): Extract<MessageContent, { type: 'input_image' }> {
-  if (item.imageUrl || item.fileId || !item.artifactId) {
+  // 勿因 `fileId` 短路：它全仓库无生产者也无解析器，短路会让带 artifactId 的图片被静默丢弃。
+  if (item.imageUrl || !item.artifactId) {
     return item;
   }
 

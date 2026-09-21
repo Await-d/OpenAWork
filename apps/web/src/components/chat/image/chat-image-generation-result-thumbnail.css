@@ -1,0 +1,189 @@
+/**
+ * 「最新图片结果」提示条的内联缩略图。
+ *
+ * 交互态（hover / active / focus-visible）统一下沉到 CSS，避免内联样式覆盖伪类；
+ * 颜色与圆角一律走 E · Nebula token，尺寸只在 `--chat-image-result-thumb-size` 定义一次。
+ *
+ * 无障碍：容器（`.chat-image-result-thumb`）是纯展示容器，不挂 `role` / `tabIndex`
+ * 与键盘处理；「放大查看」由独立按钮 `.chat-image-result-thumb__zoom` 承担，
+ * 键盘语义来自原生 `<button>`，不再包住 `GenerateImageDisplay` 内部的下载 / 放大按钮。
+ *
+ * `GenerateImageDisplay` 的内部图片按 480px 上限铺开且不接收尺寸 props，
+ * 这里把 img 压到缩略图尺寸（组件内的 object-fit: contain 继续生效），
+ * 使结果条在 375px 视口下也不溢出。
+ */
+
+.chat-image-result-thumb {
+  --chat-image-result-thumb-size: 96px;
+  --chat-image-result-thumb-chip-size: 28px;
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: var(--radius-lg);
+  line-height: 0;
+}
+
+/* 只有真实图片态才提示「可点击放大」；loading / error 是纯状态占位。 */
+.chat-image-result-thumb--ready {
+  cursor: zoom-in;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.chat-image-result-thumb--ready:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in oklch, var(--fg-strong) 12%, transparent);
+}
+
+.chat-image-result-thumb--ready:active {
+  transform: translateY(0);
+}
+
+.chat-image-result-thumb img {
+  width: var(--chat-image-result-thumb-size);
+  height: var(--chat-image-result-thumb-size);
+  min-width: 0;
+}
+
+/* 「放大查看」显式按钮：与 GenerateImageDisplay 同级，落在右下角，避开其顶部操作条。 */
+.chat-image-result-thumb__zoom {
+  position: absolute;
+  right: var(--spacing-1);
+  bottom: var(--spacing-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--chat-image-result-thumb-chip-size);
+  height: var(--chat-image-result-thumb-chip-size);
+  padding: 0;
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--fg-strong);
+  cursor: zoom-in;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.chat-image-result-thumb__zoom:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.chat-image-result-thumb__zoom:active {
+  background: var(--bg-active);
+}
+
+.chat-image-result-thumb__zoom:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.chat-image-result-thumb--loading,
+.chat-image-result-thumb--error {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--spacing-1);
+  box-sizing: border-box;
+  width: var(--chat-image-result-thumb-size);
+  height: var(--chat-image-result-thumb-size);
+  padding: var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  line-height: 1.3;
+}
+
+.chat-image-result-thumb--loading {
+  background: linear-gradient(
+    100deg,
+    var(--bg-overlay) 30%,
+    color-mix(in oklch, var(--bg-elevated) 88%, var(--accent) 12%) 50%,
+    var(--bg-overlay) 70%
+  );
+  background-size: 220% 100%;
+  animation: chat-image-result-thumb-shimmer 1.6s ease-in-out infinite;
+}
+
+.chat-image-result-thumb--error {
+  border-color: color-mix(in oklch, var(--warning) 26%, var(--border-subtle));
+  background: color-mix(in oklch, var(--warning) 6%, var(--bg-overlay));
+}
+
+.chat-image-result-thumb__error-text {
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.chat-image-result-thumb__retry {
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid color-mix(in oklch, var(--warning) 30%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.chat-image-result-thumb__retry:hover {
+  border-color: var(--warning);
+  color: var(--fg-strong);
+}
+
+.chat-image-result-thumb__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 仅供读屏的加载态文案（占位块本身是纯装饰）。 */
+.chat-image-result-thumb__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes chat-image-result-thumb-shimmer {
+  0% {
+    background-position: 130% 0;
+  }
+
+  100% {
+    background-position: -30% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-image-result-thumb--ready {
+    transition: none;
+  }
+
+  .chat-image-result-thumb--ready:hover,
+  .chat-image-result-thumb--ready:active {
+    transform: none;
+  }
+
+  .chat-image-result-thumb__zoom {
+    transition: none;
+  }
+
+  .chat-image-result-thumb--loading {
+    animation: none;
+  }
+}

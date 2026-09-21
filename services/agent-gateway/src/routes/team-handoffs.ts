@@ -13,6 +13,8 @@
  *   - GET /team/sessions/:sessionId/handoffs  查询某 session 的 handoff 链
  *   - POST /team/handoffs/:handoffId/cancel   主动取消（Phase B 唯一的写端点，
  *                                              用于让用户在 UI 上中止派发）
+ *   - POST /team/handoffs/:handoffId/dismiss  关闭一条已失败且无自动恢复路径的
+ *                                              派发（failed → cancelled）
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -25,6 +27,7 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   cancelHandoff,
   createHandoff,
+  dismissFailedHandoff,
   getHandoff,
   getReviewDispositionFromPayload,
   isHandledReviewFailurePayload,
@@ -111,6 +114,7 @@ type TeamHandoffRouteErrorCode =
   | 'team_handoff_cannot_redispatch'
   | 'team_handoff_cannot_return_to_pm1'
   | 'team_handoff_cannot_cancel'
+  | 'team_handoff_cannot_dismiss'
   | 'team_handoff_cannot_pause'
   | 'team_handoff_cannot_resume'
   | 'team_handoff_invalid_limit';
@@ -124,6 +128,7 @@ const TEAM_HANDOFF_ROUTE_ERROR_MESSAGES: Record<TeamHandoffRouteErrorCode, strin
   team_handoff_cannot_redispatch: '当前 handoff 无法重派，可能已被其他流程接管。',
   team_handoff_cannot_return_to_pm1: '当前 handoff 无法退回 PM1，可能缺少可回放的上游规划。',
   team_handoff_cannot_cancel: '当前状态不允许取消该 handoff。',
+  team_handoff_cannot_dismiss: '当前 handoff 不可关闭（仅支持关闭无自动恢复路径的失败派发）。',
   team_handoff_cannot_pause: '当前状态不允许暂停该 handoff。',
   team_handoff_cannot_resume: '当前状态不允许恢复该 handoff。',
   team_handoff_invalid_limit: '请求参数 limit 非法（应为 1..500 的正整数）。',
@@ -704,6 +709,59 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
             );
           }
         }
+      }
+      step.succeed(undefined, { handoffId });
+      return reply.send({ handoff: after });
+    },
+  );
+
+  app.post(
+    '/team/handoffs/:handoffId/dismiss',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'team.handoffs.dismiss');
+      const user = request.user as JwtPayload;
+      const handoffId = parseParams(handoffIdParamsSchema, request.params).handoffId;
+
+      const before = getHandoff({ userId: user.sub, handoffId });
+      if (!before) {
+        step.fail('not found');
+        return reply.status(404).send(teamHandoffRouteErrorPayload('team_handoff_not_found'));
+      }
+      const ok = dismissFailedHandoff({ userId: user.sub, handoffId });
+      if (!ok) {
+        step.fail(`cannot dismiss from state ${before.state}`);
+        return reply.status(409).send(
+          teamHandoffRouteErrorPayload('team_handoff_cannot_dismiss', {
+            state: before.state,
+          }),
+        );
+      }
+      const after = getHandoff({ userId: user.sub, handoffId });
+      if (after) {
+        // 同时把 to_session 的 substate 推到 'cancelled'，让前端进度条立刻反映终态
+        if (after.toSessionId) {
+          try {
+            setSubstate({
+              sessionId: after.toSessionId,
+              substate: 'cancelled',
+              userId: after.userId,
+              roleLayer: after.toRoleLayer,
+            });
+          } catch (e) {
+            console.warn(
+              `[team-handoffs] setSubstate('cancelled') 失败：${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
+        logHandoffControl({
+          action: 'cancel',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          reason: 'user-dismissed-failure',
+          record: after,
+        });
+        publishHandoffEvent({ type: 'handoff.cancelled', record: after });
       }
       step.succeed(undefined, { handoffId });
       return reply.send({ handoff: after });

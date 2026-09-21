@@ -9,6 +9,7 @@ import {
   formatSessionTime,
   formatSessionTimeTitle,
 } from '../../../utils/session/format-session-time.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { InlineEditor } from '@openAwork/shared-ui';
 import { highlightMatch } from './highlight-match.js';
 import {
@@ -18,6 +19,9 @@ import {
   DeleteIcon,
   type BaseSessionRowAction,
 } from './BaseSessionRow.js';
+
+/** 子代理折叠箭头的占位尺寸：无子代理的行渲染等宽占位符，保证同级图标与标题左对齐。 */
+const SUBAGENT_TOGGLE_SIZE = 16;
 
 export interface SessionSidebarSessionRowProps {
   activeSessionId?: string;
@@ -71,6 +75,18 @@ export function SessionSidebarSessionRow({
   const isHovered = hoveredSessionId === session.id;
   const isRenaming = renamingSessionId === session.id;
   const deleting = isDeletingSession(session.id);
+  const isSubagentsCollapsed = useUIStateStore((s) =>
+    s.collapsedSubagentParentIds.includes(session.id),
+  );
+  const toggleSubagentCollapsed = useUIStateStore((s) => s.toggleSubagentCollapsed);
+  const hasSubagents = node.children.length > 0;
+  // 搜索时树已被裁剪为「命中节点 + 祖先链」，此时强制展开，避免命中结果被折叠隐藏
+  const subagentsExpanded =
+    hasSubagents && (searchQuery.trim().length > 0 || !isSubagentsCollapsed);
+  const subagentsBodyId = `session-subagents-${encodeURIComponent(session.id)}`;
+  const subagentToggleLabel = subagentsExpanded
+    ? `折叠 ${node.children.length} 个子代理`
+    : `展开 ${node.children.length} 个子代理`;
   const sessionIcon = useMemo(
     () => extractSessionIcon(session.metadata_json),
     [session.metadata_json],
@@ -245,6 +261,58 @@ export function SessionSidebarSessionRow({
     </span>
   ) : null;
 
+  const leadingSlot = hasSubagents ? (
+    <button
+      type="button"
+      className="session-subagent-toggle"
+      aria-expanded={subagentsExpanded}
+      aria-controls={subagentsBodyId}
+      aria-label={subagentToggleLabel}
+      title={subagentToggleLabel}
+      onClick={(event) => {
+        event.stopPropagation();
+        toggleSubagentCollapsed(session.id);
+      }}
+      style={{
+        width: SUBAGENT_TOGGLE_SIZE,
+        height: SUBAGENT_TOGGLE_SIZE,
+        borderRadius: 4,
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--fg-muted)',
+        cursor: 'pointer',
+        padding: 0,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{
+          transform: subagentsExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 150ms ease',
+        }}
+      >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  ) : (
+    <span
+      aria-hidden="true"
+      style={{ width: SUBAGENT_TOGGLE_SIZE, height: SUBAGENT_TOGGLE_SIZE, flexShrink: 0 }}
+    />
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       <BaseSessionRow
@@ -256,6 +324,7 @@ export function SessionSidebarSessionRow({
         active={isActive}
         hovered={isHovered}
         icon={iconNode}
+        leadingSlot={leadingSlot}
         meta={metaNode}
         actions={actions}
         hideMetaOnHover={true}
@@ -318,8 +387,9 @@ export function SessionSidebarSessionRow({
           ) : undefined
         }
       />
-      {node.children.length > 0 && (
+      {hasSubagents && (
         <div
+          id={subagentsBodyId}
           style={{
             marginLeft: `${10 + depth * 8}px`,
             // 与父行 / 相邻子行之间留出空隙，让树形层级更清晰
@@ -328,7 +398,7 @@ export function SessionSidebarSessionRow({
             paddingTop: 2,
             paddingBottom: 2,
             borderLeft: '1px solid var(--border-subtle)',
-            display: 'flex',
+            display: subagentsExpanded ? 'flex' : 'none',
             flexDirection: 'column',
             gap: 2,
           }}

@@ -1291,7 +1291,7 @@ ALTER TABLE handoff_records ADD COLUMN cancel_reason TEXT;
 
 - **保留**：spec/plan/tasks 等 markdown 仍留在 artifact 系统中（用户可参考）
 - **不回滚**：e/f/g 已写入的代码 patch 不自动回滚（需要用户手动 git revert）
-- **审计可见**：cancelled handoff 不删除，留作 audit log（**例外**：回合回退会按回合删除审计行，见 `docs/architecture/adr-turn-rollback-hard-delete.md`）
+- **审计可见**：cancelled handoff 不删除，留作 audit log（**例外**：回合回退会按回合删除审计行，见 `docs/architecture/adr-turn-rollback-hard-delete.md`）。另注：`cancelled` 有两个来源——运行中的 cancel，以及用户对**不可自动恢复**的失败派发执行 `dismiss`（failed → cancelled，同样不删行）；见同一 ADR 的「附：新增的『关闭失败派发』（dismiss）语义」。
 
 **BackgroundTaskScheduler 接口（v3.4 新增，D40 = D3 拍板落地）**：
 

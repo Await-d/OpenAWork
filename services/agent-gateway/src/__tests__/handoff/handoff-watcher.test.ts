@@ -611,6 +611,39 @@ describe('HandoffWatcher.tickOnce', () => {
     ).toBe(0);
   });
 
+  it('可恢复的 PM1 规划失败在根会话提示一键重试，不宣称已停止自动重试', async () => {
+    const { PlanningFailure } = await import('../../handoff/capability/planning-failure.js');
+    const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
+    const retryableFromSessionId = 's-watcher-retryable-from';
+    seedSession(retryableFromSessionId, USER_ID);
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      taskRunner: async () => {
+        throw new PlanningFailure('项目调查返回无效 JSON：(空响应)', 'recoverable');
+      },
+    });
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: retryableFromSessionId,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    await watcher.tickOnce();
+
+    const readReceptionText = (): string =>
+      listSessionMessagesV2({ sessionId: retryableFromSessionId, userId: USER_ID })
+        .flatMap((message) => message.content)
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('\n');
+
+    await vi.waitFor(() => {
+      expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+      const text = readReceptionText();
+      expect(text).toContain('一键重试');
+      expect(text).not.toContain('已停止自动重试');
+    });
+  });
+
   it('pm2 handoff 在 dispatch 后保持 running，等待后续 review 收口', async () => {
     const { createPm2Runner } = await import('../../handoff/runner/pm2-runner.js');
     const watcher = new watcherModule.HandoffWatcher({

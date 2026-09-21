@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('mermaid', () => ({
@@ -10,6 +10,7 @@ vi.mock('mermaid', () => ({
 }));
 
 import MarkdownMessageContent from './markdown-message-content.js';
+import { OPEN_LINK_PREVIEW_EVENT } from '../../../utils/preview/link-preview.js';
 
 afterEach(cleanup);
 
@@ -150,6 +151,119 @@ describe('MarkdownMessageContent tables', () => {
   });
 });
 
+describe('MarkdownMessageContent images', () => {
+  const lightboxSrc = (): string | null =>
+    document.querySelector('.image-lightbox__image')?.getAttribute('src') ?? null;
+
+  it('单图：点击打开查看器，且不渲染左右切换', () => {
+    render(<MarkdownMessageContent content={'![架构图](/images/arch.png "架构图说明")'} />);
+
+    const trigger = screen.getByRole('button', { name: '放大查看图片：架构图' });
+    const thumbnail = trigger.querySelector('img');
+    expect(thumbnail?.getAttribute('src')).toBe('/images/arch.png');
+    expect(thumbnail?.getAttribute('alt')).toBe('架构图');
+    expect(thumbnail?.getAttribute('title')).toBe('架构图说明');
+    expect(document.querySelector('.image-lightbox')).toBeNull();
+
+    fireEvent.click(trigger);
+
+    expect(lightboxSrc()).toBe('/images/arch.png');
+    expect(screen.queryByRole('button', { name: '上一张' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下一张' })).toBeNull();
+  });
+
+  it('链接图片：回退为纯 <img>，不嵌套按钮、点击不打开灯箱', () => {
+    render(<MarkdownMessageContent content={'[![Logo](/logo-openai.svg)](/home)'} />);
+
+    const link = screen.getByRole('link', { name: 'Logo' });
+    const image = screen.getByRole('img', { name: 'Logo' });
+    // 锚点语义保持不变（href / 新标签打开），只是不再包一层可点击触发器。
+    expect(link.getAttribute('href')).toBe('/home');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(image.closest('a')).toBe(link);
+    expect(screen.queryByRole('button')).toBeNull();
+
+    fireEvent.click(image);
+    expect(document.querySelector('.image-lightbox')).toBeNull();
+  });
+
+  it('同段混合：链接内图片不渲染放大按钮，但图集仍按正文顺序收录全部图片', () => {
+    const content = ['[![Logo](/logo.svg)](/home)', '', '![截图](/images/1.png)'].join('\n');
+    render(<MarkdownMessageContent content={content} />);
+
+    // 可点击入口只属于链接外的图片；链接内图片保留锚点语义（见上一个用例）。
+    expect(screen.getAllByRole('button', { name: /^放大查看图片：/u })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大查看图片：截图' }));
+    expect(lightboxSrc()).toBe('/images/1.png');
+
+    // 图集收录的是正文中出现的全部图片 URL（抽取阶段不区分是否位于链接内），
+    // 所以从截图切上一张会落到链接内的 Logo —— 这是当前实现的可观察行为。
+    fireEvent.click(screen.getByRole('button', { name: '上一张' }));
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+    expect(lightboxSrc()).toBe('/logo.svg');
+  });
+
+  it('多图：从任意一张打开都带完整图集，可左右切换且边界不循环', () => {
+    const content = [
+      '![图一](/images/1.png)',
+      '',
+      '![图二](/images/2.png "第二张")',
+      '',
+      '![图三](/images/3.png)',
+    ].join('\n');
+    render(<MarkdownMessageContent content={content} />);
+
+    expect(screen.getAllByRole('button', { name: /^放大查看图片：/u })).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大查看图片：图二' }));
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+    expect(lightboxSrc()).toBe('/images/2.png');
+
+    fireEvent.click(screen.getByRole('button', { name: '下一张' }));
+    expect(screen.getByText('3 / 3')).toBeTruthy();
+    expect(lightboxSrc()).toBe('/images/3.png');
+    expect((screen.getByRole('button', { name: '下一张' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '上一张' }));
+    fireEvent.click(screen.getByRole('button', { name: '上一张' }));
+    expect(screen.getByText('1 / 3')).toBeTruthy();
+    expect(lightboxSrc()).toBe('/images/1.png');
+    expect((screen.getByRole('button', { name: '上一张' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('键盘可达：Esc 关闭查看器', () => {
+    render(<MarkdownMessageContent content={'![图一](/images/1.png)'} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大查看图片：图一' }));
+    expect(document.querySelector('.image-lightbox')).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(document.querySelector('.image-lightbox')).toBeNull();
+  });
+
+  it('代码块中的图片写法不进入图集', () => {
+    const content = [
+      '```ts',
+      'const markdown = "![伪图](/images/code.png)";',
+      '```',
+      '',
+      '![真图](/images/real.png)',
+    ].join('\n');
+    render(<MarkdownMessageContent content={content} />);
+
+    expect(screen.getAllByRole('button', { name: /^放大查看图片：/u })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大查看图片：真图' }));
+    expect(lightboxSrc()).toBe('/images/real.png');
+    expect(screen.queryByRole('button', { name: '下一张' })).toBeNull();
+  });
+});
+
 describe('MarkdownMessageContent mermaid fences', () => {
   it('把 ```mindmap 直接当图表渲染并标注类型', () => {
     const content = ['```mindmap', 'mindmap', '  root((主题))', '    分支', '```'].join('\n');
@@ -203,5 +317,75 @@ describe('MarkdownMessageContent static preview fences', () => {
     const block = container.querySelector('.chat-markdown-code-block');
     expect(block?.hasAttribute('data-preview-open')).toBe(false);
     expect(container.querySelector('pre.chat-markdown-pre')).toBeTruthy();
+  });
+});
+
+describe('MarkdownMessageContent link preview', () => {
+  const HTTPS_LINK = '[官网](https://example.com)';
+
+  /** 注册一个「认领」监听：记录 url 并 preventDefault，模拟页面的应用内预览。 */
+  function registerClaimingListener(): {
+    readonly urls: string[];
+    readonly listener: EventListener;
+  } {
+    const urls: string[] = [];
+    const listener: EventListener = (event) => {
+      urls.push((event as CustomEvent<{ url: string }>).detail.url);
+      event.preventDefault();
+    };
+    window.addEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+    return { urls, listener };
+  }
+
+  it('页面认领预览请求时阻止锚点原生跳转', () => {
+    render(<MarkdownMessageContent content={HTTPS_LINK} />);
+    const { urls, listener } = registerClaimingListener();
+
+    const result = fireEvent.click(screen.getByRole('link', { name: '官网' }));
+    window.removeEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+
+    expect(result).toBe(false);
+    expect(urls).toEqual(['https://example.com']);
+  });
+
+  it('没有页面认领时锚点保持新标签打开', () => {
+    render(<MarkdownMessageContent content={HTTPS_LINK} />);
+    const link = screen.getByRole('link', { name: '官网' });
+
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it('相对链接不进入预览面', () => {
+    render(<MarkdownMessageContent content={'[首页](/home)'} />);
+    const listener = vi.fn();
+    window.addEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+
+    const link = screen.getByRole('link', { name: '首页' });
+    fireEvent.click(link);
+    window.removeEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(link.getAttribute('href')).toBe('/home');
+  });
+
+  it('修饰键或中键点击不进入预览面', () => {
+    render(<MarkdownMessageContent content={HTTPS_LINK} />);
+    const listener = vi.fn();
+    window.addEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+
+    const link = screen.getByRole('link', { name: '官网' });
+    for (const init of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
+      fireEvent.click(link, init);
+    }
+    window.removeEventListener(OPEN_LINK_PREVIEW_EVENT, listener);
+
+    expect(listener).not.toHaveBeenCalled();
   });
 });

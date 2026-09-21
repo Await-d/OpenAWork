@@ -3,6 +3,8 @@ import * as path from 'node:path';
 
 export const APP_NAME = 'OpenAWork';
 
+const DOCUMENTS_DIR_NAME = 'Documents';
+
 export type SupportedPlatform =
   'darwin' | 'linux' | 'win32' | 'android' | 'freebsd' | 'openbsd' | 'netbsd';
 
@@ -12,6 +14,7 @@ export interface PlatformAdapter {
   getDataDir(): string;
   getTempDir(): string;
   getSkillsDir(): string;
+  getDocumentsDir(): string;
 }
 
 function detectPlatform(): SupportedPlatform {
@@ -88,12 +91,27 @@ function resolveSkillsDir(configDir: string, platform: SupportedPlatform): strin
     : path.join(configDir, 'skills');
 }
 
+function resolveDocumentsDir(platform: SupportedPlatform): string {
+  switch (platform) {
+    case 'win32':
+      return path.join(process.env['USERPROFILE'] ?? os.homedir(), DOCUMENTS_DIR_NAME);
+    case 'darwin':
+      return path.join(os.homedir(), DOCUMENTS_DIR_NAME);
+    case 'android':
+      // Android 无标准公共「文档目录」，退回应用私有数据目录。
+      return resolveDataDir(platform);
+    default:
+      return process.env['XDG_DOCUMENTS_DIR'] ?? path.join(os.homedir(), DOCUMENTS_DIR_NAME);
+  }
+}
+
 class DefaultPlatformAdapter implements PlatformAdapter {
   private readonly platform: SupportedPlatform;
   private readonly configDir: string;
   private readonly dataDir: string;
   private readonly tempDir: string;
   private readonly skillsDir: string;
+  private readonly documentsDir: string;
 
   constructor() {
     this.platform = detectPlatform();
@@ -101,6 +119,7 @@ class DefaultPlatformAdapter implements PlatformAdapter {
     this.dataDir = resolveDataDir(this.platform);
     this.tempDir = resolveTempDir(this.platform);
     this.skillsDir = resolveSkillsDir(this.configDir, this.platform);
+    this.documentsDir = resolveDocumentsDir(this.platform);
   }
 
   getPlatform(): SupportedPlatform {
@@ -121,6 +140,10 @@ class DefaultPlatformAdapter implements PlatformAdapter {
 
   getSkillsDir(): string {
     return this.skillsDir;
+  }
+
+  getDocumentsDir(): string {
+    return this.documentsDir;
   }
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   DesktopControlActionResult,
   DesktopControlCapabilities,
@@ -6,6 +6,18 @@ import type {
 } from '@openAwork/web-client';
 import type { DevtoolsSourceState } from '../state/settings-types.js';
 import { InlineFailureNotice } from '../devtools/devtools-workbench-primitives.js';
+import {
+  SettingsSegmentedRow,
+  type SettingsSegmentedOption,
+} from '../shared/settings-segmented-row.js';
+import {
+  WORKSPACE_ACTION_BTN,
+  WORKSPACE_CARD,
+  WORKSPACE_FIELD_INPUT,
+  WORKSPACE_ROW,
+  WORKSPACE_SECTION_SUB,
+  WORKSPACE_SECTION_TITLE,
+} from './workspace-styles.js';
 
 const CONTROL_ACTIONS = ['screenshot', 'click', 'type', 'key', 'hotkey', 'scroll', 'wait'] as const;
 type DesktopControlActionType = (typeof CONTROL_ACTIONS)[number];
@@ -23,71 +35,6 @@ interface SystemDesktopControlCardProps {
   onDesktopControlScroll: (scrollX: number, scrollY: number) => Promise<DesktopControlActionResult>;
   onDesktopControlWait: (ms?: number) => Promise<DesktopControlActionResult>;
 }
-
-const CARD: React.CSSProperties = {
-  borderRadius: 8,
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-  padding: '8px 10px',
-};
-
-const ROW: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-};
-
-const SECTION_TITLE: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--fg-strong)',
-  margin: 0,
-  lineHeight: 1.3,
-  letterSpacing: '0.01em',
-};
-
-const SECTION_SUB: React.CSSProperties = {
-  fontSize: 10,
-  color: 'var(--fg-muted)',
-  margin: 0,
-  marginTop: 2,
-  lineHeight: 1.4,
-};
-
-const ACTION_BTN: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--accent)',
-  background: 'var(--accent)',
-  color: 'var(--fg-on-accent)',
-  fontSize: 10,
-  fontWeight: 600,
-  padding: '4px 9px',
-  cursor: 'pointer',
-  lineHeight: 1.4,
-};
-
-const GHOST_BTN: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--border-default)',
-  background: 'transparent',
-  color: 'var(--fg-default)',
-  fontSize: 10,
-  padding: '4px 8px',
-  cursor: 'pointer',
-  lineHeight: 1.4,
-};
-
-const FIELD_INPUT: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay))',
-  color: 'var(--fg-strong)',
-  fontSize: 10,
-  padding: '5px 8px',
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
 
 const ACTION_LABELS: Record<DesktopControlActionType, string> = {
   screenshot: '截图',
@@ -245,7 +192,7 @@ function CapabilityGrid({
             key={item.key}
             title={translatedReason ?? capability?.driver ?? item.label}
             style={{
-              ...ROW,
+              ...WORKSPACE_ROW,
               minWidth: 0,
               fontSize: 10,
               color: available ? 'var(--accent)' : 'var(--fg-muted)',
@@ -305,6 +252,21 @@ export function SystemDesktopControlCard({
     () => CONTROL_ACTIONS.filter((item) => isActionAvailable(item, bridgeEnabled, capabilities)),
     [bridgeEnabled, capabilities],
   );
+  const controlActionOptions: ReadonlyArray<SettingsSegmentedOption<DesktopControlActionType>> =
+    CONTROL_ACTIONS.map((item) => {
+      const actionAvailable = isActionAvailable(item, bridgeEnabled, capabilities);
+      const unavailableReason = translateDesktopControlReason(
+        getActionCapability(item, capabilities)?.reason,
+      );
+      return {
+        value: item,
+        label: ACTION_LABELS[item],
+        disabled: !actionAvailable,
+        title: actionAvailable
+          ? ACTION_LABELS[item]
+          : (unavailableReason ?? `${ACTION_LABELS[item]} 当前不可用`),
+      };
+    });
   const availableActionCount = availableActions.length;
   const hasAnyAction = availableActionCount > 0;
   const fullyAvailable = bridgeEnabled && availableActionCount === CONTROL_ACTIONS.length;
@@ -416,15 +378,15 @@ export function SystemDesktopControlCard({
   }
 
   return (
-    <div style={CARD}>
+    <div style={WORKSPACE_CARD}>
       {desktopControlSourceState.status === 'error' && desktopControlSourceState.error ? (
         <InlineFailureNotice
           title="系统桌面控制状态加载失败"
           message={desktopControlSourceState.error}
         />
       ) : null}
-      <div style={{ ...ROW, justifyContent: 'space-between' }}>
-        <div style={ROW}>
+      <div style={{ ...WORKSPACE_ROW, justifyContent: 'space-between' }}>
+        <div style={WORKSPACE_ROW}>
           <span
             style={{
               width: 8,
@@ -434,7 +396,7 @@ export function SystemDesktopControlCard({
               flexShrink: 0,
             }}
           />
-          <span style={SECTION_TITLE}>系统桌面控制</span>
+          <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>系统桌面控制</h3>
         </div>
       </div>
       <CapabilityGrid capabilities={capabilities} bridgeEnabled={bridgeEnabled} />
@@ -460,67 +422,44 @@ export function SystemDesktopControlCard({
       </div>
       {controlConsoleEnabled ? (
         <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-default)' }}>
-          <span style={{ ...SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}>
+          <span style={{ ...WORKSPACE_SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}>
             操作控制台
           </span>
-          <div style={{ ...ROW, marginTop: 8, flexWrap: 'wrap', gap: 4 }}>
-            {CONTROL_ACTIONS.map((item) => {
-              const actionAvailable = isActionAvailable(item, bridgeEnabled, capabilities);
-              const actionUnavailableReason = translateDesktopControlReason(
-                getActionCapability(item, capabilities)?.reason,
-              );
-
-              return (
-                <button
-                  key={item}
-                  type="button"
-                  disabled={!actionAvailable}
-                  title={
-                    actionAvailable
-                      ? ACTION_LABELS[item]
-                      : (actionUnavailableReason ?? `${ACTION_LABELS[item]} 当前不可用`)
-                  }
-                  onClick={() => {
-                    setAction(item);
-                    setResult(null);
-                    setScreenshotData(null);
-                  }}
-                  style={{
-                    ...GHOST_BTN,
-                    background:
-                      action === item
-                        ? 'color-mix(in srgb, var(--accent) 15%, transparent)'
-                        : 'transparent',
-                    borderColor: action === item ? 'var(--accent)' : 'var(--border-default)',
-                    color: action === item ? 'var(--accent)' : 'var(--fg-default)',
-                    cursor: actionAvailable ? 'pointer' : 'not-allowed',
-                    opacity: actionAvailable ? 1 : 0.55,
-                  }}
-                >
-                  {ACTION_LABELS[item]}
-                </button>
-              );
-            })}
-          </div>
+          <SettingsSegmentedRow
+            ariaLabel="系统桌面控制动作"
+            options={controlActionOptions}
+            value={action}
+            onChange={(next) => {
+              setAction(next);
+              setResult(null);
+              setScreenshotData(null);
+            }}
+          />
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {action === 'screenshot' ? (
               <input
-                style={FIELD_INPUT}
+                style={WORKSPACE_FIELD_INPUT}
                 placeholder="延迟毫秒"
                 value={delayMs}
                 onChange={(event) => setDelayMs(event.target.value)}
               />
             ) : null}
             {action === 'click' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 6,
+                }}
+              >
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="X"
                   value={x}
                   onChange={(event) => setX(event.target.value)}
                 />
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="Y"
                   value={y}
                   onChange={(event) => setY(event.target.value)}
@@ -529,7 +468,7 @@ export function SystemDesktopControlCard({
             ) : null}
             {action === 'type' ? (
               <input
-                style={FIELD_INPUT}
+                style={WORKSPACE_FIELD_INPUT}
                 placeholder="输入内容"
                 value={text}
                 onChange={(event) => setText(event.target.value)}
@@ -537,7 +476,7 @@ export function SystemDesktopControlCard({
             ) : null}
             {action === 'key' ? (
               <input
-                style={FIELD_INPUT}
+                style={WORKSPACE_FIELD_INPUT}
                 placeholder="按键，例如 Enter"
                 value={key}
                 onChange={(event) => setKey(event.target.value)}
@@ -545,22 +484,28 @@ export function SystemDesktopControlCard({
             ) : null}
             {action === 'hotkey' ? (
               <input
-                style={FIELD_INPUT}
+                style={WORKSPACE_FIELD_INPUT}
                 placeholder="组合键，例如 Control,K"
                 value={keys}
                 onChange={(event) => setKeys(event.target.value)}
               />
             ) : null}
             {action === 'scroll' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 6,
+                }}
+              >
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="scrollX"
                   value={scrollX}
                   onChange={(event) => setScrollX(event.target.value)}
                 />
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="scrollY"
                   value={scrollY}
                   onChange={(event) => setScrollY(event.target.value)}
@@ -569,7 +514,7 @@ export function SystemDesktopControlCard({
             ) : null}
             {action === 'wait' ? (
               <input
-                style={FIELD_INPUT}
+                style={WORKSPACE_FIELD_INPUT}
                 placeholder="等待毫秒"
                 value={waitMs}
                 onChange={(event) => setWaitMs(event.target.value)}
@@ -580,7 +525,7 @@ export function SystemDesktopControlCard({
               onClick={() => void runAction()}
               disabled={loading || !availableActions.includes(action)}
               style={{
-                ...ACTION_BTN,
+                ...WORKSPACE_ACTION_BTN,
                 opacity: loading || !availableActions.includes(action) ? 0.6 : 1,
                 alignSelf: 'flex-start',
                 cursor: loading || !availableActions.includes(action) ? 'not-allowed' : 'pointer',

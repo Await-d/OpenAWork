@@ -1,5 +1,8 @@
-import React from 'react';
 import { BP, SS, ST } from '../shared/settings-section-styles.js';
+import {
+  SettingsSegmentedRow,
+  type SettingsSegmentedOption,
+} from '../shared/settings-segmented-row.js';
 
 interface UpstreamRetrySectionProps {
   isSaving: boolean;
@@ -9,19 +12,16 @@ interface UpstreamRetrySectionProps {
   savedMaxRetries: number;
 }
 
-const OPTION_BUTTON: React.CSSProperties = {
-  minWidth: 36,
-  borderRadius: 999,
-  border: '1px solid var(--border-default)',
-  background: 'var(--bg-overlay)',
-  color: 'var(--fg-default)',
-  padding: '5px 10px',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-  transition: 'all 150ms ease',
-};
+const RETRY_OPTION_VALUES = ['0', '1', '2', '3'] as const;
+
+type RetryOptionValue = (typeof RETRY_OPTION_VALUES)[number];
+
+const RETRY_OPTIONS: ReadonlyArray<SettingsSegmentedOption<RetryOptionValue>> =
+  RETRY_OPTION_VALUES.map((value) => ({ value, label: `${value} 次` }));
+
+function toRetryOptionValue(maxRetries: number): RetryOptionValue {
+  return RETRY_OPTION_VALUES.find((option) => option === String(maxRetries)) ?? '0';
+}
 
 export function UpstreamRetrySection({
   isSaving,
@@ -70,32 +70,12 @@ export function UpstreamRetrySection({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {[0, 1, 2, 3].map((value) => {
-          const selected = value === maxRetries;
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onChange(value)}
-              aria-pressed={selected}
-              style={{
-                ...OPTION_BUTTON,
-                background: selected
-                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
-                  : OPTION_BUTTON.background,
-                borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
-                color: selected ? 'var(--accent)' : OPTION_BUTTON.color,
-                boxShadow: selected
-                  ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent)'
-                  : 'none',
-              }}
-            >
-              <span style={{ whiteSpace: 'nowrap' }}>{value} 次</span>
-            </button>
-          );
-        })}
-      </div>
+      <SettingsSegmentedRow<RetryOptionValue>
+        ariaLabel="上游失败自动重试次数"
+        options={RETRY_OPTIONS}
+        value={toRetryOptionValue(maxRetries)}
+        onChange={(next) => onChange(Number(next))}
+      />
 
       <div
         style={{

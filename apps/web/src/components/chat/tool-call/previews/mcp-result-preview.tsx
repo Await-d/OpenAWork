@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { ImageZoomTrigger } from '../../../common/display/ImageZoomTrigger.js';
+import { ImageLightbox } from '../../image/image-lightbox.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { JsonPreview } from './json-preview.js';
 
@@ -88,17 +91,34 @@ export function extractMcpResult(output: unknown): McpResultView | null {
   };
 }
 
-function McpBlock({ block }: { block: McpContentBlock }) {
+function toImageDataUrl(block: McpContentBlock): string | null {
+  if (block.type !== 'image' || !block.data || !block.mimeType) return null;
+  return `data:${block.mimeType};base64,${block.data}`;
+}
+
+function McpBlock({
+  block,
+  imageIndex,
+  onOpenImage,
+}: {
+  block: McpContentBlock;
+  imageIndex: number | null;
+  onOpenImage: (index: number) => void;
+}) {
   if (block.type === 'text' && typeof block.text === 'string') {
     return <ExpandableOutput text={block.text} maxChars={800} maxLines={24} />;
   }
   if (block.type === 'image' && block.data && block.mimeType) {
+    const src = `data:${block.mimeType};base64,${block.data}`;
     return (
-      <img
-        className="mcp-result-image"
-        src={`data:${block.mimeType};base64,${block.data}`}
+      <ImageZoomTrigger
+        className="mcp-result-image-trigger"
+        src={src}
         alt={block.mimeType}
-        loading="lazy"
+        label={`放大查看图片：${block.mimeType}`}
+        imageClassName="mcp-result-image"
+        style={{ alignSelf: 'flex-start' }}
+        onOpen={() => onOpenImage(imageIndex ?? 0)}
       />
     );
   }
@@ -109,15 +129,40 @@ function McpBlock({ block }: { block: McpContentBlock }) {
 }
 
 export function McpResultPreview({ result }: { result: McpResultView }) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const imageUrls: string[] = [];
+  const imageIndexByBlock: (number | null)[] = [];
+  for (const block of result.blocks) {
+    const url = toImageDataUrl(block);
+    if (url === null) {
+      imageIndexByBlock.push(null);
+      continue;
+    }
+    imageIndexByBlock.push(imageUrls.length);
+    imageUrls.push(url);
+  }
+
   return (
     <div className="mcp-result" data-error={result.isError ? 'true' : undefined}>
       {result.isError && <div className="mcp-result-error">MCP 调用返回错误</div>}
       {result.blocks.map((block, index) => (
-        <McpBlock key={`${block.type}-${index}`} block={block} />
+        <McpBlock
+          key={`${block.type}-${index}`}
+          block={block}
+          imageIndex={imageIndexByBlock[index] ?? null}
+          onOpenImage={setOpenIndex}
+        />
       ))}
       {result.structuredContent !== undefined && (
         <JsonPreview data={result.structuredContent} maxLines={16} />
       )}
+      <ImageLightbox
+        open={openIndex !== null}
+        items={imageUrls.map((src) => ({ src }))}
+        index={openIndex ?? 0}
+        onIndexChange={setOpenIndex}
+        onClose={() => setOpenIndex(null)}
+      />
     </div>
   );
 }

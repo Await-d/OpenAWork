@@ -5,6 +5,8 @@ import {
   PlanningFailure,
 } from '../../handoff/capability/planning-failure.js';
 
+process.env['DATABASE_URL'] = ':memory:';
+
 describe('规划失败终止协议', () => {
   it('新 handoff 的 retry_count 为零时保留跨轮进度', () => {
     let round = 0;
@@ -20,6 +22,23 @@ describe('规划失败终止协议', () => {
   it('失败原因要求人工介入，不能进入自动降级派发', () => {
     expect(new PlanningFailure('缺少有效任务').message).toMatch(
       /^planning-generation-failed:.*需要用户介入/,
+    );
+  });
+
+  it('默认处置保留「需要用户介入」尾注，既有语义不变', () => {
+    expect(new PlanningFailure('缺少有效任务').message).toBe(
+      'planning-generation-failed: 缺少有效任务；需要用户介入',
+    );
+  });
+
+  it('recoverable 处置去掉尾注，并被判定为可恢复失败', async () => {
+    const { isRecoverableFailedHandoffReason } =
+      await import('../../handoff/store/handoff-store.js');
+    const transient = new PlanningFailure('项目调查返回无效 JSON：(空响应)', 'recoverable');
+    expect(transient.message).toBe('planning-generation-failed: 项目调查返回无效 JSON：(空响应)');
+    expect(isRecoverableFailedHandoffReason(transient.message)).toBe(true);
+    expect(isRecoverableFailedHandoffReason(new PlanningFailure('缺少有效任务').message)).toBe(
+      false,
     );
   });
 

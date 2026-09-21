@@ -130,6 +130,11 @@ export interface BaseSessionRowProps {
   hovered?: boolean;
   /** 图标插槽（左侧 icon box） */
   icon?: ReactNode;
+  /**
+   * 前导插槽：渲染在 icon 之前（如子代理折叠箭头）。
+   * 内部为按钮时，`isNestedInteractiveTarget` 会阻止触发行选择。
+   */
+  leadingSlot?: ReactNode;
   /** 元信息插槽（标题下方，非 hover 时显示） */
   meta?: ReactNode;
   /** 额外内容插槽（meta 行下方，始终显示） */
@@ -230,6 +235,7 @@ export function BaseSessionRow({
   active = false,
   hovered = false,
   icon,
+  leadingSlot,
   meta,
   extra,
   actions,
@@ -395,6 +401,7 @@ export function BaseSessionRow({
           minWidth: 0,
         }}
       >
+        {leadingSlot}
         {icon}
         <div
           style={{

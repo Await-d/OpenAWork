@@ -8,6 +8,7 @@ import { z } from 'zod';
 import {
   streamRequestSchema as permissionResumeRequestSchema,
   type ApprovedPermissionResumePayload,
+  type BlockedToolCallResumeEntry,
 } from '../routes/stream.js';
 
 export type {
@@ -103,6 +104,24 @@ export function mapPermissionRequestRow(
   };
 }
 
+function parseBlockedToolCalls(value: unknown): BlockedToolCallResumeEntry[] {
+  if (!Array.isArray(value)) return [];
+  const calls: BlockedToolCallResumeEntry[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const toolCallId = typeof record['toolCallId'] === 'string' ? record['toolCallId'] : null;
+    const toolName = typeof record['toolName'] === 'string' ? record['toolName'] : null;
+    const rawInput =
+      record['rawInput'] && typeof record['rawInput'] === 'object'
+        ? (record['rawInput'] as Record<string, unknown>)
+        : null;
+    if (!toolCallId || !toolName || !rawInput) continue;
+    calls.push({ toolCallId, toolName, rawInput });
+  }
+  return calls;
+}
+
 export function parseApprovedPermissionResumePayload(
   payloadJson: string | null,
 ): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
@@ -140,6 +159,7 @@ export function parseApprovedPermissionResumePayload(
       parsed['observability'] && typeof parsed['observability'] === 'object'
         ? (parsed['observability'] as Record<string, unknown>)
         : null;
+    const blockedToolCalls = parseBlockedToolCalls(parsed['blockedToolCalls']);
 
     return {
       clientRequestId,
@@ -147,6 +167,7 @@ export function parseApprovedPermissionResumePayload(
       requestData,
       toolCallId,
       rawInput,
+      ...(blockedToolCalls.length > 0 ? { blockedToolCalls } : {}),
       ...(observabilityCandidate
         ? {
             observability: {

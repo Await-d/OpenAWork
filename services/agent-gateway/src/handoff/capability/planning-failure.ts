@@ -1,7 +1,14 @@
+/** 失败处置：requires-user = 需要用户介入（默认，保持既有语义）；recoverable = 瞬时失败，可自动/手动重试。 */
+export type PlanningFailureDisposition = 'requires-user' | 'recoverable';
+
 /** A planning rejection is terminal for this attempt, including watcher fallback paths. */
 export class PlanningFailure extends Error {
-  constructor(reason: string) {
-    super(`planning-generation-failed: ${reason}；需要用户介入`);
+  constructor(reason: string, disposition: PlanningFailureDisposition = 'requires-user') {
+    super(
+      disposition === 'recoverable'
+        ? `planning-generation-failed: ${reason}`
+        : `planning-generation-failed: ${reason}；需要用户介入`,
+    );
     this.name = 'PlanningFailure';
   }
 }

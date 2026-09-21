@@ -9,12 +9,13 @@ import type { TabId } from './settings-page-helpers.js';
  * 1. 精简分类：从 7 个减少到 4 个核心分类
  * 2. 更宽导航：220px（原 192px），更好容纳中文
  * 3. 紧凑间距：20px gap（原 28px），节省空间
- * 4. 智能折叠：在 960px 断点切换布局（原 820px）
+ * 4. 智能折叠：在 1100px 断点切换布局（原 820px）
  */
 
 export const OPTIMIZED_NAV_WIDTH = 220;
 export const OPTIMIZED_CONTENT_GAP = 20;
-export const OPTIMIZED_COMPACT_BREAKPOINT = '(max-width: 960px)';
+export const OPTIMIZED_COMPACT_BREAKPOINT_PX = 1100;
+export const OPTIMIZED_COMPACT_BREAKPOINT = `(max-width: ${OPTIMIZED_COMPACT_BREAKPOINT_PX}px)`;
 export const OPTIMIZED_MAX_WIDTH = `calc(var(--content-max-width) + ${OPTIMIZED_NAV_WIDTH + OPTIMIZED_CONTENT_GAP}px)`;
 
 /**

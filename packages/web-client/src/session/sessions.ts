@@ -469,6 +469,12 @@ export interface DeleteSessionErrorData {
 }
 
 /**
+ * `list()` 固定请求的页大小。达到该长度说明网关可能还有未返回的会话，
+ * 调用方**不可**据此认定「未出现 = 已删除」（例如据此清理本地折叠状态）。
+ */
+export const SESSIONS_LIST_PAGE_LIMIT = 100;
+
+/**
  * Optional filters that the gateway `/sessions` route honours
  * (P3-PATH, opencode #24849 parity). Older gateway versions ignore
  * unknown query params, so omitting these is safe.
@@ -1033,7 +1039,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
   return {
     async list(token, options) {
       const params = new URLSearchParams();
-      params.set('limit', '100');
+      params.set('limit', String(SESSIONS_LIST_PAGE_LIMIT));
       if (options?.path && options.path.trim().length > 0) {
         params.set('path', options.path.trim());
         if (options.includeDescendants === false) {

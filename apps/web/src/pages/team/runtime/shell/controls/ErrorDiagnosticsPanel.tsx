@@ -17,7 +17,9 @@
 
 import { useState, useMemo, useCallback, type CSSProperties } from 'react';
 import type { HandoffEntry } from '../../../../../stores/team/team-events.js';
+import { isHandoffDismissable } from '../../data/team-handoff-dismissability.js';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
+import './error-diagnostics-panel.css';
 
 // ─── 样式 ──────────────────────────────────────────────────────────
 
@@ -161,6 +163,31 @@ const RETRY_BUTTON_STYLE: CSSProperties = {
   transition: 'background 120ms ease, transform 120ms ease',
 };
 
+/**
+ * 逐项「关闭」按钮：次要 / 幽灵操作（非 danger），仅几何内联；默认色与
+ * hover / active / focus-visible / disabled 状态见 error-diagnostics-panel.css。
+ * fontSize 10 + lineHeight 1 → 按钮高 16px，不超过错误条目文字行高 16.5px。
+ */
+const DISMISS_BUTTON_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '2px 8px',
+  borderRadius: 6,
+  fontSize: 10,
+  fontWeight: 600,
+  lineHeight: 1,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+  transition: 'color 100ms ease, background 100ms ease, border-color 100ms ease',
+};
+
+/**
+ * 每个分组内联展示的最大条目数。超出部分折叠为一行摘要 +（如有）批量关闭入口；
+ * 分组内可关闭项会被稳定分区前置，保证唯一的关闭入口不会被该上限吞掉。
+ */
+const DIAGNOSTIC_ITEM_LIMIT = 5;
+
 // ─── 类型 ──────────────────────────────────────────────────────────
 
 interface ErrorGroup {
@@ -175,6 +202,15 @@ interface ErrorItem {
   layer: string;
   message: string;
   sessionId?: string;
+  /**
+   * 是否展示「关闭」入口：服务端下发的 dismissableFailure 为权威（快照投影，
+   * 已计入不可恢复与 orphaned executor / reviewer 判定）；该标记缺失时（例如
+   * 仅经 WS 事件到达、尚未水合快照）由 isHandoffDismissable 回落本地规则：
+   * executor / reviewer 层服务端不接受，recoverableFailure === true（仍有自动
+   * 恢复路径）也不展示，避免给出必然 409 的按钮。标记未知时保留入口，不把用户
+   * 困在失败态。
+   */
+  dismissable: boolean;
 }
 
 type ErrorCategory = 'api_timeout' | 'syntax_error' | 'tool_binding' | 'unknown';
@@ -240,6 +276,8 @@ export interface ErrorDiagnosticsPanelProps {
   selectedTeam: AgentTeamsSidebarTeam | null;
   onRetryFailed?: () => void;
   retrying?: boolean;
+  onDismissFailed?: (handoffIds: readonly string[]) => void;
+  dismissingHandoffIds?: readonly string[];
 }
 
 export function ErrorDiagnosticsPanel({
@@ -247,18 +285,28 @@ export function ErrorDiagnosticsPanel({
   selectedTeam,
   onRetryFailed,
   retrying = false,
+  onDismissFailed,
+  dismissingHandoffIds = [],
 }: ErrorDiagnosticsPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   const taskFailedCount = selectedTeam?.taskFailed ?? 0;
-  const failedHandoffCount = failedHandoffs.filter((h) => h.state === 'failed').length;
+  // B8：与后端 /team/runtime 的口径对齐——PM2 评审处置已被用户确认
+  // （reviewDispositionHandled）的失败项不再计入简报，避免处置完成后简报永久驻留。
+  const visibleFailedHandoffs = useMemo(
+    () =>
+      failedHandoffs.filter(
+        (handoff) => handoff.state === 'failed' && handoff.reviewDispositionHandled !== true,
+      ),
+    [failedHandoffs],
+  );
+  const failedHandoffCount = visibleFailedHandoffs.length;
   const totalFailed = Math.max(taskFailedCount, failedHandoffCount);
 
   const errorGroups = useMemo<ErrorGroup[]>(() => {
     const groups = new Map<ErrorCategory, ErrorItem[]>();
 
-    for (const handoff of failedHandoffs) {
-      if (handoff.state !== 'failed') continue;
+    for (const handoff of visibleFailedHandoffs) {
       const message = handoff.failureReason ?? handoff.summary ?? '未知错误';
       const category = classifyError(message);
       const layer = handoff.toRoleLayer
@@ -269,6 +317,7 @@ export function ErrorDiagnosticsPanel({
         layer,
         message,
         sessionId: handoff.sessionId ?? undefined,
+        dismissable: isHandoffDismissable(handoff),
       };
       const list = groups.get(category) ?? [];
       list.push(item);
@@ -284,17 +333,31 @@ export function ErrorDiagnosticsPanel({
           layer: '会话级',
           message: `${totalFailed} 个任务执行失败，详细信息请查看任务看板`,
           sessionId: selectedTeam?.id,
+          dismissable: false,
         },
       ]);
     }
 
-    return Array.from(groups.entries()).map(([category, items]) => ({
-      category,
-      label: CATEGORY_META[category].label,
-      icon: CATEGORY_META[category].icon,
-      items,
-    }));
-  }, [failedHandoffs, selectedTeam?.id, totalFailed]);
+    return Array.from(groups.entries()).map(([category, items]) => {
+      // 稳定分区：可关闭项前置（分区内保持原相对顺序），确保 DIAGNOSTIC_ITEM_LIMIT
+      // 截断永远不会藏起唯一的「关闭」入口。
+      const dismissable: ErrorItem[] = [];
+      const rest: ErrorItem[] = [];
+      for (const item of items) {
+        if (item.dismissable) {
+          dismissable.push(item);
+        } else {
+          rest.push(item);
+        }
+      }
+      return {
+        category,
+        label: CATEGORY_META[category].label,
+        icon: CATEGORY_META[category].icon,
+        items: [...dismissable, ...rest],
+      };
+    });
+  }, [visibleFailedHandoffs, selectedTeam?.id, totalFailed]);
 
   const handleToggle = useCallback(() => {
     setExpanded((prev) => !prev);
@@ -356,39 +419,79 @@ export function ErrorDiagnosticsPanel({
 
       {expanded ? (
         <div style={CONTENT_STYLE}>
-          {errorGroups.map((group) => (
-            <div key={group.category} style={ERROR_GROUP_STYLE}>
-              <div style={ERROR_GROUP_HEADER_STYLE}>
-                <span style={ERROR_GROUP_ICON_STYLE} aria-hidden>
-                  {group.icon}
-                </span>
-                <span>{group.label}</span>
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    fontSize: 10,
-                    color: 'var(--fg-muted)',
-                    fontWeight: 600,
-                  }}
-                >
-                  {group.items.length} 项
-                </span>
-              </div>
-              {group.items.slice(0, 5).map((item, index) => (
-                <div key={`${group.category}-${item.handoffId}-${index}`} style={ERROR_ITEM_STYLE}>
-                  <span style={ERROR_ITEM_LABEL_STYLE}>[{item.layer}]</span>
-                  <span style={ERROR_ITEM_MSG_STYLE} title={item.message}>
-                    {item.message}
+          {errorGroups.map((group) => {
+            const hiddenItems = group.items.slice(DIAGNOSTIC_ITEM_LIMIT);
+            const hiddenDismissableIds = hiddenItems
+              .filter((item) => item.dismissable)
+              .map((item) => item.handoffId);
+            return (
+              <div key={group.category} style={ERROR_GROUP_STYLE}>
+                <div style={ERROR_GROUP_HEADER_STYLE}>
+                  <span style={ERROR_GROUP_ICON_STYLE} aria-hidden>
+                    {group.icon}
+                  </span>
+                  <span>{group.label}</span>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      fontSize: 10,
+                      color: 'var(--fg-muted)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {group.items.length} 项
                   </span>
                 </div>
-              ))}
-              {group.items.length > 5 ? (
-                <div style={{ ...ERROR_ITEM_STYLE, color: 'var(--fg-muted)', fontStyle: 'italic' }}>
-                  …还有 {group.items.length - 5} 项，切换到「任务」标签页查看完整列表
-                </div>
-              ) : null}
-            </div>
-          ))}
+                {group.items.slice(0, DIAGNOSTIC_ITEM_LIMIT).map((item, index) => (
+                  <div
+                    key={`${group.category}-${item.handoffId}-${index}`}
+                    style={ERROR_ITEM_STYLE}
+                  >
+                    <span style={ERROR_ITEM_LABEL_STYLE}>[{item.layer}]</span>
+                    <span style={ERROR_ITEM_MSG_STYLE} title={item.message}>
+                      {item.message}
+                    </span>
+                    {item.dismissable && onDismissFailed ? (
+                      <button
+                        type="button"
+                        className="team-error-diagnostics-panel__dismiss"
+                        style={DISMISS_BUTTON_STYLE}
+                        disabled={dismissingHandoffIds.includes(item.handoffId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDismissFailed([item.handoffId]);
+                        }}
+                        aria-label={`关闭失败项 ${item.handoffId}`}
+                      >
+                        {dismissingHandoffIds.includes(item.handoffId) ? '关闭中…' : '关闭'}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                {hiddenItems.length > 0 ? (
+                  <div className="team-error-diagnostics-panel__overflow">
+                    <span style={{ fontStyle: 'italic' }}>
+                      …还有 {hiddenItems.length} 项，切换到「任务」标签页查看完整列表
+                    </span>
+                    {hiddenDismissableIds.length > 0 && onDismissFailed ? (
+                      <button
+                        type="button"
+                        className="team-error-diagnostics-panel__dismiss"
+                        style={DISMISS_BUTTON_STYLE}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDismissFailed(hiddenDismissableIds);
+                        }}
+                        aria-label={`关闭其余 ${hiddenDismissableIds.length} 项失败项`}
+                      >
+                        关闭其余 {hiddenDismissableIds.length} 项
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>

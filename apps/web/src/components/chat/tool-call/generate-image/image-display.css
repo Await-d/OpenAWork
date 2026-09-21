@@ -1,0 +1,44 @@
+/*
+ * 生成图片卡片 hover 操作按钮（下载 / 放大查看）。
+ *
+ * 按钮叠在图片之上，不是 accent 实色填充，必须走中性浮层配色：
+ *   背景 = --bg-elevated，描边 = --border-emphasis，文字/图标 = --fg-strong。
+ *
+ * 历史 bug：背景用了 --border-strong（约 20% alpha，几乎透明）、文字用了
+ * --fg-on-accent（暗色主题下为近黑色）——两者叠加后按钮在暗色主题里不可见。
+ * 禁止再对浮层按钮使用 --fg-on-accent / var(--border-strong) 背景。
+ */
+
+.generate-image-display__hover-btn {
+  align-items: center;
+  backdrop-filter: blur(6px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  color: var(--fg-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  height: 28px;
+  justify-content: center;
+  transition:
+    background-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+  width: 28px;
+}
+
+.generate-image-display__hover-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.generate-image-display__hover-btn:active {
+  background: var(--bg-active);
+}
+
+.generate-image-display__hover-btn:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

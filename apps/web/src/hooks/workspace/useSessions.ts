@@ -4,7 +4,12 @@ import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import type { SessionTab } from '../../stores/ui/uiState.js';
 import { readPersistedActiveStreamSessionId } from '../gateway/useGatewayClient.js';
-import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
+import {
+  createSessionsClient,
+  withTokenRefresh,
+  HttpError,
+  SESSIONS_LIST_PAGE_LIMIT,
+} from '@openAwork/web-client';
 import type { TokenStore, SessionsListOptions } from '@openAwork/web-client';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { exportSession } from '../../utils/session/session-transfer.js';
@@ -112,6 +117,7 @@ export function useSessions() {
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const collapsedSessionGroups = useUIStateStore((s) => s.collapsedSessionGroups);
   const toggleGroupCollapsed = useUIStateStore((s) => s.toggleSessionGroupCollapsed);
+  const retainSubagentCollapsed = useUIStateStore((s) => s.retainSubagentCollapsed);
   const tokenStore: TokenStore = useMemo(
     () => ({
       getAccessToken: () => useAuthStore.getState().accessToken,
@@ -150,134 +156,158 @@ export function useSessions() {
     parentSessionCacheScopeRef.current = parentSessionCacheScope;
   }
 
-  const fetchSessions = useCallback(async () => {
-    if (!accessToken) {
-      setIsLoadingSessions(false);
-      return;
-    }
-    const requestId = fetchRequestIdRef.current + 1;
-    fetchRequestIdRef.current = requestId;
-    setIsLoadingSessions(true);
-    try {
-      const loadSessionList = async (): Promise<Session[]> =>
-        withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
-          const activeStreamSessionId = readPersistedActiveStreamSessionId();
-          // P3-PATH: when the user opted into "scope sidebar to current
-          // workspace", thread the selected path through the list call.
-          // We only forward it when both (a) the toggle is on AND (b) the
-          // user has actually picked a workspace, otherwise we keep the
-          // legacy global list behaviour.
-          // T-PATH-04: the feature flag in settings short-circuits the
-          // toggle entirely so an admin can pin the legacy global
-          // listing for the whole user without forcing them to clear
-          // the per-tab toggle they may have already enabled.
-          const listOptions: SessionsListOptions = { excludeTeam: true };
-          if (
-            sessionListPathFilterFeatureEnabled &&
-            sessionListPathFilterEnabled &&
-            selectedWorkspacePath
-          ) {
-            listOptions.path = selectedWorkspacePath;
-          }
-          const listedSessions = (await createSessionsClient(gatewayUrl).list(
-            token,
-            listOptions,
-          )) as unknown as Session[];
-          const hydratedSessions = await hydrateMissingParentSessions(
-            listedSessions,
-            gatewayUrl,
-            tokenStore,
-            parentSessionCacheRef.current,
-            parentSessionInFlightRef.current,
-            missingParentSessionExpiryRef.current,
-          );
-
-          for (const session of hydratedSessions) {
-            const overrideState = runStateOverridesRef.current.get(session.id);
-            if (!overrideState) {
-              continue;
-            }
-
-            if (session.state_status === overrideState) {
-              runStateOverridesRef.current.delete(session.id);
-              continue;
-            }
-
+  const fetchSessions = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!accessToken) {
+        setIsLoadingSessions(false);
+        return;
+      }
+      const requestId = fetchRequestIdRef.current + 1;
+      fetchRequestIdRef.current = requestId;
+      if (!options?.silent) {
+        setIsLoadingSessions(true);
+      }
+      try {
+        const loadSessionList = async (): Promise<Session[]> =>
+          withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
+            const activeStreamSessionId = readPersistedActiveStreamSessionId();
+            // P3-PATH: when the user opted into "scope sidebar to current
+            // workspace", thread the selected path through the list call.
+            // We only forward it when both (a) the toggle is on AND (b) the
+            // user has actually picked a workspace, otherwise we keep the
+            // legacy global list behaviour.
+            // T-PATH-04: the feature flag in settings short-circuits the
+            // toggle entirely so an admin can pin the legacy global
+            // listing for the whole user without forcing them to clear
+            // the per-tab toggle they may have already enabled.
+            const listOptions: SessionsListOptions = { excludeTeam: true };
             if (
-              session.state_status === 'idle' &&
-              overrideState !== 'idle' &&
-              session.id !== activeStreamSessionId
+              sessionListPathFilterFeatureEnabled &&
+              sessionListPathFilterEnabled &&
+              selectedWorkspacePath
             ) {
-              runStateOverridesRef.current.delete(session.id);
+              listOptions.path = selectedWorkspacePath;
             }
-          }
+            const listedSessions = (await createSessionsClient(gatewayUrl).list(
+              token,
+              listOptions,
+            )) as unknown as Session[];
+            const hydratedSessions = await hydrateMissingParentSessions(
+              listedSessions,
+              gatewayUrl,
+              tokenStore,
+              parentSessionCacheRef.current,
+              parentSessionInFlightRef.current,
+              missingParentSessionExpiryRef.current,
+            );
 
-          const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
-          return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
-        });
+            // 剪除失效的折叠父会话 ID。仅在列表完整时执行：路径过滤或触达页大小
+            // 上限时列表可能残缺，「未出现」不等于「已删除」，此时剪除会误删其它
+            // 工作区的折叠偏好。keep 集合 = 当前仍作为父会话出现的 ID。
+            if (!listOptions.path && listedSessions.length < SESSIONS_LIST_PAGE_LIMIT) {
+              const liveParentSessionIds = new Set<string>();
+              for (const session of hydratedSessions) {
+                const parentSessionId = extractParentSessionId(session.metadata_json);
+                if (parentSessionId) {
+                  liveParentSessionIds.add(parentSessionId);
+                }
+              }
+              retainSubagentCollapsed([...liveParentSessionIds]);
+            }
 
-      // 瞬时传输失败重试：见 SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS 的常量注释。
-      // 只对「非 HttpError」（即 fetch 直接被拒、被归一成中文网络文案的传输层失败）
-      // 且「快速失败」的尝试重试；HttpError 是服务端给出的确定性结果，慢失败
-      // （墙钟超时）见 SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS 的说明。
-      let data: Session[] = [];
-      for (let attempt = 0; ; attempt += 1) {
-        const attemptStartedAt = Date.now();
-        try {
-          data = await loadSessionList();
-          break;
-        } catch (error) {
-          const retryDelayMs = SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS[attempt];
-          if (
-            retryDelayMs === undefined ||
-            error instanceof HttpError ||
-            Date.now() - attemptStartedAt > SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS
-          ) {
-            throw error;
-          }
-          if (fetchRequestIdRef.current !== requestId) {
-            throw error;
-          }
-          logger.warn(`Failed to fetch sessions, retrying in ${retryDelayMs}ms`, error);
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, retryDelayMs);
+            for (const session of hydratedSessions) {
+              const overrideState = runStateOverridesRef.current.get(session.id);
+              if (!overrideState) {
+                continue;
+              }
+
+              if (session.state_status === overrideState) {
+                runStateOverridesRef.current.delete(session.id);
+                continue;
+              }
+
+              if (
+                session.state_status === 'idle' &&
+                overrideState !== 'idle' &&
+                session.id !== activeStreamSessionId
+              ) {
+                runStateOverridesRef.current.delete(session.id);
+              }
+            }
+
+            const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
+            return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
           });
+
+        // 瞬时传输失败重试：见 SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS 的常量注释。
+        // 只对「非 HttpError」（即 fetch 直接被拒、被归一成中文网络文案的传输层失败）
+        // 且「快速失败」的尝试重试；HttpError 是服务端给出的确定性结果，慢失败
+        // （墙钟超时）见 SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS 的说明。
+        let data: Session[] = [];
+        for (let attempt = 0; ; attempt += 1) {
+          const attemptStartedAt = Date.now();
+          try {
+            data = await loadSessionList();
+            break;
+          } catch (error) {
+            const retryDelayMs = SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS[attempt];
+            if (
+              retryDelayMs === undefined ||
+              error instanceof HttpError ||
+              Date.now() - attemptStartedAt > SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS
+            ) {
+              throw error;
+            }
+            if (fetchRequestIdRef.current !== requestId) {
+              throw error;
+            }
+            logger.warn(`Failed to fetch sessions, retrying in ${retryDelayMs}ms`, error);
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, retryDelayMs);
+            });
+          }
+        }
+        if (fetchRequestIdRef.current !== requestId) {
+          return;
+        }
+        const nextSessions = data;
+        mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
+        setSessions((previous) =>
+          isSessionListSemanticallyEqual(previous, nextSessions) ? previous : nextSessions,
+        );
+        setSessionsError(null);
+      } catch (err) {
+        if (fetchRequestIdRef.current !== requestId) {
+          return;
+        }
+        if (err instanceof HttpError && err.status === 401) {
+          clearAuth();
+          void navigate('/');
+          return;
+        }
+        logger.error('Failed to fetch sessions:', err);
+        if (!options?.silent) {
+          setSessionsError('会话列表加载失败');
+        }
+      } finally {
+        if (fetchRequestIdRef.current === requestId) {
+          setIsLoadingSessions(false);
         }
       }
-      if (fetchRequestIdRef.current !== requestId) {
-        return;
-      }
-      const nextSessions = data;
-      mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
-      setSessions(nextSessions);
-      setSessionsError(null);
-    } catch (err) {
-      if (fetchRequestIdRef.current !== requestId) {
-        return;
-      }
-      if (err instanceof HttpError && err.status === 401) {
-        clearAuth();
-        void navigate('/');
-        return;
-      }
-      logger.error('Failed to fetch sessions:', err);
-      setSessionsError('会话列表加载失败');
-    } finally {
-      if (fetchRequestIdRef.current === requestId) {
-        setIsLoadingSessions(false);
-      }
-    }
-  }, [
-    accessToken,
-    gatewayUrl,
-    tokenStore,
-    clearAuth,
-    navigate,
-    mergeSavedWorkspacePaths,
-    sessionListPathFilterEnabled,
-    sessionListPathFilterFeatureEnabled,
-    selectedWorkspacePath,
-  ]);
+    },
+    [
+      accessToken,
+      gatewayUrl,
+      tokenStore,
+      clearAuth,
+      navigate,
+      mergeSavedWorkspacePaths,
+      retainSubagentCollapsed,
+      sessionListPathFilterEnabled,
+      sessionListPathFilterFeatureEnabled,
+      selectedWorkspacePath,
+    ],
+  );
 
   /**
    * 进入「草稿会话」：只切到 /chat 空白态，不在服务端落库空会话。
@@ -495,9 +525,7 @@ export function useSessions() {
   }, [fetchSessions]);
 
   useEffect(() => {
-    return subscribeSessionListRefresh(() => {
-      void fetchSessions();
-    });
+    return subscribeSessionListRefresh(() => fetchSessions({ silent: true }));
   }, [fetchSessions]);
 
   useEffect(() => {
@@ -718,6 +746,38 @@ function applySessionRunStateOverrides(
   });
 
   return hasChanges ? nextSessions : sessions;
+}
+
+/**
+ * 列表等值判断：轮询返回完全相同的数据时保留旧数组引用，
+ * 避免每拍都产生新引用触发侧栏无谓重渲染。
+ */
+function isSessionListSemanticallyEqual(
+  previous: readonly Session[],
+  next: readonly Session[],
+): boolean {
+  if (previous.length !== next.length) {
+    return false;
+  }
+  for (let index = 0; index < next.length; index += 1) {
+    const left = previous[index];
+    const right = next[index];
+    if (!left || !right) {
+      return false;
+    }
+    if (
+      left.id !== right.id ||
+      left.state_status !== right.state_status ||
+      left.title !== right.title ||
+      left.updated_at !== right.updated_at ||
+      left.metadata_json !== right.metadata_json ||
+      left.team_parent_session_id !== right.team_parent_session_id ||
+      left.role_layer !== right.role_layer
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**

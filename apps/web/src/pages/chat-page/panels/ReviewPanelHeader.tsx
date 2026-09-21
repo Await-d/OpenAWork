@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { SessionFileReviewDecision } from '@openAwork/web-client';
 import './ReviewPanelHeader.css';
 import {
@@ -17,6 +18,10 @@ export interface ReviewPanelHeaderProps {
   readonly onChangeViewMode: (mode: DiffViewMode) => void;
   readonly onClose: () => void;
   readonly onRejectAll: () => void;
+  /** 审查面板的二级分区切换器（文件变更 / 产物），由调用方构造。 */
+  readonly sectionSwitcher?: ReactNode;
+  /** diff 专属控件（变更范围 / 视图模式 / 批量审查）是否可见；产物分区应传 false。 */
+  readonly showDiffControls?: boolean;
   readonly status: string;
 }
 
@@ -141,6 +146,8 @@ export function ReviewPanelHeader({
   onChangeViewMode,
   onClose,
   onRejectAll,
+  sectionSwitcher,
+  showDiffControls = true,
   status,
 }: ReviewPanelHeaderProps) {
   return (
@@ -160,38 +167,48 @@ export function ReviewPanelHeader({
       </div>
 
       <div className="review-panel-header__controls">
-        <div role="group" aria-label="变更范围" className="review-panel-header__segmented-group">
-          {CHANGE_SCOPE_OPTIONS.map((scope) => (
-            <SegmentedButton
-              key={scope.value}
-              active={changeScope === scope.value}
-              label={scope.label}
-              onClick={() => onChangeScope(scope.value)}
-            />
-          ))}
-        </div>
+        {sectionSwitcher}
 
-        <div
-          role="group"
-          aria-label="Diff 视图模式"
-          className="review-panel-header__segmented-group"
-        >
-          {DIFF_VIEW_MODE_OPTIONS.map((mode) => (
-            <SegmentedButton
-              key={mode.value}
-              active={diffViewMode === mode.value}
-              label={mode.label}
-              onClick={() => onChangeViewMode(mode.value)}
-            />
-          ))}
-        </div>
+        {showDiffControls ? (
+          <>
+            <div
+              role="group"
+              aria-label="变更范围"
+              className="review-panel-header__segmented-group"
+            >
+              {CHANGE_SCOPE_OPTIONS.map((scope) => (
+                <SegmentedButton
+                  key={scope.value}
+                  active={changeScope === scope.value}
+                  label={scope.label}
+                  onClick={() => onChangeScope(scope.value)}
+                />
+              ))}
+            </div>
 
-        <BulkReviewButtons
-          actionableCount={bulkActionableCount}
-          onAcceptAll={onAcceptAll}
-          onRejectAll={onRejectAll}
-          pending={bulkPending}
-        />
+            <div
+              role="group"
+              aria-label="Diff 视图模式"
+              className="review-panel-header__segmented-group"
+            >
+              {DIFF_VIEW_MODE_OPTIONS.map((mode) => (
+                <SegmentedButton
+                  key={mode.value}
+                  active={diffViewMode === mode.value}
+                  label={mode.label}
+                  onClick={() => onChangeViewMode(mode.value)}
+                />
+              ))}
+            </div>
+
+            <BulkReviewButtons
+              actionableCount={bulkActionableCount}
+              onAcceptAll={onAcceptAll}
+              onRejectAll={onRejectAll}
+              pending={bulkPending}
+            />
+          </>
+        ) : null}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import './image-display.css';
 
 /**
  * Generated-image display block: rounded card, hover-revealed action bar
@@ -85,7 +86,7 @@ export function GenerateImageDisplay({
               a.click();
               document.body.removeChild(a);
             }}
-            style={hoverButtonStyle}
+            className="generate-image-display__hover-btn"
           >
             ↓
           </button>
@@ -96,7 +97,7 @@ export function GenerateImageDisplay({
               e.stopPropagation();
               onOpenLightbox();
             }}
-            style={hoverButtonStyle}
+            className="generate-image-display__hover-btn"
           >
             ⤢
           </button>
@@ -105,18 +106,3 @@ export function GenerateImageDisplay({
     </div>
   );
 }
-
-const hoverButtonStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 8,
-  border: 'none',
-  background: 'var(--border-strong)',
-  backdropFilter: 'blur(6px)',
-  color: 'var(--fg-on-accent)',
-  fontSize: 14,
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};

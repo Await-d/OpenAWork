@@ -18,7 +18,7 @@ export async function requestPlanningCompletion(input: WorkflowLlmRequestConfig)
     } catch (error) {
       if (!(error instanceof WorkflowOutputError)) throw error;
       if (maxOutputTokens === 16384) {
-        throw new PlanningFailure(`${error.message}；模型未交付完整正文`);
+        throw new PlanningFailure(`${error.message}；模型未交付完整正文`, 'recoverable');
       }
       console.warn(`[planning] ${error.message}；将输出预算提高到 16384 后重试一次`);
     }

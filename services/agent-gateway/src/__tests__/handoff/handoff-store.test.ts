@@ -17,6 +17,7 @@ let store: typeof HandoffStoreModule;
 const USER_ID = 'u-handoff';
 const FROM_SESSION_ID = 's-from';
 const TO_SESSION_ID = 's-to';
+const PM2_SESSION_ID = 's-pm2';
 
 function seedUser(id: string, email: string): void {
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
@@ -44,6 +45,7 @@ beforeEach(() => {
   seedUser(USER_ID, 'handoff@example.com');
   seedSession(FROM_SESSION_ID, USER_ID);
   seedSession(TO_SESSION_ID, USER_ID);
+  seedSession(PM2_SESSION_ID, USER_ID);
 });
 
 afterAll(async () => {
@@ -337,6 +339,205 @@ describe('cancelHandoff', () => {
     });
     expect(store.cancelHandoff({ userId: 'u-other', handoffId: created.id })).toBe(false);
   });
+});
+
+describe('dismissFailedHandoff', () => {
+  it('failed → cancelled：pm1 规划失败（需要用户介入）可被用户关闭', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    const reason = 'planning-generation-failed: 项目调查返回无效 JSON；需要用户介入';
+    expect(store.failHandoff({ handoffId: created.id, claimToken: 'tok', reason })).toBe(true);
+
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    const dismissed = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+    expect(dismissed?.state).toBe('cancelled');
+    expect(dismissed?.failureReason).toBe(reason);
+    expect(dismissed?.completedAt).not.toBeNull();
+  });
+
+  it('可自动恢复的失败不可关闭，状态保持 failed', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    expect(
+      store.failHandoff({ handoffId: created.id, claimToken: 'tok', reason: '执行阶段网络超时' }),
+    ).toBe(true);
+
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+  });
+
+  it('PM2 失败派发的有效处置为 redispatch 时不可关闭，状态保持 failed', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: {
+        reviewDisposition: {
+          action: 'redispatch',
+          reason: 'Quality Review 未通过：测试覆盖不足',
+          status: 'pending',
+          updatedAtMs: Date.now(),
+        },
+      },
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    expect(
+      store.failHandoff({ handoffId: created.id, claimToken: 'tok', reason: 'runner-fail' }),
+    ).toBe(true);
+
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+  });
+
+  it('重复关闭已 cancelled 的 handoff 返回 false', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    store.failHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      reason: 'planning-generation-failed: 项目调查返回无效 JSON；需要用户介入',
+    });
+
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('cancelled');
+  });
+
+  it('非 failed 状态（pending）不可关闭', () => {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('pending');
+  });
+
+  it('其他用户不能关闭', () => {
+    seedUser('u-other', 'other@example.com');
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: TO_SESSION_ID,
+    });
+    store.failHandoff({ handoffId: created.id, claimToken: 'tok', reason: '规划失败' });
+
+    expect(store.dismissFailedHandoff({ userId: 'u-other', handoffId: created.id })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+  });
+
+  it.each(['executor', 'reviewer'] as const)(
+    'to_role_layer=%s 的孤立失败派发（父会话无 running 的 PM2 裁决者）可直接关闭',
+    (toRoleLayer) => {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM2_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer,
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      expect(
+        store.failHandoff({
+          handoffId: created.id,
+          claimToken: 'tok',
+          reason: 'Spec Review 未通过：遗漏验收场景',
+        }),
+      ).toBe(true);
+
+      expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(true);
+      expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('cancelled');
+    },
+  );
+
+  it.each(['executor', 'reviewer'] as const)(
+    'to_role_layer=%s 的失败派发在 PM2 仍 running 裁决时不可关闭',
+    (toRoleLayer) => {
+      const pm2Handoff = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: pm2Handoff.id, claimToken: 'tok-pm2' });
+      store.startHandoff({
+        handoffId: pm2Handoff.id,
+        claimToken: 'tok-pm2',
+        toSessionId: PM2_SESSION_ID,
+      });
+
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM2_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer,
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      expect(
+        store.failHandoff({
+          handoffId: created.id,
+          claimToken: 'tok',
+          reason: 'Spec Review 未通过：遗漏验收场景',
+        }),
+      ).toBe(true);
+
+      expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId: created.id })).toBe(false);
+      expect(store.getHandoff({ userId: USER_ID, handoffId: created.id })?.state).toBe('failed');
+    },
+  );
 });
 
 describe('pauseHandoff / resumeHandoff', () => {
@@ -653,6 +854,106 @@ describe('retryFailedHandoff', () => {
 
     expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: redispatch.id })).toBe(true);
     expect(store.retryFailedHandoff({ userId: USER_ID, handoffId: returnToC.id })).toBe(false);
+  });
+});
+
+describe('失败重试预算', () => {
+  const RECOVERABLE_REASON = 'planning-generation-failed: 项目调查返回无效 JSON：(空响应)';
+
+  function markFailed(handoffId: string, reason: string, failedRetryCount?: number): void {
+    if (failedRetryCount === undefined) {
+      dbModule.sqliteRun(
+        `UPDATE handoff_records SET state = 'failed', failure_reason = ? WHERE id = ?`,
+        [reason, handoffId],
+      );
+      return;
+    }
+    dbModule.sqliteRun(
+      `UPDATE handoff_records
+          SET state = 'failed', failure_reason = ?, failed_retry_count = ?
+        WHERE id = ?`,
+      [reason, failedRetryCount, handoffId],
+    );
+  }
+
+  function createRecoverableFailedHandoff(): string {
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    markFailed(created.id, RECOVERABLE_REASON);
+    return created.id;
+  }
+
+  function readCounters(handoffId: string): { failed_retry_count: number; retry_count: number } {
+    return (
+      dbModule.sqliteGet<{ failed_retry_count: number; retry_count: number }>(
+        'SELECT failed_retry_count, retry_count FROM handoff_records WHERE id = ?',
+        [handoffId],
+      ) ?? { failed_retry_count: -1, retry_count: -1 }
+    );
+  }
+
+  it('可恢复失败最多重试 MAX_FAILED_HANDOFF_RETRY_COUNT 次，预算耗尽后拒绝重试', () => {
+    const handoffId = createRecoverableFailedHandoff();
+    for (let attempt = 1; attempt <= store.MAX_FAILED_HANDOFF_RETRY_COUNT; attempt += 1) {
+      expect(store.retryFailedHandoff({ userId: USER_ID, handoffId })).toBe(true);
+      expect(readCounters(handoffId).failed_retry_count).toBe(attempt);
+      expect(store.getHandoff({ userId: USER_ID, handoffId })?.state).toBe('pending');
+      markFailed(handoffId, RECOVERABLE_REASON);
+    }
+
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId })?.state).toBe('failed');
+  });
+
+  it('重试预算独立于 retry_count，不推高自动规划返工轮次', () => {
+    const handoffId = createRecoverableFailedHandoff();
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId })).toBe(true);
+    expect(readCounters(handoffId)).toEqual({ failed_retry_count: 1, retry_count: 0 });
+  });
+
+  it('预算未耗尽时拒绝关闭；耗尽后允许关闭并转为 cancelled', () => {
+    const handoffId = createRecoverableFailedHandoff();
+    markFailed(handoffId, RECOVERABLE_REASON, 1);
+
+    expect(
+      store.isDismissableFailedHandoff({
+        state: 'failed',
+        toRoleLayer: 'pm1',
+        failureReason: RECOVERABLE_REASON,
+        failedRetryCount: 1,
+        runningPm2SessionIds: new Set<string>(),
+      }),
+    ).toBe(false);
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId })).toBe(false);
+    expect(store.getHandoff({ userId: USER_ID, handoffId })?.state).toBe('failed');
+
+    markFailed(handoffId, RECOVERABLE_REASON, store.MAX_FAILED_HANDOFF_RETRY_COUNT);
+    expect(
+      store.isDismissableFailedHandoff({
+        state: 'failed',
+        toRoleLayer: 'pm1',
+        failureReason: RECOVERABLE_REASON,
+        failedRetryCount: store.MAX_FAILED_HANDOFF_RETRY_COUNT,
+        runningPm2SessionIds: new Set<string>(),
+      }),
+    ).toBe(true);
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId })?.state).toBe('cancelled');
+  });
+
+  it('heartbeat-timeout-max-retry-exceeded 不可恢复、不可重试且可直接关闭', () => {
+    const reason = 'heartbeat-timeout-max-retry-exceeded';
+    expect(store.isRecoverableFailedHandoffReason(reason)).toBe(false);
+
+    const handoffId = createRecoverableFailedHandoff();
+    markFailed(handoffId, reason);
+    expect(store.retryFailedHandoff({ userId: USER_ID, handoffId })).toBe(false);
+    expect(store.dismissFailedHandoff({ userId: USER_ID, handoffId })).toBe(true);
+    expect(store.getHandoff({ userId: USER_ID, handoffId })?.state).toBe('cancelled');
   });
 });
 

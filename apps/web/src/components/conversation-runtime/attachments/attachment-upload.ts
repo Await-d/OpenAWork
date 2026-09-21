@@ -12,6 +12,7 @@ interface ArtifactUploadRecord {
 
 interface ArtifactUploadResponse {
   artifact?: ArtifactUploadRecord;
+  textContent?: string;
 }
 
 export interface UploadChatAttachmentsOptions {
@@ -28,6 +29,7 @@ export interface UploadedChatAttachment {
   fileName: string;
   mimeType?: string;
   preview?: string;
+  textContent?: string;
   type: AttachmentItem['type'];
 }
 
@@ -114,15 +116,18 @@ function isArtifactUploadRecord(value: unknown): value is ArtifactUploadRecord {
 }
 
 export function buildUploadedAttachmentSummaryLine(input: UploadedChatAttachment): string {
-  return input.preview
-    ? `- ${input.fileName} (artifact:${input.artifactId})\n内容摘录:\n${input.preview}`
-    : `- ${input.fileName} (artifact:${input.artifactId})`;
+  const reference = `- ${input.fileName} (artifact:${input.artifactId})`;
+  if (input.textContent) {
+    return `${reference}\n${input.textContent}`;
+  }
+  return input.preview ? `${reference}\n内容摘录:\n${input.preview}` : reference;
 }
 
 function toUploadedChatAttachment(
   file: File,
   artifact: ArtifactUploadRecord,
   contentBase64: string,
+  textContent: string | undefined,
 ): UploadedChatAttachment | null {
   if (!isArtifactUploadRecord(artifact)) {
     return null;
@@ -146,6 +151,7 @@ function toUploadedChatAttachment(
     fileName: artifact.name,
     ...(mimeType ? { mimeType } : {}),
     ...(artifact.preview ? { preview: artifact.preview } : {}),
+    ...(textContent ? { textContent } : {}),
     type: inferAttachmentType(file),
   };
 }
@@ -219,7 +225,7 @@ export async function uploadChatAttachments({
           return null;
         }
 
-        return toUploadedChatAttachment(file, payload.artifact, contentBase64);
+        return toUploadedChatAttachment(file, payload.artifact, contentBase64, payload.textContent);
       } catch {
         return null;
       }

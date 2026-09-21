@@ -1,0 +1,146 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/css/image-preview.css
+ *
+ * 展开态工具调用的图片缩略预览（look_at 图片 / desktop_automation 截图）。
+ * 缩略图固定 108px 见方（96–120px 区间）、圆角、object-fit: cover；
+ * 点击复用 `ImageLightbox` 打开大图，与产物页 / 抓图预览保持一致。
+ *
+ * 色彩 / 圆角 / 动效全部引用 E·Nebula token（src/index.css +
+ * src/styles/layout-tokens.css），禁止硬编码色值。
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.tool-call-image-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+/* 用复合选择器压过 image-zoom-trigger.css 的基础尺寸（同文件类是同级
+ * 特异性，模块加载顺序不可靠）。 */
+.image-zoom-trigger.tool-call-image-preview__trigger {
+  flex-shrink: 0;
+  width: 108px;
+  height: 108px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  transition:
+    border-color var(--dur-micro) var(--ease-micro),
+    background var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro);
+}
+
+.image-zoom-trigger.tool-call-image-preview__trigger:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+}
+
+.image-zoom-trigger.tool-call-image-preview__trigger:active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.image-zoom-trigger.tool-call-image-preview__trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.image-zoom-trigger.tool-call-image-preview__trigger .image-zoom-trigger__image {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  object-fit: cover;
+}
+
+/* ── loading 占位：小方块 + 呼吸感，不做布局动画 ── */
+
+.tool-call-image-preview__placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 108px;
+  height: 108px;
+  padding: 0 6px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+  animation: tool-call-image-preview-breathe 1.6s var(--ease-micro) infinite;
+}
+
+@keyframes tool-call-image-preview-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-call-image-preview__placeholder {
+    animation: none;
+  }
+}
+
+/* ── error 态：简短错误 + 重试按钮 ── */
+
+.tool-call-image-preview__error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in oklch, var(--danger) 32%, var(--border-default) 68%);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--danger) 8%, var(--bg-overlay) 92%);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tool-call-image-preview__error-text {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--danger) 82%, var(--fg-strong) 18%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-image-preview__retry {
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in oklch, var(--danger) 36%, var(--border-default) 64%);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: color-mix(in oklch, var(--danger) 88%, var(--fg-strong) 12%);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro);
+}
+
+.tool-call-image-preview__retry:hover {
+  border-color: color-mix(in oklch, var(--danger) 52%, var(--border-default) 48%);
+  background: color-mix(in oklch, var(--danger) 14%, transparent);
+}
+
+.tool-call-image-preview__retry:active {
+  background: color-mix(in oklch, var(--danger) 22%, transparent);
+}
+
+.tool-call-image-preview__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}

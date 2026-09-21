@@ -15,10 +15,11 @@ import type { ReactNode } from 'react';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpError } from '@openAwork/web-client';
+import { HttpError, SESSIONS_LIST_PAGE_LIMIT } from '@openAwork/web-client';
 import { useSessions } from './useSessions.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { refreshSessionListsNow } from '../../utils/session/session-list-events.js';
 
 const sessionsClientMocks = vi.hoisted(() => ({
   create: vi.fn(async () => ({ id: 'created-session' })),
@@ -65,8 +66,11 @@ beforeEach(() => {
   useUIStateStore.setState({
     activeTabId: null,
     chatView: 'session',
+    collapsedSubagentParentIds: [],
     savedWorkspacePaths: [],
     selectedWorkspacePath: null,
+    sessionListPathFilterEnabled: false,
+    sessionListPathFilterFeatureEnabled: false,
     tabs: [],
   });
 });
@@ -169,5 +173,90 @@ describe('useSessions — 会话列表瞬时失败自愈', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('useSessions — 后台静默刷新失败不打断列表', () => {
+  it('静默刷新失败时不写 sessionsError，列表保持不变', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      { id: 'session-1', title: '会话一', updated_at: '2026-01-02T00:00:00.000Z' },
+    ]);
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    sessionsClientMocks.list.mockRejectedValue(new HttpError('服务端错误', 500));
+
+    await act(async () => {
+      await refreshSessionListsNow();
+    });
+
+    // 静默刷新确实打到了接口，只是失败被吞掉，不污染已有列表与错误态。
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(2);
+    expect(result.current.sessionsError).toBeNull();
+    expect(result.current.sessions).toHaveLength(1);
+  });
+});
+
+describe('useSessions — 剪除失效的子代理折叠 ID', () => {
+  function sessionRow(id: string, parentSessionId?: string) {
+    return {
+      id,
+      title: id,
+      updated_at: '2026-01-02T00:00:00.000Z',
+      metadata_json: parentSessionId ? JSON.stringify({ parentSessionId }) : undefined,
+    };
+  }
+
+  it('列表完整时剪除已删除 / 不再有子代理的 ID', async () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['parent-live', 'parent-gone'] });
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      sessionRow('parent-live'),
+      sessionRow('child-1', 'parent-live'),
+    ]);
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current.sessions).toHaveLength(2));
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['parent-live']);
+  });
+
+  it('父会话仍在但已无子代理时同样剪除', async () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['parent-childless'] });
+    sessionsClientMocks.list.mockResolvedValueOnce([sessionRow('parent-childless')]);
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual([]);
+  });
+
+  it('路径过滤下列表可能残缺，不剪除任何 ID', async () => {
+    useUIStateStore.setState({
+      collapsedSubagentParentIds: ['parent-elsewhere'],
+      sessionListPathFilterEnabled: true,
+      sessionListPathFilterFeatureEnabled: true,
+      selectedWorkspacePath: '/ws/a',
+    });
+    sessionsClientMocks.list.mockResolvedValueOnce([sessionRow('session-in-ws-a')]);
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['parent-elsewhere']);
+  });
+
+  it('触达页大小上限时列表可能被截断，不剪除任何 ID', async () => {
+    useUIStateStore.setState({ collapsedSubagentParentIds: ['parent-beyond-limit'] });
+    sessionsClientMocks.list.mockResolvedValueOnce(
+      Array.from({ length: SESSIONS_LIST_PAGE_LIMIT }, (_element, index) =>
+        sessionRow(`session-${index}`),
+      ),
+    );
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current.sessions).toHaveLength(SESSIONS_LIST_PAGE_LIMIT));
+
+    expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['parent-beyond-limit']);
   });
 });

@@ -12,6 +12,12 @@ export interface ThinkingDefaultsRef {
   fast: ThinkingModeRef;
 }
 
+export type SubagentModelMode = 'auto' | 'inherit-main';
+
+export interface SubagentModelPolicyRef {
+  modelMode: SubagentModelMode;
+}
+
 export interface ProviderEditData {
   name: string;
   type: string;

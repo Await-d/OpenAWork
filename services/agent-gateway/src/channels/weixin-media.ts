@@ -20,36 +20,8 @@ export interface WeixinMediaUploadContext {
   readonly aesKeyHex: string;
 }
 
-export function sniffImageMediaType(buffer: Buffer): string | undefined {
-  if (buffer.length < 12) {
-    return undefined;
-  }
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-    return 'image/png';
-  }
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-    return 'image/jpeg';
-  }
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
-    return 'image/gif';
-  }
-  if (
-    buffer[0] === 0x52 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x46 &&
-    buffer[8] === 0x57 &&
-    buffer[9] === 0x45 &&
-    buffer[10] === 0x42 &&
-    buffer[11] === 0x50
-  ) {
-    return 'image/webp';
-  }
-  if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
-    return 'image/bmp';
-  }
-  return undefined;
-}
+/** 实现已抽到 `media/image-signature.ts`（look_at 复用同一份判定）；此处保留原导出名以免改动 `weixin-api-media.ts` 的引用。 */
+export { sniffImageMediaType } from '../media/image-signature.js';
 
 export function createMediaUploadContext(buffer: Buffer): WeixinMediaUploadContext {
   const aesKey = randomBytes(16);

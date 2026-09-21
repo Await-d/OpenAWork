@@ -116,6 +116,7 @@ import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-
 import { extractWorkingDirectory } from '../../utils/session/session-metadata.js';
 import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
+import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-request.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
 import {
   resolveAttachEffectDisposition,
@@ -658,6 +659,9 @@ export default function ChatPage() {
   const updateTabStreaming = useUIStateStore((s) => s.updateTabStreaming);
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
+  const setBrowserPreviewUrlForWorkspace = useUIStateStore(
+    (s) => s.setBrowserPreviewUrlForWorkspace,
+  );
   const chatView = useUIStateStore((s) => s.chatView);
   const workspaceTreeVersion = useUIStateStore((s) => s.workspaceTreeVersion);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
@@ -2759,6 +2763,9 @@ export default function ChatPage() {
     requestSessionListRefresh();
     // 草稿「转正」：会话已落库，移除草稿标签，由真实会话标签接替。
     useUIStateStore.getState().closeDraftTabs();
+    // 新会话默认收起会话面板：`reviewPanelOpened` 是全局持久化偏好，且面板可见性
+    // 受「无会话」限制，不复位会在会话落库后把上一会话残留的展开态直接放出来。
+    useUIStateStore.getState().setReviewPanelOpened(false);
     void navigate(`/chat/${session.id}`, { replace: true });
     return session.id;
   }
@@ -3954,6 +3961,24 @@ export default function ChatPage() {
   useEffect(() => {
     openBrowserPreviewRef.current = openBrowserPreview;
   });
+
+  // 聊天消息 / 工具输出 / 文件预览里的 markdown 链接点击 → 落到会话面板「预览」一级
+  // tab（Fusion 桌面）或主内容区浏览器 tab（经典 / 移动端），与 `/open <url>` 的编排
+  // 保持一致。事件只在当前页激活时认领；CachedRouteOutlet 会同时挂载多个页面。
+  const openLinkPreview = (url: string) => {
+    if (dockOwnsWorkspacePanels) {
+      setBrowserPreviewUrlForWorkspace(uiWorkspaceScope, url);
+      if (editorMode) {
+        collapseWorkspaceToPanel();
+      }
+      openWorkspacePanelTab('preview');
+      return;
+    }
+    setBrowserPreviewUrl(url);
+    setEditorMode(true);
+    setEditorPaneTab('browser');
+  };
+  useLinkPreviewRequest(pageActivation, openLinkPreview);
 
   const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
     useChatUiActions({
@@ -6435,6 +6460,7 @@ export default function ChatPage() {
                   <>
                     {latestGeneratedImageResult && artifactsWorkspaceHref && (
                       <ChatImageGenerationResultStrip
+                        artifactId={latestGeneratedImageResult.artifactId}
                         artifactTitle={latestGeneratedImageResult.artifactTitle}
                         modelLabel={latestGeneratedImageResult.modelLabel}
                         onContinueEditing={continueEditingLatestGeneratedImage}
@@ -6942,6 +6968,7 @@ export default function ChatPage() {
                     <>
                       {latestGeneratedImageResult && artifactsWorkspaceHref && (
                         <ChatImageGenerationResultStrip
+                          artifactId={latestGeneratedImageResult.artifactId}
                           artifactTitle={latestGeneratedImageResult.artifactTitle}
                           modelLabel={latestGeneratedImageResult.modelLabel}
                           onContinueEditing={continueEditingLatestGeneratedImage}

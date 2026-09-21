@@ -12,7 +12,20 @@ import type { DevtoolsSourceState } from '../state/settings-types.js';
 import { InlineFailureNotice } from '../devtools/devtools-workbench-primitives.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { DesktopControlActionResult, DesktopControlStatus } from '@openAwork/web-client';
+import {
+  SettingsSegmentedRow,
+  type SettingsSegmentedOption,
+} from '../shared/settings-segmented-row.js';
 import { SystemDesktopControlCard } from './system-desktop-control-card.js';
+import {
+  WORKSPACE_ACTION_BTN,
+  WORKSPACE_CARD,
+  WORKSPACE_FIELD_INPUT,
+  WORKSPACE_GHOST_BTN,
+  WORKSPACE_ROW,
+  WORKSPACE_SECTION_SUB,
+  WORKSPACE_SECTION_TITLE,
+} from './workspace-styles.js';
 
 interface GitHubTriggerConfig {
   appId: string;
@@ -76,35 +89,11 @@ interface WorkspaceTabContentProps {
   onDesktopControlWait: (ms?: number) => Promise<DesktopControlActionResult>;
 }
 
-const CARD: React.CSSProperties = {
-  borderRadius: 8,
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
-  padding: '8px 10px',
-};
-
 const DASHED_CARD: React.CSSProperties = {
   borderRadius: 8,
   border: '1px dashed var(--border-default)',
   background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '8px 10px',
-};
-
-const SECTION_TITLE: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--fg-strong)',
-  margin: 0,
-  lineHeight: 1.3,
-  letterSpacing: '0.01em',
-};
-
-const SECTION_SUB: React.CSSProperties = {
-  fontSize: 10,
-  color: 'var(--fg-muted)',
-  margin: 0,
-  marginTop: 2,
-  lineHeight: 1.4,
 };
 
 const BADGE: React.CSSProperties = {
@@ -129,51 +118,10 @@ const ACTIVE_BADGE: React.CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
 };
 
-const ACTION_BTN: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--accent)',
-  background: 'var(--accent)',
-  color: 'var(--fg-on-accent)',
-  fontSize: 10,
-  fontWeight: 600,
-  padding: '4px 9px',
-  cursor: 'pointer',
-  lineHeight: 1.4,
-};
-
-const GHOST_BTN: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--border-default)',
-  background: 'transparent',
-  color: 'var(--fg-default)',
-  fontSize: 10,
-  padding: '4px 8px',
-  cursor: 'pointer',
-  lineHeight: 1.4,
-};
-
 const DANGER_BTN: React.CSSProperties = {
-  ...GHOST_BTN,
+  ...WORKSPACE_GHOST_BTN,
   color: 'var(--danger)',
   borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-};
-
-const FIELD_INPUT: React.CSSProperties = {
-  borderRadius: 6,
-  border: '1px solid var(--border-default)',
-  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay))',
-  color: 'var(--fg-strong)',
-  fontSize: 10,
-  padding: '5px 8px',
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const ROW: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
 };
 
 function eventPillStyle(event: string): React.CSSProperties {
@@ -226,11 +174,22 @@ const EMPTY_SSH_FORM = {
 function CapabilityGrid({ enabled }: { enabled: boolean }) {
   const items = ['打开页面', '点击操作', '表单输入', '截图'];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px', marginTop: 8 }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: '4px 8px',
+        marginTop: 8,
+      }}
+    >
       {items.map((cap) => (
         <div
           key={cap}
-          style={{ ...ROW, fontSize: 10, color: enabled ? 'var(--accent)' : 'var(--fg-muted)' }}
+          style={{
+            ...WORKSPACE_ROW,
+            fontSize: 10,
+            color: enabled ? 'var(--accent)' : 'var(--fg-muted)',
+          }}
         >
           <span style={{ fontSize: 9, fontWeight: 700 }}>{enabled ? '✓' : '○'}</span>
           <span>{cap}</span>
@@ -244,12 +203,18 @@ function BreadcrumbPath({ path, onNavigate }: { path: string; onNavigate: (p: st
   const parts = path.split('/').filter(Boolean);
   return (
     <div
-      style={{ ...ROW, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)', marginBottom: 6 }}
+      style={{
+        ...WORKSPACE_ROW,
+        flexWrap: 'wrap',
+        fontSize: 10,
+        color: 'var(--fg-muted)',
+        marginBottom: 6,
+      }}
     >
       <button
         type="button"
         onClick={() => onNavigate('/')}
-        style={{ ...GHOST_BTN, padding: '2px 5px', fontSize: 10 }}
+        style={{ ...WORKSPACE_GHOST_BTN, padding: '2px 5px', fontSize: 10 }}
       >
         /
       </button>
@@ -261,7 +226,7 @@ function BreadcrumbPath({ path, onNavigate }: { path: string; onNavigate: (p: st
             <button
               type="button"
               onClick={() => onNavigate(target)}
-              style={{ ...GHOST_BTN, padding: '2px 5px', fontSize: 10 }}
+              style={{ ...WORKSPACE_GHOST_BTN, padding: '2px 5px', fontSize: 10 }}
             >
               {part}
             </button>
@@ -291,6 +256,14 @@ const EMPTY_TRIGGER_FORM = {
 };
 
 type AutomationActionType = 'open' | 'goto' | 'click' | 'type' | 'screenshot';
+
+const AUTOMATION_ACTION_OPTIONS: ReadonlyArray<SettingsSegmentedOption<AutomationActionType>> = [
+  { value: 'open', label: '打开页面' },
+  { value: 'goto', label: '跳转' },
+  { value: 'click', label: '点击' },
+  { value: 'type', label: '输入' },
+  { value: 'screenshot', label: '截图' },
+];
 
 export function WorkspaceTabContent({
   filePatterns,
@@ -414,12 +387,19 @@ export function WorkspaceTabContent({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <SessionListPathFilterFeatureToggle />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
-        <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={ROW}>
-            <span style={SECTION_TITLE}>文件过滤规则</span>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 8,
+          alignItems: 'start',
+        }}
+      >
+        <div style={{ ...WORKSPACE_CARD, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={WORKSPACE_ROW}>
+            <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>文件过滤规则</h3>
             {filePatterns.length > 0 && <span style={BADGE}>{filePatterns.length}</span>}
-            <span style={{ ...SECTION_SUB, marginTop: 0, marginLeft: 'auto' }}>
+            <span style={{ ...WORKSPACE_SECTION_SUB, marginTop: 0, marginLeft: 'auto' }}>
               .crushignore 规则
             </span>
           </div>
@@ -490,7 +470,7 @@ export function WorkspaceTabContent({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={CARD}>
+          <div style={WORKSPACE_CARD}>
             {desktopAutomationSourceState.status === 'error' &&
             desktopAutomationSourceState.error ? (
               <InlineFailureNotice
@@ -498,8 +478,8 @@ export function WorkspaceTabContent({
                 message={desktopAutomationSourceState.error}
               />
             ) : null}
-            <div style={{ ...ROW, justifyContent: 'space-between' }}>
-              <div style={ROW}>
+            <div style={{ ...WORKSPACE_ROW, justifyContent: 'space-between' }}>
+              <div style={WORKSPACE_ROW}>
                 <span
                   style={{
                     width: 8,
@@ -509,7 +489,7 @@ export function WorkspaceTabContent({
                     flexShrink: 0,
                   }}
                 />
-                <span style={SECTION_TITLE}>桌面自动化</span>
+                <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>桌面自动化</h3>
               </div>
             </div>
             <CapabilityGrid enabled={desktopAutomationEnabled} />
@@ -532,50 +512,25 @@ export function WorkspaceTabContent({
                   borderTop: '1px solid var(--border-default)',
                 }}
               >
-                <span style={{ ...SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}>
+                <span
+                  style={{ ...WORKSPACE_SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}
+                >
                   操作控制台
                 </span>
-                <div style={{ ...ROW, marginTop: 8, flexWrap: 'wrap', gap: 4 }}>
-                  {(['open', 'goto', 'click', 'type', 'screenshot'] as AutomationActionType[]).map(
-                    (act) => {
-                      const labels: Record<AutomationActionType, string> = {
-                        open: '打开页面',
-                        goto: '跳转',
-                        click: '点击',
-                        type: '输入',
-                        screenshot: '截图',
-                      };
-                      return (
-                        <button
-                          key={act}
-                          type="button"
-                          onClick={() => {
-                            setAutomationAction(act);
-                            setAutomationResult(null);
-                            setScreenshotData(null);
-                          }}
-                          style={{
-                            ...GHOST_BTN,
-                            fontSize: 10,
-                            background:
-                              automationAction === act
-                                ? 'color-mix(in srgb, var(--accent) 15%, transparent)'
-                                : 'transparent',
-                            borderColor:
-                              automationAction === act ? 'var(--accent)' : 'var(--border-default)',
-                            color: automationAction === act ? 'var(--accent)' : 'var(--fg-default)',
-                          }}
-                        >
-                          {labels[act]}
-                        </button>
-                      );
-                    },
-                  )}
-                </div>
+                <SettingsSegmentedRow
+                  ariaLabel="桌面自动化动作"
+                  options={AUTOMATION_ACTION_OPTIONS}
+                  value={automationAction}
+                  onChange={(next) => {
+                    setAutomationAction(next);
+                    setAutomationResult(null);
+                    setScreenshotData(null);
+                  }}
+                />
                 <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {(automationAction === 'open' || automationAction === 'goto') && (
                     <input
-                      style={FIELD_INPUT}
+                      style={WORKSPACE_FIELD_INPUT}
                       placeholder="https://..."
                       value={automationUrl}
                       onChange={(e) => setAutomationUrl(e.target.value)}
@@ -583,7 +538,7 @@ export function WorkspaceTabContent({
                   )}
                   {(automationAction === 'click' || automationAction === 'type') && (
                     <input
-                      style={FIELD_INPUT}
+                      style={WORKSPACE_FIELD_INPUT}
                       placeholder="CSS 选择器"
                       value={automationSelector}
                       onChange={(e) => setAutomationSelector(e.target.value)}
@@ -591,7 +546,7 @@ export function WorkspaceTabContent({
                   )}
                   {automationAction === 'type' && (
                     <input
-                      style={FIELD_INPUT}
+                      style={WORKSPACE_FIELD_INPUT}
                       placeholder="输入内容"
                       value={automationText}
                       onChange={(e) => setAutomationText(e.target.value)}
@@ -602,7 +557,7 @@ export function WorkspaceTabContent({
                     onClick={() => void handleAutomationRun()}
                     disabled={automationLoading}
                     style={{
-                      ...ACTION_BTN,
+                      ...WORKSPACE_ACTION_BTN,
                       opacity: automationLoading ? 0.6 : 1,
                       alignSelf: 'flex-start',
                     }}
@@ -680,13 +635,13 @@ export function WorkspaceTabContent({
           />
 
           <div style={DASHED_CARD}>
-            <div style={{ ...ROW, marginBottom: 8 }}>
-              <span style={SECTION_TITLE}>GitHub 触发器</span>
+            <div style={{ ...WORKSPACE_ROW, marginBottom: 8 }}>
+              <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>GitHub 触发器</h3>
               {githubTriggers.length > 0 && <span style={BADGE}>{githubTriggers.length}</span>}
               <button
                 type="button"
                 onClick={() => setShowTriggerForm((v) => !v)}
-                style={{ ...ACTION_BTN, marginLeft: 'auto', fontSize: 10 }}
+                style={{ ...WORKSPACE_ACTION_BTN, marginLeft: 'auto', fontSize: 10 }}
               >
                 + 注册触发器
               </button>
@@ -702,10 +657,10 @@ export function WorkspaceTabContent({
                 }}
               >
                 <span style={{ fontSize: 18, opacity: 0.5 }}>⚡</span>
-                <p style={{ ...SECTION_SUB, textAlign: 'center', margin: 0 }}>
+                <p style={{ ...WORKSPACE_SECTION_SUB, textAlign: 'center', margin: 0 }}>
                   尚未配置 GitHub 触发器
                 </p>
-                <p style={{ ...SECTION_SUB, textAlign: 'center', margin: 0 }}>
+                <p style={{ ...WORKSPACE_SECTION_SUB, textAlign: 'center', margin: 0 }}>
                   通过 API 注册触发器后，此处会显示实时状态
                 </p>
               </div>
@@ -762,40 +717,46 @@ export function WorkspaceTabContent({
                 }}
               >
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="org/repo"
                   value={triggerForm.repo}
                   onChange={(e) => setTriggerForm((f) => ({ ...f, repo: e.target.value }))}
                 />
                 <input
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="App ID"
                   value={triggerForm.appId}
                   onChange={(e) => setTriggerForm((f) => ({ ...f, appId: e.target.value }))}
                 />
                 <input
                   type="password"
-                  style={FIELD_INPUT}
+                  style={WORKSPACE_FIELD_INPUT}
                   placeholder="Webhook Secret"
                   value={triggerForm.webhookSecret}
                   onChange={(e) => setTriggerForm((f) => ({ ...f, webhookSecret: e.target.value }))}
                 />
                 <textarea
                   rows={4}
-                  style={{ ...FIELD_INPUT, resize: 'vertical', fontFamily: 'monospace' }}
+                  style={{ ...WORKSPACE_FIELD_INPUT, resize: 'vertical', fontFamily: 'monospace' }}
                   placeholder="-----BEGIN RSA PRIVATE KEY-----..."
                   value={triggerForm.privateKeyPem}
                   onChange={(e) => setTriggerForm((f) => ({ ...f, privateKeyPem: e.target.value }))}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ ...SECTION_SUB, color: 'var(--fg-default)', fontWeight: 600 }}>
+                  <span
+                    style={{
+                      ...WORKSPACE_SECTION_SUB,
+                      color: 'var(--fg-default)',
+                      fontWeight: 600,
+                    }}
+                  >
                     事件
                   </span>
                   {GITHUB_EVENTS.map((ev) => (
                     <label
                       key={ev}
                       style={{
-                        ...ROW,
+                        ...WORKSPACE_ROW,
                         fontSize: 10,
                         color: 'var(--fg-default)',
                         cursor: 'pointer',
@@ -819,7 +780,7 @@ export function WorkspaceTabContent({
                 </div>
                 <textarea
                   rows={3}
-                  style={{ ...FIELD_INPUT, resize: 'vertical' }}
+                  style={{ ...WORKSPACE_FIELD_INPUT, resize: 'vertical' }}
                   placeholder="分析 {{repo}} 仓库的 {{event}} 事件\u2026"
                   value={triggerForm.agentPromptTemplate}
                   onChange={(e) =>
@@ -827,7 +788,12 @@ export function WorkspaceTabContent({
                   }
                 />
                 <label
-                  style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}
+                  style={{
+                    ...WORKSPACE_ROW,
+                    fontSize: 10,
+                    color: 'var(--fg-default)',
+                    cursor: 'pointer',
+                  }}
                 >
                   <input
                     type="checkbox"
@@ -838,7 +804,7 @@ export function WorkspaceTabContent({
                   />
                   <span>自动批准（无需用户确认）</span>
                 </label>
-                <div style={{ ...ROW, justifyContent: 'flex-end', gap: 8 }}>
+                <div style={{ ...WORKSPACE_ROW, justifyContent: 'flex-end', gap: 8 }}>
                   {isSubmittingTrigger && (
                     <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>保存中\u2026</span>
                   )}
@@ -848,7 +814,7 @@ export function WorkspaceTabContent({
                       setShowTriggerForm(false);
                       setTriggerForm(EMPTY_TRIGGER_FORM);
                     }}
-                    style={GHOST_BTN}
+                    style={WORKSPACE_GHOST_BTN}
                   >
                     取消
                   </button>
@@ -856,7 +822,7 @@ export function WorkspaceTabContent({
                     type="button"
                     onClick={() => void handleSaveTrigger()}
                     disabled={isSubmittingTrigger}
-                    style={{ ...ACTION_BTN, opacity: isSubmittingTrigger ? 0.6 : 1 }}
+                    style={{ ...WORKSPACE_ACTION_BTN, opacity: isSubmittingTrigger ? 0.6 : 1 }}
                   >
                     注册触发器
                   </button>
@@ -866,7 +832,13 @@ export function WorkspaceTabContent({
             <button
               type="button"
               onClick={() => setShowTriggerSchema((v) => !v)}
-              style={{ ...GHOST_BTN, marginTop: 8, width: '100%', textAlign: 'left', fontSize: 10 }}
+              style={{
+                ...WORKSPACE_GHOST_BTN,
+                marginTop: 8,
+                width: '100%',
+                textAlign: 'left',
+                fontSize: 10,
+              }}
             >
               查看配置格式 {showTriggerSchema ? '▴' : '▾'}
             </button>
@@ -890,23 +862,23 @@ export function WorkspaceTabContent({
           </div>
 
           {providerUpdatesDetail ? (
-            <p style={{ ...SECTION_SUB, marginTop: 6 }}>{providerUpdatesDetail}</p>
+            <p style={{ ...WORKSPACE_SECTION_SUB, marginTop: 6 }}>{providerUpdatesDetail}</p>
           ) : null}
         </div>
       </div>
 
-      <div style={CARD}>
+      <div style={WORKSPACE_CARD}>
         {sshSourceState.status === 'error' && sshSourceState.error ? (
           <InlineFailureNotice title="SSH 连接加载失败" message={sshSourceState.error} />
         ) : null}
-        <div style={{ ...ROW, marginBottom: 8 }}>
-          <span style={SECTION_TITLE}>SSH 连接</span>
+        <div style={{ ...WORKSPACE_ROW, marginBottom: 8 }}>
+          <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>SSH 连接</h3>
           {sshConnections.length > 0 && <span style={BADGE}>{sshConnections.length}</span>}
           {connectedCount > 0 && <span style={ACTIVE_BADGE}>连接中 {connectedCount}</span>}
           <button
             type="button"
             onClick={() => setShowAddForm((v) => !v)}
-            style={{ ...ACTION_BTN, marginLeft: 'auto' }}
+            style={{ ...WORKSPACE_ACTION_BTN, marginLeft: 'auto' }}
           >
             + 添加连接
           </button>
@@ -1026,7 +998,11 @@ export function WorkspaceTabContent({
                     断开
                   </button>
                 ) : (
-                  <button type="button" onClick={() => onConnectSsh(conn.id)} style={ACTION_BTN}>
+                  <button
+                    type="button"
+                    onClick={() => onConnectSsh(conn.id)}
+                    style={WORKSPACE_ACTION_BTN}
+                  >
                     连接
                   </button>
                 )}
@@ -1039,7 +1015,7 @@ export function WorkspaceTabContent({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               gap: 6,
               padding: 10,
               borderRadius: 7,
@@ -1049,36 +1025,40 @@ export function WorkspaceTabContent({
             }}
           >
             <input
-              style={FIELD_INPUT}
+              style={WORKSPACE_FIELD_INPUT}
               placeholder="主机名 / IP"
               value={sshForm.host}
               onChange={(e) => setSshForm((f) => ({ ...f, host: e.target.value }))}
             />
             <input
-              style={FIELD_INPUT}
+              style={WORKSPACE_FIELD_INPUT}
               placeholder="端口（默认 22）"
               value={sshForm.port}
               onChange={(e) => setSshForm((f) => ({ ...f, port: e.target.value }))}
             />
             <input
-              style={FIELD_INPUT}
+              style={WORKSPACE_FIELD_INPUT}
               placeholder="用户名"
               value={sshForm.username}
               onChange={(e) => setSshForm((f) => ({ ...f, username: e.target.value }))}
             />
             <input
-              style={FIELD_INPUT}
+              style={WORKSPACE_FIELD_INPUT}
               placeholder="标签（可选）"
               value={sshForm.name}
               onChange={(e) => setSshForm((f) => ({ ...f, name: e.target.value }))}
             />
             <div
-              style={{ gridColumn: 'span 2', display: 'flex', gap: 6, justifyContent: 'flex-end' }}
+              style={{ gridColumn: '1 / -1', display: 'flex', gap: 6, justifyContent: 'flex-end' }}
             >
-              <button type="button" onClick={() => setShowAddForm(false)} style={GHOST_BTN}>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                style={WORKSPACE_GHOST_BTN}
+              >
                 取消
               </button>
-              <button type="button" onClick={handleAddSsh} style={ACTION_BTN}>
+              <button type="button" onClick={handleAddSsh} style={WORKSPACE_ACTION_BTN}>
                 确认添加
               </button>
             </div>
@@ -1086,10 +1066,18 @@ export function WorkspaceTabContent({
         )}
 
         {sshConnections.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 6 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 6,
+            }}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <BreadcrumbPath path={sshCurrentPath || '/'} onNavigate={onBrowseSshPath} />
-              <div style={{ ...CARD, padding: '4px 6px', maxHeight: 300, overflowY: 'auto' }}>
+              <div
+                style={{ ...WORKSPACE_CARD, padding: '4px 6px', maxHeight: 300, overflowY: 'auto' }}
+              >
                 <FileTreePanel
                   nodes={sshNodes}
                   onFileClick={(p) => onBrowseSshPath(p)}
@@ -1106,11 +1094,17 @@ export function WorkspaceTabContent({
                   e.currentTarget.value = '';
                 }}
               />
-              <button type="button" onClick={() => fileInputRef.current?.click()} style={GHOST_BTN}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={WORKSPACE_GHOST_BTN}
+              >
                 上传到当前目录
               </button>
             </div>
-            <div style={{ ...CARD, padding: '6px 8px', maxHeight: 300, overflowY: 'auto' }}>
+            <div
+              style={{ ...WORKSPACE_CARD, padding: '6px 8px', maxHeight: 300, overflowY: 'auto' }}
+            >
               {sshPreview ? (
                 <ArtifactPreview
                   artifact={sshPreview}
@@ -1143,7 +1137,7 @@ function SessionListPathFilterFeatureToggle(): React.ReactElement {
   return (
     <div
       style={{
-        ...CARD,
+        ...WORKSPACE_CARD,
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
@@ -1151,8 +1145,8 @@ function SessionListPathFilterFeatureToggle(): React.ReactElement {
       }}
     >
       <div style={{ flex: 1 }}>
-        <div style={SECTION_TITLE}>会话路径过滤</div>
-        <p style={{ ...SECTION_SUB, marginTop: 4 }}>
+        <h3 style={{ ...WORKSPACE_SECTION_TITLE, margin: 0 }}>会话路径过滤</h3>
+        <p style={{ ...WORKSPACE_SECTION_SUB, marginTop: 4 }}>
           开启后，侧边栏会出现「仅当前目录」开关，可把会话列表限定在当前选中的工作区目录下。
           关闭则全局停用，所有 list 调用回到无过滤模式。
         </p>

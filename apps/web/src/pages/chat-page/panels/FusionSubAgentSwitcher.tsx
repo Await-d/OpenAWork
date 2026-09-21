@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent } from 'react';
+import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
 import { getStatusLabel, type SubAgentRunItem } from './sub-agent-run-list.js';
 import './FusionSubAgentSwitcher.css';
 
@@ -36,6 +37,7 @@ export function FusionSubAgentSwitcher({
   selectedSessionId,
 }: FusionSubAgentSwitcherProps) {
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const { attachRef: attachRailRef } = useHorizontalWheelScroll<HTMLDivElement>();
 
   if (items.length <= 1) {
     return null;
@@ -76,7 +78,12 @@ export function FusionSubAgentSwitcher({
   };
 
   return (
-    <div className="fusion-sub-agent-switcher" role="tablist" aria-label="子代理切换">
+    <div
+      ref={attachRailRef}
+      className="fusion-sub-agent-switcher"
+      role="tablist"
+      aria-label="子代理切换"
+    >
       {items.map((item, index) => {
         const isSelected = index === selectedIndex;
         const label = resolveChipLabel(item);

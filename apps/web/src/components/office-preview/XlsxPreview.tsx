@@ -162,11 +162,11 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
         <div
           className="xlsx-preview-table"
           style={{
-            background: 'var(--fg-on-accent)',
+            background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             padding: 8,
-            color: 'var(--bg-overlay)',
+            color: 'var(--fg-default)',
             fontSize: 12,
             fontFamily: 'var(--font-mono, monospace)',
             overflow: 'auto',

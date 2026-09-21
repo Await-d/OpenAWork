@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveSshDialogRestore, tauriInvoke } from './settings-page-helpers.js';
+import {
+  normalizeSubagentModelPolicy,
+  resolveSshDialogRestore,
+  tauriInvoke,
+} from './settings-page-helpers.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -18,6 +22,23 @@ describe('tauriInvoke', () => {
     vi.stubGlobal('window', {} as unknown as Window & typeof globalThis);
 
     await expect(tauriInvoke('noop')).rejects.toThrow('当前不在 Tauri 桌面环境中运行。');
+  });
+});
+
+describe('normalizeSubagentModelPolicy', () => {
+  it('undefined 时回退到 auto 默认值', () => {
+    expect(normalizeSubagentModelPolicy(undefined)).toEqual({ modelMode: 'auto' });
+  });
+
+  it('非法取值回退到 auto', () => {
+    expect(normalizeSubagentModelPolicy({ modelMode: 'unknown' })).toEqual({ modelMode: 'auto' });
+    expect(normalizeSubagentModelPolicy('inherit-main')).toEqual({ modelMode: 'auto' });
+  });
+
+  it('inherit-main 时保留跟随主会话', () => {
+    expect(normalizeSubagentModelPolicy({ modelMode: 'inherit-main' })).toEqual({
+      modelMode: 'inherit-main',
+    });
   });
 });
 

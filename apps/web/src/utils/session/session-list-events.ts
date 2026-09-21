@@ -1,4 +1,5 @@
 import type { PendingQuestionRequest } from '@openAwork/web-client';
+import { logger } from '../log/logger.js';
 import type { SessionPendingPermissionState } from '../permission/pending-permission-state.js';
 export type { SessionPendingPermissionState } from '../permission/pending-permission-state.js';
 
@@ -36,6 +37,13 @@ function publishPendingInteractionSnapshot(next: SessionPendingInteractionSnapsh
   }
 }
 
+/** 会话列表刷新监听器：允许返回 Promise，调用方（轮询控制器）可据此等待本轮落定。 */
+export type SessionListRefreshListener = () => void | Promise<void>;
+
+const refreshListeners = new Set<SessionListRefreshListener>();
+
+let refreshInFlight: Promise<void> | null = null;
+
 export function requestSessionListRefresh(): void {
   if (typeof window === 'undefined' || refreshScheduled) {
     return;
@@ -48,17 +56,50 @@ export function requestSessionListRefresh(): void {
   });
 }
 
-export function subscribeSessionListRefresh(onRefresh: () => void): () => void {
+/**
+ * 完成感知的刷新入口：调用所有已注册 listener 并等待它们全部落定。
+ * 并发调用会被合并为同一个在途 Promise（单飞），因此调用方可以
+ * 「上一次刷新完成后」再排下一拍，而不是固定 interval 叠请求。
+ */
+export function refreshSessionListsNow(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+  if (refreshInFlight) {
+    return refreshInFlight;
+  }
+  const pending = Array.from(refreshListeners, (listener) => {
+    try {
+      return Promise.resolve(listener());
+    } catch (error) {
+      logger.warn('Session list refresh listener threw synchronously', error);
+      return Promise.resolve();
+    }
+  });
+  refreshInFlight = Promise.allSettled(pending)
+    .then(() => undefined)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
+}
+
+export function subscribeSessionListRefresh(onRefresh: SessionListRefreshListener): () => void {
   if (typeof window === 'undefined') {
     return () => undefined;
   }
 
+  refreshListeners.add(onRefresh);
+
   const handleRefresh = () => {
-    onRefresh();
+    void onRefresh();
   };
 
   window.addEventListener(SESSION_LIST_REFRESH_EVENT, handleRefresh);
-  return () => window.removeEventListener(SESSION_LIST_REFRESH_EVENT, handleRefresh);
+  return () => {
+    refreshListeners.delete(onRefresh);
+    window.removeEventListener(SESSION_LIST_REFRESH_EVENT, handleRefresh);
+  };
 }
 
 export function requestCurrentSessionRefresh(sessionId: string): void {

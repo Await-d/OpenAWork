@@ -17,6 +17,13 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import { MarkdownPathRef } from './markdown-path-ref.js';
+import {
+  MarkdownImage,
+  MarkdownImageInsideLinkContext,
+  MarkdownImageProvider,
+} from './markdown-image.js';
+import { extractMarkdownImageUrls } from './markdown-image-urls.js';
+import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
 import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
 import { normalizeAssistantMarkdown } from './normalize-markdown.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
@@ -75,13 +82,15 @@ export function MarkdownCore({ content }: { content: string }) {
     );
   }
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
-      components={markdownComponents}
-    >
-      {content}
-    </ReactMarkdown>
+    <MarkdownImageProvider urls={extractMarkdownImageUrls(content)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
+        components={markdownComponents}
+      >
+        {content}
+      </ReactMarkdown>
+    </MarkdownImageProvider>
   );
 }
 
@@ -274,10 +283,18 @@ const markdownComponents: Components = {
     </td>
   ),
   a: ({ children, href }) => (
-    <a className="chat-markdown-link" href={href} target="_blank" rel="noreferrer">
-      {children}
+    <a
+      className="chat-markdown-link"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => tryOpenLinkPreview(event, href)}
+    >
+      <MarkdownImageInsideLinkContext value={true}>{children}</MarkdownImageInsideLinkContext>
     </a>
   ),
+  // 正文图片接入统一查看器：单图放大，同段多图自动成集（见 markdown-image.tsx）。
+  img: ({ src, alt, title }) => <MarkdownImage src={src} alt={alt} title={title} />,
   pre: ({ children }) => <>{children}</>,
   code: ({ children, className, ...props }) => {
     const match = /language-([\w-]+)/.exec(className ?? '');
@@ -995,13 +1012,15 @@ function MarkdownPreviewCodeBlock({
             }
           >
             <div className="chat-markdown">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight]}
-                components={noMarkdownPreviewComponents}
-              >
-                {copyableCode}
-              </ReactMarkdown>
+              <MarkdownImageProvider urls={extractMarkdownImageUrls(copyableCode)}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                  components={noMarkdownPreviewComponents}
+                >
+                  {copyableCode}
+                </ReactMarkdown>
+              </MarkdownImageProvider>
             </div>
           </div>
           {shouldCollapse && (
@@ -1140,7 +1159,14 @@ function StaticPreviewCodeBlock({
             <div className="chat-markdown-preview-links">
               <span>外联地址</span>
               {externalUrls.map((url) => (
-                <a key={url} href={url} target="_blank" rel="noreferrer" title={url}>
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={url}
+                  onClick={(event) => tryOpenLinkPreview(event, url)}
+                >
                   {url}
                 </a>
               ))}
@@ -1209,13 +1235,15 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
         }
       >
         <div className="assistant-rich-content-body">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {labeledSource}
-          </ReactMarkdown>
+          <MarkdownImageProvider urls={extractMarkdownImageUrls(labeledSource)}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
+            >
+              {labeledSource}
+            </ReactMarkdown>
+          </MarkdownImageProvider>
         </div>
       </div>
       {shouldCollapse && (

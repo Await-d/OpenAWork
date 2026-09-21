@@ -37,6 +37,10 @@ pnpm exec tsx scripts/diagnose-mcp-tools.ts
 
 - 待补充
 
+### 团队协作（team 对话）
+
+- [team 规划失败：`planning-generation-failed`（PM1 规划中止且诊断无法关闭）](./planning-generation-failed.md) - `planning-generation-failed: 项目调查返回无效 JSON；需要用户介入`
+
 ### 网络连接
 
 - [内置浏览器控制台为空（跨域页面无法注入）](./browser-console-cross-origin.md) - `暂无控制台输出 · 跨域页面(非 localhost)无法注入`

@@ -7,6 +7,7 @@ import { getProviderUiList } from '@openAwork/shared-ui';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type {
   ReasoningEffortRef,
+  SubagentModelPolicyRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
 } from '../state/settings-types.js';
@@ -42,46 +43,6 @@ export type TabId = (typeof TABS)[number]['id'];
  */
 export const TAURI_ONLY_TAB_IDS: ReadonlySet<TabId> = new Set();
 
-export const TAB_CATEGORIES: ReadonlyArray<{
-  id: string;
-  label: string;
-  tabIds: readonly TabId[];
-}> = [
-  { id: 'general', label: '常规', tabIds: ['connection', 'display', 'desktop'] },
-  {
-    id: 'assistant',
-    label: '助理',
-    tabIds: ['companion', 'memory', 'templates', 'agents', 'channels'],
-  },
-  {
-    id: 'automation',
-    label: '自动化',
-    tabIds: ['workflows', 'schedules', 'skills'],
-  },
-  { id: 'account', label: '账户', tabIds: ['usage', 'security'] },
-  {
-    id: 'extensions',
-    label: '扩展与集成',
-    tabIds: ['resources', 'plugins'],
-  },
-  {
-    id: 'tools',
-    label: '工具',
-    tabIds: ['workspace', 'artifacts', 'images', 'sessions', 'devtools'],
-  },
-  { id: 'about', label: '关于', tabIds: ['about'] },
-];
-
-export const SETTINGS_TAB_NAV_WIDTH = 192;
-export const SETTINGS_TAB_CONTENT_GAP = 28;
-// 左侧 nav + gap 宽度，用于把内容列盒子相对于「非装饰 gutter」部分的外边距。
-// 旧实现在 grid 里额外保留了一条等宽的右侧装饰列（SIDE_GUTTER），用来在宽屏
-// 下让内容视觉居中；但在 ≤1100px 的窄屏下这条列会白白占掉 220px，使内容
-// 列被挤窄一半，右侧一大片空白。现在改为只用 `margin: 0 auto` 对 nav+content
-// 整体居中，丢掉额外右列，窄屏下把所有可用宽度都让给内容。
-export const SETTINGS_LAYOUT_SIDE_GUTTER = SETTINGS_TAB_NAV_WIDTH + SETTINGS_TAB_CONTENT_GAP;
-export const SETTINGS_LAYOUT_MAX_WIDTH = `calc(var(--content-max-width) + ${SETTINGS_LAYOUT_SIDE_GUTTER}px)`;
-
 export function isEmbeddedRouteTab(tab: TabId): boolean {
   switch (tab) {
     case 'templates':
@@ -114,6 +75,8 @@ export const DEFAULT_THINKING_DEFAULTS: ThinkingDefaultsRef = {
   chat: { enabled: false, effort: 'medium' },
   fast: { enabled: false, effort: 'medium' },
 };
+
+export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicyRef = { modelMode: 'auto' };
 
 export const DEFAULT_IMAGE_GENERATION_DEFAULTS: ImageGenerationDefaultsRef = {
   size: DEFAULT_IMAGE_GENERATION_SIZE,
@@ -183,6 +146,15 @@ export function normalizeImageGenerationDefaults(value: unknown): ImageGeneratio
         : 'png',
     background: record['background'] === 'opaque' ? 'opaque' : 'auto',
   };
+}
+
+export function normalizeSubagentModelPolicy(value: unknown): SubagentModelPolicyRef {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_SUBAGENT_MODEL_POLICY };
+  }
+
+  const record = value as Record<string, unknown>;
+  return { modelMode: record['modelMode'] === 'inherit-main' ? 'inherit-main' : 'auto' };
 }
 
 export function parseStructuredPayload(value: unknown): unknown {

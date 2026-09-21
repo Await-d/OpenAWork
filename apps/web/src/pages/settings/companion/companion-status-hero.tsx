@@ -44,9 +44,10 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
         }}
       >
         <div style={{ minWidth: 0, flex: '1 1 280px' }}>
-          <div id="buddy-status-hero-title" style={ST}>
+          {/* 只清 h3 默认的 marginTop；ST 自带的 marginBottom 必须保留，否则与改造前的盒模型不一致。 */}
+          <h3 id="buddy-status-hero-title" style={{ ...ST, marginTop: 0 }}>
             Buddy 伴侣
-          </div>
+          </h3>
           <div style={{ marginTop: 6, fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
             在聊天工作台里保留一个低打扰陪跑层
           </div>

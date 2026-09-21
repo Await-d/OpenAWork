@@ -1,0 +1,35 @@
+/* classic 失败内联卡「关闭」按钮 —— 次要 / 幽灵操作（非 danger）。
+ *
+ * 与错误诊断简报的 __dismiss 同一套语义：默认弱文字 + 线，hover 提亮为
+ * fg-strong + bg-hover；颜色 / 边框 / 背景与交互状态必须收敛在本文件，
+ * 因为内联声明会压过 :hover / :active / :focus-visible 伪类规则。
+ */
+
+.team-classic-inline-cards__dismiss {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.team-classic-inline-cards__dismiss:hover:not(:disabled) {
+  color: var(--fg-strong);
+  border-color: var(--border-emphasis);
+  background: var(--bg-hover);
+}
+
+.team-classic-inline-cards__dismiss:active:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-hover) 80%, var(--border-emphasis));
+  transform: translateY(1px);
+}
+
+.team-classic-inline-cards__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.team-classic-inline-cards__dismiss:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

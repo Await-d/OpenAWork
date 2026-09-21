@@ -28,6 +28,7 @@ import {
   claimHandoff,
   computeAutoRetryAvailableAtMs,
   failHandoff,
+  isRecoverableFailedHandoff,
   listPendingHandoffs,
   reclaimAbandonedHandoffs,
   startHandoff,
@@ -1440,6 +1441,11 @@ export class HandoffWatcher {
                 userId: input.handoff.userId,
                 roleLayer: 'reception',
               });
+              const retryable = isRecoverableFailedHandoff({
+                failureReason: reason,
+                payload: input.handoff.payload,
+                toRoleLayer: input.handoff.toRoleLayer,
+              });
               appendSessionMessageV2({
                 sessionId: input.handoff.fromSessionId,
                 userId: input.handoff.userId,
@@ -1448,14 +1454,24 @@ export class HandoffWatcher {
                 content: [
                   {
                     type: 'text',
-                    text: [
-                      '⚠️ PM1 规划未能完成，已停止自动重试。',
-                      '',
-                      `**原因**：${humanizePlanningFailureReason(reason)}`,
-                      '**下一步**：请重新发送该需求；若仍失败，请检查团队工作目录内容与所选模型。',
-                      '',
-                      `_技术详情：${reason}_`,
-                    ].join('\n'),
+                    text: retryable
+                      ? [
+                          '⚠️ PM1 规划遇到可重试的瞬时失败，本轮未生成完整方案。',
+                          '',
+                          `**原因**：${humanizePlanningFailureReason(reason)}`,
+                          '**下一步**：可点击「一键重试」重新规划，或直接重新发送该需求。',
+                          '（系统不会自动重试——补救重试由用户/客户端触发。）',
+                          '',
+                          `_技术详情：${reason}_`,
+                        ].join('\n')
+                      : [
+                          '⚠️ PM1 规划未能完成，已停止自动重试。',
+                          '',
+                          `**原因**：${humanizePlanningFailureReason(reason)}`,
+                          '**下一步**：请重新发送该需求；若仍失败，请检查团队工作目录内容与所选模型。',
+                          '',
+                          `_技术详情：${reason}_`,
+                        ].join('\n'),
                   },
                 ],
                 clientRequestId: `handoff:${input.handoff.id}:planning-stopped`,

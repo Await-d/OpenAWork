@@ -27,6 +27,7 @@ import {
 } from '../../../utils/workspace-alias.js';
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
+import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
 import './TitlebarTabStrip.css';
 
 export interface TitlebarTabStripProps {
@@ -78,6 +79,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const { stackedTeamTitlebar } = useTitlebarResponsiveState();
+  const { attachRef: attachTabListRef } = useHorizontalWheelScroll<HTMLDivElement>();
 
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
@@ -392,7 +394,12 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
           ) : null}
 
           {!isTeamRoute ? (
-            <div role="tablist" aria-label="Chat 会话标签" className="titlebar-tab-strip__tab-list">
+            <div
+              ref={attachTabListRef}
+              role="tablist"
+              aria-label="Chat 会话标签"
+              className="titlebar-tab-strip__tab-list"
+            >
               {tabs.map((tab, index) => {
                 const session =
                   tab.type === 'session' && tab.sessionId

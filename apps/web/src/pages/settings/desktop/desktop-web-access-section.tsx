@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { logger } from '../../../utils/log/logger.js';
 import {
   authenticateDesktopGateway,
@@ -14,7 +14,11 @@ import {
   writeDesktopGatewayMode,
 } from '../../../utils/gateway/desktop-gateway.js';
 import { tauriInvoke } from '../shared/settings-page-helpers.js';
-import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
+import { SettingsOptionCardRow } from '../shared/settings-option-card-row.js';
+import type { SettingsOptionCard } from '../shared/settings-option-card-row.js';
+import { SETTINGS_CARD_ROW_STYLE } from '../shared/settings-row.js';
+import { BP, BS_GHOST, IS, SS, ST } from '../shared/settings-section-styles.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
 
 /**
  * 「桌面端」面板的「Web 端访问」section：让局域网内其他设备通过浏览器
@@ -51,72 +55,6 @@ interface AdminPasswordStatus {
   exists: boolean;
   isDefault: boolean;
   email: string;
-}
-
-const ROW_STYLE: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 12,
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 10,
-  padding: '10px 12px',
-  background: 'var(--bg-overlay)',
-};
-
-const SECONDARY_BTN: React.CSSProperties = {
-  ...BP,
-  background: 'transparent',
-  border: '1px solid var(--border-default)',
-  color: 'var(--fg-default)',
-};
-
-function ToggleSwitch({
-  checked,
-  disabled,
-  onChange,
-  ariaLabel,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  onChange: () => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      aria-pressed={checked}
-      disabled={disabled}
-      onClick={onChange}
-      style={{
-        position: 'relative',
-        width: 42,
-        height: 24,
-        borderRadius: 999,
-        border: 'none',
-        padding: 0,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
-        flexShrink: 0,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <span
-        style={{
-          position: 'absolute',
-          top: 2,
-          left: checked ? 20 : 2,
-          width: 20,
-          height: 20,
-          borderRadius: '50%',
-          background: 'var(--bg-overlay)',
-          boxShadow: 'var(--shadow-sm)',
-          transition: 'left 180ms ease',
-        }}
-      />
-    </button>
-  );
 }
 
 function bindModeFor(exposeLan: boolean): DesktopGatewayBindMode {
@@ -524,6 +462,24 @@ export function DesktopWebAccessSection({
     }
   }, []);
 
+  const exposeOptions: SettingsOptionCard<'localhost' | 'lan'>[] = [
+    {
+      value: 'localhost',
+      label: '仅本机访问',
+      description: 'sidecar 仅 bind 127.0.0.1，只有本机浏览器/桌面端能访问。',
+      disabled: interactiveDisabled,
+    },
+    {
+      value: 'lan',
+      label: '同局域网设备可访问',
+      description:
+        passwordStatus?.isDefault === true
+          ? '需先在上方修改 admin 默认密码后才能开启。sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。'
+          : 'sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。建议同时启用桌面端 PIN。',
+      disabled: interactiveDisabled || passwordStatus?.isDefault === true,
+    },
+  ];
+
   return (
     <section style={SS}>
       <h3 style={ST}>Web 端访问</h3>
@@ -608,7 +564,13 @@ export function DesktopWebAccessSection({
             ）。在改密前 sidecar 仅 bind 到 127.0.0.1，不会暴露到
             LAN；改完后才能切到「同局域网设备可访问」。
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 8,
+            }}
+          >
             <input
               style={IS}
               type="password"
@@ -681,7 +643,7 @@ export function DesktopWebAccessSection({
         </div>
       ) : null}
 
-      <div style={ROW_STYLE}>
+      <div style={SETTINGS_CARD_ROW_STYLE}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
             {webAccessEnabled ? '已启用 Web 端访问' : '当前未启用 Web 端访问'}
@@ -699,7 +661,7 @@ export function DesktopWebAccessSection({
               : '关闭后将停止本地网关 sidecar；其他设备无法访问，桌面端会改回内置直连。'}
           </div>
         </div>
-        <ToggleSwitch
+        <SettingsToggle
           ariaLabel="启用 Web 端访问"
           checked={webAccessEnabled}
           disabled={interactiveDisabled}
@@ -709,31 +671,18 @@ export function DesktopWebAccessSection({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>暴露范围</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <ExposeOption
-            active={!webExposeLan}
-            disabled={interactiveDisabled}
-            label="仅本机访问"
-            description="sidecar 仅 bind 127.0.0.1，只有本机浏览器/桌面端能访问。"
-            onSelect={() => void handleSwitchExposeMode(false)}
-          />
-          <ExposeOption
-            active={webExposeLan}
-            disabled={interactiveDisabled || passwordStatus?.isDefault === true}
-            label="同局域网设备可访问"
-            description={
-              passwordStatus?.isDefault === true
-                ? '需先在上方修改 admin 默认密码后才能开启。sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。'
-                : 'sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。建议同时启用桌面端 PIN。'
-            }
-            onSelect={() => void handleSwitchExposeMode(true)}
-          />
-        </div>
+        <SettingsOptionCardRow
+          description="选择本地网关 sidecar 的网络暴露范围，切换后会重启网关并重新认证。"
+          options={exposeOptions}
+          value={webExposeLan ? 'lan' : 'localhost'}
+          onChange={(next) => void handleSwitchExposeMode(next === 'lan')}
+          minCardWidth={220}
+        />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>监听端口</span>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input
             style={{ ...IS, maxWidth: 140 }}
             type="number"
@@ -757,7 +706,7 @@ export function DesktopWebAccessSection({
               type="button"
               onClick={() => void handleRestart()}
               disabled={interactiveDisabled}
-              style={{ ...SECONDARY_BTN, opacity: interactiveDisabled ? 0.4 : 1 }}
+              style={{ ...BS_GHOST, opacity: interactiveDisabled ? 0.4 : 1 }}
               title="停止并重新启动本地网关（保持当前端口和暴露范围）"
             >
               {busy === 'restarting' ? '重启中…' : '重启网关'}
@@ -828,10 +777,10 @@ export function DesktopWebAccessSection({
                 >
                   {url}
                 </code>
-                <button type="button" style={SECONDARY_BTN} onClick={() => void copyUrl(url)}>
+                <button type="button" style={BS_GHOST} onClick={() => void copyUrl(url)}>
                   {copiedUrl === url ? '✓ 已复制' : '复制'}
                 </button>
-                <button type="button" style={SECONDARY_BTN} onClick={() => void openUrl(url)}>
+                <button type="button" style={BS_GHOST} onClick={() => void openUrl(url)}>
                   打开 ↗
                 </button>
               </li>
@@ -840,77 +789,5 @@ export function DesktopWebAccessSection({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function ExposeOption({
-  active,
-  disabled,
-  description,
-  label,
-  onSelect,
-}: {
-  active: boolean;
-  disabled: boolean;
-  description: string;
-  label: string;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      disabled={disabled}
-      onClick={onSelect}
-      style={{
-        ...ROW_STYLE,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
-        background: active
-          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
-          : ROW_STYLE.background,
-        textAlign: 'left',
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{label}</div>
-        <div
-          style={{
-            marginTop: 3,
-            fontSize: 11,
-            lineHeight: 1.5,
-            color: 'var(--fg-muted)',
-          }}
-        >
-          {description}
-        </div>
-      </div>
-      <div
-        aria-hidden
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}
-      >
-        {active ? (
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: 'var(--accent)',
-            }}
-          />
-        ) : null}
-      </div>
-    </button>
   );
 }

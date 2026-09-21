@@ -11,6 +11,7 @@ import {
   type MCPServerStatus,
 } from '@openAwork/shared-ui';
 import { createSettingsClient } from '@openAwork/web-client';
+import { logger } from '../../../utils/log/logger.js';
 
 interface UseMcpServersArgs {
   gatewayUrl: string;
@@ -24,6 +25,7 @@ interface UseMcpServersResult {
   setMcpServers: Dispatch<SetStateAction<MCPServerEntry[]>>;
   mcpStatuses: MCPServerStatus[];
   onRetryMcp: (serverId: string) => void;
+  loadError: string | null;
 }
 
 type McpStatusPayload = {
@@ -99,6 +101,7 @@ export function useMcpServers({
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [mcpStatuses, setMcpStatuses] = useState<MCPServerStatus[]>([]);
   const [builtinMcpServers, setBuiltinMcpServers] = useState<MCPServerEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token || !active) return;
@@ -109,14 +112,22 @@ export function useMcpServers({
         const payload = data as McpServersPayload;
         setBuiltinMcpServers(payload.builtinServers ?? []);
         setMcpServersState(mergeUserAndBuiltinServers(payload));
+        setLoadError(null);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
+        logger.error('failed to load mcp servers', error);
+      });
     void client
       .getMcpStatus(token, { includeTools: true })
-      .then((data) =>
-        setMcpStatuses(((data as McpStatusPayload).servers ?? []).map(toMcpServerStatus)),
-      )
-      .catch(() => undefined);
+      .then((data) => {
+        setMcpStatuses(((data as McpStatusPayload).servers ?? []).map(toMcpServerStatus));
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
+        logger.error('failed to load mcp servers', error);
+      });
   }, [gatewayUrl, token, active]);
 
   const setMcpServers = useCallback(
@@ -209,5 +220,5 @@ export function useMcpServers({
     [token, gatewayUrl],
   );
 
-  return { mcpServers, setMcpServers, mcpStatuses, onRetryMcp };
+  return { mcpServers, setMcpServers, mcpStatuses, onRetryMcp, loadError };
 }

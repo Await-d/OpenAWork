@@ -692,11 +692,16 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
 
         {/* 类型筛选 chips（仅有数据时显示） */}
         {availableTypes.length > 1 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div
+            role="group"
+            aria-label="按类型筛选记忆"
+            style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
+          >
             <button
               type="button"
               style={typeFilter === 'all' ? FILTER_CHIP_ACTIVE : FILTER_CHIP}
               onClick={() => setTypeFilter('all')}
+              aria-pressed={typeFilter === 'all'}
             >
               全部
             </button>
@@ -706,6 +711,7 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
                 type="button"
                 style={typeFilter === t ? FILTER_CHIP_ACTIVE : FILTER_CHIP}
                 onClick={() => setTypeFilter(typeFilter === t ? 'all' : t)}
+                aria-pressed={typeFilter === t}
               >
                 {TYPE_LABELS[t]}
                 <span

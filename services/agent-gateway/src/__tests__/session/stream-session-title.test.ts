@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({
   appendSessionEvent: vi.fn(),
@@ -27,7 +28,9 @@ vi.mock('../../session/session-title-llm.js', () => ({
 }));
 
 vi.mock('../../infra/storage-paths.js', () => ({
-  resolveGatewayArtifactsIndexPath: vi.fn(() => '/tmp/openawork-artifacts.json'),
+  resolveGatewayArtifactsIndexPath: vi.fn(
+    () => '/tmp/openawork-stream-session-title-artifacts.json',
+  ),
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -37,6 +40,42 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 import { persistStreamUserMessage } from '../../session/stream-session-title.js';
+
+const ARTIFACTS_INDEX_PATH = '/tmp/openawork-stream-session-title-artifacts.json';
+const ARTIFACT_IMAGE_DIR = '/tmp/openawork-stream-session-title-fixtures';
+const ARTIFACT_IMAGE_PATH = `${ARTIFACT_IMAGE_DIR}/photo.png`;
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+const PNG_MAGIC_BASE64 = PNG_MAGIC.toString('base64');
+
+// 真实的 artifact 索引 + 图片文件，用于验证 artifactId → base64 data URL 的解析
+// （`loadIndexedSessionArtifact` 直接读盘，mock 掉 fs 反而测不到这条路径）。
+beforeAll(() => {
+  mkdirSync(ARTIFACT_IMAGE_DIR, { recursive: true });
+  writeFileSync(ARTIFACT_IMAGE_PATH, PNG_MAGIC);
+  writeFileSync(
+    ARTIFACTS_INDEX_PATH,
+    JSON.stringify([
+      {
+        id: 'artifact-img-1',
+        sessionId: 'session-1',
+        path: ARTIFACT_IMAGE_PATH,
+        mimeType: 'image/png',
+        name: 'photo.png',
+      },
+    ]),
+  );
+});
+
+afterAll(() => {
+  rmSync(ARTIFACTS_INDEX_PATH, { force: true });
+  rmSync(ARTIFACT_IMAGE_DIR, { force: true, recursive: true });
+});
+
+function firstImagePart(): Record<string, unknown> | undefined {
+  const call = mocks.appendSessionMessage.mock.calls[0]?.[0] as
+    { content: Array<Record<string, unknown>> } | undefined;
+  return call?.content.find((part) => part['type'] === 'input_image');
+}
 
 describe('persistStreamUserMessage', () => {
   beforeEach(() => {
@@ -247,5 +286,42 @@ describe('persistStreamUserMessage', () => {
     };
     expect(call.content).toHaveLength(1);
     expect(call.content[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  // 回归：`fileId` 全仓库无生产者也无解析器，旧实现把它当作「已有来源」而短路，
+  // 导致它与 artifactId 同时出现时跳过解析、图片被上游静默丢弃。
+  it('同时带 fileId 与 artifactId 时仍按 artifactId 解析出 base64 data URL', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+
+    persistStreamUserMessage({
+      clientRequestId: 'request-img-1',
+      message: '请看这张图',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      content: [
+        { type: 'text', text: '请看这张图' },
+        { type: 'input_image', artifactId: 'artifact-img-1', fileId: 'legacy-file-id' },
+      ],
+    });
+
+    expect(firstImagePart()).toMatchObject({
+      imageUrl: `data:image/png;base64,${PNG_MAGIC_BASE64}`,
+      mimeType: 'image/png',
+      fileName: 'photo.png',
+    });
+  });
+
+  it('仅 fileId 而无 artifactId 时不编造来源，图片保持未解析', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+
+    persistStreamUserMessage({
+      clientRequestId: 'request-img-2',
+      message: '未知来源',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      content: [{ type: 'input_image', fileId: 'legacy-file-id' }],
+    });
+
+    expect(firstImagePart()?.['imageUrl']).toBeUndefined();
   });
 });

@@ -48,6 +48,7 @@ let teamEventsBus: typeof TeamEventsBusModule;
 const USER_ID = 'u-handoff-rt';
 const FROM_SESSION_ID = 's-from-rt';
 const TO_SESSION_ID = 's-to-rt';
+const PM2_SESSION_ID = 's-pm2-rt';
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
@@ -130,6 +131,7 @@ beforeEach(() => {
   seedUser(USER_ID, 'rt@example.com');
   seedSession(FROM_SESSION_ID, USER_ID, { roleLayer: 'reception' });
   seedSession(TO_SESSION_ID, USER_ID);
+  seedSession(PM2_SESSION_ID, USER_ID, { roleLayer: 'pm2' });
 });
 
 afterAll(async () => {
@@ -403,6 +405,205 @@ describe('POST /team/handoffs/:handoffId/cancel', () => {
         code: 'team_handoff_cannot_cancel',
         error: '当前状态不允许取消该 handoff。',
         state: 'completed',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /team/handoffs/:handoffId/dismiss', () => {
+  it('failed 的 pm1 规划失败可被关闭，返回 cancelled', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      store.failHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        reason: 'planning-generation-failed: 项目调查返回无效 JSON；需要用户介入',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/dismiss`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as { handoff: { state: string; failureReason: string | null } };
+      expect(data.handoff.state).toBe('cancelled');
+      expect(data.handoff.failureReason).toBe(
+        'planning-generation-failed: 项目调查返回无效 JSON；需要用户介入',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('未知 handoff 返回 404', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/team/handoffs/does-not-exist/dismiss',
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ code: 'team_handoff_not_found' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('非 failed 状态不可关闭，409', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/dismiss`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_cannot_dismiss',
+        state: 'pending',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('可自动恢复的失败不可关闭，409', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      store.failHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        reason: '执行阶段网络超时',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/dismiss`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_cannot_dismiss',
+        state: 'failed',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('孤立的 executor 失败（父会话无 running 的 PM2 裁决者）可被关闭，返回 cancelled', async () => {
+    const app = await buildApp();
+    try {
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM2_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      store.failHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        reason: 'Spec Review 未通过：遗漏验收场景',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/dismiss`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = res.json() as { handoff: { state: string; failureReason: string | null } };
+      expect(data.handoff.state).toBe('cancelled');
+      expect(data.handoff.failureReason).toBe('Spec Review 未通过：遗漏验收场景');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PM2 仍在 running 裁决时 executor 失败不可关闭，409', async () => {
+    const app = await buildApp();
+    try {
+      const pm2Handoff = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+      });
+      store.claimHandoff({ handoffId: pm2Handoff.id, claimToken: 'tok-pm2' });
+      store.startHandoff({
+        handoffId: pm2Handoff.id,
+        claimToken: 'tok-pm2',
+        toSessionId: PM2_SESSION_ID,
+      });
+
+      const created = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM2_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer: 'executor',
+      });
+      store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+      store.startHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        toSessionId: TO_SESSION_ID,
+      });
+      store.failHandoff({
+        handoffId: created.id,
+        claimToken: 'tok',
+        reason: 'Spec Review 未通过：遗漏验收场景',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/handoffs/${created.id}/dismiss`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        code: 'team_handoff_cannot_dismiss',
+        state: 'failed',
       });
     } finally {
       await app.close();

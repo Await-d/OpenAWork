@@ -361,4 +361,62 @@ describe('runLookAtTool — upstreamProtocol forwarding', () => {
     expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://cdn.example.com/photo.png');
     expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
   });
+
+  // 回归：工具描述承诺 image_data 支持「裸 base64」。旧实现把无前缀的输入推成
+  // application/octet-stream，被上游白名单拒绝；现按魔数嗅探真实格式。
+  it('裸 base64 的 image_data 按魔数嗅探为 image/png 并内联上送', async () => {
+    const bareBase64 = SAMPLE_IMAGE_DATA_URL.slice(SAMPLE_IMAGE_DATA_URL.indexOf('base64,') + 7);
+    mocks.resolveModelRoute.mockReturnValue(createRoute());
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: 'ok',
+        inputTokens: 0,
+        outputTokens: 0,
+        finishReason: 'stop',
+      }),
+    );
+
+    await runLookAtTool({
+      imageData: bareBase64,
+      goal: 'describe bare base64',
+      parentSessionId: 'parent-session',
+      userId: 'user-1',
+    });
+
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      { messages?: Array<{ content?: unknown }> } | undefined;
+    const mediaPart = (callArgs?.messages?.[0]?.content as Array<Record<string, unknown>>).find(
+      (part) => part['type'] === 'media',
+    );
+    expect(mediaPart).toMatchObject({
+      data: `data:image/png;base64,${bareBase64}`,
+      mediaType: 'image/png',
+    });
+  });
+
+  it('无法识别图片格式的 image_data 给出可读错误而不是打上游', async () => {
+    await expect(
+      runLookAtTool({
+        imageData: Buffer.from('this is definitely not an image payload at all').toString('base64'),
+        goal: 'describe',
+        parentSessionId: 'parent-session',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/无法识别图片格式/);
+
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
+  });
+
+  it('BMP 的裸 base64 被明确拒绝（不在上游白名单内）', async () => {
+    await expect(
+      runLookAtTool({
+        imageData: Buffer.concat([Buffer.from('BM'), Buffer.alloc(16)]).toString('base64'),
+        goal: 'describe',
+        parentSessionId: 'parent-session',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/不支持 image\/bmp/);
+
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
+  });
 });

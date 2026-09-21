@@ -82,6 +82,21 @@ function resolveToolStatusBadge(
   return null;
 }
 
+const EXTRA_OUTPUT_TEXT_KEYS = [
+  'message',
+  'result',
+  'summary',
+  'error',
+  'errorMessage',
+  'detail',
+  'content',
+  'text',
+] as const;
+
+/**
+ * 从 task 输出的剩余字段中提取可读提示。此前直接 `JSON.stringify` 整个对象，
+ * 会让内联卡片展示 `{ "agentType": ... }` 这类原始 JSON 噪音。
+ */
 function summarizeExtraOutput(value: unknown): string | null {
   if (typeof value === 'string') {
     const normalized = value.trim();
@@ -92,12 +107,20 @@ function summarizeExtraOutput(value: unknown): string | null {
     return null;
   }
 
-  try {
-    const serialized = JSON.stringify(value, null, 2);
-    return serialized.length > 0 ? serialized : null;
-  } catch {
-    return null;
+  if (Array.isArray(value)) {
+    return value.length > 0 ? `共 ${value.length} 项` : null;
   }
+
+  const record = value as Record<string, unknown>;
+  for (const key of EXTRA_OUTPUT_TEXT_KEYS) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  const keys = Object.keys(record);
+  return keys.length > 0 ? `字段：${keys.slice(0, 4).join('、')}` : null;
 }
 
 function compactIdentifier(value: string): string {

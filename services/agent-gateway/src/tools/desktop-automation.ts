@@ -10,7 +10,7 @@ export interface DesktopAutomationDriver {
   reload(): Promise<void>;
   click(selector: string): Promise<void>;
   type(selector: string, text: string): Promise<void>;
-  press(selector: string, key: string): Promise<void>;
+  press(selector: string | undefined, key: string): Promise<void>;
   scroll(direction: DesktopAutomationScrollDirection, amount?: number): Promise<void>;
   wait(input: DesktopAutomationWaitInput): Promise<void>;
   content(): Promise<string>;
@@ -39,7 +39,7 @@ interface BrowserAutomationRuntime {
   goForward(): Promise<unknown>;
   goto(url: string): Promise<unknown>;
   isStarted(): boolean;
-  press(selector: string, key: string): Promise<unknown>;
+  press(selector: string | undefined, key: string): Promise<unknown>;
   reload(): Promise<unknown>;
   screenshot(options?: { type?: 'png' }): Promise<string | Uint8Array>;
   snapshot(): Promise<DesktopAutomationSnapshot>;
@@ -135,7 +135,7 @@ export interface DesktopAutomationManager {
   reload(): Promise<void>;
   click(selector: string): Promise<void>;
   type(selector: string, text: string): Promise<void>;
-  press(selector: string, key: string): Promise<void>;
+  press(selector: string | undefined, key: string): Promise<void>;
   scroll(direction: DesktopAutomationScrollDirection, amount?: number): Promise<void>;
   wait(input: DesktopAutomationWaitInput): Promise<void>;
   content(): Promise<string>;
@@ -196,7 +196,7 @@ const desktopAutomationTypeInputSchema = z.object({
 
 const desktopAutomationPressInputSchema = z.object({
   action: z.literal('press'),
-  selector: z.string().min(1),
+  selector: z.string().min(1).optional(),
   key: z.string().min(1),
 });
 
@@ -249,7 +249,8 @@ export const desktopAutomationToolDefinition: ToolDefinition<
 > = {
   name: 'desktop_automation',
   description:
-    '通过统一的 action 接口控制桌面端专属的浏览器自动化运行时。仅在 gateway 作为桌面 sidecar 运行时可用。',
+    '通过统一的 action 接口控制桌面端专属的浏览器自动化运行时。仅在 gateway 作为桌面 sidecar 运行时可用。' +
+    'press 动作省略 selector 时执行全局（页面级）按键，提供 selector 时执行元素级按键。',
   inputSchema: desktopAutomationToolInputSchema,
   outputSchema: z.string(),
   timeout: 120000,
@@ -320,8 +321,13 @@ class DesktopAutomationDriverImpl implements DesktopAutomationDriver {
     await (await this.getDesktop()).type(selector, text);
   }
 
-  async press(selector: string, key: string): Promise<void> {
-    await (await this.getDesktop()).press(selector, key);
+  async press(selector: string | undefined, key: string): Promise<void> {
+    const desktop = await this.getDesktop();
+    if (typeof selector === 'string' && selector.length > 0) {
+      await desktop.press(selector, key);
+      return;
+    }
+    await desktop.press(undefined, key);
   }
 
   async scroll(direction: DesktopAutomationScrollDirection, amount = 800): Promise<void> {
@@ -408,7 +414,7 @@ class DesktopAutomationManagerImpl implements DesktopAutomationManager {
     await this.driver.type(selector, text);
   }
 
-  async press(selector: string, key: string): Promise<void> {
+  async press(selector: string | undefined, key: string): Promise<void> {
     this.assertEnabled();
     await this.driver.press(selector, key);
   }

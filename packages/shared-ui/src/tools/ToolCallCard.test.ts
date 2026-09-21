@@ -106,3 +106,22 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
     expect(data.diffView?.diffText).toBe(diff.trim());
   });
 });
+
+describe('resolveToolCallCardDisplayData 不再把对象序列化成摘要', () => {
+  it('对象型首个输入参数给出键名概述而不是 JSON', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'custom_tool',
+      input: { payload: { a: 1, b: 2 } },
+    });
+    expect(data.summary).toBe('payload：a、b');
+  });
+
+  it('无法提取字段的对象输出给出键名摘要而不是 JSON', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'custom_tool',
+      input: {},
+      output: { nested: { a: 1 } },
+    });
+    expect(data.outputPreview).toBe('字段：nested');
+  });
+});

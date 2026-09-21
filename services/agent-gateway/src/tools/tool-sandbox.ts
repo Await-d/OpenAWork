@@ -196,7 +196,10 @@ import {
   isPlanModeToolEnabledForSessionMetadata,
   shouldAutoApproveToolForSessionMetadata,
 } from '../session/session-tool-visibility.js';
-import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import {
+  parseSessionMetadataJson,
+  hasTeamDefinition,
+} from '../session/session-workspace-metadata.js';
 import {
   isSkillMcpAllowedByEffective,
   runSkillMcpTool,
@@ -217,6 +220,11 @@ import {
 } from '../task/task-crud-tools.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
+import {
+  completeInheritedParentModel,
+  resolveInheritedParentModel,
+  resolveSubagentModelPolicyForUser,
+} from '../task/subagent-model-policy.js';
 import {
   clearTaskParentAutoResumeContext,
   consumeTaskParentAutoResumeContext,
@@ -414,6 +422,31 @@ const FILE_TOOLS = new Set([
  */
 const READ_ONLY_WORKSPACE_TOOLS = new Set(['read', 'list', 'glob', 'grep']);
 
+/**
+ * Side-effect-free tools that may keep executing after a sibling pauses on a
+ * permission request. Read-only siblings are order-independent, so running them
+ * early is safe and preserves the user's batch instead of losing them to a
+ * synthetic `[Tool execution was interrupted]` result.
+ *
+ * Everything else (write / edit / bash / task / MCP side effects …) is held back
+ * until the pending approval resolves, preserving the model's `tool_use` order
+ * semantics for anything that mutates state.
+ */
+const PERMISSION_SAFE_SIBLING_TOOLS = new Set([
+  'read',
+  'list',
+  'glob',
+  'grep',
+  'webfetch',
+  'websearch',
+  'look_at',
+  'lsp',
+]);
+
+export function isPermissionSafeSiblingTool(normalizedToolName: string): boolean {
+  return PERMISSION_SAFE_SIBLING_TOOLS.has(normalizedToolName);
+}
+
 const SESSION_WORKSPACE_REQUIRED_TOOLS = new Set([
   'apply_patch',
   'ast_grep_replace',
@@ -572,12 +605,35 @@ export interface SandboxExecutionContext {
   userId?: string;
 }
 
+/**
+ * One tool call that was blocked when the turn paused on a permission request.
+ *
+ * `blockedToolCalls[0]` is always the call that actually created/owns the
+ * pending permission row; the remaining entries are the siblings that were
+ * held back because they either needed approval themselves or were withheld
+ * behind the pause (non read-only siblings after the first pending call).
+ *
+ * They are resumed together, in original `tool_use` order, so the next upstream
+ * request carries the whole batch's `tool_result`s at once (prompt-cache friendly).
+ */
+interface BlockedToolCallPayload {
+  toolCallId: string;
+  toolName: string;
+  rawInput: Record<string, unknown>;
+}
+
 interface PermissionRequestPayload {
   clientRequestId: string;
   nextRound: number;
   requestData: Record<string, unknown>;
+  /** First blocked call — kept for backward compatibility with pre-batch payloads. */
   toolCallId: string;
+  /** First blocked call input — kept for backward compatibility. */
   rawInput: Record<string, unknown>;
+  /** Real (non-category) tool name of the first blocked call. */
+  toolName?: string;
+  /** All calls blocked by this pause, in `tool_use` order. */
+  blockedToolCalls?: BlockedToolCallPayload[];
   observability?: {
     presentedToolName: string;
     canonicalToolName: string;
@@ -2218,6 +2274,7 @@ async function executeGatewayManagedToolImpl(
             filePath: parsed.data.file_path,
             goal: parsed.data.goal ?? '提取并描述文件内容',
             imageData: parsed.data.image_data,
+            ...(parsed.data.offset !== undefined ? { offset: parsed.data.offset } : {}),
             parentSessionId: sessionId,
             userId,
           }),
@@ -3603,6 +3660,27 @@ async function executeGatewayManagedToolImpl(
               ...(resolvedAgent.modelVariant ? { variant: resolvedAgent.modelVariant } : {}),
             }
           : undefined;
+      // 「子代理模型来源」策略：inherit-main 时用主对话当前模型替换自动选出的模型；
+      // thinking 仍由 category 自动决定（buildDelegatedChildRequestData 不变）。
+      // 团队模板是权威来源：team role binding 命中、或父会话带 teamDefinition 时不参与本策略，
+      // 本设置只治理普通聊天派生的子代理。
+      const subagentModelPolicy = resolveSubagentModelPolicyForUser(userId);
+      const inheritedParentModelCandidate =
+        !teamRoleBinding &&
+        !hasTeamDefinition(parentSessionMetadata) &&
+        subagentModelPolicy.modelMode === 'inherit-main'
+          ? resolveInheritedParentModel({
+              requestData: executionContext?.requestData,
+              parentSessionMetadata,
+            })
+          : undefined;
+      // 父轮请求可能只带 model：反查模型归属 provider，否则子会话流式解析会静默回落到聊天模型。
+      const inheritedParentModel = inheritedParentModelCandidate
+        ? completeInheritedParentModel(inheritedParentModelCandidate, (modelId) =>
+            selectDelegatedModelForUser(userId, [modelId]),
+          )
+        : undefined;
+      const effectiveDelegatedModel = inheritedParentModel ?? delegatedModel;
       const requestedSkills = resolvedAgent.requestedSkills;
       const category = parsed.data.category?.trim();
       const taskTags = buildTaskTags({
@@ -3629,7 +3707,7 @@ async function executeGatewayManagedToolImpl(
         ...(category ? { category } : {}),
         childSessionId,
         executionContext,
-        modelSelection: delegatedModel,
+        modelSelection: effectiveDelegatedModel,
         prompt: parsed.data.prompt,
         systemPrompt: resolvedAgent.systemPrompt,
       });
@@ -3656,14 +3734,14 @@ async function executeGatewayManagedToolImpl(
         delegatedModelCandidates: resolvedAgent.modelCandidates,
         requestedSkills,
       };
-      if (delegatedModel?.modelId) {
-        childSessionMetadata.modelId = delegatedModel.modelId;
+      if (effectiveDelegatedModel?.modelId) {
+        childSessionMetadata.modelId = effectiveDelegatedModel.modelId;
       }
-      if (delegatedModel?.providerId) {
-        childSessionMetadata.providerId = delegatedModel.providerId;
+      if (effectiveDelegatedModel?.providerId) {
+        childSessionMetadata.providerId = effectiveDelegatedModel.providerId;
       }
-      if (delegatedModel?.variant) {
-        childSessionMetadata.variant = delegatedModel.variant;
+      if (effectiveDelegatedModel?.variant) {
+        childSessionMetadata.variant = effectiveDelegatedModel.variant;
       }
       if (parentToolReference) {
         childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] = parentToolReference.clientRequestId;
@@ -5520,6 +5598,48 @@ function updatePendingPermissionPayload(
      WHERE id = ? AND status = 'pending'`,
     [JSON.stringify(payload), requestId],
   );
+}
+
+/**
+ * Merge the batch of calls blocked by a permission pause into the owning
+ * pending request payload, so the approval resume can run all of them (in
+ * `tool_use` order) instead of only the single call that created the request.
+ *
+ * Idempotent: entries are deduped by `toolCallId`, and the first entry is
+ * mirrored onto the legacy `toolCallId` / `rawInput` / `toolName` fields.
+ */
+export function recordBlockedToolCallsForPendingRequest(
+  requestId: string,
+  calls: BlockedToolCallPayload[],
+): void {
+  if (calls.length === 0) return;
+  const row = sqliteGet<{ request_payload_json: string | null }>(
+    `SELECT request_payload_json FROM permission_requests WHERE id = ? AND status = 'pending' LIMIT 1`,
+    [requestId],
+  );
+  if (!row?.request_payload_json) return;
+
+  let payload: PermissionRequestPayload;
+  try {
+    payload = JSON.parse(row.request_payload_json) as PermissionRequestPayload;
+  } catch {
+    return;
+  }
+
+  const merged = new Map<string, BlockedToolCallPayload>();
+  for (const call of payload.blockedToolCalls ?? []) merged.set(call.toolCallId, call);
+  for (const call of calls) merged.set(call.toolCallId, call);
+  const blockedToolCalls = [...merged.values()];
+  const first = blockedToolCalls[0];
+  if (!first) return;
+
+  updatePendingPermissionPayload(requestId, {
+    ...payload,
+    toolCallId: first.toolCallId,
+    toolName: first.toolName,
+    rawInput: first.rawInput,
+    blockedToolCalls,
+  });
 }
 
 function createPendingPermissionRequest(

@@ -125,6 +125,29 @@ describe('FusionSubAgentSwitcher', () => {
     expect(document.activeElement).toBe(firstChip);
   });
 
+  it('横向溢出时鼠标滚轮纵向增量驱动 chip 行横向滚动', () => {
+    renderSwitcher([makeItem('child-1'), makeItem('child-2'), makeItem('child-3')]);
+
+    const tablist = screen.getByRole('tablist', { name: '子代理切换' });
+    let scrollLeft = 0;
+
+    // jsdom 不实现布局：手动补上溢出判定与位移所需的三个度量。
+    Object.defineProperty(tablist, 'scrollWidth', { configurable: true, value: 600 });
+    Object.defineProperty(tablist, 'clientWidth', { configurable: true, value: 200 });
+    Object.defineProperty(tablist, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (next: number) => {
+        scrollLeft = next;
+      },
+    });
+
+    const notPrevented = fireEvent.wheel(tablist, { deltaY: 100 });
+
+    expect(notPrevented).toBe(false);
+    expect(scrollLeft).toBe(100);
+  });
+
   it('状态圆点与状态文案跟随 item.status', () => {
     renderSwitcher([
       makeItem('child-running', { status: 'running' }),

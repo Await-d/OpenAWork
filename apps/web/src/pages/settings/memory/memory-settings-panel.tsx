@@ -1,29 +1,7 @@
-import type React from 'react';
 import type { MemoryLoadStatus, MemorySettings } from './memory-types.js';
+import { SettingsListRow } from '../shared/settings-row.js';
+import { SettingsToggle } from '../shared/settings-toggle.js';
 import { IS } from '../shared/settings-section-styles.js';
-
-const TOGGLE_TRACK: React.CSSProperties = {
-  position: 'relative',
-  width: 36,
-  height: 20,
-  borderRadius: 10,
-  cursor: 'pointer',
-  transition: 'background 200ms ease',
-  flexShrink: 0,
-  border: 'none',
-  padding: 0,
-};
-
-const TOGGLE_KNOB: React.CSSProperties = {
-  position: 'absolute',
-  top: 2,
-  width: 16,
-  height: 16,
-  borderRadius: '50%',
-  background: 'var(--bg-raised)',
-  transition: 'left 200ms ease',
-  boxShadow: 'var(--shadow-sm)',
-};
 
 function ToggleRow({
   title,
@@ -31,46 +9,19 @@ function ToggleRow({
   checked,
   ariaLabel,
   onToggle,
+  last = false,
 }: {
   title: string;
   description: string;
   checked: boolean;
   ariaLabel: string;
   onToggle: () => void;
+  last?: boolean;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        padding: '10px 0',
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{title}</div>
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={ariaLabel}
-        style={{
-          ...TOGGLE_TRACK,
-          background: checked ? 'var(--accent)' : 'var(--switch-track-off)',
-        }}
-        onClick={onToggle}
-      >
-        <span
-          style={{
-            ...TOGGLE_KNOB,
-            left: checked ? 18 : 2,
-          }}
-        />
-      </button>
-    </div>
+    <SettingsListRow title={title} description={description} divider={!last}>
+      <SettingsToggle checked={checked} onChange={onToggle} ariaLabel={ariaLabel} />
+    </SettingsListRow>
   );
 }
 
@@ -152,7 +103,6 @@ export function MemorySettingsPanel({
           ariaLabel="切换记忆系统"
           onToggle={() => void updateSettings({ enabled: !settings.enabled })}
         />
-        <div style={{ height: 1, background: 'var(--border-subtle)' }} />
         <ToggleRow
           title="自动提取"
           description="请求完成后只提取长期有用、可复用的候选记忆。"
@@ -160,7 +110,6 @@ export function MemorySettingsPanel({
           ariaLabel="切换自动提取"
           onToggle={() => void updateSettings({ autoExtract: !settings.autoExtract })}
         />
-        <div style={{ height: 1, background: 'var(--border-subtle)' }} />
         <ToggleRow
           title="低置信候选需确认"
           description="低于自动写入阈值的候选只计入待确认，不直接入库。"
@@ -169,6 +118,7 @@ export function MemorySettingsPanel({
           onToggle={() =>
             void updateSettings({ reviewLowConfidence: !settings.reviewLowConfidence })
           }
+          last
         />
       </div>
 
