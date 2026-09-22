@@ -10,7 +10,8 @@
  *   5. coding / programmer 共用同一份公共工程纪律与【模式回流】片段（SSOT）；
  *   6. 澄清模式单轮提问上限 5 题与非标准作答的结算规则；
  *   7. coding 按编辑语义约束改动粒度（旧「80 行输出」措辞不回归）；
- *   8. programmer 引用 LSP 策略章节而非重复其工具路由。
+ *   8. programmer 引用 LSP 策略章节而非重复其工具路由；
+ *   9. 模式提示词与共享片段的长度预算（防 stable 前缀静默膨胀）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -101,6 +102,30 @@ describe('对话模式提示词：agentdocs 工作流规范', () => {
     const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS.programmer;
 
     expect(prompt).toContain('Codegraph / LSP 工具使用策略');
+  });
+
+  it('模式提示词与共享片段不超过长度预算，防止 stable 前缀静默膨胀', () => {
+    // 预算 = 当前长度 + 约 25–50% 余量。调高必须在评审中说明理由：
+    // 模式提示词位于 stable 前缀，膨胀会直接推高每轮缓存前缀的 token 成本。
+    const budgets = {
+      clarify: 4000,
+      coding: 1800,
+      programmer: 2200,
+    } as const;
+
+    for (const mode of Object.keys(budgets) as (keyof typeof budgets)[]) {
+      const length = DIALOGUE_MODE_SYSTEM_PROMPTS[mode].length;
+      expect(length, `${mode} 提示词长度 ${length} 超出预算 ${budgets[mode]}`).toBeLessThanOrEqual(
+        budgets[mode],
+      );
+    }
+
+    const sharedTotal =
+      DIALOGUE_MODE_INSTRUCTION_PRIORITY_SYSTEM_PROMPT.length +
+      EXECUTABLE_MODE_COMMON_DISCIPLINE_SYSTEM_PROMPT.length +
+      MODE_REFERRAL_SYSTEM_PROMPT.length +
+      AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT.length;
+    expect(sharedTotal, `共享片段合计 ${sharedTotal} 超出预算 1000`).toBeLessThanOrEqual(1000);
   });
 
   it('非澄清模式提示词不携带澄清人设与 __grill_confirm__ 确认门控', () => {
