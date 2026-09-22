@@ -1,29 +1,27 @@
-import React from 'react';
-import { DeveloperModePanel, LogViewer, type DevEvent } from '@openAwork/shared-ui';
+import type { CSSProperties } from 'react';
 import type { DevtoolsSourceState, SettingsDevLogRecord } from '../state/settings-types.js';
 import {
   buildLogKey,
   InlineFailureNotice,
   LogDetailsPanel,
+  rowInteractionProps,
+  subtleButtonInteractionProps,
 } from './devtools-workbench-primitives.js';
 import {
   SS,
   ST,
-  UV,
   BADGE,
-  BS,
   BG,
+  BS,
   TWO_COLUMN,
   LEFT_PANEL,
   RIGHT_PANEL,
   LIST_CONTAINER,
-  CODE_BLOCK,
+  SEARCH_INPUT,
 } from '../shared/settings-section-styles.js';
 
 export interface DevtoolsLogsSectionProps {
-  sectionRef: React.RefObject<HTMLDivElement | null>;
   devLogs: SettingsDevLogRecord[];
-  devEvents: DevEvent[];
   filteredLogs: SettingsDevLogRecord[];
   selectedLog: SettingsDevLogRecord | null;
   selectedLogKey: string | null;
@@ -36,14 +34,56 @@ export interface DevtoolsLogsSectionProps {
   setShowOnlyErrorLogs: (value: boolean | ((prev: boolean) => boolean)) => void;
   copySelectedLog: () => void;
   copyVisibleLogs: () => void;
+  /** 复制**全部** error 级别日志（不受当前搜索 / 视图切换影响）。 */
+  copyErrorLogs: () => void;
   copyLogField: (label: string, value: unknown) => void;
   onExportLogs: () => void;
 }
 
+const GHOST_INTERACTION = subtleButtonInteractionProps();
+
+const SEGMENTED_GROUP: CSSProperties = {
+  display: 'inline-flex',
+  gap: 2,
+  padding: 2,
+  borderRadius: 8,
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-subtle)',
+};
+
+/** 分段控件内的按钮：选中态用抬升背景 + 语义色文字，明显区别于普通 ghost 按钮。 */
+function segmentStyle(selected: boolean, isError: boolean): CSSProperties {
+  return {
+    appearance: 'none',
+    font: 'inherit',
+    fontSize: 12,
+    fontWeight: selected ? 600 : 500,
+    padding: '4px 10px',
+    borderRadius: 6,
+    border: '1px solid transparent',
+    background: selected ? 'var(--bg-raised)' : 'transparent',
+    color: selected ? (isError ? 'var(--danger)' : 'var(--accent)') : 'var(--fg-muted)',
+    boxShadow: selected ? 'var(--shadow-sm)' : 'none',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    transition: 'background 120ms ease, color 120ms ease',
+  };
+}
+
+const LOG_ROW_BASE = {
+  borderRadius: 8,
+  padding: '8px 10px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  cursor: 'pointer',
+  textAlign: 'left',
+  minWidth: 0,
+  transition: 'background 120ms ease, border-color 120ms ease',
+} as const;
+
 export function DevtoolsLogsSection({
-  sectionRef,
   devLogs,
-  devEvents,
   filteredLogs,
   selectedLog,
   selectedLogKey,
@@ -56,13 +96,15 @@ export function DevtoolsLogsSection({
   setShowOnlyErrorLogs,
   copySelectedLog,
   copyVisibleLogs,
+  copyErrorLogs,
   copyLogField,
   onExportLogs,
 }: DevtoolsLogsSectionProps) {
-  const visibleErrorCount = filteredLogs.filter((l) => l.level === 'error').length;
+  const visibleErrorCount = filteredLogs.filter((log) => log.level === 'error').length;
+  const totalErrorCount = devLogs.filter((log) => log.level === 'error').length;
 
   return (
-    <section ref={sectionRef} style={SS}>
+    <section style={SS}>
       <h3 style={ST}>开发者模式与日志</h3>
       {sourceState.status === 'error' && sourceState.error && (
         <InlineFailureNotice title="开发日志加载失败" message={sourceState.error} />
@@ -73,13 +115,12 @@ export function DevtoolsLogsSection({
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 4,
+          gap: 8,
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
       >
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* 搜索框 */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="search"
             value={logQuery}
@@ -87,44 +128,76 @@ export function DevtoolsLogsSection({
             aria-label="搜索开发日志"
             name="log-query"
             autoComplete="off"
-            placeholder="搜索日志..."
+            placeholder="搜索日志…"
             style={{
-              minWidth: 120,
-              background: 'transparent',
-              border: `1px solid ${logQuery ? 'var(--accent)' : 'var(--border-subtle)'}`,
-              borderRadius: 2,
-              padding: '2px 6px',
-              color: 'var(--fg-strong)',
-              fontSize: 11,
-              outline: 'none',
+              ...SEARCH_INPUT,
+              flex: '0 1 220px',
+              border: `1px solid ${logQuery ? 'var(--accent)' : 'var(--border-default)'}`,
             }}
           />
-
-          {/* 错误过滤 */}
-          <button
-            type="button"
-            onClick={() => setShowOnlyErrorLogs((prev) => !prev)}
-            style={{ ...BG, color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--fg-muted)' }}
-          >
-            {showOnlyErrorLogs ? '仅错误' : '全部'}
-          </button>
-
-          {/* 统计 */}
-          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-            {filteredLogs.length} 条{visibleErrorCount > 0 && ` (${visibleErrorCount} 错误)`}
-          </span>
+          <div role="group" aria-label="日志级别过滤" style={SEGMENTED_GROUP}>
+            <button
+              type="button"
+              onClick={() => setShowOnlyErrorLogs(false)}
+              aria-pressed={!showOnlyErrorLogs}
+              {...rowInteractionProps({
+                isActive: !showOnlyErrorLogs,
+                restBackground: 'transparent',
+              })}
+              style={segmentStyle(!showOnlyErrorLogs, false)}
+            >
+              全部 {devLogs.length}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowOnlyErrorLogs(true)}
+              aria-pressed={showOnlyErrorLogs}
+              {...rowInteractionProps({
+                isActive: showOnlyErrorLogs,
+                restBackground: 'transparent',
+              })}
+              style={segmentStyle(showOnlyErrorLogs, true)}
+            >
+              仅错误 {totalErrorCount}
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: 'var(--accent)' }} aria-live="polite">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--accent)' }} aria-live="polite">
             {copiedLogAction ?? ''}
           </span>
           <button
             type="button"
-            onClick={copySelectedLog}
-            disabled={!selectedLog}
+            onClick={copyErrorLogs}
+            disabled={totalErrorCount === 0}
+            {...GHOST_INTERACTION}
             style={{
               ...BS,
+              fontSize: 12,
+              color: totalErrorCount > 0 ? 'var(--danger)' : undefined,
+              opacity: totalErrorCount > 0 ? 1 : 0.4,
+              cursor: totalErrorCount > 0 ? 'pointer' : 'not-allowed',
+            }}
+          >
+            复制错误日志{totalErrorCount > 0 ? ` (${totalErrorCount})` : ''}
+          </button>
+          <button
+            type="button"
+            onClick={onExportLogs}
+            {...GHOST_INTERACTION}
+            style={{ ...BS, fontSize: 12 }}
+          >
+            导出日志
+          </button>
+          <button
+            type="button"
+            onClick={copySelectedLog}
+            disabled={!selectedLog}
+            {...GHOST_INTERACTION}
+            style={{
+              ...BS,
+              fontSize: 12,
               opacity: selectedLog ? 1 : 0.4,
               cursor: selectedLog ? 'pointer' : 'not-allowed',
             }}
@@ -135,8 +208,10 @@ export function DevtoolsLogsSection({
             type="button"
             onClick={copyVisibleLogs}
             disabled={filteredLogs.length === 0}
+            {...GHOST_INTERACTION}
             style={{
               ...BS,
+              fontSize: 12,
               opacity: filteredLogs.length > 0 ? 1 : 0.4,
               cursor: filteredLogs.length > 0 ? 'pointer' : 'not-allowed',
             }}
@@ -146,11 +221,18 @@ export function DevtoolsLogsSection({
         </div>
       </div>
 
+      {logQuery.trim().length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          搜索命中 {filteredLogs.length} 条
+          {visibleErrorCount > 0 && ` · 其中错误 ${visibleErrorCount} 条`}
+        </div>
+      )}
+
       {/* 两栏布局 */}
       <div style={TWO_COLUMN}>
         {/* 左侧：日志列表 */}
         <div style={LEFT_PANEL}>
-          <div style={LIST_CONTAINER}>
+          <div style={{ ...LIST_CONTAINER, maxHeight: 480 }}>
             {filteredLogs.length > 0 ? (
               filteredLogs.map((log, index) => {
                 const key = buildLogKey(log);
@@ -165,39 +247,29 @@ export function DevtoolsLogsSection({
                     key={key}
                     type="button"
                     onClick={() => setSelectedLogKey(key)}
+                    {...rowInteractionProps({ isActive, restBackground: 'transparent' })}
                     style={{
-                      borderRadius: 6,
+                      ...LOG_ROW_BASE,
                       border: isActive
-                        ? `1px solid ${isError ? 'color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)' : 'var(--border-default)'}`
+                        ? '1px solid var(--border-default)'
                         : '1px solid transparent',
                       background: isActive ? 'var(--bg-raised)' : 'transparent',
-                      boxShadow: isActive
-                        ? isError
-                          ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'
-                          : 'var(--shadow-sm)'
-                        : 'none',
+                      boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                       color: 'var(--fg-strong)',
-                      padding: '3px 6px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      minWidth: 0,
                     }}
                   >
                     <div
                       style={{
                         display: 'flex',
                         justifyContent: 'space-between',
-                        gap: 4,
+                        gap: 8,
                         alignItems: 'flex-start',
                       }}
                     >
                       <span
                         style={{
-                          fontSize: 11,
-                          fontWeight: isError ? 500 : 400,
+                          fontSize: 12,
+                          fontWeight: isActive ? 500 : 400,
                           color: isError
                             ? 'var(--danger)'
                             : isActive
@@ -209,7 +281,7 @@ export function DevtoolsLogsSection({
                           overflow: 'hidden',
                           minWidth: 0,
                           flex: 1,
-                          lineHeight: 1.3,
+                          lineHeight: 1.4,
                         }}
                       >
                         {log.message}
@@ -219,7 +291,7 @@ export function DevtoolsLogsSection({
                           ...BADGE,
                           color: isError ? 'var(--danger)' : 'var(--accent)',
                           flexShrink: 0,
-                          fontSize: 9,
+                          fontSize: 10,
                         }}
                       >
                         {log.level}
@@ -228,21 +300,23 @@ export function DevtoolsLogsSection({
                     <div
                       style={{
                         display: 'flex',
-                        gap: 3,
+                        gap: 8,
                         alignItems: 'center',
-                        fontSize: 10,
+                        fontSize: 11,
                         color: 'var(--fg-muted)',
                       }}
                     >
-                      {ts && <span style={{ fontFamily: 'monospace' }}>{ts}</span>}
+                      {ts && (
+                        <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{ts}</span>
+                      )}
                       {(log.requestId ?? log.source) && (
                         <span
                           style={{
-                            fontFamily: 'monospace',
+                            fontFamily: 'var(--font-mono, monospace)',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            maxWidth: 60,
+                            maxWidth: 90,
                           }}
                         >
                           {log.requestId ?? log.source}
@@ -256,9 +330,9 @@ export function DevtoolsLogsSection({
             ) : (
               <div
                 style={{
-                  padding: '8px 6px',
+                  padding: '20px 12px',
                   textAlign: 'center',
-                  fontSize: 11,
+                  fontSize: 12,
                   color: 'var(--fg-muted)',
                 }}
               >
@@ -270,7 +344,8 @@ export function DevtoolsLogsSection({
                       setLogQuery('');
                       setShowOnlyErrorLogs(false);
                     }}
-                    style={{ ...BG, fontSize: 11, marginLeft: 4 }}
+                    {...GHOST_INTERACTION}
+                    style={{ ...BG, fontSize: 12, marginLeft: 4 }}
                   >
                     清空筛选
                   </button>
@@ -282,105 +357,37 @@ export function DevtoolsLogsSection({
 
         {/* 右侧：详情 */}
         <div style={RIGHT_PANEL}>
-          {/* 日志详情 */}
           <div
             style={{
-              borderRadius: 2,
-              border: '1px solid var(--border-subtle)',
               display: 'flex',
-              flexDirection: 'column',
+              gap: 8,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              minHeight: 28,
             }}
           >
-            <div
-              style={{
-                padding: '3px 6px',
-                borderBottom: '1px solid var(--border-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>详情</span>
-                {selectedLog && (
-                  <>
-                    <span
-                      style={{
-                        ...BADGE,
-                        color: selectedLog.level === 'error' ? 'var(--danger)' : 'var(--accent)',
-                      }}
-                    >
-                      {selectedLog.level}
-                    </span>
-                    {selectedLog.requestId && (
-                      <span
-                        style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}
-                      >
-                        {selectedLog.requestId}
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-              {selectedLog && (
-                <div style={{ display: 'flex', gap: 2 }}>
-                  <button
-                    type="button"
-                    onClick={() => copyLogField('输入', selectedLog?.input)}
-                    style={{ ...BG, padding: '1px 4px', fontSize: 10 }}
-                  >
-                    复制输入
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => copyLogField('输出', selectedLog?.output)}
-                    style={{ ...BG, padding: '1px 4px', fontSize: 10 }}
-                  >
-                    复制输出
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {selectedLog ? (
-              <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div>
-                  <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 1 }}>
-                    输入
-                  </div>
-                  <pre style={CODE_BLOCK}>
-                    {selectedLog.input != null
-                      ? JSON.stringify(selectedLog.input, null, 2)
-                      : '(无输入)'}
-                  </pre>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginBottom: 1 }}>
-                    输出
-                  </div>
-                  <pre style={CODE_BLOCK}>
-                    {selectedLog.output != null
-                      ? JSON.stringify(selectedLog.output, null, 2)
-                      : '(无输出)'}
-                  </pre>
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  padding: '8px 6px',
-                  textAlign: 'center',
-                  fontSize: 11,
-                  color: 'var(--fg-muted)',
-                }}
-              >
-                暂无选中日志
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>日志详情</span>
+            {selectedLog && (
+              <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={() => copyLogField('输入', selectedLog.input)}
+                  {...GHOST_INTERACTION}
+                  style={{ ...BG, fontSize: 11, border: '1px solid var(--border-default)' }}
+                >
+                  复制输入
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyLogField('输出', selectedLog.output)}
+                  {...GHOST_INTERACTION}
+                  style={{ ...BG, fontSize: 11, border: '1px solid var(--border-default)' }}
+                >
+                  复制输出
+                </button>
               </div>
             )}
           </div>
-
-          {/* LogDetailsPanel */}
           <LogDetailsPanel log={selectedLog} />
         </div>
       </div>

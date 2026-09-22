@@ -13,7 +13,6 @@ process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 const providerCatalogMocks = vi.hoisted(() => ({
   getChatProvider: vi.fn(),
-  getFastProvider: vi.fn(),
   getProviderForSelection: vi.fn(),
 }));
 
@@ -41,18 +40,6 @@ const chatProvider = {
   enabled: true,
   baseUrl: 'https://api.openai.com/v1',
   defaultModels: [{ id: 'gpt-4o', label: 'GPT-4o', enabled: true }],
-  createdAt: '2026-07-12T00:00:00.000Z',
-  updatedAt: '2026-07-12T00:00:00.000Z',
-} satisfies AgentCoreModule.AIProvider;
-
-const fastProvider = {
-  id: 'openai-fast',
-  type: 'openai',
-  name: 'OpenAI Fast',
-  enabled: true,
-  baseUrl: 'https://api.openai.com/v1',
-  upstreamProtocol: 'responses',
-  defaultModels: [{ id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', enabled: true }],
   createdAt: '2026-07-12T00:00:00.000Z',
   updatedAt: '2026-07-12T00:00:00.000Z',
 } satisfies AgentCoreModule.AIProvider;
@@ -117,7 +104,6 @@ beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   providerCatalogMocks.getChatProvider.mockReset();
-  providerCatalogMocks.getFastProvider.mockReset();
   providerCatalogMocks.getProviderForSelection.mockReset();
   seedUser(USER_ID);
   seedSession(SESSION_ID);
@@ -250,11 +236,7 @@ describe('stream error contracts', () => {
     );
   });
 
-  it('仅依赖 session metadata 选型时不会被辅助 Fast 选型覆盖主对话流', async () => {
-    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
-      provider: fastProvider,
-      modelId: 'gpt-5.4-nano',
-    });
+  it('仅依赖 session metadata 选型时按会话绑定解析主对话流', async () => {
     providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
       provider: chatProvider,
       modelId: 'gpt-4o',
@@ -267,7 +249,7 @@ describe('stream error contracts', () => {
       }),
       requestData: {
         afterSeq: 0,
-        clientRequestId: 'req-fast-echo',
+        clientRequestId: 'req-metadata-selection',
         maxTokens: 2048,
         message: 'hello',
         temperature: 1,
@@ -278,7 +260,6 @@ describe('stream error contracts', () => {
     expect(route.model).toBe('gpt-4o');
     expect(route.providerType).toBe('openai');
     expect(route.upstreamProtocol).toBe('responses');
-    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
     expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
       USER_ID,
       {
@@ -289,11 +270,73 @@ describe('stream error contracts', () => {
     );
   });
 
-  it('请求显式指定 provider/model 时不会再被 Fast 覆盖', async () => {
-    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
-      provider: fastProvider,
-      modelId: 'gpt-5.4-nano',
+  it('对话未指定额度时不下发 max_tokens，显式请求与模型覆盖仍优先', async () => {
+    // 模型声明的 maxOutputTokens 是「模型理论上限」（如 384000），只用于压缩 /
+    // 溢出计算，**不参与请求额度**；未指定时请求不下发 max_tokens（对齐 opencode）。
+    const provider = {
+      ...chatProvider,
+      defaultModels: [{ ...chatProvider.defaultModels[0]!, maxOutputTokens: 32_000 }],
+    };
+    providerCatalogMocks.getProviderForSelection.mockResolvedValue({ provider, modelId: 'gpt-4o' });
+    const requestData = streamRequestSchema.parse({
+      clientRequestId: 'req-output-limit',
+      message: 'hello',
     });
+
+    const inferred = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData,
+      userId: USER_ID,
+    });
+    expect(inferred.maxTokens).toBeUndefined();
+
+    providerCatalogMocks.getProviderForSelection.mockResolvedValue({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+    const unknownLimit = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData,
+      userId: USER_ID,
+    });
+    expect(unknownLimit.maxTokens).toBeUndefined();
+
+    providerCatalogMocks.getProviderForSelection.mockResolvedValue({ provider, modelId: 'gpt-4o' });
+
+    const explicit = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData: { ...requestData, maxTokens: 4096 },
+      userId: USER_ID,
+    });
+    expect(explicit.maxTokens).toBe(4096);
+
+    providerCatalogMocks.getProviderForSelection.mockResolvedValue({
+      provider: {
+        ...provider,
+        defaultModels: [{ ...provider.defaultModels[0]!, requestOverrides: { maxTokens: 8192 } }],
+      },
+      modelId: 'gpt-4o',
+    });
+    const overridden = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData,
+      userId: USER_ID,
+    });
+    expect(overridden.maxTokens).toBe(8192);
+
+    const explicitWithOverride = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData: { ...requestData, maxTokens: 4096 },
+      userId: USER_ID,
+    });
+    // 模型级 `requestOverrides.maxTokens` 是用户在该模型上的长期配置，优先于
+    // 单次请求的显式值——与 look_at 内层调用共用同一契约
+    //（见 `__tests__/provider/inner-max-tokens-precedence.test.ts`）。
+    expect(explicitWithOverride.maxTokens).toBe(8192);
+    expect(explicitWithOverride.requestOverrides.maxTokens).toBe(8192);
+  });
+
+  it('请求显式指定与会话绑定一致的 provider/model 时以请求为准', async () => {
     providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
       provider: chatProvider,
       modelId: 'gpt-4o',
@@ -318,7 +361,6 @@ describe('stream error contracts', () => {
 
     expect(route.model).toBe('gpt-4o');
     expect(route.providerId).toBe('openai-chat');
-    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
     expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
       USER_ID,
       {
@@ -365,11 +407,7 @@ describe('stream error contracts', () => {
     );
   });
 
-  it('provider 缺失的 delegated model 绑定不会被 Fast 覆盖', async () => {
-    providerCatalogMocks.getFastProvider.mockResolvedValueOnce({
-      provider: fastProvider,
-      modelId: 'gpt-5.4-nano',
-    });
+  it('provider 缺失的 delegated model 绑定按会话 metadata 解析', async () => {
     providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
       provider: anthropicProvider,
       modelId: 'claude-opus-4-0',
@@ -395,7 +433,6 @@ describe('stream error contracts', () => {
     expect(route.model).toBe('claude-opus-4-0');
     expect(route.providerId).toBe('anthropic-chat');
     expect(route.providerType).toBe('anthropic');
-    expect(providerCatalogMocks.getFastProvider).not.toHaveBeenCalled();
     expect(providerCatalogMocks.getProviderForSelection).toHaveBeenCalledWith(
       USER_ID,
       {

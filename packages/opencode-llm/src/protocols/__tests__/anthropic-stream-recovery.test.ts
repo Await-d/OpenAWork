@@ -23,6 +23,14 @@ const messageStart = {
   message: { usage: { input_tokens: 10, output_tokens: 1 } },
 };
 
+/** `onHalt` 返回 Effect（对齐 opencode 参考库）；测试里统一 await 取事件。 */
+const haltEvents = async (
+  state: Parameters<NonNullable<typeof Anthropic.protocol.stream.onHalt>>[0],
+) => {
+  const onHalt = Anthropic.protocol.stream.onHalt;
+  return onHalt ? await Effect.runPromise(onHalt(state)) : [];
+};
+
 describe('Anthropic Messages 流式恢复', () => {
   it('单个 message_delta 只记录终止原因，finish 由 message_stop 发一次', async () => {
     const { state, events } = await runFrames([
@@ -33,7 +41,7 @@ describe('Anthropic Messages 流式恢复', () => {
 
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(1);
     expect(events.find(LLMEvent.is.finish)?.reason).toBe('stop');
-    expect(Anthropic.protocol.stream.onHalt?.(state) ?? []).toEqual([]);
+    expect(await haltEvents(state)).toEqual([]);
   });
 
   it('重复的 message_delta / message_stop 不会重复发出 finish', async () => {
@@ -80,7 +88,7 @@ describe('Anthropic Messages 流式恢复', () => {
     expect(calls[0]?.input).toEqual({ command: 'ls' });
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(1);
     expect(events.find(LLMEvent.is.finish)?.reason).toBe('length');
-    expect(Anthropic.protocol.stream.onHalt?.(state) ?? []).toEqual([]);
+    expect(await haltEvents(state)).toEqual([]);
   });
 
   it('缺失 message_stop 时由 onHalt 兜底补一次 finish', async () => {
@@ -90,7 +98,7 @@ describe('Anthropic Messages 流式恢复', () => {
     ]);
 
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(0);
-    const halted = Anthropic.protocol.stream.onHalt?.(state) ?? [];
+    const halted = await haltEvents(state);
     expect(halted.filter(LLMEvent.is.finish)).toHaveLength(1);
     expect(halted.find(LLMEvent.is.finish)?.reason).toBe('stop');
   });
@@ -183,6 +191,6 @@ describe('Anthropic Messages 流式恢复', () => {
     const { state, events } = await runFrames([messageStart]);
 
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(0);
-    expect(Anthropic.protocol.stream.onHalt?.(state) ?? []).toEqual([]);
+    expect(await haltEvents(state)).toEqual([]);
   });
 });

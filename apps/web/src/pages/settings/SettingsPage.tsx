@@ -1,7 +1,6 @@
 import React, { Suspense, useState } from 'react';
 import { useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { buildDevEventsFromLogs } from './state/settings-derived.js';
 import { ConnectionTabContent } from './connection/connection-tab-content.js';
 import { DisplayTabContent } from './display/display-tab-content.js';
 import { ChannelsTabContent } from './channels/channels-tab-content.js';
@@ -285,8 +284,6 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }, [devLogs]);
 
-  const devEvents = buildDevEventsFromLogs(devLogs);
-
   const {
     sshCurrentPath,
     sshNodes,
@@ -515,8 +512,8 @@ export default function SettingsPage() {
                 {activeTab === 'desktop' && <DesktopTabContent />}
                 {activeTab === 'devtools' && (
                   <DevtoolsTabContent
+                    gatewayUrl={gatewayUrl}
                     devLogs={devLogs}
-                    devEvents={devEvents}
                     diagnostics={diagnostics}
                     diagnosticsAvailableDates={diagnosticsAvailableDates}
                     diagnosticsDateFilter={diagnosticsDateFilter}
@@ -527,10 +524,6 @@ export default function SettingsPage() {
                     onExportLogs={exportDevLogs}
                     onRefreshAllSources={refreshAllDevtoolsSources}
                     onRefreshSource={refreshDevtoolsSource}
-                    sshConnections={sshConnections}
-                    onAddSshConnection={addSshConnection}
-                    onConnectSsh={connectSsh}
-                    onDisconnectSsh={disconnectSsh}
                   />
                 )}
                 {activeTab === 'about' && <AboutPage />}

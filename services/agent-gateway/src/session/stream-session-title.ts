@@ -26,10 +26,8 @@ export interface PersistStreamUserMessageInput {
   message: string;
   sessionId: string;
   userId: string;
-  /** Route for the main chat stream. Used as fallback for title generation. */
+  /** 会话主对话路由，同时用于标题 / 图标生成（图标不依赖全局 fast 选型）。 */
   route?: ModelRouteConfig;
-  /** Dedicated route for LLM title generation (typically the fast model). Falls back to route. */
-  titleRoute?: ModelRouteConfig;
   /**
    * Per-request dynamic context (capability list, keyword-detector reminder,
    * companion prompt, ...) that mirrors oh-my-opencode's
@@ -187,16 +185,17 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
   const isTaskCreatedSession =
     sessionRow && parseSessionMetadataJson(sessionRow.metadata_json)['createdByTool'] === 'task';
 
-  // Fire-and-forget LLM title generation to upgrade the heuristic title
-  const titleRoute = input.titleRoute ?? input.route;
+  // Fire-and-forget LLM title/icon generation on the session's own chat route.
+  // 图标与会话强相关：不使用全局 fast / inline 辅助选型，避免 fast 不可用
+  // （未配置、上游 403、模型下线）时会话图标静默缺失。
   if (
-    titleRoute &&
+    input.route &&
     !isTaskCreatedSession &&
     !isGatewayInternalRequestKey(input.clientRequestId) &&
     isFirstUserMessage(input.sessionId, input.userId)
   ) {
     void generateSessionTitleLlm({
-      route: titleRoute,
+      route: input.route,
       userMessage: text,
       sessionId: input.sessionId,
       userId: input.userId,

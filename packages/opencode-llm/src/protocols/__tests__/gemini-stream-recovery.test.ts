@@ -18,6 +18,14 @@ const runFrames = async (frames: ReadonlyArray<unknown>) => {
   return { state, events };
 };
 
+/** `onHalt` 返回 Effect（对齐 opencode 参考库）；测试里统一 await 取事件。 */
+const haltEvents = async (
+  state: Parameters<NonNullable<typeof Gemini.protocol.stream.onHalt>>[0],
+) => {
+  const onHalt = Gemini.protocol.stream.onHalt;
+  return onHalt ? await Effect.runPromise(onHalt(state)) : [];
+};
+
 describe('Gemini 流式恢复', () => {
   it('functionCall 缺省 args 时降级为空对象', async () => {
     const { events } = await runFrames([
@@ -134,7 +142,7 @@ describe('Gemini 流式恢复', () => {
   it('仅 promptFeedback.blockReason 时 finish 归类为 content-filter', async () => {
     const { state } = await runFrames([{ promptFeedback: { blockReason: 'SAFETY' } }]);
 
-    const finished = Gemini.protocol.stream.onHalt?.(state) ?? [];
+    const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
     expect(terminal?.reason).toBe('content-filter');
     expect(terminal?.reasonRaw).toBe('SAFETY');
@@ -146,7 +154,7 @@ describe('Gemini 流式恢复', () => {
       { candidates: [{ finishReason: 'STOP' }] },
     ]);
 
-    const finished = Gemini.protocol.stream.onHalt?.(state) ?? [];
+    const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
     expect(terminal?.reason).toBe('stop');
     expect(terminal?.reasonRaw).toBe('STOP');

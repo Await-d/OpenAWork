@@ -308,6 +308,21 @@ describe('POST /sessions/:sessionId/children/stop', () => {
 
       expect(await readTaskStatus(PARENT_ID, pausedChildTaskId)).toBe('cancelled');
       expect(await readTaskStatus(PARENT_ID, runningChildTaskId)).toBe('cancelled');
+      const cancelledNotices = dbModule.sqliteAll<{ id: string; data: string }>(
+        `SELECT id, data FROM message_v2 WHERE session_id = ?
+         AND json_extract(data, '$.role') = 'synthetic'`,
+        [PARENT_ID],
+      );
+      expect(cancelledNotices).toHaveLength(2);
+      expect(
+        cancelledNotices.every((notice) => JSON.parse(notice.data).metadata?.state === 'cancelled'),
+      ).toBe(true);
+      expect(
+        dbModule.sqliteGet<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM task_jobs WHERE status = ?',
+          ['cancelled'],
+        )?.count,
+      ).toBe(0);
       expect(await readTaskStatus(PARENT_ID, terminalChildTaskId)).toBe('completed');
 
       expect(readSession(PAUSED_CHILD_ID).state_status).toBe('idle');

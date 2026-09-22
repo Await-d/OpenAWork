@@ -71,11 +71,28 @@ React Hooks实践
 </examples>`;
 
 export interface TitleLlmInput {
+  /**
+   * 会话主对话路由（也是标题 / 图标生成路由）。
+   *
+   * 图标必须由会话自己的模型产出：全局 fast / inline 选型是辅助任务配置，
+   * 与某个会话的图标无关，fast 不可用不应导致会话图标缺失。
+   */
   route: ModelRouteConfig;
   userMessage: string;
   sessionId: string;
   userId: string;
 }
+
+/**
+ * 标题 / 图标生成的输出预算。
+ *
+ * 不能沿用 100 这类小预算：推理模型的思考 token 与输出共享预算，
+ * `deepseek-v4.1-flash` 在 100 时会以 `finishReason: 'length'` 返回空文本，
+ * 使标题 / 图标静默缺失；512 对长思考模型仍在边界上（思考常占 500–1500）。
+ * 取 2048 与主对话的默认输出量级一致——实际输出仍由模型决定，
+ * 预算放大只影响「不截断」，不会让标题变长。
+ */
+export const TITLE_LLM_MAX_OUTPUT_TOKENS = 2048;
 
 export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<void> {
   const { titleEmpty, iconEmpty } = getSessionTitleAndIconState(input.sessionId, input.userId);
@@ -86,25 +103,16 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
 
   try {
     const rawOutput = await callTitleLlm(input.route, input.userMessage, input.sessionId);
-    if (!rawOutput) return;
+    if (!rawOutput) {
+      return;
+    }
 
-    const lines = rawOutput
-      .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    if (lines.length === 0) return;
+    const { title, emoji } = parseTitleLlmOutput(rawOutput);
 
-    const titleLine = lines[0]!;
-    const finalTitle = titleLine.length > 12 ? titleLine.substring(0, 12) : titleLine;
-
-    const emojiLine = lines.length >= 2 ? lines[1] : undefined;
-    const emoji = emojiLine && isValidEmoji(emojiLine) ? emojiLine : undefined;
-
-    if (titleEmpty && finalTitle.length >= 4) {
+    if (titleEmpty && title && title.length >= 4) {
       sqliteRun(
         "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ? AND COALESCE(TRIM(title), '') = ''",
-        [finalTitle, input.sessionId, input.userId],
+        [title, input.sessionId, input.userId],
       );
     }
 
@@ -114,6 +122,28 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
   } catch (error: unknown) {
     console.warn('LLM title generation failed, keeping heuristic title:', error);
   }
+}
+
+/**
+ * 解析标题模型输出：第一行标题（截断到 12 字符），第二行必须是单个合法 emoji。
+ * 两行性质固定，仅按序取值，避免标题 / emoji 顺序颠倒时错位写入。
+ */
+function parseTitleLlmOutput(rawOutput: string): { title?: string; emoji?: string } {
+  const lines = rawOutput
+    .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return {};
+  }
+
+  const titleLine = lines[0]!;
+  const emojiLine = lines.length >= 2 ? lines[1] : undefined;
+  return {
+    title: titleLine.length > 12 ? titleLine.substring(0, 12) : titleLine,
+    ...(emojiLine && isValidEmoji(emojiLine) ? { emoji: emojiLine } : {}),
+  };
 }
 
 async function callTitleLlm(
@@ -147,7 +177,7 @@ async function callTitleLlm(
             content: `请为下面这段会话生成标题：\n${userMessage}`,
           },
         ],
-        maxOutputTokens: 100,
+        maxOutputTokens: TITLE_LLM_MAX_OUTPUT_TOKENS,
         temperature: 0.5,
         requestOverrides: route.requestOverrides,
         signal: controller.signal,
@@ -155,7 +185,13 @@ async function callTitleLlm(
     );
     const text = result.text.trim();
     return text.length > 0 ? text : null;
-  } catch {
+  } catch (error: unknown) {
+    // 静默吞掉会让「上游 403 / 模型不支持」这类问题只表现为「会话没有图标」，
+    // 因此保留一条带 model 的告警，便于定位是哪条路由失败。
+    console.warn(
+      `[session-title] 标题/图标生成请求失败（model=${route.model}）：`,
+      error instanceof Error ? error.message : error,
+    );
     return null;
   } finally {
     clearTimeout(timeout);

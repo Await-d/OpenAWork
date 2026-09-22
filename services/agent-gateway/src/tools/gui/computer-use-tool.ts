@@ -266,6 +266,7 @@ function createGuiRunnerModel(
         ...(route.openaiFastMode === true ? { openaiFastMode: true } : {}),
         ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
         prompt,
+        maxTokens: route.maxTokens,
         requestOverrides: route.requestOverrides,
         ...(route.systemPrompt ? { systemPrompt: route.systemPrompt } : {}),
       });

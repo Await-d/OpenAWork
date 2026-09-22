@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
-import { assert, waitFor, withMockFetch, withTempEnv } from './task-verification-helpers.js';
+import {
+  assert,
+  extractStructuredToolResultOutput,
+  extractToolResultPart,
+  waitFor,
+  withMockFetch,
+  withTempEnv,
+} from './task-verification-helpers.js';
 
 function isTaskToolOutput(value: unknown): value is {
   sessionId: string;
@@ -13,6 +20,21 @@ function isTaskToolOutput(value: unknown): value is {
 
   const candidate = value as Record<string, unknown>;
   return typeof candidate['sessionId'] === 'string' && typeof candidate['taskId'] === 'string';
+}
+
+/**
+ * 判断一次 fetch 是否为 MCP 传输请求（JSON-RPC 体或 `mcp.*` 主机）。
+ * 仅用于本脚本的 fetch 桩：MCP 不在取消链路的验收范围内。
+ */
+function isMcpTransportRequest(url: string, body: string): boolean {
+  if (body.includes('"jsonrpc"')) {
+    return true;
+  }
+  try {
+    return new URL(url).hostname.startsWith('mcp.');
+  } catch {
+    return false;
+  }
 }
 
 async function main(): Promise<void> {
@@ -29,7 +51,18 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async (_url, init) => {
+        async (input, init) => {
+          const requestUrl =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          const requestBody = typeof init?.body === 'string' ? init.body : '';
+          if (isMcpTransportRequest(requestUrl, requestBody)) {
+            // MCP 传输（如 https://mcp.grep.app 的 StreamableHTTP）：本脚本只关心
+            // 上游模型请求的取消链路，MCP 不在验收范围内。快速失败可避免把 MCP
+            // 客户端的 30s 请求超时算进「取消耗时」——此前取消要等满 30s，正是因为
+            // 第一次被桩拦截的 fetch 是 MCP 连接（`StreamableHTTPClientTransport`），
+            // 它既挂住了 MCP 初始化，也让「上游已开始」的断言落在错误的对象上。
+            return new Response('not found', { status: 404 });
+          }
           fetchStarted = true;
           const signal = init?.signal;
           return new Response(
@@ -84,9 +117,13 @@ async function main(): Promise<void> {
             email,
             'hash',
           ]);
+          // 父会话必须绑定到本脚本的临时 workspaceRoot：未绑定会话会被
+          // `resolveTaskGraphProjectRoot` 回退到系统文档目录，导致任务图写到
+          // ~/Documents/OpenAWork，而下面的断言读取的是 dbModule.WORKSPACE_ROOT，
+          // 两边不是同一份文件（waitFor 必然超时），同时污染开发者本机目录。
           dbModule.sqliteRun(
-            `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
-            [parentSessionId, userId],
+            `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
+            [parentSessionId, userId, JSON.stringify({ workingDirectory: workspaceRoot })],
           );
           dbModule.sqliteRun(
             `INSERT INTO permission_requests (
@@ -210,22 +247,13 @@ async function main(): Promise<void> {
               'child session should return to idle after cancellation',
             );
 
+            // v2 投影会把同一条 tool 消息的 tool_call 与 tool_result 合并进
+            // `content`（tool_call 在首位），因此必须按类型查找而不假定 `content[0]`。
             await waitFor(() => {
               const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
               const taskToolMessage = parentMessages.find((message) => message.role === 'tool');
-              const taskToolPart = Array.isArray(taskToolMessage?.content)
-                ? taskToolMessage.content[0]
-                : undefined;
-              if (
-                !taskToolPart ||
-                taskToolPart.type !== 'tool_result' ||
-                !taskToolPart.output ||
-                typeof taskToolPart.output !== 'object'
-              ) {
-                return false;
-              }
-
-              const output = taskToolPart.output as Record<string, unknown>;
+              const taskToolPart = extractToolResultPart(taskToolMessage);
+              const output = extractStructuredToolResultOutput(taskToolPart);
               return output?.['status'] === 'cancelled';
             }, 'parent task tool result should be replaced with cancelled status');
 

@@ -21,7 +21,10 @@ vi.mock('../../v2-runtime/upstream/index.js', () => ({
   runUpstreamGenerate: mocks.runUpstreamGenerate,
 }));
 
-import { generateSessionTitleLlm } from '../../session/session-title-llm.js';
+import {
+  generateSessionTitleLlm,
+  TITLE_LLM_MAX_OUTPUT_TOKENS,
+} from '../../session/session-title-llm.js';
 
 function createRoute(overrides?: {
   requestOverrides?: ModelRouteConfig['requestOverrides'];
@@ -41,6 +44,32 @@ function createRoute(overrides?: {
     supportsThinking: false,
     providerType: overrides?.providerType ?? 'openai',
   };
+}
+
+/**
+ * 有状态的假会话行：写入后的 title / metadata 对后续读取可见，
+ * 避免无状态 mock 下「写后状态」不可见。
+ */
+function installSessionState(initial?: { title?: string; icon?: string }): {
+  title: string;
+  metadata_json: string | null;
+} {
+  const state: { title: string; metadata_json: string | null } = {
+    title: initial?.title ?? '',
+    metadata_json: initial?.icon ? JSON.stringify({ icon: initial.icon }) : null,
+  };
+  mocks.sqliteGet.mockImplementation(() => ({ ...state }));
+  mocks.sqliteRun.mockImplementation((sql: unknown, params: unknown) => {
+    if (typeof sql !== 'string') return;
+    const values = Array.isArray(params) ? params : [];
+    if (sql.includes('SET title =')) {
+      state.title = String(values[0] ?? '');
+    }
+    if (sql.includes('SET metadata_json =')) {
+      state.metadata_json = String(values[0] ?? '');
+    }
+  });
+  return state;
 }
 
 describe('generateSessionTitleLlm', () => {
@@ -72,9 +101,7 @@ describe('generateSessionTitleLlm', () => {
   });
 
   it('calls LLM and saves only icon when title exists but icon is missing', async () => {
-    mocks.sqliteGet
-      .mockReturnValueOnce({ title: '启发式标题', metadata_json: null })
-      .mockReturnValue({ metadata_json: null });
+    mocks.sqliteGet.mockReturnValue({ title: '启发式标题', metadata_json: null });
     mocks.runUpstreamGenerate.mockReturnValue(
       Effect.succeed({
         text: '启发式标题\n🔧',
@@ -163,6 +190,7 @@ describe('generateSessionTitleLlm', () => {
   });
 
   it('swallows upstream errors and keeps the heuristic title', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.sqliteGet.mockReturnValue({ title: '' });
     mocks.runUpstreamGenerate.mockReturnValue(Effect.fail(new Error('upstream blew up')));
 
@@ -177,5 +205,30 @@ describe('generateSessionTitleLlm', () => {
 
     expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('forwards a budget large enough for reasoning models', async () => {
+    installSessionState();
+    mocks.runUpstreamGenerate.mockReturnValue(
+      Effect.succeed({
+        text: '标题够长了\n🔍',
+        inputTokens: 10,
+        outputTokens: 5,
+        finishReason: 'stop',
+      }),
+    );
+
+    await generateSessionTitleLlm({
+      route: createRoute(),
+      userMessage: '帮我修复标题',
+      sessionId: 'session-budget',
+      userId: 'user-1',
+    });
+
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      { maxOutputTokens?: number } | undefined;
+    expect(TITLE_LLM_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(256);
+    expect(callArgs?.maxOutputTokens).toBe(TITLE_LLM_MAX_OUTPUT_TOKENS);
   });
 });

@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import type { ModelRouteConfig } from '../../provider/model-router.js';
 
 const mocks = vi.hoisted(() => ({
   appendSessionEvent: vi.fn(),
   appendSessionMessage: vi.fn(),
+  generateSessionTitleLlm: vi.fn(),
   getSessionMessageByRequestId: vi.fn(),
+  isFirstUserMessage: vi.fn(() => false),
   maybeAutoTitle: vi.fn(),
   sqliteGet: vi.fn(() => ({ metadata_json: '{}' })),
 }));
@@ -23,8 +26,8 @@ vi.mock('../../session/session-title.js', () => ({
 }));
 
 vi.mock('../../session/session-title-llm.js', () => ({
-  generateSessionTitleLlm: vi.fn(),
-  isFirstUserMessage: vi.fn(() => false),
+  generateSessionTitleLlm: mocks.generateSessionTitleLlm,
+  isFirstUserMessage: mocks.isFirstUserMessage,
 }));
 
 vi.mock('../../infra/storage-paths.js', () => ({
@@ -81,7 +84,9 @@ describe('persistStreamUserMessage', () => {
   beforeEach(() => {
     mocks.appendSessionEvent.mockClear();
     mocks.appendSessionMessage.mockClear();
+    mocks.generateSessionTitleLlm.mockClear();
     mocks.getSessionMessageByRequestId.mockReset();
+    mocks.isFirstUserMessage.mockReturnValue(false);
     mocks.maybeAutoTitle.mockClear();
     mocks.sqliteGet.mockClear();
   });
@@ -323,5 +328,35 @@ describe('persistStreamUserMessage', () => {
     });
 
     expect(firstImagePart()?.['imageUrl']).toBeUndefined();
+  });
+
+  // 回归：标题 / 图标生成必须使用会话自己的路由（会话主对话模型），
+  // 不能依赖全局 fast / inline 选型——fast 未配置或上游不可用时会话图标会静默缺失。
+  it('标题 / 图标生成使用会话主路由，不注入额外路由', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+    mocks.isFirstUserMessage.mockReturnValue(true);
+    const route: ModelRouteConfig = {
+      model: 'gpt-5.6-sol',
+      apiBaseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      maxTokens: 512,
+      temperature: 0.5,
+      upstreamProtocol: 'chat_completions',
+      requestOverrides: {},
+      supportsThinking: false,
+    };
+
+    persistStreamUserMessage({
+      clientRequestId: 'request-title-route',
+      message: '帮我看看会话图标',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      route,
+    });
+
+    expect(mocks.generateSessionTitleLlm).toHaveBeenCalledWith(
+      expect.objectContaining({ route, sessionId: 'session-1', userId: 'user-1' }),
+    );
+    expect(mocks.generateSessionTitleLlm.mock.calls[0]?.[0]).not.toHaveProperty('fallbackRoute');
   });
 });

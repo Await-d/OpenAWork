@@ -53,7 +53,6 @@ const compactionStub = vi.hoisted(() => ({
 
 const providerCatalogStub = vi.hoisted(() => ({
   getChatProvider: vi.fn(),
-  getFastProvider: vi.fn(),
   getProviderForSelection: vi.fn(),
 }));
 
@@ -270,7 +269,6 @@ beforeEach(() => {
   compactionStub.overflow.mockResolvedValue({ metadataJson: '{}', triggered: false });
   compactionStub.proactive.mockResolvedValue({ metadataJson: '{}', triggered: false });
   providerCatalogStub.getChatProvider.mockReset();
-  providerCatalogStub.getFastProvider.mockReset();
   providerCatalogStub.getProviderForSelection.mockReset();
   configureProvider();
   streamStub.abort = () => undefined;

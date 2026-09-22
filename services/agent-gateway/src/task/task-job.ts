@@ -169,6 +169,12 @@ export function start(input: TaskJobStartInput): TaskJobInfo {
   return snapshot(job);
 }
 
+export function startBackground(input: TaskJobStartInput): TaskJobInfo {
+  const info = start(input);
+  background(input.id);
+  return get(input.id) ?? info;
+}
+
 export function get(id: string): TaskJobInfo | undefined {
   const job = activeJobs.get(id);
   return job ? snapshot(job) : undefined;
@@ -271,6 +277,29 @@ export function completeBackground(notificationId: string): void {
   }
 }
 
+export function completeConsumedBackgroundJobs(input: {
+  sessionId: string;
+  userId: string;
+}): number {
+  const pending = sqliteAll<{ notification_id: string }>(
+    `SELECT task_jobs.notification_id FROM task_jobs
+     JOIN message_v2 AS notice ON notice.id = task_jobs.notification_id
+     JOIN message_v2 AS consumed ON consumed.session_id = notice.session_id
+       AND consumed.user_id = notice.user_id
+       AND (consumed.time_created > notice.time_created
+         OR (consumed.time_created = notice.time_created AND consumed.id > notice.id))
+     WHERE notice.session_id = ? AND notice.user_id = ?
+       AND task_jobs.status != 'running'
+       AND json_extract(consumed.data, '$.role') IN ('user', 'assistant')
+     GROUP BY task_jobs.notification_id`,
+    [input.sessionId, input.userId],
+  );
+  for (const row of pending) {
+    completeBackground(row.notification_id);
+  }
+  return pending.length;
+}
+
 /** 未投递的可恢复后台工作，供启动恢复扫描使用。 */
 export function pendingBackground(): TaskJobRecovery[] {
   const rows = sqliteAll<PersistedTaskJobRow>('SELECT * FROM task_jobs ORDER BY updated_at ASC');
@@ -299,7 +328,9 @@ export function waitForSettle(id: string): Promise<TaskJobInfo | undefined> {
 }
 
 function normalizePersistedStatus(value: string): TaskJobStatus {
-  return value === 'completed' || value === 'error' || value === 'cancelled' ? value : 'completed';
+  return value === 'running' || value === 'completed' || value === 'error' || value === 'cancelled'
+    ? value
+    : 'error';
 }
 
 /**
@@ -325,6 +356,19 @@ export function listPersistedBackgroundJobs(): PersistedBackgroundJob[] {
     });
   }
   return jobs;
+}
+
+export function updatePersistedBackgroundJob(input: {
+  notificationId: string;
+  status: TaskJobTerminalStatus;
+  output?: string;
+  error?: string;
+}): void {
+  sqliteRun(
+    `UPDATE task_jobs SET status = ?, output = ?, error = ?, updated_at = datetime('now')
+     WHERE notification_id = ? AND status = 'running'`,
+    [input.status, input.output ?? null, input.error ?? null, input.notificationId],
+  );
 }
 
 function parseRecovery(value: string): TaskJobRecovery | undefined {

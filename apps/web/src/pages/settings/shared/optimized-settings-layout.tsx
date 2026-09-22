@@ -350,7 +350,7 @@ export function OptimizedSettingsNav({
                     }}
                     onMouseEnter={(e) => {
                       if (!isActive) {
-                        e.currentTarget.style.background = 'var(--bg-subtle)';
+                        e.currentTarget.style.background = 'var(--bg-hover)';
                       }
                     }}
                     onMouseLeave={(e) => {

@@ -139,7 +139,7 @@ export async function deliverTaskCompletion(
   if (decision.action === 'defer') {
     // 只入库（resume:false）时通知已完整交付，可清持久化记录；
     // 忙导致的延后则保留记录，供重启恢复扫描补偿（T-19b-4）。
-    if (decision.reason === 'resume-false' && injected.created) {
+    if (decision.reason === 'resume-false') {
       completeBackground(input.notificationId);
     }
     return {

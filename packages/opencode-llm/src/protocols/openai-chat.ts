@@ -10,6 +10,7 @@ import {
   Usage,
   type FinishReason,
   type JsonSchema,
+  type LLMError,
   type LLMRequest,
   type MediaPart,
   type ReasoningPart,
@@ -72,12 +73,21 @@ const OpenAIChatMessage = Schema.Union([
     role: Schema.Literal('user'),
     content: Schema.Union([Schema.String, Schema.Array(OpenAIChatUserContent)]),
   }),
-  Schema.Struct({
-    role: Schema.Literal('assistant'),
-    content: Schema.NullOr(Schema.String),
-    tool_calls: optionalArray(OpenAIChatAssistantToolCall),
-    reasoning_content: Schema.optional(Schema.String),
-  }),
+  // 对齐 opencode 参考库：assistant 消息必须容忍并保留思维链字段变体
+  // （`reasoning` / `reasoning_text` / `reasoning_details`）与未知扩展字段。
+  // 严格 Struct 会在解析历史消息时静默剥掉它们，回传上游即丢失。
+  Schema.StructWithRest(
+    Schema.Struct({
+      role: Schema.Literal('assistant'),
+      content: Schema.NullOr(Schema.String),
+      tool_calls: optionalArray(OpenAIChatAssistantToolCall),
+      reasoning_content: Schema.optional(Schema.String),
+      reasoning: Schema.optional(Schema.String),
+      reasoning_text: Schema.optional(Schema.String),
+      reasoning_details: Schema.optional(Schema.Unknown),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  ),
   Schema.Struct({
     role: Schema.Literal('tool'),
     tool_call_id: Schema.String,
@@ -156,24 +166,43 @@ const OpenAIChatToolCallDelta = Schema.Struct({
 });
 type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta>;
 
-const OpenAIChatDelta = Schema.Struct({
-  content: optionalNull(
-    Schema.Union([
-      Schema.String,
-      Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
-    ]),
-  ),
-  reasoning_content: optionalNull(Schema.String),
-  tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
-});
+const OpenAIChatDelta = Schema.StructWithRest(
+  Schema.Struct({
+    content: optionalNull(
+      Schema.Union([
+        Schema.String,
+        Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
+      ]),
+    ),
+    // 对齐 opencode 参考库：拒绝文本必须按正文渲染。
+    // 严格 Struct 会静默丢弃未声明字段——上游把可见内容放在 `refusal`
+    // 时，客户端会表现为「有思考、正文为空」。
+    refusal: optionalNull(Schema.String),
+    reasoning_content: optionalNull(Schema.String),
+    // 对齐 opencode：兼容 `reasoning` / `reasoning_text` 字段名变体
+    // （不同兼容网关对思维链字段的命名不一致）。
+    reasoning: optionalNull(Schema.String),
+    reasoning_text: optionalNull(Schema.String),
+    // 对齐 opencode：`reasoning_details` 承载结构化思维链
+    // （`reasoning.text` / `reasoning.summary`）。
+    reasoning_details: optionalNull(Schema.Unknown),
+    tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 
-const OpenAIChatChoice = Schema.Struct({
-  delta: optionalNull(OpenAIChatDelta),
-  finish_reason: optionalNull(Schema.String),
-  // Some gateways surface the provider-native reason here while normalizing
-  // `finish_reason`.
-  native_finish_reason: optionalNull(Schema.String),
-});
+const OpenAIChatChoice = Schema.StructWithRest(
+  Schema.Struct({
+    delta: optionalNull(OpenAIChatDelta),
+    finish_reason: optionalNull(Schema.String),
+    // Some gateways surface the provider-native reason here while normalizing
+    // `finish_reason`.
+    native_finish_reason: optionalNull(Schema.String),
+    // 对齐 opencode：部分兼容网关（Moonshot 等）把 usage 挂在 choice 上。
+    usage: optionalNull(OpenAIChatUsage),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 
 const OpenAIChatEvent = Schema.StructWithRest(
   Schema.Struct({
@@ -211,6 +240,28 @@ export interface ParserState {
   readonly nextToolIndex?: number;
   readonly toolIndexById?: Readonly<Record<string, number>>;
   readonly lifecycle: Lifecycle.State;
+  /**
+   * 对齐 opencode：首个被识别的思维链字段名。
+   *
+   * 不同兼容网关对思维链字段命名不一致（`reasoning_content` / `reasoning` /
+   * `reasoning_text`），记住首个命中项，避免同一响应内反复猜测字段。
+   */
+  readonly reasoningField?: string;
+  /**
+   * 对齐 opencode：流必须以 `finish_reason` 收尾（默认 true）。
+   *
+   * 缺失即视为「响应在终态事件前结束」，`finishEvents` 会产出
+   * incomplete-stream 失败而不是静默收尾。
+   */
+  readonly requireFinishReason: boolean;
+  /**
+   * 本响应已产生 provider-error（顶层 error 体）。
+   *
+   * 参考库在此抛错让流直接失败；移植版以 provider-error 事件表达
+   * （网关依赖它的 `context-overflow` 分类触发压缩），因此需要显式记录，
+   * 让 `finishEvents` 不再叠加 incomplete-stream。
+   */
+  readonly providerFailed: boolean;
 }
 
 const invalid = ProviderShared.invalidRequest;
@@ -475,14 +526,23 @@ const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMR
 // Streaming parsers are small state machines: every event returns a new state
 // plus the common `LLMEvent`s produced by that event. Tool calls are accumulated
 // because OpenAI streams JSON arguments across multiple deltas.
-const mapFinishReason = (reason: string | null | undefined): FinishReason => {
-  if (reason === 'stop') return 'stop';
+/**
+ * 对齐 opencode 参考库：不受支持的 `finish_reason` 不再静默降级。
+ *
+ * opencode 对 `error` / `network_error` / 未知值一律抛
+ * `UnknownProviderError` / `ProviderInternalError`，由上层当作「上游异常」
+ * 处理（可重试 / 可上报），而不是当成正常结束。移植版曾把未知值折叠成
+ * `'unknown'` 并被网关映射为 `end_turn`——上游流异常时表现为「思考完就停止、
+ * 没有回复」，且不会触发任何重试。
+ *
+ * 返回 `undefined` 表示该值不受支持，调用方必须转为可重试的上游错误。
+ */
+const mapFinishReason = (reason: string | null | undefined): FinishReason | undefined => {
+  if (reason === 'stop' || reason === 'end') return 'stop';
   if (reason === 'length') return 'length';
   if (reason === 'content_filter') return 'content-filter';
   if (reason === 'function_call' || reason === 'tool_calls') return 'tool-calls';
-  // Provider-reported failures surface as finish reasons in some gateways.
-  if (reason === 'error' || reason === 'network_error') return 'error';
-  return 'unknown';
+  return undefined;
 };
 
 // OpenAI Chat reports `prompt_tokens` (inclusive total) with a
@@ -490,6 +550,60 @@ const mapFinishReason = (reason: string | null | undefined): FinishReason => {
 // a `reasoning_tokens` subset. We pass the inclusive totals through and
 // derive the non-cached breakdown so the `LLM.Usage` contract is
 // satisfied on both sides.
+/**
+ * 对齐 opencode 的 `reasoningDelta`：按优先级从 delta 中提取思维链文本。
+ *
+ * 不同兼容网关对思维链字段的命名不一致——`reasoning_content`（DeepSeek 系）、
+ * `reasoning` / `reasoning_text`（部分网关）——只认 `reasoning_content` 会让
+ * 其余命名下的思考内容被静默丢弃（严格 Struct 会先一步剥掉未声明字段）。
+ */
+function pickReasoningDelta(
+  delta: Schema.Schema.Type<typeof OpenAIChatDelta> | null | undefined,
+  configuredField?: string,
+): { field: string; text: string } | undefined {
+  if (!delta) return undefined;
+  const record = delta as unknown as Record<string, unknown>;
+  const fields = new Set<string | undefined>([
+    configuredField,
+    'reasoning_content',
+    'reasoning',
+    'reasoning_text',
+  ]);
+  for (const field of fields) {
+    if (field === undefined) continue;
+    const text = record[field];
+    if (typeof text === 'string' && text.length > 0) return { field, text };
+  }
+  return undefined;
+}
+
+/**
+ * 对齐 opencode 的 `detailText`：从 `reasoning_details` 的
+ * `reasoning.text` / `reasoning.summary` 条目提取文本。
+ */
+function reasoningDetailText(details: unknown): string | undefined {
+  if (!Array.isArray(details)) return undefined;
+  const parts = details.flatMap((detail) => {
+    if (!isRecord(detail)) return [];
+    if (
+      detail['type'] === 'reasoning.text' &&
+      typeof detail['text'] === 'string' &&
+      detail['text'].length > 0
+    ) {
+      return [detail['text']];
+    }
+    if (
+      detail['type'] === 'reasoning.summary' &&
+      typeof detail['summary'] === 'string' &&
+      detail['summary'].length > 0
+    ) {
+      return [detail['summary']];
+    }
+    return [];
+  });
+  return parts.length > 0 ? parts.join('') : undefined;
+}
+
 const mapUsage = (usage: OpenAIChatEvent['usage']): Usage | undefined => {
   if (!usage) return undefined;
   const cached = usage.prompt_tokens_details?.cached_tokens;
@@ -513,7 +627,11 @@ const mapUsage = (usage: OpenAIChatEvent['usage']): Usage | undefined => {
 const step = (state: ParserState, event: OpenAIChatEvent) =>
   Effect.gen(function* () {
     const events: LLMEvent[] = [];
-    const usage = mapUsage(event.usage) ?? state.usage;
+    // 对齐 opencode：部分兼容网关（Moonshot 等）把 usage 挂在 choice 上。
+    const choiceUsage = (event.choices?.[0] as unknown as { usage?: OpenAIChatEvent['usage'] })
+      ?.usage;
+    const usage =
+      mapUsage(event.usage) ?? (choiceUsage ? mapUsage(choiceUsage) : undefined) ?? state.usage;
     const serviceTier = event.service_tier ?? state.serviceTier;
     // 200-with-error body: OpenAI-compatible gateways report rate limits and
     // quota errors as a top-level `error` object instead of an HTTP failure.
@@ -526,7 +644,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
           .filter((value): value is string => typeof value === 'string' && value.length > 0)
           .join(': ');
         return [
-          state,
+          // 记录「已失败」：`finishEvents` 据此跳过 incomplete-stream 检查
+          // （参考库在此抛错让流直接失败，移植版以事件表达，语义等价）。
+          { ...state, providerFailed: true },
           [
             LLMEvent.providerError({
               message: label || 'OpenAI Chat provider error',
@@ -543,13 +663,48 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     }
 
     const choice = event.choices?.[0];
-    const finishReason = choice?.finish_reason
-      ? mapFinishReason(choice.finish_reason)
-      : state.finishReason;
+    // 对齐 opencode：不受支持的 finish_reason 是上游异常，必须显式失败，
+    // 否则会被下游静默当作正常结束（详见 mapFinishReason 注释）。
+    let finishReason = state.finishReason;
+    if (choice?.finish_reason) {
+      const mapped = mapFinishReason(choice.finish_reason);
+      if (mapped === undefined) {
+        return yield* ProviderShared.eventError(
+          ADAPTER,
+          `Provider finish_reason: ${choice.finish_reason}`,
+          ProviderShared.encodeJson(event),
+        );
+      }
+      finishReason = mapped;
+    }
     const finishReasonRaw =
       choice?.native_finish_reason ?? choice?.finish_reason ?? state.finishReasonRaw;
     const delta = choice?.delta;
     const toolDeltas = delta?.tool_calls ?? [];
+
+    // 对齐 opencode：finish 之后仍收到内容 = 上游流异常（协议不允许）。
+    // 原样返回状态、不重复产出事件；有内容则显式失败。
+    if (state.finishReason !== undefined) {
+      const lateRefusal = delta?.['refusal'];
+      const hasLateContent =
+        Boolean(delta?.content) ||
+        (typeof lateRefusal === 'string' && lateRefusal.length > 0) ||
+        pickReasoningDelta(delta, state.reasoningField) !== undefined ||
+        reasoningDetailText(delta?.['reasoning_details']) !== undefined ||
+        toolDeltas.some(
+          (tool) =>
+            Boolean(tool.id) || Boolean(tool.function?.name) || Boolean(tool.function?.arguments),
+        );
+      if (hasLateContent) {
+        return yield* ProviderShared.eventError(
+          ADAPTER,
+          'OpenAI Chat received content after the finish reason',
+          ProviderShared.encodeJson(event),
+        );
+      }
+      return [{ ...state, usage }, events] as const;
+    }
+
     let tools = state.tools;
     const pendingToolArguments = { ...state.pendingToolArguments };
     let lastToolIndex = state.lastToolIndex ?? -1;
@@ -558,16 +713,22 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     let lifecycle = state.lifecycle;
 
-    if (delta?.reasoning_content)
-      lifecycle = Lifecycle.reasoningDelta(
-        lifecycle,
-        events,
-        'reasoning-0',
-        delta.reasoning_content,
-      );
+    // 思维链提取（对齐 opencode）：
+    //   1. `reasoning_details`（结构化条目）优先，其次按字段名探测
+    //      （`reasoning_content` / `reasoning` / `reasoning_text`）；
+    //   2. 思维链是「响应级通道」——**保持打开**，由 `finishEvents` 统一关闭，
+    //      这样迟到的思维链 delta 会并入同一块，而不是反复开关产生多个块。
+    const pickedReasoning = pickReasoningDelta(delta, state.reasoningField);
+    const reasoningField = state.reasoningField ?? pickedReasoning?.field;
+    const detailText = reasoningDetailText(
+      (delta as unknown as Record<string, unknown> | undefined)?.['reasoning_details'],
+    );
+    const reasoningText = detailText ?? pickedReasoning?.text;
+    if (reasoningText !== undefined) {
+      lifecycle = Lifecycle.reasoningDelta(lifecycle, events, 'reasoning-0', reasoningText);
+    }
 
     if (delta?.content) {
-      lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
       const text =
         typeof delta.content === 'string'
           ? delta.content
@@ -575,7 +736,12 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', text);
     }
 
-    if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
+    // 对齐 opencode：`refusal`（模型拒绝文本）同样按正文渲染。
+    // 严格 Struct 丢弃该字段时，整轮回答会表现为「有思考、正文为空」。
+    const refusal = (delta as unknown as Record<string, unknown> | undefined)?.['refusal'];
+    if (typeof refusal === 'string' && refusal.length > 0) {
+      lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', refusal);
+    }
 
     for (const tool of toolDeltas) {
       const toolId = tool.id?.trim() ? tool.id.trim() : undefined;
@@ -658,31 +824,46 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         nextToolIndex,
         toolIndexById,
         lifecycle,
+        reasoningField,
+        requireFinishReason: state.requireFinishReason,
+        providerFailed: state.providerFailed,
       },
       events,
     ] as const;
   });
 
-const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
-  const events: LLMEvent[] = [];
-  const hasToolCalls = state.toolCallEvents.length > 0;
-  const reason = state.finishReason === 'stop' && hasToolCalls ? 'tool-calls' : state.finishReason;
-  const lifecycle = state.toolCallEvents.length
-    ? Lifecycle.stepStart(state.lifecycle, events)
-    : state.lifecycle;
-  events.push(...state.toolCallEvents);
-  if (reason) {
-    Lifecycle.finish(lifecycle, events, {
-      reason,
-      reasonRaw: state.finishReasonRaw,
-      usage: state.usage,
-      ...(state.serviceTier === undefined
-        ? {}
-        : { providerMetadata: { openai: { serviceTier: state.serviceTier } } }),
-    });
-  }
-  return events;
-};
+const finishEvents = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    // 对齐 opencode 参考库：流在终态事件前结束（无 `finish_reason`）即
+    // 「不完整流」。以 `incomplete-stream` 失败整条流，让上层据此重试，
+    // 而不是把截断的响应当成正常收尾。
+    // 已产生 provider-error（顶层 error 体）时视为已有终态，不再叠加。
+    if (state.finishReason === undefined && state.requireFinishReason && !state.providerFailed) {
+      return yield* ProviderShared.incompleteStreamError(
+        ADAPTER,
+        'OpenAI Chat stream ended without finish_reason',
+      );
+    }
+    const events: LLMEvent[] = [];
+    const hasToolCalls = state.toolCallEvents.length > 0;
+    const reason =
+      state.finishReason === 'stop' && hasToolCalls ? 'tool-calls' : state.finishReason;
+    const lifecycle = state.toolCallEvents.length
+      ? Lifecycle.stepStart(state.lifecycle, events)
+      : state.lifecycle;
+    events.push(...state.toolCallEvents);
+    if (reason) {
+      Lifecycle.finish(lifecycle, events, {
+        reason,
+        reasonRaw: state.finishReasonRaw,
+        usage: state.usage,
+        ...(state.serviceTier === undefined
+          ? {}
+          : { providerMetadata: { openai: { serviceTier: state.serviceTier } } }),
+      });
+    }
+    return events;
+  });
 
 // =============================================================================
 // Protocol And OpenAI Route
@@ -701,11 +882,18 @@ export const protocol = Protocol.make({
   },
   stream: {
     event: Protocol.jsonEvent(OpenAIChatEvent),
-    initial: () => ({
+    initial: (request) => ({
       tools: ToolStream.empty<number>(),
       pendingToolArguments: {},
       toolCallEvents: [],
       lifecycle: Lifecycle.initial(),
+      // 对齐 opencode：思维链字段名可由模型兼容配置指定；
+      // 未配置时由 delta 探测首个命中的字段。
+      ...(request.model.compatibility?.reasoningField === undefined
+        ? {}
+        : { reasoningField: request.model.compatibility.reasoningField }),
+      requireFinishReason: request.model.compatibility?.requireFinishReason ?? true,
+      providerFailed: false,
     }),
     step,
     onHalt: finishEvents,

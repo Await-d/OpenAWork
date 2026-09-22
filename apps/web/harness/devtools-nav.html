@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DevtoolsSectionNav 交互状态验收</title>
+    <style>
+      /*
+       * 主题链哨兵：`.harness-theme` 提供与真实主题**不同**的哨兵色值，
+       * 证明组件跟随 CSS 变量（而不是在无变量时静默保持初始值）。
+       *
+       * ⚠️ `--bg-subtle` 是**陷阱变量**（洋红）：它不在 `src/index.css` 里定义，
+       * 历史上 devtools 的 hover 曾写成 `var(--bg-subtle)` 导致 hover 静默失效。
+       * 断言脚本会验证 hover 背景**等于** `--bg-hover` 哨兵、**不等于**这里的洋红，
+       * 从而同时守卫「用对了变量」与「没退回旧变量」。
+       */
+      body {
+        margin: 0;
+        background: #06070c;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        padding: 16px;
+      }
+      .harness-theme {
+        --bg-hover: #0d3b2e;
+        --bg-overlay: #101828;
+        --bg-raised: #1a2333;
+        --bg-subtle: #ff00ff;
+        --accent: #7c3aed;
+        --accent-subtle: rgba(124, 58, 237, 0.14);
+        --fg-on-accent: #ffffff;
+        --fg-default: #cbd5e1;
+        --fg-muted: #94a3b8;
+        --fg-strong: #f8fafc;
+        --border-subtle: #1b2534;
+        --border-default: #223044;
+        --border-emphasis: #2f4055;
+        --switch-track-off: #334155;
+        --danger: #f87171;
+        --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/devtools-nav-entry.tsx"></script>
+  </body>
+</html>

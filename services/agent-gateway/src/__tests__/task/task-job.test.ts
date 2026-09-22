@@ -139,6 +139,23 @@ describe('task-job 注册表', () => {
     ]);
   });
 
+  it('后台任务运行期间已有持久记录，终态通知身份与结果更新同一条记录', () => {
+    seedSession('child-running');
+    taskJob.start({ id: 'child-running', recovery: makeRecovery('child-running') });
+    const running = taskJob.background('child-running');
+    expect(taskJob.listPersistedBackgroundJobs()).toMatchObject([
+      { notificationId: running?.notificationId, status: 'running' },
+    ]);
+    taskJob.settle('child-running', {
+      status: 'completed',
+      notificationId: 'task-job:child-running:123',
+      output: '结束',
+    });
+    expect(taskJob.listPersistedBackgroundJobs()).toMatchObject([
+      { notificationId: 'task-job:child-running:123', status: 'completed', output: '结束' },
+    ]);
+  });
+
   it('无可恢复载体且已终态的任务不能转后台', () => {
     seedSession('child-f');
     taskJob.start({ id: 'child-f' });

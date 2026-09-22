@@ -66,7 +66,7 @@ function pruneCatalogCache(): void {
  * mid-write, a disk error, or a hand-edited DB can leave a non-JSON value. An
  * unguarded `JSON.parse` here used to throw straight out of `loadRawSettings`
  * → `getCatalog`, which sits on the main chat stream path (stream.ts →
- * getFastProvider / getProviderForSelection) — so a single corrupt provider
+ * `getProviderForSelection`) — so a single corrupt provider
  * row hard-failed every chat turn for that user. Degrade a corrupt value to
  * `null` (identical to the no-row path: `getCatalog` then builds a default
  * `ProviderManagerImpl`) + warn. (§0.94 / §0.115 single-point-failure class.)
@@ -178,25 +178,6 @@ export async function getChatProvider(userId: string) {
   const catalog = await getCatalog(userId);
   const { provider, model } = catalog.manager.getChatProviderConfig();
   return { provider, modelId: model.id };
-}
-
-/**
- * 获取 fast provider 配置。
- * 当用户未显式配置 fast（providerId/modelId 为空）时返回 null，
- * 让调用方回退到 chat route 而不是强制使用 fallback 的 fast 模型。
- */
-export async function getFastProvider(userId: string) {
-  const catalog = await getCatalog(userId);
-  const active = catalog.activeSelection;
-  if (!active?.fast?.providerId || !active?.fast?.modelId) {
-    return null;
-  }
-  try {
-    const { provider, model } = catalog.manager.getFastProviderConfig();
-    return { provider, modelId: model.id };
-  } catch {
-    return null;
-  }
 }
 
 interface ProviderSelectionOptions {

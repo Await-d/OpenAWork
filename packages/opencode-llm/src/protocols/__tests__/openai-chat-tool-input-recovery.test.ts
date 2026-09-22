@@ -21,7 +21,8 @@ const runFrames = async (frames: ReadonlyArray<unknown>) => {
     );
     state = next;
   }
-  return Chat.protocol.stream.onHalt?.(state) ?? [];
+  const onHalt = Chat.protocol.stream.onHalt;
+  return onHalt ? await Effect.runPromise(onHalt(state)) : [];
 };
 
 const toolDelta = (argumentsText: string) => ({
@@ -54,7 +55,8 @@ const collect = async (frames: ReadonlyArray<unknown>) => {
     state = next;
     events.push(...emitted);
   }
-  events.push(...(Chat.protocol.stream.onHalt?.(state) ?? []));
+  const onHalt = Chat.protocol.stream.onHalt;
+  if (onHalt) events.push(...(await Effect.runPromise(onHalt(state))));
   return events;
 };
 

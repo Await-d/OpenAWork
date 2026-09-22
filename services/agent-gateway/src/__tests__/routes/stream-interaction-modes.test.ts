@@ -90,6 +90,11 @@ describe('resolveStreamInteractionModes · 权限档位解析', () => {
 });
 
 describe('streamRequestSchema · 权限档位字段', () => {
+  it('未指定输出额度时不注入 2048，保留显式额度', () => {
+    expect(buildRequest().maxTokens).toBeUndefined();
+    expect(buildRequest({ maxTokens: 4096 }).maxTokens).toBe(4096);
+  });
+
   it('接受 permissionMode 并保留旧布尔字段', () => {
     const parsed = streamRequestSchema.parse({
       clientRequestId: 'req-permission-mode',

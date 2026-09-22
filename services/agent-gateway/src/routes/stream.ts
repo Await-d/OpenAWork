@@ -26,7 +26,7 @@ import {
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../provider/model-router.js';
-import { getFastProvider, getProviderForSelection } from '../provider/provider-catalog.js';
+import { getProviderForSelection } from '../provider/provider-catalog.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessageV2,
@@ -123,6 +123,7 @@ import {
 import { listSessionTodos } from '../tools/todo-tools.js';
 import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
 import { noteManualSessionInteraction } from '../task/task-wake-budget.js';
+import { completeConsumedBackgroundJobs } from '../task/task-job.js';
 import {
   detectRecoveryErrorType,
   recoverToolResultMissing,
@@ -550,6 +551,8 @@ const inputImagePartSchema = z
   });
 
 export const streamRequestSchema = modelRequestSchema.omit({ model: true }).extend({
+  // `maxTokens` 继承自 `modelRequestSchema`：可选、无默认值。
+  // 未显式指定时不下发 `max_tokens`（见 `provider/model-router.ts` 的注释）。
   agentId: z.string().trim().min(1).max(120).optional(),
   displayMessage: z.string().min(1).max(32768).optional(),
   dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
@@ -1484,13 +1487,18 @@ export async function resolveStreamModelRoute(input: {
   );
 
   if (providerConfig) {
+    // 未显式指定 maxTokens 时不注入任何额度：`undefined` 会一路传到协议层，
+    // 请求体里不含 `max_tokens` / `max_output_tokens`，由上游按模型自身默认
+    // 上限决定（对齐 opencode 的 `generation.maxTokens === undefined`）。
+    // 显式请求值与模型 / Provider 级 `requestOverrides.maxTokens` 原样生效。
+    const route = resolveModelRouteFromProvider(
+      providerConfig.provider,
+      providerConfig.modelId,
+      resolvedRequestData,
+    );
     return {
       ...agentSelection,
-      ...resolveModelRouteFromProvider(
-        providerConfig.provider,
-        providerConfig.modelId,
-        resolvedRequestData,
-      ),
+      ...route,
     };
   }
 
@@ -1498,12 +1506,13 @@ export async function resolveStreamModelRoute(input: {
     throw new TeamModelBindingUnavailableError();
   }
 
+  const route = resolveModelRoute({
+    ...resolvedRequestData,
+    model: resolvedRequestData.model ?? 'default',
+  });
   return {
     ...agentSelection,
-    ...resolveModelRoute({
-      ...resolvedRequestData,
-      model: resolvedRequestData.model ?? 'default',
-    }),
+    ...route,
   };
 }
 
@@ -2121,6 +2130,7 @@ export async function handleStreamRequest(input: {
   // 否则唤醒自身会把计数清零，上限永远触发不了。判定与标题守卫共用同一内部键注册表。
   if (!isGatewayInternalRequestKey(requestData.clientRequestId)) {
     noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
+    completeConsumedBackgroundJobs({ sessionId: input.sessionId, userId: input.user.sub });
   }
   const userVisibleMessage = input.teamResumeRootSessionId
     ? (requestData.displayMessage ?? '恢复团队会话')
@@ -2454,15 +2464,6 @@ export async function handleStreamRequest(input: {
       // Reset doom loop history at the start of each new user message stream
       resetDoomLoopHistory(input.sessionId);
 
-      // Resolve fast model route for LLM title generation (falls back to chat route)
-      const fastProviderConfig = await getFastProvider(input.user.sub);
-      const titleRoute = fastProviderConfig
-        ? resolveModelRouteFromProvider(fastProviderConfig.provider, fastProviderConfig.modelId, {
-            maxTokens: 100,
-            temperature: 0.5,
-          })
-        : undefined;
-
       // Per-turn thinking-language hint snapshot (CJK detector).
       //
       // We compute it here at write-time rather than in `runModelRound`
@@ -2491,7 +2492,6 @@ export async function handleStreamRequest(input: {
           sessionId: input.sessionId,
           userId: input.user.sub,
           route,
-          titleRoute,
           // Persist the per-request synthetic block as part of the user
           // message so subsequent turns see byte-identical bytes for it
           // (Anthropic / OpenAI prompt-cache prefix stability — was the

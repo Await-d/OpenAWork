@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useState } from 'react';
-import { FoldDisabledContext } from '../markdown/fold-policy.js';
+import { FoldDisabledContext, MessageFoldContext } from '../markdown/fold-policy.js';
 
 /**
  * Threshold above which an assistant message body is collapsed by
@@ -63,28 +63,30 @@ export function CollapsibleAssistantContent({
   if (!isLong) return <>{children}</>;
 
   return (
-    <div className="chat-markdown-fold-container" data-expanded={expanded ? 'true' : 'false'}>
-      <div className="chat-markdown-fold-body">{children}</div>
-      {!expanded && (
-        <button
-          type="button"
-          className="chat-markdown-fold-expand"
-          onClick={() => setExpanded(true)}
-          aria-label="展开全部消息内容"
-        >
-          展开全部 · {content.length.toLocaleString()} 字符
-        </button>
-      )}
-      {expanded && (
-        <button
-          type="button"
-          className="chat-markdown-fold-collapse"
-          onClick={() => setExpanded(false)}
-          aria-label="收起消息内容"
-        >
-          收起
-        </button>
-      )}
-    </div>
+    <MessageFoldContext value={true}>
+      <div className="chat-markdown-fold-container" data-expanded={expanded ? 'true' : 'false'}>
+        <div className="chat-markdown-fold-body">{children}</div>
+        {!expanded && (
+          <button
+            type="button"
+            className="chat-markdown-fold-expand"
+            onClick={() => setExpanded(true)}
+            aria-label="展开全部消息内容"
+          >
+            展开全部 · {content.length.toLocaleString()} 字符
+          </button>
+        )}
+        {expanded && (
+          <button
+            type="button"
+            className="chat-markdown-fold-collapse"
+            onClick={() => setExpanded(false)}
+            aria-label="收起消息内容"
+          >
+            收起
+          </button>
+        )}
+      </div>
+    </MessageFoldContext>
   );
 }

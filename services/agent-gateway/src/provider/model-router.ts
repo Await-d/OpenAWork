@@ -33,20 +33,29 @@ export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
  */
 export const MODEL_REQUEST_MAX_TOKENS_CAP = 16384;
 
-/** 未指定时的默认输出上限（同时是 schema 的 `.default()` 值）。 */
+/**
+ * 内层调用（look_at / computer_use / 标题 / 压缩等）的输出上限兜底参考值。
+ *
+ * ⚠️ **不再作为任何主对话请求的默认值**：
+ * - `modelRequestSchema.maxTokens` 已移除 `.default()`，未显式指定时**不下发**
+ *   `max_tokens`，由上游按模型自身默认上限决定（对齐 opencode v2.0.13 的
+ *   `generation.maxTokens === undefined` 语义）。
+ * - 历史行为（每个对话请求固定 2048）会在推理模型产出正文前就截断输出——
+ *   思考 token 与正文共享同一份输出预算——现象是「思考一段后直接停止、没有回复」。
+ *
+ * 常量保留仅为 `look-at` 内层链路提供与 `MODEL_REQUEST_MAX_TOKENS_CAP` 同值的
+ * 兜底参考（见 `tools/look-at-tools.ts` 的 `INNER_DEFAULT_MAX_TOKENS`）。
+ */
 export const MODEL_REQUEST_DEFAULT_MAX_TOKENS = 2048;
 
 export const modelRequestSchema = z.object({
   model: z.string().min(1).max(200).optional().default(DEFAULT_MODEL_SENTINEL),
   variant: z.string().min(1).max(80).optional(),
   systemPrompt: z.string().max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).optional(),
-  maxTokens: z
-    .number()
-    .int()
-    .min(1)
-    .max(MODEL_REQUEST_MAX_TOKENS_CAP)
-    .optional()
-    .default(MODEL_REQUEST_DEFAULT_MAX_TOKENS),
+  // 未指定时**不下发** max_tokens（不再有 `.default(2048)`）：
+  // 推理模型的思考 token 与正文共享输出预算，固定小额度会让正文在产出前
+  // 就被上游以 `finish_reason: length` 截断。显式传入时仍受 CAP 约束。
+  maxTokens: z.number().int().min(1).max(MODEL_REQUEST_MAX_TOKENS_CAP).optional(),
   temperature: z.number().min(0).max(2).optional().default(1),
 });
 
@@ -67,7 +76,12 @@ export interface ModelRouteConfig {
    *  compaction overflow formula to calculate usable input space.
    *  Mirrors opencode's `model.limit.output`. */
   maxOutputTokens?: number;
-  maxTokens: number;
+  /**
+   * 输出上限。`undefined` = 不向请求下发 `max_tokens` / `max_output_tokens`，
+   * 由上游按模型自身默认上限决定（对齐 opencode 的 `generation.maxTokens` 语义）。
+   * 只有请求显式指定或模型 / Provider 级 `requestOverrides.maxTokens` 才产生值。
+   */
+  maxTokens?: number;
   temperature: number;
   upstreamProtocol: UpstreamProtocol;
   requestOverrides: RequestOverrides;
@@ -445,7 +459,10 @@ export function resolveCompactionRoute(
     apiBaseUrl: resolvedCompactionBaseUrl,
     apiKey,
     ...(provider.openaiFastMode === true ? { openaiFastMode: true } : {}),
-    maxTokens: mergedOverrides.maxTokens ?? 4096,
+    // 压缩请求与主对话共用「未显式指定就不下发」语义：旧的 4096 兜底会被
+    // 推理模型的思考吃满 → 上游返回空摘要 → `compaction-llm.ts` 抛
+    // `Compaction LLM returned empty summary` → 自动压缩静默失败。
+    maxTokens: mergedOverrides.maxTokens,
     temperature: 0,
     upstreamProtocol,
     requestOverrides: mergedOverrides,

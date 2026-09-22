@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>思考块贴底折叠窗口验收</title>
+    <style>
+      /*
+       * 本 harness 断言的是**布局几何**（折叠窗口看到哪几行），不是 token 兜底链：
+       * 因此这里提供一套接近应用真实取值的主题变量，让文字有正常颜色与行高。
+       */
+      :root {
+        --bg-base: #0b0f16;
+        --bg-overlay: #151b26;
+        --fg-strong: #e7edf7;
+        --fg-default: #c8d1e0;
+        --fg-muted: #8e9bb0;
+        --fg-subtle: #5c6879;
+        --border-default: #2a3342;
+        --border-subtle: #1d2531;
+        --accent: #6d8cff;
+      }
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px 0 18px;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: var(--fg-subtle);
+        padding: 0 8px 6px;
+      }
+      .case {
+        max-width: 100%;
+        padding: 6px 8px;
+      }
+      .case-label {
+        font-size: 10px;
+        color: var(--fg-subtle);
+        margin-bottom: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/reasoning-tail-window-entry.tsx"></script>
+  </body>
+</html>

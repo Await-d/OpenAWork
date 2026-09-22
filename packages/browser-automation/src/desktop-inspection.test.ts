@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BROWSER_AUTOMATION_CONSOLE_BUFFER_LIMIT,
-  BROWSER_AUTOMATION_NETWORK_BODY_LIMIT,
   BROWSER_AUTOMATION_NETWORK_BUFFER_LIMIT,
   DesktopBrowserAutomation,
 } from './index.js';
@@ -251,15 +250,13 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
     expect(snapshot.requests[0]).toMatchObject({
       id: 'req-1',
       method: 'POST',
-      url: 'https://api.example.test/login',
+      url: 'https://api.example.test/',
       resourceType: 'fetch',
       status: 200,
       ok: true,
       failureText: null,
-      requestHeaders: { 'content-type': 'application/json' },
-      responseHeaders: { 'content-type': 'application/json' },
-      requestBody: null,
-      requestBodyTruncated: false,
+      requestHeaders: { 'content-type': '[omitted]' },
+      responseHeaders: { 'content-type': '[omitted]' },
     });
     expect(snapshot.requests[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -267,7 +264,11 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
   it('捕获时剔除认证头与请求体，列表和单条读取均不暴露凭据', () => {
     const request = createFakeRequest('https://user:secret@example.test/login?token=secret', {
       method: 'POST',
-      headers: { Authorization: 'Bearer secret', Cookie: 'session=secret', Accept: 'text/html' },
+      headers: {
+        Authorization: 'Bearer secret',
+        Cookie: 'session=secret',
+        Accept: 'text/html; token=secret',
+      },
       body: '{"password":"secret"}',
     });
     handle.emit('request', request);
@@ -275,7 +276,7 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
       'response',
       createFakeResponse(request, 200, {
         'Set-Cookie': 'session=secret',
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; token=secret',
       }),
     );
 
@@ -284,11 +285,21 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
       automation.networkRequest('req-1'),
     ]) {
       expect(JSON.stringify(record)).not.toContain('secret');
-      expect(record?.url).toBe('https://example.test/login');
-      expect(record?.requestHeaders).toEqual({ Accept: 'text/html' });
-      expect(record?.responseHeaders).toEqual({ 'Content-Type': 'application/json' });
-      expect(record?.requestBody).toBeNull();
+      expect(record?.url).toBe('https://example.test/');
+      expect(record?.requestHeaders).toEqual({ Accept: '[omitted]' });
+      expect(record?.responseHeaders).toEqual({ 'Content-Type': '[omitted]' });
+      expect(record).not.toHaveProperty('requestBody');
     }
+  });
+
+  it('请求路径与非 HTTP 载荷均不出现在网络诊断中', () => {
+    handle.emit('request', createFakeRequest('https://example.test/reset/SECRET?token=SECRET'));
+    handle.emit('request', createFakeRequest('data:text/plain,SECRET'));
+    expect(JSON.stringify(automation.networkRequests())).not.toContain('SECRET');
+    expect(automation.networkRequests().requests.map((request) => request.url)).toEqual([
+      'https://example.test/',
+      'data:',
+    ]);
   });
 
   it('返回快照副本：后续事件不会改写已返回的记录', () => {
@@ -315,7 +326,7 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
 
     const [record] = automation.networkRequests().requests;
 
-    expect(record?.failureText).toBe('net::ERR_FAILED');
+    expect(record?.failureText).toBe('request failed');
     expect(record?.status).toBeNull();
     expect(record?.ok).toBeNull();
   });
@@ -335,7 +346,7 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
       automation.networkRequests({ urlContains: 'api.example.test' }).requests.map((r) => r.id),
     ).toEqual(['req-1', 'req-2']);
     expect(automation.networkRequests({ method: 'post' }).requests.map((r) => r.url)).toEqual([
-      'https://api.example.test/login',
+      'https://api.example.test/',
     ]);
     expect(automation.networkRequests({ urlContains: 'missing' }).requests).toHaveLength(0);
   });
@@ -348,9 +359,10 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
     const limited = automation.networkRequests({ limit: 2 });
 
     expect(limited.requests.map((request) => request.url)).toEqual([
-      'https://example.test/3',
-      'https://example.test/4',
+      'https://example.test/',
+      'https://example.test/',
     ]);
+    expect(limited.requests.map((request) => request.id)).toEqual(['req-4', 'req-5']);
     expect(limited.truncated).toBe(true);
   });
 
@@ -373,12 +385,12 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
   it('networkRequest 命中稳定序号，未命中或被淘汰时返回 null', () => {
     handle.emit('request', createFakeRequest('https://example.test/one'));
 
-    expect(automation.networkRequest('req-1')?.url).toBe('https://example.test/one');
+    expect(automation.networkRequest('req-1')?.url).toBe('https://example.test/');
     expect(automation.networkRequest('req-404')).toBeNull();
   });
 
-  it('请求体超出上限时也不保留内容', () => {
-    const body = 'x'.repeat(BROWSER_AUTOMATION_NETWORK_BODY_LIMIT + 10);
+  it('请求体不进入网络记录', () => {
+    const body = 'x'.repeat(10_000);
 
     handle.emit(
       'request',
@@ -387,8 +399,7 @@ describe('DesktopBrowserAutomation.networkRequests', () => {
 
     const record = automation.networkRequest('req-1');
 
-    expect(record?.requestBody).toBeNull();
-    expect(record?.requestBodyTruncated).toBe(false);
+    expect(record).not.toHaveProperty('requestBody');
   });
 
   it('捕获监听异常时不影响页面操作', () => {

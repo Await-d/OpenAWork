@@ -29,7 +29,7 @@ import { normalizeAssistantMarkdown } from './normalize-markdown.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
-import { useFoldDisabled } from './fold-policy.js';
+import { useFoldDisabled, useMessageFoldActive } from './fold-policy.js';
 import { isFullHtmlDocument } from './markdown-html-document.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
@@ -1214,11 +1214,16 @@ function extractExternalUrls(code: string): string[] {
 
 function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
+  // 折叠归属：外层消息级折叠生效（长正文）或折叠被禁用（最新一条已定稿回复）时，
+  // 思考围栏块不再自折叠——否则同一屏会出现「展开全部」+「展开思考」两级提示，
+  // 且第一次点击后内容仍被外层二次裁剪。
+  const foldDisabled = useFoldDisabled();
+  const messageFoldActive = useMessageFoldActive();
   const previewSource = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const labeledSource = `*Thinking:* ${previewSource}`;
   const lineCount = previewSource.split('\n').length;
   const isCollapsible = lineCount > 1;
-  const shouldCollapse = isCollapsible && !expanded;
+  const shouldCollapse = isCollapsible && !expanded && !foldDisabled && !messageFoldActive;
 
   return (
     <div className="assistant-reasoning-block" data-collapsed={shouldCollapse ? 'true' : undefined}>
@@ -1259,7 +1264,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
           }}
         />
       )}
-      {isCollapsible && (
+      {isCollapsible && !foldDisabled && !messageFoldActive && (
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}

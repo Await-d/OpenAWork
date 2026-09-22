@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Message } from '@openAwork/shared';
 
@@ -152,6 +152,130 @@ describe('renderChatMessageContentWithOptions', () => {
     // 尾部是推理块（不绘制光标），光标仍落在最后一个非空文本段（text-1）上，不退化为零。
     expect(cursorOwners).toHaveLength(1);
     expect(cursorOwners[0]).toBe(bodies[0]);
+  });
+});
+
+describe('思考内容的折叠提示只有一层', () => {
+  /** 超过消息级折叠阈值（1500 字符），用于触发 CollapsibleAssistantContent。 */
+  const longReasoningText = Array.from(
+    { length: 80 },
+    (_, index) => `思考行 ${index + 1}：这是一段足够长的推理内容，用于触发消息级折叠阈值。`,
+  ).join('\n\n');
+
+  function reasoningMessage(id: string): ChatMessage {
+    return {
+      id,
+      role: 'assistant',
+      content: '',
+      parts: [{ id: `${id}-reasoning`, type: 'reasoning', text: longReasoningText }],
+      reasoningBlocksEndedFlags: [true],
+    };
+  }
+
+  it('长思考块内部不叠加消息级「展开全部」折叠（折叠态与展开态都不出现）', () => {
+    render(
+      <>
+        {renderChatMessageContentWithOptions(reasoningMessage('long-reasoning'), {
+          presentationMode: 'chat',
+        })}
+      </>,
+    );
+
+    const block = document.querySelector('.assistant-reasoning-block');
+    expect(block).not.toBeNull();
+    // 折叠态：思考块自带 展开，内部不应有第二层折叠容器
+    expect(block?.querySelector('.chat-markdown-fold-container')).toBeNull();
+    expect(block?.textContent).not.toContain('展开全部');
+
+    fireEvent.click(screen.getByText('展开'));
+
+    // 展开态：思考块自带的 收起 是唯一折叠控件，内容不再被 60vh 二次裁剪
+    expect(block?.querySelector('.chat-markdown-fold-container')).toBeNull();
+    expect(block?.textContent).not.toContain('展开全部');
+    expect(screen.getByText('收起')).not.toBeNull();
+  });
+
+  it('关闭推理块显示时，长思考占位展开后同样只有一层折叠', () => {
+    useDisplayPreferencesStore.setState({ showReasoningBlock: false });
+
+    render(
+      <>
+        {renderChatMessageContentWithOptions(reasoningMessage('hidden-long-reasoning'), {
+          presentationMode: 'chat',
+        })}
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '思考过程' }));
+
+    const body = document.querySelector('.assistant-reasoning-body');
+    expect(body).not.toBeNull();
+    expect(body?.querySelector('.chat-markdown-fold-container')).toBeNull();
+    expect(body?.textContent).not.toContain('展开全部');
+  });
+
+  it('思考块内部的长代码块不再自折叠（展开思考即看到全部内容）', async () => {
+    const codeFence = [
+      '```ts',
+      ...Array.from({ length: 150 }, (_, index) => `const value${index} = ${index};`),
+      '```',
+    ].join('\n');
+    const message: ChatMessage = {
+      id: 'long-reasoning-with-code',
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          id: 'reasoning-code-1',
+          type: 'reasoning',
+          text: `先写一段代码。\n\n${codeFence}`,
+        },
+      ],
+      reasoningBlocksEndedFlags: [true],
+    };
+
+    render(<>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>);
+
+    const block = document.querySelector('.assistant-reasoning-block');
+    expect(block).not.toBeNull();
+
+    fireEvent.click(screen.getByText('展开'));
+
+    // MarkdownMessageContent 在 ChatPageSections 里是 React.lazy：首帧是 Suspense
+    // 兜底（裸文本），必须等真实 markdown 渲染出来再断言，否则会假阳性通过。
+    await waitFor(() => {
+      expect(block?.querySelector('.chat-markdown-code-block')).not.toBeNull();
+    });
+
+    // 思考块内部不再出现代码块自己的「展开全部 N 行」
+    expect(block?.querySelector('[data-testid="chat-markdown-code-expand"]')).toBeNull();
+    expect(block?.querySelector('.chat-markdown-code-block[data-collapsed="true"]')).toBeNull();
+    expect(block?.textContent).not.toContain('展开全部');
+  });
+
+  it('同一条消息里的长正文仍保留消息级「展开全部」折叠（只对思考内容关闭）', () => {
+    const longText = Array.from(
+      { length: 80 },
+      (_, index) => `正文段落 ${index + 1}：这是一段足够长的正文内容，用于触发消息级折叠阈值。`,
+    ).join('\n\n');
+    const message: ChatMessage = {
+      id: 'long-text-body',
+      role: 'assistant',
+      content: '',
+      parts: [
+        { id: 'long-text-reasoning', type: 'reasoning', text: '先想一下正文怎么写。' },
+        { id: 'long-text-1', type: 'text', text: longText },
+      ],
+      reasoningBlocksEndedFlags: [true],
+    };
+
+    render(<>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>);
+
+    const foldContainers = [...document.querySelectorAll('.chat-markdown-fold-container')];
+    expect(foldContainers).toHaveLength(1);
+    // 唯一的折叠容器属于正文，不在思考块内部
+    expect(foldContainers[0]?.closest('.assistant-reasoning-body')).toBeNull();
+    expect(screen.getByText(/展开全部/)).not.toBeNull();
   });
 });
 

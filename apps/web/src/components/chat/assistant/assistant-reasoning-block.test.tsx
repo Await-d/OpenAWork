@@ -185,12 +185,27 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
   const longContent = Array.from({ length: 20 }, (_, i) => `思考行 ${i + 1}`).join('\n');
   // 与组件 computeClampedBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES) 使用同一公式
   const collapsedMaxHeight = `${3 * 1.6 * 13 + 4}px`;
+  // 折叠窗口是"贴底窗口"：column-reverse 让可见区落在末尾，超出部分从顶部裁掉
+  const collapsedBodyStyle = {
+    maxHeight: collapsedMaxHeight,
+    overflow: 'clip',
+    display: 'flex',
+    flexDirection: 'column-reverse',
+  };
+  const expandedBodyStyle = {
+    maxHeight: null,
+    overflow: null,
+    display: null,
+    flexDirection: null,
+  };
 
   const readBodyClamp = (container: HTMLElement) => {
     const body = container.querySelector<HTMLElement>('.assistant-reasoning-body');
     return {
       maxHeight: body?.style.maxHeight || null,
       overflow: body?.style.overflow || null,
+      display: body?.style.display || null,
+      flexDirection: body?.style.flexDirection || null,
     };
   };
 
@@ -216,10 +231,8 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
     // 与静态折叠一致：流式中同样折叠（不再使用更宽松的 6 行预览窗口）
     const section = container.querySelector('.assistant-reasoning-block');
     expect(section?.getAttribute('data-collapsed')).toBe('true');
-    expect(readBodyClamp(container)).toEqual({
-      maxHeight: collapsedMaxHeight,
-      overflow: 'clip',
-    });
+    expect(section?.getAttribute('data-collapsed-window')).toBe('tail');
+    expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
     expect(within(container).getByText('展开')).toBeTruthy();
   });
 
@@ -241,10 +254,7 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
     // 流式中不再无限堆高：进入折叠态并允许展开，且限高与静态折叠完全相同
     const section = container.querySelector('.assistant-reasoning-block');
     expect(section?.getAttribute('data-collapsed')).toBe('true');
-    expect(readBodyClamp(container)).toEqual({
-      maxHeight: collapsedMaxHeight,
-      overflow: 'clip',
-    });
+    expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
     expect(within(container).getByText('展开')).toBeTruthy();
   });
 
@@ -281,6 +291,9 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
 
     expect(liveClamp.maxHeight).toBe(collapsedMaxHeight);
     expect(liveClamp).toEqual(staticClamp);
+    // 折叠窗口贴底指向末尾：流式与静态同为一个"末尾 N 行"窗口（finalize 不翻转方向）
+    expect(liveSection?.getAttribute('data-collapsed-window')).toBe('tail');
+    expect(staticSection?.getAttribute('data-collapsed-window')).toBe('tail');
     expect(liveSection?.getAttribute('data-collapsed')).toBe('true');
     expect(staticSection?.getAttribute('data-collapsed')).toBe('true');
     expect(liveText).toBe(staticContainer.querySelector('.assistant-reasoning-body')?.textContent);
@@ -311,11 +324,52 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
 
     section = container.querySelector('.assistant-reasoning-block');
     expect(section?.getAttribute('data-collapsed')).toBe('true');
-    expect(readBodyClamp(container)).toEqual({
-      maxHeight: collapsedMaxHeight,
-      overflow: 'clip',
-    });
+    expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
     expect(within(container).getByText('展开')).toBeTruthy();
+  });
+
+  it('折叠窗口贴底指向最新思考：流式追加不翻转方向，展开再收起仍回到末尾', () => {
+    vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
+      selector({ reasoningExpandedByDefault: false }),
+    );
+
+    const firstBatch = Array.from({ length: 4 }, (_, i) => `思考行 ${i + 1}`).join('\n');
+    const { container, rerender } = render(
+      <AssistantReasoningBlock
+        content={firstBatch}
+        index={0}
+        total={1}
+        streaming={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+
+    // 流式追加内容：窗口保持"贴底"语义，不因内容变长而切回开头
+    rerender(
+      <AssistantReasoningBlock
+        content={longContent}
+        index={0}
+        total={1}
+        streaming={true}
+        renderBody={mockRenderBody}
+      />,
+    );
+    let section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-collapsed-window')).toBe('tail');
+    expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
+    // 文本没有被截断（裁剪发生在布局层），最新一行仍在 DOM 中
+    expect(container.querySelector('.assistant-reasoning-body')?.textContent).toContain(
+      '思考行 20',
+    );
+
+    // 展开看全量，再收起：仍然回到贴底窗口（可见区指向末尾）
+    fireEvent.click(within(container).getByText('展开'));
+    expect(readBodyClamp(container)).toEqual(expandedBodyStyle);
+
+    fireEvent.click(within(container).getByText('收起'));
+    section = container.querySelector('.assistant-reasoning-block');
+    expect(section?.getAttribute('data-collapsed-window')).toBe('tail');
+    expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
   });
 
   it('开启"推理默认展开"时流式内容完整展示', () => {
@@ -335,7 +389,7 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
 
     const section = container.querySelector('.assistant-reasoning-block');
     expect(section?.getAttribute('data-collapsed')).toBeNull();
-    expect(readBodyClamp(container)).toEqual({ maxHeight: null, overflow: null });
+    expect(readBodyClamp(container)).toEqual(expandedBodyStyle);
     expect(within(container).queryByText('展开')).toBeNull();
   });
 });

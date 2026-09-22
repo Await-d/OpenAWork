@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { BrowserAutomationError } from './index.js';
+import { BrowserAutomationError, DesktopBrowserAutomation } from './index.js';
 import { BrowserLiveSession } from './live-session.js';
 import type {
   BrowserLiveA11yNodeLike,
@@ -22,6 +22,41 @@ async function probeChromium(): Promise<boolean> {
 }
 
 const chromiumAvailable = await probeChromium();
+
+describe.skipIf(!chromiumAvailable)('DesktopBrowserAutomation restart 生命周期', () => {
+  it('重启后原对象捕获新页面的控制台、异常及网络响应', async () => {
+    const automation = new DesktopBrowserAutomation({ launchOptions: { headless: true } });
+    try {
+      await automation.start();
+      await automation.restart();
+      const page = automation.getCurrentPage();
+      const error = page.waitForEvent('pageerror');
+      await page.evaluate(() => {
+        console.log('restart-check');
+        setTimeout(() => {
+          throw new Error('restart-error');
+        }, 0);
+      });
+      await error;
+      await withHtmlServer('restart-network', async (url) => {
+        await page.goto(url);
+      });
+      expect(
+        automation.consoleMessages().messages.some((entry) => entry.text === 'restart-check'),
+      ).toBe(true);
+      expect(
+        automation
+          .consoleMessages()
+          .errors.some((entry) => entry.message.includes('restart-error')),
+      ).toBe(true);
+      expect(
+        automation.networkRequests().requests.some((entry) => entry.status === 200 && entry.ok),
+      ).toBe(true);
+    } finally {
+      await automation.close();
+    }
+  });
+});
 
 function waitForEvent(
   session: BrowserLiveSession,

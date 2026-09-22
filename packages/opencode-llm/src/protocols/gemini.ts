@@ -9,6 +9,7 @@ import {
   Usage,
   type FinishReason,
   type JsonSchema,
+  type LLMError,
   type LLMRequest,
   type MediaPart,
   type ProviderMetadata,
@@ -467,7 +468,7 @@ const mapFinishReason = (finishReason: string | undefined, hasToolCalls: boolean
   return 'unknown';
 };
 
-const finish = (state: ParserState): ReadonlyArray<LLMEvent> =>
+const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> =>
   state.finishReason || state.usage || state.promptFeedback?.blockReason
     ? (() => {
         const events: LLMEvent[] = [];
@@ -511,6 +512,10 @@ const finish = (state: ParserState): ReadonlyArray<LLMEvent> =>
         return events;
       })()
     : [];
+
+/** 对齐 opencode 参考库：`onHalt` 返回 Effect（Gemini 路径不失败）。 */
+const finish = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.sync(() => finishEvents(state));
 
 const step = (state: ParserState, event: GeminiEvent) => {
   if (ProviderShared.isRecord(event.error)) {

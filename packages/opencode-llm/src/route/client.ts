@@ -359,12 +359,32 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
             Stream.takeUntil(terminal),
           );
         }
-        return events.pipe(
-          Stream.mapAccumEffect(
-            () => protocol.stream.initial(request),
-            protocol.stream.step,
-            protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
-          ),
+        return Stream.suspend(() => {
+          let state = protocol.stream.initial(request);
+          const parsed = events.pipe(
+            Stream.mapEffect((event) =>
+              protocol.stream.step(state, event).pipe(
+                Effect.map(([next, output]) => {
+                  state = next;
+                  return output;
+                }),
+              ),
+            ),
+            Stream.flatMap(Stream.fromIterable),
+          );
+          // 对齐 opencode 参考库：`onHalt` 返回 Effect，可在“流缺少终态事件”时
+          // 让整条流失败（incomplete-stream），而不是静默收尾。
+          const onHalt = protocol.stream.onHalt;
+          return onHalt
+            ? parsed.pipe(
+                Stream.concat(
+                  Stream.suspend(() =>
+                    Stream.unwrap(onHalt(state).pipe(Effect.map(Stream.fromIterable))),
+                  ),
+                ),
+              )
+            : parsed;
+        }).pipe(
           Stream.catchCause((cause) =>
             terminalSeen.value && isTransportFailure(cause)
               ? Stream.empty

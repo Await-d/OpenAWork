@@ -24,8 +24,6 @@ const SAMPLE_NETWORK_REQUEST: DesktopAutomationNetworkRequest = {
   failureText: null,
   requestHeaders: { 'content-type': 'application/json' },
   responseHeaders: { 'content-type': 'application/json' },
-  requestBody: '{"user":"demo"}',
-  requestBodyTruncated: false,
 };
 
 class FakeDesktopAutomationManager implements DesktopAutomationManager {

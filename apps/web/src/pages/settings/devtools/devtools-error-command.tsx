@@ -10,6 +10,8 @@ import {
   buildDiagnosticClipboardRecord,
   buildDiagnosticKey,
   buildLogClipboardRecord,
+  SOLID_BUTTON_INTERACTION,
+  subtleButtonInteractionProps,
 } from './devtools-workbench-primitives.js';
 
 export interface ErrorCommandCenterProps {
@@ -22,34 +24,44 @@ export interface ErrorCommandCenterProps {
   workerErrorCount: number;
   onCopySelected: () => void;
   onCopyVisible: () => void;
+  onCopyAll: () => void;
   onCopyRelatedContext: () => void;
   onExportJson: () => void;
   onExportMarkdown: () => void;
   onExportErrorReport: () => void;
-  onSelectDiagnostic: (key: string) => void;
   onScrollToLogs: () => void;
 }
 
-const BTN_BASE: React.CSSProperties = {
-  borderRadius: 3,
+const ACTION_BUTTON: React.CSSProperties = {
+  appearance: 'none',
+  font: 'inherit',
+  borderRadius: 6,
   border: '1px solid var(--border-default)',
-  padding: '3px 8px',
-  background: 'var(--bg-overlay)',
-  color: 'var(--fg-strong)',
-  fontSize: 11,
+  padding: '6px 12px',
+  background: 'transparent',
+  color: 'var(--fg-default)',
+  fontSize: 12,
   fontWeight: 500,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  transition: 'background 120ms ease, border-color 120ms ease',
 };
 
-const BTN_DISABLED: React.CSSProperties = {
-  ...BTN_BASE,
-  cursor: 'not-allowed',
-  opacity: 0.4,
+const PRIMARY_DANGER_BUTTON: React.CSSProperties = {
+  ...ACTION_BUTTON,
+  background: 'var(--danger)',
+  border: '1px solid var(--danger)',
+  color: 'var(--fg-on-accent)',
+  fontWeight: 600,
 };
 
-function btn(enabled: boolean, extra?: React.CSSProperties): React.CSSProperties {
-  return enabled ? { ...BTN_BASE, ...extra } : { ...BTN_DISABLED, ...extra };
+function actionButton(enabled: boolean, extra?: React.CSSProperties): React.CSSProperties {
+  return enabled
+    ? { ...ACTION_BUTTON, ...extra }
+    : { ...ACTION_BUTTON, cursor: 'not-allowed', opacity: 0.4, ...extra };
 }
+
+const GHOST_INTERACTION = subtleButtonInteractionProps();
 
 export function ErrorCommandCenter({
   allDiagnostics,
@@ -61,11 +73,11 @@ export function ErrorCommandCenter({
   workerErrorCount,
   onCopySelected,
   onCopyVisible,
+  onCopyAll,
   onCopyRelatedContext,
   onExportJson,
   onExportMarkdown,
   onExportErrorReport,
-  onSelectDiagnostic,
   onScrollToLogs,
 }: ErrorCommandCenterProps) {
   const hasErrors = filteredDiagnostics.length > 0;
@@ -76,120 +88,93 @@ export function ErrorCommandCenter({
   return (
     <div
       style={{
-        borderRadius: 3,
-        border: '1px solid color-mix(in srgb, var(--danger) 20%, var(--border-subtle))',
-        background: 'color-mix(in srgb, var(--danger) 3%, transparent)',
-        padding: '4px 6px',
+        borderRadius: 10,
+        border: '1px solid var(--danger-border)',
+        background: 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay))',
+        padding: 14,
         display: 'flex',
         flexDirection: 'column',
-        gap: 4,
+        gap: 12,
       }}
       data-testid="error-command-center"
     >
       {/* 统计信息 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-            }}
-          >
-            <span>全部：{allDiagnostics.length}</span>
-            <span>可见：{filteredDiagnostics.length}</span>
-            {errorLogCount > 0 && (
-              <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
-                日志错误：{errorLogCount}
-              </span>
-            )}
-            {workerErrorCount > 0 && (
-              <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
-                Worker 异常：{workerErrorCount}
-              </span>
-            )}
-            {selectedDiagnostic?.requestId && (
-              <span style={{ color: 'var(--accent)' }}>当前：{selectedDiagnostic.requestId}</span>
-            )}
-            <span style={{ color: 'var(--accent)' }} aria-live="polite">
-              {copiedFeedback ?? ''}
-            </span>
-          </div>
-        </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          fontSize: 12,
+          color: 'var(--fg-muted)',
+        }}
+      >
+        <span>
+          全部 <b style={{ color: 'var(--fg-strong)' }}>{allDiagnostics.length}</b>
+        </span>
+        <span>
+          可见 <b style={{ color: 'var(--fg-strong)' }}>{filteredDiagnostics.length}</b>
+        </span>
+        {errorLogCount > 0 && (
+          <span style={{ color: 'var(--danger)', fontWeight: 600 }}>日志错误 {errorLogCount}</span>
+        )}
+        {workerErrorCount > 0 && (
+          <span style={{ color: 'var(--danger)', fontWeight: 600 }}>
+            Worker 异常 {workerErrorCount}
+          </span>
+        )}
+        {selectedDiagnostic?.requestId && (
+          <span style={{ color: 'var(--accent)' }}>当前：{selectedDiagnostic.requestId}</span>
+        )}
         <span
           style={{
-            fontSize: 11,
+            marginLeft: 'auto',
             fontWeight: 600,
             color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
           }}
         >
-          {hasErrors ? `${filteredDiagnostics.length} 条错误` : '无错误'}
+          {hasErrors ? `${filteredDiagnostics.length} 条待排查` : '无待排查错误'}
+        </span>
+        <span style={{ color: 'var(--accent)' }} aria-live="polite">
+          {copiedFeedback ?? ''}
         </span>
       </div>
 
-      {/* 错误列表 - 水平滚动 */}
-      {hasErrors && (
-        <div style={{ display: 'flex', gap: 3, overflowX: 'auto', paddingBottom: 2 }}>
-          {filteredDiagnostics.map((diagnostic) => {
-            const key = buildDiagnosticKey(diagnostic);
-            const isActive =
-              selectedDiagnostic !== null && buildDiagnosticKey(selectedDiagnostic) === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onSelectDiagnostic(key)}
-                title={diagnostic.message}
-                style={{
-                  flexShrink: 0,
-                  borderRadius: 6,
-                  border: isActive
-                    ? '1px solid color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%)'
-                    : '1px solid transparent',
-                  background: isActive ? 'var(--bg-raised)' : 'transparent',
-                  boxShadow: isActive
-                    ? '0 1px 3px color-mix(in oklch, var(--danger) 10%, transparent)'
-                    : 'none',
-                  color: isActive ? 'var(--danger)' : 'var(--fg-muted)',
-                  padding: '2px 5px',
-                  fontSize: 10,
-                  fontWeight: isActive ? 500 : 400,
-                  cursor: 'pointer',
-                  maxWidth: 120,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  display: 'block',
-                  textAlign: 'left',
-                }}
-              >
-                {diagnostic.requestId ?? diagnostic.toolName ?? diagnostic.filePath}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* 操作按钮 */}
-      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button
           type="button"
           onClick={onCopySelected}
           disabled={!hasSelected}
-          style={btn(hasSelected)}
+          {...GHOST_INTERACTION}
+          style={actionButton(hasSelected)}
         >
           复制当前
         </button>
-        <button type="button" onClick={onCopyVisible} disabled={!hasErrors} style={btn(hasErrors)}>
-          复制可见 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
+        <button
+          type="button"
+          onClick={onCopyVisible}
+          disabled={!hasErrors}
+          {...GHOST_INTERACTION}
+          style={actionButton(hasErrors)}
+        >
+          复制可见{hasErrors ? ` (${filteredDiagnostics.length})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={onCopyAll}
+          disabled={allDiagnostics.length === 0}
+          {...GHOST_INTERACTION}
+          style={actionButton(allDiagnostics.length > 0)}
+        >
+          复制全部{allDiagnostics.length > 0 ? ` (${allDiagnostics.length})` : ''}
         </button>
         <button
           type="button"
           onClick={onCopyRelatedContext}
           disabled={!hasSelected}
-          style={btn(hasSelected)}
+          {...GHOST_INTERACTION}
+          style={actionButton(hasSelected)}
         >
           复制关联
         </button>
@@ -197,21 +182,18 @@ export function ErrorCommandCenter({
           type="button"
           onClick={onScrollToLogs}
           disabled={!hasRelated}
-          style={btn(hasRelated)}
+          {...GHOST_INTERACTION}
+          style={actionButton(hasRelated)}
         >
-          查看日志 {hasRelated ? `(${relatedLogs.length})` : ''}
+          查看日志{hasRelated ? ` (${relatedLogs.length})` : ''}
         </button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onExportErrorReport}
             disabled={!hasExportableContext}
-            style={btn(hasExportableContext, {
-              background: 'var(--danger)',
-              color: 'var(--fg-on-accent)',
-              border: 'none',
-              fontWeight: 600,
-            })}
+            {...SOLID_BUTTON_INTERACTION}
+            style={hasExportableContext ? PRIMARY_DANGER_BUTTON : actionButton(false)}
           >
             导出报告
           </button>
@@ -219,7 +201,8 @@ export function ErrorCommandCenter({
             type="button"
             onClick={onExportJson}
             disabled={!hasExportableContext}
-            style={btn(hasExportableContext)}
+            {...GHOST_INTERACTION}
+            style={actionButton(hasExportableContext)}
           >
             JSON
           </button>
@@ -227,26 +210,13 @@ export function ErrorCommandCenter({
             type="button"
             onClick={onExportMarkdown}
             disabled={!hasExportableContext}
-            style={btn(hasExportableContext)}
+            {...GHOST_INTERACTION}
+            style={actionButton(hasExportableContext)}
           >
             MD
           </button>
         </div>
       </div>
-
-      {/* 选中的错误详情 */}
-      {hasSelected && (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-          <span style={{ color: 'var(--fg-strong)', fontWeight: 500 }}>
-            {selectedDiagnostic.message}
-          </span>
-          {selectedDiagnostic.toolName && <span> · {selectedDiagnostic.toolName}</span>}
-          {selectedDiagnostic.requestId && <span> · {selectedDiagnostic.requestId}</span>}
-          {typeof selectedDiagnostic.durationMs === 'number' && (
-            <span> · {selectedDiagnostic.durationMs}ms</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

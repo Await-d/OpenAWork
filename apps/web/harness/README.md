@@ -54,3 +54,83 @@ Playwright 浏览器由环境变量 `PLAYWRIGHT_BROWSERS_PATH` 指定（本机�
 - 三态语义色与 focus ring 的**计算值**校验：内联样式断言无法发现
   「CSS 变量未定义 → 回落到透明/继承色」这类问题。两条链（兜底 / 主题跟随）分别验证，
   避免「变量与兜底同值」把两条路径混为一谈。
+
+## devtools 分区导航交互状态验收（`devtools-nav`）
+
+对应 `src/pages/settings/devtools/devtools-section-nav.tsx` 的交互状态验收。
+
+覆盖项：
+
+| 项         | 说明                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| 分区渲染   | 总览 / 诊断 / 日志 / Worker 四个分区按钮，初始 `aria-pressed` 只落在当前分区 |
+| hover 背景 | 未选中分区 hover 后的计算背景**等于** `--bg-hover` 哨兵                      |
+| 陷阱守卫   | hover 背景**不等于** `--bg-subtle` 洋红陷阱（见下）                          |
+| 选中态     | 选中分区 hover 时保持 accent 背景，不被 hover 覆盖                           |
+| focus ring | `outline: 2px solid var(--accent)` + `outline-offset: 2px` 的计算值          |
+| 点击       | `aria-pressed` 转移到目标分区，回调收到分区 id                               |
+| 自动刷新   | `role="switch"` 存在，切换后回调收到布尔值                                   |
+| 排障复制   | 「复制排障上下文」按钮带问题计数，点击后回调触发且成功反馈可见               |
+| 导出菜单   | 打开后出现 3 个 `menuitem`，Escape 关闭                                      |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-devtools-nav.ts
+```
+
+### 为什么需要它
+
+内联样式 + CSS 变量的组合里，**变量名写错不会报错**：`var(--bg-subtle)` 在变量未定义时
+只是解析失败，元素静默保持初始背景。jsdom 不做样式解析，内联样式断言也只看声明、
+不看解析结果，只有真实引擎的 `getComputedStyle` 能判定。harness 页面用哨兵色值把
+「跟随变量」与「解析失败」区分开，并用洋红陷阱变量守卫历史缺陷的回归。
+
+## 思考块「贴底折叠窗口」验收（`reasoning-tail-window`）
+
+对应 `src/components/chat/assistant/assistant-reasoning-block.tsx` 的折叠窗口行为。
+折叠态是 **贴底窗口**：`column-reverse` 把内容钉在容器底部，超出部分从**顶部**裁掉，
+因此折叠预览始终落在最新的 N 行上。
+
+覆盖项（375 / 768 / 1280 三视口，流式与静态各一遍）：
+
+| 项           | 说明                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 窗口语义     | `data-collapsed-window="tail"` + `display:flex` / `flex-direction:column-reverse` 生效                                     |
+| 真实裁剪     | 内容子块高度确实大于窗口可视高度（`overflow:clip` 不产生滚动区，故不能用 `scrollHeight`）                                  |
+| 可见区落点   | **末段完整可见并贴底**、**首段被裁到窗口上方**（而不是显示开头、末尾被裁）                                                 |
+| 流式跟随     | 追加新行后，新末行自动进入可见区且原末行被裁到窗口上方（无 JS 跟随滚动）                                                   |
+| 展开 / 收起  | 展开后解除裁剪且开头可见；收起后可见区回到最新内容                                                                         |
+| finalize     | 流式与静态折叠窗口高度、可见区一致（不翻转方向、不跳动）                                                                   |
+| 流式光标     | 光标宿主是可见的末段（`data-streaming` 的 `::after` 落在窗口内）                                                           |
+| 折叠提示单层 | 长思考（>1500 字符）展开后，思考块内**不得**再出现消息级「展开全部 · N 字符」二次裁剪                                      |
+| 思考内代码块 | 长思考内部的长代码块（>100 行）也不自折叠：展开思考即看到全部内容，无「展开全部 N 行」                                     |
+| 思考围栏归属 | 长正文（>1500 字符）里的 ```thinking 围栏块不自折叠：只剩消息级一层提示（短正文仍保留自带折叠，见 `fold-policy.test.tsx`） |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-reasoning-tail-window.ts
+```
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：折叠窗口"看到哪几行"完全由真实排版决定；jsdom 里
+  `scrollTop` / `getBoundingClientRect` 全是 0，任何单测都无法发现"折叠后只剩开头可见"
+  这类缺陷。
+- 历史缺陷正是这一类：早期实现用 `overflow:hidden` + `scrollTop = scrollHeight` 跟随末尾，
+  finalize 时窗口又从"末 6 行"跳回"前 3 行"；后来的修法改成统一显示前 3 行，却让折叠态
+  看不到最新思考内容。本 harness 把"贴底窗口 + 流式跟随 + finalize 不跳动"三条不变量一起固化，
+  防止任何一边回退。
+- 另一个真实缺陷是**两层折叠提示**：思考块自带 展开/收起，而 >1500 字符的思考正文又会命中
+  消息级折叠（`CollapsibleAssistantContent`），展开思考后还要再点一次「展开全部 · N 字符」，
+  且第二层仍把内容裁到 60vh —— "展开"名不副实。思考正文现在显式传 `foldMode="disabled"`
+  （见 `renderReasoningRichBody`），本 harness 的"折叠提示单层"用例守卫它。
+- 同源的第三、四层是**思考内部的围栏块**与 **``thinking 围栏块**：思考块内部通过
+`FoldDisabledContext` 让代码块 / Markdown 预览块不再自折叠；长正文里的 ``thinking
+  围栏块则让位给消息级折叠（`MessageFoldContext`），短正文仍保留自带的「展开思考」。
+  这两条分别由 harness 的"思考内代码块 / 思考围栏归属"与 `fold-policy.test.tsx` 守卫。

@@ -33,6 +33,7 @@ import { AssistantEventRow } from '../assistant/assistant-event-row.js';
 import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasoning-block.helpers.js';
 import { AssistantReasoningBlock } from '../assistant/assistant-reasoning-block.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
+import { FoldDisabledContext } from '../markdown/fold-policy.js';
 import { ImageLightbox, type ImageLightboxItem } from '../image/image-lightbox.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
@@ -1038,7 +1039,11 @@ function HiddenReasoningNotice({
           style={{ marginTop: 8, marginBottom: 0 }}
         >
           <div className="assistant-reasoning-body">
-            <AssistantRichContentBody content={content} streaming={false} />
+            {/* 思考占位展开后的正文同样自带折叠语义（▶/▼），不再叠加消息级「展开全部」，
+                内部的围栏块也不再自折叠 */}
+            <FoldDisabledContext value={true}>
+              <AssistantRichContentBody content={content} foldMode="disabled" streaming={false} />
+            </FoldDisabledContext>
           </div>
         </div>
       )}
@@ -1068,16 +1073,34 @@ function AssistantRichContent({
 // eslint-disable-next-line @typescript-eslint/no-use-before-define
 const renderReasoningRichBody = (reasoningContent: string, isStreaming: boolean) => (
   // eslint-disable-next-line @typescript-eslint/no-use-before-define
-  <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
+  // foldMode="disabled"：思考块自带 展开/收起，内部不再叠加消息级「展开全部」折叠。
+  // FoldDisabledContext：思考块内部的围栏块（代码 / Markdown 预览 / ```thinking）
+  // 同样不再自折叠——"展开思考"就等于看到全部思考内容，避免二级「展开全部 N 行」。
+  <FoldDisabledContext value={true}>
+    <AssistantRichContentBody
+      content={reasoningContent}
+      foldMode="disabled"
+      streaming={isStreaming}
+    />
+  </FoldDisabledContext>
 );
 
 function AssistantRichContentBody({
   content,
+  foldMode = 'auto',
   streaming = false,
   streamingCaret = streaming,
   messageId,
 }: {
   content: string;
+  /**
+   * 消息级折叠策略（`CollapsibleAssistantContent`，长正文裁到 ~60vh + 「展开全部 · N 字符」）。
+   * - `auto`：默认，按长度阈值决定是否折叠。
+   * - `disabled`：该正文自带折叠控件（思考块 / 思考占位），不再叠加消息级折叠——
+   *   否则用户点开思考后还要再点一次「展开全部」，同一内容出现两层折叠提示，
+   *   且第二层仍把内容裁到 60vh，"展开"名不副实。
+   */
+  foldMode?: 'auto' | 'disabled';
   streaming?: boolean;
   /**
    * 是否在该 body 上绘制流式光标（`data-streaming`），默认为 `streaming`。
@@ -1167,13 +1190,21 @@ function AssistantRichContentBody({
     );
   }
 
+  const markdownBody = (
+    <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
+      <MarkdownMessageContent content={content} />
+    </React.Suspense>
+  );
+
   return (
     <div className="assistant-rich-content-body">
-      <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
+      {foldMode === 'disabled' ? (
+        markdownBody
+      ) : (
         <CollapsibleAssistantContent content={content} messageId={messageId}>
-          <MarkdownMessageContent content={content} />
+          {markdownBody}
         </CollapsibleAssistantContent>
-      </React.Suspense>
+      )}
     </div>
   );
 }

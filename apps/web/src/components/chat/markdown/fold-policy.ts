@@ -27,3 +27,22 @@ export const FoldDisabledContext = createContext(false);
 export function useFoldDisabled(): boolean {
   return useContext(FoldDisabledContext);
 }
+
+/**
+ * MessageFoldContext — 「外层消息级折叠已接管这条正文」的信号。
+ *
+ * 为什么需要它：`CollapsibleAssistantContent` 在正文超过 1500 字符时会把整条正文
+ * 裁到 ~60vh 并给出「展开全部 · N 字符」。此时正文里若还有**自带折叠**的片段
+ * （如 ```thinking 围栏块的「展开思考」），用户就会先点一次「展开全部」、再点一次
+ * 「展开思考」——同一屏出现两级展开提示，且第一次点击后内容仍被二次裁剪。
+ *
+ * 因此折叠归属外层：消息级折叠生效期间，内部片段不再自折叠；正文不长（没有外层
+ * 折叠）时，片段保留自己的折叠控件。注意 `FoldDisabledContext` 是它的反向信号
+ * （外层折叠被禁用，例如最新一条已定稿回复），两者都由 `useXxxFoldActive` 读取。
+ */
+export const MessageFoldContext = createContext(false);
+
+/** 读取「外层消息级折叠是否已接管当前正文」。默认 false。 */
+export function useMessageFoldActive(): boolean {
+  return useContext(MessageFoldContext);
+}

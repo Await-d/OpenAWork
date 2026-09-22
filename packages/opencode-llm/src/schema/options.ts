@@ -237,6 +237,20 @@ export class ModelCompatibility extends Schema.Class<ModelCompatibility>('LLM.Mo
   // Some Anthropic-compatible relays never emit thinking signatures; when set
   // to false the protocol replays unsigned thinking instead of dropping it.
   requireSignature: Schema.optional(Schema.Boolean),
+  /**
+   * 思维链字段名（对齐 opencode 参考库）。
+   *
+   * 部分兼容网关用 `reasoning` / `reasoning_text` 而非 `reasoning_content`；
+   * 配置后协议优先按该字段名探测。
+   */
+  reasoningField: Schema.optional(Schema.String),
+  /**
+   * 流必须以 `finish_reason` 收尾（对齐 opencode 参考库，默认 true）。
+   *
+   * 缺失即视为「响应在终态事件前结束」（incomplete-stream），协议层产出
+   * provider-error 而非静默收尾——否则上游截断会被当成正常结束。
+   */
+  requireFinishReason: Schema.optional(Schema.Boolean),
 }) {}
 
 export namespace ModelCompatibility {

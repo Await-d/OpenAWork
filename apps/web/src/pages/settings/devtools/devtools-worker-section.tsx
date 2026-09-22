@@ -4,9 +4,11 @@ import type { DevtoolsSourceState } from '../state/settings-types.js';
 import {
   InlineFailureNotice,
   buildWorkerKey,
+  rowInteractionProps,
+  subtleButtonInteractionProps,
   WorkerDetailsPanel,
 } from './devtools-workbench-primitives.js';
-import { SS, ST, UV, BADGE, BS, BG } from '../shared/settings-section-styles.js';
+import { SS, ST, UV, BADGE, BG, BS, SEARCH_INPUT } from '../shared/settings-section-styles.js';
 
 type WorkerStatusFilter = 'all' | 'error' | 'healthy';
 
@@ -24,6 +26,14 @@ interface DevtoolsWorkerSectionProps {
   workers: WorkerEntry[];
 }
 
+const FILTER_OPTIONS: Array<{ value: WorkerStatusFilter; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'error', label: '异常' },
+  { value: 'healthy', label: '正常' },
+];
+
+const GHOST_INTERACTION = subtleButtonInteractionProps();
+
 export function DevtoolsWorkerSection({
   copiedWorkerAction,
   filteredWorkers,
@@ -40,7 +50,7 @@ export function DevtoolsWorkerSection({
   const [workerStatusFilter, setWorkerStatusFilter] = React.useState<WorkerStatusFilter>('all');
 
   const errorCount = filteredWorkers.filter((w) => w.status === 'error').length;
-  const healthyCount = filteredWorkers.filter((w) => w.status !== 'error').length;
+  const healthyCount = filteredWorkers.length - errorCount;
 
   const statusFilteredWorkers = React.useMemo(() => {
     if (workerStatusFilter === 'error') return filteredWorkers.filter((w) => w.status === 'error');
@@ -49,15 +59,21 @@ export function DevtoolsWorkerSection({
     return filteredWorkers;
   }, [filteredWorkers, workerStatusFilter]);
 
+  const filterCounts: Record<WorkerStatusFilter, number> = {
+    all: filteredWorkers.length,
+    error: errorCount,
+    healthy: healthyCount,
+  };
+
   return (
     <section style={SS}>
       {/* 标题和统计 */}
       <div
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
       >
-        <h3 style={ST}>Worker 状态</h3>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-          共 {workers.length} · 错误 {errorCount}
+        <h3 style={{ ...ST, marginBottom: 0 }}>Worker 状态</h3>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          共 {workers.length} 个 · 异常 {errorCount} 个
         </span>
       </div>
 
@@ -75,13 +91,12 @@ export function DevtoolsWorkerSection({
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 4,
+          gap: 8,
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
       >
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* 搜索框 */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="search"
             value={workerQuery}
@@ -89,64 +104,57 @@ export function DevtoolsWorkerSection({
             aria-label="搜索 Worker"
             name="worker-query"
             autoComplete="off"
-            placeholder="搜索..."
+            placeholder="搜索 Worker…"
             style={{
-              minWidth: 100,
-              background: 'transparent',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 2,
-              padding: '2px 6px',
-              color: 'var(--fg-strong)',
-              fontSize: 11,
-              outline: 'none',
+              ...SEARCH_INPUT,
+              flex: '0 1 200px',
+              border: `1px solid ${workerQuery ? 'var(--accent)' : 'var(--border-default)'}`,
             }}
           />
 
-          {/* 状态过滤 */}
-          <div style={{ display: 'flex', gap: 1 }}>
-            <button
-              type="button"
-              onClick={() => setWorkerStatusFilter('all')}
-              style={{
-                ...BG,
-                color: workerStatusFilter === 'all' ? 'var(--accent)' : 'var(--fg-muted)',
-              }}
-            >
-              全部 {filteredWorkers.length}
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkerStatusFilter('error')}
-              style={{
-                ...BG,
-                color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--fg-muted)',
-              }}
-            >
-              错误 {errorCount}
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkerStatusFilter('healthy')}
-              style={{
-                ...BG,
-                color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--fg-muted)',
-              }}
-            >
-              健康 {healthyCount}
-            </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {FILTER_OPTIONS.map((option) => {
+              const selected = workerStatusFilter === option.value;
+              const isErrorOption = option.value === 'error';
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setWorkerStatusFilter(option.value)}
+                  aria-pressed={selected}
+                  {...GHOST_INTERACTION}
+                  style={{
+                    ...BG,
+                    fontSize: 12,
+                    border: `1px solid ${selected ? 'var(--border-emphasis)' : 'transparent'}`,
+                    background: selected ? 'var(--bg-hover)' : 'transparent',
+                    color: selected
+                      ? isErrorOption && filterCounts.error > 0
+                        ? 'var(--danger)'
+                        : 'var(--accent)'
+                      : 'var(--fg-muted)',
+                    fontWeight: selected ? 600 : 400,
+                  }}
+                >
+                  {option.label} {filterCounts[option.value]}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: 'var(--accent)' }} aria-live="polite">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--accent)' }} aria-live="polite">
             {copiedWorkerAction ?? ''}
           </span>
           <button
             type="button"
             onClick={onCopySelectedWorker}
             disabled={!selectedWorker}
+            {...GHOST_INTERACTION}
             style={{
               ...BS,
+              fontSize: 12,
               opacity: selectedWorker ? 1 : 0.4,
               cursor: selectedWorker ? 'pointer' : 'not-allowed',
             }}
@@ -157,8 +165,10 @@ export function DevtoolsWorkerSection({
             type="button"
             onClick={onCopyVisibleWorkers}
             disabled={filteredWorkers.length === 0}
+            {...GHOST_INTERACTION}
             style={{
               ...BS,
+              fontSize: 12,
               opacity: filteredWorkers.length > 0 ? 1 : 0.4,
               cursor: filteredWorkers.length > 0 ? 'pointer' : 'not-allowed',
             }}
@@ -172,8 +182,8 @@ export function DevtoolsWorkerSection({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-          gap: 3,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+          gap: 8,
         }}
       >
         {statusFilteredWorkers.length > 0 ? (
@@ -189,27 +199,33 @@ export function DevtoolsWorkerSection({
                 key={key}
                 type="button"
                 onClick={() => onSelectWorker(key)}
+                {...rowInteractionProps({
+                  isActive,
+                  restBackground: 'var(--bg-overlay)',
+                })}
                 style={{
-                  borderRadius: 2,
-                  border: `1px solid ${isError ? 'var(--danger)' : isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
-                  background: isError
-                    ? 'color-mix(in srgb, var(--danger) 5%, transparent)'
+                  borderRadius: 8,
+                  border: isError
+                    ? '1px solid var(--danger-border)'
                     : isActive
-                      ? 'color-mix(in srgb, var(--accent) 5%, transparent)'
-                      : 'transparent',
+                      ? '1px solid var(--border-default)'
+                      : '1px solid var(--border-subtle)',
+                  background: isActive ? 'var(--bg-raised)' : 'var(--bg-overlay)',
+                  boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                   color: 'var(--fg-strong)',
-                  padding: '4px 6px',
+                  padding: '10px 12px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 1,
+                  gap: 4,
                   cursor: 'pointer',
                   textAlign: 'left',
+                  minWidth: 0,
                 }}
               >
                 <span
                   style={{
-                    fontSize: 11,
-                    fontWeight: isError ? 500 : 400,
+                    fontSize: 13,
+                    fontWeight: 600,
                     color: isError ? 'var(--danger)' : 'var(--fg-strong)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -220,9 +236,9 @@ export function DevtoolsWorkerSection({
                 </span>
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     color: 'var(--fg-muted)',
-                    fontFamily: 'monospace',
+                    fontFamily: 'var(--font-mono, monospace)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -230,8 +246,14 @@ export function DevtoolsWorkerSection({
                 >
                   {worker.endpoint ?? worker.id}
                 </span>
-                <span style={{ fontSize: 10, color: isError ? 'var(--danger)' : 'var(--accent)' }}>
-                  {isError ? '⚠ ' : ''}
+                <span
+                  style={{
+                    ...BADGE,
+                    alignSelf: 'flex-start',
+                    color: isError ? 'var(--danger)' : 'var(--accent)',
+                    background: isError ? 'var(--danger-muted)' : 'var(--accent-subtle)',
+                  }}
+                >
                   {worker.status}
                 </span>
               </button>
@@ -240,12 +262,12 @@ export function DevtoolsWorkerSection({
         ) : (
           <div
             style={{
-              borderRadius: 2,
-              border: '1px dashed var(--border-subtle)',
-              padding: '8px 6px',
+              borderRadius: 8,
+              border: '1px dashed var(--border-default)',
+              padding: '20px 12px',
               textAlign: 'center',
               gridColumn: '1 / -1',
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--fg-muted)',
             }}
           >
@@ -254,7 +276,8 @@ export function DevtoolsWorkerSection({
               <button
                 type="button"
                 onClick={() => setWorkerQuery('')}
-                style={{ ...BG, fontSize: 11, marginLeft: 4 }}
+                {...GHOST_INTERACTION}
+                style={{ ...BG, fontSize: 12, marginLeft: 4 }}
               >
                 清空搜索
               </button>

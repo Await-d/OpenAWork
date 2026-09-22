@@ -8,6 +8,7 @@ import {
   type CacheHint,
   type FinishReason,
   type JsonSchema,
+  type LLMError,
   type LLMRequest,
   type ModelToolSchemaCompatibility,
   type ProviderMetadata,
@@ -758,21 +759,23 @@ const step = (state: ParserState, event: BedrockEvent) =>
 
 const framing = BedrockEventStream.framing(ADAPTER);
 
-const onHalt = (state: ParserState): ReadonlyArray<LLMEvent> =>
-  state.pendingFinish
-    ? (() => {
-        const events: LLMEvent[] = [];
-        Lifecycle.finish(state.lifecycle, events, {
-          reason:
-            state.pendingFinish.reason === 'stop' && state.hasToolCalls
-              ? 'tool-calls'
-              : state.pendingFinish.reason,
-          reasonRaw: state.pendingFinish.raw,
-          usage: state.usage,
-        });
-        return events;
-      })()
-    : [];
+const onHalt = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.sync(() =>
+    state.pendingFinish
+      ? (() => {
+          const events: LLMEvent[] = [];
+          Lifecycle.finish(state.lifecycle, events, {
+            reason:
+              state.pendingFinish.reason === 'stop' && state.hasToolCalls
+                ? 'tool-calls'
+                : state.pendingFinish.reason,
+            reasonRaw: state.pendingFinish.raw,
+            usage: state.usage,
+          });
+          return events;
+        })()
+      : [],
+  );
 
 // =============================================================================
 // Protocol And Bedrock Route

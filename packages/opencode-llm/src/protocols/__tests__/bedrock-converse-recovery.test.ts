@@ -31,13 +31,21 @@ const framing = BedrockEventStream.framing('bedrock-converse');
 const collectFrames = (bytes: Uint8Array) =>
   Effect.runPromise(Stream.runCollect(framing.frame(Stream.fromIterable([bytes]))));
 
+/** `onHalt` 返回 Effect（对齐 opencode 参考库）；测试里统一 await 取事件。 */
+const haltEvents = async (
+  state: Parameters<NonNullable<typeof Bedrock.protocol.stream.onHalt>>[0],
+) => {
+  const onHalt = Bedrock.protocol.stream.onHalt;
+  return onHalt ? await Effect.runPromise(onHalt(state)) : [];
+};
+
 describe('Bedrock Converse 流式恢复', () => {
   it('只有 metadata 的流不会伪造 stop 完成', async () => {
     const { state } = await runEvent({
       metadata: { usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 } },
     });
 
-    expect(Bedrock.protocol.stream.onHalt?.(state) ?? []).toEqual([]);
+    expect(await haltEvents(state)).toEqual([]);
   });
 
   it('message_stop + metadata 会发一次 finish 并带上 usage', async () => {
@@ -50,7 +58,7 @@ describe('Bedrock Converse 流式恢复', () => {
       state = next;
     }
 
-    const events = Bedrock.protocol.stream.onHalt?.(state) ?? [];
+    const events = await haltEvents(state);
     const finish = events.find(LLMEvent.is.finish);
     expect(finish?.reason).toBe('stop');
     expect(finish?.usage?.totalTokens).toBe(3);
@@ -100,7 +108,7 @@ describe('Bedrock Converse 流式恢复', () => {
       state = next;
     }
 
-    const finish = (Bedrock.protocol.stream.onHalt?.(state) ?? []).find(LLMEvent.is.finish);
+    const finish = (await haltEvents(state)).find(LLMEvent.is.finish);
     expect(finish?.usage?.inputTokens).toBe(10);
     expect(finish?.usage?.nonCachedInputTokens).toBe(5);
     expect(finish?.usage?.cacheReadInputTokens).toBe(3);
@@ -143,7 +151,7 @@ describe('Bedrock Converse 流式恢复', () => {
       ),
     );
 
-    const finished = Bedrock.protocol.stream.onHalt?.(state) ?? [];
+    const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
     expect(terminal?.reason).toBe('length');
     expect(terminal?.reasonRaw).toBe('model_context_window_exceeded');

@@ -11,6 +11,7 @@ import {
   type CacheHint,
   type FinishReason,
   type JsonSchema,
+  type LLMError,
   type LLMRequest,
   type MediaPart,
   type ProviderMetadata,
@@ -1077,17 +1078,18 @@ const onMessageStop = Effect.fn('AnthropicMessages.onMessageStop')(function* (st
   ] satisfies StepResult;
 });
 
-const onHalt = (state: ParserState): ReadonlyArray<LLMEvent> => {
-  if (state.finished || !state.pendingFinish) return [];
-  const events: LLMEvent[] = [];
-  Lifecycle.finish(state.lifecycle, events, {
-    reason: finishReasonFor(state, false),
-    reasonRaw: state.pendingFinish.raw,
-    usage: state.usage,
-    providerMetadata: stopMetadata(state),
+const onHalt = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.sync(() => {
+    if (state.finished || !state.pendingFinish) return [];
+    const events: LLMEvent[] = [];
+    Lifecycle.finish(state.lifecycle, events, {
+      reason: finishReasonFor(state, false),
+      reasonRaw: state.pendingFinish.raw,
+      usage: state.usage,
+      providerMetadata: stopMetadata(state),
+    });
+    return events;
   });
-  return events;
-};
 
 // Prefix `error.type` so overloads, rate limits, and quota errors are visible
 // even when the provider message is generic or empty.

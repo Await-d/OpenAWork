@@ -1,6 +1,13 @@
+import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type { SubagentNoticeState } from '@openAwork/shared';
 import { sqliteGet } from '../infra/db.js';
-import { completeBackground, listPersistedBackgroundJobs } from './task-job.js';
+import { resolveTaskGraphProjectRoot } from './task-graph-root.js';
+import {
+  completeBackground,
+  completeConsumedBackgroundJobs,
+  listPersistedBackgroundJobs,
+  updatePersistedBackgroundJob,
+} from './task-job.js';
 import { deliverTaskCompletion } from './task-job-delivery.js';
 
 /**
@@ -48,6 +55,24 @@ export async function recoverPendingTaskDeliveries(): Promise<TaskJobRecoverySum
   };
 
   for (const job of listPersistedBackgroundJobs()) {
+    const parent = sqliteGet<{ user_id: string }>(
+      'SELECT user_id FROM sessions WHERE id = ? LIMIT 1',
+      [job.recovery.parentSessionId],
+    );
+    if (parent) {
+      completeConsumedBackgroundJobs({
+        sessionId: job.recovery.parentSessionId,
+        userId: parent.user_id,
+      });
+    }
+    if (
+      !listPersistedBackgroundJobs().some(
+        (pending) => pending.notificationId === job.notificationId,
+      )
+    ) {
+      summary.skipped += 1;
+      continue;
+    }
     // 用户 id 从子会话取：`task_jobs.id` 对 `sessions` 有 FK CASCADE，
     // 子会话行一定存在（父会话可能已被删除，那种情况由交付层负责清理）。
     const child = sqliteGet<{ user_id: string }>(
@@ -62,12 +87,37 @@ export async function recoverPendingTaskDeliveries(): Promise<TaskJobRecoverySum
 
     summary.attempted += 1;
     try {
+      if (job.status === 'running') {
+        const interruptedError = '子代理执行被网关重启中断。';
+        if (parent) {
+          const manager = new AgentTaskManagerImpl();
+          const graph = await manager.loadOrCreate(
+            resolveTaskGraphProjectRoot(job.recovery.parentSessionId),
+            job.recovery.parentSessionId,
+          );
+          const task = Object.values(graph.tasks).find(
+            (entry) => entry.sessionId === job.recovery.childSessionId,
+          );
+          if (task?.status === 'running') {
+            manager.failTask(graph, task.id, interruptedError);
+            await manager.save(graph);
+          }
+        }
+        updatePersistedBackgroundJob({
+          notificationId: job.notificationId,
+          status: 'error',
+          error: interruptedError,
+        });
+        job.status = 'error';
+        job.error = interruptedError;
+      }
       const result = await deliverTaskCompletion({
         agent: job.recovery.agent,
         childSessionId: job.recovery.childSessionId,
         description: job.recovery.description,
         notificationId: job.notificationId,
         parentSessionId: job.recovery.parentSessionId,
+        ...(job.status === 'cancelled' ? { resume: false } : {}),
         state: mapStatusToNoticeState(job.status),
         text: job.error?.trim() || job.output?.trim() || RECOVERY_NOTICE_FALLBACK,
         userId: child.user_id,

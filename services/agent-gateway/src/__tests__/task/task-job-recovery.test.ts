@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type * as DbModule from '../../infra/db.js';
 import type * as TaskJobModule from '../../task/task-job.js';
 import type * as TaskJobRecoveryModule from '../../task/task-job-recovery.js';
@@ -29,6 +33,9 @@ const USER_ID = 'u-task-job-recovery';
 const PARENT_SESSION_ID = 'sess-recovery-parent';
 const CHILD_SESSION_ID = 'sess-recovery-child';
 const NOTIFICATION_ID = 'task-job:sess-recovery-child:1730000000000';
+const TEST_ROOT = join(tmpdir(), `openawork-task-job-recovery-${process.pid}`);
+process.env['WORKSPACE_ROOT'] = TEST_ROOT;
+process.env['OPENAWORK_DATA_DIR'] = join(TEST_ROOT, 'data');
 
 function seedSessions(): void {
   dbModule.sqliteRun(
@@ -69,6 +76,8 @@ function seedPersistedPendingJob(output = '子代理已完成的分析结论。'
 }
 
 beforeAll(async () => {
+  mkdirSync(TEST_ROOT, { recursive: true });
+  writeFileSync(join(TEST_ROOT, 'pnpm-workspace.yaml'), 'packages: []\n');
   vi.resetModules();
   dbModule = await import('../../infra/db.js');
   taskJob = await import('../../task/task-job.js');
@@ -84,9 +93,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await dbModule.closeDb();
+  rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
 beforeEach(() => {
+  rmSync(join(TEST_ROOT, '.agentdocs'), { recursive: true, force: true });
   mocks.continueSessionFromHistory.mockClear();
   mocks.getAnyInFlightStreamRequestForSession.mockReset();
   mocks.getAnyInFlightStreamRequestForSession.mockReturnValue(undefined);
@@ -100,6 +111,84 @@ beforeEach(() => {
 });
 
 describe('recoverPendingTaskDeliveries', () => {
+  it('重启中断运行任务时先结算任务图再唤醒父会话', async () => {
+    seedPersistedPendingJob();
+    dbModule.sqliteRun("UPDATE task_jobs SET status = 'running', output = NULL WHERE id = ?", [
+      CHILD_SESSION_ID,
+    ]);
+    const { resolveTaskGraphProjectRoot } = await import('../../task/task-graph-root.js');
+    const manager = new AgentTaskManagerImpl();
+    const root = resolveTaskGraphProjectRoot(PARENT_SESSION_ID);
+    const graph = await manager.loadOrCreate(root, PARENT_SESSION_ID);
+    const task = manager.addTask(graph, {
+      title: '审计会话唤醒原语',
+      status: 'running',
+      blockedBy: [],
+      priority: 'medium',
+      sessionId: CHILD_SESSION_ID,
+      tags: [],
+    });
+    await manager.save(graph);
+    mocks.continueSessionFromHistory.mockImplementationOnce(async () => {
+      const current = await manager.loadOrCreate(root, PARENT_SESSION_ID);
+      expect(current.tasks[task.id]?.status).toBe('failed');
+      expect(current.tasks[task.id]?.errorMessage).toBe('子代理执行被网关重启中断。');
+      return { statusCode: 200 };
+    });
+
+    const summary = await recovery.recoverPendingTaskDeliveries();
+
+    expect(summary.woken).toBe(1);
+  });
+  it('运行中的任务在重启后不会被误报完成', async () => {
+    seedPersistedPendingJob();
+    dbModule.sqliteRun("UPDATE task_jobs SET status = 'running', output = NULL WHERE id = ?", [
+      CHILD_SESSION_ID,
+    ]);
+    const summary = await recovery.recoverPendingTaskDeliveries();
+    expect(summary.attempted).toBe(1);
+    expect(summary.woken).toBe(1);
+    const row = dbModule.sqliteGet<{ data: string }>('SELECT data FROM message_v2 WHERE id = ?', [
+      NOTIFICATION_ID,
+    ]);
+    expect(row?.data).toContain('failed');
+  });
+
+  it('取消任务恢复时只补通知而不唤醒', async () => {
+    seedPersistedPendingJob();
+    dbModule.sqliteRun("UPDATE task_jobs SET status = 'cancelled' WHERE id = ?", [
+      CHILD_SESSION_ID,
+    ]);
+    const summary = await recovery.recoverPendingTaskDeliveries();
+    expect(summary.skipped).toBe(1);
+    expect(mocks.continueSessionFromHistory).not.toHaveBeenCalled();
+    expect(taskJob.pendingBackground()).toHaveLength(0);
+  });
+  it('取消通知已注入仍持久化时重启只清理记录而不唤醒', async () => {
+    seedPersistedPendingJob();
+    dbModule.sqliteRun("UPDATE task_jobs SET status = 'cancelled' WHERE id = ?", [
+      CHILD_SESSION_ID,
+    ]);
+    dbModule.sqliteRun(
+      `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        NOTIFICATION_ID,
+        PARENT_SESSION_ID,
+        USER_ID,
+        Date.now(),
+        JSON.stringify({
+          role: 'synthetic',
+          time: { created: Date.now() },
+          metadata: { state: 'cancelled' },
+        }),
+      ],
+    );
+    const summary = await recovery.recoverPendingTaskDeliveries();
+    expect(summary.skipped).toBe(1);
+    expect(taskJob.pendingBackground()).toHaveLength(0);
+    expect(mocks.continueSessionFromHistory).not.toHaveBeenCalled();
+  });
   it('无待投递记录时返回全零摘要', async () => {
     const summary = await recovery.recoverPendingTaskDeliveries();
 
@@ -137,6 +226,78 @@ describe('recoverPendingTaskDeliveries', () => {
 
     expect(summary.deferred).toBe(1);
     expect(summary.woken).toBe(0);
+    expect(taskJob.pendingBackground()).toHaveLength(1);
+  });
+
+  it('通知已在自然回合后消费时重启不再重复唤醒', async () => {
+    seedPersistedPendingJob();
+    mocks.getAnyInFlightStreamRequestForSession.mockReturnValueOnce({ clientRequestId: 'busy' });
+    const delivery = await import('../../task/task-job-delivery.js');
+    await delivery.deliverTaskCompletion({
+      agent: 'explore',
+      childSessionId: CHILD_SESSION_ID,
+      description: '审计会话唤醒原语',
+      notificationId: NOTIFICATION_ID,
+      parentSessionId: PARENT_SESSION_ID,
+      state: 'done',
+      text: '子代理已完成的分析结论。',
+      userId: USER_ID,
+    });
+    const notice = dbModule.sqliteGet<{ time_created: number }>(
+      'SELECT time_created FROM message_v2 WHERE id = ?',
+      [NOTIFICATION_ID],
+    );
+    expect(notice).toBeDefined();
+    dbModule.sqliteRun(
+      `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        'user-after-notice',
+        PARENT_SESSION_ID,
+        USER_ID,
+        (notice?.time_created ?? 0) + 1,
+        JSON.stringify({ role: 'user', time: { created: (notice?.time_created ?? 0) + 1 } }),
+      ],
+    );
+    const summary = await recovery.recoverPendingTaskDeliveries();
+    expect(summary.skipped).toBe(1);
+    expect(mocks.continueSessionFromHistory).not.toHaveBeenCalled();
+    expect(taskJob.pendingBackground()).toHaveLength(0);
+  });
+
+  it('自然回合与通知同毫秒写入且 id 更小时不误判已消费', async () => {
+    seedPersistedPendingJob();
+    mocks.getAnyInFlightStreamRequestForSession.mockReturnValueOnce({ clientRequestId: 'busy' });
+    const delivery = await import('../../task/task-job-delivery.js');
+    await delivery.deliverTaskCompletion({
+      agent: 'explore',
+      childSessionId: CHILD_SESSION_ID,
+      description: '审计会话唤醒原语',
+      notificationId: NOTIFICATION_ID,
+      parentSessionId: PARENT_SESSION_ID,
+      state: 'done',
+      text: '结论',
+      userId: USER_ID,
+    });
+    const notice = dbModule.sqliteGet<{ time_created: number }>(
+      'SELECT time_created FROM message_v2 WHERE id = ?',
+      [NOTIFICATION_ID],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        'a-before-notice-id',
+        PARENT_SESSION_ID,
+        USER_ID,
+        notice?.time_created ?? 0,
+        JSON.stringify({ role: 'user' }),
+      ],
+    );
+
+    expect(
+      taskJob.completeConsumedBackgroundJobs({ sessionId: PARENT_SESSION_ID, userId: USER_ID }),
+    ).toBe(0);
     expect(taskJob.pendingBackground()).toHaveLength(1);
   });
 

@@ -8,22 +8,24 @@ import {
   buildDiagnosticKey,
   DiagnosticDetailsPanel,
   InlineFailureNotice,
+  rowInteractionProps,
+  subtleButtonInteractionProps,
 } from './devtools-workbench-primitives.js';
 import { ErrorCommandCenter } from './devtools-error-command.js';
 import {
   SS,
   ST,
   BADGE,
-  BS,
   BG,
+  BS,
   TWO_COLUMN,
   LEFT_PANEL,
   RIGHT_PANEL,
   LIST_CONTAINER,
+  SEARCH_INPUT,
 } from '../shared/settings-section-styles.js';
 
 interface DevtoolsDiagnosticsSectionProps {
-  sectionRef: React.RefObject<HTMLDivElement | null>;
   sourceState: DevtoolsSourceState;
   diagnostics: SettingsDiagnosticRecord[];
   filteredDiagnostics: SettingsDiagnosticRecord[];
@@ -42,6 +44,7 @@ interface DevtoolsDiagnosticsSectionProps {
   onSelectDiagnostic: (key: string) => void;
   onCopySelected: () => void;
   onCopyVisible: () => void;
+  onCopyAll: () => void;
   onCopyRelatedContext: () => void;
   onExportJson: () => void;
   onExportMarkdown: () => void;
@@ -54,8 +57,19 @@ function formatDiagnosticLocation(diagnostic: SettingsDiagnosticRecord): string 
   return diagnostic.requestId ?? diagnostic.toolName ?? diagnostic.filePath;
 }
 
+const GHOST_INTERACTION = subtleButtonInteractionProps();
+
+const DATE_SELECT: React.CSSProperties = {
+  borderRadius: 6,
+  border: '1px solid var(--border-default)',
+  padding: '6px 10px',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
+  fontSize: 12,
+  cursor: 'pointer',
+};
+
 export function DevtoolsDiagnosticsSection({
-  sectionRef,
   sourceState,
   diagnostics,
   filteredDiagnostics,
@@ -74,6 +88,7 @@ export function DevtoolsDiagnosticsSection({
   onSelectDiagnostic,
   onCopySelected,
   onCopyVisible,
+  onCopyAll,
   onCopyRelatedContext,
   onExportJson,
   onExportMarkdown,
@@ -85,32 +100,24 @@ export function DevtoolsDiagnosticsSection({
   const [isClearing, setIsClearing] = React.useState(false);
 
   return (
-    <section ref={sectionRef} style={SS}>
+    <section style={SS}>
       {/* 标题和操作栏 */}
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: 4,
+          gap: 8,
           alignItems: 'center',
         }}
       >
-        <h3 style={ST}>诊断信息</h3>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+        <h3 style={{ ...ST, marginBottom: 0 }}>诊断信息</h3>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {availableDates.length > 0 && (
             <select
               value={dateFilter ?? ''}
               onChange={(event) => onSetDateFilter(event.target.value || null)}
-              style={{
-                borderRadius: 3,
-                border: '1px solid var(--border-default)',
-                padding: '3px 6px',
-                background: 'var(--bg-overlay)',
-                color: 'var(--fg-strong)',
-                fontSize: 11,
-                cursor: 'pointer',
-              }}
+              style={DATE_SELECT}
               aria-label="按日期过滤诊断"
             >
               <option value="">全部日期</option>
@@ -122,7 +129,13 @@ export function DevtoolsDiagnosticsSection({
             </select>
           )}
           {appVersion && (
-            <span style={{ ...BADGE, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
+            <span
+              style={{
+                ...BADGE,
+                color: 'var(--fg-muted)',
+                fontFamily: 'var(--font-mono, monospace)',
+              }}
+            >
               v{appVersion}
             </span>
           )}
@@ -134,9 +147,15 @@ export function DevtoolsDiagnosticsSection({
                 setIsClearing(true);
                 void onClearDiagnostics().finally(() => setIsClearing(false));
               }}
-              style={{ ...BG, color: isClearing ? 'var(--fg-muted)' : 'var(--danger)' }}
+              {...GHOST_INTERACTION}
+              style={{
+                ...BS,
+                fontSize: 12,
+                color: isClearing ? 'var(--fg-muted)' : 'var(--danger)',
+                cursor: isClearing ? 'not-allowed' : 'pointer',
+              }}
             >
-              {isClearing ? '清除中…' : '清除'}
+              {isClearing ? '清除中…' : '清除全部'}
             </button>
           )}
         </div>
@@ -153,11 +172,11 @@ export function DevtoolsDiagnosticsSection({
         workerErrorCount={workerErrors}
         onCopySelected={onCopySelected}
         onCopyVisible={onCopyVisible}
+        onCopyAll={onCopyAll}
         onCopyRelatedContext={onCopyRelatedContext}
         onExportJson={onExportJson}
         onExportMarkdown={onExportMarkdown}
         onExportErrorReport={onExportErrorReport}
-        onSelectDiagnostic={onSelectDiagnostic}
         onScrollToLogs={onScrollToLogs}
       />
 
@@ -168,8 +187,7 @@ export function DevtoolsDiagnosticsSection({
         <div style={TWO_COLUMN}>
           {/* 左侧：错误列表 */}
           <div style={LEFT_PANEL}>
-            {/* 搜索框 */}
-            <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 type="search"
                 value={diagnosticQuery}
@@ -177,16 +195,10 @@ export function DevtoolsDiagnosticsSection({
                 aria-label="搜索诊断错误"
                 name="diagnostic-query"
                 autoComplete="off"
-                placeholder="搜索错误..."
+                placeholder="搜索错误…"
                 style={{
-                  width: '100%',
-                  background: 'transparent',
-                  border: `1px solid ${diagnosticQuery ? 'var(--danger)' : 'var(--border-subtle)'}`,
-                  borderRadius: 2,
-                  padding: '3px 6px',
-                  color: 'var(--fg-strong)',
-                  fontSize: 11,
-                  outline: 'none',
+                  ...SEARCH_INPUT,
+                  border: `1px solid ${diagnosticQuery ? 'var(--danger)' : 'var(--border-default)'}`,
                 }}
               />
               {diagnosticQuery && (
@@ -194,32 +206,20 @@ export function DevtoolsDiagnosticsSection({
                   type="button"
                   onClick={() => onSetDiagnosticQuery('')}
                   aria-label="清空搜索"
-                  style={{
-                    position: 'absolute',
-                    right: 3,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--fg-muted)',
-                    fontSize: 10,
-                    padding: '1px 2px',
-                  }}
+                  {...GHOST_INTERACTION}
+                  style={{ ...BG, fontSize: 12, flexShrink: 0 }}
                 >
-                  ✕
+                  清空
                 </button>
               )}
             </div>
 
-            {/* 统计信息 */}
-            <div style={{ display: 'flex', gap: 6, fontSize: 10, color: 'var(--fg-muted)' }}>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--fg-muted)' }}>
               <span>{filteredDiagnostics.length} 条错误</span>
-              {relatedLogs.length > 0 && <span>{relatedLogs.length} 关联日志</span>}
+              {relatedLogs.length > 0 && <span>{relatedLogs.length} 条关联日志</span>}
             </div>
 
-            {/* 错误列表 */}
-            <div style={LIST_CONTAINER}>
+            <div style={{ ...LIST_CONTAINER, maxHeight: 480 }}>
               {filteredDiagnostics.map((diagnostic, index) => {
                 const key = buildDiagnosticKey(diagnostic);
                 const isActive =
@@ -230,34 +230,35 @@ export function DevtoolsDiagnosticsSection({
                     key={key}
                     type="button"
                     onClick={() => onSelectDiagnostic(key)}
+                    {...rowInteractionProps({ isActive, restBackground: 'transparent' })}
                     style={{
-                      borderRadius: 6,
+                      borderRadius: 8,
+                      padding: '8px 10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      minWidth: 0,
                       border: isActive
                         ? '1px solid var(--border-default)'
                         : '1px solid transparent',
                       background: isActive ? 'var(--bg-raised)' : 'transparent',
                       boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
                       color: 'var(--fg-strong)',
-                      padding: '4px 6px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      minWidth: 0,
                     }}
                   >
                     <div
                       style={{
                         display: 'flex',
                         justifyContent: 'space-between',
-                        gap: 4,
+                        gap: 8,
                         alignItems: 'flex-start',
                       }}
                     >
                       <span
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: isActive ? 500 : 400,
                           color: isActive ? 'var(--accent)' : 'var(--fg-strong)',
                           display: '-webkit-box',
@@ -266,13 +267,13 @@ export function DevtoolsDiagnosticsSection({
                           overflow: 'hidden',
                           minWidth: 0,
                           flex: 1,
-                          lineHeight: 1.3,
+                          lineHeight: 1.4,
                         }}
                       >
                         {diagnostic.message}
                       </span>
                       <span
-                        style={{ ...BADGE, color: 'var(--danger)', flexShrink: 0, fontSize: 9 }}
+                        style={{ ...BADGE, color: 'var(--danger)', flexShrink: 0, fontSize: 10 }}
                       >
                         {diagnostic.severity}
                       </span>
@@ -280,10 +281,10 @@ export function DevtoolsDiagnosticsSection({
                     <div
                       style={{
                         display: 'flex',
-                        gap: 4,
-                        fontSize: 10,
+                        gap: 8,
+                        fontSize: 11,
                         color: 'var(--fg-muted)',
-                        fontFamily: 'monospace',
+                        fontFamily: 'var(--font-mono, monospace)',
                       }}
                     >
                       <span
@@ -309,17 +310,19 @@ export function DevtoolsDiagnosticsSection({
           <div style={RIGHT_PANEL}>
             {/* 关联日志 */}
             {relatedLogs.length > 0 && (
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', fontSize: 10 }}>
-                <span style={{ color: 'var(--fg-muted)' }}>关联:</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
+                <span style={{ color: 'var(--fg-muted)' }}>关联日志：</span>
                 {relatedLogs.map((log, index) => (
                   <button
                     key={`${log.timestamp}-${log.requestId ?? index}`}
                     type="button"
                     onClick={onScrollToLogs}
+                    {...GHOST_INTERACTION}
                     style={{
                       ...BG,
-                      padding: '1px 4px',
-                      fontSize: 10,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      border: '1px solid var(--border-default)',
                       color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-default)',
                     }}
                   >
@@ -330,13 +333,15 @@ export function DevtoolsDiagnosticsSection({
             )}
 
             {/* 操作按钮 */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={() => onCopyDiagnosticField('输入', selectedDiagnostic?.input)}
                 disabled={!selectedDiagnostic}
+                {...GHOST_INTERACTION}
                 style={{
                   ...BS,
+                  fontSize: 12,
                   opacity: selectedDiagnostic ? 1 : 0.4,
                   cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
                 }}
@@ -347,8 +352,10 @@ export function DevtoolsDiagnosticsSection({
                 type="button"
                 onClick={() => onCopyDiagnosticField('输出', selectedDiagnostic?.output)}
                 disabled={!selectedDiagnostic}
+                {...GHOST_INTERACTION}
                 style={{
                   ...BS,
+                  fontSize: 12,
                   opacity: selectedDiagnostic ? 1 : 0.4,
                   cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
                 }}
@@ -362,18 +369,18 @@ export function DevtoolsDiagnosticsSection({
           </div>
         </div>
       ) : diagnostics.length > 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           当前筛选条件无匹配结果。共有 {diagnostics.length} 条诊断记录。
           <button
             type="button"
             onClick={() => onSetDiagnosticQuery('')}
-            style={{ ...BG, fontSize: 11, marginLeft: 4 }}
+            style={{ ...BG, fontSize: 12, marginLeft: 4 }}
           >
             清空筛选
           </button>
         </div>
       ) : (
-        <p style={{ fontSize: 11, color: 'var(--fg-muted)' }}>最近没有采集到新的异常。</p>
+        <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>最近没有采集到新的异常。</p>
       )}
     </section>
   );

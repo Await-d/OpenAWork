@@ -1510,8 +1510,11 @@ function assertResponsesPayloadShape(
   if (body['messages'] !== undefined) {
     throw new Error('did not expect chat messages payload');
   }
-  if (body['max_output_tokens'] !== 2048) {
-    throw new Error('expected max_output_tokens=2048');
+  // 请求未显式指定输出额度时**不下发** `max_output_tokens`（对齐 opencode）：
+  // 由上游按模型自身默认上限决定。历史行为是固定下发 2048，会被推理模型的
+  // 思考吃满、在正文产出前就截断。
+  if (body['max_output_tokens'] !== undefined) {
+    throw new Error('expected no max_output_tokens in request body');
   }
   if (!requestContainsText(body, expectedUserText)) {
     throw new Error(`expected request input to contain user text: ${expectedUserText}`);
@@ -1525,8 +1528,9 @@ function assertChatPayloadShape(body: Record<string, unknown>, expectedUserText:
   if (body['input'] !== undefined) {
     throw new Error('did not expect Responses input payload');
   }
-  if (body['max_tokens'] !== 2048) {
-    throw new Error('expected max_tokens=2048');
+  // 与 Responses 场景同源：未指定额度时**不下发** `max_tokens`。
+  if (body['max_tokens'] !== undefined) {
+    throw new Error('expected no max_tokens in request body');
   }
   const streamOptions = body['stream_options'];
   const streamOptionsRecord: Record<string, unknown> | null =

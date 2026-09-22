@@ -706,6 +706,15 @@ export async function requestLookAtText(input: {
   systemPrompt?: string;
   textContent?: string;
   /**
+   * 输出上限。调用方应传 `resolveLookAtRoute` 解析出的 `route.maxTokens`
+   * （已按模型声明的 `maxOutputTokens` 收敛）；缺省时退回
+   * {@link INNER_DEFAULT_MAX_TOKENS}，保持旧调用点行为不变。
+   *
+   * 不能在此硬编码小额度：推理模型的思考 token 与正文共享预算，
+   * 额度不足会让分析文本为空、`look_at` / `computer_use` 静默失败。
+   */
+  maxTokens?: number;
+  /**
    * 上游 token 用量回调（T-15）。
    *
    * `requestLookAtText` 原本只回传文本、丢弃 `RunUpstreamGenerateResult` 里的 usage，
@@ -761,7 +770,7 @@ export async function requestLookAtText(input: {
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
         messages: [{ role: 'user', content: userContent }],
-        maxOutputTokens: 2048,
+        maxOutputTokens: input.maxTokens ?? INNER_DEFAULT_MAX_TOKENS,
         temperature: 0.2,
         requestOverrides: input.requestOverrides,
         signal: controller.signal,
@@ -868,6 +877,7 @@ export async function runLookAtTool(input: {
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),
       prompt,
+      maxTokens: routeConfig.route.maxTokens,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
     });
@@ -886,6 +896,7 @@ export async function runLookAtTool(input: {
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),
       prompt,
+      maxTokens: routeConfig.route.maxTokens,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
       textContent: `File content:\n${textContent}`,
@@ -912,6 +923,7 @@ export async function runLookAtTool(input: {
         ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
         : {}),
       prompt,
+      maxTokens: routeConfig.route.maxTokens,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
       textContent: `PDF text:\n${readOutput?.text ?? '（该 PDF 未提取到可读文本，可能是扫描件或纯图片页）'}`,

@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  SSHConnectionPanel,
-  type DevEvent,
-  type SSHConnectionEntry,
-  type WorkerEntry,
-} from '@openAwork/shared-ui';
+import type { WorkerEntry } from '@openAwork/shared-ui';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -20,26 +15,28 @@ import {
   buildLogKey,
   buildWorkerClipboardRecord,
   buildWorkerKey,
-  type DevtoolsSectionId,
   findRelatedLogs,
-  InlineFailureNotice,
   matchesDiagnosticQuery,
   matchesLogQuery,
   matchesWorkerQuery,
-  SourceOverviewCard,
   stringifyDetails,
 } from './devtools-workbench-primitives.js';
-import { DevtoolsToolbarSection } from './devtools-toolbar-section.js';
-import { DevtoolsWorkerSection } from './devtools-worker-section.js';
-import { SS, ST, UV } from '../shared/settings-section-styles.js';
+import {
+  DevtoolsSectionNav,
+  type DevtoolsSectionId,
+  type DevtoolsSectionNavItem,
+} from './devtools-section-nav.js';
+import { DevtoolsOverviewSection } from './devtools-overview-section.js';
 import { DevtoolsDiagnosticsSection } from './devtools-diagnostics-section.js';
+import { DevtoolsLogsSection } from './devtools-logs-section.js';
+import { DevtoolsWorkerSection } from './devtools-worker-section.js';
 import {
   buildErrorExportPayload,
   buildErrorExportMarkdown,
   buildErrorReportHtml,
   triggerDownload,
 } from './devtools-error-command.js';
-import { DevtoolsLogsSection } from './devtools-logs-section.js';
+import { buildTroubleshootBundleMarkdown } from './devtools-troubleshoot-bundle.js';
 
 declare const __APP_VERSION__: string;
 declare const __APP_BUILD_VERSION__: string;
@@ -48,8 +45,8 @@ declare const __APP_GIT_HASH__: string;
 declare const __APP_GIT_BRANCH__: string;
 
 interface DevtoolsTabContentProps {
+  gatewayUrl: string;
   devLogs: SettingsDevLogRecord[];
-  devEvents: DevEvent[];
   diagnostics: SettingsDiagnosticRecord[];
   diagnosticsAvailableDates: string[];
   diagnosticsDateFilter: string | null;
@@ -60,10 +57,6 @@ interface DevtoolsTabContentProps {
   onExportLogs: () => void;
   onRefreshAllSources: () => void;
   onRefreshSource: (key: DevtoolsSourceKey) => void;
-  sshConnections: SSHConnectionEntry[];
-  onAddSshConnection: (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => void;
-  onConnectSsh: (id: string) => void;
-  onDisconnectSsh: (id: string) => void;
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -79,9 +72,46 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+/** 读取构建期注入的版本信息；未注入时（harness / 开发环境）降级为 dev / unknown。 */
+function readBuildInfo() {
+  let appVersion = 'dev';
+  let buildVersion = 'dev';
+  let buildTime = 'unknown';
+  let gitHash = 'unknown';
+  let gitBranch = 'unknown';
+
+  try {
+    appVersion = __APP_VERSION__;
+  } catch (_e) {
+    // 降级为 dev
+  }
+  try {
+    buildVersion = __APP_BUILD_VERSION__;
+  } catch (_e) {
+    // 降级
+  }
+  try {
+    buildTime = __APP_BUILD_TIME__;
+  } catch (_e) {
+    // 降级
+  }
+  try {
+    gitHash = __APP_GIT_HASH__;
+  } catch (_e) {
+    // 降级
+  }
+  try {
+    gitBranch = __APP_GIT_BRANCH__;
+  } catch (_e) {
+    // 降级
+  }
+
+  return { appVersion, buildVersion, buildTime, gitHash, gitBranch };
+}
+
 export function DevtoolsTabContent({
+  gatewayUrl,
   devLogs,
-  devEvents,
   diagnostics,
   diagnosticsAvailableDates,
   diagnosticsDateFilter,
@@ -92,16 +122,8 @@ export function DevtoolsTabContent({
   onExportLogs,
   onRefreshAllSources,
   onRefreshSource,
-  sshConnections,
-  onAddSshConnection,
-  onConnectSsh,
-  onDisconnectSsh,
 }: DevtoolsTabContentProps) {
-  const overviewSectionRef = React.useRef<HTMLDivElement | null>(null);
-  const diagnosticsSectionRef = React.useRef<HTMLDivElement | null>(null);
-  const logsSectionRef = React.useRef<HTMLDivElement | null>(null);
-  const sshSectionRef = React.useRef<HTMLDivElement | null>(null);
-  const workersSectionRef = React.useRef<HTMLDivElement | null>(null);
+  const [activeSection, setActiveSection] = React.useState<DevtoolsSectionId>('overview');
   const [diagnosticQuery, setDiagnosticQuery] = React.useState('');
   const [selectedDiagnosticKey, setSelectedDiagnosticKey] = React.useState<string | null>(null);
   const [copiedDiagnosticAction, setCopiedDiagnosticAction] = React.useState<string | null>(null);
@@ -126,10 +148,6 @@ export function DevtoolsTabContent({
     sourceStates.workers.status,
   ].some((status) => status === 'loading');
   const errorSources = sourceList.filter((source) => source.status === 'error' && source.error);
-  const healthyCount = sourceList.filter((source) => source.status === 'healthy').length;
-  const loadingCount = sourceList.filter((source) => source.status === 'loading').length;
-  const unavailableCount = sourceList.filter((source) => source.status === 'unavailable').length;
-  const emptyCount = sourceList.filter((source) => source.status === 'empty').length;
   const logErrors = devLogs.filter((log) => log.level === 'error').length;
   const workerErrors = workers.filter((worker) => worker.status === 'error').length;
   const filteredDiagnostics = React.useMemo(
@@ -336,17 +354,6 @@ export function DevtoolsTabContent({
     };
   }, [anyRefreshableSourceLoading, autoRefreshEnabled, onRefreshAllSources]);
 
-  const scrollToSection = React.useCallback((sectionId: DevtoolsSectionId) => {
-    const refMap: Record<DevtoolsSectionId, React.RefObject<HTMLDivElement | null>> = {
-      overview: overviewSectionRef,
-      diagnostics: diagnosticsSectionRef,
-      logs: logsSectionRef,
-      ssh: sshSectionRef,
-      workers: workersSectionRef,
-    };
-    refMap[sectionId].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, []);
-
   const copySelectedDiagnostic = React.useCallback(async () => {
     if (!selectedDiagnostic) {
       return;
@@ -378,6 +385,25 @@ export function DevtoolsTabContent({
       updateCopiedDiagnosticAction('复制失败：浏览器拒绝了剪贴板写入');
     }
   }, [filteredDiagnostics, updateCopiedDiagnosticAction]);
+
+  const copyAllDiagnostics = React.useCallback(async () => {
+    if (diagnostics.length === 0) {
+      return;
+    }
+
+    const ok = await copyToClipboard(
+      JSON.stringify(
+        diagnostics.map((diagnostic) => buildDiagnosticClipboardRecord(diagnostic)),
+        null,
+        2,
+      ),
+    );
+    if (ok) {
+      updateCopiedDiagnosticAction('全部错误已复制');
+    } else {
+      updateCopiedDiagnosticAction('复制失败：浏览器拒绝了剪贴板写入');
+    }
+  }, [diagnostics, updateCopiedDiagnosticAction]);
 
   const copyDiagnosticField = React.useCallback(
     async (label: string, value: unknown) => {
@@ -440,6 +466,26 @@ export function DevtoolsTabContent({
     }
   }, [filteredLogs, updateCopiedLogAction]);
 
+  const copyErrorLogs = React.useCallback(async () => {
+    const errorLogs = devLogs.filter((log) => log.level === 'error');
+    if (errorLogs.length === 0) {
+      return;
+    }
+
+    const ok = await copyToClipboard(
+      JSON.stringify(
+        errorLogs.map((log) => buildLogClipboardRecord(log)),
+        null,
+        2,
+      ),
+    );
+    if (ok) {
+      updateCopiedLogAction(`全部错误日志已复制（${errorLogs.length} 条）`);
+    } else {
+      updateCopiedLogAction('复制失败：浏览器拒绝了剪贴板写入');
+    }
+  }, [devLogs, updateCopiedLogAction]);
+
   const copyLogField = React.useCallback(
     async (label: string, value: unknown) => {
       const ok = await copyToClipboard(stringifyDetails(value));
@@ -485,6 +531,41 @@ export function DevtoolsTabContent({
       updateCopiedWorkerAction('复制失败：浏览器拒绝了剪贴板写入');
     }
   }, [filteredWorkers, updateCopiedWorkerAction]);
+
+  /**
+   * 一次性复制完整排障上下文（Markdown）：环境信息 + 数据源状态 + 全部诊断 +
+   * 全部错误日志 + Worker 异常，便于直接粘贴给 AI 或同事排查。
+   */
+  const copyTroubleshootBundle = React.useCallback(async (): Promise<boolean> => {
+    const markdown = buildTroubleshootBundleMarkdown({
+      generatedAt: new Date().toISOString(),
+      ...readBuildInfo(),
+      platform: typeof navigator !== 'undefined' ? navigator.platform : 'unknown',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : 'unknown',
+      gatewayUrl,
+      sourceStates,
+      diagnostics,
+      errorLogs: devLogs.filter((log) => log.level === 'error'),
+      workers,
+    });
+
+    return copyToClipboard(markdown);
+  }, [devLogs, diagnostics, gatewayUrl, sourceStates, workers]);
+
+  /** 诊断区「查看日志」：切到日志分区，并尽量选中与当前诊断关联的那条日志。 */
+  const goToRelatedLogs = React.useCallback(() => {
+    const firstRelatedLog = relatedLogs[0];
+
+    if (firstRelatedLog) {
+      setSelectedLogKey(buildLogKey(firstRelatedLog));
+      // 诊断跳转过来时清空日志搜索（原查询词属于诊断上下文），
+      // 并在关联日志是错误级别时切到「仅错误」视图，集中查看错误日志。
+      setLogQuery('');
+      setShowOnlyErrorLogs(firstRelatedLog.level === 'error');
+    }
+
+    setActiveSection('logs');
+  }, [relatedLogs]);
 
   const exportDebugBundleAsMarkdown = React.useCallback(() => {
     const lines = [
@@ -626,37 +707,7 @@ export function DevtoolsTabContent({
       return;
     }
 
-    let appVersion = 'dev';
-    let buildVersion = 'dev';
-    let buildTime = 'unknown';
-    let gitHash = 'unknown';
-    let gitBranch = 'unknown';
-
-    try {
-      appVersion = __APP_VERSION__;
-    } catch (_e) {
-      // 降级为 dev
-    }
-    try {
-      buildVersion = __APP_BUILD_VERSION__;
-    } catch (_e) {
-      // 降级
-    }
-    try {
-      buildTime = __APP_BUILD_TIME__;
-    } catch (_e) {
-      // 降级
-    }
-    try {
-      gitHash = __APP_GIT_HASH__;
-    } catch (_e) {
-      // 降级
-    }
-    try {
-      gitBranch = __APP_GIT_BRANCH__;
-    } catch (_e) {
-      // 降级
-    }
+    const { appVersion, buildVersion, buildTime, gitHash, gitBranch } = readBuildInfo();
 
     const html = buildErrorReportHtml({
       diagnostics,
@@ -673,7 +724,7 @@ export function DevtoolsTabContent({
       gitBranch,
       platform: typeof navigator !== 'undefined' ? navigator.platform : 'unknown',
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : 'unknown',
-      gatewayUrl: sourceStates.devLogs.endpoint,
+      gatewayUrl,
     });
 
     triggerDownload(html, 'text/html', `openawork-error-report-${Date.now()}.html`);
@@ -681,250 +732,172 @@ export function DevtoolsTabContent({
     devLogs,
     diagnostics,
     filteredDiagnostics,
+    gatewayUrl,
     relatedLogs,
     selectedDiagnostic,
     sourceStates,
     workers,
   ]);
 
+  const navItems: DevtoolsSectionNavItem[] = [
+    {
+      id: 'overview',
+      label: '总览',
+      count: errorSources.length,
+      hasError: errorSources.length > 0,
+    },
+    {
+      id: 'diagnostics',
+      label: '诊断',
+      count: diagnostics.length,
+      hasError: diagnostics.length > 0,
+    },
+    {
+      id: 'logs',
+      label: '日志',
+      count: devLogs.length,
+      hasError: logErrors > 0,
+    },
+    {
+      id: 'workers',
+      label: 'Worker',
+      count: workers.length,
+      hasError: workerErrors > 0,
+    },
+  ];
+
   return (
     <>
-      <DevtoolsToolbarSection
+      <DevtoolsSectionNav
+        activeSection={activeSection}
+        items={navItems}
         anyRefreshableSourceLoading={anyRefreshableSourceLoading}
         autoRefreshEnabled={autoRefreshEnabled}
-        counts={{
-          diagnostics: filteredDiagnostics.length,
-          errorSources: errorSources.length,
-          logs: filteredLogs.length,
-          sshConnections: sshConnections.length,
-          workers: workers.length,
-        }}
-        errorCount={filteredDiagnostics.length + logErrors + workerErrors}
         lastGlobalRefreshAt={lastGlobalRefreshAt}
-        workerErrors={workerErrors}
-        onExportDebugBundle={exportDebugBundle}
-        onExportErrorReport={() => {
-          void exportErrorReport();
-        }}
-        onExportMarkdownBundle={exportDebugBundleAsMarkdown}
+        issueCount={diagnostics.length + logErrors + workerErrors}
+        onSelectSection={setActiveSection}
         onRefreshAllSources={() => {
           setLastGlobalRefreshAt(Date.now());
           onRefreshAllSources();
         }}
-        onScrollToSection={scrollToSection}
-        onToggleAutoRefresh={() => setAutoRefreshEnabled((prev) => !prev)}
-      />
-
-      <section ref={overviewSectionRef} style={SS}>
-        <h3 style={ST}>数据源概览</h3>
-
-        {/* 简洁统计行 */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            flexWrap: 'wrap',
-            fontSize: 12,
-            color: 'var(--fg-muted)',
-            padding: '8px 12px',
-            background: 'var(--bg-overlay)',
-            borderRadius: 6,
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <span style={{ color: 'var(--accent)', fontWeight: 500 }}>正常 {healthyCount}</span>
-          {loadingCount > 0 && <span>加载中 {loadingCount}</span>}
-          {emptyCount > 0 && <span>暂无数据 {emptyCount}</span>}
-          {unavailableCount > 0 && (
-            <span style={{ color: 'var(--warning)', fontWeight: 500 }}>
-              未接入 {unavailableCount}
-            </span>
-          )}
-          {errorSources.length > 0 && (
-            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
-              失败 {errorSources.length}
-            </span>
-          )}
-          {logErrors > 0 && (
-            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>日志错误 {logErrors}</span>
-          )}
-          {workerErrors > 0 && (
-            <span style={{ color: 'var(--danger)', fontWeight: 500 }}>
-              Worker 异常 {workerErrors}
-            </span>
-          )}
-        </div>
-
-        {/* 错误提示 - 仅在有错误时显示 */}
-        {errorSources.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {errorSources.map((source) => (
-              <div
-                key={source.label}
-                style={{
-                  border: '1px solid color-mix(in srgb, var(--danger) 25%, var(--border-default))',
-                  borderRadius: 6,
-                  padding: '10px 12px',
-                  background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>
-                  ✗ {source.label}
-                </span>
-                <span
-                  style={{
-                    color: 'var(--fg-default)',
-                    flex: 1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {source.detail}：{source.error}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 数据源卡片 - 优化网格 */}
-        <div
-          style={{
-            ...UV,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-            gap: 10,
-          }}
-        >
-          {(Object.entries(sourceStates) as Array<[DevtoolsSourceKey, DevtoolsSourceState]>).map(
-            ([key, source]) => (
-              <SourceOverviewCard
-                key={source.label}
-                source={source}
-                onRefresh={
-                  key === 'githubTriggers' || key === 'providerUpdates'
-                    ? undefined
-                    : () => onRefreshSource(key)
-                }
-              />
-            ),
-          )}
-        </div>
-      </section>
-
-      <DevtoolsDiagnosticsSection
-        sectionRef={diagnosticsSectionRef}
-        sourceState={sourceStates.diagnostics}
-        diagnostics={diagnostics}
-        filteredDiagnostics={filteredDiagnostics}
-        selectedDiagnostic={selectedDiagnostic}
-        selectedDiagnosticKey={selectedDiagnosticKey}
-        relatedLogs={relatedLogs}
-        copiedDiagnosticAction={copiedDiagnosticAction}
-        diagnosticQuery={diagnosticQuery}
-        logErrors={logErrors}
-        workerErrors={workerErrors}
-        onSetDiagnosticQuery={setDiagnosticQuery}
-        onSelectDiagnostic={setSelectedDiagnosticKey}
-        onCopySelected={() => {
-          void copySelectedDiagnostic();
-        }}
-        onCopyVisible={() => {
-          void copyVisibleDiagnostics();
-        }}
-        onCopyRelatedContext={() => {
-          void copyRelatedContext();
-        }}
-        onExportJson={() => {
-          if (
-            filteredDiagnostics.length === 0 &&
-            selectedDiagnostic === null &&
-            relatedLogs.length === 0
-          ) {
-            return;
-          }
-
-          triggerDownload(
-            buildErrorExportPayload(filteredDiagnostics, selectedDiagnostic, relatedLogs),
-            'application/json',
-            `error-export-${Date.now()}.json`,
-          );
-        }}
-        onExportMarkdown={() => {
-          if (
-            filteredDiagnostics.length === 0 &&
-            selectedDiagnostic === null &&
-            relatedLogs.length === 0
-          ) {
-            return;
-          }
-
-          triggerDownload(
-            buildErrorExportMarkdown(filteredDiagnostics, selectedDiagnostic, relatedLogs),
-            'text/markdown',
-            `error-export-${Date.now()}.md`,
-          );
-        }}
+        onToggleAutoRefresh={setAutoRefreshEnabled}
+        onCopyTroubleshootBundle={copyTroubleshootBundle}
         onExportErrorReport={() => {
           void exportErrorReport();
         }}
-        onScrollToLogs={() => {
-          const hasVisibleRelatedLogs = relatedLogs.some((relatedLog) =>
-            filteredLogs.some((visibleLog) => buildLogKey(visibleLog) === buildLogKey(relatedLog)),
-          );
+        onExportDebugBundle={exportDebugBundle}
+        onExportMarkdownBundle={exportDebugBundleAsMarkdown}
+      />
 
-          if (relatedLogs.length > 0) {
-            const firstRelatedLog = relatedLogs[0];
-            if (firstRelatedLog) {
-              setSelectedLogKey(buildLogKey(firstRelatedLog));
+      {activeSection === 'overview' && (
+        <DevtoolsOverviewSection
+          sourceStates={sourceStates}
+          logErrors={logErrors}
+          workerErrors={workerErrors}
+          onRefreshSource={onRefreshSource}
+        />
+      )}
+
+      {activeSection === 'diagnostics' && (
+        <DevtoolsDiagnosticsSection
+          sourceState={sourceStates.diagnostics}
+          diagnostics={diagnostics}
+          filteredDiagnostics={filteredDiagnostics}
+          selectedDiagnostic={selectedDiagnostic}
+          selectedDiagnosticKey={selectedDiagnosticKey}
+          relatedLogs={relatedLogs}
+          copiedDiagnosticAction={copiedDiagnosticAction}
+          diagnosticQuery={diagnosticQuery}
+          logErrors={logErrors}
+          workerErrors={workerErrors}
+          onSetDiagnosticQuery={setDiagnosticQuery}
+          onSelectDiagnostic={setSelectedDiagnosticKey}
+          onCopySelected={() => {
+            void copySelectedDiagnostic();
+          }}
+          onCopyVisible={() => {
+            void copyVisibleDiagnostics();
+          }}
+          onCopyAll={() => {
+            void copyAllDiagnostics();
+          }}
+          onCopyRelatedContext={() => {
+            void copyRelatedContext();
+          }}
+          onExportJson={() => {
+            if (
+              filteredDiagnostics.length === 0 &&
+              selectedDiagnostic === null &&
+              relatedLogs.length === 0
+            ) {
+              return;
             }
-          }
-          if (!hasVisibleRelatedLogs) {
-            setLogQuery('');
-            setShowOnlyErrorLogs(false);
-          }
-          scrollToSection('logs');
-        }}
-        onCopyDiagnosticField={(label, value) => {
-          void copyDiagnosticField(label, value);
-        }}
-        availableDates={diagnosticsAvailableDates}
-        dateFilter={diagnosticsDateFilter}
-        onSetDateFilter={onSetDiagnosticsDateFilter}
-        onClearDiagnostics={onClearDiagnostics}
-      />
 
-      <DevtoolsLogsSection
-        sectionRef={logsSectionRef}
-        devLogs={devLogs}
-        devEvents={devEvents}
-        filteredLogs={filteredLogs}
-        selectedLog={selectedLog}
-        selectedLogKey={selectedLogKey}
-        logQuery={logQuery}
-        showOnlyErrorLogs={showOnlyErrorLogs}
-        copiedLogAction={copiedLogAction}
-        sourceState={sourceStates.devLogs}
-        setSelectedLogKey={setSelectedLogKey}
-        setLogQuery={setLogQuery}
-        setShowOnlyErrorLogs={setShowOnlyErrorLogs}
-        copySelectedLog={() => {
-          void copySelectedLog();
-        }}
-        copyVisibleLogs={() => {
-          void copyVisibleLogs();
-        }}
-        copyLogField={(label, value) => {
-          void copyLogField(label, value);
-        }}
-        onExportLogs={onExportLogs}
-      />
+            triggerDownload(
+              buildErrorExportPayload(filteredDiagnostics, selectedDiagnostic, relatedLogs),
+              'application/json',
+              `error-export-${Date.now()}.json`,
+            );
+          }}
+          onExportMarkdown={() => {
+            if (
+              filteredDiagnostics.length === 0 &&
+              selectedDiagnostic === null &&
+              relatedLogs.length === 0
+            ) {
+              return;
+            }
 
-      <section ref={workersSectionRef} style={SS}>
+            triggerDownload(
+              buildErrorExportMarkdown(filteredDiagnostics, selectedDiagnostic, relatedLogs),
+              'text/markdown',
+              `error-export-${Date.now()}.md`,
+            );
+          }}
+          onExportErrorReport={() => {
+            void exportErrorReport();
+          }}
+          onScrollToLogs={goToRelatedLogs}
+          onCopyDiagnosticField={(label, value) => {
+            void copyDiagnosticField(label, value);
+          }}
+          availableDates={diagnosticsAvailableDates}
+          dateFilter={diagnosticsDateFilter}
+          onSetDateFilter={onSetDiagnosticsDateFilter}
+          onClearDiagnostics={onClearDiagnostics}
+        />
+      )}
+
+      {activeSection === 'logs' && (
+        <DevtoolsLogsSection
+          devLogs={devLogs}
+          filteredLogs={filteredLogs}
+          selectedLog={selectedLog}
+          selectedLogKey={selectedLogKey}
+          logQuery={logQuery}
+          showOnlyErrorLogs={showOnlyErrorLogs}
+          copiedLogAction={copiedLogAction}
+          sourceState={sourceStates.devLogs}
+          setSelectedLogKey={setSelectedLogKey}
+          setLogQuery={setLogQuery}
+          setShowOnlyErrorLogs={setShowOnlyErrorLogs}
+          copySelectedLog={() => {
+            void copySelectedLog();
+          }}
+          copyVisibleLogs={() => {
+            void copyVisibleLogs();
+          }}
+          copyErrorLogs={() => {
+            void copyErrorLogs();
+          }}
+          copyLogField={(label, value) => {
+            void copyLogField(label, value);
+          }}
+          onExportLogs={onExportLogs}
+        />
+      )}
+
+      {activeSection === 'workers' && (
         <DevtoolsWorkerSection
           copiedWorkerAction={copiedWorkerAction}
           filteredWorkers={filteredWorkers}
@@ -942,33 +915,7 @@ export function DevtoolsTabContent({
           workerQuery={workerQuery}
           workers={workers}
         />
-      </section>
-
-      <section ref={sshSectionRef} style={SS}>
-        <h3 style={ST}>SSH 远程连接</h3>
-        {sourceStates.sshConnections.status === 'error' && sourceStates.sshConnections.error && (
-          <InlineFailureNotice
-            title="SSH 连接加载失败"
-            message={sourceStates.sshConnections.error}
-          />
-        )}
-        <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-          管理远程 SSH 连接
-          {sshConnections.length > 0 && (
-            <span style={{ marginLeft: 4, color: 'var(--accent)' }}>
-              当前 {sshConnections.length} 个连接
-            </span>
-          )}
-        </div>
-        <div style={UV}>
-          <SSHConnectionPanel
-            connections={sshConnections}
-            onAdd={onAddSshConnection}
-            onConnect={onConnectSsh}
-            onDisconnect={onDisconnectSsh}
-          />
-        </div>
-      </section>
+      )}
     </>
   );
 }

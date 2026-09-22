@@ -2,7 +2,10 @@ import React, { memo, useEffect, useState } from 'react';
 import { getLocalReasoningLabel } from './assistant-reasoning-block.helpers.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
-/** 流式与静态折叠共用的最大行数：保证 finalize 前后渲染高度一致，不产生跳动 */
+/**
+ * 流式与静态折叠共用的窗口行数：保证 finalize 前后渲染高度一致，不产生跳动。
+ * 折叠窗口取**末尾** N 行（见 `bodyStyle`），流式期间因此始终能看到最新思考内容。
+ */
 const REASONING_COLLAPSED_MAX_LINES = 3;
 
 function computeClampedBodyMaxHeight(lines: number): string {
@@ -81,11 +84,15 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   const showExpandButton = !expanded && isCollapsible;
   const showCollapseButton = expanded && isCollapsible;
 
-  // 折叠态不做自动跟随滚动：滚动位置会随流式更新变化，finalize 时又从"最后 3 行"
-  // 跳回"前 3 行"，与静态渲染不一致。流式与静态统一显示前 3 行。
+  // 折叠窗口是"贴底窗口"：`column-reverse` 把内容钉在容器底部，超出部分从**顶部**
+  // 裁掉，因此折叠预览始终落在最新的 N 行上 —— 流式期间新内容自动进入可见区
+  // （无需 JS 跟随滚动 / 无滚动位置跳变），用户手动收起后看到的也是最新思考。
+  // 流式与静态共用同一布局，finalize 时不会出现"末 N 行 → 前 N 行"的跳动。
   const bodyStyle: React.CSSProperties | undefined = shouldCollapse
     ? {
         maxHeight: computeClampedBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
+        display: 'flex',
+        flexDirection: 'column-reverse',
         overflow: 'clip',
         position: 'relative',
       }
@@ -97,6 +104,7 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
       data-streaming={streaming ? 'true' : 'false'}
       data-ended={ended ? 'true' : undefined}
       data-collapsed={shouldCollapse ? 'true' : undefined}
+      data-collapsed-window={shouldCollapse ? 'tail' : undefined}
       data-duration-ms={typeof durationMs === 'number' ? String(durationMs) : undefined}
     >
       <span className="assistant-reasoning-label">{label}</span>

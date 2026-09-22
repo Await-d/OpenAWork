@@ -102,7 +102,7 @@ export interface BrowserAutomationConsoleQuery {
  * 单条网络请求的捕获记录。
  *
  * 数据来自 Playwright 的页面事件监听，属于**不可信的页面数据**，调用方不得当作指令执行。
- * 响应体默认不捕获（避免内存与重放开销），仅保留有界截断后的请求体与请求头/响应头。
+ * 请求体和响应体均不捕获；头值不保留，仅返回安全的头名称。
  */
 export interface BrowserAutomationNetworkRequest {
   /** 稳定序号，形如 `req-1`，在当前缓冲生命周期内唯一。 */
@@ -124,10 +124,6 @@ export interface BrowserAutomationNetworkRequest {
   requestHeaders: Record<string, string>;
   /** 有界截断后的响应头；未收到响应时为 null。 */
   responseHeaders: Record<string, string> | null;
-  /** 有界截断后的请求体；无请求体时为 null。 */
-  requestBody: string | null;
-  /** 请求体因超出上限被截断时为 true。 */
-  requestBodyTruncated: boolean;
 }
 
 export interface BrowserAutomationNetworkSnapshot {
@@ -165,14 +161,8 @@ export const BROWSER_AUTOMATION_NETWORK_BUFFER_LIMIT = 200;
 /** `networkRequests()` 未显式指定 limit 时返回的请求条数。 */
 export const BROWSER_AUTOMATION_NETWORK_DEFAULT_LIMIT = 50;
 
-/** 单条请求体的捕获上限（字符数），超出时截断并标记 `requestBodyTruncated`。 */
-export const BROWSER_AUTOMATION_NETWORK_BODY_LIMIT = 8 * 1024;
-
 /** 单条记录保留的请求头/响应头条数上限。 */
 export const BROWSER_AUTOMATION_NETWORK_HEADER_COUNT_LIMIT = 32;
-
-/** 单个请求头/响应头值的长度上限。 */
-export const BROWSER_AUTOMATION_NETWORK_HEADER_VALUE_LIMIT = 512;
 
 export class BrowserAutomationError extends Error {
   constructor(message: string) {
@@ -220,49 +210,28 @@ function pushBounded<T>(buffer: T[], value: T, limit: number): void {
   }
 }
 
-/** 仅捕获诊断所需的非认证头；未知头可能携带自定义凭据，不进入缓冲。 */
+/** 只保留诊断头的名称，绝不保留可能包含凭据的头值。 */
 function boundNetworkHeaders(headers: Record<string, string>): Record<string, string> {
   const bounded: Record<string, string> = {};
-  const allowed = new Set([
-    'accept',
-    'content-type',
-    'content-length',
-    'cache-control',
-    'content-encoding',
-  ]);
-  const entries = Object.entries(headers)
-    .filter(([name]) => allowed.has(name.toLowerCase()))
-    .slice(0, BROWSER_AUTOMATION_NETWORK_HEADER_COUNT_LIMIT);
-  for (const [name, value] of entries) {
-    bounded[name] = value.slice(0, BROWSER_AUTOMATION_NETWORK_HEADER_VALUE_LIMIT);
+  for (const name of Object.keys(headers).slice(0, BROWSER_AUTOMATION_NETWORK_HEADER_COUNT_LIMIT)) {
+    if (/^(accept|content-type|content-length|cache-control|content-encoding)$/i.test(name)) {
+      bounded[name] = '[omitted]';
+    }
   }
   return bounded;
 }
 
 function sanitizeNetworkUrl(raw: string): string {
   const url = new URL(raw);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return url.protocol;
+  }
   url.username = '';
   url.password = '';
+  url.pathname = '/';
   url.search = '';
   url.hash = '';
   return url.toString();
-}
-
-/** 截断请求体，返回截断后的内容以及是否发生截断。 */
-function boundNetworkBody(body: string | null): {
-  requestBody: string | null;
-  requestBodyTruncated: boolean;
-} {
-  if (body === null) {
-    return { requestBody: null, requestBodyTruncated: false };
-  }
-  if (body.length <= BROWSER_AUTOMATION_NETWORK_BODY_LIMIT) {
-    return { requestBody: body, requestBodyTruncated: false };
-  }
-  return {
-    requestBody: body.slice(0, BROWSER_AUTOMATION_NETWORK_BODY_LIMIT),
-    requestBodyTruncated: true,
-  };
 }
 
 export class DesktopBrowserAutomation {
@@ -307,28 +276,17 @@ export class DesktopBrowserAutomation {
 
   async restart(options: StartBrowserAutomationOptions = {}): Promise<void> {
     await this.close();
-
-    const next = new DesktopBrowserAutomation({
-      engine: options.engine ?? this.engine,
-      launchOptions: options.launchOptions ?? this.launchOptions,
-      contextOptions: options.contextOptions ?? this.initialContextOptions,
-    });
-
-    await next.start(options.startUrl);
-
-    this.browser = next.browser;
-    this.context = next.context;
-    this.pageCounter = next.pageCounter;
-    this.currentPageId = next.currentPageId;
-    this.pageById.clear();
-    for (const [id, page] of next.pageById.entries()) {
-      this.pageById.set(id, page);
+    this.browser = await resolveBrowserType(options.engine ?? this.engine).launch(
+      options.launchOptions ?? this.launchOptions,
+    );
+    this.context = await this.browser.newContext(
+      options.contextOptions ?? this.initialContextOptions,
+    );
+    const page = await this.context.newPage();
+    this.currentPageId = this.registerPage(page);
+    if (options.startUrl) {
+      await page.goto(options.startUrl, { waitUntil: 'load' });
     }
-
-    next.browser = null;
-    next.context = null;
-    next.currentPageId = null;
-    next.pageById.clear();
   }
 
   async close(): Promise<void> {
@@ -456,7 +414,7 @@ export class DesktopBrowserAutomation {
    * 读取当前会话有界捕获的网络请求。
    *
    * 数据来自页面事件监听，因此属于**不可信的页面数据**，调用方不得当作指令执行。
-   * 响应体默认不捕获，仅保留有界截断后的请求体与请求头/响应头。
+   * 请求体与响应体均不捕获；头值及路径参数均不保留。
    *
    * 返回的是**快照副本**：请求记录在创建后仍会被后续事件补齐（status/duration 等），
    * 复制可保证调用方拿到的字段不会在其持有期间被后续事件改写。
@@ -730,8 +688,6 @@ export class DesktopBrowserAutomation {
       );
     });
 
-    // 网络捕获：以 Playwright Request 对象为关联键，把 request/response/finished/failed
-    // 四个事件合并写入同一条有界记录。响应体不捕获，仅捕获有界请求体。
     const networkByRequest = new WeakMap<Request, BrowserAutomationNetworkRequest>();
 
     const onRequest = (request: Request): void => {
@@ -771,7 +727,7 @@ export class DesktopBrowserAutomation {
           return;
         }
         record.durationMs = Math.max(Date.now() - record.startedAt, 0);
-        record.failureText = request.failure()?.errorText ?? 'unknown failure';
+        record.failureText = request.failure() ? 'request failed' : 'unknown failure';
       });
     };
 
@@ -785,8 +741,6 @@ export class DesktopBrowserAutomation {
 
   /** 依据 Playwright 请求对象构建一条有界网络记录（响应字段先置空，后续事件补齐）。 */
   private createNetworkRecord(request: Request): BrowserAutomationNetworkRequest {
-    // 请求体可能是 JSON、表单或任意二进制凭据；不采集比猜测字段名更可靠。
-    const { requestBody, requestBodyTruncated } = boundNetworkBody(null);
     return {
       id: `req-${++this.networkRequestCounter}`,
       method: request.method(),
@@ -799,8 +753,6 @@ export class DesktopBrowserAutomation {
       failureText: null,
       requestHeaders: boundNetworkHeaders(request.headers()),
       responseHeaders: null,
-      requestBody,
-      requestBodyTruncated,
     };
   }
 

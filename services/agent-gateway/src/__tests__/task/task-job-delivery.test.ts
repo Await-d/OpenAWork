@@ -192,6 +192,16 @@ describe('deliverTaskCompletion', () => {
     expect(taskJob.pendingBackground()).toHaveLength(0);
   });
 
+  it('resume:false 的通知已存在时仍清理待交付记录', async () => {
+    seedPersistedJob('task-job:notif-cancel');
+    await deliver('task-job:notif-cancel', false);
+    seedPersistedJob('task-job:notif-cancel');
+    const result = await deliver('task-job:notif-cancel', false);
+    expect(result.created).toBe(false);
+    expect(taskJob.pendingBackground()).toHaveLength(0);
+    expect(mocks.continueSessionFromHistory).not.toHaveBeenCalled();
+  });
+
   it('父会话繁忙：留库待消费，不注册重试、不清理记录（供恢复扫描补偿）', async () => {
     seedPersistedJob('task-job:notif-busy');
     mocks.getAnyInFlightStreamRequestForSession.mockReturnValue({ clientRequestId: 'in-flight' });

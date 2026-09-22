@@ -244,7 +244,11 @@ import {
   resolveInheritedParentModel,
   resolveSubagentModelPolicyForUser,
 } from '../task/subagent-model-policy.js';
-import { settle as settleTaskJob, start as startTaskJob } from '../task/task-job.js';
+import {
+  get as getTaskJob,
+  settle as settleTaskJob,
+  startBackground as startBackgroundTaskJob,
+} from '../task/task-job.js';
 import {
   clearTaskParentContext,
   upsertTaskParentContext,
@@ -913,6 +917,17 @@ export async function terminateChildSession(input: {
     status: toolOutputStatus,
     taskId: taskEntry.id,
     timeoutSource: input.timeoutSource,
+    userId: input.userId,
+  });
+
+  await settleChildTaskNotification({
+    agent: taskEntry.assignedAgent ?? 'task',
+    childSessionId: input.childSessionId,
+    error: terminalErrorMessage,
+    parentSessionId: input.graphSessionId,
+    status: taskStatus,
+    taskTitle: taskEntry.title ?? taskEntry.id,
+    taskUpdatedAt: graph.tasks[input.taskId]?.updatedAt ?? Date.now(),
     userId: input.userId,
   });
 
@@ -4112,6 +4127,12 @@ async function executeGatewayManagedToolImpl(
         });
 
         if (shouldRunInBackground && childRequestData) {
+          registerBackgroundChildTask({
+            assignedAgent: resolvedAgent.agentId,
+            childSessionId,
+            parentSessionId: sessionId,
+            taskTitle: effectiveTaskDescription,
+          });
           setTimeout(() => {
             void runChildTaskSessionInBackground({
               assignedAgent: resolvedAgent.agentId,
@@ -4261,6 +4282,12 @@ async function executeGatewayManagedToolImpl(
       });
 
       if (shouldRunInBackground && childRequestData) {
+        registerBackgroundChildTask({
+          assignedAgent: resolvedAgent.agentId,
+          childSessionId,
+          parentSessionId: sessionId,
+          taskTitle: effectiveTaskDescription,
+        });
         setTimeout(() => {
           void runChildTaskSessionInBackground({
             assignedAgent: resolvedAgent.agentId,
@@ -4577,6 +4604,7 @@ async function executeGatewayManagedToolImpl(
         const result = await cancelBackgroundTaskEntry({
           graph,
           graphSessionId: sessionId,
+          taskManager,
           taskId,
           userId,
         });
@@ -5003,6 +5031,7 @@ async function cancelBackgroundTaskEntry(input: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   graphSessionId: string;
   reason?: ChildSessionTerminalReason;
+  taskManager: AgentTaskManagerImpl;
   taskId: string;
   userId: string;
 }): Promise<{
@@ -5061,6 +5090,8 @@ async function cancelBackgroundTaskEntry(input: {
     };
   }
 
+  await input.taskManager.save(input.graph);
+
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [childSessionId, input.userId],
@@ -5092,6 +5123,16 @@ async function cancelBackgroundTaskEntry(input: {
     taskId: taskEntry.id,
     userId: input.userId,
   });
+  await settleChildTaskNotification({
+    agent: taskEntry.assignedAgent ?? 'task',
+    childSessionId,
+    error: '子代理已被取消。',
+    parentSessionId: input.graphSessionId,
+    status: 'cancelled',
+    taskTitle: taskEntry.title ?? taskEntry.id,
+    taskUpdatedAt: input.graph.tasks[input.taskId]?.updatedAt ?? Date.now(),
+    userId: input.userId,
+  });
   publishSessionRunEvent(
     input.graphSessionId,
     buildTaskUpdateEvent({
@@ -5119,6 +5160,57 @@ async function cancelBackgroundTaskEntry(input: {
   };
 }
 
+async function settleChildTaskNotification(input: {
+  agent: string;
+  childSessionId: string;
+  error: string;
+  parentSessionId: string;
+  status: 'failed' | 'cancelled';
+  taskTitle: string;
+  taskUpdatedAt: number;
+  userId: string;
+}): Promise<void> {
+  const notificationId = buildTaskJobNotificationId({
+    childSessionId: input.childSessionId,
+    taskUpdatedAt: input.taskUpdatedAt,
+  });
+  settleTaskJob(input.childSessionId, {
+    notificationId,
+    status: input.status === 'cancelled' ? 'cancelled' : 'error',
+    error: input.error,
+  });
+  await deliverTaskCompletion({
+    agent: input.agent,
+    childSessionId: input.childSessionId,
+    description: input.taskTitle,
+    notificationId,
+    parentSessionId: input.parentSessionId,
+    ...(input.status === 'cancelled' ? { resume: false } : {}),
+    state: input.status,
+    text: input.error,
+    userId: input.userId,
+  });
+}
+
+function registerBackgroundChildTask(input: {
+  assignedAgent: string;
+  childSessionId: string;
+  parentSessionId: string;
+  taskTitle: string;
+}): void {
+  startBackgroundTaskJob({
+    id: input.childSessionId,
+    title: input.taskTitle,
+    recovery: {
+      kind: 'subagent',
+      parentSessionId: input.parentSessionId,
+      childSessionId: input.childSessionId,
+      agent: input.assignedAgent,
+      description: input.taskTitle,
+    },
+  });
+}
+
 async function runChildTaskSessionInBackground(input: {
   assignedAgent: string;
   childSessionId: string;
@@ -5139,19 +5231,20 @@ async function runChildTaskSessionInBackground(input: {
   const firstResponseTimeoutMs = getTaskChildFirstResponseTimeoutMs();
   const firstResponseRetryMaxRetries = getTaskChildFirstResponseRetryMaxRetries(input.requestData);
 
-  // TaskJob 旁路登记（Phase 1：只落状态，不改变任何既有行为）。
-  // 上游以 Job 注册表承载子代理生命周期；这里先让状态可见，交付层在后续阶段接入。
-  startTaskJob({
-    id: input.childSessionId,
-    title: input.taskTitle,
-    recovery: {
-      kind: 'subagent',
-      parentSessionId: input.parentSessionId,
-      childSessionId: input.childSessionId,
-      agent: input.assignedAgent,
-      description: input.taskTitle,
-    },
-  });
+  const existingJob = getTaskJob(input.childSessionId);
+  if (existingJob && existingJob.status !== 'running') {
+    return;
+  }
+  const graph = await loadTaskGraphForSession(taskManager, input.parentSessionId);
+  if (
+    graph.tasks[input.childTaskId]?.status !== 'running' ||
+    (existingJob && getTaskJob(input.childSessionId)?.status !== 'running')
+  ) {
+    return;
+  }
+  if (!existingJob) {
+    registerBackgroundChildTask(input);
+  }
 
   try {
     const { runSessionInBackground } = await import('../routes/stream-runtime.js');
@@ -5326,7 +5419,13 @@ function isIgnorableChildFinalizeError(error: unknown): boolean {
   }
 
   return (
+    // 关库竞态：后台终结算器可能晚于 `closeDb()` 执行（网关关停 / 验收脚本收尾）。
+    // ⚠️ 各运行时的措辞不同，必须都覆盖——只匹配一种会让「容忍」在另一种运行时**形同虚设**：
+    //   - `database is not open`：旧运行时（迁移前）的措辞，保留兼容；
+    //   - `Cannot use a closed database`：**bun:sqlite 的实际措辞**（迁移后曾漏配，
+    //     导致本该被吞掉的竞态照样以 unhandled rejection 抛出、进程退出码为 1）。
     error.message.includes('database is not open') ||
+    error.message.includes('Cannot use a closed database') ||
     (typeof (error as { code?: unknown }).code === 'string' &&
       (error as { code?: string }).code === 'ERR_INVALID_STATE')
   );
@@ -5386,10 +5485,41 @@ async function finalizeChildTaskRun(input: {
   }
 
   if (task.status === 'cancelled' || task.status === 'failed' || task.status === 'completed') {
-    await input.taskManager.save(graph);
     const assignedAgent = task.assignedAgent ?? input.assignedAgent;
     const terminalOutputStatus = mapTaskStatusToToolOutputStatus(task.status);
     const terminalUpdateStatus = mapTaskStatusToUpdateStatus(task.status);
+    const notificationId = buildTaskJobNotificationId({
+      childSessionId: input.childSessionId,
+      taskUpdatedAt: task.updatedAt,
+    });
+    settleTaskJob(input.childSessionId, {
+      notificationId,
+      status:
+        task.status === 'completed'
+          ? 'completed'
+          : task.status === 'failed'
+            ? 'error'
+            : 'cancelled',
+      ...(task.result ? { output: task.result } : {}),
+      ...(task.errorMessage ? { error: task.errorMessage } : {}),
+    });
+    await input.taskManager.save(graph);
+    await deliverTaskCompletion({
+      agent: assignedAgent,
+      childSessionId: input.childSessionId,
+      description: input.taskTitle,
+      notificationId,
+      parentSessionId: input.parentSessionId,
+      ...(task.status === 'cancelled' ? { resume: false } : {}),
+      state:
+        task.status === 'completed' ? 'done' : task.status === 'failed' ? 'failed' : 'cancelled',
+      text: buildTaskJobNoticeText({
+        errorMessage: task.errorMessage,
+        result: task.result,
+        summary,
+      }),
+      userId: input.userId,
+    });
     const childMetadata = getSessionMetadata(input.childSessionId);
     const terminalReason = input.result.reason ?? readChildSessionTerminalReason(childMetadata);
     const timeoutSource = readChildSessionTimeoutSource(childMetadata);
@@ -5485,7 +5615,6 @@ async function finalizeChildTaskRun(input: {
     });
   }
 
-  await input.taskManager.save(graph);
   const nextTask = graph.tasks[input.childTaskId];
   const eventStatus = mapTaskStatusToUpdateStatus(nextTask?.status ?? task.status);
   const nextAssignedAgent = nextTask?.assignedAgent ?? input.assignedAgent;
@@ -5511,6 +5640,7 @@ async function finalizeChildTaskRun(input: {
       ...(nextTask?.errorMessage ? { error: nextTask.errorMessage } : {}),
     });
   }
+  await input.taskManager.save(graph);
   syncParentTaskToolResult({
     assignedAgent: nextAssignedAgent,
     category: input.taskCategory,

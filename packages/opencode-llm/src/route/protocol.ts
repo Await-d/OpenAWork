@@ -61,8 +61,16 @@ export interface ProtocolStream<Frame, Event, State> {
   ) => Effect.Effect<readonly [State, ReadonlyArray<LLMEvent>], LLMError>;
   /** Optional request-completion signal for transports that do not end naturally. */
   readonly terminal?: (event: Event) => boolean;
-  /** Optional flush emitted when the framed stream ends. */
-  readonly onHalt?: (state: State) => ReadonlyArray<LLMEvent>;
+  /**
+   * Optional flush emitted when the framed stream ends.
+   *
+   * Returns an Effect so a protocol can **fail** the stream when it ended
+   * without a proper terminal event (e.g. OpenAI Chat finishing without
+   * `finish_reason` → `incomplete-stream`) — aligned with the opencode
+   * reference implementation. A plain array is no longer accepted: callers
+   * that never fail use `Effect.succeed`.
+   */
+  readonly onHalt?: (state: State) => Effect.Effect<ReadonlyArray<LLMEvent>, LLMError>;
 }
 
 /**

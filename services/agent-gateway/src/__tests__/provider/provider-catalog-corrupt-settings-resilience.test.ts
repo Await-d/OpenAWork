@@ -2,7 +2,7 @@
  * Regression (§0.116, provider-catalog corrupt-settings tolerance):
  * loadRawSettings reads the `providers` / `active_selection` user_settings rows
  * and parsed each with an unguarded JSON.parse. getCatalog sits on the main
- * chat stream path (stream.ts → getFastProvider / getProviderForSelection), so
+ * chat stream path (stream.ts → getProviderForSelection), so
  * a single corrupt provider row threw straight out and hard-failed EVERY chat
  * turn for that user. The parse now degrades a corrupt value to null — the same
  * path as a missing row, which getCatalog already handles by building a default

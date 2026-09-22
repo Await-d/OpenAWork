@@ -456,6 +456,10 @@ function makeMapper(
       }
       case 'provider-error':
         diagnostics.sawError = true;
+        // provider-error 是终态（对齐 opencode 的 `providerFailed` 语义）：
+        // 标记 done 后，流尾部的「无终态事件」兜底检查不会再叠加一条
+        // 误导性的 STREAM_STALL（例如「无 finish_reason 的不完整流」场景）。
+        state.doneEmitted = true;
         input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
         return [
           {
