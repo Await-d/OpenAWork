@@ -95,18 +95,31 @@ done
 
 # Write sync manifest
 SYNC_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-cat > "$SYNC_MANIFEST" <<EOF
-{
-  "upstream": "$REPO_URL",
-  "branch": "$BRANCH",
-  "commit": "$COMMIT_SHA",
-  "syncedAt": "$SYNC_TIME",
-  "skills": [
-$(printf '    "%s",\n' ${synced[@]+"${synced[@]}"} | sed '$ s/,$//')
-  ],
-  "skipped": [$(if [ ${#skipped[@]} -gt 0 ]; then echo ""; printf '    "%s",\n' "${skipped[@]}"; echo "  "; fi])
+
+# Render a bash array as a compact JSON array ([] when empty).
+to_json_array() {
+  if [ "$#" -eq 0 ]; then
+    printf '[]'
+    return 0
+  fi
+  printf '%s\n' "$@" | jq -R . | jq -s -c .
 }
-EOF
+
+jq -n \
+  --arg upstream "$REPO_URL" \
+  --arg branch "$BRANCH" \
+  --arg commit "$COMMIT_SHA" \
+  --arg syncedAt "$SYNC_TIME" \
+  --argjson skills "$(to_json_array ${synced[@]+"${synced[@]}"})" \
+  --argjson skipped "$(to_json_array ${skipped[@]+"${skipped[@]}"})" \
+  '{
+    upstream: $upstream,
+    branch: $branch,
+    commit: $commit,
+    syncedAt: $syncedAt,
+    skills: $skills,
+    skipped: $skipped
+  }' > "$SYNC_MANIFEST"
 
 echo ""
 echo "==> Done! Synced ${#synced[@]} skills, skipped ${#skipped[@]}"

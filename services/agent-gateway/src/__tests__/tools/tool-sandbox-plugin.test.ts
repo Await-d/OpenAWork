@@ -14,6 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as DesktopAutomationModule from '../../tools/desktop-automation.js';
 
 const mocks = vi.hoisted(() => ({
   callMcpToolForSessionMock: vi.fn(),
@@ -21,15 +22,23 @@ const mocks = vi.hoisted(() => ({
   getConfiguredMcpServerForSessionMock: vi.fn(),
   getMcpServerFingerprintMock: vi.fn(() => 'fp'),
   sqliteAllMock: vi.fn(() => []),
-  sqliteGetMock: vi.fn((query: string) => {
-    if (query.includes('SELECT user_id FROM sessions')) {
-      return { user_id: 'user-1' };
-    }
-    if (query.includes('SELECT metadata_json')) {
-      return { metadata_json: '{"yoloMode":true}' };
-    }
-    return undefined;
-  }),
+  runDesktopAutomationToolMock: vi.fn(),
+  // 显式返回类型：mock 的推断类型由此处决定，必须覆盖所有会在
+  // `mockImplementation` 覆盖里出现的形状（否则 TS2345）。加类型标注
+  // 而不是加分支——分支会改变其它用例的运行时行为。
+  sqliteGetMock: vi.fn(
+    (
+      query: string,
+    ): { user_id: string } | { metadata_json: string } | { value: string } | undefined => {
+      if (query.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
+      if (query.includes('SELECT metadata_json')) {
+        return { metadata_json: '{"yoloMode":true}' };
+      }
+      return undefined;
+    },
+  ),
   sqliteRunMock: vi.fn(),
 }));
 
@@ -49,6 +58,16 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
   getConfiguredMcpServerForSession: mocks.getConfiguredMcpServerForSessionMock,
   getMcpServerFingerprint: mocks.getMcpServerFingerprintMock,
 }));
+
+// 运行环境层关闭时 `runDesktopAutomationTool` 会抛错；这里只替换执行函数，
+// 其余导出（如 toolDefinition）保持真实。
+vi.mock('../../tools/desktop-automation.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof DesktopAutomationModule>();
+  return {
+    ...actual,
+    runDesktopAutomationTool: mocks.runDesktopAutomationToolMock,
+  };
+});
 
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 import { _registerPluginForTest, _resetPluginsForTest } from '../../runtime/plugin-host.js';
@@ -240,5 +259,74 @@ describe('tool-sandbox plugin hook integration (PR-D-Plugin)', () => {
         ([query]) => typeof query === 'string' && query.includes('permission_requests'),
       ),
     ).toBe(false);
+  });
+
+  it('desktop_automation is rejected before permission when the plugin is disabled', async () => {
+    const sandbox = createDefaultSandbox();
+
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-desktop-automation-disabled',
+        toolName: 'desktop_automation',
+        rawInput: { action: 'status' },
+      },
+      new AbortController().signal,
+      'session-1',
+      {
+        clientRequestId: 'req-desktop-automation-disabled',
+        nextRound: 1,
+        requestData: { clientRequestId: 'req-desktop-automation-disabled' },
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      '浏览器自动化插件未启用。请在设置 → 插件中启用后再使用 desktop_automation。',
+    );
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('permission_requests'),
+      ),
+    ).toBe(false);
+  });
+
+  it('desktop_automation 运行环境关闭时以工具错误返回，不穿透打断回合', async () => {
+    // 插件开关放行（否则会先被用户级门控拒绝，测不到运行环境层）。
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('SELECT user_id FROM sessions')) {
+        return { user_id: 'user-1' };
+      }
+      if (query.includes('SELECT metadata_json')) {
+        return { metadata_json: '{"yoloMode":true}' };
+      }
+      if (query.includes('user_settings')) {
+        return { value: JSON.stringify({ desktopAutomation: { enabled: true } }) };
+      }
+      return undefined;
+    });
+    mocks.runDesktopAutomationToolMock.mockRejectedValue(
+      new Error('desktop-only automation is disabled in this runtime'),
+    );
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-desktop-automation-runtime-off',
+        toolName: 'desktop_automation',
+        rawInput: { action: 'goto', url: 'https://example.test' },
+      },
+      new AbortController().signal,
+      'session-1',
+      {
+        clientRequestId: 'req-desktop-automation-runtime-off',
+        nextRound: 1,
+        requestData: { clientRequestId: 'req-desktop-automation-runtime-off' },
+      },
+    );
+
+    // 关键：异常被捕获成结构化错误，而不是抛出打断整个工具回合。
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('desktop-only automation is disabled');
   });
 });

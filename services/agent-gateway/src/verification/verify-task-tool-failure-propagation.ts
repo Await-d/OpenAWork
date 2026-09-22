@@ -54,7 +54,13 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+              // 父会话置为**非空闲**：本脚本关注的是「子代理失败向上传播」，与唤醒无关。
+              // 若父会话空闲，子代理结算会**同步唤醒**父会话（单通道交付，见
+              // `task/task-job-delivery.ts`），其后台流会与脚本收尾竞态——脚本关库后
+              // 该流仍在 flush 运行事件 → `Database has closed` → 退出码 1（断言其实已全过）。
+              // 非空闲时唤醒按设计「留库待消费」（通知照常注入，断言不受影响），
+              // 与 `verify-task-tool-auto-run.ts` 的既有隔离手法一致。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
               [parentSessionId, userId],
             );
 
@@ -116,13 +122,8 @@ async function main(): Promise<void> {
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentToolMessage = parentMessages.find((message) => message.role === 'tool');
-            const parentReminder = parentMessages.find((message) => {
-              if (message.role !== 'assistant') {
-                return false;
-              }
-              const text = readSingleTextMessage(message);
-              return text.includes('子代理失败 · 让子代理触发失败');
-            });
+            // 完成提示现由**合成通知**承载（T-27 已移除 assistant_event 卡片生产者）。
+            const parentNotice = parentMessages.find((message) => message.role === 'synthetic');
             assert(
               parentToolMessage?.role === 'tool',
               'parent session should persist a tool_result',
@@ -144,25 +145,16 @@ async function main(): Promise<void> {
               'parent tool_result should expose the user-facing child error summary',
             );
 
-            const reminderText = readSingleTextMessage(
-              parentReminder as { content: Array<{ type: string; text?: string }> },
-            );
-            const reminderPayload = JSON.parse(reminderText) as {
-              payload?: { message?: string; status?: string; title?: string };
-              type?: string;
-            };
-            assert(
-              reminderPayload.type === 'assistant_event',
-              'failure reminder should be assistant_event',
+            const noticeText = readSingleTextMessage(
+              parentNotice as { content: Array<{ type: string; text?: string }> },
             );
             assert(
-              reminderPayload.payload?.status === 'error',
-              'failure reminder should be marked error',
+              noticeText.includes(EXPECTED_USER_FACING_ERROR),
+              'failure notice should include the user-facing error summary',
             );
             assert(
-              reminderPayload.payload?.message?.includes(`错误：${EXPECTED_USER_FACING_ERROR}`) ===
-                true,
-              'failure reminder should include the user-facing error summary',
+              parentNotice?.metadata?.['state'] === 'failed',
+              'failure notice metadata should mark failed state',
             );
 
             console.log('verify-task-tool-failure-propagation: ok');

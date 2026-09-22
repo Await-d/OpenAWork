@@ -90,4 +90,16 @@ export class OpenAIProvider extends BaseProvider {
     const visionModels = ['gpt-4', 'gpt-4o', 'gpt-5'];
     return visionModels.some((prefix) => modelId.startsWith(prefix));
   }
+
+  /**
+   * 检查模型是否支持 GUI grounding（能输出可直接执行的屏幕坐标）
+   *
+   * 语义说明：GUI grounding ≠ 视觉能力。具备视觉的模型不一定能输出坐标，
+   * 因此这里不复用 supportsVision 的宽泛前缀判断，而是采用保守的显式白名单，
+   * 默认返回 false，仅对确知具备 grounding 能力的模型返回 true。
+   */
+  supportsGuiGrounding(modelId: string): boolean {
+    // 目前仅 OpenAI 的 computer-use-preview 系列模型明确具备 GUI grounding 能力。
+    return modelId.startsWith('computer-use-preview');
+  }
 }

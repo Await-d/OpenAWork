@@ -76,10 +76,14 @@ import {
   validateSessionMetadataPatch,
 } from '../session/session-workspace-metadata.js';
 import { getSshService } from '../ssh/ssh-service.js';
+import { renameSessionTitle } from '../session/session-title.js';
+import {
+  SESSION_WORKSPACE_IMMUTABLE_ERROR,
+  warpSessionWorkspace,
+} from '../session/session-workspace-warp.js';
 import { filterSessionsByPath } from '../session/session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
-import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
 import { stopDirectChildSessions } from '../session/stop-child-sessions.js';
 import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
@@ -1098,7 +1102,6 @@ async function deleteSessionTree(input: {
         sessionId: session.id,
         userId: input.userId,
       });
-      clearPendingTaskParentAutoResumesForSession({ sessionId: session.id, userId: input.userId });
       // Purge per-session in-memory state that keys on sessionId. These maps
       // never evict on their own, so without this a deleted session leaks one
       // entry per map for the process lifetime (unbounded over many sessions).
@@ -1296,7 +1299,6 @@ const SESSION_ROUTE_ERROR_MESSAGES = {
   taskNotFound: '目标任务不存在。',
   workspaceForbidden: '工作区路径不在允许范围内。',
 } as const;
-const SESSION_WORKSPACE_IMMUTABLE_ERROR = '当前会话已绑定工作区，不能直接修改。';
 const SESSION_PARENT_IMMUTABLE_ERROR = '当前会话已绑定父会话，不能直接修改。';
 
 async function reconcileSessionRuntimeForResponse(
@@ -3187,16 +3189,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         pendingSshConnectionId = extractSessionSshConnectionId(normalizedMetadata.metadata);
       }
 
-      if (body.title !== undefined && nextMetadataJson !== null) {
-        sqliteRun(
-          "UPDATE sessions SET title = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [body.title, nextMetadataJson, sessionId, user.sub],
-        );
-      } else if (body.title !== undefined) {
-        sqliteRun(
-          "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [body.title, sessionId, user.sub],
-        );
+      if (body.title !== undefined) {
+        renameSessionTitle({
+          sessionId,
+          userId: user.sub,
+          title: body.title,
+          metadataJson: nextMetadataJson,
+        });
       } else if (nextMetadataJson !== null) {
         sqliteRun(
           "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
@@ -3259,102 +3258,39 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       });
       const body = parseBody(patchWorkspaceSchema, request.body);
 
-      const session = sqliteGet<SessionRow>(
-        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [sessionId, user.sub],
-      );
-      if (!session) {
-        throw ApiError.notFound('目标会话不存在。');
-      }
+      const warpResult = warpSessionWorkspace({
+        sessionId,
+        userId: user.sub,
+        workingDirectory: body.workingDirectory,
+        force: body.force === true,
+        onSshUnbindWarning: (error) => {
+          request.log.warn({ err: error }, 'session warp: ssh unbind failed');
+        },
+      });
 
-      const metadata = parseSessionMetadataJson(session.metadata_json);
-      const currentWorkingDirectory = extractSessionWorkingDirectory(metadata);
-      // SSH 会话语义：warp 目标只能是「本地目录」或「解绑」——这两种操作都
-      // 意味着离开 SSH 工作区，因此成功后同步清除 sshConnectionId 并解绑。
-      const currentSshConnectionId = extractSessionSshConnectionId(metadata);
-      const isSshSession = currentSshConnectionId !== null;
-      const { workingDirectory, force } = body;
-      const isForcedWarp = force === true;
-      let safeWorkingDirectory: string | null = null;
-      if (workingDirectory === null) {
-        if (!isForcedWarp && !isSshSession && isSessionWorkspaceRebindingAttempt(metadata, null)) {
-          step.fail('workspace immutable');
-          return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
-        }
-        delete metadata['workingDirectory'];
-        if (isSshSession) {
-          delete metadata['sshConnectionId'];
-        }
-      } else {
-        safeWorkingDirectory = validateWorkspacePath(workingDirectory);
-        if (!safeWorkingDirectory) {
+      switch (warpResult.kind) {
+        case 'not_found':
+          throw ApiError.notFound('目标会话不存在。');
+        case 'forbidden_path': {
           const pathStep = child('path-safety');
           pathStep.fail('forbidden path');
           step.fail('forbidden path');
           return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
         }
-
-        if (
-          !isForcedWarp &&
-          !isSshSession &&
-          isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)
-        ) {
+        case 'immutable':
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
-        }
-
-        metadata['workingDirectory'] = safeWorkingDirectory;
-        if (isSshSession) {
-          delete metadata['sshConnectionId'];
-        }
+        case 'unchanged':
+          step.succeed(undefined, { unchanged: true });
+          return reply.send({ ok: true, workingDirectory: warpResult.workingDirectory });
+        case 'warped':
+          step.succeed(undefined, warpResult.forced ? { warped: true } : undefined);
+          return reply.send({
+            ok: true,
+            workingDirectory: warpResult.workingDirectory,
+            ...(warpResult.forced ? { warped: true } : {}),
+          });
       }
-      if (currentWorkingDirectory === safeWorkingDirectory) {
-        step.succeed(undefined, { unchanged: true });
-        return reply.send({ ok: true, workingDirectory: currentWorkingDirectory });
-      }
-
-      // Append a warp-history entry whenever we accept a forced rebind
-      // so future audits can reconstruct which workspaces the session
-      // has visited. We never throw on a malformed history blob — it
-      // is purely additive metadata.
-      if (isForcedWarp && currentWorkingDirectory !== null) {
-        const existing = metadata['workspaceWarpHistory'];
-        const history = Array.isArray(existing) ? [...existing] : [];
-        history.push({
-          from: currentWorkingDirectory,
-          to: safeWorkingDirectory,
-          at: new Date().toISOString(),
-        });
-        // Cap the history to a reasonable size so a runaway script
-        // can't unbound-grow the metadata blob.
-        const TRIM = 50;
-        metadata['workspaceWarpHistory'] = history.slice(-TRIM);
-      }
-
-      sqliteRun(
-        "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-        [JSON.stringify(metadata), sessionId, user.sub],
-      );
-
-      // 离开 SSH 工作区后解除会话↔连接绑定（内存 registry + 持久层），
-      // 避免后续工具调用继续被路由到远端。best-effort，不阻断 warp 结果。
-      if (currentSshConnectionId) {
-        try {
-          getSshService().unbindSession(user.sub, sessionId);
-        } catch (error) {
-          request.log.warn({ err: error }, 'session warp: ssh unbind failed');
-        }
-      }
-
-      step.succeed(undefined, isForcedWarp ? { warped: true } : undefined);
-      // Workspace warp may have introduced a new working directory.
-      // Refresh the per-user allowlist cache.
-      invalidateUserWorkspaceAllowlist(user.sub);
-      return reply.send({
-        ok: true,
-        workingDirectory: safeWorkingDirectory,
-        ...(isForcedWarp ? { warped: true } : {}),
-      });
     },
   );
 

@@ -188,7 +188,7 @@ const OWNER_SCAN_IO_TIMEOUT_MS = 1_000;
 /**
  * 归属回溯的深度上限（从监听进程起最多向上检查 8 层祖先）。
  *
- * `npm run dev` / `pnpm exec vite` 这类监听者不是终端 shell 本身，而是它的
+ * `npm run dev` / `bunx vite` 这类监听者不是终端 shell 本身，而是它的
  * 1–2 层后代（shell → 包管理器 → runner → 实际 server）；再加上 `sh -c`
  * 包装，4–5 层也绰绰有余。取 8 是「覆盖常见链」与「每个端口最多 8 次
  * /proc/<pid>/stat 读取」之间的折中；超过上限一律返回 null —— 宁可没有归属，

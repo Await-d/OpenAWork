@@ -184,7 +184,7 @@ export function getToolCategory(toolName: string): string | undefined {
     n === 'write' ||
     n === 'edit' ||
     n === 'multi_edit' ||
-    n === 'apply_patch' ||
+    n === 'patch' ||
     n === 'ast_grep_replace' ||
     n === 'workspace_create_directory' ||
     n === 'workspace_review_revert'

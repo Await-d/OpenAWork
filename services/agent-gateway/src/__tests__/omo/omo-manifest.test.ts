@@ -67,7 +67,7 @@ describe('OMO adapter manifest parser', () => {
       hooks: {
         PostToolUse: [
           {
-            matcher: '^(apply_patch|write)$',
+            matcher: '^(patch|write)$',
             hooks: [
               {
                 type: 'command',
@@ -120,7 +120,7 @@ describe('OMO adapter manifest parser', () => {
     });
     expect(hooks.hooks[0]).toEqual({
       event: 'PostToolUse',
-      matcher: '^(apply_patch|write)$',
+      matcher: '^(patch|write)$',
       commands: [
         {
           kind: 'command',

@@ -167,7 +167,7 @@ export function classifyCapabilityToolGroup(label: string): ChannelCapabilityToo
     case 'edit':
     case 'multi_edit':
     case 'write':
-    case 'apply_patch':
+    case 'patch':
     case 'workspace_review_status':
     case 'workspace_review_diff':
     case 'workspace_create_directory':

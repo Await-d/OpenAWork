@@ -3,7 +3,7 @@ import { useFileEditorContext } from '../../../../App.js';
 import { CopyBtn } from '../shared/copy-btn.js';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
-/* ── FileContentPreview (workspace_read_file / read) ── */
+/* ── FileContentPreview (read) ── */
 
 export interface FileContentLike {
   path: string;
@@ -16,7 +16,7 @@ export interface FileContentLike {
 }
 
 /**
- * Recognise a `workspace_read_file` / `read` output envelope. Conservative:
+ * Recognise a `read` output envelope. Conservative:
  * requires *both* `path` and `content` to be strings so we don't poach the
  * generic textPayload path used by webfetch / lsp_* / mcp_call etc. (they
  * only carry `output|content|text|message|result`, never `path`).

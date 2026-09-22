@@ -362,8 +362,12 @@ export interface CreateHandoffInput {
  *     （pm1-runner / artifact-chain / pm2-runner / watcher）；
  *   - `reception:` / `reception-client:` —— reception-orchestrator 无显式用户键时的兜底键；
  *   - `team-resume:` —— 团队恢复后台运行的请求键（team-resume-context）；
- *   - `task:` / `task-reminder:` / `task-auto-resume:` / `task-parent-decision:` ——
- *     task 子代理请求键、父任务完成提醒、父会话自动续跑 / 决策请求；
+ *   - `task:` / `task-job:` —— task 子代理请求键；`task-job:` 是单通道交付的合成通知身份
+ *     （`task-job:<childSessionId>:<taskUpdatedAt>`，同时用作唤醒请求的幂等键）；
+ *   - `task-reminder:` / `task-auto-resume:` / `task-parent-decision:` —— 父任务完成提醒、
+ *     父会话自动续跑 / 决策请求。**前两者已无生产者**（旧「伪造用户请求 + 定时重试」机制随单通道交付退役），
+ *     保留在此仅为**存量数据的只读兼容**：历史会话里这些 clientRequestId 仍需被识别为网关内部键。
+ *     `task-parent-decision:` 仍在生产（子代理中途停顿时由父代理决策）；
  *   - `command:` / `command-card:` / `loop:` / `ulw-verify:` / `permission:` ——
  *     斜杠命令运行、命令卡片、命令循环、ULW 验证与权限兜底键；
  *   - `team-inbound:` / `start-work:` / `workflow-plan:` —— 团队反向消息、start-work
@@ -428,12 +432,17 @@ export const GATEWAY_INTERNAL_REQUEST_KEY_SHAPES: readonly GatewayInternalReques
   {
     prefix: 'task-auto-resume:',
     sample: `task-auto-resume:${SAMPLE_UUID}:${SAMPLE_UUID}`,
-    source: 'task/task-parent-auto-resume',
+    source: 'legacy: task/task-parent-auto-resume（已退役，仅存量兼容）',
   },
   {
     prefix: 'task-parent-decision:',
     sample: `task-parent-decision:${SAMPLE_UUID}:${SAMPLE_UUID}`,
     source: 'task/task-parent-auto-decision',
+  },
+  {
+    prefix: 'task-job:',
+    sample: `task-job:${SAMPLE_UUID}:1730000000000`,
+    source: 'task/task-job-delivery',
   },
   {
     prefix: 'command:',

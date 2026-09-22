@@ -16,7 +16,6 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { cancelPendingPermissionRequestsForSession } from '../routes/permissions.js';
 import { cancelPendingQuestionRequestsForSession } from '../routes/questions.js';
 import { stopAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
-import { clearPendingTaskParentAutoResumeForTask } from '../task/task-parent-auto-resume.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import { CHILD_SESSION_TERMINAL_REASON_KEY, terminateChildSession } from '../tools/tool-sandbox.js';
 import { parseSessionParentId } from './session-descendant-tree.js';
@@ -320,14 +319,6 @@ export async function stopDirectChildSessions(
         sessionId: childSessionId,
         userId: input.userId,
       });
-
-      if (resolvedTask) {
-        clearPendingTaskParentAutoResumeForTask({
-          parentSessionId: input.parentSessionId,
-          userId: input.userId,
-          taskId: resolvedTask.taskId,
-        });
-      }
 
       await reconcileSessionRuntime({ sessionId: childSessionId, userId: input.userId });
     } catch (error) {

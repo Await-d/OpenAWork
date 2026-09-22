@@ -1,4 +1,5 @@
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -9,25 +10,44 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '../../../..');
 const gatewayDir = resolve(root, 'services/agent-gateway');
 const binariesDir = resolve(root, 'apps/desktop/src-tauri/binaries');
+// 注意：`bun run <script>` 默认仍用 Node 执行脚本（process.versions.bun 为空），
+// 但 bun 会把 npm_execpath 指向 bun 可执行文件、npm_config_user_agent 设为 "bun/<版本>"。
+// 三种信号都要看：能复用调用者用的那个 bun 时最稳（不依赖 PATH），
+// 否则回退 BUN_INSTALL/bin/bun，最后才是 PATH 上的 bun（bun.exe 不含空格，无需 cmd 包装）。
 const npmExecPath = process.env.npm_execpath ?? '';
-const invokedByPnpm = basename(npmExecPath).toLowerCase().startsWith('pnpm');
-const fallbackPnpmCommand = process.platform === 'win32' ? 'cmd.exe' : 'pnpm';
-const fallbackPnpmBaseArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm'] : [];
-const pnpmCommand = invokedByPnpm ? process.execPath : fallbackPnpmCommand;
-const pnpmBaseArgs = invokedByPnpm ? [npmExecPath] : fallbackPnpmBaseArgs;
+const npmExecPathIsBun = basename(npmExecPath).toLowerCase().startsWith('bun');
+const npmUserAgentIsBun = (process.env.npm_config_user_agent ?? '')
+  .toLowerCase()
+  .startsWith('bun/');
+const bunFromInvoker = npmExecPathIsBun && existsSync(npmExecPath) ? npmExecPath : null;
+const installedBunCommand = process.env.BUN_INSTALL
+  ? resolve(process.env.BUN_INSTALL, 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun')
+  : null;
+const fallbackBunCommand =
+  bunFromInvoker ??
+  (installedBunCommand && existsSync(installedBunCommand)
+    ? installedBunCommand
+    : process.platform === 'win32'
+      ? 'bun.exe'
+      : 'bun');
+const bunCommand =
+  typeof process.versions.bun === 'string' ? process.execPath : fallbackBunCommand;
+console.log(
+  `[bundle-sidecar] bun 调用信号：npm_execpath=${npmExecPathIsBun} user_agent=${npmUserAgentIsBun} → 使用 ${bunCommand}`,
+);
 
 if (process.env.OPENAWORK_SKIP_SIDECAR_BUNDLE === '1') {
   console.log('Skipping gateway sidecar bundling because OPENAWORK_SKIP_SIDECAR_BUNDLE=1.');
   process.exit(0);
 }
 
-function createPnpmArgs(...args) {
-  return [...pnpmBaseArgs, ...args];
+function createBunArgs(...args) {
+  return args;
 }
 
-// 当通过 pnpm 调用本脚本时，pnpmCommand = node.exe + pnpm 脚本路径，
-// 可避免含空格的路径（如 D:\Program Files\...）被 cmd 拆断。
-// npm_execpath 也会被 npm 设置；tauri-action 通过 npm run 调用时必须回退到 pnpm。
+// 当通过 bun 调用本脚本时，bunCommand = 当前 bun 可执行文件，
+// 可避免含空格的路径（如 D:\Program Files\...）被 cmd 拆断；
+// tauri-action / npm / pnpm 调用时回退到 PATH 上的 bun。
 const useShell = false;
 
 function run(command, args, options = {}) {
@@ -395,11 +415,12 @@ exec "$target" "$@"
 }
 
 // Step 1: Compile gateway TypeScript（确保 workspace 依赖已编译）。
-run(pnpmCommand, createPnpmArgs('build'), { cwd: gatewayDir });
+run(bunCommand, createBunArgs('run', 'build'), { cwd: gatewayDir });
 
 // Step 2: 用 Bun 将 gateway 编译为独立可执行文件（含所有依赖）。
 // 这一步产出 dist/agent-gateway[.exe]，无需 node_modules，彻底消除
-// Windows 下 pnpm deploy 产生 NTFS junction 导致 tauri-build 资源打包失败的问题。
+// Windows 上 node_modules 硬链接/联接（历史方案 pnpm deploy 会产生 NTFS junction）
+// 导致 tauri-build 资源打包失败的问题。
 //
 // playwright-core 内部有 chromium-bidi / electron 等可选模块，运行时按需懒加载；
 // Bun --compile 静态分析时无法找到这些包，需标记 external 跳过。桌面端 sidecar

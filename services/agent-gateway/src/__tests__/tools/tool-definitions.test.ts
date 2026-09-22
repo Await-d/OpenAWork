@@ -23,6 +23,19 @@ describe('gateway tool definitions render contract', () => {
     }
   });
 
+  it('publishes the newly added gateway tools with model-visible parameters', () => {
+    const definitions = buildGatewayToolDefinitions();
+    const byName = new Map(definitions.map((definition) => [definition.function.name, definition]));
+
+    expect(byName.has('models')).toBe(true);
+    expect(byName.has('session_rename')).toBe(true);
+    expect(byName.has('session_move')).toBe(true);
+    expect(byName.get('models')?.function.parameters.properties).toHaveProperty('query');
+    expect(byName.get('session_rename')?.function.parameters.required).toContain('title');
+    expect(byName.get('session_move')?.function.parameters.required).toContain('directory');
+    expect(byName.get('session_move')?.function.parameters.properties).toHaveProperty('force');
+  });
+
   it('renders the effective skill set into the visible Skill definition', () => {
     const definitions = buildGatewayToolDefinitions({
       effectiveSkills: [

@@ -10,7 +10,7 @@
 
 ## 事实依据（截至本次备注）
 
-- 根 `package.json` / `pnpm-workspace.yaml` 未声明任何 `dotnet` 脚本；`.github/workflows/` 无任何 .NET 构建或测试任务。
+- 根 `package.json`（含 `workspaces` 字段）未声明任何 `dotnet` 脚本；`.github/workflows/` 无任何 .NET 构建或测试任务。
 - 仓库根 `README.md` 仍将其列为「.NET 方案」，但仅作结构说明，不代表处于维护状态。
 - 与 TS 网关的差异已有正式记录：`docs/architecture/adr-turn-rollback-hard-delete.md` 明确 `.NET` 网关不在支持范围。
 

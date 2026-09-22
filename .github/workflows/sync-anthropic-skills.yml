@@ -21,6 +21,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lint shell script
+        run: shellcheck scripts/sync-anthropic-skills.sh
+
       - name: Run sync script
         run: bash scripts/sync-anthropic-skills.sh
 
@@ -49,7 +52,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add packages/resources/resources/skills/reference/
-          git commit -m "release(skills): 同步 Anthropic skills（${{ steps.manifest.outputs.commit }}）"
+          git commit -m "chore(skills): 同步 Anthropic skills（${{ steps.manifest.outputs.commit }}）"
           git push origin HEAD:main
 
       - name: Write job summary
@@ -67,7 +70,7 @@ jobs:
             echo "| 上游 commit | \`$COMMIT\` |" >> "$GITHUB_STEP_SUMMARY"
             echo "| 同步 skills | $SKILLS |" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "已推送到 main，CI 通过后将自动触发构建发布。" >> "$GITHUB_STEP_SUMMARY"
+            echo "已推送到 main（chore 提交，不会触发自动构建发布）。" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## ⏭ 无更新" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"

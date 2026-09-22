@@ -684,7 +684,7 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   bash_output: bashOutputPermissionDeriver,
   bash_kill: bashKillPermissionDeriver,
   ast_grep_replace: astGrepReplacePermissionDeriver,
-  apply_patch: applyPatchPermissionDeriver,
+  patch: applyPatchPermissionDeriver,
   task: taskPermissionDeriver,
   workspace_create_directory: workspaceCreateDirectoryPermissionDeriver,
   workspace_review_revert: workspaceReviewRevertPermissionDeriver,

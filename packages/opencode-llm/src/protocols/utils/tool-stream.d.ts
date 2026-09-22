@@ -66,6 +66,17 @@ export declare const appendOrStart: <K extends StreamKey>(
   missingToolMessage: string,
 ) => AppendOutcome<K> | LLMError;
 /**
+ * Append argument text to a started tool. Returns `undefined` when no tool is
+ * open under `key`, for protocols that intentionally ignore deltas without a
+ * matching open block (Bedrock can emit a late delta after `contentBlockStop`,
+ * or a delta for an index that never started).
+ */
+export declare const append: <K extends StreamKey>(
+  tools: State<K>,
+  key: K,
+  text: string,
+) => AppendOutcome<K> | undefined;
+/**
  * Append argument text to a tool that must already have been started. This keeps
  * protocols honest when their stream grammar promises a start event before any
  * argument delta.

@@ -64,6 +64,11 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
     if (!rawMessage || typeof rawMessage !== 'object') continue;
     const record = rawMessage as Record<string, unknown>;
     const role = record['role'];
+    // Transcript roles. `synthetic` (gateway-injected subagent completion
+    // notices) is deliberately NOT in this list: it is not user input and must
+    // never render as a chat bubble. It is surfaced through the dedicated
+    // notice channel (`SubagentNoticeRow`) instead of the transcript.
+    // Keep this whitelist explicit — do not widen it to accept unknown roles.
     if (role !== 'user' && role !== 'assistant' && role !== 'tool') continue;
     const id = typeof record['id'] === 'string' ? record['id'] : crypto.randomUUID();
     const createdAt =
@@ -431,6 +436,8 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
                 ...(toolResult.fileDiffs ? { fileDiffs: toolResult.fileDiffs } : {}),
                 output: toolResult.output,
                 isError: hasPendingPermission ? false : toolResult.isError,
+                // 跨消息合并的 tool_result 同样带截图附件（computer_use 最终截图）。
+                ...(toolResult.attachments ? { attachments: toolResult.attachments } : {}),
                 ...(toolResult.observability ? { observability: toolResult.observability } : {}),
                 pendingPermissionRequestId: hasPendingPermission
                   ? toolResult.pendingPermissionRequestId
@@ -479,7 +486,15 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         id: fallbackMessageId,
         role: 'assistant',
         content: createAssistantTraceContent(fallbackTracePayload),
-        parts: partsFromAssistantTrace(fallbackMessageId, fallbackTracePayload),
+        // `partsFromAssistantTrace` 的类型（shared）不带 attachments，
+        // 这里按 toolCallId 回填，保证孤立的 tool_result 刷新后也能看到截图。
+        parts: partsFromAssistantTrace(fallbackMessageId, fallbackTracePayload).map((part) =>
+          part.type === 'tool' &&
+          part.toolCallId === toolResult.toolCallId &&
+          toolResult.attachments
+            ? { ...part, attachments: toolResult.attachments }
+            : part,
+        ),
         rawContent: content as Message['content'],
         createdAt: createdAtValue,
         model,

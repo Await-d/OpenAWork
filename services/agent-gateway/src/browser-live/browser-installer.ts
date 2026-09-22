@@ -130,7 +130,7 @@ export function buildInstallUnavailableMessage(): string {
  * 1. `OPENAWORK_PLAYWRIGHT_CLI` 显式覆盖（测试 / 特殊部署用；要求文件存在）；
  * 2. 从本模块自身解析 `playwright/package.json`；
  * 3. 从 `@openAwork/browser-automation` 入口解析——网关不直接依赖 playwright，
- *    它由 browser-automation 声明，pnpm 下常落在该包的嵌套 node_modules 里。
+ *    它由 browser-automation 声明，隔离式 node_modules（bun / pnpm）下常落在该包自己的 node_modules 里。
  *
  * 全部失败返回 null。
  */

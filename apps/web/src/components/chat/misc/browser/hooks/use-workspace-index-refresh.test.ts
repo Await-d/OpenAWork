@@ -2,21 +2,37 @@
 /**
  * useWorkspaceIndexRefresh 轮询行为覆盖。
  *
- * 钉住几件容易坏掉的事：只在启用 + 有工作区路径时轮询；首次读取只建立基线不回调；
- * 版本变化（含变小，对应网关重启）才回调；读取失败静默降级；卸载后清理定时器。
+ * 钉住几件容易坏掉的事：只在启用 + 有可监视的绝对工作区路径时轮询；纯 UI 作用域键
+ * （`__session__:` / `__default__`）与相对路径直接跳过；首次读取只建立基线不回调；
+ * 版本变化（含变小，对应网关重启）才回调；读取失败静默降级、403 直接停轮询；
+ * 卸载后清理定时器。
  */
 
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
-import { useWorkspaceIndexRefresh } from './use-workspace-index-refresh.js';
+import {
+  resolveWorkspaceIndexWatchPath,
+  useWorkspaceIndexRefresh,
+} from './use-workspace-index-refresh.js';
 
-const mocks = vi.hoisted(() => ({
-  getFileIndexVersion: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class HttpError<T = unknown> extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly data?: T,
+    ) {
+      super(message);
+      this.name = 'HttpError';
+    }
+  }
+  return { getFileIndexVersion: vi.fn(), HttpError };
+});
 
 vi.mock('@openAwork/web-client', () => ({
   createWorkspaceClient: () => ({ getFileIndexVersion: mocks.getFileIndexVersion }),
+  HttpError: mocks.HttpError,
 }));
 
 /** 刷新微任务队列，让上一次 poll 的 promise 结算。 */
@@ -95,6 +111,52 @@ describe('useWorkspaceIndexRefresh', () => {
     expect(mocks.getFileIndexVersion).not.toHaveBeenCalled();
   });
 
+  it.each(['__session__:session-a', '__default__', 'relative/dir'])(
+    '纯 UI 作用域键 / 相对路径（%s）回退到默认工作区（空 path）',
+    async (workspacePath) => {
+      mocks.getFileIndexVersion.mockResolvedValue({ root: '/default-ws', version: 1 });
+      const onChange = vi.fn();
+      renderHook(() => useWorkspaceIndexRefresh({ enabled: true, workspacePath, onChange }));
+
+      await flush();
+      expect(mocks.getFileIndexVersion).toHaveBeenCalledWith('token-1', '');
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([400, 403])('网关 %i 时停止轮询，不再重复请求', async (status) => {
+    mocks.getFileIndexVersion.mockRejectedValue(new mocks.HttpError('rejected', status));
+    const onChange = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      renderHook(() => useWorkspaceIndexRefresh({ enabled: true, workspacePath: '/ws', onChange }));
+
+      await flush();
+      expect(mocks.getFileIndexVersion).toHaveBeenCalledTimes(1);
+
+      await advance(10_000);
+      expect(mocks.getFileIndexVersion).toHaveBeenCalledTimes(1);
+      expect(onChange).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('500 等非确定性失败继续重试', async () => {
+    mocks.getFileIndexVersion.mockRejectedValue(new mocks.HttpError('server error', 500));
+    const onChange = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      renderHook(() => useWorkspaceIndexRefresh({ enabled: true, workspacePath: '/ws', onChange }));
+
+      await flush();
+      await advance();
+      expect(mocks.getFileIndexVersion.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('读取失败时静默降级且不抛出', async () => {
     mocks.getFileIndexVersion.mockRejectedValue(new Error('boom'));
     const onChange = vi.fn();
@@ -125,5 +187,29 @@ describe('useWorkspaceIndexRefresh', () => {
     await advance(10_000);
 
     expect(mocks.getFileIndexVersion.mock.calls.length).toBe(callsBeforeUnmount);
+  });
+});
+
+describe('resolveWorkspaceIndexWatchPath', () => {
+  it.each([
+    '/ws',
+    '/home/user/project',
+    'E:\\01.Projects\\OpenAWork',
+    'C:/proj',
+    '\\\\host\\share',
+  ])('绝对文件系统路径（%s）原样返回', (path) => {
+    expect(resolveWorkspaceIndexWatchPath(path)).toBe(path);
+  });
+
+  it.each([
+    '__session__:b3384f61-c634-4162-ac4c-61fda7ef583a',
+    '__default__',
+    'relative/dir',
+    '',
+    '   ',
+    null,
+    undefined,
+  ])('非绝对路径 / 空值（%s）返回空串以回退默认工作区', (path) => {
+    expect(resolveWorkspaceIndexWatchPath(path)).toBe('');
   });
 });

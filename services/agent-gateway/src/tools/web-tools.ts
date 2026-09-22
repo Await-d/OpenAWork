@@ -24,6 +24,15 @@ function resolveWebfetchMaxResponseBytes(): number {
   );
 }
 
+/**
+ * Cloudflare 挑战重试时使用的 User-Agent。
+ *
+ * 首次请求**不显式设置** User-Agent（保持运行时默认，零行为变更）；
+ * 仅当命中 Cloudflare 挑战（403 + `cf-mitigated: challenge`）时，改用这个
+ * 与默认不同的 UA 重试一次（对齐 opencode v2.0.12 的「换 UA 重试」语义）。
+ */
+const WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT = 'OpenAWork-webfetch';
+
 function isAllowedWebfetchUrl(value: string): boolean {
   try {
     const protocol = new URL(value).protocol;
@@ -95,6 +104,41 @@ function createAbortSignal(
   };
 }
 
+/**
+ * Cloudflare 挑战判定：仅当 HTTP 403 且响应头附带 `cf-mitigated: challenge`。
+ * 其它 403（普通拒绝）不满足条件，保持原有错误路径不变。
+ */
+function isCloudflareChallenge(response: Response): boolean {
+  return response.status === 403 && response.headers.get('cf-mitigated') === 'challenge';
+}
+
+/**
+ * 发起 webfetch 请求并在命中 Cloudflare 挑战时换一个 User-Agent 重试一次。
+ *
+ * 首次请求**不显式设置 User-Agent**（保持运行时默认，与改动前行为一致）；
+ * 仅重试时改用 `WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT`。
+ * 重试复用同一个 `AbortSignal`，因此仍受整体超时约束，最多只重试一次；
+ * 重试仍失败时把末尾响应交回调用方，由既有 `!response.ok` 分支按原样抛错。
+ */
+async function fetchWithCloudflareChallengeRetry(
+  url: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const response = await fetch(url, { signal });
+
+  if (!isCloudflareChallenge(response)) {
+    return response;
+  }
+
+  // 释放首次挑战响应体，再换 UA 重试一次。
+  await response.body?.cancel().catch(() => undefined);
+
+  return fetch(url, {
+    signal,
+    headers: { 'user-agent': WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT },
+  });
+}
+
 function htmlToText(html: string): string {
   return html
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/giu, ' ')
@@ -154,7 +198,7 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
       const { signal: requestSignal, cleanup } = createAbortSignal(input.timeout, signal);
 
       try {
-        const response = await fetch(normalizedUrl, { signal: requestSignal });
+        const response = await fetchWithCloudflareChallengeRetry(normalizedUrl, requestSignal);
         const contentType = response.headers.get('content-type') ?? 'text/plain';
 
         if (!response.ok) {

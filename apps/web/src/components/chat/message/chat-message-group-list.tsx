@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SubagentNotice } from '@openAwork/shared';
+import { SubagentNoticeRow } from '@openAwork/shared-ui';
 import type { ChatMessage, ChatUsageDetails } from '../../conversation-runtime/messages/support.js';
 import { readAssistantTracePayload } from '../../conversation-runtime/messages/support.js';
 import { CHAT_SCROLL_BOTTOM_SPACER_HEIGHT } from '../../conversation-runtime/scroll/scroll-constants.js';
@@ -34,12 +36,32 @@ export interface ChatRenderEntry {
   usageDetails?: ChatUsageDetails;
 }
 
-export interface ChatRenderGroup {
+/**
+ * 渲染群组 = 判别联合。`kind` 必填，因此**每个**访问 `.entries` / `.role` 的消费者
+ * 都必须显式窄化——这给了编译期保护，避免新增群组类型时被静默当成消息组处理
+ * （本仓历史上多次出现的「静默错位」失效模式）。
+ *
+ * `subagent-notice` 群组承载网关注入的子代理完成通知（`role: 'synthetic'`），
+ * 对齐 opencode 把 notice 作为时间线行渲染的语义；它**不是**聊天气泡，
+ * 因此不进入 `ChatMessage[]`、也不触碰 role 分支密集的消息渲染层。
+ */
+export interface ChatRenderMessageGroup {
+  kind: 'messages';
   actions?: ChatRenderAction[];
   entries: ChatRenderEntry[];
   key: string;
   role: ChatMessage['role'];
 }
+
+export interface ChatRenderNoticeGroup {
+  kind: 'subagent-notice';
+  /** 与消息组同一时间轴，用于按位置排序。 */
+  createdAt: number;
+  key: string;
+  notice: SubagentNotice;
+}
+
+export type ChatRenderGroup = ChatRenderMessageGroup | ChatRenderNoticeGroup;
 
 export interface ChatProviderDescriptor {
   id: string;
@@ -167,6 +189,9 @@ function computeDividerLabels(groups: ChatRenderGroup[]): Array<string | null> {
 }
 
 function readGroupTimestamp(group: ChatRenderGroup): number | null {
+  if (group.kind === 'subagent-notice') {
+    return group.createdAt;
+  }
   const first = group.entries[0]?.message;
   if (!first) return null;
   const raw = first.createdAt;
@@ -469,6 +494,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserDisplayName,
   currentUserEmail,
   group,
+  onOpenSubagentChild,
   providerCatalog,
   timeDividerLabel,
 }: {
@@ -478,9 +504,28 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserDisplayName?: string;
   currentUserEmail: string;
   group: ChatRenderGroup;
+  /** 点击子代理通知时打开对应子会话；未传入时通知行不可点击。 */
+  onOpenSubagentChild?: (childSessionId: string) => void;
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   timeDividerLabel?: string | null;
 }) {
+  if (group.kind === 'subagent-notice') {
+    return (
+      <div
+        className="chat-message-group"
+        data-chat-group-root="true"
+        data-group-key={group.key}
+        data-role="synthetic"
+      >
+        {timeDividerLabel ? <TimeDividerRow label={timeDividerLabel} /> : null}
+        <SubagentNoticeRow
+          notice={group.notice}
+          {...(onOpenSubagentChild ? { onOpenChild: onOpenSubagentChild } : {})}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="chat-message-group"
@@ -565,6 +610,11 @@ interface GroupContentMetrics {
 }
 
 function readGroupContentMetrics(group: ChatRenderGroup): GroupContentMetrics {
+  if (group.kind === 'subagent-notice') {
+    // 通知行是固定高度的单行，内容权重只用于高度估算的兜底。
+    return { contentWeight: 0, statuses: group.notice.state };
+  }
+
   let contentWeight = 0;
   const statuses: string[] = [];
 
@@ -580,6 +630,10 @@ function readGroupContentMetrics(group: ChatRenderGroup): GroupContentMetrics {
 }
 
 function getGroupLayoutSignature(group: ChatRenderGroup): string {
+  if (group.kind === 'subagent-notice') {
+    return `notice:${group.notice.id}:${group.notice.state}:${group.notice.description}`;
+  }
+
   return group.entries
     .map((entry) => {
       const message = entry.message;
@@ -595,6 +649,11 @@ function getGroupLayoutSignature(group: ChatRenderGroup): string {
 }
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
+  if (group.kind === 'subagent-notice') {
+    // 单行紧凑通知：13px 文字 + 上 12px / 下 4px padding。
+    return 16 + 12 + 4 + 8;
+  }
+
   let estimatedContentHeight = 0;
   let extraHeaderHeight = 0;
 

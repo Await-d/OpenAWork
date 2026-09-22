@@ -46,9 +46,9 @@ export type TaskProfile = z.infer<typeof taskProfileSchema>;
 
 export const TOOLSET_CATEGORIES = [
   'read', // 文件读取 / grep / glob
-  'write', // 文件写入 / edit / apply_patch
+  'write', // 文件写入 / edit / patch
   'shell', // bash 执行
-  'web', // web_search / fetch
+  'web', // websearch / webfetch
   'lsp', // LSP 语义查询
   'test', // 测试执行
   'review', // 代码审查工具

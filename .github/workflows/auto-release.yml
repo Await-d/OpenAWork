@@ -30,15 +30,23 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Configure git identity
         run: |
@@ -100,7 +108,7 @@ jobs:
       - name: Format bumped version files
         if: steps.changes.outputs.has_changes == 'true'
         run: |
-          pnpm exec prettier --write \
+          bunx prettier --write \
             package.json \
             'apps/*/package.json' \
             'packages/*/package.json' \

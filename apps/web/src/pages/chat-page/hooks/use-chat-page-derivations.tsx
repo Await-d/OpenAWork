@@ -12,10 +12,17 @@ import { toast } from '../../../components/common/feedback/ToastNotification.js'
 import type { FileTreeNode } from '../../../components/common/modal/WorkspacePickerModal.js';
 import type { ChatContextUsageSnapshot } from '../../../components/conversation-runtime/messages/context-usage.js';
 import type { ChatUsageDetails } from '../../../components/conversation-runtime/messages/message-model.js';
-import type { ChatMessage, WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
+import type {
+  ChatMessage,
+  WorkspaceFileMentionItem,
+} from '../../../components/conversation-runtime/messages/support.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import { WorkspaceFileTreePanel } from '../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
-import type { OpenFile, OpenFileOptions, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
+import type {
+  OpenFile,
+  OpenFileOptions,
+  RevealTarget,
+} from '../../../hooks/editor/useFileEditor.js';
 
 import { useBookmarkStore } from '../../../stores/chat/bookmarks.js';
 import type { ChatEditorPaneTab } from '.././hooks/use-chat-ui-state.js';
@@ -24,7 +31,12 @@ import type { DialogueMode } from '.././mode/dialogue-mode.js';
 import type { FusionContextOverviewProps } from '.././panels/FusionContextTab.js';
 import type { ChatRightPanelState } from '.././state/chat-stream-state.js';
 import type { PendingPermissionRequest, SessionPermissionMode } from '@openAwork/shared';
-import type { PendingQuestionRequest, Session, SessionTask, SessionTodo } from '@openAwork/web-client';
+import type {
+  PendingQuestionRequest,
+  Session,
+  SessionTask,
+  SessionTodo,
+} from '@openAwork/web-client';
 import { useCallback, useMemo } from 'react';
 import type { Dispatch, SetStateAction, TransitionStartFunction } from 'react';
 import type { NavigateFunction } from 'react-router';
@@ -38,7 +50,18 @@ export interface ChatPageDerivationsDeps {
   readonly chatSearch: ReturnType<typeof useChatSearch>;
   readonly childSessions: Session[];
   readonly collapseWorkspaceToPanel: () => void;
-  readonly compactions: { id: string; summary: string; trigger: "manual" | "automatic"; phase?: "started" | "completed" | "failed" | undefined; occurredAt: number; compactedMessages?: number | undefined; representedMessages?: number | undefined; cause?: "manual" | "usage_overflow" | "provider_overflow" | "proactive_near_overflow" | undefined; strategy?: "runtime_replace" | "summary_only" | "replay" | "synthetic_continue" | undefined; }[];
+  readonly compactions: {
+    id: string;
+    summary: string;
+    trigger: 'manual' | 'automatic';
+    phase?: 'started' | 'completed' | 'failed' | undefined;
+    occurredAt: number;
+    compactedMessages?: number | undefined;
+    representedMessages?: number | undefined;
+    cause?:
+      'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow' | undefined;
+    strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue' | undefined;
+  }[];
   readonly contentArtifactCount: number;
   readonly contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
@@ -50,7 +73,22 @@ export interface ChatPageDerivationsDeps {
   readonly effectiveContextMessageCount: number;
   readonly effectiveReportedStreamUsage: ChatBackendUsageSnapshot | undefined;
   readonly effectiveWorkingDirectory: string | null;
-  readonly fileEditor: { openFiles: OpenFile[]; activeFile: OpenFile | null; activeFilePath: string | null; loading: boolean; saveError: string | null; openFile: (path: string, options?: OpenFileOptions | undefined) => Promise<void>; closeFile: (path: string) => void; updateContent: (path: string, content: string) => void; saveFile: (path: string) => Promise<void>; reorderFiles: (fromIndex: number, toIndex: number) => void; setActiveFilePath: (path: string | null) => void; isDirty: (path: string) => boolean; revealTarget: RevealTarget | null; clearRevealTarget: () => void; };
+  readonly fileEditor: {
+    openFiles: OpenFile[];
+    activeFile: OpenFile | null;
+    activeFilePath: string | null;
+    loading: boolean;
+    saveError: string | null;
+    openFile: (path: string, options?: OpenFileOptions | undefined) => Promise<void>;
+    closeFile: (path: string) => void;
+    updateContent: (path: string, content: string) => void;
+    saveFile: (path: string) => Promise<void>;
+    reorderFiles: (fromIndex: number, toIndex: number) => void;
+    setActiveFilePath: (path: string | null) => void;
+    isDirty: (path: string) => boolean;
+    revealTarget: RevealTarget | null;
+    clearRevealTarget: () => void;
+  };
   readonly fusionChatLayout: FusionChatLayoutState;
   readonly handleCompactCurrentSession: () => Promise<void>;
   readonly handleCopyMessage: (message: ChatMessage) => void;
@@ -62,90 +100,160 @@ export interface ChatPageDerivationsDeps {
   readonly navigate: NavigateFunction;
   readonly navigateToHome: () => void;
   readonly openBrowserPreview: () => void;
-  readonly openWorkspacePanelTab: (tab: "code" | "preview") => void;
+  readonly openWorkspacePanelTab: (tab: 'code' | 'preview') => void;
   readonly pendingPermissions: PendingPermissionRequest[];
   readonly pendingQuestions: PendingQuestionRequest[];
   readonly permissionMode: SessionPermissionMode;
-  readonly promoteWorkspaceTab: (tab: "code" | "browser") => void;
+  readonly promoteWorkspaceTab: (tab: 'code' | 'browser') => void;
   readonly requestWorkspaceBindingChange: () => void;
   readonly reviewPanelOpened: boolean;
   readonly rightOpen: boolean;
   readonly rightPanelState: ChatRightPanelState;
   readonly serverTotalTurnCount: number | null;
-  readonly sessionStateStatus: "idle" | "running" | "paused" | null | undefined;
+  readonly sessionStateStatus: 'idle' | 'running' | 'paused' | null | undefined;
   readonly sessionTasks: SessionTask[];
   readonly sessionTodos: SessionTodo[];
   readonly setEditorMode: (v: boolean) => void;
   readonly setEditorPaneTab: (tab: ChatEditorPaneTab) => void;
   readonly setRightOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
-  readonly setRightTab: (value: "agent" | "overview" | "mcp" | "bookmarks" | "plan" | "tools" | "terminals" | "skills" | "snapshots" | "history" | "viz" | ((prev: "agent" | "overview" | "mcp" | "bookmarks" | "plan" | "tools" | "terminals" | "skills" | "snapshots" | "history" | "viz") => "agent" | "overview" | "mcp" | "bookmarks" | "plan" | "tools" | "terminals" | "skills" | "snapshots" | "history" | "viz")) => void;
+  readonly setRightTab: (
+    value:
+      | 'agent'
+      | 'overview'
+      | 'mcp'
+      | 'bookmarks'
+      | 'plan'
+      | 'tools'
+      | 'terminals'
+      | 'skills'
+      | 'snapshots'
+      | 'history'
+      | 'viz'
+      | ((
+          prev:
+            | 'agent'
+            | 'overview'
+            | 'mcp'
+            | 'bookmarks'
+            | 'plan'
+            | 'tools'
+            | 'terminals'
+            | 'skills'
+            | 'snapshots'
+            | 'history'
+            | 'viz',
+        ) =>
+          | 'agent'
+          | 'overview'
+          | 'mcp'
+          | 'bookmarks'
+          | 'plan'
+          | 'tools'
+          | 'terminals'
+          | 'skills'
+          | 'snapshots'
+          | 'history'
+          | 'viz'),
+  ) => void;
   readonly setShowTemplatePanel: Dispatch<SetStateAction<boolean>>;
   readonly startSessionSwitchTransition: TransitionStartFunction;
   readonly streamingUsageDetails: ChatUsageDetails | undefined;
   readonly visibleStreaming: boolean;
-  readonly workspace: { workingDirectory: string | null; sshConnectionId: string | null; loading: boolean; error: string | null; setWorkspace: (path: string) => Promise<void>; clearWorkspace: () => Promise<void>; validatePath: (path: string) => Promise<{ valid: boolean; error?: string | undefined; path?: string | undefined; }>; fetchRootPath: () => Promise<string>; fetchWorkspaceRoots: () => Promise<string[]>; fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>; fetchSshTree: (connectionId: string, path: string) => Promise<FileTreeNode[]>; createSshDirectory: (connectionId: string, path: string) => Promise<void>; searchFileIndex: (path: string, options: { query: string; limit?: number | undefined; signal?: AbortSignal | undefined; sessionId?: string | null | undefined; sshConnectionId?: string | null | undefined; }) => Promise<{ files: string[]; directories: string[]; }>; createDirectory: (path: string) => Promise<void>; fetchFile: (path: string) => Promise<{ content: string; truncated: boolean; }>; searchFiles: (q: string, rootPath: string, maxResults?: number) => Promise<{ path: string; line: number; text: string; }[]>; };
+  readonly workspace: {
+    workingDirectory: string | null;
+    sshConnectionId: string | null;
+    loading: boolean;
+    error: string | null;
+    setWorkspace: (path: string) => Promise<void>;
+    clearWorkspace: () => Promise<void>;
+    validatePath: (
+      path: string,
+    ) => Promise<{ valid: boolean; error?: string | undefined; path?: string | undefined }>;
+    fetchRootPath: () => Promise<string>;
+    fetchWorkspaceRoots: () => Promise<string[]>;
+    fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>;
+    fetchSshTree: (connectionId: string, path: string) => Promise<FileTreeNode[]>;
+    createSshDirectory: (connectionId: string, path: string) => Promise<void>;
+    searchFileIndex: (
+      path: string,
+      options: {
+        query: string;
+        limit?: number | undefined;
+        signal?: AbortSignal | undefined;
+        sessionId?: string | null | undefined;
+        sshConnectionId?: string | null | undefined;
+      },
+    ) => Promise<{ files: string[]; directories: string[] }>;
+    createDirectory: (path: string) => Promise<void>;
+    fetchFile: (path: string) => Promise<{ content: string; truncated: boolean }>;
+    searchFiles: (
+      q: string,
+      rootPath: string,
+      maxResults?: number,
+    ) => Promise<{ path: string; line: number; text: string }[]>;
+  };
   readonly workspaceFileItems: WorkspaceFileMentionItem[];
   readonly yoloMode: boolean;
 }
 
 export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
   const {
-  artifactsWorkspaceHref,
-  assistantUsageDetails,
-  bookmarkStore,
-  browserPreviewUrl,
-  canAdjustWorkspaceBinding,
-  chatSearch,
-  childSessions,
-  collapseWorkspaceToPanel,
-  compactions,
-  contentArtifactCount,
-  contentArtifactCountStatus,
-  contextUsageSnapshot,
-  currentSessionId,
-  dialogueMode,
-  dockOwnsWorkspacePanels,
-  editorFullScreen,
-  editorPaneTab,
-  effectiveContextMessageCount,
-  effectiveReportedStreamUsage,
-  effectiveWorkingDirectory,
-  fileEditor,
-  fusionChatLayout,
-  handleCompactCurrentSession,
-  handleCopyMessage,
-  handleToggleYolo,
-  hiddenMessageCount,
-  isFusionLayout,
-  messages,
-  multiSelect,
-  navigate,
-  navigateToHome,
-  openBrowserPreview,
-  openWorkspacePanelTab,
-  pendingPermissions,
-  pendingQuestions,
-  permissionMode,
-  promoteWorkspaceTab,
-  requestWorkspaceBindingChange,
-  reviewPanelOpened,
-  rightOpen,
-  rightPanelState,
-  serverTotalTurnCount,
-  sessionStateStatus,
-  sessionTasks,
-  sessionTodos,
-  setEditorMode,
-  setEditorPaneTab,
-  setRightOpen,
-  setRightTab,
-  setShowTemplatePanel,
-  startSessionSwitchTransition,
-  streamingUsageDetails,
-  visibleStreaming,
-  workspace,
-  workspaceFileItems,
-  yoloMode
+    artifactsWorkspaceHref,
+    assistantUsageDetails,
+    bookmarkStore,
+    browserPreviewUrl,
+    canAdjustWorkspaceBinding,
+    chatSearch,
+    childSessions,
+    collapseWorkspaceToPanel,
+    compactions,
+    contentArtifactCount,
+    contentArtifactCountStatus,
+    contextUsageSnapshot,
+    currentSessionId,
+    dialogueMode,
+    dockOwnsWorkspacePanels,
+    editorFullScreen,
+    editorPaneTab,
+    effectiveContextMessageCount,
+    effectiveReportedStreamUsage,
+    effectiveWorkingDirectory,
+    fileEditor,
+    fusionChatLayout,
+    handleCompactCurrentSession,
+    handleCopyMessage,
+    handleToggleYolo,
+    hiddenMessageCount,
+    isFusionLayout,
+    messages,
+    multiSelect,
+    navigate,
+    navigateToHome,
+    openBrowserPreview,
+    openWorkspacePanelTab,
+    pendingPermissions,
+    pendingQuestions,
+    permissionMode,
+    promoteWorkspaceTab,
+    requestWorkspaceBindingChange,
+    reviewPanelOpened,
+    rightOpen,
+    rightPanelState,
+    serverTotalTurnCount,
+    sessionStateStatus,
+    sessionTasks,
+    sessionTodos,
+    setEditorMode,
+    setEditorPaneTab,
+    setRightOpen,
+    setRightTab,
+    setShowTemplatePanel,
+    startSessionSwitchTransition,
+    streamingUsageDetails,
+    visibleStreaming,
+    workspace,
+    workspaceFileItems,
+    yoloMode,
   } = deps;
 
   const composerStatsData = useMemo<ComposerStatsData | null>(() => {
@@ -510,5 +618,15 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
       handleToggleYolo,
     ],
   );
-  return { composerStatsData, handleFusionContextCompactSession, handleFusionContextOpenRecoveryStrategy, fusionContextSessionStateStatus, fusionContextOverview, handleOpenFusionEditorFile, handleShowFusionEditor, renderWorkspaceFileTree, commandPaletteItems };
+  return {
+    composerStatsData,
+    handleFusionContextCompactSession,
+    handleFusionContextOpenRecoveryStrategy,
+    fusionContextSessionStateStatus,
+    fusionContextOverview,
+    handleOpenFusionEditorFile,
+    handleShowFusionEditor,
+    renderWorkspaceFileTree,
+    commandPaletteItems,
+  };
 }

@@ -65,6 +65,14 @@ const AnthropicServerToolResultType = Schema.Literals([
   'code_execution_tool_result',
   'web_fetch_tool_result',
 ]);
+// Safety-filtered thinking arrives as an opaque encrypted `data` payload with
+// no visible text. It must round-trip verbatim so multi-turn thinking + tool
+// use conversations keep their reasoning continuity.
+const AnthropicRedactedThinkingBlock = Schema.Struct({
+  type: Schema.tag('redacted_thinking'),
+  data: Schema.String,
+  cache_control: Schema.optional(AnthropicCacheControl),
+});
 const AnthropicServerToolResultBlock = Schema.Struct({
   type: AnthropicServerToolResultType,
   tool_use_id: Schema.String,
@@ -93,6 +101,7 @@ const AnthropicUserBlock = Schema.Union([
 const AnthropicAssistantBlock = Schema.Union([
   AnthropicTextBlock,
   AnthropicThinkingBlock,
+  AnthropicRedactedThinkingBlock,
   AnthropicToolUseBlock,
   AnthropicServerToolUseBlock,
   AnthropicServerToolResultBlock,
@@ -154,6 +163,9 @@ const AnthropicStreamBlock = Schema.Struct({
   // server_tool_use id in `tool_use_id`.
   tool_use_id: Schema.optional(Schema.String),
   content: Schema.optional(Schema.Unknown),
+  // `redacted_thinking` blocks arrive whole with the opaque safety-filtered
+  // payload in `data`.
+  data: Schema.optional(Schema.String),
 });
 const AnthropicStreamDelta = Schema.Struct({
   type: Schema.optional(Schema.String),
@@ -202,11 +214,41 @@ const cacheControl = (breakpoints, cache) => {
   breakpoints.remaining -= 1;
   return Cache.ttlBucket(cache.ttlSeconds) === '1h' ? EPHEMERAL_1H : EPHEMERAL_5M;
 };
-const anthropicMetadata = (metadata) => ({ anthropic: metadata });
+const anthropicMetadata = (metadata) => ({
+  anthropic: metadata,
+});
 const signatureFromMetadata = (metadata) => {
   const anthropic = metadata?.anthropic;
   if (!ProviderShared.isRecord(anthropic)) return undefined;
   return typeof anthropic.signature === 'string' ? anthropic.signature : undefined;
+};
+const redactedDataFromMetadata = (metadata) => {
+  const anthropic = metadata?.anthropic;
+  if (!ProviderShared.isRecord(anthropic)) return undefined;
+  return typeof anthropic.redactedData === 'string' ? anthropic.redactedData : undefined;
+};
+// Anthropic requires a signature on every thinking block, except for relay
+// providers that never emit one. A signature-less block must be dropped or
+// demoted, never sent as an unsigned `thinking` block (which the API rejects).
+const requireThinkingSignature = (request) => {
+  if (request.model.compatibility?.requireSignature !== undefined)
+    return request.model.compatibility.requireSignature;
+  const provider = request.model.provider.toLowerCase();
+  const model = request.model.id.toLowerCase();
+  const baseURL = (request.model.route.endpoint.baseURL ?? '').toLowerCase();
+  if (
+    provider === 'kimi-for-coding' ||
+    provider === 'moonshotai' ||
+    provider === 'moonshotai-cn' ||
+    model.startsWith('kimi-') ||
+    baseURL.includes('api.kimi.com/coding') ||
+    baseURL.includes('api.moonshot.ai/anthropic') ||
+    baseURL.includes('api.moonshot.cn/anthropic')
+  )
+    return false;
+  if (provider.includes('xiaomi') || model.includes('mimo') || baseURL.includes('xiaomimimo.com'))
+    return false;
+  return true;
 };
 const lowerTool = (breakpoints, tool, inputSchema) => ({
   name: tool.name,
@@ -221,15 +263,18 @@ const lowerToolChoice = (toolChoice) =>
     required: () => ({ type: 'any' }),
     tool: (name) => ({ type: 'tool', name }),
   });
+// Anthropic only accepts `[a-zA-Z0-9_-]` in tool ids; ids minted by other
+// providers must be scrubbed so replayed history stays sendable.
+const scrubToolCallID = (id) => id.replace(/[^a-zA-Z0-9_-]/g, '_');
 const lowerToolCall = (part) => ({
   type: 'tool_use',
-  id: part.id,
+  id: scrubToolCallID(part.id),
   name: part.name,
   input: part.input,
 });
 const lowerServerToolCall = (part) => ({
   type: 'server_tool_use',
-  id: part.id,
+  id: scrubToolCallID(part.id),
   name: part.name,
   input: part.input,
 });
@@ -249,7 +294,14 @@ const lowerServerToolResult = Effect.fn('AnthropicMessages.lowerServerToolResult
       return yield* invalid(
         `Anthropic Messages does not know how to round-trip server tool result for ${part.name}`,
       );
-    return { type: wireType, tool_use_id: part.id, content: part.result.value };
+    // Prefer the provider-owned replay payload; fall back to the result value for
+    // histories built directly from provider events.
+    const payload = part.providerMetadata?.['anthropic']?.['result'] ?? part.result.value;
+    return {
+      type: wireType,
+      tool_use_id: scrubToolCallID(part.id),
+      content: payload,
+    };
   },
 );
 const lowerImage = Effect.fn('AnthropicMessages.lowerImage')(function* (part) {
@@ -380,6 +432,7 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(
         const content = [];
         for (const part of message.content) {
           if (part.type === 'text') {
+            if (part.text.trim().length === 0) continue;
             content.push({
               type: 'text',
               text: part.text,
@@ -396,13 +449,14 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(
             'media',
           ]);
         }
-        messages.push({ role: 'user', content });
+        if (content.length > 0) messages.push({ role: 'user', content });
         continue;
       }
       if (message.role === 'assistant') {
         const content = [];
         for (const part of message.content) {
           if (part.type === 'text') {
+            if (part.text.trim().length === 0) continue;
             content.push({
               type: 'text',
               text: part.text,
@@ -411,11 +465,26 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(
             continue;
           }
           if (part.type === 'reasoning') {
-            content.push({
-              type: 'thinking',
-              thinking: part.text,
-              signature: part.encrypted ?? signatureFromMetadata(part.providerMetadata),
-            });
+            // A signature marks visible thinking; only signature-less parts
+            // carrying redactedData round-trip as opaque redacted_thinking.
+            const signature = part.encrypted ?? signatureFromMetadata(part.providerMetadata);
+            const redactedData = redactedDataFromMetadata(part.providerMetadata);
+            if (signature === undefined && redactedData !== undefined) {
+              content.push({ type: 'redacted_thinking', data: redactedData });
+              continue;
+            }
+            if (typeof signature !== 'string' || signature.trim().length === 0) {
+              if (part.text.trim().length === 0) continue;
+              if (!requireThinkingSignature(request)) {
+                content.push({ type: 'thinking', thinking: part.text, signature: '' });
+                continue;
+              }
+              // Unsigned thinking is invalid on the real API; demote it to text
+              // so the conversation stays sendable.
+              content.push({ type: 'text', text: part.text });
+              continue;
+            }
+            content.push({ type: 'thinking', thinking: part.text, signature });
             continue;
           }
           if (part.type === 'tool-call') {
@@ -441,7 +510,7 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(
           ]);
         content.push({
           type: 'tool_result',
-          tool_use_id: part.id,
+          tool_use_id: scrubToolCallID(part.id),
           content: yield* lowerToolResultContent(part),
           is_error: part.result.type === 'error' ? true : undefined,
           cache_control: cacheControl(breakpoints, part.cache),
@@ -532,7 +601,7 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
 // =============================================================================
 const mapFinishReason = (reason) => {
   if (reason === 'end_turn' || reason === 'stop_sequence' || reason === 'pause_turn') return 'stop';
-  if (reason === 'max_tokens') return 'length';
+  if (reason === 'max_tokens' || reason === 'model_context_window_exceeded') return 'length';
   if (reason === 'tool_use') return 'tool-calls';
   if (reason === 'refusal') return 'content-filter';
   return 'unknown';
@@ -642,6 +711,10 @@ const onContentBlockStart = (state, event) => {
           id: block.id ?? String(event.index),
           name: block.name ?? '',
           providerExecuted: block.type === 'server_tool_use',
+          // Gateways may deliver the full tool input on the start block and
+          // never emit `input_json_delta`; seed the accumulator so the final
+          // `tool-call` still carries the real arguments.
+          ...(block.input === undefined ? {} : { input: ProviderShared.encodeJson(block.input) }),
         }),
       },
       [
@@ -675,6 +748,31 @@ const onContentBlockStart = (state, event) => {
           events,
           `reasoning-${event.index ?? 0}`,
           block.thinking,
+        ),
+        // Some providers put the signature on the start block instead of a
+        // later `signature_delta`; hold it for `content_block_stop`.
+        ...(block.signature !== undefined && event.index !== undefined
+          ? {
+              reasoningSignatures: { ...state.reasoningSignatures, [event.index]: block.signature },
+            }
+          : {}),
+      },
+      events,
+    ];
+  }
+  // Redacted thinking surfaces as a reasoning block carrying the opaque payload
+  // as metadata; the matching `content_block_stop` closes it. Dropping it used
+  // to break multi-turn thinking continuity for safety-filtered turns.
+  if (block.type === 'redacted_thinking' && block.data !== undefined) {
+    const events = [];
+    return [
+      {
+        ...state,
+        lifecycle: Lifecycle.reasoningStart(
+          state.lifecycle,
+          events,
+          `reasoning-${event.index ?? 0}`,
+          anthropicMetadata({ redactedData: block.data }),
         ),
       },
       events,
@@ -722,21 +820,26 @@ const onContentBlockDelta = Effect.fn('AnthropicMessages.onContentBlockDelta')(
       ];
     }
     if (delta?.type === 'signature_delta' && delta.signature) {
-      const events = [];
+      // Record only; the reasoning block closes on `content_block_stop` (or
+      // `message_stop`), where the signature is attached. Ending here would close
+      // the block early if the provider streams more thinking afterwards.
       return [
-        {
-          ...state,
-          lifecycle: Lifecycle.reasoningEnd(
-            state.lifecycle,
-            events,
-            `reasoning-${event.index ?? 0}`,
-            anthropicMetadata({ signature: delta.signature }),
-          ),
-        },
-        events,
+        event.index === undefined
+          ? state
+          : {
+              ...state,
+              reasoningSignatures: {
+                ...state.reasoningSignatures,
+                [event.index]: delta.signature,
+              },
+            },
+        NO_EVENTS,
       ];
     }
     if (delta?.type === 'input_json_delta' && event.index !== undefined) {
+      // A delta without an open block (out-of-order/truncated stream) is ignored
+      // rather than failing the whole response.
+      if (!state.tools[event.index]) return [state, NO_EVENTS];
       if (!delta.partial_json) return [state, NO_EVENTS];
       const result = ToolStream.appendExisting(
         ADAPTER,
@@ -762,28 +865,78 @@ const onContentBlockStop = Effect.fn('AnthropicMessages.onContentBlockStop')(
     const result = yield* ToolStream.finish(ADAPTER, state.tools, event.index);
     const events = [];
     const resultEvents = result.events ?? [];
+    const signature = state.reasoningSignatures[event.index];
     const lifecycle = resultEvents.length
       ? Lifecycle.stepStart(state.lifecycle, events)
       : Lifecycle.reasoningEnd(
           Lifecycle.textEnd(state.lifecycle, events, `text-${event.index}`),
           events,
           `reasoning-${event.index}`,
+          signature === undefined ? undefined : anthropicMetadata({ signature }),
         );
     events.push(...resultEvents);
-    return [{ ...state, lifecycle, tools: result.tools }, events];
+    const reasoningSignatures = Object.fromEntries(
+      Object.entries(state.reasoningSignatures).filter(([key]) => key !== String(event.index)),
+    );
+    return [{ ...state, lifecycle, tools: result.tools, reasoningSignatures }, events];
   },
 );
+// `message_delta` only records the terminal reason. Emitting `finish` here
+// used to double-fire when a provider sent several deltas (or a bare usage
+// update), and it finalized before `message_stop` could flush tools whose
+// `content_block_stop` never arrived. `message_stop` now owns the single
+// terminal emit; `onHalt` covers providers that omit it.
 const onMessageDelta = (state, event) => {
   const usage = mergeUsage(state.usage, mapUsage(event.usage));
+  const stopReason = event.delta?.stop_reason;
+  const pendingFinish =
+    typeof stopReason === 'string' && stopReason.length > 0
+      ? {
+          reason: mapFinishReason(stopReason),
+          raw: stopReason,
+          ...(typeof event.delta?.stop_sequence === 'string' && event.delta.stop_sequence.length > 0
+            ? { stopSequence: event.delta.stop_sequence }
+            : {}),
+        }
+      : state.pendingFinish;
+  return [{ ...state, usage, pendingFinish }, NO_EVENTS];
+};
+const finishReasonFor = (state, hasToolCalls) => {
+  const reason = state.pendingFinish?.reason ?? (hasToolCalls ? 'tool-calls' : 'stop');
+  return reason === 'stop' && hasToolCalls ? 'tool-calls' : reason;
+};
+const stopMetadata = (state) =>
+  state.pendingFinish?.stopSequence
+    ? anthropicMetadata({ stopSequence: state.pendingFinish.stopSequence })
+    : undefined;
+const onMessageStop = Effect.fn('AnthropicMessages.onMessageStop')(function* (state) {
+  if (state.finished) return [state, NO_EVENTS];
+  const finished = yield* ToolStream.finishAll(ADAPTER, state.tools);
   const events = [];
-  const lifecycle = Lifecycle.finish(state.lifecycle, events, {
-    reason: mapFinishReason(event.delta?.stop_reason),
-    usage,
-    providerMetadata: event.delta?.stop_sequence
-      ? anthropicMetadata({ stopSequence: event.delta.stop_sequence })
-      : undefined,
+  let lifecycle = state.lifecycle;
+  if (finished.events.length) {
+    lifecycle = Lifecycle.stepStart(lifecycle, events);
+    events.push(...finished.events);
+  }
+  const hasToolCalls = finished.events.some(LLMEvent.is.toolCall);
+  lifecycle = Lifecycle.finish(lifecycle, events, {
+    reason: finishReasonFor(state, hasToolCalls),
+    reasonRaw: state.pendingFinish?.raw,
+    usage: state.usage,
+    providerMetadata: stopMetadata(state),
   });
-  return [{ ...state, lifecycle, usage }, events];
+  return [{ ...state, lifecycle, tools: finished.tools, finished: true }, events];
+});
+const onHalt = (state) => {
+  if (state.finished || !state.pendingFinish) return [];
+  const events = [];
+  Lifecycle.finish(state.lifecycle, events, {
+    reason: finishReasonFor(state, false),
+    reasonRaw: state.pendingFinish.raw,
+    usage: state.usage,
+    providerMetadata: stopMetadata(state),
+  });
+  return events;
 };
 // Prefix `error.type` so overloads, rate limits, and quota errors are visible
 // even when the provider message is generic or empty.
@@ -793,6 +946,10 @@ const providerErrorMessage = (event) => {
   if (type && message) return `${type}: ${message}`;
   return message || type || 'Anthropic Messages stream error';
 };
+// Anthropic reports transient upstream conditions as typed stream errors.
+// Preserve their retryability so the caller's retry policy can act on them
+// instead of treating every `error` event as terminal.
+const ANTHROPIC_RETRYABLE_ERRORS = new Set(['overloaded_error', 'rate_limit_error']);
 const onError = (state, event) => [
   state,
   [
@@ -801,6 +958,8 @@ const onError = (state, event) => [
       classification: isContextOverflow(event.error?.message ?? '')
         ? 'context-overflow'
         : undefined,
+      retryable:
+        event.error?.type !== undefined && ANTHROPIC_RETRYABLE_ERRORS.has(event.error.type),
     }),
   ],
 ];
@@ -811,6 +970,7 @@ const step = (state, event) => {
   if (event.type === 'content_block_delta') return onContentBlockDelta(state, event);
   if (event.type === 'content_block_stop') return onContentBlockStop(state, event);
   if (event.type === 'message_delta') return Effect.succeed(onMessageDelta(state, event));
+  if (event.type === 'message_stop') return onMessageStop(state);
   if (event.type === 'error') return Effect.succeed(onError(state, event));
   return Effect.succeed([state, NO_EVENTS]);
 };
@@ -830,8 +990,15 @@ export const protocol = Protocol.make({
   },
   stream: {
     event: Protocol.jsonEvent(AnthropicEvent),
-    initial: () => ({ tools: ToolStream.empty(), lifecycle: Lifecycle.initial() }),
+    initial: () => ({
+      tools: ToolStream.empty(),
+      lifecycle: Lifecycle.initial(),
+      pendingFinish: undefined,
+      reasoningSignatures: {},
+      finished: false,
+    }),
     step,
+    onHalt,
   },
 });
 export const route = Route.make({

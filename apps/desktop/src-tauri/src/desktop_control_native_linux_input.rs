@@ -1,11 +1,16 @@
 use super::input_unavailable_reason;
 use crate::desktop_control_native::{
     command_exists, coordinate_arg, run_command, ClickAction, ClickRequest, ClickResponse,
-    DesktopControlError, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse, MouseButton,
-    ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse, WaitRequest, WaitResponse,
+    DesktopControlError, DragRequest, DragResponse, HotkeyRequest, HotkeyResponse, KeyRequest,
+    KeyResponse, LongPressRequest, LongPressResponse, MouseButton, MouseMoveRequest,
+    MouseMoveResponse, ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse,
+    WaitRequest, WaitResponse,
 };
 use std::thread;
 use std::time::Duration;
+
+const MAX_GESTURE_MS: u64 = 10_000;
+const DRAG_STEPS: u32 = 8;
 
 pub fn click(request: ClickRequest) -> Result<ClickResponse, DesktopControlError> {
     require_xdotool()?;
@@ -128,6 +133,106 @@ pub fn wait(request: WaitRequest) -> WaitResponse {
     WaitResponse { success: true, ms }
 }
 
+pub fn mouse_move(request: MouseMoveRequest) -> Result<MouseMoveResponse, DesktopControlError> {
+    require_xdotool()?;
+    run_command(
+        "xdotool",
+        &[
+            "mousemove".to_owned(),
+            coordinate_arg(request.x),
+            coordinate_arg(request.y),
+        ],
+    )?;
+    Ok(MouseMoveResponse {
+        success: true,
+        x: request.x,
+        y: request.y,
+        driver: "xdotool".to_owned(),
+    })
+}
+
+pub fn drag(request: DragRequest) -> Result<DragResponse, DesktopControlError> {
+    require_xdotool()?;
+    let button = mouse_button_arg(request.button);
+    if let Err(error) = run_drag_sequence(&request, button) {
+        release_mouse_button(button);
+        return Err(error);
+    }
+    Ok(DragResponse {
+        success: true,
+        from_x: request.from_x,
+        from_y: request.from_y,
+        to_x: request.to_x,
+        to_y: request.to_y,
+        button: request.button,
+        driver: "xdotool".to_owned(),
+    })
+}
+
+pub fn long_press(request: LongPressRequest) -> Result<LongPressResponse, DesktopControlError> {
+    require_xdotool()?;
+    let button = mouse_button_arg(request.button);
+    let ms = request.ms.min(MAX_GESTURE_MS);
+    run_command(
+        "xdotool",
+        &[
+            "mousemove".to_owned(),
+            coordinate_arg(request.x),
+            coordinate_arg(request.y),
+        ],
+    )?;
+    run_command("xdotool", &["mousedown".to_owned(), button.to_owned()])?;
+    if ms > 0 {
+        thread::sleep(Duration::from_millis(ms));
+    }
+    run_command("xdotool", &["mouseup".to_owned(), button.to_owned()])?;
+    Ok(LongPressResponse {
+        success: true,
+        x: request.x,
+        y: request.y,
+        button: request.button,
+        ms,
+        driver: "xdotool".to_owned(),
+    })
+}
+
+fn run_drag_sequence(request: &DragRequest, button: &str) -> Result<(), DesktopControlError> {
+    let step_delay = gesture_step_delay(request.ms.min(MAX_GESTURE_MS), DRAG_STEPS);
+    run_command(
+        "xdotool",
+        &[
+            "mousemove".to_owned(),
+            coordinate_arg(request.from_x),
+            coordinate_arg(request.from_y),
+        ],
+    )?;
+    run_command("xdotool", &["mousedown".to_owned(), button.to_owned()])?;
+    for index in 1..=DRAG_STEPS {
+        let ratio = f64::from(index) / f64::from(DRAG_STEPS);
+        let x = request.from_x + (request.to_x - request.from_x) * ratio;
+        let y = request.from_y + (request.to_y - request.from_y) * ratio;
+        run_command(
+            "xdotool",
+            &["mousemove".to_owned(), coordinate_arg(x), coordinate_arg(y)],
+        )?;
+        if step_delay > 0 {
+            thread::sleep(Duration::from_millis(step_delay));
+        }
+    }
+    run_command("xdotool", &["mouseup".to_owned(), button.to_owned()])
+}
+
+fn release_mouse_button(button: &str) {
+    let _ = run_command("xdotool", &["mouseup".to_owned(), button.to_owned()]);
+}
+
+fn gesture_step_delay(ms: u64, steps: u32) -> u64 {
+    if steps == 0 {
+        return 0;
+    }
+    ms / u64::from(steps)
+}
+
 fn require_xdotool() -> Result<(), DesktopControlError> {
     if command_exists("xdotool") {
         Ok(())
@@ -227,5 +332,21 @@ fn is_function_key(value: &str) -> bool {
     match rest.parse::<u8>() {
         Ok(number) => (1..=12).contains(&number),
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gesture_step_delay_splits_total_duration_across_steps() {
+        assert_eq!(gesture_step_delay(300, 8), 37);
+        assert_eq!(gesture_step_delay(0, 8), 0);
+    }
+
+    #[test]
+    fn gesture_step_delay_guards_against_zero_steps() {
+        assert_eq!(gesture_step_delay(300, 0), 0);
     }
 }

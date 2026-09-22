@@ -31,14 +31,20 @@ export function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGr
       seenMessageIds.add(messageId);
     }
     const lastGroup = groups[groups.length - 1];
-    const lastEntry = lastGroup?.entries[lastGroup.entries.length - 1];
+    const lastEntry =
+      lastGroup?.kind === 'messages' ? lastGroup.entries[lastGroup.entries.length - 1] : undefined;
     const sameRole = lastEntry && lastEntry.message.role === entry.message.role;
     const sameIdentity = (lastEntry?.groupIdentityKey ?? null) === (entry.groupIdentityKey ?? null);
-    if (sameRole && sameIdentity) {
+    if (lastGroup?.kind === 'messages' && sameRole && sameIdentity) {
       lastGroup.entries.push(entry);
       continue;
     }
-    groups.push({ entries: [entry], key: entry.message.id, role: entry.message.role });
+    groups.push({
+      kind: 'messages',
+      entries: [entry],
+      key: entry.message.id,
+      role: entry.message.role,
+    });
   }
   return groups;
 }

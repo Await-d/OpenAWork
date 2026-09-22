@@ -40,8 +40,8 @@ export const TOOLSET_TO_TOOL_NAMES: Record<ToolsetCategory, readonly string[]> =
     'codegraph_callers',
     'codegraph_impact',
   ],
-  write: ['write', 'edit', 'multi_edit', 'apply_patch'],
-  shell: ['bash', 'run_background_bash', 'interactive_bash'],
+  write: ['write', 'edit', 'multi_edit', 'patch'],
+  shell: ['bash', 'run_bash_in_background', 'interactive_bash'],
   // 实际注册的联网工具规范名是 'websearch' / 'webfetch'（tools/tool-aliases.ts、
   // tools/web-tools.ts），早期写成 'web_search' 与任何已注册工具都对不上，会被
   // filterToolsByAllowedSets 静默过滤掉，导致 reception / executor 选了 web 也拿不到

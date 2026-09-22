@@ -11,7 +11,7 @@
 **快速诊断**：
 
 ```bash
-pnpm exec tsx scripts/diagnose-mcp-tools.ts
+bunx tsx scripts/diagnose-mcp-tools.ts
 ```
 
 **详细文档**：[mcp-tools-error.md](./mcp-tools-error.md)
@@ -19,7 +19,7 @@ pnpm exec tsx scripts/diagnose-mcp-tools.ts
 **快速修复**（禁用 Flat MCP 模式）：
 
 1. 在 `.env` 中添加：`OPENAWORK_DISABLE_MCP_FLAT_TOOLS=1`
-2. 重启 Gateway：`pnpm --filter @openAwork/agent-gateway dev`
+2. 重启 Gateway：`bun run --filter @openAwork/agent-gateway dev`
 
 ---
 
@@ -74,7 +74,7 @@ cat .env.example
 
 ```bash
 # 检查 Gateway 是否运行
-pnpm --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway dev
 
 # 检查 Redis 是否运行
 redis-cli ping
@@ -89,7 +89,7 @@ Gateway 日志通常包含有用的错误信息：
 
 ```bash
 # 查看 Gateway 启动日志
-pnpm --filter @openAwork/agent-gateway dev 2>&1 | tee gateway.log
+bun run --filter @openAwork/agent-gateway dev 2>&1 | tee gateway.log
 
 # 过滤错误信息
 grep -i "error\|warn\|fail" gateway.log
@@ -100,14 +100,14 @@ grep -i "error\|warn\|fail" gateway.log
 有时清除缓存可以解决问题：
 
 ```bash
-# 清除 pnpm 缓存
-pnpm store prune
+# 清除 bun 缓存
+bun pm cache rm
 
 # 重新安装依赖
-pnpm install
+bun install
 
 # 重新构建
-pnpm build
+bun run build
 ```
 
 ---
@@ -119,7 +119,7 @@ pnpm build
 1. **错误信息**：完整的错误堆栈
 2. **环境信息**：
    - Node.js 版本：`node --version`
-   - pnpm 版本：`pnpm --version`
+   - bun 版本：`bun --version`
    - 操作系统：`uname -a`
 3. **重现步骤**：详细的操作步骤
 4. **诊断信息**：相关诊断脚本的输出

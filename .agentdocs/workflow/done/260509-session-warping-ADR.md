@@ -54,7 +54,7 @@ Scout agent（P1-SCOUT）可能已在 `~/.cache/openawork/repos/...` 的克隆�
 ### 未提交 diff 的暴露方式
 
 - `workspaceReviewStatusTool` / `workspaceReviewDiffTool`（见 `tool-definitions.ts`）可以读出当前 workspace 的改动
-- 没有现成的"把 diff apply 到另一个目录"流程；`apply_patch` 工具能 apply 单次 patch，但不覆盖跨 workspace 搬运语义
+- 没有现成的"把 diff apply 到另一个目录"流程；`patch` 工具能 apply 单次补丁，但不覆盖跨 workspace 搬运语义
 
 ### 分享/权限层
 

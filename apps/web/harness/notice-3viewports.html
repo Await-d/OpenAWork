@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SubagentNoticeRow 三视口验收</title>
+    <style>
+      /*
+       * ⚠️ 这里**刻意不定义**任何组件会消费的 token（--aux / --danger / --warning /
+       * --accent / --accent-subtle / --fg-*）——页面 chrome 一律用字面量。
+       *
+       * 原因：`packages/shared-ui/src/tokens.ts` 的取值形如 `var(--aux, #8b9cf5)`，
+       * 即「CSS 变量优先、hex 兜底」。若在这里把变量定义成与兜底相同的值，
+       * 两条路径会被混为一谈：既没证明「无变量时兜底正确」，也没证明「有变量时跟随主题」。
+       * 因此拆成两条链：本页默认 = 兜底链；`.themed` = 主题链（哨兵色值）。
+       */
+      body {
+        margin: 0;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        padding: 0;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 0;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 0 8px 4px;
+      }
+      /* 主题链哨兵色值：与组件兜底完全不同，用于证明「跟随主题变量」。 */
+      .themed {
+        --aux: #123456;
+        --danger: #234567;
+        --warning: #345678;
+        --accent: #456789;
+        --accent-subtle: rgba(69, 103, 137, 0.2);
+        --fg-default: #56789a;
+        --fg-muted: #6789ab;
+        --fg-subtle: #789abc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/notice-3viewports-entry.tsx"></script>
+  </body>
+</html>

@@ -51,10 +51,7 @@ type BookmarkStoreApi = ReturnType<typeof useBookmarkStore.getState>;
  * `topBar` 与 `compact` 因分支而异（fusion 紧凑 + 融合顶栏；classic 常规 + 经典顶栏），
  * 由区域容器负责填充，故从公共子集里剔除。
  */
-export type ChatConversationViewCommonProps = Omit<
-  ChatConversationViewProps,
-  'topBar' | 'compact'
->;
+export type ChatConversationViewCommonProps = Omit<ChatConversationViewProps, 'topBar' | 'compact'>;
 
 /**
  * 区域容器组装分支 `topBar` 所需的公共输入。
@@ -97,8 +94,10 @@ export interface ChatConversationViewChromeInputs {
 }
 
 /** 公共 props 组装输入：公共 props + 区域 chrome，全部塞进**一个**对象。 */
-export interface ChatConversationViewPropsInput
-  extends Omit<ChatConversationViewCommonProps, 'sessionSource' | 'composerExtras'> {
+export interface ChatConversationViewPropsInput extends Omit<
+  ChatConversationViewCommonProps,
+  'sessionSource' | 'composerExtras'
+> {
   /** session 来源标识；chat 端固定 'chat'，缺省即 'chat'。 */
   sessionSource?: SessionConversationSource;
   /** composer 能力开关；缺省使用 chat 端全开集合。 */

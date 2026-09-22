@@ -105,7 +105,8 @@ type BedrockSystemBlock = Schema.Schema.Type<typeof BedrockSystemBlock>;
 const BedrockToolSpec = Schema.Struct({
   toolSpec: Schema.Struct({
     name: Schema.String,
-    description: Schema.String,
+    // Converse rejects blank descriptions, so they are omitted entirely.
+    description: Schema.optional(Schema.String),
     inputSchema: Schema.Struct({
       json: JsonObject,
     }),
@@ -202,6 +203,20 @@ const BedrockEvent = Schema.Struct({
       metrics: Schema.optional(Schema.Unknown),
     }),
   ),
+  // AWS event-stream `:message-type: exception` frames are rewrapped by the
+  // framing layer under a single `exception` key (the type lives in the
+  // `:exception-type` header). Keep the legacy per-type fields below for
+  // callers that build events directly.
+  exception: Schema.optional(
+    Schema.Struct({
+      type: Schema.String,
+      details: Schema.Struct({
+        message: Schema.optional(Schema.String),
+        originalMessage: Schema.optional(Schema.String),
+        originalStatusCode: Schema.optional(Schema.Number),
+      }),
+    }),
+  ),
   internalServerException: Schema.optional(Schema.Struct({ message: Schema.String })),
   modelStreamErrorException: Schema.optional(Schema.Struct({ message: Schema.String })),
   validationException: Schema.optional(Schema.Struct({ message: Schema.String })),
@@ -216,7 +231,7 @@ type BedrockEvent = Schema.Schema.Type<typeof BedrockEvent>;
 const lowerToolSpec = (tool: ToolDefinition, inputSchema: JsonSchema): BedrockToolSpec => ({
   toolSpec: {
     name: tool.name,
-    description: tool.description,
+    ...(tool.description.trim().length > 0 ? { description: tool.description } : {}),
     inputSchema: { json: inputSchema },
   },
 });
@@ -268,16 +283,29 @@ const reasoningSignature = (part: ReasoningPart) => {
   );
 };
 
+// Models can emit names/keys that Converse rejects when the call is replayed
+// in history; sanitize before sending.
+const removeEmptyToolInputKeys = (input: unknown): unknown => {
+  if (Array.isArray(input)) return input.map(removeEmptyToolInputKeys);
+  if (!ProviderShared.isRecord(input)) return input;
+  return Object.fromEntries(
+    Object.entries(input).flatMap(([key, value]) =>
+      key === '' ? [] : [[key, removeEmptyToolInputKeys(value)]],
+    ),
+  );
+};
+
 const lowerToolCall = (part: ToolCallPart): BedrockToolUseBlock => ({
   toolUse: {
     toolUseId: part.id,
-    name: part.name,
-    input: part.input,
+    name: part.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || '_',
+    input: removeEmptyToolInputKeys(part.input),
   },
 });
 
 const lowerToolResultContent = Effect.fn('BedrockConverse.lowerToolResultContent')(function* (
   part: ToolResultPart,
+  documentNames: Set<string>,
 ) {
   if (part.result.type === 'text' || part.result.type === 'error')
     return [{ text: ProviderShared.toolResultText(part) }];
@@ -289,12 +317,15 @@ const lowerToolResultContent = Effect.fn('BedrockConverse.lowerToolResultContent
       content.push({ text: item.text });
       continue;
     }
-    const media = yield* BedrockMedia.lower({
-      type: 'media',
-      mediaType: item.mime,
-      data: item.uri,
-      filename: item.name,
-    });
+    const media = yield* BedrockMedia.lower(
+      {
+        type: 'media',
+        mediaType: item.mime,
+        data: item.uri,
+        filename: item.name,
+      },
+      documentNames,
+    );
     if (!('image' in media))
       return yield* ProviderShared.invalidRequest(
         'Bedrock Converse only supports image media in tool results',
@@ -306,11 +337,12 @@ const lowerToolResultContent = Effect.fn('BedrockConverse.lowerToolResultContent
 
 const lowerToolResult = Effect.fn('BedrockConverse.lowerToolResult')(function* (
   part: ToolResultPart,
+  documentNames: Set<string>,
 ) {
   return {
     toolResult: {
       toolUseId: part.id,
-      content: yield* lowerToolResultContent(part),
+      content: yield* lowerToolResultContent(part, documentNames),
       status: part.result.type === 'error' ? 'error' : 'success',
     },
   } satisfies BedrockToolResultBlock;
@@ -319,6 +351,7 @@ const lowerToolResult = Effect.fn('BedrockConverse.lowerToolResult')(function* (
 const lowerMessages = Effect.fn('BedrockConverse.lowerMessages')(function* (
   request: LLMRequest,
   breakpoints: BedrockCache.Breakpoints,
+  documentNames: Set<string>,
 ) {
   const messages: BedrockMessage[] = [];
 
@@ -349,11 +382,18 @@ const lowerMessages = Effect.fn('BedrockConverse.lowerMessages')(function* (
           continue;
         }
         if (part.type === 'media') {
-          content.push(yield* BedrockMedia.lower(part));
+          content.push(yield* BedrockMedia.lower(part, documentNames));
           continue;
         }
       }
-      messages.push({ role: 'user', content });
+      // Converse requires alternating roles; fold consecutive user messages.
+      const previous = messages.at(-1);
+      if (previous?.role === 'user')
+        messages[messages.length - 1] = {
+          role: 'user',
+          content: [...previous.content, ...content],
+        };
+      else messages.push({ role: 'user', content });
       continue;
     }
 
@@ -383,6 +423,9 @@ const lowerMessages = Effect.fn('BedrockConverse.lowerMessages')(function* (
           continue;
         }
       }
+      // An empty assistant turn carries nothing and would break role
+      // alternation; drop it.
+      if (content.length === 0) continue;
       messages.push({ role: 'assistant', content });
       continue;
     }
@@ -393,11 +436,15 @@ const lowerMessages = Effect.fn('BedrockConverse.lowerMessages')(function* (
         return yield* ProviderShared.unsupportedContent('Bedrock Converse', 'tool', [
           'tool-result',
         ]);
-      content.push(yield* lowerToolResult(part));
+      content.push(yield* lowerToolResult(part, documentNames));
       const cachePoint = BedrockCache.block(breakpoints, part.cache);
       if (cachePoint) content.push(cachePoint);
     }
-    messages.push({ role: 'user', content });
+    // Parallel tool results belong to the same user turn.
+    const previous = messages.at(-1);
+    if (previous?.role === 'user')
+      messages[messages.length - 1] = { role: 'user', content: [...previous.content, ...content] };
+    else messages.push({ role: 'user', content });
   }
 
   return messages;
@@ -409,23 +456,31 @@ const lowerSystem = (
   breakpoints: BedrockCache.Breakpoints,
   system: ReadonlyArray<LLMRequest['system'][number]>,
 ): BedrockSystemBlock[] =>
-  system.flatMap((part) => textWithCache(breakpoints, part.text, part.cache));
+  system
+    .filter((part) => part.text.length > 0)
+    .flatMap((part) => textWithCache(breakpoints, part.text, part.cache));
 
 const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined;
   const generation = request.generation;
   // Bedrock-Claude shares Anthropic's 4-breakpoint cap. Spend the budget in
   // tools → system → messages order to favour the highest-impact prefixes.
-  const breakpoints = BedrockCache.breakpoints();
+  const breakpoints = BedrockCache.breakpoints(request.model.id);
+  // `toolChoice: "none"` only omits the choice; the tool declarations stay so
+  // the cached prefix remains stable.
   const toolConfig =
-    request.tools.length > 0 && request.toolChoice?.type !== 'none'
+    request.tools.length > 0
       ? {
           tools: lowerTools(request.model.compatibility?.toolSchema, breakpoints, request.tools),
           toolChoice,
         }
       : undefined;
-  const system = request.system.length === 0 ? undefined : lowerSystem(breakpoints, request.system);
-  const messages = yield* lowerMessages(request, breakpoints);
+  const systemBlocks = lowerSystem(breakpoints, request.system);
+  const system = systemBlocks.length === 0 ? undefined : systemBlocks;
+  // Converse requires document labels to be unique across the whole request, so
+  // one Set is threaded through every media lowering call.
+  const documentNames = new Set<string>();
+  const messages = yield* lowerMessages(request, breakpoints, documentNames);
   if (breakpoints.dropped > 0) {
     yield* Effect.logWarning(
       `Bedrock Converse: dropped ${breakpoints.dropped} cache breakpoint(s); the API allows at most ${BedrockCache.BEDROCK_BREAKPOINT_CAP} per request.`,
@@ -460,31 +515,29 @@ const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request:
 // =============================================================================
 const mapFinishReason = (reason: string): FinishReason => {
   if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
-  if (reason === 'max_tokens') return 'length';
+  if (reason === 'max_tokens' || reason === 'model_context_window_exceeded') return 'length';
   if (reason === 'tool_use') return 'tool-calls';
   if (reason === 'content_filtered' || reason === 'guardrail_intervened') return 'content-filter';
   return 'unknown';
 };
 
-// AWS Bedrock Converse reports `inputTokens` (inclusive total) with
-// `cacheReadInputTokens` and `cacheWriteInputTokens` as subsets. Pass
-// the total through and derive the non-cached breakdown. Bedrock does
-// not break reasoning out of `outputTokens` for any current model.
+// AWS reports `inputTokens` separately from cache reads and writes, so it is the
+// *non-cached* count; the inclusive total must be summed. Bedrock does not break
+// reasoning out of `outputTokens` for current models.
 const mapUsage = (usage: BedrockUsageSchema | undefined): Usage | undefined => {
   if (!usage) return undefined;
-  const cacheTotal = (usage.cacheReadInputTokens ?? 0) + (usage.cacheWriteInputTokens ?? 0);
-  const nonCached = ProviderShared.subtractTokens(usage.inputTokens, cacheTotal);
+  const inputTokens = ProviderShared.sumTokens(
+    usage.inputTokens,
+    usage.cacheReadInputTokens,
+    usage.cacheWriteInputTokens,
+  );
   return new Usage({
-    inputTokens: usage.inputTokens,
+    inputTokens,
     outputTokens: usage.outputTokens,
-    nonCachedInputTokens: nonCached,
+    nonCachedInputTokens: usage.inputTokens,
     cacheReadInputTokens: usage.cacheReadInputTokens,
     cacheWriteInputTokens: usage.cacheWriteInputTokens,
-    totalTokens: ProviderShared.totalTokens(
-      usage.inputTokens,
-      usage.outputTokens,
-      usage.totalTokens,
-    ),
+    totalTokens: ProviderShared.totalTokens(inputTokens, usage.outputTokens, usage.totalTokens),
     providerMetadata: { bedrock: usage },
   });
 };
@@ -492,9 +545,12 @@ const mapUsage = (usage: BedrockUsageSchema | undefined): Usage | undefined => {
 interface ParserState {
   readonly tools: ToolStream.State<number>;
   // Bedrock splits the finish into `messageStop` (carries `stopReason`) and
-  // `metadata` (carries usage). Hold the terminal event in state so `onHalt`
-  // can emit exactly one finish after both chunks have had a chance to arrive.
-  readonly pendingFinish: { readonly reason: FinishReason; readonly usage?: Usage } | undefined;
+  // `metadata` (carries usage). Hold the stop reason in state so `onHalt` can
+  // emit exactly one finish after both chunks have had a chance to arrive.
+  // `metadata` never fabricates a stop reason: a stream that ends without
+  // `messageStop` stays incomplete instead of completing as an implicit `stop`.
+  readonly pendingFinish: { readonly reason: FinishReason; readonly raw?: string } | undefined;
+  readonly usage?: Usage;
   readonly hasToolCalls: boolean;
   readonly lifecycle: Lifecycle.State;
   readonly reasoningSignatures: Readonly<Record<number, string>>;
@@ -566,14 +622,14 @@ const step = (state: ParserState, event: BedrockEvent) =>
 
     if (event.contentBlockDelta?.delta?.toolUse) {
       const index = event.contentBlockDelta.contentBlockIndex;
-      const result = ToolStream.appendExisting(
-        ADAPTER,
+      // A delta can arrive after `contentBlockStop` (or for an index that never
+      // started); ignore it instead of failing the whole response.
+      const result = ToolStream.append(
         state.tools,
         index,
         event.contentBlockDelta.delta.toolUse.input,
-        'Bedrock Converse tool delta is missing its tool call',
       );
-      if (ToolStream.isError(result)) return yield* result;
+      if (!result) return [state, []] as const;
       const events: LLMEvent[] = [];
       const lifecycle = result.events.length
         ? Lifecycle.stepStart(state.lifecycle, events)
@@ -613,12 +669,24 @@ const step = (state: ParserState, event: BedrockEvent) =>
     }
 
     if (event.messageStop) {
+      // Bedrock reports corrupted model output as a stop reason rather than an
+      // exception. Treat it as a failed turn so the caller can retry instead of
+      // accepting a truncated/`unknown` completion.
+      if (
+        event.messageStop.stopReason === 'malformed_model_output' ||
+        event.messageStop.stopReason === 'malformed_tool_use'
+      )
+        return yield* ProviderShared.eventError(
+          ADAPTER,
+          `Bedrock Converse stopped with ${event.messageStop.stopReason}`,
+          ProviderShared.encodeJson(event),
+        );
       return [
         {
           ...state,
           pendingFinish: {
             reason: mapFinishReason(event.messageStop.stopReason),
-            usage: state.pendingFinish?.usage,
+            raw: event.messageStop.stopReason,
           },
         },
         [],
@@ -626,10 +694,29 @@ const step = (state: ParserState, event: BedrockEvent) =>
     }
 
     if (event.metadata) {
-      const usage = mapUsage(event.metadata.usage);
+      return [{ ...state, usage: mapUsage(event.metadata.usage) ?? state.usage }, []] as const;
+    }
+
+    if (event.exception) {
+      const { type, details } = event.exception;
+      const message =
+        details.message ?? details.originalMessage ?? `Bedrock Converse stream error: ${type}`;
       return [
-        { ...state, pendingFinish: { reason: state.pendingFinish?.reason ?? 'stop', usage } },
-        [],
+        state,
+        [
+          LLMEvent.providerError({
+            message,
+            classification:
+              type === 'validationException' && isContextOverflow(message)
+                ? 'context-overflow'
+                : undefined,
+            retryable:
+              type === 'throttlingException' ||
+              type === 'internalServerException' ||
+              type === 'serviceUnavailableException' ||
+              type === 'modelStreamErrorException',
+          }),
+        ],
       ] as const;
     }
 
@@ -680,7 +767,8 @@ const onHalt = (state: ParserState): ReadonlyArray<LLMEvent> =>
             state.pendingFinish.reason === 'stop' && state.hasToolCalls
               ? 'tool-calls'
               : state.pendingFinish.reason,
-          usage: state.pendingFinish.usage,
+          reasonRaw: state.pendingFinish.raw,
+          usage: state.usage,
         });
         return events;
       })()
@@ -704,6 +792,7 @@ export const protocol = Protocol.make({
     initial: () => ({
       tools: ToolStream.empty<number>(),
       pendingFinish: undefined,
+      usage: undefined,
       hasToolCalls: false,
       lifecycle: Lifecycle.initial(),
       reasoningSignatures: {},

@@ -173,10 +173,13 @@ export interface WorkspaceClient {
    *
    * 版本随索引（重）建与失效单调前进，内置浏览器预览据此轮询判断工作区文件是否
    * 变化。只读且 O(1)，不触发索引构建，失败时抛 `HttpError`。
+   *
+   * `path` 省略 / 为空时，网关回退到「未绑定会话默认工作区」——供无工作目录的
+   * 会话（只有 `__session__:<id>` 这类 UI 作用域键）继续轮询预览刷新。
    */
   getFileIndexVersion(
     token: string,
-    path: string,
+    path?: string | null,
     options?: { signal?: AbortSignal },
   ): Promise<{ root: string; version: number }>;
   /** GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。 */
@@ -603,10 +606,14 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
 
   const getFileIndexVersion = async (
     token: string,
-    path: string,
+    path?: string | null,
     options?: { signal?: AbortSignal },
   ): Promise<{ root: string; version: number }> => {
-    const params = buildPathParams(path);
+    const requestedPath = path?.trim() ?? '';
+    const params = new URLSearchParams();
+    if (requestedPath) {
+      params.set('path', requestedPath);
+    }
     const response = await fetchWithTimeout(
       withQuery(`${baseUrl}/workspace/files/index-version`, params),
       {
@@ -624,7 +631,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     }
     const data = (await response.json()) as { root?: unknown; version?: unknown };
     return {
-      root: typeof data.root === 'string' ? data.root : path,
+      root: typeof data.root === 'string' ? data.root : requestedPath,
       version: typeof data.version === 'number' ? data.version : 0,
     };
   };

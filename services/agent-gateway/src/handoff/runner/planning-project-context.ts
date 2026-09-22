@@ -25,6 +25,7 @@ export async function collectPlanningProjectContext(directory: string): Promise<
     'package.json',
     'README.md',
     'tsconfig.json',
+    'bun.lock',
     'pnpm-workspace.yaml',
   ]) {
     try {

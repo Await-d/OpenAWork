@@ -27,9 +27,14 @@ export interface DesktopControlPluginSettings {
   enabled: boolean;
 }
 
+export interface DesktopAutomationPluginSettings {
+  enabled: boolean;
+}
+
 export interface PluginSettings {
   imageGeneration?: ImageGenerationPluginSettings;
   desktopControl?: DesktopControlPluginSettings;
+  desktopAutomation?: DesktopAutomationPluginSettings;
 }
 
 interface PluginsTabContentProps {
@@ -38,12 +43,14 @@ interface PluginsTabContentProps {
   activeImageModelId?: string;
 }
 
-type PluginId = 'desktop-control' | 'image-generation' | 'mcp' | 'skills' | 'websearch';
+type PluginId =
+  'desktop-automation' | 'desktop-control' | 'image-generation' | 'mcp' | 'skills' | 'websearch';
 
 const SEARCH_MANAGED_MCP_IDS = new Set(['open_websearch', 'websearch']);
 
 function normalizePluginId(value: string | null): PluginId {
   switch (value) {
+    case 'desktop-automation':
     case 'desktop-control':
     case 'image-generation':
     case 'mcp':
@@ -242,6 +249,24 @@ export function PluginsTabContent({
     [saveSettings],
   );
 
+  const updateDesktopAutomationPlugin = useCallback(
+    (patch: Partial<DesktopAutomationPluginSettings>) => {
+      setPluginSettings((prev) => {
+        const next: PluginSettings = {
+          ...prev,
+          desktopAutomation: {
+            enabled: prev.desktopAutomation?.enabled ?? false,
+            ...prev.desktopAutomation,
+            ...patch,
+          },
+        };
+        void saveSettings(next);
+        return next;
+      });
+    },
+    [saveSettings],
+  );
+
   const selectPlugin = useCallback(
     (pluginId: PluginId) => {
       setSelectedPluginId(pluginId);
@@ -254,6 +279,7 @@ export function PluginsTabContent({
 
   const imgPlugin = pluginSettings.imageGeneration ?? { enabled: false, modelSource: 'global' };
   const desktopControlPlugin = pluginSettings.desktopControl ?? { enabled: false };
+  const desktopAutomationPlugin = pluginSettings.desktopAutomation ?? { enabled: false };
   const searchManagedMcpServers = mcpServers.filter((server) =>
     SEARCH_MANAGED_MCP_IDS.has(server.id),
   );
@@ -368,6 +394,30 @@ export function PluginsTabContent({
       label: '系统桌面控制',
       description: '为 Agent 提供截图、点击、输入和按键 Tool。',
       enabled: desktopControlPlugin.enabled,
+    },
+    {
+      id: 'desktop-automation',
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="M2 9h20" />
+          <circle cx="5.5" cy="6.5" r="0.5" fill="currentColor" />
+          <circle cx="8.5" cy="6.5" r="0.5" fill="currentColor" />
+          <path d="M9 13.5l2 2 4-4" />
+        </svg>
+      ),
+      label: '浏览器自动化',
+      description: '为 Agent 提供网页导航、点击、填写与截图 Tool。',
+      enabled: desktopAutomationPlugin.enabled,
     },
     {
       id: 'skills',
@@ -736,7 +786,7 @@ export function PluginsTabContent({
                 系统桌面控制
               </div>
               <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
-                控制 Agent 是否获得系统级 desktop_control Tool。
+                控制 Agent 是否获得系统级桌面工具（desktop_control 与 computer_use）。
               </div>
             </div>
 
@@ -751,7 +801,9 @@ export function PluginsTabContent({
             >
               <div>
                 <h3 style={{ ...SECTION_TITLE, margin: 0 }}>启用插件</h3>
-                <div style={SECTION_DESC}>启用后才会把 desktop_control 注入 Agent 工具列表</div>
+                <div style={SECTION_DESC}>
+                  启用后才会把 desktop_control 与 computer_use 注入 Agent 工具列表
+                </div>
               </div>
               <SettingsToggle
                 checked={desktopControlPlugin.enabled}
@@ -791,6 +843,10 @@ export function PluginsTabContent({
                     : '插件未启用，后端不会注入该工具，历史调用也会被拒绝。'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
+                  可用动作：截图、坐标点击（含按下、抬起、双击）、文本输入、单键与组合键、滚动、
+                  等待、拖拽、鼠标移动、长按
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
                   可用参数：action、x、y、text、key、keys、scrollX、scrollY、ms
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -805,13 +861,161 @@ export function PluginsTabContent({
                   <span style={PARAM_CHIP}>ms</span>
                 </div>
               </div>
+
+              {/* computer_use 与 desktop_control 共用同一个插件开关（T-14b），
+                  这里显式列出，避免用户以为开关只影响 desktop_control。 */}
+              <div
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: 'var(--fg-strong)',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  computer_use
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: desktopControlPlugin.enabled ? 'var(--accent)' : 'var(--fg-muted)',
+                    marginTop: 2,
+                  }}
+                >
+                  {desktopControlPlugin.enabled
+                    ? '插件已启用，具备 GUI grounding 能力的模型可驱动桌面完成多步任务。'
+                    : '插件未启用，模型不会看到该工具，历史调用也会被拒绝。'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
+                  内嵌「截图 → 视觉决策 → 动作」循环，每步执行进度会实时显示在对话里。
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={PARAM_CHIP}>instruction</span>
+                  <span style={PARAM_CHIP}>maxSteps</span>
+                </div>
+              </div>
             </div>
 
             <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <h3 style={{ ...SECTION_TITLE, margin: 0 }}>执行边界</h3>
               <div style={SECTION_DESC}>
-                插件开关只决定 Agent 工具是否注入和是否允许执行；实际截图、点击、输入、按键、
-                滚动等动作仍会继续走权限审批与运行环境能力检查。
+                插件开关只决定 Agent 工具是否注入和是否允许执行；实际截图、坐标点击（含按下、抬起、
+                双击）、文本输入、单键与组合键、滚动、等待、拖拽、鼠标移动、长按等动作仍会继续走
+                权限审批与运行环境能力检查。computer_use 除插件开关外还需当前模型具备 GUI grounding
+                能力，否则会直接返回明确原因而不执行。
+              </div>
+            </div>
+
+            {saving && (
+              <div style={{ fontSize: 11, color: 'var(--fg-muted)', textAlign: 'right' }}>
+                保存中…
+              </div>
+            )}
+          </>
+        )}
+
+        {selectedPlugin && selectedPluginId === 'desktop-automation' && (
+          <>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
+                浏览器自动化
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
+                控制 Agent 是否获得桌面端专属的浏览器自动化工具（desktop_automation）。
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                ...CARD,
+              }}
+            >
+              <div>
+                <h3 style={{ ...SECTION_TITLE, margin: 0 }}>启用插件</h3>
+                <div style={SECTION_DESC}>启用后才会把 desktop_automation 注入 Agent 工具列表</div>
+              </div>
+              <SettingsToggle
+                checked={desktopAutomationPlugin.enabled}
+                onChange={(v) => updateDesktopAutomationPlugin({ enabled: v })}
+                ariaLabel="启用插件"
+              />
+            </div>
+
+            <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>Tool 状态</h3>
+              <div
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: 'var(--fg-strong)',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  desktop_automation
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: desktopAutomationPlugin.enabled ? 'var(--accent)' : 'var(--fg-muted)',
+                    marginTop: 2,
+                  }}
+                >
+                  {desktopAutomationPlugin.enabled
+                    ? '插件已启用，后端会在本用户会话中注入该工具。'
+                    : '插件未启用，后端不会注入该工具，历史调用也会被拒绝。'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
+                  可用动作：导航与点击、输入、按键、滚动、等待、内容读取、页面快照、截图；检查面：
+                  悬停、勾选、下拉选择、查找元素、iframe 列表、执行脚本、控制台读取
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 4 }}>
+                  可用参数：action、url、selector、text、key、checked、values、limit、script、args、
+                  level、clear、direction、amount、ms
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={PARAM_CHIP}>action</span>
+                  <span style={PARAM_CHIP}>url</span>
+                  <span style={PARAM_CHIP}>selector</span>
+                  <span style={PARAM_CHIP}>text</span>
+                  <span style={PARAM_CHIP}>key</span>
+                  <span style={PARAM_CHIP}>checked</span>
+                  <span style={PARAM_CHIP}>values</span>
+                  <span style={PARAM_CHIP}>limit</span>
+                  <span style={PARAM_CHIP}>script</span>
+                  <span style={PARAM_CHIP}>args</span>
+                  <span style={PARAM_CHIP}>level</span>
+                  <span style={PARAM_CHIP}>clear</span>
+                  <span style={PARAM_CHIP}>direction</span>
+                  <span style={PARAM_CHIP}>amount</span>
+                  <span style={PARAM_CHIP}>ms</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <h3 style={{ ...SECTION_TITLE, margin: 0 }}>执行边界</h3>
+              <div style={SECTION_DESC}>
+                插件开关只决定 desktop_automation 是否注入工具列表与是否允许执行；实际导航、点击、
+                输入、按键、滚动、等待、脚本执行等动作仍会继续走权限审批。该插件还需要运行环境支持：
+                桌面端 sidecar 会自动注入 DESKTOP_AUTOMATION=1，纯 Web 或远程网关环境即使打开开关也
+                无法使用。
               </div>
             </div>
 

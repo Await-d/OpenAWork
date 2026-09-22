@@ -192,7 +192,7 @@ store/      ──→ runner/    ❌ 禁止（store 不依赖执行逻辑）
 
 **静态强制**：自定义 ESLint 规则 `team-architecture/no-cross-layer-runner-import`
 （`scripts/eslint-rules/no-cross-layer-runner-import.mjs`，配套 RuleTester 自测
-`no-cross-layer-runner-import.test.mjs`，由 `pnpm run lint:rules` 运行）。新增白名单
+`no-cross-layer-runner-import.test.mjs`，由 `bun run lint:rules` 运行）。新增白名单
 编排器或新受控通道，必须走架构 review（见 `docs/architecture/team-architecture-l1-baseline.md` §L1.4）。
 
 ---

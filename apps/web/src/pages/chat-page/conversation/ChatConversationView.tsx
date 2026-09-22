@@ -145,6 +145,8 @@ export interface ChatConversationViewProps {
   // ─── 消息列表 ───────────────────────────────────────────────────────
   messages: ChatMessage[];
   groupedMessageEntries: ChatRenderGroup[];
+  /** 点击子代理通知行时打开对应子会话（未传入时通知不可点击）。 */
+  onOpenSubagentChild?: (childSessionId: string) => void;
   visibleMessageCount: number;
   hiddenMessageCount: number;
   visibleStreaming: boolean;
@@ -448,6 +450,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
     messages,
     groupedMessageEntries,
+    onOpenSubagentChild,
     visibleMessageCount: _visibleMessageCount,
     hiddenMessageCount,
     visibleStreaming,
@@ -580,33 +583,37 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   const groupsWithHistoryEdit = useMemo(() => {
     if (!historyEditPrompt) return groupedMessageEntries;
 
-    return groupedMessageEntries.map((group) => ({
-      ...group,
-      entries: group.entries.map((entry) => {
-        if (entry.message.id !== historyEditPrompt.messageId) return entry;
+    return groupedMessageEntries.map((group) => {
+      // 通知群组没有可编辑的消息，原样透传（判别联合保证此处已窄化）。
+      if (group.kind !== 'messages') return group;
+      return {
+        ...group,
+        entries: group.entries.map((entry) => {
+          if (entry.message.id !== historyEditPrompt.messageId) return entry;
 
-        return {
-          ...entry,
-          renderContent: () => (
-            <HistoryEditInlineEditor
-              key={historyEditPrompt.messageId}
-              initialText={historyEditPrompt.text}
-              inputParts={historyEditPrompt.inputParts}
-              onClose={onCloseHistoryEdit}
-              onResendCurrent={(text, editedInputParts) => {
-                snapshotAwareAction.checkAndExecute({
-                  action: 'edit',
-                  sourceMessageId: historyEditPrompt.messageId,
-                  onProceed: () => onResendHistoryEdit(text, editedInputParts),
-                });
-              }}
-              onContinueCurrent={onContinueHistoryEdit}
-              onCreateBranch={onCreateBranchFromHistoryEdit}
-            />
-          ),
-        };
-      }),
-    }));
+          return {
+            ...entry,
+            renderContent: () => (
+              <HistoryEditInlineEditor
+                key={historyEditPrompt.messageId}
+                initialText={historyEditPrompt.text}
+                inputParts={historyEditPrompt.inputParts}
+                onClose={onCloseHistoryEdit}
+                onResendCurrent={(text, editedInputParts) => {
+                  snapshotAwareAction.checkAndExecute({
+                    action: 'edit',
+                    sourceMessageId: historyEditPrompt.messageId,
+                    onProceed: () => onResendHistoryEdit(text, editedInputParts),
+                  });
+                }}
+                onContinueCurrent={onContinueHistoryEdit}
+                onCreateBranch={onCreateBranchFromHistoryEdit}
+              />
+            ),
+          };
+        }),
+      };
+    });
   }, [
     groupedMessageEntries,
     historyEditPrompt,
@@ -762,6 +769,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     providerCatalog={providerCatalog}
                     resolveInlinePermissionActions={resolveInlinePermissionActions}
                     scrollRegionRef={scrollRegionRef}
+                    {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
                   />
                 </>
               ) : (

@@ -27,7 +27,6 @@ import {
   type PublishRunEventMeta,
 } from '../session/session-run-events.js';
 import { getFreshSessionRuntimeThread } from '../session/session-runtime-thread-store.js';
-import { clearPendingTaskParentAutoResumesForSession } from '../task/task-parent-auto-resume.js';
 import {
   stopAnyInFlightStreamRequestForSession,
   stopInFlightStreamRequest,
@@ -183,9 +182,6 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      if (stopped) {
-        clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
-      }
       return reply.status(200).send({ stopped });
     },
   );
@@ -242,9 +238,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      if (stopped) {
-        clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
-      } else {
+      if (!stopped) {
         // No in-flight request found — the stream may have ended without
         // cleaning up state_status. Run the reconciler to reset stale
         // running/paused state back to idle so the frontend can recover.

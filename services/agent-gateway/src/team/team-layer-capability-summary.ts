@@ -68,9 +68,9 @@ export interface LayerCapabilitySummary {
 
 const TOOLSET_CATEGORY_META: Record<string, { label: string; description: string }> = {
   read: { label: '读取', description: '文件读取 / grep / glob / codegraph 发现缓存' },
-  write: { label: '写入', description: '文件写入 / edit / apply_patch' },
+  write: { label: '写入', description: '文件写入 / edit / patch' },
   shell: { label: '命令行', description: 'bash / 终端执行' },
-  web: { label: '联网', description: 'web_search / fetch' },
+  web: { label: '联网', description: 'websearch / webfetch' },
   lsp: { label: 'LSP', description: 'LSP 语义查询（定义 / 引用 / 重命名）' },
   test: { label: '测试', description: '测试执行' },
   review: { label: '审查', description: '代码审查工具' },

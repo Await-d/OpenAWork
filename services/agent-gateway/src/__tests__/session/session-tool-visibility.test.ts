@@ -313,7 +313,7 @@ describe('session tool visibility', () => {
     };
 
     expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(true);
-    expect(isGatewayToolEnabledForSessionMetadata('workspace_tree', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('list', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(false);
   });
 

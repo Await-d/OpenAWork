@@ -67,15 +67,11 @@ export function batchSubInputSummary(tool: string, input: Record<string, unknown
       return `$ ${oneLine.length > 64 ? `${oneLine.slice(0, 64)}…` : oneLine}`;
     }
   }
-  if (
-    normalized === 'workspace_search' ||
-    normalized === 'grep' ||
-    normalized === 'workspace_grep'
-  ) {
+  if (normalized === 'grep' || normalized === 'codesearch') {
     const pattern = input.pattern ?? input.query;
     if (typeof pattern === 'string' && pattern) return pattern;
   }
-  if (normalized === 'workspace_glob' || normalized === 'glob') {
+  if (normalized === 'glob') {
     const pattern = input.pattern;
     if (typeof pattern === 'string' && pattern) return pattern;
   }

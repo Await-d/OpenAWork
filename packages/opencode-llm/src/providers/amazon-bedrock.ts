@@ -3,6 +3,7 @@ import { Auth } from '../route/auth.js';
 import { ProviderID, type ModelID } from '../schema/index.js';
 import * as BedrockConverse from '../protocols/bedrock-converse.js';
 import type { BedrockCredentials } from '../protocols/bedrock-converse.js';
+import { BedrockAuth } from '../protocols/utils/bedrock-auth.js';
 
 export const id = ProviderID.make('amazon-bedrock');
 
@@ -21,12 +22,21 @@ const bedrockBaseURL = (region: string) => `https://bedrock-runtime.${region}.am
 
 const configuredRoute = (input: Config) => {
   const { apiKey, credentials, region, baseURL, ...rest } = input;
-  const resolvedRegion = region ?? credentials?.region ?? 'us-east-1';
+  // Keep the endpoint region and the signing region aligned: env is consulted
+  // before falling back so the default credential chain signs for the same
+  // region the URL targets.
+  const resolvedRegion =
+    region ?? credentials?.region ?? BedrockAuth.resolveRegion() ?? 'us-east-1';
   return BedrockConverse.route.with({
     ...rest,
     provider: id,
     endpoint: { baseURL: baseURL ?? bedrockBaseURL(resolvedRegion) },
-    auth: apiKey === undefined ? BedrockConverse.sigV4Auth(credentials) : Auth.bearer(apiKey),
+    auth:
+      apiKey !== undefined
+        ? Auth.bearer(apiKey)
+        : credentials !== undefined
+          ? BedrockConverse.sigV4Auth(credentials)
+          : BedrockAuth.auth,
   });
 };
 

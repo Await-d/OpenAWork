@@ -2,7 +2,7 @@
  * verify-v2-runtime — end-to-end smoke test for the v2-runtime stack.
  *
  * Run with:
- *   pnpm --filter @openAwork/agent-gateway exec tsx src/verification/verify-v2-runtime.ts
+ *   bun run --filter @openAwork/agent-gateway verify src/verification/verify-v2-runtime.ts
  *
  * Mirrors the existing `verification/verify-*.ts` scripts: spins up an
  * in-memory SQLite, runs the legacy `migrate()` to install the V2

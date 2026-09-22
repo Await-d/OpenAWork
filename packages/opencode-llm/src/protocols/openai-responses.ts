@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Encoding, Schema } from 'effect';
 import { Route } from '../route/client.js';
 import { Auth } from '../route/auth.js';
 import { Endpoint } from '../route/endpoint.js';
@@ -81,6 +81,53 @@ const OpenAIResponsesFunctionCallOutput = Schema.Union([
   Schema.Array(OpenAIResponsesFunctionCallOutputContent),
 ]);
 
+// Hosted (provider-executed) items that OpenAI accepts back as `input`. With
+// `store: false` there is no server-side item to reference, so the recorded item
+// itself must be replayed to keep hosted-tool context across turns.
+const OpenAIResponsesHostedToolItem = Schema.Union([
+  Schema.StructWithRest(
+    Schema.Struct({
+      type: Schema.tag('computer_call'),
+      id: Schema.String,
+      status: Schema.optional(Schema.String),
+      call_id: Schema.optional(Schema.String),
+      action: optionalNull(JsonObject),
+      pending_safety_checks: Schema.optional(Schema.Array(JsonObject)),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  ),
+  Schema.StructWithRest(
+    Schema.Struct({
+      type: Schema.tag('web_search_call'),
+      id: Schema.String,
+      status: Schema.optional(Schema.String),
+      action: optionalNull(JsonObject),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  ),
+  Schema.StructWithRest(
+    Schema.Struct({
+      type: Schema.tag('web_search_preview_call'),
+      id: Schema.String,
+      status: Schema.optional(Schema.String),
+      action: optionalNull(JsonObject),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  ),
+  Schema.StructWithRest(
+    Schema.Struct({
+      type: Schema.tag('image_generation_call'),
+      id: Schema.String,
+      status: Schema.optional(Schema.String),
+      result: optionalNull(Schema.String),
+      output_format: Schema.optional(Schema.Literals(['png', 'jpeg', 'webp'])),
+      revised_prompt: optionalNull(Schema.String),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  ),
+]);
+type OpenAIResponsesHostedToolItem = Schema.Schema.Type<typeof OpenAIResponsesHostedToolItem>;
+
 const OpenAIResponsesInputItem = Schema.Union([
   Schema.Struct({ role: Schema.tag('system'), content: Schema.String }),
   Schema.Struct({ role: Schema.tag('user'), content: Schema.Array(OpenAIResponsesInputContent) }),
@@ -90,6 +137,7 @@ const OpenAIResponsesInputItem = Schema.Union([
   }),
   OpenAIResponsesReasoningItem,
   OpenAIResponsesItemReference,
+  OpenAIResponsesHostedToolItem,
   Schema.Struct({
     type: Schema.tag('function_call'),
     call_id: Schema.String,
@@ -205,6 +253,9 @@ const OpenAIResponsesStreamItem = Schema.StructWithRest(
     code: optionalNull(Schema.String),
     container_id: optionalNull(Schema.String),
     outputs: optionalNull(Schema.Unknown),
+    // `image_generation_call` returns its bytes as base64 in `result`.
+    result: optionalNull(Schema.String),
+    output_format: optionalNull(Schema.String),
     server_label: optionalNull(Schema.String),
     output: optionalNull(Schema.Unknown),
     error: optionalNull(Schema.Unknown),
@@ -232,6 +283,10 @@ const OpenAIResponsesEvent = Schema.StructWithRest(
   Schema.Struct({
     type: Schema.String,
     delta: optionalNull(Schema.String),
+    // `output_text.done` / `reasoning_*.done` carry the authoritative complete
+    // text; `function_call_arguments.done` carries the authoritative arguments.
+    text: optionalNull(Schema.String),
+    arguments: optionalNull(Schema.String),
     item_id: optionalNull(Schema.String),
     summary_index: optionalNull(Schema.Number),
     item: optionalNull(OpenAIResponsesStreamItem),
@@ -243,10 +298,14 @@ const OpenAIResponsesEvent = Schema.StructWithRest(
           incomplete_details: optionalNull(Schema.Struct({ reason: optionalNull(Schema.String) })),
           usage: optionalNull(OpenAIResponsesUsage),
           error: optionalNull(OpenAIResponsesErrorPayload),
+          // Completed responses repeat the final output items here; used to
+          // recover tool calls whose `output_item.done` was omitted.
+          output: optionalNull(Schema.Array(Schema.Unknown)),
         }),
         [Schema.Record(Schema.String, Schema.Unknown)],
       ),
     ),
+    error: optionalNull(OpenAIResponsesErrorPayload),
     code: optionalNull(Schema.String),
     message: optionalNull(Schema.String),
     param: optionalNull(Schema.String),
@@ -334,6 +393,18 @@ const hostedToolItemID = (part: ToolResultPart) => {
     : undefined;
 };
 
+// The stream recorder stores the whole hosted item as the tool result value, so
+// it can be replayed verbatim when the server has no stored copy (`store:false`).
+const restoreHostedToolItem = (item: unknown): OpenAIResponsesHostedToolItem | undefined =>
+  Schema.is(OpenAIResponsesHostedToolItem)(item) ? item : undefined;
+
+// The input union includes open (`StructWithRest`) hosted items, so `in`/discriminant
+// narrowing alone degrades `content` to `unknown`. This guard pins the user variant.
+const isUserInputItem = (
+  item: OpenAIResponsesInputItem | undefined,
+): item is Extract<OpenAIResponsesInputItem, { role: 'user' }> =>
+  item !== undefined && 'role' in item && item.role === 'user';
+
 const lowerUserContent = Effect.fn('OpenAIResponses.lowerUserContent')(function* (
   part: LLMRequest['messages'][number]['content'][number],
 ) {
@@ -388,7 +459,7 @@ const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (requ
     if (message.role === 'system') {
       const part = yield* ProviderShared.wrappedSystemUpdate('OpenAI Responses', message);
       const previous = input.at(-1);
-      if (previous && 'role' in previous && previous.role === 'user')
+      if (isUserInputItem(previous))
         input[input.length - 1] = {
           role: 'user',
           content: [...previous.content, { type: 'input_text', text: part.text }],
@@ -459,9 +530,29 @@ const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (requ
         if (part.type === 'tool-result' && part.providerExecuted === true) {
           flushText();
           const itemID = hostedToolItemID(part);
-          if (store !== false && itemID && !hostedToolReferences.has(itemID))
-            input.push({ type: 'item_reference', id: itemID });
-          if (itemID) hostedToolReferences.add(itemID);
+          if (store !== false) {
+            if (itemID && !hostedToolReferences.has(itemID))
+              input.push({ type: 'item_reference', id: itemID });
+            if (itemID) hostedToolReferences.add(itemID);
+            continue;
+          }
+          // `store:false` cannot use `item_reference`; replay the recorded item
+          // itself when we captured it so hosted context survives the turn.
+          const hosted =
+            part.result.type === 'json' ? restoreHostedToolItem(part.result.value) : undefined;
+          if (itemID !== undefined && hosted?.id === itemID) {
+            if (!hostedToolReferences.has(itemID)) {
+              input.push(hosted);
+              hostedToolReferences.add(itemID);
+            }
+            continue;
+          }
+          // Otherwise degrade the result into user-visible text so the model
+          // still sees the output instead of losing the call entirely.
+          input.push({
+            role: 'user',
+            content: [{ type: 'input_text', text: ProviderShared.toolResultText(part) }],
+          });
           continue;
         }
         return yield* ProviderShared.unsupportedContent('OpenAI Responses', 'assistant', [
@@ -576,7 +667,14 @@ const mapUsage = (usage: OpenAIResponsesUsage | null | undefined) => {
 
 const mapFinishReason = (event: OpenAIResponsesEvent, hasFunctionCall: boolean): FinishReason => {
   const reason = event.response?.incomplete_details?.reason;
-  if (reason === undefined || reason === null) return hasFunctionCall ? 'tool-calls' : 'stop';
+  if (reason === undefined || reason === null)
+    // Tool calls win over the incomplete signal; otherwise an `incomplete`
+    // without a detail reason is an unknown truncation, not a clean stop.
+    return hasFunctionCall
+      ? 'tool-calls'
+      : event.type === 'response.incomplete'
+        ? 'unknown'
+        : 'stop';
   if (reason === 'max_output_tokens') return 'length';
   if (reason === 'content_filter') return 'content-filter';
   return hasFunctionCall ? 'tool-calls' : 'unknown';
@@ -604,7 +702,10 @@ const HOSTED_TOOLS = {
     name: 'code_interpreter',
     input: (item) => ({ code: item.code, container_id: item.container_id }),
   },
-  computer_use_call: { name: 'computer_use', input: (item) => item.action ?? {} },
+  // 注意：本仓的客户端 GUI 工具已占用 `computer_use` 这一名称，为避免同名两义
+  // （hosted/providerExecuted 与本地执行工具混淆），这里把 hosted 的
+  // `computer_call` 暴露名改为 `computer_use_preview`，与 OpenAI wire 工具名保持一致。
+  computer_call: { name: 'computer_use_preview', input: (item) => item.action ?? {} },
   image_generation_call: { name: 'image_generation', input: () => ({}) },
   mcp_call: {
     name: 'mcp',
@@ -633,17 +734,47 @@ const isReasoningItem = (
   item.type === 'reasoning' && typeof item.id === 'string' && item.id.length > 0;
 
 // Round-trip the full item as the structured result so consumers can extract
-// outputs / sources / status without re-decoding.
-const hostedToolResult = (item: OpenAIResponsesStreamItem) => {
+// outputs / sources / status without re-decoding. Generated images are surfaced
+// as media content (with base64 validation) instead of an opaque blob.
+const hostedToolResult = Effect.fn('OpenAIResponses.hostedToolResult')(function* (
+  item: OpenAIResponsesStreamItem,
+) {
   const isError = typeof item.error !== 'undefined' && item.error !== null;
+  if (
+    item.type === 'image_generation_call' &&
+    typeof item.result === 'string' &&
+    item.result.length > 0
+  ) {
+    yield* Effect.fromResult(Encoding.decodeBase64(item.result)).pipe(
+      Effect.mapError((cause) =>
+        ProviderShared.eventError(
+          ADAPTER,
+          'OpenAI Responses returned invalid image base64',
+          undefined,
+          cause,
+        ),
+      ),
+    );
+    const format = item.output_format ?? 'png';
+    return {
+      type: 'content' as const,
+      value: [
+        {
+          type: 'file' as const,
+          uri: `data:image/${format};base64,${item.result}`,
+          mime: `image/${format}`,
+        },
+      ],
+    };
+  }
   return isError
     ? { type: 'error' as const, value: item.error }
     : { type: 'json' as const, value: item };
-};
+});
 
-const hostedToolEvents = (
+const hostedToolEvents = Effect.fn('OpenAIResponses.hostedToolEvents')(function* (
   item: OpenAIResponsesStreamItem & { type: HostedToolType; id: string },
-): ReadonlyArray<LLMEvent> => {
+) {
   const tool = HOSTED_TOOLS[item.type];
   const providerMetadata = openaiMetadata({ itemId: item.id });
   return [
@@ -657,22 +788,27 @@ const hostedToolEvents = (
     LLMEvent.toolResult({
       id: item.id,
       name: tool.name,
-      result: hostedToolResult(item),
+      result: yield* hostedToolResult(item),
       providerExecuted: true,
       providerMetadata,
     }),
   ];
-};
+});
 
 type StepResult = readonly [ParserState, ReadonlyArray<LLMEvent>];
 
 const NO_EVENTS: StepResult['1'] = [];
 
 // `response.completed` / `response.incomplete` are clean finishes that emit a
-// `finish` event; `response.failed` is a hard failure that emits a
-// `provider-error`. All three end the stream — kept in one set so `step` and
-// the protocol's `terminal` predicate stay in sync.
-const TERMINAL_TYPES = new Set(['response.completed', 'response.incomplete', 'response.failed']);
+// `finish` event; `response.failed` and a bare `error` are failures that emit a
+// `provider-error`. They all end the stream — kept in one set so `step` and the
+// protocol's `terminal` predicate stay in sync.
+const TERMINAL_TYPES = new Set([
+  'response.completed',
+  'response.incomplete',
+  'response.failed',
+  'error',
+]);
 
 const onOutputTextDelta = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
   if (!event.delta) return [state, NO_EVENTS];
@@ -689,6 +825,16 @@ const onOutputTextDelta = (state: ParserState, event: OpenAIResponsesEvent): Ste
     },
     events,
   ];
+};
+
+// Some compatible gateways emit a final `output_text.done` without streaming any
+// deltas. Reconcile the complete text as a single delta unless a text block for
+// that item already streamed.
+const onOutputTextDone = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
+  const id = event.item_id ?? 'text-0';
+  if (typeof event.text !== 'string' || event.text.length === 0) return [state, NO_EVENTS];
+  if (state.lifecycle.text.has(id)) return [state, NO_EVENTS];
+  return onOutputTextDelta(state, { ...event, delta: event.text });
 };
 
 const onReasoningDelta = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
@@ -719,10 +865,20 @@ const onReasoningDelta = (state: ParserState, event: OpenAIResponsesEvent): Step
   ];
 };
 
-const onReasoningDone = (state: ParserState, _event: OpenAIResponsesEvent): StepResult => [
-  state,
-  NO_EVENTS,
-];
+// Mirrors `output_text.done`: a reasoning summary final with no streamed deltas
+// is reconciled as one delta.
+const onReasoningDone = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
+  if (typeof event.text !== 'string' || event.text.length === 0) return [state, NO_EVENTS];
+  const itemID = event.item_id ?? 'reasoning-0';
+  const activeSummaryIndex =
+    event.summary_index ?? state.reasoningItems[itemID]?.activeSummaryIndex;
+  const id =
+    activeSummaryIndex !== undefined || state.reasoningItems[itemID]
+      ? `${itemID}:${activeSummaryIndex ?? 0}`
+      : itemID;
+  if (state.lifecycle.reasoning.has(id)) return [state, NO_EVENTS];
+  return onReasoningDelta(state, { ...event, delta: event.text });
+};
 
 const reasoningMetadata = (
   item: OpenAIResponsesStreamItem & { id: string },
@@ -911,12 +1067,34 @@ const onReasoningSummaryPartDone = (
 
 const onFunctionCallArgumentsDelta = Effect.fn('OpenAIResponses.onFunctionCallArgumentsDelta')(
   function* (state: ParserState, event: OpenAIResponsesEvent) {
-    if (!event.item_id || !event.delta) return [state, NO_EVENTS] satisfies StepResult;
+    if (!event.item_id) return [state, NO_EVENTS] satisfies StepResult;
+    const tool = state.tools[event.item_id];
+    // A delta for an item we never registered (out-of-order/omitted
+    // `output_item.added`) is ignored instead of failing the whole response.
+    if (!tool) return [state, NO_EVENTS] satisfies StepResult;
+    const final =
+      event.type === 'response.function_call_arguments.done'
+        ? (event.arguments ?? undefined)
+        : undefined;
+    if (event.type === 'response.function_call_arguments.done' && final === undefined)
+      return [state, NO_EVENTS] satisfies StepResult;
+    // The `.done` event repeats the complete arguments; resync if the streamed
+    // prefix disagrees rather than appending a duplicated tail.
+    if (final !== undefined && !final.startsWith(tool.input))
+      return [
+        {
+          ...state,
+          tools: ToolStream.start(state.tools, event.item_id, { ...tool, input: final }),
+        },
+        NO_EVENTS,
+      ] satisfies StepResult;
+    const delta = final === undefined ? event.delta : final.slice(tool.input.length);
+    if (!delta) return [state, NO_EVENTS] satisfies StepResult;
     const result = ToolStream.appendExisting(
       ADAPTER,
       state.tools,
       event.item_id,
-      event.delta,
+      delta,
       'OpenAI Responses tool argument delta is missing its tool call',
     );
     if (ToolStream.isError(result)) return yield* result;
@@ -938,9 +1116,17 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
 
   if (item.type === 'function_call') {
     if (!item.id || !item.call_id || !item.name) return [state, NO_EVENTS] satisfies StepResult;
-    const tools = state.tools[item.id]
-      ? state.tools
-      : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name });
+    // A done-only call (no `output_item.added` / argument deltas) still needs a
+    // matching `tool-input-start` so consumers can build the block.
+    const newlyStarted = !state.tools[item.id];
+    const providerMetadata = openaiMetadata({ itemId: item.id });
+    const tools = newlyStarted
+      ? ToolStream.start(state.tools, item.id, {
+          id: item.call_id,
+          name: item.name,
+          providerMetadata,
+        })
+      : state.tools;
     const result =
       item.arguments === undefined || item.arguments === null
         ? yield* ToolStream.finish(ADAPTER, tools, item.id)
@@ -950,6 +1136,8 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
     const lifecycle = resultEvents.length
       ? Lifecycle.stepStart(state.lifecycle, events)
       : state.lifecycle;
+    if (newlyStarted)
+      events.push(LLMEvent.toolInputStart({ id: item.call_id, name: item.name, providerMetadata }));
     events.push(...resultEvents);
     return [
       {
@@ -965,7 +1153,7 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
   if (isHostedToolItem(item)) {
     const events: LLMEvent[] = [];
     const lifecycle = Lifecycle.stepStart(state.lifecycle, events);
-    events.push(...hostedToolEvents(item));
+    events.push(...(yield* hostedToolEvents(item)));
     return [{ ...state, lifecycle }, events] satisfies StepResult;
   }
 
@@ -1002,10 +1190,45 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
   return [state, NO_EVENTS] satisfies StepResult;
 });
 
-const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
+const onResponseFinish = Effect.fn('OpenAIResponses.onResponseFinish')(function* (
+  state: ParserState,
+  event: OpenAIResponsesEvent,
+) {
   const events: LLMEvent[] = [];
-  const lifecycle = Lifecycle.finish(state.lifecycle, events, {
-    reason: mapFinishReason(event, state.hasFunctionCall),
+  let tools = state.tools;
+  let lifecycle = state.lifecycle;
+  let hasFunctionCall = state.hasFunctionCall;
+
+  // Some compatible providers omit `output_item.done` even after completing the
+  // response but repeat the final items in `response.output`. Re-run those
+  // function calls with their authoritative arguments before the pending flush.
+  const output = event.response?.output;
+  if (Array.isArray(output)) {
+    for (const raw of output) {
+      if (!ProviderShared.isRecord(raw) || raw['type'] !== 'function_call') continue;
+      const id = typeof raw['id'] === 'string' ? raw['id'] : undefined;
+      if (id === undefined || tools[id] === undefined) continue;
+      const args = typeof raw['arguments'] === 'string' ? raw['arguments'] : undefined;
+      const recovered =
+        args === undefined
+          ? yield* ToolStream.finish(ADAPTER, tools, id)
+          : yield* ToolStream.finishWithInput(ADAPTER, tools, id, args);
+      tools = recovered.tools;
+      const emitted = recovered.events ?? [];
+      if (emitted.length) lifecycle = Lifecycle.stepStart(lifecycle, events);
+      hasFunctionCall = hasFunctionCall || emitted.some((item) => LLMEvent.is.toolCall(item));
+      events.push(...emitted);
+    }
+  }
+
+  // Flush whatever is still pending before emitting the terminal finish.
+  const pending = yield* ToolStream.finishAll(ADAPTER, tools);
+  if (pending.events.length) lifecycle = Lifecycle.stepStart(lifecycle, events);
+  hasFunctionCall = hasFunctionCall || pending.events.some((item) => LLMEvent.is.toolCall(item));
+  events.push(...pending.events);
+  lifecycle = Lifecycle.finish(lifecycle, events, {
+    reason: mapFinishReason(event, hasFunctionCall),
+    reasonRaw: event.response?.incomplete_details?.reason ?? undefined,
     usage: mapUsage(event.response?.usage),
     providerMetadata:
       event.response?.id || event.response?.service_tier
@@ -1015,8 +1238,11 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
           })
         : undefined,
   });
-  return [{ ...state, lifecycle }, events];
-};
+  return [
+    { ...state, tools: pending.tools, hasFunctionCall, lifecycle },
+    events,
+  ] satisfies StepResult;
+});
 
 // Build a single human-readable message from whatever the provider supplied.
 // When both code and message are present, prefix the code so consumers see
@@ -1025,14 +1251,25 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
 // to be indistinguishable from generic stream drops.
 const providerErrorMessage = (event: OpenAIResponsesEvent, fallback: string): string => {
   const nested = event.response?.error ?? undefined;
-  const message = event.message || nested?.message || undefined;
-  const code = event.code || nested?.code || undefined;
+  // The streaming `error` event carries details at the top level; support both.
+  const top = event.error ?? undefined;
+  const message = event.message || top?.message || nested?.message || undefined;
+  const code = event.code || top?.code || nested?.code || undefined;
   if (message && code) return `${code}: ${message}`;
   return message || code || fallback;
 };
 
+// Transient upstream failures that a retry can recover from. Everything else
+// (invalid request, content policy, context overflow) is reported as terminal.
+const RETRYABLE_ERROR_CODES = new Set([
+  'rate_limit_exceeded',
+  'server_error',
+  'internal_error',
+  'overloaded',
+]);
+
 const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
-  const code = event.code || event.response?.error?.code || undefined;
+  const code = event.code || event.error?.code || event.response?.error?.code || undefined;
   const message = providerErrorMessage(event, fallback);
   return LLMEvent.providerError({
     message,
@@ -1040,6 +1277,7 @@ const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
       code === 'context_length_exceeded' || isContextOverflow(message)
         ? 'context-overflow'
         : undefined,
+    retryable: code !== undefined && RETRYABLE_ERROR_CODES.has(code),
   });
 };
 
@@ -1056,6 +1294,8 @@ const onError = (state: ParserState, event: OpenAIResponsesEvent): StepResult =>
 const step = (state: ParserState, event: OpenAIResponsesEvent) => {
   if (event.type === 'response.output_text.delta')
     return Effect.succeed(onOutputTextDelta(state, event));
+  if (event.type === 'response.output_text.done')
+    return Effect.succeed(onOutputTextDone(state, event));
   if (
     event.type === 'response.reasoning_text.delta' ||
     event.type === 'response.reasoning_summary.delta' ||
@@ -1074,11 +1314,14 @@ const step = (state: ParserState, event: OpenAIResponsesEvent) => {
     return Effect.succeed(onReasoningSummaryPartDone(state, event));
   if (event.type === 'response.output_item.added')
     return Effect.succeed(onOutputItemAdded(state, event));
-  if (event.type === 'response.function_call_arguments.delta')
+  if (
+    event.type === 'response.function_call_arguments.delta' ||
+    event.type === 'response.function_call_arguments.done'
+  )
     return onFunctionCallArgumentsDelta(state, event);
   if (event.type === 'response.output_item.done') return onOutputItemDone(state, event);
   if (event.type === 'response.completed' || event.type === 'response.incomplete')
-    return Effect.succeed(onResponseFinish(state, event));
+    return onResponseFinish(state, event);
   if (event.type === 'response.failed') return Effect.succeed(onResponseFailed(state, event));
   if (event.type === 'error') return Effect.succeed(onError(state, event));
   return Effect.succeed<StepResult>([state, NO_EVENTS]);

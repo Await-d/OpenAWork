@@ -100,6 +100,8 @@ export declare const TextEnd: Schema.Struct<{
   readonly providerMetadata: Schema.optional<
     Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
   >;
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  readonly text: Schema.optional<Schema.String>;
 }>;
 export type TextEnd = Schema.Schema.Type<typeof TextEnd>;
 export declare const ReasoningStart: Schema.Struct<{
@@ -125,6 +127,8 @@ export declare const ReasoningEnd: Schema.Struct<{
   readonly providerMetadata: Schema.optional<
     Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
   >;
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  readonly text: Schema.optional<Schema.String>;
 }>;
 export type ReasoningEnd = Schema.Schema.Type<typeof ReasoningEnd>;
 export declare const ToolInputStart: Schema.Struct<{
@@ -194,7 +198,7 @@ export declare const ToolResult: Schema.Struct<{
                 readonly type: Schema.Literal<'file'>;
                 readonly uri: Schema.String;
                 readonly mime: Schema.String;
-                readonly name: Schema.optional<any>;
+                readonly name: Schema.optional<Schema.String>;
               }>,
             ]
           >
@@ -219,7 +223,7 @@ export declare const ToolResult: Schema.Struct<{
               readonly type: Schema.Literal<'file'>;
               readonly uri: Schema.String;
               readonly mime: Schema.String;
-              readonly name: Schema.optional<any>;
+              readonly name: Schema.optional<Schema.String>;
             }>,
           ]
         >
@@ -256,6 +260,7 @@ export declare const StepFinish: Schema.Struct<{
   readonly reason: Schema.Literals<
     readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
   >;
+  readonly reasonRaw: Schema.optional<Schema.String>;
   readonly usage: Schema.optional<typeof Usage>;
   readonly providerMetadata: Schema.optional<
     Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -267,6 +272,7 @@ export declare const Finish: Schema.Struct<{
   readonly reason: Schema.Literals<
     readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
   >;
+  readonly reasonRaw: Schema.optional<Schema.String>;
   readonly usage: Schema.optional<typeof Usage>;
   readonly providerMetadata: Schema.optional<
     Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -276,7 +282,9 @@ export type Finish = Schema.Schema.Type<typeof Finish>;
 export declare const ProviderErrorEvent: Schema.Struct<{
   readonly type: Schema.tag<'provider-error'>;
   readonly message: Schema.String;
-  readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+  readonly classification: Schema.optional<
+    Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+  >;
   readonly retryable: Schema.optional<Schema.Boolean>;
   readonly providerMetadata: Schema.optional<
     Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -311,6 +319,8 @@ declare const llmEventTagged: Schema.toTaggedUnion<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>,
     Schema.Struct<{
       readonly type: Schema.tag<'reasoning-start'>;
@@ -333,6 +343,8 @@ declare const llmEventTagged: Schema.toTaggedUnion<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>,
     Schema.Struct<{
       readonly type: Schema.tag<'tool-input-start'>;
@@ -397,7 +409,7 @@ declare const llmEventTagged: Schema.toTaggedUnion<
                     readonly type: Schema.Literal<'file'>;
                     readonly uri: Schema.String;
                     readonly mime: Schema.String;
-                    readonly name: Schema.optional<any>;
+                    readonly name: Schema.optional<Schema.String>;
                   }>,
                 ]
               >
@@ -422,7 +434,7 @@ declare const llmEventTagged: Schema.toTaggedUnion<
                   readonly type: Schema.Literal<'file'>;
                   readonly uri: Schema.String;
                   readonly mime: Schema.String;
-                  readonly name: Schema.optional<any>;
+                  readonly name: Schema.optional<Schema.String>;
                 }>,
               ]
             >
@@ -457,6 +469,7 @@ declare const llmEventTagged: Schema.toTaggedUnion<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -467,6 +480,7 @@ declare const llmEventTagged: Schema.toTaggedUnion<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -475,7 +489,9 @@ declare const llmEventTagged: Schema.toTaggedUnion<
     Schema.Struct<{
       readonly type: Schema.tag<'provider-error'>;
       readonly message: Schema.String;
-      readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+      readonly classification: Schema.optional<
+        Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+      >;
       readonly retryable: Schema.optional<Schema.Boolean>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -530,6 +546,8 @@ export declare const LLMEvent: Schema.Union<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>,
     Schema.Struct<{
       readonly type: Schema.tag<'reasoning-start'>;
@@ -552,6 +570,8 @@ export declare const LLMEvent: Schema.Union<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>,
     Schema.Struct<{
       readonly type: Schema.tag<'tool-input-start'>;
@@ -616,7 +636,7 @@ export declare const LLMEvent: Schema.Union<
                     readonly type: Schema.Literal<'file'>;
                     readonly uri: Schema.String;
                     readonly mime: Schema.String;
-                    readonly name: Schema.optional<any>;
+                    readonly name: Schema.optional<Schema.String>;
                   }>,
                 ]
               >
@@ -641,7 +661,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: Schema.Literal<'file'>;
                   readonly uri: Schema.String;
                   readonly mime: Schema.String;
-                  readonly name: Schema.optional<any>;
+                  readonly name: Schema.optional<Schema.String>;
                 }>,
               ]
             >
@@ -676,6 +696,7 @@ export declare const LLMEvent: Schema.Union<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -686,6 +707,7 @@ export declare const LLMEvent: Schema.Union<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -694,7 +716,9 @@ export declare const LLMEvent: Schema.Union<
     Schema.Struct<{
       readonly type: Schema.tag<'provider-error'>;
       readonly message: Schema.String;
-      readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+      readonly classification: Schema.optional<
+        Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+      >;
       readonly retryable: Schema.optional<Schema.Boolean>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -728,6 +752,8 @@ export declare const LLMEvent: Schema.Union<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>;
     'reasoning-start': Schema.Struct<{
       readonly type: Schema.tag<'reasoning-start'>;
@@ -750,6 +776,8 @@ export declare const LLMEvent: Schema.Union<
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
       >;
+      /** Authoritative complete value; replaces accumulated deltas when present. */
+      readonly text: Schema.optional<Schema.String>;
     }>;
     'tool-input-start': Schema.Struct<{
       readonly type: Schema.tag<'tool-input-start'>;
@@ -814,7 +842,7 @@ export declare const LLMEvent: Schema.Union<
                     readonly type: Schema.Literal<'file'>;
                     readonly uri: Schema.String;
                     readonly mime: Schema.String;
-                    readonly name: Schema.optional<any>;
+                    readonly name: Schema.optional<Schema.String>;
                   }>,
                 ]
               >
@@ -839,7 +867,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: Schema.Literal<'file'>;
                   readonly uri: Schema.String;
                   readonly mime: Schema.String;
-                  readonly name: Schema.optional<any>;
+                  readonly name: Schema.optional<Schema.String>;
                 }>,
               ]
             >
@@ -874,6 +902,7 @@ export declare const LLMEvent: Schema.Union<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -884,6 +913,7 @@ export declare const LLMEvent: Schema.Union<
       readonly reason: Schema.Literals<
         readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
       >;
+      readonly reasonRaw: Schema.optional<Schema.String>;
       readonly usage: Schema.optional<typeof Usage>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -892,7 +922,9 @@ export declare const LLMEvent: Schema.Union<
     'provider-error': Schema.Struct<{
       readonly type: Schema.tag<'provider-error'>;
       readonly message: Schema.String;
-      readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+      readonly classification: Schema.optional<
+        Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+      >;
       readonly retryable: Schema.optional<Schema.Boolean>;
       readonly providerMetadata: Schema.optional<
         Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -938,6 +970,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }
       | {
           readonly type: 'reasoning-start';
@@ -972,6 +1005,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }
       | {
           readonly type: 'tool-input-start';
@@ -1045,7 +1079,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               };
@@ -1061,7 +1095,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               }
@@ -1093,7 +1127,8 @@ export declare const LLMEvent: Schema.Union<
           readonly type: 'step-finish';
           readonly index: number;
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1106,7 +1141,8 @@ export declare const LLMEvent: Schema.Union<
       | {
           readonly type: 'finish';
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1119,7 +1155,7 @@ export declare const LLMEvent: Schema.Union<
       | {
           readonly type: 'provider-error';
           readonly message: string;
-          readonly classification?: 'context-overflow' | undefined;
+          readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
           readonly retryable?: boolean | undefined;
           readonly providerMetadata?:
             | {
@@ -1183,6 +1219,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         },
         {
           readonly type: Keys;
@@ -1232,6 +1269,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         },
         {
           readonly type: Keys;
@@ -1330,7 +1368,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               };
@@ -1346,7 +1384,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               }
@@ -1388,7 +1426,8 @@ export declare const LLMEvent: Schema.Union<
           readonly type: 'step-finish';
           readonly index: number;
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1406,7 +1445,8 @@ export declare const LLMEvent: Schema.Union<
         {
           readonly type: 'finish';
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1424,7 +1464,7 @@ export declare const LLMEvent: Schema.Union<
         {
           readonly type: 'provider-error';
           readonly message: string;
-          readonly classification?: 'context-overflow' | undefined;
+          readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
           readonly retryable?: boolean | undefined;
           readonly providerMetadata?:
             | {
@@ -1476,6 +1516,7 @@ export declare const LLMEvent: Schema.Union<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     };
     'reasoning-start': (u: unknown) => u is {
       readonly type: 'reasoning-start';
@@ -1510,6 +1551,7 @@ export declare const LLMEvent: Schema.Union<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     };
     'tool-input-start': (u: unknown) => u is {
       readonly type: 'tool-input-start';
@@ -1583,7 +1625,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           };
@@ -1599,7 +1641,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           }
@@ -1630,7 +1672,8 @@ export declare const LLMEvent: Schema.Union<
     'step-finish': (u: unknown) => u is {
       readonly type: 'step-finish';
       readonly index: number;
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -1642,7 +1685,8 @@ export declare const LLMEvent: Schema.Union<
     };
     finish: (u: unknown) => u is {
       readonly type: 'finish';
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -1655,7 +1699,7 @@ export declare const LLMEvent: Schema.Union<
     'provider-error': (u: unknown) => u is {
       readonly type: 'provider-error';
       readonly message: string;
-      readonly classification?: 'context-overflow' | undefined;
+      readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
       readonly retryable?: boolean | undefined;
       readonly providerMetadata?:
         | {
@@ -1703,6 +1747,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }) => any;
         'reasoning-start': (value: {
           readonly type: 'reasoning-start';
@@ -1737,6 +1782,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }) => any;
         'tool-input-start': (value: {
           readonly type: 'tool-input-start';
@@ -1810,7 +1856,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               };
@@ -1826,7 +1872,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               }
@@ -1858,7 +1904,8 @@ export declare const LLMEvent: Schema.Union<
           readonly type: 'step-finish';
           readonly index: number;
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1871,7 +1918,8 @@ export declare const LLMEvent: Schema.Union<
         finish: (value: {
           readonly type: 'finish';
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -1884,7 +1932,7 @@ export declare const LLMEvent: Schema.Union<
         'provider-error': (value: {
           readonly type: 'provider-error';
           readonly message: string;
-          readonly classification?: 'context-overflow' | undefined;
+          readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
           readonly retryable?: boolean | undefined;
           readonly providerMetadata?:
             | {
@@ -1934,6 +1982,7 @@ export declare const LLMEvent: Schema.Union<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           }
         | {
             readonly type: 'reasoning-start';
@@ -1968,6 +2017,7 @@ export declare const LLMEvent: Schema.Union<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           }
         | {
             readonly type: 'tool-input-start';
@@ -2041,7 +2091,7 @@ export declare const LLMEvent: Schema.Union<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 };
@@ -2057,7 +2107,7 @@ export declare const LLMEvent: Schema.Union<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 }
@@ -2089,7 +2139,8 @@ export declare const LLMEvent: Schema.Union<
             readonly type: 'step-finish';
             readonly index: number;
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -2102,7 +2153,8 @@ export declare const LLMEvent: Schema.Union<
         | {
             readonly type: 'finish';
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -2115,7 +2167,7 @@ export declare const LLMEvent: Schema.Union<
         | {
             readonly type: 'provider-error';
             readonly message: string;
-            readonly classification?: 'context-overflow' | undefined;
+            readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
             readonly retryable?: boolean | undefined;
             readonly providerMetadata?:
               | {
@@ -2163,6 +2215,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }) => any;
         'reasoning-start': (value: {
           readonly type: 'reasoning-start';
@@ -2197,6 +2250,7 @@ export declare const LLMEvent: Schema.Union<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         }) => any;
         'tool-input-start': (value: {
           readonly type: 'tool-input-start';
@@ -2270,7 +2324,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               };
@@ -2286,7 +2340,7 @@ export declare const LLMEvent: Schema.Union<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               }
@@ -2318,7 +2372,8 @@ export declare const LLMEvent: Schema.Union<
           readonly type: 'step-finish';
           readonly index: number;
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -2331,7 +2386,8 @@ export declare const LLMEvent: Schema.Union<
         finish: (value: {
           readonly type: 'finish';
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -2344,7 +2400,7 @@ export declare const LLMEvent: Schema.Union<
         'provider-error': (value: {
           readonly type: 'provider-error';
           readonly message: string;
-          readonly classification?: 'context-overflow' | undefined;
+          readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
           readonly retryable?: boolean | undefined;
           readonly providerMetadata?:
             | {
@@ -2396,6 +2452,7 @@ export declare const LLMEvent: Schema.Union<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           }
         | {
             readonly type: 'reasoning-start';
@@ -2430,6 +2487,7 @@ export declare const LLMEvent: Schema.Union<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           }
         | {
             readonly type: 'tool-input-start';
@@ -2503,7 +2561,7 @@ export declare const LLMEvent: Schema.Union<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 };
@@ -2519,7 +2577,7 @@ export declare const LLMEvent: Schema.Union<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 }
@@ -2551,7 +2609,8 @@ export declare const LLMEvent: Schema.Union<
             readonly type: 'step-finish';
             readonly index: number;
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -2564,7 +2623,8 @@ export declare const LLMEvent: Schema.Union<
         | {
             readonly type: 'finish';
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -2577,7 +2637,7 @@ export declare const LLMEvent: Schema.Union<
         | {
             readonly type: 'provider-error';
             readonly message: string;
-            readonly classification?: 'context-overflow' | undefined;
+            readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
             readonly retryable?: boolean | undefined;
             readonly providerMetadata?:
               | {
@@ -2635,6 +2695,7 @@ export declare const LLMEvent: Schema.Union<
           };
         }
       | undefined;
+    readonly text?: string | undefined;
   };
   reasoningStart: (input: WithID<ReasoningStart, ContentBlockID>) => {
     readonly type: 'reasoning-start';
@@ -2669,6 +2730,7 @@ export declare const LLMEvent: Schema.Union<
           };
         }
       | undefined;
+    readonly text?: string | undefined;
   };
   toolInputStart: (input: WithID<ToolInputStart, ToolCallID>) => {
     readonly type: 'tool-input-start';
@@ -2742,7 +2804,7 @@ export declare const LLMEvent: Schema.Union<
                 readonly type: 'file';
                 readonly uri: string;
                 readonly mime: string;
-                readonly name?: any;
+                readonly name?: string | undefined;
               }
           )[];
         };
@@ -2758,7 +2820,7 @@ export declare const LLMEvent: Schema.Union<
                 readonly type: 'file';
                 readonly uri: string;
                 readonly mime: string;
-                readonly name?: any;
+                readonly name?: string | undefined;
               }
           )[];
         }
@@ -2789,7 +2851,8 @@ export declare const LLMEvent: Schema.Union<
   stepFinish: (input: WithUsage<StepFinish>) => {
     readonly type: 'step-finish';
     readonly index: number;
-    readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+    readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+    readonly reasonRaw?: string | undefined;
     readonly usage?: Usage | undefined;
     readonly providerMetadata?:
       | {
@@ -2801,7 +2864,8 @@ export declare const LLMEvent: Schema.Union<
   };
   finish: (input: WithUsage<Finish>) => {
     readonly type: 'finish';
-    readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+    readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+    readonly reasonRaw?: string | undefined;
     readonly usage?: Usage | undefined;
     readonly providerMetadata?:
       | {
@@ -2815,7 +2879,7 @@ export declare const LLMEvent: Schema.Union<
     input: {
       readonly message: string;
       readonly type?: 'provider-error' | undefined;
-      readonly classification?: 'context-overflow' | undefined;
+      readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
       readonly retryable?: boolean | undefined;
       readonly providerMetadata?:
         | {
@@ -2829,7 +2893,7 @@ export declare const LLMEvent: Schema.Union<
   ) => {
     readonly type: 'provider-error';
     readonly message: string;
-    readonly classification?: 'context-overflow' | undefined;
+    readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
     readonly retryable?: boolean | undefined;
     readonly providerMetadata?:
       | {
@@ -2877,6 +2941,7 @@ export declare const LLMEvent: Schema.Union<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     };
     reasoningStart: (u: unknown) => u is {
       readonly type: 'reasoning-start';
@@ -2911,6 +2976,7 @@ export declare const LLMEvent: Schema.Union<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     };
     toolInputStart: (u: unknown) => u is {
       readonly type: 'tool-input-start';
@@ -2984,7 +3050,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           };
@@ -3000,7 +3066,7 @@ export declare const LLMEvent: Schema.Union<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           }
@@ -3031,7 +3097,8 @@ export declare const LLMEvent: Schema.Union<
     stepFinish: (u: unknown) => u is {
       readonly type: 'step-finish';
       readonly index: number;
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -3043,7 +3110,8 @@ export declare const LLMEvent: Schema.Union<
     };
     finish: (u: unknown) => u is {
       readonly type: 'finish';
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -3056,7 +3124,7 @@ export declare const LLMEvent: Schema.Union<
     providerError: (u: unknown) => u is {
       readonly type: 'provider-error';
       readonly message: string;
-      readonly classification?: 'context-overflow' | undefined;
+      readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
       readonly retryable?: boolean | undefined;
       readonly providerMetadata?:
         | {
@@ -3146,6 +3214,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
             >;
+            /** Authoritative complete value; replaces accumulated deltas when present. */
+            readonly text: Schema.optional<Schema.String>;
           }>,
           Schema.Struct<{
             readonly type: Schema.tag<'reasoning-start'>;
@@ -3168,6 +3238,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
             >;
+            /** Authoritative complete value; replaces accumulated deltas when present. */
+            readonly text: Schema.optional<Schema.String>;
           }>,
           Schema.Struct<{
             readonly type: Schema.tag<'tool-input-start'>;
@@ -3232,7 +3304,7 @@ declare const LLMResponse_base: Schema.Class<
                           readonly type: Schema.Literal<'file'>;
                           readonly uri: Schema.String;
                           readonly mime: Schema.String;
-                          readonly name: Schema.optional<any>;
+                          readonly name: Schema.optional<Schema.String>;
                         }>,
                       ]
                     >
@@ -3257,7 +3329,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: Schema.Literal<'file'>;
                         readonly uri: Schema.String;
                         readonly mime: Schema.String;
-                        readonly name: Schema.optional<any>;
+                        readonly name: Schema.optional<Schema.String>;
                       }>,
                     ]
                   >
@@ -3292,6 +3364,7 @@ declare const LLMResponse_base: Schema.Class<
             readonly reason: Schema.Literals<
               readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
             >;
+            readonly reasonRaw: Schema.optional<Schema.String>;
             readonly usage: Schema.optional<typeof Usage>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3302,6 +3375,7 @@ declare const LLMResponse_base: Schema.Class<
             readonly reason: Schema.Literals<
               readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
             >;
+            readonly reasonRaw: Schema.optional<Schema.String>;
             readonly usage: Schema.optional<typeof Usage>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3310,7 +3384,9 @@ declare const LLMResponse_base: Schema.Class<
           Schema.Struct<{
             readonly type: Schema.tag<'provider-error'>;
             readonly message: Schema.String;
-            readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+            readonly classification: Schema.optional<
+              Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+            >;
             readonly retryable: Schema.optional<Schema.Boolean>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3344,6 +3420,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
             >;
+            /** Authoritative complete value; replaces accumulated deltas when present. */
+            readonly text: Schema.optional<Schema.String>;
           }>;
           'reasoning-start': Schema.Struct<{
             readonly type: Schema.tag<'reasoning-start'>;
@@ -3366,6 +3444,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
             >;
+            /** Authoritative complete value; replaces accumulated deltas when present. */
+            readonly text: Schema.optional<Schema.String>;
           }>;
           'tool-input-start': Schema.Struct<{
             readonly type: Schema.tag<'tool-input-start'>;
@@ -3430,7 +3510,7 @@ declare const LLMResponse_base: Schema.Class<
                           readonly type: Schema.Literal<'file'>;
                           readonly uri: Schema.String;
                           readonly mime: Schema.String;
-                          readonly name: Schema.optional<any>;
+                          readonly name: Schema.optional<Schema.String>;
                         }>,
                       ]
                     >
@@ -3455,7 +3535,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: Schema.Literal<'file'>;
                         readonly uri: Schema.String;
                         readonly mime: Schema.String;
-                        readonly name: Schema.optional<any>;
+                        readonly name: Schema.optional<Schema.String>;
                       }>,
                     ]
                   >
@@ -3490,6 +3570,7 @@ declare const LLMResponse_base: Schema.Class<
             readonly reason: Schema.Literals<
               readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
             >;
+            readonly reasonRaw: Schema.optional<Schema.String>;
             readonly usage: Schema.optional<typeof Usage>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3500,6 +3581,7 @@ declare const LLMResponse_base: Schema.Class<
             readonly reason: Schema.Literals<
               readonly ['stop', 'length', 'tool-calls', 'content-filter', 'error', 'unknown']
             >;
+            readonly reasonRaw: Schema.optional<Schema.String>;
             readonly usage: Schema.optional<typeof Usage>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3508,7 +3590,9 @@ declare const LLMResponse_base: Schema.Class<
           'provider-error': Schema.Struct<{
             readonly type: Schema.tag<'provider-error'>;
             readonly message: Schema.String;
-            readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+            readonly classification: Schema.optional<
+              Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+            >;
             readonly retryable: Schema.optional<Schema.Boolean>;
             readonly providerMetadata: Schema.optional<
               Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
@@ -3554,6 +3638,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }
             | {
                 readonly type: 'reasoning-start';
@@ -3588,6 +3673,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }
             | {
                 readonly type: 'tool-input-start';
@@ -3661,7 +3747,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     };
@@ -3677,7 +3763,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     }
@@ -3709,7 +3795,8 @@ declare const LLMResponse_base: Schema.Class<
                 readonly type: 'step-finish';
                 readonly index: number;
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -3722,7 +3809,8 @@ declare const LLMResponse_base: Schema.Class<
             | {
                 readonly type: 'finish';
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -3735,7 +3823,7 @@ declare const LLMResponse_base: Schema.Class<
             | {
                 readonly type: 'provider-error';
                 readonly message: string;
-                readonly classification?: 'context-overflow' | undefined;
+                readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                 readonly retryable?: boolean | undefined;
                 readonly providerMetadata?:
                   | {
@@ -3799,6 +3887,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               },
               {
                 readonly type: Keys;
@@ -3848,6 +3937,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               },
               {
                 readonly type: Keys;
@@ -3946,7 +4036,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     };
@@ -3962,7 +4052,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     }
@@ -4004,7 +4094,8 @@ declare const LLMResponse_base: Schema.Class<
                 readonly type: 'step-finish';
                 readonly index: number;
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4022,7 +4113,8 @@ declare const LLMResponse_base: Schema.Class<
               {
                 readonly type: 'finish';
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4040,7 +4132,7 @@ declare const LLMResponse_base: Schema.Class<
               {
                 readonly type: 'provider-error';
                 readonly message: string;
-                readonly classification?: 'context-overflow' | undefined;
+                readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                 readonly retryable?: boolean | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4092,6 +4184,7 @@ declare const LLMResponse_base: Schema.Class<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           };
           'reasoning-start': (u: unknown) => u is {
             readonly type: 'reasoning-start';
@@ -4126,6 +4219,7 @@ declare const LLMResponse_base: Schema.Class<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           };
           'tool-input-start': (u: unknown) => u is {
             readonly type: 'tool-input-start';
@@ -4199,7 +4293,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 };
@@ -4215,7 +4309,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 }
@@ -4247,7 +4341,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly type: 'step-finish';
             readonly index: number;
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -4260,7 +4355,8 @@ declare const LLMResponse_base: Schema.Class<
           finish: (u: unknown) => u is {
             readonly type: 'finish';
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -4273,7 +4369,7 @@ declare const LLMResponse_base: Schema.Class<
           'provider-error': (u: unknown) => u is {
             readonly type: 'provider-error';
             readonly message: string;
-            readonly classification?: 'context-overflow' | undefined;
+            readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
             readonly retryable?: boolean | undefined;
             readonly providerMetadata?:
               | {
@@ -4321,6 +4417,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }) => any;
               'reasoning-start': (value: {
                 readonly type: 'reasoning-start';
@@ -4355,6 +4452,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }) => any;
               'tool-input-start': (value: {
                 readonly type: 'tool-input-start';
@@ -4428,7 +4526,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     };
@@ -4444,7 +4542,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     }
@@ -4476,7 +4574,8 @@ declare const LLMResponse_base: Schema.Class<
                 readonly type: 'step-finish';
                 readonly index: number;
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4489,7 +4588,8 @@ declare const LLMResponse_base: Schema.Class<
               finish: (value: {
                 readonly type: 'finish';
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4502,7 +4602,7 @@ declare const LLMResponse_base: Schema.Class<
               'provider-error': (value: {
                 readonly type: 'provider-error';
                 readonly message: string;
-                readonly classification?: 'context-overflow' | undefined;
+                readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                 readonly retryable?: boolean | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4552,6 +4652,7 @@ declare const LLMResponse_base: Schema.Class<
                         };
                       }
                     | undefined;
+                  readonly text?: string | undefined;
                 }
               | {
                   readonly type: 'reasoning-start';
@@ -4586,6 +4687,7 @@ declare const LLMResponse_base: Schema.Class<
                         };
                       }
                     | undefined;
+                  readonly text?: string | undefined;
                 }
               | {
                   readonly type: 'tool-input-start';
@@ -4659,7 +4761,7 @@ declare const LLMResponse_base: Schema.Class<
                               readonly type: 'file';
                               readonly uri: string;
                               readonly mime: string;
-                              readonly name?: any;
+                              readonly name?: string | undefined;
                             }
                         )[];
                       };
@@ -4675,7 +4777,7 @@ declare const LLMResponse_base: Schema.Class<
                               readonly type: 'file';
                               readonly uri: string;
                               readonly mime: string;
-                              readonly name?: any;
+                              readonly name?: string | undefined;
                             }
                         )[];
                       }
@@ -4707,7 +4809,8 @@ declare const LLMResponse_base: Schema.Class<
                   readonly type: 'step-finish';
                   readonly index: number;
                   readonly reason:
-                    'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                    'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                  readonly reasonRaw?: string | undefined;
                   readonly usage?: Usage | undefined;
                   readonly providerMetadata?:
                     | {
@@ -4720,7 +4823,8 @@ declare const LLMResponse_base: Schema.Class<
               | {
                   readonly type: 'finish';
                   readonly reason:
-                    'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                    'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                  readonly reasonRaw?: string | undefined;
                   readonly usage?: Usage | undefined;
                   readonly providerMetadata?:
                     | {
@@ -4733,7 +4837,7 @@ declare const LLMResponse_base: Schema.Class<
               | {
                   readonly type: 'provider-error';
                   readonly message: string;
-                  readonly classification?: 'context-overflow' | undefined;
+                  readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                   readonly retryable?: boolean | undefined;
                   readonly providerMetadata?:
                     | {
@@ -4783,6 +4887,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }) => any;
               'reasoning-start': (value: {
                 readonly type: 'reasoning-start';
@@ -4817,6 +4922,7 @@ declare const LLMResponse_base: Schema.Class<
                       };
                     }
                   | undefined;
+                readonly text?: string | undefined;
               }) => any;
               'tool-input-start': (value: {
                 readonly type: 'tool-input-start';
@@ -4890,7 +4996,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     };
@@ -4906,7 +5012,7 @@ declare const LLMResponse_base: Schema.Class<
                             readonly type: 'file';
                             readonly uri: string;
                             readonly mime: string;
-                            readonly name?: any;
+                            readonly name?: string | undefined;
                           }
                       )[];
                     }
@@ -4938,7 +5044,8 @@ declare const LLMResponse_base: Schema.Class<
                 readonly type: 'step-finish';
                 readonly index: number;
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4951,7 +5058,8 @@ declare const LLMResponse_base: Schema.Class<
               finish: (value: {
                 readonly type: 'finish';
                 readonly reason:
-                  'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                  'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                readonly reasonRaw?: string | undefined;
                 readonly usage?: Usage | undefined;
                 readonly providerMetadata?:
                   | {
@@ -4964,7 +5072,7 @@ declare const LLMResponse_base: Schema.Class<
               'provider-error': (value: {
                 readonly type: 'provider-error';
                 readonly message: string;
-                readonly classification?: 'context-overflow' | undefined;
+                readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                 readonly retryable?: boolean | undefined;
                 readonly providerMetadata?:
                   | {
@@ -5016,6 +5124,7 @@ declare const LLMResponse_base: Schema.Class<
                         };
                       }
                     | undefined;
+                  readonly text?: string | undefined;
                 }
               | {
                   readonly type: 'reasoning-start';
@@ -5050,6 +5159,7 @@ declare const LLMResponse_base: Schema.Class<
                         };
                       }
                     | undefined;
+                  readonly text?: string | undefined;
                 }
               | {
                   readonly type: 'tool-input-start';
@@ -5123,7 +5233,7 @@ declare const LLMResponse_base: Schema.Class<
                               readonly type: 'file';
                               readonly uri: string;
                               readonly mime: string;
-                              readonly name?: any;
+                              readonly name?: string | undefined;
                             }
                         )[];
                       };
@@ -5139,7 +5249,7 @@ declare const LLMResponse_base: Schema.Class<
                               readonly type: 'file';
                               readonly uri: string;
                               readonly mime: string;
-                              readonly name?: any;
+                              readonly name?: string | undefined;
                             }
                         )[];
                       }
@@ -5171,7 +5281,8 @@ declare const LLMResponse_base: Schema.Class<
                   readonly type: 'step-finish';
                   readonly index: number;
                   readonly reason:
-                    'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                    'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                  readonly reasonRaw?: string | undefined;
                   readonly usage?: Usage | undefined;
                   readonly providerMetadata?:
                     | {
@@ -5184,7 +5295,8 @@ declare const LLMResponse_base: Schema.Class<
               | {
                   readonly type: 'finish';
                   readonly reason:
-                    'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+                    'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+                  readonly reasonRaw?: string | undefined;
                   readonly usage?: Usage | undefined;
                   readonly providerMetadata?:
                     | {
@@ -5197,7 +5309,7 @@ declare const LLMResponse_base: Schema.Class<
               | {
                   readonly type: 'provider-error';
                   readonly message: string;
-                  readonly classification?: 'context-overflow' | undefined;
+                  readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
                   readonly retryable?: boolean | undefined;
                   readonly providerMetadata?:
                     | {
@@ -5255,6 +5367,7 @@ declare const LLMResponse_base: Schema.Class<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         };
         reasoningStart: (input: WithID<ReasoningStart, ContentBlockID>) => {
           readonly type: 'reasoning-start';
@@ -5289,6 +5402,7 @@ declare const LLMResponse_base: Schema.Class<
                 };
               }
             | undefined;
+          readonly text?: string | undefined;
         };
         toolInputStart: (input: WithID<ToolInputStart, ToolCallID>) => {
           readonly type: 'tool-input-start';
@@ -5362,7 +5476,7 @@ declare const LLMResponse_base: Schema.Class<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               };
@@ -5378,7 +5492,7 @@ declare const LLMResponse_base: Schema.Class<
                       readonly type: 'file';
                       readonly uri: string;
                       readonly mime: string;
-                      readonly name?: any;
+                      readonly name?: string | undefined;
                     }
                 )[];
               }
@@ -5410,7 +5524,8 @@ declare const LLMResponse_base: Schema.Class<
           readonly type: 'step-finish';
           readonly index: number;
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -5423,7 +5538,8 @@ declare const LLMResponse_base: Schema.Class<
         finish: (input: WithUsage<Finish>) => {
           readonly type: 'finish';
           readonly reason:
-            'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+            'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+          readonly reasonRaw?: string | undefined;
           readonly usage?: Usage | undefined;
           readonly providerMetadata?:
             | {
@@ -5437,7 +5553,7 @@ declare const LLMResponse_base: Schema.Class<
           input: {
             readonly message: string;
             readonly type?: 'provider-error' | undefined;
-            readonly classification?: 'context-overflow' | undefined;
+            readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
             readonly retryable?: boolean | undefined;
             readonly providerMetadata?:
               | {
@@ -5451,7 +5567,7 @@ declare const LLMResponse_base: Schema.Class<
         ) => {
           readonly type: 'provider-error';
           readonly message: string;
-          readonly classification?: 'context-overflow' | undefined;
+          readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
           readonly retryable?: boolean | undefined;
           readonly providerMetadata?:
             | {
@@ -5499,6 +5615,7 @@ declare const LLMResponse_base: Schema.Class<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           };
           reasoningStart: (u: unknown) => u is {
             readonly type: 'reasoning-start';
@@ -5533,6 +5650,7 @@ declare const LLMResponse_base: Schema.Class<
                   };
                 }
               | undefined;
+            readonly text?: string | undefined;
           };
           toolInputStart: (u: unknown) => u is {
             readonly type: 'tool-input-start';
@@ -5606,7 +5724,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 };
@@ -5622,7 +5740,7 @@ declare const LLMResponse_base: Schema.Class<
                         readonly type: 'file';
                         readonly uri: string;
                         readonly mime: string;
-                        readonly name?: any;
+                        readonly name?: string | undefined;
                       }
                   )[];
                 }
@@ -5654,7 +5772,8 @@ declare const LLMResponse_base: Schema.Class<
             readonly type: 'step-finish';
             readonly index: number;
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -5667,7 +5786,8 @@ declare const LLMResponse_base: Schema.Class<
           finish: (u: unknown) => u is {
             readonly type: 'finish';
             readonly reason:
-              'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+              'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+            readonly reasonRaw?: string | undefined;
             readonly usage?: Usage | undefined;
             readonly providerMetadata?:
               | {
@@ -5680,7 +5800,7 @@ declare const LLMResponse_base: Schema.Class<
           providerError: (u: unknown) => u is {
             readonly type: 'provider-error';
             readonly message: string;
-            readonly classification?: 'context-overflow' | undefined;
+            readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
             readonly retryable?: boolean | undefined;
             readonly providerMetadata?:
               | {

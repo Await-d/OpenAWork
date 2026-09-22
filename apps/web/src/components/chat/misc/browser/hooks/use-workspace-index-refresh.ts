@@ -7,21 +7,48 @@
  * 由宿主（内置浏览器）走既有的刷新机制重载预览。
  *
  * 全程 best-effort：任何读取失败都只记录日志、绝不抛出，更不会产生 unhandled
- * rejection；禁停用、无工作区路径、无 token 时完全不轮询，并在卸载 / 依赖变化时
- * 清理定时器。
+ * rejection；禁停用、无 workspace 作用域、无 token 时完全不轮询，并在卸载 / 依赖
+ * 变化时清理定时器。作用域不是绝对路径时（无工作目录的会话）交给网关回退到未绑定
+ * 会话默认工作区。
  */
 
 import { useEffect, useRef } from 'react';
-import { createWorkspaceClient } from '@openAwork/web-client';
+import { HttpError, createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 /** 默认轮询间隔：兼顾「接近实时」与请求量，2500ms 足以覆盖常见的写盘节奏。 */
 export const WORKSPACE_INDEX_REFRESH_DEFAULT_INTERVAL_MS = 2500;
 
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
+
+/**
+ * 解析轮询应发给网关的 `path`。
+ *
+ * 宿主传入的 `workspacePath` 语义上是「按 workspace 隔离 UI 状态的持久化 key」，
+ * 无工作目录的会话会落成 `__session__:<id>` / `__default__` 这类纯 UI 作用域键。
+ * 这类值（以及相对路径、空值）不是可索引的绝对文件系统路径，返回空串交给网关
+ * 回退到「未绑定会话默认工作区」，让无工作目录的会话也能拿到预览刷新信号。
+ */
+export function resolveWorkspaceIndexWatchPath(workspacePath: string | null | undefined): string {
+  const trimmed = workspacePath?.trim() ?? '';
+  if (!trimmed) {
+    return '';
+  }
+  const isAbsolutePath =
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('\\\\') ||
+    WINDOWS_ABSOLUTE_PATH_PATTERN.test(trimmed);
+  return isAbsolutePath ? trimmed : '';
+}
+
 export interface UseWorkspaceIndexRefreshOptions {
   /** 是否启用轮询（宿主通常传「预览可见」）。 */
   enabled: boolean;
-  /** 要监视的工作区路径；空值时不做任何请求。 */
+  /**
+   * 要监视的工作区作用域。绝对文件系统路径会原样轮询；空值、纯 UI 作用域键
+   * （`__session__:<id>` / `__default__`）或相对路径则请求网关的「未绑定会话默认
+   * 工作区」（见 {@link resolveWorkspaceIndexWatchPath}）。完全为空时不发请求。
+   */
   workspacePath: string | null;
   /** 版本发生变化（含变小）时回调，宿主据此刷新预览。 */
   onChange: () => void;
@@ -49,8 +76,11 @@ export function useWorkspaceIndexRefresh({
 
   useEffect(() => {
     if (!enabled) return;
-    const path = workspacePath?.trim();
-    if (!path || !accessToken || !gatewayUrl) return;
+    const workspaceScope = workspacePath?.trim() ?? '';
+    if (!workspaceScope || !accessToken || !gatewayUrl) return;
+    // 非绝对路径（UI 作用域键）→ 空串，让网关回退到未绑定会话默认工作区。
+    const path = resolveWorkspaceIndexWatchPath(workspaceScope);
+    const pathLabel = path || '(默认工作区)';
 
     let client: ReturnType<typeof createWorkspaceClient> | null = null;
     try {
@@ -64,6 +94,15 @@ export function useWorkspaceIndexRefresh({
     let disposed = false;
     let inFlight = false;
     let lastVersion: number | null = null;
+    let timer: number | null = null;
+
+    const stop = (): void => {
+      disposed = true;
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
 
     const poll = async (): Promise<void> => {
       if (disposed || inFlight) return;
@@ -82,20 +121,23 @@ export function useWorkspaceIndexRefresh({
           onChangeRef.current();
         }
       } catch (error) {
-        // 轮询失败静默降级：下一轮重试，绝不抛出 unhandled rejection。
-        if (!disposed) {
-          console.warn('[use-workspace-index-refresh] 读取索引版本失败：', String(error));
+        if (disposed) return;
+        // 400 / 403 = 网关已判定该路径不可访问（跨主机 / 不在允许范围 / 当前账号无权）。
+        // 路径本身不会变化，继续轮询只会持续刷失败日志，因此直接停止。
+        if (error instanceof HttpError && (error.status === 400 || error.status === 403)) {
+          console.warn('[use-workspace-index-refresh] 工作区路径被网关拒绝，停止轮询：', pathLabel);
+          stop();
+          return;
         }
+        // 其它失败静默降级：下一轮重试，绝不抛出 unhandled rejection。
+        console.warn('[use-workspace-index-refresh] 读取索引版本失败：', String(error));
       } finally {
         inFlight = false;
       }
     };
 
     void poll();
-    const timer = window.setInterval(() => void poll(), intervalMs);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
+    timer = window.setInterval(() => void poll(), intervalMs);
+    return stop;
   }, [enabled, workspacePath, accessToken, gatewayUrl, intervalMs]);
 }

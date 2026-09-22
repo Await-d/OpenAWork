@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { resolveToolCallCardDisplayData } from './ToolCallCard.js';
 
 /**
- * `apply_patch` (and write/edit/multi_edit) outputs are object envelopes
+ * `patch` (and write/edit/multi_edit) outputs are object envelopes
  * that get JSON-stringified during agent-gateway storage. The UI receives
  * the encoded string, so the diff resolver has to recover the structured
  * shape before it can produce a real diff view — otherwise the user sees
  * a 4KB raw JSON dump in the generic ExpandableOutput fallback.
  */
 describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recovery)', () => {
-  it('recovers a single-file apply_patch envelope from a JSON string', () => {
+  it('recovers a single-file patch envelope from a JSON string', () => {
     const output = JSON.stringify({
       success: true,
       files: [
@@ -26,7 +26,7 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
     });
 
     const data = resolveToolCallCardDisplayData({
-      toolName: 'apply_patch',
+      toolName: 'patch',
       input: { patchText: '...' },
       output,
     });
@@ -42,7 +42,7 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
     expect(data.diffView?.files).toBeUndefined();
   });
 
-  it('recovers a multi-file apply_patch envelope from a JSON string', () => {
+  it('recovers a multi-file patch envelope from a JSON string', () => {
     const output = JSON.stringify({
       success: true,
       files: [
@@ -66,7 +66,7 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
     });
 
     const data = resolveToolCallCardDisplayData({
-      toolName: 'apply_patch',
+      toolName: 'patch',
       input: { patchText: '...' },
       output,
     });
@@ -88,7 +88,7 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
 
   it('falls through gracefully on malformed JSON', () => {
     const data = resolveToolCallCardDisplayData({
-      toolName: 'apply_patch',
+      toolName: 'patch',
       input: { patchText: '...' },
       output: '{ this is not valid json',
     });
@@ -98,7 +98,7 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
   it('still recognises raw unified-diff string output', () => {
     const diff = `diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n`;
     const data = resolveToolCallCardDisplayData({
-      toolName: 'apply_patch',
+      toolName: 'patch',
       input: { patchText: '...' },
       output: diff,
     });

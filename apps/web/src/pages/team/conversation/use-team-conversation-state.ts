@@ -167,6 +167,7 @@ export function useTeamConversationState(
   const {
     messages,
     setMessages,
+    subagentNotices,
     childSessions,
     setChildSessions,
     sessionStateStatus,
@@ -329,6 +330,7 @@ export function useTeamConversationState(
 
   return {
     messages,
+    subagentNotices,
     setMessages,
     streaming,
     stoppingStream,

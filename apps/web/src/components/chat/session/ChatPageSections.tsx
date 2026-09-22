@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import '../message/chat-message.css';
 import './ChatPageSections.css';
 import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
+import type { InputImageContent } from '@openAwork/shared';
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
@@ -306,6 +307,8 @@ function renderToolCallContent(input: {
     selectedScopePattern?: string;
     onSelectScopeLevel?: (level: AlwaysScopeLevel) => void;
   };
+  /** tool result 的图片附件（`computer_use` 最终截图），其余工具为空。 */
+  attachments?: readonly InputImageContent[];
   durationMs?: number;
   isError?: boolean;
   kind?: 'agent' | 'mcp' | 'skill' | 'tool';
@@ -347,6 +350,7 @@ function renderToolCallContent(input: {
   return (
     <ToolCallDisplay
       approvalActions={input.approvalActions}
+      attachments={input.attachments}
       key={input.reactKey}
       input={input.toolInput}
       isError={input.isError}
@@ -752,6 +756,7 @@ function AssistantPartsContent({
           const part = item.part;
           return renderToolCallContent({
             reactKey: part.id,
+            attachments: part.attachments,
             kind: part.kind,
             toolCallId: part.toolCallId,
             toolName: part.toolName,

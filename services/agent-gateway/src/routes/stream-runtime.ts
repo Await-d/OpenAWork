@@ -65,7 +65,6 @@ import {
 } from './stream.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { publishTeamUsageEvent } from './stream-team-events.js';
-import { runModelRound } from './stream-model-round.js';
 import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
@@ -81,7 +80,7 @@ import {
   triggerOverflowCompaction,
   triggerProactiveCompaction,
 } from '../compaction/auto-compaction-trigger.js';
-import { MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES } from '../task/task-parent-auto-resume.js';
+import { runModelRound, MAX_CONTINUATION_ROUNDS } from './stream-model-round.js';
 import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
 import {
   autoExtractMemoriesForRequest,
@@ -762,11 +761,7 @@ async function continueFromApprovedToolResult(input: {
           }
         }
 
-        if (
-          result.overflow === true &&
-          overflowTriggered &&
-          round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
-        ) {
+        if (result.overflow === true && overflowTriggered && round < MAX_CONTINUATION_ROUNDS) {
           continue;
         }
 
@@ -1155,6 +1150,57 @@ export async function runSessionInBackground(input: {
     clearInternalTeamResumeRequest(requestData.clientRequestId);
     throw error;
   }
+}
+
+/**
+ * 从既有历史继续执行一轮（唤醒父会话），**不新增用户轮**。
+ *
+ * 与 `runSessionInBackground` 的关键区别：后者会持久化一条用户消息（「用户发言」语义），
+ * 本函数只触发执行——输入（例如已落库的子代理完成通知）必须已存在于会话历史中。
+ * 对齐上游 opencode 的 `sessions.synthetic`（入库）与 `execution.wake`（执行）两段分离。
+ *
+ * 幂等：调用方应传入稳定的 `clientRequestId`（如通知身份 `notificationId`），
+ * 复用既有「按请求的已完成重放」语义，重复唤醒不会重复执行。
+ */
+export async function continueSessionFromHistory(input: {
+  clientRequestId: string;
+  onStarted?: () => void;
+  sessionId: string;
+  signal?: AbortSignal;
+  userId: string;
+  writeChunk?: (chunk: RunEvent) => void;
+}): Promise<HandleStreamResult> {
+  const sessionContext = loadSessionContext(input.sessionId, input.userId);
+  if (!sessionContext) {
+    throw new Error(`目标会话不存在：${input.sessionId}`);
+  }
+
+  const user = loadSessionUser(input.sessionId, input.userId);
+  if (!user) {
+    throw new Error(`Session user not found: ${input.userId}`);
+  }
+
+  // `message` 在此模式下不承载输入（输入已在历史中），但 schema 要求该字段存在。
+  const requestData = streamRequestSchema.parse({
+    clientRequestId: input.clientRequestId,
+    message: '',
+  });
+
+  return handleStreamRequest({
+    continueFromHistory: true,
+    headers: {},
+    ip: 'internal',
+    method: 'INTERNAL',
+    path: `/sessions/${input.sessionId}/stream/continue`,
+    requestData,
+    ...(input.signal ? { signal: input.signal } : {}),
+    sessionContext,
+    sessionId: input.sessionId,
+    transport: 'SSE',
+    user,
+    writeChunk: input.writeChunk ?? (() => undefined),
+    onStarted: input.onStarted,
+  });
 }
 
 export async function resumeAnsweredQuestionRequest(input: {

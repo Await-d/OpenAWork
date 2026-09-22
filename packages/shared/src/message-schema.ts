@@ -1,4 +1,45 @@
-export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
+/**
+ * Message role.
+ *
+ * `synthetic` marks gateway-authored messages that are injected into a session
+ * by the gateway itself rather than authored by the end user. The canonical
+ * producer is subagent completion delivery (a finished child session reports
+ * back into its parent), mirroring opencode's first-class `synthetic` message
+ * type (`packages/schema/src/session-inbox.ts` → `SyntheticPayload`).
+ *
+ * Semantics:
+ *   - visible to the model (lowered to the upstream `user` role when building
+ *     the provider request),
+ *   - never rendered as user input in any client,
+ *   - carries `description` + `metadata` so clients can render a compact notice
+ *     (opencode renders `metadata.source === 'subagent'` as a one-line notice
+ *     that links to the child session).
+ */
+export type MessageRole = 'user' | 'assistant' | 'tool' | 'system' | 'synthetic';
+
+/**
+ * Completion state of a subagent notice. Mirrors the `metadata.state` values
+ * produced by the gateway's task-job settlement, which in turn map onto
+ * opencode's `Job.Status` (`completed | error | cancelled`).
+ */
+export type SubagentNoticeState = 'done' | 'failed' | 'cancelled';
+
+/**
+ * Notice contract for `role: 'synthetic'` messages whose
+ * `metadata.source === 'subagent'`.
+ *
+ * Mirrors opencode's `SubagentCompletion.deliver` metadata
+ * (`packages/core/src/session/subagent-completion.ts`). Clients render it as a
+ * compact notice row that links to the child session — never as user input.
+ */
+export type SubagentNoticeMetadata = {
+  source: 'subagent';
+  /** Child session id; presence makes the notice navigable. */
+  childID?: string;
+  /** Subagent name (e.g. `explore`). */
+  agent?: string;
+  state?: SubagentNoticeState;
+};
 
 export interface TextContent {
   type: 'text';
@@ -183,6 +224,19 @@ export interface Message {
   createdAt: number;
   agentId?: string;
   clientRequestId?: string;
+  /**
+   * Short human-readable label. For `role: 'synthetic'` this is the notice
+   * label (e.g. the subagent task description). Aligns with opencode's
+   * `message.description` on synthetic messages.
+   */
+  description?: string;
+  /**
+   * Structured notice payload. For `role: 'synthetic'` with
+   * `metadata.source === 'subagent'` the shape is
+   * `{ source, childID, agent, state }`, matching opencode's
+   * `SubagentCompletion.deliver` metadata and the client notice contract.
+   */
+  metadata?: Record<string, unknown>;
   model?: string;
   providerId?: string;
   durationMs?: number;

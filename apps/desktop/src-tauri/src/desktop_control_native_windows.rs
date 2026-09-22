@@ -2,8 +2,9 @@ use crate::desktop_control_native::{
     command_exists, coordinate_arg, read_png_response, run_command, temp_png_path, ClickAction,
     ClickRequest, ClickResponse, DesktopControlAction, DesktopControlActionResponse,
     DesktopControlCapabilities, DesktopControlCapability, DesktopControlError,
-    DesktopControlStatus, MouseButton, ScreenshotRequest, ScrollRequest, ScrollResponse,
-    WaitRequest, WaitResponse,
+    DesktopControlStatus, DragRequest, DragResponse, LongPressRequest, LongPressResponse,
+    MouseButton, MouseMoveRequest, MouseMoveResponse, ScreenshotRequest, ScrollRequest,
+    ScrollResponse, WaitRequest, WaitResponse,
 };
 use std::thread;
 use std::time::Duration;
@@ -12,6 +13,8 @@ use std::time::Duration;
 mod input;
 
 const POWERSHELL_REASON: &str = "PowerShell is required for native Windows desktop control";
+const MAX_GESTURE_MS: u64 = 10_000;
+const DRAG_STEPS: u32 = 8;
 
 pub fn status() -> DesktopControlStatus {
     let driver = powershell_program();
@@ -28,7 +31,10 @@ pub fn status() -> DesktopControlStatus {
             type_text: capability.clone(),
             key: capability.clone(),
             hotkey: capability.clone(),
-            scroll: capability,
+            scroll: capability.clone(),
+            drag: capability.clone(),
+            mouse_move: capability.clone(),
+            long_press: capability,
             wait: DesktopControlCapability::available("std-thread-sleep"),
         },
     }
@@ -55,6 +61,15 @@ pub fn execute_action(
         }
         DesktopControlAction::Scroll(request) => {
             scroll(request).map(DesktopControlActionResponse::Scroll)
+        }
+        DesktopControlAction::Drag(request) => {
+            drag(request).map(DesktopControlActionResponse::Drag)
+        }
+        DesktopControlAction::MouseMove(request) => {
+            mouse_move(request).map(DesktopControlActionResponse::MouseMove)
+        }
+        DesktopControlAction::LongPress(request) => {
+            long_press(request).map(DesktopControlActionResponse::LongPress)
         }
         DesktopControlAction::Wait(request) => {
             Ok(DesktopControlActionResponse::Wait(wait(request)))
@@ -137,6 +152,100 @@ fn wait(request: WaitRequest) -> WaitResponse {
     let ms = request.ms.min(10_000);
     thread::sleep(Duration::from_millis(ms));
     WaitResponse { success: true, ms }
+}
+
+fn mouse_move(request: MouseMoveRequest) -> Result<MouseMoveResponse, DesktopControlError> {
+    let script = format!(
+        "{} [MouseBridge]::SetCursorPos({},{});",
+        mouse_bridge_type(),
+        coordinate_arg(request.x),
+        coordinate_arg(request.y)
+    );
+    run_powershell(script)?;
+    Ok(MouseMoveResponse {
+        success: true,
+        x: request.x,
+        y: request.y,
+        driver: powershell_driver(),
+    })
+}
+
+fn drag(request: DragRequest) -> Result<DragResponse, DesktopControlError> {
+    let mut script = mouse_bridge_type();
+    script.push_str(&format!(
+        " [MouseBridge]::SetCursorPos({},{});",
+        coordinate_arg(request.from_x),
+        coordinate_arg(request.from_y)
+    ));
+    script.push_str(&format!(
+        " {}",
+        mouse_event_flags(ClickAction::Down, request.button)
+    ));
+    let step_delay = gesture_step_delay(request.ms.min(MAX_GESTURE_MS), DRAG_STEPS);
+    for index in 1..=DRAG_STEPS {
+        let ratio = f64::from(index) / f64::from(DRAG_STEPS);
+        let x = request.from_x + (request.to_x - request.from_x) * ratio;
+        let y = request.from_y + (request.to_y - request.from_y) * ratio;
+        script.push_str(&format!(
+            " [MouseBridge]::SetCursorPos({},{});",
+            coordinate_arg(x),
+            coordinate_arg(y)
+        ));
+        if step_delay > 0 {
+            script.push_str(&format!(" Start-Sleep -Milliseconds {step_delay};"));
+        }
+    }
+    script.push_str(&format!(
+        " {}",
+        mouse_event_flags(ClickAction::Up, request.button)
+    ));
+    run_powershell(script)?;
+    Ok(DragResponse {
+        success: true,
+        from_x: request.from_x,
+        from_y: request.from_y,
+        to_x: request.to_x,
+        to_y: request.to_y,
+        button: request.button,
+        driver: powershell_driver(),
+    })
+}
+
+fn long_press(request: LongPressRequest) -> Result<LongPressResponse, DesktopControlError> {
+    let ms = request.ms.min(MAX_GESTURE_MS);
+    let mut script = mouse_bridge_type();
+    script.push_str(&format!(
+        " [MouseBridge]::SetCursorPos({},{});",
+        coordinate_arg(request.x),
+        coordinate_arg(request.y)
+    ));
+    script.push_str(&format!(
+        " {}",
+        mouse_event_flags(ClickAction::Down, request.button)
+    ));
+    if ms > 0 {
+        script.push_str(&format!(" Start-Sleep -Milliseconds {ms};"));
+    }
+    script.push_str(&format!(
+        " {}",
+        mouse_event_flags(ClickAction::Up, request.button)
+    ));
+    run_powershell(script)?;
+    Ok(LongPressResponse {
+        success: true,
+        x: request.x,
+        y: request.y,
+        button: request.button,
+        ms,
+        driver: powershell_driver(),
+    })
+}
+
+fn gesture_step_delay(ms: u64, steps: u32) -> u64 {
+    if steps == 0 {
+        return 0;
+    }
+    ms / u64::from(steps)
 }
 
 fn powershell_program() -> Option<&'static str> {

@@ -94,6 +94,8 @@ export function discoverWorkspaceRoot(startPath: string): string {
   while (true) {
     if (
       existsSync(join(currentPath, 'pnpm-workspace.yaml')) ||
+      existsSync(join(currentPath, 'bun.lock')) ||
+      existsSync(join(currentPath, 'bun.lockb')) ||
       existsSync(join(currentPath, '.git'))
     ) {
       return currentPath;

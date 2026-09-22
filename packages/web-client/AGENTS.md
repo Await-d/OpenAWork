@@ -84,7 +84,7 @@ src/
 
 - [ ] 在 `src/<domain>.ts` 中定义 `interface <Domain>Client` 和 `function create<Domain>Client(baseUrl)`。
 - [ ] 在 `src/index.ts` 中导出 factory 函数和类型。
-- [ ] 跑 `pnpm --filter @openAwork/web-client build` 确认 dist 产出。
+- [ ] 跑 `bun run --filter @openAwork/web-client build` 确认 dist 产出。
 - [ ] 在消费端用 `create<Domain>Client(gatewayUrl).<method>(token, ...)` 调用。
 
 ## 禁止事项

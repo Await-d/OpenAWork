@@ -9,7 +9,7 @@
  * 4. 提供修复建议
  *
  * 使用方法：
- *   pnpm exec tsx scripts/diagnose-mcp-tools.ts
+ *   bunx tsx scripts/diagnose-mcp-tools.ts
  */
 
 import { buildGatewayToolDefinitions } from '../services/agent-gateway/src/tools/tool-definitions.js';
@@ -93,7 +93,7 @@ if (flatModeEnabled) {
   console.log('');
   console.log('   解决方案 B：禁用 Flat 模式（用于调试）');
   console.log('     1. 在 .env 中添加：OPENAWORK_DISABLE_MCP_FLAT_TOOLS=1');
-  console.log('     2. 重启 Gateway：pnpm --filter @openAwork/agent-gateway dev');
+  console.log('     2. 重启 Gateway：bun run --filter @openAwork/agent-gateway dev');
   console.log('     3. 模型将可以使用 mcp_list_tools 和 mcp_call');
 } else {
   console.log('   ⚠️  系统运行在传统 MCP 模式');

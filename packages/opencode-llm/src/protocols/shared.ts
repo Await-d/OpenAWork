@@ -92,17 +92,41 @@ export const sumTokens = (...values: ReadonlyArray<number | undefined>): number 
   return values.reduce((acc: number, value) => acc + (value ?? 0), 0);
 };
 
-export const eventError = (route: string, message: string, raw?: string) =>
+export const eventError = (route: string, message: string, raw?: string, cause?: unknown) =>
   new LLMError({
     module: 'ProviderShared',
     method: 'stream',
-    reason: new InvalidProviderOutputReason({ route, message, raw }),
+    reason: new InvalidProviderOutputReason({ route, message, raw, cause }),
+  });
+
+/**
+ * A response that ended before its terminal event (`finish` / `provider-error`).
+ * `classification: 'incomplete-stream'` lets the caller distinguish "the
+ * provider got cut off" from a malformed payload and decide whether to continue
+ * or retry rather than treating a truncated answer as complete.
+ */
+export const incompleteStreamError = (
+  route: string,
+  message?: string,
+  raw?: string,
+  cause?: unknown,
+) =>
+  new LLMError({
+    module: 'ProviderShared',
+    method: 'stream',
+    reason: new InvalidProviderOutputReason({
+      route,
+      message: message ?? 'The provider response ended unexpectedly.',
+      classification: 'incomplete-stream',
+      raw,
+      cause,
+    }),
   });
 
 export const parseJson = (route: string, input: string, message: string) =>
   Effect.try({
     try: () => decodeJson(input),
-    catch: () => eventError(route, message, input),
+    catch: (cause) => eventError(route, message, input, cause),
   });
 
 /**
@@ -319,11 +343,11 @@ export const sseFraming = (
  * `InvalidRequestReason` with route context or trace metadata, the change
  * lands here.
  */
-export const invalidRequest = (message: string) =>
+export const invalidRequest = (message: string, cause?: unknown) =>
   new LLMError({
     module: 'ProviderShared',
     method: 'request',
-    reason: new InvalidRequestReason({ message }),
+    reason: new InvalidRequestReason({ message, cause }),
   });
 
 export const matchToolChoice = <Auto, None, Required, Tool>(
@@ -376,7 +400,7 @@ export const unsupportedContent = (
 export const validateWith =
   <A, I, E extends { readonly message: string }>(decode: (input: I) => Effect.Effect<A, E>) =>
   (payload: I) =>
-    decode(payload).pipe(Effect.mapError((error) => invalidRequest(error.message)));
+    decode(payload).pipe(Effect.mapError((error) => invalidRequest(error.message, error)));
 
 /**
  * Build an HTTP POST with a JSON body. Sets `content-type: application/json`

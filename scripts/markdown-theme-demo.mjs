@@ -16,6 +16,7 @@
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -27,15 +28,16 @@ const INDEX_CSS = path.join(ROOT, 'apps/web/src/index.css');
 const CHAT_CSS = path.join(ROOT, 'apps/web/src/components/chat/message/chat-message.css');
 const TOKENS_TS = path.join(ROOT, 'apps/web/src/components/chat/markdown/theme-tokens.ts');
 const MERMAID_THEME_TS = path.join(ROOT, 'apps/web/src/components/chat/markdown/mermaid-theme.ts');
-const MERMAID_ENTRY = path.join(
-  ROOT,
-  'node_modules/.pnpm/mermaid@12.0.0/node_modules/mermaid/dist/mermaid.core.mjs',
-);
+// 依赖入口按 workspace 声明链动态解析：bun / pnpm 都是隔离式 node_modules，
+// 传递依赖只挂在「声明它的包」下，写死 store 路径会随版本升级失效。
+const WEB_MANIFEST = path.join(ROOT, 'apps', 'web', 'package.json');
+const webRequire = createRequire(WEB_MANIFEST);
 
-const ESBUILD = path.join(
-  ROOT,
-  'node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/lib/main.js',
-);
+/** mermaid 是 apps/web 的直接依赖（Markdown 图表渲染）。 */
+const MERMAID_ENTRY = webRequire.resolve('mermaid');
+
+/** esbuild 是 vite 的传递依赖，沿 vite 的清单继续解析。 */
+const ESBUILD = createRequire(webRequire.resolve('vite/package.json')).resolve('esbuild');
 
 const THEME_STYLES = [
   'nebula',

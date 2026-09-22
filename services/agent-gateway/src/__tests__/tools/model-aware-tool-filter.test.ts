@@ -65,27 +65,27 @@ describe('getEnabledTools (model-aware filtering)', () => {
     vi.resetModules();
   });
 
-  it('hides edit/multi_edit/write and exposes apply_patch for GPT-5 models', () => {
+  it('hides edit/multi_edit/write and exposes patch for GPT-5 models', () => {
     const tools = getEnabledTools(true, { modelId: 'gpt-5-codex' });
     const names = tools.map((t) => t.function.name);
-    expect(names).toContain('apply_patch');
+    expect(names).toContain('patch');
     expect(names).not.toContain('edit');
     expect(names).not.toContain('multi_edit');
     expect(names).not.toContain('write');
   });
 
-  it('hides apply_patch and exposes edit/multi_edit/write for GPT-4 / Claude / others', () => {
+  it('hides patch and exposes edit/multi_edit/write for GPT-4 / Claude / others', () => {
     const claude = getEnabledTools(true, { modelId: 'claude-sonnet-4-5' });
     const claudeNames = claude.map((t) => t.function.name);
     expect(claudeNames).toContain('edit');
     expect(claudeNames).toContain('multi_edit');
     expect(claudeNames).toContain('write');
-    expect(claudeNames).not.toContain('apply_patch');
+    expect(claudeNames).not.toContain('patch');
 
     const gpt4 = getEnabledTools(true, { modelId: 'gpt-4o' });
     const gpt4Names = gpt4.map((t) => t.function.name);
     expect(gpt4Names).toContain('edit');
-    expect(gpt4Names).not.toContain('apply_patch');
+    expect(gpt4Names).not.toContain('patch');
   });
 
   it('still gates websearch / webfetch behind the webSearchEnabled flag', () => {
@@ -101,13 +101,13 @@ describe('getEnabledTools (model-aware filtering)', () => {
   });
 
   it('falls back to the legacy "expose everything" surface when modelId is missing', () => {
-    // No modelId → both apply_patch and edit/write should be present
+    // No modelId → both patch and edit/write should be present
     // so the existing pre-PR-A behaviour is preserved for callers
     // (e.g. test fixtures, dev tooling) that haven't plumbed model
     // selection into getEnabledTools yet.
     const tools = getEnabledTools(true);
     const names = tools.map((t) => t.function.name);
-    expect(names).toContain('apply_patch');
+    expect(names).toContain('patch');
     expect(names).toContain('edit');
     expect(names).toContain('multi_edit');
     expect(names).toContain('write');
@@ -120,7 +120,7 @@ describe('getEnabledTools (model-aware filtering)', () => {
     const mod = await import('../../routes/stream.js');
     const tools = mod.getEnabledTools(true, { modelId: 'gpt-5-codex' });
     const names = tools.map((t) => t.function.name);
-    expect(names).toContain('apply_patch');
+    expect(names).toContain('patch');
     expect(names).toContain('edit');
     expect(names).toContain('multi_edit');
     expect(names).toContain('write');

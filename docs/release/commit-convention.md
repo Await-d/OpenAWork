@@ -86,11 +86,11 @@ Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
 
 ## 本地触发方式
 
-- `pre-commit`：运行 `pnpm lint-staged`
-- `commit-msg`：运行 `pnpm commitlint --edit "$1"`
+- `pre-commit`：运行 `bunx lint-staged`
+- `commit-msg`：运行 `bunx commitlint --edit "$1"`
 
 如果需要在提交前手动检查，可执行：
 
 ```bash
-pnpm commitlint --edit .git/COMMIT_EDITMSG
+bunx commitlint --edit .git/COMMIT_EDITMSG
 ```

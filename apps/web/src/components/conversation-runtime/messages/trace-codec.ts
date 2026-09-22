@@ -19,6 +19,7 @@ import type {
 import { hasActivePendingPermissionRequest } from './message-coercion.js';
 import {
   parseFileDiffContent,
+  parseInputImageAttachments,
   parseModifiedFilesSummaryContent,
   parseToolCallObservability,
 } from './message-content.js';
@@ -182,6 +183,9 @@ export function partsFromOrderedAssistantContent(
       const fileDiffs = Array.isArray(record['fileDiffs'])
         ? record['fileDiffs'].flatMap((entry) => parseFileDiffContent(entry))
         : undefined;
+      // 最终截图（computer_use）只存在于 tool_result 的 attachments 通道，
+      // output 里没有；历史加载必须把它带回 tool part，否则刷新后卡片只剩占位。
+      const attachments = parseInputImageAttachments(record['attachments']);
       const targetIndex = toolPartIndexByCallId.get(toolCallId);
       if (targetIndex !== undefined) {
         const existing = parts[targetIndex];
@@ -190,6 +194,7 @@ export function partsFromOrderedAssistantContent(
             ...existing,
             output: record['output'],
             isError: hasPendingPermission ? false : isError,
+            ...(attachments ? { attachments } : {}),
             ...(observability ? { observability } : {}),
             ...(fileDiffs && fileDiffs.length > 0 ? { fileDiffs } : {}),
             ...(hasPendingPermission && pendingPermissionRequestId
@@ -217,6 +222,7 @@ export function partsFromOrderedAssistantContent(
         input: {},
         output: record['output'],
         isError: hasPendingPermission ? false : isError,
+        ...(attachments ? { attachments } : {}),
         ...(observability ? { observability } : {}),
         ...(fileDiffs && fileDiffs.length > 0 ? { fileDiffs } : {}),
         ...(hasPendingPermission && pendingPermissionRequestId
@@ -304,6 +310,18 @@ function mergePartWithSnapshot(
       text,
       ...(snapshotPart.startedAt !== undefined ? { startedAt: snapshotPart.startedAt } : {}),
       ...(snapshotPart.endedAt !== undefined ? { endedAt: snapshotPart.endedAt } : {}),
+    };
+  }
+  if (existingPart.type === 'tool' && snapshotPart.type === 'tool') {
+    // 快照优先（它有落定后的 status / output），但图片附件不能因此丢失：
+    // computer_use 的最终截图只在 attachments 通道，若快照侧缺字段则沿用实时值。
+    const snapshotHasAttachments =
+      snapshotPart.attachments !== undefined && snapshotPart.attachments.length > 0;
+    return {
+      ...snapshotPart,
+      ...(!snapshotHasAttachments && existingPart.attachments
+        ? { attachments: existingPart.attachments }
+        : {}),
     };
   }
   return snapshotPart;

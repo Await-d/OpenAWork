@@ -6,16 +6,11 @@ import type { Framing } from './framing.js';
 import { HttpTransport } from './transport/index.js';
 import type { Transport, TransportRuntime } from './transport/index.js';
 import type { Protocol } from './protocol.js';
-import type {
-  LLMError,
-  LLMEvent,
-  PreparedRequestOf,
-  ProtocolID,
-  ProviderOptions,
-} from '../schema/index.js';
+import type { LLMError, PreparedRequestOf, ProtocolID, ProviderOptions } from '../schema/index.js';
 import {
   GenerationOptions,
   HttpOptions,
+  LLMEvent,
   LLMRequest,
   LLMResponse,
   Model,
@@ -201,6 +196,7 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     }
   | {
       readonly type: 'reasoning-start';
@@ -235,6 +231,7 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
             };
           }
         | undefined;
+      readonly text?: string | undefined;
     }
   | {
       readonly type: 'tool-input-start';
@@ -308,7 +305,7 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           };
@@ -324,7 +321,7 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
                   readonly type: 'file';
                   readonly uri: string;
                   readonly mime: string;
-                  readonly name?: any;
+                  readonly name?: string | undefined;
                 }
             )[];
           }
@@ -355,7 +352,8 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
   | {
       readonly type: 'step-finish';
       readonly index: number;
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: import('../schema/events.js').Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -367,7 +365,8 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
     }
   | {
       readonly type: 'finish';
-      readonly reason: 'length' | 'error' | 'unknown' | 'stop' | 'tool-calls' | 'content-filter';
+      readonly reason: 'length' | 'stop' | 'tool-calls' | 'content-filter' | 'error' | 'unknown';
+      readonly reasonRaw?: string | undefined;
       readonly usage?: import('../schema/events.js').Usage | undefined;
       readonly providerMetadata?:
         | {
@@ -380,7 +379,7 @@ export declare const streamRequest: (request: LLMRequest) => Stream.Stream<
   | {
       readonly type: 'provider-error';
       readonly message: string;
-      readonly classification?: 'context-overflow' | undefined;
+      readonly classification?: 'context-overflow' | 'payload-too-large' | undefined;
       readonly retryable?: boolean | undefined;
       readonly providerMetadata?:
         | {

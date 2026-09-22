@@ -19,15 +19,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Lint commit messages
         run: |
@@ -57,7 +65,7 @@ jobs:
           fi
 
           echo "Linting commits: ${FROM_SHA}..${TO_SHA}"
-          pnpm commitlint --from "$FROM_SHA" --to "$TO_SHA" --verbose
+          bunx commitlint --from "$FROM_SHA" --to "$TO_SHA" --verbose
 
   quality:
     name: Lint & Typecheck
@@ -66,27 +74,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build OpenCode LLM dependency
-        run: pnpm --filter "@openAwork/opencode-llm" build
+        run: bun run --filter "@openAwork/opencode-llm" build
 
       - name: Lint
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
 
       - name: Format check
-        run: pnpm format:check
+        run: bun run format:check
 
       - name: Typecheck
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/artifacts" --filter "@openAwork/logger" --filter "@openAwork/browser-automation" --filter "@openAwork/skill-registry" --filter "@openAwork/skills" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" typecheck
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/artifacts" --filter "@openAwork/logger" --filter "@openAwork/browser-automation" --filter "@openAwork/skill-registry" --filter "@openAwork/skills" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" typecheck
 
   test:
     name: Unit Tests
@@ -97,21 +113,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build OpenCode LLM dependency
-        run: pnpm --filter "@openAwork/opencode-llm" build
+        run: bun run --filter "@openAwork/opencode-llm" build
 
       - name: Test
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
 
   chat-recovery-fast:
     name: Chat Recovery Fast Gates
@@ -120,21 +144,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build OpenCode LLM dependency
-        run: pnpm --filter "@openAwork/opencode-llm" build
+        run: bun run --filter "@openAwork/opencode-llm" build
 
       - name: Run gateway chat fast checks
-        run: pnpm --filter "@openAwork/agent-gateway" run test:chat:fast
+        run: bun run --filter "@openAwork/agent-gateway" test:chat:fast
 
   desktop-native:
     name: Desktop Native Check
@@ -143,12 +175,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install Linux desktop build dependencies
         run: |
@@ -172,16 +212,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+        run: bun install --frozen-lockfile
 
       - name: Check desktop native build
         env:
           OPENAWORK_REQUIRE_DESKTOP_NATIVE_CHECK: '1'
-        run: pnpm check:desktop-native
+        run: bun run check:desktop-native
 
   build:
     name: Build
@@ -190,18 +226,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build OpenCode LLM dependency
-        run: pnpm --filter "@openAwork/opencode-llm" build
+        run: bun run --filter "@openAwork/opencode-llm" build
 
       - name: Build packages
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" build
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" build

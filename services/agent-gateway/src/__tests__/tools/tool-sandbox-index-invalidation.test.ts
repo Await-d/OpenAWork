@@ -48,12 +48,12 @@ describe('ToolSandbox.execute 索引失效接线', () => {
     expect(mocks.invalidateForToolCallMock).toHaveBeenCalledWith('session-1', 'edit');
   }, 20_000);
 
-  it('legacy 工具名会先规范化为 canonical 再交给失效桥接', async () => {
+  it('带 functions. 前缀的工具名会先剥前缀再交给失效桥接', async () => {
     const { ToolSandbox } = await import('../../tools/tool-sandbox.js');
     const sandbox = new ToolSandbox({ defaultTimeoutMs: 1000 });
 
     await sandbox.execute(
-      { toolCallId: 'call-legacy-read', toolName: 'workspace_read_file', rawInput: {} },
+      { toolCallId: 'call-prefixed-read', toolName: 'functions.read', rawInput: {} },
       new AbortController().signal,
       'session-1',
     );

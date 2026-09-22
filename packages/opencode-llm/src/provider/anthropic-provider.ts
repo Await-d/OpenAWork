@@ -99,6 +99,25 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   /**
+   * 检查模型是否支持 GUI grounding（能输出可直接执行的屏幕坐标，即 computer use）
+   *
+   * 语义说明：GUI grounding ≠ 视觉能力。绝大多数支持视觉的 Claude 模型并不具备
+   * 坐标级 grounding 能力，因此这里不复用 supportsVision 的宽泛判断，而是采用
+   * 保守的显式白名单，默认返回 false，仅列出官方明确支持 computer use 的模型。
+   */
+  supportsGuiGrounding(modelId: string): boolean {
+    // 官方明确支持 computer use（可输出坐标）的 Claude 模型白名单。
+    const groundingModels = [
+      'claude-3-5-sonnet-20241022',
+      'claude-3-7-sonnet-20250219',
+      'claude-sonnet-4',
+      'claude-opus-4',
+      'claude-haiku-4-5',
+    ];
+    return groundingModels.some((model) => modelId.includes(model));
+  }
+
+  /**
    * 检查模型是否支持工具调用
    */
   supportsTools(modelId: string): boolean {

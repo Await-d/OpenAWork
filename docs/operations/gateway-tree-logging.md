@@ -175,9 +175,9 @@ step.succeed();
 5. 如果是 WS/SSE，是否保持 requestId 关联？
 6. 修改后是否执行：
    - `lsp_diagnostics`
-   - `pnpm --filter @openAwork/logger build`（如果改到 logger）
-   - `pnpm --filter @openAwork/agent-gateway build`
-   - `pnpm --filter @openAwork/agent-gateway test`
+   - `bun run --filter @openAwork/logger build`（如果改到 logger）
+   - `bun run --filter @openAwork/agent-gateway build`
+   - `bun run --filter @openAwork/agent-gateway test`
 
 ## 参考实现
 

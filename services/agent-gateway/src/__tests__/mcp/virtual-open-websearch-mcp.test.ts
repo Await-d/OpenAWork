@@ -536,6 +536,29 @@ describe('virtual open websearch mcp', () => {
       expect(readFirstText(result)).toContain('只支持公开 HTTP(S) 网页 URL。');
     });
 
+    it('预检阶段就说清 fake-IP 解析结果，并给出 FAKE_IP_CIDRS 开关', async () => {
+      config.fakeIpCidrs = [];
+      dnsLookupMock.mockResolvedValueOnce([{ address: '198.18.6.204', family: 4 }]);
+
+      const result = await callFetchWeb('https://opencode.ai/v2/install');
+
+      expect(result.isError).toBe(true);
+      const message = readFirstText(result);
+      expect(message).toContain('只支持公开 HTTP(S) 网页 URL。');
+      expect(message).toContain('FAKE_IP_CIDRS=198.18.0.0/15');
+      expect(requestWithSafeRedirectsMock).not.toHaveBeenCalled();
+    });
+
+    it('预检阶段区分「域名解析失败」', async () => {
+      dnsLookupMock.mockRejectedValueOnce(new Error('ENOTFOUND'));
+
+      const result = await callFetchWeb('https://opencode.ai/v2/install');
+
+      expect(result.isError).toBe(true);
+      expect(readFirstText(result)).toContain('域名解析失败');
+      expect(requestWithSafeRedirectsMock).not.toHaveBeenCalled();
+    });
+
     it('allows DNS answers matching the configured fake-IP CIDRs', async () => {
       config.fakeIpCidrs = ['198.18.0.0/15'];
       dnsLookupMock.mockResolvedValueOnce([{ address: '198.18.0.2', family: 4 }]);

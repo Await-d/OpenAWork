@@ -19,6 +19,14 @@ import {
   reconcilePartsById,
 } from './trace-codec.js';
 
+/** `computer_use` 最终截图的 tool result 附件形态（网关只下发 artifactId）。 */
+const GUI_SNAPSHOT = {
+  type: 'input_image' as const,
+  artifactId: 'artifact-gui-1',
+  fileName: 'computer-use-final.png',
+  mimeType: 'image/png',
+};
+
 describe('createAssistantTraceContent', () => {
   it('清洗 reasoningBlocks：剥离 [REDACTED]、trim 并丢弃空块', () => {
     const content = createAssistantTraceContent({
@@ -283,6 +291,64 @@ describe('partsFromOrderedAssistantContent', () => {
     expect(tool).toMatchObject({ status: 'completed', output: 'ok', isError: false });
   });
 
+  it('把 tool_result 的 attachments 带进工具段（刷新后 computer_use 截图仍可见）', () => {
+    const parts = partsFromOrderedAssistantContent('m1', [
+      {
+        type: 'tool_call',
+        toolCallId: 'tool-gui',
+        toolName: 'computer_use',
+        input: { instruction: '打开系统设置' },
+      },
+      {
+        type: 'tool_result',
+        toolCallId: 'tool-gui',
+        toolName: 'computer_use',
+        output: '{"success":true}',
+        isError: false,
+        attachments: [GUI_SNAPSHOT],
+      },
+    ]);
+
+    const tool = parts[0] as ChatToolPart;
+    expect(tool.attachments).toEqual([GUI_SNAPSHOT]);
+    expect(tool.status).toBe('completed');
+  });
+
+  it('孤儿 tool_result 的 attachments 不会丢失', () => {
+    const parts = partsFromOrderedAssistantContent('m1', [
+      { type: 'text', text: '前' },
+      {
+        type: 'tool_result',
+        toolCallId: 'ghost-gui',
+        toolName: 'computer_use',
+        output: '{"success":true}',
+        isError: false,
+        attachments: [GUI_SNAPSHOT],
+      },
+    ]);
+
+    const tool = parts[1] as ChatToolPart;
+    expect(tool.toolName).toBe('computer_use');
+    expect(tool.attachments).toEqual([GUI_SNAPSHOT]);
+  });
+
+  it('不带 attachments 的 tool_result 不产生该字段', () => {
+    const parts = partsFromOrderedAssistantContent('m1', [
+      { type: 'tool_call', toolCallId: 'tool-read', toolName: 'read', input: {} },
+      {
+        type: 'tool_result',
+        toolCallId: 'tool-read',
+        toolName: 'read',
+        output: 'ok',
+        isError: false,
+      },
+    ]);
+
+    const tool = parts[0] as ChatToolPart;
+    expect(tool.attachments).toBeUndefined();
+    expect('attachments' in tool).toBe(false);
+  });
+
   it('空 reasoning 与纯空白 text 被丢弃；无 toolCallId 的工具用位置 ID', () => {
     const parts = partsFromOrderedAssistantContent('m1', [
       { type: 'reasoning', text: '   ' },
@@ -409,6 +475,33 @@ describe('reconcilePartsById', () => {
     expect(merged.map((part) => part.id)).toEqual(['tool-a', 'm:text']);
     expect(merged[0]).toMatchObject({ status: 'completed', output: 'ok' });
     expect(merged[1]).toMatchObject({ text: 'hello world' });
+  });
+
+  it('快照工具段缺 attachments 时沿用实时值（computer_use 截图不因合并丢失）', () => {
+    const merged = reconcilePartsById(
+      [tool('tool-gui', { status: 'running', attachments: [GUI_SNAPSHOT] })],
+      [tool('tool-gui', { status: 'completed', output: '{"success":true}' })],
+    );
+
+    expect(merged[0]).toMatchObject({
+      status: 'completed',
+      output: '{"success":true}',
+      attachments: [GUI_SNAPSHOT],
+    });
+  });
+
+  it('快照工具段自带 attachments 时以快照为准', () => {
+    const snapshotAttachment = {
+      type: 'input_image' as const,
+      artifactId: 'artifact-gui-2',
+      mimeType: 'image/png',
+    };
+    const merged = reconcilePartsById(
+      [tool('tool-gui', { status: 'running', attachments: [GUI_SNAPSHOT] })],
+      [tool('tool-gui', { status: 'completed', attachments: [snapshotAttachment] })],
+    );
+
+    expect(merged[0]).toMatchObject({ attachments: [snapshotAttachment] });
   });
 
   it('快照正文是实时正文的前缀扩展时保留更完整的实时正文', () => {

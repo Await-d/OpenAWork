@@ -136,6 +136,12 @@ const convert = (message: UnifiedMessage): Message | undefined => {
       return undefined;
     case 'user':
       return userMessage(message);
+    case 'synthetic':
+      // D-1: gateway-injected notices are model-visible but must not be
+      // rendered as user input on the client. Upstream protocols only know
+      // user/assistant/tool turns, so downgrade to a `user` turn. The
+      // `syntheticKind` tag is gateway-side metadata and is dropped here.
+      return userMessage({ role: 'user', content: message.content });
     case 'assistant':
       return assistantMessage(message);
     case 'tool':

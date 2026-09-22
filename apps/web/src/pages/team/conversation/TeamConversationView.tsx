@@ -422,6 +422,7 @@ export function TeamConversationView({
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     return buildTeamGroupedMessageEntries({
       messages: state.messages,
+      subagentNotices: state.subagentNotices,
       roleLayer: state.roleLayer,
       resolveInlinePermissionActions,
       visibleStreaming: state.visibleStreaming,

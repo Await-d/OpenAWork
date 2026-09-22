@@ -1,6 +1,7 @@
 import type {
   FileBackupRef,
   FileDiffContent,
+  InputImageContent,
   ModifiedFilesSummaryContent,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
@@ -114,7 +115,51 @@ function parseInputImageContent(value: unknown): ChatInputImageItem[] {
   ];
 }
 
+/**
+ * 解析 tool result 的 `attachments`（`InputImageContent[]`）。
+ *
+ * 只接受显式 `type: 'input_image'` 的条目；缺失 / 非数组 / 全部无效时返回
+ * `undefined`，让调用方按「字段缺席」处理——这样没有附件的工具（read / bash
+ * 等）在历史加载后与既有渲染完全一致。
+ */
+export function parseInputImageAttachments(value: unknown): InputImageContent[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const attachments = value.flatMap((item): InputImageContent[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return [];
+    }
+
+    const content = item as Record<string, unknown>;
+    if (content['type'] !== 'input_image') {
+      return [];
+    }
+
+    return [
+      {
+        type: 'input_image',
+        ...(typeof content['artifactId'] === 'string' ? { artifactId: content['artifactId'] } : {}),
+        ...(content['detail'] === 'auto' ||
+        content['detail'] === 'high' ||
+        content['detail'] === 'low' ||
+        content['detail'] === 'original'
+          ? { detail: content['detail'] }
+          : {}),
+        ...(typeof content['fileId'] === 'string' ? { fileId: content['fileId'] } : {}),
+        ...(typeof content['fileName'] === 'string' ? { fileName: content['fileName'] } : {}),
+        ...(typeof content['imageUrl'] === 'string' ? { imageUrl: content['imageUrl'] } : {}),
+        ...(typeof content['mimeType'] === 'string' ? { mimeType: content['mimeType'] } : {}),
+      },
+    ];
+  });
+
+  return attachments.length > 0 ? attachments : undefined;
+}
+
 export function extractToolResults(rawContent: unknown[]): Array<{
+  attachments?: InputImageContent[];
   clientRequestId?: string;
   fileDiffs?: FileDiffContent[];
   toolCallId: string;
@@ -129,8 +174,10 @@ export function extractToolResults(rawContent: unknown[]): Array<{
     if (!item || typeof item !== 'object') return [];
     const content = item as Record<string, unknown>;
     if (content['type'] === 'tool_result' && typeof content['toolCallId'] === 'string') {
+      const attachments = parseInputImageAttachments(content['attachments']);
       return [
         {
+          ...(attachments ? { attachments } : {}),
           ...(typeof content['clientRequestId'] === 'string'
             ? { clientRequestId: content['clientRequestId'] }
             : {}),

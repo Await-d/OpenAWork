@@ -119,6 +119,15 @@ describe('OpenAIProvider', () => {
       expect(provider.supportsVision('gpt-3.5-turbo')).toBe(false);
     });
 
+    it('应该保守识别支持 GUI grounding 的模型', () => {
+      expect(provider.supportsGuiGrounding('computer-use-preview')).toBe(true);
+      expect(provider.supportsGuiGrounding('computer-use-preview-2025-03-11')).toBe(true);
+      // 具备视觉不等于具备 grounding：默认返回 false。
+      expect(provider.supportsGuiGrounding('gpt-4o')).toBe(false);
+      expect(provider.supportsGuiGrounding('gpt-5')).toBe(false);
+      expect(provider.supportsGuiGrounding('gpt-3.5-turbo')).toBe(false);
+    });
+
     it('应该检查模型是否在支持列表中', () => {
       expect(provider.supportsModel('gpt-4')).toBe(true);
       expect(provider.supportsModel('gpt-4o')).toBe(true);

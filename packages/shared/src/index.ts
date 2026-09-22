@@ -48,6 +48,8 @@ export {
   partsFromAssistantTrace,
   readAssistantTracePayloadFromParts,
 } from './assistant-trace.js';
+export { parseSubagentNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from './subagent-notice.js';
+export type { SubagentNotice } from './subagent-notice.js';
 export type {
   ImageGenerationBackground,
   ImageGenerationOutputFormat,
@@ -86,6 +88,8 @@ export type {
   MessageContent,
   MessageRole,
   ModifiedFilesSummaryContent,
+  SubagentNoticeMetadata,
+  SubagentNoticeState,
   TextContent,
   ToolCallContent,
   ToolCallObservabilityAnnotation,

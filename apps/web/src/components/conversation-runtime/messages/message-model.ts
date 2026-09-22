@@ -1,5 +1,6 @@
 import type {
   FileDiffContent,
+  InputImageContent,
   Message,
   ModifiedFilesSummaryContent,
   ToolCallObservabilityAnnotation,
@@ -31,6 +32,13 @@ export interface ChatToolPart {
   type: 'tool';
   toolCallId: string;
   toolName: string;
+  /**
+   * tool result 的图片附件通道（`StreamToolResultChunk.attachments`）。
+   *
+   * 目前只有 `computer_use` 的最终截图走这里（网关刻意不把 base64 塞进
+   * `output`）；其余工具保持 undefined，渲染行为与既有实现一致。
+   */
+  attachments?: InputImageContent[];
   kind?: 'agent' | 'mcp' | 'skill' | 'tool';
   input: Record<string, unknown>;
   clientRequestId?: string;

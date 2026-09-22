@@ -804,7 +804,7 @@ async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
 ///   其他桌面端会话或独立工具提供服务。
 ///
 /// 为什么必须保留 kill 自己 child 的逻辑：dev 模式下若不 kill，残留 node
-/// 进程会持有 `sidecars/agent-gateway` 下的文件，导致下次 `pnpm dev` 时
+/// 进程会持有 `sidecars/agent-gateway` 下的文件，导致下次 `bun run dev` 时
 /// bundle-sidecar 的 `rm -rf` 触发 EBUSY、Tauri build 复制资源 PermissionDenied。
 fn shutdown_gateway_child(app: &tauri::AppHandle) {
     let gateway_state = app.state::<GatewayProcess>().0.clone();

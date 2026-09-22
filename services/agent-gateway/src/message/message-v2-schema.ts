@@ -326,7 +326,21 @@ export interface SystemMessage extends MessageBase {
   time: { created: number };
 }
 
-export type MessageInfo = UserMessage | AssistantMessage | ToolMessage | SystemMessage;
+/**
+ * Gateway-injected message. Mirrors opencode's first-class synthetic message
+ * type. The producer is subagent completion delivery; `metadata.source ===
+ * 'subagent'` carries `{ childID, agent, state }` and `description` carries the
+ * task label, which together drive the client notice row.
+ */
+export interface SyntheticMessage extends MessageBase {
+  role: 'synthetic';
+  time: { created: number };
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type MessageInfo =
+  UserMessage | AssistantMessage | ToolMessage | SystemMessage | SyntheticMessage;
 
 // ─── WithParts (read model) ───
 

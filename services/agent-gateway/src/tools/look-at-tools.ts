@@ -558,7 +558,19 @@ function buildLookAtPrompt(goal: string, filename: string, mimeType: string): st
   ].join('\n');
 }
 
-async function resolveLookAtRoute(userId: string, systemPrompt: string | undefined) {
+/**
+ * 解析一次多模态调用的路由。
+ *
+ * `selectionOverride` 用于**显式指定 provider/model**，绕过默认的
+ * `multimodal-looker` 委派模型选择。GUI Agent（`computer_use`）需要它：
+ * 其模型由 `resolveGuiModelGate` 按 grounding 能力单独判定，若不走 override，
+ * 内层调用会落到与门控结果不一致的模型上（路径 B 的自定义 GUI endpoint 更会完全失效）。
+ */
+export async function resolveLookAtRoute(
+  userId: string,
+  systemPrompt: string | undefined,
+  selectionOverride?: { readonly providerId: string; readonly modelId: string },
+) {
   const managedLooker = listManagedAgentsForUser(userId).find(
     (agent) => agent.id === 'multimodal-looker',
   );
@@ -580,15 +592,25 @@ async function resolveLookAtRoute(userId: string, systemPrompt: string | undefin
     userId,
     managedEntries.length > 0 ? managedEntries : getReferenceAgentModelEntries('multimodal-looker'),
   );
+  // override 优先：GUI 门控已判定过模型能力，这里必须尊重其结果。
   const providerConfig = await getProviderConfigForSelection(
     providersRow?.value ? JSON.parse(providersRow.value) : undefined,
     selectionRow?.value ? JSON.parse(selectionRow.value) : undefined,
-    delegatedModel,
+    selectionOverride ?? delegatedModel,
   );
   if (providerConfig) {
+    // 输出上限的优先级链（由 model-router 合成，这里只提供**兜底默认值**）：
+    //   1. 模型级 requestOverrides.maxTokens（最高）
+    //   2. Provider 级 requestOverrides.maxTokens
+    //   3. 模型声明的 maxOutputTokens（收敛到 schema 上限）
+    //   4. 常量兜底 MODEL_REQUEST_DEFAULT_MAX_TOKENS（与本地 INNER_DEFAULT_MAX_TOKENS 同值）
+    // 即：用户配置的 maxTokens 本来就会生效，无需在此读取配置。
+    const modelConfig = providerConfig.provider.defaultModels.find(
+      (model) => model.id === providerConfig.modelId,
+    );
     return {
       route: resolveModelRouteFromProvider(providerConfig.provider, providerConfig.modelId, {
-        maxTokens: 2048,
+        maxTokens: resolveInnerMaxTokens(modelConfig?.maxOutputTokens),
         variant: delegatedModel?.variant ?? managedLooker?.variant,
         systemPrompt,
         temperature: 0.2,
@@ -601,7 +623,8 @@ async function resolveLookAtRoute(userId: string, systemPrompt: string | undefin
   return {
     route: resolveModelRoute({
       model: fallbackModel,
-      maxTokens: 2048,
+      // 无 Provider 配置可用 → 没有模型级 maxOutputTokens，只能走常量兜底。
+      maxTokens: INNER_DEFAULT_MAX_TOKENS,
       variant: delegatedModel?.variant ?? managedLooker?.variant,
       systemPrompt,
       temperature: 0.2,
@@ -611,10 +634,56 @@ async function resolveLookAtRoute(userId: string, systemPrompt: string | undefin
   };
 }
 
-async function requestLookAtText(input: {
+/**
+ * 内层调用输出上限的**本地兜底常量**。
+ *
+ * 为什么不用 `model-router` 导出的常量：`look-at-*` 系列测试会 `vi.mock`
+ * `../provider/model-router.js`，新增的具名导入会让 mock 缺字段而整体报错。
+ * 为避免无谓地改动多个测试文件，这里保留本地副本；**数值漂移由测试守护**——
+ * `look-at-inner-max-tokens.test.ts` 会断言本模块的收敛结果等于
+ * `MODEL_REQUEST_MAX_TOKENS_CAP`，若上游改上限则该测试立刻失败。
+ */
+const INNER_MAX_TOKENS_CAP = 16_384;
+const INNER_DEFAULT_MAX_TOKENS = 2_048;
+
+/**
+ * 内层调用（look_at / computer_use）的输出上限兜底值。
+ *
+ * 优先级链见 {@link resolveLookAtRoute}：**用户配置的 `requestOverrides.maxTokens`
+ * 始终优先**，本函数只决定「都没配时用什么」——优先采用模型声明的
+ * `maxOutputTokens`（按 schema 上限收敛），否则退回常量默认值。
+ *
+ * 收敛是必需的：模型声明的值（65536 / 131072 等）大于 `ModelRequest` 的
+ * `maxTokens` 上限，直接传入会被 Zod 拒绝。
+ */
+export function resolveInnerMaxTokens(modelMaxOutputTokens?: number): number {
+  if (
+    typeof modelMaxOutputTokens === 'number' &&
+    Number.isFinite(modelMaxOutputTokens) &&
+    modelMaxOutputTokens > 0
+  ) {
+    return Math.min(Math.floor(modelMaxOutputTokens), INNER_MAX_TOKENS_CAP);
+  }
+  return INNER_DEFAULT_MAX_TOKENS;
+}
+
+/**
+ * 通过 look_at 已解析出的路由发起一次多模态上游调用，返回模型原始文本。
+ *
+ * 该函数原本是 look_at 的内部实现；GUI Agent（`computer_use`）复用同一链路，
+ * 因此对外导出（T-13）。相对 look_at 的单图调用，这里新增可选的
+ * {@link RequestLookAtTextInput.imageDataUrls}，用于一次上送最近多张截图
+ * （GUI 主循环的滑动窗口）。`imageDataUrl` 单图入参保持向后兼容。
+ */
+export async function requestLookAtText(input: {
   apiBaseUrl: string;
   apiKey: string;
   imageDataUrl?: string;
+  /**
+   * 多图上行（GUI 滑动窗口）。提供时优先于 {@link imageDataUrl}，
+   * 每个元素都会作为一条 `media` 内容上送。
+   */
+  imageDataUrls?: readonly { readonly data: string; readonly mediaType: string }[];
   mimeType: string;
   model: string;
   providerType?: string;
@@ -630,20 +699,34 @@ async function requestLookAtText(input: {
   requestOverrides: RequestOverrides;
   systemPrompt?: string;
   textContent?: string;
+  /**
+   * 上游 token 用量回调（T-15）。
+   *
+   * `requestLookAtText` 原本只回传文本、丢弃 `RunUpstreamGenerateResult` 里的 usage，
+   * 导致多模态链路（`look_at` / `computer_use`）的消耗不计入用户用量。
+   * 这里以可选回调的形式把 usage 交回调用方，**不改变既有调用方的行为**。
+   */
+  onUsage?: (usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  }) => void;
 }): Promise<string> {
+  const imageParts: Message.ContentInput =
+    input.imageDataUrls !== undefined && input.imageDataUrls.length > 0
+      ? input.imageDataUrls.map((image) => ({
+          type: 'media' as const,
+          data: image.data,
+          mediaType: image.mediaType,
+        }))
+      : input.imageDataUrl
+        ? [{ type: 'media' as const, data: input.imageDataUrl, mediaType: input.mimeType }]
+        : [];
+
   const userContent: Message.ContentInput = [
     { type: 'text', text: input.prompt },
-    ...(input.textContent
-      ? ([{ type: 'text', text: input.textContent }] as const)
-      : input.imageDataUrl
-        ? ([
-            {
-              type: 'media',
-              data: input.imageDataUrl,
-              mediaType: input.mimeType,
-            },
-          ] as const)
-        : []),
+    ...(input.textContent ? ([{ type: 'text', text: input.textContent }] as const) : imageParts),
   ];
 
   const controller = new AbortController();
@@ -688,6 +771,13 @@ async function requestLookAtText(input: {
   if (!text) {
     throw new Error('No multimodal response text returned');
   }
+  // T-15：把上游 usage 交回调用方（GUI 内循环跨多步聚合后入账）。
+  input.onUsage?.({
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cacheReadTokens: result.cacheReadTokens,
+    cacheWriteTokens: result.cacheWriteTokens,
+  });
   return text;
 }
 

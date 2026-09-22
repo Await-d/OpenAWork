@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 import { Route } from '../route/client.js';
 import { Protocol } from '../route/protocol.js';
+import { Usage, type FinishReason } from '../schema/index.js';
 import { Lifecycle } from './utils/lifecycle.js';
 import { ToolStream } from './utils/tool-stream.js';
 export declare const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
@@ -127,6 +128,16 @@ declare const AnthropicMessagesBody: Schema.Struct<{
                   readonly type: Schema.tag<'thinking'>;
                   readonly thinking: Schema.String;
                   readonly signature: Schema.optional<Schema.String>;
+                  readonly cache_control: Schema.optional<
+                    Schema.Struct<{
+                      readonly type: Schema.tag<'ephemeral'>;
+                      readonly ttl: Schema.optional<Schema.Literals<readonly ['5m', '1h']>>;
+                    }>
+                  >;
+                }>,
+                Schema.Struct<{
+                  readonly type: Schema.tag<'redacted_thinking'>;
+                  readonly data: Schema.String;
                   readonly cache_control: Schema.optional<
                     Schema.Struct<{
                       readonly type: Schema.tag<'ephemeral'>;
@@ -280,6 +291,20 @@ declare const AnthropicMessagesBody: Schema.Struct<{
   >;
 }>;
 export type AnthropicMessagesBody = Schema.Schema.Type<typeof AnthropicMessagesBody>;
+interface ParserState {
+  readonly tools: ToolStream.State<number>;
+  readonly usage?: Usage;
+  readonly lifecycle: Lifecycle.State;
+  readonly pendingFinish:
+    | {
+        readonly reason: FinishReason;
+        readonly raw?: string;
+        readonly stopSequence?: string;
+      }
+    | undefined;
+  readonly reasoningSignatures: Readonly<Record<number, string>>;
+  readonly finished: boolean;
+}
 /**
  * The Anthropic Messages protocol — request body construction, body schema,
  * and the streaming-event state machine. Used by native Anthropic Cloud and
@@ -387,6 +412,16 @@ export declare const protocol: Protocol<
                 readonly id: string;
                 readonly name: string;
                 readonly input: unknown;
+                readonly cache_control?:
+                  | {
+                      readonly type: 'ephemeral';
+                      readonly ttl?: '1h' | '5m' | undefined;
+                    }
+                  | undefined;
+              }
+            | {
+                readonly type: 'redacted_thinking';
+                readonly data: string;
                 readonly cache_control?:
                   | {
                       readonly type: 'ephemeral';
@@ -546,6 +581,7 @@ export declare const protocol: Protocol<
           readonly input?: unknown;
           readonly tool_use_id?: string | undefined;
           readonly content?: unknown;
+          readonly data?: string | undefined;
         }
       | undefined;
     readonly delta?:
@@ -574,10 +610,7 @@ export declare const protocol: Protocol<
         }
       | undefined;
   },
-  {
-    tools: Partial<Record<number, ToolStream.PendingTool>>;
-    lifecycle: Lifecycle.State;
-  }
+  ParserState
 >;
 export declare const route: Route<
   {
@@ -681,6 +714,16 @@ export declare const route: Route<
                 readonly id: string;
                 readonly name: string;
                 readonly input: unknown;
+                readonly cache_control?:
+                  | {
+                      readonly type: 'ephemeral';
+                      readonly ttl?: '1h' | '5m' | undefined;
+                    }
+                  | undefined;
+              }
+            | {
+                readonly type: 'redacted_thinking';
+                readonly data: string;
                 readonly cache_control?:
                   | {
                       readonly type: 'ephemeral';

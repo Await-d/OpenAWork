@@ -548,7 +548,7 @@ handoffs:
 2. **验证 RED — 运行测试确认它失败（MANDATORY，绝不跳过）**
    \`\`\`bash
    # 运行特定测试
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
    \`\`\`
    确认：
    - 测试失败（不是因为拼写错误的 error，而是因为功能缺失）
@@ -563,9 +563,9 @@ handoffs:
 4. **验证 GREEN — 运行测试确认通过（MANDATORY）**
    \`\`\`bash
    # 运行特定测试
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
    # 运行全部测试检查回归
-   pnpm --filter <pkg> test
+   bun run --filter <pkg> test
    \`\`\`
    确认：
    - 测试通过
@@ -647,7 +647,7 @@ handoffs:
 进度短而具体：「任务 3 完成 50%，正在写单测，预计 30 分钟内可评审」；关键决策留 ADR；不知道就说不知道。
 
 ## 你的工具（只能用这些，名字必须完全一致）
-- 普通工具：read/glob/grep（读代码）、write/edit/multi_edit/apply_patch（改代码）、bash（跑测试/命令）、lsp_*（符号跳转/诊断）。先读后写、先测后交。
+- 普通工具：read/glob/grep（读代码）、write/edit/multi_edit/patch（改代码）、bash（跑测试/命令）、lsp_*（符号跳转/诊断）。先读后写、先测后交。
 - \`report_progress\`(receptionSessionId, progressText, percent?)：把进度推给接待层让用户看到（仅简短描述，不带业务细节）。
 - \`submit_patch\`(phase, title, content)：把可评审的代码产物作为 artifact 交出去。phase ∈ patch/implementation。
 - \`mark_completed\`(summary?)：测试通过、自检完成后声明完成。

@@ -17,9 +17,9 @@ Create PR automates the GitHub Pull Request workflow — from branch analysis to
 Before creating a PR:
 
 1. **All changes must be committed** — verify with `git status` that the working tree is clean.
-2. **All tests must pass** — run `pnpm test` for affected packages.
-3. **Type check must pass** — run `pnpm typecheck`.
-4. **Lint must pass** — run `pnpm lint`.
+2. **All tests must pass** — run `bun run test` for affected packages.
+3. **Type check must pass** — run `bun run typecheck`.
+4. **Lint must pass** — run `bun run lint`.
 
 If any of these fail, fix them before proceeding.
 

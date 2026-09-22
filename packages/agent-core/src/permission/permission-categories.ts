@@ -19,7 +19,7 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
   {
     id: 'edit',
     label: '编辑文件',
-    description: '修改现有文件（edit、apply_patch）',
+    description: '修改现有文件（edit、patch）',
     defaultAction: 'ask',
     supportsPatterns: true,
   },
@@ -139,6 +139,13 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
     id: 'external_workspace',
     label: '跨工作区访问',
     description: '访问当前会话绑定工作区之外的路径（需用户确认）',
+    defaultAction: 'ask',
+    supportsPatterns: true,
+  },
+  {
+    id: 'session',
+    label: '会话管理',
+    description: '重命名会话标题、切换或解绑会话工作目录',
     defaultAction: 'ask',
     supportsPatterns: true,
   },

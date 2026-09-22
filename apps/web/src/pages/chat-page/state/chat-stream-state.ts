@@ -1,5 +1,6 @@
 import type {
   BatchSubToolProgress,
+  InputImageContent,
   RunEvent,
   StreamChunk,
   TaskTimeoutSource,
@@ -41,6 +42,11 @@ export interface ChatToolCallEntry {
   requestId?: string;
   output?: unknown;
   isError?: boolean;
+  /**
+   * tool result 的图片附件（`StreamToolResultChunk.attachments`）。
+   * 目前只有 `computer_use` 的最终截图走这条通道；其余工具保持 undefined。
+   */
+  attachments?: InputImageContent[];
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   status: 'running' | 'paused' | 'completed' | 'failed';
@@ -85,6 +91,8 @@ export interface ToolCallCardModel {
   input: Record<string, unknown>;
   output?: unknown;
   isError: boolean;
+  /** tool result 的图片附件（`computer_use` 最终截图）。 */
+  attachments?: InputImageContent[];
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   status: ChatToolCallEntry['status'];
@@ -189,6 +197,9 @@ export function getToolCallCards(state: ChatRightPanelState): ToolCallCardModel[
     ...(toolCall.requestId ? { requestId: toolCall.requestId } : {}),
     output: toolCall.output,
     isError: toolCall.isError === true || toolCall.status === 'failed',
+    ...(toolCall.attachments && toolCall.attachments.length > 0
+      ? { attachments: toolCall.attachments }
+      : {}),
     ...(toolCall.pendingPermissionRequestId
       ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
       : {}),
@@ -650,6 +661,8 @@ function applyToolProgressEvent(
     ...(typeof event.clientRequestId === 'string' ? { requestId: event.clientRequestId } : {}),
     output: existing?.output,
     isError: existing?.isError,
+    // tool_progress 可能晚于 tool_result 到达：必须保留已写入的截图附件。
+    ...(existing?.attachments ? { attachments: existing.attachments } : {}),
     status: 'running',
     batchProgress: {
       subTools: event.subTools,
@@ -684,6 +697,13 @@ function applyToolResultEvent(
     ...(typeof event.clientRequestId === 'string' ? { requestId: event.clientRequestId } : {}),
     output: event.output,
     isError: isPendingPermission ? false : event.isError,
+    // 附件只在本次 result 携带时覆盖；否则沿用已有值，避免同一 toolCallId
+    // 的后续事件（tool_progress / 重复 result）把截图抹掉。
+    ...(event.attachments && event.attachments.length > 0
+      ? { attachments: event.attachments }
+      : existing?.attachments
+        ? { attachments: existing.attachments }
+        : {}),
     pendingPermissionRequestId: event.pendingPermissionRequestId,
     ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     status,

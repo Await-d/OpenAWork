@@ -17,11 +17,11 @@ Covered capabilities:
 Run all of the following before gateway rollout:
 
 ```bash
-pnpm --filter @openAwork/agent-gateway run test:file-changes
-pnpm --filter @openAwork/agent-gateway run test:restore
-pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
-pnpm --filter @openAwork/agent-gateway run test:durable
-pnpm --filter @openAwork/agent-gateway build
+bun run --filter @openAwork/agent-gateway test:file-changes
+bun run --filter @openAwork/agent-gateway test:restore
+bun run --filter @openAwork/agent-gateway test:delete-cleanup
+bun run --filter @openAwork/agent-gateway test:durable
+bun run --filter @openAwork/agent-gateway build
 ```
 
 ## Runtime Flags
@@ -36,7 +36,7 @@ pnpm --filter @openAwork/agent-gateway build
 
 Before enabling gateway rollout:
 
-- [ ] `session_file_backups` rows are being created for `edit/write/file_write/write_file/workspace_write_file/apply_patch`
+- [ ] `session_file_backups` rows are being created for `edit / multi_edit / write / patch`
 - [ ] `backup_before_ref_json` is present in `session_file_diffs` for eligible write paths
 - [ ] `session_snapshots.summary.backupBeforeRefs` is non-empty for restore/apply and backup-capable writes
 - [ ] `restore/preview` returns `hashValidation` and `workspaceReview`
@@ -64,9 +64,9 @@ If restore/apply or backup capture regresses:
 3. Re-run:
 
 ```bash
-pnpm --filter @openAwork/agent-gateway run test:restore
-pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
-pnpm --filter @openAwork/agent-gateway run test:durable
+bun run --filter @openAwork/agent-gateway test:restore
+bun run --filter @openAwork/agent-gateway test:delete-cleanup
+bun run --filter @openAwork/agent-gateway test:durable
 ```
 
 4. Roll back gateway to previous version if failures reproduce.

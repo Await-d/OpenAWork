@@ -130,7 +130,7 @@ npx playwright install chromium
 - 否则落到 `<effective_data_root>/browsers`（跟随桌面端设置里的数据根目录）。
 
 `desktop_automation` 工具与实时预览共用同一个 sidecar 进程，因此注入一次、两处同时生效。
-以 `pnpm --filter @openAwork/agent-gateway dev` 独立跑网关时不会注入，Playwright 按自身
+以 `bun run --filter @openAwork/agent-gateway dev` 独立跑网关时不会注入，Playwright 按自身
 平台默认目录（如 `~/.cache/ms-playwright`）解析，也可以自己 export 该变量覆盖。
 
 ### 3.5 验证

@@ -16,7 +16,7 @@
  *
  * Run:
  *   cd services/agent-gateway && bun src/verification/verify-terminal-pty-interactive.ts
- *   cd services/agent-gateway && pnpm exec tsx src/verification/verify-terminal-pty-interactive.ts
+ *   cd services/agent-gateway && bunx tsx src/verification/verify-terminal-pty-interactive.ts
  */
 
 import { spawnSync } from 'node:child_process';

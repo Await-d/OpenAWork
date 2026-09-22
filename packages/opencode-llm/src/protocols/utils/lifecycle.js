@@ -5,14 +5,16 @@ export const stepStart = (state, events) => {
   events.push(LLMEvent.stepStart({ index: 0 }));
   return { ...state, stepStarted: true };
 };
-export const textDelta = (state, events, id, text) => {
+export const textStart = (state, events, id, providerMetadata) => {
+  if (state.text.has(id)) return state;
   const stepped = stepStart(state, events);
-  if (stepped.text.has(id)) {
-    events.push(LLMEvent.textDelta({ id, text }));
-    return stepped;
-  }
-  events.push(LLMEvent.textStart({ id }), LLMEvent.textDelta({ id, text }));
+  events.push(LLMEvent.textStart({ id, providerMetadata }));
   return { ...stepped, text: new Set([...stepped.text, id]) };
+};
+export const textDelta = (state, events, id, text, providerMetadata) => {
+  const started = textStart(state, events, id);
+  events.push(LLMEvent.textDelta({ id, text, providerMetadata }));
+  return started;
 };
 export const reasoningStart = (state, events, id, providerMetadata) => {
   if (state.reasoning.has(id)) return state;
@@ -22,24 +24,38 @@ export const reasoningStart = (state, events, id, providerMetadata) => {
 };
 export const reasoningDelta = (state, events, id, text, providerMetadata) => {
   const started = reasoningStart(state, events, id, providerMetadata);
-  events.push(LLMEvent.reasoningDelta({ id, text }));
+  events.push(LLMEvent.reasoningDelta({ id, text, providerMetadata }));
   return started;
 };
-export const reasoningEnd = (state, events, id, providerMetadata) => {
+export const reasoningEnd = (
+  state,
+  events,
+  id,
+  providerMetadata,
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text,
+) => {
   if (!state.reasoning.has(id)) return state;
   const stepped = stepStart(state, events);
-  events.push(LLMEvent.reasoningEnd({ id, providerMetadata }));
+  events.push(LLMEvent.reasoningEnd({ id, text, providerMetadata }));
   const reasoning = new Set(stepped.reasoning);
   reasoning.delete(id);
   return { ...stepped, reasoning };
 };
-export const textEnd = (state, events, id, providerMetadata) => {
+export const textEnd = (
+  state,
+  events,
+  id,
+  providerMetadata,
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text,
+) => {
   if (!state.text.has(id)) return state;
   const stepped = stepStart(state, events);
-  events.push(LLMEvent.textEnd({ id, providerMetadata }));
-  const text = new Set(stepped.text);
-  text.delete(id);
-  return { ...stepped, text };
+  events.push(LLMEvent.textEnd({ id, text, providerMetadata }));
+  const open = new Set(stepped.text);
+  open.delete(id);
+  return { ...stepped, text: open };
 };
 const closeOpenBlocks = (state, events) => {
   for (const id of state.reasoning) events.push(LLMEvent.reasoningEnd({ id }));
@@ -52,6 +68,7 @@ export const finish = (state, events, input) => {
     LLMEvent.stepFinish({
       index: 0,
       reason: input.reason,
+      reasonRaw: input.reasonRaw,
       usage: input.usage,
       providerMetadata: input.providerMetadata,
     }),

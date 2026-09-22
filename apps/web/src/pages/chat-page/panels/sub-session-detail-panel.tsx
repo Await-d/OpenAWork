@@ -150,12 +150,13 @@ function buildGroupedMessages(
   const groups: ChatRenderGroup[] = [];
   for (const entry of entries) {
     const lastGroup = groups[groups.length - 1];
-    if (lastGroup && lastGroup.role === entry.message.role) {
+    if (lastGroup?.kind === 'messages' && lastGroup.role === entry.message.role) {
       lastGroup.entries.push(entry);
       continue;
     }
 
     groups.push({
+      kind: 'messages',
       entries: [entry],
       key: entry.message.id,
       role: entry.message.role,

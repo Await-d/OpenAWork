@@ -25,11 +25,28 @@ export const SUPPORTED_MODELS = Object.freeze(
 
 export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
 
+/**
+ * `ModelRequest.maxTokens` 的 schema 上限。
+ *
+ * 模型配置里的 `maxOutputTokens`（如 65536 / 131072）通常**大于**该上限，
+ * 因此把它用作请求值时必须先收敛，否则 Zod 校验会直接失败。
+ */
+export const MODEL_REQUEST_MAX_TOKENS_CAP = 16384;
+
+/** 未指定时的默认输出上限（同时是 schema 的 `.default()` 值）。 */
+export const MODEL_REQUEST_DEFAULT_MAX_TOKENS = 2048;
+
 export const modelRequestSchema = z.object({
   model: z.string().min(1).max(200).optional().default(DEFAULT_MODEL_SENTINEL),
   variant: z.string().min(1).max(80).optional(),
   systemPrompt: z.string().max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).optional(),
-  maxTokens: z.number().int().min(1).max(16384).optional().default(2048),
+  maxTokens: z
+    .number()
+    .int()
+    .min(1)
+    .max(MODEL_REQUEST_MAX_TOKENS_CAP)
+    .optional()
+    .default(MODEL_REQUEST_DEFAULT_MAX_TOKENS),
   temperature: z.number().min(0).max(2).optional().default(1),
 });
 

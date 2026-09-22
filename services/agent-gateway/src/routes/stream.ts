@@ -120,12 +120,9 @@ import {
   readPendingCancelReason,
   reserveInFlightStreamRequest,
 } from './stream-cancellation.js';
-import {
-  isTaskParentAutoResumeClientRequestId,
-  MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES,
-  noteManualSessionInteraction,
-} from '../task/task-parent-auto-resume.js';
 import { listSessionTodos } from '../tools/todo-tools.js';
+import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
+import { noteManualSessionInteraction } from '../task/task-wake-budget.js';
 import {
   detectRecoveryErrorType,
   recoverToolResultMissing,
@@ -165,7 +162,7 @@ import {
   shouldInjectNotepadDirective,
   NOTEPAD_DIRECTIVE,
 } from '../session/sisyphus-junior-notepad.js';
-import { runModelRound } from './stream-model-round.js';
+import { runModelRound, MAX_CONTINUATION_ROUNDS } from './stream-model-round.js';
 
 export const STREAM_ERROR_MESSAGES = {
   inputImageMissingSource: 'input_image 必须提供 artifactId、fileId 或 imageUrl 其中之一。',
@@ -831,7 +828,7 @@ export function recordTaskToolCallOrThrow(
 }
 
 /**
- * Determine whether the given model string should use `apply_patch` (the
+ * Determine whether the given model string should use `patch` (the
  * OpenAI v1 Responses-API patch tool) instead of the generic
  * `edit / multi_edit / write` triplet for code mutations.
  *
@@ -846,15 +843,15 @@ export function recordTaskToolCallOrThrow(
  * ```
  *
  * Rationale: GPT-5 generation models are trained to emit unified-diff
- * patches via `apply_patch` and degrade noticeably when handed
+ * patches via `patch` and degrade noticeably when handed
  * `edit/write`. GPT-4 / open-source forks (`*oss*`) still expect
  * `edit/write`. Anthropic and other providers always use `edit/write`
  * here because they have their own tool-call shape and don't ship
- * `apply_patch` training data.
+ * `patch` training data.
  *
  * Returns:
- * - `true`  → emit `apply_patch`, hide `edit/multi_edit/write`
- * - `false` → emit `edit/multi_edit/write`, hide `apply_patch`
+ * - `true`  → emit `patch`, hide `edit/multi_edit/write`
+ * - `false` → emit `edit/multi_edit/write`, hide `patch`
  * - `null`  → "I don't know" (model id missing) — caller should fall
  *             back to the legacy expose-everything surface so that
  *             dev fixtures / tests / callers that haven't plumbed the
@@ -877,7 +874,7 @@ export function getEnabledTools(
   } = {},
 ) {
   // When the operator opts out we fall back to the pre-PR-A behaviour:
-  // every model sees both `apply_patch` and `edit/write`, leaving tool
+  // every model sees both `patch` and `edit/write`, leaving tool
   // selection up to the model. This is the escape hatch for sites that
   // depend on a homogeneous tool surface across providers — set
   // `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1` to enable.
@@ -892,7 +889,7 @@ export function getEnabledTools(
     // legacy expose-everything; true/false drive the patch-vs-edit
     // mutual exclusion.
     if (usePatch === null) return true;
-    if (name === 'apply_patch') return usePatch;
+    if (name === 'patch') return usePatch;
     if (name === 'edit' || name === 'multi_edit' || name === 'write') {
       return !usePatch;
     }
@@ -992,7 +989,7 @@ const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
   'write',
   'edit',
   'multi_edit',
-  'apply_patch',
+  'patch',
   'submit_patch',
   'task',
   'task_create',
@@ -1172,7 +1169,7 @@ function clearStaleReplayRequestArtifacts(input: {
     sessionId: input.sessionId,
     userId: input.userId,
     clientRequestId: input.clientRequestId,
-    roles: ['assistant', 'tool'],
+    roles: ['assistant', 'tool', 'synthetic'],
   });
   deleteRequestFileDiffs({
     clientRequestId: input.clientRequestId,
@@ -1625,8 +1622,8 @@ export async function executeToolCalls(input: {
 
     const normalizedInputText = toolCall.inputText.trim();
     // Canonicalize once so every pre-dispatch guard/injection/reminder keys off
-    // the resolved tool identity (`functions.write` / `Write` / `workspace_write_file`
-    // all resolve to `write`) instead of the raw model-emitted name.
+    // the resolved tool identity (`functions.write` / `Write` / `TaskList`
+    // all resolve to their canonical name) instead of the raw model-emitted name.
     const canonicalToolName = normalizeToolNameForEnablement(toolCall.toolName);
 
     // Batch permission gate (route B): once a sibling is awaiting approval, only
@@ -2032,6 +2029,16 @@ export async function handleStreamRequest(input: {
   sessionId: string;
   teamResumeRootSessionId?: string;
   /**
+   * 从既有历史继续执行一轮（唤醒），而不是开启一个新的用户轮。
+   *
+   * 用途：网关注入的合成通知（如子代理完成）已落库、且对模型表现为 `user` 轮，
+   * 此时只需触发执行——**不持久化用户消息、不派发用户消息插件事件、不计入「用户手动交互」**。
+   * 未设置时（`undefined`/`false`）所有既有行为逐字节保持不变。
+   *
+   * 对齐上游 opencode 的 `sessions.synthetic` + `execution.wake` 两段语义。
+   */
+  continueFromHistory?: boolean;
+  /**
    * Optional external abort signal. When the caller's transport (e.g. an SSE
    * connection) drops, aborting this signal will propagate to the internal
    * abortController and cancel the in-flight model run. This prevents the
@@ -2110,7 +2117,9 @@ export async function handleStreamRequest(input: {
   const runId = randomUUID();
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(input.method, input.path, input.headers, input.ip);
-  if (!isTaskParentAutoResumeClientRequestId(requestData.clientRequestId)) {
+  // 用户**真实**交互重置「连续自动唤醒」计数；网关内部请求（唤醒、回流、handoff 等）不重置，
+  // 否则唤醒自身会把计数清零，上限永远触发不了。判定与标题守卫共用同一内部键注册表。
+  if (!isGatewayInternalRequestKey(requestData.clientRequestId)) {
     noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
   }
   const userVisibleMessage = input.teamResumeRootSessionId
@@ -2181,20 +2190,23 @@ export async function handleStreamRequest(input: {
   // plugins rewrite `parts` to inject system context; this MVP keeps
   // the contract narrow because the surrounding stream pipeline
   // doesn't re-read `requestData.message` after this point.)
-  try {
-    await dispatchChatMessage(
-      {
-        sessionID: input.sessionId,
-        modelId: route.model,
-        messageID: requestData.clientRequestId,
-      },
-      {
-        message: { role: 'user', content: userVisibleMessage },
-        parts: [],
-      },
-    );
-  } catch (error) {
-    return failReservation(error);
+  // 从既有历史继续（唤醒）时不存在「用户刚发出的消息」，不派发用户消息插件事件。
+  if (!input.continueFromHistory) {
+    try {
+      await dispatchChatMessage(
+        {
+          sessionID: input.sessionId,
+          modelId: route.model,
+          messageID: requestData.clientRequestId,
+        },
+        {
+          message: { role: 'user', content: userVisibleMessage },
+          parts: [],
+        },
+      );
+    } catch (error) {
+      return failReservation(error);
+    }
   }
 
   let workspaceCtx: Awaited<ReturnType<typeof buildWorkspaceContext>>;
@@ -2466,30 +2478,33 @@ export async function handleStreamRequest(input: {
           ? detectThinkingLanguageHintFromText(requestData.message)
           : null;
 
-      persistStreamUserMessage({
-        content: buildStreamUserContent({
-          inputParts: input.teamResumeRootSessionId ? undefined : requestData.inputParts,
+      // 唤醒请求不落用户轮：输入（合成通知）已在历史中，且对模型表现为 user 轮。
+      if (!input.continueFromHistory) {
+        persistStreamUserMessage({
+          content: buildStreamUserContent({
+            inputParts: input.teamResumeRootSessionId ? undefined : requestData.inputParts,
+            message: userVisibleMessage,
+          }),
+          clientRequestId: requestData.clientRequestId,
+          displayMessage: input.teamResumeRootSessionId ? undefined : requestData.displayMessage,
           message: userVisibleMessage,
-        }),
-        clientRequestId: requestData.clientRequestId,
-        displayMessage: input.teamResumeRootSessionId ? undefined : requestData.displayMessage,
-        message: userVisibleMessage,
-        sessionId: input.sessionId,
-        userId: input.user.sub,
-        route,
-        titleRoute,
-        // Persist the per-request synthetic block as part of the user
-        // message so subsequent turns see byte-identical bytes for it
-        // (Anthropic / OpenAI prompt-cache prefix stability — was the
-        // root cause of the websearch low-cache-hit bug, mirrors
-        // opencode's `insertReminders` → `sessions.updatePart()` flow).
-        syntheticContext: {
-          injectedPrompt,
-          capabilityContext,
-          companionPrompt,
-          thinkingLanguageHint,
-        },
-      });
+          sessionId: input.sessionId,
+          userId: input.user.sub,
+          route,
+          titleRoute,
+          // Persist the per-request synthetic block as part of the user
+          // message so subsequent turns see byte-identical bytes for it
+          // (Anthropic / OpenAI prompt-cache prefix stability — was the
+          // root cause of the websearch low-cache-hit bug, mirrors
+          // opencode's `insertReminders` → `sessions.updatePart()` flow).
+          syntheticContext: {
+            injectedPrompt,
+            capabilityContext,
+            companionPrompt,
+            thinkingLanguageHint,
+          },
+        });
+      }
 
       // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
       let dynamicToolDefs: DynamicToolEntry[] = [];
@@ -2558,8 +2573,8 @@ export async function handleStreamRequest(input: {
           effectiveSkills,
           // Per-turn model-aware tool filter (mirrors opencode
           // `tool/registry.ts:303-315`): GPT-5 generation models get
-          // `apply_patch` and lose `edit/multi_edit/write`; other models
-          // keep `edit/multi_edit/write` and lose `apply_patch`. Falls
+          // `patch` and lose `edit/multi_edit/write`; other models
+          // keep `edit/multi_edit/write` and lose `patch`. Falls
           // back to the legacy "expose everything" behaviour when
           // `route.model` is missing or `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1`.
           modelId: route.model,
@@ -2950,11 +2965,7 @@ export async function handleStreamRequest(input: {
           }
         }
 
-        if (
-          result.overflow === true &&
-          overflowTriggered &&
-          round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
-        ) {
+        if (result.overflow === true && overflowTriggered && round < MAX_CONTINUATION_ROUNDS) {
           continue;
         }
 
@@ -2966,7 +2977,7 @@ export async function handleStreamRequest(input: {
             const incompleteTodos = listSessionTodos(input.sessionId).filter(
               (t) => t.status !== 'completed' && t.status !== 'cancelled',
             );
-            if (incompleteTodos.length > 0 && round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES) {
+            if (incompleteTodos.length > 0 && round < MAX_CONTINUATION_ROUNDS) {
               const total = incompleteTodos.length;
               syntheticContinuationPrompt = `[SYSTEM DIRECTIVE: OPENAWORK - TODO CONTINUATION]\n\nIncomplete tasks remain in your todo list. Continue working on the next pending task.\n\n- Proceed without asking for permission\n- Mark each task complete when finished\n- Do not stop until all tasks are done\n\n[Status: ${total - incompleteTodos.filter((t) => t.status === 'pending').length}/${total} completed, ${incompleteTodos.filter((t) => t.status === 'pending').length} remaining]`;
               continue;
@@ -3024,7 +3035,7 @@ export async function handleStreamRequest(input: {
           if (
             result.stopReason === 'error' &&
             !result.overflow &&
-            round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
+            round < MAX_CONTINUATION_ROUNDS
           ) {
             const errorType = detectRecoveryErrorType(result.upstreamError);
             if (errorType) {

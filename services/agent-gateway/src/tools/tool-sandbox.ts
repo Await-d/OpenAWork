@@ -81,10 +81,17 @@ import {
   runDesktopControlTool,
 } from './desktop-control.js';
 import {
+  computerUseToolDefinition,
+  runComputerUseToolWithScreenshot,
+} from './gui/computer-use-tool.js';
+import {
   createDesktopScreenshotArtifactToolResult,
   readDesktopControlScreenshotPayload,
 } from './desktop-screenshot-artifact.js';
-import { isDesktopControlPluginEnabledForUser } from './plugin-tool-settings.js';
+import {
+  isDesktopAutomationPluginEnabledForUser,
+  isDesktopControlPluginEnabledForUser,
+} from './plugin-tool-settings.js';
 import type { DynamicToolEntry } from './dynamic-tool-loader.js';
 import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
 import { createEditTool } from './edit-tools.js';
@@ -183,6 +190,13 @@ import {
   sessionReadToolDefinition,
   sessionSearchToolDefinition,
 } from '../session/session-manager-tools.js';
+import {
+  runSessionMoveTool,
+  runSessionRenameTool,
+  sessionMoveToolDefinition,
+  sessionRenameToolDefinition,
+} from './session-management-tools.js';
+import { modelSearchToolDefinition, runModelSearchTool } from './model-search-tools.js';
 import { createPermissionAskedEvent } from '../session/session-permission-events.js';
 import { createQuestionAskedEvent } from '../session/session-question-events.js';
 import {
@@ -225,15 +239,20 @@ import {
   resolveInheritedParentModel,
   resolveSubagentModelPolicyForUser,
 } from '../task/subagent-model-policy.js';
+import { settle as settleTaskJob, start as startTaskJob } from '../task/task-job.js';
 import {
-  clearTaskParentAutoResumeContext,
-  consumeTaskParentAutoResumeContext,
-  scheduleTaskParentAutoResume,
-  upsertTaskParentAutoResumeContext,
-} from '../task/task-parent-auto-resume.js';
+  clearTaskParentContext,
+  upsertTaskParentContext,
+} from '../task/task-parent-context-store.js';
+import {
+  buildTaskJobNoticeText,
+  buildTaskJobNotificationId,
+  deliverTaskCompletion,
+} from '../task/task-job-delivery.js';
+import { checkSubagentDepthAllowed } from '../task/subagent-depth.js';
 import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-auto-decision.js';
 import { extractLatestChildSessionSummary } from '../task/task-result-extraction.js';
-import { taskToolDefinition } from '../task/task-tools.js';
+import { taskToolDefinition, isTaskToolName } from '../task/task-tools.js';
 import {
   formatSubTodoReadValidationError,
   formatSubTodoWriteValidationError,
@@ -264,6 +283,7 @@ import {
 } from '../provider/upstream-retry-policy.js';
 import { webfetchTool } from './web-tools.js';
 import { invalidateWorkspaceFileIndexForToolCall } from '../workspace/workspace-file-index-invalidation.js';
+import { injectDirectoryAgentsIntoReadResult } from '../session/directory-agents-injection.js';
 import {
   assertSessionWorkspacePath,
   assertSessionWorkingDirectory,
@@ -448,7 +468,7 @@ export function isPermissionSafeSiblingTool(normalizedToolName: string): boolean
 }
 
 const SESSION_WORKSPACE_REQUIRED_TOOLS = new Set([
-  'apply_patch',
+  'patch',
   'ast_grep_replace',
   'bash',
   'edit',
@@ -482,7 +502,7 @@ const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
 ];
 
 export const TOOL_WHITELIST = new Set<string>([
-  'apply_patch',
+  'patch',
   'bash',
   runBashInBackgroundToolDefinition.name,
   bashOutputToolDefinition.name,
@@ -497,6 +517,9 @@ export const TOOL_WHITELIST = new Set<string>([
   sessionReadToolDefinition.name,
   sessionSearchToolDefinition.name,
   sessionInfoToolDefinition.name,
+  sessionRenameToolDefinition.name,
+  sessionMoveToolDefinition.name,
+  modelSearchToolDefinition.name,
   astGrepSearchToolDefinition.name,
   astGrepReplaceToolDefinition.name,
   interactiveBashToolDefinition.name,
@@ -507,6 +530,9 @@ export const TOOL_WHITELIST = new Set<string>([
   lookAtToolDefinition.name,
   'read_tool_output',
   'edit',
+  // multi_edit 与 edit/write 同属文件编辑家族，之前漏登记（靠 register() 运行时补进
+  // 实例白名单才没暴露问题）；静态表补齐，visible/whitelist/category 三者对齐。
+  'multi_edit',
   'batch',
   'skill',
   'task',
@@ -532,6 +558,7 @@ export const TOOL_WHITELIST = new Set<string>([
   'mcp_call',
   desktopAutomationToolDefinition.name,
   desktopControlToolDefinition.name,
+  computerUseToolDefinition.name,
   'generate_image',
   convertMediaToolDefinition.name,
   extractMediaInfoToolDefinition.name,
@@ -770,7 +797,7 @@ function clearTimedOutChildSessionAttemptArtifacts(input: {
 
   deleteSessionMessagesByRequestScope({
     clientRequestId: input.clientRequestId,
-    roles: ['assistant', 'tool'],
+    roles: ['assistant', 'tool', 'synthetic'],
     sessionId: input.childSessionId,
     userId: input.userId,
   });
@@ -831,10 +858,6 @@ export async function terminateChildSession(input: {
   };
   await taskManager.save(graph);
 
-  clearTaskParentAutoResumeContext({
-    childSessionId: input.childSessionId,
-    userId: input.userId,
-  });
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [input.childSessionId, input.userId],
@@ -885,19 +908,6 @@ export async function terminateChildSession(input: {
     status: toolOutputStatus,
     taskId: taskEntry.id,
     timeoutSource: input.timeoutSource,
-    userId: input.userId,
-  });
-
-  appendParentTaskCompletionReminder({
-    assignedAgent,
-    childSessionId: input.childSessionId,
-    errorMessage: terminalErrorMessage,
-    parentSessionId: input.graphSessionId,
-    reason: input.reason,
-    status: toolOutputStatus,
-    taskId: taskEntry.id,
-    taskTitle: taskEntry.title,
-    taskUpdatedAt: Date.now(),
     userId: input.userId,
   });
 
@@ -992,101 +1002,6 @@ function buildTaskToolOutput(input: {
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.timeoutSource ? { timeoutSource: input.timeoutSource } : {}),
   };
-}
-
-function truncateTaskReminderText(value: string, maxLength = 1200): string {
-  const normalized = value.trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function buildTaskCompletionAssistantEventText(input: {
-  assignedAgent: string;
-  childSessionId: string;
-  errorMessage?: string;
-  reason?: string;
-  result?: string;
-  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
-  taskTitle: string;
-}): string {
-  const primaryMessage = truncateTaskReminderText(
-    input.errorMessage ?? input.result ?? '子代理执行已结束。',
-  );
-  const titleSuffix = input.reason === 'timeout' ? '（超时）' : '';
-  const payload = {
-    source: 'openawork_internal',
-    type: 'assistant_event',
-    payload: {
-      kind: 'agent',
-      title:
-        input.status === 'failed'
-          ? `子代理失败${titleSuffix} · ${input.taskTitle}`
-          : input.status === 'cancelled'
-            ? `子代理已取消 · ${input.taskTitle}`
-            : `子代理已完成 · ${input.taskTitle}`,
-      message: [
-        `代理：${input.assignedAgent}`,
-        input.errorMessage ? `错误：${primaryMessage}` : `结果：${primaryMessage}`,
-        ...(input.reason ? [`原因：${input.reason}`] : []),
-        `会话：${input.childSessionId}`,
-      ].join('\n'),
-      status:
-        input.status === 'failed' ? 'error' : input.status === 'cancelled' ? 'paused' : 'success',
-    },
-  };
-
-  return JSON.stringify(payload);
-}
-
-function createTaskCompletionReminderClientRequestId(input: {
-  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
-  taskId: string;
-  updatedAt: number;
-}): string {
-  return `task-reminder:${input.taskId}:${input.status}:${input.updatedAt}`;
-}
-
-function appendParentTaskCompletionReminder(input: {
-  assignedAgent: string;
-  childSessionId: string;
-  errorMessage?: string;
-  parentSessionId: string;
-  reason?: string;
-  result?: string;
-  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
-  taskId: string;
-  taskTitle: string;
-  taskUpdatedAt: number;
-  userId: string;
-}): void {
-  appendSessionMessage({
-    sessionId: input.parentSessionId,
-    userId: input.userId,
-    role: 'assistant',
-    content: [
-      {
-        type: 'text',
-        text: buildTaskCompletionAssistantEventText({
-          assignedAgent: input.assignedAgent,
-          childSessionId: input.childSessionId,
-          errorMessage: input.errorMessage,
-          reason: input.reason,
-          result: input.result,
-          status: input.status,
-          taskTitle: input.taskTitle,
-        }),
-      },
-    ],
-    clientRequestId: createTaskCompletionReminderClientRequestId({
-      status: input.status,
-      taskId: input.taskId,
-      updatedAt: input.taskUpdatedAt,
-    }),
-    replaceExisting: true,
-  });
 }
 
 function isTaskCreatedSessionMetadata(metadata: Record<string, unknown>): boolean {
@@ -1598,7 +1513,7 @@ function hasWorkspaceScopedExecutionInput(request: ToolCallRequest): boolean {
     case 'glob':
     case 'grep':
       return typeof rawInput.pattern === 'string' && rawInput.pattern.trim().length > 0;
-    case 'apply_patch':
+    case 'patch':
       return typeof rawInput.patchText === 'string' && rawInput.patchText.trim().length > 0;
     case 'ast_grep_replace':
       return typeof rawInput.pattern === 'string' && rawInput.pattern.trim().length > 0;
@@ -1922,13 +1837,26 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      return {
-        toolCallId: request.toolCallId,
-        toolName: request.toolName,
-        output: await runDesktopAutomationTool(parsed.data),
-        isError: false,
-        durationMs: 0,
-      };
+      // 运行环境层（`DESKTOP_AUTOMATION=1`）关闭时，manager 的 `assertEnabled()`
+      // 会抛错；此处必须捕获并以结构化工具错误返回，否则异常会穿透沙箱分派
+      // 打断整个工具回合（与 computer_use 分支的处理保持一致）。
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runDesktopAutomationTool(parsed.data),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     if (request.toolName === desktopControlToolDefinition.name) {
@@ -1995,6 +1923,80 @@ async function executeGatewayManagedToolImpl(
         isError: false,
         durationMs: 0,
       };
+    }
+
+    if (request.toolName === computerUseToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = computerUseToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        const computerUseResult = await runComputerUseToolWithScreenshot(parsed.data, {
+          userId,
+          sessionId,
+          toolCallId: request.toolCallId,
+          signal,
+        });
+        // G3：把最后一张截图转成 artifact，并以 attachments 回传（与 desktop_control 截图同范式）。
+        const screenshot = computerUseResult.screenshot;
+        if (screenshot) {
+          try {
+            const artifactResult = createDesktopScreenshotArtifactToolResult({
+              userId,
+              sessionId,
+              toolCallId: request.toolCallId,
+              screenshotPayload: screenshot.dataBase64.startsWith('data:')
+                ? screenshot.dataBase64
+                : `data:${screenshot.mediaType};base64,${screenshot.dataBase64}`,
+              title: 'Computer use final screenshot',
+              summary: 'GUI 任务结束时的屏幕画面已作为图片附件提供。',
+              sourceKind: 'tool_desktop_control_screenshot',
+              createdByNote: 'computer_use final screenshot',
+            });
+            return {
+              toolCallId: request.toolCallId,
+              toolName: request.toolName,
+              output: computerUseResult.output,
+              attachments: artifactResult.attachments,
+              isError: false,
+              durationMs: 0,
+            };
+          } catch {
+            // artifact 生成失败不应让整个 GUI 任务算失败——降级为纯文本结果。
+          }
+        }
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: computerUseResult.output,
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     if (request.toolName === sessionListToolDefinition.name) {
@@ -2115,6 +2117,137 @@ async function executeGatewayManagedToolImpl(
         isError: false,
         durationMs: 0,
       };
+    }
+
+    if (request.toolName === sessionRenameToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionRenameToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const renamed = runSessionRenameTool(sessionId, userId, parsed.data);
+      if (!renamed.ok) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: renamed.error,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: { sessionID: renamed.sessionID, title: renamed.title },
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === sessionMoveToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionMoveToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const moved = runSessionMoveTool(sessionId, userId, parsed.data);
+      if (!moved.ok) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: moved.error,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: {
+          sessionID: moved.sessionID,
+          workingDirectory: moved.workingDirectory,
+          changed: moved.changed,
+          forced: moved.forced,
+        },
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === modelSearchToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = modelSearchToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const sessionMetadata = getSessionMetadata(sessionId);
+      const ownProviderId =
+        typeof sessionMetadata['providerId'] === 'string'
+          ? sessionMetadata['providerId']
+          : undefined;
+      try {
+        const output = await runModelSearchTool(userId, parsed.data, { ownProviderId });
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: error instanceof Error ? error.message : String(error),
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     if (request.toolName === taskCreateToolDefinition.name) {
@@ -3047,24 +3180,38 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
-      const output = await executeApplyPatch(parsed.data, {
-        beforeWriteBackup: async ({ content, filePath }) =>
-          captureBeforeWriteBackup({
-            sessionId,
-            userId,
-            requestId: executionContext?.clientRequestId,
-            toolCallId: request.toolCallId,
-            toolName: request.toolName,
-            filePath,
-            content,
-            kind: 'before_write',
-          }),
-        sessionId,
-      });
+      // 补丁是「先整体校验、再落盘」的两段式：解析 / 匹配失败属于模型可自愈
+      // 的输入错误，必须以工具错误结果回传（模型据此换锚点重试），不能抛出
+      // 异常中断整个回合。
+      let output: Awaited<ReturnType<typeof executeApplyPatch>>;
+      try {
+        output = await executeApplyPatch(parsed.data, {
+          beforeWriteBackup: async ({ content, filePath }) =>
+            captureBeforeWriteBackup({
+              sessionId,
+              userId,
+              requestId: executionContext?.clientRequestId,
+              toolCallId: request.toolCallId,
+              toolName: request.toolName,
+              filePath,
+              content,
+              kind: 'before_write',
+            }),
+          sessionId,
+        });
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: error instanceof Error ? error.message : String(error),
+          isError: true,
+          durationMs: 0,
+        };
+      }
       await markCodegraphFilesStaleBestEffort({
         sessionId,
         files: output.files.map((file) => file.path),
-        reason: 'apply_patch',
+        reason: 'patch',
       });
       return {
         toolCallId: request.toolCallId,
@@ -3576,7 +3723,7 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
-    if (request.toolName === 'task') {
+    if (isTaskToolName(request.toolName)) {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
         return {
@@ -3701,6 +3848,25 @@ async function executeGatewayManagedToolImpl(
           ? existingTaskBySession
           : null;
       const childSessionId = resumableTask?.sessionId ?? requestedSessionId ?? randomUUID();
+      // 子代理嵌套深度限制（对齐上游 `experimental.subagent_depth`，默认 1）。
+      // 仅约束「新建子会话」；恢复既有子会话（session_id / task_id 命中）不受限，
+      // 否则已完成的任务将无法被继续。
+      const isResumingExistingChild = Boolean(resumableTask?.sessionId ?? requestedSessionId);
+      if (!isResumingExistingChild) {
+        const depthCheck = checkSubagentDepthAllowed({
+          parentSessionId: sessionId,
+          userId,
+        });
+        if (!depthCheck.allowed) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: depthCheck.message,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+      }
       const childSessionTitle = `${effectiveTaskDescription} (@${resolvedAgent.agentId})`;
       const childRequestData = buildDelegatedChildRequestData({
         agentId: resolvedAgent.agentId,
@@ -3720,11 +3886,6 @@ async function executeGatewayManagedToolImpl(
               toolCallId: request.toolCallId,
             }
           : undefined;
-      const autoResumeRequestData = executionContext?.requestData;
-      const canAutoResumeParentSession =
-        shouldRunInBackground &&
-        parentToolReference !== undefined &&
-        autoResumeRequestData !== undefined;
       const childSessionMetadata: Record<string, unknown> = {
         parentSessionId: sessionId,
         subagentType: resolvedAgent.agentId,
@@ -3917,16 +4078,20 @@ async function executeGatewayManagedToolImpl(
           title: effectiveTaskDescription,
         });
         await taskManager.save(graph);
-        if (canAutoResumeParentSession && autoResumeRequestData) {
-          upsertTaskParentAutoResumeContext({
+        // 写入父会话上下文：子代理中途停下（待批准 / 待回答）时，
+        // `task/task-parent-auto-decision.ts` 需要父会话的原始请求数据来构造父级决策请求。
+        if (
+          shouldRunInBackground &&
+          parentToolReference !== undefined &&
+          executionContext?.requestData !== undefined
+        ) {
+          upsertTaskParentContext({
             childSessionId,
             parentSessionId: sessionId,
-            requestData: autoResumeRequestData,
+            requestData: executionContext.requestData,
             taskId: resumableTask.id,
             userId,
           });
-        } else {
-          clearTaskParentAutoResumeContext({ childSessionId, userId });
         }
 
         publishSessionRunEvent(sessionId, {
@@ -4057,16 +4222,19 @@ async function executeGatewayManagedToolImpl(
         taskManager.startTask(graph, childTask.id);
       }
       await taskManager.save(graph);
-      if (canAutoResumeParentSession && autoResumeRequestData) {
-        upsertTaskParentAutoResumeContext({
+      // 同上前置条件：为父级决策路径留存父会话原始请求数据。
+      if (
+        shouldRunInBackground &&
+        parentToolReference !== undefined &&
+        executionContext?.requestData !== undefined
+      ) {
+        upsertTaskParentContext({
           childSessionId,
           parentSessionId: sessionId,
-          requestData: autoResumeRequestData,
+          requestData: executionContext.requestData,
           taskId: childTask.id,
           userId,
         });
-      } else {
-        clearTaskParentAutoResumeContext({ childSessionId, userId });
       }
 
       publishSessionRunEvent(sessionId, {
@@ -4888,7 +5056,6 @@ async function cancelBackgroundTaskEntry(input: {
     };
   }
 
-  clearTaskParentAutoResumeContext({ childSessionId, userId: input.userId });
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [childSessionId, input.userId],
@@ -4966,6 +5133,20 @@ async function runChildTaskSessionInBackground(input: {
       : undefined;
   const firstResponseTimeoutMs = getTaskChildFirstResponseTimeoutMs();
   const firstResponseRetryMaxRetries = getTaskChildFirstResponseRetryMaxRetries(input.requestData);
+
+  // TaskJob 旁路登记（Phase 1：只落状态，不改变任何既有行为）。
+  // 上游以 Job 注册表承载子代理生命周期；这里先让状态可见，交付层在后续阶段接入。
+  startTaskJob({
+    id: input.childSessionId,
+    title: input.taskTitle,
+    recovery: {
+      kind: 'subagent',
+      parentSessionId: input.parentSessionId,
+      childSessionId: input.childSessionId,
+      agent: input.assignedAgent,
+      description: input.taskTitle,
+    },
+  });
 
   try {
     const { runSessionInBackground } = await import('../routes/stream-runtime.js');
@@ -5201,10 +5382,6 @@ async function finalizeChildTaskRun(input: {
 
   if (task.status === 'cancelled' || task.status === 'failed' || task.status === 'completed') {
     await input.taskManager.save(graph);
-    clearTaskParentAutoResumeContext({
-      childSessionId: input.childSessionId,
-      userId: input.userId,
-    });
     const assignedAgent = task.assignedAgent ?? input.assignedAgent;
     const terminalOutputStatus = mapTaskStatusToToolOutputStatus(task.status);
     const terminalUpdateStatus = mapTaskStatusToUpdateStatus(task.status);
@@ -5226,25 +5403,6 @@ async function finalizeChildTaskRun(input: {
       timeoutSource,
       userId: input.userId,
     });
-    if (
-      terminalOutputStatus === 'cancelled' ||
-      terminalOutputStatus === 'failed' ||
-      terminalOutputStatus === 'done'
-    ) {
-      appendParentTaskCompletionReminder({
-        assignedAgent,
-        childSessionId: input.childSessionId,
-        errorMessage: task.errorMessage,
-        parentSessionId: input.parentSessionId,
-        reason: terminalReason,
-        result: task.result,
-        status: terminalOutputStatus,
-        taskId: task.id,
-        taskTitle: input.taskTitle,
-        taskUpdatedAt: task.updatedAt,
-        userId: input.userId,
-      });
-    }
     publishSessionRunEvent(
       input.parentSessionId,
       buildTaskUpdateEvent({
@@ -5327,18 +5485,27 @@ async function finalizeChildTaskRun(input: {
   const eventStatus = mapTaskStatusToUpdateStatus(nextTask?.status ?? task.status);
   const nextAssignedAgent = nextTask?.assignedAgent ?? input.assignedAgent;
   const terminalToolOutputStatus = mapTaskStatusToToolOutputStatus(nextTask?.status ?? task.status);
-  const autoResumeContext =
-    terminalToolOutputStatus === 'done' || terminalToolOutputStatus === 'failed'
-      ? consumeTaskParentAutoResumeContext({
-          childSessionId: input.childSessionId,
-          parentSessionId: input.parentSessionId,
-          userId: input.userId,
-        })
-      : (clearTaskParentAutoResumeContext({
-          childSessionId: input.childSessionId,
-          userId: input.userId,
-        }),
-        null);
+  const notificationId = buildTaskJobNotificationId({
+    childSessionId: input.childSessionId,
+    taskUpdatedAt: nextTask?.updatedAt ?? task.updatedAt,
+  });
+  if (
+    terminalToolOutputStatus === 'done' ||
+    terminalToolOutputStatus === 'failed' ||
+    terminalToolOutputStatus === 'cancelled'
+  ) {
+    settleTaskJob(input.childSessionId, {
+      notificationId,
+      status:
+        terminalToolOutputStatus === 'done'
+          ? 'completed'
+          : terminalToolOutputStatus === 'failed'
+            ? 'error'
+            : 'cancelled',
+      ...(nextTask?.result ? { output: nextTask.result } : {}),
+      ...(nextTask?.errorMessage ? { error: nextTask.errorMessage } : {}),
+    });
+  }
   syncParentTaskToolResult({
     assignedAgent: nextAssignedAgent,
     category: input.taskCategory,
@@ -5358,34 +5525,32 @@ async function finalizeChildTaskRun(input: {
     terminalToolOutputStatus === 'failed' ||
     terminalToolOutputStatus === 'cancelled'
   ) {
-    appendParentTaskCompletionReminder({
-      assignedAgent: nextAssignedAgent,
+    // ── 单通道交付（T-25）：合成通知（幂等）+ 唤醒决策 ──────────────────
+    // 取代旧的「伪造用户请求 + 定时重试」路径；忙时由交付层留库待消费。
+    // 取消任务只投递通知、不唤醒（与旧语义一致）。
+    await deliverTaskCompletion({
+      agent: nextAssignedAgent,
       childSessionId: input.childSessionId,
-      errorMessage: nextTask?.errorMessage,
+      description: input.taskTitle,
+      notificationId,
       parentSessionId: input.parentSessionId,
-      reason: input.result.reason,
-      result: nextTask?.result,
-      status: terminalToolOutputStatus,
-      taskId: task.id,
-      taskTitle: input.taskTitle,
-      taskUpdatedAt: nextTask?.updatedAt ?? task.updatedAt,
+      ...(terminalToolOutputStatus === 'cancelled' ? { resume: false } : {}),
+      state:
+        terminalToolOutputStatus === 'done'
+          ? 'done'
+          : terminalToolOutputStatus === 'failed'
+            ? 'failed'
+            : 'cancelled',
+      text: buildTaskJobNoticeText({
+        errorMessage: nextTask?.errorMessage,
+        result: nextTask?.result,
+        summary,
+      }),
       userId: input.userId,
     });
-  }
-  if (
-    autoResumeContext &&
-    (terminalToolOutputStatus === 'done' || terminalToolOutputStatus === 'failed')
-  ) {
-    scheduleTaskParentAutoResume({
-      assignedAgent: nextAssignedAgent,
+    // 任务已终态：父会话上下文不再需要（自动决策只在子代理中途停顿时读取）。
+    clearTaskParentContext({
       childSessionId: input.childSessionId,
-      errorMessage: nextTask?.errorMessage,
-      parentSessionId: input.parentSessionId,
-      requestData: autoResumeContext.requestData,
-      result: nextTask?.result,
-      status: terminalToolOutputStatus,
-      taskId: nextTask?.id ?? task.id,
-      taskTitle: input.taskTitle,
       userId: input.userId,
     });
   }
@@ -5761,7 +5926,7 @@ function resolveEffectivePermissionCategory(toolName: string): string {
   // DEFAULT_PERMISSION_RULES 的通配符 allow，保持 fail-closed 改造前的语义；
   // 否则未登记的指令会落到 custom(ask)，后台 team 会话无人可审批而被卡死。
   if (isBuiltinInstructionName(toolName)) return toolName;
-  // Map raw tool name to permission category (e.g. 'workspace_write_file' → 'write').
+  // Map raw tool name to permission category (e.g. 'multi_edit' → 'edit').
   return parseFlatMcpToolName(toolName) ? 'mcp_call' : resolvePermissionCategory(toolName);
 }
 
@@ -5836,7 +6001,7 @@ function ensurePermissionForTool(
   }
 
   // Use category ID for all permission lookup/storage so that tools in the
-  // same category (e.g. edit, apply_patch, workspace_review_revert → 'edit')
+  // same category (e.g. edit, patch, workspace_review_revert → 'edit')
   // share a single approval and don't prompt the user repeatedly.
   const category = resolveEffectivePermissionCategory(request.toolName);
 
@@ -6109,6 +6274,65 @@ export class ToolSandbox {
         ? '系统桌面控制插件未启用。请在设置 → 插件中启用后再使用 desktop_control。'
         : `Session owner not found for session ${sessionId}`;
       if (!userId || !isDesktopControlPluginEnabledForUser(userId)) {
+        const result: ToolCallResult = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: true,
+          durationMs: 0,
+        };
+        writeAuditLog({
+          sessionId,
+          category: 'tool',
+          sourceName: request.toolName,
+          requestId: request.toolCallId,
+          input: effectiveRequest.rawInput,
+          output: result.output,
+          isError: result.isError ?? false,
+          durationMs: result.durationMs ?? null,
+        });
+        return result;
+      }
+    }
+
+    // computer_use 与 desktop_control 共用「系统桌面控制」插件开关（T-14b）：
+    // 二者本质都驱动系统桌面，启用/停用必须一致，不新增独立开关。
+    if (effectiveRequest.toolName === computerUseToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      const output = userId
+        ? '系统桌面控制插件未启用。请在设置 → 插件中启用后再使用 computer_use。'
+        : `Session owner not found for session ${sessionId}`;
+      if (!userId || !isDesktopControlPluginEnabledForUser(userId)) {
+        const result: ToolCallResult = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: true,
+          durationMs: 0,
+        };
+        writeAuditLog({
+          sessionId,
+          category: 'tool',
+          sourceName: request.toolName,
+          requestId: request.toolCallId,
+          input: effectiveRequest.rawInput,
+          output: result.output,
+          isError: result.isError ?? false,
+          durationMs: result.durationMs ?? null,
+        });
+        return result;
+      }
+    }
+
+    // desktop_automation 拥有独立于「系统桌面控制」的插件开关：即使运行环境
+    // 已注入该工具（DESKTOP_AUTOMATION=1），用户级开关关闭时也必须在这里拒绝，
+    // 避免直接调用 API 或历史会话绕过设置页配置。
+    if (effectiveRequest.toolName === desktopAutomationToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      const output = userId
+        ? '浏览器自动化插件未启用。请在设置 → 插件中启用后再使用 desktop_automation。'
+        : `Session owner not found for session ${sessionId}`;
+      if (!userId || !isDesktopAutomationPluginEnabledForUser(userId)) {
         const result: ToolCallResult = {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
@@ -6421,6 +6645,21 @@ export class ToolSandbox {
       isError: result.isError ?? false,
       durationMs: result.durationMs ?? null,
     });
+    // read 成功后按需注入最近的 AGENTS.md 作为上下文指令（按「会话 + 路径」去重，
+    // 失败不影响读取本身）。SSH 远程 read 走 executeGatewayManagedTool 提前返回，
+    // 不会到达此处，符合「远程文件不注入本地指令」的预期。
+    if (!result.isError && effectiveRequest.toolName === readTool.name) {
+      try {
+        result = await injectDirectoryAgentsIntoReadResult(result, {
+          sessionId,
+          workspaceRoot: getSessionWorkspaceRoot(sessionId),
+        });
+      } catch (error) {
+        // 兜底：解析工作区根等前置步骤异常也不能让 read 失败。
+        console.warn('[tool-sandbox] read 注入 AGENTS.md 失败，已跳过：', error);
+      }
+    }
+
     if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
       consumeOncePermission(permissionState.requestId);
     }

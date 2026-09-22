@@ -6,6 +6,7 @@ import type { FileBackupRef } from '@openAwork/shared';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
+import { deriveUpdatedText, ensureTrailingNewline, parsePatchText } from './patch-text.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { assertSessionWorkspacePath } from '../workspace/workspace-safety.js';
@@ -32,21 +33,33 @@ const applyPatchOutputSchema = z.object({
   diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
-type PatchAction =
-  | { type: 'add'; path: string; content: string }
-  | { type: 'delete'; path: string }
-  | {
-      type: 'update';
-      path: string;
-      moveTo?: string;
-      hunks: Array<{ oldText: string; newText: string }>;
-    };
+const APPLY_PATCH_DESCRIPTION = [
+  '将结构化补丁应用到工作区文件，一次调用可批量完成新增 / 删除 / 修改 / 重命名。补丁语言是面向文件的精简 diff 格式：',
+  '',
+  '*** Begin Patch',
+  '*** Add File: <路径>',
+  '+新文件的内容',
+  '*** Update File: <路径>',
+  '*** Move to: <新路径>',
+  '@@ 可选上下文锚点',
+  ' 上下文行',
+  '-旧行',
+  '+新行',
+  '*** Delete File: <路径>',
+  '*** End Patch',
+  '',
+  '要点：每个文件操作都必须带 *** 开头的操作头；新增行以 + 前缀、上下文行以空格前缀；修改块可用 @@ <文本> 指定起始锚点，或用 *** End of File 锚定文件末尾。补丁先整体校验再写入，任何一处匹配失败都不会改动任何文件。',
+].join('\n');
 
 type PlannedPatchOperation =
   | { type: 'add'; path: string; content: string }
   | { type: 'delete'; path: string }
   | { type: 'write'; path: string; content: string }
   | { type: 'move'; sourcePath: string; targetPath: string; content: string };
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function assertPatchPath(path: string, sessionId: string): string {
   const safePath = assertSessionWorkspacePath({ path, sessionId });
@@ -56,137 +69,22 @@ function assertPatchPath(path: string, sessionId: string): string {
   return safePath;
 }
 
-function extractHunkLineValue(line: string): string {
-  if (line.startsWith('+') || line.startsWith('-') || line.startsWith(' ')) {
-    return line.slice(1);
+async function readFileForPatch(filePath: string, failureMessage: string): Promise<string> {
+  try {
+    return await fsp.readFile(filePath, 'utf8');
+  } catch (error) {
+    throw new Error(`patch verification failed: ${failureMessage}: ${describeError(error)}`);
   }
-  return line;
 }
 
-function parsePatchText(patchText: string): PatchAction[] {
-  const lines = patchText.split(/\r?\n/u);
-  if (lines[0] !== '*** Begin Patch' || !lines.includes('*** End Patch')) {
-    throw new Error('patch rejected: missing *** Begin Patch / *** End Patch envelope');
+async function assertDeletable(filePath: string): Promise<void> {
+  try {
+    await fsp.stat(filePath);
+  } catch (error) {
+    throw new Error(
+      `patch verification failed: Failed to delete ${filePath}: ${describeError(error)}`,
+    );
   }
-
-  const actions: PatchAction[] = [];
-  let index = 1;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? '';
-    if (line === '*** End Patch') {
-      return actions;
-    }
-
-    if (line.startsWith('*** Add File: ')) {
-      const path = line.slice('*** Add File: '.length).trim();
-      index += 1;
-      const contentLines: string[] = [];
-      while (index < lines.length) {
-        const current = lines[index] ?? '';
-        if (current.startsWith('*** ') || current === '*** End Patch') {
-          break;
-        }
-        if (!current.startsWith('+')) {
-          throw new Error(`Invalid add-file line for ${path}: ${current}`);
-        }
-        contentLines.push(current.slice(1));
-        index += 1;
-      }
-      actions.push({ type: 'add', path, content: contentLines.join('\n') });
-      continue;
-    }
-
-    if (line.startsWith('*** Delete File: ')) {
-      const path = line.slice('*** Delete File: '.length).trim();
-      actions.push({ type: 'delete', path });
-      index += 1;
-      continue;
-    }
-
-    if (line.startsWith('*** Update File: ')) {
-      const path = line.slice('*** Update File: '.length).trim();
-      index += 1;
-      let moveTo: string | undefined;
-      if ((lines[index] ?? '').startsWith('*** Move to: ')) {
-        moveTo = (lines[index] ?? '').slice('*** Move to: '.length).trim();
-        index += 1;
-      }
-
-      const hunks: Array<{ oldText: string; newText: string }> = [];
-      while (index < lines.length) {
-        const current = lines[index] ?? '';
-        if (current.startsWith('*** ') || current === '*** End Patch') {
-          break;
-        }
-        if (!current.startsWith('@@')) {
-          throw new Error(`Invalid update hunk header for ${path}: ${current}`);
-        }
-        index += 1;
-        const oldLines: string[] = [];
-        const newLines: string[] = [];
-        while (index < lines.length) {
-          const hunkLine = lines[index] ?? '';
-          if (
-            hunkLine.startsWith('@@') ||
-            hunkLine.startsWith('*** ') ||
-            hunkLine === '*** End Patch'
-          ) {
-            break;
-          }
-          if (hunkLine.startsWith('-')) {
-            oldLines.push(extractHunkLineValue(hunkLine));
-          } else if (hunkLine.startsWith('+')) {
-            newLines.push(extractHunkLineValue(hunkLine));
-          } else {
-            const value = extractHunkLineValue(hunkLine);
-            oldLines.push(value);
-            newLines.push(value);
-          }
-          index += 1;
-        }
-        hunks.push({ oldText: oldLines.join('\n'), newText: newLines.join('\n') });
-      }
-
-      actions.push({ type: 'update', path, moveTo, hunks });
-      continue;
-    }
-
-    if (line.trim().length === 0) {
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unsupported patch line: ${line}`);
-  }
-
-  throw new Error('patch rejected: missing *** End Patch');
-}
-
-async function planUpdateAction(
-  action: Extract<PatchAction, { type: 'update' }>,
-  sessionId: string,
-): Promise<PlannedPatchOperation> {
-  const sourcePath = assertPatchPath(action.path, sessionId);
-  const originalContent = await fsp.readFile(sourcePath, 'utf8');
-  const eol = originalContent.includes('\r\n') ? '\r\n' : '\n';
-  let nextContent = originalContent;
-
-  for (const hunk of action.hunks) {
-    const oldText = hunk.oldText.replace(/\n/gu, eol);
-    const newText = hunk.newText.replace(/\n/gu, eol);
-    if (!nextContent.includes(oldText)) {
-      throw new Error(`Patch hunk not found in ${sourcePath}`);
-    }
-    nextContent = nextContent.replace(oldText, newText);
-  }
-
-  const targetPath = action.moveTo ? assertPatchPath(action.moveTo, sessionId) : sourcePath;
-  if (targetPath !== sourcePath) {
-    return { type: 'move', sourcePath, targetPath, content: nextContent };
-  }
-
-  return { type: 'write', path: sourcePath, content: nextContent };
 }
 
 async function planPatchText(
@@ -194,23 +92,44 @@ async function planPatchText(
   sessionId: string,
 ): Promise<PlannedPatchOperation[]> {
   const actions = parsePatchText(patchText);
+  if (actions.length === 0) {
+    throw new Error('patch rejected: empty patch');
+  }
+
   const planned: PlannedPatchOperation[] = [];
+  // 同一文件出现多个 Update 块时，后续块必须基于前一块的结果推导（写盘在
+  // 全部校验之后统一进行，不能回读磁盘，否则后面一块会覆盖前面一块）。
+  const pendingContent = new Map<string, string>();
 
   for (const action of actions) {
     if (action.type === 'add') {
       const safePath = assertPatchPath(action.path, sessionId);
-      planned.push({ type: 'add', path: safePath, content: action.content });
+      planned.push({ type: 'add', path: safePath, content: ensureTrailingNewline(action.content) });
       continue;
     }
 
     if (action.type === 'delete') {
       const safePath = assertPatchPath(action.path, sessionId);
-      await fsp.stat(safePath);
+      await assertDeletable(safePath);
       planned.push({ type: 'delete', path: safePath });
       continue;
     }
 
-    planned.push(await planUpdateAction(action, sessionId));
+    const sourcePath = assertPatchPath(action.path, sessionId);
+    const original =
+      pendingContent.get(sourcePath) ??
+      (await readFileForPatch(sourcePath, `Failed to read file to update ${sourcePath}`));
+    const derived = deriveUpdatedText({ chunks: action.chunks, original, path: sourcePath });
+    const targetPath = action.moveTo ? assertPatchPath(action.moveTo, sessionId) : sourcePath;
+
+    if (targetPath !== sourcePath) {
+      planned.push({ type: 'move', sourcePath, targetPath, content: derived.content });
+      pendingContent.set(targetPath, derived.content);
+      continue;
+    }
+
+    planned.push({ type: 'write', path: sourcePath, content: derived.content });
+    pendingContent.set(sourcePath, derived.content);
   }
 
   return planned;
@@ -359,7 +278,7 @@ export async function executeApplyPatch(
   },
 ): Promise<z.infer<typeof applyPatchOutputSchema>> {
   if (!options?.sessionId) {
-    throw new Error('apply_patch requires session workspace context');
+    throw new Error('patch requires session workspace context');
   }
   const planned = await planPatchText(input.patchText, options.sessionId);
   const files = await applyPlannedOperations(planned, options);
@@ -383,21 +302,20 @@ export async function executeApplyPatch(
 
 function buildApplyPatchPermissionScope(patchText: string): string {
   const digest = createHash('sha256').update(patchText).digest('hex').slice(0, 12);
-  return `apply_patch:${digest}`;
+  return `patch:${digest}`;
 }
 
 export const applyPatchToolDefinition: ToolDefinition<
   typeof applyPatchInputSchema,
   typeof applyPatchOutputSchema
 > = {
-  name: 'apply_patch',
-  description:
-    '将结构化补丁信封应用到工作区文件上。在 Begin/End Patch 块内支持 Add File、Update File、Delete File、Move to 等操作。',
+  name: 'patch',
+  description: APPLY_PATCH_DESCRIPTION,
   inputSchema: applyPatchInputSchema,
   outputSchema: applyPatchOutputSchema,
   timeout: 120000,
   execute: async () => {
-    throw new Error('apply_patch must execute through the gateway-managed sandbox path');
+    throw new Error('patch must execute through the gateway-managed sandbox path');
   },
 };
 

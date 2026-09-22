@@ -1,3 +1,6 @@
+import { parseSubagentNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from '@openAwork/shared';
+import type { Message, SubagentNotice, SubagentNoticeState } from '@openAwork/shared';
+
 export interface MobileChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -12,6 +15,19 @@ export interface MobileInputImage {
   imageUrl?: string;
   mimeType?: string;
 }
+
+export type MobileSubagentNoticeState = SubagentNoticeState;
+
+/**
+ * 子代理完成通知的移动端形状。
+ *
+ * **直接复用 `@openAwork/shared` 的 SSOT 类型**（Web / 桌面 / 移动三端同一份语义），
+ * 移动端只负责「原始行 → `Message` 形状」的适配，可见性规则不在本文件实现。
+ */
+export type MobileSubagentNotice = SubagentNotice;
+
+/** 子代理名缺失时的中性占位（与 shared / shared-ui 共用同一常量）。 */
+export const DEFAULT_SUBAGENT_AGENT = SUBAGENT_NOTICE_DEFAULT_AGENT;
 
 export function normalizeMobileChatMessages(rawMessages: unknown): MobileChatMessage[] {
   if (!Array.isArray(rawMessages)) {
@@ -41,6 +57,113 @@ export function extractRuntimeThinkingDelta(value: unknown): string {
   return collectReasoningFragments(value).join('');
 }
 
+/** 把原始行适配成 `Message` 形状；`content` 只取 text part 拼接（其它 part 一律忽略）。 */
+function toSubagentNoticeMessage(record: Record<string, unknown>, id: string): Message {
+  const parts = Array.isArray(record['content']) ? record['content'] : [];
+  const text = parts
+    .flatMap((part) => {
+      if (!part || typeof part !== 'object' || Array.isArray(part)) {
+        return [];
+      }
+      const partRecord = part as Record<string, unknown>;
+      return partRecord['type'] === 'text' && typeof partRecord['text'] === 'string'
+        ? [partRecord['text']]
+        : [];
+    })
+    .join('\n')
+    .trim();
+
+  const description = record['description'];
+  const metadata = record['metadata'];
+
+  return {
+    id,
+    role: 'synthetic',
+    content: text.length > 0 ? [{ type: 'text', text }] : [],
+    createdAt: 0,
+    ...(typeof description === 'string' ? { description } : {}),
+    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { metadata: metadata as Record<string, unknown> }
+      : {}),
+  };
+}
+
+/**
+ * 从网关返回的原始会话行解析「子代理完成通知」；不是通知时返回 `null`。
+ *
+ * **语义不在本文件实现**：只做「原始行 → `Message` 形状」适配，然后委托
+ * `@openAwork/shared` 的 `parseSubagentNotice`（Web / 桌面 / 移动三端同一份 SSOT），
+ * 避免可见性规则在三端漂移。
+ *
+ * 测试环境通过 `apps/mobile/vitest.config.ts` 把 `@openAwork/shared` 别名到源码，
+ * 因此纯逻辑单测不依赖 `dist/` 构建顺序。
+ */
+export function parseMobileSubagentNotice(rawMessage: unknown): MobileSubagentNotice | null {
+  if (!rawMessage || typeof rawMessage !== 'object' || Array.isArray(rawMessage)) {
+    return null;
+  }
+
+  const record = rawMessage as Record<string, unknown>;
+  if (record['role'] !== 'synthetic') {
+    return null;
+  }
+
+  const id = record['id'];
+  if (typeof id !== 'string' || id.length === 0) {
+    return null;
+  }
+
+  // 语义（可见性规则、状态回落、agent 兜底）统一由 `@openAwork/shared` 的
+  // `parseSubagentNotice` 决定，移动端只做输入形状适配，避免三端语义漂移。
+  return parseSubagentNotice(toSubagentNoticeMessage(record, id));
+}
+
+/** 按出现顺序收集子代理完成通知；非通知行被忽略。 */
+export function collectMobileSubagentNotices(rawMessages: unknown): MobileSubagentNotice[] {
+  if (!Array.isArray(rawMessages)) {
+    return [];
+  }
+
+  return rawMessages.flatMap((rawMessage) => {
+    const notice = parseMobileSubagentNotice(rawMessage);
+    return notice ? [notice] : [];
+  });
+}
+
+/**
+ * 合并两次「通知快照」：已展示的保持原顺序，新出现的按 `incoming` 顺序追加；
+ * 同一 id（通知身份 `task-job:<child>:<updatedAt>`）只保留一份，以 `incoming` 为准。
+ *
+ * 实时通道会在流式期间反复重算同一会话的通知列表（子代理结算事件 + 流结束），
+ * 因此合并必须**幂等**：重复解析不会产生重复行，也不会因为一次残缺快照丢掉
+ * 已经展示过的通知。非对象 / 缺 id 的脏数据直接跳过（历史加载已经做过一次
+ * 校验，这里是防御性兜底）。
+ */
+export function mergeMobileSubagentNotices(
+  existing: readonly (MobileSubagentNotice | null | undefined)[] | null | undefined,
+  incoming: readonly (MobileSubagentNotice | null | undefined)[] | null | undefined,
+): MobileSubagentNotice[] {
+  const merged: MobileSubagentNotice[] = [];
+  const indexById = new Map<string, number>();
+
+  for (const notice of [...(existing ?? []), ...(incoming ?? [])]) {
+    if (!notice || typeof notice.id !== 'string' || notice.id.length === 0) {
+      continue;
+    }
+
+    const knownIndex = indexById.get(notice.id);
+    if (knownIndex === undefined) {
+      indexById.set(notice.id, merged.length);
+      merged.push(notice);
+      continue;
+    }
+
+    merged[knownIndex] = notice;
+  }
+
+  return merged;
+}
+
 function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | null {
   if (!rawMessage || typeof rawMessage !== 'object') {
     return null;
@@ -48,6 +171,10 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
 
   const record = rawMessage as Record<string, unknown>;
   const id = typeof record['id'] === 'string' ? record['id'] : null;
+  // Transcript roles. `synthetic` (gateway-injected subagent completion
+  // notices) is intentionally excluded: it is not user input and must not
+  // render as a chat bubble. Mobile surfaces it through the dedicated notice
+  // channel instead of the transcript.
   const role =
     record['role'] === 'user' || record['role'] === 'assistant' || record['role'] === 'tool'
       ? record['role']

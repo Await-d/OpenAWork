@@ -11,7 +11,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'pnpm vite:dev',
+    command: 'bun run vite:dev',
     url: 'http://127.0.0.1:1420',
     reuseExistingServer: !process.env['CI'],
     timeout: 30000,

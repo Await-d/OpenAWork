@@ -42,7 +42,13 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+              // 父会话置为**非空闲**：本脚本关注的是「子代理不产生权限请求」，与唤醒无关。
+              // 若父会话空闲，子代理结算会**同步唤醒**父会话（单通道交付，见
+              // `task/task-job-delivery.ts`），其后台流会与脚本收尾竞态——脚本关库后
+              // 该流仍在 flush 运行事件 → `Database has closed` → 退出码 1（断言其实已全过）。
+              // 非空闲时唤醒按设计「留库待消费」（通知照常注入，断言不受影响），
+              // 与 `verify-task-tool-auto-run.ts` 的既有隔离手法一致。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
               [parentSessionId, userId],
             );
 

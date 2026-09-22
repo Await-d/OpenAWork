@@ -162,7 +162,7 @@ function collectReferencedIconFiles(manifest) {
 
 /**
  * 读取包内清单与图标名，缓存一次供 dev/build 复用。
- * packageDir 由调用方从 apps/web 锚定解析（pnpm 下该包只位于 apps/web/node_modules）。
+ * packageDir 由调用方从 apps/web 锚定解析（隔离式 node_modules 下该包只位于 apps/web/node_modules）。
  */
 function loadIconAssets(packageDir) {
   const manifestPath = join(packageDir, 'dist', 'material-icons.json');

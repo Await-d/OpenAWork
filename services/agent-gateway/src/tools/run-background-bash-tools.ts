@@ -59,7 +59,7 @@ const runBackgroundBashInputSchema = z.object({
     .min(1)
     .optional()
     .describe(
-      '可选：用 5-10 个词清晰描述这个后台命令。省略时由 command 前缀自动生成。示例：\n输入：npm run dev\n输出：启动开发服务器\n\n输入：pnpm exec vitest run\n输出：运行单元测试\n\n输入：tail -F build.log\n输出：持续跟踪构建日志',
+      '可选：用 5-10 个词清晰描述这个后台命令。省略时由 command 前缀自动生成。示例：\n输入：npm run dev\n输出：启动开发服务器\n\n输入：bun run test\n输出：运行单元测试\n\n输入：tail -F build.log\n输出：持续跟踪构建日志',
     ),
   workdir: z.string().min(1).optional().describe('命令执行的工作目录绝对路径。默认工作区根目录。'),
   timeout: z

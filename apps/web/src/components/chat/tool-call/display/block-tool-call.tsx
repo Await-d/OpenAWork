@@ -6,6 +6,7 @@ import {
   UnifiedCodeDiff,
 } from '@openAwork/shared-ui';
 import { useState, useMemo } from 'react';
+import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ImageLightbox } from '../../image/image-lightbox.js';
@@ -28,7 +29,19 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
 import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 
-/* ── BlockToolCall (write / edit / bash / web / apply_patch / multi_edit) ── */
+/* ── BlockToolCall (write / edit / bash / web / patch / multi_edit) ── */
+
+/**
+ * `react-markdown` 会把 `![]()` 与危险协议（`![](javascript:…)`）的图片地址统一转成
+ * 空串，照常渲染 `<img src="">` 会让浏览器把当前页面当成图片再请求一次（React 也会
+ * 就此告警）。抓取页面的 Markdown 里这类坏图很常见，这里直接丢弃。
+ */
+const WEB_MARKDOWN_COMPONENTS: Components = {
+  img: ({ src, alt, title }) =>
+    src ? (
+      <img src={src} alt={alt ?? ''} title={title} loading="lazy" referrerPolicy="no-referrer" />
+    ) : null,
+};
 
 export function BlockToolCall({
   approvalActions,
@@ -318,7 +331,10 @@ export function BlockToolCall({
                   {/* Markdown content */}
                   {!webSummary.imageUrl && !webSummary.searchResults && webSummary.isMarkdown && (
                     <div className="tool-call-block-web-markdown">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={WEB_MARKDOWN_COMPONENTS}
+                      >
                         {webSummary.cleanedContent}
                       </ReactMarkdown>
                     </div>

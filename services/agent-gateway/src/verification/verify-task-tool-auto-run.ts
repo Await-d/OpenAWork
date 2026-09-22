@@ -10,6 +10,7 @@ import {
   extractStructuredToolResultOutput,
   extractToolResultPart,
   isTaskToolOutput,
+  readSingleTextMessage,
   createProtocolAwareStream,
   createDelayedChatCompletionsStream,
   readFetchBody,
@@ -90,7 +91,11 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+              // 父会话标记为 `paused`：本脚本的断言是**子侧**且基于 fetchCalls 下标，
+              // 而单通道交付（T-25）会在父会话空闲时**同步唤醒**并插入一次父侧上游请求，
+              // 从而打乱下标。这里让唤醒按设计「延后」（父会话非空闲）以隔离两侧关注点；
+              // 唤醒本身由 `verify-task-job-wake.ts` 专门验收。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
               [parentSessionId, userId],
             );
             const sandbox = createDefaultSandbox();
@@ -288,29 +293,8 @@ async function main(): Promise<void> {
 
               const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
               const parentTaskResult = parentMessages.find((message) => message.role === 'tool');
-              const parentCompletionReminder = parentMessages.find((message) => {
-                if (message.role !== 'assistant') {
-                  return false;
-                }
-
-                const firstContent = message.content[0];
-                if (!firstContent || firstContent.type !== 'text') {
-                  return false;
-                }
-
-                try {
-                  const parsed = JSON.parse(firstContent.text) as {
-                    payload?: { title?: string; message?: string; status?: string };
-                    type?: string;
-                  };
-                  return (
-                    parsed.type === 'assistant_event' &&
-                    parsed.payload?.title === '子代理已完成 · 让子代理写出结论'
-                  );
-                } catch {
-                  return false;
-                }
-              });
+              // 完成提示现由**合成通知**承载（T-27 已移除 assistant_event 卡片生产者）。
+              const parentNotice = parentMessages.find((message) => message.role === 'synthetic');
               assert(
                 parentTaskResult?.role === 'tool',
                 'parent session should persist the delegated tool result',
@@ -341,34 +325,24 @@ async function main(): Promise<void> {
                   String(parentTaskOutput['message']).includes(`task_id: ${output.sessionId}`),
                 'parent session tool_result should expose opencode-style task_result semantics',
               );
-              const parentReminderText =
-                parentCompletionReminder?.content[0]?.type === 'text'
-                  ? parentCompletionReminder.content[0].text
-                  : null;
-              assert(
-                parentReminderText !== null,
-                'parent session should persist a visible assistant reminder when the child task completes',
-              );
-              const parentReminderPayload = JSON.parse(parentReminderText ?? '{}') as {
-                payload?: { message?: string; status?: string; title?: string };
-                type?: string;
-              };
-              assert(
-                parentReminderPayload.type === 'assistant_event',
-                'parent completion reminder should use assistant_event payload',
+              const parentNoticeText = readSingleTextMessage(
+                parentNotice as { content: Array<{ type: string; text?: string }> },
               );
               assert(
-                parentReminderPayload.payload?.status === 'success',
-                'parent completion reminder should mark successful child runs as success',
+                parentNotice !== undefined,
+                'parent session should receive a synthetic subagent notice when the child task completes',
               );
               assert(
-                typeof parentReminderPayload.payload?.message === 'string',
-                'parent completion reminder should include the delegated child summary',
+                parentNoticeText.length > 0,
+                'parent completion notice should include the delegated child summary',
               );
               assert(
-                parentReminderPayload.payload?.message?.includes(`会话：${output.sessionId}`) ===
-                  true,
-                'parent completion reminder should point back to the child session id',
+                parentNotice?.metadata?.['state'] === 'done',
+                'parent completion notice metadata should mark done state',
+              );
+              assert(
+                parentNotice?.metadata?.['childID'] === output.sessionId,
+                'parent completion notice should point back to the child session id',
               );
               assert(
                 events.some(
@@ -483,6 +457,21 @@ async function main(): Promise<void> {
               assert(
                 fetchCalls.length === 2,
                 'task resume should issue a second child upstream request',
+              );
+
+              // ── 单通道交付契约（T-25）──────────────────────────────────
+              // 父会话必须收到一条 synthetic 通知，且**不得**被伪造出用户轮。
+              const parentMessagesAfterDelivery = listSessionMessages({
+                sessionId: parentSessionId,
+                userId,
+              });
+              assert(
+                parentMessagesAfterDelivery.some((message) => message.role === 'synthetic'),
+                'parent session should receive a synthetic subagent notice (single-channel delivery)',
+              );
+              assert(
+                !parentMessagesAfterDelivery.some((message) => message.role === 'user'),
+                'single-channel delivery must not fabricate a user message in the parent session',
               );
 
               assert(
@@ -697,7 +686,9 @@ async function main(): Promise<void> {
           'hash',
         ]);
         sqliteRun(
-          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'idle')`,
+          // 父会话非空闲 → 单通道交付（T-25）的唤醒按设计「延后」，避免父侧上游请求
+          // 打乱本场景基于计数的断言；唤醒本身由 verify-task-job-wake.ts 专门验收。
+          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
           [parentSessionId, userId],
         );
         sqliteRun(
@@ -825,7 +816,9 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+              // 父会话非空闲 → 单通道交付（T-25）的唤醒按设计「延后」，避免父侧上游请求
+              // 打乱本场景基于计数的断言；唤醒本身由 verify-task-job-wake.ts 专门验收。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
               [parentSessionId, userId],
             );
 
@@ -933,7 +926,9 @@ async function main(): Promise<void> {
           'hash',
         ]);
         sqliteRun(
-          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'idle')`,
+          // 父会话非空闲 → 单通道交付（T-25）的唤醒按设计「延后」，避免父侧上游请求
+          // 打乱本场景基于计数的断言；唤醒本身由 verify-task-job-wake.ts 专门验收。
+          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
           [parentSessionId, userId],
         );
         sqliteRun(
@@ -1016,7 +1011,9 @@ async function main(): Promise<void> {
           'hash',
         ]);
         sqliteRun(
-          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'idle')`,
+          // 父会话非空闲 → 单通道交付（T-25）的唤醒按设计「延后」，避免父侧上游请求
+          // 打乱本场景基于计数的断言；唤醒本身由 verify-task-job-wake.ts 专门验收。
+          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
           [parentSessionId, userId],
         );
         sqliteRun(

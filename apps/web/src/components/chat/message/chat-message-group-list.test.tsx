@@ -66,6 +66,7 @@ describe('ChatMessageGroupList', () => {
     // Given
     const bottomRef = createRef<HTMLDivElement>();
     const groups: ChatRenderGroup[] = Array.from({ length: 32 }, (_, index) => ({
+      kind: 'messages',
       entries: [],
       key: `group-${index}`,
       role: 'assistant',
@@ -95,6 +96,7 @@ describe('ChatMessageGroupList', () => {
   it('keeps consecutive tool-only messages at their original message positions', () => {
     const groups: ChatRenderGroup[] = [
       {
+        kind: 'messages',
         entries: [
           createToolOnlyEntry('assistant-tool-1', 'tool-1'),
           createToolOnlyEntry('assistant-tool-2', 'tool-2'),
@@ -243,6 +245,7 @@ function installVirtualizationMocks(): void {
 
 function createVirtualizedGroups(streamingContent: string): ChatRenderGroup[] {
   const streamingGroup: ChatRenderGroup = {
+    kind: 'messages',
     entries: [
       {
         message: {
@@ -261,6 +264,7 @@ function createVirtualizedGroups(streamingContent: string): ChatRenderGroup[] {
   const fillerGroups: ChatRenderGroup[] = Array.from(
     { length: VIRTUALIZATION_GROUP_COUNT - 1 },
     (_, index) => ({
+      kind: 'messages',
       entries: [
         {
           message: {

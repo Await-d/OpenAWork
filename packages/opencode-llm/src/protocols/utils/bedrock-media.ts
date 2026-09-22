@@ -59,20 +59,44 @@ const DOCUMENT_FORMATS = {
   'text/markdown': 'md',
 } as const satisfies Record<string, DocumentFormat>;
 
-const documentBlock = (part: MediaPart, format: DocumentFormat, bytes: string): DocumentBlock => ({
+const documentBlock = (name: string, format: DocumentFormat, bytes: string): DocumentBlock => ({
   document: {
     format,
-    name: part.filename ?? `document.${format}`,
+    name,
     source: { bytes },
   },
 });
+
+// Converse requires document labels to be unique across the entire request,
+// including tool results. Sanitize to the characters Converse accepts, cap the
+// length, and disambiguate duplicates with a numeric suffix.
+const documentName = (filename: string | undefined, names: Set<string>): string => {
+  const base =
+    (filename ?? '')
+      .replace(/\.[^.]*$/, '')
+      .replace(/[^a-zA-Z0-9 ()[\]-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200)
+      .trim() || 'document';
+  let name = base;
+  for (let index = 2; names.has(name); index++) {
+    const suffix = ` ${index}`;
+    name = `${base.slice(0, 200 - suffix.length).trimEnd()}${suffix}`;
+  }
+  names.add(name);
+  return name;
+};
 
 // Route by MIME. Known image/document formats lower into a typed block; anything
 // else fails with a clear error instead of silently degrading to a malformed
 // document block. Image MIME types not in `IMAGE_FORMATS` (e.g. `image/svg+xml`)
 // get an image-specific error so the caller knows it's a format-support issue,
 // not a kind-detection issue.
-export const lower = Effect.fn('BedrockMedia.lower')(function* (part: MediaPart) {
+export const lower = Effect.fn('BedrockMedia.lower')(function* (
+  part: MediaPart,
+  documentNames: Set<string>,
+) {
   const mime = part.mediaType.toLowerCase();
   const imageFormat = IMAGE_FORMATS[mime as keyof typeof IMAGE_FORMATS];
   if (imageFormat) {
@@ -94,7 +118,7 @@ export const lower = Effect.fn('BedrockMedia.lower')(function* (part: MediaPart)
       part,
       new Set<string>(Object.keys(DOCUMENT_FORMATS)),
     );
-    return documentBlock(part, documentFormat, media.base64);
+    return documentBlock(documentName(part.filename, documentNames), documentFormat, media.base64);
   }
   return yield* ProviderShared.invalidRequest(
     `Bedrock Converse does not support media type ${part.mediaType}`,

@@ -283,6 +283,12 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
     role: info.role,
     createdAt: info.time.created,
     content,
+    // Synthetic notices carry the client-facing notice contract (label +
+    // provenance). The write path persists them on `message_v2.data`, so the
+    // read path must round-trip them or clients receive a bare
+    // `role: 'synthetic'` with nothing to render.
+    ...(info.role === 'synthetic' && info.description ? { description: info.description } : {}),
+    ...(info.role === 'synthetic' && info.metadata ? { metadata: info.metadata } : {}),
     ...('agent' in info && typeof info.agent === 'string' ? { agentId: info.agent } : {}),
     ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
     ...('modelID' in info && typeof info.modelID === 'string' ? { model: info.modelID } : {}),
@@ -506,6 +512,70 @@ function deleteSessionMessagesByExactRequestRole(input: {
   deleteLegacySessionMessagesByRequestRole(input);
 }
 
+/**
+ * Build the discriminated `MessageInfo` for a role.
+ *
+ * Uses an exhaustive switch with a `never` guard so that adding a member to
+ * `MessageRole` becomes a compile error here, instead of silently degrading to
+ * `system` — the previous `if/else` chain ended in `else → system`, which
+ * silently rewrote unknown roles (including `synthetic`) and defeated the
+ * "model sees it / clients don't render it as user input" contract.
+ */
+function buildMessageInfo(input: {
+  role: MessageRole;
+  baseInfo: {
+    id: MessageID;
+    sessionID: string;
+    clientRequestId?: string;
+    status?: MessageInfo['status'];
+  };
+  timeCreated: number;
+  assistantTokens: AssistantMessage['tokens'];
+  agentId?: string | null;
+  modelID?: string;
+  providerID?: string;
+  completedAt?: number;
+  firstContentAt?: number;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}): MessageInfo {
+  switch (input.role) {
+    case 'user':
+      return { ...input.baseInfo, role: 'user', time: { created: input.timeCreated } };
+    case 'assistant':
+      return {
+        ...input.baseInfo,
+        ...(input.agentId ? { agent: input.agentId } : {}),
+        role: 'assistant',
+        ...(input.modelID ? { modelID: input.modelID } : {}),
+        ...(input.providerID ? { providerID: input.providerID } : {}),
+        time: {
+          created: input.timeCreated,
+          ...(input.completedAt ? { completed: input.completedAt } : {}),
+          ...(input.firstContentAt ? { firstContent: input.firstContentAt } : {}),
+        },
+        cost: 0,
+        tokens: input.assistantTokens,
+      };
+    case 'tool':
+      return { ...input.baseInfo, role: 'tool', time: { created: input.timeCreated } };
+    case 'system':
+      return { ...input.baseInfo, role: 'system', time: { created: input.timeCreated } };
+    case 'synthetic':
+      return {
+        ...input.baseInfo,
+        role: 'synthetic',
+        time: { created: input.timeCreated },
+        ...(input.description ? { description: input.description } : {}),
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      };
+    default: {
+      const exhaustive: never = input.role;
+      throw new Error(`Unsupported message role: ${String(exhaustive)}`);
+    }
+  }
+}
+
 export function appendSessionMessageV2(input: {
   sessionId: string;
   userId: string;
@@ -521,6 +591,10 @@ export function appendSessionMessageV2(input: {
   messageId?: string;
   replaceExisting?: boolean;
   status?: string;
+  /** Notice label; only consumed by `role: 'synthetic'`. */
+  description?: string;
+  /** Notice payload; only consumed by `role: 'synthetic'`. */
+  metadata?: Record<string, unknown>;
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -568,27 +642,19 @@ export function appendSessionMessageV2(input: {
     ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     ...(input.status ? { status: input.status as MessageInfo['status'] } : {}),
   };
-  const info: MessageInfo =
-    input.role === 'user'
-      ? { ...baseInfo, role: 'user', time: { created: timeCreated } }
-      : input.role === 'assistant'
-        ? {
-            ...baseInfo,
-            ...(input.agentId ? { agent: input.agentId } : {}),
-            role: 'assistant',
-            ...(input.modelID ? { modelID: input.modelID } : {}),
-            ...(input.providerID ? { providerID: input.providerID } : {}),
-            time: {
-              created: timeCreated,
-              ...(input.completedAt ? { completed: input.completedAt } : {}),
-              ...(input.firstContentAt ? { firstContent: input.firstContentAt } : {}),
-            },
-            cost: 0,
-            tokens: assistantTokens,
-          }
-        : input.role === 'tool'
-          ? { ...baseInfo, role: 'tool', time: { created: timeCreated } }
-          : { ...baseInfo, role: 'system', time: { created: timeCreated } };
+  const info: MessageInfo = buildMessageInfo({
+    role: input.role,
+    baseInfo,
+    timeCreated,
+    assistantTokens,
+    agentId: input.agentId,
+    modelID: input.modelID,
+    providerID: input.providerID,
+    completedAt: input.completedAt,
+    firstContentAt: input.firstContentAt,
+    description: input.description,
+    metadata: input.metadata,
+  });
 
   // Emit event → projector writes to V2 DB
   emitEvent({

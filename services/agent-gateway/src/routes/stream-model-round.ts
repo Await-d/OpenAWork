@@ -14,6 +14,15 @@ import {
   resolveEffectiveContextWindow,
   parseContextLimitError,
 } from '../compaction/context-window-resolver.js';
+
+/**
+ * 单次请求内允许的**最大续写轮次**（溢出续写 / todo 续跑共用同一上限）。
+ *
+ * 前身是已退役的 auto-resume 机制的 `MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES`；
+ * 该机制随单通道交付退役后，这个上限仍被 `routes/stream.ts` 与 `routes/stream-runtime.ts`
+ * 的续写判定使用——**数值保持 10 不变**，语义收敛为「续写轮次上限」。
+ */
+export const MAX_CONTINUATION_ROUNDS = 10;
 import {
   isCompactionThresholdReached,
   parsePercentageOverride,

@@ -3,7 +3,8 @@ dist
 node_modules
 .expo
 src-tauri
-pnpm-lock.yaml
+bun.lock
+@temp/
 .sisyphus
 .serena
 .agentdocs

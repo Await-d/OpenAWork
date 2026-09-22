@@ -233,8 +233,7 @@ describe('task tool — command (reserved field, no-op)', () => {
     // sees the contract. Pin enough of it that a silent edit can't
     // turn the field into a "secret active" field without dragging
     // this test along.
-    const description =
-      taskToolDefinition.inputSchema._def.schema?.shape?.command?._def?.description ?? '';
+    const description = taskInputShape().command?._def?.description ?? '';
     // OpenAWork 已将该 describe 文本统一为中文，校验关键约束词仍在：
     // 「保留字段」+「忽略」+ 用 prompt 表达工作。
     expect(description).toMatch(/保留字段/);
@@ -242,3 +241,22 @@ describe('task tool — command (reserved field, no-op)', () => {
     expect(description).toMatch(/prompt/);
   });
 });
+
+/**
+ * `taskToolDefinition.inputSchema` 是 ZodEffects 链（`.superRefine()` → `.transform()`），
+ * 逐层解包到对象层以读取字段级 `.describe()`。层数变化时这里会抛错而不是静默返回空串。
+ */
+function taskInputShape(): Record<string, { _def?: { description?: string } }> {
+  let current: unknown = taskToolDefinition.inputSchema;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== 'object') {
+      break;
+    }
+    const candidate = current as { _def?: { schema?: unknown }; shape?: unknown };
+    if (candidate.shape) {
+      return candidate.shape as Record<string, { _def?: { description?: string } }>;
+    }
+    current = candidate._def?.schema;
+  }
+  throw new Error('无法定位 task 输入 schema 的对象层（ZodEffects 包装层数已变化）');
+}

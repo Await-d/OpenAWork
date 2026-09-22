@@ -1,5 +1,7 @@
 import { Schema } from 'effect';
-export declare const ProviderFailureClassification: Schema.Literal<'context-overflow'>;
+export declare const ProviderFailureClassification: Schema.Literals<
+  readonly ['context-overflow', 'payload-too-large']
+>;
 export type ProviderFailureClassification = typeof ProviderFailureClassification.Type;
 declare const HttpRequestDetails_base: Schema.Class<
   HttpRequestDetails,
@@ -50,7 +52,10 @@ declare const InvalidRequestReason_base: Schema.Class<
     readonly _tag: Schema.tag<'InvalidRequest'>;
     readonly message: Schema.String;
     readonly parameter: Schema.optional<Schema.String>;
-    readonly classification: Schema.optional<Schema.Literal<'context-overflow'>>;
+    readonly classification: Schema.optional<
+      Schema.Literals<readonly ['context-overflow', 'payload-too-large']>
+    >;
+    readonly cause: Schema.optional<Schema.Unknown>;
     readonly providerMetadata: Schema.optional<
       Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
     >;
@@ -178,6 +183,8 @@ declare const InvalidProviderOutputReason_base: Schema.Class<
     readonly message: Schema.String;
     readonly route: Schema.optional<Schema.String>;
     readonly raw: Schema.optional<Schema.String>;
+    readonly classification: Schema.optional<Schema.Literals<readonly ['incomplete-stream']>>;
+    readonly cause: Schema.optional<Schema.Unknown>;
     readonly providerMetadata: Schema.optional<
       Schema.$Record<Schema.String, Schema.$Record<Schema.String, Schema.Unknown>>
     >;

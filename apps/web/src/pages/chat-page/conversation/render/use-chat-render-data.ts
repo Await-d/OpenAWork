@@ -19,6 +19,11 @@ import {
 } from './chat-page-utils.js';
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
 import {
+  buildSubagentNoticeGroups,
+  mergeNoticeGroupsIntoRenderGroups,
+} from '../../../../components/conversation-runtime/messages/subagent-notice-groups.js';
+import type { SubagentNotice } from '@openAwork/shared';
+import {
   buildChatContextUsageSnapshot,
   resolveEffectiveContextWindow,
   type ChatContextUsageSnapshot,
@@ -123,6 +128,7 @@ export interface ChatRenderDataInput {
   handleCopyMessageGroup: (messages: ChatMessage[]) => void;
   openChildSessionInspector: (sessionId: string) => void;
   selectedChildSessionId: string | null;
+  subagentNotices?: SubagentNotice[];
   taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined;
   visibleMessageCount?: number;
   serverTotalTurnCount?: number | null;
@@ -183,6 +189,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     handleCopyMessageGroup,
     openChildSessionInspector,
     selectedChildSessionId,
+    subagentNotices,
     taskToolRuntimeLookup,
     visibleMessageCount,
     serverTotalTurnCount,
@@ -669,10 +676,14 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   ]);
 
   const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    return groupChatRenderEntries(historicalRenderedMessageEntries).map((group) =>
+    const messageGroups = groupChatRenderEntries(historicalRenderedMessageEntries).map((group) =>
       decorateAssistantGroupActions(group, handleCopyMessageGroup),
     );
-  }, [handleCopyMessageGroup, historicalRenderedMessageEntries]);
+    return mergeNoticeGroupsIntoRenderGroups({
+      messageGroups,
+      noticeGroups: buildSubagentNoticeGroups(subagentNotices ?? []),
+    });
+  }, [handleCopyMessageGroup, historicalRenderedMessageEntries, subagentNotices]);
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     const mergedEntries = mergeStreamingEntryIntoHistoricalEntries(
@@ -686,9 +697,13 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       return historicalGroupedMessageEntries;
     }
 
-    return groupChatRenderEntries(mergedEntries).map((group) =>
+    const messageGroups = groupChatRenderEntries(mergedEntries).map((group) =>
       decorateAssistantGroupActions(group, handleCopyMessageGroup),
     );
+    return mergeNoticeGroupsIntoRenderGroups({
+      messageGroups,
+      noticeGroups: buildSubagentNoticeGroups(subagentNotices ?? []),
+    });
   }, [
     activeStreamClientRequestId,
     activeStreamMessageId,
@@ -696,6 +711,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     historicalGroupedMessageEntries,
     historicalRenderedMessageEntries,
     streamingRenderedMessageEntry,
+    subagentNotices,
   ]);
 
   return {

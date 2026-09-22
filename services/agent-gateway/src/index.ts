@@ -684,6 +684,25 @@ try {
   startParentProcessWatch();
   bootLogger.flush(bootContext, 200);
 
+  // T-26：单通道交付的重启恢复扫描——补偿「父会话繁忙时留库待消费」的通知。
+  // 放在 listen 之后：投递/唤醒可能触发模型执行，不应拖延服务就绪。
+  step = bootLogger.start('gateway.task-job-recovery');
+  try {
+    const { recoverPendingTaskDeliveries } = await import('./task/task-job-recovery.js');
+    const recovery = await recoverPendingTaskDeliveries();
+    bootLogger.succeed(step, undefined, {
+      attempted: recovery.attempted,
+      deferred: recovery.deferred,
+      dropped: recovery.dropped,
+      failed: recovery.failed,
+      skipped: recovery.skipped,
+      woken: recovery.woken,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLogger.fail(step, message);
+  }
+
   step = bootLogger.start('gateway.pairing-qr');
   const pairingSession = await pairingManager.generatePairingCode();
   qrcodeTerminal.generate(pairingSession.qrData, { small: true }, (qr: string) => {

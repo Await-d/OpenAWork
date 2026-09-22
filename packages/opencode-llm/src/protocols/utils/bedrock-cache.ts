@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 import type { CacheHint } from '../../schema/index.js';
-import { newBreakpoints, ttlBucket, type Breakpoints } from './cache.js';
+import { newBreakpoints, ttlBucket } from './cache.js';
 
 // Bedrock cache markers are positional: emit a `cachePoint` block immediately
 // after the content the caller wants treated as a cacheable prefix. Bedrock
@@ -18,8 +18,38 @@ export type CachePointBlock = Schema.Schema.Type<typeof CachePointBlock>;
 // budget is respected across `system`, `messages`, and `tools`.
 export const BEDROCK_BREAKPOINT_CAP = 4;
 
-export type { Breakpoints } from './cache.js';
-export const breakpoints = () => newBreakpoints(BEDROCK_BREAKPOINT_CAP);
+const LEGACY_CLAUDE = [
+  'anthropic.claude-instant',
+  'anthropic.claude-v1',
+  'anthropic.claude-v2',
+  'anthropic.claude-3-',
+];
+
+// Legacy Claude releases support explicit caching but only for five minutes.
+const CLAUDE_5M = [
+  'anthropic.claude-3-5-sonnet-20241022-v2:0',
+  'anthropic.claude-3-5-haiku-20241022-v1:0',
+  'anthropic.claude-3-7-sonnet-20250219-v1:0',
+  'anthropic.claude-sonnet-4-20250514-v1:0',
+  'anthropic.claude-opus-4-20250514-v1:0',
+  'anthropic.claude-opus-4-1-20250805-v1:0',
+];
+
+// Only Claude supports explicit `cachePoint` markers; other families (Nova,
+// Llama, Mistral, …) reject them with a ValidationException, and legacy Claude
+// generations reject the 1h TTL. Gating here prevents a 400 on every request.
+export const breakpoints = (modelID: string) => {
+  // Substring matching also handles regional prefixes and model-bearing ARNs.
+  const short = CLAUDE_5M.some((id) => modelID.includes(id));
+  return {
+    ...newBreakpoints(BEDROCK_BREAKPOINT_CAP),
+    supported:
+      modelID.includes('anthropic.claude-') &&
+      (short || !LEGACY_CLAUDE.some((id) => modelID.includes(id))),
+    ttl1h: !short,
+  };
+};
+export type Breakpoints = ReturnType<typeof breakpoints>;
 
 const DEFAULT_5M: CachePointBlock = { cachePoint: { type: 'default' } };
 const DEFAULT_1H: CachePointBlock = { cachePoint: { type: 'default', ttl: '1h' } };
@@ -28,13 +58,14 @@ export const block = (
   breakpoints: Breakpoints,
   cache: CacheHint | undefined,
 ): CachePointBlock | undefined => {
+  if (!breakpoints.supported) return undefined;
   if (cache?.type !== 'ephemeral' && cache?.type !== 'persistent') return undefined;
   if (breakpoints.remaining <= 0) {
     breakpoints.dropped += 1;
     return undefined;
   }
   breakpoints.remaining -= 1;
-  return ttlBucket(cache.ttlSeconds) === '1h' ? DEFAULT_1H : DEFAULT_5M;
+  return breakpoints.ttl1h && ttlBucket(cache.ttlSeconds) === '1h' ? DEFAULT_1H : DEFAULT_5M;
 };
 
 export * as BedrockCache from './bedrock-cache.js';

@@ -69,12 +69,14 @@ function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): s
 }
 
 function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
+  // 只认规范名 `read`。改名前的审计行一律不算证据：方向是 fail-safe ——
+  // 模型重新读一次即可，不会因此跳过读取。
   const rows = sqliteAll<AuditLogRow>(
     `SELECT input_json, output_json
      FROM audit_logs
      WHERE session_id = ?
        AND is_error = 0
-       AND tool_name IN ('read', 'workspace_read_file')
+       AND tool_name = 'read'
      ORDER BY id DESC
      LIMIT 50`,
     [sessionId],

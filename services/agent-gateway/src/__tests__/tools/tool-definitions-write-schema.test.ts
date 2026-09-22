@@ -38,6 +38,15 @@ describe('buildGatewayToolDefinitions write schema', () => {
         'click',
         'type',
         'press',
+        'hover',
+        'check',
+        'select',
+        'find',
+        'frames',
+        'evaluate',
+        'console',
+        'network_list',
+        'network_get',
         'scroll',
         'wait',
         'content',
@@ -50,6 +59,16 @@ describe('buildGatewayToolDefinitions write schema', () => {
       amount: { type: 'integer', minimum: 1, maximum: 10000 },
       ms: { type: 'integer', minimum: 0, maximum: 60000 },
       key: { type: 'string' },
+      checked: { type: 'boolean' },
+      values: { type: 'array', minItems: 1, maxItems: 50 },
+      limit: { type: 'integer', minimum: 1, maximum: 200 },
+      script: { type: 'string', maxLength: 20000 },
+      args: { type: 'array', maxItems: 20 },
+      level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'] },
+      clear: { type: 'boolean' },
+      urlContains: { type: 'string' },
+      method: { type: 'string' },
+      requestId: { type: 'string' },
     });
   });
 
@@ -61,7 +80,19 @@ describe('buildGatewayToolDefinitions write schema', () => {
     expect(desktopControlTool).toBeDefined();
     expect(desktopControlTool?.function.parameters.required).toEqual(['action']);
     expect(desktopControlTool?.function.parameters.properties.action).toMatchObject({
-      enum: ['status', 'screenshot', 'click', 'type', 'key', 'hotkey', 'scroll', 'wait'],
+      enum: [
+        'status',
+        'screenshot',
+        'click',
+        'type',
+        'key',
+        'hotkey',
+        'scroll',
+        'wait',
+        'drag',
+        'mouse_move',
+        'long_press',
+      ],
     });
     expect(desktopControlTool?.function.parameters.properties).toMatchObject({
       delayMs: { type: 'integer', minimum: 0, maximum: 5000 },
@@ -69,6 +100,11 @@ describe('buildGatewayToolDefinitions write schema', () => {
       clickAction: { type: 'string', enum: ['click', 'double_click', 'down', 'up'] },
       keys: { type: 'array', minItems: 2, maxItems: 4 },
       ms: { type: 'integer', minimum: 0, maximum: 10000 },
+      box: { type: 'array', minItems: 4, maxItems: 4 },
+      fromX: { type: 'number' },
+      fromY: { type: 'number' },
+      toX: { type: 'number' },
+      toY: { type: 'number' },
     });
   });
 });

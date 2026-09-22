@@ -160,6 +160,87 @@ describe('resolveToolCallImageSource — desktop_automation / desktop_control', 
   });
 });
 
+describe('resolveToolCallImageSource — computer_use', () => {
+  const SCREENSHOT_ATTACHMENT = {
+    type: 'input_image' as const,
+    artifactId: 'artifact-gui-1',
+    fileName: 'computer-use-final.png',
+    mimeType: 'image/png',
+    detail: 'high' as const,
+  };
+
+  it('从 attachments 的 artifactId 解析为 artifact 源（output 里没有 artifactId）', () => {
+    const output = JSON.stringify({
+      success: true,
+      steps: 2,
+      summary: '已完成：打开了系统设置',
+      history: [{ step: 1, thought: '先点开始菜单', action: 'click', success: true }],
+    });
+
+    expect(resolveToolCallImageSource('computer_use', {}, output, [SCREENSHOT_ATTACHMENT])).toEqual(
+      {
+        kind: 'artifact',
+        artifactId: 'artifact-gui-1',
+        alt: 'GUI 操作截图',
+      },
+    );
+  });
+
+  it('无 attachments / 空数组 → null（截图不在 output 里）', () => {
+    const output = JSON.stringify({ success: true, steps: 1, summary: '完成', history: [] });
+
+    expect(resolveToolCallImageSource('computer_use', {}, output)).toBeNull();
+    expect(resolveToolCallImageSource('computer_use', {}, output, [])).toBeNull();
+  });
+
+  it('跳过非图片附件，取第一个可用的图片附件', () => {
+    const attachments = [
+      { type: 'input_image' as const, artifactId: 'artifact-text', mimeType: 'text/plain' },
+      { type: 'input_image' as const, artifactId: 'artifact-gui-2', mimeType: 'image/jpeg' },
+    ];
+
+    expect(resolveToolCallImageSource('computer_use', {}, undefined, attachments)).toEqual({
+      kind: 'artifact',
+      artifactId: 'artifact-gui-2',
+      alt: 'GUI 操作截图',
+    });
+  });
+
+  it('没有 artifactId 时回退 imageUrl（data URL → inline，http(s) → remote）', () => {
+    expect(
+      resolveToolCallImageSource('computer_use', {}, undefined, [
+        { type: 'input_image', imageUrl: PNG_DATA_URL, mimeType: 'image/png' },
+      ]),
+    ).toEqual({ kind: 'inline', src: PNG_DATA_URL, alt: 'GUI 操作截图' });
+    expect(
+      resolveToolCallImageSource('computer_use', {}, undefined, [
+        { type: 'input_image', imageUrl: REMOTE_IMAGE_URL, mimeType: 'image/png' },
+      ]),
+    ).toEqual({ kind: 'remote', src: REMOTE_IMAGE_URL, alt: 'GUI 操作截图' });
+  });
+
+  it('附件只有无法识别的 imageUrl（如网关相对路径）→ null', () => {
+    expect(
+      resolveToolCallImageSource('computer_use', {}, undefined, [
+        { type: 'input_image', imageUrl: '/attachments/a.png', mimeType: 'image/png' },
+      ]),
+    ).toBeNull();
+  });
+
+  it('其它工具不消费 attachments', () => {
+    expect(
+      resolveToolCallImageSource('read', { file_path: '/workspace/a.ts' }, 'ok', [
+        SCREENSHOT_ATTACHMENT,
+      ]),
+    ).toBeNull();
+    expect(
+      resolveToolCallImageSource('desktop_control', {}, JSON.stringify({ success: true }), [
+        SCREENSHOT_ATTACHMENT,
+      ]),
+    ).toBeNull();
+  });
+});
+
 describe('resolveToolCallImageSource — 其它工具', () => {
   it('无关工具即使带图片字段也返回 null', () => {
     expect(resolveToolCallImageSource('read', { file_path: '/workspace/a.png' })).toBeNull();

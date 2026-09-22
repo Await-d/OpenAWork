@@ -103,7 +103,7 @@ export async function executeShellCommandTool(
  * 工具定义
  */
 export const shellCommandToolDefinition = {
-  name: 'execute_shell_command',
+  name: 'shell_command',
   description: '在系统上执行 Shell 命令（支持 Bash 和 PowerShell）',
   inputSchema: shellCommandInputSchema,
   outputSchema: shellCommandOutputSchema,

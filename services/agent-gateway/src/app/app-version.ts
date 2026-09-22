@@ -90,7 +90,7 @@ function walkPackageJson(
  * 1. `OPENAWORK_APP_VERSION` —— 桌面端 / 启动器显式注入。
  * 2. 工作区 root `openAwork` package.json —— monorepo 源码运行兜底。
  * 3. 最近一个 package.json 的 version —— bun-compile 也可能命中。
- * 4. `npm_package_version` —— `pnpm run` 之类的间接兜底。
+ * 4. `npm_package_version` —— `bun run` 之类的间接兜底。
  * 5. `'0.0.1'` —— 终极兜底；正常生产环境不应该走到这里。
  */
 export function loadAppVersion(options: LoadAppVersionOptions = {}): string {

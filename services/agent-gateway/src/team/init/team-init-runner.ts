@@ -233,6 +233,7 @@ const EVIDENCE_IGNORED_DIRS = new Set([
  */
 const MANIFEST_CANDIDATES: Array<{ label: string; rel: string; maxChars: number }> = [
   { label: 'package.json', rel: 'package.json', maxChars: 2000 },
+  { label: 'bun.lock', rel: 'bun.lock', maxChars: 600 },
   { label: 'pnpm-workspace.yaml', rel: 'pnpm-workspace.yaml', maxChars: 600 },
   { label: 'tsconfig.json', rel: 'tsconfig.json', maxChars: 800 },
   { label: 'pyproject.toml', rel: 'pyproject.toml', maxChars: 1500 },

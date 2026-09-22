@@ -269,6 +269,16 @@ describe('bash-tools', () => {
       expect(description).not.toMatch(/\$\{maxLines\}/);
       expect(description).not.toMatch(/\$\{maxBytes\}/);
     });
+
+    it('不示范会被守卫拒绝的写法（HEREDOC / 命令替换 / 换行）', () => {
+      const description = bashToolDefinition.description;
+      // 守卫无条件拒绝 `$(...)` 与任何换行（见 DISALLOWED_PATTERNS），描述里就
+      // 不能再教 HEREDOC 或 `$(cat <<'EOF' ...)`，否则模型照做必被拒。
+      expect(description).not.toContain("<<'EOF'");
+      expect(description).toContain('--body-file');
+      expect(description).toContain('命令替换');
+      expect(description).not.toContain('仅在引号字符串内允许换行');
+    });
   });
 
   describe('buildBashPermissionScope', () => {

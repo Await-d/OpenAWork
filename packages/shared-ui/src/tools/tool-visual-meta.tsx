@@ -80,7 +80,7 @@ const TOOL_TO_ICON: Record<string, ToolIconKey> = {
   write: 'code-lines',
   edit: 'edit',
   multi_edit: 'edit',
-  apply_patch: 'apply-patch',
+  patch: 'apply-patch',
   bash: 'console',
   webfetch: 'window-cursor',
   websearch: 'window-cursor',

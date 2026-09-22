@@ -17,6 +17,9 @@ pub fn status() -> DesktopControlStatus {
             key: unsupported.clone(),
             hotkey: unsupported.clone(),
             scroll: unsupported.clone(),
+            drag: unsupported.clone(),
+            mouse_move: unsupported.clone(),
+            long_press: unsupported.clone(),
             wait: DesktopControlCapability::available("std-thread-sleep"),
         },
     }
@@ -40,6 +43,9 @@ pub fn execute_action(
         | DesktopControlAction::TypeText(_)
         | DesktopControlAction::Key(_)
         | DesktopControlAction::Hotkey(_)
-        | DesktopControlAction::Scroll(_) => Err(DesktopControlError::new(UNSUPPORTED_REASON)),
+        | DesktopControlAction::Scroll(_)
+        | DesktopControlAction::Drag(_)
+        | DesktopControlAction::MouseMove(_)
+        | DesktopControlAction::LongPress(_) => Err(DesktopControlError::new(UNSUPPORTED_REASON)),
     }
 }

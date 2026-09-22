@@ -2,6 +2,7 @@ import type { DialogueMode } from '@openAwork/shared';
 import type { GatewayToolDefinition } from '../tools/tool-definitions.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
+import { isTaskToolName } from '../task/task-tools.js';
 import {
   CHANNEL_SEND_TOOL_NAMES,
   FEISHU_CHANNEL_TOOL_NAMES,
@@ -103,17 +104,12 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'codegraph_callers':
     case 'codegraph_impact':
     case 'read_tool_output':
-    case 'workspace_tree':
-    case 'workspace_read_file':
-    case 'workspace_search':
     case 'workspace_review_status':
       return 'read';
     case 'edit':
     case 'write':
-    case 'apply_patch':
+    case 'patch':
     case 'lsp_rename':
-    case 'workspace_write_file':
-    case 'workspace_create_file':
     case 'workspace_create_directory':
     case 'workspace_review_revert':
       return 'edit';
@@ -122,8 +118,6 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'bash':
     case 'interactive_bash':
     case 'run_bash_in_background':
-    case 'read_background_bash_output':
-    case 'terminate_background_bash':
       return 'bash';
     case 'mcp_list_tools':
     case 'mcp_call':
@@ -287,7 +281,7 @@ export function isGatewayToolEnabledForSessionMetadata(
     return false;
   }
 
-  if (toolName === 'task') {
+  if (isTaskToolName(toolName)) {
     return isTaskToolEnabledForSessionMetadata(metadata);
   }
 

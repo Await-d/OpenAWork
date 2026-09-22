@@ -43,6 +43,7 @@ function createSetters(): SessionSnapshotLoaderSetters {
     () => undefined;
   const setIsSessionSnapshotReady: SessionSnapshotLoaderSetters['setIsSessionSnapshotReady'] = () =>
     undefined;
+  const setSubagentNotices: SessionSnapshotLoaderSetters['setSubagentNotices'] = () => undefined;
 
   return {
     setMessages,
@@ -59,6 +60,7 @@ function createSetters(): SessionSnapshotLoaderSetters {
     setLatestUpstreamSummary,
     setRecoveredStreamSnapshot,
     setIsSessionSnapshotReady,
+    setSubagentNotices,
   };
 }
 

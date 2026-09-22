@@ -354,7 +354,7 @@ resetProviderCache();
 ### 测试命令
 
 ```bash
-pnpm --filter @openAwork/agent-core test src/utils/shell/shell-executor.test.ts
+bun run --filter @openAwork/agent-core test src/utils/shell/shell-executor.test.ts
 ```
 
 ## 使用示例

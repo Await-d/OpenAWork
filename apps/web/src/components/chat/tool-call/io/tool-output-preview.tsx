@@ -26,10 +26,6 @@ import {
   extractReviewChangesFromOutput,
   ReviewStatusPreview,
 } from '../previews/review-status-preview.js';
-import {
-  extractSearchHitsFromOutput,
-  SearchResultsPreview,
-} from '../previews/search-results-preview.js';
 import { SuccessConfirmPreview } from '../previews/success-confirm-preview.js';
 import {
   TaskListPreview,
@@ -71,24 +67,23 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
 /**
  * Render a tool's output expansion panel. Tries domain-aware paths in order:
  *   1. todo-family → TodoListPreview from metadata.todos
- *   2. read / workspace_read_file → FileContentPreview
+ *   2. read → FileContentPreview
  *   3. grep → GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview
  *   4. glob → FilePathListPreview
- *   5. workspace_search → SearchResultsPreview
- *   6. workspace_tree / list → TreeNodesPreview
- *   7. workspace_review_status → ReviewStatusPreview
- *   8. workspace_create_directory / workspace_review_revert → SuccessConfirmPreview
- *   9. mcp_list_tools → McpToolListPreview
- *  10. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
- *  11. read_tool_output → ToolOutputReadPreview
- *  12. background_output → BackgroundOutputPreview
- *  13. codegraph_* → CodegraphResultPreview
- *  14. skill → SkillContentPreview (unwraps `<skill_content>`)
- *  15. question / askuserquestion → QuestionAnswerPreview
- *  16. MCP/shape-matched envelope → McpResultPreview
- *  17. envelope `{output|content|text|message|result: string}` → text
+ *   5. list → TreeNodesPreview
+ *   6. workspace_review_status → ReviewStatusPreview
+ *   7. workspace_create_directory / workspace_review_revert → SuccessConfirmPreview
+ *   8. mcp_list_tools → McpToolListPreview
+ *   9. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
+ *  10. read_tool_output → ToolOutputReadPreview
+ *  11. background_output → BackgroundOutputPreview
+ *  12. codegraph_* → CodegraphResultPreview
+ *  13. skill → SkillContentPreview (unwraps `<skill_content>`)
+ *  14. question / askuserquestion → QuestionAnswerPreview
+ *  15. MCP/shape-matched envelope → McpResultPreview
+ *  16. envelope `{output|content|text|message|result: string}` → text
  *      + DiagnosticsPreview if `diagnostics` array is present
- *  18. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
+ *  17. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
  *
  * Order matters: the shape-matched MCP and skill/question branches must run
  * before the generic text/JSON fallbacks or those envelopes get dumped raw.
@@ -112,7 +107,7 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     }
   }
 
-  if (normalized === 'read' || normalized === 'workspace_read_file') {
+  if (normalized === 'read') {
     const data = extractFileContentFromOutput(output);
     if (data) return <FileContentPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
@@ -136,12 +131,7 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
     if (paths) return <FilePathListPreview paths={paths} defaultExpanded={shouldExpandByDefault} />;
   }
 
-  if (normalized === 'workspace_search') {
-    const data = extractSearchHitsFromOutput(output);
-    if (data) return <SearchResultsPreview data={data} />;
-  }
-
-  if (normalized === 'workspace_tree' || normalized === 'list') {
+  if (normalized === 'list') {
     const data = extractTreeNodesFromOutput(output);
     if (data) return <TreeNodesPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }

@@ -559,27 +559,31 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
   const groupsWithHistoryEdit = useMemo(() => {
     if (!historyEditPrompt) return groupedMessageEntries;
 
-    return groupedMessageEntries.map((group) => ({
-      ...group,
-      entries: group.entries.map((entry) => {
-        if (entry.message.id !== historyEditPrompt.messageId) return entry;
+    return groupedMessageEntries.map((group) => {
+      // 通知群组没有可编辑的消息，原样透传（判别联合保证此处已窄化）。
+      if (group.kind !== 'messages') return group;
+      return {
+        ...group,
+        entries: group.entries.map((entry) => {
+          if (entry.message.id !== historyEditPrompt.messageId) return entry;
 
-        return {
-          ...entry,
-          renderContent: () => (
-            <HistoryEditInlineEditor
-              key={historyEditPrompt.messageId}
-              initialText={historyEditPrompt.text}
-              inputParts={historyEditPrompt.inputParts}
-              onClose={onCloseHistoryEdit}
-              onResendCurrent={onResendHistoryEdit}
-              onContinueCurrent={onContinueHistoryEdit}
-              onCreateBranch={onCreateBranchFromHistoryEdit}
-            />
-          ),
-        };
-      }),
-    }));
+          return {
+            ...entry,
+            renderContent: () => (
+              <HistoryEditInlineEditor
+                key={historyEditPrompt.messageId}
+                initialText={historyEditPrompt.text}
+                inputParts={historyEditPrompt.inputParts}
+                onClose={onCloseHistoryEdit}
+                onResendCurrent={onResendHistoryEdit}
+                onContinueCurrent={onContinueHistoryEdit}
+                onCreateBranch={onCreateBranchFromHistoryEdit}
+              />
+            ),
+          };
+        }),
+      };
+    });
   }, [
     groupedMessageEntries,
     historyEditPrompt,

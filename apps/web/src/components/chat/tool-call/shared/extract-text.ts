@@ -1,7 +1,7 @@
 /**
  * Pull a human-readable text payload out of a tool output. Most OpenAWork
  * built-in tools return `{output: "<rendered text>", ...}` (todoread, skill,
- * lsp_*, etc.); some return `{content: "<text>"}` (workspace_read_file).
+ * lsp_*, etc.); some return `{content: "<text>"}` (read).
  * We surface that text so users see the formatted message instead of an
  * envelope full of structural noise.
  */

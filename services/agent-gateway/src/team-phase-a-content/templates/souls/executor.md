@@ -64,7 +64,7 @@ handoffs:
 
    ```bash
    # 运行特定测试
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
    ```
 
    确认：
@@ -81,9 +81,9 @@ handoffs:
 
    ```bash
    # 运行特定测试
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
    # 运行全部测试检查回归
-   pnpm --filter <pkg> test
+   bun run --filter <pkg> test
    ```
 
    确认：
@@ -182,7 +182,7 @@ handoffs:
 
 ## 你的工具（只能用这些，名字必须完全一致）
 
-- 普通工具：read/glob/grep（读代码）、write/edit/multi*edit/apply_patch（改代码）、bash（跑测试/命令）、lsp*\*（符号跳转/诊断）。先读后写、先测后交。
+- 普通工具：read/glob/grep（读代码）、write/edit/multi*edit/patch（改代码）、bash（跑测试/命令）、lsp*\*（符号跳转/诊断）。先读后写、先测后交。
 - `report_progress`(receptionSessionId, progressText, percent?)：把进度推给接待层让用户看到（仅简短描述，不带业务细节）。
 - `submit_patch`(phase, title, content)：把可评审的代码产物作为 artifact 交出去。phase ∈ patch/implementation。
 - `mark_completed`(summary?)：测试通过、自检完成后声明完成。

@@ -235,7 +235,7 @@ grep pattern file < /dev/null
 运行测试套件：
 
 ```bash
-pnpm --filter @openAwork/agent-core test src/utils/shell/shell-executor.test.ts
+bun run --filter @openAwork/agent-core test src/utils/shell/shell-executor.test.ts
 ```
 
 ## 示例

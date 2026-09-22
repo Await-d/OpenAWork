@@ -256,6 +256,9 @@ export function recoverActiveAssistantStream(
         output: event.output,
         isError: hasPendingPermission ? false : event.isError,
         status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+        ...(event.attachments && event.attachments.length > 0
+          ? { attachments: event.attachments }
+          : {}),
         ...(hasPendingPermission && event.pendingPermissionRequestId
           ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
           : {}),

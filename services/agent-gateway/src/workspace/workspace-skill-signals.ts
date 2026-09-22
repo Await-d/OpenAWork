@@ -25,6 +25,7 @@ const TREE_MAX_ENTRIES = 200;
 const README_NAMES = ['README.md', 'README.en.md', 'readme.md'];
 const MANIFEST_NAMES_PRIORITY = [
   'package.json',
+  'bun.lock',
   'pnpm-workspace.yaml',
   'Cargo.toml',
   'pyproject.toml',

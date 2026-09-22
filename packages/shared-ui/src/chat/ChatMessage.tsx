@@ -17,6 +17,11 @@ export interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, style }: ChatMessageProps) {
+  // Gateway-injected notices (`role: 'synthetic'`, e.g. subagent completion
+  // delivery) are not conversation bubbles. They are rendered by the dedicated
+  // notice row; never fall through to the assistant bubble style.
+  if (message.role === 'synthetic') return null;
+
   const isUser = message.role === 'user';
   const text = message.content.map(renderContent).join('');
 

@@ -52,9 +52,12 @@ export function MarkdownImage({ src, alt, title, imageStyle }: MarkdownImageProp
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
 
-  // 空地址（被 react-markdown 过滤掉的危险协议等）保持默认渲染，不接查看器；
-  // 链接内的图片同理回退为纯 `<img>`，把点击留给 `<a>` 的跳转语义。
-  if (!src || insideLink) {
+  // 空地址（`![]()`、或被 react-markdown 抹掉协议的危险链接）不渲染：`<img src="">`
+  // 会让浏览器把当前页面当图片再请求一次（React 也会就此告警）。
+  if (!src) return null;
+
+  // 链接内的图片回退为纯 `<img>`，把点击留给 `<a>` 的跳转语义。
+  if (insideLink) {
     return <img src={src} alt={alt ?? ''} title={title} style={imageStyle} loading="lazy" />;
   }
 

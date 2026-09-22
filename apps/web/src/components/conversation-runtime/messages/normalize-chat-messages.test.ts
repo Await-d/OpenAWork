@@ -25,6 +25,14 @@ const LEGACY_TOOL_CALL = JSON.stringify({
   },
 });
 
+/** `computer_use` 最终截图的 tool result 附件形态（网关只下发 artifactId）。 */
+const GUI_SNAPSHOT = {
+  type: 'input_image' as const,
+  artifactId: 'artifact-gui-1',
+  fileName: 'computer-use-final.png',
+  mimeType: 'image/png',
+};
+
 function firstMessage(rawMessages: unknown): ChatMessage | undefined {
   return normalizeChatMessages(rawMessages)[0];
 }
@@ -171,11 +179,33 @@ describe('normalizeChatMessages · 输入与字段集', () => {
       42,
       { role: 'system', content: '系统消息' },
       { role: 'tool', content: '字符串工具内容' },
+      {
+        id: 's-1',
+        role: 'synthetic',
+        content: '子代理已完成 · 审计会话唤醒原语',
+        description: '审计会话唤醒原语',
+        metadata: { source: 'subagent', childID: 'child-1', agent: 'explore', state: 'completed' },
+      },
       { id: 'u-1', role: 'user', content: '保留我' },
     ]);
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.id).toBe('u-1');
+  });
+
+  it('synthetic（网关注入的子代理通知）不得进入 transcript', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 's-2',
+        role: 'synthetic',
+        content: '子代理已失败 · 修复登录',
+        description: '修复登录',
+        metadata: { source: 'subagent', childID: 'child-2', agent: 'general', state: 'error' },
+        createdAt: 1,
+      },
+    ]);
+
+    expect(messages).toHaveLength(0);
   });
 });
 
@@ -354,6 +384,66 @@ describe('normalizeChatMessages · 数组内容分支', () => {
       output: 'ok',
     });
     expect(messages[0]?.parts?.[1]).toMatchObject({ status: 'completed', output: 'ok' });
+  });
+
+  it('跨消息合并 tool_result 时把 attachments 同步到 parts', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'a-gui',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '开始 GUI 操作' },
+          {
+            type: 'tool_call',
+            toolCallId: 'tc-gui',
+            toolName: 'computer_use',
+            input: { instruction: '打开系统设置' },
+          },
+        ],
+        createdAt: 1,
+      },
+      {
+        id: 't-gui',
+        role: 'tool',
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'tc-gui',
+            toolName: 'computer_use',
+            output: '{"success":true}',
+            isError: false,
+            attachments: [GUI_SNAPSHOT],
+          },
+        ],
+        createdAt: 2,
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.parts?.[1]).toMatchObject({ attachments: [GUI_SNAPSHOT] });
+  });
+
+  it('孤立 tool_result 的回退消息保留 attachments', () => {
+    const message = requireFirstMessage([
+      {
+        id: 't-gui-orphan',
+        role: 'tool',
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'tc-gui-orphan',
+            toolName: 'computer_use',
+            output: '{"success":true}',
+            isError: false,
+            attachments: [GUI_SNAPSHOT],
+          },
+        ],
+        createdAt: 5,
+      },
+    ]);
+
+    const tool = message.parts?.find((part): part is ChatToolPart => part.type === 'tool');
+    expect(tool?.attachments).toEqual([GUI_SNAPSHOT]);
   });
 
   it('孤立的 tool_result 生成回退消息', () => {

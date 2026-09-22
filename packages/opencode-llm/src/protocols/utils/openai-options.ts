@@ -76,9 +76,21 @@ export const include = (
   return filtered.length > 0 ? filtered : undefined;
 };
 
+// OpenAI limits `prompt_cache_key` to 64 chars; DeepSeek and Zai inherit the
+// same limit through their OpenAI-compatible APIs. Clamp with unicode-aware
+// slicing so an over-long key surfaces as a truncated cache key instead of an
+// HTTP 400 that fails the whole request.
+export const OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
+
 export const promptCacheKey = (request: LLMRequest) => {
+  // Caching explicitly disabled: never send a key (it would also enable the
+  // provider-side cache the caller asked to skip).
+  if (request.cache === 'none') return undefined;
   const value = options(request)?.promptCacheKey;
-  return typeof value === 'string' ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  const chars = Array.from(value);
+  if (chars.length <= OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH) return value;
+  return chars.slice(0, OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH).join('');
 };
 
 export const textVerbosity = (request: LLMRequest) => {

@@ -161,6 +161,9 @@ export class ModelDefaults extends Schema.Class('LLM.ModelDefaults')({
 export const ModelToolSchemaCompatibility = Schema.Literals(['gemini', 'moonshot']);
 export class ModelCompatibility extends Schema.Class('LLM.ModelCompatibility')({
   toolSchema: Schema.optional(ModelToolSchemaCompatibility),
+  // Some Anthropic-compatible relays never emit thinking signatures; when set
+  // to false the protocol replays unsigned thinking instead of dropping it.
+  requireSignature: Schema.optional(Schema.Boolean),
 }) {}
 (function (ModelCompatibility) {
   /** Normalize model/upstream compatibility metadata without projecting requests. */

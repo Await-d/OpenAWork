@@ -11,11 +11,18 @@ export interface State {
 }
 export declare const initial: () => State;
 export declare const stepStart: (state: State, events: LLMEvent[]) => State;
+export declare const textStart: (
+  state: State,
+  events: LLMEvent[],
+  id: string,
+  providerMetadata?: ProviderMetadata,
+) => State;
 export declare const textDelta: (
   state: State,
   events: LLMEvent[],
   id: string,
   text: string,
+  providerMetadata?: ProviderMetadata,
 ) => State;
 export declare const reasoningStart: (
   state: State,
@@ -35,18 +42,23 @@ export declare const reasoningEnd: (
   events: LLMEvent[],
   id: string,
   providerMetadata?: ProviderMetadata,
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text?: string,
 ) => State;
 export declare const textEnd: (
   state: State,
   events: LLMEvent[],
   id: string,
   providerMetadata?: ProviderMetadata,
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text?: string,
 ) => State;
 export declare const finish: (
   state: State,
   events: LLMEvent[],
   input: {
     readonly reason: FinishReason;
+    readonly reasonRaw?: string;
     readonly usage?: Usage;
     readonly providerMetadata?: ProviderMetadata;
   },

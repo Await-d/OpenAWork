@@ -5,10 +5,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const gatewayRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const bunCommand = process.platform === 'win32' ? 'bun.exe' : 'bun';
 const child = spawn(
-  pnpmCommand,
-  ['exec', 'tsx', 'src/verification/verify-message-v2-event-projection.ts'],
+  bunCommand,
+  ['x', 'tsx', 'src/verification/verify-message-v2-event-projection.ts'],
   {
     cwd: gatewayRoot,
     env: process.env,

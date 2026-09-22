@@ -59,9 +59,9 @@ src/
 ## 常用命令
 
 ```bash
-pnpm --filter @openAwork/mobile dev     # Expo 开发服务器
-pnpm --filter @openAwork/mobile build   # EAS 构建
-pnpm --filter @openAwork/mobile test    # Vitest
+bun run --filter @openAwork/mobile dev     # Expo 开发服务器
+bun run --filter @openAwork/mobile build   # EAS 构建
+bun run --filter @openAwork/mobile test    # Vitest
 ```
 
 ## 禁止事项

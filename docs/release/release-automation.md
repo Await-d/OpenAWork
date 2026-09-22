@@ -72,11 +72,11 @@
 
 发布前门禁（当前已接入 `Prepare Release`）：
 
-- `pnpm format:check`
-- `pnpm typecheck`
-- `pnpm --filter @openAwork/web build`
-- `pnpm --filter @openAwork/agent-gateway test:unit`
-- `pnpm --filter @openAwork/mobile test`
+- `bun run format:check`
+- `bun run typecheck`
+- `bun run --filter @openAwork/web build`
+- `bun run --filter @openAwork/agent-gateway test:unit`
+- `bun run --filter @openAwork/mobile test`
 - `scripts/release-notes.mjs` dry-run 校验（使用预计版本号生成发布稿草案）
 
 ### CI 与发布包的区别
@@ -100,8 +100,8 @@
 
 当前**暂不纳入**发布门禁的项目：
 
-- `pnpm --filter @openAwork/desktop exec vite build`
-- `pnpm --filter @openAwork/agent-gateway build:binary`
+- `cd apps/desktop && bunx vite build`（bun 的 `--filter` 只认脚本名，不能直接跑任意 bin）
+- `bun run --filter @openAwork/agent-gateway build:binary`
 
 这两项目前属于已知开发中红项，待相关负责人收口后再提升为正式门禁。
 
@@ -139,16 +139,16 @@
 ## 本地命令
 
 ```bash
-pnpm version:bump -- --bump auto
-pnpm version:bump -- --bump minor
-pnpm version:bump:dry-run
-pnpm build:desktop
-pnpm package:desktop
+bun run version:bump --bump auto
+bun run version:bump --bump minor
+bun run version:bump:dry-run
+bun run build:desktop
+bun run package:desktop
 ```
 
 ### 本地桌面安装包
 
-- `pnpm build:desktop` / `pnpm package:desktop` 会执行桌面端 Tauri 打包。
+- `bun run build:desktop` / `bun run package:desktop` 会执行桌面端 Tauri 打包。
 - 构建成功后，脚本会直接打印识别到的安装包路径。
 - 默认安装包目录为：`apps/desktop/src-tauri/target/release/bundle/`
 - Linux 本地打包前需先安装：`pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`

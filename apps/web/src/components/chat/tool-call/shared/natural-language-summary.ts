@@ -26,7 +26,7 @@ export function naturalLanguageSummary(toolName: string, input: Record<string, u
   // ── 文件编辑 ──
   if (n === 'write') return '已创建了文件';
   if (n === 'edit' || n === 'multi_edit' || n === 'hash_edit') return '已编辑了文件';
-  if (n === 'apply_patch') return '已应用了补丁';
+  if (n === 'patch') return '已应用了补丁';
   if (n === 'ast_grep_replace') return '已执行了 AST 替换';
   if (n === 'workspace_create_directory') return '已创建了目录';
   if (n === 'workspace_review_revert') return '已还原了文件';

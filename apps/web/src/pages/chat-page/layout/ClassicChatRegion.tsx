@@ -31,8 +31,16 @@ export interface ClassicChatRegionProps {
 
 export function ClassicChatRegion({ model }: ClassicChatRegionProps): ReactElement {
   const { chrome, ...view } = model;
-  const { sessionId, gatewayUrl, token, rightOpen, dialogueMode, permissionMode, messages, editorMode } =
-    view;
+  const {
+    sessionId,
+    gatewayUrl,
+    token,
+    rightOpen,
+    dialogueMode,
+    permissionMode,
+    messages,
+    editorMode,
+  } = view;
 
   return (
     <ChatConversationView
@@ -140,7 +148,10 @@ export function ClassicChatRegion({ model }: ClassicChatRegionProps): ReactEleme
               onCancel={() => chrome.multiSelect.disableMultiSelect()}
             />
           )}
-          <WorkflowRuntimeStatusStrip runtime={chrome.workflowRuntime} tasks={chrome.sessionTasks} />
+          <WorkflowRuntimeStatusStrip
+            runtime={chrome.workflowRuntime}
+            tasks={chrome.sessionTasks}
+          />
         </>
       }
     />

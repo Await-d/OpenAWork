@@ -1,6 +1,8 @@
+import type { InputImageContent } from '@openAwork/shared';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import { BatchToolCallCard } from '../cards/batch-tool-call-card.js';
 import { BlockToolCall } from './block-tool-call.js';
+import { ComputerUseToolCard } from '../cards/computer-use-tool-card.js';
 import { GenerateImageToolCard } from '../cards/generate-image-tool-card.js';
 import { ConvertMediaToolCard } from '../cards/convert-media-tool-card.js';
 import { GenerateAudioToolCard } from '../cards/generate-audio-tool-card.js';
@@ -22,6 +24,12 @@ export interface ToolCallDisplayProps {
   kind?: ToolCallCardProps['kind'];
   toolCallId?: string;
   pendingPermissionRequestId?: string;
+  /**
+   * tool result 的图片附件通道（`StreamToolResultChunk.attachments`）。
+   *
+   * 目前只有 `computer_use` 消费它（最终截图不在 output 里）；其余卡片忽略。
+   */
+  attachments?: readonly InputImageContent[];
 }
 
 export function ToolCallDisplay(props: ToolCallDisplayProps) {
@@ -94,6 +102,24 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
         status={props.status}
         isError={props.isError}
         durationMs={props.durationMs}
+      />
+    );
+  }
+
+  // computer_use 必须早于 isInlineTool 兜底：它不在 inline 名单里，但仍放在
+  // 兜底之前，避免后续有人把它误加进 INLINE_TOOLS 后静默退化成一行的 pill。
+  if (normalized === 'computer_use') {
+    return (
+      <ComputerUseToolCard
+        approvalActions={props.approvalActions}
+        attachments={props.attachments}
+        input={props.input}
+        output={props.output}
+        status={props.status}
+        isError={props.isError}
+        durationMs={props.durationMs}
+        kind={props.kind}
+        pendingPermissionRequestId={props.pendingPermissionRequestId}
       />
     );
   }

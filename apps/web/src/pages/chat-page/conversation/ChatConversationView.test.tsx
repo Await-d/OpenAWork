@@ -42,6 +42,7 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 
 function makeGroup(message: ChatMessage) {
   return {
+    kind: 'messages' as const,
     key: `group-${message.id}`,
     role: message.role,
     entries: [
@@ -204,10 +205,12 @@ describe('ChatConversationView — 基础骨架', () => {
     const streamColumn = scrollRegion.parentElement;
     expect(beforeMessages.parentElement).toBe(streamColumn?.parentElement);
     expect(beforeMessages.nextElementSibling).toBe(streamColumn);
-    expect(topBar.compareDocumentPosition(scrollRegion) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(scrollRegion.compareDocumentPosition(afterMessages) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
+    expect(
+      topBar.compareDocumentPosition(scrollRegion) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      scrollRegion.compareDocumentPosition(afterMessages) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('composer slot（composerFooterSlot / composerRightSlot）透传到 composer 区域', () => {
@@ -345,7 +348,9 @@ describe('ChatConversationView — 状态条 / 错误栏 / composer 分支', () 
   it('streamError 非空时渲染错误栏并透传 dismiss 回调', () => {
     const onDismissStreamError = vi.fn();
     render(
-      <ChatConversationView {...createViewProps({ streamError: '流式响应中断', onDismissStreamError })} />,
+      <ChatConversationView
+        {...createViewProps({ streamError: '流式响应中断', onDismissStreamError })}
+      />,
     );
 
     const errorBar = screen.getByTestId('chat-stream-error-bar');
@@ -368,7 +373,10 @@ describe('ChatConversationView — 状态条 / 错误栏 / composer 分支', () 
   it('composerDisabled + hint 时用禁用提示替代 composer', () => {
     render(
       <ChatConversationView
-        {...createViewProps({ composerDisabled: true, composerDisabledHint: '只读会话，暂不可发言' })}
+        {...createViewProps({
+          composerDisabled: true,
+          composerDisabledHint: '只读会话，暂不可发言',
+        })}
       />,
     );
 

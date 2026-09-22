@@ -262,7 +262,7 @@ describe('extractTextFromOutput', () => {
     });
   });
 
-  it('falls back to .content (workspace_read_file shape)', () => {
+  it('falls back to .content (read shape)', () => {
     expect(
       extractTextFromOutput({
         content: 'file body',
@@ -307,7 +307,7 @@ describe('extractTextFromOutput', () => {
 });
 
 describe('extractSearchHitsFromOutput', () => {
-  it('parses workspace_search results into structured hits', () => {
+  it('parses search results into structured hits', () => {
     const data = extractSearchHitsFromOutput({
       path: '/repo',
       query: 'foo',
@@ -348,7 +348,7 @@ describe('extractSearchHitsFromOutput', () => {
 });
 
 describe('extractTreeNodesFromOutput', () => {
-  it('reads workspace_tree nodes + meta', () => {
+  it('reads list nodes + meta', () => {
     const data = extractTreeNodesFromOutput({
       path: '/repo',
       depth: 2,
@@ -452,13 +452,13 @@ describe('batchSubInputSummary', () => {
     expect(out.length).toBeLessThanOrEqual(70);
   });
 
-  it('uses pattern for grep / workspace_search', () => {
-    expect(batchSubInputSummary('workspace_search', { pattern: 'handler' })).toBe('handler');
+  it('uses pattern/query for grep / codesearch', () => {
+    expect(batchSubInputSummary('codesearch', { query: 'handler' })).toBe('handler');
     expect(batchSubInputSummary('grep', { query: 'todo' })).toBe('todo');
   });
 
-  it('uses glob pattern for workspace_glob', () => {
-    expect(batchSubInputSummary('workspace_glob', { pattern: '**/*.ts' })).toBe('**/*.ts');
+  it('uses glob pattern', () => {
+    expect(batchSubInputSummary('glob', { pattern: '**/*.ts' })).toBe('**/*.ts');
   });
 
   it('falls back to file path when present', () => {
@@ -526,7 +526,7 @@ describe('buildPartialBashOutput', () => {
 });
 
 describe('extractFileContentFromOutput', () => {
-  it('recognises a workspace_read_file output envelope', () => {
+  it('recognises a read output envelope', () => {
     const out = extractFileContentFromOutput({
       path: 'src/foo.ts',
       content: 'line 1\nline 2',
@@ -1312,7 +1312,7 @@ describe('getToolCategory', () => {
       'write',
       'edit',
       'multi_edit',
-      'apply_patch',
+      'patch',
       'ast_grep_replace',
       'workspace_create_directory',
     ]) {

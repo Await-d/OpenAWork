@@ -1,17 +1,26 @@
 # OpenAWork agent-gateway 生产镜像。
 #
 # 用 Debian（glibc）而不是 Alpine（musl）：packages/agent-core 依赖 better-sqlite3，
-# 其预编译二进制只有 glibc 版本；musl 下 pnpm 得带整套编译工具链从源码构建。
+# 其预编译二进制只有 glibc 版本；musl 下要带整套编译工具链从源码构建。
+#
+# 包管理器是 bun（安装依赖 + 跑构建脚本），运行时仍是 Node（CMD node dist/index.js）。
 
 # ---------------------------------------------------------------------------
-# 阶段 1 —— 安装网关的 workspace 依赖闭包并编译 TypeScript
+# 阶段 0 —— bun 运行时镜像（版本与仓库根 `.bun-version` 对齐，升级时两处一起改）
+# ---------------------------------------------------------------------------
+ARG BUN_VERSION=1.4.2
+FROM oven/bun:${BUN_VERSION} AS bun-runtime
+
+# ---------------------------------------------------------------------------
+# 阶段 1 —— 安装网关的 workspace 依赖闭包、编译 TypeScript、裁剪 devDependencies
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# 让 corepack 按仓库的 `packageManager` 字段锁定 pnpm 版本（pnpm@10.25.0）。
-RUN corepack enable
-# 非交互模式：pnpm 清理或重装 node_modules 时不会因为没有 TTY 卡在确认提示。
+# bun 二进制从阶段 0 取（官方镜像），避免在 node 基础镜像里额外装包。
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+
+# 非交互模式：bun 清理或重装 node_modules 时不会因为没有 TTY 卡在确认提示。
 ENV CI=true
 
 # 原生依赖（better-sqlite3 / koffi / ffmpeg-static）取不到预编译产物时的兜底编译
@@ -22,8 +31,10 @@ RUN apt-get update \
 
 # 先拷清单，让依赖层只在依赖变化时才失效。
 # 只拷网关的 `workspace:*` 传递闭包 —— apps/* 与纯 UI 包（shared-ui、web-client、
-# multi-agent）有意排除，避免把无关依赖带进运行时的 node_modules。
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
+# multi-agent）有意排除；bun 会跳过 bun.lock 中存在但磁盘上没有的 workspace
+# （note: skipped N workspaces），因此不会把无关依赖带进 node_modules。
+COPY package.json bun.lock .npmrc ./
+COPY patches ./patches
 COPY packages/agent-core/package.json ./packages/agent-core/
 COPY packages/artifacts/package.json ./packages/artifacts/
 COPY packages/browser-automation/package.json ./packages/browser-automation/
@@ -40,7 +51,7 @@ COPY packages/skill-types/package.json ./packages/skill-types/
 COPY packages/skills/package.json ./packages/skills/
 COPY packages/telemetry/package.json ./packages/telemetry/
 COPY services/agent-gateway/package.json ./services/agent-gateway/
-RUN pnpm install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 # 源码（与上面的清单同一个闭包）。
 COPY tsconfig.base.json ./
@@ -61,31 +72,26 @@ COPY packages/skills ./packages/skills
 COPY packages/telemetry ./packages/telemetry
 COPY services/agent-gateway ./services/agent-gateway
 
-RUN pnpm --filter "./packages/**" build \
-    && pnpm --filter @openAwork/agent-gateway build
+RUN bun run --filter "./packages/*" build \
+    && bun run --filter @openAwork/agent-gateway build
 
 # bash-tools.ts 在运行期读盘加载提示词模板，优先找编译产物同目录的 `./bash.txt`。
 # tsc 不搬运非 TS 资源，少了这一步，任何编译态下该工具都会静默退化成 stub 提示词。
 RUN cp services/agent-gateway/src/tools/bash.txt services/agent-gateway/dist/tools/bash.txt
 
-# 编译完成后剔除 devDependencies；运行阶段直接原样拷贝这份裁剪过的 node_modules。
+# 剔除 devDependencies。
 #
-# 这里必须带 `--ignore-scripts`：根 `prepare` 脚本会跑 husky，而 husky 正被本次裁剪
-# 移除，不忽略脚本的话安装会直接失败。
-#
-# 本步骤绝不能在前面先清空 node_modules。上一层的安装脚本才是把 better-sqlite3 的
-# 原生绑定与 ffmpeg-static 的二进制写进 .pnpm 的环节；一旦清空，这些目录会从 store
-# 的原始 tarball 重建，两个产物都会消失，而 `pnpm rebuild` 补不回来（实测：退出码 0
-# 却什么都没产出）。保留 node_modules 能保证运行期产物完好，代价是约 220 MB 的 dev
-# 孤儿（typescript / vitest / vite / playwright / react-dom）—— pnpm 按整份
-# pnpm-lock.yaml 的依赖图落地（含 apps/mobile），`--prod` 够不到它们。
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
+# bun 的等价物是 `bun prune --production`（`bun install --production` 对已存在的
+# node_modules 是 no-op，不会裁剪）。这一步只删包目录，不重装、不重跑脚本，
+# 因此上一步写进 node_modules/.bun 的原生产物（better-sqlite3 绑定、ffmpeg 二进制）
+# 会原样保留 —— 与旧 pnpm 流程的 `install --prod --ignore-scripts` 语义一致。
+RUN bun prune --production \
     && rm -rf packages/*/src services/agent-gateway/src packages/*/*.tsbuildinfo
 
 # ffprobe-static 自带各操作系统的预编译二进制；在 Linux 上 darwin 与 win32 两棵树
 # （约 237 MB）纯属冗余 —— 网关只会拉起 linux 那份（见 src/media/ffmpeg-bridge.ts）。
-RUN rm -rf node_modules/.pnpm/ffprobe-static@*/node_modules/ffprobe-static/bin/darwin \
-           node_modules/.pnpm/ffprobe-static@*/node_modules/ffprobe-static/bin/win32
+RUN rm -rf node_modules/.bun/ffprobe-static@*/node_modules/ffprobe-static/bin/darwin \
+           node_modules/.bun/ffprobe-static@*/node_modules/ffprobe-static/bin/win32
 
 # ---------------------------------------------------------------------------
 # 阶段 2 —— 运行时（只带必要内容）
@@ -111,25 +117,11 @@ RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# pnpm 的隔离式 node_modules 靠符号链接指向 workspace 内的包目录，所以必须把这些包
-# 目录一并拷入，否则链接会断。
+# bun 的隔离式 node_modules 靠符号链接指向 node_modules/.bun，所以必须把整棵依赖树
+# 与各 workspace 包目录一并拷入，否则链接会断。
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
-COPY --from=builder /app/packages/agent-core ./packages/agent-core
-COPY --from=builder /app/packages/artifacts ./packages/artifacts
-COPY --from=builder /app/packages/browser-automation ./packages/browser-automation
-COPY --from=builder /app/packages/logger ./packages/logger
-COPY --from=builder /app/packages/lsp-client ./packages/lsp-client
-COPY --from=builder /app/packages/mcp-client ./packages/mcp-client
-COPY --from=builder /app/packages/opencode-llm ./packages/opencode-llm
-COPY --from=builder /app/packages/pairing ./packages/pairing
-COPY --from=builder /app/packages/platform-adapter ./packages/platform-adapter
-COPY --from=builder /app/packages/resources ./packages/resources
-COPY --from=builder /app/packages/shared ./packages/shared
-COPY --from=builder /app/packages/skill-registry ./packages/skill-registry
-COPY --from=builder /app/packages/skill-types ./packages/skill-types
-COPY --from=builder /app/packages/skills ./packages/skills
-COPY --from=builder /app/packages/telemetry ./packages/telemetry
+COPY --from=builder /app/package.json /app/bun.lock ./
+COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/services/agent-gateway ./services/agent-gateway
 
 # docker-compose.yml 把命名卷 `gateway_data` 挂到这里。

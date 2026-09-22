@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildChatRightPanelStateFromRunEvents } from './chat-stream-state.js';
+import { buildChatRightPanelStateFromRunEvents, getToolCallCards } from './chat-stream-state.js';
+
+const GUI_SNAPSHOT = {
+  type: 'input_image' as const,
+  artifactId: 'artifact-gui-1',
+  fileName: 'computer-use-final.png',
+  mimeType: 'image/png',
+};
 
 describe('buildChatRightPanelStateFromRunEvents', () => {
   it('从 done/error 事件重建 upstreamSummary 历史', () => {
@@ -74,6 +81,76 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
     });
 
     expect(state.toolCalls[0]?.requestId).toBe('req-tools-1');
+  });
+
+  it('tool_result 的 attachments 会写入工具条目并透传到 ToolCallCardModel', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '展示 computer_use 最终截图',
+      events: [
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'call-gui-1',
+          toolName: 'computer_use',
+          inputDelta: '{"instruction":"打开系统设置"}',
+        },
+        {
+          type: 'tool_result',
+          toolCallId: 'call-gui-1',
+          toolName: 'computer_use',
+          output: '{"success":true}',
+          isError: false,
+          attachments: [GUI_SNAPSHOT],
+        },
+      ],
+    });
+
+    expect(state.toolCalls[0]?.attachments).toEqual([GUI_SNAPSHOT]);
+    expect(getToolCallCards(state)[0]?.attachments).toEqual([GUI_SNAPSHOT]);
+  });
+
+  it('tool_result 不带 attachments 时字段保持 undefined（其它工具不受影响）', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '普通工具结果',
+      events: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-read-1',
+          toolName: 'read',
+          output: 'ok',
+          isError: false,
+        },
+      ],
+    });
+
+    expect(state.toolCalls[0]?.toolName).toBe('read');
+    expect(state.toolCalls[0]?.attachments).toBeUndefined();
+    expect(getToolCallCards(state)[0]?.attachments).toBeUndefined();
+  });
+
+  it('tool_progress 不覆盖同一 toolCallId 已写入的 attachments', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '批量工具进度',
+      events: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-gui-2',
+          toolName: 'computer_use',
+          output: '{"success":true}',
+          isError: false,
+          attachments: [GUI_SNAPSHOT],
+        },
+        {
+          type: 'tool_progress',
+          toolCallId: 'call-gui-2',
+          toolName: 'computer_use',
+          subTools: [],
+          completedCount: 1,
+          totalCount: 2,
+        },
+      ],
+    });
+
+    expect(state.toolCalls[0]?.attachments).toEqual([GUI_SNAPSHOT]);
   });
 
   it('tool_call_delta 在工具尚未完成时也会携带 requestId', () => {

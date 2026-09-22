@@ -25,6 +25,7 @@ import {
 } from '../hooks/chat-stream-guard';
 import type { AgentActivity } from '../components/AgentActivityPanel';
 import { AgentActivityPanel } from '../components/AgentActivityPanel';
+import { SubagentNoticeList } from '../components/SubagentNoticeRow';
 import { MobileVoiceRecorder } from '../components/MobileVoiceRecorder';
 import { MobileAttachmentBar } from '../components/MobileAttachmentBar';
 import type { MobileAttachmentItem } from '../components/MobileAttachmentBar';
@@ -42,7 +43,12 @@ import {
 } from './chat-screen-state';
 import { createChatScreenGuardedStreamHandlers } from './chat-screen-stream-handlers';
 import ExpoPersistenceAdapter from '../store/providerPersistence';
-import { normalizeMobileChatMessages } from '../chat/chat-message-content';
+import {
+  collectMobileSubagentNotices,
+  mergeMobileSubagentNotices,
+  normalizeMobileChatMessages,
+} from '../chat/chat-message-content';
+import type { MobileSubagentNotice } from '../chat/chat-message-content';
 import {
   buildChatDraftSummary,
   findChatMessageMatches,
@@ -87,6 +93,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
   const persistence = useMemo(() => new ExpoPersistenceAdapter(), []);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [subagentNotices, setSubagentNotices] = useState<MobileSubagentNotice[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -146,6 +153,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     >();
     setHistoryLoading(resetState.historyLoading);
     setMessages(resetState.messages);
+    setSubagentNotices([]);
     setArtifactHistory(resetState.artifactHistory);
     setActivities(resetState.activities);
     setSending(resetState.sending);
@@ -245,6 +253,41 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     void syncTaskActivities();
   }, [syncTaskActivities]);
 
+  /**
+   * 子代理完成通知的增量刷新通道。
+   *
+   * 网关的 synthetic 通知只落库、没有独立的实时事件，因此移动端在流式期间
+   * 收到子任务终态 `task_update`（注入严格先于该事件发布）或流结束时，重新
+   * 拉取父会话并重算通知列表；合并按 id 幂等，重复触发不会产生重复行，
+   * 也不会覆盖已经展示过的通知。
+   */
+  const refreshSubagentNotices = useCallback(
+    (requestSessionId: string) => {
+      if (!accessToken || !canApplySessionMutation(requestSessionId)) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          const session = await sessionsClient.get(accessToken, requestSessionId);
+          if (!canApplySessionMutation(requestSessionId)) {
+            return;
+          }
+          setSubagentNotices((previous) =>
+            mergeMobileSubagentNotices(
+              previous,
+              collectMobileSubagentNotices(session.messages ?? []),
+            ),
+          );
+        } catch (error) {
+          if (handleAuthError(error)) return;
+          console.warn('Failed to refresh mobile subagent notices', error);
+        }
+      })();
+    },
+    [accessToken, canApplySessionMutation, handleAuthError, sessionsClient],
+  );
+
   useEffect(() => {
     if (!accessToken) {
       return;
@@ -324,6 +367,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         }
         const msgs: Message[] = normalizeMobileChatMessages(session.messages ?? []);
         setMessages((previous) => reconcileMobileChatMessages(previous, msgs));
+        setSubagentNotices(collectMobileSubagentNotices(session.messages ?? []));
       } catch (error) {
         if (handleAuthError(error)) return;
         console.warn('Failed to load mobile chat history', error);
@@ -405,6 +449,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         clearActiveStreamToken: () => {
           activeStreamTokenRef.current = null;
         },
+        refreshSubagentNotices,
         requestSessionId,
         scheduleScrollToBottom: () => {
           setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
@@ -429,6 +474,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       clearSendingAfterStaleAbort,
       imageGenerationBusy,
       loadArtifactHistory,
+      refreshSubagentNotices,
       sending,
       sessionId,
       stream,
@@ -908,6 +954,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             ) : (
               <Text style={styles.empty}>开始对话…</Text>
             )
+          }
+          ListFooterComponent={
+            <SubagentNoticeList
+              notices={subagentNotices}
+              onOpenChild={(childSessionId) => router.push(`/chat/${childSessionId}`)}
+            />
           }
           renderItem={({ item }) => (
             <ChatMessageBubble

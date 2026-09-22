@@ -33,8 +33,8 @@ team-phase-a-content/
 
 1. 编辑 `templates/souls/<role>.md` 或 `templates/shared/quality-gates.md`
 2. 在 `soul-defaults.ts` 中将 `DEFAULT_SOUL_VERSION` +1
-3. 运行 `pnpm --filter @openAwork/agent-gateway typecheck` 验证
-4. 运行 `pnpm --filter @openAwork/agent-gateway test` 验证
+3. 运行 `bun run --filter @openAwork/agent-gateway typecheck` 验证
+4. 运行 `bun run --filter @openAwork/agent-gateway test` 验证
 
 ## 来源标注
 

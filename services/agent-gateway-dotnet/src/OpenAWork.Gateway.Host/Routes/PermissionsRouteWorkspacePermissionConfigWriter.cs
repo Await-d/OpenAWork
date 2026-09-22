@@ -249,9 +249,9 @@ internal static class PermissionsRouteWorkspacePermissionConfigWriter
     private static string ResolvePermissionCategory(string toolName)
         => toolName switch
         {
-            "read" or "workspace_read_file" => "read",
-            "edit" or "apply_patch" => "edit",
-            "write" or "workspace_write_file" or "workspace_create_file" or "workspace_create_directory" => "write",
+            "read" => "read",
+            "edit" or "patch" => "edit",
+            "write" or "workspace_create_directory" => "write",
             "bash" or "interactive_bash" => "bash",
             "glob" => "glob",
             "grep" => "grep",

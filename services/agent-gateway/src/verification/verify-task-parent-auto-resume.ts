@@ -15,7 +15,12 @@ import {
 
 const CHILD_RESULT = '子代理已经执行完成。';
 const AUTO_RESUME_RESULT = '我已收到子代理结果，并同步回主对话。';
-const AUTO_RESUME_HEADER = '以下是后台子代理已完成后自动回流到主对话的结果';
+/**
+ * 单通道交付（T-25）的唤醒请求由**合成通知**驱动，通知正文即子代理结果。
+ * 旧路径（`buildAutoResumeMessage`）的固定表头已随伪造用户请求一并退役——
+ * 这里改用通知正文作为「父会话侧上游请求」的判定标记。
+ */
+const NOTICE_BODY = CHILD_RESULT;
 
 function readTextMessage(message: { content: Array<{ type: string; text?: string }> }): string {
   const firstContent = message.content[0];
@@ -39,7 +44,7 @@ async function main(): Promise<void> {
           const body = await readFetchBody(_url, init);
           fetchCalls.push(body);
           const lastUserMessage = readLastUserMessage(body);
-          if (lastUserMessage.includes(AUTO_RESUME_HEADER)) {
+          if (lastUserMessage.includes(NOTICE_BODY)) {
             return createProtocolAwareStream(_url, AUTO_RESUME_RESULT);
           }
           return createProtocolAwareStream(_url, CHILD_RESULT);
@@ -119,29 +124,29 @@ async function main(): Promise<void> {
                 message.role === 'assistant' &&
                 readTextMessage(message as never) === AUTO_RESUME_RESULT,
             );
-            const completionReminder = parentMessages.find((message) => {
-              if (message.role !== 'assistant') {
-                return false;
-              }
-              const text = readTextMessage(message);
-              return text.includes('子代理已完成 · 让子代理完成后自动回流');
-            });
-
             assert(
               autoResumeReply?.role === 'assistant',
               'parent session should persist auto-resume reply',
             );
+            assert(fetchCalls.length === 2, '单通道交付应触发一次子会话运行 + 一次父会话唤醒');
             assert(
-              completionReminder?.role === 'assistant',
-              'parent session should still keep the completion reminder alongside auto-resume',
+              readLastUserMessage(fetchCalls[1] ?? '').includes(NOTICE_BODY),
+              '第二次上游请求应由合成通知驱动（而非伪造的用户请求）',
+            );
+
+            // ── 单通道交付契约（T-25）──────────────────────────────────
+            const notices = parentMessages.filter((message) => message.role === 'synthetic');
+            assert(
+              notices.length === 1,
+              `父会话应恰好收到一条 synthetic 通知，实际 ${notices.length}`,
             );
             assert(
-              fetchCalls.length === 2,
-              'auto-resume should trigger one child run and one parent continuation',
+              readTextMessage(notices[0] ?? { content: [] }) === NOTICE_BODY,
+              '通知正文应为子代理结果',
             );
             assert(
-              readLastUserMessage(fetchCalls[1] ?? '').includes(AUTO_RESUME_HEADER),
-              'second upstream request should be driven by the injected auto-resume message',
+              !parentMessages.some((message) => message.role === 'user'),
+              '单通道交付不得在父会话中伪造用户轮',
             );
 
             console.log('verify-task-parent-auto-resume: ok');

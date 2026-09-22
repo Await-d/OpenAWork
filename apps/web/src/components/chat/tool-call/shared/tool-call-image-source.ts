@@ -1,16 +1,20 @@
 /**
  * 工具调用图片源解析（纯函数，无 React / 无副作用）。
  *
- * 覆盖两类「查阅了图片」的工具调用：
+ * 覆盖三类「查阅了图片」的工具调用：
  *   - `look_at`：图片只存在于**入参**（`input.image_data` / `input.file_path`），
  *     网关最终只把分析文本写回 output，图片本身不进 output；
  *   - `desktop_automation` / `desktop_control`：截图以 artifact 形式存在，
- *     output JSON 里带 `artifactId`（见网关 desktop-screenshot-artifact.ts）。
+ *     output JSON 里带 `artifactId`（见网关 desktop-screenshot-artifact.ts）；
+ *   - `computer_use`：最终截图**不在 output 里**（网关刻意剥离 base64 以防撑爆
+ *     上下文，见 gateway 的 runComputerUseToolWithScreenshot），只通过 tool result
+ *     的 `attachments` 通道回传，因此必须由调用方把 attachments 传进来。
  *
  * 解析结果供 `useToolCallImagePreview` 决定后续的读取方式（内联 data URL /
  * 远端 URL / 工作区文件 / 产物中心）。
  */
 
+import type { InputImageContent } from '@openAwork/shared';
 import { getFilePreviewKind } from '../../../../utils/file/file-preview.js';
 
 export type ToolCallImageSource =
@@ -33,6 +37,7 @@ const BARE_BASE64_MIN_LENGTH = 128;
 
 const LOOK_AT_ALT = '已查看的图片';
 const DESKTOP_SCREENSHOT_ALT = '桌面截图';
+const COMPUTER_USE_SCREENSHOT_ALT = 'GUI 操作截图';
 
 /**
  * 把 `look_at` 入参解析为图片源。
@@ -122,10 +127,64 @@ function resolveDesktopScreenshotSource(output: unknown): ToolCallImageSource | 
   return { kind: 'artifact', artifactId, alt: DESKTOP_SCREENSHOT_ALT };
 }
 
+/**
+ * 判断一条 tool result attachment 是否可作为图片预览（非图片一律跳过）。
+ *
+ * `mimeType` 缺失时按历史数据兜底放行——attach 场景下网关一定带 mimeType，
+ * 但内存态 / 老会话可能缺字段，缺字段时宁可多给一个预览机会。
+ */
+function isImageAttachment(attachment: InputImageContent): boolean {
+  const mimeType = attachment.mimeType;
+  if (mimeType === undefined) return true;
+  return mimeType.toLowerCase().startsWith('image/');
+}
+
+/**
+ * 从 tool result 的 `attachments` 里解析 `computer_use` 的最终截图。
+ *
+ * 优先级：带 artifactId 的附件（走产物中心，与 desktop_control 截图同路径）
+ * → data URL → http(s) 远端地址。网关当前只会下发 artifactId 形态，后两者
+ * 是给未来 / 自定义渠道留的兼容分支；都不匹配时返回 null（卡片会给出空态占位）。
+ */
+function resolveComputerUseScreenshotSource(
+  attachments: readonly InputImageContent[] | undefined,
+): ToolCallImageSource | null {
+  if (!attachments || attachments.length === 0) return null;
+
+  for (const attachment of attachments) {
+    if (!isImageAttachment(attachment)) continue;
+
+    const artifactId = attachment.artifactId?.trim();
+    if (artifactId) {
+      return { kind: 'artifact', artifactId, alt: COMPUTER_USE_SCREENSHOT_ALT };
+    }
+
+    const imageUrl = attachment.imageUrl?.trim();
+    if (imageUrl) {
+      if (INLINE_DATA_URL_PATTERN.test(imageUrl)) {
+        return { kind: 'inline', src: imageUrl, alt: COMPUTER_USE_SCREENSHOT_ALT };
+      }
+      if (REMOTE_URL_PATTERN.test(imageUrl)) {
+        return { kind: 'remote', src: imageUrl, alt: COMPUTER_USE_SCREENSHOT_ALT };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 解析工具调用的图片源。
+ *
+ * `attachments` 是 tool result 的附件通道（`StreamToolResultChunk.attachments`）；
+ * 只有 `computer_use` 会消费它——其余工具的图片来自入参或 output，传了也会忽略，
+ * 因此调用方可以安全地把附件一路透传下来。
+ */
 export function resolveToolCallImageSource(
   toolName: string,
   input: Record<string, unknown>,
   output?: unknown,
+  attachments?: readonly InputImageContent[],
 ): ToolCallImageSource | null {
   const normalized = toolName.trim().toLowerCase();
 
@@ -135,6 +194,11 @@ export function resolveToolCallImageSource(
 
   if (normalized === 'desktop_automation' || normalized === 'desktop_control') {
     return resolveDesktopScreenshotSource(output);
+  }
+
+  if (normalized === 'computer_use') {
+    // 截图只走 attachments：output 里的 lastScreenshot 已被网关剥离。
+    return resolveComputerUseScreenshotSource(attachments);
   }
 
   // 其它工具（generate_image / convert_media / read 等）已有专属卡片或并非

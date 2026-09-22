@@ -1,5 +1,6 @@
 import type { ZodIssue, ZodTypeAny, infer as ZodInfer } from 'zod';
 import type { InputImageContent, ToolCallContent, ToolResultContent } from '@openAwork/shared';
+import { repairToolInput } from './tool-input-repair.js';
 
 export interface ToolDefinition<
   TInput extends ZodTypeAny = ZodTypeAny,
@@ -125,7 +126,10 @@ export class ToolRegistry {
       throw new ToolNotFoundError(request.toolName);
     }
 
-    const parsed = tool.inputSchema.safeParse(request.rawInput);
+    // 先按 schema 尝试修复模型常见的输入错误；修复层纯函数、不抛异常，
+    // 无法判断时原样返回，因此不改变原有校验失败的行为。
+    const repairedInput = repairToolInput(tool.inputSchema, request.rawInput);
+    const parsed = tool.inputSchema.safeParse(repairedInput);
     if (!parsed.success) {
       throw new ToolValidationError(request.toolName, parsed.error.issues);
     }

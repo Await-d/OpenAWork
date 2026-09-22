@@ -15,7 +15,7 @@ OpenAWork 是跨平台 AI Agent 工作台，采用 TypeScript monorepo 架构：
 - **后端**：Fastify 5 网关（`services/agent-gateway`）
 - **前端**：React Web（Vite）、Tauri v2 桌面端、Expo 移动端
 - **核心包**：agent-core（状态机 + 工具）、multi-agent（DAG 编排）、skill-registry（技能沙箱）
-- **技术栈**：TypeScript（strict + NodeNext）、pnpm workspace、Zod 校验、SQLite + Postgres + Redis
+- **技术栈**：TypeScript（strict + NodeNext）、bun workspace、Zod 校验、SQLite + Postgres + Redis
 
 ## 目录结构
 
@@ -159,36 +159,36 @@ OpenAWork/
 
 ```bash
 # 开发（所有包并行）
-pnpm dev
+bun run dev
 
 # 构建所有包
-pnpm build
+bun run build
 
 # 代码检查
-pnpm lint
-pnpm lint:fix
+bun run lint
+bun run lint:fix
 
 # 格式化
-pnpm format
+bun run format
 
 # 全量类型检查
-pnpm typecheck
+bun run typecheck
 
 # 全量测试
-pnpm test
+bun run test
 
 # 仅网关
-pnpm --filter @openAwork/agent-gateway dev
-pnpm --filter @openAwork/agent-gateway build:binary
+bun run --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway build:binary
 
 # 单个包测试
-pnpm --filter @openAwork/agent-core test
+bun run --filter @openAwork/agent-core test
 
 # 单个测试文件
-pnpm --filter @openAwork/agent-core exec vitest run src/__tests__/state-machine.test.ts
+bun run --filter @openAwork/agent-core test src/__tests__/state-machine.test.ts
 
 # 匹配测试名称关键字
-pnpm --filter @openAwork/agent-core exec vitest run -t "测试名称关键字"
+bun run --filter @openAwork/agent-core test -t "测试名称关键字"
 ```
 
 ## 环境变量
@@ -254,9 +254,9 @@ pnpm --filter @openAwork/agent-core exec vitest run -t "测试名称关键字"
 
 若 `agent-gateway` 类型突然出现 `app.jwt`、`request.user` 等属性缺失：
 
-1. 优先运行 `pnpm check:fastify-alignment`
-2. 这类问题常由 `pnpm-lock.yaml` 中多份 `fastify` 版本引起
-3. 该检查已接入 `lint-staged`，改动 `package.json`/`pnpm-lock.yaml` 后提交前自动运行
+1. 优先运行 `bun run check:fastify-alignment`
+2. 这类问题常由 `bun.lock` 中多份 `fastify` 版本引起
+3. 该检查已接入 `lint-staged`，改动 `package.json`/`bun.lock` 后提交前自动运行
 
 ### Husky Hook 本地状态
 
@@ -287,7 +287,7 @@ pnpm --filter @openAwork/agent-core exec vitest run -t "测试名称关键字"
 2. 遵循 TypeScript strict 模式，零 `any`、零 `@ts-ignore`
 3. 组件超过 80 行或 3 层嵌套 JSX 必须拆分
 4. 涉及 UI 必须参考 `packages/shared-ui/DESIGN-TOKENS.md`
-5. 提交前运行 `pnpm lint`、`pnpm typecheck`、`pnpm test`
+5. 提交前运行 `bun run lint`、`bun run typecheck`、`bun run test`
 6. 提交信息遵循 `type(scope): 中文描述` 格式
 
 ### 修复 Bug

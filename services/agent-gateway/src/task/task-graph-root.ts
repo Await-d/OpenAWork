@@ -10,8 +10,14 @@ import {
   getSessionWorkingDirectory,
 } from '../workspace/workspace-safety.js';
 
+/** 仓库根标记：pnpm / bun workspace 或 Git 元数据（产品需同时兼容 pnpm 与 bun 项目）。 */
 function isRepositoryWorkspaceRoot(rootPath: string): boolean {
-  return existsSync(join(rootPath, 'pnpm-workspace.yaml')) || existsSync(join(rootPath, '.git'));
+  return (
+    existsSync(join(rootPath, 'pnpm-workspace.yaml')) ||
+    existsSync(join(rootPath, 'bun.lock')) ||
+    existsSync(join(rootPath, 'bun.lockb')) ||
+    existsSync(join(rootPath, '.git'))
+  );
 }
 
 function resolveWorkspaceRootForWorkingDirectory(workingDirectory: string): string {

@@ -20,7 +20,7 @@ Superpowers is a development methodology framework adapted from obra/superpowers
 2. **Verify RED (MANDATORY)** — Run the test and confirm it fails for the expected reason.
 
    ```bash
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
    ```
    - Fails because the feature is missing, not because of a typo.
    - Test passes immediately? You are testing existing behavior — fix the test.
@@ -31,8 +31,8 @@ Superpowers is a development methodology framework adapted from obra/superpowers
 4. **Verify GREEN (MANDATORY)** — Run the test and confirm it passes.
 
    ```bash
-   pnpm --filter <pkg> exec vitest run path/to/test.test.ts -t "test name"
-   pnpm --filter <pkg> test
+   bun run --filter <pkg> test path/to/test.test.ts -t "test name"
+   bun run --filter <pkg> test
    ```
    - Other tests must still pass.
 
@@ -108,12 +108,12 @@ Before marking work complete, verify:
 - [ ] Watched each test fail before implementing
 - [ ] Each test failed for expected reason (feature missing, not typo)
 - [ ] Wrote minimal code to pass each test
-- [ ] All tests pass (`pnpm --filter <pkg> test`)
+- [ ] All tests pass (`bun run --filter <pkg> test`)
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
-- [ ] Type check passes (`pnpm typecheck`)
-- [ ] Lint passes (`pnpm lint`)
+- [ ] Type check passes (`bun run typecheck`)
+- [ ] Lint passes (`bun run lint`)
 
 Cannot check all boxes? You skipped a step. Revisit before claiming done.
 
@@ -121,17 +121,17 @@ Cannot check all boxes? You skipped a step. Revisit before claiming done.
 
 ```bash
 # Run specific package tests
-pnpm --filter @openAwork/<pkg> test
+bun run --filter @openAwork/<pkg> test
 
 # Run specific test file
-pnpm --filter @openAwork/<pkg> exec vitest run src/__tests__/file.test.ts
+bun run --filter @openAwork/<pkg> test src/__tests__/file.test.ts
 
 # Run tests matching a name
-pnpm --filter @openAwork/<pkg> exec vitest run -t "test name"
+bun run --filter @openAwork/<pkg> test -t "test name"
 
 # Full type check
-pnpm typecheck
+bun run typecheck
 
 # Lint
-pnpm lint
+bun run lint
 ```

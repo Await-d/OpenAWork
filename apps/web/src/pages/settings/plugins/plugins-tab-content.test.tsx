@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { PluginsTabContent } from './plugins-tab-content.js';
+import type { PluginSettings } from './plugins-tab-content.js';
+
+const settingsClientMocks = vi.hoisted(() => ({
+  getPlugins: vi.fn(async (): Promise<unknown> => ({})),
+  putPlugins: vi.fn(async (_token: string, _payload: unknown) => undefined),
+}));
 
 vi.mock('@openAwork/shared-ui', () => ({
   MCPServerConfig: ({
@@ -28,7 +34,8 @@ vi.mock('@openAwork/shared-ui', () => ({
 
 vi.mock('@openAwork/web-client', () => ({
   createSettingsClient: () => ({
-    getPlugins: vi.fn(async () => ({})),
+    getPlugins: settingsClientMocks.getPlugins,
+    putPlugins: settingsClientMocks.putPlugins,
     getWebsearch: vi.fn(async () => ({ providers: [], rolloutMode: 'sequential' })),
   }),
   refreshAccessToken: vi.fn(async () => ({
@@ -152,5 +159,37 @@ describe('PluginsTabContent', () => {
     expect(screen.getByText('MCP 状态列表:open_websearch,websearch')).toBeTruthy();
     expect(screen.getByText('隐藏新增')).toBeTruthy();
     expect(screen.getByText('Web 搜索策略')).toBeTruthy();
+  });
+
+  it('根据 plugin=desktop-automation 直达浏览器自动化管理面', async () => {
+    renderPluginsTab('/settings/plugins?plugin=desktop-automation');
+
+    await waitFor(() => {
+      expect(screen.getByText(/控制 Agent 是否获得桌面端专属的浏览器自动化工具/)).toBeTruthy();
+    });
+    expect(screen.getByText('desktop_automation')).toBeTruthy();
+    expect(screen.getByText('启用插件')).toBeTruthy();
+  });
+
+  it('切换 desktop-automation 开关会保存 desktopAutomation.enabled 且不影响 desktopControl', async () => {
+    settingsClientMocks.getPlugins.mockResolvedValueOnce({
+      desktopAutomation: { enabled: false },
+      desktopControl: { enabled: true },
+    });
+
+    renderPluginsTab('/settings/plugins?plugin=desktop-automation');
+
+    const toggle = await screen.findByRole('switch', { name: '启用插件' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(settingsClientMocks.putPlugins).toHaveBeenCalled();
+    });
+    const payload = settingsClientMocks.putPlugins.mock.calls.at(-1)?.[1] as PluginSettings;
+    expect(payload.desktopAutomation?.enabled).toBe(true);
+    // 两个桌面插件是独立开关：启用 desktop_automation 不得改动 desktop_control。
+    expect(payload.desktopControl?.enabled).toBe(true);
   });
 });

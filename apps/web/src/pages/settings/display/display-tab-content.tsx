@@ -545,7 +545,7 @@ const TOOL_EXPAND_CATEGORIES: ToolExpandCategory[] = [
 
 const TOOL_EXPAND_DESCRIPTIONS: Record<ToolExpandCategory, string> = {
   bash: 'bash / interactive_bash — Shell 命令执行',
-  fileEdit: 'write / edit / multi_edit / apply_patch — 文件写入与编辑',
+  fileEdit: 'write / edit / multi_edit / patch — 文件写入与编辑',
   fileRead: 'read / grep / glob / list / codesearch — 文件读取与搜索',
   mcp: 'mcp_call / mcp_list_tools / skill_mcp — MCP 服务器工具调用',
   skill: 'skill — 技能调用',

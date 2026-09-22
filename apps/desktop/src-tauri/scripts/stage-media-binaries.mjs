@@ -2,7 +2,7 @@ import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
+import { runPackageLifecycleScripts } from '../../../../scripts/rebuild-native-packages.mjs';
 
 // Stage ffmpeg / ffprobe so packaged desktop builds resolve them via
 // OPENAWORK_RESOURCES_DIR → <resource_dir>/gateway-resources/media/<name>.
@@ -120,14 +120,11 @@ for (const binary of binaries) {
       : `Missing ${binary.destName}, attempting to rebuild ${binary.packageName}...`,
   );
   try {
-    execSync(`pnpm rebuild ${binary.packageName}`, {
-      cwd: root,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        npm_config_arch: binary.rebuildArch,
-        npm_config_platform: platform,
-      },
+    // bun 没有 `pnpm rebuild` 等价命令：直接按目标 arch/platform 重跑该包的
+    // install/postinstall（解析与错误语义见 scripts/rebuild-native-packages.mjs）。
+    runPackageLifecycleScripts([binary.packageName], {
+      arch: binary.rebuildArch,
+      platform,
     });
   } catch (e) {
     console.warn(`Warning: Failed to rebuild ${binary.packageName}: ${e.message}`);

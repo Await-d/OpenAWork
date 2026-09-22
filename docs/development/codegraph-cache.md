@@ -40,7 +40,7 @@ codegraph 失败不能阻断 `/health`、desktop sidecar、`app.listen()` 或普
 - `write`
 - `edit`
 - `multi_edit`
-- `apply_patch`
+- `patch`
 - `lsp_rename`
 
 stale 标记失败不能回滚成功写入。查询返回 stale 时，agent 必须用 `read` 或 LSP 读取真实当前内容后再编辑或删除。

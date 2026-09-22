@@ -74,7 +74,7 @@ const bunCommand = resolveCommand('bun');
 
 if (!cargoCommand) {
   const message =
-    '未检测到 cargo，无法执行桌面原生检查。若改动 apps/desktop/src-tauri/**，请先安装 Rust 工具链后再运行 `pnpm check:desktop-native`。';
+    '未检测到 cargo，无法执行桌面原生检查。若改动 apps/desktop/src-tauri/**，请先安装 Rust 工具链后再运行 `bun run check:desktop-native`。';
   if (REQUIRE_NATIVE_CHECK) {
     console.error(message);
     process.exit(1);
@@ -85,7 +85,7 @@ if (!cargoCommand) {
 
 if (!bunCommand) {
   const message =
-    '未检测到 bun，无法生成桌面 sidecar。若改动 apps/desktop/**，请先安装 Bun 后再运行 `pnpm check:desktop-native`。';
+    '未检测到 bun，无法生成桌面 sidecar。若改动 apps/desktop/**，请先安装 Bun 后再运行 `bun run check:desktop-native`。';
   if (REQUIRE_NATIVE_CHECK) {
     console.error(message);
     process.exit(1);
@@ -107,7 +107,7 @@ const childEnv = {
 try {
   const webDistDir = resolve(REPO_ROOT, 'apps/web/dist');
   if (!existsSync(webDistDir)) {
-    run('pnpm', ['--filter', '@openAwork/web', 'build'], {
+    run('bun', ['run', '--filter', '@openAwork/web', 'build'], {
       cwd: REPO_ROOT,
       env: childEnv,
     });

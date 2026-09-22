@@ -2,7 +2,7 @@
  * Shared utilities for rendering file paths in tool output previews.
  *
  * Why centralised: every preview that shows paths (grep groups, glob lists,
- * workspace_search hits, grep counts) used to render the full absolute path
+ * search hits, grep counts) used to render the full absolute path
  * on every row. With deep monorepo paths this wastes ~70% of the visual
  * width on a repeated prefix and makes filenames hard to scan.
  *

@@ -21,6 +21,9 @@ class FakeDesktopControlManager implements DesktopControlManager {
   readonly hotkey = vi.fn(async () => ({ success: true, mode: 'hotkey', keys: ['Control', 'K'] }));
   readonly scroll = vi.fn(async () => ({ success: true, scrollX: 0, scrollY: -600 }));
   readonly wait = vi.fn(async () => ({ success: true, ms: 250 }));
+  readonly drag = vi.fn(async () => ({ success: true, mode: 'drag' }));
+  readonly mouseMove = vi.fn(async () => ({ success: true, mode: 'mouse_move' }));
+  readonly longPress = vi.fn(async () => ({ success: true, mode: 'long_press' }));
 }
 
 describe('runDesktopControlTool', () => {

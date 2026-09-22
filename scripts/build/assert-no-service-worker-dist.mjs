@@ -73,8 +73,8 @@ export function assertNoServiceWorkerInDist(distDir = DEFAULT_WEB_DIST_DIR) {
       `检查目录：${distDir}`,
       '桌面端打包必须禁用 PWA（apps/web/vite.config.ts 的 VitePWA.disable）。',
       '处理方式：',
-      '  1) 清掉旧产物：pnpm --filter @openAwork/web clean',
-      '  2) 打包走 pnpm --filter @openAwork/desktop build（beforeBuildCommand 会重建 dist）；',
+      '  1) 清掉旧产物：bun run --filter @openAwork/web clean',
+      '  2) 打包走 bun run --filter @openAwork/desktop build（beforeBuildCommand 会重建 dist）；',
       '     若在 Tauri CLI 之外单独构建 web，需要带 OPENAWORK_DESKTOP_BUILD=1 再构建。',
     ].join('\n'),
   );

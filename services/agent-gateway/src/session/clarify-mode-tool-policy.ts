@@ -25,6 +25,8 @@ const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   'session_read',
   'session_search',
   'session_info',
+  // 只读的模型检索：澄清模式下也应允许（不产生文件/网络副作用）。
+  'models',
   'todoread',
   'subtodoread',
   'task_list',

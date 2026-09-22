@@ -98,6 +98,17 @@ describe('AnthropicProvider', () => {
       expect(provider.supportsVision('claude-sonnet-4-0')).toBe(true);
     });
 
+    it('应该保守识别支持 GUI grounding 的模型', () => {
+      expect(provider.supportsGuiGrounding('claude-3-5-sonnet-20241022')).toBe(true);
+      expect(provider.supportsGuiGrounding('claude-3-7-sonnet-20250219')).toBe(true);
+      expect(provider.supportsGuiGrounding('claude-sonnet-4-0')).toBe(true);
+      expect(provider.supportsGuiGrounding('claude-opus-4-0')).toBe(true);
+      // 具备视觉不等于具备 grounding：默认返回 false。
+      expect(provider.supportsGuiGrounding('claude-3-opus-20240229')).toBe(false);
+      expect(provider.supportsGuiGrounding('claude-3-sonnet-20240229')).toBe(false);
+      expect(provider.supportsGuiGrounding('claude-3-haiku-20240307')).toBe(false);
+    });
+
     it('应该正确识别支持工具调用的模型', () => {
       expect(provider.supportsTools('claude-3-opus-20240229')).toBe(true);
       expect(provider.supportsTools('claude-sonnet-4-0')).toBe(true);

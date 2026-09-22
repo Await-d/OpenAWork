@@ -806,6 +806,22 @@ export async function migrate(): Promise<void> {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS task_jobs (
+      id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      notification_id TEXT NOT NULL,
+      recovery_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      output TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_task_jobs_notification ON task_jobs(notification_id)',
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS usage_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

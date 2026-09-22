@@ -87,7 +87,7 @@ function appendGateEvidence(result: AnthropicGateResult): void {
 
 async function main(): Promise<void> {
   mkdirSync(join(process.cwd(), '../../.omo/evidence'), { recursive: true });
-  const baseline = `Baseline failing-first: pnpm --filter @openAwork/agent-gateway verify:compaction-parity\n${process.env['TASK8_BASELINE_RESULT'] ?? 'recorded in the task-8 evidence before this verifier existed'}\n`;
+  const baseline = `Baseline failing-first: bun run --filter @openAwork/agent-gateway verify:compaction-parity\n${process.env['TASK8_BASELINE_RESULT'] ?? 'recorded in the task-8 evidence before this verifier existed'}\n`;
   appendEvidence(
     `Task 8 — compaction parity verifier\nDate: ${new Date().toISOString()}\n\n${baseline}`,
   );

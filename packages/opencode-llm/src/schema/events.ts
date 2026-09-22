@@ -114,6 +114,8 @@ export const TextEnd = Schema.Struct({
   type: Schema.tag('text-end'),
   id: ContentBlockID,
   providerMetadata: Schema.optional(ProviderMetadata),
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text: Schema.optional(Schema.String),
 }).annotate({ identifier: 'LLM.Event.TextEnd' });
 export type TextEnd = Schema.Schema.Type<typeof TextEnd>;
 
@@ -136,6 +138,8 @@ export const ReasoningEnd = Schema.Struct({
   type: Schema.tag('reasoning-end'),
   id: ContentBlockID,
   providerMetadata: Schema.optional(ProviderMetadata),
+  /** Authoritative complete value; replaces accumulated deltas when present. */
+  text: Schema.optional(Schema.String),
 }).annotate({ identifier: 'LLM.Event.ReasoningEnd' });
 export type ReasoningEnd = Schema.Schema.Type<typeof ReasoningEnd>;
 
@@ -198,6 +202,11 @@ export const StepFinish = Schema.Struct({
   type: Schema.tag('step-finish'),
   index: Schema.Number,
   reason: FinishReason,
+  // Provider-native stop reason that produced `reason` (e.g. `end_turn`,
+  // `max_tokens`, `model_context_window_exceeded`). Kept alongside the
+  // normalized union so diagnostics can tell "truncated" apart from "stopped"
+  // without changing the normalized contract.
+  reasonRaw: Schema.optional(Schema.String),
   usage: Schema.optional(Usage),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: 'LLM.Event.StepFinish' });
@@ -206,6 +215,7 @@ export type StepFinish = Schema.Schema.Type<typeof StepFinish>;
 export const Finish = Schema.Struct({
   type: Schema.tag('finish'),
   reason: FinishReason,
+  reasonRaw: Schema.optional(Schema.String),
   usage: Schema.optional(Usage),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: 'LLM.Event.Finish' });
@@ -342,17 +352,43 @@ export type PreparedRequestOf<Body> = Omit<PreparedRequest, 'body'> & {
   readonly body: Body;
 };
 
-const responseText = (events: ReadonlyArray<LLMEvent>) =>
-  events
-    .filter(LLMEvent.is.textDelta)
-    .map((event) => event.text)
-    .join('');
+// Join text fragments in emission order, letting an authoritative `text-end`
+// value replace whatever deltas accumulated for that block id. Without the
+// override a provider that only sends the final value (or corrects a lossy
+// stream) would be reconstructed wrong.
+const joinFragments = (events: ReadonlyArray<LLMEvent>, kind: 'text' | 'reasoning'): string => {
+  const order: string[] = [];
+  const byId = new Map<string, string>();
+  const push = (id: string, text: string, replace: boolean) => {
+    if (!byId.has(id)) order.push(id);
+    byId.set(id, replace ? text : (byId.get(id) ?? '') + text);
+  };
+  for (const event of events) {
+    if (kind === 'text') {
+      if (LLMEvent.is.textDelta(event)) {
+        push(event.id, event.text, false);
+        continue;
+      }
+      if (LLMEvent.is.textEnd(event) && event.text !== undefined) {
+        push(event.id, event.text, true);
+        continue;
+      }
+      continue;
+    }
+    if (LLMEvent.is.reasoningDelta(event)) {
+      push(event.id, event.text, false);
+      continue;
+    }
+    if (LLMEvent.is.reasoningEnd(event) && event.text !== undefined) {
+      push(event.id, event.text, true);
+    }
+  }
+  return order.map((id) => byId.get(id) ?? '').join('');
+};
 
-const responseReasoning = (events: ReadonlyArray<LLMEvent>) =>
-  events
-    .filter(LLMEvent.is.reasoningDelta)
-    .map((event) => event.text)
-    .join('');
+const responseText = (events: ReadonlyArray<LLMEvent>) => joinFragments(events, 'text');
+
+const responseReasoning = (events: ReadonlyArray<LLMEvent>) => joinFragments(events, 'reasoning');
 
 const responseUsage = (events: ReadonlyArray<LLMEvent>) =>
   events.reduce<Usage | undefined>(
@@ -472,9 +508,11 @@ const reduceTextEnd = (state: ResponseState, event: TextEnd): ResponseState => {
   const current = state.textParts[event.id];
   if (!current) return state;
   const providerMetadata = event.providerMetadata ?? current.providerMetadata;
+  // An authoritative `text` replaces the accumulated deltas.
+  const text = event.text ?? current.text;
   return {
-    ...replaceContent(state, current.contentIndex, textContent(current.text, providerMetadata)),
-    textParts: { ...state.textParts, [event.id]: { ...current, providerMetadata } },
+    ...replaceContent(state, current.contentIndex, textContent(text, providerMetadata)),
+    textParts: { ...state.textParts, [event.id]: { ...current, text, providerMetadata } },
   };
 };
 
@@ -512,13 +550,13 @@ const reduceReasoningEnd = (state: ResponseState, event: ReasoningEnd): Response
   const current = state.reasoningParts[event.id];
   if (!current) return state;
   const providerMetadata = event.providerMetadata ?? current.providerMetadata;
+  const text = event.text ?? current.text;
   return {
-    ...replaceContent(
-      state,
-      current.contentIndex,
-      reasoningContent(current.text, providerMetadata),
-    ),
-    reasoningParts: { ...state.reasoningParts, [event.id]: { ...current, providerMetadata } },
+    ...replaceContent(state, current.contentIndex, reasoningContent(text, providerMetadata)),
+    reasoningParts: {
+      ...state.reasoningParts,
+      [event.id]: { ...current, text, providerMetadata },
+    },
   };
 };
 

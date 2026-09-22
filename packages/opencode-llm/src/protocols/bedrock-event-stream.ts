@@ -1,6 +1,6 @@
 import { EventStreamCodec } from '@smithy/eventstream-codec';
 import { fromUtf8, toUtf8 } from '@smithy/util-utf8';
-import { Effect, Stream } from 'effect';
+import { Effect, Encoding, Stream } from 'effect';
 import type { Framing } from '../route/framing.js';
 import { ProviderShared } from './shared.js';
 
@@ -21,6 +21,13 @@ interface FrameBufferState {
 
 const initialFrameBuffer: FrameBufferState = { buffer: new Uint8Array(0), offset: 0 };
 
+// The framer consumes either a network chunk or the end-of-stream sentinel.
+// The sentinel lets us detect a truncated final frame (a provider that closes
+// mid-frame) instead of silently treating the short read as a complete stream.
+type FrameInput = { readonly _tag: 'Chunk'; readonly bytes: Uint8Array } | { readonly _tag: 'End' };
+
+const endOfStream: FrameInput = { _tag: 'End' };
+
 const appendChunk = (state: FrameBufferState, chunk: Uint8Array): FrameBufferState => {
   const remaining = state.buffer.length - state.offset;
   // Compact: drop the consumed prefix and append the new chunk in one alloc.
@@ -32,9 +39,19 @@ const appendChunk = (state: FrameBufferState, chunk: Uint8Array): FrameBufferSta
   return { buffer: next, offset: 0 };
 };
 
-const consumeFrames = (route: string) => (state: FrameBufferState, chunk: Uint8Array) =>
+const consumeFrames = (route: string) => (state: FrameBufferState, input: FrameInput) =>
   Effect.gen(function* () {
-    let cursor = appendChunk(state, chunk);
+    if (input._tag === 'End') {
+      const remaining = state.buffer.subarray(state.offset);
+      if (remaining.length > 0)
+        return yield* ProviderShared.incompleteStreamError(
+          route,
+          `Incomplete Bedrock Converse event-stream frame: ${remaining.length} buffered bytes remain at end of stream`,
+          Encoding.encodeBase64(remaining),
+        );
+      return [state, [] as object[]] as const;
+    }
+    let cursor = appendChunk(state, input.bytes);
     const out: object[] = [];
     while (cursor.buffer.length - cursor.offset >= 4) {
       const view = cursor.buffer.subarray(cursor.offset);
@@ -52,14 +69,39 @@ const consumeFrames = (route: string) => (state: FrameBufferState, chunk: Uint8A
             `Failed to decode Bedrock Converse event-stream frame: ${
               error instanceof Error ? error.message : String(error)
             }`,
+            Encoding.encodeBase64(view.subarray(0, totalLength)),
+            error,
           ),
       });
       cursor = { buffer: cursor.buffer, offset: cursor.offset + totalLength };
 
-      if (decoded.headers[':message-type']?.value !== 'event') continue;
-      const eventType = decoded.headers[':event-type']?.value;
-      if (typeof eventType !== 'string') continue;
       const payload = utf8.decode(decoded.body);
+      // Original headers + payload, kept on every emitted frame so a later
+      // chunk-schema decode failure can report the wire body instead of only the
+      // reconstructed object. The chunk schema ignores the extra key.
+      const rawBody = ProviderShared.encodeJson({ headers: decoded.headers, body: payload });
+      const messageType = decoded.headers[':message-type']?.value;
+      // A `:message-type: error` frame carries its code/message in headers and
+      // has no JSON payload. Dropping it used to make a failed Bedrock turn look
+      // like a clean, empty completion, so surface it as a provider error.
+      if (messageType === 'error') {
+        const code = decoded.headers[':error-code']?.value;
+        const message = decoded.headers[':error-message']?.value;
+        return yield* ProviderShared.eventError(
+          route,
+          [code, message]
+            .filter((value): value is string => typeof value === 'string')
+            .join(': ') || 'Bedrock Converse event-stream error',
+          rawBody,
+        );
+      }
+      const eventType =
+        messageType === 'event'
+          ? decoded.headers[':event-type']?.value
+          : messageType === 'exception'
+            ? decoded.headers[':exception-type']?.value
+            : undefined;
+      if (typeof eventType !== 'string') continue;
       if (!payload) continue;
       // The AWS event stream pads short payloads with a `p` field. Drop it
       // before handing the object to the chunk schema. JSON decode goes
@@ -71,7 +113,11 @@ const consumeFrames = (route: string) => (state: FrameBufferState, chunk: Uint8A
         'Failed to parse Bedrock Converse event-stream payload',
       )) as Record<string, unknown>;
       delete parsed.p;
-      out.push({ [eventType]: parsed });
+      out.push(
+        messageType === 'exception'
+          ? { exception: { type: eventType, details: parsed }, rawBody }
+          : { [eventType]: parsed, rawBody },
+      );
     }
     return [cursor, out] as const;
   });
@@ -85,7 +131,11 @@ const consumeFrames = (route: string) => (state: FrameBufferState, chunk: Uint8A
 export const framing = (route: string): Framing<object> => ({
   id: 'aws-event-stream',
   frame: (bytes) =>
-    bytes.pipe(Stream.mapAccumEffect(() => initialFrameBuffer, consumeFrames(route))),
+    bytes.pipe(
+      Stream.map((chunk): FrameInput => ({ _tag: 'Chunk', bytes: chunk })),
+      Stream.concat(Stream.succeed(endOfStream)),
+      Stream.mapAccumEffect(() => initialFrameBuffer, consumeFrames(route)),
+    ),
 });
 
 export * as BedrockEventStream from './bedrock-event-stream.js';

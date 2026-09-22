@@ -744,8 +744,21 @@ export function buildNormalizedConversationFromHistory(
       }
     }
 
-    if ((message.role === 'user' || message.role === 'system') && textContent.length > 0) {
-      normalizedMessages.push({ role: message.role, content: textContent });
+    // `synthetic` messages are gateway-authored notices (e.g. subagent
+    // completion delivery). They must stay visible to the model and lower to
+    // the upstream `user` role (decision D-1), mirroring the v2 pipeline in
+    // `message-to-model-messages.ts`. This normalized layer only carries
+    // upstream roles — provenance stays on the v2 `MessageInfo`
+    // (`role: 'synthetic'`) — so folding them into the existing user branch is
+    // the minimal, type-safe mapping.
+    if (
+      (message.role === 'user' || message.role === 'system' || message.role === 'synthetic') &&
+      textContent.length > 0
+    ) {
+      normalizedMessages.push({
+        role: message.role === 'synthetic' ? 'user' : message.role,
+        content: textContent,
+      });
     }
 
     toolResults.forEach((content) => pushToolResult(content));

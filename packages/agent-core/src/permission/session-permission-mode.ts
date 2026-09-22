@@ -29,7 +29,7 @@ export function resolveSessionPermissionMode(
 
 /**
  * `auto-edit` 档位自动放行的权限类别（仅文件编辑与写入）。
- * 中档位覆盖全部 `edit` + `write` 类工具，包括 `apply_patch` 的删除/移动与
+ * 中档位覆盖全部 `edit` + `write` 类工具，包括 `patch` 的删除/移动与
  * `ast_grep_replace`（`dryRun:false`）的批量重写——语义是「文件修改已预先批准」，
  * 排除所有破坏性文件操作会让重构场景失去意义；需要收紧时靠显式 `deny` 规则
  * （deny 始终优先于档位快捷分支）。

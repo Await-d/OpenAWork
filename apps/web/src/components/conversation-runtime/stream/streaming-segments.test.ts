@@ -27,6 +27,14 @@ import type { ChatMessagePart, ChatReasoningPart, ChatToolPart } from '../messag
 
 const MESSAGE_ID = 'msg-1';
 
+/** `computer_use` 最终截图的 tool result 附件形态（网关只下发 artifactId）。 */
+const GUI_SNAPSHOT = {
+  type: 'input_image' as const,
+  artifactId: 'artifact-gui-1',
+  fileName: 'computer-use-final.png',
+  mimeType: 'image/png',
+};
+
 interface ReasoningMeta {
   blockKey: string;
 }
@@ -367,6 +375,50 @@ describe('applyToolResultToStreamingSegment', () => {
       output: 'done',
       status: 'completed',
     });
+  });
+
+  it('把 tool result 的 attachments 写入匹配的工具段（computer_use 最终截图）', () => {
+    let segments: ChatMessagePart[] = [];
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-gui',
+      toolName: 'computer_use',
+      input: { instruction: '打开系统设置' },
+    });
+    segments = applyToolResultToStreamingSegment(segments, {
+      toolCallId: 'tool-gui',
+      output: '{"success":true}',
+      status: 'completed',
+      attachments: [GUI_SNAPSHOT],
+    });
+
+    const tool = segments[0] as ChatToolPart;
+    expect(tool.attachments).toEqual([GUI_SNAPSHOT]);
+    expect(tool.status).toBe('completed');
+  });
+
+  it('tool_result 先到占位时同样保留 attachments', () => {
+    const segments = applyToolResultToStreamingSegment([], {
+      toolCallId: 'tool-gui-late',
+      output: '{"success":true}',
+      status: 'completed',
+      attachments: [GUI_SNAPSHOT],
+    });
+
+    const tool = segments[0] as ChatToolPart;
+    expect(tool.toolName).toBe('tool');
+    expect(tool.attachments).toEqual([GUI_SNAPSHOT]);
+  });
+
+  it('不带 attachments 的 tool_result 不写入该字段（shape 与既有实现一致）', () => {
+    const segments = applyToolResultToStreamingSegment([], {
+      toolCallId: 'tool-read',
+      output: 'ok',
+      status: 'completed',
+    });
+
+    const tool = segments[0] as ChatToolPart;
+    expect(tool.attachments).toBeUndefined();
+    expect('attachments' in tool).toBe(false);
   });
 });
 

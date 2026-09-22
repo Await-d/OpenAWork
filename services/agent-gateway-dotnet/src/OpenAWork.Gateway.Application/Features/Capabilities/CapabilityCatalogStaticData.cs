@@ -33,7 +33,7 @@ internal static class CapabilityCatalogStaticData
         ("skill", "Skill", "Execute installed skill"),
         ("batch", "batch", "Run batched operations"),
         ("bash", "bash", "Run shell command"),
-        ("apply_patch", "apply_patch", "Apply unified patch"),
+        ("patch", "patch", "Apply unified patch"),
         ("question", "AskUserQuestion", "Ask the user a structured question"),
         ("enter_plan_mode", "EnterPlanMode", "Enter plan mode"),
         ("exit_plan_mode", "ExitPlanMode", "Exit plan mode"),

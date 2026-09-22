@@ -13,6 +13,11 @@ import type {
 } from '../../../components/conversation-runtime/messages/support.js';
 import { groupChatRenderEntries } from '../../../components/conversation-runtime/messages/group-render-entries.js';
 import {
+  buildSubagentNoticeGroups,
+  mergeNoticeGroupsIntoRenderGroups,
+} from '../../../components/conversation-runtime/messages/subagent-notice-groups.js';
+import type { SubagentNotice } from '@openAwork/shared';
+import {
   getRoleLayerIdentity,
   getRoleLayerIdentityFromAgentId,
 } from '../runtime/data/role-layer-identity.js';
@@ -27,6 +32,8 @@ export function buildTeamGroupedMessageEntries(input: {
   resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
   streamBuffer: string;
   streamingSegments: ChatMessagePart[];
+  /** 子代理完成通知；按时间位置插入消息群组之间（与 chat 端口径一致）。 */
+  subagentNotices?: SubagentNotice[];
   visibleStreaming: boolean;
 }): ChatRenderGroup[] {
   const seenMessageIds = new Set<string>();
@@ -109,5 +116,8 @@ export function buildTeamGroupedMessageEntries(input: {
     });
   }
 
-  return groupChatRenderEntries(entries);
+  return mergeNoticeGroupsIntoRenderGroups({
+    messageGroups: groupChatRenderEntries(entries),
+    noticeGroups: buildSubagentNoticeGroups(input.subagentNotices ?? []),
+  });
 }

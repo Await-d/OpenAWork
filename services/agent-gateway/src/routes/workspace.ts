@@ -27,6 +27,7 @@ import {
   resolveWorkspaceEntryPathForRequest,
   ensureIgnoreRulesLoadedForPath,
   getSessionWorkingDirectoryForUser,
+  resolveUnboundSessionWorkspaceFallback,
   resolveWorkspaceRootForPath,
 } from '../workspace/workspace-safety.js';
 import {
@@ -699,30 +700,40 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
    *
    * 与 `/workspace/files/search` 不同：这里**不触发**索引构建，也不占用文件索引
    * 全量扫描的限流预算——只读一个进程内计数器，代价恒定。
+   *
+   * 未绑定工作区的会话（前端只会给出 `__session__:<id>` 这类 UI 作用域键，而非
+   * 绝对路径）回退到「未绑定会话默认工作区」，让预览刷新在无工作区时也能工作；
+   * 但显式传入的绝对路径若不在允许范围内，仍然按白名单拒绝。
    */
   app.get(
     '/workspace/files/index-version',
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.files.index-version');
-      const schema = z.object({ path: z.string() });
+      const schema = z.object({ path: z.string().optional() });
 
       const parseStep = child('parse-query');
       const parsed = parseQuery(schema, request.query);
       parseStep.succeed();
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
+      const requestedPath = parsed.path?.trim() ?? '';
+      const explicitSafePath = requestedPath
+        ? validateWorkspacePathForRequest(requestedPath)
+        : null;
+      if (requestedPath && explicitSafePath === null && isWorkspaceAbsolutePath(requestedPath)) {
+        // 显式给出的绝对路径却不在允许范围内：不放宽白名单，照旧拒绝。
         pathStep.fail('forbidden path');
         step.fail('forbidden path');
         return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
       }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const usesDefaultWorkspace = explicitSafePath === null;
+      const safePath = explicitSafePath ?? resolveUnboundSessionWorkspaceFallback();
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const version = getWorkspaceFileIndexVersion(safePath);
-      step.succeed(undefined, { version });
+      step.succeed(undefined, { version, usesDefaultWorkspace });
       return reply.send({ root: safePath, version });
     },
   );

@@ -35,7 +35,7 @@ export type ThemeStyle =
 /**
  * 工具折叠类别——按用户可感知的工具类型分组，控制聊天页面中各类型工具调用的默认展开/折叠行为。
  * - `bash`：Shell 命令（bash / interactive_bash）
- * - `fileEdit`：文件写入/编辑（write / edit / multi_edit / apply_patch / hash_edit）
+ * - `fileEdit`：文件写入/编辑（write / edit / multi_edit / patch / hash_edit）
  * - `fileRead`：文件读取/搜索（read / grep / glob / list / codesearch / ast_grep_*）
  * - `mcp`：MCP 工具调用（mcp_call / mcp_list_tools / mcp_* 前缀 / skill_mcp）
  * - `skill`：Skill 工具调用（skill）
@@ -65,7 +65,7 @@ export function classifyToolName(toolName: string): ToolExpandCategory {
     n === 'write' ||
     n === 'edit' ||
     n === 'multi_edit' ||
-    n === 'apply_patch' ||
+    n === 'patch' ||
     n === 'hash_edit' ||
     n === 'workspace_create_directory' ||
     n === 'workspace_review_revert'

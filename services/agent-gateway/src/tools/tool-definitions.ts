@@ -40,6 +40,11 @@ import {
   sessionSearchToolDefinition,
 } from '../session/session-manager-tools.js';
 import {
+  sessionMoveToolDefinition,
+  sessionRenameToolDefinition,
+} from './session-management-tools.js';
+import { modelSearchToolDefinition } from './model-search-tools.js';
+import {
   AST_GREP_LANGUAGES,
   astGrepReplaceToolDefinition,
   astGrepSearchToolDefinition,
@@ -48,7 +53,6 @@ import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
-import { shellCommandToolDefinition } from './shell-command-tools.js';
 import { generateImageToolDefinition } from './image-generation-tool.js';
 import { convertMediaToolDefinition } from './convert-media-tool.js';
 import { extractMediaInfoToolDefinition } from './extract-media-info-tool.js';
@@ -56,6 +60,7 @@ import { extractVideoFrameToolDefinition } from './extract-video-frame-tool.js';
 import { generateAudioToolDefinition } from './generate-audio-tool.js';
 import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import { desktopControlToolDefinition } from './desktop-control.js';
+import { computerUseToolDefinition } from './gui/computer-use-tool.js';
 import {
   buildDesktopAutomationParameters,
   buildDesktopControlParameters,
@@ -168,7 +173,6 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   skillTool,
   batchToolDefinition,
   bashToolDefinition,
-  shellCommandToolDefinition,
   runBashInBackgroundToolDefinition,
   bashOutputToolDefinition,
   bashKillToolDefinition,
@@ -184,6 +188,9 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   sessionReadToolDefinition,
   sessionSearchToolDefinition,
   sessionInfoToolDefinition,
+  sessionRenameToolDefinition,
+  sessionMoveToolDefinition,
+  modelSearchToolDefinition,
   astGrepSearchToolDefinition,
   astGrepReplaceToolDefinition,
   interactiveBashToolDefinition,
@@ -192,6 +199,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   lookAtToolDefinition,
   desktopAutomationToolDefinition,
   desktopControlToolDefinition,
+  computerUseToolDefinition,
   workspaceReviewStatusTool,
   workspaceReviewDiffTool,
   writeTool,
@@ -713,6 +721,24 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return buildDesktopAutomationParameters();
     case 'desktop_control':
       return buildDesktopControlParameters();
+    case 'computer_use':
+      return {
+        type: 'object',
+        properties: {
+          instruction: {
+            type: 'string',
+            description: '用自然语言描述要让系统桌面完成的任务，例如「打开系统设置」。',
+          },
+          maxSteps: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: '最大循环步数（可选，1–100）；省略时由主循环使用默认上限。',
+          },
+        },
+        required: ['instruction'],
+        additionalProperties: false,
+      };
     case 'list':
       return {
         type: 'object',
@@ -914,7 +940,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['terminal_id'],
         additionalProperties: false,
       };
-    case 'apply_patch':
+    case 'patch':
       return {
         type: 'object',
         properties: {
@@ -1614,6 +1640,65 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: [],
+        additionalProperties: false,
+      };
+    case 'models':
+      return {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: '要在模型名称与 ID 中搜索的文本，按空白拆分为多个关键词。',
+          },
+          provider: {
+            type: 'string',
+            description: '按 Provider ID 或名称过滤；建议先试自身所在 Provider。',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: '返回的模型数量上限，默认 20。',
+          },
+          offset: {
+            type: 'integer',
+            minimum: 0,
+            description: '分页偏移量，默认 0。',
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      };
+    case 'session_rename':
+      return {
+        type: 'object',
+        properties: {
+          sessionID: {
+            type: 'string',
+            description: '要重命名的会话 ID；省略时重命名当前会话。',
+          },
+          title: {
+            type: 'string',
+            description: '新的会话标题（1–200 字符，去除首尾空白后不能为空）。',
+          },
+        },
+        required: ['title'],
+        additionalProperties: false,
+      };
+    case 'session_move':
+      return {
+        type: 'object',
+        properties: {
+          directory: {
+            type: ['string', 'null'],
+            description: '会话新的工作目录；传 null 表示解绑当前工作区。',
+          },
+          force: {
+            type: 'boolean',
+            description: 'true 时强制切换已绑定工作区，并写入 workspaceWarpHistory 审计。',
+          },
+        },
+        required: ['directory'],
         additionalProperties: false,
       };
     default:

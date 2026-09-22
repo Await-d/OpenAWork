@@ -24,13 +24,10 @@ export const CHANNEL_PERMISSION_TOOL_NAMES = [
 
 const BASE_TOOL_TO_CATEGORY = {
   read: 'read',
-  workspace_read_file: 'read',
   edit: 'edit',
   multi_edit: 'edit',
-  apply_patch: 'edit',
+  patch: 'edit',
   write: 'write',
-  workspace_write_file: 'write',
-  workspace_create_file: 'write',
   workspace_create_directory: 'write',
   bash: 'bash',
   interactive_bash: 'bash',
@@ -68,6 +65,12 @@ const BASE_TOOL_TO_CATEGORY = {
   ast_grep_replace: 'edit',
   desktop_automation: 'desktop_automation',
   desktop_control: 'desktop_control',
+  // computer_use 与 desktop_control 同属「系统桌面控制」权限类别（默认 ask）：
+  // 两者都驱动本机桌面，权限语义必须一致。
+  computer_use: 'desktop_control',
+  // 会话管理：重命名标题、切换/解绑工作目录。均为会话级副作用，默认 ask。
+  session_rename: 'session',
+  session_move: 'session',
 } as const;
 
 export const TOOL_TO_PERMISSION_CATEGORY: Readonly<Record<string, string>> = {
@@ -143,4 +146,6 @@ export const ALLOW_BY_DEFAULT_TOOL_NAMES: ReadonlySet<string> = new Set<string>(
   'list',
   'workspace_review_status',
   'workspace_review_diff',
+  // 模型搜索只读：只列出账号已配置 provider 的模型，无文件/网络副作用。
+  'models',
 ]);

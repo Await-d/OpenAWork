@@ -1,4 +1,4 @@
-import type { InputImageContent, RunEvent } from '@openAwork/shared';
+import type { InputImageContent, RunEvent, SubagentNotice } from '@openAwork/shared';
 import type {
   InboundMessageType,
   InboundPayloadByType,
@@ -58,7 +58,8 @@ export interface UseTeamConversationStateOptions {
 
 export interface TeamConversationState {
   // ─── 消息 + 流式 ──────────────────────────────────────────────────
-  messages: ChatMessage[];
+  messages: ChatMessage[]; /** 子代理完成通知（`role: 'synthetic'`），与 `messages` 同源解析但走独立通道。 */
+  subagentNotices: SubagentNotice[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   streaming: boolean;
   stoppingStream: boolean;

@@ -17,6 +17,8 @@ import type { RecoveredActiveAssistantStream } from '../../../../components/conv
 import { createSessionsClient } from '@openAwork/web-client';
 import type { ChatRightPanelState } from '../../state/chat-stream-state.js';
 import { reconcileSnapshotChatMessages } from '../../../../components/conversation-runtime/messages/support.js';
+import { collectSubagentNotices } from '../../../../components/conversation-runtime/messages/subagent-notices.js';
+import type { SubagentNotice } from '@openAwork/shared';
 import {
   prepareSessionRecoveryState,
   buildRightPanelStateFromSessionSnapshot,
@@ -71,6 +73,13 @@ export interface SessionSnapshotLoaderSetters {
       | ((prev: RecoveredActiveAssistantStream | null) => RecoveredActiveAssistantStream | null),
   ) => void;
   setIsSessionSnapshotReady: (value: boolean) => void;
+  /**
+   * 子代理完成通知（`role: 'synthetic'`）。
+   *
+   * `messageLimit` 生效时 `recovery.session.messages` 只含最近 N 条，
+   * 因此通知同样是**窗口内子集**——与转录可见范围一致，属预期。
+   */
+  setSubagentNotices: (value: SubagentNotice[]) => void;
 }
 
 export interface SessionSnapshotLoaderReturn {
@@ -118,6 +127,7 @@ export function useSessionSnapshotLoader(
     setSessionStateStatus,
     setRecoveryActiveStream,
     setLatestUpstreamSummary,
+    setSubagentNotices,
     setRecoveredStreamSnapshot,
     setIsSessionSnapshotReady,
   } = setters;
@@ -230,6 +240,8 @@ export function useSessionSnapshotLoader(
             reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
           );
         }
+        // 通知与消息同源解析，但走独立通道（synthetic 不进 transcript）。
+        setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
         setMessageRatings(prepared.messageRatings);
         setRightPanelState(
           buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),

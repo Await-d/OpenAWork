@@ -14,6 +14,7 @@ import type * as WorkspaceRoutesModule from '../../routes/workspace.js';
 import type * as SshWorkspaceFileIndexModule from '../../workspace/ssh-workspace-file-index.js';
 import type * as UserWorkspaceAllowlistModule from '../../workspace/user-workspace-allowlist.js';
 import type * as WorkspaceFileIndexModule from '../../workspace/workspace-file-index.js';
+import type * as WorkspaceSafetyModule from '../../workspace/workspace-safety.js';
 
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'openawork-workspace-routes-'));
 const outsideRoot = mkdtempSync(join(tmpdir(), 'openawork-workspace-outside-'));
@@ -40,6 +41,7 @@ let SshServiceCtor: typeof SshServiceModule.SshService;
 let createSshConnection: typeof SshStoreModule.createSshConnection;
 let migrateSshTables: typeof SshStoreModule.migrateSshTables;
 let resetSshWorkspaceFileIndexCacheForTest: typeof SshWorkspaceFileIndexModule.resetSshWorkspaceFileIndexCacheForTest;
+let resolveUnboundSessionWorkspaceFallback: typeof WorkspaceSafetyModule.resolveUnboundSessionWorkspaceFallback;
 
 const USER_ID = 'u-workspace-routes';
 const SESSION_ID = 's-workspace-routes';
@@ -193,6 +195,8 @@ beforeAll(async () => {
   resetSshWorkspaceFileIndexCacheForTest = (
     await import('../../workspace/ssh-workspace-file-index.js')
   ).resetSshWorkspaceFileIndexCacheForTest;
+  resolveUnboundSessionWorkspaceFallback = (await import('../../workspace/workspace-safety.js'))
+    .resolveUnboundSessionWorkspaceFallback;
 });
 
 beforeEach(() => {
@@ -733,7 +737,25 @@ describe('workspace routes', () => {
     }
   });
 
-  it('GET /workspace/files/index-version 缺少 path 返回中文 400', async () => {
+  it('GET /workspace/files/index-version 非路径作用域回退到未绑定会话默认工作区', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/index-version?path=${encodeURIComponent('__session__:s-unbound')}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { root: string; version: number };
+      expect(body.root).toBe(resolveUnboundSessionWorkspaceFallback());
+      expect(typeof body.version).toBe('number');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/index-version 缺少 path 时回退默认工作区', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({
@@ -742,11 +764,26 @@ describe('workspace routes', () => {
         headers: { authorization: bearer(app) },
       });
 
-      expect(response.statusCode).toBe(400);
-      expect(response.json()).toMatchObject({
-        name: 'BadRequest',
-        data: { message: '查询参数无效。' },
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as { root: string }).root).toBe(
+        resolveUnboundSessionWorkspaceFallback(),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/index-version 对白名单外绝对路径仍返回 403', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/files/index-version?path=${encodeURIComponent(outsideRoot)}`,
+        headers: { authorization: bearer(app) },
       });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: '工作区路径不在允许范围内。' });
     } finally {
       await app.close();
     }

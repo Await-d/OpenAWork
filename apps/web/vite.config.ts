@@ -20,7 +20,7 @@ const isDesktopBuild =
   Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.OPENAWORK_DESKTOP_BUILD === '1';
 
 /**
- * material-icon-theme 在 pnpm 下只装在 apps/web/node_modules，
+ * material-icon-theme 在隔离式 node_modules 下只装在 apps/web/node_modules，
  * 必须从 apps/web/package.json 锚定解析，否则根目录解析不到该包。
  */
 const requireFromWeb = createRequire(new URL('./package.json', import.meta.url));

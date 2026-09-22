@@ -36,6 +36,24 @@ export interface SystemMessage {
   content: string;
 }
 
+/**
+ * Gateway-injected notice (e.g. subagent completion delivery). Mirrors
+ * opencode's first-class synthetic message: the upstream model must see the
+ * text, while clients render it as a non-user notice row (D-1).
+ *
+ * This stays a distinct member of `UnifiedMessage` instead of collapsing
+ * into `UserMessageUnified` here, so every renderer switch is forced by the
+ * exhaustiveness check and a new role can never be dropped silently.
+ * The upstream protocols only know user/assistant/tool turns, so
+ * `native-message-bridge.ts` downgrades this to a `user` turn.
+ */
+export interface SyntheticMessageUnified {
+  role: 'synthetic';
+  content: string;
+  /** Origin tag, mirroring `UserMessageUnified.syntheticKind`. */
+  syntheticKind?: 'subagent-notice';
+}
+
 export interface UserMessageUnified {
   role: 'user';
   content: string;
@@ -115,7 +133,11 @@ export interface ToolResultMessage {
 }
 
 export type UnifiedMessage =
-  SystemMessage | UserMessageUnified | AssistantMessageUnified | ToolResultMessage;
+  | SystemMessage
+  | UserMessageUnified
+  | SyntheticMessageUnified
+  | AssistantMessageUnified
+  | ToolResultMessage;
 
 /**
  * Conversion options. Intentionally narrow — this matches opencode's
@@ -582,6 +604,21 @@ export function toModelMessages(
         .trim();
       if (text.length > 0) {
         result.push({ role: 'system', content: text });
+      }
+    }
+
+    if (msg.info.role === 'synthetic') {
+      // D-1: synthetic notices stay model-visible, but they must not be
+      // rendered as user input on the client. `info.description` /
+      // `info.metadata` are client-facing notice fields only and are
+      // deliberately not forwarded upstream; the body lives in text parts.
+      const text = msg.parts
+        .filter((p): p is TextPart => p.type === 'text' && p.ignored !== true)
+        .map((p) => p.text)
+        .join('\n')
+        .trim();
+      if (text.length > 0) {
+        result.push({ role: 'synthetic', content: text, syntheticKind: 'subagent-notice' });
       }
     }
   }

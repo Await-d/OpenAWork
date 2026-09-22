@@ -419,6 +419,27 @@ describe('createWorkspaceClient getFileIndexVersion', () => {
     expect(result).toEqual({ root: '/workspace/demo', version: 0 });
   });
 
+  it('省略 path 时不带 path 查询参数（网关回退默认工作区）', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ root: '/default-ws', version: 3 }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    const result = await client.getFileIndexVersion('token-1', '');
+
+    expect(result).toEqual({ root: '/default-ws', version: 3 });
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const [url] = firstCall;
+    expect(String(url)).toBe('http://localhost:3000/workspace/files/index-version');
+  });
+
   it('失败时抛带状态码的 HttpError 并映射权限文案', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

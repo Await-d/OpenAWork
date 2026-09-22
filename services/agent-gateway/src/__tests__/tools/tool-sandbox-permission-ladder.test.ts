@@ -256,7 +256,7 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(permissionInsertParams()).toBeUndefined();
   });
 
-  it('auto-edit 档位下 apply_patch 自动执行且不创建 pending 权限请求', async () => {
+  it('auto-edit 档位下 patch 自动执行且不创建 pending 权限请求', async () => {
     mocks.metadataJson = JSON.stringify({
       permissionMode: 'auto-edit',
       workingDirectory: TEST_WORKSPACE,
@@ -272,7 +272,7 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     const result = await createDefaultSandbox().execute(
       {
         toolCallId: 'call-auto-edit-patch',
-        toolName: 'apply_patch',
+        toolName: 'patch',
         rawInput: { patchText },
       },
       new AbortController().signal,
@@ -284,6 +284,122 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(result.pendingPermissionRequestId).toBeUndefined();
     expect(readFileSync(targetPath, 'utf8')).toContain('patched content');
     expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('同一文件的多个 Update 块按顺序累积，后块不会覆盖前块', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-patch-sequential.txt');
+    writeFileSync(targetPath, 'A\nB\n', 'utf8');
+    const patchText = [
+      '*** Begin Patch',
+      `*** Update File: ${targetPath}`,
+      '@@',
+      '-A',
+      '+B',
+      '@@',
+      '-B',
+      '+C',
+      '*** End Patch',
+    ].join('\n');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-patch-sequential',
+        toolName: 'patch',
+        rawInput: { patchText },
+      },
+      new AbortController().signal,
+      'session-auto-edit-patch-sequential',
+      executionContext('req-auto-edit-patch-sequential'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(readFileSync(targetPath, 'utf8')).toBe('B\nC\n');
+    expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('一次补丁内完成新增 / 修改 / 移动 / 删除', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const addPath = join(TEST_WORKSPACE, 'patch-multi-add.txt');
+    const updatePath = join(TEST_WORKSPACE, 'patch-multi-update.txt');
+    const moveSourcePath = join(TEST_WORKSPACE, 'patch-multi-move.txt');
+    const moveTargetPath = join(TEST_WORKSPACE, 'patch-multi-moved.txt');
+    const deletePath = join(TEST_WORKSPACE, 'patch-multi-delete.txt');
+    writeFileSync(updatePath, 'alpha\nbeta\n', 'utf8');
+    writeFileSync(moveSourcePath, 'gamma\n', 'utf8');
+    writeFileSync(deletePath, 'obsolete\n', 'utf8');
+
+    const patchText = [
+      '*** Begin Patch',
+      `*** Add File: ${addPath}`,
+      '+added line',
+      `*** Update File: ${updatePath}`,
+      '@@',
+      '-beta',
+      '+BETA',
+      `*** Update File: ${moveSourcePath}`,
+      `*** Move to: ${moveTargetPath}`,
+      '-gamma',
+      '+GAMMA',
+      `*** Delete File: ${deletePath}`,
+      '*** End Patch',
+    ].join('\n');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-patch-multi',
+        toolName: 'patch',
+        rawInput: { patchText },
+      },
+      new AbortController().signal,
+      'session-patch-multi',
+      executionContext('req-patch-multi'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(readFileSync(addPath, 'utf8')).toBe('added line\n');
+    expect(readFileSync(updatePath, 'utf8')).toBe('alpha\nBETA\n');
+    expect(existsSync(moveSourcePath)).toBe(false);
+    expect(readFileSync(moveTargetPath, 'utf8')).toBe('GAMMA\n');
+    expect(existsSync(deletePath)).toBe(false);
+  });
+
+  it('补丁匹配失败时返回可自愈的工具错误，而不是抛异常中断回合', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'auto-edit-patch-miss.txt');
+    writeFileSync(targetPath, 'a\n', 'utf8');
+    const patchText = [
+      '*** Begin Patch',
+      `*** Update File: ${targetPath}`,
+      '@@',
+      '-not-here',
+      '+x',
+      '*** End Patch',
+    ].join('\n');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-auto-edit-patch-miss',
+        toolName: 'patch',
+        rawInput: { patchText },
+      },
+      new AbortController().signal,
+      'session-auto-edit-patch-miss',
+      executionContext('req-auto-edit-patch-miss'),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('Failed to find expected lines in');
+    expect(readFileSync(targetPath, 'utf8')).toBe('a\n');
   });
 
   it('auto-edit 档位下 workspace_review_revert 仍需要审批（豁免工具）', async () => {
@@ -563,27 +679,42 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(insertedMetadata?.['yoloMode']).toBe(true);
   });
 
-  it('auto-edit 档位不放过 desktop_automation：仍需审批', async () => {
+  it('auto-edit 档位不放过 desktop_automation：仍需审批（先放行浏览器自动化插件 gate）', async () => {
     // desktop_automation 默认动作是 ask，且不在 AUTO_EDIT_PERMISSION_CATEGORIES（仅 edit/write）内。
+    // 该工具在权限检查之前还有一道「浏览器自动化插件未启用」gate，
+    // 这里通过 sqliteGet 的 user_settings 查询返回已启用配置放行该 gate，使断言落在权限层本身。
     mocks.metadataJson = JSON.stringify({
       permissionMode: 'auto-edit',
       workingDirectory: TEST_WORKSPACE,
     });
+    const originalSqliteGetImplementation = mocks.sqliteGetMock.getMockImplementation();
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('user_settings')) {
+        return { value: JSON.stringify({ desktopAutomation: { enabled: true } }) };
+      }
+      return originalSqliteGetImplementation?.(query);
+    });
 
-    const result = await createDefaultSandbox().execute(
-      {
-        toolCallId: 'call-auto-edit-desktop-automation',
-        toolName: 'desktop_automation',
-        rawInput: { action: 'status' },
-      },
-      new AbortController().signal,
-      'session-auto-edit-desktop-automation',
-      executionContext('req-auto-edit-desktop-automation'),
-    );
+    try {
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: 'call-auto-edit-desktop-automation',
+          toolName: 'desktop_automation',
+          rawInput: { action: 'status' },
+        },
+        new AbortController().signal,
+        'session-auto-edit-desktop-automation',
+        executionContext('req-auto-edit-desktop-automation'),
+      );
 
-    expect(result.pendingPermissionRequestId).toBeDefined();
-    expect(String(result.output)).toContain('requires approval');
-    expect(permissionInsertParams()?.[2]).toBe('desktop_automation');
+      expect(result.pendingPermissionRequestId).toBeDefined();
+      expect(String(result.output)).toContain('requires approval');
+      expect(permissionInsertParams()?.[2]).toBe('desktop_automation');
+    } finally {
+      if (originalSqliteGetImplementation) {
+        mocks.sqliteGetMock.mockImplementation(originalSqliteGetImplementation);
+      }
+    }
   });
 
   it('auto-edit 档位不放过 desktop_control：仍需审批（先放行桌面控制插件 gate）', async () => {

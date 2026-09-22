@@ -55,7 +55,7 @@ describe('resolvePermissionCategory', () => {
     // Already covered before the audit — guard against accidental
     // regressions while we're in the same area.
     expect(resolvePermissionCategory('edit')).toBe('edit');
-    expect(resolvePermissionCategory('apply_patch')).toBe('edit');
+    expect(resolvePermissionCategory('patch')).toBe('edit');
     expect(resolvePermissionCategory('write')).toBe('write');
     expect(resolvePermissionCategory('bash')).toBe('bash');
     expect(resolvePermissionCategory('interactive_bash')).toBe('bash');

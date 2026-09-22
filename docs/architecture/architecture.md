@@ -24,7 +24,7 @@
 | 构建工具 | Vite                              | ^6.0.0   | 快速 HMR、ESM 原生                |
 | 测试框架 | Vitest                            | —        | 与 Vite 生态统一                  |
 | E2E      | Playwright                        | —        | 跨浏览器 + 桌面端                 |
-| 包管理   | pnpm                              | —        | workspace 协议、严格依赖          |
+| 包管理   | bun                               | —        | workspace 协议、严格依赖          |
 | 运行时   | Bun（gateway 编译）+ Node（开发） | —        | 二进制 sidecar                    |
 | 桌面端   | Tauri v2                          | ^2.10.1  | Rust 安全、小体积                 |
 | 移动端   | Expo Router（React Native）       | —        | 跨平台移动                        |

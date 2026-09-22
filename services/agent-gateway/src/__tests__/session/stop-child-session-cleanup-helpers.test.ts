@@ -2,7 +2,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type * as DbModule from '../../infra/db.js';
 import type * as PermissionsRoutesModule from '../../routes/permissions.js';
 import type * as QuestionsRoutesModule from '../../routes/questions.js';
-import type * as TaskParentAutoResumeModule from '../../task/task-parent-auto-resume.js';
 
 const mocks = vi.hoisted(() => ({
   publishSessionRunEvent: vi.fn(),
@@ -37,7 +36,6 @@ process.env['JWT_SECRET'] = 'stop-child-session-helpers-test-secret-1234567890';
 let dbModule: typeof DbModule;
 let permissionsModule: typeof PermissionsRoutesModule;
 let questionsModule: typeof QuestionsRoutesModule;
-let autoResume: typeof TaskParentAutoResumeModule;
 
 const USER_ID = 'u-stop-child-helpers';
 const OTHER_USER_ID = 'u-stop-child-helpers-other';
@@ -125,7 +123,6 @@ beforeAll(async () => {
   await dbModule.migrate();
   permissionsModule = await import('../../routes/permissions.js');
   questionsModule = await import('../../routes/questions.js');
-  autoResume = await import('../../task/task-parent-auto-resume.js');
 });
 
 beforeEach(() => {
@@ -283,94 +280,5 @@ describe('cancelPendingQuestionRequestsForSession', () => {
 
     expect(transitioned).toBe(0);
     expect(readQuestionStatus('q-foreign').status).toBe('pending');
-  });
-});
-
-describe('clearPendingTaskParentAutoResumeForTask', () => {
-  function scheduleItem(input: {
-    childSessionId: string;
-    parentSessionId: string;
-    taskId: string;
-    taskTitle: string;
-  }): void {
-    autoResume.scheduleTaskParentAutoResume({
-      assignedAgent: 'explore',
-      childSessionId: input.childSessionId,
-      parentSessionId: input.parentSessionId,
-      requestData: { clientRequestId: 'parent-round-1', message: '父回合' },
-      status: 'done',
-      taskId: input.taskId,
-      taskTitle: input.taskTitle,
-      userId: USER_ID,
-    });
-  }
-
-  it('Given 同会话两个待回流子代理 When 只摘除一个 Then 另一个仍按计划回流', async () => {
-    const parentSessionId = 'sess-auto-resume-keep';
-    const keepTitle = '保留的子代理任务';
-    const dropTitle = '被摘除的子代理任务';
-    seedSession(parentSessionId, USER_ID, 'idle');
-    vi.useFakeTimers();
-    scheduleItem({
-      childSessionId: 'child-keep',
-      parentSessionId,
-      taskId: 'task-keep',
-      taskTitle: keepTitle,
-    });
-    scheduleItem({
-      childSessionId: 'child-drop',
-      parentSessionId,
-      taskId: 'task-drop',
-      taskTitle: dropTitle,
-    });
-
-    autoResume.clearPendingTaskParentAutoResumeForTask({
-      parentSessionId,
-      userId: USER_ID,
-      taskId: 'task-drop',
-    });
-    await vi.advanceTimersByTimeAsync(1000);
-
-    expect(mocks.runSessionInBackground).toHaveBeenCalledTimes(1);
-    const firstCall = mocks.runSessionInBackground.mock.calls[0] as unknown as
-      [{ requestData: Record<string, unknown> }] | undefined;
-    const message = String(firstCall?.[0]?.requestData['message'] ?? '');
-    expect(message).toContain(keepTitle);
-    expect(message).not.toContain(dropTitle);
-    autoResume.clearPendingTaskParentAutoResumesForSession({
-      sessionId: parentSessionId,
-      userId: USER_ID,
-    });
-  });
-
-  it('Given 会话仅剩一个待回流条目 When 摘除该任务 Then 清理定时器且不再回流', async () => {
-    const parentSessionId = 'sess-auto-resume-last';
-    seedSession(parentSessionId, USER_ID, 'idle');
-    vi.useFakeTimers();
-    scheduleItem({
-      childSessionId: 'child-last',
-      parentSessionId,
-      taskId: 'task-last',
-      taskTitle: '唯一的子代理任务',
-    });
-
-    autoResume.clearPendingTaskParentAutoResumeForTask({
-      parentSessionId,
-      userId: USER_ID,
-      taskId: 'task-last',
-    });
-    await vi.advanceTimersByTimeAsync(2000);
-
-    expect(mocks.runSessionInBackground).not.toHaveBeenCalled();
-  });
-
-  it('Given 无待回流条目 When 摘除 Then 空操作且不抛错', () => {
-    expect(() =>
-      autoResume.clearPendingTaskParentAutoResumeForTask({
-        parentSessionId: 'sess-auto-resume-empty',
-        userId: USER_ID,
-        taskId: 'task-missing',
-      }),
-    ).not.toThrow();
   });
 });

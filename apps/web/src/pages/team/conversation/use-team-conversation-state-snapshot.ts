@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RunEvent } from '@openAwork/shared';
+import type { RunEvent, SubagentNotice } from '@openAwork/shared';
+import { collectSubagentNotices } from '../../../components/conversation-runtime/messages/subagent-notices.js';
 import {
   createSessionsClient,
   type PendingPermissionRequest,
@@ -70,6 +71,8 @@ export interface UseTeamConversationSnapshotOptions {
 export interface UseTeamConversationSnapshotResult {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  /** 子代理完成通知（`role: 'synthetic'`），与 `messages` 同源解析但走独立通道。 */
+  subagentNotices: SubagentNotice[];
   childSessions: Array<{ id: string; role_layer?: string | null; messages: ChatMessage[] }>;
   setChildSessions: React.Dispatch<
     React.SetStateAction<Array<{ id: string; role_layer?: string | null; messages: ChatMessage[] }>>
@@ -124,6 +127,11 @@ export function useTeamConversationSnapshot(
   } = options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /**
+   * 子代理完成通知（网关注入的 `role: 'synthetic'` 消息）。
+   * 与 `messages` 同源解析；通知不进 transcript，由渲染层按时间位置插入消息群组之间。
+   */
+  const [subagentNotices, setSubagentNotices] = useState<SubagentNotice[]>([]);
   const [childSessions, setChildSessions] = useState<
     Array<{ id: string; role_layer?: string | null; messages: ChatMessage[] }>
   >([]);
@@ -280,6 +288,7 @@ export function useTeamConversationSnapshot(
       if (!streamingRef.current) {
         setMessages((previous) => reconcileSnapshotChatMessages(previous, normalized));
       }
+      setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
 
       setChildSessions(
         recovery.children.map((child) => {
@@ -673,6 +682,7 @@ export function useTeamConversationSnapshot(
   return {
     messages,
     setMessages,
+    subagentNotices,
     childSessions,
     setChildSessions,
     sessionStateStatus,

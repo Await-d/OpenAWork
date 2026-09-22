@@ -80,6 +80,13 @@ describe('MarkdownImage 链接内回退', () => {
     fireEvent.click(trigger);
     expect(lightboxSrc()).toBe('/images/arch.png');
   });
+
+  it('空地址不渲染：既不接查看器，也不产出 `<img src="">`', () => {
+    const { container } = render(<MarkdownImage src="" alt="坏图" />);
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
 });
 
 describe('无内禀尺寸图片的兜底标记', () => {

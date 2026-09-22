@@ -1,7 +1,10 @@
 import { Schema } from 'effect';
 import { ModelID, ProviderID, ProviderMetadata, RouteID } from './ids.js';
 
-export const ProviderFailureClassification = Schema.Literal('context-overflow');
+export const ProviderFailureClassification = Schema.Literals([
+  'context-overflow',
+  'payload-too-large',
+]);
 export type ProviderFailureClassification = typeof ProviderFailureClassification.Type;
 
 export class HttpRequestDetails extends Schema.Class<HttpRequestDetails>('LLM.HttpRequestDetails')({
@@ -42,6 +45,10 @@ export class InvalidRequestReason extends Schema.Class<InvalidRequestReason>(
   message: Schema.String,
   parameter: Schema.optional(Schema.String),
   classification: Schema.optional(ProviderFailureClassification),
+  // Underlying exception, when the failure was caused by one (e.g. a Schema
+  // decode error). Kept so diagnostics can distinguish a syntax error from a
+  // shape mismatch instead of collapsing both into the message.
+  cause: Schema.optional(Schema.Unknown),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -152,6 +159,12 @@ export class InvalidProviderOutputReason extends Schema.Class<InvalidProviderOut
   message: Schema.String,
   route: Schema.optional(Schema.String),
   raw: Schema.optional(Schema.String),
+  // `incomplete-stream` marks a response that ended before its terminal event,
+  // so callers can tell "provider got cut off" apart from a malformed payload
+  // and decide whether to continue or retry.
+  classification: Schema.optional(Schema.Literals(['incomplete-stream'])),
+  // Underlying exception from the JSON/Schema decode that failed.
+  cause: Schema.optional(Schema.Unknown),
   providerMetadata: Schema.optional(ProviderMetadata),
 }) {
   get retryable() {

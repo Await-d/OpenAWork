@@ -49,7 +49,7 @@ vi.mock('../../workspace/workspace-safety.js', () => ({
 }));
 
 vi.mock('../../tools/apply-patch-tools.js', () => ({
-  buildApplyPatchPermissionScope: (patchText: string) => `apply_patch:${patchText.length}`,
+  buildApplyPatchPermissionScope: (patchText: string) => `patch:${patchText.length}`,
 }));
 
 vi.mock('../../tools/workspace-tools.js', () => ({
@@ -274,13 +274,13 @@ describe('tool permission derivers · 文件 / bash / patch 类', () => {
     expect(buildToolPermissionRequestContext(ctx('run_bash_in_background', {}))).toBeNull();
   });
 
-  it('apply_patch：scope 基于补丁内容摘要', () => {
-    const out = buildToolPermissionRequestContext(ctx('apply_patch', { patchText: 'abc' }));
-    expect(out).toMatchObject({ scope: 'apply_patch:3', riskLevel: 'high', always: ['*'] });
+  it('patch：scope 基于补丁内容摘要', () => {
+    const out = buildToolPermissionRequestContext(ctx('patch', { patchText: 'abc' }));
+    expect(out).toMatchObject({ scope: 'patch:3', riskLevel: 'high', always: ['*'] });
   });
 
-  it('apply_patch：空补丁返回 null', () => {
-    expect(buildToolPermissionRequestContext(ctx('apply_patch', { patchText: '   ' }))).toBeNull();
+  it('patch：空补丁返回 null', () => {
+    expect(buildToolPermissionRequestContext(ctx('patch', { patchText: '   ' }))).toBeNull();
   });
 
   it('ast_grep_replace：scope 为 ast:lang:pattern', () => {

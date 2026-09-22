@@ -90,14 +90,13 @@ export const SSH_REMOTE_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
  * 调用这些工具会收到明确错误，避免「以为在改远端、实际改了 gateway 本地」。
  */
 export const SSH_REMOTE_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
-  'apply_patch',
+  'patch',
   'ast_grep_search',
   'ast_grep_replace',
   'interactive_bash',
   'run_bash_in_background',
   'bash_output',
   'bash_kill',
-  'execute_shell',
   'look_at',
   'read_tool_output',
   'lsp_rename',
@@ -396,12 +395,13 @@ function hasRemoteReadEvidence(
   sessionId: string,
   remotePath: string,
 ): boolean {
+  // 同 edit-tools.hasReadEvidenceForPath：只认规范名 `read`，旧名审计行不算证据。
   const rows = sqliteAll<RemoteAuditRow>(
     `SELECT input_json, output_json
      FROM audit_logs
      WHERE session_id = ?
        AND is_error = 0
-       AND tool_name IN ('read', 'workspace_read_file')
+       AND tool_name = 'read'
      ORDER BY id DESC
      LIMIT 50`,
     [sessionId],

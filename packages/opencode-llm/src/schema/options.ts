@@ -234,6 +234,9 @@ export type ModelToolSchemaCompatibility = Schema.Schema.Type<typeof ModelToolSc
 
 export class ModelCompatibility extends Schema.Class<ModelCompatibility>('LLM.ModelCompatibility')({
   toolSchema: Schema.optional(ModelToolSchemaCompatibility),
+  // Some Anthropic-compatible relays never emit thinking signatures; when set
+  // to false the protocol replays unsigned thinking instead of dropping it.
+  requireSignature: Schema.optional(Schema.Boolean),
 }) {}
 
 export namespace ModelCompatibility {

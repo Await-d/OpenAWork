@@ -5,7 +5,7 @@
 Generate an Ed25519 signing keypair using the Tauri CLI:
 
 ```bash
-pnpm tauri signer generate -w ~/.tauri/openAwork-updater-key.pem
+bun run tauri signer generate -w ~/.tauri/openAwork-updater-key.pem
 ```
 
 This prints:

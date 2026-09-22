@@ -31,25 +31,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Run unit tests
-        run: pnpm --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" test
+        run: bun run --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" test
 
       - name: Gateway durable verification gates
         if: inputs.target == 'gateway'
         run: |
-          pnpm --filter @openAwork/agent-gateway run test:restore
-          pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
-          pnpm --filter @openAwork/agent-gateway run test:durable
+          bun run --filter @openAwork/agent-gateway test:restore
+          bun run --filter @openAwork/agent-gateway test:delete-cleanup
+          bun run --filter @openAwork/agent-gateway test:durable
 
       - name: Smoke check health endpoint
         if: inputs.target == 'gateway'

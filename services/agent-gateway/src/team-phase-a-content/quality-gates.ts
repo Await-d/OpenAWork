@@ -6,7 +6,7 @@
  * 修改流程：
  *   1. 编辑 templates/shared/quality-gates.md
  *   2. 将内容同步到本文件的 QUALITY_GATES_MD 常量
- *   3. 运行 `pnpm --filter @openAwork/agent-gateway typecheck` 验证
+ *   3. 运行 `bun run --filter @openAwork/agent-gateway typecheck` 验证
  *
  * 注入位置：team-instruction-stack.ts 的第 3.5 层（constitution 之后、project-memory 之前）。
  * 这样所有角色的 LLM 都能看到共享质量门禁，无需每个 SOUL 重复定义。

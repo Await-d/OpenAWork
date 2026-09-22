@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
-/* ── workspace_tree / list nodes preview (indented file tree) ── */
+/* ── list nodes preview (indented file tree) ── */
 
 export interface TreeNode {
   name: string;

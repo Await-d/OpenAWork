@@ -1,3 +1,4 @@
+import type { InputImageContent } from '@openAwork/shared';
 import type { ChatMessagePart } from '../../../../components/conversation-runtime/messages/support.js';
 import { applyToolResultToStreamingSegment } from '../../../../components/conversation-runtime/stream/streaming-segments.js';
 import type { LiveToolCallState } from './chat-page-utils.js';
@@ -43,6 +44,8 @@ export interface ApplyStreamToolResultInput {
     resumedAfterApproval?: boolean;
     toolCallId: string;
     toolName: string;
+    /** tool result 的图片附件（`computer_use` 最终截图）；其它工具为空。 */
+    attachments?: InputImageContent[];
   };
   hasPendingPermission: boolean;
   liveToolCalls: Map<string, LiveToolCallState>;
@@ -66,6 +69,12 @@ export function applyStreamToolResult(input: ApplyStreamToolResultInput): Applie
     isError: hasPendingPermission ? false : event.isError,
     pendingPermissionRequestId: hasPendingPermission ? event.pendingPermissionRequestId : undefined,
     resumedAfterApproval: event.resumedAfterApproval,
+    // 附件只在本次 result 携带时覆盖；否则沿用上一次的（避免后续事件把它抹掉）。
+    ...(event.attachments && event.attachments.length > 0
+      ? { attachments: event.attachments }
+      : previous?.attachments
+        ? { attachments: previous.attachments }
+        : {}),
     toolCallId: event.toolCallId,
     status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
     toolName: event.toolName,
@@ -77,6 +86,9 @@ export function applyStreamToolResult(input: ApplyStreamToolResultInput): Applie
       output: event.output,
       isError: hasPendingPermission ? false : event.isError,
       status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+      ...(event.attachments && event.attachments.length > 0
+        ? { attachments: event.attachments }
+        : {}),
       ...(hasPendingPermission && rawPendingPermissionRequestId
         ? { pendingPermissionRequestId: rawPendingPermissionRequestId }
         : {}),

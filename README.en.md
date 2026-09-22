@@ -311,9 +311,9 @@ flowchart TB
 
 ### Engineering Tooling
 
-- pnpm workspace monorepo
+- bun workspace monorepo
 - Node.js `>= 22.13.0`
-- pnpm `>= 10.0.0`
+- bun `>= 1.4.0`
 - ESM / NodeNext module system
 - ESLint + Prettier
 - Husky + Commitlint
@@ -359,7 +359,7 @@ OpenAWork/
 OpenAWork currently has two common ways to run:
 
 - **Local development**
-  - start apps and services in the monorepo via `pnpm`
+  - start apps and services in the monorepo via `bun`
   - suitable for frontend, gateway, and shared-package iteration
 
 - **Docker**
@@ -378,7 +378,7 @@ Default ports:
 ### 1. Install dependencies
 
 ```bash
-pnpm install
+bun install
 ```
 
 ### 2. Configure environment variables
@@ -399,7 +399,7 @@ At minimum, review:
 ### 3. Start local development
 
 ```bash
-pnpm dev
+bun run dev
 ```
 
 ### 4. Or start with Docker
@@ -412,28 +412,28 @@ docker compose up --build
 
 ```bash
 # Start all workspaces
-pnpm dev
+bun run dev
 
 # Build shared packages, services, and Web
-pnpm build
+bun run build
 
 # Type check
-pnpm typecheck
+bun run typecheck
 
 # Run all tests
-pnpm test
+bun run test
 
 # Run E2E tests
-pnpm test:e2e
+bun run test:e2e
 
 # Run gateway only
-pnpm --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway dev
 
 # Run desktop app
-pnpm --filter @openAwork/desktop dev
+bun run --filter @openAwork/desktop dev
 
 # Run mobile app
-pnpm --filter @openAwork/mobile dev
+bun run --filter @openAwork/mobile dev
 ```
 
 ## Who This Project Is For
@@ -456,7 +456,7 @@ OpenAWork is a strong fit for:
 
 1. **`AGENTS.md`**
    - best entry point for repository knowledge and conventions
-2. **`package.json` + `pnpm-workspace.yaml`**
+2. **`package.json` `workspaces` field**
    - understand the monorepo structure quickly
 3. **`apps/web/src/App.tsx`**
    - see the frontend entry and route surface

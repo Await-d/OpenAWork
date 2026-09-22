@@ -90,7 +90,11 @@ const toolResultContentSchema = z.object({
 
 const messageSnapshotSchema = z.object({
   id: z.string(),
-  role: z.enum(['user', 'assistant', 'tool', 'system']),
+  // `synthetic` is a gateway-injected role (subagent completion delivery back
+  // into the parent session). Accepting it here keeps this execute-command
+  // snapshot boundary aligned with the server-side message semantics instead
+  // of rejecting gateway-authored snapshots with a 400.
+  role: z.enum(['user', 'assistant', 'tool', 'system', 'synthetic']),
   content: z.array(z.union([textContentSchema, toolCallContentSchema, toolResultContentSchema])),
   createdAt: z.number(),
 });
@@ -2143,4 +2147,5 @@ export const __testing = {
   executeStartWorkReviewCommand,
   findLatestWorkflowPlan,
   findMatchingWorkflowPlan,
+  messageSnapshotSchema,
 };

@@ -132,12 +132,12 @@ describe('settings routes error contracts', () => {
   it('待审批的 batch 子调用不计入失败，单独归类为待审批', () => {
     const summary = extractAuditSummaryForTesting({
       results: [
-        { tool: 'execute_shell', isError: false, output: 'ok' },
+        { tool: 'bash', isError: false, output: 'ok' },
         {
-          tool: 'execute_shell',
+          tool: 'bash',
           isError: true,
           output:
-            'Tool "execute_shell" requires approval before it can run. Permission request abc-123 has been created. Ask the user to approve it, then retry.',
+            'Tool "bash" requires approval before it can run. Permission request abc-123 has been created. Ask the user to approve it, then retry.',
         },
       ],
       total: 2,
@@ -151,10 +151,10 @@ describe('settings routes error contracts', () => {
       results: [
         { tool: 'read', isError: true, output: 'boom' },
         {
-          tool: 'execute_shell',
+          tool: 'bash',
           isError: true,
           output:
-            'Tool "execute_shell" is waiting for approval. Permission request abc-123 is still pending. Ask the user to approve it, then retry.',
+            'Tool "bash" is waiting for approval. Permission request abc-123 is still pending. Ask the user to approve it, then retry.',
         },
       ],
       total: 2,

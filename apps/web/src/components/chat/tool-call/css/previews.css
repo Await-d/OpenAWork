@@ -194,7 +194,7 @@
   padding: 4px 6px;
 }
 
-/* ── workspace_search results (grep-style) ── */
+/* ── search results (grep-style) ── */
 
 .tool-call-search-results {
   display: flex;
@@ -249,7 +249,7 @@
   gap: 4px;
 }
 
-/* ── workspace_tree / list nodes ── */
+/* ── list nodes ── */
 
 .tool-call-tree {
   display: flex;

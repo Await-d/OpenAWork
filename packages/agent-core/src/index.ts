@@ -65,6 +65,11 @@ export {
   ToolTimeoutError,
   ToolRegistry,
 } from './tools/tool-contract.js';
+export { repairToolInput } from './tools/tool-input-repair.js';
+
+// GUI Agent（computer-use）纯逻辑模块：坐标换算 / 动作类型 / Operator 接口 / 截图缩放。
+// Phase 0 仅导出纯逻辑，平台实现由网关侧在 Phase 1 接入。
+export * from './gui/index.js';
 
 export type { SessionStore } from './session/session-store.js';
 export { InMemorySessionStore, SessionNotFoundError } from './session/session-store.js';

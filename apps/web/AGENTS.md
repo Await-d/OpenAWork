@@ -64,7 +64,7 @@ src/
 - **主题**：默认深色，浅色模式通过 `document.documentElement.classList.add('light')` 切换，存储于 `localStorage`。
 - **引导**：通过 `localStorage.getItem('onboarded') !== '1'` 控制是否显示。
 - **遥测授权**：通过 `localStorage.getItem('telemetry_consent_shown') !== '1'` 控制。
-- **ESLint**：`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除；`pnpm --filter @openAwork/web lint` 会显式提示跳过，待后续单独收口历史 lint 债务。
+- **ESLint**：`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除；`bun run --filter @openAwork/web lint` 会显式提示跳过，待后续单独收口历史 lint 债务。
 - **会话权限档位（composer）**：档位控件 `src/components/chat/composer/ComposerPermissionModeSelect.tsx`（在 `UnifiedComposer.tsx:616` 渲染，`ComposerPermissionMode = SessionPermissionMode`，选项定义见 :21-37）；顶栏 `src/components/chat/session/ChatTopBar.tsx` 的 `auto-edit`（:167）与 `yolo`（:114）chip 是只读展示。
 - **metadata 快照必须含 `permissionMode`**：`createSessionMetadataSnapshot`（`src/pages/chat-page/conversation/render/chat-page-utils.ts:86`）的 `permissionMode` 字段（:103）参与 dirty 检查；若遗漏，`ask → auto-edit` 会得到完全相同的快照，导致 PATCH 被静默跳过。同一快照里 `yoloMode` 仍按 `permissionMode === 'yolo'` 派生回写（:104）。
 
@@ -77,9 +77,24 @@ src/
 ## 常用命令
 
 ```bash
-pnpm --filter @openAwork/web dev        # Vite 开发服务器
-pnpm --filter @openAwork/web build      # 生产构建 → dist/
+bun run --filter @openAwork/web dev        # Vite 开发服务器
+bun run --filter @openAwork/web build      # 生产构建 → dist/
 ```
+
+### 真实浏览器验收 harness（`harness/`）
+
+`harness/` 是**开发期验收目录**，不参与构建、不被 `src/` 导入，用于在**真实 Chromium** 里
+渲染真实组件，覆盖 jsdom 覆盖不到的部分（真实布局下的截断、真实引擎解析后的计算样式）。
+需要 dev server 已在 `127.0.0.1:5173` 运行：
+
+```bash
+# 仓库根目录执行（NODE_PATH 指向唯一声明 playwright 的 workspace，原因见 harness/README.md）
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-notice-3viewports.ts
+```
+
+新增涉及**布局 / 尺寸 / 省略号 / 主题变量解析**的组件改动时，应在此补对应用例——
+jsdom 不做布局（见 `.agentdocs/index.md` 已知陷阱）。
 
 ## 代码组织规则
 

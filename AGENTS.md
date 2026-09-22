@@ -11,7 +11,7 @@
 ## 概述
 
 跨平台 AI Agent 工作台：Fastify 网关 + React Web + Tauri 桌面端 + Expo 移动端。
-技术栈：TypeScript（严格模式，NodeNext 模块），pnpm monorepo，Zod 校验，SQLite + Postgres + Redis。
+技术栈：TypeScript（严格模式，NodeNext 模块），bun monorepo，Zod 校验，SQLite + Postgres + Redis。
 
 ## 目录结构
 
@@ -75,6 +75,7 @@ OpenAWork/
 - **消息渠道**：Telegram、Discord、飞书、钉钉、Slack 各自实现 `MessagingChannelService` 接口，位于 `services/agent-gateway/src/channels/`。
 - **哈希锚定编辑**：自定义文件编辑工具（`packages/agent-core/src/tools/hash-edit.ts`）使用 SHA-256 行哈希替代行号，防止编辑漂移。
 - **路由分级**：`packages/agent-core/src/routing.ts` 定义 R0–R3 路由分级（复杂度层级），用于 Agent 任务调度。
+- **子代理结果交付（单通道）**：子代理结算后由 `services/agent-gateway/src/task/task-job-delivery.ts` 的 `deliverTaskCompletion` 投递——先幂等准入（`injectSyntheticSessionMessage`，`notificationId` 同时作消息 id 与唤醒请求键），再由纯函数 `resolveTaskJobWakeDecision` 决策，最后 `continueSessionFromHistory` 唤醒。通知以 **`synthetic` 角色**落库（对模型可见、客户端不得按用户输入渲染；`description` + `metadata = { source:'subagent', childID, agent, state }` 是 notice 契约）。**通知已落库 ⇒ 延后永不丢**，故禁止恢复「定时重试 / 伪造用户请求」类补偿路径；自动唤醒受 `task/task-wake-budget.ts` 上限约束（用户真实交互才重置计数）。
 - **.evidence/**：fastify、ioredis、postgres 的只读参考源码，禁止编辑。
 
 ## 约定
@@ -155,49 +156,49 @@ OpenAWork/
 
 ```bash
 # 开发（所有包并行）
-pnpm dev
+bun run dev
 
 # 构建所有包
-pnpm build
+bun run build
 
 # 代码检查（仅 packages + services）
-pnpm lint
-pnpm lint:fix
+bun run lint
+bun run lint:fix
 
 # 格式化
-pnpm format
-pnpm format:check
+bun run format
+bun run format:check
 
 # 全量类型检查
-pnpm typecheck
+bun run typecheck
 
 # 全量测试
-pnpm test
+bun run test
 
 # E2E（Web）
-pnpm test:e2e
+bun run test:e2e
 
 # 仅网关
-pnpm --filter @openAwork/agent-gateway dev
-pnpm --filter @openAwork/agent-gateway build:binary
+bun run --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway build:binary
 
 # 清理所有
-pnpm clean
+bun run clean
 
 # 单个包测试（以 agent-core 为例，替换包名即可）
-pnpm --filter @openAwork/agent-core test
+bun run --filter @openAwork/agent-core test
 
 # 单个测试文件
-pnpm --filter @openAwork/agent-core exec vitest run src/__tests__/state-machine.test.ts
+bun run --filter @openAwork/agent-core test src/__tests__/state-machine.test.ts
 
 # 匹配测试名称关键字
-pnpm --filter @openAwork/agent-core exec vitest run -t "测试名称关键字"
+bun run --filter @openAwork/agent-core test -t "测试名称关键字"
 
 # 带覆盖率
-pnpm --filter @openAwork/agent-core exec vitest run --coverage
+bun run --filter @openAwork/agent-core test --coverage
 
 # 监听模式（开发时）
-pnpm --filter @openAwork/agent-core exec vitest
+cd packages/agent-core && bunx vitest
 ```
 
 ## 环境变量
@@ -298,8 +299,8 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 
 - `apps/desktop` 使用 `useHasHydrated()` 模式（Zustand persist 水合守卫）——`apps/web` 中也有相同模式，两者均为有意保留，并非重复。
 - 移动端使用手动屏幕状态机（非 React Navigation 栈）——`apps/mobile/src/navigation/AppNavigator.tsx`
-- 若 `agent-gateway` 或 Fastify 插件类型突然出现 `app.jwt`、`request.user`、`request.jwtVerify`、`injectWS`、`websocket`、`hide` 等属性缺失，优先排查 **Fastify 依赖是否分叉**，先运行 `pnpm check:fastify-alignment`；这类问题常由 `pnpm-lock.yaml` 中同时解析出多份 `fastify` / `fastify-plugin` 版本引起，表现会像“类型增强失效”而非业务代码直接报错。
-- `pnpm check:fastify-alignment` 已接入根 `package.json` 的 `lint-staged`，凡是改动 `package.json` / `pnpm-lock.yaml` / workspace 子包清单后，提交前都应以它为首要排查入口；如果它失败，先修依赖对齐，再看后续 lint / typecheck。
+- 若 `agent-gateway` 或 Fastify 插件类型突然出现 `app.jwt`、`request.user`、`request.jwtVerify`、`injectWS`、`websocket`、`hide` 等属性缺失，优先排查 **Fastify 依赖是否分叉**，先运行 `bun run check:fastify-alignment`；这类问题常由 `bun.lock` 中同时解析出多份 `fastify` / `fastify-plugin` 版本引起，表现会像“类型增强失效”而非业务代码直接报错。
+- `bun run check:fastify-alignment` 已接入根 `package.json` 的 `lint-staged`，凡是改动 `package.json` / `bun.lock` / workspace 子包清单后，提交前都应以它为首要排查入口；如果它失败，先修依赖对齐，再看后续 lint / typecheck。
 - `.husky/` 当前被 `.gitignore` 忽略，仓库里的 Husky hook 属于**本地机器状态**，不会随 Git 提交共享；因此排查“本地能拦、远端没拦”或“我改了 pre-push 但别人没生效”时，应先确认规则是否真正落在受版本控制的 `package.json`、`scripts/` 或 `.github/workflows/` 中。
 - 手机端云端自动构建依赖 GitHub Secret `EXPO_TOKEN`（EAS 云构建凭证）。未配置时 `auto-release.yml` 会**自动跳过**手机端 dispatch，并在 workflow summary 中说明原因，自动发布流程仍会成功结束；需要启用手机端自动构建时，先在仓库 Secrets 中配置 `EXPO_TOKEN` 即可，无需改动任何 workflow。
 - `packages/agent-core/src/catwalk/` — 模型评测/对比模块

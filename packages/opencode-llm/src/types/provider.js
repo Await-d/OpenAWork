@@ -58,6 +58,11 @@ export const ModelLimitsSchema = z.object({
   maxOutputTokens: z.number().int().positive().optional(),
   maxTotalTokens: z.number().int().positive().optional(),
   supportsVision: z.boolean().optional(),
+  /**
+   * 是否支持 GUI grounding（能输出可直接执行的屏幕坐标）。
+   * 注意：grounding 能力 ≠ 视觉能力，具备视觉的模型不一定能输出坐标。
+   */
+  supportsGuiGrounding: z.boolean().optional(),
   supportsTools: z.boolean().optional(),
   supportsStreaming: z.boolean().optional(),
   supportsJSON: z.boolean().optional(),
@@ -223,3 +228,4 @@ export function createProviderConfig(type, options) {
 export function validateProviderConfig(config) {
   return ProviderConfigSchema.safeParse(config).success;
 }
+//# sourceMappingURL=provider.js.map

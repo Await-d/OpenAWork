@@ -18,6 +18,7 @@ import {
   getPlanProgress,
   type PlanProgress,
 } from './boulder-state.js';
+import { isTaskToolName } from '../task/task-tools.js';
 
 const ORCHESTRATOR_AGENT_IDS = new Set(['atlas', 'zeus', 'sisyphus']);
 
@@ -205,7 +206,7 @@ export function checkAtlasGuard(input: {
   }
 
   // delegate_task: inject single-task directive
-  if (input.toolName === 'delegate_task' || input.toolName === 'task') {
+  if (input.toolName === 'delegate_task' || isTaskToolName(input.toolName)) {
     if (input.prompt && !input.prompt.includes('[System Directive: 单任务约束]')) {
       return { injectSingleTaskDirective: true, injectDelegationWarning: false };
     }

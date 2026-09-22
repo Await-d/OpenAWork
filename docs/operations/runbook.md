@@ -192,9 +192,9 @@ export OPENAWORK_DATA_ROOT="${OPENAWORK_DATA_DIR:-$HOME/.local/share/OpenAWork/a
 export OPENAWORK_DB_PATH="${OPENAWORK_DATABASE_PATH:-$OPENAWORK_DATA_ROOT/openAwork.db}"
 
 # 1. Re-run gateway durability verification
-pnpm --filter @openAwork/agent-gateway run test:restore
-pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
-pnpm --filter @openAwork/agent-gateway run test:durable
+bun run --filter @openAwork/agent-gateway test:restore
+bun run --filter @openAwork/agent-gateway test:delete-cleanup
+bun run --filter @openAwork/agent-gateway test:durable
 
 # 2. Inspect backup rows for recent failures
 sqlite3 "$OPENAWORK_DB_PATH" "SELECT backup_id, session_id, file_path, content_tier, created_at FROM session_file_backups ORDER BY created_at DESC LIMIT 20;"

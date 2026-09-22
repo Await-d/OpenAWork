@@ -1,8 +1,10 @@
-import { Effect } from 'effect';
+import { Effect, Option } from 'effect';
 import { LLMError, LLMEvent, type ProviderMetadata, type ToolCall } from '../../schema/index.js';
 import { eventError, parseToolInput, type ToolAccumulator } from '../shared.js';
+import { parse } from './partial-json.js';
 
 type StreamKey = string | number;
+const parsePartialInput = Option.liftThrowable(parse);
 
 /**
  * One pending streamed tool call. Providers emit the tool identity and JSON
@@ -63,8 +65,35 @@ const inputDelta = (tool: PendingTool, text: string) =>
     text,
   });
 
-const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
-  parseToolInput(route, tool.name, inputOverride ?? tool.input).pipe(
+/**
+ * Finalize one pending tool call's argument JSON. Providers sometimes emit
+ * arguments that are not strictly valid JSON (a raw control character inside a
+ * string, a stray backslash) even though the call itself is complete. Failing
+ * the whole stream for a locally-executed tool is wasteful: the tool would
+ * simply have rejected the input and let the model self-correct. Fall back to a
+ * best-effort partial parse, and finally to `{}`, so the round survives.
+ *
+ * Provider-executed (hosted) tool calls stay strict: their input is passed
+ * straight back to the provider on the next turn, so a lossy recovery would be
+ * silently wrong rather than locally recoverable.
+ */
+const toolCall = (
+  route: string,
+  tool: PendingTool,
+  inputOverride?: string,
+): Effect.Effect<ToolCall, LLMError> => {
+  const raw = inputOverride ?? tool.input;
+  return parseToolInput(route, tool.name, raw).pipe(
+    Effect.catch((error) =>
+      tool.providerExecuted
+        ? Effect.fail(error)
+        : Effect.succeed(
+            Option.getOrElse(
+              Option.map(parsePartialInput(raw), (input) => input ?? {}),
+              () => ({}),
+            ),
+          ),
+    ),
     Effect.map((input): ToolCall =>
       LLMEvent.toolCall({
         id: tool.id,
@@ -75,6 +104,7 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
       }),
     ),
   );
+};
 
 /** Store the updated tool and produce the optional public delta event. */
 const appendTool = <K extends StreamKey>(
@@ -122,8 +152,11 @@ export const appendOrStart = <K extends StreamKey>(
   missingToolMessage: string,
 ): AppendOutcome<K> | LLMError => {
   const current = tools[key];
-  const id = delta.id?.trim() || current?.id;
-  const name = delta.name?.trim() || current?.name;
+  // An already-registered identity is frozen: later deltas may repeat a
+  // different/blank id, and re-keying mid-call would split one tool call into
+  // two downstream. A blank delta id/name means "unchanged".
+  const id = current?.id ?? (delta.id?.trim() ? delta.id.trim() : undefined);
+  const name = current?.name ?? (delta.name?.trim() ? delta.name.trim() : undefined);
   if (!id || !name) return eventError(route, missingToolMessage);
 
   const tool = {
@@ -139,6 +172,23 @@ export const appendOrStart = <K extends StreamKey>(
 };
 
 /**
+ * Append argument text to a started tool. Returns `undefined` when no tool is
+ * open under `key`, for protocols that intentionally ignore deltas without a
+ * matching open block (Bedrock can emit a late delta after `contentBlockStop`,
+ * or a delta for an index that never started).
+ */
+export const append = <K extends StreamKey>(
+  tools: State<K>,
+  key: K,
+  text: string,
+): AppendOutcome<K> | undefined => {
+  const current = tools[key];
+  if (!current) return undefined;
+  if (text.length === 0) return { tools, tool: current, events: [] };
+  return appendTool(tools, key, { ...current, input: `${current.input}${text}` }, text);
+};
+
+/**
  * Append argument text to a tool that must already have been started. This keeps
  * protocols honest when their stream grammar promises a start event before any
  * argument delta.
@@ -149,12 +199,7 @@ export const appendExisting = <K extends StreamKey>(
   key: K,
   text: string,
   missingToolMessage: string,
-): AppendOutcome<K> | LLMError => {
-  const current = tools[key];
-  if (!current) return eventError(route, missingToolMessage);
-  if (text.length === 0) return { tools, tool: current, events: [] };
-  return appendTool(tools, key, { ...current, input: `${current.input}${text}` }, text);
-};
+): AppendOutcome<K> | LLMError => append(tools, key, text) ?? eventError(route, missingToolMessage);
 
 /**
  * Finalize one pending tool call: parse the accumulated raw JSON, remove it

@@ -141,7 +141,10 @@ export function FusionChatRegion({ model }: FusionChatRegionProps): ReactElement
               onCancel={() => chrome.multiSelect.disableMultiSelect()}
             />
           )}
-          <WorkflowRuntimeStatusStrip runtime={chrome.workflowRuntime} tasks={chrome.sessionTasks} />
+          <WorkflowRuntimeStatusStrip
+            runtime={chrome.workflowRuntime}
+            tasks={chrome.sessionTasks}
+          />
         </>
       }
     />

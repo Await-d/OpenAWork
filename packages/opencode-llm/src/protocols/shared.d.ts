@@ -79,7 +79,24 @@ export declare const subtractTokens: (
 export declare const sumTokens: (
   ...values: ReadonlyArray<number | undefined>
 ) => number | undefined;
-export declare const eventError: (route: string, message: string, raw?: string) => LLMError;
+export declare const eventError: (
+  route: string,
+  message: string,
+  raw?: string,
+  cause?: unknown,
+) => LLMError;
+/**
+ * A response that ended before its terminal event (`finish` / `provider-error`).
+ * `classification: 'incomplete-stream'` lets the caller distinguish "the
+ * provider got cut off" from a malformed payload and decide whether to continue
+ * or retry rather than treating a truncated answer as complete.
+ */
+export declare const incompleteStreamError: (
+  route: string,
+  message?: string,
+  raw?: string,
+  cause?: unknown,
+) => LLMError;
 export declare const parseJson: (
   route: string,
   input: string,
@@ -254,7 +271,7 @@ export declare const sseFraming: (
  * `InvalidRequestReason` with route context or trace metadata, the change
  * lands here.
  */
-export declare const invalidRequest: (message: string) => LLMError;
+export declare const invalidRequest: (message: string, cause?: unknown) => LLMError;
 export declare const matchToolChoice: <Auto, None, Required, Tool>(
   route: string,
   toolChoice: NonNullable<LLMRequest['toolChoice']>,

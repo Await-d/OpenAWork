@@ -66,7 +66,7 @@ describe('invalidateWorkspaceFileIndexForToolCall', () => {
       'write',
       'edit',
       'multi_edit',
-      'apply_patch',
+      'patch',
       'ast_grep_replace',
       'lsp_rename',
       'bash',

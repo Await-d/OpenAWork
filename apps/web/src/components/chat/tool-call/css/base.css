@@ -275,7 +275,7 @@
   margin-left: 6px;
 }
 
-/* ── Tool call block display (write/edit/bash/apply_patch) ── */
+/* ── Tool call block display (write/edit/bash/patch) ── */
 
 .tool-call-block {
   display: flex;

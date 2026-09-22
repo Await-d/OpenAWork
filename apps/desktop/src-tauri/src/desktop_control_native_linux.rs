@@ -46,7 +46,10 @@ pub fn status() -> DesktopControlStatus {
             type_text: input.clone(),
             key: input.clone(),
             hotkey: input.clone(),
-            scroll: input,
+            scroll: input.clone(),
+            drag: input.clone(),
+            mouse_move: input.clone(),
+            long_press: input,
             wait: DesktopControlCapability::available("std-thread-sleep"),
         },
     }
@@ -73,6 +76,15 @@ pub fn execute_action(
         }
         DesktopControlAction::Scroll(request) => {
             input::scroll(request).map(DesktopControlActionResponse::Scroll)
+        }
+        DesktopControlAction::Drag(request) => {
+            input::drag(request).map(DesktopControlActionResponse::Drag)
+        }
+        DesktopControlAction::MouseMove(request) => {
+            input::mouse_move(request).map(DesktopControlActionResponse::MouseMove)
+        }
+        DesktopControlAction::LongPress(request) => {
+            input::long_press(request).map(DesktopControlActionResponse::LongPress)
         }
         DesktopControlAction::Wait(request) => {
             Ok(DesktopControlActionResponse::Wait(input::wait(request)))

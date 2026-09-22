@@ -5,11 +5,11 @@ import { Endpoint } from '../route/endpoint.js';
 import { HttpTransport } from '../route/transport/index.js';
 import { Protocol } from '../route/protocol.js';
 import {
+  LLMEvent,
   ReasoningEfforts,
   Usage,
   type FinishReason,
   type JsonSchema,
-  type LLMEvent,
   type LLMRequest,
   type MediaPart,
   type ReasoningPart,
@@ -19,6 +19,7 @@ import {
   type ToolContent,
 } from '../schema/index.js';
 import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
+import { isContextOverflow } from '../provider-error.js';
 import { OpenAIOptions, type OpenAIServiceTier } from './utils/openai-options.js';
 import { Lifecycle } from './utils/lifecycle.js';
 import { ToolSchemaProjection } from './utils/tool-schema.js';
@@ -147,7 +148,9 @@ const OpenAIChatToolCallDeltaFunction = Schema.Struct({
 });
 
 const OpenAIChatToolCallDelta = Schema.Struct({
-  index: Schema.Number,
+  // Some OpenAI-compatible gateways omit `index`; the parser resolves it from
+  // the tool id / running position instead of failing the whole stream.
+  index: optionalNull(Schema.Number),
   id: optionalNull(Schema.String),
   function: optionalNull(OpenAIChatToolCallDeltaFunction),
 });
@@ -167,13 +170,29 @@ const OpenAIChatDelta = Schema.Struct({
 const OpenAIChatChoice = Schema.Struct({
   delta: optionalNull(OpenAIChatDelta),
   finish_reason: optionalNull(Schema.String),
+  // Some gateways surface the provider-native reason here while normalizing
+  // `finish_reason`.
+  native_finish_reason: optionalNull(Schema.String),
 });
 
-const OpenAIChatEvent = Schema.Struct({
-  choices: Schema.Array(OpenAIChatChoice),
-  usage: optionalNull(OpenAIChatUsage),
-  service_tier: optionalNull(OpenAIOptions.OpenAIServiceTier),
-});
+const OpenAIChatEvent = Schema.StructWithRest(
+  Schema.Struct({
+    // Error-only bodies carry no `choices`; tolerate their absence.
+    choices: optionalArray(OpenAIChatChoice),
+    usage: optionalNull(OpenAIChatUsage),
+    service_tier: optionalNull(OpenAIOptions.OpenAIServiceTier),
+    // 200-with-error-body responses (rate limits, quota, invalid request) come
+    // back as a top-level `error` object instead of an HTTP failure.
+    error: Schema.optional(
+      Schema.Struct({
+        type: optionalNull(Schema.String),
+        code: optionalNull(Schema.String),
+        message: optionalNull(Schema.String),
+      }),
+    ),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>;
 type OpenAIChatRequestMessage = LLMRequest['messages'][number];
 
@@ -183,7 +202,14 @@ export interface ParserState {
   readonly toolCallEvents: ReadonlyArray<LLMEvent>;
   readonly usage?: Usage;
   readonly finishReason?: FinishReason;
+  readonly finishReasonRaw?: string;
   readonly serviceTier?: OpenAIServiceTier;
+  // Tool-call index resolution when a gateway omits `tool_calls[].index`:
+  // remember the id→index mapping and the running position so anonymous deltas
+  // continue the current call and a new id opens the next one.
+  readonly lastToolIndex?: number;
+  readonly nextToolIndex?: number;
+  readonly toolIndexById?: Readonly<Record<string, number>>;
   readonly lifecycle: Lifecycle.State;
 }
 
@@ -279,7 +305,12 @@ const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(func
   }
   return {
     role: 'assistant' as const,
-    content: content.length === 0 ? null : ProviderShared.joinText(content),
+    // OpenAI Chat requires `content` or `tool_calls` to be set. A reasoning-only
+    // turn (no text, no tool call) therefore uses an empty string rather than
+    // `null`, which strict OpenAI-compatible gateways reject with
+    // "Invalid assistant message: content or tool_calls must be set".
+    content:
+      content.length > 0 ? ProviderShared.joinText(content) : toolCalls.length > 0 ? null : '',
     tool_calls: toolCalls.length === 0 ? undefined : toolCalls,
     reasoning_content:
       reasoning.length > 0
@@ -364,6 +395,15 @@ const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: 
       else messages.push({ role: 'user', content: part.text });
       continue;
     }
+    // Assistant turns made up entirely of blank text carry nothing for the
+    // model; drop them instead of emitting an empty message. Reasoning-only
+    // turns are intentionally kept (they lower to `content: ""` plus the
+    // reasoning field), matching the upstream OpenAI Chat protocol.
+    if (
+      message.role === 'assistant' &&
+      message.content.every((part) => part.type === 'text' && part.text.trim() === '')
+    )
+      continue;
     if (message.role === 'tool') {
       const lowered = yield* lowerToolMessages(message);
       messages.push(...lowered.messages);
@@ -440,6 +480,8 @@ const mapFinishReason = (reason: string | null | undefined): FinishReason => {
   if (reason === 'length') return 'length';
   if (reason === 'content_filter') return 'content-filter';
   if (reason === 'function_call' || reason === 'tool_calls') return 'tool-calls';
+  // Provider-reported failures surface as finish reasons in some gateways.
+  if (reason === 'error' || reason === 'network_error') return 'error';
   return 'unknown';
 };
 
@@ -473,14 +515,46 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     const events: LLMEvent[] = [];
     const usage = mapUsage(event.usage) ?? state.usage;
     const serviceTier = event.service_tier ?? state.serviceTier;
-    const choice = event.choices[0];
+    // 200-with-error body: OpenAI-compatible gateways report rate limits and
+    // quota errors as a top-level `error` object instead of an HTTP failure.
+    if (event.error) {
+      const type = event.error.type ?? undefined;
+      const code = event.error.code ?? undefined;
+      const message = event.error.message ?? undefined;
+      if (type !== undefined || code !== undefined || message !== undefined) {
+        const label = [code ?? type, message]
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+          .join(': ');
+        return [
+          state,
+          [
+            LLMEvent.providerError({
+              message: label || 'OpenAI Chat provider error',
+              classification: isContextOverflow(label) ? 'context-overflow' : undefined,
+              retryable:
+                code === 'rate_limit_exceeded' ||
+                code === 'insufficient_quota' ||
+                code === 'server_error' ||
+                type === 'server_error',
+            }),
+          ],
+        ] as const;
+      }
+    }
+
+    const choice = event.choices?.[0];
     const finishReason = choice?.finish_reason
       ? mapFinishReason(choice.finish_reason)
       : state.finishReason;
+    const finishReasonRaw =
+      choice?.native_finish_reason ?? choice?.finish_reason ?? state.finishReasonRaw;
     const delta = choice?.delta;
     const toolDeltas = delta?.tool_calls ?? [];
     let tools = state.tools;
     const pendingToolArguments = { ...state.pendingToolArguments };
+    let lastToolIndex = state.lastToolIndex ?? -1;
+    let nextToolIndex = state.nextToolIndex ?? 0;
+    const toolIndexById = { ...state.toolIndexById };
 
     let lifecycle = state.lifecycle;
 
@@ -504,42 +578,68 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, 'reasoning-0');
 
     for (const tool of toolDeltas) {
-      const current = tools[tool.index];
+      const toolId = tool.id?.trim() ? tool.id.trim() : undefined;
+      const matchedById = toolId === undefined ? undefined : toolIndexById[toolId];
+      const index =
+        tool.index ??
+        matchedById ??
+        (toolId !== undefined && lastToolIndex >= 0 && tools[lastToolIndex]?.id !== toolId
+          ? nextToolIndex
+          : Math.max(lastToolIndex, 0));
+      const current = tools[index];
       const toolName = tool.function?.name;
       const toolArguments = tool.function?.arguments ?? '';
-      if (!current && !tool.id && !toolName && toolArguments.length === 0) continue;
-      if (!current && !tool.id?.trim() && !toolName?.trim() && toolArguments.length > 0) {
-        pendingToolArguments[tool.index] =
-          `${pendingToolArguments[tool.index] ?? ''}${toolArguments}`;
+      if (!current && toolId === undefined && !toolName && toolArguments.length === 0) continue;
+      if (!current && toolId === undefined && !toolName?.trim() && toolArguments.length > 0) {
+        pendingToolArguments[index] = `${pendingToolArguments[index] ?? ''}${toolArguments}`;
+        if (toolId !== undefined) toolIndexById[toolId] = index;
+        lastToolIndex = index;
+        nextToolIndex = Math.max(nextToolIndex, index + 1);
         continue;
       }
-      const bufferedArguments = pendingToolArguments[tool.index] ?? '';
-      delete pendingToolArguments[tool.index];
+      const bufferedArguments = pendingToolArguments[index] ?? '';
+      delete pendingToolArguments[index];
       const result = ToolStream.appendOrStart(
         ADAPTER,
         tools,
-        tool.index,
+        index,
         {
           id: tool.id ?? undefined,
           name: toolName ?? undefined,
           text: `${bufferedArguments}${toolArguments}`,
         },
-        `OpenAI Chat tool call delta is missing id or name (index=${tool.index}, hasCurrent=${String(current !== undefined)}, hasId=${String(Boolean(tool.id?.trim()))}, hasName=${String(Boolean(toolName?.trim()))}, argumentLength=${String(toolArguments.length)}, bufferedArgumentLength=${String(bufferedArguments.length)})`,
+        `OpenAI Chat tool call delta is missing id or name (index=${index}, hasCurrent=${String(current !== undefined)}, hasId=${String(toolId !== undefined)}, hasName=${String(Boolean(toolName?.trim()))}, argumentLength=${String(toolArguments.length)}, bufferedArgumentLength=${String(bufferedArguments.length)})`,
       );
       if (ToolStream.isError(result)) return yield* result;
       tools = result.tools;
+      if (toolId !== undefined) toolIndexById[toolId] = index;
+      lastToolIndex = index;
+      nextToolIndex = Math.max(nextToolIndex, index + 1);
       if (result.events.length) lifecycle = Lifecycle.stepStart(lifecycle, events);
       events.push(...result.events);
     }
 
+    // Truncation and content filtering terminate the response without ever
+    // completing the pending tool calls, so their accumulated arguments are
+    // partial by definition. Finalizing them would either fail the stream or —
+    // worse — hand a half-written command to a local tool. Drop them instead
+    // and let the caller's incomplete-stream continuation re-request.
+    const incompleteTools = finishReason === 'length' || finishReason === 'content-filter';
+
     // Finalize accumulated tool inputs eagerly when finish_reason arrives so
     // JSON parse failures fail the stream at the boundary rather than at halt.
-    if (finishReason !== undefined && Object.keys(pendingToolArguments).length > 0)
+    if (
+      finishReason !== undefined &&
+      !incompleteTools &&
+      state.finishReason === undefined &&
+      Object.keys(pendingToolArguments).length > 0
+    )
       return yield* invalid(
         `OpenAI Chat tool call delta is missing id or name (unresolvedIndexes=${Object.keys(pendingToolArguments).join(',')})`,
       );
     const finished =
       finishReason !== undefined &&
+      !incompleteTools &&
       state.finishReason === undefined &&
       Object.keys(tools).length > 0
         ? yield* ToolStream.finishAll(ADAPTER, tools)
@@ -552,7 +652,11 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         toolCallEvents: finished?.events ?? state.toolCallEvents,
         usage,
         finishReason,
+        finishReasonRaw,
         serviceTier,
+        lastToolIndex,
+        nextToolIndex,
+        toolIndexById,
         lifecycle,
       },
       events,
@@ -570,6 +674,7 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   if (reason) {
     Lifecycle.finish(lifecycle, events, {
       reason,
+      reasonRaw: state.finishReasonRaw,
       usage: state.usage,
       ...(state.serviceTier === undefined
         ? {}

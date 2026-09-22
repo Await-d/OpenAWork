@@ -9,6 +9,8 @@
  * In OpenAWork it's integrated into executeToolCalls as a post-processing step.
  */
 
+import { isTaskToolName } from './task-tools.js';
+
 const EMPTY_TASK_RESPONSE_WARNING = `[任务空响应警告]
 
 任务调用已完成但未返回响应。这表明 agent 可能：
@@ -22,7 +24,7 @@ const EMPTY_TASK_RESPONSE_WARNING = `[任务空响应警告]
  * Check if a task tool result is empty and return a warning if so.
  */
 export function detectEmptyTaskResponse(toolName: string, output: string): string {
-  if (toolName !== 'task' && toolName !== 'Task') return output;
+  if (!isTaskToolName(toolName) && toolName !== 'Task') return output;
 
   const trimmed = output?.trim() ?? '';
   if (trimmed === '') {

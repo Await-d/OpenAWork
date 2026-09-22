@@ -1,9 +1,23 @@
-import type { InputImageContent, WorkflowRuntimeState } from '@openAwork/shared';
+import type { InputImageContent, SubagentNotice, WorkflowRuntimeState } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { Session, SessionTask } from '@openAwork/web-client';
-import { createArtifactsClient, createQuestionsClient, createSessionsClient, createSettingsClient, createSshClient } from '@openAwork/web-client';
+import {
+  createArtifactsClient,
+  createQuestionsClient,
+  createSessionsClient,
+  createSettingsClient,
+  createSshClient,
+} from '@openAwork/web-client';
 import type { CSSProperties } from 'react';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useFileEditorContext } from '../../App.js';
 import { usePageActivation } from '../../components/common/routing/CachedRouteOutlet.js';
@@ -12,7 +26,10 @@ import { ChatImageGenerationResultStrip } from '../../components/chat/image/Chat
 import { sharedUiThemeVars } from '../../components/chat/session/ChatPageSections.js';
 import { type UnifiedComposerActivity } from '../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../components/chat/composer/use-mention-file-search.js';
-import { ComposerWorkspaceMenu, type ComposerSshConnectionSummary } from '../../components/chat/composer/ComposerWorkspaceMenu.js';
+import {
+  ComposerWorkspaceMenu,
+  type ComposerSshConnectionSummary,
+} from '../../components/chat/composer/ComposerWorkspaceMenu.js';
 import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
 import type { ComposerPermissionMode } from '../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
@@ -25,7 +42,10 @@ import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
-import SshWorkspacePickerModal, { type SshPickerConnection, type SshWorkspaceSelection } from '../../components/common/modal/SshWorkspacePickerModal.js';
+import SshWorkspacePickerModal, {
+  type SshPickerConnection,
+  type SshWorkspaceSelection,
+} from '../../components/common/modal/SshWorkspacePickerModal.js';
 import type { SshConnectionDraft } from '../../components/common/modal/SshConnectionCreateForm.js';
 import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
@@ -35,11 +55,20 @@ import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useCurrentUserDisplayName } from '../../stores/user-profile/current-user-profile.js';
 import { resolveEffectiveTerminalPanelPosition, useUIStateStore } from '../../stores/ui/uiState.js';
-import { type ChatSettingsProvider, loadSavedChatSessionDefaults } from '../../utils/chat/chat-session-defaults.js';
-import { COMPOSER_REFERENCE_EVENT_NAME, isComposerReferenceEvent } from '../../utils/chat/composer-reference-events.js';
+import {
+  type ChatSettingsProvider,
+  loadSavedChatSessionDefaults,
+} from '../../utils/chat/chat-session-defaults.js';
+import {
+  COMPOSER_REFERENCE_EVENT_NAME,
+  isComposerReferenceEvent,
+} from '../../utils/chat/composer-reference-events.js';
 import { logger } from '../../utils/log/logger.js';
 
-import { requestCurrentSessionRefresh, requestSessionListRefresh } from '../../utils/session/session-list-events.js';
+import {
+  requestCurrentSessionRefresh,
+  requestSessionListRefresh,
+} from '../../utils/session/session-list-events.js';
 import { subscribeSessionDialogueModeSwitch } from '../../utils/session/dialogue-mode-events.js';
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 
@@ -49,28 +78,70 @@ import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-requ
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
 
 import { ChatEditorPane } from './panels/chat-editor-pane.js';
-import { collapseFusionWorkspaceToPanel, promoteFusionWorkspaceTab } from './panels/fusion-workspace-promotion.js';
+import {
+  collapseFusionWorkspaceToPanel,
+  promoteFusionWorkspaceTab,
+} from './panels/fusion-workspace-promotion.js';
 import { WorkspaceFileTreePanel } from '../../components/layout/sidebar/WorkspaceFileTreePanel.js';
-import { buildQueuedComposerScopeKey, buildRightPanelStateFromSessionSnapshot, createSessionMetadataSnapshot, isImmediatelyRenderableStructuredContent, prepareSessionRecoveryState, REMOTE_STREAM_RECOVERY_POLL_MS } from './conversation/render/chat-page-utils.js';
+import {
+  buildQueuedComposerScopeKey,
+  buildRightPanelStateFromSessionSnapshot,
+  createSessionMetadataSnapshot,
+  isImmediatelyRenderableStructuredContent,
+  prepareSessionRecoveryState,
+  REMOTE_STREAM_RECOVERY_POLL_MS,
+} from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 
-import { type ImageEditReferenceArtifact, toImageEditReferenceArtifacts } from './conversation/render/image-edit-reference-artifacts.js';
+import {
+  type ImageEditReferenceArtifact,
+  toImageEditReferenceArtifacts,
+} from './conversation/render/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from '../../components/conversation-runtime/messages/ordered-id.js';
 
 import { startSequentialPolling } from '../../components/conversation-runtime/session/sequential-polling.js';
 
-import { type SessionStateStatus, type SessionTodoItem, shouldPollSessionRuntime } from '../../components/conversation-runtime/session/session-runtime.js';
+import {
+  type SessionStateStatus,
+  type SessionTodoItem,
+  shouldPollSessionRuntime,
+} from '../../components/conversation-runtime/session/session-runtime.js';
 
 import { type ChatBackendUsageSnapshot } from '../../components/conversation-runtime/stream/stream-usage.js';
 
-import { extractStreamingThinkingTexts, joinStreamingThinkingTexts, type StreamingThinkingBlock } from '../../components/conversation-runtime/stream/streaming-thinking.js';
-import { buildSubAgentRunItems, isActiveStatus, SubAgentRunList } from './panels/sub-agent-run-list.js';
+import {
+  extractStreamingThinkingTexts,
+  joinStreamingThinkingTexts,
+  type StreamingThinkingBlock,
+} from '../../components/conversation-runtime/stream/streaming-thinking.js';
+import {
+  buildSubAgentRunItems,
+  isActiveStatus,
+  SubAgentRunList,
+} from './panels/sub-agent-run-list.js';
 import { BatchStopSubAgentsControl } from './panels/batch-stop-sub-agents-control.js';
 
-import { buildUserHistoryJumpItems, UserHistoryJumpList } from './history/user-history-jump-list.js';
-import { type ChatMessagePart, estimateTokenCount, MENTION_SEARCH_LIMIT, type ReasoningEffort, reconcileSnapshotChatMessages, type WorkspaceFileMentionItem } from '../../components/conversation-runtime/messages/support.js';
-import { buildTaskToolRuntimeLookup, buildTerminalTaskSyncMarker, resolveTaskToolRuntimeSnapshot } from './conversation/render/task-tool-runtime.js';
-import { mergePendingQuestion, selectPendingQuestionForRequest } from './conversation/render/select-pending-question.js';
+import {
+  buildUserHistoryJumpItems,
+  UserHistoryJumpList,
+} from './history/user-history-jump-list.js';
+import {
+  type ChatMessagePart,
+  estimateTokenCount,
+  MENTION_SEARCH_LIMIT,
+  type ReasoningEffort,
+  reconcileSnapshotChatMessages,
+  type WorkspaceFileMentionItem,
+} from '../../components/conversation-runtime/messages/support.js';
+import {
+  buildTaskToolRuntimeLookup,
+  buildTerminalTaskSyncMarker,
+  resolveTaskToolRuntimeSnapshot,
+} from './conversation/render/task-tool-runtime.js';
+import {
+  mergePendingQuestion,
+  selectPendingQuestionForRequest,
+} from './conversation/render/select-pending-question.js';
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
 
 import { useAssistantMessageProcessing } from './conversation/snapshot/use-assistant-message-processing.js';
@@ -78,7 +149,11 @@ import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js
 
 import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
 import { useWebSearchAvailable } from './hooks/use-web-search-available.js';
-import { type HistoryEditPrompt, type RetryPrompt, useChatMessageActions } from './hooks/use-chat-message-actions.js';
+import {
+  type HistoryEditPrompt,
+  type RetryPrompt,
+  useChatMessageActions,
+} from './hooks/use-chat-message-actions.js';
 import { useChatBranchSession } from './hooks/use-chat-branch-session.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
 
@@ -101,7 +176,11 @@ import { useSessionContentArtifactCount } from './conversation/snapshot/use-sess
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
 
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
-import { resolveModelSelectionSourceFromMetadata, shouldAdoptSessionModelSelectionDefaults, type ModelSelectionSource } from './conversation/settings/model-selection-source.js';
+import {
+  resolveModelSelectionSourceFromMetadata,
+  shouldAdoptSessionModelSelectionDefaults,
+  type ModelSelectionSource,
+} from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
 
@@ -109,8 +188,16 @@ import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-w
 
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { normalizeChatThinkingState } from './conversation/settings/resolve-chat-thinking-request.js';
-import { type ChatRightPanelState, createInitialChatRightPanelState, getToolCallCards } from './state/chat-stream-state.js';
-import { DIALOGUE_MODE_OPTIONS, type DialogueMode, getDefaultAgentForDialogueMode } from './mode/dialogue-mode.js';
+import {
+  type ChatRightPanelState,
+  createInitialChatRightPanelState,
+  getToolCallCards,
+} from './state/chat-stream-state.js';
+import {
+  DIALOGUE_MODE_OPTIONS,
+  type DialogueMode,
+  getDefaultAgentForDialogueMode,
+} from './mode/dialogue-mode.js';
 import { useDialogueModeSwitch } from './mode/use-dialogue-mode-switch.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
 import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
@@ -355,6 +442,14 @@ export default function ChatPage() {
 
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
+  /**
+   * 子代理完成通知（网关注入的 `role: 'synthetic'` 消息）。
+   *
+   * 与 `messages` 同源解析但走独立通道：`normalizeChatMessages` 会把 synthetic
+   * 排除在 transcript 之外（它不是用户输入），因此通知由渲染层按时间位置
+   * 插入消息群组之间（`ChatRenderGroup` 的 `subagent-notice` 变体）。
+   */
+  const [subagentNotices, setSubagentNotices] = useState<SubagentNotice[]>([]);
   const [sessionTodos, setSessionTodos] = useState<SessionTodoItem[]>([]);
   // 待办控制器：在 ChatPage 创建一份，让 ChatTopBar 内嵌 todo slot 与
   // SessionConversationView 内的浮层共享展开状态、避免双份 state。
@@ -1269,6 +1364,7 @@ export default function ChatPage() {
         setLatestUpstreamSummary,
         setRecoveredStreamSnapshot,
         setIsSessionSnapshotReady,
+        setSubagentNotices,
       },
     );
 
@@ -2968,6 +3064,7 @@ export default function ChatPage() {
     groupedMessageEntries,
   } = useChatRenderData({
     messages,
+    subagentNotices,
     pendingPermissions,
     modelPrices,
     activeProviderId: effectiveProviderId,
@@ -3040,7 +3137,17 @@ export default function ChatPage() {
   const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
   // ─── 输入框下方统计栏数据 ──────────────────────────────────────────────
-  const { composerStatsData, handleFusionContextCompactSession, handleFusionContextOpenRecoveryStrategy, fusionContextSessionStateStatus, fusionContextOverview, handleOpenFusionEditorFile, handleShowFusionEditor, renderWorkspaceFileTree, commandPaletteItems } = useChatPageDerivations({
+  const {
+    composerStatsData,
+    handleFusionContextCompactSession,
+    handleFusionContextOpenRecoveryStrategy,
+    fusionContextSessionStateStatus,
+    fusionContextOverview,
+    handleOpenFusionEditorFile,
+    handleShowFusionEditor,
+    renderWorkspaceFileTree,
+    commandPaletteItems,
+  } = useChatPageDerivations({
     artifactsWorkspaceHref,
     assistantUsageDetails,
     bookmarkStore,
@@ -3303,6 +3410,7 @@ export default function ChatPage() {
     ),
     messages,
     groupedMessageEntries,
+    onOpenSubagentChild: (childSessionId: string) => setSelectedChildSessionId(childSessionId),
     visibleMessageCount: visibleMessageCount ?? sanitizedHistoricalMessages.length,
     hiddenMessageCount,
     visibleStreaming,
@@ -3376,11 +3484,7 @@ export default function ChatPage() {
     onCloseHistoryEdit: () => setHistoryEditPrompt(null),
     onResendHistoryEdit: (text, editedInputParts) => {
       if (!historyEditPrompt) return;
-      void handleEditResendInCurrentSession(
-        text,
-        historyEditPrompt.messageId,
-        editedInputParts,
-      );
+      void handleEditResendInCurrentSession(text, historyEditPrompt.messageId, editedInputParts);
       setHistoryEditPrompt(null);
     },
     onContinueHistoryEdit: (text, editedInputParts) => {
@@ -3395,11 +3499,7 @@ export default function ChatPage() {
     },
     onCreateBranchFromHistoryEdit: (text, editedInputParts) => {
       if (!historyEditPrompt) return;
-      void createBranchSessionFromMessage(
-        text,
-        historyEditPrompt.messageId,
-        editedInputParts,
-      );
+      void createBranchSessionFromMessage(text, historyEditPrompt.messageId, editedInputParts);
       setHistoryEditPrompt(null);
     },
     retryPrompt,
@@ -3487,8 +3587,9 @@ export default function ChatPage() {
     onClearManualAgentId: handleClearManualAgentId,
     onEditPreviousUserMessage: handleEditPreviousUserMessage,
     onContinueEditingImage: continueEditingLatestGeneratedImage,
-    onNavigateToArtifacts:
-      artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined,
+    onNavigateToArtifacts: artifactsWorkspaceHref
+      ? () => navigate(artifactsWorkspaceHref)
+      : undefined,
     onSelectImageReferenceArtifactId: setSelectedImageEditReferenceArtifactId,
     onCompanionActivityChange: setCompanionComposerActivity,
     markSessionMetadataDirty,

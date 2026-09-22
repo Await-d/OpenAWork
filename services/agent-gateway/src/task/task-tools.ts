@@ -34,6 +34,23 @@ const optionalNonBlankStringSchema = z.preprocess((value) => {
  *   `.describe` text is intentionally explicit about the no-op so the
  *   model doesn't expect side effects.
  */
+/**
+ * 子代理工具的**规范名**（对齐上游 opencode 的 `subagent`）。
+ *
+ * `task` 作为**别名**继续被接受（兼容既有 prompt、存量会话与验收脚本）：
+ * 名称归一由 `routes/tool-name-compat.ts` 与 `tools/legacy-tool-name-rewrite.ts`
+ * 的镜像表承担，运行期判定统一走 `isTaskToolName()`。
+ */
+export const TASK_TOOL_NAME = 'subagent';
+
+/** 历史别名。新代码不要产出它；仅用于接受既有调用。 */
+export const TASK_TOOL_LEGACY_NAME = 'task';
+
+/** 是否为子代理工具（规范名或历史别名）。 */
+export function isTaskToolName(toolName: string): boolean {
+  return toolName === TASK_TOOL_NAME || toolName === TASK_TOOL_LEGACY_NAME;
+}
+
 const taskInputSchema = z
   .object({
     description: optionalNonBlankStringSchema,
@@ -41,7 +58,7 @@ const taskInputSchema = z
     subagent_type: optionalNonBlankStringSchema,
     category: optionalNonBlankStringSchema,
     load_skills: z.array(z.string().min(1)).default([]),
-    run_in_background: z.boolean().default(false),
+    run_in_background: z.boolean().optional(),
     session_id: optionalNonBlankStringSchema.describe(
       '要继续的已有子会话 ID（取代旧的 `resume` 字段）。',
     ),
@@ -49,6 +66,12 @@ const taskInputSchema = z
     command: optionalNonBlankStringSchema.describe(
       '保留字段，仅用于上游 schema 兼容的 slash command 标识。OpenAWork 目前忽略该字段——slash command 是服务端动作而非 prompt 模板，请直接在 `prompt` 中表达工作。',
     ),
+    // ── 上游 `subagent` 工具的输入别名（对齐 opencode）────────────────────
+    // 上游 schema：`{ agent, description, prompt, model, sessionID, background }`。
+    // 这里接受同义字段并归一化为本仓的规范字段，使上游形状的调用可直接工作。
+    agent: optionalNonBlankStringSchema.describe('`subagent_type` 的上游别名。'),
+    background: z.boolean().optional().describe('`run_in_background` 的上游别名。'),
+    sessionID: optionalNonBlankStringSchema.describe('`session_id` 的上游别名。'),
   })
   .superRefine((value, context) => {
     if (value.subagent_type && value.category) {
@@ -59,14 +82,29 @@ const taskInputSchema = z
       });
     }
 
-    if (!value.subagent_type && !value.category) {
+    if (!value.subagent_type && !value.category && !value.agent) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Either category or subagent_type is required',
         path: ['subagent_type'],
       });
     }
-  });
+
+    if (value.subagent_type && value.agent && value.subagent_type !== value.agent) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'subagent_type and agent disagree; provide only one',
+        path: ['agent'],
+      });
+    }
+  })
+  .transform((value) => ({
+    ...value,
+    // 归一化上游别名 → 本仓规范字段。显式给出的规范字段优先。
+    subagent_type: value.subagent_type ?? value.agent,
+    run_in_background: value.run_in_background ?? value.background ?? false,
+    session_id: value.session_id ?? value.sessionID,
+  }));
 
 const taskOutputSchema = z.object({
   taskId: z.string(),
@@ -83,9 +121,9 @@ const taskOutputSchema = z.object({
 });
 
 export const taskToolDefinition: ToolDefinition<typeof taskInputSchema, typeof taskOutputSchema> = {
-  name: 'task',
+  name: TASK_TOOL_NAME,
   description:
-    '启动一个 agent 任务，可按 category 选取或直接指定 agent。category 与 subagent_type 仅传其一。load_skills 与 run_in_background 必填。同步执行使用 run_in_background=false，仅并行后台工作时才传 true。子任务自动超时由助手首活超时 / 重试则控制。',
+    '启动一个 agent 任务，可按 category 选取或直接指定 agent。category 与 subagent_type 仅传其一。load_skills 与 run_in_background 必填。同步执行使用 run_in_background=false，仅并行后台工作时才传 true。子任务自动超时由助手首活超时 / 重试则控制。别名 `task` 同样被接受；也接受 `agent` / `background` / `sessionID` 作为同义字段。',
   inputSchema: taskInputSchema,
   outputSchema: taskOutputSchema,
   timeout: 30000,

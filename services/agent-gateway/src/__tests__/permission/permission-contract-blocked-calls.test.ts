@@ -158,13 +158,11 @@ describe('resolveBlockedCalls', () => {
       toolCallId: 'call-1',
       toolName: 'edit',
       rawInput: { path: 'a.ts' },
-      blockedToolCalls: [
-        { toolCallId: 'call-1', toolName: 'apply_patch', rawInput: { path: 'a.ts' } },
-      ],
+      blockedToolCalls: [{ toolCallId: 'call-1', toolName: 'patch', rawInput: { path: 'a.ts' } }],
     });
 
     expect(calls).toEqual([
-      { toolCallId: 'call-1', toolName: 'apply_patch', rawInput: { path: 'a.ts' } },
+      { toolCallId: 'call-1', toolName: 'patch', rawInput: { path: 'a.ts' } },
     ]);
   });
 

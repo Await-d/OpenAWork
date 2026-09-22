@@ -2,7 +2,8 @@ use crate::desktop_control_native::{
     command_exists, coordinate_arg, read_png_response, run_command, temp_png_path, ClickAction,
     ClickRequest, ClickResponse, DesktopControlAction, DesktopControlActionResponse,
     DesktopControlCapabilities, DesktopControlCapability, DesktopControlError,
-    DesktopControlStatus, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse,
+    DesktopControlStatus, DragRequest, DragResponse, HotkeyRequest, HotkeyResponse, KeyRequest,
+    KeyResponse, LongPressRequest, LongPressResponse, MouseMoveRequest, MouseMoveResponse,
     ScreenshotRequest, ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse,
     WaitRequest, WaitResponse,
 };
@@ -35,6 +36,13 @@ pub fn status() -> DesktopControlStatus {
             scroll: DesktopControlCapability::unavailable(
                 "generic macOS scroll is not implemented",
             ),
+            drag: DesktopControlCapability::unavailable("generic macOS drag is not implemented"),
+            mouse_move: DesktopControlCapability::unavailable(
+                "generic macOS mouse move is not implemented",
+            ),
+            long_press: DesktopControlCapability::unavailable(
+                "generic macOS long press is not implemented",
+            ),
             wait: DesktopControlCapability::available("std-thread-sleep"),
         },
     }
@@ -59,6 +67,15 @@ pub fn execute_action(
         }
         DesktopControlAction::Scroll(request) => {
             scroll(request).map(DesktopControlActionResponse::Scroll)
+        }
+        DesktopControlAction::Drag(request) => {
+            drag(request).map(DesktopControlActionResponse::Drag)
+        }
+        DesktopControlAction::MouseMove(request) => {
+            mouse_move(request).map(DesktopControlActionResponse::MouseMove)
+        }
+        DesktopControlAction::LongPress(request) => {
+            long_press(request).map(DesktopControlActionResponse::LongPress)
         }
         DesktopControlAction::Wait(request) => {
             Ok(DesktopControlActionResponse::Wait(wait(request)))
@@ -165,6 +182,27 @@ fn scroll(request: ScrollRequest) -> Result<ScrollResponse, DesktopControlError>
     Err(DesktopControlError::new(format!(
         "macOS generic scroll is not implemented (scrollX={}, scrollY={})",
         request.scroll_x, request.scroll_y
+    )))
+}
+
+fn drag(request: DragRequest) -> Result<DragResponse, DesktopControlError> {
+    Err(DesktopControlError::new(format!(
+        "macOS generic drag is not implemented (from={},{} to={},{})",
+        request.from_x, request.from_y, request.to_x, request.to_y
+    )))
+}
+
+fn mouse_move(request: MouseMoveRequest) -> Result<MouseMoveResponse, DesktopControlError> {
+    Err(DesktopControlError::new(format!(
+        "macOS generic mouse move is not implemented (x={}, y={})",
+        request.x, request.y
+    )))
+}
+
+fn long_press(request: LongPressRequest) -> Result<LongPressResponse, DesktopControlError> {
+    Err(DesktopControlError::new(format!(
+        "macOS generic long press is not implemented (x={}, y={}, ms={})",
+        request.x, request.y, request.ms
     )))
 }
 

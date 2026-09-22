@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { computeCommonPathPrefix, PathPrefixBadge, StyledPath } from '../shared/path-display.js';
 
-/* ── workspace_search results preview (grep-style list) ── */
+/* ── search-results preview（grep 风格列表；识别 {results:[{path,line,text}]} 形状）── */
 
 export interface SearchHit {
   path: string;

@@ -54,12 +54,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Ensure workflow runs from a branch
         run: |
@@ -69,22 +77,22 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Format check
-        run: pnpm format:check
+        run: bun run format:check
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: bun run typecheck
 
       - name: Build web
-        run: pnpm --filter @openAwork/web build
+        run: bun run --filter @openAwork/web build
 
       - name: Gateway unit tests
-        run: pnpm --filter @openAwork/agent-gateway test:unit
+        run: bun run --filter @openAwork/agent-gateway test:unit
 
       - name: Mobile unit tests
-        run: pnpm --filter @openAwork/mobile test
+        run: bun run --filter @openAwork/mobile test
 
       - name: Preview next version
         id: next_version
@@ -109,7 +117,7 @@ jobs:
 
       - name: Format bumped version files
         run: |
-          pnpm exec prettier --write \
+          bunx prettier --write \
             package.json \
             'apps/*/package.json' \
             'packages/*/package.json' \

@@ -2,13 +2,11 @@ import { PRESENTED_TO_CANONICAL } from '../claude-code/claude-code-tool-surface-
 import { stripFunctionsNamespacePrefix } from '../tools/legacy-tool-name-rewrite.js';
 
 const LEGACY_ENABLED_TOOL_NAME_MAP = {
-  execute_shell: 'bash',
-  web_search: 'websearch',
-  workspace_tree: 'list',
-  workspace_read_file: 'read',
-  workspace_search: 'grep',
-  workspace_write_file: 'write',
-  workspace_create_file: 'write',
+  // 子代理工具的历史别名（canonical 为上游名 `subagent`）。
+  // 全仓唯一保留的运行期双名：存量会话与历史 tool_call 仍会带 `task`，
+  // 删掉会让这些调用被启用门禁拒绝（见 tools/legacy-tool-name-rewrite.ts
+  // 的说明——改名表已清空，这里只做「同一工具的两个历史名字」归一）。
+  task: 'subagent',
 } as const;
 
 export function normalizeToolNameForEnablement(toolName: string): string {

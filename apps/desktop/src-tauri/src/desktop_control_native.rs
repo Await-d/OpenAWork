@@ -22,9 +22,11 @@ pub use self::desktop_control_native_common::{
 };
 pub use self::desktop_control_native_models::{
     ClickAction, ClickRequest, ClickResponse, DesktopControlAction, DesktopControlActionResponse,
-    DesktopControlCapabilities, DesktopControlCapability, DesktopControlStatus, HotkeyRequest,
-    HotkeyResponse, KeyRequest, KeyResponse, MouseButton, ScreenshotRequest, ScreenshotResponse,
-    ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse, WaitRequest, WaitResponse,
+    DesktopControlCapabilities, DesktopControlCapability, DesktopControlStatus, DragRequest,
+    DragResponse, HotkeyRequest, HotkeyResponse, KeyRequest, KeyResponse, LongPressRequest,
+    LongPressResponse, MouseButton, MouseMoveRequest, MouseMoveResponse, ScreenshotRequest,
+    ScreenshotResponse, ScrollRequest, ScrollResponse, TypeTextRequest, TypeTextResponse,
+    WaitRequest, WaitResponse,
 };
 
 pub fn status() -> DesktopControlStatus {

@@ -849,7 +849,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
         summary: `代码变更 · +${summary.added} / -${summary.removed}`,
       };
     }
-    // Recovery path: write/edit/multi_edit/apply_patch outputs are
+    // Recovery path: write/edit/multi_edit/patch outputs are
     // serialised to JSON during storage (see stringifyToolResultOutput in
     // agent-gateway), so the UI receives a JSON-encoded string rather than
     // a parsed envelope. Without this, multi-file patches render as a 4KB
@@ -894,7 +894,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
     .filter((item): item is ToolDiffFileView => Boolean(item));
 
   if (multiFiles && multiFiles.length >= 1) {
-    // Single-file `files[]` (common for apply_patch with one update) — render
+    // Single-file `files[]` (common for patch with one update) — render
     // as a single-file diff view rather than falling through and missing the
     // chance to surface the diff. Without this, single-file patches dropped
     // into the generic JSON fallback.

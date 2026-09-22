@@ -23,10 +23,12 @@ import {
 } from '../handoff/store/handoff-store.js';
 import { assert } from './task-verification-helpers.js';
 
-const SCAN_DIRS = ['handoff/runner', 'tools', 'routes'] as const;
+const SCAN_DIRS = ['handoff/runner', 'tools', 'routes', 'task'] as const;
 const BUILDER_FUNCTION_NAME = /(ClientRequestId|ClientIdempotencyKey|RequestKey|WorkflowPlan)/;
 const KEY_PREFIX_CONST_NAME = /(?:REQUEST|CLIENT)[A-Z_]*PREFIX[A-Z_]*/;
-const PREFIX_CONST_VALUE = /PREFIX\w*\s*=\s*'([a-z][a-z0-9_-]*)/;
+// 常量式前缀必须连同分隔符一起捕获（`task-parent-decision:` / `restore-apply-`），
+// 否则与注册表中的带分隔符前缀做 `startsWith` 覆盖判定时会永远不匹配。
+const PREFIX_CONST_VALUE = /PREFIX\w*\s*=\s*'([a-z][a-z0-9_-]*[:-]?)/;
 const LITERAL_KEY_PREFIX = /`([a-z][a-z0-9-]*[:-])/;
 
 interface DiscoveredRequestKeyPrefix {

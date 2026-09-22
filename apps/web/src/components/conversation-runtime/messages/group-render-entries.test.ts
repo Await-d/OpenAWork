@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatRenderEntry } from '../../chat/message/chat-message-group-list.js';
+import type {
+  ChatRenderEntry,
+  ChatRenderGroup,
+} from '../../chat/message/chat-message-group-list.js';
 import { groupChatRenderEntries } from './group-render-entries.js';
+
+/**
+ * 取回消息组：协议已改为判别联合（`kind`），访问 `.entries` 前必须窄化。
+ * 若实际不是消息组则**直接让测试失败**（而不是静默跳过断言）。
+ */
+function requireMessageGroup(
+  group: ChatRenderGroup | undefined,
+): ChatRenderGroup & { kind: 'messages' } {
+  if (group?.kind !== 'messages') {
+    throw new Error(`期望消息组，实际为 ${String(group?.kind)}`);
+  }
+  return group;
+}
 
 function assistantEntry(id: string, groupIdentityKey?: string): ChatRenderEntry {
   return {
@@ -33,7 +49,7 @@ describe('groupChatRenderEntries', () => {
     ]);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.entries).toHaveLength(2);
+    expect(requireMessageGroup(groups[0]).entries).toHaveLength(2);
   });
 
   it('相邻 assistant 但来源身份不同，不再误并组', () => {
@@ -44,8 +60,8 @@ describe('groupChatRenderEntries', () => {
     ]);
 
     expect(groups).toHaveLength(2);
-    expect(groups[0]?.entries).toHaveLength(1);
-    expect(groups[1]?.entries).toHaveLength(2);
+    expect(requireMessageGroup(groups[0]).entries).toHaveLength(1);
+    expect(requireMessageGroup(groups[1]).entries).toHaveLength(2);
   });
 
   it('同一请求的不同 assistant 轮次不在分组层被吞掉', () => {
@@ -55,7 +71,7 @@ describe('groupChatRenderEntries', () => {
     ]);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.entries).toHaveLength(2);
+    expect(requireMessageGroup(groups[0]).entries).toHaveLength(2);
   });
 
   it('工具轮派生请求与最终请求仍分别展示', () => {
@@ -64,6 +80,6 @@ describe('groupChatRenderEntries', () => {
       assistantRequestEntry('final-round', 'request-1'),
     ]);
 
-    expect(groups[0]?.entries).toHaveLength(2);
+    expect(requireMessageGroup(groups[0]).entries).toHaveLength(2);
   });
 });

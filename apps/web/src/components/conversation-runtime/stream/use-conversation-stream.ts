@@ -175,6 +175,8 @@ interface RoundAccumulator {
       output?: unknown;
       isError?: boolean;
       resumedAfterApproval?: boolean;
+      /** tool result 的图片附件（`computer_use` 最终截图）。 */
+      attachments?: InputImageContent[];
       toolCallId: string;
       status: 'streaming' | 'completed';
       toolName: string;
@@ -505,6 +507,12 @@ export function useConversationStream(
           output: event.output,
           isError: hasPendingPermission ? false : event.isError,
           resumedAfterApproval: event.resumedAfterApproval,
+          // 附件只在本次 result 携带时覆盖；否则沿用上一次的。
+          ...(event.attachments && event.attachments.length > 0
+            ? { attachments: event.attachments }
+            : previous?.attachments
+              ? { attachments: previous.attachments }
+              : {}),
           toolCallId: event.toolCallId,
           status: 'completed',
           toolName: event.toolName,
@@ -514,6 +522,9 @@ export function useConversationStream(
           output: event.output,
           isError: hasPendingPermission ? false : event.isError,
           status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+          ...(event.attachments && event.attachments.length > 0
+            ? { attachments: event.attachments }
+            : {}),
           ...(hasPendingPermission && event.pendingPermissionRequestId
             ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
             : {}),

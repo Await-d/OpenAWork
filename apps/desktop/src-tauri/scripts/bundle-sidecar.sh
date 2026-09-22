@@ -8,7 +8,7 @@ BINARIES_DIR="$ROOT/apps/desktop/src-tauri/binaries"
 TARGET_TRIPLE="${TAURI_TARGET_TRIPLE:-$(rustc -Vv | grep host | awk '{print $2}')}"
 
 cd "$GATEWAY_DIR"
-pnpm build
+bun run build
 
 rm -rf "$SIDECARS_DIR"
 mkdir -p "$SIDECARS_DIR"

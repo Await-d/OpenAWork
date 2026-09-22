@@ -1,4 +1,4 @@
-import type { SessionPermissionMode } from '@openAwork/shared';
+import type { InputImageContent, SessionPermissionMode } from '@openAwork/shared';
 import type {
   SessionMessageRatingRecord,
   SessionRecoveryReadModel,
@@ -48,6 +48,11 @@ export interface LiveToolCallState {
   output?: unknown;
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
+  /**
+   * tool result 的图片附件（`StreamToolResultChunk.attachments`）。
+   * `computer_use` 的最终截图只走这里；其它工具保持 undefined。
+   */
+  attachments?: InputImageContent[];
   status: 'streaming' | 'paused' | 'completed' | 'error';
   toolCallId: string;
   toolName: string;
@@ -244,6 +249,8 @@ export function decorateAssistantGroupActions(
   group: ChatRenderGroup,
   handleCopyMessageGroup: (messages: ChatMessage[]) => void,
 ): ChatRenderGroup {
+  // 通知群组没有可复制的助手消息。
+  if (group.kind !== 'messages') return group;
   const firstEntry = group.entries[0];
   if (!firstEntry || group.role !== 'assistant' || group.entries.length <= 1) return group;
   return {

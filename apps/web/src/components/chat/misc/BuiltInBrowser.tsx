@@ -64,8 +64,11 @@ interface BuiltInBrowserProps {
   /** When set, the browser navigates to this URL automatically (e.g. from dev-server detection). */
   previewUrl?: string | null;
   /**
-   * 当前工作区路径,用来按 workspace 隔离 tabs / history / activeTab 的持久化。
+   * 当前工作区作用域,用来按 workspace 隔离 tabs / history / activeTab 的持久化。
    * 跨 workspace 切会话时,sidebar 会传入新的 workspacePath,本组件会重建 tabs 状态。
+   *
+   * 注意:这是 UI 持久化作用域,无工作目录的会话会落成 `__session__:<id>` 这类非路径
+   * 键。索引版本轮询遇到非路径作用域时会交给网关回退到未绑定会话默认工作区。
    */
   workspacePath?: string | null;
   /**

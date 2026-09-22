@@ -57,16 +57,34 @@ export const sumTokens = (...values) => {
   if (values.every((value) => value === undefined)) return undefined;
   return values.reduce((acc, value) => acc + (value ?? 0), 0);
 };
-export const eventError = (route, message, raw) =>
+export const eventError = (route, message, raw, cause) =>
   new LLMError({
     module: 'ProviderShared',
     method: 'stream',
-    reason: new InvalidProviderOutputReason({ route, message, raw }),
+    reason: new InvalidProviderOutputReason({ route, message, raw, cause }),
+  });
+/**
+ * A response that ended before its terminal event (`finish` / `provider-error`).
+ * `classification: 'incomplete-stream'` lets the caller distinguish "the
+ * provider got cut off" from a malformed payload and decide whether to continue
+ * or retry rather than treating a truncated answer as complete.
+ */
+export const incompleteStreamError = (route, message, raw, cause) =>
+  new LLMError({
+    module: 'ProviderShared',
+    method: 'stream',
+    reason: new InvalidProviderOutputReason({
+      route,
+      message: message ?? 'The provider response ended unexpectedly.',
+      classification: 'incomplete-stream',
+      raw,
+      cause,
+    }),
   });
 export const parseJson = (route, input, message) =>
   Effect.try({
     try: () => decodeJson(input),
-    catch: () => eventError(route, message, input),
+    catch: (cause) => eventError(route, message, input, cause),
   });
 /**
  * Join the `text` field of a list of parts with newlines. Used by routes
@@ -222,7 +240,7 @@ export const errorText = (error) => {
  */
 export const sseFraming = (bytes) =>
   bytes.pipe(
-    Stream.decodeText(),
+    Stream.decodeText,
     Stream.pipeThroughChannel(Sse.decode()),
     Stream.catchTag('Retry', () => Stream.empty),
     Stream.filter((event) => event.data.length > 0 && event.data !== '[DONE]'),
@@ -245,11 +263,11 @@ export const sseFraming = (bytes) =>
  * `InvalidRequestReason` with route context or trace metadata, the change
  * lands here.
  */
-export const invalidRequest = (message) =>
+export const invalidRequest = (message, cause) =>
   new LLMError({
     module: 'ProviderShared',
     method: 'request',
-    reason: new InvalidRequestReason({ message }),
+    reason: new InvalidRequestReason({ message, cause }),
   });
 export const matchToolChoice = (route, toolChoice, cases) =>
   Effect.gen(function* () {
@@ -276,7 +294,7 @@ export const unsupportedContent = (route, role, types) =>
  * `LLMError` carrying the original parse-error message.
  */
 export const validateWith = (decode) => (payload) =>
-  decode(payload).pipe(Effect.mapError((error) => invalidRequest(error.message)));
+  decode(payload).pipe(Effect.mapError((error) => invalidRequest(error.message, error)));
 /**
  * Build an HTTP POST with a JSON body. Sets `content-type: application/json`
  * automatically after caller-supplied headers so routes cannot accidentally

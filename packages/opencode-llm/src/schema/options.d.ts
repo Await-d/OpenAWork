@@ -297,6 +297,7 @@ declare const ModelCompatibility_base: Schema.Class<
   ModelCompatibility,
   Schema.Struct<{
     readonly toolSchema: Schema.optional<Schema.Literals<readonly ['gemini', 'moonshot']>>;
+    readonly requireSignature: Schema.optional<Schema.Boolean>;
   }>,
   {}
 >;

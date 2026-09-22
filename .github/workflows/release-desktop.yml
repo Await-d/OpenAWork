@@ -99,7 +99,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TAURI_SCRIPT: pnpm --filter @openAwork/desktop exec tauri
+      TAURI_SCRIPT: bun run --filter @openAwork/desktop tauri
       TAURI_LINUX_AYATANA_APPINDICATOR: '0'
       # 桌面端打包必须禁用 PWA：显式声明，不再只依赖 Tauri CLI 注入的 TAURI_ENV_PLATFORM。
       OPENAWORK_DESKTOP_BUILD: '1'
@@ -175,12 +175,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - uses: actions/download-artifact@v4
         with:
@@ -240,13 +248,13 @@ jobs:
         if: matrix.label == 'windows-aarch64'
         shell: bash
         run: |
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm rebuild @sentry/cli better-sqlite3 esbuild koffi msw
-          npm_config_arch=x64 pnpm rebuild ffmpeg-static
+          bun install --frozen-lockfile --ignore-scripts
+          node scripts/rebuild-native-packages.mjs @sentry/cli better-sqlite3 esbuild koffi msw
+          node scripts/rebuild-native-packages.mjs ffmpeg-static --arch=x64
 
       - name: Install dependencies
         if: matrix.label != 'windows-aarch64'
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       # 媒体二进制暂存目前仅对 Windows 目标开启：
       # - macOS 需要先决定嵌套 Mach-O 的签名/公证方案；
@@ -262,7 +270,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Build gateway sidecar
         shell: bash
@@ -430,9 +438,9 @@ jobs:
           APPIMAGE_STATUS="$RUNNER_TEMP/tauri-linux-appimage-status.txt"
           APPIMAGE_DIAGNOSTICS="$RUNNER_TEMP/tauri-linux-appimage-diagnostics.md"
 
-          pnpm --filter @openAwork/desktop exec tauri build --bundles deb $TARGET_FLAG --verbose 2>&1 | tee "$DEB_LOG"
+          bun run --filter @openAwork/desktop tauri build --bundles deb $TARGET_FLAG --verbose 2>&1 | tee "$DEB_LOG"
 
-          if pnpm --filter @openAwork/desktop exec tauri build --bundles appimage $TARGET_FLAG --verbose; then
+          if bun run --filter @openAwork/desktop tauri build --bundles appimage $TARGET_FLAG --verbose; then
             echo 'success' > "$APPIMAGE_STATUS"
           else
             appimage_status=$?

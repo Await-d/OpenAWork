@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm --filter @openAwork/web dev",
-    "beforeBuildCommand": "pnpm --filter @openAwork/web build"
+    "beforeDevCommand": "bun run --filter @openAwork/web dev",
+    "beforeBuildCommand": "bun run --filter @openAwork/web build"
   },
   "app": {
     "withGlobalTauri": true,

@@ -10,6 +10,7 @@ import * as ProviderShared from '../protocols/shared.js';
 import {
   GenerationOptions,
   HttpOptions,
+  LLMEvent,
   LLMRequest,
   LLMResponse,
   Model,
@@ -90,19 +91,50 @@ const resolveRequestOptions = (request) => {
 const streamError = (route, message, cause) => {
   const failed = cause.reasons.find(Cause.isFailReason)?.error;
   if (failed instanceof LLMErrorClass) return failed;
-  return ProviderShared.eventError(route, message, Cause.pretty(cause));
+  return ProviderShared.eventError(route, message, Cause.pretty(cause), cause);
 };
+const isTransportFailure = (cause) => {
+  const failed = cause.reasons.find(Cause.isFailReason)?.error;
+  return failed instanceof LLMErrorClass && failed.reason._tag === 'Transport';
+};
+// A well-formed response always ends with a terminal event. A stream that closes
+// without one was cut off, so fail with `incomplete-stream` instead of letting
+// callers treat a truncated answer as complete. `Stream.onEnd` runs only on a
+// successful end, so transport failures keep their own, more specific error.
+const requireTerminalEvent = (route) => (events) =>
+  Stream.suspend(() => {
+    let terminal = false;
+    return events.pipe(
+      Stream.mapEffect((event) => {
+        if (terminal)
+          return Effect.fail(
+            ProviderShared.eventError(
+              route,
+              `Provider emitted ${event.type} after the terminal event`,
+            ),
+          );
+        if (LLMEvent.is.finish(event) || LLMEvent.is.providerError(event)) terminal = true;
+        return Effect.succeed(event);
+      }),
+      Stream.onEnd(
+        Effect.suspend(() =>
+          terminal ? Effect.void : Effect.fail(ProviderShared.incompleteStreamError(route)),
+        ),
+      ),
+    );
+  });
 function makeFromTransport(input) {
   const protocol = input.protocol;
   const encodeBody = Schema.encodeSync(Schema.fromJsonString(protocol.body.schema));
   const decodeEventEffect = Schema.decodeUnknownEffect(protocol.stream.event);
   const decodeEvent = (route) => (frame) =>
     decodeEventEffect(frame).pipe(
-      Effect.mapError(() =>
+      Effect.mapError((cause) =>
         ProviderShared.eventError(
           input.id,
           `Invalid ${route} stream event`,
           typeof frame === 'string' ? frame : ProviderShared.encodeJson(frame),
+          cause,
         ),
       ),
     );
@@ -142,14 +174,26 @@ function makeFromTransport(input) {
         }),
       streamPrepared: (prepared, request, runtime) => {
         const route = `${request.model.provider}/${request.model.route.id}`;
-        const events = routeInput.transport
+        // A few HTTP/2 providers reset the stream while the client is
+        // closing the response after a terminal Responses event. Remember
+        // whether the protocol has already reached a clean terminal state so
+        // that this transport-level close does not turn a completed answer
+        // into a visible provider error.
+        const terminalSeen = { value: false };
+        let events = routeInput.transport
           .frames(prepared, request, runtime)
-          .pipe(
-            Stream.mapEffect(decodeEvent(route)),
-            protocol.stream.terminal
-              ? Stream.takeUntil(protocol.stream.terminal)
-              : (stream) => stream,
+          .pipe(Stream.mapEffect(decodeEvent(route)));
+        if (protocol.stream.terminal) {
+          const terminal = protocol.stream.terminal;
+          events = events.pipe(
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                if (terminal(event)) terminalSeen.value = true;
+              }),
+            ),
+            Stream.takeUntil(terminal),
           );
+        }
         return events.pipe(
           Stream.mapAccumEffect(
             () => protocol.stream.initial(request),
@@ -157,8 +201,11 @@ function makeFromTransport(input) {
             protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
           ),
           Stream.catchCause((cause) =>
-            Stream.fail(streamError(route, `Failed to read ${route} stream`, cause)),
+            terminalSeen.value && isTransportFailure(cause)
+              ? Stream.empty
+              : Stream.fail(streamError(route, `Failed to read ${route} stream`, cause)),
           ),
+          requireTerminalEvent(route),
         );
       },
     };
@@ -224,9 +271,8 @@ const generateWith = (stream) =>
     );
     const response = LLMResponse.complete(state);
     if (response) return response;
-    return yield* ProviderShared.eventError(
+    return yield* ProviderShared.incompleteStreamError(
       `${request.model.provider}/${request.model.route.id}`,
-      'Provider stream ended without a terminal finish event',
     );
   });
 export const prepare = (request) => prepareWith(request);
@@ -255,7 +301,11 @@ export const layer = Layer.effect(
       http: yield* RequestExecutor.Service,
       webSocket: Option.getOrUndefined(yield* Effect.serviceOption(WebSocketExecutor.Service)),
     });
-    return Service.of({ prepare: prepareWith, stream, generate: generateWith(stream) });
+    return Service.of({
+      prepare: prepareWith,
+      stream,
+      generate: generateWith(stream),
+    });
   }),
 );
 export const Route = { make };

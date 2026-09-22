@@ -313,9 +313,9 @@ flowchart TB
 
 #### 工程体系
 
-- pnpm workspace monorepo
+- bun workspace monorepo
 - Node.js `>= 22.13.0`
-- pnpm `>= 10.0.0`
+- bun `>= 1.4.0`
 - ESM / NodeNext 模块体系
 - ESLint + Prettier
 - Husky + Commitlint
@@ -361,7 +361,7 @@ OpenAWork/
 OpenAWork 当前有两条最常见的运行方式：
 
 - **本地开发模式**
-  - 使用 `pnpm` 启动 monorepo 下各应用与服务
+  - 使用 `bun` 启动 monorepo 下各应用与服务
   - 适合前端、网关与共享包联调
 
 - **Docker 模式**
@@ -380,7 +380,7 @@ OpenAWork 当前有两条最常见的运行方式：
 #### 1. 安装依赖
 
 ```bash
-pnpm install
+bun install
 ```
 
 #### 2. 配置环境变量
@@ -401,7 +401,7 @@ cp .env.example .env
 #### 3. 启动开发环境
 
 ```bash
-pnpm dev
+bun run dev
 ```
 
 #### 4. 或使用 Docker 快速拉起
@@ -414,28 +414,28 @@ docker compose up --build
 
 ```bash
 # 启动所有 workspace
-pnpm dev
+bun run dev
 
 # 构建共享包、服务与 Web
-pnpm build
+bun run build
 
 # 类型检查
-pnpm typecheck
+bun run typecheck
 
 # 全量测试
-pnpm test
+bun run test
 
 # E2E 测试
-pnpm test:e2e
+bun run test:e2e
 
 # 仅启动网关
-pnpm --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway dev
 
 # 启动桌面端
-pnpm --filter @openAwork/desktop dev
+bun run --filter @openAwork/desktop dev
 
 # 启动移动端
-pnpm --filter @openAwork/mobile dev
+bun run --filter @openAwork/mobile dev
 ```
 
 ### 适合谁使用
@@ -460,7 +460,7 @@ OpenAWork 适合以下几类场景：
 
 1. **`AGENTS.md`**
    - 最适合作为项目知识总入口
-2. **`package.json` + `pnpm-workspace.yaml`**
+2. **`package.json` 的 `workspaces` 字段**
    - 快速理解 monorepo 组织方式
 3. **`apps/web/src/App.tsx`**
    - 了解前端页面入口与整体路由面

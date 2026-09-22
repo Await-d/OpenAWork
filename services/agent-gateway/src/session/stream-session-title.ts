@@ -11,7 +11,7 @@ import type { ModelRouteConfig } from '../provider/model-router.js';
 import { generateSessionTitleLlm, isFirstUserMessage } from './session-title-llm.js';
 import { sqliteGet } from '../infra/db.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
-import { isTaskParentAutoResumeClientRequestId } from '../task/task-parent-auto-resume.js';
+import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
 import { appendSessionEvent } from './session-entry-store.js';
 import { makeSessionEventId } from './session-event.js';
 import {
@@ -192,7 +192,7 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
   if (
     titleRoute &&
     !isTaskCreatedSession &&
-    !isTaskParentAutoResumeClientRequestId(input.clientRequestId) &&
+    !isGatewayInternalRequestKey(input.clientRequestId) &&
     isFirstUserMessage(input.sessionId, input.userId)
   ) {
     void generateSessionTitleLlm({

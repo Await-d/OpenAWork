@@ -20,7 +20,7 @@
  * (so committed round messages also reflect that order before the gateway
  * refresh replaces them with persisted truth).
  */
-import type { StreamThinkingChunk } from '@openAwork/shared';
+import type { InputImageContent, StreamThinkingChunk } from '@openAwork/shared';
 import type { ChatMessagePart } from '../messages/support.js';
 import type { StreamingThinkingBlock } from './streaming-thinking.js';
 
@@ -172,6 +172,8 @@ export function upsertStreamingToolSegment(
     pendingPermissionRequestId?: string;
     resumedAfterApproval?: boolean;
     kind?: 'agent' | 'mcp' | 'skill' | 'tool';
+    /** tool result 的图片附件（`computer_use` 最终截图）；无附件时保持 undefined。 */
+    attachments?: InputImageContent[];
   },
 ): ChatMessagePart[] {
   const next = segments.slice();
@@ -195,6 +197,9 @@ export function upsertStreamingToolSegment(
         ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
         ...(toolCall.isError !== undefined ? { isError: toolCall.isError } : {}),
         ...(toolCall.kind ? { kind: toolCall.kind } : {}),
+        ...(toolCall.attachments && toolCall.attachments.length > 0
+          ? { attachments: toolCall.attachments }
+          : {}),
         ...(toolCall.pendingPermissionRequestId
           ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
           : {}),
@@ -213,6 +218,9 @@ export function upsertStreamingToolSegment(
     ...(toolCall.kind ? { kind: toolCall.kind } : {}),
     ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
     ...(toolCall.isError !== undefined ? { isError: toolCall.isError } : {}),
+    ...(toolCall.attachments && toolCall.attachments.length > 0
+      ? { attachments: toolCall.attachments }
+      : {}),
     ...(toolCall.pendingPermissionRequestId
       ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
       : {}),
@@ -240,6 +248,8 @@ export function applyToolResultToStreamingSegment(
     status?: 'running' | 'paused' | 'completed' | 'failed';
     pendingPermissionRequestId?: string;
     resumedAfterApproval?: boolean;
+    /** tool result 的图片附件（`computer_use` 最终截图）；无附件时保持 undefined。 */
+    attachments?: InputImageContent[];
   },
 ): ChatMessagePart[] {
   const next = segments.slice();
@@ -256,6 +266,9 @@ export function applyToolResultToStreamingSegment(
       ...(toolResult.output !== undefined ? { output: toolResult.output } : {}),
       ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
       ...(toolResult.status ? { status: toolResult.status } : {}),
+      ...(toolResult.attachments && toolResult.attachments.length > 0
+        ? { attachments: toolResult.attachments }
+        : {}),
       ...(toolResult.pendingPermissionRequestId !== undefined
         ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
         : {}),
@@ -270,6 +283,9 @@ export function applyToolResultToStreamingSegment(
       ...(toolResult.output !== undefined ? { output: toolResult.output } : {}),
       ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
       ...(toolResult.status ? { status: toolResult.status } : {}),
+      ...(toolResult.attachments && toolResult.attachments.length > 0
+        ? { attachments: toolResult.attachments }
+        : {}),
       ...(toolResult.pendingPermissionRequestId !== undefined
         ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
         : {}),

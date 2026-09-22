@@ -113,7 +113,7 @@ const scenarios = {
       {
         title: '读取 package.json',
         path: 'package.json',
-        detail: '发现 pnpm monorepo。',
+        detail: '发现 bun monorepo。',
         short: true,
       },
       {

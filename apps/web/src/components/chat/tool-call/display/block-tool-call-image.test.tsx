@@ -88,4 +88,23 @@ describe('BlockToolCall web image preview', () => {
 
     expect(screen.queryByRole('img', { name: '抓取到的网络图片' })).toBeNull();
   });
+
+  it('discards empty-src images inside fetched markdown instead of rendering `<img src="">`', () => {
+    render(
+      <BlockToolCall
+        toolName="webfetch"
+        input={{ url: 'https://example.com/docs' }}
+        output={{
+          url: 'https://example.com/docs',
+          status: 200,
+          contentType: 'text/markdown',
+          format: 'markdown',
+          content: '# 标题\n\n![坏图]()\n\n正文',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('标题')).toBeTruthy();
+    expect(document.querySelector('img')).toBeNull();
+  });
 });

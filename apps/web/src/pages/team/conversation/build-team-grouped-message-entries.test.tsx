@@ -3,7 +3,24 @@ import {
   createAssistantTraceContent,
   type ChatMessage,
 } from '../../../components/conversation-runtime/messages/support.js';
+import type {
+  ChatRenderEntry,
+  ChatRenderGroup,
+} from '../../../components/chat/message/chat-message-group-list.js';
 import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
+
+/**
+ * 取回消息组：协议已改为判别联合（`kind`），访问 `.entries` 前必须窄化。
+ * 实际不是消息组时直接让测试失败（而不是静默跳过断言）。
+ */
+function requireMessageGroup(
+  group: ChatRenderGroup | undefined,
+): ChatRenderGroup & { kind: 'messages' } {
+  if (group?.kind !== 'messages') {
+    throw new Error(`期望消息组，实际为 ${String(group?.kind)}`);
+  }
+  return group;
+}
 import type { ResolveInlinePermissionActionsFn } from '../../../components/chat/session/ChatPageSections.js';
 
 describe('buildTeamGroupedMessageEntries', () => {
@@ -35,7 +52,7 @@ describe('buildTeamGroupedMessageEntries', () => {
       buildEntryActions: () => [],
     });
 
-    const entries = groups.flatMap((group) => group.entries);
+    const entries = groups.flatMap((group) => requireMessageGroup(group).entries);
     expect(entries.map((entry) => entry.message.id)).toEqual([
       'same-id',
       'team-streaming-assistant',
@@ -68,9 +85,9 @@ describe('buildTeamGroupedMessageEntries', () => {
 
     const streamingGroup = groups[1];
     expect(streamingGroup?.key).toBe('team-streaming-assistant');
-    expect(streamingGroup?.entries).toHaveLength(1);
+    expect(requireMessageGroup(streamingGroup).entries).toHaveLength(1);
 
-    const streamingEntry = streamingGroup?.entries[0];
+    const streamingEntry = requireMessageGroup(streamingGroup).entries[0];
     expect(streamingEntry?.message.id).toBe('team-streaming-assistant');
     expect(streamingEntry?.message.role).toBe('assistant');
     expect(streamingEntry?.message.status).toBe('streaming');
@@ -92,7 +109,7 @@ describe('buildTeamGroupedMessageEntries', () => {
     });
 
     expect(groups).toHaveLength(1);
-    const streamingEntry = groups[0]?.entries[0];
+    const streamingEntry = requireMessageGroup(groups[0]).entries[0];
     expect(streamingEntry?.message.content).toBe('团队正在处理中…');
     expect(streamingEntry?.message.agentId).toBe('executor');
     expect(streamingEntry?.groupIdentityKey).toBe('executor');
@@ -136,7 +153,7 @@ describe('buildTeamGroupedMessageEntries', () => {
       buildEntryActions: () => [],
     });
 
-    const assistantEntry = groups[0]?.entries[0];
+    const assistantEntry = requireMessageGroup(groups[0]).entries[0];
     expect(assistantEntry).toBeTruthy();
     // renderContent 在统一 chat 风格渲染下不应抛错，并会消费审批解析器。
     expect(() => assistantEntry?.renderContent(assistantEntry.message)).not.toThrow();

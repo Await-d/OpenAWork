@@ -35,7 +35,7 @@ OPENAWORK_DISABLE_MCP_FLAT_TOOLS=1
 2. 重启 Agent Gateway：
 
 ```bash
-pnpm --filter @openAwork/agent-gateway dev
+bun run --filter @openAwork/agent-gateway dev
 ```
 
 ### 方案 2：检查 MCP 服务器配置
@@ -61,7 +61,7 @@ pnpm --filter @openAwork/agent-gateway dev
 运行诊断脚本：
 
 ```bash
-pnpm exec tsx scripts/diagnose-mcp-tools.ts
+bunx tsx scripts/diagnose-mcp-tools.ts
 ```
 
 输出示例：
@@ -168,6 +168,6 @@ A: 禁用后：
 
 如果问题仍未解决，请：
 
-1. 收集诊断信息：运行 `pnpm exec tsx scripts/diagnose-mcp-tools.ts`
+1. 收集诊断信息：运行 `bunx tsx scripts/diagnose-mcp-tools.ts`
 2. 检查 Gateway 日志中的错误信息
 3. 在 GitHub Issues 中报告问题，附上诊断信息

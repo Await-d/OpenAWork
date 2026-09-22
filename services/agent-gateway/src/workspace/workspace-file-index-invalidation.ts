@@ -17,7 +17,7 @@ import { invalidateSshWorkspaceFileIndexForSession } from './ssh-workspace-file-
 /**
  * 可能改动工作区文件系统的 canonical 工具名。
  *
- * 包含文件写入（write / edit / multi_edit / apply_patch / ast_grep_replace /
+ * 包含文件写入（write / edit / multi_edit / patch / ast_grep_replace /
  * lsp_rename / workspace_create_directory / workspace_review_revert）、可执行
  * 任意命令的 shell（bash / interactive_bash / run_bash_in_background）以及会
  * 落盘克隆产物的 repo_clone。只读 / 检索 / 会话类工具绝不在此集合内。
@@ -29,7 +29,7 @@ export const WORKSPACE_FILE_INDEX_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'write',
   'edit',
   'multi_edit',
-  'apply_patch',
+  'patch',
   'ast_grep_replace',
   'lsp_rename',
   'bash',

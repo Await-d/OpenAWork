@@ -1,6 +1,7 @@
 use crate::desktop_control_native::{
-    execute_action, status, ClickRequest, DesktopControlAction, HotkeyRequest, KeyRequest,
-    ScreenshotRequest, ScrollRequest, TypeTextRequest, WaitRequest,
+    execute_action, status, ClickRequest, DesktopControlAction, DragRequest, HotkeyRequest,
+    KeyRequest, LongPressRequest, MouseMoveRequest, ScreenshotRequest, ScrollRequest,
+    TypeTextRequest, WaitRequest,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::{Arc, Mutex};
@@ -159,6 +160,9 @@ fn parse_action(action_name: &str, body: &[u8]) -> Result<DesktopControlAction, 
         "key" => parse_json::<KeyRequest>(body).map(DesktopControlAction::Key),
         "hotkey" => parse_json::<HotkeyRequest>(body).map(DesktopControlAction::Hotkey),
         "scroll" => parse_json::<ScrollRequest>(body).map(DesktopControlAction::Scroll),
+        "drag" => parse_json::<DragRequest>(body).map(DesktopControlAction::Drag),
+        "mouse_move" => parse_json::<MouseMoveRequest>(body).map(DesktopControlAction::MouseMove),
+        "long_press" => parse_json::<LongPressRequest>(body).map(DesktopControlAction::LongPress),
         "wait" => parse_json::<WaitRequest>(body).map(DesktopControlAction::Wait),
         _ => Err(format!("unsupported desktop control action: {action_name}")),
     }

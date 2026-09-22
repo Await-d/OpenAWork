@@ -12,10 +12,10 @@ The `apps/web` React SPA supports four deployment modes.
 ## Mode 1: Static Hosting (Vercel / Netlify / CDN)
 
 ```bash
-pnpm --filter @openAwork/shared build
-pnpm --filter @openAwork/shared-ui build
-pnpm --filter @openAwork/web-client build
-pnpm --filter @openAwork/web build
+bun run --filter @openAwork/shared build
+bun run --filter @openAwork/shared-ui build
+bun run --filter @openAwork/web-client build
+bun run --filter @openAwork/web build
 ```
 
 Upload `apps/web/dist/` to your CDN. Configure your hosting to redirect all 404s to `index.html`.
@@ -23,7 +23,7 @@ Upload `apps/web/dist/` to your CDN. Configure your hosting to redirect all 404s
 Set Vite proxy targets via environment variable at build time:
 
 ```bash
-VITE_GATEWAY_URL=https://api.example.com pnpm --filter @openAwork/web build
+VITE_GATEWAY_URL=https://api.example.com bun run --filter @openAwork/web build
 ```
 
 Or configure a reverse proxy (see Mode 3).
@@ -35,8 +35,8 @@ Or configure a reverse proxy (see Mode 3).
 The Gateway automatically serves the Web UI when `apps/web/dist/` exists.
 
 ```bash
-pnpm --filter @openAwork/web build
-pnpm --filter @openAwork/agent-gateway start
+bun run --filter @openAwork/web build
+bun run --filter @openAwork/agent-gateway start
 ```
 
 Access at `http://localhost:3000`. The gateway serves the SPA from `/` and falls back to `index.html` for client-side routing.
