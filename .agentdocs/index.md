@@ -2,6 +2,16 @@
 
 ## 已完成的任务
 
+### ✅ 260923-对话模式提示词收口-P1 - 澄清提问纪律 / 编辑粒度 / LSP 去重
+**状态**: 已完成（2026-09-23）——T-01…T-06 全部交付并验证；复杂度 **Lightweight**（score +2）
+**归档位置**: [workflow/done/260923-对话模式提示词收口-P1.md](workflow/done/260923-对话模式提示词收口-P1.md)
+
+**成果总结**:
+- ✅ clarify：【frontier 提问纪律】新增「单轮提问上限 5 题」（超过时按「阻塞范围 → 依赖深度」排序分批并说明剩余项）与「作答不完整结算规则」（部分作答留 frontier 重问、明确跳过按推荐项暂定、"都行 / 你决定"采纳推荐项结算）、「答案与代码事实冲突先确认」；【AskUserQuestion】首条同步上限。
+- ✅ coding：禁止事项的「超过 80 行应分步给出」改为编辑语义（单次编辑小而可验证，约 80 行以上分阶段落地、每阶段验证）。
+- ✅ programmer：【工具使用策略】去重，语义查询与重命名改为引用同系统提示的「Codegraph / LSP 工具使用策略」章节，保留影响评估 / 实现 / 验证三条非重复条目。
+- ✅ 契约测试新增 3 例（含旧「80 行输出」措辞负向断言）；验证：定向 3 文件 / 37 测试通过（提示词契约 11/11）、网关 typecheck exit 0、ESLint 0 error、Prettier 全通过。
+
 ### ✅ 260923-对话模式提示词收口 - P0：指令优先级 / 模式回流 / 可执行模式公共纪律
 **状态**: 已完成（2026-09-23）——T-01…T-06 全部交付并验证；复杂度 **Lightweight**（score +2）
 **归档位置**: [workflow/done/260923-对话模式提示词收口.md](workflow/done/260923-对话模式提示词收口.md)
@@ -592,6 +602,7 @@
 
 ### 架构决策
 - [2026-09-23] **对话模式提示词共享片段是 SSOT，禁止在各模式内复制粘贴**：`services/agent-gateway/src/routes/stream-system-prompts.ts` 导出四个共享常量——`DIALOGUE_MODE_INSTRUCTION_PRIORITY_SYSTEM_PROMPT`（三模式通用：项目约定 > 模式纪律 > 通用最佳实践；其他注入提示如子代理说明 / 工具章节冲突时先说明再按优先级执行）、`EXECUTABLE_MODE_COMMON_DISCIPLINE_SYSTEM_PROMPT`（coding + programmer：先读后写 / 事实驱动附证据 / 最小变更 / 验证闭环 / 测试诚信）、`MODE_REFERRAL_SYSTEM_PROMPT`（coding + programmer 模式回流：歧义先问清、方向性分歧建议切回澄清、方案失效先停并给回退范围）、`AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT`（coding + programmer 承接澄清方案先落盘 / 登记 index / 勾选 T-XX / 归档 done）。契约测试 `dialogue-mode-prompts.test.ts` 直接引用共享常量做断言，防复制粘贴漂移；澄清模式保持只读，不继承可执行模式纪律。
+- [2026-09-23] **对话模式提示词 P1 收口**：clarify 单轮提问上限 5 题（frontier 超限按「阻塞范围 → 依赖深度」排序分批并说明剩余项；部分作答留 frontier 重问、明确跳过按推荐项暂定、"都行"采纳推荐项结算、答案与代码事实冲突时先确认再结算）；coding 改动粒度按编辑语义（约 80 行以上分阶段落地）；programmer 的 LSP 工具路由与重命名序列以 `LSP_TOOL_GUIDANCE_SYSTEM_PROMPT` 为单一来源（模式提示只引用章节，不重复）。契约测试含旧措辞负向断言。
 - [2026-09-22] **自动唤醒必须有预算上限，且只统计「真正发生的唤醒」**：单通道交付的唤醒是**事件驱动**的（子代理结算 → 投递通知 → 唤醒父会话），若被唤醒的父会话又委派新的后台子代理，其完成会再次唤醒它 → **无界自激**。落点 `services/agent-gateway/src/task/task-wake-budget.ts`（上限 10，与旧机制同值）：由 `deliverTaskCompletion` 在**决策为「要唤醒」之后**才消费预算（`resume:false` / 父会话在飞 / 父会话 paused 均不计入），耗尽时**仍然投递通知**（已落库 ⇒ 用户下次自然发言模型依然看得到，**不丢信息**），只返回 `wake:'skipped'` + `deferReason:'budget-exhausted'`；计数只在**非网关内部请求**时重置（复用 `isGatewayInternalRequestKey`——否则唤醒自身会把计数清零，上限永远触发不了）。进程内存储，重启即清零（可接受：重启后首次唤醒总是允许的）。
 - [2026-09-22] **包管理器全量由 pnpm 切到 bun（bun@1.4.2）**：`bun.lock` 为唯一事实来源（`pnpm-lock.yaml` / `pnpm-workspace.yaml` 已删，workspace 用根 `package.json` 的 `workspaces` 字段）。`pnpm.onlyBuiltDependencies` → 顶层 `trustedDependencies`、`pnpm.patchedDependencies` → 顶层 `patchedDependencies`（playwright-core 补丁实测生效）；`peerDependencyRules` / `allowedDeprecatedVersions` / `.npmrc auto-install-peers` 无等价物已删。CI（7 个 workflow）、两个 Dockerfile、桌面脚本、活跃文档同步切换；**测试运行器仍是 Vitest**（23 包、692 处 `vi.*`），bun 只替代「装包」这一层。网关/客户端里「识别第三方项目包管理器」的探测列表（lsp root markers、repo-overview、bash-arity、ERR_PNPM 提示、workspace 根标记）**保留 pnpm 项并新增 bun 项**——产品需同时支持两种仓库。方案与实测数据见 `workflow/260922-pnpm全量迁移bun.md`。
 - [2026-09-21] **批量工具权限暂停语义 = 只读兄弟放行 + 整批收集 + 批末统一 pause**：`isPermissionSafeSiblingTool` 白名单（read/list/glob/grep/webfetch/websearch/look_at/lsp）内的只读工具在待批期间继续执行；其余兄弟被扣住并入 pending payload 的 `blockedToolCalls`；批准后按 `tool_use` 顺序整批恢复，且仅当无残留 pending 才续轮。理由：上游 `tool_result` 顺序 + 整批 barrier 保证 prompt cache 前缀稳定，同时不丢只读兄弟。落点：`services/agent-gateway`（`routes/stream.ts` / `routes/stream-runtime.ts` / `tools/tool-sandbox.ts` / `permission/permission-contract.ts`）。**不照抄 opencode 的阻塞 await**——其 run 与请求解耦（durable drain），OpenAWork 的 run 绑在 SSE 请求上。

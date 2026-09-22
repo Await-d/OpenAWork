@@ -7,7 +7,10 @@
  *   2. 澄清模式的共识确认门控与"确认后自动切换到编程模式"说明；
  *   3. coding / programmer 承接澄清方案时先落盘计划并登记 `.agentdocs/index.md`；
  *   4. 三个模式声明【指令优先级】（多来源提示词冲突时的裁决顺序）；
- *   5. coding / programmer 共用同一份公共工程纪律与【模式回流】片段（SSOT）。
+ *   5. coding / programmer 共用同一份公共工程纪律与【模式回流】片段（SSOT）；
+ *   6. 澄清模式单轮提问上限 5 题与非标准作答的结算规则；
+ *   7. coding 按编辑语义约束改动粒度（旧「80 行输出」措辞不回归）；
+ *   8. programmer 引用 LSP 策略章节而非重复其工具路由。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -77,6 +80,27 @@ describe('对话模式提示词：agentdocs 工作流规范', () => {
     expect(codingPrompt).toContain(AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT);
     expect(programmerPrompt).toContain(AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT);
     expect(programmerPrompt).toContain('.agentdocs/workflow/done/');
+  });
+
+  it('澄清模式限制单轮提问数量并定义非标准作答的结算规则', () => {
+    const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS.clarify;
+
+    expect(prompt).toContain('单轮提问上限');
+    expect(prompt).toContain('作答不完整');
+    expect(prompt).toContain('都行');
+  });
+
+  it('编程模式按编辑语义约束改动粒度，旧「80 行输出」措辞不回归', () => {
+    const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS.coding;
+
+    expect(prompt).toContain('分阶段落地');
+    expect(prompt).not.toContain('超过 80 行应分步给出');
+  });
+
+  it('程序员模式引用 LSP 策略章节而非重复其工具路由', () => {
+    const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS.programmer;
+
+    expect(prompt).toContain('Codegraph / LSP 工具使用策略');
   });
 
   it('非澄清模式提示词不携带澄清人设与 __grill_confirm__ 确认门控', () => {
