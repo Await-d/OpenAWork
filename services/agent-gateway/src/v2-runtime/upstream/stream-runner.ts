@@ -8,7 +8,7 @@ import type {
   StreamToolResultChunk,
 } from '@openAwork/shared';
 import type { Message, SystemPart, ToolDefinition } from '@openAwork/opencode-llm';
-import { dispatchChatParams } from '../../runtime/plugin-host.js';
+import { dispatchChatParams, type ChatParamsOutput } from '../../runtime/plugin-host.js';
 import {
   buildBaseProviderOptions,
   buildProviderOptions,
@@ -518,6 +518,49 @@ function buildGeneration(
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000;
 
+/**
+ * Invariant: every outbound model request must run the same `chat.params` hook
+ * chain. The streaming runner and the non-streaming `runUpstreamGenerate`
+ * façade share this seed/resolve pair — new upstream runners must reuse them
+ * instead of talking to the native client directly.
+ */
+export function seedChatParamsOutput(
+  generation: OpenCodeLLM.GenerationOptions.Input | undefined,
+  output: ChatParamsOutput,
+): void {
+  if (generation?.temperature !== undefined) output.temperature = generation.temperature;
+  if (generation?.topP !== undefined) output.topP = generation.topP;
+  if (generation?.maxTokens !== undefined) output.maxOutputTokens = generation.maxTokens;
+  if (generation?.frequencyPenalty !== undefined)
+    output.options['frequencyPenalty'] = generation.frequencyPenalty;
+  if (generation?.presencePenalty !== undefined)
+    output.options['presencePenalty'] = generation.presencePenalty;
+}
+
+/** Fold `chat.params` plugin output back into native generation options. */
+export function resolveGenerationFromChatParams(
+  output: ChatParamsOutput,
+): OpenCodeLLM.GenerationOptions | undefined {
+  const fields: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+  } = {
+    ...(output.temperature === undefined ? {} : { temperature: output.temperature }),
+    ...(output.maxOutputTokens === undefined ? {} : { maxTokens: output.maxOutputTokens }),
+    ...(output.topP === undefined ? {} : { topP: output.topP }),
+    ...(typeof output.options['frequencyPenalty'] === 'number'
+      ? { frequencyPenalty: output.options['frequencyPenalty'] }
+      : {}),
+    ...(typeof output.options['presencePenalty'] === 'number'
+      ? { presencePenalty: output.options['presencePenalty'] }
+      : {}),
+  };
+  return Object.keys(fields).length === 0 ? undefined : OpenCodeLLM.GenerationOptions.make(fields);
+}
+
 export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstreamStream {
   const state: RunnerState = {
     ...(input.runId === undefined ? {} : { runId: input.runId }),
@@ -584,43 +627,15 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
     }),
     thinkingProviderOptions,
   );
-  const chatParamsOutput: {
-    temperature?: number;
-    topP?: number;
-    maxOutputTokens?: number;
-    options: Record<string, unknown>;
-  } = { options: {} };
-  const initialGeneration = generation;
-  if (initialGeneration?.temperature !== undefined)
-    chatParamsOutput.temperature = initialGeneration.temperature;
-  if (initialGeneration?.topP !== undefined) chatParamsOutput.topP = initialGeneration.topP;
-  if (initialGeneration?.maxTokens !== undefined)
-    chatParamsOutput.maxOutputTokens = initialGeneration.maxTokens;
-  if (initialGeneration?.frequencyPenalty !== undefined)
-    chatParamsOutput.options['frequencyPenalty'] = initialGeneration.frequencyPenalty;
-  if (initialGeneration?.presencePenalty !== undefined)
-    chatParamsOutput.options['presencePenalty'] = initialGeneration.presencePenalty;
+  const chatParamsOutput: ChatParamsOutput = { options: {} };
+  seedChatParamsOutput(generation, chatParamsOutput);
   const cancelled = { value: false };
   const source = Stream.unwrap(
     Effect.promise(() =>
       dispatchChatParams({ sessionID: input.sessionId ?? '', modelId }, chatParamsOutput),
     ).pipe(
       Effect.map(() => {
-        const resolvedGeneration: OpenCodeLLM.GenerationOptions.Input = {
-          ...(chatParamsOutput.temperature === undefined
-            ? {}
-            : { temperature: chatParamsOutput.temperature }),
-          ...(chatParamsOutput.maxOutputTokens === undefined
-            ? {}
-            : { maxTokens: chatParamsOutput.maxOutputTokens }),
-          ...(chatParamsOutput.topP === undefined ? {} : { topP: chatParamsOutput.topP }),
-          ...(typeof chatParamsOutput.options['frequencyPenalty'] === 'number'
-            ? { frequencyPenalty: chatParamsOutput.options['frequencyPenalty'] }
-            : {}),
-          ...(typeof chatParamsOutput.options['presencePenalty'] === 'number'
-            ? { presencePenalty: chatParamsOutput.options['presencePenalty'] }
-            : {}),
-        };
+        const resolvedGeneration = resolveGenerationFromChatParams(chatParamsOutput);
         const body = input.requestOverrides?.body;
         const headers = withOpencodeSessionHeader(input.requestOverrides?.headers, {
           providerType: input.providerType,
@@ -639,9 +654,7 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
           ...(system === undefined ? {} : { system }),
           messages: transformedMessages,
           tools: effectiveTools === undefined ? [] : Object.values(effectiveTools),
-          ...(Object.keys(resolvedGeneration).length === 0
-            ? {}
-            : { generation: resolvedGeneration }),
+          ...(resolvedGeneration === undefined ? {} : { generation: resolvedGeneration }),
           ...(providerOptions === undefined ? {} : { providerOptions }),
           ...(http === undefined ? {} : { http }),
         });

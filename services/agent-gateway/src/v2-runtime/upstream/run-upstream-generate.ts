@@ -47,6 +47,8 @@ import { sanitizeSurrogates } from './message-transforms.js';
 import { guardNativeToolContext } from './tool-context-guard.js';
 import { withOpencodeSessionHeader } from './session-affinity.js';
 import { resolveToolContextPolicy } from '../../compaction/tool-context-policy.js';
+import { dispatchChatParams, type ChatParamsOutput } from '../../runtime/plugin-host.js';
+import { resolveGenerationFromChatParams, seedChatParamsOutput } from './stream-runner.js';
 
 export interface RunUpstreamGenerateInput {
   /** OpenAWork-side provider type (`openai`, `anthropic`, `gemini`, ...). */
@@ -304,7 +306,18 @@ export function runUpstreamGenerate(
     );
 
     const timeoutMs = input.timeoutMs ?? resolveUpstreamGenerateTimeoutMs();
-    const generation = buildGenerationOptions(input, omit);
+    // Invariant: every outbound model request must run the same `chat.params`
+    // hook chain as the streaming runner — non-streaming callers (compaction,
+    // titles, workflow, look-at, memory extraction) must not bypass plugins.
+    const chatParamsOutput: ChatParamsOutput = { options: {} };
+    seedChatParamsOutput(buildGenerationOptions(input, omit), chatParamsOutput);
+    yield* Effect.promise(() =>
+      dispatchChatParams(
+        { sessionID: input.sessionId ?? '', modelId: input.model },
+        chatParamsOutput,
+      ),
+    );
+    const generation = resolveGenerationFromChatParams(chatParamsOutput);
     const body = input.requestOverrides?.body;
     const headers = withOpencodeSessionHeader(input.requestOverrides?.headers, {
       providerType: input.providerType,
@@ -323,7 +336,7 @@ export function runUpstreamGenerate(
       system: systemMessages,
       messages: transformedMessages,
       tools: [],
-      ...(generation ? { generation } : {}),
+      ...(generation === undefined ? {} : { generation }),
       ...(providerOptions ? { providerOptions } : {}),
       ...(http ? { http } : {}),
     });

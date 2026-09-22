@@ -205,6 +205,38 @@ const resolveBuiltinFallbackModel = (
     }
   | undefined => BUILTIN_MODEL_INDEX.get(modelId);
 
+/**
+ * Invariant: every outbound model request must pass through the same provider
+ * hook chain. `request.headers` / `request.body` are dispatched here so that
+ * all route-resolution paths (env fallback, provider selection, compaction)
+ * inject identical overrides — new resolution paths must funnel through this
+ * helper instead of hand-rolling provider-specific headers/body fields.
+ */
+const applyProviderRequestHooks = (
+  providerType: AIProvider['type'] | undefined,
+  provider: AIProvider | undefined,
+  modelId: string,
+  requestOverrides: RequestOverrides,
+): RequestOverrides => {
+  if (providerType === undefined || provider === undefined) {
+    return requestOverrides;
+  }
+
+  // 方案 5：插件注入额外 headers（合并到 requestOverrides.headers）
+  const headers: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
+  runHookAll('request.headers', providerType, { model: modelId, provider, headers });
+
+  // 方案 5：插件注入额外 body 字段（合并到 requestOverrides.body，最终成为 http.body）
+  const body: Record<string, unknown> = { ...(requestOverrides.body ?? {}) };
+  runHookAll('request.body', providerType, { model: modelId, provider, body });
+
+  return {
+    ...requestOverrides,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(Object.keys(body).length > 0 ? { body } : {}),
+  };
+};
+
 export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const model =
     request.model === DEFAULT_MODEL_SENTINEL
@@ -213,9 +245,19 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const builtinFallback = resolveBuiltinFallbackModel(model);
   const builtinProvider = builtinFallback?.provider;
   const builtinModel = builtinFallback?.model;
-  const requestOverrides = buildRequestOverrides(undefined, undefined, model);
   const providerType =
     builtinProvider?.type ?? (model.startsWith('claude') ? 'anthropic' : undefined);
+  // 未命中内置模型索引的模型（如 `claude-*` 变体）没有 provider 实例，退回平台预设
+  // 作为 hook 上下文，保证 header/body 注入与其它解析路径一致。
+  const pluginProvider =
+    builtinProvider ??
+    (providerType === undefined ? undefined : BUILTIN_PROVIDER_INDEX.get(providerType));
+  const requestOverrides = applyProviderRequestHooks(
+    providerType,
+    pluginProvider,
+    model,
+    buildRequestOverrides(undefined, undefined, model),
+  );
   const isAnthropic = providerType === 'anthropic';
   const rawApiBaseUrl = normalizeBaseUrl(
     (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
@@ -314,17 +356,13 @@ export function resolveModelRouteFromProvider(
   const apiKey =
     runHookFirst('resolve.apiKey', provider.type, { provider }) ?? resolveProviderApiKey(provider);
 
-  // 方案 5：插件注入额外 headers（合并到 requestOverrides.headers）
-  const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
-  runHookAll('request.headers', provider.type, {
-    model: modelId,
+  // 方案 5：插件注入额外 headers / body（见 applyProviderRequestHooks）
+  const mergedOverrides = applyProviderRequestHooks(
+    provider.type,
     provider,
-    headers: pluginHeaders,
-  });
-  const mergedOverrides = {
-    ...requestOverrides,
-    ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),
-  };
+    modelId,
+    requestOverrides,
+  );
 
   return {
     model: modelId,
@@ -393,17 +431,13 @@ export function resolveCompactionRoute(
   const apiKey =
     runHookFirst('resolve.apiKey', provider.type, { provider }) ?? resolveProviderApiKey(provider);
 
-  // 方案 5：插件注入 headers
-  const pluginHeaders: Record<string, string> = { ...(requestOverrides.headers ?? {}) };
-  runHookAll('request.headers', provider.type, {
-    model: modelId,
+  // 方案 5：插件注入额外 headers / body（见 applyProviderRequestHooks）
+  const mergedOverrides = applyProviderRequestHooks(
+    provider.type,
     provider,
-    headers: pluginHeaders,
-  });
-  const mergedOverrides = {
-    ...requestOverrides,
-    ...(Object.keys(pluginHeaders).length > 0 ? { headers: pluginHeaders } : {}),
-  };
+    modelId,
+    requestOverrides,
+  );
 
   return {
     model: modelId,

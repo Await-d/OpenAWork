@@ -16,12 +16,32 @@ export interface ResolveProtocolContext {
   baseUrl: string;
 }
 
+/**
+ * `request.headers` — 就地改写 `headers` 注入平台特有请求头。
+ *
+ * 派发点：`provider/model-router.ts` 的 `applyProviderRequestHooks`（env 回退 /
+ * provider 选择 / 压缩三条解析路径共用），结果合并进 `RequestOverrides.headers`，
+ * 再由各上游 runner 作为 HTTP 头发出。
+ *
+ * 不变量：所有出站模型请求必须经过同一条 hook 链，新增路径不得绕过路由解析。
+ */
 export interface RequestHeadersContext {
   model: string;
   provider: AIProvider;
   headers: Record<string, string>;
 }
 
+/**
+ * `request.body` — 就地改写 `body` 覆盖平台特有 JSON 请求字段。
+ *
+ * 派发点与 `request.headers` 相同（同一条 hook 链），结果合并进
+ * `RequestOverrides.body`，由各上游 runner 作为 `http.body` 覆盖到协议请求体上；
+ * 协议自有字段（messages / temperature / max_tokens 等）会被
+ * `@openAwork/opencode-llm` 的 overlay denylist 拒绝。
+ *
+ * 不变量：与 `request.headers` 一致——所有出站模型请求都必须经过该 hook，
+ * 不允许存在静默失效的路径。
+ */
 export interface RequestBodyContext {
   model: string;
   provider: AIProvider;
