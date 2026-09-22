@@ -258,6 +258,8 @@
 
 **Phase 3（CodeMode）未开始**。
 
+**基线升级（2026-09-22）**: 上游已发布 **v2.0.13**（本地对照目录由 `temp/opencode-v2.0.12` 原地重命名为 `temp/opencode-v2.0.13`，tag `v2.0.13` / commit `3180aab`）。Phase 3 的移植基线改用 **v2.0.13**：其 codemode 解释器语义补齐一大截（Iterator helpers + `Iterator.from`、`Promise.withResolvers`、`Promise.try`、ToPropertyKey 全量、生成器 `prototype` 与参数同步绑定、`delete` 非引用、函数重声明等），test262 `skipped.txt` 收缩 149 行。**移植时必须补上游漏掉的 `limits`**：上游 `packages/core/src/codemode/tool.ts` 接线时未把 `ExecutionLimits` 传给 `CodeMode.make`，导致 `execute` 实际**无超时、无工具调用上限、无输出字节上限**（限额能力已实现但未启用）——照抄会把该缺陷一起带过来。另注意 v2.0.13 重写了 codemode 指令 prompt（明确「工具只能在 `execute` 内调用、`search` 同步、不要猜工具名」），移植时以新版措辞为准。
+
 **范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
 ### ✅ 260922-子代理对标opencode改造方案 - 子代理结果回流收敛为 Job → 合成消息 → 唤醒 单闭环
@@ -619,6 +621,7 @@
 - [2026-09-16] 会话权限阶梯以 `permissionMode: 'ask'|'auto-edit'|'yolo'` 为**规范键**，布尔 `yoloMode` 降级为**派生投影**（`yoloMode === (permissionMode === 'yolo')`），使 legacy 读方 / 写方零改动；写入侧 canonicalizer 必须 patch-aware 并采用 5 级优先级（patch 规范键 > patch 布尔 > 合并后规范键 > 合并后布尔 > 保持缺席），否则 legacy 客户端 PATCH 布尔会被丢弃、session 卡在 `yolo`，形成向更不安全方向的**单向棘轮**。
 - [2026-09-16] 权限阶梯的 **deny-first 不变量**：`auto-edit` / `yolo` 的免审批快捷分支只能在**通配符 allow/deny 与作用域级 allow/deny 之后**执行，故这两档仅跳过 `ask`、永不放行被显式 `deny` 的调用；唯一执行点是 `ensurePermissionForTool`（`services/agent-gateway/src/tools/tool-sandbox.ts`），category 计算须上提以便中间档测试解析后的类别。
 - [2026-09-22] 权限阶梯新增 **deny-only 后置裁决层**（`permission.evaluate` hook，对齐 opencode v2.0.13）：`ensurePermissionForTool` 在**全部内置裁决之后**派发该 hook（工具级 / 作用域级规则 → 档位快捷分支 yolo / auto-edit / 后台 team / reception → 渠道策略 → workspace 永久规则 → saved approvals → **hook**）。插件**只能**把结论降级为 `deny`（设 `effect='deny'`，其它取值一律忽略），永远无法授权，故 **deny-first 不变量不变**：显式 `deny` 仍先于一切快捷分支早退，hook 只在「本会放行 / 免审批」与「本会进入 `ask`」两条出口生效。**`ask` 路径必须先过 hook 再落 pending**——否则被插件拒绝的调用会在 `permission_requests` 里留下无人应答的 pending 记录。插件抛错只 warn（`dispatchHook` 既有语义），零插件注册时行为与改动前完全一致。注意 hook 是 async 的：`ensurePermissionForTool` 已改为返回 `Promise`，新增放行分支必须走 `gatePermissionDecision` 而不是直接 `return`。
+- [2026-09-22] **不采纳上游「子会话共享父会话 prompt cache 亲和」**（opencode v2.0.13 的 `promptCacheKey = parentID ?? fork?.sessionID ?? id`）：本仓子会话的 system prompt 是**子代理自身**的 prompt（`tool-sandbox.ts` 的 `delegatedSystemPrompt: resolvedAgent.systemPrompt`），工具集与消息历史也不继承父会话，**与父会话不共享可缓存前缀**——共享键只会把「不同前缀」的请求放进同一缓存分片、与父会话争用，与本仓刻意使用 per-session 键的理由相悖（见 `v2-runtime/upstream/provider-options.ts` 的 `prompt_cache_key` 注释，已加防回归说明）。若将来子会话改为「继承父会话前缀」的形态，再重新评估。同一原则的正面用法：`sessionId` 缺失的辅助调用应补**自己归属会话**的键（2026-09-22 已补齐 workflow / look_at / 记忆抽取 / GUI 四处），而不是借父会话的键。
 
 - [2026-09-21] **不做「提供商文件引用（Files API / file_id）」通路**：上游多为第三方中转/自建，不保证实现 Files API；且该通路会把用户图片**持久化到第三方服务端**（OpenAI 默认长期保留、Anthropic 对整个 workspace 可见），与「内联 base64、请求即走」是本质不同的数据姿态。已对照 `temp/opencode`（github-v1.2.25-2014）验证：其原生协议层**零上传、零 file_id、100% 内联 base64**，且**刻意不支持公网 URL 图片**（`validateMedia` 只收 base64；session 入口 switch 只处理 `data:`/`file:`）——无 URL 抓取即无 SSRF 面。
 - [2026-09-21] **opencode 媒体上行基线（可对齐目标）**：图片=data URL 内联 + 服务端缩放(5MiB/2000×2000)；文本文件=经 `read` 工具**内联正文**(2000 行/50KB/单行 2000 字符)，不是只发路径；PDF=**不抽文本**、整份 base64 交给原生支持 `pdf` 模态的模型，不支持则降级为「让模型转告用户」的文本；docx/xlsx/pptx=**明确拒绝**(binary)；能力位 `modalities.input` 含 `image`/`pdf`，自定义/openai-compatible provider **默认 image/pdf=false、text=true**。**差距在非图片文件（文本内联 / PDF 直传 / 二进制明确拒绝），不在图片引用。**

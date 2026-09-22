@@ -1006,6 +1006,11 @@ export function buildBaseProviderOptions(input: {
     // OpenAI's prompt cache hits are keyed by `prompt_cache_key`. Without
     // it, concurrent sessions in the same org evict each other's prefix
     // cache entries (matches opencode `transform.ts` `options()`).
+    // Deliberately per-session: a child (subagent) session runs the
+    // subagent's own system prompt with its own tools and an empty history,
+    // so it shares no cacheable prefix with the parent. Do NOT copy opencode
+    // v2.0.13's `parentID ?? fork?.sessionID ?? id` affinity here — it would
+    // only put a different prefix on the parent's cache shard.
     return providerOptions(modelInfo, {
       store: false,
       ...(input.sessionId ? { promptCacheKey: input.sessionId } : {}),
