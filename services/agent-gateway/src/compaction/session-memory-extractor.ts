@@ -266,6 +266,8 @@ export async function extractSessionMemory(input: {
             ? { headers: input.route.requestOverrides.headers }
             : {}),
           model: input.route.model,
+          // Pass the owning session so this call gets a prompt cache key + affinity header.
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
           system: SESSION_MEMORY_SYSTEM_PROMPT,
           messages: modelMessages,
           maxOutputTokens: config.maxOutputTokens,

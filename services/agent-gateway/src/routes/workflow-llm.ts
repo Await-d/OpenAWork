@@ -95,7 +95,11 @@ export interface WorkflowLlmRequestConfig {
    */
   upstreamProtocol?: UpstreamProtocolKind;
   openaiFastMode?: boolean;
-  /** Session ID — reserved for future cache-key routing. */
+  /**
+   * Session this request belongs to. Forwarded upstream so the call gets a
+   * stable prompt cache key (and the OpenCode Go session-affinity header).
+   * Falls back to `usageContext.sessionId` when omitted.
+   */
   sessionId?: string;
   /**
    * Override the default output token budget (`WORKFLOW_MAX_OUTPUT_TOKENS`).
@@ -179,6 +183,11 @@ export async function requestWorkflowLlmCompletion(
   const timeoutMs = input.timeoutMs ?? DEFAULT_WORKFLOW_LLM_TIMEOUT_MS;
   const useTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
 
+  // Forward the owning session so the upstream call gets a prompt cache key and
+  // the OpenCode Go session-affinity header; team callers that only provide
+  // usage attribution still get affinity via `usageContext.sessionId`.
+  const sessionId = input.sessionId ?? input.usageContext?.sessionId;
+
   const timeoutController = new AbortController();
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -206,6 +215,7 @@ export async function requestWorkflowLlmCompletion(
         apiKey: input.apiKey,
         baseURL: input.apiBaseUrl,
         model: input.model,
+        ...(sessionId ? { sessionId } : {}),
         messages: [{ role: 'user', content: input.prompt }],
         ...(input.system ? { system: input.system } : {}),
         temperature: input.temperature,

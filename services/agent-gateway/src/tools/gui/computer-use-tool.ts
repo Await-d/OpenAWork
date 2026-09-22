@@ -237,10 +237,14 @@ type LookAtRoute = Awaited<ReturnType<typeof resolveLookAtRoute>>['route'];
 /**
  * 基于 `look_at` 已解析路由构造 {@link GuiRunnerModel}：
  * system prompt 用 GUI 模板，user prompt = 指令 + 动作历史，截图以 data URL 多图上送。
+ *
+ * `sessionId` 传 GUI 子会话 id：内层 VLM 调用因此带上 prompt cache key 与会话亲和头，
+ * 且同一轮循环的所有步骤共享同一个键。
  */
 function createGuiRunnerModel(
   route: LookAtRoute,
   onUsage?: (usage: GuiStepUsage) => void,
+  sessionId?: string,
 ): GuiRunnerModel {
   return {
     predict: async ({ instruction, screenshots, history }) => {
@@ -252,6 +256,7 @@ function createGuiRunnerModel(
 
       return requestLookAtText({
         ...(onUsage ? { onUsage } : {}),
+        ...(sessionId ? { sessionId } : {}),
         apiBaseUrl: route.apiBaseUrl,
         apiKey: route.apiKey,
         mimeType: images[images.length - 1]?.mediaType ?? 'image/png',
@@ -330,8 +335,6 @@ export async function runComputerUseTool(
   const collectUsage = (step: GuiStepUsage) => {
     guiUsage = accumulateGuiUsage(guiUsage, step);
   };
-  const model = createGuiRunnerModel(route.route, collectUsage);
-
   // G4：沙箱托管路径绕过 ToolRegistry 的超时包装，`timeout: 300000` 仅为声明值。
   // 这里显式施加总时限，避免 GUI 循环（每步上游调用最长 120s）无限累积。
   const timeoutSignal = AbortSignal.timeout(GUI_TOTAL_TIMEOUT_MS);
@@ -357,6 +360,11 @@ export async function runComputerUseTool(
     ...(guiModelId ? { modelId: guiModelId } : {}),
     ...(route.route.variant ? { variant: route.route.variant } : {}),
   });
+
+  // Inner VLM calls belong to the GUI child session: passing its id gives the
+  // look_at path a prompt cache key and the session affinity header (OpenCode Go
+  // rejects requests without one), and all steps of this loop share the same key.
+  const model = createGuiRunnerModel(route.route, collectUsage, guiSession.sessionId);
   // 主循环把一步拆成 thought → action → action-result 三个事件，这里先暂存前两者，
   // 到 action-result 时一次性落定该步（与 `GuiHistoryEntry` 的字段一一对应）。
   let pendingThought = '';

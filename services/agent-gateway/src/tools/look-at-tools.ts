@@ -697,6 +697,12 @@ export async function requestLookAtText(input: {
   upstreamProtocol?: UpstreamProtocol;
   prompt: string;
   requestOverrides: RequestOverrides;
+  /**
+   * Session this request belongs to (the `look_at` / GUI child session).
+   * Forwarded upstream so the call gets a prompt cache key and, on OpenCode Go,
+   * the required `x-opencode-session` affinity header.
+   */
+  sessionId?: string;
   systemPrompt?: string;
   textContent?: string;
   /**
@@ -750,6 +756,9 @@ export async function requestLookAtText(input: {
           ? { headers: input.requestOverrides.headers }
           : {}),
         model: input.model,
+        // Pass the owning session so the upstream call gets a prompt cache key
+        // and the OpenCode Go session-affinity header.
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
         messages: [{ role: 'user', content: userContent }],
         maxOutputTokens: 2048,
@@ -851,6 +860,8 @@ export async function runLookAtTool(input: {
       imageDataUrl: resolvedImageSource.imageDataUrl,
       mimeType: resolvedImageSource.mimeType,
       model: routeConfig.route.model,
+      // Pass the child session so this call gets a prompt cache key + affinity header.
+      sessionId: childSessionId,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol
@@ -867,6 +878,8 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
+      // Pass the child session so this call gets a prompt cache key + affinity header.
+      sessionId: childSessionId,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol
@@ -891,6 +904,8 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
+      // Pass the child session so this call gets a prompt cache key + affinity header.
+      sessionId: childSessionId,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       ...(routeConfig.route.openaiFastMode === true ? { openaiFastMode: true } : {}),
       ...(routeConfig.route.upstreamProtocol

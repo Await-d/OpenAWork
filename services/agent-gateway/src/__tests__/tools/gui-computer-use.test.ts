@@ -34,13 +34,22 @@ const mocks = vi.hoisted(() => {
   }> = [];
   const publishedEvents: Array<{ sessionId: string; event: Record<string, unknown> }> = [];
   const lookAtResponses: CannedLookAtResponse[] = [];
+  const lookAtSessionIds: Array<string | undefined> = [];
   const reset = (): void => {
     sessionInserts.length = 0;
     childMessages.length = 0;
     publishedEvents.length = 0;
     lookAtResponses.length = 0;
+    lookAtSessionIds.length = 0;
   };
-  return { sessionInserts, childMessages, publishedEvents, lookAtResponses, reset };
+  return {
+    sessionInserts,
+    childMessages,
+    publishedEvents,
+    lookAtResponses,
+    lookAtSessionIds,
+    reset,
+  };
 });
 
 // 只替换副作用出口，其余导出保持真实（`importOriginal`），
@@ -97,6 +106,7 @@ vi.mock('../../tools/look-at-tools.js', async (orig) => {
     // 内层 VLM 的确定性替身：按队列返回模型原始输出，并**照真实契约回调 onUsage**
     // （T-15 / T-21 的用量聚合链依赖这个回调）。
     requestLookAtText: async (input: {
+      sessionId?: string;
       onUsage?: (usage: {
         inputTokens: number;
         outputTokens: number;
@@ -104,6 +114,7 @@ vi.mock('../../tools/look-at-tools.js', async (orig) => {
         cacheWriteTokens: number;
       }) => void;
     }): Promise<string> => {
+      mocks.lookAtSessionIds.push(input.sessionId);
       const next = mocks.lookAtResponses.shift();
       if (!next) {
         throw new Error('no canned look_at response left');
@@ -390,6 +401,14 @@ describe('T-17 / T-18 / T-21：子会话、逐步进度与用量回传', () => {
     expect(metadata['parentSessionId']).toBe('session-parent');
     expect(metadata['createdByTool']).toBe('computer_use');
     expect(metadata['subagentType']).toBe('gui-agent');
+
+    // 内层 VLM 调用归属 GUI 子会话：look_at 链路收到子会话 id（prompt cache key /
+    // 会话亲和头的来源），且不等于父会话 id（父子缓存键保持隔离）。
+    const guiChildSessionId = String(sessionInsert?.params[0]);
+    expect(guiChildSessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(guiChildSessionId).not.toBe('session-parent');
+    expect(mocks.lookAtSessionIds).toHaveLength(2);
+    expect(mocks.lookAtSessionIds.every((id) => id === guiChildSessionId)).toBe(true);
 
     // 子会话消息：指令 → 步骤 → 最终摘要。
     expect(mocks.childMessages.map((message) => message.role)).toEqual([
