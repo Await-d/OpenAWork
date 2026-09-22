@@ -1,0 +1,34 @@
+diff --git a/dist/cjs/client/auth.js b/dist/cjs/client/auth.js
+index c2e4fa91d26f5336889f6afa416147db75fc4872..18508370b1d975c2c63eb9f05c3340bdb5ce9085 100644
+--- a/dist/cjs/client/auth.js
++++ b/dist/cjs/client/auth.js
+@@ -741,12 +741,6 @@
+     if (scope) {
+         authorizationUrl.searchParams.set('scope', scope);
+     }
+-    if (scope?.includes('offline_access')) {
+-        // if the request includes the OIDC-only "offline_access" scope,
+-        // we need to set the prompt to "consent" to ensure the user is prompted to grant offline access
+-        // https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess
+-        authorizationUrl.searchParams.append('prompt', 'consent');
+-    }
+     if (resource) {
+         authorizationUrl.searchParams.set('resource', resource.href);
+     }
+diff --git a/dist/esm/client/auth.js b/dist/esm/client/auth.js
+index e183040fc2bba22ca1ccc784984f3310854403b7..f221995a6e75e7d5486bfae231a214de16a27b8f 100644
+--- a/dist/esm/client/auth.js
++++ b/dist/esm/client/auth.js
+@@ -716,12 +716,6 @@
+     if (scope) {
+         authorizationUrl.searchParams.set('scope', scope);
+     }
+-    if (scope?.includes('offline_access')) {
+-        // if the request includes the OIDC-only "offline_access" scope,
+-        // we need to set the prompt to "consent" to ensure the user is prompted to grant offline access
+-        // https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess
+-        authorizationUrl.searchParams.append('prompt', 'consent');
+-    }
+     if (resource) {
+         authorizationUrl.searchParams.set('resource', resource.href);
+     }
