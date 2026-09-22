@@ -129,7 +129,12 @@ import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import type { McpSessionScope } from '../mcp/mcp-server-authorization.js';
 import { isBuiltinInstructionName } from '../handoff/capability/layer-capabilities.js';
 import { TOOLSET_TO_TOOL_NAMES } from '../handoff/capability/toolset-gate.js';
-import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
+import {
+  dispatchPermissionEvaluate,
+  dispatchToolExecuteAfter,
+  dispatchToolExecuteBefore,
+  type PermissionEvaluateEvent,
+} from '../runtime/plugin-host.js';
 import {
   classifySshRemoteToolPolicy,
   executeSshRemoteTool,
@@ -5940,13 +5945,70 @@ function resolveEffectivePermissionAction(
   return evaluatePermissionRules(category, scope, DEFAULT_PERMISSION_RULES, workspaceRules).action;
 }
 
-function ensurePermissionForTool(
+/**
+ * `permission.evaluate`（deny-only 后置裁决）的输入：内置权限阶梯最终结论的描述。
+ *
+ * `scope` 取与本次裁决最相关的资源——工具级通配符分支用 `'*'`，其余分支用派生的
+ * 真实作用域（bash 命令串、工作区相对路径等）；`decision` 是进入 hook 时的内置
+ * 结论：`allow` = 放行 / 免审批，`ask` = 将进入人工审批。
+ */
+interface PermissionEvaluationInput {
+  sessionId: string;
+  toolName: string;
+  category: string;
+  scope: string;
+  decision: 'allow' | 'ask';
+}
+
+/**
+ * 运行 `permission.evaluate` 后置裁决；返回非 null 表示本次调用被插件拒绝。
+ *
+ * 只有把 `effect` 设为 `'deny'` 才会被采纳，其它取值（包括试图改成 allow 的）
+ * 一律忽略——插件只能把内置结论降级为拒绝，永远无法授权，deny-first 不变量
+ * （显式 deny 优先于 yolo / auto-edit 等档位快捷分支）因此仍然成立。
+ * 插件抛错由 `dispatchHook` 记录 warn 后继续，不会破坏本次请求。
+ */
+async function runPermissionEvaluateHook(
+  input: PermissionEvaluationInput,
+): Promise<{ kind: 'denied'; reason: string } | null> {
+  const event: PermissionEvaluateEvent = {
+    sessionID: input.sessionId,
+    toolName: input.toolName,
+    permission: input.category,
+    scope: input.scope,
+    decision: input.decision,
+  };
+  await dispatchPermissionEvaluate(event);
+  if (event.effect !== 'deny') return null;
+  const message = typeof event.message === 'string' ? event.message.trim() : '';
+  return {
+    kind: 'denied',
+    reason: message || `工具 "${input.toolName}" 被插件权限策略（permission.evaluate）拒绝。`,
+  };
+}
+
+/**
+ * 先跑 deny-only 后置裁决，未被否决时保留内置结论。
+ *
+ * 所有「放行 / 免审批」分支都必须经过这里：hook 在规则、档位快捷分支
+ * （yolo / auto-edit / 后台 team / reception）、渠道策略、workspace 永久规则、
+ * saved approvals（含会话批准与父会话继承）全部判定之后运行，因此插件可以否决
+ * 这些分支，但无法放行任何已被拒绝或未获批的调用。
+ */
+async function gatePermissionDecision(
+  input: PermissionEvaluationInput,
+  state: PermissionState,
+): Promise<PermissionState> {
+  return (await runPermissionEvaluateHook(input)) ?? state;
+}
+
+async function ensurePermissionForTool(
   sessionId: string,
   request: ToolCallRequest,
   observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
   sshManaged = false,
-): PermissionState {
+): Promise<PermissionState> {
   // Rule engine: evaluate default rules + workspace rules (last-match-wins).
   // Users override defaults via .openawork.permissions.json.
   const sessionMetadata = getSessionMetadata(sessionId);
@@ -5962,12 +6024,28 @@ function ensurePermissionForTool(
       : getSessionWorkspaceRoot(sessionId);
   const workspaceRules = workspaceRoot ? loadWorkspacePermissionRules(workspaceRoot) : [];
 
+  // Use category ID for all permission lookup/storage so that tools in the
+  // same category (e.g. edit, patch, workspace_review_revert → 'edit')
+  // share a single approval and don't prompt the user repeatedly.
+  const category = resolveEffectivePermissionCategory(request.toolName);
+
+  // deny-only 后置裁决（permission.evaluate）的公共输入；各分支只补 scope / decision。
+  const evaluationBase = {
+    sessionId,
+    toolName: request.toolName,
+    category,
+  };
+
   // Pre-check with wildcard scope: skip context building for globally allowed tools.
   const toolLevelAction = resolveEffectivePermissionAction(request.toolName, '*', workspaceRules);
   if (toolLevelAction === 'allow') {
-    return { kind: 'not_needed' };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: '*', decision: 'allow' },
+      { kind: 'not_needed' },
+    );
   }
   if (toolLevelAction === 'deny') {
+    // 已拒绝的早退路径不再调用 hook（插件只能降级，无法改变 deny）。
     return {
       kind: 'denied',
       reason: `工具 "${request.toolName}" 被权限规则禁止。`,
@@ -5977,7 +6055,10 @@ function ensurePermissionForTool(
   // 'ask' → build permission context for scope-specific evaluation.
   const context = buildPermissionRequestContext(sessionId, request, sshManaged);
   if (!context) {
-    return { kind: 'not_needed' };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: '*', decision: 'allow' },
+      { kind: 'not_needed' },
+    );
   }
 
   // Re-evaluate with the actual scope for fine-grained rules.
@@ -5987,11 +6068,14 @@ function ensurePermissionForTool(
     workspaceRules,
   );
   if (scopedAction === 'allow') {
-    return {
-      kind: 'approved',
-      requestId: 'workspace-rule',
-      decision: 'permanent',
-    };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      {
+        kind: 'approved',
+        requestId: 'workspace-rule',
+        decision: 'permanent',
+      },
+    );
   }
   if (scopedAction === 'deny') {
     return {
@@ -5999,11 +6083,6 @@ function ensurePermissionForTool(
       reason: `工具 "${request.toolName}" 在作用域 "${context.scope}" 被权限规则禁止。`,
     };
   }
-
-  // Use category ID for all permission lookup/storage so that tools in the
-  // same category (e.g. edit, patch, workspace_review_revert → 'edit')
-  // share a single approval and don't prompt the user repeatedly.
-  const category = resolveEffectivePermissionCategory(request.toolName);
 
   // Team session 自动批准修改类工具：
   // 后台运行的 team 成员（pm1/pm2/executor/reviewer）无法与用户交互审批，
@@ -6020,7 +6099,10 @@ function ensurePermissionForTool(
     isBackgroundAutoApprovedTeamSession(sessionRoleContext) ||
     isReceptionReadOnlyToolAutoApproved(sessionRoleContext, request.toolName)
   ) {
-    return { kind: 'not_needed' };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      { kind: 'not_needed' },
+    );
   }
 
   // auto-edit 档位：仅自动放行文件编辑 / 写入类别（edit、write）。
@@ -6031,23 +6113,32 @@ function ensurePermissionForTool(
     AUTO_EDIT_PERMISSION_CATEGORIES.has(category) &&
     !AUTO_EDIT_EXCLUDED_TOOLS.has(request.toolName)
   ) {
-    return { kind: 'not_needed' };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      { kind: 'not_needed' },
+    );
   }
 
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
-    return {
-      kind: 'approved',
-      requestId: 'channel-policy',
-      decision: 'session',
-    };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      {
+        kind: 'approved',
+        requestId: 'channel-policy',
+        decision: 'session',
+      },
+    );
   }
 
   if (workspaceRoot && hasWorkspacePermanentPermission(sessionId, category, context.scope)) {
-    return {
-      kind: 'approved',
-      requestId: 'workspace-policy',
-      decision: 'permanent',
-    };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      {
+        kind: 'approved',
+        requestId: 'workspace-policy',
+        decision: 'permanent',
+      },
+    );
   }
 
   const requestPayload =
@@ -6066,12 +6157,24 @@ function ensurePermissionForTool(
 
   const approved = findApprovedPermission(sessionId, category, context.scope);
   if (approved) {
-    return {
-      kind: 'approved',
-      requestId: approved.id,
-      decision: approved.decision,
-    };
+    return gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      {
+        kind: 'approved',
+        requestId: approved.id,
+        decision: approved.decision,
+      },
+    );
   }
+
+  // ask 阶段的最后一道裁决：必须先过 hook 再落 pending，否则被插件拒绝的调用
+  // 会在 permission_requests 里留下一个无人应答的 pending 记录。
+  const veto = await runPermissionEvaluateHook({
+    ...evaluationBase,
+    scope: context.scope,
+    decision: 'ask',
+  });
+  if (veto) return veto;
 
   const pendingRequestId = findPendingPermission(sessionId, category, context.scope);
   if (pendingRequestId) {
@@ -6495,7 +6598,7 @@ export class ToolSandbox {
       }
     }
 
-    const permissionState = ensurePermissionForTool(
+    const permissionState = await ensurePermissionForTool(
       sessionId,
       effectiveRequest,
       toolObservability,

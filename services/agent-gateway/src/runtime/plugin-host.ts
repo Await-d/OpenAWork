@@ -4,8 +4,10 @@
  * Inspiration: `@/temp/opencode/packages/plugin/src/index.ts`'s
  * `Hooks` interface. We expose a curated subset that matches the
  * surface area OpenAWork's stream + sandbox can hook today; the
- * remaining hooks (permission, auth, provider, experimental) stay
- * as documented extension points.
+ * remaining hooks (auth, provider, experimental) stay as documented
+ * extension points. `permission.evaluate` is implemented as a
+ * **deny-only post-adjudication** of the sandbox's built-in permission
+ * ladder (see `PermissionEvaluateEvent`).
  *
  * **Architecture invariants** (do NOT regress these):
  *
@@ -131,6 +133,41 @@ export interface ChatParamsOutput {
   options: Record<string, unknown>;
 }
 
+/**
+ * `permission.evaluate` — deny-only post-adjudication of a tool
+ * permission decision (opencode v2.0.13 `permission.evaluate` parity).
+ *
+ * The sandbox dispatches this hook from the very end of
+ * `ensurePermissionForTool`, i.e. AFTER the built-in ladder has settled:
+ * tool-level / scope-level rules, the permission-mode shortcuts (`yolo`,
+ * `auto-edit`, background team, reception read-only), channel policy,
+ * workspace permanent rules and saved approvals (user grants, session
+ * approvals, parent-session inheritance) — and before a pending request
+ * would be persisted for the `ask` path.
+ *
+ * Plugins may ONLY downgrade the outcome: set `effect = 'deny'` (plus an
+ * optional user-facing `message`). Any other value is ignored, so the hook
+ * can never grant a permission, never bypass a rule-level `deny`, and the
+ * sandbox's deny-first invariant still holds.
+ */
+export interface PermissionEvaluateEvent {
+  sessionID: string;
+  toolName: string;
+  /** Resolved permission category, e.g. 'bash' | 'edit' | 'write' | 'mcp_call' | 'custom'. */
+  permission: string;
+  /**
+   * Concrete resource scope of this call (bash command, workspace-relative
+   * path, ...); `'*'` when the decision came from the tool-level wildcard.
+   */
+  scope: string;
+  /** Built-in verdict entering this hook: 'allow' = 放行 / 免审批, 'ask' = 将进入人工审批. */
+  decision: 'allow' | 'ask';
+  /** Deny-only: plugins may set `'deny'`; every other value is ignored. */
+  effect?: 'deny';
+  /** User-facing reason used when a `'deny'` effect is honoured. */
+  message?: string;
+}
+
 export interface PluginHooks {
   'tool.execute.before'?: (
     input: ToolExecuteBeforeInput,
@@ -142,6 +179,7 @@ export interface PluginHooks {
   ) => void | Promise<void>;
   'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => void | Promise<void>;
   'chat.params'?: (input: ChatParamsInput, output: ChatParamsOutput) => void | Promise<void>;
+  'permission.evaluate'?: (event: PermissionEvaluateEvent) => void | Promise<void>;
 }
 
 /**
@@ -228,21 +266,21 @@ export async function ensurePluginsLoaded(): Promise<void> {
 
 /**
  * Run a hook against every loaded plugin in registration order.
- * Each plugin sees the SAME `output` reference, so mutations
- * compose. Hook errors are caught per-plugin so a misbehaving
- * plugin can't poison a downstream one.
+ * Each plugin sees the SAME arguments, so mutations compose (two-arg
+ * hooks mutate `output` in place; single-event hooks mutate the event,
+ * e.g. `permission.evaluate`). Hook errors are caught per-plugin so a
+ * misbehaving plugin can't poison a downstream one.
  */
 async function dispatchHook<K extends keyof PluginHooks>(
   hookName: K,
-  input: Parameters<NonNullable<PluginHooks[K]>>[0],
-  output: Parameters<NonNullable<PluginHooks[K]>>[1],
+  ...args: Parameters<NonNullable<PluginHooks[K]>>
 ): Promise<void> {
   for (const plugin of loadedPlugins) {
-    const fn = plugin.hooks[hookName] as
-      ((i: typeof input, o: typeof output) => void | Promise<void>) | undefined;
+    const fn = plugin.hooks[hookName] as unknown as
+      ((...hookArgs: Parameters<NonNullable<PluginHooks[K]>>) => void | Promise<void>) | undefined;
     if (!fn) continue;
     try {
-      await fn(input, output);
+      await fn(...args);
     } catch (err) {
       console.warn(
         `[plugin-host] Plugin "${plugin.source}" hook "${String(hookName)}" threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -277,6 +315,16 @@ export async function dispatchChatParams(
   output: ChatParamsOutput,
 ): Promise<void> {
   await dispatchHook('chat.params', input, output);
+}
+
+/**
+ * Deny-only post-adjudication hook. Callers MUST run this after every
+ * built-in permission verdict has been reached and MUST only honour
+ * `event.effect === 'deny'` — a plugin can downgrade a decision, never
+ * grant or widen one.
+ */
+export async function dispatchPermissionEvaluate(event: PermissionEvaluateEvent): Promise<void> {
+  await dispatchHook('permission.evaluate', event);
 }
 
 // -----------------------------------------------------------------
