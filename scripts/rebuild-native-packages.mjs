@@ -111,13 +111,20 @@ export function runPackageLifecycleScripts(packageNames, options = {}) {
       continue;
     }
 
-    // 与 npm/pnpm 运行生命周期脚本的语义对齐：把包自身与仓库根的 node_modules/.bin
-    // 加进 PATH。bun 的隔离式布局下依赖的 bin 只挂在包自身的 node_modules/.bin 里
-    // （例如 better-sqlite3 的 prebuild-install），不补 PATH 会出现退出码 127。
+    // 与 npm/pnpm 运行生命周期脚本的语义对齐：把包自身、**包所在 node_modules** 与
+    // 仓库根的 `.bin` 加进 PATH。
+    //
+    // 关键点是中间那一项：隔离式布局（bun 的 `node_modules/.bun/<name>@<ver>/node_modules/`
+    // 与 pnpm 的 `.pnpm/...`）把「该包依赖的 bin」放在**包的父级** `node_modules/.bin`，
+    // 而不是包内部的 `node_modules/.bin`（后者通常不存在）。例如 better-sqlite3 的 install
+    // 脚本是 `prebuild-install || node-gyp rebuild`，prebuild-install 只挂在父级 .bin 下；
+    // 漏掉它就会退化为「找不到 prebuild-install」→ 无 node-gyp 的环境（如 Windows ARM64
+    // runner）直接失败，有 node-gyp 的环境则静默改成源码编译。
     const scriptEnv = {
       ...env,
       PATH: [
         join(packageDir, 'node_modules', '.bin'),
+        join(dirname(packageDir), '.bin'),
         join(rootDir, 'node_modules', '.bin'),
         env.PATH ?? '',
       ]
