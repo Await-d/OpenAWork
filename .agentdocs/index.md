@@ -2,6 +2,16 @@
 
 ## 已完成的任务
 
+### ✅ 260923-对话模式提示词收口 - P0：指令优先级 / 模式回流 / 可执行模式公共纪律
+**状态**: 已完成（2026-09-23）——T-01…T-06 全部交付并验证；复杂度 **Lightweight**（score +2）
+**归档位置**: [workflow/done/260923-对话模式提示词收口.md](workflow/done/260923-对话模式提示词收口.md)
+
+**成果总结**:
+- ✅ 四个共享提示词片段落为 SSOT 常量（`services/agent-gateway/src/routes/stream-system-prompts.ts`）：三个模式均声明【指令优先级】（项目约定 > 模式纪律 > 通用最佳实践）；coding / programmer 共用【共通工程纪律】与【模式回流】；agentdocs 落盘 / 登记 / 归档段由 coding 下沉为共用，修复手动 clarify → programmer 的断链。
+- ✅ coding 删除内联 agentdocs 长句与重复的【行为原则】四条目，改为【快速路径】（求快不跳步 + 分批验证，替代原「一次一题」串行语义）；programmer 删除与公共纪律重复的条目，把不可执行的「未标注置信度」改为「无法验证必须标注"未验证"及证据缺口」。
+- ✅ 契约测试新增 3 例（优先级三模式覆盖 / 公共纪律与回流 SSOT 引用 / programmer 共用 agentdocs 衔接段），锁定共享常量引用而非复制粘贴。
+- ✅ 验证：定向 3 文件 / 34 测试通过（提示词契约 8/8）；网关 typecheck exit 0；ESLint 0 error；Prettier 全通过。
+
 ### ✅ 260921-权限暂停全批收集改造 - 批量工具权限暂停不再丢失兄弟调用
 **状态**: 已完成（2026-09-21）——T-01…T-18 全部交付并验证；复杂度 **Full orchestration**（score +6）
 **归档位置**: [workflow/done/260921-权限暂停全批收集改造.md](workflow/done/260921-权限暂停全批收集改造.md)
@@ -581,6 +591,7 @@
 - [2026-09-21] **切勿据「源码 TODO/FIXME 字面量」给缺口定级** → 扫标记会得出错误的 P0。实证两项均为误判，**不要重复当待办**：① `packages/opencode-llm/src/index.ts:42` 的 `TODO: 错误处理模块需要更新以适配 Effect 4.0 API` 是**过期注释**——仓库依赖本就是 `effect@4.0.0-beta.83`（`pnpm-lock.yaml` 唯一版本，无 stable 4.0），`tsc --noEmit` **EXIT=0**、`vitest run src/error` **4 文件 38 例全绿**，且**零生产消费者**（唯一引用者是包内集成测试 `src/__tests__/integration/e2e-simple.test.ts`），子路径 `./error` 仍经 `package.json` exports 可用；② `packages/skill-registry/src/installer.ts:130` 的 `Signature verification not implemented in MVP` 属**不可适用控制**——全仓无签名产物/公钥/`cosign`/`gpg`/`createSign`（`SkillManifest` 无 signature 字段），`skipSignatureVerification` 7 处调用点**全为 `true`/`?? true`**，抛错分支运行时不可达。**判缺口必须先验证前提（版本/消费者/可复现失败），再定级。**
 
 ### 架构决策
+- [2026-09-23] **对话模式提示词共享片段是 SSOT，禁止在各模式内复制粘贴**：`services/agent-gateway/src/routes/stream-system-prompts.ts` 导出四个共享常量——`DIALOGUE_MODE_INSTRUCTION_PRIORITY_SYSTEM_PROMPT`（三模式通用：项目约定 > 模式纪律 > 通用最佳实践；其他注入提示如子代理说明 / 工具章节冲突时先说明再按优先级执行）、`EXECUTABLE_MODE_COMMON_DISCIPLINE_SYSTEM_PROMPT`（coding + programmer：先读后写 / 事实驱动附证据 / 最小变更 / 验证闭环 / 测试诚信）、`MODE_REFERRAL_SYSTEM_PROMPT`（coding + programmer 模式回流：歧义先问清、方向性分歧建议切回澄清、方案失效先停并给回退范围）、`AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT`（coding + programmer 承接澄清方案先落盘 / 登记 index / 勾选 T-XX / 归档 done）。契约测试 `dialogue-mode-prompts.test.ts` 直接引用共享常量做断言，防复制粘贴漂移；澄清模式保持只读，不继承可执行模式纪律。
 - [2026-09-22] **自动唤醒必须有预算上限，且只统计「真正发生的唤醒」**：单通道交付的唤醒是**事件驱动**的（子代理结算 → 投递通知 → 唤醒父会话），若被唤醒的父会话又委派新的后台子代理，其完成会再次唤醒它 → **无界自激**。落点 `services/agent-gateway/src/task/task-wake-budget.ts`（上限 10，与旧机制同值）：由 `deliverTaskCompletion` 在**决策为「要唤醒」之后**才消费预算（`resume:false` / 父会话在飞 / 父会话 paused 均不计入），耗尽时**仍然投递通知**（已落库 ⇒ 用户下次自然发言模型依然看得到，**不丢信息**），只返回 `wake:'skipped'` + `deferReason:'budget-exhausted'`；计数只在**非网关内部请求**时重置（复用 `isGatewayInternalRequestKey`——否则唤醒自身会把计数清零，上限永远触发不了）。进程内存储，重启即清零（可接受：重启后首次唤醒总是允许的）。
 - [2026-09-22] **包管理器全量由 pnpm 切到 bun（bun@1.4.2）**：`bun.lock` 为唯一事实来源（`pnpm-lock.yaml` / `pnpm-workspace.yaml` 已删，workspace 用根 `package.json` 的 `workspaces` 字段）。`pnpm.onlyBuiltDependencies` → 顶层 `trustedDependencies`、`pnpm.patchedDependencies` → 顶层 `patchedDependencies`（playwright-core 补丁实测生效）；`peerDependencyRules` / `allowedDeprecatedVersions` / `.npmrc auto-install-peers` 无等价物已删。CI（7 个 workflow）、两个 Dockerfile、桌面脚本、活跃文档同步切换；**测试运行器仍是 Vitest**（23 包、692 处 `vi.*`），bun 只替代「装包」这一层。网关/客户端里「识别第三方项目包管理器」的探测列表（lsp root markers、repo-overview、bash-arity、ERR_PNPM 提示、workspace 根标记）**保留 pnpm 项并新增 bun 项**——产品需同时支持两种仓库。方案与实测数据见 `workflow/260922-pnpm全量迁移bun.md`。
 - [2026-09-21] **批量工具权限暂停语义 = 只读兄弟放行 + 整批收集 + 批末统一 pause**：`isPermissionSafeSiblingTool` 白名单（read/list/glob/grep/webfetch/websearch/look_at/lsp）内的只读工具在待批期间继续执行；其余兄弟被扣住并入 pending payload 的 `blockedToolCalls`；批准后按 `tool_use` 顺序整批恢复，且仅当无残留 pending 才续轮。理由：上游 `tool_result` 顺序 + 整批 barrier 保证 prompt cache 前缀稳定，同时不丢只读兄弟。落点：`services/agent-gateway`（`routes/stream.ts` / `routes/stream-runtime.ts` / `tools/tool-sandbox.ts` / `permission/permission-contract.ts`）。**不照抄 opencode 的阻塞 await**——其 run 与请求解耦（durable drain），OpenAWork 的 run 绑在 SSE 请求上。
@@ -651,6 +662,7 @@
 - 所有提示词使用中文编写
 - 提示词文件命名: `<tool-name>-prompt.ts`
 - 导出常量命名: `<TOOL>_USAGE_GUIDE` 和 `<TOOL>_TOOLS_LIST`
+- 对话模式提示词共享片段（指令优先级 / 共通工程纪律 / 模式回流 / agentdocs 衔接）必须引用 `stream-system-prompts.ts` 的共享常量，禁止在各模式内复制粘贴（契约测试锁定）
 - 遵循统一的导出规范，便于维护和扩展
 
 ### 已知陷阱
