@@ -351,6 +351,10 @@
 
 **再升级（2026-09-23）**: 上游 **v2.0.14** 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.14`，tag `v2.0.14` / commit `08462140`）。该版本距 v2.0.13 仅约 3 小时、共 5 个提交，实质代码约 80 行：① Electron renderer IPC 负载剔除 `undefined` 字段；② TUI 打开对话框过滤 git worktree 项目；③ models.dev 快照刷新；④ Console API 参考文档（Inference/BYOK/Usage/Budgets）。**经逐项核实无适用本仓的借鉴项**（我们无 Electron IPC 边界、无 TUI、用自建 provider catalog、无 Console 面），既有对齐结论不受影响。唯一可留存的通用原则：跨序列化边界时 **structured clone 保留 `undefined` 键、而 JSON codec 要求键缺席**——将来引入 Worker/MessagePort + JSON 解码时必须按 `JSON.stringify` 语义递归剔除 undefined，且不要把二进制放进该路径。
 
+**再升级（2026-09-23，v2.0.15）**: 上游 v2.0.15 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.15`，tag `v2.0.15` / commit `6f3639d82e`；42 提交 / 250 文件 / +6782−2549）。要点：① **codemode 解释器继续向 native 语义收敛**——新增 tagged templates + `String.raw`、`for...in` 任意左值（成员表达式/解构模式）、`match`/`matchAll`/`search`/`split` 接受任意值并按模式串强制转换、重复参数名 last-wins、Date setter 与单参构造走对象自身 `valueOf`/`toString`（支持矩阵同步更新，Phase 3 移植基线再次变好）；② **ai 包新增媒体基础**（`Media.Source` 四态 `bytes|base64|url|ref` + `Media.Asset` 惰性 `bytes()`/过期时间/providerMetadata；设计文档 `packages/ai/docs/media-design.md`；媒体执行形态是路由策略而非 API 形态：inline / async job / 双向流；不支持项报错而非静默丢弃），图片协议按此重写；评测 API 增 gateway provider 且 action→`run`；③ session 支持自由 metadata 更新 + `session.metadata.updated` 事件；项目按最近活跃排序；git 插件支持分支子目录安装（pacote 补丁同步升级）。
+**本版发现一项适用本仓的缺口（待办）**：上游 `fix(ai): ignore bare null SSE frames` 修的正是我们同样存在的行为——`packages/opencode-llm/src/protocols/shared.ts` 的 `sseFraming` 只过滤空串与 `[DONE]`，裸 `data: null` 帧会走到 `stream/processor.ts` 的 `JSON.parse('null')` → `parseEventSync(null)` 抛错 → **整条上游流中断**（部分 OpenAI 兼容代理会在事件之间或 `[DONE]` 之后发 `data: null`；`sseFraming` 是 SSE 的唯一咽喉，单点修复即可）。修法同上游：过滤条件加 `event.data !== 'null'` + 补测试。
+**其余项经查不适用**：client 的「`new URL('/api/…', base)` 丢 base 路径前缀」我们无该拼接模式；技能安装走 `git clone` 不涉及 pacote 的 `::path:`/200+HTML 陷阱（但**不支持子目录 skill**，属特性缺口）；未发现 MCP OAuth 日志存在「只留分类、丢 message」的等价物。
+
 **范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
 ### ✅ 260922-子代理对标opencode改造方案 - 子代理结果回流收敛为 Job → 合成消息 → 唤醒 单闭环
