@@ -249,9 +249,7 @@ describe('bun-pty 后端（Windows 真实 PTY）', () => {
     else process.env['OPENAWORK_PTY_BACKEND'] = originalForceEnv;
   });
 
-  function makeInput(
-    overrides: Partial<SpawnTerminalProcessInput> = {},
-  ): {
+  function makeInput(overrides: Partial<SpawnTerminalProcessInput> = {}): {
     input: SpawnTerminalProcessInput;
     chunks: Uint8Array[];
     exits: Array<[number | null, string | null]>;
