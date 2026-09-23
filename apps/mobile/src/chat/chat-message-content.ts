@@ -7,6 +7,10 @@ export interface MobileChatMessage {
   content: string;
   inputImages?: MobileInputImage[];
   reasoningBlocks?: string[];
+  /** 该消息（assistant trace）关联的回合键，用于回退时定位受影响快照。 */
+  clientRequestIds?: string[];
+  /** 消息创建时间（毫秒）；用于按时间过滤受影响快照，缺失时不参与过滤。 */
+  createdAtMs?: number;
 }
 
 export interface MobileInputImage {
@@ -164,6 +168,22 @@ export function mergeMobileSubagentNotices(
   return merged;
 }
 
+/**
+ * 归一化消息创建时间：网关主路径是毫秒 epoch（`session_messages.created_at_ms`），
+ * 但历史数据 / 兼容路径可能是 ISO 字符串——两种都要接受，否则会退化成
+ * 「无时间信息 → 全部快照成为影响面」（影响面与恢复基线双双放大）。
+ */
+function toCreatedAtMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | null {
   if (!rawMessage || typeof rawMessage !== 'object') {
     return null;
@@ -193,6 +213,18 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
     return null;
   }
 
+  const rawClientRequestId =
+    typeof record['clientRequestId'] === 'string' && record['clientRequestId'].length > 0
+      ? record['clientRequestId']
+      : null;
+  const clientRequestIds = [
+    ...(rawClientRequestId ? [rawClientRequestId] : []),
+    ...(normalizedContent.clientRequestIds ?? []),
+  ].filter((requestId, index, items) => items.indexOf(requestId) === index);
+
+  const rawCreatedAt = record['createdAt'];
+  const createdAtMs = toCreatedAtMs(rawCreatedAt);
+
   return {
     id,
     role: role === 'user' ? 'user' : 'assistant',
@@ -203,6 +235,8 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
     ...(normalizedContent.reasoningBlocks && normalizedContent.reasoningBlocks.length > 0
       ? { reasoningBlocks: normalizedContent.reasoningBlocks }
       : {}),
+    ...(clientRequestIds.length > 0 ? { clientRequestIds } : {}),
+    ...(createdAtMs !== undefined ? { createdAtMs } : {}),
   };
 }
 
@@ -210,6 +244,7 @@ function normalizeMobileMessageContent(content: unknown): {
   content: string;
   inputImages?: MobileInputImage[];
   reasoningBlocks?: string[];
+  clientRequestIds?: string[];
 } {
   if (typeof content === 'string') {
     const assistantTrace = parseAssistantTraceContent(content);
@@ -218,6 +253,9 @@ function normalizeMobileMessageContent(content: unknown): {
         content: buildAssistantTraceText(assistantTrace),
         ...(assistantTrace.reasoningBlocks.length > 0
           ? { reasoningBlocks: assistantTrace.reasoningBlocks }
+          : {}),
+        ...(assistantTrace.clientRequestIds.length > 0
+          ? { clientRequestIds: assistantTrace.clientRequestIds }
           : {}),
       };
     }
@@ -366,6 +404,7 @@ function parseAssistantTraceContent(content: string): {
   content: string;
   reasoningBlocks: string[];
   toolNames: string[];
+  clientRequestIds: string[];
 } | null {
   try {
     const parsed = JSON.parse(content) as {
@@ -374,6 +413,7 @@ function parseAssistantTraceContent(content: string): {
         text?: unknown;
         reasoningBlocks?: unknown;
         toolCalls?: unknown;
+        modifiedFilesSummary?: { files?: unknown };
       };
     };
 
@@ -398,7 +438,30 @@ function parseAssistantTraceContent(content: string): {
         })
       : [];
 
-    return { content: text, reasoningBlocks, toolNames };
+    // 回退检测用的回合键：toolCalls 与变更摘要里的 clientRequestId。
+    const clientRequestIds: string[] = [];
+    const pushRequestId = (value: unknown): void => {
+      if (typeof value === 'string' && value.length > 0 && !clientRequestIds.includes(value)) {
+        clientRequestIds.push(value);
+      }
+    };
+    if (Array.isArray(parsed.payload.toolCalls)) {
+      for (const item of parsed.payload.toolCalls) {
+        if (item && typeof item === 'object') {
+          pushRequestId((item as Record<string, unknown>)['clientRequestId']);
+        }
+      }
+    }
+    const summaryFiles = parsed.payload.modifiedFilesSummary?.files;
+    if (Array.isArray(summaryFiles)) {
+      for (const item of summaryFiles) {
+        if (item && typeof item === 'object') {
+          pushRequestId((item as Record<string, unknown>)['clientRequestId']);
+        }
+      }
+    }
+
+    return { content: text, reasoningBlocks, toolNames, clientRequestIds };
   } catch {
     return null;
   }

@@ -20,6 +20,7 @@ import {
   UNBOUND_WORKSPACE_LABEL,
 } from '../../utils/session/session-grouping.js';
 import { subscribeSessionListRefresh } from '../../utils/session/session-list-events.js';
+import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import {
   getSessionDeleteErrorMessage,
   isSessionAlreadyDeletedError,
@@ -107,7 +108,6 @@ export default function SessionsPage() {
     [],
   );
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
-  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
   const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
   const persistedListPaneWidth = useUIStateStore((s) => s.sessionsListPaneWidth);
@@ -251,17 +251,27 @@ export default function SessionsPage() {
   /**
    * 进入「草稿会话」：不在服务端落库空会话，真正的会话由 ChatPage 在首条消息
    * 发出时惰性创建，因此连续点击「新建」不会堆积空对话。
+   *
+   * 工作区按「点击来源」解析：分组 / 工作区菜单等显式入口传路径；通用入口继承
+   * 当前激活会话标签的工作区；都不可解析时回落全局选中值。
    */
   async function createSession(inheritWorkspacePath?: string | null) {
     if (!token) return;
 
     const uiState = useUIStateStore.getState();
-    if (inheritWorkspacePath) {
-      uiState.setSelectedWorkspacePath(inheritWorkspacePath);
-      addSavedWorkspacePath(inheritWorkspacePath);
-    }
-    uiState.addDraftTab(inheritWorkspacePath ?? undefined);
-    uiState.navigateToHome();
+    const activeTab = uiState.tabs.find((tab) => tab.id === uiState.activeTabId) ?? null;
+    const contextSessionId = activeTab?.type === 'session' ? activeTab.sessionId : null;
+    const resolvedWorkspace = resolveNewSessionWorkspace({
+      ...(inheritWorkspacePath !== undefined
+        ? { explicitWorkspacePath: inheritWorkspacePath }
+        : {}),
+      contextSessionId,
+      activeSessionWorkspace: uiState.activeSessionWorkspace,
+      sessions,
+      fallbackWorkspacePath: uiState.selectedWorkspacePath,
+    });
+
+    uiState.openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
     preloadChatRoute(null);
     void navigate('/chat');
   }

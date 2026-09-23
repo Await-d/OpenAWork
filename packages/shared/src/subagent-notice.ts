@@ -71,6 +71,17 @@ function readNoticeText(message: Message): string {
 }
 
 /**
+ * 剥离网关注入的 `<subagent …>…</subagent>` 包裹（参考库 `SubagentCompletion.deliver`
+ * 的标签形态），让客户端拿到纯正文。模型侧不受影响——`parseSubagentNotice` 只服务
+ * 客户端，模型请求直接读取 text parts（`message-to-model-messages.ts`）。
+ */
+function stripSubagentNoticeWrapper(value: string): string {
+  const trimmed = value.trim();
+  const match = /^<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>$/u.exec(trimmed);
+  return match?.[1]?.trim() ?? trimmed;
+}
+
+/**
  * 把消息解析为子代理通知；不是子代理通知时返回 `null`。
  *
  * 可见性规则对齐上游（`session-ui/src/timeline/projection.ts` 的 `isNotice`
@@ -99,7 +110,7 @@ export function parseSubagentNotice(message: Message): SubagentNotice | null {
     state,
     description,
     ...(metadata.childID ? { childSessionId: metadata.childID } : {}),
-    text: readNoticeText(message),
+    text: stripSubagentNoticeWrapper(readNoticeText(message)),
     createdAt: message.createdAt,
   };
 }

@@ -14,7 +14,8 @@
  * - **suspend** = 显式输入意图（wheel / touch / key 指向更早内容）**或**一次
  *   **非程序化**的位置变化（原生滚动条拖拽 / 轨道点击 / `Cmd+↑/↓` /
  *   `scrollIntoView` / 缓存恢复 `scrollTo`）离开**真正底部**。区分依据是
- *   「当前位置是否等于本模块记录的程序化落点」，不靠时间窗口。
+ *   「当前位置是否等于本模块记录的程序化落点」，不靠时间窗口；**纯布局增长**
+ *   （`scrollTop` 未位移，只有内容在长高）不构成位置变化，不据此挂起。
  * - **resume** = 程序化落点仍在 latest 边缘内（宽松：内容 / 布局增长的保持区），
  *   **或**非程序化位置回到**真正底部**（严格：用户明确回到最新），或显式
  *   「回到最新」。
@@ -73,7 +74,7 @@ export const CHAT_LATEST_EDGE_TOLERANCE_PX = 32;
 export const CHAT_TRUE_BOTTOM_TOLERANCE_PX = 32;
 
 /**
- * `forceFollowToLatest` settle 循环的硬上限（帧）：首帧滚动 + 至多 2 帧复检。
+ * `forceFollowToLatest` settle 循环的硬上限（帧）：**同步首帧**滚动 + 至多 2 帧复检。
  * 持续增高的内容由 ResizeObserver 接管，不在这里无限重试（也刻意不用 WebKit
  * 支持不可靠的 `scrollend`）。
  */

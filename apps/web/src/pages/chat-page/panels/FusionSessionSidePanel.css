@@ -458,3 +458,12 @@ button.fusion-side-panel__file-row:focus-visible {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+/* 后台任务 tab：面板自身不带滚动容器（避免双滚动条），由宿主提供唯一滚动条。 */
+.fusion-side-panel__background-host {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}

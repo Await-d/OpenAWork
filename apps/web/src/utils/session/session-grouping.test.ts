@@ -5,6 +5,7 @@ import {
   filterSessionTreeGroupsByMatcher,
   filterSessionTreeGroupsByQuery,
   groupSessionsByWorkspace,
+  resolveSessionWorkspaceBindingById,
 } from './session-grouping.js';
 import type { WorkspaceSessionTreeGroup, WorkspaceSessionTreeNode } from './session-grouping.js';
 
@@ -61,6 +62,104 @@ describe('groupSessionsByWorkspace', () => {
 
     expect(groups.map((group) => group.workspacePath)).toEqual(['/repo/alpha', null]);
     expect(groups[1]?.workspaceLabel).toBe(UNBOUND_WORKSPACE_LABEL);
+  });
+});
+
+describe('resolveSessionWorkspaceBindingById', () => {
+  it('按 id 解析会话自身本地工作区（SSH 连接 id 为 null）', () => {
+    const boundSession: Session = {
+      ...makeSession('bound', '工作区会话'),
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/alpha' }),
+    };
+
+    expect(resolveSessionWorkspaceBindingById([boundSession], 'bound')).toEqual({
+      sshConnectionId: null,
+      workspacePath: '/repo/alpha',
+    });
+  });
+
+  it('SSH 会话把远端路径与连接 id 成对返回', () => {
+    const sshSession: Session = {
+      ...makeSession('ssh-session', '远端会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-1',
+        workingDirectory: '/remote/repo',
+      }),
+    };
+
+    expect(resolveSessionWorkspaceBindingById([sshSession], 'ssh-session')).toEqual({
+      sshConnectionId: 'ssh-1',
+      workspacePath: '/remote/repo',
+    });
+  });
+
+  it('自身未绑定时沿父会话链继承', () => {
+    const parent: Session = {
+      ...makeSession('parent', '父会话'),
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/parent' }),
+    };
+    const child: Session = {
+      ...makeSession('child', '子会话'),
+      metadata_json: JSON.stringify({ parentSessionId: 'parent' }),
+    };
+
+    expect(resolveSessionWorkspaceBindingById([parent, child], 'child')).toEqual({
+      sshConnectionId: null,
+      workspacePath: '/repo/parent',
+    });
+  });
+
+  it('已确认未绑定的会话返回空绑定', () => {
+    expect(
+      resolveSessionWorkspaceBindingById([makeSession('unbound', '无工作区')], 'unbound'),
+    ).toEqual({ sshConnectionId: null, workspacePath: null });
+  });
+
+  it('子会话沿父会话链继承 SSH 绑定', () => {
+    const parent: Session = {
+      ...makeSession('ssh-parent', '远端父会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-parent',
+        workingDirectory: '/remote/parent',
+      }),
+    };
+    const child: Session = {
+      ...makeSession('ssh-child', '子会话'),
+      metadata_json: JSON.stringify({ parentSessionId: 'ssh-parent' }),
+    };
+
+    expect(resolveSessionWorkspaceBindingById([parent, child], 'ssh-child')).toEqual({
+      sshConnectionId: 'ssh-parent',
+      workspacePath: '/remote/parent',
+    });
+  });
+
+  it('路径与 SSH 绑定各自沿父链继承（子会话只带远端路径时连接 id 取自祖先）', () => {
+    const parent: Session = {
+      ...makeSession('ssh-parent', '远端父会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-parent',
+        workingDirectory: '/remote/parent',
+      }),
+    };
+    const child: Session = {
+      ...makeSession('ssh-child', '子会话'),
+      metadata_json: JSON.stringify({
+        parentSessionId: 'ssh-parent',
+        workingDirectory: '/remote/child',
+      }),
+    };
+
+    expect(resolveSessionWorkspaceBindingById([parent, child], 'ssh-child')).toEqual({
+      sshConnectionId: 'ssh-parent',
+      workspacePath: '/remote/child',
+    });
+  });
+
+  it('列表里找不到目标会话时返回 undefined', () => {
+    expect(
+      resolveSessionWorkspaceBindingById([makeSession('other', '其它')], 'missing'),
+    ).toBeUndefined();
   });
 });
 

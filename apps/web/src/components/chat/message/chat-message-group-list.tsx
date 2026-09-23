@@ -518,10 +518,20 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
         data-role="synthetic"
       >
         {timeDividerLabel ? <TimeDividerRow label={timeDividerLabel} /> : null}
-        <SubagentNoticeRow
-          notice={group.notice}
-          {...(onOpenSubagentChild ? { onOpenChild: onOpenSubagentChild } : {})}
-        />
+        {/* 通知行复用消息行的列结构（占位头像 + 同一条 flex gap），
+            保证通知文本与相邻消息的**内容列**左对齐；窄屏下 gap 收窄也自动跟随，
+            避免再写死一个 40px 缩进。 */}
+        <div className="chat-message-row chat-message-row--notice" data-role="synthetic">
+          <div className="chat-message-avatar-frame" aria-hidden="true">
+            <div className="chat-message-avatar-spacer" />
+          </div>
+          <div className="chat-message-main">
+            <SubagentNoticeRow
+              notice={group.notice}
+              {...(onOpenSubagentChild ? { onOpenChild: onOpenSubagentChild } : {})}
+            />
+          </div>
+        </div>
       </div>
     );
   }
@@ -650,8 +660,8 @@ function getGroupLayoutSignature(group: ChatRenderGroup): string {
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
   if (group.kind === 'subagent-notice') {
-    // 单行紧凑通知：13px 文字 + 上 12px / 下 4px padding。
-    return 16 + 12 + 4 + 8;
+    // 单行紧凑通知：行高 16px + 上下各 8px padding + 8px 兜底。
+    return 16 + 8 + 8 + 8;
   }
 
   let estimatedContentHeight = 0;

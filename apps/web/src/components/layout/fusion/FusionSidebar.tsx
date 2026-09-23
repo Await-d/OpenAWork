@@ -214,7 +214,6 @@ export function FusionSidebar({
 
   const leftSidebarOpen = useUIStateStore((state) => state.leftSidebarOpen);
   const setLeftSidebarOpen = useUIStateStore((state) => state.setLeftSidebarOpen);
-  const navigateToHome = useUIStateStore((state) => state.navigateToHome);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
@@ -429,10 +428,11 @@ export function FusionSidebar({
   );
 
   const handleNewTask = useCallback(() => {
-    navigateToHome();
     preloadRoute('/chat');
-    void navigate('/chat');
-  }, [navigate, navigateToHome, preloadRoute]);
+    // 统一走 newSession：工作区按「点击来源」解析（当前会话 → 全局选中值），
+    // 并保证草稿标签 / 路由落点与其它新建入口一致。
+    void newSession();
+  }, [newSession, preloadRoute]);
 
   const handleNewTeamWorkspace = useCallback(() => {
     preloadRoute('/team');
@@ -1042,7 +1042,7 @@ export function FusionSidebar({
         <FusionSidebarPeek
           activeSessionId={currentSessionId}
           nodes={peekSessionNodes}
-          onCreateSession={handleNewTask}
+          onCreateSession={() => void newSession(peekWorkspacePath)}
           onMouseEnter={clearPeekCloseTimer}
           onMouseLeave={scheduleCloseProjectPeek}
           onSelectSession={handlePeekSelectSession}

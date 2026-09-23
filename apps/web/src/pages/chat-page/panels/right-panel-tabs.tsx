@@ -6,6 +6,7 @@ export const RIGHT_PANEL_TABS = [
   { id: 'tools', label: '工具' },
   { id: 'bookmarks', label: '收藏' },
   { id: 'terminals', label: '终端' },
+  { id: 'background', label: '后台任务' },
   { id: 'skills', label: 'Skills' },
   { id: 'snapshots', label: '快照' },
   { id: 'history', label: '历史' },
@@ -25,6 +26,10 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     terminals: {
       title: '终端管理',
       description: '查看当前会话的运行/已完成终端，查看输出或快速终止。',
+    },
+    background: {
+      title: '后台任务',
+      description: '统一查看当前会话的子代理任务与后台命令，支持停止 / 终止。',
     },
     skills: {
       title: 'Skill 设置',
@@ -94,6 +99,16 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path d="M7 15h4" />
         <path d="M7 9l3 3-3 3" />
+      </svg>
+    );
+  }
+  if (tabId === 'background') {
+    // 堆叠图层：表示「在后台排队 / 并行推进」的任务集合；与终端的窗口图标区分。
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M12 3.5l7.5 4-7.5 4-7.5-4 7.5-4z" />
+        <path d="M4.5 12l7.5 4 7.5-4" />
+        <path d="M4.5 16.2l7.5 4 7.5-4" />
       </svg>
     );
   }

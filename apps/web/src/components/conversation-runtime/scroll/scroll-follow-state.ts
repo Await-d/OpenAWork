@@ -18,7 +18,11 @@
  *   明确在追最新内容时，位置落在 latest 边缘内即可恢复（由
  *   `useScrollManager.handleSeekLatest` 裁决）；上滑手势永远分类为 `leave-latest`，
  *   不会触发这条例外。
- * - **不变量**：suspend = 显式输入意图 OR 非程序化位置离开真正底部；
+ * - **布局变化 ≠ 外部滚动**：`scrollTop` 未发生位移时，位置偏离 latest 只可能是
+ *   内容在长（首批内容到达 / 高度重排），不是用户或外部把位置改了。此时保持
+ *   原状态（`positionMoved === false`），让自动跟随把视口带回最新处；否则会话
+ *   开屏的第一帧就会因内容增高被判成「用户离开」而挂起跟随。
+ * - **不变量**：suspend = 显式输入意图 OR **位置确实位移过**的非程序化位置离开真正底部；
  *   resume = 程序化落点在 latest 边缘内 OR 非程序化位置回到真正底部 OR
  *   显式向下意图 + 非程序化位置落在 latest 边缘内；
  *   永不使用时间窗口。
@@ -93,17 +97,39 @@ export function resolveKeyboardIntent(input: {
  * - 未提供 position（意图路径的 seek-latest）⇒ 保持不变，交给位置路径裁决。
  * - programmatic（本模块自己的落点，只有内容增长）⇒ 宽松边界 atLatestEdge 即可恢复/保持。
  * - 非 programmatic（用户/外部把位置改了）⇒ 只有回到真正底部 atTrueBottom 才恢复。
+ * - 非 programmatic 且未到真正底部时，再看位置是否发生位移（`positionMoved`）：
+ *   未位移 ⇒ 只有**布局**在动（首批内容到达 / 高度重排），不构成用户 / 外部滚动的
+ *   证据，保持原状态；已位移 / 未知 ⇒ 挂起。
  */
 export function resolveFollowInterrupted(input: {
   intent: ScrollUserIntent | null;
   interrupted: boolean;
-  position?: { programmatic: boolean; atLatestEdge: boolean; atTrueBottom: boolean };
+  position?: {
+    programmatic: boolean;
+    atLatestEdge: boolean;
+    atTrueBottom: boolean;
+    /**
+     * 当前位置相对上一次观测是否发生了位移。**缺省按 true（保守）处理**：
+     * 只有调用方明确知道本次对账由纯布局变化触发时才允许传 false
+     * （见 `useScrollManager` 的 ResizeObserver 对账路径）。
+     *
+     * 为什么需要它：会话开屏 / 首次内容到达时，`scrollTop` 停在 0 不动，只有
+     * 内容在长高。旧实现把「非程序化位置 + 未到真正底部」一律判成外部滚动，
+     * 于是首个内容提交的那一帧就把跟随挂起——开屏贴底被迫依赖后续
+     * `forceFollowToLatest` 再补一次，慢机 / 后台标签页下会永久停在中途。
+     */
+    positionMoved?: boolean;
+  };
 }): boolean {
   if (input.intent === 'leave-latest') return true;
   const p = input.position;
   if (!p) return input.interrupted;
   if (p.programmatic) return p.atLatestEdge ? false : input.interrupted;
-  return p.atTrueBottom ? false : true;
+  // 非程序化位置回到真正底部 ⇒ 恢复（与是否位移过无关）。
+  if (p.atTrueBottom) return false;
+  // 非程序化位置、未到真正底部、但位置没有位移 ⇒ 只有布局在长，不构成外部滚动证据。
+  if (p.positionMoved === false) return input.interrupted;
+  return true;
 }
 
 /**

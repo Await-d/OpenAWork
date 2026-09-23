@@ -200,6 +200,12 @@ export interface MessagingChannelService {
     readonly recordIds: readonly string[];
     readonly signal?: AbortSignal;
   }): Promise<unknown>;
+  /**
+   * 入站消息媒体补全：HTTP 入站路由在 parser 之后、notify 之前调用。
+   * 实现方应从 message.raw 提取媒体引用并下载，返回可能带 images 的新消息。
+   * 契约：失败时必须原样返回入参消息（不得抛错、不得阻塞投递）；无媒体时原样返回。
+   */
+  enrichInboundMessage?(message: ChannelMessage): Promise<ChannelMessage>;
   getGroupMessages(chatId: string, count?: number): Promise<ChannelMessage[]>;
   listGroups(): Promise<ChannelGroup[]>;
   supportsStreaming?: boolean;

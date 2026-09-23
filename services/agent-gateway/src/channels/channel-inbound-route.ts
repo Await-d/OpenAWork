@@ -37,6 +37,10 @@ interface ChannelInboundRouteDeps {
     channel: ChannelInstance,
   ) => ChannelMessage | null;
   readonly notifyChannel: (event: ChannelEvent) => void;
+  readonly enrichInboundMessage?: (input: {
+    readonly channel: ChannelInstance;
+    readonly message: ChannelMessage;
+  }) => Promise<ChannelMessage>;
   readonly recordInboundDiagnostic?: (input: {
     readonly pluginId: string;
     readonly accepted: boolean;
@@ -133,6 +137,29 @@ function parseInboundQuery(
     return null;
   }
   return parsedQuery.data;
+}
+
+/**
+ * 入站媒体补全的调用侧兜底：enrich 是「尽力而为」的装饰步骤，任何失败都必须
+ * 回退到原始消息，绝不能因为下载失败丢掉一条已经解析成功的入站消息。
+ */
+async function enrichInboundMessageOrFallback(
+  deps: ChannelInboundRouteDeps,
+  channel: ChannelInstance,
+  message: ChannelMessage,
+): Promise<ChannelMessage> {
+  if (!deps.enrichInboundMessage) {
+    return message;
+  }
+  try {
+    return await deps.enrichInboundMessage({ channel, message });
+  } catch (error) {
+    console.warn('[channels] inbound media enrich failed', {
+      channelId: channel.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return message;
+  }
 }
 
 export async function registerChannelInboundRoutes(
@@ -274,8 +301,8 @@ export async function registerChannelInboundRoutes(
       return reply.status(403).send({ error: 'Invalid channel inbound secret' });
     }
 
-    const message = deps.parseMessage(channel.type, request.body, channel);
-    if (!message) {
+    const parsedMessage = deps.parseMessage(channel.type, request.body, channel);
+    if (!parsedMessage) {
       deps.recordInboundDiagnostic?.({
         pluginId: channel.id,
         accepted: false,
@@ -283,6 +310,8 @@ export async function registerChannelInboundRoutes(
       });
       return reply.status(202).send({ accepted: false, reason: 'ignored' });
     }
+
+    const message = await enrichInboundMessageOrFallback(deps, channel, parsedMessage);
 
     deps.recordInboundDiagnostic?.({
       pluginId: channel.id,

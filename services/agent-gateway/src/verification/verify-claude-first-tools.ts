@@ -64,9 +64,11 @@ async function main(): Promise<void> {
             const accessToken = app.jwt.sign({ sub: userId, email });
             const sessionId = randomUUID();
             sqliteRun(
+              // yolo 档位：本脚本关注 Claude-first 工具契约（Agent 工具），
+              // 委派免审批（权限门控由 verify-task-tool-permission-gate.ts 专门验收）。
               `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status)
                VALUES (?, ?, '[]', ?, 'idle')`,
-              [sessionId, userId, JSON.stringify({})],
+              [sessionId, userId, JSON.stringify({ permissionMode: 'yolo' })],
             );
 
             const sandbox = createDefaultSandbox();
@@ -355,8 +357,8 @@ async function verifyAgent(input: {
     'sync Agent output should include the delegated child content',
   );
   assert(
-    String(syncResult.output).includes('<task_result>'),
-    'sync Agent output should append opencode task_result metadata',
+    String(syncResult.output).includes('<subagent sessionID="'),
+    'sync Agent output should use the opencode subagent result wrapper',
   );
   assert(
     String(syncResult.output).includes('task_id:'),

@@ -123,7 +123,11 @@ async function main(): Promise<void> {
           // 两边不是同一份文件（waitFor 必然超时），同时污染开发者本机目录。
           dbModule.sqliteRun(
             `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
-            [parentSessionId, userId, JSON.stringify({ workingDirectory: workspaceRoot })],
+            [
+              parentSessionId,
+              userId,
+              JSON.stringify({ workingDirectory: workspaceRoot, permissionMode: 'yolo' }),
+            ],
           );
           dbModule.sqliteRun(
             `INSERT INTO permission_requests (

@@ -13,6 +13,7 @@ import React, {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -73,6 +74,7 @@ import { subscribeSessionDialogueModeSwitch } from '../../utils/session/dialogue
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 
 import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
+import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
 import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-request.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
@@ -92,12 +94,14 @@ import {
   REMOTE_STREAM_RECOVERY_POLL_MS,
 } from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
+import { useBackgroundTaskPanel } from './panels/use-background-task-panel.js';
 
 import {
   type ImageEditReferenceArtifact,
   toImageEditReferenceArtifacts,
 } from './conversation/render/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from '../../components/conversation-runtime/messages/ordered-id.js';
+import { collectSubagentNotices } from '../../components/conversation-runtime/messages/subagent-notices.js';
 
 import { startSequentialPolling } from '../../components/conversation-runtime/session/sequential-polling.js';
 
@@ -120,6 +124,7 @@ import {
   SubAgentRunList,
 } from './panels/sub-agent-run-list.js';
 import { BatchStopSubAgentsControl } from './panels/batch-stop-sub-agents-control.js';
+import { BackgroundTaskQuickChip } from './panels/background-task-quick-chip.js';
 
 import {
   buildUserHistoryJumpItems,
@@ -737,6 +742,15 @@ export default function ChatPage() {
     gatewayUrl,
     token,
   });
+  /**
+   * 「后台任务」面板模型：把当前会话的子代理任务与终端行归一为统一列表
+   * （子代理 + 后台命令），由右栏 `background` tab 消费。数据源与实时性口径
+   * 完全复用 `sessionTasks` / `sessionTerminals`，v1 不新增网关请求。
+   */
+  const backgroundTaskPanel = useBackgroundTaskPanel({
+    tasks: sessionTasks,
+    terminals: sessionTerminals.terminals,
+  });
   const fusionChatLayout = useFusionChatLayout({
     canDockSidePanel: canDockFusionSidePanel,
     currentSessionId,
@@ -1154,6 +1168,72 @@ export default function ChatPage() {
     },
     [isFusionLayout, isMobileViewport, setReviewPanelOpened, setSidePanelActiveTab],
   );
+  /**
+   * 「后台任务」面板的「查看终端」入口：后台命令行与终端管理分属两个 tab，
+   * 这里把跳转与选中态一起提升到 ChatPage —— 切到 `terminals` tab，并把目标
+   * 终端 id 透传给右栏（终端列表据此展开 / 高亮该行）。
+   */
+  const [backgroundTaskPreviewTerminalId, setBackgroundTaskPreviewTerminalId] = useState<
+    string | null
+  >(null);
+  const handlePreviewBackgroundTerminal = useCallback(
+    (terminalId: string) => {
+      setRightOpen(true);
+      setRightTab('terminals');
+      setBackgroundTaskPreviewTerminalId(terminalId);
+    },
+    [setRightOpen, setRightTab],
+  );
+  /**
+   * Fusion 布局的「查看终端」：Fusion 没有右栏「终端管理」tab，终端在**底部终端面板**，
+   * 因此改为展开底部面板并把目标终端 id 记入同一份选中态（供后续聚焦高亮消费）。
+   */
+  const handlePreviewBackgroundTerminalFusion = useCallback(
+    (terminalId: string) => {
+      setTerminalPanelOpened(true);
+      setBackgroundTaskPreviewTerminalId(terminalId);
+    },
+    [setTerminalPanelOpened],
+  );
+  // 离开「终端管理」后清除选中高亮：下次手动切回时不应残留上一次的预览态。
+  useEffect(() => {
+    if (rightTab !== 'terminals') {
+      setBackgroundTaskPreviewTerminalId(null);
+    }
+  }, [rightTab]);
+
+  /**
+   * 常驻胶囊的「打开后台面板」：按布局路由到已交付的完整面板——
+   * fusion 切停靠侧栏的 `background` tab，classic 展开右栏并切到「后台任务」tab。
+   */
+  const handleOpenBackgroundTaskPanel = useCallback(() => {
+    if (isFusionLayout) {
+      setSidePanelActiveTab('background');
+      return;
+    }
+    setRightOpen(true);
+    setRightTab('background');
+  }, [isFusionLayout, setRightOpen, setRightTab, setSidePanelActiveTab]);
+
+  /**
+   * 打开「文件变更」面板：fusion 布局走停靠侧栏的审查 tab（可接受/拒绝），
+   * classic 布局没有审查面板，退回到右栏「快照」tab（可预览 / 恢复）。
+   * 顺带自增 review revision，确保打开时拉取的是最新投影。
+   *
+   * 同时关闭重试 / 编辑弹窗：它们都是全屏遮罩（zIndex 高于右栏），不关掉会挡住面板。
+   */
+  const openFileChangesPanel = useCallback(() => {
+    setRetryPrompt(null);
+    setHistoryEditPrompt(null);
+    setReviewRefreshRevision((revision) => revision + 1);
+    if (isFusionLayout) {
+      setSidePanelActiveTab('review');
+      setReviewPanelOpened(true);
+      return;
+    }
+    setRightOpen(true);
+    setRightTab('snapshots');
+  }, [isFusionLayout, setReviewPanelOpened, setSidePanelActiveTab]);
 
   const loadSavedChatDefaults = useCallback(async () => {
     if (!token) {
@@ -1643,6 +1723,9 @@ export default function ChatPage() {
           setWorkflowRuntime(prepared.session.workflowRuntime ?? null);
           setPendingPermissions(prepared.pendingPermissions);
           setPendingQuestions(prepared.pendingQuestions);
+          // 父任务状态变化（例如子代理结算）会走到这里；通知必须同源刷新，
+          // 否则后台子代理完成时用户要等到下一次流式结束才看得到通知行。
+          setSubagentNotices(collectSubagentNotices(session.session?.messages ?? []));
           setSessionStateStatus(prepared.sessionStateStatus);
           syncRecoveredStreamSnapshot(
             prepared.session,
@@ -1731,6 +1814,7 @@ export default function ChatPage() {
       setSessionTasks,
       setSessionTodos,
       setShowSkeletonAfterDelay,
+      setSubagentNotices,
       setThinkingEnabled,
       setVisibleMessageCount,
       setWebSearchEnabled,
@@ -1949,7 +2033,11 @@ export default function ChatPage() {
   // IMPORTANT: Only depends on `isSessionSnapshotReady` and the stable
   // `forceFollowToLatest` callback.  `messages.length` is read via ref so
   // streaming updates don't cause cleanup to cancel the settle loop.
-  useEffect(() => {
+  //
+  // 用 layout effect 而非 passive effect：`forceFollowToLatest` 的同步首帧会在
+  // 本帧绘制前贴底；放到 passive effect（绘制之后才跑）时，长历史会话打开后的
+  // 第一帧会画在旧位置（用户先看到最旧的消息），慢机 / 后台标签页下该窗口可达数秒。
+  useLayoutEffect(() => {
     if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messagesLengthRef.current > 0) {
       // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
       if (sessionRestoredFromCacheRef.current) {
@@ -1989,7 +2077,10 @@ export default function ChatPage() {
   // so streaming updates (which change messages.length) don't cause the
   // cleanup to cancel an in-progress smooth scroll.  Those values are read
   // via refs instead.
-  useEffect(() => {
+  //
+  // 与 Effect A 同理用 layout effect：面板从 `display: none` 恢复时，同步首帧
+  // 贴底才能保证重新显示的第一帧就在最新处。
+  useLayoutEffect(() => {
     const wasActive = prevPageActiveRef.current;
     prevPageActiveRef.current = isPageActive;
     if (
@@ -2021,17 +2112,28 @@ export default function ChatPage() {
   }, []);
 
   /**
-   * 欢迎页「新建会话」：只把当前视图复位为空白草稿并聚焦输入框，
-   * 不立即在服务端创建空会话——真正的会话在首条消息发出时才落库，
-   * 因此连续点击不会堆积空对话。
+   * 欢迎页「新建会话」：把当前视图复位为空白草稿并聚焦输入框，不立即在服务端
+   * 创建空会话——真正的会话在首条消息发出时才落库，因此连续点击不会堆积空对话。
+   *
+   * 草稿工作区按「点击来源」继承当前上下文：已有会话取 store 里已解析的工作区
+   * 绑定（含父会话链 / SSH，与 useWorkspace 同源），尚未解析时回落当前全局选中值
+   * （不能把「未知」当成「未绑定」而误清）；草稿态沿用当前草稿工作区。
    */
   const handleStartNewSession = useCallback(() => {
     setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
     focusComposerWithText('');
+    const resolvedWorkspace = resolveNewSessionWorkspace({
+      contextSessionId: currentSessionId,
+      activeSessionWorkspace: useUIStateStore.getState().activeSessionWorkspace,
+      fallbackWorkspacePath: selectedWorkspacePath,
+    });
+    useUIStateStore
+      .getState()
+      .openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
     if (currentSessionId) {
       void navigate('/chat');
     }
-  }, [currentSessionId, focusComposerWithText, navigate]);
+  }, [currentSessionId, focusComposerWithText, navigate, selectedWorkspacePath]);
 
   const appendTextToComposer = useCallback((text: string) => {
     setInput((previous) => {
@@ -2514,6 +2616,7 @@ export default function ChatPage() {
       historyEditPrompt,
       sendMessage,
       createBranchSessionFromMessage,
+      onOpenFileChangesPanel: openFileChangesPanel,
     });
 
   useEffect(() => {
@@ -2862,7 +2965,7 @@ export default function ChatPage() {
           workingDirectory: normalizedPath,
           sshConnectionId: selection.connectionId,
         });
-        setActiveSessionWorkspace(currentSessionId, normalizedPath);
+        setActiveSessionWorkspace(currentSessionId, normalizedPath, selection.connectionId);
       }
 
       setSelectedWorkspacePath(normalizedPath);
@@ -2971,9 +3074,22 @@ export default function ChatPage() {
     />
   ) : null;
   const activeSubAgentCount = subAgentRunItems.filter((item) => isActiveStatus(item.status)).length;
-  /** 输入框上方的 footer slot：工作空间选择 + 有活跃子代理时的批量停止入口。 */
+  /** 活跃后台任务数（含排队）——与常驻胶囊的显隐口径一致。 */
+  const activeBackgroundTaskCount = backgroundTaskPanel.summary.activeTotal;
+  /**
+   * 左侧浮动栏的「后台命令」分组数据：只取 shell 行（调用方契约，行组件不做过滤）。
+   * 引用保持稳定，避免 rail 内部按数组身份做的 memo 失效。
+   */
+  const backgroundTaskShellRows = useMemo(
+    () => backgroundTaskPanel.rows.filter((row) => row.kind === 'shell'),
+    [backgroundTaskPanel.rows],
+  );
+  /**
+   * 输入框上方的 footer slot：工作空间选择 + 有活跃子代理时的批量停止入口
+   * + 「后台任务」常驻胶囊（仅在有活跃任务时自渲染）。
+   */
   const composerFooterSlot =
-    composerWorkspaceSlot || activeSubAgentCount > 0 ? (
+    composerWorkspaceSlot || activeSubAgentCount > 0 || activeBackgroundTaskCount > 0 ? (
       <>
         {composerWorkspaceSlot}
         {activeSubAgentCount > 0 ? (
@@ -2983,6 +3099,19 @@ export default function ChatPage() {
             onConfirm={handleStopAllChildSessions}
           />
         ) : null}
+        <BackgroundTaskQuickChip
+          model={backgroundTaskPanel}
+          onKillTerminal={sessionTerminals.killTerminal}
+          onOpenPanel={handleOpenBackgroundTaskPanel}
+          onOpenSession={openChildSessionInspector}
+          onPreviewTerminal={
+            isFusionLayout ? handlePreviewBackgroundTerminalFusion : handlePreviewBackgroundTerminal
+          }
+          onStopAllSubagents={handleStopAllChildSessions}
+          onStopSubagent={handleStopChildSession}
+          pendingKillIds={sessionTerminals.pendingKillIds}
+          stoppingSubAgentIds={stoppingSubAgentIds}
+        />
       </>
     ) : null;
   const {
@@ -3177,8 +3306,7 @@ export default function ChatPage() {
     isFusionLayout,
     messages,
     multiSelect,
-    navigate,
-    navigateToHome,
+    onStartNewSession: handleStartNewSession,
     openBrowserPreview,
     openWorkspacePanelTab,
     pendingPermissions,
@@ -3287,11 +3415,7 @@ export default function ChatPage() {
         // dispatch a custom event that App.tsx listens for
         window.dispatchEvent(new CustomEvent('app:cycle-theme'));
       },
-      onNewSession: () => {
-        setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
-        navigate('/chat');
-        navigateToHome();
-      },
+      onNewSession: handleStartNewSession,
     },
     isPageActive,
   );
@@ -3359,9 +3483,15 @@ export default function ChatPage() {
       <>
         <SubAgentRunList
           items={subAgentRunItems}
-          selectedSessionId={selectedChildSessionId}
+          onKillShell={sessionTerminals.killTerminal}
+          onPreviewShell={
+            isFusionLayout ? handlePreviewBackgroundTerminalFusion : handlePreviewBackgroundTerminal
+          }
           onSelectSession={openChildSessionInspector}
           onStopSession={handleStopChildSession}
+          pendingKillShellIds={sessionTerminals.pendingKillIds}
+          selectedSessionId={selectedChildSessionId}
+          shellItems={backgroundTaskShellRows}
           stoppingSessionIds={stoppingSubAgentIds}
         />
         <UserHistoryJumpList
@@ -3510,6 +3640,7 @@ export default function ChatPage() {
     onRetryBranch: () => {
       void handleRetryInNewSession();
     },
+    onOpenFileChangesPanel: openFileChangesPanel,
     chatSearch,
     composerVariant,
     providers,
@@ -3770,6 +3901,20 @@ export default function ChatPage() {
           sidePanel={
             <FusionDockedSidePanel
               activeTab={sidePanelActiveTab}
+              backgroundTaskPanel={{
+                model: backgroundTaskPanel,
+                loading: sessionTerminals.loading,
+                error: sessionTerminals.error,
+                lastSyncedAtMs: sessionTerminals.lastSyncedAtMs,
+                stoppingSubAgentIds,
+                pendingKillIds: sessionTerminals.pendingKillIds,
+                onReloadTerminals: sessionTerminals.reload,
+                onOpenSession: openChildSessionInspector,
+                onStopSubagent: handleStopChildSession,
+                onStopAllSubagents: handleStopAllChildSessions,
+                onPreviewTerminal: handlePreviewBackgroundTerminalFusion,
+                onKillTerminal: sessionTerminals.killTerminal,
+              }}
               currentSessionId={currentSessionId}
               currentUserDisplayName={currentUserDisplayName}
               currentUserEmail={currentUserEmail}
@@ -4064,8 +4209,15 @@ export default function ChatPage() {
           sessionTerminalsLoading={sessionTerminals.loading}
           sessionTerminalsError={sessionTerminals.error}
           sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
+          sessionTerminalsLastSyncedAtMs={sessionTerminals.lastSyncedAtMs}
           onKillTerminal={sessionTerminals.killTerminal}
           onReloadTerminals={sessionTerminals.reload}
+          backgroundTaskModel={backgroundTaskPanel}
+          stoppingSubAgentIds={stoppingSubAgentIds}
+          onStopSubagent={handleStopChildSession}
+          onStopAllSubagents={handleStopAllChildSessions}
+          onPreviewTerminal={handlePreviewBackgroundTerminal}
+          backgroundTaskPreviewTerminalId={backgroundTaskPreviewTerminalId}
           ensureMessageVisible={ensureMessageVisible}
         />
       ) : null}

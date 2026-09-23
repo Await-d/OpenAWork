@@ -36,6 +36,7 @@ const AGENT_ID_TO_ROLE_LAYER: ReadonlyMap<string, SoulRoleLayer> = new Map<strin
   ['explorer', 'pm2'],
   ['librarian', 'pm2'],
   ['scout', 'pm2'],
+  ['web-researcher', 'pm2'],
   ['zeus', 'pm2'],
   ['team-leader', 'pm2'],
   ['researcher', 'pm2'],

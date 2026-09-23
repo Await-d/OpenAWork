@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('mermaid', () => ({
@@ -119,6 +119,26 @@ describe('思考围栏块的折叠归属', () => {
 
     expect(screen.queryByText(/展开全部 ·/)).toBeNull();
     expect(screen.getByText('展开思考')).toBeTruthy();
+  });
+
+  it('思考围栏块与主思考块共用窗口参数：折叠 5 行贴底、展开到高度上限', () => {
+    const content = `先想一下。\n\n${buildThinkingFence(20)}`;
+
+    render(<MarkdownMessageContent content={content} />);
+
+    const body = document.querySelector<HTMLElement>('.assistant-reasoning-body');
+    expect(body).not.toBeNull();
+    // 折叠态：最新 5 行窗口（与 REASONING_COLLAPSED_MAX_LINES 同一公式），超出部分从顶部裁掉
+    expect(body?.style.maxHeight).toBe(`${5 * 1.6 * 13 + 4}px`);
+    expect(body?.style.overflow).toBe('clip');
+    expect(body?.style.flexDirection).toBe('column-reverse');
+
+    fireEvent.click(screen.getByText('展开思考'));
+
+    // 展开态：仍是同一贴底窗口，放宽到高度上限并在块内滚动
+    expect(body?.style.maxHeight).toBe('min(60vh, 480px)');
+    expect(body?.style.overflow).toBe('auto');
+    expect(body?.style.flexDirection).toBe('column-reverse');
   });
 });
 

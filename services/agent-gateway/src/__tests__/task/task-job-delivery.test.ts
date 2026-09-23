@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
+import type * as MessageAdapterModule from '../../message/message-v2-adapter.js';
 import type * as TaskJobModule from '../../task/task-job.js';
 import type * as TaskJobDeliveryModule from '../../task/task-job-delivery.js';
 import type * as TaskWakeBudgetModule from '../../task/task-wake-budget.js';
@@ -23,6 +24,7 @@ process.env['DATABASE_URL'] = ':memory:';
 process.env['JWT_SECRET'] = 'task-job-delivery-test-secret-1234567890';
 
 let dbModule: typeof DbModule;
+let messageAdapter: typeof MessageAdapterModule;
 let taskJob: typeof TaskJobModule;
 let delivery: typeof TaskJobDeliveryModule;
 let wakeBudget: typeof TaskWakeBudgetModule;
@@ -82,6 +84,7 @@ function deliver(notificationId: string, resume?: boolean) {
 beforeAll(async () => {
   vi.resetModules();
   dbModule = await import('../../infra/db.js');
+  messageAdapter = await import('../../message/message-v2-adapter.js');
   taskJob = await import('../../task/task-job.js');
   delivery = await import('../../task/task-job-delivery.js');
   wakeBudget = await import('../../task/task-wake-budget.js');
@@ -154,6 +157,63 @@ describe('resolveTaskJobWakeDecision（纯函数）', () => {
         parentStateStatus: 'running',
       }),
     ).toEqual({ action: 'defer', reason: 'busy' });
+  });
+});
+
+describe('formatSubagentNoticeText（纯函数）', () => {
+  it('渲染为参考库的 <subagent> 标签形态（state 用上游 wire 词表）', () => {
+    expect(
+      delivery.formatSubagentNoticeText({
+        childSessionId: 'sess-child',
+        description: '审计会话唤醒原语',
+        state: 'done',
+        text: '子代理已完成。',
+      }),
+    ).toBe(
+      [
+        '<subagent sessionID="sess-child" state="completed" description="审计会话唤醒原语">',
+        '子代理已完成。',
+        '</subagent>',
+      ].join('\n'),
+    );
+  });
+
+  it('description 缺失时省略属性，并净化属性中的引号 / 换行', () => {
+    expect(
+      delivery.formatSubagentNoticeText({
+        childSessionId: 'sess-child',
+        description: '坏"标题"\n第二行',
+        state: 'failed',
+        text: 'x',
+      }),
+    ).toBe(
+      [
+        '<subagent sessionID="sess-child" state="error" description="坏 标题 第二行">',
+        'x',
+        '</subagent>',
+      ].join('\n'),
+    );
+    expect(
+      delivery.formatSubagentNoticeText({
+        childSessionId: 'sess-child',
+        state: 'cancelled',
+        text: 'x',
+      }),
+    ).toBe(['<subagent sessionID="sess-child" state="cancelled">', 'x', '</subagent>'].join('\n'));
+  });
+
+  it('超长正文截断并保留去子会话读全文的指引', () => {
+    const rendered = delivery.formatSubagentNoticeText({
+      childSessionId: 'sess-child',
+      state: 'done',
+      text: '长'.repeat(5_000),
+    });
+
+    expect(rendered).toContain('[子代理完成通知过长，已截断');
+    expect(rendered).toContain('sessionID: sess-child');
+    expect(rendered).toContain('</subagent>');
+    // 截断后的正文远小于原文（4_000 上限 + 标签 / 提示开销）。
+    expect(rendered.length).toBeLessThan(5_000);
   });
 });
 
@@ -269,5 +329,28 @@ describe('deliverTaskCompletion', () => {
     expect(mocks.continueSessionFromHistory).not.toHaveBeenCalled();
     // 通知已投递（不丢信息）
     expect(result.created).toBe(true);
+  });
+
+  it('注入的合成通知正文带 <subagent> 标签（对齐参考库），客户端字段仍保留', async () => {
+    seedPersistedJob('task-job:notif-tagged');
+    const result = await deliver('task-job:notif-tagged');
+    expect(result.created).toBe(true);
+
+    const notice = messageAdapter
+      .listSessionMessagesV2({ sessionId: PARENT_SESSION_ID, userId: USER_ID })
+      .find((message) => message.role === 'synthetic');
+    expect(notice).toBeDefined();
+
+    const text = (notice?.content ?? [])
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
+    expect(text).toContain(
+      '<subagent sessionID="sess-delivery-child" state="completed" description="审计会话唤醒原语">',
+    );
+    expect(text).toContain('子代理已完成 · 审计会话唤醒原语');
+    expect(text.endsWith('</subagent>')).toBe(true);
+    expect(notice?.description).toBe('审计会话唤醒原语');
+    expect(notice?.metadata?.['state']).toBe('done');
   });
 });

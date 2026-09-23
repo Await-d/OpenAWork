@@ -53,12 +53,15 @@ function buildLongMessageWithThinkingFence(): string {
     { length: 60 },
     (_, index) => `正文段落 ${index + 1}：用于把正文推过 1500 字符阈值，触发消息级折叠。`,
   ).join('\n\n');
-  const fence = [
+  return `${filler}\n\n${buildThinkingFence(8)}`;
+}
+
+function buildThinkingFence(lineCount: number): string {
+  return [
     '```thinking',
-    ...Array.from({ length: 8 }, (_, index) => `思考第 ${index + 1} 行内容`),
+    ...Array.from({ length: lineCount }, (_, index) => `思考第 ${index + 1} 行内容`),
     '```',
   ].join('\n');
-  return `${filler}\n\n${fence}`;
 }
 
 /** 供验收脚本驱动"流式继续输出"：所有视口内的实时用例一起增长。 */
@@ -165,6 +168,19 @@ function LongMessageThinkingFenceCase() {
   return <>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>;
 }
 
+/**
+ * 短正文里的 ```thinking 围栏：正文没过消息级折叠阈值，围栏块自带折叠生效，
+ * 用于守卫"围栏块与主思考块共用窗口参数（折叠 5 行贴底 + 展开高度上限）"。
+ */
+function ShortMessageThinkingFenceCase() {
+  const message: ChatMessage = {
+    id: 'harness-short-message-thinking-fence',
+    role: 'assistant',
+    content: `先想一下。\n\n${buildThinkingFence(30)}`,
+  };
+  return <>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>;
+}
+
 function Viewport({ width }: { width: number }) {
   return (
     <div className="viewport" data-viewport={width} style={{ width }}>
@@ -184,6 +200,10 @@ function Viewport({ width }: { width: number }) {
       <div className="case" data-case="long-message-thinking-fence">
         <div className="case-label">长正文 + ```thinking 围栏（历史消息）</div>
         <LongMessageThinkingFenceCase />
+      </div>
+      <div className="case" data-case="short-message-thinking-fence">
+        <div className="case-label">短正文 + ```thinking 围栏（自带折叠）</div>
+        <ShortMessageThinkingFenceCase />
       </div>
     </div>
   );

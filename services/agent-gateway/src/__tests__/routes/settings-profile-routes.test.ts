@@ -471,4 +471,75 @@ describe('settings profile routes', () => {
       await app.close();
     }
   });
+
+  it('PUT /settings/providers 保存的默认模型选择在 catalog 派生模型不入库时读回不丢失', async () => {
+    const app = await buildApp();
+    try {
+      const authorization = await bearer(app);
+
+      const getResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/providers',
+        headers: { authorization },
+      });
+      expect(getResponse.statusCode).toBe(200);
+      const initial = getResponse.json() as {
+        providers: Array<{
+          id: string;
+          enabled: boolean;
+          defaultModels: Array<{ id: string; enabled: boolean }>;
+        }>;
+        activeSelection: { chat: { providerId: string; modelId: string } };
+      };
+
+      // 选一个与当前 fallback 不同的启用模型：落库只保留覆盖项，目标模型会以
+      // catalog 派生形式被裁剪出 providers 行，读取时必须等目录同步补回后
+      // 再校验选择，否则会被误判失效并静默回退到 fallback（保存即「没有效果」）。
+      const fallback = initial.activeSelection.chat;
+      const targetProvider = initial.providers.find((provider) => {
+        if (!provider.enabled) return false;
+        const enabledModels = provider.defaultModels.filter((model) => model.enabled);
+        return (
+          enabledModels.length > 0 &&
+          !(provider.id === fallback.providerId && enabledModels[0]?.id === fallback.modelId)
+        );
+      });
+      expect(targetProvider).toBeDefined();
+      const enabledModels = (targetProvider?.defaultModels ?? []).filter((model) => model.enabled);
+      const chatModelId = enabledModels[0]?.id;
+      const fastModelId = (enabledModels[1] ?? enabledModels[0])?.id;
+      expect(chatModelId).toBeDefined();
+      expect(fastModelId).toBeDefined();
+
+      const intendedSelection = {
+        chat: { providerId: targetProvider?.id, modelId: chatModelId },
+        fast: { providerId: targetProvider?.id, modelId: fastModelId },
+      };
+      const putResponse = await app.inject({
+        method: 'PUT',
+        url: '/settings/providers',
+        headers: { authorization },
+        payload: {
+          providers: initial.providers,
+          activeSelection: intendedSelection,
+        },
+      });
+      expect(putResponse.statusCode).toBe(200);
+      expect(
+        (putResponse.json() as { activeSelection: typeof intendedSelection }).activeSelection,
+      ).toMatchObject(intendedSelection);
+
+      const readResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/providers',
+        headers: { authorization },
+      });
+      expect(readResponse.statusCode).toBe(200);
+      expect(
+        (readResponse.json() as { activeSelection: typeof intendedSelection }).activeSelection,
+      ).toMatchObject(intendedSelection);
+    } finally {
+      await app.close();
+    }
+  });
 });

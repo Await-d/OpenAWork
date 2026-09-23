@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe('SessionSidePanel', () => {
-  it('桌面停靠面板渲染 代码/预览/审查/子代理/会话概览 五个一级 tab', () => {
+  it('桌面停靠面板渲染 代码/预览/审查/子代理/后台/会话概览 六个一级 tab', () => {
     const onTabChange = vi.fn();
 
     render(
@@ -22,6 +22,7 @@ describe('SessionSidePanel', () => {
       '预览',
       '审查',
       '子代理',
+      '后台',
       '会话概览',
     ]);
     expect(screen.queryByRole('tab', { name: '工作区' })).toBeNull();
@@ -40,7 +41,7 @@ describe('SessionSidePanel', () => {
     expect(onTabChange).toHaveBeenLastCalledWith('preview');
   });
 
-  it('键盘左右循环按 代码→预览→审查→子代理→会话概览 顺序移动', () => {
+  it('键盘左右循环按 代码→预览→审查→子代理→后台→会话概览 顺序移动', () => {
     const onTabChange = vi.fn();
 
     render(
@@ -53,6 +54,7 @@ describe('SessionSidePanel', () => {
     const previewTab = screen.getByRole('tab', { name: '预览' });
     const reviewTab = screen.getByRole('tab', { name: '审查' });
     const agentTab = screen.getByRole('tab', { name: '子代理' });
+    const backgroundTab = screen.getByRole('tab', { name: '后台' });
     const contextTab = screen.getByRole('tab', { name: '会话概览' });
 
     // 审查 位于代码/预览之后：左移回到预览，右移进入子代理。
@@ -88,6 +90,7 @@ describe('SessionSidePanel', () => {
     expect(onTabChange).toHaveBeenLastCalledWith('review');
     expect(document.activeElement).toBe(reviewTab);
 
+    // 新增「后台」一级 tab：审查 → 子代理 → 后台 → 会话概览（末位再右移回到代码）。
     fireEvent.keyDown(reviewTab, { key: 'ArrowRight' });
 
     expect(onTabChange).toHaveBeenLastCalledWith('agent');
@@ -95,8 +98,18 @@ describe('SessionSidePanel', () => {
 
     fireEvent.keyDown(agentTab, { key: 'ArrowRight' });
 
+    expect(onTabChange).toHaveBeenLastCalledWith('background');
+    expect(document.activeElement).toBe(backgroundTab);
+
+    fireEvent.keyDown(backgroundTab, { key: 'ArrowRight' });
+
     expect(onTabChange).toHaveBeenLastCalledWith('context');
     expect(document.activeElement).toBe(contextTab);
+
+    fireEvent.keyDown(contextTab, { key: 'ArrowRight' });
+
+    expect(onTabChange).toHaveBeenLastCalledWith('code');
+    expect(document.activeElement).toBe(codeTab);
   });
 
   it('子代理 tab 按 subAgentCount 渲染数量徽章，数量为 0 时不渲染', () => {

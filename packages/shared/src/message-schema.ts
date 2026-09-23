@@ -225,6 +225,15 @@ export interface Message {
   agentId?: string;
   clientRequestId?: string;
   /**
+   * 持久化状态（V2 `MessageInfo.status`）：`final` = 已完成；`error` = 上游失败；
+   * `streaming` = 仍在流式写入。
+   *
+   * 读路径（`v2ToV1Message`）必须回传它：请求重放 / 清理判定依赖
+   * `getSessionMessageByRequestId` 返回的 `status`（`stored.status === 'error'`），
+   * 漏传会让判定**静默失效**（恒为 final，失败请求被误当作可重放结果）。
+   */
+  status?: 'final' | 'error' | 'streaming';
+  /**
    * Short human-readable label. For `role: 'synthetic'` this is the notice
    * label (e.g. the subagent task description). Aligns with opencode's
    * `message.description` on synthetic messages.

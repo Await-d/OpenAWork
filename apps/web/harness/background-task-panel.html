@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BackgroundTaskPanel 三视口验收</title>
+    <style>
+      /*
+       * 页面 chrome 一律用字面量：**刻意不定义**组件消费的 token，
+       * 让面板落到 `packages/shared-ui/src/tokens.ts` 的 hex 兜底 —— 与
+       * `notice-3viewports.html` 同一口径（理由见 harness/README.md）。
+       * Wave 3 若要补「主题链」哨兵色，另起 `.themed` 包裹层，不要覆盖这里的默认链。
+       */
+      body {
+        margin: 0;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        padding: 0;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 0;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 0 8px 4px;
+      }
+      .case-label {
+        font-size: 10px;
+        color: #4d5b6e;
+        padding: 6px 8px 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/background-task-panel-entry.tsx"></script>
+  </body>
+</html>

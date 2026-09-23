@@ -2,6 +2,7 @@ import {
   Children,
   Fragment,
   memo,
+  type CSSProperties,
   type ReactNode,
   useCallback,
   useEffect,
@@ -31,6 +32,11 @@ import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
 import { useFoldDisabled, useMessageFoldActive } from './fold-policy.js';
 import { isFullHtmlDocument } from './markdown-html-document.js';
+import {
+  computeReasoningBodyMaxHeight,
+  REASONING_COLLAPSED_MAX_LINES,
+  REASONING_EXPANDED_MAX_HEIGHT,
+} from '../assistant/reasoning-window.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -1222,23 +1228,35 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
   const previewSource = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const labeledSource = `*Thinking:* ${previewSource}`;
   const lineCount = previewSource.split('\n').length;
-  const isCollapsible = lineCount > 1;
-  const shouldCollapse = isCollapsible && !expanded && !foldDisabled && !messageFoldActive;
+  // 折叠归属与窗口参数：窗口与主思考块（AssistantReasoningBlock）共用同一组参数——
+  // 折叠显示最新 REASONING_COLLAPSED_MAX_LINES 行，展开到 REASONING_EXPANDED_MAX_HEIGHT
+  // 后在块内滚动；自折叠被禁用（外层折叠生效 / 最新回复）时不做任何限高。
+  const selfFoldAvailable = lineCount > 1 && !foldDisabled && !messageFoldActive;
+  const shouldCollapse = selfFoldAvailable && !expanded;
+
+  const windowStyle: CSSProperties | null = shouldCollapse
+    ? {
+        maxHeight: computeReasoningBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
+        overflow: 'clip',
+      }
+    : selfFoldAvailable
+      ? { maxHeight: REASONING_EXPANDED_MAX_HEIGHT, overflow: 'auto' }
+      : null;
+
+  // 与主思考块一致的「贴底窗口」：column-reverse 把内容钉在容器底部，超出部分从顶部
+  // 裁掉，可见区始终落在最新的若干行上；展开后向上滚即可回看更早的思考。
+  const bodyStyle: CSSProperties | undefined = windowStyle
+    ? {
+        ...windowStyle,
+        display: 'flex',
+        flexDirection: 'column-reverse',
+        position: 'relative',
+      }
+    : undefined;
 
   return (
     <div className="assistant-reasoning-block" data-collapsed={shouldCollapse ? 'true' : undefined}>
-      <div
-        className="assistant-reasoning-body"
-        style={
-          shouldCollapse
-            ? {
-                maxHeight: `${2 * 1.6 * 13 + 4}px`,
-                overflow: 'clip',
-                position: 'relative',
-              }
-            : undefined
-        }
-      >
+      <div className="assistant-reasoning-body" style={bodyStyle}>
         <div className="assistant-rich-content-body">
           <MarkdownImageProvider urls={extractMarkdownImageUrls(labeledSource)}>
             <ReactMarkdown
@@ -1251,20 +1269,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
           </MarkdownImageProvider>
         </div>
       </div>
-      {shouldCollapse && (
-        <div
-          style={{
-            position: 'relative',
-            marginTop: -30,
-            height: 30,
-            background:
-              'linear-gradient(to bottom, transparent 0%, var(--bg-base) 40%, var(--bg-base) 100%)',
-            pointerEvents: 'none',
-            borderRadius: '0 0 6px 6px',
-          }}
-        />
-      )}
-      {isCollapsible && !foldDisabled && !messageFoldActive && (
+      {selfFoldAvailable && (
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}

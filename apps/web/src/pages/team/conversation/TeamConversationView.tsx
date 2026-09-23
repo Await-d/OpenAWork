@@ -25,6 +25,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
+import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
+import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
 import type { ChatRenderGroup } from '../../../components/chat/message/chat-message-group-list.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
@@ -43,6 +45,7 @@ import { TeamSessionHeader } from './extras/TeamSessionHeader.js';
 import { TeamUserJumpRail } from './extras/TeamUserJumpRail.js';
 import { TeamRoleTypingIndicator } from './extras/TeamRoleTypingIndicator.js';
 import { TeamInitModal } from './extras/TeamInitModal.js';
+import { TeamChangesPanelModal } from './extras/TeamChangesPanelModal.js';
 import { TeamRunEventsPreview } from './extras/TeamRunEventsPreview.js';
 import type { LayerMessages } from './extras/team-layer-messages.js';
 import type { MultiLayerViewMode, ViewMode } from './extras/TeamViewModeToggle.js';
@@ -368,6 +371,8 @@ export function TeamConversationView({
     [composerEnabled, state, gatewayUrl, sessionId, token, dispatchTeamText],
   );
 
+  const [changesPanelOpen, setChangesPanelOpen] = useState(false);
+
   const {
     findRetrySource,
     handleComposerModelSelect,
@@ -384,10 +389,47 @@ export function TeamConversationView({
     composerEnabled,
     dispatchTeamText,
     gatewayUrl,
+    onOpenChangesPanel: () => setChangesPanelOpen(true),
     sessionId,
     state,
     token,
   });
+
+  /**
+   * 文件变更必选交互：重试 / 编辑重发前检测受影响范围的变更，
+   * 有变更则先让用户选择（保留 / 恢复 / 打开变更快照 / 取消）。
+   * team 的面板落点 = 变更快照 modal（不能跨引 chat 的审查面板）。
+   */
+  const snapshotAwareAction = useSnapshotAwareAction({
+    sessionId,
+    gatewayUrl,
+    messages: state.messages,
+    onOpenFileChangesPanel: () => {
+      // 变更快照是 modal，底层重试 / 编辑弹窗必须先关闭，否则会挡住面板。
+      setRetryPrompt(null);
+      setHistoryEditPrompt(null);
+      setChangesPanelOpen(true);
+    },
+  });
+
+  const requestRetryWithFileChoice = useCallback(() => {
+    snapshotAwareAction.checkAndExecute({
+      action: 'retry',
+      ...(retryPrompt ? { sourceMessageId: retryPrompt.messageId } : {}),
+      onProceed: handleRetryCurrent,
+    });
+  }, [handleRetryCurrent, retryPrompt, snapshotAwareAction]);
+
+  const requestHistoryEditWithFileChoice = useCallback(
+    (text: string, inputParts?: InputImageContent[]) => {
+      snapshotAwareAction.checkAndExecute({
+        action: 'edit',
+        ...(historyEditPrompt ? { sourceMessageId: historyEditPrompt.messageId } : {}),
+        onProceed: () => handleResendHistoryEdit(text, inputParts),
+      });
+    },
+    [handleResendHistoryEdit, historyEditPrompt, snapshotAwareAction],
+  );
 
   const {
     activePendingQuestion,
@@ -596,6 +638,17 @@ export function TeamConversationView({
           }}
         />
       )}
+      <SnapshotRestoreConfirmDialog
+        {...snapshotAwareAction.dialogProps}
+        restoring={snapshotAwareAction.restoring}
+      />
+      {changesPanelOpen ? (
+        <TeamChangesPanelModal
+          gatewayUrl={gatewayUrl}
+          onClose={() => setChangesPanelOpen(false)}
+          sessionId={sessionId}
+        />
+      ) : null}
       <div
         style={
           soloMode || classicWorkbench
@@ -752,11 +805,11 @@ export function TeamConversationView({
               onReplyInlineQuestion={onReplyInlineQuestion}
               historyEditPrompt={historyEditPrompt}
               onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
-              onResendHistoryEdit={handleResendHistoryEdit}
+              onResendHistoryEdit={requestHistoryEditWithFileChoice}
               onContinueHistoryEdit={handleContinueHistoryEdit}
               retryPrompt={retryPrompt}
               onCloseRetry={() => setRetryPrompt(null)}
-              onRetryCurrent={handleRetryCurrent}
+              onRetryCurrent={requestRetryWithFileChoice}
               chatSearch={chatSearch}
               composerVariant="session"
               providers={state.providers}

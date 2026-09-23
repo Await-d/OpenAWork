@@ -25,6 +25,7 @@ import type {
 } from '../../../hooks/editor/useFileEditor.js';
 
 import { useBookmarkStore } from '../../../stores/chat/bookmarks.js';
+import type { RightPanelTabId } from '.././panels/right-panel-tabs.js';
 import type { ChatEditorPaneTab } from '.././hooks/use-chat-ui-state.js';
 import type { FusionChatLayoutState } from '.././layout/use-fusion-chat-layout.js';
 import type { DialogueMode } from '.././mode/dialogue-mode.js';
@@ -39,7 +40,6 @@ import type {
 } from '@openAwork/web-client';
 import { useCallback, useMemo } from 'react';
 import type { Dispatch, SetStateAction, TransitionStartFunction } from 'react';
-import type { NavigateFunction } from 'react-router';
 
 export interface ChatPageDerivationsDeps {
   readonly artifactsWorkspaceHref: string | null;
@@ -97,8 +97,11 @@ export interface ChatPageDerivationsDeps {
   readonly isFusionLayout: boolean;
   readonly messages: ChatMessage[];
   readonly multiSelect: UseMessageMultiSelectReturn;
-  readonly navigate: NavigateFunction;
-  readonly navigateToHome: () => void;
+  /**
+   * 新建会话：由 ChatPage 统一处理工作区继承 + 草稿标签（命令面板「新建会话」
+   * 必须与侧栏 / 快捷键入口同源，否则会落到陈旧工作区）。
+   */
+  readonly onStartNewSession: () => void;
   readonly openBrowserPreview: () => void;
   readonly openWorkspacePanelTab: (tab: 'code' | 'preview') => void;
   readonly pendingPermissions: PendingPermissionRequest[];
@@ -117,43 +120,7 @@ export interface ChatPageDerivationsDeps {
   readonly setEditorPaneTab: (tab: ChatEditorPaneTab) => void;
   readonly setRightOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   readonly setRightTab: (
-    value:
-      | 'agent'
-      | 'overview'
-      | 'mcp'
-      | 'bookmarks'
-      | 'plan'
-      | 'tools'
-      | 'terminals'
-      | 'skills'
-      | 'snapshots'
-      | 'history'
-      | 'viz'
-      | ((
-          prev:
-            | 'agent'
-            | 'overview'
-            | 'mcp'
-            | 'bookmarks'
-            | 'plan'
-            | 'tools'
-            | 'terminals'
-            | 'skills'
-            | 'snapshots'
-            | 'history'
-            | 'viz',
-        ) =>
-          | 'agent'
-          | 'overview'
-          | 'mcp'
-          | 'bookmarks'
-          | 'plan'
-          | 'tools'
-          | 'terminals'
-          | 'skills'
-          | 'snapshots'
-          | 'history'
-          | 'viz'),
+    value: RightPanelTabId | ((prev: RightPanelTabId) => RightPanelTabId),
   ) => void;
   readonly setShowTemplatePanel: Dispatch<SetStateAction<boolean>>;
   readonly startSessionSwitchTransition: TransitionStartFunction;
@@ -227,8 +194,7 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
     isFusionLayout,
     messages,
     multiSelect,
-    navigate,
-    navigateToHome,
+    onStartNewSession,
     openBrowserPreview,
     openWorkspacePanelTab,
     pendingPermissions,
@@ -568,8 +534,7 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
         shortcut: '⌘N',
         icon: '✨',
         onExecute: () => {
-          navigate('/chat');
-          navigateToHome();
+          onStartNewSession();
         },
       },
       {
@@ -611,8 +576,7 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
       fusionChatLayout.rightPanelCommandLabel,
       fusionChatLayout.toggleReviewPanel,
       isFusionLayout,
-      navigate,
-      navigateToHome,
+      onStartNewSession,
       setRightOpen,
       setRightTab,
       handleToggleYolo,

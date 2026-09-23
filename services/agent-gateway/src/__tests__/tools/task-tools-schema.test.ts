@@ -260,3 +260,14 @@ function taskInputShape(): Record<string, { _def?: { description?: string } }> {
   }
   throw new Error('无法定位 task 输入 schema 的对象层（ZodEffects 包装层数已变化）');
 }
+
+describe('task tool — 子代理选型指引', () => {
+  it('工具描述写明联网资讯检索派 web-researcher，并给出各 agent 定位', () => {
+    const description = taskToolDefinition.description;
+
+    expect(description).toContain('子代理选型');
+    expect(description).toMatch(/web-researcher=联网新闻/);
+    expect(description).toMatch(/scout=外部依赖源码/);
+    expect(description).toContain('general=通用研究');
+  });
+});

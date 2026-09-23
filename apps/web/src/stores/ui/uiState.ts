@@ -163,7 +163,23 @@ export interface UIStateStore {
   tabs: SessionTab[];
   activeTabId: string | null;
   addSessionTab: (sessionId: string, title: string, workspacePath?: string) => string;
-  addDraftTab: (workspacePath?: string) => string;
+  /**
+   * 新建草稿标签（同一时刻只保留一个，重复调用复用并激活）。
+   *
+   * `workspacePath`：string=绑定该工作区；`null`=显式清掉草稿已有工作区；
+   * 省略=保持草稿现有工作区不变。
+   */
+  addDraftTab: (workspacePath?: string | null) => string;
+  /**
+   * 进入「新建会话」草稿态的统一入口：把解析好的工作区落到全局选中值与草稿
+   * 标签上，并把 Chat 视图复位到空白草稿。工作区解析（显式来源 / 当前上下文
+   * 继承 / 全局兜底）由调用方用 `resolveNewSessionWorkspace` 完成。
+   *
+   * `sshConnectionId`：`undefined`=不改动现有草稿 SSH 绑定（显式路径 / 全局兜底
+   * 沿用既有行为）；`null`=清空；string=绑定该连接（继承远端会话时与远端路径
+   * 成对写入，避免只继承路径丢掉连接）。
+   */
+  openDraftSession: (workspacePath: string | null, sshConnectionId?: string | null) => string;
   /**
    * 草稿「转正」后移除草稿标签：会话在用户发出首条消息时才真正创建，
    * 创建成功后草稿标签由真实会话标签接替，标签栏不残留空对话入口。
@@ -251,9 +267,15 @@ export interface UIStateStore {
   activeSessionWorkspace: {
     sessionId: string;
     path: string | null;
+    /** 会话解析出的 SSH 连接 id（本地工作区为 null）；新建会话继承工作区时一并带走。 */
+    sshConnectionId: string | null;
     version: number;
   } | null;
-  setActiveSessionWorkspace: (sessionId: string, path: string | null) => void;
+  setActiveSessionWorkspace: (
+    sessionId: string,
+    path: string | null,
+    sshConnectionId?: string | null,
+  ) => void;
   clearActiveSessionWorkspace: (sessionId?: string) => void;
 
   /**
@@ -536,6 +558,7 @@ function isTerminalPanelPosition(value: unknown): value is TerminalPanelPosition
 export const SIDE_PANEL_ACTIVE_TABS = [
   'review',
   'agent',
+  'background',
   'code',
   'preview',
   'context',
@@ -1103,9 +1126,12 @@ export const useUIStateStore = create<UIStateStore>()(
         // 重复点击「新建会话」只会复用并激活它，不会无限堆积空对话标签。
         const existingDraftTab = state.tabs.find((tab) => tab.type === 'draft');
         if (existingDraftTab) {
-          const nextWorkspacePath = workspacePath ?? existingDraftTab.workspacePath;
+          // 省略参数 = 沿用草稿现有工作区；显式传值（含 null）才改写，
+          // 保证「在未绑定分组新建」能真正清掉上一次的工作区。
+          const hasExplicitWorkspace = workspacePath !== undefined;
+          const nextWorkspacePath = workspacePath ?? undefined;
           const nextTab: SessionTab =
-            nextWorkspacePath && nextWorkspacePath !== existingDraftTab.workspacePath
+            hasExplicitWorkspace && nextWorkspacePath !== existingDraftTab.workspacePath
               ? { ...existingDraftTab, workspacePath: nextWorkspacePath }
               : existingDraftTab;
 
@@ -1124,9 +1150,23 @@ export const useUIStateStore = create<UIStateStore>()(
 
         const tabId = createTabId('draft');
         set((currentState) => ({
-          tabs: [...currentState.tabs, createDraftTab(tabId, workspacePath)],
+          tabs: [...currentState.tabs, createDraftTab(tabId, workspacePath ?? undefined)],
           activeTabId: tabId,
         }));
+        return tabId;
+      },
+      openDraftSession: (workspacePath, sshConnectionId) => {
+        const state = get();
+        state.setSelectedWorkspacePath(workspacePath);
+        if (workspacePath) {
+          state.addSavedWorkspacePath(workspacePath);
+        }
+        if (sshConnectionId !== undefined) {
+          state.setSelectedSshConnectionId(sshConnectionId);
+        }
+
+        const tabId = state.addDraftTab(workspacePath);
+        state.navigateToHome();
         return tabId;
       },
       closeDraftTabs: () => {
@@ -1435,11 +1475,12 @@ export const useUIStateStore = create<UIStateStore>()(
       selectedSshConnectionId: null,
       setSelectedSshConnectionId: (connectionId) => set({ selectedSshConnectionId: connectionId }),
       activeSessionWorkspace: null,
-      setActiveSessionWorkspace: (sessionId, path) =>
+      setActiveSessionWorkspace: (sessionId, path, sshConnectionId = null) =>
         set((state) => ({
           activeSessionWorkspace: {
             sessionId,
             path: path ? normalizeWorkspacePath(path) : null,
+            sshConnectionId,
             version:
               state.activeSessionWorkspace?.sessionId === sessionId
                 ? state.activeSessionWorkspace.version + 1

@@ -14,7 +14,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
+import { ToastContainer } from '../../../components/common/feedback/ToastNotification.js';
 import { useChatRetryAndEdit } from './use-chat-retry-and-edit.js';
 import type { RetryPrompt } from './use-chat-message-actions.js';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
@@ -193,6 +194,32 @@ describe('useChatRetryAndEdit — handleRetryInCurrentSession', () => {
     ]);
     expect(sendMessage).toHaveBeenCalledWith('retry text', {});
     expect(setRetryPrompt).toHaveBeenCalledWith(null);
+  });
+
+  it('回退成功后发出带「查看文件变更」入口的 toast', async () => {
+    const onOpenFileChangesPanel = vi.fn();
+    const retryPrompt: RetryPrompt = { sourceMessageId: 'm3', text: 'retry text' };
+
+    render(<ToastContainer />);
+    const { result } = renderHook(() =>
+      useChatRetryAndEdit(
+        makeOptions({
+          retryPrompt,
+          onOpenFileChangesPanel,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleRetryInCurrentSession();
+    });
+
+    expect(screen.getByText('已回退到所选消息，后续内容已清除')).toBeTruthy();
+    const actionButton = screen.getByRole('button', { name: '查看文件变更' });
+    act(() => {
+      actionButton.click();
+    });
+    expect(onOpenFileChangesPanel).toHaveBeenCalledTimes(1);
   });
 
   it('截断失败时中止重发、把错误送达 UI 且不产生未处理 rejection', async () => {

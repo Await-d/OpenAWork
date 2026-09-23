@@ -30,6 +30,7 @@ import { MobileVoiceRecorder } from '../components/MobileVoiceRecorder';
 import { MobileAttachmentBar } from '../components/MobileAttachmentBar';
 import type { MobileAttachmentItem } from '../components/MobileAttachmentBar';
 import { ChatMessageBubble } from '../components/chat-message-bubble';
+import { RollbackNotice } from '../components/RollbackNotice';
 import { MobileCompanionStage } from '../components/MobileCompanionStage';
 import { MobileChatSearchBar } from '../components/MobileChatSearchBar';
 import { ActionSheet } from '../components/ActionSheet';
@@ -76,6 +77,7 @@ import { inferAttachmentType, resolveAttachmentMimeType } from './chat-screen/ch
 import { useChatArtifacts } from './chat-screen/use-chat-artifacts';
 import { useChatImageViewer } from './chat-screen/use-chat-image-viewer';
 import { useMobileImageGenerationSettings } from './chat-screen/use-mobile-image-generation-settings';
+import { useRollbackFileChoice } from './chat-screen/use-rollback-file-choice';
 
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl, userEmail } = useAuthStore();
@@ -386,6 +388,41 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     loadArtifactHistory,
     sessionId,
   ]);
+
+  const [rollbackNotice, setRollbackNotice] = useState<string | null>(null);
+
+  // 回退 / 重新生成的文件变更必选交互：检测到变更时先让用户选择处理方式。
+  const rollbackFileChoice = useRollbackFileChoice({
+    accessToken,
+    gatewayUrl,
+    messages,
+    sessionId,
+  });
+
+  useEffect(() => {
+    if (!rollbackNotice) return;
+    const timer = setTimeout(() => setRollbackNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [rollbackNotice]);
+
+  /** 截断到指定消息（inclusive），同步本地列表并给出回退提示。 */
+  const truncateToMessage = useCallback(
+    async (messageId: string) => {
+      if (!accessToken) {
+        // 不得静默降级：无凭据时截断会被跳过，若继续重发就会产生重复回答。
+        throw new Error('缺少登录凭据，无法回退消息。');
+      }
+      const { messages: remaining } = await createSessionsClient(gatewayUrl).truncateMessages(
+        accessToken,
+        sessionId,
+        messageId,
+        { inclusive: true },
+      );
+      setMessages(normalizeMobileChatMessages(remaining));
+      setRollbackNotice('已回退到所选消息，后续内容已清除');
+    },
+    [accessToken, gatewayUrl, sessionId, setMessages],
+  );
 
   const startTextStream = useCallback(
     async (draft: RetryableTextRequest, options: { appendUserMessage: boolean }) => {
@@ -738,20 +775,25 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         return;
       }
 
-      await startTextStream(
-        {
-          displayMessage: text || `上传了 ${inputParts.length} 张图片`,
-          ...(inputParts.length > 0 ? { inputParts } : {}),
-          requestMessage: text,
-          userContent: text,
-          ...(message.inputImages && message.inputImages.length > 0
-            ? { userInputImages: message.inputImages }
-            : {}),
-        },
-        { appendUserMessage: true },
-      );
+      // 有文件变更时先让用户选择；截断落在本条用户消息（inclusive）后重发，
+      // 避免原消息与新消息在列表里重复出现。
+      await rollbackFileChoice.requestRollbackWithFileChoice(message.id, async () => {
+        await truncateToMessage(message.id);
+        await startTextStream(
+          {
+            displayMessage: text || `上传了 ${inputParts.length} 张图片`,
+            ...(inputParts.length > 0 ? { inputParts } : {}),
+            requestMessage: text,
+            userContent: text,
+            ...(message.inputImages && message.inputImages.length > 0
+              ? { userInputImages: message.inputImages }
+              : {}),
+          },
+          { appendUserMessage: true },
+        );
+      });
     },
-    [startTextStream],
+    [rollbackFileChoice, startTextStream, truncateToMessage],
   );
 
   const regenerateAssistantMessage = useCallback(
@@ -765,20 +807,26 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
 
       const inputParts = toInputImageParts(previousUserMessage);
       const text = previousUserMessage.content.trim();
-      await startTextStream(
-        {
-          displayMessage: text || `上传了 ${inputParts.length} 张图片`,
-          ...(inputParts.length > 0 ? { inputParts } : {}),
-          requestMessage: text,
-          userContent: text,
-          ...(previousUserMessage.inputImages && previousUserMessage.inputImages.length > 0
-            ? { userInputImages: previousUserMessage.inputImages }
-            : {}),
-        },
-        { appendUserMessage: false },
-      );
+      // 有文件变更时先让用户选择（保留 / 恢复 / 取消）；无变更直接继续。
+      // 检测以「上一条用户消息」为源（覆盖其后所有回合），截断落在本条 assistant 消息
+      // （inclusive）——保留用户气泡，只清掉这轮回答，避免追加出重复回答。
+      await rollbackFileChoice.requestRollbackWithFileChoice(previousUserMessage.id, async () => {
+        await truncateToMessage(message.id);
+        await startTextStream(
+          {
+            displayMessage: text || `上传了 ${inputParts.length} 张图片`,
+            ...(inputParts.length > 0 ? { inputParts } : {}),
+            requestMessage: text,
+            userContent: text,
+            ...(previousUserMessage.inputImages && previousUserMessage.inputImages.length > 0
+              ? { userInputImages: previousUserMessage.inputImages }
+              : {}),
+          },
+          { appendUserMessage: false },
+        );
+      });
     },
-    [messages, startTextStream],
+    [messages, rollbackFileChoice, startTextStream, truncateToMessage],
   );
 
   const retryLastTextRequest = useCallback(async () => {
@@ -901,7 +949,18 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       <View style={styles.container}>
         <ChatHeader
           onBack={() => router.back()}
-          onOpenAnswerRetry={() => router.push('/answer-retry')}
+          onOpenAnswerRetry={() => {
+            const latestAssistant = [...messages]
+              .reverse()
+              .find((message) => message.role === 'assistant');
+            router.push({
+              pathname: '/answer-retry',
+              params: {
+                sessionId,
+                ...(latestAssistant ? { messageId: latestAssistant.id } : {}),
+              },
+            });
+          }}
           onOpenAttachments={() => router.push('/attachments')}
           onOpenInputContext={() => router.push('/input-context')}
           onToggleSearch={() => setSearchOpen((prev) => !prev)}
@@ -931,6 +990,17 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             }}
             onNext={() => moveSearchResult('next')}
             onPrevious={() => moveSearchResult('previous')}
+          />
+        ) : null}
+
+        {rollbackNotice ? (
+          <RollbackNotice
+            text={rollbackNotice}
+            onDismiss={() => setRollbackNotice(null)}
+            onOpenSnapshots={() => {
+              setRollbackNotice(null);
+              router.push({ pathname: '/snapshot-recovery', params: { sessionId } });
+            }}
           />
         ) : null}
 

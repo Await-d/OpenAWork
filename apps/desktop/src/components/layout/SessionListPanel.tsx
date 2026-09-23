@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useNavigate, useLocation, useParams } from 'react-router';
 import { useAuthStore } from '../../../../web/src/stores/auth/auth.js';
+import { useUIStateStore } from '../../../../web/src/stores/ui/uiState.js';
+import { resolveNewSessionWorkspace } from '../../../../web/src/utils/session/new-session-workspace.js';
 
 interface SessionRow {
   id: string;
@@ -38,7 +40,28 @@ export default function SessionListPanel() {
 
   async function createSession() {
     if (!token) return;
-    const session = await createSessionsClient(gatewayUrl).create(token ?? '');
+    // 工作区按「点击来源」解析：正在查看的会话 → 全局选中值；都没有时不传
+    // metadata，保持「未绑定工作区」语义，避免凭空写一个路径。
+    const uiState = useUIStateStore.getState();
+    const contextSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] || null;
+    const resolvedWorkspace = resolveNewSessionWorkspace({
+      contextSessionId,
+      activeSessionWorkspace: uiState.activeSessionWorkspace,
+      fallbackWorkspacePath: uiState.selectedWorkspacePath,
+    });
+    const session = await createSessionsClient(gatewayUrl).create(token ?? '', {
+      ...(resolvedWorkspace.workspacePath
+        ? {
+            metadata: {
+              workingDirectory: resolvedWorkspace.workspacePath,
+              // 远端工作区必须与连接 id 成对写入，否则网关按本地路径校验。
+              ...(resolvedWorkspace.sshConnectionId
+                ? { sshConnectionId: resolvedWorkspace.sshConnectionId }
+                : {}),
+            },
+          }
+        : {}),
+    });
     if (session.id) void navigate(`/chat/${session.id}`);
   }
 

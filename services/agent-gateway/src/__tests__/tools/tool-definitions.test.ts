@@ -36,6 +36,26 @@ describe('gateway tool definitions render contract', () => {
     expect(byName.get('session_move')?.function.parameters.properties).toHaveProperty('force');
   });
 
+  it('Agent 工具的参数携带子代理选型指引（联网资讯检索派 web-researcher）', () => {
+    const definitions = buildGatewayToolDefinitions();
+    const agent = definitions.find((definition) => definition.function.name === 'Agent');
+    const properties = agent?.function.parameters.properties ?? {};
+
+    // 历史现象：模型把联网新闻检索全部派给 scout（当时没有正确选项）。
+    // 选型指引必须落在模型真正读到的位置：Agent 工具描述 + schema 参数说明。
+    expect(agent?.function.description).toContain('web-researcher');
+    expect(agent?.function.description).toContain('不要派 scout');
+    expect(properties['subagent_type']).toMatchObject({
+      description: expect.stringContaining('web-researcher'),
+    });
+    expect(properties['subagent_type']).toMatchObject({
+      description: expect.stringContaining('不要派 scout'),
+    });
+    expect(properties['run_in_background']).toMatchObject({
+      description: expect.stringContaining('task_id'),
+    });
+  });
+
   it('renders the effective skill set into the visible Skill definition', () => {
     const definitions = buildGatewayToolDefinitions({
       effectiveSkills: [

@@ -61,8 +61,8 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
   {
     id: 'task_run',
     label: '子任务委派',
-    description: '启动子代理执行委派任务',
-    defaultAction: 'allow',
+    description: '启动子代理执行委派任务（默认需用户批准；yolo 档位与 team 后台成员免审批）',
+    defaultAction: 'ask',
     supportsPatterns: true,
   },
   {

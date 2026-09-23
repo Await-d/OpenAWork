@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   PlanPanel,
   ToolCallCard,
@@ -40,6 +40,8 @@ import {
 } from '../../../components/chat/terminal/TerminalListToolbar.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
+import { BackgroundTaskPanel } from './background-task-panel.js';
+import type { BackgroundTaskPanelModel } from './use-background-task-panel.js';
 import { BookmarksPanel } from '../../../components/chat/misc/bookmarks-panel.js';
 import {
   RIGHT_PANEL_TABS,
@@ -65,6 +67,19 @@ import type {
 import type { DialogueMode } from '../mode/dialogue-mode.js';
 
 const EMPTY_KILL_SET = new Set<string>();
+
+/** 后台任务面板的稳定空集合：避免每次渲染新建 Set 触发子组件无谓重渲染。 */
+const EMPTY_BACKGROUND_ID_SET: ReadonlySet<string> = new Set<string>();
+
+/** 可选回调的缺省占位：面板签名要求必填，宿主未接线时保持无操作而非崩溃。 */
+const NOOP_BACKGROUND_PANEL_CALLBACK = (): void => {};
+
+/** 后台任务模型缺省值：宿主尚未提供数据时渲染空面板（三态由 loading / error 表达）。 */
+const EMPTY_BACKGROUND_TASK_MODEL: BackgroundTaskPanelModel = {
+  rows: [],
+  summary: { activeTotal: 0, runningShells: 0, runningSubagents: 0 },
+  now: 0,
+};
 
 const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
   running: '运行中',
@@ -207,6 +222,23 @@ export interface ChatRightPanelProps {
   sessionTerminalsPendingKillIds?: Set<string>;
   onKillTerminal?: (terminalId: string) => Promise<void>;
   onReloadTerminals?: () => void;
+  /** 后台任务面板模型（`ChatPage` 的 `useBackgroundTaskPanel` 产出）。 */
+  backgroundTaskModel?: BackgroundTaskPanelModel;
+  /** 正在停止中的子代理 id：后台面板行内呈现「停止中」。 */
+  stoppingSubAgentIds?: ReadonlySet<string>;
+  /** 终端列表最近一次成功同步的时间戳（后台面板顶部「同步于 Xs 前」）。 */
+  sessionTerminalsLastSyncedAtMs?: number | null;
+  /** 停止单个子代理（后台面板行内操作，透传 `handleStopChildSession`）。 */
+  onStopSubagent?: (childSessionId: string) => void;
+  /** 停止全部子代理（后台面板汇总条操作，透传 `handleStopAllChildSessions`）。 */
+  onStopAllSubagents?: () => void;
+  /**
+   * 从后台面板跳转「终端管理」并选中目标终端。选中态由 `ChatPage` 提升，
+   * 经 `backgroundTaskPreviewTerminalId` 回传，用于终端列表展开 / 高亮该行。
+   */
+  onPreviewTerminal?: (terminalId: string) => void;
+  /** 由 `onPreviewTerminal` 选中的终端 id；终端面板据此展开并高亮该行。 */
+  backgroundTaskPreviewTerminalId?: string | null;
   /**
    * Bridge from `ChatPage`: bookmark navigate / future message-jump
    * surfaces use this to expand pagination so a target message that's
@@ -651,11 +683,30 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       loading={props.sessionTerminalsLoading ?? false}
                       error={props.sessionTerminalsError ?? null}
                       pendingKillIds={props.sessionTerminalsPendingKillIds ?? EMPTY_KILL_SET}
+                      focusTerminalId={props.backgroundTaskPreviewTerminalId ?? null}
                       onKill={props.onKillTerminal}
                       onReload={props.onReloadTerminals}
                       gatewayUrl={gatewayUrl}
                       token={token}
                       sessionId={currentSessionId}
+                    />
+                  )}
+                  {rightTab === 'background' && (
+                    <BackgroundTaskPanel
+                      model={props.backgroundTaskModel ?? EMPTY_BACKGROUND_TASK_MODEL}
+                      loading={props.sessionTerminalsLoading ?? false}
+                      error={props.sessionTerminalsError ?? null}
+                      lastSyncedAtMs={props.sessionTerminalsLastSyncedAtMs ?? null}
+                      stoppingSubAgentIds={props.stoppingSubAgentIds ?? EMPTY_BACKGROUND_ID_SET}
+                      pendingKillIds={props.sessionTerminalsPendingKillIds ?? EMPTY_KILL_SET}
+                      onReloadTerminals={props.onReloadTerminals ?? NOOP_BACKGROUND_PANEL_CALLBACK}
+                      onOpenSession={openChildSessionInspector}
+                      onStopSubagent={props.onStopSubagent ?? NOOP_BACKGROUND_PANEL_CALLBACK}
+                      onStopAllSubagents={
+                        props.onStopAllSubagents ?? NOOP_BACKGROUND_PANEL_CALLBACK
+                      }
+                      onPreviewTerminal={props.onPreviewTerminal ?? NOOP_BACKGROUND_PANEL_CALLBACK}
+                      onKillTerminal={props.onKillTerminal ?? NOOP_BACKGROUND_PANEL_CALLBACK}
                     />
                   )}
                   {rightTab === 'mcp' && (
@@ -751,6 +802,7 @@ function RightPanelTerminalsContent({
   loading,
   error,
   pendingKillIds,
+  focusTerminalId,
   onKill,
   onReload,
   gatewayUrl,
@@ -762,6 +814,8 @@ function RightPanelTerminalsContent({
   loading: boolean;
   error: string | null;
   pendingKillIds: Set<string>;
+  /** 由后台面板跳转选中的终端：进入时自动展开并滚动到该行。 */
+  focusTerminalId?: string | null;
   onKill?: (terminalId: string) => Promise<void>;
   onReload?: () => void;
   gatewayUrl: string;
@@ -770,7 +824,23 @@ function RightPanelTerminalsContent({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  const focusRowRef = useRef<HTMLDivElement | null>(null);
   const filter = useSessionTerminalFilter();
+
+  useEffect(() => {
+    if (!focusTerminalId) return;
+    // 后台面板跳转过来时展开目标行；滚动放到下一帧，确保展开后的行已完成布局。
+    setExpandedId(focusTerminalId);
+    const frame = requestAnimationFrame(() => {
+      const node = focusRowRef.current;
+      // jsdom 不实现 scrollIntoView：守卫后组件测试不会因此抛错。
+      if (node && typeof node.scrollIntoView === 'function') {
+        node.scrollIntoView({ block: 'nearest' });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusTerminalId]);
+
   const active = terminals.filter((t) => ACTIVE_TERMINAL_STATUSES.has(t.status));
   const closed = terminals.filter((t) => !ACTIVE_TERMINAL_STATUSES.has(t.status));
   const visible = filterSessionTerminals([...active, ...closed], filter);
@@ -860,18 +930,26 @@ function RightPanelTerminalsContent({
           const isActive = ACTIVE_TERMINAL_STATUSES.has(terminal.status);
           const isExpanded = expandedId === terminal.terminalId;
           const isPendingKill = pendingKillIds.has(terminal.terminalId);
+          const isFocused = focusTerminalId === terminal.terminalId;
           const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? 'var(--fg-muted)';
           const statusLabel = TERMINAL_STATUS_LABELS[terminal.status] ?? terminal.status;
           return (
             <div
               key={terminal.terminalId}
+              ref={isFocused ? focusRowRef : undefined}
+              data-terminal-id={terminal.terminalId}
+              data-focused={isFocused ? 'true' : undefined}
               style={{
-                border: '1px solid var(--border-subtle)',
+                border: isFocused
+                  ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-default))'
+                  : '1px solid var(--border-subtle)',
                 borderRadius: 8,
                 padding: '8px 10px',
-                background: isActive
-                  ? 'color-mix(in oklch, var(--bg-overlay) 94%, var(--success) 6%)'
-                  : 'var(--bg-overlay)',
+                background: isFocused
+                  ? 'color-mix(in oklch, var(--accent) 8%, var(--bg-overlay))'
+                  : isActive
+                    ? 'color-mix(in oklch, var(--bg-overlay) 94%, var(--success) 6%)'
+                    : 'var(--bg-overlay)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,

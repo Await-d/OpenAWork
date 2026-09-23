@@ -183,16 +183,24 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
     [input.sessionId, input.userId],
   );
   const isTaskCreatedSession =
-    sessionRow && parseSessionMetadataJson(sessionRow.metadata_json)['createdByTool'] === 'task';
+    sessionRow !== undefined &&
+    parseSessionMetadataJson(sessionRow.metadata_json)['createdByTool'] === 'task';
 
   // Fire-and-forget LLM title/icon generation on the session's own chat route.
   // 图标与会话强相关：不使用全局 fast / inline 辅助选型，避免 fast 不可用
   // （未配置、上游 403、模型下线）时会话图标静默缺失。
+  //
+  // 网关内部请求键默认跳过（唤醒 / 定时 / 命令 / handoff 都不是会话自己的用户回合），
+  // 唯一例外是 task 子代理会话自身的运行键（`task:<parent>:child:<childSessionId>`）——
+  // 子代理同样生成图标；父侧 task-* 通知键（task-job / task-reminder /
+  // task-parent-decision / task-auto-resume）仍按内部键跳过。
+  const isInternalRequestKey = isGatewayInternalRequestKey(input.clientRequestId);
+  const isTaskChildRun =
+    isTaskCreatedSession && isDelegatedChildClientRequestId(input.clientRequestId);
   if (
     input.route &&
-    !isTaskCreatedSession &&
-    !isGatewayInternalRequestKey(input.clientRequestId) &&
-    isFirstUserMessage(input.sessionId, input.userId)
+    isFirstUserMessage(input.sessionId, input.userId) &&
+    (!isInternalRequestKey || isTaskChildRun)
   ) {
     void generateSessionTitleLlm({
       route: input.route,
@@ -203,4 +211,15 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
   }
 
   return text;
+}
+
+/**
+ * 判定请求键是否为 task 子代理会话自身的运行键。
+ *
+ * 形状由 `buildDelegatedChildClientRequestId`（tools/call-omo-agent-output.ts）产出：
+ * `task:<parentClientRequestId>:child:<childSessionId>`（超长时收敛为摘要）。
+ * 父侧的 `task-*` 通知键是 `task-` 前缀而非 `task:`，不会误判。
+ */
+function isDelegatedChildClientRequestId(clientRequestId: string): boolean {
+  return clientRequestId.startsWith('task:');
 }

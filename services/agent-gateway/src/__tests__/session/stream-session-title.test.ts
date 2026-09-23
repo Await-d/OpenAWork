@@ -43,6 +43,7 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 import { persistStreamUserMessage } from '../../session/stream-session-title.js';
+import { buildDelegatedChildClientRequestId } from '../../tools/call-omo-agent-output.js';
 
 const ARTIFACTS_INDEX_PATH = '/tmp/openawork-stream-session-title-artifacts.json';
 const ARTIFACT_IMAGE_DIR = '/tmp/openawork-stream-session-title-fixtures';
@@ -78,6 +79,19 @@ function firstImagePart(): Record<string, unknown> | undefined {
   const call = mocks.appendSessionMessage.mock.calls[0]?.[0] as
     { content: Array<Record<string, unknown>> } | undefined;
   return call?.content.find((part) => part['type'] === 'input_image');
+}
+
+function createChatRoute(): ModelRouteConfig {
+  return {
+    model: 'gpt-5.6-sol',
+    apiBaseUrl: 'https://api.example.com/v1',
+    apiKey: 'test-key',
+    maxTokens: 512,
+    temperature: 0.5,
+    upstreamProtocol: 'chat_completions',
+    requestOverrides: {},
+    supportsThinking: false,
+  };
 }
 
 describe('persistStreamUserMessage', () => {
@@ -335,16 +349,7 @@ describe('persistStreamUserMessage', () => {
   it('标题 / 图标生成使用会话主路由，不注入额外路由', () => {
     mocks.getSessionMessageByRequestId.mockReturnValue(null);
     mocks.isFirstUserMessage.mockReturnValue(true);
-    const route: ModelRouteConfig = {
-      model: 'gpt-5.6-sol',
-      apiBaseUrl: 'https://api.example.com/v1',
-      apiKey: 'test-key',
-      maxTokens: 512,
-      temperature: 0.5,
-      upstreamProtocol: 'chat_completions',
-      requestOverrides: {},
-      supportsThinking: false,
-    };
+    const route = createChatRoute();
 
     persistStreamUserMessage({
       clientRequestId: 'request-title-route',
@@ -358,5 +363,65 @@ describe('persistStreamUserMessage', () => {
       expect.objectContaining({ route, sessionId: 'session-1', userId: 'user-1' }),
     );
     expect(mocks.generateSessionTitleLlm.mock.calls[0]?.[0]).not.toHaveProperty('fallbackRoute');
+  });
+
+  // task 子代理会话同样生成图标：只放行子会话自身的运行键
+  // （`task:<parent>:child:<childSessionId>`，与 buildDelegatedChildClientRequestId 同源）。
+  it('task 子代理会话用自身运行键时生成标题 / 图标', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+    mocks.isFirstUserMessage.mockReturnValue(true);
+    mocks.sqliteGet.mockReturnValueOnce({
+      metadata_json: JSON.stringify({ createdByTool: 'task', parentSessionId: 'parent-1' }),
+    });
+    const route = createChatRoute();
+    const clientRequestId = buildDelegatedChildClientRequestId({
+      childSessionId: 'child-1',
+      parentClientRequestId: 'parent-request-1',
+    });
+
+    persistStreamUserMessage({
+      clientRequestId,
+      message: '深挖一下这个话题',
+      sessionId: 'child-1',
+      userId: 'user-1',
+      route,
+    });
+
+    expect(mocks.generateSessionTitleLlm).toHaveBeenCalledWith(
+      expect.objectContaining({ route, sessionId: 'child-1', userId: 'user-1' }),
+    );
+  });
+
+  it('task 子代理会话收到父侧通知键时仍跳过生成', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+    mocks.isFirstUserMessage.mockReturnValue(true);
+    mocks.sqliteGet.mockReturnValueOnce({
+      metadata_json: JSON.stringify({ createdByTool: 'task', parentSessionId: 'parent-1' }),
+    });
+
+    persistStreamUserMessage({
+      clientRequestId: 'task-parent-decision:child-1:00000000-0000-4000-8000-000000000000',
+      message: '继续',
+      sessionId: 'child-1',
+      userId: 'user-1',
+      route: createChatRoute(),
+    });
+
+    expect(mocks.generateSessionTitleLlm).not.toHaveBeenCalled();
+  });
+
+  it('普通会话收到网关内部键时跳过生成', () => {
+    mocks.getSessionMessageByRequestId.mockReturnValue(null);
+    mocks.isFirstUserMessage.mockReturnValue(true);
+
+    persistStreamUserMessage({
+      clientRequestId: 'cron-job-123-00000000-0000-4000-8000-000000000000',
+      message: '定时任务',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      route: createChatRoute(),
+    });
+
+    expect(mocks.generateSessionTitleLlm).not.toHaveBeenCalled();
   });
 });

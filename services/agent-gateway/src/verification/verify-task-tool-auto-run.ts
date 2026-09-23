@@ -9,6 +9,7 @@ import {
   assert,
   extractStructuredToolResultOutput,
   extractToolResultPart,
+  isSessionTitleGenerationRequest,
   isTaskToolOutput,
   readSingleTextMessage,
   createProtocolAwareStream,
@@ -74,7 +75,13 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          fetchCalls.push(await readFetchBody(_url, init));
+          const body = await readFetchBody(_url, init);
+          // 标题/图标生成是子会话首条用户消息触发的 fire-and-forget 旁路请求
+          //（`stream-session-title.ts` 对 task 子代理的例外），不属于子代理运行契约；
+          // 排除它以保持下方 fetchCalls 下标 / 计数断言的语义稳定。
+          if (!isSessionTitleGenerationRequest(body)) {
+            fetchCalls.push(body);
+          }
           return createProtocolAwareStream(_url, '子代理已经执行完成。');
         },
         async () => {
@@ -95,7 +102,9 @@ async function main(): Promise<void> {
               // 而单通道交付（T-25）会在父会话空闲时**同步唤醒**并插入一次父侧上游请求，
               // 从而打乱下标。这里让唤醒按设计「延后」（父会话非空闲）以隔离两侧关注点；
               // 唤醒本身由 `verify-task-job-wake.ts` 专门验收。
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
+              // yolo 档位：本脚本关注交付/回流契约，委派免审批（权限门控由
+              // verify-task-tool-permission-gate.ts 专门验收）。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{"permissionMode":"yolo"}', 'paused')`,
               [parentSessionId, userId],
             );
             const sandbox = createDefaultSandbox();
@@ -321,9 +330,11 @@ async function main(): Promise<void> {
               );
               assert(
                 typeof parentTaskOutput?.['message'] === 'string' &&
-                  String(parentTaskOutput['message']).includes('<task_result>') &&
+                  String(parentTaskOutput['message']).includes(
+                    `<subagent sessionID="${output.sessionId}" state="completed">`,
+                  ) &&
                   String(parentTaskOutput['message']).includes(`task_id: ${output.sessionId}`),
-                'parent session tool_result should expose opencode-style task_result semantics',
+                'parent session tool_result should expose opencode-style subagent result semantics',
               );
               const parentNoticeText = readSingleTextMessage(
                 parentNotice as { content: Array<{ type: string; text?: string }> },
@@ -794,7 +805,11 @@ async function main(): Promise<void> {
     async () => {
       await withMockFetch(
         async (_url, init) => {
-          startupActivityFetchCalls.push(await readFetchBody(_url, init));
+          const body = await readFetchBody(_url, init);
+          // 同上：排除标题/图标生成旁路请求，保持「只发起一次 upstream 请求」的计数语义。
+          if (!isSessionTitleGenerationRequest(body)) {
+            startupActivityFetchCalls.push(body);
+          }
           return createDelayedChatCompletionsStream({
             delayMs: 80,
             request: _url,
@@ -818,7 +833,9 @@ async function main(): Promise<void> {
             sqliteRun(
               // 父会话非空闲 → 单通道交付（T-25）的唤醒按设计「延后」，避免父侧上游请求
               // 打乱本场景基于计数的断言；唤醒本身由 verify-task-job-wake.ts 专门验收。
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
+              // yolo 档位：本脚本关注交付/回流契约，委派免审批（权限门控由
+              // verify-task-tool-permission-gate.ts 专门验收）。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{"permissionMode":"yolo"}', 'paused')`,
               [parentSessionId, userId],
             );
 

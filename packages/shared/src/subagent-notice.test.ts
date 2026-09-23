@@ -110,4 +110,28 @@ describe('parseSubagentNotice', () => {
 
     expect(notice?.text).toBe('第一段\n第二段');
   });
+
+  it('剥离 <subagent> 包裹，客户端拿到纯正文', () => {
+    const notice = parseSubagentNotice(
+      buildMessage({
+        content: [
+          {
+            type: 'text',
+            text: [
+              '<subagent sessionID="child-1" state="done" description="审计会话唤醒原语">',
+              '子代理已完成 · 审计会话唤醒原语',
+              '</subagent>',
+            ].join('\n'),
+          },
+        ],
+      }),
+    );
+
+    expect(notice?.text).toBe('子代理已完成 · 审计会话唤醒原语');
+  });
+
+  it('无包裹时正文保持原样（兼容存量消息）', () => {
+    const notice = parseSubagentNotice(buildMessage({}));
+    expect(notice?.text).toBe('子代理已完成 · 审计会话唤醒原语');
+  });
 });

@@ -20,6 +20,60 @@ describe('normalizeMobileChatMessages', () => {
     expect(messages[0]?.content).toBe('第一次');
   });
 
+  it('保留消息创建时间与消息级回合键（回退检测用）', () => {
+    const messages = normalizeMobileChatMessages([
+      {
+        id: 'a-1',
+        role: 'assistant',
+        content: 'ok',
+        createdAt: 1700000000000,
+        clientRequestId: 'req-msg',
+      },
+    ]);
+
+    expect(messages[0]?.createdAtMs).toBe(1700000000000);
+    expect(messages[0]?.clientRequestIds).toEqual(['req-msg']);
+
+    // 历史 / 兼容路径可能是 ISO 字符串：必须同样归一化为毫秒，否则会退化成
+    // 「无时间信息 → 全部快照成为影响面」。
+    const isoMessages = normalizeMobileChatMessages([
+      { id: 'a-iso', role: 'assistant', content: 'ok', createdAt: '2026-07-15T10:05:00.000Z' },
+    ]);
+    expect(isoMessages[0]?.createdAtMs).toBe(Date.parse('2026-07-15T10:05:00.000Z'));
+  });
+
+  it('从 assistant trace 提取 toolCalls / 变更摘要里的回合键', () => {
+    const trace = JSON.stringify({
+      type: 'assistant_trace',
+      payload: {
+        text: 'done',
+        toolCalls: [{ toolCallId: 't-1', toolName: 'write_file', clientRequestId: 'req-tool' }],
+        modifiedFilesSummary: {
+          type: 'modified_files_summary',
+          title: '变更',
+          summary: '摘要',
+          files: [
+            {
+              file: 'a.ts',
+              before: '',
+              after: '',
+              additions: 1,
+              deletions: 0,
+              clientRequestId: 'req-file',
+            },
+          ],
+        },
+      },
+    });
+    const messages = normalizeMobileChatMessages([
+      { id: 'a-2', role: 'assistant', content: trace, createdAt: 1700000000001 },
+    ]);
+
+    expect(messages[0]?.clientRequestIds).toEqual(['req-tool', 'req-file']);
+    expect(messages[0]?.createdAtMs).toBe(1700000000001);
+    expect(messages[0]?.content).toContain('done');
+  });
+
   it('synthetic（网关注入的子代理通知）不得进入移动端 transcript', () => {
     const messages = normalizeMobileChatMessages([
       {

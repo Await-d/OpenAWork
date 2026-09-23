@@ -414,3 +414,15 @@ export async function seedPendingToolCallConversation(input: {
     ],
   });
 }
+
+/**
+ * 判定是否为会话标题/图标生成的旁路请求。
+ *
+ * 来源：`session-title-llm.ts` 的 `TITLE_SYSTEM_PROMPT`（首句「你是一个标题生成器。」）。
+ * task 子代理会话同样会生成图标（`stream-session-title.ts` 的 task 子代理例外），
+ * 该请求是 fire-and-forget 旁路、不属于子代理运行契约；验收脚本在收集
+ * `fetchCalls` 时应排除它，保持「子会话运行 + 父会话唤醒」的下标 / 计数语义。
+ */
+export function isSessionTitleGenerationRequest(body: string): boolean {
+  return body.includes('标题生成器');
+}

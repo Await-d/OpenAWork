@@ -9,6 +9,7 @@ import {
   ChatOverviewTabContent,
   type UpstreamSummaryItem,
 } from './right-panel-sections.js';
+import { ChatRightPanel } from './chat-right-panel.js';
 import type { ChatOverviewTabContentProps } from './chat-overview-tab-content.js';
 
 const copyTextToClipboardMock = vi.hoisted(() =>
@@ -22,6 +23,15 @@ vi.mock('../../../components/layout/file-tree/file-tree-actions.js', () => ({
 vi.mock('@openAwork/shared-ui', () => ({
   ContextPanel: () => <div data-testid="context-panel-mock" />,
   PlanHistoryPanel: () => <div data-testid="plan-history-panel-mock" />,
+  // ChatRightPanel 的模块图（settings / provider 链路）在模块级读取平台目录，
+  // 占位返回空列表即可，与 block-tool-call 等测试的 mock 口径一致。
+  getProviderUiList: () => [],
+}));
+
+// W2b 的后台任务面板以占位替身接入：本用例只验证右栏 tab 接线（切到
+// `background` 会渲染面板），不依赖面板内部实现。
+vi.mock('./background-task-panel.js', () => ({
+  BackgroundTaskPanel: () => <div data-testid="background-task-panel-mock" />,
 }));
 
 afterEach(() => {
@@ -103,6 +113,58 @@ function renderOverview(overrides: Partial<ChatOverviewTabContentProps> = {}) {
       <ChatOverviewTabContent {...createOverviewProps(overrides)} />
     </MemoryRouter>,
   );
+}
+
+/**
+ * 右栏全量 props 的最小可用集合：仅用于验证 tab 接线，
+ * 未涉及的分支传空值即可（只有 `background` 分支会被渲染）。
+ */
+function createRightPanelProps(): React.ComponentProps<typeof ChatRightPanel> {
+  return {
+    agentEvents: [],
+    artifactsWorkspaceHref: null,
+    attachmentItems: [],
+    childSessions: [],
+    compactions: [],
+    contentArtifactCount: 0,
+    contentArtifactCountStatus: 'ready',
+    contextUsageSnapshot: null,
+    currentSessionId: 'session-1',
+    currentUserEmail: undefined,
+    dagEdges: [],
+    dagNodes: [],
+    dialogueMode: 'coding',
+    effectiveWorkingDirectory: '/workspace/demo',
+    gatewayUrl: 'http://127.0.0.1:3000',
+    mcpServers: [],
+    messages: [],
+    navigate: () => {},
+    onCompactSession: () => {},
+    onOpenRecoveryStrategy: () => {},
+    openChildSessionInspector: () => {},
+    pendingPermissions: [],
+    pendingQuestions: [],
+    planHistory: [],
+    planTasks: [],
+    providerCatalog: new Map(),
+    resolveTaskToolRuntimeSnapshot: () => undefined,
+    rightOpen: true,
+    rightTab: 'background',
+    selectedChildSessionId: null,
+    sessionStateStatus: null,
+    sessionTasks: [],
+    sessionTodos: [],
+    setRightTab: () => {},
+    setToolFilter: () => {},
+    sharedUiThemeVars: {},
+    taskToolRuntimeLookup: undefined,
+    token: null,
+    toolCallCards: [],
+    toolFilter: 'all',
+    upstreamSummaries: [],
+    workspaceFileItems: [],
+    yoloMode: false,
+  };
 }
 
 describe('right-panel-sections UI', () => {
@@ -270,5 +332,16 @@ describe('right-panel-sections UI', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(document.getElementById(contentId ?? '')?.hasAttribute('hidden')).toBe(false);
     expect(screen.getByText('检查点与恢复')).toBeTruthy();
+  });
+
+  it('切到 background tab 渲染 BackgroundTaskPanel（占位替身）', () => {
+    render(<ChatRightPanel {...createRightPanelProps()} />);
+
+    const backgroundTab = screen.getByRole('tab', { name: '后台任务' });
+    expect(backgroundTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('background-task-panel-mock')).toBeTruthy();
+    expect(
+      screen.getByText('统一查看当前会话的子代理任务与后台命令，支持停止 / 终止。'),
+    ).toBeTruthy();
   });
 });

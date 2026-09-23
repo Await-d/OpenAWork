@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import { listBuiltinChannelCommands } from './channel-command-experience.js';
 import { parseSlackInboundMessage } from './inbound-parsers/slack.js';
+import { attachSlackInboundImages } from './slack-media.js';
 
 type SlackApp = {
   start(port?: number): Promise<unknown>;
@@ -35,6 +36,7 @@ type SlackMessage = {
   user?: string;
   text?: string;
   username?: string;
+  files?: unknown[];
 };
 
 type SlackWebClient = {
@@ -237,7 +239,14 @@ export class SlackChannelService implements MessagingChannelService {
         botId: this.botUserId,
       });
       if (!msg) return;
-      this.notify({ type: 'message', pluginId: this.pluginId, message: msg });
+      // Slack 入站不经过通用路由的 enrich 钩子：在此处下载图片（base64）后
+      // 再 notify；下载失败不影响文本投递（attach 内部降级为原消息）。
+      const enriched = await attachSlackInboundImages({
+        token: this.instance.config['botToken'] ?? '',
+        message: msg,
+        raw: message,
+      });
+      this.notify({ type: 'message', pluginId: this.pluginId, message: enriched });
     });
   }
 }

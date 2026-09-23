@@ -57,6 +57,45 @@ export function buildTaskToolBackgroundMessage(input: {
   ].join('\n');
 }
 
+/**
+ * 上游 wire 词表（参考库 `Job.Status`）：标签内 `state` 属性对齐
+ * `completed | error | cancelled`。本仓内部/客户端契约仍用 `done | failed | cancelled`
+ * （`SubagentNoticeState`），仅在**写给模型的标签文本**里做映射。
+ */
+const SUBAGENT_WIRE_STATE: Record<'done' | 'failed' | 'cancelled', string> = {
+  done: 'completed',
+  failed: 'error',
+  cancelled: 'cancelled',
+};
+
+/** 把本仓状态词表映射为上游 wire 词表（`done → completed` / `failed → error`）。 */
+export function toSubagentWireState(state: 'done' | 'failed' | 'cancelled'): string {
+  return SUBAGENT_WIRE_STATE[state];
+}
+
+/**
+ * 同步 task 结果正文上限（字符）。
+ *
+ * 参考库前台路径只回传子代理最后一条 assistant 文本（`SubagentCompletion.text`），
+ * 但不设长度上限；本上限是**额外防护**——防止单条超长总结（例如把整个文件
+ * 贴进回复）直接吃掉父会话上下文。超出时截断并引导按 `task_id` / sessionID
+ * 去子会话读全文。
+ */
+const MAX_DELEGATED_RESULT_CHARS = 20_000;
+
+function clampDelegatedResultBody(body: string, sessionId: string): string {
+  if (body.length <= MAX_DELEGATED_RESULT_CHARS) {
+    return body;
+  }
+
+  return `${body.slice(0, MAX_DELEGATED_RESULT_CHARS)}\n\n[子代理结果过长，已截断 — 完整内容见子会话 sessionID: ${sessionId}]`;
+}
+
+/**
+ * 同步 task 工具结果（前台/等待路径）——形态对齐参考库 `subagent` 工具的
+ * 模型可见内容：`<subagent sessionID="…" state="…">…</subagent>`（`subagent.ts:257-266`），
+ * 前面保留本仓的 `task_id` resume 提示行。
+ */
 export function buildTaskToolTerminalMessage(input: {
   agent: string;
   category?: string;
@@ -69,14 +108,17 @@ export function buildTaskToolTerminalMessage(input: {
 }): string {
   const fallback =
     input.status === 'failed' ? '任务失败。' : input.status === 'cancelled' ? '任务已取消。' : '';
-  const body = input.errorMessage?.trim() || input.resultText?.trim() || fallback;
+  const body = clampDelegatedResultBody(
+    input.errorMessage?.trim() || input.resultText?.trim() || fallback,
+    input.sessionId,
+  );
 
   return [
     `task_id: ${input.sessionId}（如需继续本任务可用来 resume）`,
     '',
-    '<task_result>',
+    `<subagent sessionID="${input.sessionId}" state="${toSubagentWireState(input.status)}">`,
     body,
-    '</task_result>',
+    '</subagent>',
   ].join('\n');
 }
 

@@ -7,6 +7,7 @@
 import type { AIProvider, ActiveSelection } from '@openAwork/agent-core';
 import { ProviderManagerImpl } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
+import { applyStoredActiveSelection } from './provider-config.js';
 
 interface UserSettingRow {
   key: string;
@@ -113,16 +114,14 @@ export async function getCatalog(userId: string): Promise<CatalogEntry> {
 
   const { rawProviders, rawSelection } = loadRawSettings(userId);
 
+  // 构造期不传 selection：落库只存用户覆写项，catalog 派生模型要等
+  // syncFromModelsDev 才补回，提前校验会让指向这些模型的选择静默回退。
   const manager = rawProviders
-    ? new ProviderManagerImpl({
-        providers: rawProviders as AIProvider[],
-        active: rawSelection as ActiveSelection | undefined,
-      })
-    : rawSelection
-      ? new ProviderManagerImpl({ active: rawSelection as ActiveSelection })
-      : new ProviderManagerImpl();
+    ? new ProviderManagerImpl({ providers: rawProviders as AIProvider[] })
+    : new ProviderManagerImpl();
 
   await manager.syncFromModelsDev();
+  applyStoredActiveSelection(manager, rawSelection);
   const config = manager.getConfig();
 
   const entry: CatalogEntry = {

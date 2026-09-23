@@ -23,7 +23,7 @@ import {
 import './SessionSidePanel.css';
 
 export type SidePanelTabId =
-  'review' | 'agent' | 'code' | 'preview' | 'context' | 'files' | 'browser';
+  'review' | 'agent' | 'background' | 'code' | 'preview' | 'context' | 'files' | 'browser';
 
 export interface SessionSidePanelProps {
   readonly reviewCount?: number;
@@ -52,6 +52,7 @@ const PANEL_TAB_ORDER: readonly SidePanelTabId[] = [
   'preview',
   'review',
   'agent',
+  'background',
   'context',
 ];
 
@@ -79,6 +80,7 @@ export function SessionSidePanel({
   const panelInstanceId = useId();
   const tabButtonRefs = useRef<Record<SidePanelTabId, HTMLButtonElement | null>>({
     agent: null,
+    background: null,
     browser: null,
     code: null,
     context: null,
@@ -91,6 +93,7 @@ export function SessionSidePanel({
     { id: 'preview', label: '预览' },
     { id: 'review', label: '审查', badge: reviewCount || undefined },
     { id: 'agent', label: '子代理', badge: subAgentCount || undefined },
+    { id: 'background', label: '后台' },
     { id: 'context', label: '会话概览' },
   ];
   const activePanelId = `${panelInstanceId}-${activeTab}-panel`;

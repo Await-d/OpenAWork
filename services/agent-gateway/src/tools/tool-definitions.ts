@@ -22,6 +22,7 @@ import { bashToolDefinition, MAX_BASH_TIMEOUT_MS } from './bash-tools.js';
 import { applyPatchToolDefinition } from './apply-patch-tools.js';
 import { questionToolDefinition } from './question-tools.js';
 import { taskToolDefinition } from '../task/task-tools.js';
+import { FROZEN_CATEGORY_DESCRIPTIONS } from '../reference-frozen/category-snapshot.js';
 import { enterPlanModeToolDefinition, exitPlanModeToolDefinition } from './plan-mode-tools.js';
 import { readToolOutputToolDefinition } from './tool-output-tools.js';
 import {
@@ -1028,11 +1029,12 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
           subagent_type: {
             type: 'string',
-            description: '未传 category 时必填。**不要**同时传 category 和 subagent_type。',
+            description:
+              '未传 category 时必填。**不要**同时传 category 和 subagent_type。常用选型：explore（代码库内搜索定位）/ librarian（代码库与官方文档检索、实现示例）/ scout（外部依赖源码、上游仓库与第三方文档的只读研究）/ web-researcher（联网新闻、资讯与公开网页检索；多来源交叉比对，只读）/ general（通用研究与多步执行）。**联网资讯/新闻检索派 web-researcher，不要派 scout**。其他内置或自定义 agent 也可直接传 id。',
           },
           category: {
             type: 'string',
-            description: '未传 subagent_type 时必填。**不要**同时传 category 和 subagent_type。',
+            description: `未传 subagent_type 时必填。**不要**同时传 category 和 subagent_type。可选：${Object.keys(FROZEN_CATEGORY_DESCRIPTIONS).join(' / ')}。`,
           },
           load_skills: {
             type: 'array',
@@ -1215,11 +1217,29 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          description: { type: 'string' },
-          prompt: { type: 'string' },
-          subagent_type: { type: 'string' },
-          run_in_background: { type: 'boolean' },
-          session_id: { type: 'string' },
+          description: {
+            type: 'string',
+            description: '任务简要描述（3-5 个词），用于列表与完成通知展示。',
+          },
+          prompt: {
+            type: 'string',
+            description:
+              '传给子代理的完整任务指令：目标、边界与期望产出写清楚，子代理只拿到这一条指令。',
+          },
+          subagent_type: {
+            type: 'string',
+            description:
+              '子代理类型。常用：explore（代码库内搜索定位）/ librarian（代码库与官方文档检索、实现示例）/ scout（外部依赖源码、上游仓库与第三方文档的只读研究）/ web-researcher（联网新闻、资讯与公开网页检索；多来源交叉比对，只读）/ oracle·metis·momus（只读顾问与计划审查）/ hephaestus（自主深度实施）/ multimodal-looker（多模态媒体解读）。**联网资讯/新闻检索派 web-researcher，不要派 scout**（也可由主会话直接用 websearch / webfetch）。',
+          },
+          run_in_background: {
+            type: 'boolean',
+            description:
+              'true=异步执行（立即返回 task_id，完成时自动回流通知，需要并行多任务时才用）；false=同步等待结果。省略时为 false。',
+          },
+          session_id: {
+            type: 'string',
+            description: '要继续的已有子代理会话 id（可选）。',
+          },
         },
         required: ['prompt', 'subagent_type'],
         additionalProperties: false,

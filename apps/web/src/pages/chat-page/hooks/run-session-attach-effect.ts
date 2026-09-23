@@ -13,6 +13,7 @@ import { createAttachStreamReconnectWiring } from '../../../components/conversat
 import { handleInterruptedAttachStream } from '../../../components/conversation-runtime/attach/attach-stream-reconnect.js';
 import type { ScheduleStreamAttachRetryInput } from '../../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
+import type { RightPanelTabId } from '../panels/right-panel-tabs.js';
 import {
   applyPermissionDecisionToLocalAssistantMessages,
   applyToolResultToLocalAssistantMessages,
@@ -173,45 +174,7 @@ export interface SessionAttachDeps {
   >;
   readonly setReportedStreamUsage: Dispatch<SetStateAction<ChatBackendUsageSnapshot | null>>;
   readonly setRightPanelState: Dispatch<SetStateAction<ChatRightPanelState>>;
-  readonly setRightTab: (
-    value:
-      | 'overview'
-      | 'plan'
-      | 'tools'
-      | 'bookmarks'
-      | 'terminals'
-      | 'skills'
-      | 'snapshots'
-      | 'history'
-      | 'viz'
-      | 'mcp'
-      | 'agent'
-      | ((
-          prev:
-            | 'overview'
-            | 'plan'
-            | 'tools'
-            | 'bookmarks'
-            | 'terminals'
-            | 'skills'
-            | 'snapshots'
-            | 'history'
-            | 'viz'
-            | 'mcp'
-            | 'agent',
-        ) =>
-          | 'overview'
-          | 'plan'
-          | 'tools'
-          | 'bookmarks'
-          | 'terminals'
-          | 'skills'
-          | 'snapshots'
-          | 'history'
-          | 'viz'
-          | 'mcp'
-          | 'agent'),
-  ) => void;
+  readonly setRightTab: Dispatch<SetStateAction<RightPanelTabId>>;
   readonly setSessionStateStatus: Dispatch<
     SetStateAction<'idle' | 'running' | 'paused' | null | undefined>
   >;

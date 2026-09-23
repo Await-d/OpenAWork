@@ -147,6 +147,28 @@ describe('TerminalInputQueue', () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
+  it('dispose 时若有在飞写入，落地后仍补发尾批（不丢刚敲的字符）', async () => {
+    const first = createDeferred();
+    const write = vi.fn<(data: string) => Promise<void>>(() => first.promise);
+    const queue = new TerminalInputQueue({ write, onError: vi.fn() });
+
+    queue.push('git co');
+    await vi.advanceTimersByTimeAsync(TERMINAL_INPUT_MERGE_MS);
+    expect(write).toHaveBeenCalledTimes(1);
+
+    // 第一个请求还没落地时用户又敲了字，随后组件卸载。
+    queue.push('mmit');
+    write.mockImplementation(async () => undefined);
+    queue.dispose();
+
+    first.resolve();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(write.mock.calls.map((call) => call[0])).toEqual(['git co', 'mmit']);
+    expect(queue.hasPending).toBe(false);
+  });
+
   it('空字符串输入不产生请求', async () => {
     const write = vi.fn<(data: string) => Promise<void>>(async () => undefined);
     const queue = new TerminalInputQueue({ write, onError: vi.fn() });

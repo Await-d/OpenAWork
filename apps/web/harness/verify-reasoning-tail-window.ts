@@ -24,7 +24,8 @@ import type { Locator, Page } from 'playwright';
 
 const URL = 'http://127.0.0.1:5173/harness/reasoning-tail-window.html';
 const VIEWPORTS = [375, 768, 1280];
-const LINE_APPEND_COUNT = 3;
+/** 追加行数必须大于折叠窗口行数（5），才能把原末行推出可见区。 */
+const LINE_APPEND_COUNT = 6;
 
 const failures: string[] = [];
 const passes: string[] = [];
@@ -242,16 +243,55 @@ try {
       `previousLast=${previousLastText.slice(0, 12)}…`,
     );
 
-    // 展开 → 收起：可见区回到末尾
+    // 展开 → 收起：可见区仍在末尾，且展开态有高度上限、块内可滚动回看更早内容
     await liveBlock.getByRole('button', { name: '展开', exact: true }).click();
     const expanded = await readWindowGeometry(liveBlock);
     check(
-      `[${width}] 点击展开后解除裁剪且开头可见`,
+      `[${width}] 点击展开后应用高度上限且可见区仍在末尾`,
       expanded.collapsed === null &&
-        expanded.body.maxHeight === 'none' &&
-        expanded.contentHeight <= expanded.body.clientHeight + 1 &&
-        (expanded.first?.top ?? -1) >= expanded.body.top - 0.5,
-      `maxHeight=${expanded.body.maxHeight} first=${expanded.first?.top.toFixed(1)} bodyTop=${expanded.body.top.toFixed(1)}`,
+        expanded.body.maxHeight !== 'none' &&
+        expanded.body.clientHeight > 0 &&
+        expanded.body.clientHeight <= 480 + 1 &&
+        expanded.body.scrollHeight > expanded.body.clientHeight + 1 &&
+        expanded.contentHeight > expanded.body.clientHeight + 1 &&
+        isTailWindow(expanded),
+      `maxHeight=${expanded.body.maxHeight} clientHeight=${expanded.body.clientHeight} scrollHeight=${expanded.body.scrollHeight} contentHeight=${expanded.contentHeight}`,
+    );
+
+    // 用户可以看见更早的思考：在块内滚回开头后，首段完整可见、末段被滚出窗口
+    const scrolledToStart = await liveBlock.evaluate((el) => {
+      const body = el.querySelector<HTMLElement>('.assistant-reasoning-body');
+      const paragraphs = [...(body?.querySelectorAll('p') ?? [])];
+      const first = paragraphs[0];
+      const last = paragraphs.at(-1);
+      if (!body || !first || !last) {
+        return null;
+      }
+      first.scrollIntoView({ block: 'nearest' });
+      const bodyRect = body.getBoundingClientRect();
+      const firstRect = first.getBoundingClientRect();
+      const lastRect = last.getBoundingClientRect();
+      return {
+        // 亚像素：Chrome 的滚动偏移取整后首段可能被裁掉不到 1px，留 2px 容差
+        firstFullyVisible:
+          firstRect.top >= bodyRect.top - 2 && firstRect.bottom <= bodyRect.bottom + 0.5,
+        lastClippedBelow: lastRect.top >= bodyRect.bottom - 0.5,
+        firstTop: firstRect.top,
+        firstBottom: firstRect.bottom,
+        lastTop: lastRect.top,
+        bodyTop: bodyRect.top,
+        bodyBottom: bodyRect.bottom,
+        scrollTop: body.scrollTop,
+        scrollHeight: body.scrollHeight,
+        clientHeight: body.clientHeight,
+      };
+    });
+    check(
+      `[${width}] 展开后可在块内滚动回看更早的思考（首段可见、末段滚出）`,
+      scrolledToStart !== null &&
+        scrolledToStart.firstFullyVisible &&
+        scrolledToStart.lastClippedBelow,
+      JSON.stringify(scrolledToStart),
     );
 
     await liveBlock.getByRole('button', { name: '收起', exact: true }).click();
@@ -301,13 +341,28 @@ try {
       `codeBlockCount=${nestedFold.codeBlockCount} codeFoldButtonCount=${nestedFold.codeFoldButtonCount} collapsedCodeBlockCount=${nestedFold.collapsedCodeBlockCount}`,
     );
 
-    // 展开长思考后内容应完整可见（不再被 60vh 裁剪）
-    const longExpanded = await readWindowGeometry(longBlock);
+    // 展开长思考后：只有一层高度上限（不再叠加消息级「展开全部」），窗口贴底、可在块内滚动
+    const longTailWindow = await longBlock.evaluate((el) => {
+      const body = el.querySelector<HTMLElement>('.assistant-reasoning-body');
+      const content = body?.firstElementChild;
+      if (!body || !content) {
+        return null;
+      }
+      const bodyRect = body.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      return {
+        maxHeight: getComputedStyle(body).maxHeight,
+        scrollable: body.scrollHeight > body.clientHeight + 1,
+        contentBottomVisible: contentRect.bottom <= bodyRect.bottom + 0.5,
+      };
+    });
     check(
-      `[${width}] 展开长思考后内容完整可见（无二次裁剪）`,
-      longExpanded.contentHeight <= longExpanded.body.clientHeight + 1 &&
-        (longExpanded.first?.top ?? -1) >= longExpanded.body.top - 0.5,
-      `contentHeight=${longExpanded.contentHeight} clientHeight=${longExpanded.body.clientHeight}`,
+      `[${width}] 展开长思考后只有一层高度上限且窗口贴底可滚动`,
+      longTailWindow !== null &&
+        longTailWindow.maxHeight !== 'none' &&
+        longTailWindow.scrollable &&
+        longTailWindow.contentBottomVisible,
+      JSON.stringify(longTailWindow),
     );
 
     await longBlock.getByRole('button', { name: '收起', exact: true }).click();
@@ -344,6 +399,63 @@ try {
       `[${width}] 长消息的折叠仍把正文裁到 60vh`,
       fenceFolds.foldBodyMaxHeight > 0,
       `foldBodyMaxHeight=${fenceFolds.foldBodyMaxHeight}`,
+    );
+
+    // 短正文里的 ```thinking 围栏块：与主思考块共用窗口参数（折叠 5 行贴底 + 展开高度上限）
+    const shortFenceBlock = scope
+      .locator('[data-case="short-message-thinking-fence"] .assistant-reasoning-block')
+      .first();
+    await shortFenceBlock.waitFor({ state: 'attached' });
+    const fenceWindow = await shortFenceBlock.evaluate((el) => {
+      const body = el.querySelector<HTMLElement>('.assistant-reasoning-body');
+      const content = body?.firstElementChild;
+      if (!body || !content) {
+        return null;
+      }
+      const bodyRect = body.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      return {
+        collapsed: el.getAttribute('data-collapsed'),
+        maxHeight: getComputedStyle(body).maxHeight,
+        flexDirection: getComputedStyle(body).flexDirection,
+        clipped: contentRect.height > body.clientHeight + 1,
+        contentBottomVisible: contentRect.bottom <= bodyRect.bottom + 0.5,
+      };
+    });
+    check(
+      `[${width}] 思考围栏块折叠态与主思考块同窗口（5 行 = 108px、贴底裁剪）`,
+      fenceWindow !== null &&
+        fenceWindow.collapsed === 'true' &&
+        fenceWindow.flexDirection === 'column-reverse' &&
+        Math.abs(Number.parseFloat(fenceWindow.maxHeight) - 108) < 0.5 &&
+        fenceWindow.clipped &&
+        fenceWindow.contentBottomVisible,
+      JSON.stringify(fenceWindow),
+    );
+
+    await shortFenceBlock.getByRole('button', { name: '展开思考' }).click();
+    const fenceExpanded = await shortFenceBlock.evaluate((el) => {
+      const body = el.querySelector<HTMLElement>('.assistant-reasoning-body');
+      const content = body?.firstElementChild;
+      if (!body || !content) {
+        return null;
+      }
+      const bodyRect = body.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      return {
+        maxHeight: getComputedStyle(body).maxHeight,
+        scrollable: body.scrollHeight > body.clientHeight + 1,
+        contentBottomVisible: contentRect.bottom <= bodyRect.bottom + 0.5,
+      };
+    });
+    check(
+      `[${width}] 展开思考后应用高度上限且可在块内滚动`,
+      fenceExpanded !== null &&
+        fenceExpanded.maxHeight !== 'none' &&
+        Number.parseFloat(fenceExpanded.maxHeight) <= 480 + 1 &&
+        fenceExpanded.scrollable &&
+        fenceExpanded.contentBottomVisible,
+      JSON.stringify(fenceExpanded),
     );
   }
 } finally {

@@ -73,13 +73,16 @@ export function parseWeComInboundMessage(
   }
 
   const data = normalizeInboundRaw(raw);
-  if (!isRecord(data) || data['MsgType'] !== 'text') {
+  const msgType = readString(data, 'MsgType');
+  if (!isRecord(data) || (msgType !== 'text' && msgType !== 'image')) {
     return null;
   }
 
   const chatId = readString(data, 'ChatId') || readString(data, 'FromUserName');
   const rawContent = readString(data, 'Content');
-  if (!chatId || !rawContent) {
+  // 图片消息通常没有 Content，图片地址在 PicUrl；纯文本路径保持原有语义。
+  const picUrl = readString(data, 'PicUrl');
+  if (!chatId || (!rawContent && !picUrl)) {
     return null;
   }
 
@@ -91,7 +94,7 @@ export function parseWeComInboundMessage(
     return null;
   }
 
-  const content = stripLeadingMentions(rawContent);
+  const content = stripLeadingMentions(rawContent) || (picUrl ? '[User sent an image]' : '');
   if (!content) {
     return null;
   }
@@ -103,6 +106,9 @@ export function parseWeComInboundMessage(
     chatId,
     content,
     timestamp: readTimestamp(readString(data, 'CreateTime')),
+    // 企业微信图片消息不提供 mime，v1 默认 image/jpeg（媒体验证依赖下游；
+    // 若 PicUrl 不可访问会由下游降级）。
+    ...(picUrl ? { images: [{ imageUrl: picUrl, mediaType: 'image/jpeg' }] } : {}),
     raw: data,
   };
 }

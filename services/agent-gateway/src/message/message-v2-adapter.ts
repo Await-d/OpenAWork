@@ -291,6 +291,9 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
     ...(info.role === 'synthetic' && info.metadata ? { metadata: info.metadata } : {}),
     ...('agent' in info && typeof info.agent === 'string' ? { agentId: info.agent } : {}),
     ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
+    // 状态必须回传：请求重放 / 清理判定（`getSessionMessageByRequestId` →
+    // `stored.status === 'error'`）依赖它，漏传会让失败请求被误当作可重放结果。
+    ...(info.status ? { status: info.status } : {}),
     ...('modelID' in info && typeof info.modelID === 'string' ? { model: info.modelID } : {}),
     ...('providerID' in info && typeof info.providerID === 'string'
       ? { providerId: info.providerID }
@@ -1629,9 +1632,11 @@ export function getSessionMessageByRequestId(input: {
     (m) => m.role === input.role && m.clientRequestId === input.clientRequestId,
   );
   if (!msg) return null;
+  // `status` 由读路径回传（`v2ToV1Message`）；此前读路径漏传导致该判定恒为 'final'，
+  // 失败请求会被误当作可重放结果。'streaming' 视为未终态，按 'final' 处理（调用方只区分 error）。
   return {
     message: msg,
-    status: (msg as Message & { status?: string }).status === 'error' ? 'error' : 'final',
+    status: msg.status === 'error' ? 'error' : 'final',
   };
 }
 

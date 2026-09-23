@@ -84,15 +84,15 @@ afterEach(() => {
 });
 
 describe('FusionSidebar 展开 Panel', () => {
-  it('点击新建会话会回到 Chat 首页', async () => {
+  it('点击新建会话走统一 newSession 入口并回到 Chat 首页', async () => {
+    const sessionsResult = setFusionSidebarChatGroups([], []);
     renderFusionSidebar('/chat/open-session');
 
     fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
 
     expect(useUIStateStore.getState().chatView).toBe('home');
-    await waitFor(() => {
-      expect(screen.getByTestId('location-probe').textContent).toBe('/chat');
-    });
+    expect(useUIStateStore.getState().tabs.some((tab) => tab.type === 'draft')).toBe(true);
+    expect(sessionsResult.newSession).toHaveBeenCalledWith();
     expect(getFusionSidebarMocks().preloadRouteModuleByPath).toHaveBeenCalledWith('/chat');
   });
 

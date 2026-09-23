@@ -62,7 +62,6 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const closeTabs = useUIStateStore((s) => s.closeTabs);
   const reorderTabs = useUIStateStore((s) => s.reorderTabs);
   const addSessionTab = useUIStateStore((s) => s.addSessionTab);
-  const addDraftTab = useUIStateStore((s) => s.addDraftTab);
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const updateTabTitle = useUIStateStore((s) => s.updateTabTitle);
   const isPinned = useUIStateStore((s) => s.isPinned);
@@ -75,7 +74,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
     selectedWorkspacePath ? resolveWorkspaceDisplayName(selectedWorkspacePath) : '',
   );
 
-  const { sessions, quickDeleteSession, isDeletingSession } = useSessions();
+  const { sessions, newSession, quickDeleteSession, isDeletingSession } = useSessions();
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const { stackedTeamTitlebar } = useTitlebarResponsiveState();
@@ -257,10 +256,10 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   );
 
   const handleNewTab = useCallback(() => {
-    addDraftTab();
-    navigateToHome();
-    void navigate('/chat');
-  }, [addDraftTab, navigate, navigateToHome]);
+    // 统一走 newSession：工作区按「点击来源」解析（当前会话 → 全局选中值），
+    // 并复用唯一草稿标签，避免 Ctrl+T 产生绑定到陈旧工作区的会话。
+    void newSession();
+  }, [newSession]);
 
   useTitlebarKeyboardShortcuts({
     activeTabId,

@@ -177,6 +177,68 @@ describe('useUIStateStore tabs', () => {
     expect(useUIStateStore.getState().tabs[0]?.workspacePath).toBe('/ws/b');
   });
 
+  it('显式传 null 复用草稿标签时清掉已有工作区', () => {
+    const draftTabId = useUIStateStore.getState().addDraftTab('/ws/a');
+
+    const nextDraftTabId = useUIStateStore.getState().addDraftTab(null);
+
+    expect(nextDraftTabId).toBe(draftTabId);
+    expect(useUIStateStore.getState().tabs).toHaveLength(1);
+    expect(useUIStateStore.getState().tabs[0]?.workspacePath).toBeUndefined();
+  });
+
+  it('省略工作区参数时保留草稿标签已有工作区', () => {
+    useUIStateStore.getState().addDraftTab('/ws/a');
+
+    useUIStateStore.getState().addDraftTab();
+
+    expect(useUIStateStore.getState().tabs[0]?.workspacePath).toBe('/ws/a');
+  });
+
+  it('openDraftSession 落工作区、加草稿标签并回到 Chat 首页', () => {
+    useUIStateStore.setState({ chatView: 'session', selectedWorkspacePath: '/ws/old' });
+
+    const tabId = useUIStateStore.getState().openDraftSession('/ws/new');
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/ws/new');
+    expect(state.savedWorkspacePaths).toContain('/ws/new');
+    expect(state.chatView).toBe('home');
+    expect(state.activeTabId).toBe(tabId);
+    expect(state.tabs[0]?.type).toBe('draft');
+    expect(state.tabs[0]?.workspacePath).toBe('/ws/new');
+  });
+
+  it('openDraftSession(null) 显式不绑定工作区并清掉选中值', () => {
+    useUIStateStore.setState({ selectedWorkspacePath: '/ws/old' });
+    useUIStateStore.getState().addDraftTab('/ws/old');
+
+    useUIStateStore.getState().openDraftSession(null);
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBeNull();
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]?.workspacePath).toBeUndefined();
+  });
+
+  it('openDraftSession 可成对写入 SSH 连接 id（远端工作区继承）', () => {
+    useUIStateStore.getState().openDraftSession('/remote/repo', 'ssh-1');
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/remote/repo');
+    expect(state.selectedSshConnectionId).toBe('ssh-1');
+  });
+
+  it('openDraftSession 省略 SSH 参数时保留现有草稿绑定，显式 null 时清空', () => {
+    useUIStateStore.getState().openDraftSession('/remote/repo', 'ssh-1');
+
+    useUIStateStore.getState().openDraftSession('/remote/repo');
+    expect(useUIStateStore.getState().selectedSshConnectionId).toBe('ssh-1');
+
+    useUIStateStore.getState().openDraftSession('/ws/local', null);
+    expect(useUIStateStore.getState().selectedSshConnectionId).toBeNull();
+  });
+
   it('closeDraftTabs 在草稿转正后移除草稿标签并落到幸存标签', () => {
     const draftTabId = useUIStateStore.getState().addDraftTab();
     const sessionTabId = useUIStateStore.getState().addSessionTab('s-1', '会话一');

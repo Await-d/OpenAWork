@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SubAgentRunList 折叠验收</title>
+    <style>
+      /*
+       * SubAgentRunList 是 apps/web 组件（非 shared-ui），消费 `src/index.css` 的主题变量。
+       * 本页用**哨兵色值**提供这组变量，模拟应用主题层：
+       *   - `--bg-hover` / `--accent` / `--accent-subtle` 用哨兵值，断言脚本验证
+       *     hover 背景与 focus ring 的计算值确实跟随变量（变量名写错时解析失败 → 断言失败）。
+       *   - 其余变量取接近真实暗色主题的值；页面 chrome 一律用字面量。
+       */
+      body {
+        margin: 0;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        padding: 0;
+      }
+      /* 与 `src/index.css` 的全局 `box-sizing: border-box` 对齐，保证宽度实测
+       * 与应用一致（否则展开态会多出 8px 左内边距，实占 208 而非 200）。 */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      .harness-theme {
+        /* 哨兵：hover 断言 */
+        --bg-hover: #0d3b2e;
+        --bg-overlay: #101828;
+        /* 哨兵：focus ring / 活跃徽标 */
+        --accent: #7c3aed;
+        --accent-subtle: rgba(124, 58, 237, 0.14);
+        --fg-strong: #f8fafc;
+        --fg-default: #cbd5e1;
+        --fg-muted: #94a3b8;
+        --border-subtle: #1b2534;
+        --border-default: #223044;
+        --success: #34d399;
+        --warning: #f0b429;
+        --danger: #f87171;
+        --danger-border: rgba(248, 113, 113, 0.3);
+        --danger-muted: rgba(248, 113, 113, 0.14);
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 0 16px;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 0 8px 8px;
+      }
+      /* 复刻真实宿主 `SPLIT_INNER_STYLE`：相对定位 + flex + overflow:hidden。 */
+      .host {
+        position: relative;
+        display: flex;
+        height: 360px;
+        overflow: hidden;
+        background: #0b0e18;
+      }
+      .fake-message-stream {
+        flex: 1;
+        min-width: 0;
+        padding: 16px;
+      }
+      .fake-message {
+        font-size: 12px;
+        color: #7a8194;
+        border: 1px dashed #223044;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/sub-agent-run-list-entry.tsx"></script>
+  </body>
+</html>

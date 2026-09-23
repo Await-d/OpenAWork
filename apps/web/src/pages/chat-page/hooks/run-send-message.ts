@@ -8,6 +8,7 @@
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { isImageFile } from '../../../components/conversation-runtime/attachments/attachment-upload.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
+import type { RightPanelTabId } from '../panels/right-panel-tabs.js';
 import {
   applyPermissionDecisionToLocalAssistantMessages,
   applyToolResultToLocalAssistantMessages,
@@ -208,45 +209,7 @@ export interface SendMessageDeps {
   readonly setReportedStreamUsage: Dispatch<SetStateAction<ChatBackendUsageSnapshot | null>>;
   readonly setRightOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   readonly setRightPanelState: Dispatch<SetStateAction<ChatRightPanelState>>;
-  readonly setRightTab: (
-    value:
-      | 'mcp'
-      | 'overview'
-      | 'plan'
-      | 'tools'
-      | 'bookmarks'
-      | 'terminals'
-      | 'skills'
-      | 'snapshots'
-      | 'history'
-      | 'viz'
-      | 'agent'
-      | ((
-          prev:
-            | 'mcp'
-            | 'overview'
-            | 'plan'
-            | 'tools'
-            | 'bookmarks'
-            | 'terminals'
-            | 'skills'
-            | 'snapshots'
-            | 'history'
-            | 'viz'
-            | 'agent',
-        ) =>
-          | 'mcp'
-          | 'overview'
-          | 'plan'
-          | 'tools'
-          | 'bookmarks'
-          | 'terminals'
-          | 'skills'
-          | 'snapshots'
-          | 'history'
-          | 'viz'
-          | 'agent'),
-  ) => void;
+  readonly setRightTab: Dispatch<SetStateAction<RightPanelTabId>>;
   readonly setSessionReloadNonce: Dispatch<SetStateAction<number>>;
   readonly setSessionStateStatus: Dispatch<
     SetStateAction<'idle' | 'running' | 'paused' | null | undefined>

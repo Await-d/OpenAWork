@@ -7,6 +7,7 @@
  */
 import type { ChatView } from '../../../stores/ui/uiState.js';
 import { reconcileSnapshotChatMessages } from '../../../components/conversation-runtime/messages/support.js';
+import { collectSubagentNotices } from '../../../components/conversation-runtime/messages/subagent-notices.js';
 import type {
   AssistantTraceToolCall,
   ChatMessage,
@@ -38,6 +39,7 @@ import type { ChatRightPanelState } from '.././state/chat-stream-state.js';
 import type {
   PendingPermissionRequest,
   SessionPermissionMode,
+  SubagentNotice,
   UpstreamStreamSummary,
   WorkflowRuntimeState,
 } from '@openAwork/shared';
@@ -120,6 +122,7 @@ export interface ChatSessionSwitchDeps {
   readonly setSessionTasks: Dispatch<SetStateAction<SessionTask[]>>;
   readonly setSessionTodos: Dispatch<SetStateAction<SessionTodo[]>>;
   readonly setShowSkeletonAfterDelay: Dispatch<SetStateAction<boolean>>;
+  readonly setSubagentNotices: Dispatch<SetStateAction<SubagentNotice[]>>;
   readonly setThinkingEnabled: Dispatch<SetStateAction<boolean>>;
   readonly setVisibleMessageCount: Dispatch<SetStateAction<number>>;
   readonly setWebSearchEnabled: Dispatch<SetStateAction<boolean>>;
@@ -198,6 +201,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     setSessionTasks,
     setSessionTodos,
     setShowSkeletonAfterDelay,
+    setSubagentNotices,
     setThinkingEnabled,
     setVisibleMessageCount,
     setWebSearchEnabled,
@@ -257,6 +261,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
       setWorkflowRuntime(null);
       setPendingPermissions([]);
       setPendingQuestions([]);
+      setSubagentNotices([]);
       setSessionStateStatus(null);
       setIsSessionSnapshotReady(true);
       setSessionModesHydrated(false);
@@ -373,6 +378,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
           setWorkflowRuntime(prepared.session.workflowRuntime ?? null);
           setPendingPermissions(prepared.pendingPermissions);
           setPendingQuestions(prepared.pendingQuestions);
+          setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
           setSessionStateStatus(prepared.sessionStateStatus);
           setRecoveryActiveStream(recovery.activeStream);
           syncRecoveredStreamSnapshot(
@@ -412,6 +418,9 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     const cachedScrollTop = cachedView.scrollTop;
     startSessionSwitchTransition(() => {
       setMessages(cachedMessages);
+      // 缓存视图不携带通知：先清掉上一个会话的通知，避免串会话；随后
+      // recovery 响应会把本会话的通知补上（窗口内子集）。
+      setSubagentNotices([]);
       setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
       setIsSessionLoading(false);
     });
@@ -437,6 +446,8 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
         sessionStateStatus !== 'idle'
       ) {
         setMessages([]);
+        // 会话已切换：通知同样清空，避免旧会话的完成通知串到新会话。
+        setSubagentNotices([]);
       } else {
         console.log('[SESSION_LOAD] 跳过清空消息，同一会话且已完成', {
           requestedSessionId,
@@ -554,6 +565,9 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
           setWorkflowRuntime(prepared.session.workflowRuntime ?? null);
           setPendingPermissions(prepared.pendingPermissions);
           setPendingQuestions(prepared.pendingQuestions);
+          // 通知与消息同源解析（synthetic 不进 transcript）：每次应用 recovery
+          // 都必须刷新，否则「打开/切换会话」路径会丢掉全部子代理完成通知。
+          setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
           setSessionStateStatus(prepared.sessionStateStatus);
           setRecoveryActiveStream(recovery.activeStream);
           syncRecoveredStreamSnapshot(

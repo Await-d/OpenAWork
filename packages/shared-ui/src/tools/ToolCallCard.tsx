@@ -660,9 +660,22 @@ function resolveTaskSemanticPreview(meta: TaskToolMeta): string | undefined {
     return undefined;
   }
 
-  const taskResultMatch = preferred.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/u);
-  const normalized = (taskResultMatch?.[1] ?? preferred).trim();
+  const normalized = extractTaskResultBody(preferred);
   return normalized.length > 0 ? truncateText(normalized, 160) : undefined;
+}
+
+/**
+ * 提取任务结果正文：`<subagent …>` 是当前形态（对齐参考库 `subagent` 工具的
+ * 模型可见内容），`<task_result>` 保留为存量消息兼容。
+ */
+function extractTaskResultBody(value: string): string {
+  const subagentMatch = value.match(/<subagent\b[^>]*>\s*([\s\S]*?)\s*<\/subagent>/u);
+  if (subagentMatch?.[1]) {
+    return subagentMatch[1].trim();
+  }
+
+  const taskResultMatch = value.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/u);
+  return (taskResultMatch?.[1] ?? value).trim();
 }
 
 function resolveTaskFooter(meta: TaskToolMeta): string | undefined {

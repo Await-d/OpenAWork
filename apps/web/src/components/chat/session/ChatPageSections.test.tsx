@@ -189,7 +189,8 @@ describe('思考内容的折叠提示只有一层', () => {
 
     fireEvent.click(screen.getByText('展开'));
 
-    // 展开态：思考块自带的 收起 是唯一折叠控件，内容不再被 60vh 二次裁剪
+    // 展开态：思考块自带的 收起 是唯一折叠控件；消息级折叠不介入，
+    // 高度只受思考块自己的展开上限（min(60vh, 480px) + 块内滚动）约束
     expect(block?.querySelector('.chat-markdown-fold-container')).toBeNull();
     expect(block?.textContent).not.toContain('展开全部');
     expect(screen.getByText('收起')).not.toBeNull();
@@ -214,7 +215,7 @@ describe('思考内容的折叠提示只有一层', () => {
     expect(body?.textContent).not.toContain('展开全部');
   });
 
-  it('思考块内部的长代码块不再自折叠（展开思考即看到全部内容）', async () => {
+  it('思考块内部的长代码块不再自折叠（展开思考后只有思考块自己的高度上限）', async () => {
     const codeFence = [
       '```ts',
       ...Array.from({ length: 150 }, (_, index) => `const value${index} = ${index};`),

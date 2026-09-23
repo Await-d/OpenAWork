@@ -62,7 +62,7 @@ export function InlineToolCall({
         ...(isError !== undefined ? { isError } : {}),
       });
     }
-    return naturalLanguageSummary(toolName, input);
+    return naturalLanguageSummary(toolName, input, output);
   }, [isLsp, toolName, input, output, visualState, isError]);
 
   // Every inline tool is expandable so the user can always inspect both the

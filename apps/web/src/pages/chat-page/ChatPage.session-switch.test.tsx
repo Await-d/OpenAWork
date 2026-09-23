@@ -42,9 +42,13 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
 
 const SESSION_A_MESSAGE = '会话A独有内容-ALPHA-7f3d';
 const SESSION_B_MESSAGE = '会话B独有内容-BRAVO-9c1e';
+const NOTICE_A_DESCRIPTION = '会话A子代理任务-ALPHA';
+const NOTICE_B_DESCRIPTION = '会话B子代理任务-BRAVO';
 
 interface RecoveryOptions {
   readonly messages: Array<{ content: string; id: string; role: 'assistant' | 'user' }>;
+  /** 子代理完成通知（`role: 'synthetic'`）；走独立通道，不进 transcript。 */
+  readonly notices?: Array<{ description: string; id: string }>;
   readonly totalTurnCount?: number;
 }
 
@@ -57,12 +61,22 @@ function buildRecovery(sessionId: string, options: RecoveryOptions) {
     ratings: [],
     session: {
       id: sessionId,
-      messages: options.messages.map((message, index) => ({
-        content: message.content,
-        createdAtMs: 1_700_000_000_000 + index,
-        id: message.id,
-        role: message.role,
-      })),
+      messages: [
+        ...options.messages.map((message, index) => ({
+          content: message.content,
+          createdAtMs: 1_700_000_000_000 + index,
+          id: message.id,
+          role: message.role,
+        })),
+        ...(options.notices ?? []).map((notice, index) => ({
+          content: [{ text: `scout 已完成 · ${notice.description}`, type: 'text' }],
+          createdAt: 1_700_000_100_000 + index,
+          description: notice.description,
+          id: notice.id,
+          metadata: { agent: 'scout', source: 'subagent', state: 'done' },
+          role: 'synthetic',
+        })),
+      ],
       state_status: 'idle',
     },
     tasks: [],
@@ -156,10 +170,20 @@ class InertEventSource {
  * 只读消息流本身的文本，不要在整页上做模糊文本匹配：
  * 同一条用户消息还会出现在 UserHistoryJumpList 的跳转标签里，
  * 全页匹配会命中两处（且无法区分「消息流残留」与「跳转列表残留」）。
+ *
+ * 同时排除子代理通知群组（`data-role="synthetic"`）——通知是独立时间线行，
+ * 不属于消息流；本函数只统计消息群组。
  */
 function readRenderedMessageGroupTexts(): string[] {
-  return Array.from(document.querySelectorAll('[data-chat-group-root="true"]')).map(
-    (group) => group.textContent ?? '',
+  return Array.from(
+    document.querySelectorAll('[data-chat-group-root="true"]:not([data-role="synthetic"])'),
+  ).map((group) => group.textContent ?? '');
+}
+
+/** 只读子代理通知行本身（`data-component="subagent-notice"`），避免整页文本模糊匹配。 */
+function readRenderedNoticeTexts(): string[] {
+  return Array.from(document.querySelectorAll('[data-component="subagent-notice"]')).map(
+    (node) => node.textContent ?? '',
   );
 }
 
@@ -195,12 +219,14 @@ beforeEach(() => {
     if (sessionId === 'session-a') {
       return buildRecovery(sessionId, {
         messages: [{ content: SESSION_A_MESSAGE, id: 'msg-a-1', role: 'user' }],
+        notices: [{ description: NOTICE_A_DESCRIPTION, id: 'task-job:session-a-child' }],
         totalTurnCount: 9,
       });
     }
     if (sessionId === 'session-b') {
       return buildRecovery(sessionId, {
         messages: [{ content: SESSION_B_MESSAGE, id: 'msg-b-1', role: 'user' }],
+        notices: [{ description: NOTICE_B_DESCRIPTION, id: 'task-job:session-b-child' }],
         totalTurnCount: 1,
       });
     }
@@ -288,5 +314,28 @@ describe('ChatPage — 会话切换', () => {
     );
 
     expect(readRenderedMessageGroupTexts().join('\n')).not.toContain(SESSION_B_MESSAGE);
+  });
+
+  it('切到会话 B 后渲染 B 的子代理完成通知，且不残留 A 的通知', async () => {
+    const router = renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedNoticeTexts().join('\n')).toContain(NOTICE_A_DESCRIPTION);
+      },
+      { timeout: 5000 },
+    );
+
+    await switchToSession(router, '/chat/session-b');
+
+    await waitFor(
+      () => {
+        expect(readRenderedNoticeTexts().join('\n')).toContain(NOTICE_B_DESCRIPTION);
+      },
+      { timeout: 5000 },
+    );
+
+    const noticesAfterSwitch = readRenderedNoticeTexts().join('\n');
+    expect(noticesAfterSwitch).not.toContain(NOTICE_A_DESCRIPTION);
   });
 });

@@ -1,5 +1,7 @@
+import type { Buffer } from 'node:buffer';
 import type {
   MessagingChannelService,
+  ChannelImageAttachment,
   ChannelInstance,
   ChannelEvent,
   ChannelMessage,
@@ -9,7 +11,11 @@ import type {
   ChannelServiceFactory,
 } from './types.js';
 import { channelFetch, computeChannelRetryDelayMs } from './channel-http.js';
-import { parseTelegramInboundMessage } from './inbound-parsers/telegram.js';
+import {
+  parseTelegramInboundMessage,
+  resolveTelegramImageCandidate,
+} from './inbound-parsers/telegram.js';
+import { downloadTelegramInboundImage, sendTelegramPhoto } from './telegram-media.js';
 import { listTelegramBotCommands } from './channel-localization.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
@@ -33,6 +39,15 @@ interface TelegramUpdate {
     date: number;
     entities?: Array<{ type?: string; offset?: number; length?: number }>;
   };
+}
+
+/** 出站图片入参，与 `MessagingChannelService.sendImage` / `replyImage` 的契约一致。 */
+interface TelegramImageSendInput {
+  readonly buffer: Buffer;
+  readonly fileName?: string;
+  readonly signal?: AbortSignal;
+  readonly sourceUrl?: string;
+  readonly text?: string;
 }
 
 export class TelegramChannelService implements MessagingChannelService {
@@ -61,6 +76,14 @@ export class TelegramChannelService implements MessagingChannelService {
 
   private get apiBase(): string {
     return `https://api.telegram.org/bot${this.token}`;
+  }
+
+  /**
+   * 图片下载专用基址（内嵌 bot token，禁止外泄）。**必须无尾斜杠**：
+   * `telegram-media` 按字面 `${fileBaseUrl}/${file_path}` 拼接。
+   */
+  private get fileBaseUrl(): string {
+    return `https://api.telegram.org/file/bot${this.token}`;
   }
 
   /**
@@ -131,10 +154,11 @@ export class TelegramChannelService implements MessagingChannelService {
           if (data.ok) {
             for (const update of data.result) {
               this.pollOffset = update.update_id + 1;
-              if (update.message?.text) {
-                const msg = this.parseUpdate(update);
-                if (msg)
-                  this.safeNotify({ type: 'message', pluginId: this.pluginId, message: msg });
+              // 图片消息文本可能为空：用纯函数判定候选，避免把无文本的
+              // photo/document 更新整批丢掉。
+              if (update.message?.text || resolveTelegramImageCandidate(update.message)) {
+                // 不 await：图片下载可能耗时数秒，等待会拖慢长轮询节奏。
+                this.dispatchUpdate(update);
               }
             }
           }
@@ -205,6 +229,53 @@ export class TelegramChannelService implements MessagingChannelService {
     });
   }
 
+  /**
+   * 入站更新派发必须 fire-and-forget：图片下载（getFile → 取回文件）可能耗时
+   * 数秒，await 会拖慢长轮询节奏。这里统一吞掉 rejection 并 warn，保证派发
+   * 失败既不中断轮询循环，也不会产生 unhandled rejection。
+   */
+  private dispatchUpdate(update: TelegramUpdate): void {
+    void this.handleUpdate(update).catch((err) => {
+      console.warn('[telegram] update dispatch failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  private async handleUpdate(update: TelegramUpdate): Promise<void> {
+    const message = this.parseUpdate(update);
+    if (!message) {
+      return;
+    }
+    const images = await this.downloadInboundImages(update);
+    this.safeNotify({
+      type: 'message',
+      pluginId: this.pluginId,
+      message: images.length > 0 ? { ...message, images } : message,
+    });
+  }
+
+  /**
+   * 下载入站图片并转为 base64 附件。故意不传 AbortSignal：`pollAbort` 会在每轮
+   * 长轮询结束（含 `finally`）时置空，派生下载会拿到竞态中的信号；下载本身由
+   * `telegram-media` 内部的 30s 超时兜底，失败时返回 `null`，消息按占位符投递。
+   */
+  private async downloadInboundImages(update: TelegramUpdate): Promise<ChannelImageAttachment[]> {
+    const candidate = resolveTelegramImageCandidate(update);
+    if (!candidate) {
+      return [];
+    }
+    const image = await downloadTelegramInboundImage({
+      apiBase: this.apiBase,
+      fileBaseUrl: this.fileBaseUrl,
+      fileId: candidate.fileId,
+      ...(candidate.fileName ? { fileName: candidate.fileName } : {}),
+      ...(candidate.mimeType ? { mimeType: candidate.mimeType } : {}),
+      ...(candidate.fileSize !== undefined ? { fileSize: candidate.fileSize } : {}),
+    });
+    return image ? [image] : [];
+  }
+
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {
     const res = await channelFetch(`${this.apiBase}/sendMessage`, {
       method: 'POST',
@@ -224,6 +295,44 @@ export class TelegramChannelService implements MessagingChannelService {
     });
     const data = (await res.json()) as { result?: { message_id: number } };
     return { messageId: String(data.result?.message_id ?? '') };
+  }
+
+  /**
+   * 出站发图：Telegram 的 `sendPhoto` 只接受二进制 multipart，故 `sourceUrl`
+   * 按接口保留但不使用（调用方需先取成 buffer）。
+   */
+  async sendImage(chatId: string, input: TelegramImageSendInput): Promise<{ messageId: string }> {
+    return sendTelegramPhoto({
+      apiBase: this.apiBase,
+      chatId,
+      buffer: input.buffer,
+      ...(input.fileName ? { fileName: input.fileName } : {}),
+      ...(input.text ? { caption: input.text } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  }
+
+  /**
+   * 回复图片：`messageId` 约定与 `replyMessage` 一致，为 `<chatId>:<msgId>`；
+   * 引用消息 id 通过 `reply_to_message_id` 传给 `sendPhoto`。
+   */
+  async replyImage(
+    messageId: string,
+    input: TelegramImageSendInput,
+  ): Promise<{ messageId: string }> {
+    const [chatId, msgId] = messageId.split(':');
+    if (!chatId || !msgId) {
+      throw new Error('Telegram image reply requires "<chatId>:<messageId>" reference');
+    }
+    return sendTelegramPhoto({
+      apiBase: this.apiBase,
+      chatId,
+      buffer: input.buffer,
+      ...(input.fileName ? { fileName: input.fileName } : {}),
+      ...(input.text ? { caption: input.text } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      replyToMessageId: msgId,
+    });
   }
 
   async getGroupMessages(chatId: string, count?: number): Promise<ChannelMessage[]> {

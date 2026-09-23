@@ -265,6 +265,8 @@ export interface ChatConversationViewProps {
   onCloseRetry: () => void;
   onRetryCurrent: () => void;
   onRetryBranch: () => void;
+  /** 文件变更面板入口（回退对话框 / 回退成功 toast 共用）。 */
+  onOpenFileChangesPanel?: () => void;
 
   // ─── search overlay ────────────────────────────────────────────────
   chatSearch: ReturnType<typeof useChatSearch>;
@@ -511,6 +513,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onCloseRetry,
     onRetryCurrent,
     onRetryBranch,
+    onOpenFileChangesPanel,
 
     chatSearch,
 
@@ -576,7 +579,12 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
 
   const composerFeatures = buildComposerFeatures(composerExtras, webSearchAvailable);
 
-  const snapshotAwareAction = useSnapshotAwareAction({ sessionId, gatewayUrl, messages });
+  const snapshotAwareAction = useSnapshotAwareAction({
+    sessionId,
+    gatewayUrl,
+    messages,
+    ...(onOpenFileChangesPanel ? { onOpenFileChangesPanel } : {}),
+  });
 
   const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
 
@@ -673,6 +681,14 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     alignItems: 'stretch',
     gap: compact ? '1rem' : '1.5rem',
     minHeight: '100%',
+    // `minHeight: 100%` 会关闭 flex 项的内容自动最小高度，而默认 `flex-shrink: 1`
+    // 会把内容列的**盒子**压回滚动区高度（内容溢出但盒子不变）。`useScrollManager`
+    // 的自动跟随依赖「内容列 ResizeObserver 在内容增长时回调」——盒子被钉住后这条
+    // 主路径完全失效：流式期间只有正文增量（buffer 变化）能触发跟随，推理段增长、
+    // 工具卡输出、定稿时的 Markdown / meta 渲染都追不上，收尾时视口会停在最新回复
+    // 上方。`flexShrink: 0` 让盒子等于内容高度（空态仍由 minHeight 撑满），恢复
+    // 观测路径。
+    flexShrink: 0,
   };
 
   // 待办 controller 与浮层都由 ChatTopBar 一侧挂载（顶部右侧 popover）；本组件不再

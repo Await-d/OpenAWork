@@ -123,7 +123,7 @@ const taskOutputSchema = z.object({
 export const taskToolDefinition: ToolDefinition<typeof taskInputSchema, typeof taskOutputSchema> = {
   name: TASK_TOOL_NAME,
   description:
-    '启动一个 agent 任务，可按 category 选取或直接指定 agent。category 与 subagent_type 仅传其一。load_skills 与 run_in_background 必填。同步执行使用 run_in_background=false，仅并行后台工作时才传 true。子任务自动超时由助手首活超时 / 重试则控制。别名 `task` 同样被接受；也接受 `agent` / `background` / `sessionID` 作为同义字段。',
+    '启动一个 agent 任务，可按 category 选取或直接指定 agent。category 与 subagent_type 仅传其一。load_skills 与 run_in_background 必填。同步执行使用 run_in_background=false，仅并行后台工作时才传 true。子任务自动超时由助手首活超时 / 重试则控制。别名 `task` 同样被接受；也接受 `agent` / `background` / `sessionID` 作为同义字段。子代理选型（按任务性质选，不要默认 scout）：explore=代码库内搜索与定位；librarian=代码库与官方文档检索、多仓库分析、实现示例；scout=外部依赖源码 / 上游仓库 / 第三方文档的只读研究；web-researcher=联网新闻 / 资讯 / 公开网页检索（多来源交叉比对，只读）；general=通用研究与多步执行；oracle/metis/momus/prometheus=只读顾问与计划审查。其他内置或自定义 agent 也可直接传 id。',
   inputSchema: taskInputSchema,
   outputSchema: taskOutputSchema,
   timeout: 30000,

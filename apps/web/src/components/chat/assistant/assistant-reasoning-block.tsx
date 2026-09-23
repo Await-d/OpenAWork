@@ -1,16 +1,11 @@
 import React, { memo, useEffect, useState } from 'react';
 import { getLocalReasoningLabel } from './assistant-reasoning-block.helpers.js';
+import {
+  computeReasoningBodyMaxHeight,
+  REASONING_COLLAPSED_MAX_LINES,
+  REASONING_EXPANDED_MAX_HEIGHT,
+} from './reasoning-window.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
-
-/**
- * 流式与静态折叠共用的窗口行数：保证 finalize 前后渲染高度一致，不产生跳动。
- * 折叠窗口取**末尾** N 行（见 `bodyStyle`），流式期间因此始终能看到最新思考内容。
- */
-const REASONING_COLLAPSED_MAX_LINES = 3;
-
-function computeClampedBodyMaxHeight(lines: number): string {
-  return `${lines * 1.6 * 13 + 4}px`;
-}
 
 function formatReasoningEndedBadge(durationMs?: number): string {
   if (typeof durationMs !== 'number' || durationMs < 0) {
@@ -84,16 +79,27 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   const showExpandButton = !expanded && isCollapsible;
   const showCollapseButton = expanded && isCollapsible;
 
-  // 折叠窗口是"贴底窗口"：`column-reverse` 把内容钉在容器底部，超出部分从**顶部**
-  // 裁掉，因此折叠预览始终落在最新的 N 行上 —— 流式期间新内容自动进入可见区
+  // 折叠与展开共用同一套「贴底窗口」：`column-reverse` 把内容钉在容器底部，超出部分从
+  // **顶部**裁掉，可见区始终落在最新的若干行上 —— 流式期间新内容自动进入窗口
   // （无需 JS 跟随滚动 / 无滚动位置跳变），用户手动收起后看到的也是最新思考。
   // 流式与静态共用同一布局，finalize 时不会出现"末 N 行 → 前 N 行"的跳动。
-  const bodyStyle: React.CSSProperties | undefined = shouldCollapse
+  // 展开只是把窗口从 `REASONING_COLLAPSED_MAX_LINES` 行放宽到
+  // `REASONING_EXPANDED_MAX_HEIGHT` 并在块内滚动：想回看更早的思考向上滚即可，
+  // 窗口方向不变、内容不会翻回开头。
+  const windowStyle: React.CSSProperties | null = shouldCollapse
     ? {
-        maxHeight: computeClampedBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
+        maxHeight: computeReasoningBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
+        overflow: 'clip',
+      }
+    : expanded && isCollapsible
+      ? { maxHeight: REASONING_EXPANDED_MAX_HEIGHT, overflow: 'auto' }
+      : null;
+
+  const bodyStyle: React.CSSProperties | undefined = windowStyle
+    ? {
+        ...windowStyle,
         display: 'flex',
         flexDirection: 'column-reverse',
-        overflow: 'clip',
         position: 'relative',
       }
     : undefined;

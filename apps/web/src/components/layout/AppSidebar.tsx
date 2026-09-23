@@ -52,14 +52,8 @@ export default function AppSidebar({
   onLogout,
   pendingPermissionIndicator = false,
 }: AppSidebarProps) {
-  const {
-    navigate,
-    preloadRoute,
-    preloadChatRoute,
-    openChatSession,
-    handleNewTask,
-    handleNewTeamWorkspace,
-  } = useAppSidebarNavigation();
+  const { navigate, preloadRoute, preloadChatRoute, openChatSession, handleNewTeamWorkspace } =
+    useAppSidebarNavigation();
   const location = useLocation();
   const wideViewport = useWideViewport();
   const gatewayStatus = useGatewayStatus(gatewayUrl);
@@ -149,6 +143,12 @@ export default function AppSidebar({
     exportSessionAsMarkdown,
     exportSessionAsJson,
   } = useSessions();
+
+  // 新建会话：统一走 newSession，工作区按「点击来源」解析（当前会话 → 全局选中值）。
+  const handleNewTask = useCallback(() => {
+    preloadRoute('/chat');
+    void newSession();
+  }, [newSession, preloadRoute]);
 
   // ─── 团队会话数据 ───
   const {

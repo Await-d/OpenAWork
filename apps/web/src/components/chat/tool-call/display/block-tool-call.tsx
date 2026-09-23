@@ -119,7 +119,10 @@ export function BlockToolCall({
     [toolName, input, output, open],
   );
 
-  const title = useMemo(() => naturalLanguageSummary(toolName, input), [toolName, input]);
+  const title = useMemo(
+    () => naturalLanguageSummary(toolName, input, output),
+    [toolName, input, output],
+  );
 
   // 折叠态只解析来源不取图：真正的请求发生在 open === true 时渲染的预览组件里。
   const imageSource = useMemo(

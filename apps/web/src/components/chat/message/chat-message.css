@@ -39,6 +39,24 @@
   margin-top: -2px;
 }
 
+/* ── 子代理通知行 ──────────────────────────────────────────────
+ * 复用消息行的列结构做左对齐：占位块复刻头像尺寸（28px），横向偏移由
+ * `.chat-message-row` 的 `gap` 提供（≤640px 时收窄为 10px 自动跟随）。
+ * 纵向留白交给通知行自身的 padding，这里把行内边距清零避免双份间距。
+ */
+.chat-message-row--notice {
+  padding: 0;
+}
+
+.chat-message-row--notice .chat-message-main {
+  padding-top: 0;
+}
+
+.chat-message-avatar-spacer {
+  width: 28px;
+  height: 28px;
+}
+
 .chat-message-avatar-frame {
   flex-shrink: 0;
   padding-top: 2px;

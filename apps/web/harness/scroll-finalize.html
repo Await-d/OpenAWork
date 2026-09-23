@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>对话 finalize 自动贴底验收</title>
+    <style>
+      /*
+       * 本 harness 断言的是**滚动几何**（finalize 前后是否仍在最新消息处），
+       * 不是 token 兜底链：这里提供一套接近应用真实取值的主题变量，
+       * 让文字有正常颜色、行高与间距。
+       */
+      :root {
+        --bg-base: #0b0f16;
+        --bg-overlay: #151b26;
+        --bg-subtle: #1a2130;
+        --bg-hover: #1f2836;
+        --fg-strong: #e7edf7;
+        --fg-default: #c8d1e0;
+        --fg-muted: #8e9bb0;
+        --fg-subtle: #5c6879;
+        --border-default: #2a3342;
+        --border-subtle: #1d2531;
+        --border-emphasis: #3a465a;
+        --accent: #6d8cff;
+        --accent-hover: #7f9aff;
+        --accent-subtle: rgba(109, 140, 255, 0.14);
+        --accent-border: rgba(109, 140, 255, 0.35);
+        --success: #4cc38a;
+        --warning: #e0a75c;
+        --danger: #e06c6c;
+        --info: #6d8cff;
+        --aux: #8b9cf5;
+      }
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/scroll-finalize-entry.tsx"></script>
+  </body>
+</html>

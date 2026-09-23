@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import { channelFetch } from './channel-http.js';
 import { parseWhatsAppInboundMessage } from './inbound-parsers/whatsapp.js';
+import { attachWhatsAppInboundImages } from './whatsapp-media.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 
 export class WhatsAppChannelService implements MessagingChannelService {
@@ -166,6 +167,18 @@ export class WhatsAppChannelService implements MessagingChannelService {
         }
       }
     }
+  }
+
+  /**
+   * 服务层入站 enrich：WhatsApp 图片消息只带媒体 ID，需在通用路由派发前
+   * 下载为 base64 附件（`ChannelMessage.images`），供多模态输入消费。
+   * 失败只降级为占位符消息，绝不上抛。
+   */
+  async enrichInboundMessage(message: ChannelMessage): Promise<ChannelMessage> {
+    return attachWhatsAppInboundImages({
+      accessToken: this.accessToken,
+      message,
+    });
   }
 
   async getGroupMessages(_chatId: string, _count?: number): Promise<ChannelMessage[]> {

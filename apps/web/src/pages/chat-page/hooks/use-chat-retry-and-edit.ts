@@ -21,6 +21,7 @@
 import { useCallback } from 'react';
 import type { InputImageContent, Message } from '@openAwork/shared';
 import { createSessionsClient } from '@openAwork/web-client';
+import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
 import { filterTranscriptMessages } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
@@ -60,6 +61,10 @@ export interface UseChatRetryAndEditOptions {
     sourceMessageId: string,
     inputParts?: InputImageContent[],
   ) => Promise<string | undefined>;
+  /**
+   * 回退成功后的「查看文件变更」入口（可选）。缺省时 toast 不带操作按钮。
+   */
+  onOpenFileChangesPanel?: () => void;
 }
 
 export interface ChatRetryAndEdit {
@@ -103,7 +108,23 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
     historyEditPrompt,
     sendMessage,
     createBranchSessionFromMessage,
+    onOpenFileChangesPanel,
   } = options;
+
+  /**
+   * 回退（截断）成功后的可见反馈：toast + 「查看文件变更」入口。
+   * 产品要求回退不得静默完成——即使没有变更，也要给出「已回退」反馈。
+   */
+  const notifyRollbackApplied = useCallback(() => {
+    toast(
+      '已回退到所选消息，后续内容已清除',
+      'success',
+      undefined,
+      onOpenFileChangesPanel
+        ? { action: { label: '查看文件变更', onClick: onOpenFileChangesPanel } }
+        : undefined,
+    );
+  }, [onOpenFileChangesPanel]);
 
   // ── 工具回调 ──────────────────────────────────────────────────────────
   const truncateSessionMessagesInPlace = useCallback(
@@ -158,6 +179,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       setStreamError(`回退失败，已取消重发：${message}`);
       return;
     }
+    notifyRollbackApplied();
     const normalizedRemainingMessages = filterTranscriptMessages(
       normalizeChatMessages(remainingMessages),
     );
@@ -179,6 +201,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
   }, [
     currentSessionId,
     messages,
+    notifyRollbackApplied,
     resetStreamState,
     retryPrompt,
     sendMessage,
@@ -206,6 +229,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
         setStreamError(`回退失败，已取消重发：${message}`);
         return;
       }
+      notifyRollbackApplied();
       const normalizedRemainingMessages = filterTranscriptMessages(
         normalizeChatMessages(remainingMessages),
       );
@@ -229,6 +253,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       currentSessionId,
       historyEditPrompt,
       messages,
+      notifyRollbackApplied,
       resetStreamState,
       sendMessage,
       setMessages,

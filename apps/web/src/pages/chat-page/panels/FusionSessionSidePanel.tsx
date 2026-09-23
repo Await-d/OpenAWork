@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import type { ChatProviderDescriptor } from '../../../components/chat/message/chat-message-group-list.js';
 import type {
   EditorBrowserWorkspaceProps,
@@ -14,6 +14,7 @@ import type {
   FusionContextRuntimeSummary,
 } from './FusionContextTab.js';
 import { FusionReviewTab } from './FusionReviewTab.js';
+import { BackgroundTaskPanel } from './background-task-panel.js';
 import { FusionSubAgentSwitcher } from './FusionSubAgentSwitcher.js';
 import { FusionWorkspaceTab } from './FusionWorkspaceTab.js';
 import { SessionSidePanel } from './SessionSidePanel.js';
@@ -23,7 +24,8 @@ import type { SubAgentRunItem } from './sub-agent-run-list.js';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { useReviewPanelFileChanges } from './use-review-panel-file-changes.js';
 
-export type FusionDesktopPanelTab = 'review' | 'agent' | 'code' | 'preview' | 'context';
+export type FusionDesktopPanelTab =
+  'review' | 'agent' | 'background' | 'code' | 'preview' | 'context';
 
 /**
  * 桌面停靠面板一级 tab（审查 / 子代理 / 代码 / 预览 / Context）；移动端专属 tab
@@ -35,6 +37,8 @@ export function resolveFusionDesktopPanelTab(tab: SidePanelTabId): FusionDesktop
   switch (tab) {
     case 'agent':
       return 'agent';
+    case 'background':
+      return 'background';
     case 'code':
       return 'code';
     case 'preview':
@@ -82,6 +86,11 @@ export interface FusionSessionSidePanelProps {
   readonly subAgentCount?: number;
   /** 子代理消息里父级 task 工具的运行态查找表。 */
   readonly taskToolRuntimeLookup?: TaskToolRuntimeLookup;
+  /**
+   * 后台任务 tab：直接透传给 `BackgroundTaskPanel`（模型 + 回调由 ChatPage 组装）。
+   * 用分组 props 而不是 12 个散列 props，避免两个面板（classic / fusion）的传参重复。
+   */
+  readonly backgroundTaskPanel: ComponentProps<typeof BackgroundTaskPanel>;
   readonly token: string | null;
   readonly workspacePath: string | null;
   /**
@@ -93,6 +102,7 @@ export interface FusionSessionSidePanelProps {
 
 export function FusionSessionSidePanel({
   activeTab,
+  backgroundTaskPanel,
   currentSessionId,
   currentUserDisplayName,
   currentUserEmail,
@@ -245,6 +255,15 @@ export function FusionSessionSidePanel({
           saving={saving}
           workspacePath={workspacePath}
         />
+      </div>
+      <div
+        className="fusion-side-panel__pane"
+        data-testid="fusion-panel-pane-background"
+        hidden={desktopTab !== 'background'}
+      >
+        <div className="fusion-side-panel__background-host">
+          <BackgroundTaskPanel {...backgroundTaskPanel} />
+        </div>
       </div>
       <div
         className="fusion-side-panel__pane"

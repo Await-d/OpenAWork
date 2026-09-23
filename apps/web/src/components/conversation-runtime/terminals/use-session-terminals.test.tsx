@@ -160,6 +160,50 @@ describe('useSessionTerminals.applyRunEvent', () => {
     });
     expect(result.current.terminals.length).toBe(0);
   });
+
+  it('令牌轮换（accessToken 变化）不清空终端 map、不触发重新拉取', async () => {
+    const fetchMock = vi.mocked(fetch);
+    /** 只统计「终端列表」请求；shell 配置请求也走 fetch，不能混入。 */
+    const listCalls = (): number =>
+      fetchMock.mock.calls.filter((call) => {
+        const url = String(call[0]);
+        return url.endsWith('/terminals') || url.includes('/terminals?');
+      }).length;
+
+    const { result, rerender } = renderHook(
+      ({ token }: { token: string }) =>
+        useSessionTerminals({ currentSessionId: SESSION_ID, gatewayUrl: GATEWAY, token }),
+      { initialProps: { token: TOKEN } },
+    );
+
+    // 等首次 hydration 落地（空列表），避免它与下面的本地行合并产生竞态。
+    await waitFor(() => {
+      expect(listCalls()).toBe(1);
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.applyRunEvent({
+        type: 'terminal_started',
+        terminalId: 'term_token',
+        sessionId: SESSION_ID,
+        toolName: 'bash',
+        kind: 'foreground',
+        command: 'echo token',
+        cwd: '/tmp',
+        startedAtMs: 1_700_000_000_000,
+      });
+    });
+    expect(result.current.terminals).toHaveLength(1);
+
+    rerender({ token: 'rotated-token' });
+
+    // 轮换不得清空 map / 重跑 hydration：否则 active 终端瞬间为 null，
+    // `InteractiveTerminalView` 会整体卸载重建（xterm 销毁、WS 重连、焦点丢失）。
+    expect(result.current.terminals).toHaveLength(1);
+    expect(result.current.terminals[0]?.terminalId).toBe('term_token');
+    expect(listCalls()).toBe(1);
+  });
 });
 
 /**

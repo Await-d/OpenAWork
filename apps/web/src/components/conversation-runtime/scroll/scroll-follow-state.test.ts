@@ -150,6 +150,65 @@ describe('resolveFollowInterrupted', () => {
       }),
     ).toBe(true);
   });
+
+  it('非程序化位置、未到真正底部但位置未位移（只有布局在长）⇒ 保持原状态', () => {
+    // 会话开屏：scrollTop 停在 0 不动，只有内容长高。这不是外部滚动，不能挂起。
+    expect(
+      resolveFollowInterrupted({
+        intent: null,
+        interrupted: false,
+        position: {
+          atLatestEdge: false,
+          atTrueBottom: false,
+          programmatic: false,
+          positionMoved: false,
+        },
+      }),
+    ).toBe(false);
+    // 已经挂起的跟随不会被布局增长恢复（用户仍在上方翻历史）。
+    expect(
+      resolveFollowInterrupted({
+        intent: null,
+        interrupted: true,
+        position: {
+          atLatestEdge: false,
+          atTrueBottom: false,
+          programmatic: false,
+          positionMoved: false,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it('位置未位移但已回到真正底部 ⇒ 仍然恢复跟随（自愈不依赖位移）', () => {
+    expect(
+      resolveFollowInterrupted({
+        intent: null,
+        interrupted: true,
+        position: {
+          atLatestEdge: false,
+          atTrueBottom: true,
+          programmatic: false,
+          positionMoved: false,
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('位置确实位移过（用户 / 外部滚动）⇒ 未到真正底部就挂起', () => {
+    expect(
+      resolveFollowInterrupted({
+        intent: null,
+        interrupted: false,
+        position: {
+          atLatestEdge: true,
+          atTrueBottom: false,
+          programmatic: false,
+          positionMoved: true,
+        },
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('isProgrammaticPosition', () => {

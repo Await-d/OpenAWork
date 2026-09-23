@@ -71,6 +71,18 @@ describe('collectSubagentNotices', () => {
     expect(collectSubagentNotices('junk')).toEqual([]);
   });
 
+  it('字符串 createdAt 解析为毫秒时间戳（避免回落 0 被顶到会话最前）', () => {
+    const notices = collectSubagentNotices([
+      syntheticRow({ id: 's-iso', createdAt: '2026-01-02T03:04:05.000Z' }),
+      syntheticRow({ id: 's-bad', createdAt: 'junk' }),
+      syntheticRow({ id: 's-missing', createdAt: undefined }),
+    ]);
+
+    expect(notices[0]?.createdAt).toBe(Date.parse('2026-01-02T03:04:05.000Z'));
+    expect(notices[1]?.createdAt).toBe(0);
+    expect(notices[2]?.createdAt).toBe(0);
+  });
+
   it('description 与 metadata 缺失时不误判为通知', () => {
     const notices = collectSubagentNotices([
       {

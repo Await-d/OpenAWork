@@ -2,6 +2,54 @@
 
 ## 已完成的任务
 
+### ✅ 260923-渠道入站图片与出站发图 - Telegram / Discord 补齐入站图片与出站发图
+**状态**: ✅ 已完成并验证（2026-09-23，5 任务 / 4 个并行代理 + 协调者收口）
+**复杂度**: Full orchestration（score +6）
+**归档位置**: [workflow/done/260923-渠道入站图片与出站发图.md](workflow/done/260923-渠道入站图片与出站发图.md)
+
+**成果总结**:
+- ✅ **Telegram 入站图片**：`telegram-media.ts`（getFile → 下载 → base64，4MB 上限 + 魔数嗅探 + 失败降级）+ parser 占位消息 + 轮询 fire-and-forget enrich 接线（不 await 下载、不传 `pollAbort`）。
+- ✅ **Telegram 出站图片**：`sendImage` / `replyImage`（`sendPhoto` multipart、caption ≤1024 截断、`<chatId>:<msgId>` 引用）。
+- ✅ **Discord 入站图片**：attachments → `images`（CDN URL 直映射、4 张上限、扩展名兜底、纯附件消息不再丢弃）。
+- ✅ **Discord 出站图片**：multipart `payload_json` + `files[0]`、content ≤2000 截断、文件名 sanitize、`message_reference` 引用回复。
+- ✅ **零描述符改动**：`PluginSendImage` / `replyImage` 由工具层能力探测自动打通（`tools/channel-tools.ts`）；`services/agent-gateway/AGENTS.md` 补两条不变量（渠道媒体能力 / 入站媒体扩展点）。
+- ✅ **验证**：全量单测 **551 文件 / 4219 用例 EXIT=0** · typecheck exit 0 · gateway 全包 ESLint exit 0 · 改动文件 Prettier 全绿；协调者复查修复 2 处（photo `file_size` 丢失、`largest` 空值类型）。
+- ⚠️ **已知限制**：Telegram relay/webhook 模式图片不下载（envelope 形态 `images` 仍支持）；非图片附件忽略；caption/content 超长截断；Discord CDN URL 约 24h 时效；真实 bot token 冒烟不可得（mock 全链路已覆盖）。
+
+### ✅ 260923-后台任务常驻入口 - 胶囊（composer footer）+ 左侧浮动栏升级为统一「后台任务」栏
+**状态**: ✅ 已交付并验证（2026-09-23，协调者 + 1 条并行流）
+**复杂度**: Full orchestration（score +4）
+**方案文档**: [workflow/done/260923-后台任务常驻入口.md](workflow/done/260923-后台任务常驻入口.md)
+**运行计划**: `.agentdocs/runtime/260923-后台任务常驻入口/master_plan.md`（临时目录）
+**交付**: ① 输入框上方左侧（`composerFooterSlot`，classic/fusion 共用）常驻「后台 N」胶囊（脉冲点 + 悬停细目）→ 展开 320px 列表：子代理行（打开/停止）+ 命令行（查看/终止）+ 头部「全部停止」+ 底部「打开后台面板」（fusion → 侧栏 background tab；classic → 右栏后台任务 tab）；**仅在有活跃任务时渲染**。② `SubAgentRunList` 升级：表头「后台任务 + 总数」、折叠胶囊「后台 N 运行中」、可选 `shellItems` 第二组「后台命令」（查看/终止，终止仅 running）——缺省逐字节零变化（team 端零回归）。
+**关键约束**: 组件内不发请求（复用 `useBackgroundTaskPanel` + 既有回调）；**三入口（胶囊/浮动栏/面板）共用同一确认弹窗**（`background-task-confirm-dialog.tsx`）；计数一律由活跃行派生。
+**验证**: 胶囊 13 例 + rail 19 例（含既有 10 例未动）+ 面板 17 例；`apps/web` 全量 **525 文件 / 5199 用例**绿、typecheck 0、prettier 全净；rail harness **63/0**、panel/chip harness **157 断言 × 3 视口**全绿；实机只读冒烟（Fusion 默认）：rail 显示「子代理 9 + 后台命令 3」、胶囊 0 活跃不出现、0 页面错误。
+**执行期决策**: 折叠胶囊宽度阈值由 `<= 100` 放宽到 `<= 140`（承载「后台 N 运行中」后实测 131.75px，仍显著窄于展开态 200px）。
+**复查修项（2026-09-23 复查轮）**: ① **`foreground` 终端不再算「后台命令」**——真实会话 3 个终端（阻塞 `bash` + 2 个用户交互终端）曾被聚合成「后台命令 3」并可能让胶囊误报「后台 1」；过滤点收敛到 `background-task-model.ts` 的 `buildBackgroundTaskRows`（`background`/`tmux` 保留，`kind` 缺失不隐藏），四处入口共享；② 剪贴板调用改为成员直调（去掉方法抽取，规避 `unbound-method` 与丢 `this` 风险）；③ 删除 HEAD 遗留死代码 `shouldShowTaskLabel`（apps/web 被排除 lint 故从未暴露）；④ 胶囊弹层 `maxHeight` 加 `45vh` 上限（极矮视口下防被 `overflow: hidden` 裁剪）**并补真实浏览器回归守卫**——harness 新增 `chip-short` 用例（1280×460 矮窗口 + 62vh 裁切面板 + 6 条活跃行），红/绿证明有效（去掉封顶即失败：`popoverTop=22 < paneTop=78`）；⑤ 补 master_plan 编号映射（执行期新增「确认弹窗抽取」导致编号后移一位）。
+
+### ✅ 260923-后台任务统一管理面板 - 后台任务面板（Classic + Fusion 双入口，统一展示子代理任务与后台命令）
+**状态**: ✅ 已交付并验证（2026-09-23，3 条并行流 + 协调者收口）
+**复杂度**: Full orchestration（score +6）
+**方案文档**: [workflow/done/260923-后台任务统一管理面板.md](workflow/done/260923-后台任务统一管理面板.md)
+**运行计划**: `.agentdocs/runtime/260923-后台任务统一管理面板/master_plan.md`（临时目录）
+**交付**: `BackgroundTaskPanel`（汇总条 + 子代理任务区 + 后台命令区 + 三态 + 逐行确认弹窗 + 可复制 `task_id`/`terminalId`）；入口**两套布局都登记**——classic `ChatRightPanel` 的「后台任务」tab 与 Fusion `FusionSessionSidePanel` 的「后台」tab；操作＝打开子会话 / 停止（单 + 全停）/ 查看终端 / 终止，破坏性操作二次确认；**v1 零网关改动**（复用 `sessionTasks` + `useSessionTerminals`）
+**验证**: 定向测试 81 例（W1+W2）＋面板/接线新增用例 → `apps/web` 全量 **524 文件 / 5177 用例**绿、typecheck 0、prettier 全净；真实浏览器 harness **124 断言 × 3 视口**全绿（`apps/web/harness/verify-background-task-panel.ts`）；真实应用只读冒烟（Fusion 默认布局：12 行实数据、0 页面错误）
+**Wave 3 偏差（已补）**: ① 默认布局是 fusion，`ChatRightPanel` 在 Fusion 下不渲染 → 补 `FusionSessionSidePanel` 入口（`SidePanelTabId`/`PANEL_TAB_ORDER`/`SIDE_PANEL_ACTIVE_TABS`/分组 props）；② 终态行原本仍渲染「停止/终止」→ 改为仅活跃行渲染（对齐 `SubAgentRunList` 口径）
+**已知限制（后续可选）**: Fusion 的「查看终端」先展开底部终端面板（未做终端聚焦高亮，classic 已有 `focusTerminalId`）；面板数据受会话加载窗口限制（`recovery.tasks` turn limit）
+
+### ✅ 260923-回退文件变更必选交互 - 重试/回退的文件变更改为必选交互（三端）
+**状态**: 已完成（2026-09-23）——T-01…T-12 全部交付并验证；复杂度 **Full orchestration**（score +6）
+**归档位置**: [workflow/done/260923-回退文件变更必选交互.md](workflow/done/260923-回退文件变更必选交互.md)
+
+**成果总结**:
+- ✅ 共享核心（Web）：新增 `affected-changes.ts` 三信号检测纯逻辑；`useSnapshotAwareAction` 改为「有变更必弹窗（含无快照/读取失败）」+ 面板入口；`SnapshotRestoreConfirmDialog` 增加内联文件清单 / 不可恢复原因 /「打开文件变更面板」；`toast()` 支持 action（默认 8s，点击 dismiss）。
+- ✅ Chat：`ChatPage.openFileChangesPanel`（fusion → 审查 tab；classic → 右栏「快照」tab）；回退成功 toast「已回退到所选消息」+「查看文件变更」。
+- ✅ Team：接入同一 hook + 对话框；「打开面板」= `TeamChangesPanelModal`（复用 `SnapshotTimelinePanel`）；`truncateAndResend` 回退 toast +「查看变更快照」。
+- ✅ 移动端：`MobileChatMessage` 增 `clientRequestIds/createdAtMs`；`rollback-file-choice` + `use-rollback-file-choice` 双信号检测 + Alert 三选；长按「重新生成/重发」修复为**先截断再流式**（消除重复回答）+ `RollbackNotice` 回退提示（含「查看变更」→ 快照恢复页）；`answer-retry` 带参并复用同一流程。
+- ✅ 验证：新增/更新单测 68 例（web 51 + mobile 26 组内）；web 全量 **518 文件 / 5030 测试**、mobile **14 / 290**、根 `typecheck` 22/22、mobile ESLint 0 error、改动文件 Prettier 通过。
+- 🔍 **复查轮次（2026-09-23）**：独立评审发现并修复 **7 项 P1 真实缺陷**——① 检测不完整时仍静默放行（`detectionIncomplete` 死标记）；② 快照 `datetime('now')` 时间戳被按本地时区解析（非 UTC 时区下受影响判定/恢复基线整体偏移）；③ request-scoped（ASC）同秒快照的排序兜底方向反了 → 恢复基线取到更晚者；④ 移动端同秒无并列兜底；⑤ 移动端 request 零命中不回退（与 Web 结论相反）；⑥ 移动端 detail 失败仍做部分恢复并报成功；⑦ `answer-retry` 以被删除消息为检测源漏掉自身回合键。另修 8 项 P2（放行分支收敛、异常不再静默、无凭据不降级重发、恢复 toast 区分覆盖范围、打开面板关闭底层弹窗、team 声明顺序、ISO 时间归一化、复用 client），4 项记录为取舍。
+- ℹ️ 偏差：Team 面板落点为快照时间线（跨引约束）；移动端提示为流内 `RollbackNotice`（无 toast 设施）。已知瑕疵：web 全量 3 轮中 2 轮各 1 例失败（首跑 `waitFor` 超时、三跑 `use-scroll-manager` 同步贴底），**均属并行滚动改动的高并发 flaky**（该文件隔离复跑 38/38，且不引用本次改动模块），复跑全绿。
+
 ### ✅ 260923-对话模式提示词收口-P2 - 模块化 / 长度预算 / Web 同步契约 / 缺省兜底评估
 **状态**: 已完成（2026-09-23）——T-01…T-07 全部交付并验证；P2-4 评估为不采纳；复杂度 **Lightweight**（score +2）
 **归档位置**: [workflow/done/260923-对话模式提示词收口-P2.md](workflow/done/260923-对话模式提示词收口-P2.md)
@@ -261,6 +309,16 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
+### 🟡 260923-渠道入站图片第二批（Slack / WhatsApp / 企业微信）
+**状态**: 🔵 实施中（W1–W4 四代理并行）
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-23
+**方案文档**: [workflow/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md](workflow/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md)
+
+**目标**: 通用 service 级入站媒体 enrich 钩子（`enrichInboundMessage`，HTTP 入站路由 parse 后调用）+ Slack/WhatsApp 入站图片下载转 base64 + 企业微信 `PicUrl` 直映射（v1 不下载）。
+
+**范围边界**: 不含出站媒体 / QQ 入站图片 / relay 模式 enrich（与第一批已知限制一致）。
+
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
 **状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
 **复杂度**: Full orchestration（score +6）
@@ -307,10 +365,10 @@
 **关键结论（双向核实）**:
 - **上游骨架**：`job.ts`（统一 Job API + KV 持久化 + 25 条消费历史）、`subagent.ts`（前台 `jobs.block` / 后台占位文案 / 失败保留 sessionID / depth 限制默认 1）、`subagent-completion.ts`（`synthetic` 注入 + `id=notificationID` 幂等 + `resume` 默认唤醒）、`restart.ts`（重启恢复续跑或补投）。
 - **本仓缺口**：① 无 synthetic role（`MessageRole` 仅 `user|assistant|tool|system`），`appendSessionMessageV2` 只写库不跑模型；② 无 `wakeSession` 原语，唯一自动续跑靠 `scheduleDrain` **伪造新用户请求** + 800/1500ms 重试；③ `state_status` 仅三态，无法表达「已入队未唤醒」；④ 无子代理深度硬上限。
-- **本仓更强（不照抄）**：空响应警告、连续回流上限 10、结果含工具结果拼装、子代理中途替决策（`task-parent-auto-decision.ts`）、`task_*` 任务图。
+- **本仓更强（不照抄）**：空响应警告、连续回流上限 10、子代理中途替决策（`task-parent-auto-decision.ts`）、`task_*` 任务图。（**2026-09-23 修订**：结果不再做「含工具结果」的全量拼装——已对齐上游「最后一条 assistant 文本」提取口径，见 D-8 修订。）
 - **前缀爆炸半径可控但有 role 爆炸半径**：前端**不引用** `task-reminder:` / `task-auto-resume:` / `task-parent-decision:` 三个前缀（风险在 `handoff-store.ts` 内部键注册表与守卫测试）；但 D-1 决策后新增 role 触及 **shared / 模型上下文 / 前端白名单 / 移动端渲染四层**。
 
-**Gate 0 结论（2026-09-22，按「上游对齐优先」定档）**: D-1 **新增 `synthetic` role**（上游本就是独立 synthetic 类型）｜D-2 **拆分 `runSessionInBackground`**（admit / wake 分离）｜D-3 **canonical 改 `subagent` + 保留 `task` 别名**（上游本身做过 `task→subagent` 迁移）｜D-4 配置键 **`subagent_depth` 默认 `1`**｜D-5 **`.NET` 已废弃，不纳入**｜D-6 身份改用 **`notificationID`**（前缀降级为内部键兼容）｜D-7 采纳 `resume` 布尔，不引入 `steer/queue`｜D-8 结果文本**保留本仓富抽取**（有意偏离）｜D-9 **前端渲染对齐上游 Notice 契约**。
+**Gate 0 结论（2026-09-22，按「上游对齐优先」定档）**: D-1 **新增 `synthetic` role**（上游本就是独立 synthetic 类型）｜D-2 **拆分 `runSessionInBackground`**（admit / wake 分离）｜D-3 **canonical 改 `subagent` + 保留 `task` 别名**（上游本身做过 `task→subagent` 迁移）｜D-4 配置键 **`subagent_depth` 默认 `1`**｜D-5 **`.NET` 已废弃，不纳入**｜D-6 身份改用 **`notificationID`**（前缀降级为内部键兼容）｜D-7 采纳 `resume` 布尔，不引入 `steer/queue`｜D-8 结果文本**保留本仓富抽取**（有意偏离）——**2026-09-23 修订：改为对齐上游**（只取最后一条 assistant 文本 + `<subagent>` 外层包裹 + 4k/20k 长度上限，防父会话上下文膨胀）｜D-9 **前端渲染对齐上游 Notice 契约**。
 
 **详细复查（R-01…R-14，最重要的 5 条）**:
 - 🔴 **R-01/R-02**：新增 role **不会**自动让模型看到——`toModelMessages`（`message-to-model-messages.ts:456-587`）**无 else、无 assertNever**，synthetic 会被**静默丢弃**；且 `message-v2-adapter.ts:571-591` 的 `else → system` 会把 synthetic **静默改写成 system**。
@@ -609,11 +667,26 @@
 ## 项目记忆
 
 ### 已知陷阱补充
+
+- [2026-09-23] **「后台任务」视图必须过滤 `foreground` 终端**：`SessionTerminalSummary.kind` 有三值——`foreground`（**阻塞式** `bash` 调用 + 用户交互终端 `quick_terminal`）、`background`（`run_bash_in_background`）、`tmux`（`interactive_bash`）；三者都会写 `session_terminals`。不过滤的后果：后台任务面板/左侧浮动栏/composer 胶囊把用户自己开着的终端算成「后台命令在跑」（实测真实会话 3 个终端全部 foreground，含 2 个交互终端）。过滤点唯一：`apps/web/src/pages/chat-page/panels/background-task-model.ts` 的 `buildBackgroundTaskRows`（`kind` 缺失时不隐藏，兼容旧网关）。
+
+- [2026-09-23] **折叠胶囊的宽度断言会被「新增文案」打破**：`apps/web/harness/verify-sub-agent-run-list.ts` 原断言折叠宽度 `<= 100`（`子代理` 单词时代），加入「后台 N 运行中」后实测 131.75px。**改这类断言时保留「`< expanded`」的严格关系**（原始意图是「显著窄于 200px 展开态」），只放宽绝对值阈值并把新阈值写进 README。
+
+- [2026-09-23] **新增右侧面板入口必须「两套布局都登记」**：classic 用 `ChatRightPanel`（`RIGHT_PANEL_TABS` + meta + 图标），**fusion（默认布局，`workbenchLayoutMode: 'fusion'`）用 `FusionSessionSidePanel`**（`SidePanelTabId` + `PANEL_TAB_ORDER` + store 的 `SIDE_PANEL_ACTIVE_TABS` 白名单）；只改一套时默认用户根本看不到入口（本仓实测：只加 `ChatRightPanel` 后，默认布局下该 tab 不存在）。验收必须切真实布局冒烟，不能只跑组件测试。
+- [2026-09-23] **tab id 联合类型有手抄副本**：`hooks/run-send-message.ts` / `hooks/run-session-attach-effect.ts` / `hooks/use-chat-page-derivations.tsx` 曾各自复制一份 tab union，新增 tab 后 `ChatPage` 的 `setRightTab` 传参在三处整体 TS2322；已统一改为引用 `RightPanelTabId`。**新增/删除 tab 前先 grep `setRightTab` 的全部声明点**，别再复制 union。
+- [2026-09-23] **快照时间戳格式混用会让「受影响范围」判定整体偏移**：`snapshot_trees.created_at` 由 SQLite `datetime('now')` 写入（UTC、秒级、`YYYY-MM-DD HH:MM:SS`、无时区后缀），而消息时间是 `created_at_ms`（毫秒 epoch）。`Date.parse('2026-07-15 10:05:00')` 在 V8 中按**本地时区**解释 → 非 UTC 时区下快照被算成偏移一个时区：UTC+X 会漏掉受影响快照（恢复入口被错误隐藏 / 静默），UTC−X 会把保留回合之前的快照算进来（恢复基线过晚→过度回退）。修法：识别该格式并补 `Z` 按 UTC 解析（`affected-changes.ts` / `rollback-file-choice.ts` 的 `toTimestamp`），测试断言用 `Date.UTC(...)`（TZ 无关）。**凡混用 SQLite 时间串与 epoch 的判定都必须先归一化时区语义。**
+- [2026-09-23] **快照列表的 SQL 排序方向不同，并列兜底必须显式传方向**：`listSnapshotTreesForRequest` = `ORDER BY created_at ASC, id ASC`，`listSnapshotTreesForSession` = `ORDER BY created_at DESC, id DESC`。`created_at` 只有秒级精度，同一回合多个 step 快照常同秒；若排序函数用「按输入顺序取反」这种隐含方向的兜底，request-scoped（ASC）输入会把恢复基线取成**更晚**的快照（更早步骤的改动不回滚）。修法：排序函数显式收 `inputOrder: 'asc' | 'desc'`（见 `affected-changes.ts` 的 `sortSnapshotsByCreatedAt`），移动端约定输入为 DESC、内部翻转为 ASC 后稳定排序。
+- [2026-09-23] **回合回退不还原工作区文件**：`rollbackSessionTurn`（`services/agent-gateway/src/session/session-turn-rollback.ts`）只按回合硬删 `session_file_diffs` / `session_snapshots` 记录，**磁盘文件原样保留**；`snapshot_trees`（shadow git）与 `session_file_backups` 也不随回合删除 → 任何回退/重试 UI **必须显式让用户选择**是否恢复文件（文案禁止暗示「回退会还原文件」），且「回退后仍能恢复」这条路径依赖快照树，不能依赖已删的 diff 记录。
 - [2026-09-21] **批量工具权限暂停的 resume 会「删兄弟结果」** → `continueFromApprovedToolResult` 的 `truncateSessionMessagesAfter(messageId=本工具结果, inclusive:false)` 会连带删除暂停轮已写入的兄弟 tool_result（因本工具结果消息 id 更早），且 pending payload 只存单个 `toolCallId` → 修复：payload 增 `blockedToolCalls[]` 整批保序恢复 + 移除该 truncate（幂等改由确定性 `clientRequestId`+`replaceExisting` 承担）。
 - [2026-09-06] 实时聊天重复/Thinking 错位 → 标准 WS/SSE 只保存 `lastSeq:0`，重挂载 attach 从头 replay → Gateway 在持久化事件后附加 `clientRequestId + seq`，Web 分发前推进并持久化游标；文本内容指纹不应替代协议游标。
 - [2026-09-21] **切勿据「源码 TODO/FIXME 字面量」给缺口定级** → 扫标记会得出错误的 P0。实证两项均为误判，**不要重复当待办**：① `packages/opencode-llm/src/index.ts:42` 的 `TODO: 错误处理模块需要更新以适配 Effect 4.0 API` 是**过期注释**——仓库依赖本就是 `effect@4.0.0-beta.83`（`pnpm-lock.yaml` 唯一版本，无 stable 4.0），`tsc --noEmit` **EXIT=0**、`vitest run src/error` **4 文件 38 例全绿**，且**零生产消费者**（唯一引用者是包内集成测试 `src/__tests__/integration/e2e-simple.test.ts`），子路径 `./error` 仍经 `package.json` exports 可用；② `packages/skill-registry/src/installer.ts:130` 的 `Signature verification not implemented in MVP` 属**不可适用控制**——全仓无签名产物/公钥/`cosign`/`gpg`/`createSign`（`SkillManifest` 无 signature 字段），`skipSignatureVerification` 7 处调用点**全为 `true`/`?? true`**，抛错分支运行时不可达。**判缺口必须先验证前提（版本/消费者/可复现失败），再定级。**
 
 ### 架构决策
+
+- [2026-09-23] **后台任务有「三个入口」，但只有一套动作语义**：`BackgroundTaskPanel`（完整面板）/ `BackgroundTaskQuickChip`（composer footer 常驻胶囊，仅活跃时）/ `SubAgentRunList`（左侧浮动栏，含可选 `shellItems` 第二组）三者都消费 `useBackgroundTaskPanel` 的同一份行模型，破坏性操作统一走 `background-task-confirm-dialog.tsx`，并统一复用 `handleStopChildSession` / `killTerminal` / 预览终端 / `openChildSessionInspector`。**新增入口时必须复用这三个共用件**，禁止再实现一套停止/终止语义；计数一律由**活跃行**（running + pending）派生（`summary` 只用于「全部停止」的目标数量）。
+
+- [2026-09-23] **后台任务面板（classic + fusion 双入口）的组件契约与数据口径**：`BackgroundTaskPanel`（`apps/web/src/pages/chat-page/panels/background-task-panel.tsx`）是纯展示组件——**不发请求、不自带滚动容器**（宿主提供唯一滚动条），数据由 `useBackgroundTaskPanel` 归一 `sessionTasks`（`recovery.tasks` + 3s `getStatus` 轮询 + `task_update` 事件）与 `useSessionTerminals`（run events 实时 + 5s/20s 兜底对账 + `lastSyncedAtMs`）；行模型 `BackgroundTaskRow` 的 `key` = subagent `task_id` / shell `terminalId`；**终态行不渲染破坏性操作**（停止只对 running/pending 子代理，终止只对 running 命令），避免 `skipped`/`alreadyClosed` 噪声。
+- [2026-09-23] **回退 / 重试的文件变更处理 = 必选交互（三端同一口径）**：检测到变更就必须让用户选择（保留 / 恢复 / 打开面板 / 取消）；**「读取失败」不得当成「没有变更」**——任一信号读取失败（`detectionIncomplete`）且无证据时**同样弹窗**（展示「无法确认该范围是否存在变更」、隐藏恢复并给出原因），只有「检测完整且零变更」才允许静默继续。检测 SSOT = `apps/web/src/components/chat/snapshot/affected-changes.ts`（三信号：消息 trace 的 `modifiedFilesSummary` / `snapshot_trees` / 按 request 的 `session_file_diffs` 投影；合并优先级 diff > trace > snapshot；收集为 **inclusive** 于源消息）；移动端在 `apps/mobile/src/chat/rollback-file-choice.ts` 镜像同一判定（依赖 `MobileChatMessage.clientRequestIds/createdAtMs`）。回退成功必须有可见反馈（Web `toast(msg, type, duration?, { action })`；移动端 `RollbackNotice`）。Team 的「变更快照」面复用 `components/chat/snapshot/SnapshotTimelinePanel`，不得跨引 `pages/chat-page/**`。
 - [2026-09-23] **对话模式提示词共享片段是 SSOT，禁止在各模式内复制粘贴**：`services/agent-gateway/src/routes/stream-system-prompts.ts` 导出四个共享常量——`DIALOGUE_MODE_INSTRUCTION_PRIORITY_SYSTEM_PROMPT`（三模式通用：项目约定 > 模式纪律 > 通用最佳实践；其他注入提示如子代理说明 / 工具章节冲突时先说明再按优先级执行）、`EXECUTABLE_MODE_COMMON_DISCIPLINE_SYSTEM_PROMPT`（coding + programmer：先读后写 / 事实驱动附证据 / 最小变更 / 验证闭环 / 测试诚信）、`MODE_REFERRAL_SYSTEM_PROMPT`（coding + programmer 模式回流：歧义先问清、方向性分歧建议切回澄清、方案失效先停并给回退范围）、`AGENTDOCS_PLAN_HANDOFF_SYSTEM_PROMPT`（coding + programmer 承接澄清方案先落盘 / 登记 index / 勾选 T-XX / 归档 done）。契约测试 `dialogue-mode-prompts.test.ts` 直接引用共享常量做断言，防复制粘贴漂移；澄清模式保持只读，不继承可执行模式纪律。
 - [2026-09-23] **对话模式提示词 P1 收口**：clarify 单轮提问上限 5 题（frontier 超限按「阻塞范围 → 依赖深度」排序分批并说明剩余项；部分作答留 frontier 重问、明确跳过按推荐项暂定、"都行"采纳推荐项结算、答案与代码事实冲突时先确认再结算）；coding 改动粒度按编辑语义（约 80 行以上分阶段落地）；programmer 的 LSP 工具路由与重命名序列以 `LSP_TOOL_GUIDANCE_SYSTEM_PROMPT` 为单一来源（模式提示只引用章节，不重复）。契约测试含旧措辞负向断言。
 - [2026-09-23] **对话模式提示词 P2 收口**：模式提示词拆到 `services/agent-gateway/src/routes/dialogue-mode-prompts/`（shared/clarify/coding/programmer/index），`stream-system-prompts.ts` 仅 re-export 保持公共面；**不采用 `.md` 资源文件**（tsc 不搬运非 TS 资源，构建期搬运成本高于收益）。契约测试新增长度预算（clarify ≤4000 / coding ≤1800 / programmer ≤2200 / 共享合计 ≤1000，调高需评审说明）与 Web 文案同步锚点（网关侧测试期读取 `apps/web/src/pages/chat-page/mode/dialogue-mode.ts`，生产零依赖）。
@@ -658,6 +731,7 @@
 - [2026-09-16] 会话权限阶梯以 `permissionMode: 'ask'|'auto-edit'|'yolo'` 为**规范键**，布尔 `yoloMode` 降级为**派生投影**（`yoloMode === (permissionMode === 'yolo')`），使 legacy 读方 / 写方零改动；写入侧 canonicalizer 必须 patch-aware 并采用 5 级优先级（patch 规范键 > patch 布尔 > 合并后规范键 > 合并后布尔 > 保持缺席），否则 legacy 客户端 PATCH 布尔会被丢弃、session 卡在 `yolo`，形成向更不安全方向的**单向棘轮**。
 - [2026-09-16] 权限阶梯的 **deny-first 不变量**：`auto-edit` / `yolo` 的免审批快捷分支只能在**通配符 allow/deny 与作用域级 allow/deny 之后**执行，故这两档仅跳过 `ask`、永不放行被显式 `deny` 的调用；唯一执行点是 `ensurePermissionForTool`（`services/agent-gateway/src/tools/tool-sandbox.ts`），category 计算须上提以便中间档测试解析后的类别。
 - [2026-09-22] 权限阶梯新增 **deny-only 后置裁决层**（`permission.evaluate` hook，对齐 opencode v2.0.13）：`ensurePermissionForTool` 在**全部内置裁决之后**派发该 hook（工具级 / 作用域级规则 → 档位快捷分支 yolo / auto-edit / 后台 team / reception → 渠道策略 → workspace 永久规则 → saved approvals → **hook**）。插件**只能**把结论降级为 `deny`（设 `effect='deny'`，其它取值一律忽略），永远无法授权，故 **deny-first 不变量不变**：显式 `deny` 仍先于一切快捷分支早退，hook 只在「本会放行 / 免审批」与「本会进入 `ask`」两条出口生效。**`ask` 路径必须先过 hook 再落 pending**——否则被插件拒绝的调用会在 `permission_requests` 里留下无人应答的 pending 记录。插件抛错只 warn（`dispatchHook` 既有语义），零插件注册时行为与改动前完全一致。注意 hook 是 async 的：`ensurePermissionForTool` 已改为返回 `Promise`，新增放行分支必须走 `gatePermissionDecision` 而不是直接 `return`。
+- [2026-09-23] **子代理委派权限默认收紧为 `ask`**（`task_run` 类别，`packages/agent-core/src/permission/permission-categories.ts`）：默认 chat 会话委派子代理（`task` / `call_omo_agent`）**需要用户批准**（产生 pending、子代理不启动）；`auto-edit` 只覆盖 edit/write，委派仍需批准；免审批仅限 **`yolo` 档位、team 后台成员、cron 无人会话的委派**（`isUnattendedSessionDelegationAutoApproved`，只放行 `task_run`；`source` 只由服务端写入且不在 metadata PATCH 白名单，客户端无法伪造）与**渠道会话已启用工具**（既有 `channel-policy` 豁免，复查确认已覆盖委派）。用户批准（once/session/permanent）后同会话重试命中 saved approval 直接放行。旧契约「默认免审批」（`verify-task-tool-no-permission.ts`）已被 `verify-task-tool-permission-gate.ts`（`test:task-permission`，6 场景）取代——这是对参考库的**有意偏离**（参考库 agent permissions 默认全 allow）。子代理**内部工具**的档位继承（yolo 全放行 / auto-edit 放行 edit+write / 默认 ask）保持不变。
 - [2026-09-22] **不采纳上游「子会话共享父会话 prompt cache 亲和」**（opencode v2.0.13 的 `promptCacheKey = parentID ?? fork?.sessionID ?? id`）：本仓子会话的 system prompt 是**子代理自身**的 prompt（`tool-sandbox.ts` 的 `delegatedSystemPrompt: resolvedAgent.systemPrompt`），工具集与消息历史也不继承父会话，**与父会话不共享可缓存前缀**——共享键只会把「不同前缀」的请求放进同一缓存分片、与父会话争用，与本仓刻意使用 per-session 键的理由相悖（见 `v2-runtime/upstream/provider-options.ts` 的 `prompt_cache_key` 注释，已加防回归说明）。若将来子会话改为「继承父会话前缀」的形态，再重新评估。同一原则的正面用法：`sessionId` 缺失的辅助调用应补**自己归属会话**的键（2026-09-22 已补齐 workflow / look_at / 记忆抽取 / GUI 四处），而不是借父会话的键。
 
 - [2026-09-21] **不做「提供商文件引用（Files API / file_id）」通路**：上游多为第三方中转/自建，不保证实现 Files API；且该通路会把用户图片**持久化到第三方服务端**（OpenAI 默认长期保留、Anthropic 对整个 workspace 可见），与「内联 base64、请求即走」是本质不同的数据姿态。已对照 `temp/opencode`（github-v1.2.25-2014）验证：其原生协议层**零上传、零 file_id、100% 内联 base64**，且**刻意不支持公网 URL 图片**（`validateMedia` 只收 base64；session 入口 switch 只处理 `data:`/`file:`）——无 URL 抓取即无 SSRF 面。
@@ -683,6 +757,16 @@
 - [2026-09-22] **`synthetic` 消息角色契约**（对齐 opencode）：`role: 'synthetic'` 对模型**可见**（`toModelMessages` 保留，`native-message-bridge` 降级为上游 `user`），客户端**不得**按用户输入渲染；`Message.description` + `metadata = { source:'subagent', childID, agent, state }` 是客户端 notice 契约。可见性规则：非空 `description` 才成形，`failed` 即使无描述也强制可见。**读路径必须回传 `description`/`metadata`**（`v2ToV1Message` 曾漏，属静默缺陷）。
 
 - [2026-09-22] **Web 端渲染网关注入内容时，扩「群组协议」而不是扩 `ChatMessage.role`**：`ChatMessage.role` 只有 `user|assistant` 两值且全仓有 **101 处** role 分支，扩它必然产生静默错位（非 user 即按 assistant 渲染）；而 `ChatRenderGroup` 的消费者只有渲染层约 6 处，且把 `kind` 设为**必填判别字段**后所有访问 `.entries`/`.role` 的消费者都被编译器强制窄化。落点：`apps/web/src/components/chat/message/chat-message-group-list.tsx` + `conversation-runtime/messages/subagent-notice-groups.ts`。通知按 `createdAt` **时间位置**插入消息群组之间（同时间戳排在消息之后）。
+
+- [2026-09-23] **子代理通知的「正确位置」必须落到条目边界，不能只在群组级插入**：`mergeNoticeGroupsIntoRenderGroups` 原先只在**群组之间**按 `createdAt` 插入，而 `groupChatRenderEntries` 会把相邻同角色 assistant 消息（同一次请求的多轮输出、以及子代理唤醒续写的那条）合成**一个**视觉组——通知时间戳落在组内时被整体推到组后，于是「scout 已完成 · …」总是出现在**已经用上其结果的回复之后**，与 DB 顺序（A1 → notice → A2）及上游 notice 时间线语义相反（这也是 T-16b 设计要点「entry 级有序归并」落地成 group 级时的收窄代价）。修法：通知落在某组条目跨度内时，按条目边界把组拆成多段（首段保留原 key 与组级 actions，后续段以首条目消息 id 作 key——天然唯一稳定），通知插在中间；组内同戳仍「通知在消息之后」、未知时间戳条目不阻塞的既有语义不变。落点 `apps/web/src/components/conversation-runtime/messages/subagent-notice-groups.ts`，由纯函数用例 + 渲染层用例共同守卫（`subagent-notice-groups.test.ts` / `chat-message-group-list.test.tsx`）。**附带修掉**：`subagent-notices.ts` 原先只认数字 `createdAt`（ISO 串回落 `0` → 通知被顶到会话最前），改用 `message-coercion.ts` 的 `getComparableCreatedAt`。
+
+- [2026-09-23] **通知通道必须挂在「每一个 recovery 应用点」上，不能只挂快照加载器**：`subagentNotices` 原先只在 `use-session-snapshot-loader.ts` 的 `loadCurrentSessionSnapshot` 里收集，而 chat 端打开/切换会话走的是 `run-chat-session-switch-effect.ts`（软刷新 + 主加载两条分支），父任务同步走 `ChatPage.tsx` 的 `buildTerminalTaskSyncMarker` effect——这两条路径**都不收集**，后果有二：① 刷新/切换会话后通知**全部消失**，只有「流式结束后的快照刷新」才会把通知带进来；② 切会话时旧会话的通知**残留**到新会话（`subagentNotices` 不按会话分键）。修法：在所有 recovery 应用点统一 `setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []))`，并在会话切换 / 缓存恢复 / 无会话重置时清空。**判据**：新增任何 `getRecovery(...).then(...)` 应用点都必须同步接线通知，否则同一功能在「打开会话」与「流式结束」两条路径表现不一致。回归守卫：`ChatPage.session-switch.test.tsx` 新增「切到 B 渲染 B 的通知且不残留 A 的通知」。
+
+- [2026-09-23] **子代理选型指引必须落在「模型真正读到的位置」，agent 的边界要写进它自己的定义**：历史现象是「联网新闻检索被全部派给 `scout`」——根因有三：① 模型实际调用的是 **`call_omo_agent`（可见名 `Agent`）**，而它的 JSON-schema 参数**完全没有描述**（`subagent_type: { type: 'string' }`），只有工具描述里一串名字；② 该工具的委派白名单（`CALL_OMO_ALLOWED_AGENTS`，**运行期强制**：不在名单直接报错）里没有任何「通用/联网研究」agent，scout 是唯一的「外部研究」语义项；③ `scout.md` 只有一行描述 + 一行提示词，没有边界。修法（三层）：**定义层** `packages/resources/resources/agents/builtin/scout.md` 按房内风格重写（identity / mission / scope：承接=依赖源码·上游仓库·第三方文档；不承接=联网资讯检索→主会话 web 工具或 general、workspace 内检索→explore、实现示例→librarian / working_rules / results 输出契约 / constraints）；**工具层** `call-omo-agent-tools.ts` 与 `task-tools.ts` 的工具描述补「选型 + 联网检索不委派」指引，`tool-definitions.ts` 给 `Agent`（`case 'Agent'`）与 `task`（`case 'task'`）的 `subagent_type`/`run_in_background`/`category` 补参数说明（category 名单从 `FROZEN_CATEGORY_DESCRIPTIONS` 派生，避免漂移）；**回归层** 新增 3 处测试（resources 的 scout 边界、gateway 的 `Agent` 参数指引、task 工具描述指引）。**未做（有意）**：未把 `general` 加入 `CALL_OMO_ALLOWED_AGENTS`——那是白名单扩权 + 其模型候选在 frozen 快照中无条目，属产品决策，需要时单独评估。
+
+- [2026-09-23] **子代理选型的「正解 + 验收」补齐（A + C）**：A = 新增只读内置 agent **`web-researcher`**（`packages/resources/resources/agents/builtin/web-researcher.md` + `SYSTEM_BUILTIN_AGENT_NAMES` + `CALL_OMO_ALLOWED_AGENTS`；指引统一改为「联网资讯/新闻检索派 web-researcher，不要派 scout」；`team-role-layer-mapping` 与 scout/librarian 同归 pm2）——此前白名单没有正确的联网检索委派对象，模型只能把任务塞给语义最近的 scout。C = 新增验收脚本 `services/agent-gateway/src/verification/verify-subagent-selection.ts`（走真实沙盒 `call_omo_agent` 路径：web-researcher 放行且子会话拿到其系统提示词 / 未知 agent 被拒且错误信息列出可用名单 / `Agent` 工具描述与 schema 的选型指引可见 / web-researcher 与 scout 的委派解析各自命中内置描述符），接入 `test:subagent-selection` 与 `test:verification`。**真模型的「选型质量」不在覆盖范围**（属模型行为，需真实 LLM 手工验收：用一句「查一下今天的最新新闻」驱动会话，观察 tool call 的 `subagent_type`）。**附带发现（他人的在途改动，未修）**：`verify-task-tool-auto-run.ts` / `verify-task-parent-auto-resume.ts` 等**基于 `fetchCalls` 下标/计数**的验收脚本，会被「新建会话触发标题生成 LLM 调用」（`session/stream-session-title.ts` 在途改动）打乱——`fetchCalls[0]` 变成标题生成请求、子代理请求退到 `[1]`；修法是改为按请求特征（是否含 agent 系统提示词）过滤，而不是硬编码下标。
+
+- [2026-09-23] **通知行与工具卡摘要的「位置/归属」三条 UI 口径**：① **通知行必须复用消息行的列结构**（`chat-message-row--notice` + `.chat-message-avatar-spacer` 占位 28px），横向偏移交给 `.chat-message-row` 的 `gap`——写死 40px 缩进会在 ≤640px（gap 收窄为 10px）时错位；实测修复前通知文本比消息正文左移 40px（`left=486` vs `526`），修复后两者盒子对齐（`526/526`）。② **通知行的上下留白必须对称**：原先 `padding: 12px 0 4px` 让文字偏向下一条消息（实测上 28px / 下 21px，观感「靠近下半区域」），改为两侧同取 `spacing[2]`（`8px 0`）后为 24 / 25（余下 1px 来自相邻群组自身结构）；`estimateGroupHeight` 的兜底估值同步改为 `16 + 8 + 8 + 8`（总量不变，虚拟列表行为不变）。③ **`background_output` 的折叠摘要带出任务名与读取时刻的任务状态**（`已读取了后台输出 · <任务名>（已完成/运行中/…）`）：任务名与状态都从工具输出的两种模板解析（完成 → `描述：X` 行；未完成 → `| 描述 | X |` + `| 状态 | **running** |` 表格行，见 `services/agent-gateway/src/task/delegated-task-display.ts`），解析不到时保持旧文案而不猜归属。**这条同时消解「先读取再提示已完成」的观感**：读取卡自带读取时刻的状态，通知行只是同一结算事件的系统记录；实测读取卡出现在通知之前，是因为它所属 assistant 消息的时间戳是**该轮起点**（模型 `block=true` 等待时轮起点早于结算），不是因果倒置。落点 `natural-language-summary.ts` 的 `resolveBackgroundTaskReadInfo`（5 例测试），调用方 `block-tool-call.tsx` / `inline-tool-call.tsx` 需把 `output` 一并传入。
 
 ### 编码约定
 - 所有提示词使用中文编写

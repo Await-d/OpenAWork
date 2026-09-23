@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,9 @@ import { textPresets } from '../src/theme/typography';
 import { Screen } from '../src/components/Screen';
 import { ScreenHeader } from '../src/components/ui';
 import { useAuthStore } from '../src/store/auth';
+import { normalizeMobileChatMessages } from '../src/chat/chat-message-content';
+import type { MobileChatMessage } from '../src/chat/chat-message-content';
+import { useRollbackFileChoice } from '../src/screens/chat-screen/use-rollback-file-choice';
 
 const RETRY_MODES = [
   {
@@ -50,6 +53,27 @@ export default function AnswerRetryScreen() {
   const { accessToken, gatewayUrl } = useAuthStore();
   const [selected, setSelected] = useState<string>('same');
   const [retrying, setRetrying] = useState(false);
+  const [messages, setMessages] = useState<MobileChatMessage[]>([]);
+
+  // 检测信号：会话消息（回合键 / 时间），用于定位受影响快照。
+  useEffect(() => {
+    if (!sessionId || !accessToken) return;
+    void (async () => {
+      try {
+        const session = await createSessionsClient(gatewayUrl).get(accessToken, sessionId);
+        setMessages(normalizeMobileChatMessages(session.messages ?? []));
+      } catch {
+        // 读取失败时退化为「全部快照」，由选择流程的不可恢复原因兜底。
+      }
+    })();
+  }, [accessToken, gatewayUrl, sessionId]);
+
+  const rollbackFileChoice = useRollbackFileChoice({
+    accessToken,
+    gatewayUrl,
+    messages,
+    sessionId: sessionId ?? '',
+  });
 
   const handleRetry = useCallback(async () => {
     if (!sessionId || !accessToken || !messageId) {
@@ -58,15 +82,18 @@ export default function AnswerRetryScreen() {
     }
     setRetrying(true);
     try {
-      const client = createSessionsClient(gatewayUrl);
-      await client.truncateMessages(accessToken, sessionId, messageId, { inclusive: true });
-      router.replace(`/chat/${sessionId}`);
+      // 检测到文件变更时先让用户选择（保留 / 恢复 / 取消），再截断并回到聊天页。
+      await rollbackFileChoice.requestRollbackWithFileChoice(messageId, async () => {
+        const client = createSessionsClient(gatewayUrl);
+        await client.truncateMessages(accessToken, sessionId, messageId, { inclusive: true });
+        router.replace(`/chat/${sessionId}`);
+      });
     } catch (err) {
       Alert.alert('重试失败', err instanceof Error ? err.message : '请稍后重试');
     } finally {
       setRetrying(false);
     }
-  }, [sessionId, messageId, accessToken, gatewayUrl]);
+  }, [sessionId, messageId, accessToken, gatewayUrl, rollbackFileChoice]);
 
   return (
     <Screen>

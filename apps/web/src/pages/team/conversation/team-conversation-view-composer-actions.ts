@@ -10,6 +10,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import type { InputImageContent } from '@openAwork/shared';
 import { createSessionsClient, createSettingsClient } from '@openAwork/web-client';
+import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { applyRollbackReceipt } from '../../../stores/team/rollback-tombstones.js';
 import type { ChatRenderAction } from '../../../components/chat/message/chat-message-group-list.js';
 import { copyExportToClipboard } from '../../../components/chat/message/message-export.js';
@@ -111,6 +112,8 @@ export function useTeamConversationViewRetryActions(input: {
   composerEnabled: boolean;
   dispatchTeamText: (text: string, inputParts?: InputImageContent[]) => Promise<boolean>;
   gatewayUrl: string;
+  /** 「查看变更快照」入口（回退成功 toast 的 action）。 */
+  onOpenChangesPanel?: () => void;
   sessionId: string;
   state: TeamConversationState;
   token: string | null;
@@ -129,7 +132,15 @@ export function useTeamConversationViewRetryActions(input: {
   setHistoryEditPrompt: Dispatch<SetStateAction<HistoryEditPromptInput | null>>;
   setRetryPrompt: Dispatch<SetStateAction<RetryPromptInput | null>>;
 } {
-  const { composerEnabled, dispatchTeamText, gatewayUrl, sessionId, state, token } = input;
+  const {
+    composerEnabled,
+    dispatchTeamText,
+    gatewayUrl,
+    onOpenChangesPanel,
+    sessionId,
+    state,
+    token,
+  } = input;
 
   const handleStopStream = useCallback(async () => {
     if (!composerEnabled) return;
@@ -178,12 +189,21 @@ export function useTeamConversationViewRetryActions(input: {
       // 旧回合的过程时间线与流错误不再属于当前视图。
       state.setRunEvents([]);
       state.setStreamError(null);
+      // 回退成功必须可见（产品要求不得静默），并给出「查看变更快照」入口。
+      toast(
+        '已回退到所选消息，后续内容已清除',
+        'success',
+        undefined,
+        onOpenChangesPanel
+          ? { action: { label: '查看变更快照', onClick: onOpenChangesPanel } }
+          : undefined,
+      );
       // 重发也走统一路由（与正常提交一致，避免在 clarifying 环节误绕过 inbound）。
       await dispatchTeamText(text, inputParts);
       // startStream 路径不会自行 reload：主动补一次快照 resync，否则过程时间线残留。
       void state.reload();
     },
-    [gatewayUrl, sessionId, state, token, dispatchTeamText],
+    [dispatchTeamText, gatewayUrl, onOpenChangesPanel, sessionId, state, token],
   );
 
   const handleResendHistoryEdit = useCallback(

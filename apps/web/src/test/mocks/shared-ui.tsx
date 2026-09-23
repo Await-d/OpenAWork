@@ -14,3 +14,8 @@ export type { Tokens } from '../../../../../packages/shared-ui/src/tokens.js';
 // composer 附件预览的接线测试覆盖真实交互契约（点击 / 键盘 / aria-label）。
 export { ImagePreview } from '../../../../../packages/shared-ui/src/chat/ImagePreview.js';
 export type { ImagePreviewProps } from '../../../../../packages/shared-ui/src/chat/ImagePreview.js';
+
+// SubagentNoticeRow 同为纯展示组件（仅依赖 react + shared 类型 + tokens），
+// 转发真实实现才能让「通知按时间位置渲染」的接线测试覆盖真实行渲染。
+export { SubagentNoticeRow } from '../../../../../packages/shared-ui/src/chat/SubagentNoticeRow.js';
+export type { SubagentNoticeRowProps } from '../../../../../packages/shared-ui/src/chat/SubagentNoticeRow.js';

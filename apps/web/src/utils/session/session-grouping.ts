@@ -1,4 +1,8 @@
-import { extractParentSessionId, extractWorkingDirectory } from './session-metadata.js';
+import {
+  extractParentSessionId,
+  extractSshConnectionId,
+  extractWorkingDirectory,
+} from './session-metadata.js';
 import { getPathBasename } from '../workspace-path.js';
 
 export interface SessionWithWorkspaceLike {
@@ -53,12 +57,12 @@ export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   sessions: TSession[],
 ): Map<string, number> {
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
-  const resolvedWorkspaceCache = new Map<string, string | null>();
+  const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
   const counts = new Map<string, number>();
 
   for (const session of sessions) {
     const groupKey = getWorkspaceGroupKey(
-      resolveSessionWorkspacePath(session, sessionsById, resolvedWorkspaceCache),
+      resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache).workspacePath,
     );
     counts.set(groupKey, (counts.get(groupKey) ?? 0) + 1);
   }
@@ -77,7 +81,7 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   const groups = new Map<string, WorkspaceSessionGroup<TSession>>();
   const savedWorkspaceOrder = new Map<string, number>();
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
-  const resolvedWorkspaceCache = new Map<string, string | null>();
+  const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
 
   savedWorkspacePaths.forEach((path, index) => {
     const normalizedPath = normalizeWorkspacePath(path);
@@ -99,11 +103,11 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   });
 
   for (const session of orderedSessions) {
-    const workspacePath = resolveSessionWorkspacePath(
+    const workspacePath = resolveSessionWorkspaceBinding(
       session,
       sessionsById,
-      resolvedWorkspaceCache,
-    );
+      resolvedBindingCache,
+    ).workspacePath;
     const groupKey = getWorkspaceGroupKey(workspacePath);
     const existing = groups.get(groupKey);
 
@@ -167,16 +171,16 @@ export function listWorkspacePathsFromSessions<TSession extends SessionWithWorks
 ): string[] {
   const orderedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
-  const resolvedWorkspaceCache = new Map<string, string | null>();
+  const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
   const workspacePaths: string[] = [];
   const seenWorkspacePaths = new Set<string>();
 
   for (const session of orderedSessions) {
-    const workspacePath = resolveSessionWorkspacePath(
+    const workspacePath = resolveSessionWorkspaceBinding(
       session,
       sessionsById,
-      resolvedWorkspaceCache,
-    );
+      resolvedBindingCache,
+    ).workspacePath;
     if (!workspacePath || seenWorkspacePaths.has(workspacePath)) {
       continue;
     }
@@ -362,45 +366,82 @@ function getLatestUpdatedAt<TSession extends SessionWithWorkspaceLike>(
   }, '');
 }
 
-function resolveSessionWorkspacePath<TSession extends SessionWithWorkspaceLike>(
+/**
+ * 会话工作区绑定（路径 + SSH 连接 id）。
+ *
+ * 两个字段各自沿父会话链继承（与 `useWorkspace` / 网关解析口径一致）：
+ * 只继承远端路径而丢掉连接 id 会让新建的会话落到错误的校验分支。
+ */
+export interface SessionWorkspaceBinding {
+  readonly workspacePath: string | null;
+  readonly sshConnectionId: string | null;
+}
+
+/**
+ * 按会话 id 从已加载的会话列表解析工作区绑定（与分组共用同一套父会话继承规则）。
+ *
+ * 列表可能被路径筛选 / 分页截断：目标会话不在列表里时返回 `undefined`，
+ * 让调用方区分「未找到（可回落）」与「已确认未绑定」。
+ */
+export function resolveSessionWorkspaceBindingById<TSession extends SessionWithWorkspaceLike>(
+  sessions: readonly TSession[],
+  sessionId: string,
+): SessionWorkspaceBinding | undefined {
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const targetSession = sessionsById.get(sessionId);
+  if (!targetSession) {
+    return undefined;
+  }
+
+  return resolveSessionWorkspaceBinding(targetSession, sessionsById, new Map());
+}
+
+function resolveSessionWorkspaceBinding<TSession extends SessionWithWorkspaceLike>(
   session: TSession,
   sessionsById: Map<string, TSession>,
-  resolvedWorkspaceCache: Map<string, string | null>,
+  resolvedBindingCache: Map<string, SessionWorkspaceBinding>,
   activeSessionIds: Set<string> = new Set(),
-): string | null {
-  const cachedWorkspacePath = resolvedWorkspaceCache.get(session.id);
-  if (cachedWorkspacePath !== undefined) {
-    return cachedWorkspacePath;
+): SessionWorkspaceBinding {
+  const cachedBinding = resolvedBindingCache.get(session.id);
+  if (cachedBinding !== undefined) {
+    return cachedBinding;
   }
 
   const ownWorkspacePath = extractWorkingDirectory(session.metadata_json);
-  if (ownWorkspacePath !== null) {
-    resolvedWorkspaceCache.set(session.id, ownWorkspacePath);
-    return ownWorkspacePath;
-  }
+  const ownSshConnectionId = extractSshConnectionId(session.metadata_json);
+  const ownBinding: SessionWorkspaceBinding = {
+    workspacePath: ownWorkspacePath,
+    sshConnectionId: ownSshConnectionId,
+  };
 
+  // 两个字段各自沿父链继承（与 useWorkspace / 网关解析口径一致）：
+  // 子会话可能只带 parentSessionId，也可能只补了 workingDirectory 而 SSH
+  // 绑定落在祖先层级，任一字段缺失都要继续向上找。
   const parentSessionId = extractParentSessionId(session.metadata_json);
-  if (!parentSessionId || activeSessionIds.has(session.id)) {
-    resolvedWorkspaceCache.set(session.id, null);
-    return null;
-  }
-
-  const parentSession = sessionsById.get(parentSessionId);
+  const parentSession =
+    parentSessionId && !activeSessionIds.has(session.id)
+      ? sessionsById.get(parentSessionId)
+      : undefined;
   if (!parentSession) {
-    resolvedWorkspaceCache.set(session.id, null);
-    return null;
+    resolvedBindingCache.set(session.id, ownBinding);
+    return ownBinding;
   }
 
   activeSessionIds.add(session.id);
-  const inheritedWorkspacePath = resolveSessionWorkspacePath(
+  const inheritedBinding = resolveSessionWorkspaceBinding(
     parentSession,
     sessionsById,
-    resolvedWorkspaceCache,
+    resolvedBindingCache,
     activeSessionIds,
   );
   activeSessionIds.delete(session.id);
-  resolvedWorkspaceCache.set(session.id, inheritedWorkspacePath);
-  return inheritedWorkspacePath;
+
+  const resolvedBinding: SessionWorkspaceBinding = {
+    workspacePath: ownWorkspacePath ?? inheritedBinding.workspacePath,
+    sshConnectionId: ownSshConnectionId ?? inheritedBinding.sshConnectionId,
+  };
+  resolvedBindingCache.set(session.id, resolvedBinding);
+  return resolvedBinding;
 }
 
 function normalizeWorkspacePath(path: string): string | null {

@@ -37,7 +37,7 @@ import { whatsAppFactory } from './whatsapp.js';
 import { qqFactory } from './qq.js';
 import { shouldHandleChannelEvent } from './subscription-filter.js';
 import type { ChannelDiagnostics, ChannelEvent, ChannelInstance } from './types.js';
-import { channelLogInfo, summarizeChannelEvent } from './channel-log.js';
+import { channelLogInfo, channelLogWarn, summarizeChannelEvent } from './channel-log.js';
 import {
   parseDingTalkInboundMessage,
   parseDiscordInboundMessage,
@@ -342,6 +342,21 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
     resolveChannel: resolveAnyChannel,
     parseMessage: (type, raw, channel) => channelManager.parseMessage(type, raw, { channel }),
     notifyChannel,
+    enrichInboundMessage: async ({ channel, message }) => {
+      const service = channelManager.getService(channel.id);
+      if (!service?.enrichInboundMessage) {
+        return message;
+      }
+      try {
+        return await service.enrichInboundMessage(message);
+      } catch (error) {
+        channelLogWarn('inbound media enrich failed', {
+          channelId: channel.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return message;
+      }
+    },
     recordInboundDiagnostic: (input) => channelManager.recordInboundDiagnostic(input),
   });
 

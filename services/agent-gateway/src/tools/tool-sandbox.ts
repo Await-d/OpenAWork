@@ -4175,10 +4175,9 @@ async function executeGatewayManagedToolImpl(
                 category,
                 completedAt: refreshedTask.completedAt,
                 errorMessage: refreshedTask.errorMessage,
-                resultText:
-                  collectDelegatedSessionText(
-                    listSessionMessages({ sessionId: childSessionId, userId }),
-                  ) || refreshedTask.result,
+                // 对齐参考库前台路径（`SubagentCompletion.text`）：只回传子代理最后一条
+                // assistant 文本，不再把整个子会话的文本 + 工具输出全量拼进父会话。
+                resultText: getChildSessionSummary(childSessionId, userId) || refreshedTask.result,
                 sessionId: childSessionId,
                 startedAt: refreshedTask.startedAt,
                 status:
@@ -4331,10 +4330,9 @@ async function executeGatewayManagedToolImpl(
               category,
               completedAt: refreshedTask.completedAt,
               errorMessage: refreshedTask.errorMessage,
-              resultText:
-                collectDelegatedSessionText(
-                  listSessionMessages({ sessionId: childSessionId, userId }),
-                ) || refreshedTask.result,
+              // 对齐参考库前台路径：只回传子代理最后一条 assistant 文本，
+              // 不再全量拼接子会话文本与工具输出（防父会话上下文膨胀）。
+              resultText: getChildSessionSummary(childSessionId, userId) || refreshedTask.result,
               sessionId: childSessionId,
               startedAt: refreshedTask.startedAt,
               status:
@@ -4951,7 +4949,11 @@ function formatValidationIssues(
 }
 
 function getChildSessionSummary(sessionId: string, userId: string): string {
-  return extractLatestChildSessionSummary(listSessionMessages({ sessionId, userId }));
+  // 对齐参考库：只在**已完成**的 assistant 消息里找最终文本
+  //（`subagent-job.ts` 的 `message.error === undefined` 判定 → 这里用 statuses 过滤）。
+  return extractLatestChildSessionSummary(
+    listSessionMessages({ sessionId, userId, statuses: ['final'] }),
+  );
 }
 
 function stripThinkingBlocks(value: string): string {
@@ -5788,6 +5790,34 @@ function isReceptionReadOnlyToolAutoApproved(
   );
 }
 
+/**
+ * 无人来源会话（cron 定时任务）的**委派**免审批。
+ *
+ * cron 会话由定时器驱动、用户不在场：若委派需要审批，任务会一直挂到用户下次
+ * 打开 Web UI，定时任务静默停摆。委派子代理（`task_run` 类别）是定时任务的
+ * 常规能力，故在此放行——与 `isBackgroundAutoApprovedTeamSession` 同类。
+ *
+ * 安全边界：
+ *   - 免审批分支在**通配符 / 作用域级 deny 之后**执行，显式 `deny` 仍然优先；
+ *   - 只放行**委派类别**（`task` / `call_omo_agent` → `task_run`）：cron 会话内的
+ *     写操作（edit/write/bash）保持 `ask`，沿用既有语义（用户可在 Web UI 批准）；
+ *   - `source` 只在服务端写入（`cron/agent-handler.ts`），会话 metadata PATCH 是
+ *     strict 白名单（`session-workspace-metadata.ts`，不含 `source`），客户端无法伪造。
+ *
+ * 渠道会话不在此列：其已启用工具走既有 `channel-policy` 豁免
+ * （`shouldAutoApproveToolForSessionMetadata`）。
+ */
+function isUnattendedSessionDelegationAutoApproved(
+  metadata: Record<string, unknown>,
+  permissionCategory: string,
+): boolean {
+  if (metadata['source'] !== 'cron') {
+    return false;
+  }
+
+  return permissionCategory === 'task_run';
+}
+
 function updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): void {
   sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
     JSON.stringify(metadata),
@@ -6227,6 +6257,7 @@ async function ensurePermissionForTool(
   if (
     permissionMode === 'yolo' ||
     isBackgroundAutoApprovedTeamSession(sessionRoleContext) ||
+    isUnattendedSessionDelegationAutoApproved(sessionMetadata, category) ||
     isReceptionReadOnlyToolAutoApproved(sessionRoleContext, request.toolName)
   ) {
     return gatePermissionDecision(

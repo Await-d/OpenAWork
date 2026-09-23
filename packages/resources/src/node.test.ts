@@ -27,6 +27,7 @@ import {
   listResourceCenterCatalog,
   resourcePath,
 } from './node.js';
+import { getSystemBuiltinAgentDescriptor } from './system-descriptors.js';
 
 describe('reference resource skills', () => {
   it('creates manifests for integrated resource skills and keeps reference-only skills disabled', () => {
@@ -308,5 +309,34 @@ describe('resource catalog', () => {
         'components/luckin-summary.html',
       ]),
     );
+  });
+});
+
+describe('scout agent definition', () => {
+  it('把「外部依赖 / 仓库 / 文档研究」与联网资讯检索划清边界', () => {
+    const descriptor = getSystemBuiltinAgentDescriptor('scout');
+
+    expect(descriptor).toBeDefined();
+    // 选型依据（模型/UI 都读 description）：必须写明不承接联网资讯检索，
+    // 否则模型会把它当成通用联网搜索 agent（历史现象：新闻检索全部派给 scout）。
+    expect(descriptor?.description).toContain('不承接联网资讯');
+    expect(descriptor?.description).toContain('依赖源码');
+    // 子代理自身提示词里必须给出「不承接」的替代路径，避免它硬接或直接失败。
+    expect(descriptor?.systemPrompt).toContain('联网资讯 / 新闻 / 时事 / 实时行情检索');
+    expect(descriptor?.systemPrompt).toContain('explore');
+  });
+});
+
+describe('web-researcher agent definition', () => {
+  it('作为联网信息检索的正确委派对象存在，且为只读', () => {
+    const descriptor = getSystemBuiltinAgentDescriptor('web-researcher');
+
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.description).toContain('联网检索');
+    expect(descriptor?.systemPrompt).toContain('你是 Web Researcher');
+    expect(descriptor?.systemPrompt).toContain('多来源');
+    // 只读契约：与 explore / scout 同一口径，禁止写文件。
+    expect(descriptor?.systemPrompt).toContain('只读');
+    expect(descriptor?.systemPrompt).toContain('不创建、不修改、不删除任何文件');
   });
 });

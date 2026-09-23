@@ -172,6 +172,7 @@ export interface ProviderManager {
   toggleModelEnabled(providerId: string, modelId: string, enabled?: boolean): AIProvider;
   setActiveChat(providerId: string, modelId: string): ActiveSelection;
   setActiveFast(providerId: string, modelId: string): ActiveSelection;
+  applyActiveSelection(selection: ActiveSelection): ActiveSelection;
   getChatProviderConfig(): { provider: AIProvider; model: AIModelConfig };
   getFastProviderConfig(): { provider: AIProvider; model: AIModelConfig };
   syncBuiltinPresets(): AIProvider[];

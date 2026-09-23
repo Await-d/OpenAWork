@@ -55,6 +55,31 @@ function makeAssistantMessage(id: string, requestId: string, createdAt: string):
   };
 }
 
+/** 只有回合键、没有变更摘要的 assistant 消息（用于「无证据」场景）。 */
+function makeAssistantMessageWithoutFiles(
+  id: string,
+  requestId: string,
+  createdAt: string,
+): ChatMessage {
+  return {
+    id,
+    role: 'assistant',
+    createdAt,
+    content: createAssistantTraceContent({
+      text: 'done',
+      toolCalls: [
+        {
+          toolCallId: `tool-${requestId}`,
+          toolName: 'read_file',
+          input: {},
+          clientRequestId: requestId,
+          status: 'completed',
+        },
+      ],
+    }),
+  };
+}
+
 function makeSnapshot(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     treeHash: 'tree-default',
@@ -163,18 +188,20 @@ describe('useSnapshotAwareAction', () => {
         );
       }
       if (url.endsWith('/sessions/session-1/snapshot-trees?clientRequestId=req-1')) {
+        // 网关 request-scoped 列表 = ORDER BY created_at ASC, id ASC：
+        // 同秒的 step 快照必须按「更早者在前」返回（夹具与真实契约保持一致）。
         return new Response(
           JSON.stringify({
             trees: [
               makeSnapshot({
-                treeHash: 'tree-affected-2',
-                parentTreeHash: 'tree-affected-1',
+                treeHash: 'tree-affected-1',
+                parentTreeHash: 'tree-keep',
                 clientRequestId: 'req-1',
                 createdAt: '2026-07-15 10:05:00',
               }),
               makeSnapshot({
-                treeHash: 'tree-affected-1',
-                parentTreeHash: 'tree-keep',
+                treeHash: 'tree-affected-2',
+                parentTreeHash: 'tree-affected-1',
                 clientRequestId: 'req-1',
                 createdAt: '2026-07-15 10:05:00',
               }),
@@ -555,5 +582,281 @@ describe('useSnapshotAwareAction', () => {
       expect(result.current.dialogProps.restoreUnavailableReason).toContain('没有可用快照');
     });
     expect(result.current.dialogProps.restoreTargetTreeHash).toBeNull();
+  });
+
+  it('无快照但有消息 trace 变更时仍然弹窗，并标记不可自动恢复', async () => {
+    const onProceed = vi.fn();
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/sessions/session-1/snapshot-trees?clientRequestId=req-trace-only')) {
+        return new Response(JSON.stringify({ trees: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/sessions/session-1/snapshot-trees')) {
+        return new Response(JSON.stringify({ trees: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/sessions/session-1/requests/req-trace-only/file-changes')) {
+        return new Response(
+          JSON.stringify({
+            clientRequestId: 'req-trace-only',
+            fileChanges: { fileDiffs: [], snapshots: [], summary: { totalFileDiffs: 0 } },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useSnapshotAwareAction({
+        sessionId: 'session-1',
+        gatewayUrl: 'http://localhost:3000',
+        messages: [
+          makeUserMessage('source-user', '2026-07-15T10:00:00.000Z'),
+          makeAssistantMessage('assistant-after', 'req-trace-only', '2026-07-15T10:05:00.000Z'),
+        ],
+      }),
+    );
+
+    await act(async () => {
+      result.current.checkAndExecute({
+        action: 'retry',
+        sourceMessageId: 'source-user',
+        onProceed,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.dialogProps.open).toBe(true);
+    });
+    expect(onProceed).not.toHaveBeenCalled();
+    expect(result.current.dialogProps.files?.map((file) => file.file)).toEqual(['changed.ts']);
+    expect(result.current.dialogProps.restoreTargetTreeHash).toBeNull();
+    expect(result.current.dialogProps.restoreUnavailableReason).toContain('没有可用快照');
+  });
+
+  it('快照列表读取失败但有变更证据时弹窗并提示读取失败', async () => {
+    const onProceed = vi.fn();
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes('/snapshot-trees')) {
+        return new Response(JSON.stringify({ error: 'snapshot backend down' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/sessions/session-1/requests/req-read-fail/file-changes')) {
+        return new Response(
+          JSON.stringify({
+            clientRequestId: 'req-read-fail',
+            fileChanges: { fileDiffs: [], snapshots: [], summary: { totalFileDiffs: 0 } },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useSnapshotAwareAction({
+        sessionId: 'session-1',
+        gatewayUrl: 'http://localhost:3000',
+        messages: [
+          makeUserMessage('source-user', '2026-07-15T10:00:00.000Z'),
+          makeAssistantMessage('assistant-after', 'req-read-fail', '2026-07-15T10:05:00.000Z'),
+        ],
+      }),
+    );
+
+    await act(async () => {
+      result.current.checkAndExecute({
+        action: 'edit',
+        sourceMessageId: 'source-user',
+        onProceed,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.dialogProps.open).toBe(true);
+    });
+    expect(onProceed).not.toHaveBeenCalled();
+    expect(result.current.dialogProps.restoreUnavailableReason).toContain('快照信息读取失败');
+  });
+
+  it('无任何变更证据时静默放行', async () => {
+    const onProceed = vi.fn();
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/sessions/session-1/snapshot-trees')) {
+        return new Response(JSON.stringify({ trees: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useSnapshotAwareAction({
+        sessionId: 'session-1',
+        gatewayUrl: 'http://localhost:3000',
+        messages: [
+          makeUserMessage('source-user', '2026-07-15T10:00:00.000Z'),
+          {
+            id: 'assistant-plain',
+            role: 'assistant',
+            content: '没有文件变更',
+            createdAt: '2026-07-15T10:05:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      result.current.checkAndExecute({
+        action: 'retry',
+        sourceMessageId: 'source-user',
+        onProceed,
+      });
+    });
+
+    await waitFor(() => {
+      expect(onProceed).toHaveBeenCalledTimes(1);
+    });
+    expect(result.current.dialogProps.open).toBe(false);
+  });
+
+  it('打开文件变更面板会取消本次操作并触发回调', async () => {
+    const onProceed = vi.fn();
+    const onOpenFileChangesPanel = vi.fn();
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/sessions/session-1/snapshot-trees?clientRequestId=req-open-panel')) {
+        return new Response(JSON.stringify({ trees: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/sessions/session-1/snapshot-trees')) {
+        return new Response(JSON.stringify({ trees: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/sessions/session-1/requests/req-open-panel/file-changes')) {
+        return new Response(
+          JSON.stringify({
+            clientRequestId: 'req-open-panel',
+            fileChanges: { fileDiffs: [], snapshots: [], summary: { totalFileDiffs: 0 } },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useSnapshotAwareAction({
+        sessionId: 'session-1',
+        gatewayUrl: 'http://localhost:3000',
+        messages: [
+          makeUserMessage('source-user', '2026-07-15T10:00:00.000Z'),
+          makeAssistantMessage('assistant-after', 'req-open-panel', '2026-07-15T10:05:00.000Z'),
+        ],
+        onOpenFileChangesPanel,
+      }),
+    );
+
+    await act(async () => {
+      result.current.checkAndExecute({
+        action: 'retry',
+        sourceMessageId: 'source-user',
+        onProceed,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.dialogProps.open).toBe(true);
+    });
+
+    await act(async () => {
+      result.current.dialogProps.onOpenFileChangesPanel?.();
+    });
+
+    expect(onOpenFileChangesPanel).toHaveBeenCalledTimes(1);
+    expect(onProceed).not.toHaveBeenCalled();
+    expect(result.current.dialogProps.open).toBe(false);
+  });
+
+  it('三路信号失败且无变更证据时仍弹窗（检测不完整，不得静默放行）', async () => {
+    const onProceed = vi.fn();
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes('/snapshot-trees')) {
+        return new Response(JSON.stringify({ error: 'snapshot backend down' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/file-changes')) {
+        return new Response(JSON.stringify({ error: 'file changes down' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useSnapshotAwareAction({
+        sessionId: 'session-1',
+        gatewayUrl: 'http://localhost:3000',
+        messages: [
+          makeUserMessage('source-user', '2026-07-15T10:00:00.000Z'),
+          makeAssistantMessageWithoutFiles(
+            'assistant-after',
+            'req-incomplete',
+            '2026-07-15T10:05:00.000Z',
+          ),
+        ],
+      }),
+    );
+
+    await act(async () => {
+      result.current.checkAndExecute({
+        action: 'retry',
+        sourceMessageId: 'source-user',
+        onProceed,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.dialogProps.open).toBe(true);
+    });
+    expect(onProceed).not.toHaveBeenCalled();
+    expect(result.current.dialogProps.detectionIncomplete).toBe(true);
+    expect(result.current.dialogProps.files).toEqual([]);
+    expect(result.current.dialogProps.affectedSnapshots).toEqual([]);
+    expect(result.current.dialogProps.restoreTargetTreeHash).toBeNull();
+    expect(result.current.dialogProps.restoreUnavailableReason).toContain('检测文件变更时出错');
   });
 });

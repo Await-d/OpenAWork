@@ -40,6 +40,11 @@ conversation-runtime/
   且落在 latest 边缘内 —— 由 `use-scroll-manager.ts` 的 `handleSeekLatest` 处理。
   向上手势一律走 `leave-latest` 立即挂起。**禁止**引入时间窗口 / 防抖式"忽略若干毫秒内滚动事件"，
   也**禁止**把宽松的 latest 边缘判定开放给非向下意图：那正是历史回归（一个滚轮刻度被静默撤销）的来源。
+- **挂起必须要求「位置确实位移」**（`positionMoved`）：非程序化位置 + 未到真正底部，但 `scrollTop`
+  自上一次对账以来没有变化 ⇒ 只有**布局**在长（首批内容到达 / 高度重排），不构成用户 / 外部滚动的
+  证据，保持原状态、交给自动跟随贴底。ResizeObserver 对账路径显式传 `layoutOnly: true`；
+  未知基线按「已位移」保守处理。**禁止**把布局增长当成外部滚动挂起跟随——那会让会话开屏的第一帧
+  就把跟随挂掉，慢机 / 后台标签页下永久停在中途。
 - **`tool_result` 先到时必须就地占位**：live（`stream/streaming-segments.ts`
   `applyToolResultToStreamingSegment`）与持久化（`messages/trace-codec.ts`
   `partsFromOrderedAssistantContent`）两条路径必须**同序**；匹配不到 `tool_call` 时在**到达位置**

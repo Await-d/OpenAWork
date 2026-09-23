@@ -18,6 +18,8 @@ const sessionFixtures = vi.hoisted(() => ({
   firstTitle: 'Chat 会话一',
 }));
 
+const newSessionMock = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => tauriWindowControls,
 }));
@@ -43,6 +45,7 @@ vi.mock('../../../hooks/workspace/useSessions.js', () => ({
     setSessionSearch: vi.fn(),
     startRename: vi.fn(),
     commitRename: vi.fn(),
+    newSession: newSessionMock,
     quickDeleteSession: vi.fn(),
     quickExportSession: vi.fn(),
   }),
@@ -146,6 +149,7 @@ beforeEach(() => {
   cleanup();
   resetUiState();
   sessionFixtures.firstTitle = 'Chat 会话一';
+  newSessionMock.mockClear();
   tauriWindowControls.close.mockClear();
   tauriWindowControls.minimize.mockClear();
   tauriWindowControls.toggleMaximize.mockClear();
@@ -246,6 +250,14 @@ describe('TitlebarTabStrip', () => {
     expect(screen.getByText('Chat 会话一')).not.toBeNull();
     expect(screen.getByRole('button', { name: '工具菜单' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
+  });
+
+  it('Ctrl+T 新建会话走统一 newSession 入口', () => {
+    renderTitlebar('/chat/chat-session-1');
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: 't' });
+
+    expect(newSessionMock).toHaveBeenCalledTimes(1);
   });
 
   it('会规范化会话标题首尾空白且不会触发循环更新', () => {

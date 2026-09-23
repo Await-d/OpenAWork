@@ -302,6 +302,26 @@ export class ProviderManagerImpl implements ProviderManager {
     return this.getActiveSelection();
   }
 
+  /**
+   * 整体套用一份 ActiveSelection，并立即按当前 provider/model 清单归一化
+   * （失效选择回退到首个可用项，fast 为空视为「已关闭」）。
+   *
+   * 读取路径必须先完成目录同步（`syncFromModelsDev` / `syncBuiltinPresets`）再调用：
+   * 落库只保留用户覆写项，catalog 派生模型在同步后才会回到 provider 列表；若在
+   * 构造期就传入选择，这些模型尚未补回，选择会被误判失效并静默回退到 fallback。
+   */
+  public applyActiveSelection(selection: ActiveSelection): ActiveSelection {
+    this.active = {
+      ...selection,
+      chat: { ...selection.chat },
+      fast: { ...selection.fast },
+      ...(selection.compaction ? { compaction: { ...selection.compaction } } : {}),
+      ...(selection.image ? { image: { ...selection.image } } : {}),
+    };
+    this.ensureActiveSelectionValid();
+    return this.getActiveSelection();
+  }
+
   public getChatProviderConfig(): { provider: AIProvider; model: AIModelConfig } {
     return this.getSelectionConfig(this.active.chat.providerId, this.active.chat.modelId);
   }

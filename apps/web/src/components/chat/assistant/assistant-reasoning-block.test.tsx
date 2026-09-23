@@ -183,8 +183,8 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
   });
 
   const longContent = Array.from({ length: 20 }, (_, i) => `思考行 ${i + 1}`).join('\n');
-  // 与组件 computeClampedBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES) 使用同一公式
-  const collapsedMaxHeight = `${3 * 1.6 * 13 + 4}px`;
+  // 与组件 computeReasoningBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES) 使用同一公式
+  const collapsedMaxHeight = `${5 * 1.6 * 13 + 4}px`;
   // 折叠窗口是"贴底窗口"：column-reverse 让可见区落在末尾，超出部分从顶部裁掉
   const collapsedBodyStyle = {
     maxHeight: collapsedMaxHeight,
@@ -192,11 +192,12 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
     display: 'flex',
     flexDirection: 'column-reverse',
   };
+  // 展开态同样是贴底窗口，只是放宽到高度上限并在块内滚动（向上滚回看更早的思考）
   const expandedBodyStyle = {
-    maxHeight: null,
-    overflow: null,
-    display: null,
-    flexDirection: null,
+    maxHeight: 'min(60vh, 480px)',
+    overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column-reverse',
   };
 
   const readBodyClamp = (container: HTMLElement) => {
@@ -299,7 +300,7 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
     expect(liveText).toBe(staticContainer.querySelector('.assistant-reasoning-body')?.textContent);
   });
 
-  it('流式预览中点击展开后展示全部内容，可再收起回到预览', () => {
+  it('流式预览中点击展开后应用高度上限，可再收起回到预览窗口', () => {
     vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
       selector({ reasoningExpandedByDefault: false }),
     );
@@ -372,7 +373,7 @@ describe('AssistantReasoningBlock - 流式进行中的实时预览折叠', () =>
     expect(readBodyClamp(container)).toEqual(collapsedBodyStyle);
   });
 
-  it('开启"推理默认展开"时流式内容完整展示', () => {
+  it('开启"推理默认展开"时同样应用高度上限', () => {
     vi.mocked(useDisplayPreferencesStore).mockImplementation((selector: any) =>
       selector({ reasoningExpandedByDefault: true }),
     );

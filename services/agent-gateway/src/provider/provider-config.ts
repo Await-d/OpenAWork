@@ -367,22 +367,32 @@ export const resolveStoredDefaultThinkingMode = (
   return { ...parsed[mode] };
 };
 
+/** 在模型清单完备后套用已落库的选择；缺失/损坏的选择保持管理器当前状态。 */
+export const applyStoredActiveSelection = (
+  manager: InstanceType<typeof ProviderManagerImpl>,
+  rawActiveSelection: unknown,
+): void => {
+  const active = parseStoredActiveSelection(rawActiveSelection);
+  if (active) {
+    manager.applyActiveSelection(active);
+  }
+};
+
 const createProviderManager = async (
   rawProviders: unknown,
   rawActiveSelection: unknown,
   options: { syncModelsDev?: boolean } = {},
 ): Promise<InstanceType<typeof ProviderManagerImpl>> => {
   const providers = parseStoredProviders(rawProviders);
-  const active = parseStoredActiveSelection(rawActiveSelection);
-  const manager = providers
-    ? new ProviderManagerImpl({ providers, active })
-    : active
-      ? new ProviderManagerImpl({ active })
-      : new ProviderManagerImpl();
+  // 不在构造期传 selection：落库只存用户覆写项，catalog 派生模型要等目录同步
+  // 才补回；提前校验会把指向这些模型的选择误判为失效并静默回退（保存后读回即
+  // 变成 fallback）。统一在模型清单补齐后再套用选择。
+  const manager = providers ? new ProviderManagerImpl({ providers }) : new ProviderManagerImpl();
 
   if (options.syncModelsDev !== false) {
     await manager.syncFromModelsDev();
   }
+  applyStoredActiveSelection(manager, rawActiveSelection);
 
   return manager;
 };

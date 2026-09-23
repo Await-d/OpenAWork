@@ -630,6 +630,10 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     alignItems: 'stretch',
     gap: compact ? '1rem' : '1.5rem',
     minHeight: '100%',
+    // 与 chat 端 `ChatConversationView` 同因同修：`minHeight: 100%` + 默认
+    // `flex-shrink: 1` 会把内容列盒子压回滚动区高度，导致滚动跟随依赖的内容列
+    // ResizeObserver 永不回调（详见 chat 端同名字段的注释）。
+    flexShrink: 0,
   };
 
   // 待办 controller 与浮层都由 ChatTopBar 一侧挂载（顶部右侧 popover）；本组件不再

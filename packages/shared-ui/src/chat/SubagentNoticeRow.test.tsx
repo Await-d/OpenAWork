@@ -114,7 +114,7 @@ describe('SubagentNoticeRow', () => {
     expect(row?.textContent).not.toContain('·');
   });
 
-  it('grouped 收紧上间距，未分组时使用 token 上间距', () => {
+  it('grouped 收紧上下间距，未分组时上下留白对称', () => {
     const { container: groupedContainer, unmount: unmountGrouped } = render(
       <SubagentNoticeRow notice={buildNotice()} grouped />,
     );
@@ -128,6 +128,7 @@ describe('SubagentNoticeRow', () => {
     const looseRow = looseContainer.querySelector(
       '[data-component="subagent-notice"]',
     ) as HTMLElement;
-    expect(looseRow.style.padding).toBe('12px 0px 4px');
+    // 对称 padding：通知行夹在两条消息之间时必须上下居中，不得偏向任一侧。
+    expect(looseRow.style.padding).toBe('8px 0px');
   });
 });

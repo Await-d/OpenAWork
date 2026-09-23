@@ -183,13 +183,18 @@ export function useWorkspace(sessionId: string | null) {
     sessionId !== null && activeSessionWorkspace?.sessionId === sessionId;
   const retainedWorkspaceState = sessionId !== null && workspaceState.sessionId === sessionId;
   const retainedWorkingDirectory = retainedWorkspaceState ? workspaceState.path : null;
-  // SSH 连接 id 没有 activeSessionWorkspace 那层 store 缓存，只能取本 hook
-  // 为同一会话解析出的值；切到别的会话时立刻回落 null，避免身份串味。
+  // SSH 连接 id 与 resolvedWorkingDirectory 同源，优先取 store 缓存：本地 warp
+  // 会解绑 SSH（网关删除 metadata.sshConnectionId），缓存里的 null 才是当前真相；
+  // hook 本地值只在同会话内 setWorkspace 时不会刷新，可能残留旧连接。
+  // 切到别的会话时立刻回落 null，避免身份串味。
   const retainedSshConnectionId = retainedWorkspaceState ? workspaceState.sshConnectionId : null;
 
   const resolvedWorkingDirectory = hasActiveSessionWorkspace
     ? activeSessionWorkspace.path
     : retainedWorkingDirectory;
+  const resolvedSshConnectionId = hasActiveSessionWorkspace
+    ? (activeSessionWorkspace.sshConnectionId ?? null)
+    : retainedSshConnectionId;
 
   useEffect(() => {
     if (!sessionId) {
@@ -242,7 +247,7 @@ export function useWorkspace(sessionId: string | null) {
           sessionId,
           sshConnectionId: result.sshConnectionId,
         });
-        setActiveSessionWorkspace(sessionId, result.path);
+        setActiveSessionWorkspace(sessionId, result.path, result.sshConnectionId);
         setError(null);
       })
       .catch((error: unknown) => {
@@ -278,7 +283,7 @@ export function useWorkspace(sessionId: string | null) {
           // 改工作区路径不改会话的 SSH 绑定：同一会话保留已解析的远端连接 id。
           sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
         }));
-        setActiveSessionWorkspace(sessionId, normalizedPath || null);
+        setActiveSessionWorkspace(sessionId, normalizedPath || null, null);
         setError(null);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -301,7 +306,7 @@ export function useWorkspace(sessionId: string | null) {
         sessionId,
         sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
       }));
-      setActiveSessionWorkspace(sessionId, null);
+      setActiveSessionWorkspace(sessionId, null, null);
       setError(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -445,7 +450,7 @@ export function useWorkspace(sessionId: string | null) {
      * 当前会话的 SSH 连接 id（本地会话为 null）。读取身份消费方据此判断
      * 会话是否绑定远端工作区；无活动的会话工作区时为 null。
      */
-    sshConnectionId: retainedSshConnectionId,
+    sshConnectionId: resolvedSshConnectionId,
     loading,
     error,
     setWorkspace,

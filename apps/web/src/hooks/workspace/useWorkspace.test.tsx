@@ -248,6 +248,49 @@ describe('useWorkspace', () => {
     expect(result.current.sshConnectionId).toBeNull();
   });
 
+  it('SSH 会话切到本地工作区后 sshConnectionId 立即回落 null', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-remote/workspace')) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/sessions/session-remote')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: 'session-remote',
+              metadata_json: JSON.stringify({
+                workingDirectory: '/remote/repo',
+                sshConnectionId: 'conn-1',
+              }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-remote'));
+
+    await waitFor(() => {
+      expect(result.current.sshConnectionId).toBe('conn-1');
+    });
+
+    await act(async () => {
+      await result.current.setWorkspace('/workspace/local');
+    });
+
+    // 网关 warp 到本地目录会解绑 SSH；hook 返回的身份必须与路径同源，
+    // 否则「新建会话」会把远端连接 id 带到本地草稿上。
+    expect(result.current.workingDirectory).toBe('/workspace/local');
+    expect(result.current.sshConnectionId).toBeNull();
+  });
+
   it('fetchFile 会读取结构化结果并带上当前 workspaceRoot', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();

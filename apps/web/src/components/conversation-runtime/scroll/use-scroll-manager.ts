@@ -7,14 +7,18 @@ import {
   CHAT_LAYOUT_WAIT_MAX_FRAMES,
   CHAT_TRUE_BOTTOM_TOLERANCE_PX,
 } from './scroll-constants.js';
-import { isProgrammaticPosition, resolveFollowInterrupted } from './scroll-follow-state.js';
+import {
+  isProgrammaticPosition,
+  resolveFollowInterrupted,
+  SCROLL_PROGRAMMATIC_POSITION_TOLERANCE_PX,
+} from './scroll-follow-state.js';
 import { useScrollIntent } from './use-scroll-intent.js';
 
 /**
  * 自动跟随的最终不变量（**never a time window**）：
  *
- *   suspend = explicit input intent OR a non-programmatic position leaving the
- *             true bottom;
+ *   suspend = explicit input intent OR a non-programmatic position that actually
+ *             moved (scrollTop 位移) and left the true bottom;
  *   resume  = a programmatic landing still at the latest edge, OR a
  *             non-programmatic position reaching the true bottom, OR an
  *             explicit downward intent landing inside the latest edge.
@@ -26,6 +30,11 @@ import { useScrollIntent } from './use-scroll-intent.js';
  *   轨道点击、`Cmd+↑/↓`、书签/搜索 `scrollIntoView`、缓存恢复 `scrollTo`。
  *   区分依据是 `programmaticScrollTopRef`：本模块每次主动滚动（或决定不滚动）
  *   都记录目标落点，`scrollTop === 落点` 的位移只可能来自我们自己。
+ * - **布局变化不是外部滚动**：`lastObservedScrollTopRef` 记录上一次对账观测到的
+ *   `scrollTop`；位置没有位移时，偏离 latest 只可能是内容在长（首批内容到达 /
+ *   高度重排）。ResizeObserver 对账显式标注 `layoutOnly`，此时不挂起跟随——
+ *   否则会话开屏的第一帧就会因内容长高被判成「用户离开」，开屏贴底只能靠
+ *   后续 `forceFollowToLatest` 补一次（慢机 / 后台标签页下会永久停在中途）。
  * - **位置是两态的**：程序化落点只用宽松的 `atLatestEdge`（内容 / 布局增长的
  *   保持区，含 80–160px 的 spacer 阅读位置）；非程序化位置必须回到真正底部
  *   （`distanceToBottom <= CHAT_TRUE_BOTTOM_TOLERANCE_PX`）才恢复。单一宽松判定
@@ -184,6 +193,13 @@ export function useScrollManager(
    * `scrollTop` 仍等于该值，不会被误判为用户离开。
    */
   const programmaticScrollTopRef = useRef<number | null>(null);
+  /**
+   * 上一次对账观测到的 `scrollTop`（原样记录，含首次的 null = 未知）。
+   * 用于回答「这次位置偏离 latest，是位置被移动了，还是只有内容长高了」：
+   * 布局增长不会改变 `scrollTop`，外部滚动 / 手势 / 钳位都会。未知按「已移动」
+   * 保守处理（缺省不放开挂起）。
+   */
+  const lastObservedScrollTopRef = useRef<number | null>(null);
   const previousSessionKeyRef = useRef(sessionKey);
   /** `reconcileFollowState` 的有界布局重试帧与其帧计数（成功测量后归零）。 */
   const reconcileRetryFrameRef = useRef<number | null>(null);
@@ -238,13 +254,21 @@ export function useScrollManager(
    *   `atLatestEdge` 保持 / 恢复跟随；
    * - 位置 != 落点（用户手势 / 滚动条拖拽 / 键盘跳转 / `scrollIntoView` /
    *   缓存恢复）⇒ 只有回到**真正底部**（`atTrueBottom`）才恢复，否则挂起。
+   * - 位置 == 上一次观测（`positionMoved === false`）⇒ 谁也没动位置，只是**布局**
+   *   在长（`layoutOnly` 调用于 ResizeObserver / 容器尺寸变化）⇒ 保持原状态，
+   *   不据此挂起。
    *
    * 它也是「幽灵挂起」的自愈路径：一次零位移的 wheel/ArrowUp 会让
    * `userInterruptedRef = true`，但下一个 reconcile 测到「位置仍是程序化落点
    * 且仍在 latest 边缘内」就会清除它——不需要任何计时器。
+   *
+   * `layoutOnly: true` 由 ResizeObserver 路径传入：会话开屏 / 首批内容到达时
+   * `scrollTop` 停在 0 不动、只有内容在长高，若按「非程序化位置未到真正底部」
+   * 挂起跟随，开屏贴底就会被推迟到下一次显式 `forceFollowToLatest`，慢机 /
+   * 后台标签页下甚至永久停在中途。
    */
   const reconcileFollowState = useCallback(
-    (scrollRegion: HTMLDivElement): void => {
+    (scrollRegion: HTMLDivElement, reconcileOptions?: { layoutOnly?: boolean }): void => {
       // 容器尚未完成布局（CSS containment / 路由过渡）时 clientHeight 为 0。
       // 直接放弃会让布局窗口内增长的内容永远得不到对账（流式结束后再没有任何
       // 事件来结算），因此在帧预算内重排；计数在成功测量后归零。
@@ -261,7 +285,7 @@ export function useScrollManager(
               scheduleRetry();
               return;
             }
-            reconcileFollowState(region);
+            reconcileFollowState(region, reconcileOptions);
           });
         };
         scheduleRetry();
@@ -281,17 +305,38 @@ export function useScrollManager(
         programmaticScrollTop: programmaticScrollTopRef.current,
         scrollTop: measurement.scrollTop,
       });
+      // 位置相对上一次观测是否位移过。布局增长不改变 scrollTop：这种「位置停在
+      // 旧处、内容在长」不是用户 / 外部滚动的证据（未知则保守按已位移处理）。
+      const previousScrollTop = lastObservedScrollTopRef.current;
+      const positionMoved =
+        reconcileOptions?.layoutOnly === true
+          ? false
+          : previousScrollTop === null
+            ? true
+            : Math.abs(measurement.scrollTop - previousScrollTop) >
+              SCROLL_PROGRAMMATIC_POSITION_TOLERANCE_PX;
+      lastObservedScrollTopRef.current = measurement.scrollTop;
       const atTrueBottom = measurement.distanceToBottom <= CHAT_TRUE_BOTTOM_TOLERANCE_PX;
       const interrupted = resolveFollowInterrupted({
         intent: null,
         interrupted: userInterruptedRef.current,
-        position: { atLatestEdge, atTrueBottom, programmatic },
+        position: { atLatestEdge, atTrueBottom, programmatic, positionMoved },
       });
       userInterruptedRef.current = interrupted;
+      // 未挂起 + 位置不是本模块记录的程序化落点 ⇒ 这是**浏览器钳位**（内容瞬时
+      // 缩短 / 视口高度变化把 `scrollTop` 移到当时的 `maxScrollTop`）或用户自己回到
+      // 真正底部：两种情况下当前位置都是「在最新处」的合法基线，必须把它记为新的
+      // 程序化落点。否则旧落点会一直停留在钳位前的位置，下一次内容增长时
+      // `isProgrammaticPosition` 判 false、`atTrueBottom` 也判 false，跟随被误挂起
+      // ——表现为「流式结束后视口停在最新回复上方，必须手动往下滚」。
+      if (!interrupted && !programmatic) {
+        programmaticScrollTopRef.current = measurement.scrollTop;
+      }
       applyFollowState(interrupted);
     },
     [
       applyFollowState,
+      lastObservedScrollTopRef,
       measureScroll,
       programmaticScrollTopRef,
       scrollRegionRef,
@@ -431,6 +476,10 @@ export function useScrollManager(
   /**
    * 强制回到最新并在 `CHAT_FOLLOW_SETTLE_MAX_FRAMES` 帧内复检，返回取消函数。
    *
+   * **同步首帧**：调用当帧就测量并贴底（再由有界帧循环 / ResizeObserver 复检后续
+   * 增长）。这样从 layout effect 调用的「开屏贴底」能在本帧绘制前落地——会话开屏
+   * 时内容提交后的第一帧不会画在旧位置（长历史会话表现为先看到最旧消息）。
+   *
    * 与 `scrollToBottom` 一样，**协议层只做即时滚动**：`behavior` 参数仅为调用方
    * 签名兼容而保留，任何传入值（包括真实调用方传的 `'smooth'`）都会被忽略，实际
    * 滚动一律 `behavior: 'auto'`——smooth 动画的中间位置会被
@@ -477,7 +526,10 @@ export function useScrollManager(
         }
       };
 
-      frameId = requestAnimationFrame(settle);
+      // **同步首帧**：调用方若是 layout effect（会话开屏贴底），同步贴底才能在本帧
+      // 绘制前完成。只排 rAF 会让内容提交后的第一帧画在旧位置——长历史会话表现为
+      // 「先看到最旧的消息，之后才跳到最新」；慢机 / 后台标签页下更久。
+      settle();
 
       return () => {
         cancelled = true;
@@ -506,6 +558,10 @@ export function useScrollManager(
       // 恢复**不是**程序化落点（它可能落在历史中部）：清掉落点，让位置裁决走
       // non-programmatic 分支 —— 只有恢复到真正底部才继续跟随。
       programmaticScrollTopRef.current = null;
+      // 恢复是**外部给定的位置**：清掉位移基线（未知 ⇒ 保守按已位移），
+      // 保证这次恢复一定走「只有回到真正底部才继续跟随」的裁决，而不是因
+      // 基线恰好等于恢复值被当成「位置未动」。
+      lastObservedScrollTopRef.current = null;
       if (pendingScrollFrameRef.current !== null)
         cancelAnimationFrame(pendingScrollFrameRef.current);
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
@@ -526,6 +582,7 @@ export function useScrollManager(
     },
     [
       applyFollowState,
+      lastObservedScrollTopRef,
       measureScroll,
       pendingScrollFrameRef,
       programmaticScrollTopRef,
@@ -585,8 +642,17 @@ export function useScrollManager(
     // 泄漏到新会话（否则新会话永不跟随）；旧会话的程序化落点也必须清除。
     userInterruptedRef.current = false;
     programmaticScrollTopRef.current = null;
+    // 位移基线一并清空（未知 = 保守按已位移），新会话的首次对账不会被旧会话的
+    // 位置污染。
+    lastObservedScrollTopRef.current = null;
     applyFollowState(false);
-  }, [applyFollowState, programmaticScrollTopRef, sessionKey, userInterruptedRef]);
+  }, [
+    applyFollowState,
+    lastObservedScrollTopRef,
+    programmaticScrollTopRef,
+    sessionKey,
+    userInterruptedRef,
+  ]);
 
   useEffect(() => {
     if (messagesLength === 0 && !visibleStreaming && visibleStreamBufferLength === 0) {
@@ -627,21 +693,35 @@ export function useScrollManager(
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
     const contentColumn = contentColumnRef.current;
-    if (!contentColumn) return;
-    // ResizeObserver 是工具卡片高度增长（不改变 visibleStreamBufferLength）
-    // 之后重新贴底的主路径。先 reconcile 再跟随：
+    const scrollRegion = scrollRegionRef.current;
+    if (!contentColumn && !scrollRegion) return;
+    // ResizeObserver 同时观测**内容列**与**滚动区**：
+    // - 内容列：内容增长（流式 token / 工具卡展开 / Markdown 惰性块）的主路径。
+    //   ⚠️ 该路径要求内容列的**盒子**随内容增长 —— `ChatConversationView` /
+    //   `TeamConversationLayout` 的 `contentColumnStyle` 必须保持 `flexShrink: 0`：
+    //   `minHeight: 100%` 会关闭 flex 项的内容自动最小高度，默认 `flex-shrink: 1`
+    //   会把盒子压回滚动区高度（内容溢出但盒子不变），本回调就再也不会触发。
+    // - 滚动区：可视高度变化（输入区统计行、面板开合、窗口 resize）会在内容完全
+    //   不变的情况下改变「到最新处的距离」，并可能让浏览器把 `scrollTop` 钳到新的
+    //   `maxScrollTop`。内容远高于视口时内容列盒子不再跟随视口高度，只观测内容列
+    //   会漏掉这一类（表现为流式结束后视口停在最新回复上方）。
+    // 先 reconcile 再跟随：
     // - 绝不因 userInterruptedRef 提前 return —— 那会把「位置已回到 latest」的
     //   自愈路径永久切断；
     // - 空会话（瞬时清空）不参与测量，避免空容器的 distanceToBottom = 0 伪造成
     //   「已回 latest」而丢掉用户的滚动保持。
     const observer = new ResizeObserver(() => {
-      const scrollRegion = scrollRegionRef.current;
-      if (!scrollRegion) return;
+      const region = scrollRegionRef.current;
+      if (!region) return;
       if (messagesLength === 0 && !visibleStreaming) return;
-      reconcileFollowState(scrollRegion);
+      // 本回调由**布局变化**触发（内容长高 / 滚动区尺寸变化），不是滚动事件：
+      // `scrollTop` 未位移时不能把「位置偏离 latest」当成外部滚动挂起跟随，
+      // 否则会话开屏的第一帧就会把跟随挂掉（见 resolveFollowInterrupted）。
+      reconcileFollowState(region, { layoutOnly: true });
       autoFollowLatest();
     });
-    observer.observe(contentColumn);
+    if (contentColumn) observer.observe(contentColumn);
+    if (scrollRegion) observer.observe(scrollRegion);
     return () => observer.disconnect();
   }, [
     autoFollowLatest,

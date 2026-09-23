@@ -64,6 +64,7 @@ beforeEach(() => {
   sessionsClientMocks.list.mockClear();
   useAuthStore.setState({ accessToken: 'test-token', gatewayUrl: 'http://localhost:3000' });
   useUIStateStore.setState({
+    activeSessionWorkspace: null,
     activeTabId: null,
     chatView: 'session',
     collapsedSubagentParentIds: [],
@@ -121,6 +122,152 @@ describe('useSessions.newSession — 草稿会话', () => {
     expect(state.selectedWorkspacePath).toBe('/ws/a');
     expect(state.savedWorkspacePaths).toContain('/ws/a');
     expect(state.tabs[0]?.workspacePath).toBe('/ws/a');
+  });
+
+  it('无显式工作区时继承当前会话的工作区', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        metadata_json: JSON.stringify({ workingDirectory: '/ws/current' }),
+        title: '会话一',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    const { result } = renderUseSessions('/chat/session-1');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/ws/current');
+    expect(state.savedWorkspacePaths).toContain('/ws/current');
+    expect(state.tabs[0]?.workspacePath).toBe('/ws/current');
+  });
+
+  it('实时解析缓存优先于会话列表 metadata', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        metadata_json: JSON.stringify({ workingDirectory: '/ws/list' }),
+        title: '会话一',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    useUIStateStore.setState({
+      activeSessionWorkspace: {
+        sessionId: 'session-1',
+        path: '/ws/live',
+        sshConnectionId: null,
+        version: 1,
+      },
+    });
+    const { result } = renderUseSessions('/chat/session-1');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    expect(useUIStateStore.getState().selectedWorkspacePath).toBe('/ws/live');
+  });
+
+  it('当前会话未绑定工作区时新建会话同样不绑定，不沿用陈旧选中值', async () => {
+    useUIStateStore.setState({ selectedWorkspacePath: '/ws/stale' });
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        title: '会话一',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    const { result } = renderUseSessions('/chat/session-1');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBeNull();
+    expect(state.tabs[0]?.workspacePath).toBeUndefined();
+  });
+
+  it('显式 null 的入口（未绑定分组）不继承当前会话工作区', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        metadata_json: JSON.stringify({ workingDirectory: '/ws/current' }),
+        title: '会话一',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    const { result } = renderUseSessions('/chat/session-1');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession(null);
+    });
+
+    expect(useUIStateStore.getState().selectedWorkspacePath).toBeNull();
+  });
+
+  it('上下文会话不在列表时回落全局选中值', async () => {
+    useUIStateStore.setState({ selectedWorkspacePath: '/ws/fallback' });
+    const { result } = renderUseSessions('/chat/session-1');
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    expect(useUIStateStore.getState().selectedWorkspacePath).toBe('/ws/fallback');
+  });
+
+  it('非 /chat 路由（如会话页）用当前激活会话标签作为上下文', async () => {
+    const tabId = useUIStateStore.getState().addSessionTab('session-tab', '标签会话');
+    useUIStateStore.setState({
+      activeSessionWorkspace: {
+        sessionId: 'session-tab',
+        path: '/ws/tab',
+        sshConnectionId: null,
+        version: 1,
+      },
+      activeTabId: tabId,
+    });
+    const { result } = renderUseSessions('/sessions');
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/ws/tab');
+    expect(state.tabs.some((tab) => tab.type === 'draft')).toBe(true);
+  });
+
+  it('继承 SSH 远端会话时远端路径与连接 id 成对带走', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        metadata_json: JSON.stringify({
+          sshConnectionId: 'ssh-1',
+          workingDirectory: '/remote/repo',
+        }),
+        title: '远端会话',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    const { result } = renderUseSessions('/chat/session-1');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/remote/repo');
+    expect(state.selectedSshConnectionId).toBe('ssh-1');
   });
 });
 

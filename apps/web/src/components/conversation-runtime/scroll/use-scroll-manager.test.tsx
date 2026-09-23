@@ -647,6 +647,75 @@ describe('useScrollManager', () => {
     expect(harness.getScrollTop()).toBe(900);
   });
 
+  it('视口高度变化引起的浏览器钳位不得永久挂起跟随', () => {
+    const harness = createScrollHarness();
+    setupEngagedAtBottom(harness);
+    const { manager, setEffects } = renderManager(harness, {
+      visibleStreaming: true,
+      visibleStreamBufferLength: 3,
+    });
+
+    // 流式增长 → 自动跟随到 800 并记录落点
+    harness.setScrollHeight(1200);
+    setEffects({ visibleStreamBufferLength: 4 });
+    expect(harness.getScrollTop()).toBe(800);
+
+    // 流式结束瞬间：输入区变矮（统计行折叠 / 停止按钮消失）→ 滚动区可视高度
+    // 变大 → maxScrollTop 从 800 变成 740，浏览器把 scrollTop 钳到 740。
+    // 这是非程序化位移，而且**不会**改变内容列高度（内容远高于视口时内容列
+    // 高度由内容决定）→ 没有任何内容列 resize 回调。
+    harness.setClientHeight(460);
+    harness.setScrollTop(740);
+    act(() => {
+      manager().handleScroll(harness.scrollEvent());
+    });
+    expect(manager().isFollowEngaged()).toBe(true);
+
+    // 输入区恢复原高 + 定稿消息渲染完成：末条消息组底边被推到视口下方
+    harness.setClientHeight(400);
+    harness.setScrollHeight(1300);
+    harness.setAnchorContentTop(1100);
+    harness.setAnchorContentBottom(1230);
+    harness.getObserver()?.trigger();
+
+    expect(manager().isFollowEngaged()).toBe(true);
+    expect(manager().isFollowingRef.current).toBe(true);
+    expect(harness.getScrollTop()).toBe(900);
+  });
+
+  it('浏览器钳位落在真正底部后成为新的跟随基线', () => {
+    const harness = createScrollHarness();
+    setupEngagedAtBottom(harness);
+    const { manager, setEffects } = renderManager(harness, {
+      visibleStreaming: true,
+      visibleStreamBufferLength: 3,
+    });
+
+    harness.setScrollHeight(1200);
+    setEffects({ visibleStreamBufferLength: 4 });
+    expect(harness.getScrollTop()).toBe(800);
+
+    // 内容瞬时缩短（流式气泡先卸载）→ 浏览器把 scrollTop 钳到 600，
+    // 只产生 scroll 事件（没有内容列 resize、也没有 buffer 变化）。
+    harness.setScrollHeight(1000);
+    harness.setScrollTop(600);
+    act(() => {
+      manager().handleScroll(harness.scrollEvent());
+    });
+    expect(manager().isFollowEngaged()).toBe(true);
+
+    // 定稿消息渲染（内容回涨）：位置不再是旧落点 800，但语义上仍在最新处，
+    // 必须继续跟随，而不是被误判为「外部滚动」永久挂起。
+    harness.setScrollHeight(1400);
+    harness.setAnchorContentTop(1100);
+    harness.setAnchorContentBottom(1230);
+    harness.getObserver()?.trigger();
+
+    expect(manager().isFollowEngaged()).toBe(true);
+    expect(manager().isFollowingRef.current).toBe(true);
+    expect(harness.getScrollTop()).toBe(1000);
+  });
+
   it('restoreScrollTop 恢复到历史中部会挂起跟随', () => {
     const harness = createScrollHarness();
     setupEngagedAtBottom(harness);
@@ -1084,6 +1153,76 @@ describe('useScrollManager', () => {
     harness.flushAnimationFrame();
     expect(harness.getScrollTop()).toBe(680);
     cleanupZeroHeight();
+  });
+
+  it('forceFollowToLatest 同步完成首帧贴底（不依赖 rAF），供开屏在绘制前落地', () => {
+    const harness = createScrollHarness();
+    setupEngagedAtBottom(harness);
+    const { manager } = renderManager(harness);
+
+    // 手动帧队列：任何依赖 rAF 的贴底都不会发生。
+    harness.enableManualFrames();
+    harness.setScrollTop(120);
+
+    const cleanup = manager().forceFollowToLatest('auto');
+
+    // 未 flush 任何动画帧：同步首帧必须已经贴底。
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 680, behavior: 'auto' });
+    expect(harness.getScrollTop()).toBe(680);
+    cleanup();
+  });
+
+  it('首批内容到达（只有布局变化、位置未位移）不会被对账误挂起，仍贴底', () => {
+    const harness = createScrollHarness();
+    // 初始：空会话（不可滚动），跟随启用；此时还没有任何程序化落点。
+    harness.setScrollHeight(CLIENT_HEIGHT);
+    harness.setScrollTop(0);
+    harness.setAnchorContentTop(CLIENT_HEIGHT - ANCHOR_HEIGHT);
+    harness.setAnchorContentBottom(CLIENT_HEIGHT);
+    const { manager, setEffects } = renderManager(harness, { messagesLength: 0 });
+    harness.enableManualFrames();
+
+    // 首批内容提交：内容列长高（布局变化），scrollTop 仍停在 0（没有位移）。
+    // 这正是会话开屏的第一帧——旧实现会在这里把跟随挂起，开屏贴底只能靠
+    // 后续 forceFollowToLatest 补一次（慢机 / 后台标签页下会永久停在中途）。
+    harness.setScrollHeight(2000);
+    harness.setAnchorContentTop(1900);
+    harness.setAnchorContentBottom(2000);
+    setEffects({ messagesLength: 2 });
+    harness.getObserver()?.trigger();
+
+    expect(manager().isFollowEngaged()).toBe(true);
+    expect(manager().isFollowingRef.current).toBe(true);
+    expect(harness.getShowScrollToBottom()).toBe(false);
+
+    // 对账之后由自动跟随的帧补上贴底。
+    harness.flushAnimationFrame();
+    expect(harness.getScrollTop()).toBe(1600);
+  });
+
+  it('开屏后迟到增长（布局变化）继续贴底，不被判成外部滚动', () => {
+    const harness = createScrollHarness();
+    harness.setScrollHeight(CLIENT_HEIGHT);
+    harness.setScrollTop(0);
+    harness.setAnchorContentTop(CLIENT_HEIGHT - ANCHOR_HEIGHT);
+    harness.setAnchorContentBottom(CLIENT_HEIGHT);
+    const { manager, setEffects } = renderManager(harness, { messagesLength: 0 });
+
+    harness.setScrollHeight(2000);
+    harness.setAnchorContentTop(1900);
+    harness.setAnchorContentBottom(2000);
+    setEffects({ messagesLength: 2 });
+    expect(harness.getScrollTop()).toBe(1600);
+
+    // 开屏落地后 Markdown / 图片等迟到增长：内容继续长高、scrollTop 不动。
+    harness.setScrollHeight(2600);
+    harness.setAnchorContentTop(2500);
+    harness.setAnchorContentBottom(2600);
+    harness.advanceClock(50);
+    harness.getObserver()?.trigger();
+
+    expect(manager().isFollowEngaged()).toBe(true);
+    expect(harness.getScrollTop()).toBe(2200);
   });
 
   it('返回的跟随 ref 名称为 isFollowingRef', () => {

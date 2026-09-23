@@ -10,6 +10,8 @@ interface ParsedSessionMetadata {
   parentSessionId?: string;
   /** 审批方式档位：规范字段，旧数据由 yoloMode 布尔回退推导。 */
   permissionMode: SessionPermissionMode;
+  /** SSH 远程工作区绑定的连接 id；存在即表示 workingDirectory 是远端绝对路径。 */
+  sshConnectionId?: string;
   teamWorkspaceId?: string;
   workingDirectory: string | null;
   yoloMode: boolean;
@@ -37,6 +39,15 @@ export function extractWorkingDirectory(metadataJson?: string): string | null {
 
 export function extractParentSessionId(metadataJson?: string): string | null {
   return parseSessionMetadata(metadataJson).parentSessionId ?? null;
+}
+
+/**
+ * 会话绑定的 SSH 连接 id（存在即表示会话运行在远端工作区模式）。
+ * 用于「新建会话」继承上下文时把工作区路径与连接绑定一起带走，
+ * 避免只继承远端路径却丢掉连接 id 造成绑定错位。
+ */
+export function extractSshConnectionId(metadataJson?: string): string | null {
+  return parseSessionMetadata(metadataJson).sshConnectionId ?? null;
 }
 
 export interface SessionModeLabelOptions {
@@ -119,6 +130,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       modelLabel?: unknown;
       parentSessionId?: unknown;
       permissionMode?: unknown;
+      sshConnectionId?: unknown;
       teamWorkspaceId?: unknown;
       workingDirectory?: unknown;
       yoloMode?: unknown;
@@ -145,6 +157,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       modelLabel: normalizeOptionalString(parsed.modelLabel),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
       permissionMode,
+      sshConnectionId: normalizeOptionalString(parsed.sshConnectionId),
       teamWorkspaceId: normalizeOptionalString(parsed.teamWorkspaceId),
       workingDirectory: normalizeOptionalString(parsed.workingDirectory) ?? null,
       // 布尔字段只作为档位的派生投影，避免两个字段互相矛盾。

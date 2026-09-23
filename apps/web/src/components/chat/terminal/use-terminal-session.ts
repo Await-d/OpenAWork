@@ -107,6 +107,17 @@ export const TERMINAL_WS_TRANSPORT_ENABLED = true;
 const TERMINAL_WS_RECONNECT_BASE_MS = 500;
 const TERMINAL_WS_RECONNECT_MAX_MS = 5000;
 
+/**
+ * WS 未 open（连接中 / 退避重连窗口）期间的按键缓冲上限（字符数）。
+ *
+ * 为什么不再「直接丢弃」：SSH 类终端在传输短暂中断时不会吞掉用户已经敲下的
+ * 字符；丢掉的若是那次回车，用户只会看到命令没执行、再按一次才生效 —— 观感
+ * 就是「回车要按两下」。缓冲在首帧确认链路可用后按序补发；若链路判定不可用
+ * （回退 SSE），缓冲整体交给输入队列；若终端已退出，则丢弃。上限用于防止网关
+ * 长时间不可用时的无界堆积。
+ */
+const TERMINAL_WS_INPUT_BUFFER_LIMIT_CHARS = 8 * 1024;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -134,6 +145,23 @@ export function useTerminalSession({
   const onWriteErrorRef = useRef(onWriteError);
   onWriteErrorRef.current = onWriteError;
 
+  /**
+   * 令牌走 ref，不进 effect 依赖：JWT 到期前会自动轮换 `accessToken`，若让
+   * 轮换触发 effect 重建，xterm 会被销毁、WS 断开重连、焦点丢失，用户正在跑的
+   * TUI 也会被 snapshot 回放重置（实测生产构建每 ~13 分钟复现一次）。连接与
+   * 请求在调用时读取最新令牌即可；只有「有没有令牌」变化才需要重挂终端。
+   */
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = token !== null;
+  /** WS 断线窗口的按键缓冲；跨 effect 重建保留，由新实例在首帧后补发。 */
+  const pendingInputRef = useRef<{ terminalId: string; data: string }>({
+    terminalId,
+    data: '',
+  });
+  /** 重建前焦点是否在终端内；重建后归位（否则用户得再点一次才能继续输入）。 */
+  const wasFocusedRef = useRef(false);
+
   // 能力未知（旧后端、或 `terminal_started` 事件本地构造的行）按「能 resize」
   // 处理，避免在真正支持 PTY 的运行时上静默退化；只有显式 false 才跳过请求。
   const resizeSupported = terminal.supportsResize !== false;
@@ -150,9 +178,16 @@ export function useTerminalSession({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !sessionId || !token) return;
+    const activeToken = tokenRef.current;
+    if (!container || !sessionId || activeToken === null) return;
     // 切换会话时父组件会短暂地用旧 terminal 渲染，此期间不要连 SSE。
     if (terminalSessionId !== sessionId) return;
+    // 令牌可能在 effect 存续期间被轮换；发请求时始终读最新值，避免用到过期令牌。
+    const liveToken = (): string => tokenRef.current ?? activeToken;
+    // 同一 hook 实例被复用到另一个终端时，丢弃上一终端遗留的未发送输入。
+    if (pendingInputRef.current.terminalId !== terminalId) {
+      pendingInputRef.current = { terminalId, data: '' };
+    }
 
     // 交互式 PTY 是 raw-mode：convertEol 会把裸 `\n` 改写成 `\r\n`，破坏
     // TUI 的绝对定位，直接表现为输入与渲染位置错位；显式 `true` 才关掉，
@@ -163,6 +198,11 @@ export function useTerminalSession({
     const { terminal: term, fitAddon, searchAddon } = runtime;
     termRef.current = term;
     searchRef.current = searchAddon;
+    // 终端重建（令牌轮换 / 传输重挂 / 分屏物化）：把焦点还给终端。
+    if (wasFocusedRef.current) {
+      wasFocusedRef.current = false;
+      term.focus();
+    }
 
     const reportNotice = (message: string) => {
       setNotice(message);
@@ -212,6 +252,8 @@ export function useTerminalSession({
     }): void => {
       if (exited) return;
       exited = true;
+      // 终端已退出：断线期间缓冲的输入不再有意义，丢弃（否则下次重建会补发到别的进程）。
+      pendingInputRef.current.data = '';
       term.writeln('');
       term.writeln(
         `\u001b[2m[终端已结束 · 状态 ${status}${
@@ -226,7 +268,7 @@ export function useTerminalSession({
           gatewayUrl,
           sessionId,
           terminalId,
-          token,
+          token: liveToken(),
           data,
         });
         if (!result.ok) {
@@ -238,21 +280,54 @@ export function useTerminalSession({
       },
     });
 
+    /** 取出缓冲（清空）；调用方负责发出。 */
+    const takePendingInput = (): string => {
+      const buffered = pendingInputRef.current.data;
+      pendingInputRef.current.data = '';
+      return buffered;
+    };
+
+    /** 追加到缓冲；超过上限时从头部丢弃最旧的字符（尾部才是用户最新意图）。 */
+    const appendPendingInput = (data: string): void => {
+      const combined = pendingInputRef.current.data + data;
+      pendingInputRef.current.data =
+        combined.length > TERMINAL_WS_INPUT_BUFFER_LIMIT_CHARS
+          ? combined.slice(combined.length - TERMINAL_WS_INPUT_BUFFER_LIMIT_CHARS)
+          : combined;
+    };
+
     /**
-     * 输入路由：WS 打开时直接走 socket（没有 16ms 合并窗口）；socket 未 open
-     * （连接中 / 重连退避窗口）直接丢弃 —— 盲目缓冲会在新连接上乱序重放。
-     * 只有 'sse' 传输才进 `TerminalInputQueue`。
+     * 按序补发缓冲到指定 WS（链路已被首帧确认可用）。
+     *
+     * 先确认目标可写、再取走缓冲：若目标不可写（刚被替换 / 已关闭），缓冲必须留在
+     * 原地等下一次机会，不能「取出来再丢」。
+     */
+    const flushPendingInputToSocket = (target: TerminalSocketLike | null): void => {
+      const buffered = pendingInputRef.current.data;
+      if (buffered.length === 0 || target?.state !== 'open') return;
+      pendingInputRef.current.data = '';
+      target.sendInput(buffered);
+    };
+
+    /**
+     * 输入路由：WS 打开时直接走 socket（没有 16ms 合并窗口，先补发断线缓冲）；
+     * socket 未 open（连接中 / 重连退避窗口）先缓冲，首帧确认链路可用后按序补发
+     * （见 `TERMINAL_WS_INPUT_BUFFER_LIMIT_CHARS` 注释：丢掉的通常是那次回车）。
+     * 只有 'sse' 传输才进 `TerminalInputQueue`——切换时把 WS 缓冲整体交接过去。
      */
     const sendInput = (data: string): void => {
-      if (data.length === 0 || !inputEnabledRef.current) return;
+      if (data.length === 0 || !inputEnabledRef.current || exited) return;
       if (transport === 'ws') {
         const current = socket;
         if (current?.state === 'open') {
+          flushPendingInputToSocket(current);
           current.sendInput(data);
+          return;
         }
+        appendPendingInput(data);
         return;
       }
-      queue.push(data);
+      queue.push(takePendingInput() + data);
     };
 
     const requestPasteConfirmation = (summary: PasteGuardSummary): Promise<boolean> =>
@@ -321,14 +396,33 @@ export function useTerminalSession({
         gatewayUrl,
         sessionId,
         terminalId,
-        token,
+        token: liveToken(),
         onStatus: (status) => setStreamStatus(status),
-        onSnapshot: writeSnapshot,
+        onSnapshot: (payload) => {
+          // snapshot = 这条流真的通了：复位退避（与 WS 的 markFrameReceived 同义）。
+          reconnectAttempt = 0;
+          writeSnapshot(payload);
+        },
         onOutput: writeOutput,
         onExited: handleExit,
-        onError: reportStreamError,
+        onError: (error) => {
+          reportStreamError(error);
+          // EventSource 只在网络级错误上自动重连；HTTP 失败（401 / 502…）会让它永久
+          // CLOSED，且自动重连沿用旧 URL（令牌轮换后必然 401）。这里按与 WS 相同的
+          // 退避、用最新令牌重建这条流，而不是永久停在断开状态（终端已退出则不再重建，
+          // 与 WS 的 onClose 分支同语义）。
+          if (!exited && source?.readyState === EventSource.CLOSED) {
+            scheduleSseRestart();
+          }
+        },
       });
     };
+
+    /**
+     * 由 SSE 段落调用：在 WS 退避段落的赋值处定义（需要 `startSseStream`，两者
+     * 互相引用，用可变引用打破声明顺序）。未赋值前是 no-op。
+     */
+    let scheduleSseRestart: () => void = () => undefined;
 
     let lastCols = 0;
     let lastRows = 0;
@@ -347,9 +441,14 @@ export function useTerminalSession({
         pendingResize = { cols, rows };
         return;
       }
-      void resizeTerminal({ gatewayUrl, sessionId, terminalId, token, cols, rows }).catch(
-        () => undefined,
-      );
+      void resizeTerminal({
+        gatewayUrl,
+        sessionId,
+        terminalId,
+        token: liveToken(),
+        cols,
+        rows,
+      }).catch(() => undefined);
     };
 
     const flushPendingResize = (): void => {
@@ -420,6 +519,10 @@ export function useTerminalSession({
         reconnectTimer = null;
       }
       closeSocket();
+      // WS 阶段缓冲的按键整体交给输入队列，保持先后顺序且不丢字。
+      if (pendingInputRef.current.data.length > 0) {
+        queue.push(takePendingInput());
+      }
       startSseStream();
       // 首个 fit 若发生在 socket 未 open 期间，需要在这里补一次 HTTP resize。
       flushPendingResize();
@@ -437,6 +540,40 @@ export function useTerminalSession({
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
         openSocket();
+      }, delay);
+    };
+
+    /**
+     * SSE 流永久关闭后的重建（与 WS 共用同一套退避计时器 —— 两种传输互斥，不会
+     * 同时使用）。关闭旧流后立刻用最新令牌建一条新流；期间到期的回调由 `disposed`
+     * 与 `transport` 守卫挡住。
+     */
+    scheduleSseRestart = (): void => {
+      if (disposed || exited || transport !== 'sse' || reconnectTimer !== null) return;
+      const attempt = reconnectAttempt;
+      reconnectAttempt += 1;
+      const delay = Math.min(
+        TERMINAL_WS_RECONNECT_BASE_MS * 2 ** attempt,
+        TERMINAL_WS_RECONNECT_MAX_MS,
+      );
+      setStreamStatus('reconnecting');
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        if (disposed || exited || transport !== 'sse') return;
+        const current = source;
+        source = null;
+        if (current) {
+          try {
+            current.close();
+          } catch {
+            /* 流已经关闭 */
+          }
+        }
+        // 与 WS 重连同语义：换一副新 replay，让新流的 snapshot 重新 reset + 全量
+        // 回放（否则「snapshot 只应用首次」会把新 snapshot 丢掉，断流期间的输出
+        // 就永远缺失）。
+        replay = createTerminalStreamReplay();
+        startSseStream();
       }, delay);
     };
 
@@ -468,7 +605,7 @@ export function useTerminalSession({
           gatewayUrl,
           sessionId,
           terminalId,
-          token,
+          token: liveToken(),
           handlers: {
             onOpen: () => {
               if (generation !== socketGeneration || disposed) return;
@@ -479,16 +616,20 @@ export function useTerminalSession({
             onSnapshot: (payload) => {
               if (generation !== socketGeneration || disposed) return;
               markFrameReceived();
+              // 首帧 = 链路确认可用：补发断线期间缓冲的按键（SSE 语义同款，不静默吞输入）。
+              flushPendingInputToSocket(socket);
               writeSnapshot(payload);
             },
             onOutput: (payload) => {
               if (generation !== socketGeneration || disposed) return;
               markFrameReceived();
+              flushPendingInputToSocket(socket);
               writeOutput(payload);
             },
             onExit: (payload) => {
               if (generation !== socketGeneration || disposed) return;
               markFrameReceived();
+              // 终端退出：handleExit 会清空断线缓冲，不再补发。
               handleExit(payload);
               setStreamStatus('closed');
             },
@@ -556,6 +697,9 @@ export function useTerminalSession({
     container.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
+      // 记录重建前焦点是否在终端内（此刻 DOM 仍挂载）；新实例挂载后归位，
+      // 避免令牌轮换等重建动作吞掉用户的下一次击键。
+      wasFocusedRef.current = container.contains(document.activeElement);
       disposed = true;
       // 作废所有在途连接回调（close / error 的延迟投递）。
       socketGeneration += 1;
@@ -599,7 +743,24 @@ export function useTerminalSession({
       setSearchOpen(false);
       setContextMenu(null);
     };
-  }, [gatewayUrl, token, sessionId, terminalId, terminalSessionId]);
+    // 依赖里用 `hasToken` 而不是 `token`：令牌轮换不应触发终端重建（见 tokenRef 注释）。
+  }, [gatewayUrl, hasToken, sessionId, terminalId, terminalSessionId]);
+
+  /**
+   * `terminal.interactive` 可能在挂载后才从「未知」变为已知：由 `terminal_started`
+   * 事件本地构造的行不带该字段，紧随其后的服务端同步才会补上。`convertEol` 只在
+   * 创建时读一次的话，未知兜底的 `true` 会永久留在实例上，破坏 TUI 的绝对定位
+   * （表现为输出错位）。xterm 支持运行时改该选项（`InputHandler` 每处理 `\n` 时
+   * 都读 `rawOptions.convertEol`），这里把变化同步进已挂载的实例。
+   */
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const convertEol = terminal.interactive !== true;
+    if (term.options.convertEol !== convertEol) {
+      term.options.convertEol = convertEol;
+    }
+  }, [terminal.interactive]);
 
   const closeSearch = () => {
     setSearchOpen(false);

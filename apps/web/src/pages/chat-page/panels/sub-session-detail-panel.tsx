@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import {
   ChatMessageGroupList,
@@ -331,10 +331,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   // 就绪判断只依赖 `hasMessages` 布尔位（空 → 非空的翻转），配合 keyed ref 保证一次性：
   // 同一 childSessionId 只贴一次，消息提交 / 流式 tick 不重跑；切换子会话重新武装。
   // 后续提交的贴底由协议层在「跟随仍启用」时接管。
+  //
+  // 用 layout effect：`forceFollowToLatest` 的同步首帧会在本帧绘制前贴底，预览面板
+  // 打开时不会先画一遍最旧的消息。
   const initialOpenSessionRef = useRef<string | null>(null);
   const hasMessages = messages.length > 0;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (childSessionId === null) {
       initialOpenSessionRef.current = null;
       return;

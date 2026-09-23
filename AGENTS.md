@@ -75,7 +75,7 @@ OpenAWork/
 - **消息渠道**：Telegram、Discord、飞书、钉钉、Slack 各自实现 `MessagingChannelService` 接口，位于 `services/agent-gateway/src/channels/`。
 - **哈希锚定编辑**：自定义文件编辑工具（`packages/agent-core/src/tools/hash-edit.ts`）使用 SHA-256 行哈希替代行号，防止编辑漂移。
 - **路由分级**：`packages/agent-core/src/routing.ts` 定义 R0–R3 路由分级（复杂度层级），用于 Agent 任务调度。
-- **子代理结果交付（单通道）**：子代理结算后由 `services/agent-gateway/src/task/task-job-delivery.ts` 的 `deliverTaskCompletion` 投递——先幂等准入（`injectSyntheticSessionMessage`，`notificationId` 同时作消息 id 与唤醒请求键），再由纯函数 `resolveTaskJobWakeDecision` 决策，最后 `continueSessionFromHistory` 唤醒。通知以 **`synthetic` 角色**落库（对模型可见、客户端不得按用户输入渲染；`description` + `metadata = { source:'subagent', childID, agent, state }` 是 notice 契约）。**通知已落库 ⇒ 延后永不丢**，故禁止恢复「定时重试 / 伪造用户请求」类补偿路径；自动唤醒受 `task/task-wake-budget.ts` 上限约束（用户真实交互才重置计数）。
+- **子代理结果交付（单通道）**：子代理结算后由 `services/agent-gateway/src/task/task-job-delivery.ts` 的 `deliverTaskCompletion` 投递——先幂等准入（`injectSyntheticSessionMessage`，`notificationId` 同时作消息 id 与唤醒请求键），再由纯函数 `resolveTaskJobWakeDecision` 决策，最后 `continueSessionFromHistory` 唤醒。通知以 **`synthetic` 角色**落库（对模型可见、客户端不得按用户输入渲染；`description` + `metadata = { source:'subagent', childID, agent, state }` 是 notice 契约）。**通知正文由 `formatSubagentNoticeText` 渲染为参考库的 `<subagent sessionID state description>` 标签形态**（标签内 `state` 用上游 wire 词表 `completed|error|cancelled`；客户端 `parseSubagentNotice` 解析时剥离标签），并带 4k 字符上限（超出截断 + 指引去子会话读全文）；**同步 task 结果只取子代理最后一条 assistant 文本**（`extractLatestChildSessionSummary`，不再全量拼接子会话文本/工具输出），并同样以 `<subagent sessionID state>` 包裹（保留 `task_id` resume 提示行），正文另有 20k 字符上限（`delegated-task-display.ts`）。**通知已落库 ⇒ 延后永不丢**，故禁止恢复「定时重试 / 伪造用户请求」类补偿路径；自动唤醒受 `task/task-wake-budget.ts` 上限约束（用户真实交互才重置计数）。
 - **.evidence/**：fastify、ioredis、postgres 的只读参考源码，禁止编辑。
 
 ## 约定

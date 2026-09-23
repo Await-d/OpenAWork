@@ -175,6 +175,19 @@ describe('ChatConversationView — 基础骨架', () => {
     expect(contentColumn.getAttribute('data-message-layout')).toBe('unified');
   });
 
+  it('内容列盒子必须随内容增长（flexShrink: 0）—— 滚动跟随的 RO 主路径依赖它', () => {
+    // `minHeight: 100%` 会关闭 flex 项的内容自动最小高度，默认 `flex-shrink: 1`
+    // 会把内容列盒子压回滚动区高度：内容溢出但盒子不变 ⇒ `useScrollManager` 的
+    // ResizeObserver 永不回调 ⇒ 推理段增长 / 工具卡输出 / 定稿后的异步 Markdown
+    // 都追不上，收尾时视口停在最新回复上方。真实几何由 harness
+    // `verify-scroll-finalize.ts` 场景 D 守卫（jsdom 不做布局）。
+    render(<ChatConversationView {...createViewProps()} />);
+
+    const contentColumn = screen.getByTestId('chat-content-column');
+    expect(contentColumn.style.flexShrink).toBe('0');
+    expect(contentColumn.style.minHeight).toBe('100%');
+  });
+
   it('display preference 切到 split 时内容列 data-message-layout 同步变化', () => {
     useDisplayPreferencesStore.setState({ messageLayout: 'split' });
 

@@ -604,7 +604,15 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
   // 继承守卫：父会话未表达档位时，task 子会话不得凭空写入 permissionMode:'ask'
   // （否则会污染「从未表达过档位」的会话，并违背 metadata 模块「不凭空写 ask」的约定）。
   it('task 子会话在父会话未表达档位时保持权限键缺席', async () => {
-    mocks.metadataJson = '{}';
+    // 父会话只表达工作区（不表达档位）；权限文件需要 workingDirectory 才能被加载。
+    mocks.metadataJson = JSON.stringify({ workingDirectory: TEST_WORKSPACE });
+    // 委派动作默认需要审批（`task_run` 默认 ask）；本用例只关注子会话档位继承，
+    // 用工作区规则显式允许委派，隔离权限门控。
+    writeFileSync(
+      join(TEST_WORKSPACE, '.openawork.permissions.json'),
+      JSON.stringify({ rules: [{ permission: 'task_run', pattern: '*', action: 'allow' }] }),
+      'utf8',
+    );
 
     const result = await createDefaultSandbox().execute(
       {
@@ -630,7 +638,17 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
   });
 
   it('task 子会话继承父会话显式 permissionMode（不被降级为 ask）', async () => {
-    mocks.metadataJson = JSON.stringify({ permissionMode: 'auto-edit' });
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    // auto-edit 档位只覆盖 edit/write，不覆盖委派动作（task_run）；这里显式允许委派，
+    // 让用例聚焦「子会话档位继承」本身。
+    writeFileSync(
+      join(TEST_WORKSPACE, '.openawork.permissions.json'),
+      JSON.stringify({ rules: [{ permission: 'task_run', pattern: '*', action: 'allow' }] }),
+      'utf8',
+    );
 
     const result = await createDefaultSandbox().execute(
       {
@@ -655,6 +673,7 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
   });
 
   it('task 子会话继承父会话历史布尔 yoloMode:true', async () => {
+    // yolo 档位免审批（免审批分支在 ask 之前），委派动作无需额外放行规则。
     mocks.metadataJson = JSON.stringify({ yoloMode: true });
 
     const result = await createDefaultSandbox().execute(

@@ -85,7 +85,6 @@ export const navItemStyle: CSSProperties = {
  */
 export function useAppSidebarNavigation() {
   const navigate = useNavigate();
-  const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const triggerTeamNewWorkspace = useUIStateStore((s) => s.triggerTeamNewWorkspace);
 
   const preloadRoute = useCallback((path: string) => {
@@ -104,12 +103,6 @@ export function useAppSidebarNavigation() {
     [navigate, preloadChatRoute],
   );
 
-  const handleNewTask = useCallback(() => {
-    navigateToHome();
-    preloadRoute('/chat');
-    void navigate('/chat');
-  }, [navigate, navigateToHome, preloadRoute]);
-
   const handleNewTeamWorkspace = useCallback(() => {
     preloadRoute('/team');
     triggerTeamNewWorkspace();
@@ -121,7 +114,6 @@ export function useAppSidebarNavigation() {
     preloadRoute,
     preloadChatRoute,
     openChatSession,
-    handleNewTask,
     handleNewTeamWorkspace,
   };
 }

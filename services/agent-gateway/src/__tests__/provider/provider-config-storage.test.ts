@@ -45,4 +45,28 @@ describe('materializeProviderConfigForStorage', () => {
       customProvider.defaultModels,
     );
   });
+
+  it('落库后读回不丢失指向 catalog 派生模型的默认选择', async () => {
+    const catalog = await materializeProviderConfig(undefined, undefined);
+    const provider = catalog.providers.find(
+      (item) => item.enabled && item.defaultModels.some((model) => model.enabled),
+    );
+    expect(provider).toBeDefined();
+    const model = provider?.defaultModels.find((item) => item.enabled);
+    expect(model).toBeDefined();
+
+    const selection = {
+      chat: { providerId: provider?.id ?? '', modelId: model?.id ?? '' },
+      fast: { providerId: provider?.id ?? '', modelId: model?.id ?? '' },
+    };
+
+    // 落库只保留覆盖项：catalog 派生模型不会写回，读取时必须等目录同步补回
+    // 模型清单后再校验选择，否则会误判失效并静默回退到 fallback。
+    const stored = await materializeProviderConfigForStorage(catalog.providers, selection);
+    expect(stored.activeSelection.chat).toEqual(selection.chat);
+
+    const readBack = await materializeProviderConfig(stored.providers, stored.activeSelection);
+    expect(readBack.activeSelection.chat).toEqual(selection.chat);
+    expect(readBack.activeSelection.fast).toEqual(selection.fast);
+  });
 });

@@ -34,6 +34,8 @@ export class TerminalInputQueue {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private retryBlocked = false;
+  /** dispose 时仍有在飞写入：等它落地后再补发一次（不丢尾批）。 */
+  private drainAfterInflight = false;
 
   constructor(private readonly options: TerminalInputQueueOptions) {}
 
@@ -66,12 +68,22 @@ export class TerminalInputQueue {
     void this.dispatch();
   }
 
-  /** 卸载：清定时器并做一次尽力而为的收尾发送。 */
+  /**
+   * 卸载：清定时器并做一次尽力而为的收尾发送。
+   *
+   * 若此刻正有一个写入在飞（用户在上一次 flush 尚未落地时又敲了字），不能并发
+   * 第二个写入；改为标记收尾，等在飞落地后在 `dispatch` 的 finally 里补发一次，
+   * 否则这批字符会随组件卸载被静默丢掉（表现为「刚敲的回车没生效」）。
+   */
   dispose(): void {
     if (this.disposed) {
       return;
     }
-    this.flush();
+    if (this.inFlight) {
+      this.drainAfterInflight = true;
+    } else {
+      this.flush();
+    }
     this.disposed = true;
   }
 
@@ -107,9 +119,38 @@ export class TerminalInputQueue {
       this.options.onError(error instanceof Error ? error : new Error(String(error)), data);
     } finally {
       this.inFlight = false;
-      if (!this.disposed && !this.retryBlocked && this.pending.length > 0) {
+      if (this.disposed) {
+        // 卸载时的尾批补发：dispose 已在等在飞落地，这里绕过 `disposed` 闸门发一次。
+        if (this.drainAfterInflight) {
+          this.drainAfterInflight = false;
+          void this.finalDrain();
+        }
+        return;
+      }
+      if (!this.retryBlocked && this.pending.length > 0) {
         this.scheduleFlush();
       }
+    }
+  }
+
+  /**
+   * 收尾写入：组件已卸载但仍有残留字符时的最后一次尽力而为发送
+   * （POST 不依赖组件存活）。失败只上报、不再重试。
+   */
+  private async finalDrain(): Promise<void> {
+    if (this.inFlight || this.pending.length === 0) {
+      return;
+    }
+    const data = this.pending;
+    this.pending = '';
+    this.inFlight = true;
+    try {
+      await this.options.write(data);
+    } catch (error) {
+      this.pending = data + this.pending;
+      this.options.onError(error instanceof Error ? error : new Error(String(error)), data);
+    } finally {
+      this.inFlight = false;
     }
   }
 }

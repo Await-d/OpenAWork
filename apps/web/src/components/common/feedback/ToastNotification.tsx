@@ -2,19 +2,41 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 
 export type ToastType = 'info' | 'success' | 'warning' | 'error';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Toast {
   id: string;
   message: string;
   type: ToastType;
   duration?: number;
+  /** 可选操作按钮（如「查看文件变更」）；带 action 时默认展示更久。 */
+  action?: ToastAction;
 }
 
 type ToastHandler = (toast: Omit<Toast, 'id'>) => void;
 
 let _addToast: ToastHandler = () => undefined;
 
-export function toast(message: string, type: ToastType = 'info', duration = 3500) {
-  _addToast({ message, type, duration });
+const DEFAULT_TOAST_DURATION_MS = 3500;
+/** 带操作按钮的 toast 需要更长的可点击窗口。 */
+const ACTION_TOAST_DURATION_MS = 8000;
+
+export function toast(
+  message: string,
+  type: ToastType = 'info',
+  duration?: number,
+  options?: { action?: ToastAction },
+) {
+  const action = options?.action;
+  _addToast({
+    message,
+    type,
+    duration: duration ?? (action ? ACTION_TOAST_DURATION_MS : DEFAULT_TOAST_DURATION_MS),
+    ...(action ? { action } : {}),
+  });
 }
 
 // ── Type config ────────────────────────────────────────────────
@@ -188,17 +210,55 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: stri
         <ToastTypeIcon type={t.type} size={15} />
       </span>
 
-      {/* Message */}
-      <span
+      {/* Message + optional action */}
+      <div
         style={{
           flex: 1,
           minWidth: 0,
-          color: 'var(--fg-strong)',
-          wordBreak: 'break-word',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: t.action ? 6 : 0,
         }}
       >
-        {t.message}
-      </span>
+        <span
+          style={{
+            color: 'var(--fg-strong)',
+            wordBreak: 'break-word',
+          }}
+        >
+          {t.message}
+        </span>
+        {t.action ? (
+          <button
+            type="button"
+            onClick={() => {
+              t.action?.onClick();
+              setExiting(true);
+            }}
+            style={{
+              alignSelf: 'flex-start',
+              padding: '2px 8px',
+              borderRadius: 6,
+              border: '1px solid color-mix(in oklch, var(--accent) 32%, var(--border-default))',
+              background: 'transparent',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+              fontSize: 11,
+              fontWeight: 600,
+              transition: 'background 120ms',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background =
+                'color-mix(in oklch, var(--accent) 12%, transparent)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            {t.action.label}
+          </button>
+        ) : null}
+      </div>
 
       {/* Close button */}
       <button

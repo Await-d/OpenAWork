@@ -6,6 +6,7 @@ import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
   createProtocolAwareStream,
+  isSessionTitleGenerationRequest,
   readFetchBody,
   readLastUserMessage,
   waitFor,
@@ -16,7 +17,8 @@ import {
 const CHILD_RESULT = '子代理已经执行完成。';
 const AUTO_RESUME_RESULT = '我已收到子代理结果，并同步回主对话。';
 /**
- * 单通道交付（T-25）的唤醒请求由**合成通知**驱动，通知正文即子代理结果。
+ * 单通道交付（T-25）的唤醒请求由**合成通知**驱动，通知正文为 `<subagent>`
+ * 包裹的子代理结果（对齐参考库 `SubagentCompletion.deliver` 的标签形态）。
  * 旧路径（`buildAutoResumeMessage`）的固定表头已随伪造用户请求一并退役——
  * 这里改用通知正文作为「父会话侧上游请求」的判定标记。
  */
@@ -42,7 +44,12 @@ async function main(): Promise<void> {
       await withMockFetch(
         async (_url, init) => {
           const body = await readFetchBody(_url, init);
-          fetchCalls.push(body);
+          // 标题/图标生成是子会话首条用户消息触发的 fire-and-forget 旁路请求
+          //（`stream-session-title.ts` 对 task 子代理的例外）；排除它以保持
+          // 「子会话运行 + 父会话唤醒」的 fetchCalls 计数 / 下标语义。
+          if (!isSessionTitleGenerationRequest(body)) {
+            fetchCalls.push(body);
+          }
           const lastUserMessage = readLastUserMessage(body);
           if (lastUserMessage.includes(NOTICE_BODY)) {
             return createProtocolAwareStream(_url, AUTO_RESUME_RESULT);
@@ -62,7 +69,9 @@ async function main(): Promise<void> {
               'hash',
             ]);
             sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
+              // yolo 档位：本脚本关注父会话自动唤醒契约，委派免审批（权限门控由
+              // verify-task-tool-permission-gate.ts 专门验收）。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{"permissionMode":"yolo"}')`,
               [parentSessionId, userId],
             );
 
@@ -140,9 +149,12 @@ async function main(): Promise<void> {
               notices.length === 1,
               `父会话应恰好收到一条 synthetic 通知，实际 ${notices.length}`,
             );
+            const noticeText = readTextMessage(notices[0] ?? { content: [] });
             assert(
-              readTextMessage(notices[0] ?? { content: [] }) === NOTICE_BODY,
-              '通知正文应为子代理结果',
+              noticeText.startsWith('<subagent sessionID=') &&
+                noticeText.includes(NOTICE_BODY) &&
+                noticeText.endsWith('</subagent>'),
+              `通知正文应为 <subagent> 包裹的子代理结果，实际=${noticeText.slice(0, 160)}`,
             );
             assert(
               !parentMessages.some((message) => message.role === 'user'),

@@ -6,7 +6,79 @@
  * 例：已编辑了文件 / 已运行了命令 / 已查看 4 个文件 / 已调用 MCP 工具
  */
 
-export function naturalLanguageSummary(toolName: string, input: Record<string, unknown>): string {
+/**
+ * 后台任务读数的任务信息。
+ *
+ * `background_output` 的工具输出有两种模板（见
+ * `services/agent-gateway/src/task/delegated-task-display.ts`）：
+ * - 任务已完成 → `任务结果` 块，含 `描述：<任务名>` 行；
+ * - 任务未完成 → `# 任务状态` 表格，含 `| 描述 | <任务名> |` 与 `| 状态 | **running** |` 行。
+ *
+ * 两个字段都解析不到时返回空对象——宁可只显示动作，也不猜一个错误的归属。
+ */
+export interface BackgroundTaskReadInfo {
+  /** 任务名（描述）。 */
+  label?: string;
+  /** 读取时刻的任务状态（已完成 / 运行中 / 排队中 / 已失败 / 已取消）。 */
+  state?: string;
+}
+
+const TASK_STATE_LABELS: Record<string, string> = {
+  cancelled: '已取消',
+  completed: '已完成',
+  done: '已完成',
+  failed: '已失败',
+  pending: '排队中',
+  running: '运行中',
+};
+
+export function resolveBackgroundTaskReadInfo(output: unknown): BackgroundTaskReadInfo {
+  const text = readBackgroundOutputText(output);
+  if (text.length === 0) {
+    return {};
+  }
+
+  const resultLine = /^描述：(.+)$/m.exec(text)?.[1];
+  const tableRow = /^\|\s*描述\s*\|\s*(.+?)\s*\|\s*$/m.exec(text)?.[1];
+  const label = (resultLine ?? tableRow)?.trim();
+
+  // `任务结果` 模板只在任务已完成时使用；状态表格模板里显式带状态列。
+  const tableState = /^\|\s*状态\s*\|\s*\*{0,2}([A-Za-z_-]+)\*{0,2}\s*\|\s*$/m.exec(text)?.[1];
+  const state = text.startsWith('任务结果')
+    ? '已完成'
+    : tableState
+      ? TASK_STATE_LABELS[tableState.trim().toLowerCase()]
+      : undefined;
+
+  return {
+    ...(label && label.length > 0 ? { label } : {}),
+    ...(state ? { state } : {}),
+  };
+}
+
+function readBackgroundOutputText(output: unknown): string {
+  if (typeof output === 'string') {
+    return output;
+  }
+
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    for (const key of ['message', 'result', 'text']) {
+      const value = record[key];
+      if (typeof value === 'string') {
+        return value;
+      }
+    }
+  }
+
+  return '';
+}
+
+export function naturalLanguageSummary(
+  toolName: string,
+  input: Record<string, unknown>,
+  output?: unknown,
+): string {
   const n = toolName.trim().toLowerCase();
 
   // ── 文件读取 ──
@@ -33,7 +105,12 @@ export function naturalLanguageSummary(toolName: string, input: Record<string, u
 
   // ── Shell 执行 ──
   if (n === 'bash' || n === 'interactive_bash') return '已运行了命令';
-  if (n === 'background_output') return '已读取了后台输出';
+  if (n === 'background_output') {
+    // 读的是哪一个后台任务、读到的是什么状态（解析不到时保持旧文案）。
+    const { label, state } = resolveBackgroundTaskReadInfo(output);
+    const base = label ? `已读取了后台输出 · ${label}` : '已读取了后台输出';
+    return state ? `${base}（${state}）` : base;
+  }
   if (n === 'background_cancel') return '已取消了后台任务';
   if (n === 'desktop_automation') return '已执行了桌面操作';
   if (n === 'look_at') return '已查看了图像';

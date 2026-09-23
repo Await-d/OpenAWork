@@ -63,7 +63,11 @@ export function parseWhatsAppInboundMessage(raw: unknown): ChannelMessage | null
   const contact = readRecordArray(value, 'contacts')[0] ?? null;
   const profile = readRecord(contact, 'profile');
   const text = readRecord(message, 'text');
-  const content = readString(text, 'body');
+  const image = readRecord(message, 'image');
+  const caption = readString(image, 'caption');
+  // 图片消息没有 text.body：优先正文，其次图片 caption，最后占位符。
+  // 真实字节在服务层 enrich（`whatsapp-media.ts`）阶段下载，parser 不产 images。
+  const content = readString(text, 'body') || caption || (image ? '[User sent an image]' : '');
   const chatId = resolveWhatsAppChatId(value, message);
   if (!chatId || !content) {
     return null;

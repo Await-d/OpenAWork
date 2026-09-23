@@ -151,7 +151,11 @@ function createSessionsResult(): FusionSidebarSessionsResult {
     isDeletingSession: vi.fn(() => false),
     isLoadingSessions: false,
     sessionsError: null,
-    newSession: vi.fn(async () => undefined),
+    // 模拟真实 newSession 的 store 落点（草稿 + 工作区 + 回首页），
+    // 路由跳转由 useSessions 自身负责，集成测试只断言调用与 store 效果。
+    newSession: vi.fn(async (workspacePath?: string | null) => {
+      useUIStateStore.getState().openDraftSession(workspacePath ?? null);
+    }),
     quickDeleteSession: vi.fn(async () => true),
     quickExportSession: vi.fn(async () => undefined),
     renameValue: '',

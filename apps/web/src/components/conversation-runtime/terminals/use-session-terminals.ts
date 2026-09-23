@@ -137,6 +137,16 @@ export function useSessionTerminals(
   options: UseSessionTerminalsOptions,
 ): UseSessionTerminalsResult {
   const { currentSessionId, gatewayUrl, token } = options;
+  /**
+   * 令牌走 ref，不进这些 effect 的依赖：JWT 轮换会改变 `token` 的值，若让它触发
+   * 身份 effect，终端 map 会被清空（`setTerminalsById({})`）并在重新拉取完成前
+   * 保持空态 —— `TerminalPane` 拿不到 active 终端，`InteractiveTerminalView` 整个
+   * 卸载再重建（xterm 销毁、WS 重连、焦点丢失，正在跑的 TUI 被重置）。请求时读
+   * 最新值即可；只有「有没有令牌」的变化才需要重置 / 重拉。
+   */
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = token !== null;
   const [terminalsById, setTerminalsById] = useState<Record<string, SessionTerminalView>>({});
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -163,12 +173,13 @@ export function useSessionTerminals(
   // shell profile 列表是宿主级的，与会话无关：刻意不依赖 currentSessionId，
   // 否则每次切会话都会重取一份内容完全相同的列表。
   useEffect(() => {
-    if (!token) {
+    const currentToken = tokenRef.current;
+    if (currentToken === null) {
       setShellProfiles([]);
       return;
     }
     const controller = new AbortController();
-    void listShellProfiles({ gatewayUrl, token, signal: controller.signal })
+    void listShellProfiles({ gatewayUrl, token: currentToken, signal: controller.signal })
       .then((profiles) => {
         if (!controller.signal.aborted) setShellProfiles(profiles);
       })
@@ -176,7 +187,7 @@ export function useSessionTerminals(
         if (!controller.signal.aborted) setShellProfiles([]);
       });
     return () => controller.abort();
-  }, [gatewayUrl, token]);
+  }, [gatewayUrl, hasToken]);
 
   const hasActiveTerminals = useMemo(
     () => Object.values(terminalsById).some((t) => ACTIVE_STATUSES.has(t.status)),
@@ -189,7 +200,8 @@ export function useSessionTerminals(
    */
   const runSync = useCallback(
     async (mode: 'initial' | 'silent'): Promise<void> => {
-      if (!currentSessionId || !token) return;
+      const currentToken = tokenRef.current;
+      if (!currentSessionId || currentToken === null) return;
 
       inflightController.current?.abort();
       const controller = new AbortController();
@@ -201,7 +213,7 @@ export function useSessionTerminals(
         const payload = await listSessionTerminals({
           gatewayUrl,
           sessionId: currentSessionId,
-          token,
+          token: currentToken,
           limit: 50,
           signal: controller.signal,
         });
@@ -231,7 +243,7 @@ export function useSessionTerminals(
         setSyncTick((prev) => prev + 1);
       }
     },
-    [currentSessionId, gatewayUrl, token],
+    [currentSessionId, gatewayUrl],
   );
 
   useEffect(() => {
@@ -242,7 +254,7 @@ export function useSessionTerminals(
     setLastSyncedAtMs(null);
     failureCountRef.current = 0;
 
-    if (!currentSessionId || !token) {
+    if (!currentSessionId || !hasToken) {
       setLoading(false);
       setSyncing(false);
       return;
@@ -254,7 +266,7 @@ export function useSessionTerminals(
       inflightController.current?.abort();
       inflightController.current = null;
     };
-  }, [currentSessionId, gatewayUrl, token, runSync]);
+  }, [currentSessionId, gatewayUrl, hasToken, runSync]);
 
   // `reload()` 只负责重新拉取，**不**重置本地快照。
   //
@@ -265,15 +277,15 @@ export function useSessionTerminals(
   useEffect(() => {
     if (handledReloadNonceRef.current === reloadNonce) return;
     handledReloadNonceRef.current = reloadNonce;
-    if (!currentSessionId || !token) return;
+    if (!currentSessionId || !hasToken) return;
     // `runSync` 自身会 abort 上一个 in-flight 请求，所以这里不需要额外的
     // abort 清理闭包——它只属于身份 effect（会话切换 / 卸载）。
     void runSync('initial');
-  }, [reloadNonce, currentSessionId, token, runSync]);
+  }, [reloadNonce, currentSessionId, hasToken, runSync]);
 
   // 兜底 reconcile 循环。延迟同时承担两个职责：常态轮询周期 + 失败退避。
   useEffect(() => {
-    if (!currentSessionId || !token) return;
+    if (!currentSessionId || !hasToken) return;
 
     const baseDelay = hasActiveTerminals
       ? ACTIVE_RECONCILE_INTERVAL_MS
@@ -287,11 +299,11 @@ export function useSessionTerminals(
     }, delay);
 
     return () => window.clearTimeout(timer);
-  }, [currentSessionId, token, hasActiveTerminals, runSync, syncTick]);
+  }, [currentSessionId, hasToken, hasActiveTerminals, runSync, syncTick]);
 
   // 回到前台时立刻对齐一次，避免用户看到离开期间积压的过期状态。
   useEffect(() => {
-    if (!currentSessionId || !token) return;
+    if (!currentSessionId || !hasToken) return;
     const onVisibilityChange = (): void => {
       if (typeof document !== 'undefined' && document.hidden) return;
       void runSync('silent');
@@ -302,7 +314,7 @@ export function useSessionTerminals(
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onVisibilityChange);
     };
-  }, [currentSessionId, token, runSync]);
+  }, [currentSessionId, hasToken, runSync]);
 
   const applyRunEvent = useCallback(
     (event: RunEvent) => {
@@ -391,7 +403,8 @@ export function useSessionTerminals(
 
   const killTerminal = useCallback(
     async (terminalId: string) => {
-      if (!currentSessionId || !token) return;
+      const currentToken = tokenRef.current;
+      if (!currentSessionId || currentToken === null) return;
       setPendingKills((prev) => {
         const next = new Set(prev);
         next.add(terminalId);
@@ -413,7 +426,7 @@ export function useSessionTerminals(
           gatewayUrl,
           sessionId: currentSessionId,
           terminalId,
-          token,
+          token: currentToken,
         });
         if (response.terminal) {
           setTerminalsById((previous) => ({
@@ -431,7 +444,7 @@ export function useSessionTerminals(
         });
       }
     },
-    [currentSessionId, gatewayUrl, token],
+    [currentSessionId, gatewayUrl],
   );
 
   const killTerminals = useCallback(
@@ -452,7 +465,8 @@ export function useSessionTerminals(
 
   const renameTerminalFn = useCallback(
     async (terminalId: string, name: string | null) => {
-      if (!currentSessionId || !token) return;
+      const currentToken = tokenRef.current;
+      if (!currentSessionId || currentToken === null) return;
       // Optimistic update
       setTerminalsById((previous) => {
         const existing = previous[terminalId];
@@ -470,7 +484,7 @@ export function useSessionTerminals(
           gatewayUrl,
           sessionId: currentSessionId,
           terminalId,
-          token,
+          token: currentToken,
           name,
         });
         if (response.terminal) {
@@ -483,7 +497,7 @@ export function useSessionTerminals(
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [currentSessionId, gatewayUrl, token],
+    [currentSessionId, gatewayUrl],
   );
 
   const dismissTerminal = useCallback((terminalId: string) => {

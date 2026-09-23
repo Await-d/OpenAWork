@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { getSessionModeLabels } from './session-metadata.js';
+import { extractSshConnectionId, getSessionModeLabels } from './session-metadata.js';
+
+describe('extractSshConnectionId — SSH 工作区绑定', () => {
+  it('解析出会话绑定的 SSH 连接 id', () => {
+    expect(
+      extractSshConnectionId(JSON.stringify({ sshConnectionId: 'ssh-1', workingDirectory: '/r' })),
+    ).toBe('ssh-1');
+  });
+
+  it('本地会话 / 非法值回落 null', () => {
+    expect(extractSshConnectionId(JSON.stringify({ workingDirectory: '/repo' }))).toBeNull();
+    expect(extractSshConnectionId(JSON.stringify({ sshConnectionId: '   ' }))).toBeNull();
+    expect(extractSshConnectionId(undefined)).toBeNull();
+  });
+});
 
 describe('getSessionModeLabels — 审批方式档位标签', () => {
   it('ask 档不追加任何审批标签', () => {

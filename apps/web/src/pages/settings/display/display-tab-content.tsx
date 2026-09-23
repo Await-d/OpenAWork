@@ -647,7 +647,7 @@ function ReasoningToolSection() {
               推理过程默认展开
             </span>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-              AI 思考过程超过 3 行时默认展开，而非折叠
+              AI 思考过程超过 5 行时默认展开，而非折叠
             </span>
           </div>
           <SettingsToggle

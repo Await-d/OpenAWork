@@ -60,7 +60,9 @@ async function main(): Promise<void> {
               // 该流仍在 flush 运行事件 → `Database has closed` → 退出码 1（断言其实已全过）。
               // 非空闲时唤醒按设计「留库待消费」（通知照常注入，断言不受影响），
               // 与 `verify-task-tool-auto-run.ts` 的既有隔离手法一致。
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{}', 'paused')`,
+              // yolo 档位：本脚本关注失败传播契约，委派免审批（权限门控由
+              // verify-task-tool-permission-gate.ts 专门验收）。
+              `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status) VALUES (?, ?, '[]', '{"permissionMode":"yolo"}', 'paused')`,
               [parentSessionId, userId],
             );
 

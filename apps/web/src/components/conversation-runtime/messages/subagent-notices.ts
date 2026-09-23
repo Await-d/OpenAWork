@@ -1,5 +1,6 @@
 import { parseSubagentNotice } from '@openAwork/shared';
 import type { Message, MessageRole, SubagentNotice } from '@openAwork/shared';
+import { getComparableCreatedAt } from './message-coercion.js';
 
 /**
  * 从网关返回的原始会话行中收集「子代理完成通知」。
@@ -34,7 +35,14 @@ function toMessageShape(record: Record<string, unknown>): Message | null {
   }
 
   const content = Array.isArray(record['content']) ? (record['content'] as Message['content']) : [];
-  const createdAt = typeof record['createdAt'] === 'number' ? record['createdAt'] : 0;
+  // 与消息侧同口径解析（数字毫秒或 ISO 串）；畸形值回落 0——确定性优先，
+  // 避免每次快照重算把通知挪到列表末尾。
+  const createdAt =
+    getComparableCreatedAt(
+      typeof record['createdAt'] === 'number' || typeof record['createdAt'] === 'string'
+        ? record['createdAt']
+        : undefined,
+    ) ?? 0;
   const description = record['description'];
   const metadata = readMetadata(record['metadata']);
 

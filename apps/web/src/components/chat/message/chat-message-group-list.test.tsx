@@ -7,6 +7,10 @@ import {
   resolveGroupHeight,
   type ChatRenderGroup,
 } from './chat-message-group-list.js';
+import {
+  buildSubagentNoticeGroups,
+  mergeNoticeGroupsIntoRenderGroups,
+} from '../../conversation-runtime/messages/subagent-notice-groups.js';
 
 function createToolOnlyEntry(messageId: string, toolCallId: string) {
   return {
@@ -121,6 +125,61 @@ describe('ChatMessageGroupList', () => {
     const secondIndex = markup.indexOf('data-rendered-tool="tool-2"');
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
+  });
+
+  it('通知落在同一助手群组的条目之间时渲染在两条消息之间（而非整组之后）', () => {
+    const messageGroups: ChatRenderGroup[] = [
+      {
+        kind: 'messages',
+        key: 'turn-1',
+        role: 'assistant',
+        entries: [
+          {
+            message: { id: 'a-1', role: 'assistant', content: '', createdAt: 1_000 },
+            renderContent: () => <span data-rendered-message="a-1" />,
+          },
+          {
+            message: { id: 'a-2', role: 'assistant', content: '', createdAt: 9_000 },
+            renderContent: () => <span data-rendered-message="a-2" />,
+          },
+        ],
+      },
+    ];
+    const groups = mergeNoticeGroupsIntoRenderGroups({
+      messageGroups,
+      noticeGroups: buildSubagentNoticeGroups([
+        {
+          id: 'n-1',
+          agent: 'scout',
+          state: 'done',
+          description: '国际时事最新新闻',
+          text: 'scout 已完成 · 国际时事最新新闻',
+          createdAt: 5_000,
+        },
+      ]),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ChatMessageGroupList
+        activeModelId="gpt-5.4"
+        activeProviderId="openai"
+        bottomRef={createRef<HTMLDivElement>()}
+        currentUserEmail="user@example.com"
+        groups={groups}
+        scrollRegionRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    const firstIndex = markup.indexOf('data-rendered-message="a-1"');
+    const noticeIndex = markup.indexOf('data-component="subagent-notice"');
+    const secondIndex = markup.indexOf('data-rendered-message="a-2"');
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(noticeIndex).toBeGreaterThan(firstIndex);
+    expect(secondIndex).toBeGreaterThan(noticeIndex);
+    // 通知行必须复用消息行的列结构（占位头像 + 同一条 flex gap），
+    // 否则文本会落在头像槽位下方、与消息正文差 40px（真实几何由浏览器验证）。
+    expect(markup).toContain('chat-message-row--notice');
+    expect(markup).toContain('chat-message-avatar-spacer');
   });
 });
 

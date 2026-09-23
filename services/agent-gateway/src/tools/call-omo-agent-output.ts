@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import type { Message } from '@openAwork/shared';
-import { compareOrderedIds } from '../infra/ordered-id.js';
 import { buildTaskToolTerminalMessage } from '../task/delegated-task-display.js';
-import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
+import { extractLatestChildSessionSummary } from '../task/task-result-extraction.js';
 
 const MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 const DIGEST_LENGTH = 32;
@@ -61,7 +60,10 @@ export function buildCallOmoAgentSyncOutput(input: {
   messages: Message[];
   sessionId: string;
 }): string {
-  const body = collectRelevantMessageText(input.messages) || buildFallbackText(input);
+  // 对齐参考库前台路径（`SubagentCompletion.text`）：只取子代理**最后一条有文本的
+  // assistant 消息**。旧实现（`collectRelevantMessageText`）会把子会话全部文本与
+  // 工具输出全量拼接，被父会话工具结果整体携带——单次任务即可吃掉大量上下文。
+  const body = extractLatestChildSessionSummary(input.messages) || buildFallbackText(input);
   return buildTaskToolTerminalMessage({
     agent: 'subagent',
     errorMessage: input.isError ? body : undefined,
@@ -81,97 +83,4 @@ function buildFallbackText(input: { fallbackText?: string; isError?: boolean }):
   }
 
   return '错误：未找到助手或工具响应';
-}
-
-function collectRelevantMessageText(messages: Message[]): string {
-  return [...messages]
-    .sort((left, right) => compareOrderedIds(left.id, right.id))
-    .flatMap((message) => {
-      const toolResultTexts = extractToolResultContentsFromMessage(message)
-        .map((part) => stringifyToolOutput(part.output))
-        .filter((text) => text.length > 0);
-
-      if (message.role === 'assistant') {
-        return message.content
-          .flatMap((part) => {
-            if (part.type !== 'text') {
-              return [];
-            }
-
-            const text = part.text.trim();
-            return text.length > 0 && !isAssistantEventText(text) ? [text] : [];
-          })
-          .concat(toolResultTexts);
-      }
-
-      return toolResultTexts;
-    })
-    .join('\n\n')
-    .trim();
-}
-
-function isAssistantEventText(value: string): boolean {
-  if (!value.startsWith('{') || !value.endsWith('}')) {
-    return false;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as { source?: unknown; type?: unknown };
-    return parsed.type === 'assistant_event' || parsed.source === 'openawork_internal';
-  } catch {
-    return false;
-  }
-}
-
-function stringifyToolOutput(output: unknown): string {
-  const stringifyFallback = (value: unknown): string => {
-    if (value == null) {
-      return '';
-    }
-    if (typeof value === 'string') {
-      return value.trim();
-    }
-    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-      return String(value);
-    }
-    if (typeof value === 'symbol') {
-      return value.toString();
-    }
-    if (typeof value === 'function') {
-      return value.name.length > 0 ? `[Function: ${value.name}]` : '[Function]';
-    }
-    if (value instanceof Error) {
-      return value.stack ?? value.message;
-    }
-    return Object.prototype.toString.call(value);
-  };
-
-  if (typeof output === 'string') {
-    return output.trim();
-  }
-
-  if (Array.isArray(output)) {
-    return output
-      .map((item) => stringifyToolOutput(item))
-      .filter((item) => item.length > 0)
-      .join('\n\n');
-  }
-
-  if (output && typeof output === 'object') {
-    const record = output as Record<string, unknown>;
-    for (const key of ['text', 'summary', 'message', 'result', 'stdout', 'detail']) {
-      const value = record[key];
-      if (typeof value === 'string' && value.trim().length > 0) {
-        return value.trim();
-      }
-    }
-
-    try {
-      return JSON.stringify(output, null, 2);
-    } catch {
-      return stringifyFallback(output);
-    }
-  }
-
-  return stringifyFallback(output);
 }

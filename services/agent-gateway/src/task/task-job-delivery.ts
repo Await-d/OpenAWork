@@ -2,6 +2,7 @@ import type { SubagentNoticeState } from '@openAwork/shared';
 import { sqliteGet } from '../infra/db.js';
 import { injectSyntheticSessionMessage } from '../message/synthetic-message-injection.js';
 import { getAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
+import { toSubagentWireState } from './delegated-task-display.js';
 import { completeBackground } from './task-job.js';
 import { tryConsumeWakeBudget } from './task-wake-budget.js';
 
@@ -16,6 +17,12 @@ import { tryConsumeWakeBudget } from './task-wake-budget.js';
  *   - 不再伪造用户请求；
  *   - 忙时**留库待消费**而非注册 800/1500ms 定时重试；
  *   - 通知已落库，因此「延后」永不丢——用户下一次自然发言时模型仍能看到它。
+ *
+ * 通知正文由 `formatSubagentNoticeText` 统一渲染为参考库的
+ * `<subagent sessionID="..." state="..." description="...">…</subagent>` 标签形态，
+ * 并带一道**长度防护**（`MAX_SUBAGENT_NOTICE_CHARS`）：`description` / `metadata`
+ * 是客户端字段、不下发模型（见 `message-to-model-messages.ts`），因此来源信息
+ * 必须写在正文里；超长正文截断并引导模型去子会话读全文。
  */
 
 export type TaskJobWakeDeferReason =
@@ -73,6 +80,50 @@ export function buildTaskJobNoticeText(input: {
   return primary.length > 0 ? primary : '子代理执行已结束。';
 }
 
+/**
+ * 通知正文上限（字符）。
+ *
+ * 参考库（`SubagentCompletion.deliver`）对通知正文不设上限；本上限是**额外防护**：
+ * 子代理若把整段文件内容塞进最终回复，通知会把父会话上下文吃掉一大块。
+ * 超出时截断并引导去子会话读全文（通知已落库，「留库待消费」语义不受影响）。
+ */
+const MAX_SUBAGENT_NOTICE_CHARS = 4_000;
+
+/** `<subagent>` 标签属性净化：双引号 / 换行会破坏标签结构（参考库不净化，此处更严格）。 */
+function sanitizeNoticeAttribute(value: string): string {
+  return value.replace(/["\r\n]+/gu, ' ').trim();
+}
+
+/**
+ * 把通知正文渲染为参考库的 `<subagent>` 标签形态：
+ *
+ *   `<subagent sessionID="..." state="..." description="...">\n{text}\n</subagent>`
+ *
+ * `state` 经 `toSubagentWireState` 映射为上游 wire 词表（`completed | error | cancelled`，
+ * 参考库 `Job.Status`）；`metadata.state` 仍用本仓客户端契约词表（`done | failed | cancelled`）。
+ * `description` 缺失时省略该属性（参考库工具必填，项目 `failed` 允许为空）。
+ */
+export function formatSubagentNoticeText(input: {
+  childSessionId: string;
+  description?: string;
+  state: SubagentNoticeState;
+  text: string;
+}): string {
+  const description = input.description ? sanitizeNoticeAttribute(input.description) : '';
+  const body =
+    input.text.length <= MAX_SUBAGENT_NOTICE_CHARS
+      ? input.text
+      : `${input.text.slice(0, MAX_SUBAGENT_NOTICE_CHARS)}\n\n[子代理完成通知过长，已截断 — 完整内容见子会话 sessionID: ${input.childSessionId}]`;
+
+  return [
+    `<subagent sessionID="${sanitizeNoticeAttribute(input.childSessionId)}" state="${toSubagentWireState(input.state)}"${
+      description.length > 0 ? ` description="${description}"` : ''
+    }>`,
+    body,
+    '</subagent>',
+  ].join('\n');
+}
+
 export interface TaskJobDeliveryInput {
   /** 子会话 id（通知来源）。 */
   childSessionId: string;
@@ -115,7 +166,12 @@ export async function deliverTaskCompletion(
     sessionId: input.parentSessionId,
     userId: input.userId,
     notificationId: input.notificationId,
-    text: input.text,
+    text: formatSubagentNoticeText({
+      childSessionId: input.childSessionId,
+      ...(input.description ? { description: input.description } : {}),
+      state: input.state,
+      text: input.text,
+    }),
     ...(input.description ? { description: input.description } : {}),
     metadata: {
       source: 'subagent',

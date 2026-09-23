@@ -2,11 +2,16 @@ import { createPrivateKey, sign } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthModule from '../../infra/auth.js';
+import type * as ChannelInboundRouteModule from '../../channels/channel-inbound-route.js';
 import type * as ChannelsRouterModule from '../../channels/router.js';
 import type * as DbModule from '../../infra/db.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import { channelManager } from '../../channels/manager.js';
-import type { ChannelInstance } from '../../channels/types.js';
+import type {
+  ChannelImageAttachment,
+  ChannelInstance,
+  ChannelMessage,
+} from '../../channels/types.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -22,6 +27,7 @@ const QQ_CHANNEL_ID = 'channel-inbound-qq';
 
 let authPlugin: typeof AuthModule.default;
 let channelRoutes: typeof ChannelsRouterModule.channelRoutes;
+let registerChannelInboundRoutes: typeof ChannelInboundRouteModule.registerChannelInboundRoutes;
 let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 
@@ -108,6 +114,8 @@ beforeAll(async () => {
   requestWorkflowPlugin = requestWorkflow.default;
   const channelsRouter = await import('../../channels/router.js');
   channelRoutes = channelsRouter.channelRoutes;
+  const inboundRoute = await import('../../channels/channel-inbound-route.js');
+  registerChannelInboundRoutes = inboundRoute.registerChannelInboundRoutes;
 });
 
 beforeEach(() => {
@@ -350,6 +358,198 @@ describe('channel inbound route', () => {
       });
     } finally {
       await app.close();
+    }
+  });
+});
+
+type InboundRouteDeps = Parameters<
+  typeof ChannelInboundRouteModule.registerChannelInboundRoutes
+>[1];
+type InboundEnrichHook = NonNullable<InboundRouteDeps['enrichInboundMessage']>;
+
+const ENRICH_TIMESTAMP = 1_788_000_000_000;
+const ENRICH_INBOUND_SECRET = 'relay-secret';
+
+function makeEnrichPayload(input: {
+  readonly chatId: string;
+  readonly content: string;
+  readonly messageId: string;
+}): Record<string, unknown> {
+  return {
+    chatId: input.chatId,
+    content: input.content,
+    messageId: input.messageId,
+    senderId: 'enrich-user-1',
+    timestamp: ENRICH_TIMESTAMP,
+  };
+}
+
+/** 用生产 parser 计算期望值，断言 enrich 的输入就是 parser 输出。 */
+function expectParsedInboundMessage(raw: unknown, channel: ChannelInstance): ChannelMessage {
+  const parsed = channelManager.parseMessage('telegram', raw, { channel });
+  expect(parsed).not.toBeNull();
+  if (!parsed) {
+    throw new Error('telegram inbound parser returned null');
+  }
+  return parsed;
+}
+
+interface InboundRouteHarness {
+  readonly app: FastifyInstance;
+  readonly channel: ChannelInstance;
+  readonly notifiedMessages: ChannelMessage[];
+}
+
+/**
+ * 只注册入站通用路由，并显式注入 deps（parser 仍复用生产注册表），
+ * 便于观察 enrich → notify 的消息流向。
+ */
+async function buildInboundRouteApp(options?: {
+  readonly enrichInboundMessage?: InboundEnrichHook;
+}): Promise<InboundRouteHarness> {
+  const channel = makeChannel({
+    id: TELEGRAM_CHANNEL_ID,
+    type: 'telegram',
+    config: { token: 'redacted', inboundSecret: ENRICH_INBOUND_SECRET },
+  });
+  const notifiedMessages: ChannelMessage[] = [];
+  const app = Fastify();
+  await registerChannelInboundRoutes(app, {
+    resolveChannel: (channelId) => (channelId === channel.id ? channel : null),
+    parseMessage: (type, raw, resolvedChannel) =>
+      channelManager.parseMessage(type, raw, { channel: resolvedChannel }),
+    notifyChannel: (event) => {
+      if (event.type === 'message') {
+        notifiedMessages.push(event.message);
+      }
+    },
+    enrichInboundMessage: options?.enrichInboundMessage,
+  });
+  await app.ready();
+  return { app, channel, notifiedMessages };
+}
+
+function postEnrichInbound(app: FastifyInstance, payload: Record<string, unknown>) {
+  return app.inject({
+    method: 'POST',
+    url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+    headers: { 'x-openawork-channel-secret': ENRICH_INBOUND_SECRET },
+    payload,
+  });
+}
+
+describe('channel inbound route enrich hook', () => {
+  it('enrich 成功时 notify 收到带 images 的补全消息', async () => {
+    const images: ChannelImageAttachment[] = [
+      { base64: 'aW1hZ2UtYnl0ZXM=', mediaType: 'image/jpeg', fileName: 'photo.jpg' },
+    ];
+    const enrichInputs: Array<{ channel: ChannelInstance; message: ChannelMessage }> = [];
+    const harness = await buildInboundRouteApp({
+      enrichInboundMessage: async (input) => {
+        enrichInputs.push(input);
+        return { ...input.message, images };
+      },
+    });
+
+    try {
+      const payload = makeEnrichPayload({
+        chatId: 'chat-enrich-1',
+        content: '请看图',
+        messageId: 'msg-enrich-1',
+      });
+      const parsedMessage = expectParsedInboundMessage(payload, harness.channel);
+      const response = await postEnrichInbound(harness.app, payload);
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ accepted: true });
+      expect(harness.notifiedMessages).toHaveLength(1);
+      expect(harness.notifiedMessages[0]).toEqual({ ...parsedMessage, images });
+      expect(enrichInputs).toHaveLength(1);
+      expect(enrichInputs[0]?.message).toEqual(parsedMessage);
+      expect(enrichInputs[0]?.channel).toBe(harness.channel);
+    } finally {
+      await harness.app.close();
+    }
+  });
+
+  it('enrich 抛错时 notify 仍收到原始消息且响应 202', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const harness = await buildInboundRouteApp({
+      enrichInboundMessage: async () => {
+        throw new Error('media download failed');
+      },
+    });
+
+    try {
+      const payload = makeEnrichPayload({
+        chatId: 'chat-enrich-2',
+        content: '图片下载会失败',
+        messageId: 'msg-enrich-2',
+      });
+      const parsedMessage = expectParsedInboundMessage(payload, harness.channel);
+      const response = await postEnrichInbound(harness.app, payload);
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ accepted: true });
+      expect(harness.notifiedMessages).toHaveLength(1);
+      expect(harness.notifiedMessages[0]).toEqual(parsedMessage);
+      expect(harness.notifiedMessages[0]?.images).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith('[channels] inbound media enrich failed', {
+        channelId: TELEGRAM_CHANNEL_ID,
+        error: 'media download failed',
+      });
+    } finally {
+      warnSpy.mockRestore();
+      await harness.app.close();
+    }
+  });
+
+  it('未提供 enrich 时行为与现状一致', async () => {
+    const harness = await buildInboundRouteApp();
+
+    try {
+      const payload = makeEnrichPayload({
+        chatId: 'chat-enrich-3',
+        content: '无 enrich 钩子',
+        messageId: 'msg-enrich-3',
+      });
+      const parsedMessage = expectParsedInboundMessage(payload, harness.channel);
+      const response = await postEnrichInbound(harness.app, payload);
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ accepted: true });
+      expect(harness.notifiedMessages).toEqual([parsedMessage]);
+    } finally {
+      await harness.app.close();
+    }
+  });
+
+  it('enrich 收到 parser 输出与解析出的渠道实例，返回原消息时原样投递', async () => {
+    const enrichInputs: Array<{ channel: ChannelInstance; message: ChannelMessage }> = [];
+    const harness = await buildInboundRouteApp({
+      enrichInboundMessage: async (input) => {
+        enrichInputs.push(input);
+        return input.message;
+      },
+    });
+
+    try {
+      const payload = makeEnrichPayload({
+        chatId: 'chat-enrich-4',
+        content: '无媒体',
+        messageId: 'msg-enrich-4',
+      });
+      const parsedMessage = expectParsedInboundMessage(payload, harness.channel);
+      const response = await postEnrichInbound(harness.app, payload);
+
+      expect(response.statusCode).toBe(202);
+      expect(enrichInputs).toHaveLength(1);
+      expect(enrichInputs[0]?.channel).toBe(harness.channel);
+      expect(enrichInputs[0]?.message).toEqual(parsedMessage);
+      expect(harness.notifiedMessages).toHaveLength(1);
+      expect(harness.notifiedMessages[0]).toBe(enrichInputs[0]?.message);
+    } finally {
+      await harness.app.close();
     }
   });
 });

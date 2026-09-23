@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useLocation, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import type { SessionTab } from '../../stores/ui/uiState.js';
@@ -18,6 +18,7 @@ import {
   filterSessionTreeGroupsByQuery,
   listWorkspacePathsFromSessions,
 } from '../../utils/session/session-grouping.js';
+import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import {
   subscribeSessionListRefresh,
   subscribeSessionRunState,
@@ -100,16 +101,13 @@ const SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS = 5_000;
 
 export function useSessions() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const accessToken = useAuthStore((s) => s.accessToken);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
-  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
-  const addDraftTab = useUIStateStore((s) => s.addDraftTab);
-  const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
-  const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const sessionListPathFilterEnabled = useUIStateStore((s) => s.sessionListPathFilterEnabled);
   const sessionListPathFilterFeatureEnabled = useUIStateStore(
     (s) => s.sessionListPathFilterFeatureEnabled,
@@ -315,28 +313,35 @@ export function useSessions() {
    * 真正的会话由 ChatPage 在用户发出首条消息时惰性创建（`ensureSession`），
    * 因此连续点击「新建会话」不会堆积空对话；已处于草稿态时只会复用同一个草稿
    * （草稿标签由 uiState 去重），不会无限新建。
+   *
+   * 工作区按「点击来源」解析（见 `resolveNewSessionWorkspacePath`）：显式传入的
+   * 分组 / 项目 / 文件树路径优先；否则继承当前正在查看的会话（或激活会话标签）
+   * 的工作区；都不可解析时才回落全局选中值——避免沿用陈旧选中值导致新建后
+   * 还要手动调整工作区。
    */
   const newSession = useCallback(
     async (workspacePath?: string | null, _parentSessionId?: string | null) => {
       if (!accessToken) return;
 
-      if (workspacePath) {
-        setSelectedWorkspacePath(workspacePath);
-        addSavedWorkspacePath(workspacePath);
-      }
+      const uiState = useUIStateStore.getState();
+      const activeTab = uiState.tabs.find((tab) => tab.id === uiState.activeTabId) ?? null;
+      // 侧栏 / 标题栏渲染在布局路由下，`useParams` 拿不到子路由的 sessionId，
+      // 只能从 location 解析当前正在查看的会话（与各侧栏既有做法一致）。
+      const routeSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] || null;
+      const contextSessionId =
+        routeSessionId ?? (activeTab?.type === 'session' ? activeTab.sessionId : null);
+      const resolvedWorkspace = resolveNewSessionWorkspace({
+        ...(workspacePath !== undefined ? { explicitWorkspacePath: workspacePath } : {}),
+        contextSessionId,
+        activeSessionWorkspace: uiState.activeSessionWorkspace,
+        sessions,
+        fallbackWorkspacePath: uiState.selectedWorkspacePath,
+      });
 
-      addDraftTab(workspacePath ?? undefined);
-      navigateToHome();
+      uiState.openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
       void navigate('/chat');
     },
-    [
-      accessToken,
-      addDraftTab,
-      addSavedWorkspacePath,
-      navigateToHome,
-      setSelectedWorkspacePath,
-      navigate,
-    ],
+    [accessToken, location.pathname, navigate, sessions],
   );
 
   const startRename = useCallback((session: Session) => {

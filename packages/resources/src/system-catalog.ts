@@ -17,6 +17,7 @@ export const SYSTEM_BUILTIN_AGENT_NAMES = [
   'multimodal-looker',
   'sisyphus-junior',
   'scout',
+  'web-researcher',
 ] as const;
 
 export type SystemBuiltinAgentName = (typeof SYSTEM_BUILTIN_AGENT_NAMES)[number];
