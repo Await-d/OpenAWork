@@ -6,7 +6,7 @@
  * 或出现裂图。
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import { useFileIconTheme } from './file-icon-theme-context.js';
@@ -78,30 +78,29 @@ function MaterialFileIcon({
   mode: 'dark' | 'light';
 }) {
   const manifest = useMaterialIconManifest(basePath);
-  const [failed, setFailed] = useState(false);
+  // 记录「哪一张图」加载失败，而不是一个布尔量：布尔量必须靠 effect 在换图时复位，
+  // 而 passive effect 在提交之后才异步落地——图片若在复位之前报错，复位会把失败状态
+  // 覆盖回成功，img 便一直停在裂图态（jsdom 等无网络环境不会再来第二次 error）。
+  // 按 iconSrc 记账后换图天然免复位：key 变了就不再等于上次失败的那个 key。
+  const [failedIconSrc, setFailedIconSrc] = useState<string | null>(null);
 
   const iconId = manifest ? resolveFileIcon({ name, manifest, mode }).iconId : null;
-  const iconKey = iconId === null ? null : `${basePath}:${iconId}`;
+  const iconSrc = iconId === null ? null : `${basePath}/${iconId}.svg`;
+  const failed = iconSrc !== null && failedIconSrc === iconSrc;
 
-  // 解析结果或 basePath 变化意味着换了一张图：清掉上一次的 404 记忆。
-  // 否则组件实例被复用（同一行换了文件名）时会永久停在通用轮廓，直到 remount。
-  useEffect(() => {
-    setFailed(false);
-  }, [iconKey]);
-
-  if (failed || iconId === null) {
+  if (iconSrc === null || failed) {
     return <GenericFileGlyph size={size} className={className} />;
   }
 
   return (
     <img
-      src={`${basePath}/${iconId}.svg`}
+      src={iconSrc}
       width={size}
       height={size}
       alt=""
       aria-hidden
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={() => setFailedIconSrc(iconSrc)}
       className={className}
       style={ICON_STYLE}
     />
@@ -123,30 +122,26 @@ function MaterialFolderIcon({
 }) {
   const { mode, basePath } = useFileIconTheme();
   const manifest = useMaterialIconManifest(basePath);
-  const [failed, setFailed] = useState(false);
+  const [failedIconSrc, setFailedIconSrc] = useState<string | null>(null);
 
   const resolved = manifest ? resolveFolderIcon({ name, isRoot, manifest, mode }) : null;
   const iconId = resolved ? (open ? resolved.openIconId : resolved.iconId) : null;
-  const iconKey = iconId === null ? null : `${basePath}:${iconId}`;
+  const iconSrc = iconId === null ? null : `${basePath}/${iconId}.svg`;
+  const failed = iconSrc !== null && failedIconSrc === iconSrc;
 
-  // 同 MaterialFileIcon：展开态切换或解析结果变化时允许重新尝试加载。
-  useEffect(() => {
-    setFailed(false);
-  }, [iconKey]);
-
-  if (failed || iconId === null) {
+  if (iconSrc === null || failed) {
     return <GenericFolderGlyph size={size} open={open} className={className} />;
   }
 
   return (
     <img
-      src={`${basePath}/${iconId}.svg`}
+      src={iconSrc}
       width={size}
       height={size}
       alt=""
       aria-hidden
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={() => setFailedIconSrc(iconSrc)}
       className={className}
       style={ICON_STYLE}
     />
