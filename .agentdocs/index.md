@@ -291,6 +291,8 @@
 
 **基线升级（2026-09-22）**: 上游已发布 **v2.0.13**（本地对照目录由 `temp/opencode-v2.0.12` 原地重命名为 `temp/opencode-v2.0.13`，tag `v2.0.13` / commit `3180aab`）。Phase 3 的移植基线改用 **v2.0.13**：其 codemode 解释器语义补齐一大截（Iterator helpers + `Iterator.from`、`Promise.withResolvers`、`Promise.try`、ToPropertyKey 全量、生成器 `prototype` 与参数同步绑定、`delete` 非引用、函数重声明等），test262 `skipped.txt` 收缩 149 行。**移植时必须补上游漏掉的 `limits`**：上游 `packages/core/src/codemode/tool.ts` 接线时未把 `ExecutionLimits` 传给 `CodeMode.make`，导致 `execute` 实际**无超时、无工具调用上限、无输出字节上限**（限额能力已实现但未启用）——照抄会把该缺陷一起带过来。另注意 v2.0.13 重写了 codemode 指令 prompt（明确「工具只能在 `execute` 内调用、`search` 同步、不要猜工具名」），移植时以新版措辞为准。
 
+**再升级（2026-09-23）**: 上游 **v2.0.14** 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.14`，tag `v2.0.14` / commit `08462140`）。该版本距 v2.0.13 仅约 3 小时、共 5 个提交，实质代码约 80 行：① Electron renderer IPC 负载剔除 `undefined` 字段；② TUI 打开对话框过滤 git worktree 项目；③ models.dev 快照刷新；④ Console API 参考文档（Inference/BYOK/Usage/Budgets）。**经逐项核实无适用本仓的借鉴项**（我们无 Electron IPC 边界、无 TUI、用自建 provider catalog、无 Console 面），既有对齐结论不受影响。唯一可留存的通用原则：跨序列化边界时 **structured clone 保留 `undefined` 键、而 JSON codec 要求键缺席**——将来引入 Worker/MessagePort + JSON 解码时必须按 `JSON.stringify` 语义递归剔除 undefined，且不要把二进制放进该路径。
+
 **范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
 ### ✅ 260922-子代理对标opencode改造方案 - 子代理结果回流收敛为 Job → 合成消息 → 唤醒 单闭环
