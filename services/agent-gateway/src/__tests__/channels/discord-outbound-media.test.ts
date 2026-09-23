@@ -194,7 +194,7 @@ describe('DiscordChannelService 出站图片/文件', () => {
 
     await expect(
       service.sendImage('chan-1', { buffer: Buffer.from('x'), text: 'hi' }),
-    ).rejects.toThrow('Discord sendImage failed: Invalid Form Body');
+    ).rejects.toThrow('Discord message send failed: Invalid Form Body');
   });
 
   it('sendImage 成功时返回上游消息 id', async () => {

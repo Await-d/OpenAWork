@@ -26,7 +26,7 @@ import { join } from 'node:path';
 import type { RunEvent, StreamTerminalOutputChunk } from '@openAwork/shared';
 import type * as DbModule from '../infra/db.js';
 import type * as PersistentModule from '../session/persistent-terminals.js';
-import type { TerminalBackendCapabilities } from '../session/pty-backend.js';
+import type { BunPtyModuleLike, TerminalBackendCapabilities } from '../session/pty-backend.js';
 import type * as RegistryModule from '../session/session-terminal-registry.js';
 import type * as RunEventsModule from '../session/session-run-events.js';
 
@@ -188,13 +188,31 @@ interface RunnerState {
   deps: DriverDeps;
   capabilities: TerminalBackendCapabilities;
   tempDir: string;
+  /**
+   * 该主机是否具备真实 PTY：POSIX 原生，或 Windows 上可加载的 bun-pty。
+   * 与 `spawnTerminalProcess` 的选择逻辑保持一致（能力探测是纯函数，这里额外
+   * 尝试加载 bun-pty 模块来判断 Windows 路径是否可用）。
+   */
+  interactive: boolean;
+  interactiveNote: string;
+}
+
+function resolveInteractiveCapability(
+  capabilities: TerminalBackendCapabilities,
+  ptyBackend: { loadBunPtyModule: () => BunPtyModuleLike | null },
+): { interactive: boolean; note: string } {
+  if (capabilities.kind === 'pty') {
+    return { interactive: true, note: 'native PTY (Bun Terminal API)' };
+  }
+  if (capabilities.runtime === 'bun' && ptyBackend.loadBunPtyModule() !== null) {
+    return { interactive: true, note: 'bun-pty (portable-pty / ConPTY)' };
+  }
+  return { interactive: false, note: capabilities.reason ?? 'no PTY' };
 }
 
 function ptySkipReason(state: RunnerState): string | null {
-  if (state.capabilities.kind === 'pty') return null;
-  return `PTY-only assertion skipped under ${state.capabilities.runtime}: ${
-    state.capabilities.reason ?? 'no PTY'
-  }`;
+  if (state.interactive) return null;
+  return `PTY-only assertion skipped under ${state.capabilities.runtime}: ${state.interactiveNote}`;
 }
 
 function missingToolReason(tool: string): string | null {
@@ -612,13 +630,21 @@ async function main(): Promise<void> {
   const ptyBackend = await import('../session/pty-backend.js');
 
   const capabilities = ptyBackend.detectTerminalBackend();
+  const interactiveCapability = resolveInteractiveCapability(capabilities, ptyBackend);
   const deps: DriverDeps = { db, registry, runEvents, persistent };
-  const state: RunnerState = { deps, capabilities, tempDir: tempDataDir };
+  const state: RunnerState = {
+    deps,
+    capabilities,
+    tempDir: tempDataDir,
+    interactive: interactiveCapability.interactive,
+    interactiveNote: interactiveCapability.note,
+  };
 
   console.log('=== T-08/T-10 终端 PTY 能力矩阵 ===');
   console.log(
     `runtime=${capabilities.runtime} platform=${capabilities.platform} kind=${capabilities.kind} ` +
-      `supportsResize=${capabilities.supportsResize} reason=${capabilities.reason ?? '(none)'}`,
+      `supportsResize=${capabilities.supportsResize} interactive=${interactiveCapability.interactive} ` +
+      `pty=${interactiveCapability.note} reason=${capabilities.reason ?? '(none)'}`,
   );
   for (const tool of ['vim', 'less', 'top', 'htop', 'python3', 'bash', 'tput', 'stty']) {
     const path = which(tool);
@@ -711,9 +737,11 @@ async function main(): Promise<void> {
       item: 'Node/pipe 降级回归 (T-10)',
       run: () => casePipeDegradation(state),
       skipReason: () =>
-        state.capabilities.kind === 'pipe'
+        !state.interactive && state.capabilities.kind === 'pipe'
           ? null
-          : `T-10 pipe 回归仅在 Node/pipe 运行时执行；当前 runtime=${state.capabilities.runtime} kind=pty`,
+          : state.interactive
+            ? `T-10 pipe 回归仅在无真实 PTY 时执行；当前已有 ${state.interactiveNote}`
+            : `T-10 pipe 回归仅在 Node/pipe 运行时执行；当前 runtime=${state.capabilities.runtime} kind=pty`,
     },
   ];
 
@@ -779,6 +807,9 @@ async function cleanup(): Promise<void> {
   } catch {
     /* module load failure during teardown is non-fatal */
   }
+  // 等被 kill 的子进程把 exit 事件送完：`onExit` 会写 DB，若 DB 先关闭，迟到的
+  // exit 会在事件回调里抛 `database is not open`，表现为「断言全过但退出码 1」。
+  await sleep(300);
   try {
     const db = await import('../infra/db.js');
     await db.closeDb();

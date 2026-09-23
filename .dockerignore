@@ -29,6 +29,9 @@
 .env
 .env.*
 
+# 本地部署脚本与配置（可能含 JWT_SECRET 等密钥）
+deploy
+
 # 测试覆盖率产物
 **/coverage
 **/.nyc_output

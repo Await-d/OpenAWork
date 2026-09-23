@@ -16,3 +16,6 @@ packages/resources/resources/skills/reference/
 
 # .NET 网关是独立解决方案，其 obj/bin 构建产物不纳入仓库格式检查。
 services/agent-gateway-dotnet/
+
+# 本地部署目录（不在版本控制中，见 .gitignore 的 deploy/）
+deploy/

@@ -6,8 +6,8 @@
  * bot token，一旦下发给模型 / 客户端就等于泄露凭证，因此这里统一下载并转成
  * base64 附件（`ChannelImageAttachment`），下游只消费字节、看不到 token。
  *
- * 出站：`sendPhoto` 走 multipart（`FormData`），boundary 必须由 fetch 自行
- * 生成，调用方不得手动设置 `Content-Type`。
+ * 出站：`sendPhoto` / `sendDocument` 走 multipart（`FormData`），boundary 必须
+ * 由 fetch 自行生成，调用方不得手动设置 `Content-Type`。
  *
  * 本模块不感知会话 / 渠道生命周期：入站失败一律 warn + 返回 `null`（调用方
  * 保留占位符消息），出站失败才抛错（发送失败必须让上层感知）。
@@ -48,6 +48,16 @@ export interface TelegramPhotoInput {
   readonly fileName?: string;
   readonly caption?: string;
   readonly replyToMessageId?: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface TelegramDocumentInput {
+  /** `https://api.telegram.org/bot<token>` */
+  readonly apiBase: string;
+  readonly chatId: string;
+  readonly buffer: Buffer;
+  readonly fileName: string;
+  readonly caption?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -177,6 +187,37 @@ export async function sendTelegramPhoto(input: TelegramPhotoInput): Promise<{ me
   };
   if (data.ok !== true) {
     throw new Error(`Telegram sendPhoto failed: ${data.description ?? 'invalid response'}`);
+  }
+  return { messageId: String(data.result?.message_id ?? '') };
+}
+
+/** 通过 multipart `sendDocument` 发送文件；上游拒绝时抛错。 */
+export async function sendTelegramDocument(
+  input: TelegramDocumentInput,
+): Promise<{ messageId: string }> {
+  const form = new FormData();
+  form.set('chat_id', input.chatId);
+  form.set('document', bufferToBlob(input.buffer), input.fileName);
+
+  const caption = truncateTelegramCaption(input.caption);
+  if (caption) {
+    form.set('caption', caption);
+  }
+
+  // 不设置 Content-Type：FormData 必须由 fetch 生成带 boundary 的头。
+  const res = await channelFetch(`${input.apiBase}/sendDocument`, {
+    method: 'POST',
+    body: form,
+    timeoutMs: TELEGRAM_MEDIA_TIMEOUT_MS,
+    signal: input.signal,
+  });
+  const data = (await res.json()) as {
+    ok?: boolean;
+    description?: string;
+    result?: { message_id?: number };
+  };
+  if (data.ok !== true) {
+    throw new Error(`Telegram sendDocument failed: ${data.description ?? 'invalid response'}`);
   }
   return { messageId: String(data.result?.message_id ?? '') };
 }

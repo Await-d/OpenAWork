@@ -9,13 +9,18 @@ import type {
   ChannelReplyLanguage,
   ChannelStreamingHandle,
   ChannelServiceFactory,
+  FeishuFileType,
 } from './types.js';
 import { channelFetch, computeChannelRetryDelayMs } from './channel-http.js';
 import {
   parseTelegramInboundMessage,
   resolveTelegramImageCandidate,
 } from './inbound-parsers/telegram.js';
-import { downloadTelegramInboundImage, sendTelegramPhoto } from './telegram-media.js';
+import {
+  downloadTelegramInboundImage,
+  sendTelegramDocument,
+  sendTelegramPhoto,
+} from './telegram-media.js';
 import { listTelegramBotCommands } from './channel-localization.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
@@ -332,6 +337,30 @@ export class TelegramChannelService implements MessagingChannelService {
       ...(input.text ? { caption: input.text } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       replyToMessageId: msgId,
+    });
+  }
+
+  /**
+   * 出站发文件：走 `sendDocument` multipart。`fileType` 按接口保留但不使用——
+   * Telegram 由文件名 / 内容自行推断文档类型，无需调用方声明。
+   */
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendTelegramDocument({
+      apiBase: this.apiBase,
+      chatId,
+      buffer: input.buffer,
+      fileName: input.fileName,
+      ...(input.text ? { caption: input.text } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
   }
 

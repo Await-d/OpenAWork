@@ -46,7 +46,9 @@ const SECTION_TITLE_STYLE = CK_SECTION_LABEL_STYLE;
 const TAB_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,

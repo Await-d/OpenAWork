@@ -167,6 +167,7 @@ import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
 import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
 import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
 import { useChatStopChildSessions } from './hooks/use-chat-stop-child-sessions.js';
+import { useChildSessionSelection } from './hooks/use-child-session-selection.js';
 import { runEnsureSession } from './hooks/run-ensure-session.js';
 import { runSendMessage } from './hooks/run-send-message.js';
 import { useChatPageDerivations } from './hooks/use-chat-page-derivations.js';
@@ -1133,6 +1134,24 @@ export default function ChatPage() {
     () => buildSubAgentRunItems(childSessions, sessionTasks, currentSessionId),
     [childSessions, sessionTasks, currentSessionId],
   );
+  /**
+   * 子代理选择编排：显式选择（点击卡片 / 通知行 / 列表 / 键盘导航）优先，
+   * 运行列表变化只做兜底回填，绝不覆盖用户刚点开的目标。
+   * 自动选择 / Alt+↑↓ 导航 / 面板打开策略的细节见 hook 内注释。
+   */
+  const { openChildSessionInspector } = useChildSessionSelection({
+    currentSessionId,
+    isFusionLayout,
+    isMobileViewport,
+    rightTab,
+    selectedChildSessionId,
+    setReviewPanelOpened,
+    setRightOpen,
+    setRightTab,
+    setSelectedChildSessionId,
+    setSidePanelActiveTab,
+    subAgentRunItems,
+  });
   const userHistoryJumpItems = useMemo(() => buildUserHistoryJumpItems(messages), [messages]);
   /**
    * Latest non-streaming assistant message id. `CollapsibleAssistantContent`
@@ -1155,19 +1174,6 @@ export default function ChatPage() {
     }
     return null;
   }, [messages]);
-  const openChildSessionInspector = useCallback(
-    (nextSessionId: string) => {
-      setSelectedChildSessionId(nextSessionId);
-      setRightOpen(true);
-      setRightTab('agent');
-      // 桌面 Fusion 停靠面板仅在 reviewPanelOpened 时渲染：只切 tab 不会展开面板。
-      if (isFusionLayout && !isMobileViewport) {
-        setSidePanelActiveTab('agent');
-        setReviewPanelOpened(true);
-      }
-    },
-    [isFusionLayout, isMobileViewport, setReviewPanelOpened, setSidePanelActiveTab],
-  );
   /**
    * 「后台任务」面板的「查看终端」入口：后台命令行与终端管理分属两个 tab，
    * 这里把跳转与选中态一起提升到 ChatPage —— 切到 `terminals` tab，并把目标
@@ -1283,79 +1289,6 @@ export default function ChatPage() {
     },
     [activeModelId, activeProviderId, gatewayUrl, token],
   );
-
-  useEffect(() => {
-    if (subAgentRunItems.length === 0) {
-      if (selectedChildSessionId !== null) {
-        setSelectedChildSessionId(null);
-      }
-      if (rightTab === 'agent') {
-        setRightTab('overview');
-      }
-      return;
-    }
-
-    if (
-      selectedChildSessionId &&
-      subAgentRunItems.some((item) => item.sessionId === selectedChildSessionId)
-    ) {
-      return;
-    }
-
-    const runningCandidate =
-      subAgentRunItems.find((item) => item.status === 'running' || item.status === 'pending') ??
-      subAgentRunItems[0];
-    const nextId = runningCandidate?.sessionId ?? null;
-    if (nextId !== selectedChildSessionId) {
-      setSelectedChildSessionId(nextId);
-    }
-  }, [rightTab, selectedChildSessionId, subAgentRunItems]);
-
-  useEffect(() => {
-    if (subAgentRunItems.length < 2) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.altKey || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) {
-        return;
-      }
-
-      event.preventDefault();
-      const currentIndex = subAgentRunItems.findIndex(
-        (item) => item.sessionId === selectedChildSessionId,
-      );
-      const safeIndex = currentIndex === -1 ? 0 : currentIndex;
-      const nextIndex =
-        event.key === 'ArrowDown'
-          ? (safeIndex + 1) % subAgentRunItems.length
-          : (safeIndex - 1 + subAgentRunItems.length) % subAgentRunItems.length;
-      const nextItem = subAgentRunItems[nextIndex];
-      if (!nextItem) {
-        return;
-      }
-
-      setSelectedChildSessionId(nextItem.sessionId);
-      setRightOpen(true);
-      setRightTab('agent');
-      if (isFusionLayout && !isMobileViewport) {
-        setSidePanelActiveTab('agent');
-        setReviewPanelOpened(true);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [
-    isFusionLayout,
-    isMobileViewport,
-    selectedChildSessionId,
-    setReviewPanelOpened,
-    setSidePanelActiveTab,
-    subAgentRunItems,
-  ]);
 
   useEffect(() => {
     if (!token) return;
@@ -3540,7 +3473,7 @@ export default function ChatPage() {
     ),
     messages,
     groupedMessageEntries,
-    onOpenSubagentChild: (childSessionId: string) => setSelectedChildSessionId(childSessionId),
+    onOpenSubagentChild: openChildSessionInspector,
     visibleMessageCount: visibleMessageCount ?? sanitizedHistoricalMessages.length,
     hiddenMessageCount,
     visibleStreaming,
@@ -3927,7 +3860,7 @@ export default function ChatPage() {
                 void navigate(`/chat/${nextSessionId}`);
               }}
               onPromoteToFullScreen={promoteWorkspaceTab}
-              onSelectChildSession={(nextSessionId) => setSelectedChildSessionId(nextSessionId)}
+              onSelectChildSession={openChildSessionInspector}
               onTabChange={setSidePanelActiveTab}
               overview={fusionContextOverview}
               providerCatalog={providerCatalog}

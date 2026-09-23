@@ -1,0 +1,142 @@
+name: Release Docker Image
+
+# 构建并推送 agent-gateway 生产镜像到 GHCR。
+#
+# 触发方式：workflow_dispatch（手动，或被 auto-release.yml / prepare-release.yml 派发）。
+# 有意不用 `push: tags` 触发：发布流程用 GITHUB_TOKEN 推 tag，而 GITHUB_TOKEN 产生的
+# push 事件不会触发新的 workflow（防递归），因此必须显式 dispatch。
+#
+# 版本注入（全部动态读取，不在镜像里写死）：
+# - BUN_VERSION      ← 仓库根 `.bun-version`
+# - OPENAWORK_VERSION ← 输入参数，缺省时读 package.json version
+# - OPENAWORK_GIT_SHA ← 当前提交 SHA
+# 构建参数最终落到 OCI 标签（org.opencontainers.image.version / revision）与
+# ENV OPENAWORK_VERSION，可用 `docker inspect` 核对。
+#
+# 镜像标签：
+# - preview 通道：<version>-preview、preview
+# - release 通道：<version>、<major>.<minor>、latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本（x.y.z，留空则读取 package.json version）'
+        required: false
+        default: ''
+        type: string
+      channel:
+        description: '发布通道'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - release
+      platforms:
+        description: '构建平台（逗号分隔；多平台会显著变慢）'
+        required: false
+        default: 'linux/amd64'
+        type: string
+
+concurrency:
+  group: release-docker-${{ inputs.channel }}-${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & Push gateway image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version and image tags
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${INPUT_VERSION}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")
+          fi
+
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid version: '$VERSION' (expected x.y.z)" >&2
+            exit 1
+          fi
+
+          BUN_VERSION=$(tr -d '[:space:]' < .bun-version)
+          if [ -z "$BUN_VERSION" ]; then
+            echo '.bun-version is empty' >&2
+            exit 1
+          fi
+
+          IMAGE="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')/agent-gateway"
+          MAJOR_MINOR=$(printf '%s' "$VERSION" | cut -d. -f1,2)
+
+          if [ "$INPUT_CHANNEL" = 'release' ]; then
+            TAGS=$(printf '%s\n' "$IMAGE:$VERSION" "$IMAGE:$MAJOR_MINOR" "$IMAGE:latest")
+          else
+            TAGS=$(printf '%s\n' "$IMAGE:$VERSION-preview" "$IMAGE:preview")
+          fi
+
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "bun_version=$BUN_VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo 'tags<<TAGS_EOF'
+            printf '%s\n' "$TAGS"
+            echo 'TAGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Image: $IMAGE"
+          echo "Version: $VERSION (channel: $INPUT_CHANNEL)"
+          printf 'Tags:\n%s\n' "$TAGS"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/agent-gateway/Dockerfile
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            BUN_VERSION=${{ steps.meta.outputs.bun_version }}
+            OPENAWORK_VERSION=${{ steps.meta.outputs.version }}
+            OPENAWORK_GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Write job summary
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          echo '## 🐳 网关镜像已发布' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '| 项目 | 值 |' >> "$GITHUB_STEP_SUMMARY"
+          echo '|------|-----|' >> "$GITHUB_STEP_SUMMARY"
+          echo "| 镜像 | \`$IMAGE\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 版本 | \`$VERSION\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 通道 | \`$CHANNEL\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 平台 | \`$PLATFORMS\` |" >> "$GITHUB_STEP_SUMMARY"

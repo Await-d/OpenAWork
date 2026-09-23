@@ -9,6 +9,7 @@
     "build": "bun run tauri build && bun run check:web-dist && node src-tauri/scripts/print-bundle-artifacts.mjs",
     "package": "bun run build",
     "bundle-sidecar": "node src-tauri/scripts/bundle-sidecar.mjs",
+    "build:bun-pty-lib": "node src-tauri/scripts/build-bun-pty-lib.mjs",
     "check:web-dist": "node ../../scripts/build/assert-no-service-worker-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",

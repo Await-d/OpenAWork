@@ -6,11 +6,12 @@ import type {
   ChannelMessage,
   ChannelServiceFactory,
   ChannelStreamingHandle,
+  FeishuFileType,
   MessagingChannelService,
 } from './types.js';
 import { listBuiltinChannelCommands } from './channel-command-experience.js';
 import { parseSlackInboundMessage } from './inbound-parsers/slack.js';
-import { attachSlackInboundImages } from './slack-media.js';
+import { attachSlackInboundImages, sendSlackFile, type SlackUploadClient } from './slack-media.js';
 
 type SlackApp = {
   start(port?: number): Promise<unknown>;
@@ -55,6 +56,7 @@ type SlackWebClient = {
     list(): Promise<{ channels?: Array<{ id: string; name: string; num_members?: number }> }>;
     history(args: { channel: string; limit?: number }): Promise<{ messages?: SlackMessage[] }>;
   };
+  files: SlackUploadClient['files'];
 };
 
 type BoltConstructor = new (options: {
@@ -131,6 +133,89 @@ export class SlackChannelService implements MessagingChannelService {
       thread_ts: threadTs,
     });
     return { messageId: res.ts };
+  }
+
+  /**
+   * 出站发送文件：走 Slack `files.uploadV2`（bot token 需具备 `files:write`
+   * scope），`text` 非空时作为 `initial_comment` 随文件投递。
+   *
+   * `fileType` 按接口保留但不使用——Slack 由文件本身推断类型；`signal` 同样按
+   * 接口保留——`uploadV2` 内部的三段请求不暴露 AbortSignal 透传点，故不下传。
+   */
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendSlackFile({
+      client: this.client(),
+      channelId: chatId,
+      buffer: input.buffer,
+      fileName: input.fileName,
+      ...(input.text ? { text: input.text } : {}),
+    });
+  }
+
+  /**
+   * 出站发送图片：与 `sendFile` 共用 `files.uploadV2`（bot token 需具备
+   * `files:write` scope），`fileName` 缺省为 `image.png`，`text` 非空时作为
+   * `initial_comment` 随图投递。
+   *
+   * `signal` / `sourceUrl` 按接口保留但不透传——`uploadV2` 内部的三段请求不暴露
+   * AbortSignal 透传点（与既有 `sendFile` 一致）；图片字节由调用方先取好后经
+   * `buffer` 传入，故无需再消费 `sourceUrl`。
+   */
+  async sendImage(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName?: string;
+      readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendSlackFile({
+      client: this.client(),
+      channelId: chatId,
+      buffer: input.buffer,
+      fileName: input.fileName ?? 'image.png',
+      ...(input.text ? { text: input.text } : {}),
+    });
+  }
+
+  /**
+   * 回复图片。messageId 格式与 `replyMessage` 一致，为 `<channelId>:<ts>`：
+   * Slack 是线程模型，回复历史消息即把文件挂到该消息的线程（`thread_ts`），
+   * 而不是引用展示。格式不合法时直接抛错、不发任何请求。
+   */
+  async replyImage(
+    messageId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName?: string;
+      readonly signal?: AbortSignal;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    const [channelId, threadTs] = messageId.split(':');
+    if (!channelId || !threadTs) {
+      throw new Error('Slack image reply requires "<channelId>:<ts>" reference');
+    }
+    return sendSlackFile({
+      client: this.client(),
+      channelId,
+      buffer: input.buffer,
+      fileName: input.fileName ?? 'image.png',
+      ...(input.text ? { text: input.text } : {}),
+      threadTs,
+    });
   }
 
   async getGroupMessages(chatId: string, count?: number): Promise<ChannelMessage[]> {

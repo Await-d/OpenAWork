@@ -1,14 +1,18 @@
 /**
- * Slack 入站图片编解码（网络 + 编解码封装，不含渠道接线）。
+ * Slack 入站图片编解码 + 出站文件上传（网络 + 编解码封装，不含渠道接线）。
  *
- * Slack 文件对象上的 `url_private` / `url_private_download` 是带凭证语义的
- * 私有地址：必须携带 `Authorization: Bearer <botToken>`（bot token 需要
+ * 入站：Slack 文件对象上的 `url_private` / `url_private_download` 是带凭证
+ * 语义的私有地址：必须携带 `Authorization: Bearer <botToken>`（bot token 需要
  * `files:read` scope）才能取回。把该 URL 直接下发给模型 / 客户端等于泄露
  * 私有链接，因此这里统一下载并转成 base64 附件（`ChannelImageAttachment`），
  * 下游只消费字节、看不到 URL 与 token。
  *
- * 本模块不感知会话 / 渠道生命周期：失败一律 warn + 返回 `null`（调用方保留
- * `[User sent an image]` 占位符消息），绝不向调用方抛错。
+ * 出站：`files.uploadV2` 由 Bolt 内部完成 getUploadURLExternal → 上传 →
+ * completeUploadExternal 三段请求（bot token 需要 `files:write` scope）。
+ *
+ * 本模块不感知会话 / 渠道生命周期：入站失败一律 warn + 返回 `null`（调用方
+ * 保留 `[User sent an image]` 占位符消息），出站失败才抛错（发送失败必须让
+ * 上层感知）。
  */
 
 import { sniffImageMediaType } from '../media/image-signature.js';
@@ -193,4 +197,51 @@ function resolveSlackImageMimeType(file: Record<string, unknown>): string {
 
 function warnSlackImageSkip(url: string, detail: Record<string, unknown>): void {
   console.warn('[slack] 入站图片下载失败', { url, ...detail });
+}
+
+/**
+ * 出站上传的最小客户端结构：Bolt `client.files` 的子集。
+ *
+ * `uploadV2` 由 Bolt 内部完成 getUploadURLExternal → 上传 → completeUploadExternal
+ * 三段请求；bot token 必须带 `files:write` scope，否则上游返回 `ok: false`。
+ */
+export interface SlackUploadClient {
+  readonly files: {
+    uploadV2(args: {
+      readonly channel_id: string;
+      readonly file: Buffer;
+      readonly filename: string;
+      readonly initial_comment?: string;
+      /** 非空时把文件挂到该消息所在线程（Slack 用 thread_ts 表达线程归属）。 */
+      readonly thread_ts?: string;
+    }): Promise<{ ok?: boolean; error?: string; files?: Array<{ id?: string }> }>;
+  };
+}
+
+/**
+ * 通过 Slack `files.uploadV2` 发送文件；失败抛错（发送失败必须可见）。
+ *
+ * 与入站相反：这里不吞异常——上游 `ok: false` 与网络异常都向上抛，由工具层把
+ * 发送失败回传给模型。`text` 非空时作为 `initial_comment` 随文件一起投递；
+ * `threadTs` 非空时写入 `thread_ts`，把文件挂到该消息所在线程。
+ */
+export async function sendSlackFile(input: {
+  readonly client: SlackUploadClient;
+  readonly channelId: string;
+  readonly buffer: Buffer;
+  readonly fileName: string;
+  readonly text?: string;
+  readonly threadTs?: string;
+}): Promise<{ messageId: string }> {
+  const result = await input.client.files.uploadV2({
+    channel_id: input.channelId,
+    file: input.buffer,
+    filename: input.fileName,
+    ...(input.text ? { initial_comment: input.text } : {}),
+    ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
+  });
+  if (result.ok === false) {
+    throw new Error(`Slack sendFile failed: ${result.error ?? 'unknown error'}`);
+  }
+  return { messageId: result.files?.[0]?.id ?? '' };
 }

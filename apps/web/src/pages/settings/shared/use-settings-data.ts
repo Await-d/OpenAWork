@@ -29,6 +29,7 @@ import { createInitialDevtoolsSourceStates } from '../state/settings-derived.js'
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
+  SubagentLimitsRef,
   SubagentModelPolicyRef,
   ThinkingDefaultsRef,
 } from '../state/settings-types.js';
@@ -44,6 +45,7 @@ interface UseSettingsDataOptions {
       defaultThinking?: ThinkingDefaultsRef | null;
       imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
       subagentModelPolicy?: SubagentModelPolicyRef | null;
+      subagentLimits?: SubagentLimitsRef | null;
     },
     options?: {
       syncDraft?: boolean;
@@ -152,6 +154,7 @@ export function useSettingsData({
           defaultThinking?: ThinkingDefaultsRef | null;
           imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
           subagentModelPolicy?: SubagentModelPolicyRef | null;
+          subagentLimits?: SubagentLimitsRef | null;
         };
         if (typed.providers) {
           providersRef.current = typed.providers;
@@ -163,6 +166,7 @@ export function useSettingsData({
             defaultThinking: typed.defaultThinking,
             imageGenerationDefaults: typed.imageGenerationDefaults,
             subagentModelPolicy: typed.subagentModelPolicy,
+            subagentLimits: typed.subagentLimits,
           },
           { syncDraft: true, syncSaved: true },
         );

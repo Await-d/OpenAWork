@@ -2,6 +2,60 @@
 
 ## 已完成的任务
 
+### ✅ 260923-渠道收尾清理第五批（QQ 入站图片 / relay enrich / 三处小修复）
+**状态**: ✅ 已完成并验证（2026-09-23，3 任务 / 3 个并行代理 + 协调者）
+**复杂度**: Full orchestration（score +6）
+**归档位置**: [workflow/done/260923-渠道收尾清理第五批.md](workflow/done/260923-渠道收尾清理第五批.md)
+
+**成果总结**:
+- ✅ **QQ 入站图片**：`inbound-parsers/qq.ts` 的 `attachments` 中 `image/*` → `images`（URL 直映射、4 张上限、大小写不敏感）；三个 parse 函数接入，占位符逻辑零回归。
+- ✅ **relay 模式 enrich**：`ChannelRelayOptions.enrich` + `handleMessage` 接入 + `manager.startRelay` 注入（双层兜底）——relay（`wsUrl` 中转）形态图片与 HTTP 入站一致支持下载。
+- ✅ **Discord `listGroups` 语义修复**：guild → text channel（`type === 0`，上限 10 guild、单 guild 失败/网络异常跳过）。
+- ✅ **飞书群消息 content 解析**：`{"text":"..."}` → 纯文本；非文本结构原样保留（不丢信息）。
+- ✅ **weixin `pluginType` 一致性**（`weixin-official` → `weixin`）+ **`identity-mapping.ts` 未接线标记**（预留状态与接入前需设计的 4 项）。
+- ✅ **验证**：全量单测 **564 文件 / 4355 用例 EXIT=0**（仓库残留清零）· typecheck exit 0 · 全包 ESLint exit 0 · channels 全域 48 文件 / 328 用例绿。
+- ⚠️ **不做项（已记录理由）**：企业微信入站图片 v2（`MediaId` 加密下载，不可验证）；钉钉任何媒体（API 细节不可达）；真实渠道冒烟（环境无凭据）。
+
+### ✅ 260923-渠道出站媒体第四批（Slack / WhatsApp / 企业微信 / QQ）
+**状态**: ✅ 已交付（2026-09-23，4 任务 / 4 个并行代理 + 协调者收口）；本批独立验证全绿，仓库级验证受两处外部在途工作阻塞
+**复杂度**: Full orchestration（score +6）
+**归档位置**: [workflow/done/260923-渠道出站媒体第四批-Slack-WhatsApp-企业微信-QQ.md](workflow/done/260923-渠道出站媒体第四批-Slack-WhatsApp-企业微信-QQ.md)
+
+**成果总结**:
+- ✅ **Slack**：`sendImage` + `replyImage`（`files.uploadV2`；`replyImage` 用 `thread_ts` 挂线程，非法引用抛错不发请求）。
+- ✅ **WhatsApp**：`sendImage` + `sendFile`（两步：`/{phoneNumberId}/media` multipart 上传 → `/messages` 发 `image`/`document`；上传失败不进入发送步骤）。
+- ✅ **企业微信**：`sendFile`（应用模式 `media/upload?type=file` → `message/send` 的 `msgtype=file`；webhook-only 模式零网络即抛明确文案）。
+- ✅ **QQ**：`sendFile`（`uploadQQMedia` 泛化，`file_type: 4`；c2c/group 可用、`channel` 抛错）。
+- ✅ **验证**：channels 全域 **46 文件 / 305 用例全绿** · 全包 ESLint exit 0 · 改动文件 Prettier 全绿 · 各代理定向全绿（W1 36 / W2 28 / W3 14 / W4 19）。
+- ⚠️ **外部阻塞（非本批，未修改用户文件）**：`task/subagent-limits.ts:48` 类型错误 + `task/subagent-depth.test.ts` 2 用例失败（用户在途「子代理数量限制」功能重构；建议修复方式已记录在 runtime 错误表与对话中）。
+- ⚠️ **已知限制**：钉钉 `sendFile` 未实现（官方文档不可达、API 不可验证）；Slack 需 `files:write` scope；WhatsApp 上传成功但发送失败留孤立媒体（Meta 侧过期）。
+- ✅ **收口补充（21:00）**：QQ 技术债（D-5）**已偿还**——`QQApiClient` 新增 `sendFile` 委托，`qq.ts` 删除约 50 行重复（`apiBase`/`mediaContext`/`sendQQMessageBody`）；qq 三测试 19 用例绿、channels 全域 305 用例绿、无 QQ 类型错误；全包 typecheck 已随用户修复归零。残留：`task/subagent-depth.test.ts` 2 用例失败（用户功能重构待同步测试，未代改）。
+
+### ✅ 260923-PluginSendFile 通用工具与三平台文件发送
+**状态**: ✅ 已完成并验证（2026-09-23，3 任务 / 3 个并行代理 + 协调者收口）
+**复杂度**: Full orchestration（score +4）
+**归档位置**: [workflow/done/260923-PluginSendFile通用工具与三平台文件发送.md](workflow/done/260923-PluginSendFile通用工具与三平台文件发送.md)
+
+**成果总结**:
+- ✅ **通用 `PluginSendFile`**：参数 `{ file_path, content? }`（无 `message_id`，接口无 `replyFile`）+ 执行分支（既有 `executeChannelMediaTool` 的 file 分支）+ 参数说明显式登记；模型在渠道会话可直接发文件。
+- ✅ **Telegram / Discord / Slack**：`sendTelegramDocument`（`/sendDocument` multipart，caption ≤1024）、Discord 复用 `postDiscordMessage`（错误前缀修为通用 `message send`）、Slack `files.uploadV2`（需 `files:write` scope）。
+- ✅ **策略层登记 5 处**（描述符 / 可见性 / 权限派生 / **agent-core `CHANNEL_PERMISSION_TOOL_NAMES`** / 参数说明）；收口由全量测试抓到 agent-core 映射缺失并修复（agent-core 589 测试绿），`AGENTS.md` 登记点清单已升级为「5 处缺一不可」。
+- ✅ **验证**：gateway 全量 **557 文件 / 4292 用例 EXIT=0** · typecheck exit 0 · 全包 ESLint exit 0 · agent-core 48 文件 / 589 测试绿 · 改动文件 Prettier 全绿。
+- ⚠️ **已知限制**：钉钉/企业微信/WhatsApp/QQ 未实现 `sendFile`（调用命中能力探测文案）；Slack 需 `files:write` scope；`sendFile` 无引用回复语义；`fileType` 参数保留不用。
+
+### ✅ 260923-渠道入站图片第二批（Slack / WhatsApp / 企业微信）
+**状态**: ✅ 已完成并验证（2026-09-23，4 任务 / 4 个并行代理 + 协调者收口）
+**复杂度**: Full orchestration（score +6）
+**归档位置**: [workflow/done/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md](workflow/done/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md)
+
+**成果总结**:
+- ✅ **通用 enrich 钩子**：`MessagingChannelService.enrichInboundMessage?`（`types.ts:208`）+ HTTP 入站路由 parse 后调用（`channel-inbound-route.ts:314`）+ **双层失败兜底**（router `channelLogWarn` / 路由 `enrichInboundMessageOrFallback`）——enrich 失败原样投递、绝不丢消息；QQ 分支与 relay 不接入。
+- ✅ **Slack 入站图片**：`slack-media.ts`（`url_private_download` + Bearer，4MB / 4 张上限，需 `files:read` scope，单张失败跳过）+ parser 准入放宽（纯文件消息不再丢弃）。
+- ✅ **WhatsApp 入站图片**：`whatsapp-media.ts`（两步 Graph API 下载，5MB 上限，经 enrich 钩子）。
+- ✅ **企业微信入站图片**：`PicUrl` → `imageUrl`（v1 零网络；mime 默认 `image/jpeg`）。
+- ✅ **验证**：全量单测 **554 文件 / 4266 用例 EXIT=0**（较上批 +47 = 本批新用例）· typecheck exit 0 · 全包 ESLint exit 0 · 渠道全域 39 文件 / 265 测试绿；协调者复查无缺陷。
+- ⚠️ **已知限制**：企业微信 v1 不下载 `MediaId`；Slack 需 `files:read` scope、relay 形态不走 Bolt handler 因而不下载；WhatsApp 无出站媒体方法；relay 模式不走 enrich。
+
 ### ✅ 260923-渠道入站图片与出站发图 - Telegram / Discord 补齐入站图片与出站发图
 **状态**: ✅ 已完成并验证（2026-09-23，5 任务 / 4 个并行代理 + 协调者收口）
 **复杂度**: Full orchestration（score +6）
@@ -308,16 +362,6 @@
 ## 未完成与近期收口任务（明细）
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
-
-### 🟡 260923-渠道入站图片第二批（Slack / WhatsApp / 企业微信）
-**状态**: 🔵 实施中（W1–W4 四代理并行）
-**复杂度**: Full orchestration（score +6）
-**开始日期**: 2026-09-23
-**方案文档**: [workflow/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md](workflow/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md)
-
-**目标**: 通用 service 级入站媒体 enrich 钩子（`enrichInboundMessage`，HTTP 入站路由 parse 后调用）+ Slack/WhatsApp 入站图片下载转 base64 + 企业微信 `PicUrl` 直映射（v1 不下载）。
-
-**范围边界**: 不含出站媒体 / QQ 入站图片 / relay 模式 enrich（与第一批已知限制一致）。
 
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
 **状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**

@@ -320,4 +320,9 @@ describe('WeixinChannelService', () => {
     await expect(service.start()).rejects.toThrow('Weixin startup check failed: invalid token');
     expect(service.isRunning()).toBe(false);
   });
+
+  it('pluginType 与渠道描述符保持一致（weixin）', () => {
+    const service = new WeixinChannelService(makeWeixinChannel(), () => undefined);
+    expect(service.pluginType).toBe('weixin');
+  });
 });

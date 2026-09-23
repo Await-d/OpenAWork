@@ -39,6 +39,7 @@ import {
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider/provider-config.js';
+import { resolveSubagentLimitsForUser } from '../task/subagent-limits.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { listRequestWorkflowLogs } from '../runtime/request-workflow-log-store.js';
 import {
@@ -925,6 +926,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const subagentModelPolicy = parseStoredSubagentModelPolicy(
         parseStoredJson(subagentPolicyRow?.value),
       );
+      const subagentLimits = resolveSubagentLimitsForUser(user.sub);
       materializeStep.succeed(undefined, { providers: providers.length });
       step.succeed(undefined, { providers: providers.length });
 
@@ -934,6 +936,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         defaultThinking,
         imageGenerationDefaults,
         subagentModelPolicy,
+        subagentLimits,
       });
     },
   );
@@ -972,6 +975,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         parseStoredJson(subagentPolicyRow?.value),
       );
       const subagentModelPolicy = parsed.subagentModelPolicy ?? storedSubagentPolicy;
+      // 子代理数量限制：字段缺省表示「未变更」，保持已落库值（与 subagentModelPolicy 同语义）。
+      const subagentLimits = parsed.subagentLimits ?? resolveSubagentLimitsForUser(user.sub);
 
       const materializeStep = child('materialize');
       const mergedActiveSelection = mergeActiveSelectionPreservingStored({
@@ -1033,6 +1038,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       );
       saveSubagentPolicyStep.succeed();
 
+      const saveSubagentLimitsStep = child('save-subagent-limits');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'subagent_limits', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(subagentLimits)],
+      );
+      saveSubagentLimitsStep.succeed();
+
       // 方案 3：配置变更后 invalidate catalog 缓存
       invalidateCatalog(user.sub);
 
@@ -1044,6 +1057,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         defaultThinking,
         imageGenerationDefaults,
         subagentModelPolicy,
+        subagentLimits,
       });
     },
   );

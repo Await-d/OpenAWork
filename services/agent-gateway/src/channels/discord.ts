@@ -5,14 +5,25 @@ import type {
   ChannelMessage,
   ChannelGroup,
   ChannelServiceFactory,
+  FeishuFileType,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
+import { channelLogWarn } from './channel-log.js';
 import { DiscordGatewayClient } from './discord-gateway.js';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
 /** Discord 单条消息 `content` 的字符上限。 */
 const DISCORD_CONTENT_MAX_LENGTH = 2000;
+
+/**
+ * `listGroups` 最多检查的 guild 数量。每个 guild 都要额外发一次频道列表
+ * 请求（N+1），无上限会随 bot 所在服务器数量线性放大，因此设 10 个封顶。
+ */
+const DISCORD_LIST_GROUPS_MAX_GUILDS = 10;
+
+/** Discord 频道类型枚举值：GUILD_TEXT（文本频道），即真正可收发消息的容器。 */
+const DISCORD_GUILD_TEXT_CHANNEL_TYPE = 0;
 
 export class DiscordChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -161,6 +172,28 @@ export class DiscordChannelService implements MessagingChannelService {
   }
 
   /**
+   * 出站发文件：Discord 不区分图片 / 文件，复用同一消息端点（`payload_json`
+   * + `files[0]`）。`fileType` 按接口保留但不使用。
+   */
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return this.postDiscordMessage(
+      chatId,
+      { content: truncateDiscordContent(input.text) },
+      { buffer: input.buffer, fileName: sanitizeDiscordFileName(input.fileName) },
+      input.signal,
+    );
+  }
+
+  /**
    * 统一的 multipart 消息投递：`payload_json` 为 JSON 消息体，
    * `files[0]` 为附件。请求头只能用 `authHeaders`（不带 Content-Type），
    * 让 fetch 自己生成 boundary；Discord 附件上传比纯文本慢，超时放宽到 30s。
@@ -183,7 +216,7 @@ export class DiscordChannelService implements MessagingChannelService {
     });
     const data = (await res.json()) as { id?: string; code?: number; message?: string };
     if (!res.ok) {
-      throw new Error(`Discord sendImage failed: ${data.message ?? res.status}`);
+      throw new Error(`Discord message send failed: ${data.message ?? res.status}`);
     }
     return { messageId: data.id ?? '' };
   }
@@ -216,14 +249,74 @@ export class DiscordChannelService implements MessagingChannelService {
     }));
   }
 
+  /**
+   * 列出可用于收发消息的容器。
+   *
+   * 语义说明：Discord 的**消息容器是 channel（频道）**，guild（服务器）只是
+   * 频道的上级分组。`GET /users/@me/guilds` 返回的是服务器列表，直接当群组
+   * 返回属于语义错位；因此这里先取 guild 列表（最多
+   * `DISCORD_LIST_GROUPS_MAX_GUILDS` 个，避免 N+1 请求失控），再逐个拉取
+   * 其下的 GUILD_TEXT（`type === 0`）频道作为结果。
+   *
+   * 单个 guild 的频道请求失败（非 2xx / 响应非数组 / 网络异常）时跳过该
+   * guild，不影响其余结果。Discord 不提供 memberCount，故不填。
+   */
   async listGroups(): Promise<ChannelGroup[]> {
     const res = await channelFetch(`${DISCORD_API}/users/@me/guilds`, { headers: this.headers });
     const body = (await res.json()) as unknown;
     if (!Array.isArray(body)) {
       return [];
     }
-    const guilds = body as Array<{ id?: string; name?: string }>;
-    return guilds.map((g) => ({ id: g.id ?? '', name: g.name ?? '' }));
+    const guilds = (body as Array<{ id?: string }>).slice(0, DISCORD_LIST_GROUPS_MAX_GUILDS);
+    const groups: ChannelGroup[] = [];
+    for (const guild of guilds) {
+      if (!guild.id) {
+        continue;
+      }
+      groups.push(...(await this.fetchGuildTextChannels(guild.id)));
+    }
+    return groups;
+  }
+
+  /**
+   * 拉取单个 guild 下的文本频道。任何失败都只跳过该 guild 并返回空数组，
+   * 绝不抛出——`listGroups` 用于展示/诊断，不应因某一个服务器不可见而整体失败。
+   */
+  private async fetchGuildTextChannels(guildId: string): Promise<ChannelGroup[]> {
+    try {
+      const res = await channelFetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
+        headers: this.headers,
+      });
+      if (!res.ok) {
+        channelLogWarn('discord guild channels request failed', {
+          pluginId: this.pluginId,
+          guildId,
+          status: res.status,
+        });
+        return [];
+      }
+      const body = (await res.json()) as unknown;
+      if (!Array.isArray(body)) {
+        channelLogWarn('discord guild channels response is not an array', {
+          pluginId: this.pluginId,
+          guildId,
+        });
+        return [];
+      }
+      const channels = body as Array<{ id?: string; name?: string; type?: number }>;
+      return channels
+        .filter(
+          (channel) => channel.type === DISCORD_GUILD_TEXT_CHANNEL_TYPE && Boolean(channel.id),
+        )
+        .map((channel) => ({ id: channel.id ?? '', name: channel.name ?? '' }));
+    } catch (error) {
+      channelLogWarn('discord guild channels request threw', {
+        pluginId: this.pluginId,
+        guildId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 }
 

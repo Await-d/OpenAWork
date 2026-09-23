@@ -53,7 +53,9 @@ const BADGE: React.CSSProperties = {
 
 const CARD: React.CSSProperties = {
   borderRadius: 12,
-  border: '1px solid var(--border-default)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--border-default)',
   background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '12px 16px',
   display: 'flex',

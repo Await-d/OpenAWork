@@ -198,6 +198,22 @@ jobs:
           echo "tag_created=true" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Dispatch docker image publish
+        if: steps.tag.outputs.tag_created == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-docker.yml',
+              ref: 'main',
+              inputs: {
+                version: '${{ steps.version.outputs.version }}',
+                channel: 'preview',
+              },
+            });
+
       - name: Dispatch desktop release workflow
         if: steps.tag.outputs.tag_created == 'true' && steps.changes.outputs.build_desktop == 'true'
         uses: actions/github-script@v7
@@ -276,6 +292,8 @@ jobs:
             else
               echo "- 移动预览：已跳过（未配置 \`EXPO_TOKEN\` secret）。" >> "$GITHUB_STEP_SUMMARY"
             fi
+
+            echo "- 网关镜像：已派发 \`release-docker.yml\`（preview 通道，推送 GHCR）。" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## ⚠️ 自动发布：标签已存在" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -283,4 +301,5 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "- 桌面预览：已跳过（标签已存在，未重复派发）。" >> "$GITHUB_STEP_SUMMARY"
             echo "- 移动预览：已跳过（标签已存在，未重复派发）。" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 网关镜像：已跳过（标签已存在，未重复派发）。" >> "$GITHUB_STEP_SUMMARY"
           fi

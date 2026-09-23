@@ -638,6 +638,7 @@ function defaultPermissionDeriver(ctx: ToolPermissionDerivationContext): Permiss
 const CHANNEL_SEND_TOOL_NAMES = [
   'PluginSendMessage',
   'PluginSendImage',
+  'PluginSendFile',
   'WeixinSendImage',
   'WeixinSendFile',
   'FeishuSendImage',

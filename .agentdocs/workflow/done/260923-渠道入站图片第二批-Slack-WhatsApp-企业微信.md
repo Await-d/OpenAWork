@@ -68,13 +68,31 @@ enrichInboundMessage?(message: ChannelMessage): Promise<ChannelMessage>;
   - 偏差备案：新增用例走「直接注册 `registerChannelInboundRoutes` + 显式注入 deps」，`router.ts` 的 `getService` 查表层未被专门用例覆盖（需启动真实渠道，收口阶段由渠道全域回归间接覆盖）；测试夹具用 `Parameters<typeof registerChannelInboundRoutes>[1]` 推导类型，不扩大生产导出面
 - [x] T-02（W2）WhatsApp：`inbound-parsers/whatsapp.ts` + 新建 `whatsapp-media.ts` + `whatsapp.ts` + 新建 `__tests__/channels/whatsapp-inbound-media.test.ts` ✅（18 用例；4 文件 41 测试绿；ESLint/Prettier 绿）
   - 偏差备案：第二步二进制响应无 JSON `mime_type`，实现改为「响应 `Content-Type`（仅接受 image/*）→ 第一步元数据 `mime_type`」，回退顺序仍严格 `sniff → input.mimeType → 响应侧`
-- [ ] T-03（W3）Slack：`inbound-parsers/slack.ts` + 新建 `slack-media.ts` + `slack.ts` + 新建 `__tests__/channels/slack-inbound-media.test.ts`
+- [x] T-03（W3）Slack：`inbound-parsers/slack.ts` + 新建 `slack-media.ts` + `slack.ts` + 新建 `__tests__/channels/slack-inbound-media.test.ts` ✅（19 用例；3 文件 42 测试绿；typecheck exit 0；ESLint/Prettier 绿）
+  - 偏差备案：`readSlackImageFiles` 为「先过滤图片再 `slice`」（非图片不占 4 张配额，与 Discord 语义一致）；401/403 warn 带 `files:read` scope 提示；relay 形态不走 Bolt handler（已知限制）
 - [x] T-04（W4）企业微信：`inbound-parsers/wecom.ts` + 新建 `__tests__/channels/wecom-inbound-media.test.ts` ✅（6 用例；3 文件 28 测试绿；ESLint/Prettier 绿）
 
 ### Phase 2：验证与收口（协调者）
 
-- [ ] T-05 全量回归（`test:unit` + `typecheck` + 全包 ESLint + Prettier）+ 缺陷复查
-- [ ] T-06 更新 `services/agent-gateway/AGENTS.md` + 归档
+- [x] T-05 全量回归（`test:unit` + `typecheck` + 全包 ESLint + Prettier）+ 缺陷复查 ✅（全量 **554 文件 / 4266 用例 EXIT=0**；typecheck exit 0；全包 ESLint exit 0；渠道全域 39 文件 / 265 测试绿）
+- [x] T-06 更新 `services/agent-gateway/AGENTS.md` + 归档 ✅（「渠道媒体能力」合并两批 + 新增「渠道入站媒体扩展点与 enrich 钩子」不变量）
+
+## 成果总结（2026-09-23）
+
+**状态**：✅ 已交付并验证 —— T-01…T-06 全部完成（4 任务 / 4 个并行代理 + 协调者收口）。
+
+**交付内容**：
+
+- ✅ **通用 enrich 钩子**：`MessagingChannelService.enrichInboundMessage?`（`types.ts:208`）+ 路由接入（`channel-inbound-route.ts:314`）+ **双层失败兜底**（router `channelLogWarn` / 路由 `enrichInboundMessageOrFallback`）——enrich 失败原样投递、绝不丢消息；QQ 特殊分支与 relay 模式不接入。
+- ✅ **Slack 入站图片**：`slack-media.ts`（`url_private_download || url_private` + Bearer；4MB / 4 张上限；401/403 提示 `files:read` scope；单张失败跳过）+ parser 准入放宽（纯文件消息不再丢弃）+ Bolt handler 接线。
+- ✅ **WhatsApp 入站图片**：`whatsapp-media.ts`（两步 Graph API 下载，5MB 上限，`sniff → input.mimeType → 响应侧` 回退）+ parser 支持 `image`（caption 优先、占位符兜底）+ `enrichInboundMessage` 实现。
+- ✅ **企业微信入站图片**：`PicUrl` → `imageUrl`（v1 零网络、不解密 `MediaId`；mime 默认 `image/jpeg`）+ parser 准入放宽。
+
+**改动面**：8 个源文件（新建 `whatsapp-media.ts` / `slack-media.ts`；修改 `types.ts` / `channel-inbound-route.ts` / `router.ts` / `whatsapp.ts` / `slack.ts` / `inbound-parsers/{whatsapp,slack,wecom}.ts`）+ 4 个测试文件（47 新用例）+ `services/agent-gateway/AGENTS.md`。
+
+**验证**：全量单测 **554 文件 / 4266 用例 EXIT=0**（较上批 4222 +47 = 本批新用例）· typecheck exit 0 · 全包 ESLint exit 0 · 渠道全域 39 文件 / 265 测试绿 · 各代理定向 ESLint / Prettier 全绿。协调者复查未发现缺陷。
+
+**已知限制**：企业微信 v1 不下载 `MediaId`（`PicUrl` 可访问性未验证）；Slack 需 `files:read` scope、relay 形态不走 Bolt handler 因而不下载；WhatsApp 无出站媒体方法；relay 模式不走 enrich（与第一批一致）。
 
 ## 风险与取舍
 

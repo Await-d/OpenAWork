@@ -92,6 +92,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check Docker version alignment
+        run: bun run check:docker-versions
+
       - name: Build OpenCode LLM dependency
         run: bun run --filter "@openAwork/opencode-llm" build
 

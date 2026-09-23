@@ -14,6 +14,8 @@ export function buildChannelToolParameters(toolName: string): ToolParameters | n
       return replyMessageParameters();
     case 'PluginSendImage':
       return pluginMediaParameters();
+    case 'PluginSendFile':
+      return pluginFileParameters();
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages':
@@ -124,6 +126,18 @@ function pluginMediaParameters(): ToolParameters {
         description:
           '可选，要回复的历史消息 ID；优先使用 PluginGetCurrentChatMessages 返回的 replyMessageId',
       },
+    },
+    required: ['file_path'],
+    additionalProperties: false,
+  };
+}
+
+function pluginFileParameters(): ToolParameters {
+  return {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: '工作区内绝对路径，或 HTTP/HTTPS 文件 URL' },
+      content: { type: 'string', description: '可选，发送文件前附带的文本' },
     },
     required: ['file_path'],
     additionalProperties: false,

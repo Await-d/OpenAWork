@@ -7,6 +7,7 @@ import { getProviderUiList } from '@openAwork/shared-ui';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type {
   ReasoningEffortRef,
+  SubagentLimitsRef,
   SubagentModelPolicyRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
@@ -77,6 +78,22 @@ export const DEFAULT_THINKING_DEFAULTS: ThinkingDefaultsRef = {
 };
 
 export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicyRef = { modelMode: 'auto' };
+
+/**
+ * 子代理数量限制的护栏（与网关 `SUBAGENT_LIMITS_GUARDRAILS` 对齐）。
+ * 前端同时用于数字输入的 min/max 与本地草稿归一，避免保存出无效值。
+ */
+export const SUBAGENT_LIMITS_GUARDRAILS = {
+  maxRunningPerRoot: { min: 1, max: 16 },
+  maxTotalPerRoot: { min: 1, max: 200 },
+  maxNestingDepth: { min: 1, max: 8 },
+} as const;
+
+export const DEFAULT_SUBAGENT_LIMITS: SubagentLimitsRef = {
+  maxRunningPerRoot: 4,
+  maxTotalPerRoot: 24,
+  maxNestingDepth: 1,
+};
 
 export const DEFAULT_IMAGE_GENERATION_DEFAULTS: ImageGenerationDefaultsRef = {
   size: DEFAULT_IMAGE_GENERATION_SIZE,
@@ -155,6 +172,67 @@ export function normalizeSubagentModelPolicy(value: unknown): SubagentModelPolic
 
   const record = value as Record<string, unknown>;
   return { modelMode: record['modelMode'] === 'inherit-main' ? 'inherit-main' : 'auto' };
+}
+
+function readBoundedInteger(
+  value: unknown,
+  bounds: { min: number; max: number },
+  fallback: number,
+): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  // 与网关落库归一一致：越界值收敛到边界，无法解析才回落默认值。
+  return Math.min(Math.max(Math.trunc(parsed), bounds.min), bounds.max);
+}
+
+/**
+ * 归一子代理数量限制草稿：
+ * - 字段缺失 / 越界 → 默认值；
+ * - `maxTotalPerRoot < maxRunningPerRoot` → 自动抬升累计上限，与网关落库语义一致。
+ */
+export function normalizeSubagentLimits(value: unknown): SubagentLimitsRef {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_SUBAGENT_LIMITS };
+  }
+
+  const record = value as Record<string, unknown>;
+  const maxRunningPerRoot = readBoundedInteger(
+    record['maxRunningPerRoot'],
+    SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot,
+    DEFAULT_SUBAGENT_LIMITS.maxRunningPerRoot,
+  );
+  const maxTotalPerRoot = readBoundedInteger(
+    record['maxTotalPerRoot'],
+    SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot,
+    DEFAULT_SUBAGENT_LIMITS.maxTotalPerRoot,
+  );
+  const maxNestingDepth = readBoundedInteger(
+    record['maxNestingDepth'],
+    SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth,
+    DEFAULT_SUBAGENT_LIMITS.maxNestingDepth,
+  );
+
+  return {
+    maxRunningPerRoot,
+    maxTotalPerRoot: Math.max(maxTotalPerRoot, maxRunningPerRoot),
+    maxNestingDepth,
+  };
+}
+
+/** 数字输入解析：非整数 / 越界 / 空串返回 `null`（调用方保留上一次有效值）。 */
+export function parseBoundedIntegerInput(value: string, min: number, max: number): number | null {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed >= min && parsed <= max ? parsed : null;
 }
 
 export function parseStructuredPayload(value: unknown): unknown {

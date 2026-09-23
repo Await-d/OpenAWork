@@ -62,6 +62,12 @@ export function InteractiveTerminalView({
       : session.streamStatus === 'closed'
         ? '输出流已断开'
         : null;
+  /**
+   * 管道后端（显式 `interactive === false`）没有真实 PTY：命令仍可执行，但没有
+   * 行编辑 / 方向键 / Tab 补全 / TUI。明确告知降级范围，避免被误判成按键失灵；
+   * 能力未知（缺省）不提示，防止对旧后端误报。
+   */
+  const degraded = terminal.interactive === false;
 
   return (
     <div className="terminal-root" data-testid={`terminal-view-${terminal.terminalId}`}>
@@ -79,6 +85,16 @@ export function InteractiveTerminalView({
         <span className="terminal-stream-chip" role="status" data-testid="terminal-stream-chip">
           <span className="terminal-stream-chip__dot" aria-hidden="true" />
           {streamHint}
+        </span>
+      ) : null}
+      {degraded && !session.searchOpen ? (
+        <span
+          className="terminal-degraded-chip"
+          role="status"
+          data-testid="terminal-degraded-chip"
+          title="当前后端没有真实 PTY（管道模式）：命令仍可执行，但没有行编辑 / 方向键 / Tab 补全 / TUI 支持。"
+        >
+          降级终端 · 无行编辑 / TUI
         </span>
       ) : null}
       <TerminalSearchBar

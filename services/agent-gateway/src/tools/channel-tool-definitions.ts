@@ -70,6 +70,11 @@ export const channelMediaInputSchema = pluginMediaInputSchema.extend({
   chat_id: currentChannelIdSchema,
 });
 
+export const pluginFileInputSchema = z.object({
+  file_path: z.string().min(1),
+  content: z.preprocess(normalizeBlankString, z.string().min(1).optional()),
+});
+
 export const weixinMediaInputSchema = z.object({
   plugin_id: z.string().min(1).optional(),
   chat_id: z.string().min(1).optional(),
@@ -79,6 +84,7 @@ export const weixinMediaInputSchema = z.object({
 
 export type ChannelMediaInput = z.infer<typeof channelMediaInputSchema>;
 export type WeixinMediaInput = z.infer<typeof weixinMediaInputSchema>;
+export type PluginFileInput = z.infer<typeof pluginFileInputSchema>;
 
 function gatewayOnly(): Promise<string> {
   throw new Error('channel tools must execute through the gateway-managed sandbox path');
@@ -173,6 +179,18 @@ export const pluginSendImageToolDefinition: ToolDefinition<
   execute: gatewayOnly,
 };
 
+export const pluginSendFileToolDefinition: ToolDefinition<
+  typeof pluginFileInputSchema,
+  typeof channelToolOutputSchema
+> = {
+  name: 'PluginSendFile',
+  description:
+    '向当前消息渠道会话发送真实文件附件。只需要传 file_path 和可选 content；plugin_id/chat_id 已由当前 channel session 自动提供，不要传空字符串、default、current 或占位符。file_path 支持工作区内绝对路径或 HTTP/HTTPS URL。当前通道支持文件发送时，应优先调用本工具投递文件，不要只发送 Markdown 链接；本工具不支持回复历史消息，需要回复时请使用 PluginReplyMessage。',
+  inputSchema: pluginFileInputSchema,
+  outputSchema: channelToolOutputSchema,
+  execute: gatewayOnly,
+};
+
 export const weixinSendFileToolDefinition: ToolDefinition<
   typeof weixinMediaInputSchema,
   typeof channelToolOutputSchema
@@ -189,6 +207,7 @@ export const CHANNEL_TOOL_DEFINITIONS = [
   pluginSendMessageToolDefinition,
   pluginReplyMessageToolDefinition,
   pluginSendImageToolDefinition,
+  pluginSendFileToolDefinition,
   pluginGetGroupMessagesToolDefinition,
   pluginListGroupsToolDefinition,
   pluginSummarizeGroupToolDefinition,

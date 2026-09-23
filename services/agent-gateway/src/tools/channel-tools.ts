@@ -10,12 +10,11 @@ import {
 import {
   pluginListGroupsInputSchema,
   channelMediaInputSchema,
+  pluginFileInputSchema,
   pluginMessageInputSchema,
   pluginMessagesInputSchema,
   pluginReplyInputSchema,
   weixinMediaInputSchema,
-  type ChannelMediaInput,
-  type WeixinMediaInput,
 } from './channel-tool-definitions.js';
 
 export { CHANNEL_TOOL_DEFINITIONS, CHANNEL_TOOL_NAME_SET } from './channel-tool-definitions.js';
@@ -46,6 +45,8 @@ export async function executeChannelTool(input: {
     }
     case 'PluginSendImage':
       return executeChannelMediaTool(input, channelMediaInputSchema.parse(input.rawInput), 'image');
+    case 'PluginSendFile':
+      return executeChannelMediaTool(input, pluginFileInputSchema.parse(input.rawInput), 'file');
     case 'PluginGetGroupMessages':
     case 'PluginSummarizeGroup':
     case 'PluginGetCurrentChatMessages': {
@@ -75,9 +76,23 @@ export async function executeChannelTool(input: {
   }
 }
 
+/**
+ * 渠道媒体类工具解析后的最小入参形状。
+ *
+ * `PluginSendImage` / `WeixinSendImage` 等允许 `message_id` 回复历史消息，
+ * `PluginSendFile` 没有 `message_id`，故这里统一放宽为可选字段。
+ */
+type ChannelMediaToolInput = {
+  readonly file_path: string;
+  readonly content?: string;
+  readonly message_id?: string;
+  readonly chat_id?: string;
+  readonly plugin_id?: string;
+};
+
 async function executeChannelMediaTool(
   input: { readonly sessionId: string; readonly signal: AbortSignal },
-  parsed: ChannelMediaInput | WeixinMediaInput,
+  parsed: ChannelMediaToolInput,
   kind: 'file' | 'image',
 ): Promise<string> {
   const ctx = assertChannelContext(input.sessionId, parsed);
@@ -122,7 +137,7 @@ async function executeChannelMediaTool(
   );
 }
 
-function readMediaReplyMessageId(parsed: ChannelMediaInput | WeixinMediaInput): string | undefined {
+function readMediaReplyMessageId(parsed: ChannelMediaToolInput): string | undefined {
   if ('message_id' in parsed) {
     return parsed.message_id;
   }

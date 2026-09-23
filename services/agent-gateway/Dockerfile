@@ -4,17 +4,25 @@
 # 其预编译二进制只有 glibc 版本；musl 下要带整套编译工具链从源码构建。
 #
 # 包管理器是 bun（安装依赖 + 跑构建脚本），运行时仍是 Node（CMD node dist/index.js）。
+#
+# 构建参数（默认值与仓库根 `.bun-version` / docker-compose.yml 对齐，漂移由
+# `bun run check:docker-versions` 拦截；发布流水线通过 --build-arg 注入真实版本）：
+#   BUN_VERSION         bun 工具链版本（默认与 `.bun-version` 一致）
+#   NODE_VERSION        Node 主版本，builder / runtime 基础镜像共用
+#   OPENAWORK_VERSION   应用版本（package.json version），写入 OCI 标签与 ENV
+#   OPENAWORK_GIT_SHA   构建提交，写入 OCI revision 标签
 
 # ---------------------------------------------------------------------------
 # 阶段 0 —— bun 运行时镜像（版本与仓库根 `.bun-version` 对齐，升级时两处一起改）
 # ---------------------------------------------------------------------------
 ARG BUN_VERSION=1.4.2
+ARG NODE_VERSION=22
 FROM oven/bun:${BUN_VERSION} AS bun-runtime
 
 # ---------------------------------------------------------------------------
 # 阶段 1 —— 安装网关的 workspace 依赖闭包、编译 TypeScript、裁剪 devDependencies
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS builder
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
 WORKDIR /app
 
 # bun 二进制从阶段 0 取（官方镜像），避免在 node 基础镜像里额外装包。
@@ -96,9 +104,20 @@ RUN rm -rf node_modules/.bun/ffprobe-static@*/node_modules/ffprobe-static/bin/da
 # ---------------------------------------------------------------------------
 # 阶段 2 —— 运行时（只带必要内容）
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS runtime
+FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# 应用版本元数据：发布流水线注入真实值（package.json version + 提交 SHA），
+# 本地构建保持 dev / unknown。运行时可 `docker inspect` 或容器内 env 查看。
+ARG OPENAWORK_VERSION=dev
+ARG OPENAWORK_GIT_SHA=unknown
+LABEL org.opencontainers.image.title="OpenAWork agent-gateway" \
+      org.opencontainers.image.description="OpenAWork AI Agent 工作台网关（Fastify 5 HTTP/WS 服务）" \
+      org.opencontainers.image.source="https://github.com/Await-d/OpenAWork" \
+      org.opencontainers.image.version="${OPENAWORK_VERSION}" \
+      org.opencontainers.image.revision="${OPENAWORK_GIT_SHA}"
+ENV OPENAWORK_VERSION=${OPENAWORK_VERSION}
 
 # 网关的 bash / GitHub 工具链路期望 PATH 上有 git。
 RUN apt-get update \

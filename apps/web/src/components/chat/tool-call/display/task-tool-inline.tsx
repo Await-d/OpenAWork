@@ -1,8 +1,12 @@
-import { Fragment } from 'react';
-import { ToolKindIcon, resolveToolCallCardDisplayData, tokens } from '@openAwork/shared-ui';
+import { Fragment, type ReactNode } from 'react';
+import {
+  ToolKindIcon,
+  resolveSubagentSessionIdFromToolOutput,
+  resolveToolCallCardDisplayData,
+  tokens,
+} from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import type { TaskToolRuntimeSnapshot } from '../../../../pages/chat-page/conversation/render/task-tool-runtime.js';
-import { tryFormatJson } from '../../../../utils/format-json.js';
 
 interface TaskToolInlineProps {
   approvalActions?: ToolCallCardProps['approvalActions'];
@@ -32,6 +36,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function readTaskTimeoutSource(
@@ -150,42 +163,63 @@ function summarizeRuntimeState(
     : `${prefix} ${normalized.slice(0, 139).trimEnd()}…`;
 }
 
+function readTaskAgentType(input: Record<string, unknown>): string | undefined {
+  // `agent` 是上游 `subagent` 工具的 `subagent_type` 别名。
+  return readNonEmptyString(input['subagent_type']) ?? readNonEmptyString(input['agent']);
+}
+
 function readTaskFallbackTitle(input: Record<string, unknown>): string {
   const candidates = [input['description'], input['command'], input['prompt']];
   for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
+    const value = readNonEmptyString(candidate);
+    if (value) {
+      return value;
     }
   }
 
   return '子代理任务';
 }
 
-function readTaskFallbackFooter(output: unknown): string | null {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return null;
-  }
+/**
+ * 子代理输出可能是对象（`task` / `subagent`）或文本（`call_omo_agent` 的
+ * `<subagent sessionID="…">` 包裹 / 「会话 ID：…」行）：以对象字段优先，
+ * 文本形态由 shared-ui 的提取函数兜底。
+ */
+function resolveTaskChildSessionId(input: {
+  input: Record<string, unknown>;
+  output: unknown;
+  taskMetaOutputSessionId?: string;
+  taskMetaRequestedSessionId?: string;
+  runtimeSnapshot?: TaskToolRuntimeSnapshot;
+}): string | null {
+  const candidates: Array<string | undefined> = [
+    input.runtimeSnapshot?.sessionId,
+    input.taskMetaOutputSessionId,
+    input.taskMetaRequestedSessionId,
+    readNonEmptyString(asRecord(input.output)?.['sessionId']),
+    resolveSubagentSessionIdFromToolOutput(input.output),
+  ];
 
-  const record = output as Record<string, unknown>;
-
-  const sessionId =
-    typeof record['sessionId'] === 'string' && record['sessionId'].trim().length > 0
-      ? record['sessionId'].trim()
-      : null;
-  const taskId =
-    typeof record['taskId'] === 'string' && record['taskId'].trim().length > 0
-      ? record['taskId'].trim()
-      : null;
-
-  if (sessionId) {
-    return `会话 ${compactIdentifier(sessionId)}`;
-  }
-
-  if (taskId) {
-    return `任务 ${compactIdentifier(taskId)}`;
+  for (const candidate of candidates) {
+    if (candidate) {
+      return candidate;
+    }
   }
 
   return null;
+}
+
+function readTaskFallbackFooter(input: {
+  childSessionId: string | null;
+  output: unknown;
+}): string | null {
+  if (input.childSessionId) {
+    return `会话 ${compactIdentifier(input.childSessionId)}`;
+  }
+
+  const record = asRecord(input.output);
+  const taskId = readNonEmptyString(record?.['taskId']);
+  return taskId ? `任务 ${compactIdentifier(taskId)}` : null;
 }
 
 function buildDetailItems(input: {
@@ -274,6 +308,50 @@ function TaskToolKindBadge() {
   );
 }
 
+/**
+ * 子代理卡片的容器骨架：`button`（可点击，携带 hover / focus / selected 语义）
+ * 或 `div`（纯展示）。富信息分支与精简分支共用，避免两条渲染路径的可点击性
+ * 与选中态各自漂移——历史缺陷：精简分支（输出缺失 / 工具名不在旧名单内）
+ * 永远 `data-clickable="false"`，点击没有任何反馈。
+ */
+function TaskInlineShell({
+  childSessionId,
+  children,
+  onOpenChildSession,
+  selectedChildSessionId,
+}: {
+  childSessionId: string | null;
+  children: ReactNode;
+  onOpenChildSession?: (sessionId: string) => void;
+  selectedChildSessionId?: string | null;
+}) {
+  const isClickable = Boolean(childSessionId && onOpenChildSession);
+  const isSelected = childSessionId !== null && childSessionId === selectedChildSessionId;
+  const ContainerTag = isClickable ? 'button' : 'div';
+
+  return (
+    <ContainerTag
+      className="chat-task-inline"
+      data-chat-task-inline="true"
+      data-clickable={isClickable ? 'true' : 'false'}
+      data-selected={isSelected ? 'true' : 'false'}
+      {...(isClickable
+        ? {
+            onClick: () => {
+              if (childSessionId && onOpenChildSession) {
+                onOpenChildSession(childSessionId);
+              }
+            },
+            type: 'button' as const,
+          }
+        : {})}
+    >
+      <div className="chat-task-inline-rail" aria-hidden="true" />
+      <div className="chat-task-inline-main">{children}</div>
+    </ContainerTag>
+  );
+}
+
 export function TaskToolInline(props: TaskToolInlineProps) {
   const displayData = resolveToolCallCardDisplayData({
     toolCallId: props.toolCallId,
@@ -282,32 +360,42 @@ export function TaskToolInline(props: TaskToolInlineProps) {
     output: props.output,
   });
 
+  const childSessionId = resolveTaskChildSessionId({
+    input: props.input,
+    output: props.output,
+    taskMetaOutputSessionId: displayData.taskMeta?.outputSessionId,
+    taskMetaRequestedSessionId: displayData.taskMeta?.requestedSessionId,
+    runtimeSnapshot: props.runtimeSnapshot,
+  });
+  const isClickable = Boolean(childSessionId && props.onOpenChildSession);
+  const isSelected = childSessionId !== null && childSessionId === props.selectedChildSessionId;
+  const hintText = isClickable ? (isSelected ? '正在查看' : '点击查看') : null;
+
   if (!displayData.taskMeta || !displayData.taskSummary) {
     const fallbackTitle = readTaskFallbackTitle(props.input);
+    const agentType = readTaskAgentType(props.input);
     const fallbackDetailItems = buildDetailItems({
-      metaText: readTaskFallbackFooter(props.output),
+      metaText: readTaskFallbackFooter({ childSessionId, output: props.output }),
       runtimeSummary: null,
-      hintText: null,
+      hintText,
       timeoutText: null,
     });
 
     return (
-      <div className="chat-task-inline" data-chat-task-inline="true" data-clickable="false">
-        <div className="chat-task-inline-rail" aria-hidden="true" />
-        <div className="chat-task-inline-main">
-          <div className="chat-task-inline-meta">
-            <TaskToolKindBadge />
-            {typeof props.input['subagent_type'] === 'string' &&
-            props.input['subagent_type'].trim() ? (
-              <TaskInlineMetaLabel label={props.input['subagent_type'].trim()} tone="muted" />
-            ) : null}
-          </div>
-          <div className="chat-task-inline-title" title={fallbackTitle}>
-            {fallbackTitle}
-          </div>
-          {renderDetailItems(fallbackDetailItems)}
+      <TaskInlineShell
+        childSessionId={childSessionId}
+        onOpenChildSession={props.onOpenChildSession}
+        selectedChildSessionId={props.selectedChildSessionId}
+      >
+        <div className="chat-task-inline-meta">
+          <TaskToolKindBadge />
+          {agentType ? <TaskInlineMetaLabel label={agentType} tone="muted" /> : null}
         </div>
-      </div>
+        <div className="chat-task-inline-title" title={fallbackTitle}>
+          {fallbackTitle}
+        </div>
+        {renderDetailItems(fallbackDetailItems)}
+      </TaskInlineShell>
     );
   }
 
@@ -315,11 +403,6 @@ export function TaskToolInline(props: TaskToolInlineProps) {
   const taskStatusBadge = resolveTaskStatusBadge(effectiveTaskStatus);
   const toolStatusBadge = resolveToolStatusBadge(props.status, props.isError);
   const extraOutputText = summarizeExtraOutput(displayData.taskMeta.extraOutput);
-  const childSessionId =
-    props.runtimeSnapshot?.sessionId ?? displayData.taskMeta.outputSessionId ?? null;
-  const isClickable = Boolean(childSessionId && props.onOpenChildSession);
-  const isSelected = childSessionId !== null && childSessionId === props.selectedChildSessionId;
-  const ContainerTag = isClickable ? 'button' : 'div';
   const titleText = displayData.taskSummary.subtitle ?? displayData.taskSummary.title;
   const runtimeSummary = summarizeRuntimeState(props.runtimeSnapshot);
   const runtimeTerminalReason = props.runtimeSnapshot?.terminalReason;
@@ -334,7 +417,6 @@ export function TaskToolInline(props: TaskToolInlineProps) {
   const metaText = childSessionId
     ? `会话 ${compactIdentifier(childSessionId)}`
     : (extraOutputText ?? displayData.summary);
-  const hintText = isClickable ? (isSelected ? '正在查看' : '点击查看') : null;
   const timeoutText =
     runtimeTerminalReason === 'timeout' || outputReason === 'timeout'
       ? timeoutSource
@@ -349,42 +431,28 @@ export function TaskToolInline(props: TaskToolInlineProps) {
   });
 
   return (
-    <ContainerTag
-      className="chat-task-inline"
-      data-chat-task-inline="true"
-      data-clickable={isClickable ? 'true' : 'false'}
-      data-selected={isSelected ? 'true' : 'false'}
-      {...(isClickable
-        ? {
-            onClick: () => {
-              if (childSessionId && props.onOpenChildSession) {
-                props.onOpenChildSession(childSessionId);
-              }
-            },
-            type: 'button' as const,
-          }
-        : {})}
+    <TaskInlineShell
+      childSessionId={childSessionId}
+      onOpenChildSession={props.onOpenChildSession}
+      selectedChildSessionId={props.selectedChildSessionId}
     >
-      <div className="chat-task-inline-rail" aria-hidden="true" />
-      <div className="chat-task-inline-main">
-        <div className="chat-task-inline-meta">
-          <TaskToolKindBadge />
-          {displayData.taskMeta.agentType && (
-            <TaskInlineMetaLabel label={displayData.taskMeta.agentType} tone="muted" />
-          )}
-          {displayData.taskMeta.readonly && <TaskInlineMetaLabel label="只读" tone="muted" />}
-          {toolStatusBadge && (
-            <TaskInlineMetaLabel label={toolStatusBadge.label} tone={toolStatusBadge.color} />
-          )}
-          {taskStatusBadge && (
-            <TaskInlineMetaLabel label={taskStatusBadge.label} tone={taskStatusBadge.color} />
-          )}
-        </div>
-        <div className="chat-task-inline-title" title={titleText}>
-          {titleText}
-        </div>
-        {renderDetailItems(detailItems)}
+      <div className="chat-task-inline-meta">
+        <TaskToolKindBadge />
+        {displayData.taskMeta.agentType && (
+          <TaskInlineMetaLabel label={displayData.taskMeta.agentType} tone="muted" />
+        )}
+        {displayData.taskMeta.readonly && <TaskInlineMetaLabel label="只读" tone="muted" />}
+        {toolStatusBadge && (
+          <TaskInlineMetaLabel label={toolStatusBadge.label} tone={toolStatusBadge.color} />
+        )}
+        {taskStatusBadge && (
+          <TaskInlineMetaLabel label={taskStatusBadge.label} tone={taskStatusBadge.color} />
+        )}
       </div>
-    </ContainerTag>
+      <div className="chat-task-inline-title" title={titleText}>
+        {titleText}
+      </div>
+      {renderDetailItems(detailItems)}
+    </TaskInlineShell>
   );
 }

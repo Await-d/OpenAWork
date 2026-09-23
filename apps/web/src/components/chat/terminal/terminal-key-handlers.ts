@@ -14,7 +14,8 @@
  * 已清掉的日志重新灌回来，用户会看到「清了又回来」的鬼影。
  */
 
-export type TerminalShortcut = 'copy' | 'paste' | 'search' | 'clear-buffer' | 'clear-shell';
+export type TerminalShortcut =
+  'copy' | 'paste' | 'search' | 'clear-buffer' | 'clear-shell' | 'kill-line';
 
 /** 判定所需的按键信息子集（`KeyboardEvent` 结构上满足）。 */
 export interface TerminalKeyEventLike {
@@ -38,6 +39,7 @@ export interface TerminalSelectionSource {
  * | --- | --- | --- |
  * | Ctrl/⌘+Shift+C | `copy` | 无选中时返回 `null`，不劫持浏览器默认复制 |
  * | Ctrl/⌘+Shift+V | `paste` | 走输入队列注入，不用 `term.paste()` 的透明通道 |
+ * | ⌘+Backspace | `kill-line` | 删到行首（readline 的 Ctrl+U / `0x15`），参考实现同款 |
  * | Ctrl/⌘+V | `null` | 保持浏览器默认，交由 xterm `onData` 处理 |
  * | Ctrl/⌘+F | `search` | 打开/聚焦搜索条 |
  * | Ctrl/⌘+K | `clear-buffer` | `term.clear()` |
@@ -60,6 +62,11 @@ export function resolveTerminalShortcut(
   // Ctrl+Shift+C 在浏览器里 `key` 是大写 'C'，统一小写后再比对。
   const key = event.key.toLowerCase();
 
+  // macOS：⌘+Backspace = 删到行首（readline 的 Ctrl+U）。只认 meta，避免抢
+  // Ctrl+Backspace（各 shell / 终端对它的语义不一致）。
+  if (key === 'backspace' && event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    return 'kill-line';
+  }
   if (key === 'c' && event.shiftKey) {
     return context.hasSelection ? 'copy' : null;
   }
@@ -88,6 +95,8 @@ export interface TerminalKeyHandlerDeps {
   clearBuffer: () => void;
   /** 向后端发送 `\x0c`。 */
   sendShellClear: () => void;
+  /** 向后端发送 `\x15`（删到行首）；仅在真实 PTY 上有效。 */
+  sendKillLine: () => void;
 }
 
 /**
@@ -120,6 +129,9 @@ export function createTerminalCustomKeyHandler(
         return false;
       case 'clear-shell':
         deps.sendShellClear();
+        return false;
+      case 'kill-line':
+        deps.sendKillLine();
         return false;
     }
   };

@@ -7,6 +7,13 @@ export type { StreamRendererProps } from './chat/StreamRenderer.js';
 export { ToolCallCard } from './tools/ToolCallCard.js';
 export type { ToolCallCardDisplayData, ToolCallCardProps, ToolKind } from './tools/ToolCallCard.js';
 export { resolveToolCallCardDisplayData } from './tools/ToolCallCard.js';
+export {
+  extractSubagentSessionIdFromText,
+  isSubagentToolName,
+  resolveSubagentSessionIdFromToolOutput,
+  SUBAGENT_TOOL_NAMES,
+} from './tools/subagent-tool-names.js';
+export type { SubagentToolName } from './tools/subagent-tool-names.js';
 export { BashTerminalCard } from './tools/tool-call-card-bash-terminal.js';
 export type { BashTerminalView } from './tools/tool-call-card-bash-terminal.js';
 export { BatchTerminalCard } from './tools/tool-call-card-batch-terminal.js';

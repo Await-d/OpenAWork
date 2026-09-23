@@ -1,4 +1,4 @@
-import type { ChannelMessage } from '../types.js';
+import type { ChannelImageAttachment, ChannelMessage } from '../types.js';
 import {
   isRecord,
   normalizeInboundRaw,
@@ -9,6 +9,8 @@ import {
   readTimestamp,
   stripLeadingMentions,
 } from '../inbound-utils.js';
+
+const QQ_MAX_IMAGE_ATTACHMENTS = 4;
 
 export function parseQQInboundMessage(raw: unknown): ChannelMessage | null {
   const envelope = parseSimpleEnvelope(raw);
@@ -59,6 +61,7 @@ function parseQQC2CMessage(
   if (!senderId || !content) {
     return null;
   }
+  const images = readQQImageAttachments(event, QQ_MAX_IMAGE_ATTACHMENTS);
   return {
     id: buildQQReplyReference(`c2c:${senderId}`, readString(event, 'id')),
     senderId,
@@ -67,6 +70,7 @@ function parseQQC2CMessage(
     chatName: senderId,
     content,
     timestamp: readTimestamp(event['timestamp']),
+    ...(images.length > 0 ? { images } : {}),
     raw,
   };
 }
@@ -82,6 +86,7 @@ function parseQQGroupMessage(
     return null;
   }
   const chatId = `group:${groupOpenId}`;
+  const images = readQQImageAttachments(event, QQ_MAX_IMAGE_ATTACHMENTS);
   return {
     id: buildQQReplyReference(chatId, readString(event, 'id')),
     senderId: readString(author, 'member_openid') || readString(author, 'id') || 'unknown',
@@ -90,6 +95,7 @@ function parseQQGroupMessage(
     chatName: groupOpenId,
     content,
     timestamp: readTimestamp(event['timestamp']),
+    ...(images.length > 0 ? { images } : {}),
     raw,
   };
 }
@@ -108,6 +114,7 @@ function parseQQChannelMessage(
     return null;
   }
   const chatId = `channel:${channelId}`;
+  const images = readQQImageAttachments(event, QQ_MAX_IMAGE_ATTACHMENTS);
 
   return {
     id: buildQQReplyReference(chatId, readString(event, 'id')),
@@ -117,6 +124,7 @@ function parseQQChannelMessage(
     chatName: readString(event, 'guild_id') || channelId,
     content,
     timestamp: readTimestamp(event['timestamp']),
+    ...(images.length > 0 ? { images } : {}),
     raw,
   };
 }
@@ -154,4 +162,32 @@ function describeQQAttachments(event: Record<string, unknown>): string {
     return '[User sent a video]';
   }
   return '[User sent an attachment]';
+}
+
+function toQQImageAttachment(attachment: Record<string, unknown>): ChannelImageAttachment | null {
+  const mediaType = readString(attachment, 'content_type').trim();
+  if (!mediaType.toLowerCase().startsWith('image/')) {
+    return null;
+  }
+  const imageUrl = readString(attachment, 'url');
+  if (!imageUrl) {
+    return null;
+  }
+  const fileName = readString(attachment, 'filename');
+  return {
+    imageUrl,
+    mediaType,
+    ...(fileName ? { fileName } : {}),
+  };
+}
+
+// QQ CDN 附件 URL 直映射为 imageUrl（与 Discord 同款取舍：不下载、不转 base64，避免消息体积膨胀）。
+function readQQImageAttachments(
+  event: Record<string, unknown>,
+  maxCount: number,
+): ChannelImageAttachment[] {
+  return readRecordArray(event, 'attachments')
+    .map((attachment) => toQQImageAttachment(attachment))
+    .filter((image): image is ChannelImageAttachment => image !== null)
+    .slice(0, maxCount);
 }

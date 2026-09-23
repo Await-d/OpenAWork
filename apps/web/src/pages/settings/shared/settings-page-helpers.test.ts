@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  normalizeSubagentLimits,
   normalizeSubagentModelPolicy,
+  parseBoundedIntegerInput,
   resolveSshDialogRestore,
   tauriInvoke,
 } from './settings-page-helpers.js';
@@ -39,6 +41,70 @@ describe('normalizeSubagentModelPolicy', () => {
     expect(normalizeSubagentModelPolicy({ modelMode: 'inherit-main' })).toEqual({
       modelMode: 'inherit-main',
     });
+  });
+});
+
+describe('normalizeSubagentLimits', () => {
+  it('undefined / 非对象时回落默认值（4 / 24 / 1）', () => {
+    expect(normalizeSubagentLimits(undefined)).toEqual({
+      maxRunningPerRoot: 4,
+      maxTotalPerRoot: 24,
+      maxNestingDepth: 1,
+    });
+    expect(normalizeSubagentLimits('bad')).toEqual({
+      maxRunningPerRoot: 4,
+      maxTotalPerRoot: 24,
+      maxNestingDepth: 1,
+    });
+  });
+
+  it('保留合法取值', () => {
+    expect(
+      normalizeSubagentLimits({
+        maxRunningPerRoot: 6,
+        maxTotalPerRoot: 30,
+        maxNestingDepth: 2,
+      }),
+    ).toEqual({ maxRunningPerRoot: 6, maxTotalPerRoot: 30, maxNestingDepth: 2 });
+  });
+
+  it('部分字段缺失时逐项回落默认值', () => {
+    expect(normalizeSubagentLimits({ maxRunningPerRoot: 8 })).toEqual({
+      maxRunningPerRoot: 8,
+      maxTotalPerRoot: 24,
+      maxNestingDepth: 1,
+    });
+  });
+
+  it('越界值收敛到护栏边界', () => {
+    expect(
+      normalizeSubagentLimits({
+        maxRunningPerRoot: 999,
+        maxTotalPerRoot: 999,
+        maxNestingDepth: 99,
+      }),
+    ).toEqual({ maxRunningPerRoot: 16, maxTotalPerRoot: 200, maxNestingDepth: 8 });
+  });
+
+  it('累计上限小于并发上限时自动抬升', () => {
+    expect(normalizeSubagentLimits({ maxRunningPerRoot: 10, maxTotalPerRoot: 5 })).toEqual({
+      maxRunningPerRoot: 10,
+      maxTotalPerRoot: 10,
+      maxNestingDepth: 1,
+    });
+  });
+});
+
+describe('parseBoundedIntegerInput', () => {
+  it('合法整数原样返回', () => {
+    expect(parseBoundedIntegerInput('7', 1, 16)).toBe(7);
+  });
+
+  it('越界 / 空串 / 非数字返回 null（调用方保留上一次有效值）', () => {
+    expect(parseBoundedIntegerInput('99', 1, 16)).toBeNull();
+    expect(parseBoundedIntegerInput('0', 1, 16)).toBeNull();
+    expect(parseBoundedIntegerInput('', 1, 16)).toBeNull();
+    expect(parseBoundedIntegerInput('abc', 1, 16)).toBeNull();
   });
 });
 

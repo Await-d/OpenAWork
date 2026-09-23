@@ -2,6 +2,7 @@ export const CHANNEL_PERMISSION_TOOL_NAMES = [
   'PluginSendMessage',
   'PluginReplyMessage',
   'PluginSendImage',
+  'PluginSendFile',
   'PluginGetGroupMessages',
   'PluginListGroups',
   'PluginSummarizeGroup',

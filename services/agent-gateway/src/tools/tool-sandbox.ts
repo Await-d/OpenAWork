@@ -259,6 +259,7 @@ import {
   deliverTaskCompletion,
 } from '../task/task-job-delivery.js';
 import { checkSubagentDepthAllowed } from '../task/subagent-depth.js';
+import { getTaskSessionLimitError, isTaskCreatedSessionMetadata } from '../task/subagent-limits.js';
 import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-auto-decision.js';
 import { extractLatestChildSessionSummary } from '../task/task-result-extraction.js';
 import { taskToolDefinition, isTaskToolName } from '../task/task-tools.js';
@@ -695,21 +696,6 @@ const TASK_PARENT_TOOL_REQUEST_ID_KEY = 'taskParentToolRequestId';
 
 type TaskToolOutputStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
-interface TaskSessionRow {
-  id: string;
-  metadata_json: string;
-  state_status: string;
-}
-
-interface ParsedTaskSessionRow extends TaskSessionRow {
-  metadata: Record<string, unknown>;
-  parentSessionId: string | null;
-}
-
-const MAX_TASK_CHILD_SESSION_DEPTH = 4;
-const MAX_TASK_CHILD_SESSION_DESCENDANTS = 24;
-const MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT = 4;
-
 /** Terminal reason written to child session metadata and propagated through events. */
 export type ChildSessionTerminalReason = 'timeout' | 'cancelled';
 
@@ -1022,128 +1008,6 @@ function buildTaskToolOutput(input: {
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.timeoutSource ? { timeoutSource: input.timeoutSource } : {}),
   };
-}
-
-function isTaskCreatedSessionMetadata(metadata: Record<string, unknown>): boolean {
-  return metadata.createdByTool === 'task';
-}
-
-function listParsedTaskSessionsForUser(userId: string): ParsedTaskSessionRow[] {
-  return sqliteAll<TaskSessionRow>(
-    'SELECT id, metadata_json, state_status FROM sessions WHERE user_id = ?',
-    [userId],
-  ).map((row) => {
-    const metadata = parseSessionMetadataJson(row.metadata_json);
-    const parentSessionId =
-      typeof metadata.parentSessionId === 'string' ? metadata.parentSessionId : null;
-    return {
-      ...row,
-      metadata,
-      parentSessionId,
-    };
-  });
-}
-
-function resolveTaskSessionChain(
-  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
-  sessionId: string,
-): string[] {
-  const chain: string[] = [];
-  const visited = new Set<string>();
-  let currentSessionId: string | null = sessionId;
-
-  while (currentSessionId && !visited.has(currentSessionId)) {
-    chain.push(currentSessionId);
-    visited.add(currentSessionId);
-    currentSessionId = sessionsById.get(currentSessionId)?.parentSessionId ?? null;
-  }
-
-  return chain;
-}
-
-function resolveTaskRootSessionId(
-  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
-  sessionId: string,
-): string {
-  const chain = resolveTaskSessionChain(sessionsById, sessionId);
-  return chain[chain.length - 1] ?? sessionId;
-}
-
-function countTaskChildSessionsUnderRoot(
-  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
-  rootSessionId: string,
-): number {
-  let count = 0;
-  for (const session of sessionsById.values()) {
-    if (!isTaskCreatedSessionMetadata(session.metadata)) {
-      continue;
-    }
-
-    if (resolveTaskRootSessionId(sessionsById, session.id) === rootSessionId) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
-function countRunningTaskChildSessionsUnderRoot(
-  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
-  rootSessionId: string,
-  excludeSessionId?: string,
-): number {
-  let count = 0;
-  for (const session of sessionsById.values()) {
-    if (session.id === excludeSessionId || session.state_status !== 'running') {
-      continue;
-    }
-
-    if (!isTaskCreatedSessionMetadata(session.metadata)) {
-      continue;
-    }
-
-    if (resolveTaskRootSessionId(sessionsById, session.id) === rootSessionId) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
-export function getTaskSessionLimitError(input: {
-  currentSessionId: string;
-  excludeRunningSessionId?: string;
-  isNewChildSession: boolean;
-  userId: string;
-}): string | null {
-  const taskSessions = listParsedTaskSessionsForUser(input.userId);
-  const sessionsById = new Map(taskSessions.map((session) => [session.id, session]));
-  const nextChildDepth = resolveTaskSessionChain(sessionsById, input.currentSessionId).length;
-  const rootSessionId = resolveTaskRootSessionId(sessionsById, input.currentSessionId);
-
-  if (input.isNewChildSession && nextChildDepth > MAX_TASK_CHILD_SESSION_DEPTH) {
-    return `子代理嵌套深度已达到上限（${MAX_TASK_CHILD_SESSION_DEPTH}），请在当前会话内完成后续工作。`;
-  }
-
-  if (
-    input.isNewChildSession &&
-    countTaskChildSessionsUnderRoot(sessionsById, rootSessionId) >=
-      MAX_TASK_CHILD_SESSION_DESCENDANTS
-  ) {
-    return `当前任务树下的子代理数量已达到上限（${MAX_TASK_CHILD_SESSION_DESCENDANTS}），请先结束部分子任务再继续委派。`;
-  }
-
-  if (
-    countRunningTaskChildSessionsUnderRoot(
-      sessionsById,
-      rootSessionId,
-      input.excludeRunningSessionId,
-    ) >= MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT
-  ) {
-    return `当前任务树中正在运行的子代理已达到上限（${MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT}），请等待已有子任务完成后再继续。`;
-  }
-
-  return null;
 }
 
 function buildTaskTags(input: {

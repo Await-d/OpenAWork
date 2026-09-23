@@ -240,6 +240,24 @@ export class ChannelManager {
         channelLogInfo('relay received channel event', summarizeChannelEvent(event));
         notify(event);
       },
+      // relay 形态现与 HTTP 入站一致地支持媒体 enrich：注入 service 的
+      // enrichInboundMessage 实现（无实现时原样返回）。这里是第二层兜底——
+      // service 抛错时告警并原样投递，绝不因媒体下载失败丢消息。
+      enrich: async (message) => {
+        const service = this.services.get(instance.id);
+        if (!service?.enrichInboundMessage) {
+          return message;
+        }
+        try {
+          return await service.enrichInboundMessage(message);
+        } catch (error) {
+          channelLogWarn('relay inbound media enrich failed', {
+            channelId: instance.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return message;
+        }
+      },
     });
     this.relays.set(instance.id, relay);
     relay.start();

@@ -125,3 +125,87 @@ describe('resolveToolCallCardDisplayData 不再把对象序列化成摘要', () 
     expect(data.outputPreview).toBe('字段：nested');
   });
 });
+
+/**
+ * 子代理工具名与子会话 id 的解析口径：消息流卡片能否点击打开右侧预览，
+ * 完全取决于 `taskMeta` 是否生成、`outputSessionId` / `requestedSessionId`
+ * 是否能解析出子会话 id。
+ */
+describe('子代理工具（subagent / call_omo_agent / delegate_task）', () => {
+  it('规范名 subagent 也生成 taskMeta 并携带子代理类型', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'subagent',
+      input: { prompt: '调查 foo', subagent_type: 'explore' },
+      output: { taskId: 't1', sessionId: 'ses_child_1', status: 'completed' },
+    });
+
+    expect(data.taskMeta).toBeDefined();
+    expect(data.taskMeta?.agentType).toBe('explore');
+    expect(data.taskMeta?.outputSessionId).toBe('ses_child_1');
+    expect(data.taskSummary).toBeDefined();
+  });
+
+  it('上游别名 agent 作为子代理类型兜底', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'subagent',
+      input: { prompt: '调查 foo', agent: 'oracle' },
+    });
+
+    expect(data.taskMeta?.agentType).toBe('oracle');
+  });
+
+  it('call_omo_agent 的文本输出从 <subagent sessionID="…"> 提取子会话 id', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'call_omo_agent',
+      input: { prompt: '跑一下', subagent_type: 'explore' },
+      output:
+        'task_id: ses_child_2（如需继续本任务可用来 resume）\n<subagent sessionID="ses_child_2" state="completed">done</subagent>',
+    });
+
+    expect(data.taskMeta?.outputSessionId).toBe('ses_child_2');
+  });
+
+  it('call_omo_agent 的后台文本输出从「会话 ID：」行提取子会话 id', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'call_omo_agent',
+      input: { prompt: '后台跑', subagent_type: 'explore', run_in_background: true },
+      output: '后台 agent 任务已成功启动。\n\n任务 ID：t9\n会话 ID：ses_child_3\n描述：后台跑',
+    });
+
+    expect(data.taskMeta?.outputSessionId).toBe('ses_child_3');
+  });
+
+  it('resume 调用从输入侧 session_id 得到 requestedSessionId', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'subagent',
+      input: { prompt: '继续', session_id: 'ses_child_4' },
+    });
+
+    expect(data.taskMeta?.requestedSessionId).toBe('ses_child_4');
+  });
+
+  it('delegate_task 同样进入子代理卡片口径', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'delegate_task',
+      input: { description: '委派实施', prompt: '实现 X' },
+      output: { taskId: 't2', sessionId: 'ses_child_5', status: 'running' },
+    });
+
+    expect(data.taskMeta).toBeDefined();
+    expect(data.taskMeta?.outputSessionId).toBe('ses_child_5');
+  });
+
+  it('子代理标准输入字段不算「额外输入」', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'subagent',
+      input: {
+        prompt: '实现 X',
+        subagent_type: 'hephaestus',
+        run_in_background: true,
+        load_skills: ['a'],
+      },
+    });
+
+    expect(data.taskMeta?.hasAdditionalInputFields).toBe(false);
+  });
+});

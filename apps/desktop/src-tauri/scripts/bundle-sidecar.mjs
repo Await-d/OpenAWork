@@ -450,6 +450,24 @@ if (bunTarget) {
   console.log(`Cross-compiling gateway sidecar with bun --target=${bunTarget} (triple=${targetTriple})`);
   prefetchBunRuntime(bunTarget);
 }
+
+// Windows ARM64：bun-pty 的 npm 包只带 x64 的 rust_pty.dll（ARM64 进程无法加载），
+// 需要现场用上游源码构建 arm64 DLL 并覆盖到 bun-pty 的加载路径，随后的 bun compile
+// 才会把正确架构的库嵌入 sidecar。构建失败不阻断发布：终端自动回退管道。
+if (isWindowsTriple(targetTriple) && String(targetTriple).includes('aarch64')) {
+  try {
+    const { buildBunPtyArm64Lib } = await import('./build-bun-pty-lib.mjs');
+    await buildBunPtyArm64Lib({ gatewayDir });
+  } catch (error) {
+    // 双保险：构建脚本内部已把失败降级为警告，这里再兜一层，绝不让它阻断发布。
+    console.warn(
+      `[bundle-sidecar] bun-pty ARM64 库构建异常（忽略，终端将回退管道）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 runBunCompileWithRetry(bunArgs, { cwd: gatewayDir }, 3);
 
 // Step 3: 把 gateway 可执行文件复制到 binaries/ 并加上 Tauri 要求的目标三元组后缀。

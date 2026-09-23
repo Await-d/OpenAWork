@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import type { TerminalContextMenuItem } from './TerminalContextMenu.js';
 import { buildTerminalCommandItems } from './terminal-pane-menu.js';
@@ -372,6 +372,40 @@ describe('InteractiveTerminalView', () => {
     expect(screen.getByTestId('terminal-search-bar')).toBeTruthy();
   });
 
+  it('⌘+Backspace：真实 PTY 下发 \\x15（删到行首），管道后端不下发', async () => {
+    const pressKillLine = async (state: ReturnType<typeof lastTerminal>): Promise<void> => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Backspace',
+        metaKey: true,
+        cancelable: true,
+      });
+      await act(async () => {
+        expect(state.keyHandler?.(event)).toBe(false);
+      });
+    };
+    const stdinBodies = (): unknown[] =>
+      fetchMock.mock.calls
+        .filter((call) => String(call[0]).endsWith('/stdin'))
+        .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
+
+    renderView(makeTerminalView({ interactive: true }));
+    await pressKillLine(lastTerminal());
+    // 用 waitFor 等合并窗口 + 网络往返落地，避免并行负载下固定 sleep 的时序抖动。
+    await waitFor(() => {
+      expect(stdinBodies()).toEqual([{ data: '\x15' }]);
+    });
+    cleanup();
+    fetchMock.mockClear();
+
+    renderView(makeTerminalView({ interactive: false }));
+    await pressKillLine(lastTerminal());
+    // 负向断言：留出一个合并窗口 + 余量，确认确实没有请求发出。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(stdinBodies()).toEqual([]);
+  });
+
   it('写入失败时给出可见反馈', async () => {
     fetchMock.mockImplementation(
       async () =>
@@ -526,6 +560,22 @@ describe('InteractiveTerminalView', () => {
     expect(
       fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/stdin')).length,
     ).toBeGreaterThan(0);
+  });
+
+  it('interactive=false（管道后端）渲染降级提示；PTY / 能力未知不渲染', () => {
+    renderView(makeTerminalView({ interactive: false }));
+    const chip = screen.getByTestId('terminal-degraded-chip');
+    expect(chip.textContent).toContain('降级终端');
+    expect(chip.getAttribute('title')).toContain('没有真实 PTY');
+    cleanup();
+
+    renderView(makeTerminalView({ interactive: true }));
+    expect(screen.queryByTestId('terminal-degraded-chip')).toBeNull();
+    cleanup();
+
+    // 能力未知（旧后端）不误报。
+    renderView();
+    expect(screen.queryByTestId('terminal-degraded-chip')).toBeNull();
   });
 
   describe('内容区右键菜单的面板命令段', () => {

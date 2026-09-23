@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import { channelFetch } from './channel-http.js';
 import { buildTextCard, FEISHU_API, parseFeishuMessageId } from './feishu-api-types.js';
+import { parseJsonRecord } from './inbound-utils.js';
 import {
   feishuCardUpdateResponseSchema,
   feishuCodeOnlySchema,
@@ -134,10 +135,26 @@ export async function getFeishuGroupMessages(
     senderId: item.sender?.id ?? 'unknown',
     senderName: item.sender?.name ?? item.sender?.id ?? 'unknown',
     chatId,
-    content: item.body?.content ?? '',
+    content: parseFeishuMessageText(item.body?.content ?? ''),
     timestamp: Number(item.create_time) || Date.now(),
     raw: item,
   }));
+}
+
+/**
+ * 把飞书消息 `body.content`（原始 JSON 字符串）解析为可读文本。
+ *
+ * 飞书文本消息的 content 形如 `{"text":"hello"}`，直接透传会让模型读到
+ * JSON 而不是文本；因此能提取出非空 `text` 时返回纯文本。其余形态
+ * （图片 / 富文本 post / 非 JSON 字符串等）原样返回入参，避免丢信息。
+ */
+function parseFeishuMessageText(content: string): string {
+  const parsed = parseJsonRecord(content);
+  const text = parsed?.['text'];
+  if (typeof text === 'string' && text.length > 0) {
+    return text;
+  }
+  return content;
 }
 
 export async function listFeishuGroups(auth: FeishuAuthContext): Promise<ChannelGroup[]> {

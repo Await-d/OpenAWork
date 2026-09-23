@@ -22,6 +22,7 @@ export const CHANNEL_SEND_TOOL_NAMES: ReadonlySet<string> = new Set([
   'PluginSendMessage',
   'PluginReplyMessage',
   'PluginSendImage',
+  'PluginSendFile',
   'PluginGetGroupMessages',
   'PluginListGroups',
   'PluginSummarizeGroup',

@@ -25,7 +25,7 @@
     },
     "apps/desktop": {
       "name": "@openAwork/desktop",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@monaco-editor/react": "^4.7.0",
         "@openAwork/artifacts": "workspace:*",
@@ -61,7 +61,7 @@
     },
     "apps/mobile": {
       "name": "@openAwork/mobile",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@expo/metro-runtime": "~55.0.12",
         "@expo/vector-icons": "^15.1.1",
@@ -101,7 +101,7 @@
     },
     "apps/web": {
       "name": "@openAwork/web",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@antv/g-canvas": "2.2.0",
         "@antv/g-webgl": "2.1.1",
@@ -159,7 +159,7 @@
     },
     "packages/agent-core": {
       "name": "@openAwork/agent-core",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/platform-adapter": "workspace:*",
         "@openAwork/shared": "workspace:*",
@@ -178,14 +178,14 @@
     },
     "packages/artifacts": {
       "name": "@openAwork/artifacts",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/browser-automation": {
       "name": "@openAwork/browser-automation",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "playwright": "1.58.2",
         "playwright-core": "1.58.2",
@@ -196,7 +196,7 @@
     },
     "packages/logger": {
       "name": "@openAwork/logger",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
@@ -211,7 +211,7 @@
     },
     "packages/lsp-client": {
       "name": "@openAwork/lsp-client",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "vscode-jsonrpc": "^8.2.0",
         "vscode-languageserver-types": "^3.17.5",
@@ -222,7 +222,7 @@
     },
     "packages/mcp-client": {
       "name": "@openAwork/mcp-client",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.0",
         "@openAwork/skill-types": "workspace:*",
@@ -233,7 +233,7 @@
     },
     "packages/multi-agent": {
       "name": "@openAwork/multi-agent",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/agent-core": "workspace:*",
         "@openAwork/shared": "workspace:*",
@@ -245,7 +245,7 @@
     },
     "packages/opencode-llm": {
       "name": "@openAwork/opencode-llm",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@effect/platform-node": "4.0.0-beta.83",
         "@smithy/eventstream-codec": "^4.2.14",
@@ -262,21 +262,21 @@
     },
     "packages/pairing": {
       "name": "@openAwork/pairing",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/platform-adapter": {
       "name": "@openAwork/platform-adapter",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/resources": {
       "name": "@openAwork/resources",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/skill-types": "workspace:*",
       },
@@ -286,14 +286,14 @@
     },
     "packages/shared": {
       "name": "@openAwork/shared",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/shared-ui": {
       "name": "@openAwork/shared-ui",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/shared": "workspace:*",
         "fuzzysort": "^3.1.0",
@@ -313,7 +313,7 @@
     },
     "packages/skill-registry": {
       "name": "@openAwork/skill-registry",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/skill-types": "workspace:*",
         "fflate": "^0.8.2",
@@ -325,14 +325,14 @@
     },
     "packages/skill-types": {
       "name": "@openAwork/skill-types",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/skills": {
       "name": "@openAwork/skills",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/agent-core": "workspace:*",
         "@openAwork/mcp-client": "workspace:*",
@@ -345,14 +345,14 @@
     },
     "packages/telemetry": {
       "name": "@openAwork/telemetry",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "devDependencies": {
         "@types/node": "^20.19.37",
       },
     },
     "packages/web-client": {
       "name": "@openAwork/web-client",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@openAwork/shared": "workspace:*",
       },
@@ -362,7 +362,7 @@
     },
     "services/agent-gateway": {
       "name": "@openAwork/agent-gateway",
-      "version": "1.1.6",
+      "version": "1.1.8",
       "dependencies": {
         "@fastify/compress": "^8.3.1",
         "@fastify/cors": "^10.1.0",
@@ -391,6 +391,7 @@
         "@openAwork/telemetry": "workspace:*",
         "@slack/bolt": "^4.7.3",
         "@types/turndown": "^5.0.6",
+        "bun-pty": "^0.4.10",
         "dingtalk-stream": "^2.1.5",
         "drizzle-orm": "^0.36.4",
         "effect": "4.0.0-beta.83",
@@ -1878,6 +1879,8 @@
     "buffer-from": ["buffer-from@1.1.2", "https://registry.npmmirror.com/buffer-from/-/buffer-from-1.1.2.tgz", {}, "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ=="],
 
     "buildcheck": ["buildcheck@0.0.7", "https://registry.npmmirror.com/buildcheck/-/buildcheck-0.0.7.tgz", {}, "sha512-lHblz4ahamxpTmnsk+MNTRWsjYKv965MwOrSJyeD588rR3Jcu7swE+0wN5F+PbL5cjgu/9ObkhfzEPuofEMwLA=="],
+
+    "bun-pty": ["bun-pty@0.4.10", "https://registry.npmmirror.com/bun-pty/-/bun-pty-0.4.10.tgz", {}, "sha512-7WFtCw9MwG9gMMvkX+pwUOavNbgmfL+masMWmO9d/HdFCz8VdR+5G4Q3UCLhy2OJ/ImbWuJ1FHFmm0KdgW102w=="],
 
     "bytes": ["bytes@3.1.2", "https://registry.npmmirror.com/bytes/-/bytes-3.1.2.tgz", {}, "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg=="],
 

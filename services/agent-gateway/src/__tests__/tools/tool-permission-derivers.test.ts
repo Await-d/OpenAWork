@@ -102,6 +102,7 @@ describe('tool permission derivers · 简单任务 / 渠道 / 桌面类', () => 
       risk: 'high',
     },
     { tool: 'PluginSendImage', input: {}, scope: 'channel:*:*:send', risk: 'high' },
+    { tool: 'PluginSendFile', input: {}, scope: 'channel:*:*:send', risk: 'high' },
     {
       tool: 'PluginReplyMessage',
       input: { plugin_id: 'telegram', message_id: 'm-1' },

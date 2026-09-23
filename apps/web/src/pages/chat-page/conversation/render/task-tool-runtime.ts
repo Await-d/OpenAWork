@@ -1,4 +1,5 @@
 import type { Session, SessionTask } from '@openAwork/web-client';
+import { resolveSubagentSessionIdFromToolOutput } from '@openAwork/shared-ui';
 
 export type TaskToolRuntimeStatus =
   'pending' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -119,12 +120,24 @@ export function resolveTaskToolRuntimeSnapshot(
     }
   }
 
-  const candidateSessionId = readString(outputRecord?.['sessionId']);
-  if (!candidateSessionId) {
-    return undefined;
+  // 子会话 id 的解析顺序：输出对象字段 → 文本输出（`<subagent sessionID>` /
+  // 「会话 ID：」两种网关文本形态）→ 输入侧 resume 目标（`session_id` /
+  // 上游别名 `sessionID`）。任一步命中都允许卡片直接打开对应子代理预览。
+  const candidateSessionIds = [
+    readString(outputRecord?.['sessionId']),
+    resolveSubagentSessionIdFromToolOutput(output),
+    readString(input['session_id']),
+    readString(input['sessionID']),
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidateSessionId of candidateSessionIds) {
+    const snapshot = lookup.bySessionId.get(candidateSessionId);
+    if (snapshot) {
+      return snapshot;
+    }
   }
 
-  return lookup.bySessionId.get(candidateSessionId);
+  return undefined;
 }
 
 export function buildTerminalTaskSyncMarker(sessionTasks: SessionTask[]): string {

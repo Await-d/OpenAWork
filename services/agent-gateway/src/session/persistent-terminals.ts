@@ -12,11 +12,12 @@
  *             (no output for >300ms, prompt visible, ready for input)
  *           → close() / process exit / abort → 'exited' | 'killed'
  *
- * Backend selection is delegated to `pty-backend.ts`: on Bun (non-Windows)
- * we allocate a real PTY so `isatty(0)`, `vim`/`top`/`htop` and resize-aware
- * TUIs work; under Node and on Windows we degrade to piped stdio (input /
- * output still flow, but resize is a no-op). This avoids pulling in
- * `node-pty` (a native addon with awkward cross-platform prebuilds).
+ * Backend selection is delegated to `pty-backend.ts`: on Bun we allocate a real
+ * PTY — via Bun's native `terminal` API on POSIX, and via the `bun-pty` package
+ * on Windows (Bun's own Terminal API is POSIX-only) — so `isatty(0)`,
+ * `vim`/`top`/`htop` and resize-aware TUIs work. Under Node, or when the PTY
+ * module is unavailable, we degrade to piped stdio (input / output still flow,
+ * but resize is a no-op).
  */
 
 import { StringDecoder } from 'node:string_decoder';
@@ -219,8 +220,10 @@ export function spawnPersistentTerminal(
     }
     initialCommandWritten = true;
     clearInitialCommandTimer();
-    // Append a newline so the shell actually executes it.
-    terminalProcess.write(`${initialCommand}\n`);
+    // 用 `\r`（Enter 的字节）而不是 `\n`：真实 PTY 上 `\r` 才是「回车」
+    // （POSIX 侧由 tty 的 ICRNL 兜底，Windows ConPTY 直接吃 `\r`）；管道后端在
+    // win32 会把行结束符规范成 `\r\n`，POSIX 交互式 shell 也接受裸 `\r`。
+    terminalProcess.write(`${initialCommand}\r`);
   };
 
   const onData = (chunk: Uint8Array): void => {

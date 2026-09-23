@@ -29,10 +29,10 @@ export async function sendQQImage(
 ): Promise<{ messageId: string }> {
   switch (target.type) {
     case 'c2c': {
-      const media = await uploadQQImage(
+      const media = await uploadQQMedia(
         context,
         `/v2/users/${encodeURIComponent(target.id)}/files`,
-        { buffer: input.buffer, sourceUrl: input.sourceUrl },
+        { buffer: input.buffer, sourceUrl: input.sourceUrl, fileType: 1 },
       );
       return context.sendMessageBody(
         `/v2/users/${encodeURIComponent(target.id)}/messages`,
@@ -40,10 +40,10 @@ export async function sendQQImage(
       );
     }
     case 'group': {
-      const media = await uploadQQImage(
+      const media = await uploadQQMedia(
         context,
         `/v2/groups/${encodeURIComponent(target.id)}/files`,
-        { buffer: input.buffer, sourceUrl: input.sourceUrl },
+        { buffer: input.buffer, sourceUrl: input.sourceUrl, fileType: 1 },
       );
       return context.sendMessageBody(
         `/v2/groups/${encodeURIComponent(target.id)}/messages`,
@@ -52,6 +52,52 @@ export async function sendQQImage(
     }
     case 'channel':
       throw new Error('QQ channel messages do not support this image sender yet.');
+  }
+}
+
+/**
+ * 出站发文件：QQ 的图片与文件共用同一个富媒体上传接口，仅 `file_type` 不同
+ * （图片 1 / 文件 4），发送同样是 `msg_type: 7` + `media.file_info`。
+ *
+ * `fileName` 仅用于接口对齐：QQ 文件消息不携带文件名，上传体只有
+ * `file_type` + `url` / `file_data`，因此它不参与任何请求体。
+ */
+export async function sendQQFile(
+  context: QQMediaApiContext,
+  target: QQChatTarget,
+  input: {
+    readonly buffer: Buffer;
+    readonly fileName: string;
+    readonly replyToMessageId?: string;
+    readonly sourceUrl?: string;
+    readonly text?: string;
+  },
+): Promise<{ messageId: string }> {
+  switch (target.type) {
+    case 'c2c': {
+      const media = await uploadQQMedia(
+        context,
+        `/v2/users/${encodeURIComponent(target.id)}/files`,
+        { buffer: input.buffer, sourceUrl: input.sourceUrl, fileType: 4 },
+      );
+      return context.sendMessageBody(
+        `/v2/users/${encodeURIComponent(target.id)}/messages`,
+        buildQQMediaMessageBody(context, media, input.replyToMessageId, input.text),
+      );
+    }
+    case 'group': {
+      const media = await uploadQQMedia(
+        context,
+        `/v2/groups/${encodeURIComponent(target.id)}/files`,
+        { buffer: input.buffer, sourceUrl: input.sourceUrl, fileType: 4 },
+      );
+      return context.sendMessageBody(
+        `/v2/groups/${encodeURIComponent(target.id)}/messages`,
+        buildQQMediaMessageBody(context, media, input.replyToMessageId, input.text),
+      );
+    }
+    case 'channel':
+      throw new Error('QQ channel messages do not support this file sender yet.');
   }
 }
 
@@ -73,18 +119,19 @@ function buildQQMediaMessageBody(
   return body;
 }
 
-async function uploadQQImage(
+async function uploadQQMedia(
   context: QQMediaApiContext,
   path: string,
-  input: { readonly buffer: Buffer; readonly sourceUrl?: string },
+  input: { readonly buffer: Buffer; readonly sourceUrl?: string; readonly fileType: number },
 ): Promise<QQUploadedMedia> {
   const token = await context.getAccessToken();
+  const fileType = input.fileType === 1 ? 'image' : 'file';
   const body = input.sourceUrl
-    ? { file_type: 1, url: input.sourceUrl }
-    : { file_type: 1, file_data: input.buffer.toString('base64') };
+    ? { file_type: input.fileType, url: input.sourceUrl }
+    : { file_type: input.fileType, file_data: input.buffer.toString('base64') };
   channelLogInfo('qq media upload started', {
     path,
-    fileType: 'image',
+    fileType,
     byteLength: input.buffer.byteLength,
     source: input.sourceUrl ? 'url' : 'base64',
   });
@@ -111,7 +158,7 @@ async function uploadQQImage(
   }
   channelLogInfo('qq media upload completed', {
     path,
-    fileType: 'image',
+    fileType,
     ttl: readString(data, 'ttl'),
     fileUuid: readString(data, 'file_uuid'),
   });

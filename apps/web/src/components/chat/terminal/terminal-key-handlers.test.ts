@@ -77,6 +77,22 @@ describe('resolveTerminalShortcut', () => {
     );
   });
 
+  it('⌘+Backspace 命中「删到行首」（参考实现同款）；Ctrl+Backspace 放行给 shell', () => {
+    expect(
+      resolveTerminalShortcut(keyEvent({ key: 'Backspace', metaKey: true }), withoutSelection),
+    ).toBe('kill-line');
+    // Ctrl+Backspace / ⌘+Shift+Backspace 语义各终端不一，不劫持。
+    expect(
+      resolveTerminalShortcut(keyEvent({ key: 'Backspace', ctrlKey: true }), withoutSelection),
+    ).toBeNull();
+    expect(
+      resolveTerminalShortcut(
+        keyEvent({ key: 'Backspace', metaKey: true, shiftKey: true }),
+        withoutSelection,
+      ),
+    ).toBeNull();
+  });
+
   it('未命中的组合一律放行', () => {
     const cases: TerminalKeyEventLike[] = [
       keyEvent({ key: 'c', ctrlKey: true }),
@@ -104,6 +120,7 @@ describe('createTerminalCustomKeyHandler', () => {
       openSearch: vi.fn(),
       clearBuffer: vi.fn(),
       sendShellClear: vi.fn(),
+      sendKillLine: vi.fn(),
     };
   }
 
@@ -152,6 +169,20 @@ describe('createTerminalCustomKeyHandler', () => {
     expect(deps.openSearch).toHaveBeenCalledTimes(1);
     expect(deps.clearBuffer).toHaveBeenCalledTimes(1);
     expect(deps.sendShellClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('⌘+Backspace 触发「删到行首」并阻止默认行为', () => {
+    const deps = createDeps();
+    const handler = createTerminalCustomKeyHandler(deps);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      metaKey: true,
+      cancelable: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(deps.sendKillLine).toHaveBeenCalledTimes(1);
   });
 
   it('Ctrl+C 中断信号原样放行', () => {

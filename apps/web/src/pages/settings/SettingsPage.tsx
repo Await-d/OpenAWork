@@ -108,12 +108,14 @@ export default function SettingsPage() {
     defaultThinking,
     imageGenerationDefaults,
     subagentModelPolicy,
+    subagentLimits,
     hasUnsavedDefaultModelChanges,
     savingDefaultModelSettings,
     setActiveSelection,
     setDefaultThinking,
     setImageGenerationDefaults,
     setSubagentModelPolicy,
+    setSubagentLimits,
     saveDefaultModelSettings,
     handleTestModel,
     handleSyncCatalog,
@@ -363,12 +365,14 @@ export default function SettingsPage() {
                     defaultThinking={defaultThinking}
                     imageGenerationDefaults={imageGenerationDefaults}
                     subagentModelPolicy={subagentModelPolicy}
+                    subagentLimits={subagentLimits}
                     hasUnsavedDefaultChanges={hasUnsavedDefaultModelChanges}
                     isSavingDefaultChanges={savingDefaultModelSettings}
                     setActiveSelection={setActiveSelection}
                     setDefaultThinking={setDefaultThinking}
                     setImageGenerationDefaults={setImageGenerationDefaults}
                     setSubagentModelPolicy={setSubagentModelPolicy}
+                    setSubagentLimits={setSubagentLimits}
                     saveDefaultModelSettings={() => {
                       void saveDefaultModelSettings();
                     }}

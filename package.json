@@ -22,6 +22,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:fastify-alignment": "node scripts/check-fastify-dependency-alignment.mjs",
+    "check:docker-versions": "node scripts/check-docker-version-alignment.mjs",
     "check:desktop-native": "node scripts/check-desktop-native.mjs",
     "typecheck": "bun run --workspaces --if-present typecheck",
     "test": "bun run --workspaces --if-present test",
@@ -69,6 +70,9 @@
   "lint-staged": {
     "{package.json,bun.lock,apps/*/package.json,packages/*/package.json,services/*/package.json}": [
       "node scripts/check-fastify-dependency-alignment.mjs"
+    ],
+    "{.bun-version,services/agent-gateway/Dockerfile,apps/web/Dockerfile,docker-compose.yml}": [
+      "node scripts/check-docker-version-alignment.mjs"
     ],
     "packages/**/*.{ts,tsx}": [
       "eslint --no-warn-ignored",

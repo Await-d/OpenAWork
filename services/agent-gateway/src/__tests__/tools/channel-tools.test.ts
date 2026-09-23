@@ -24,6 +24,7 @@ type SqliteGetMockRow = {
 
 type SendImageMock = NonNullable<MessagingChannelService['sendImage']>;
 type ReplyImageMock = NonNullable<MessagingChannelService['replyImage']>;
+type SendFileMock = NonNullable<MessagingChannelService['sendFile']>;
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(TEST_DIR, '../../../../../');
@@ -42,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   }),
   sendMessageMock: vi.fn(async () => ({ messageId: 'message-1' })),
   sendImageMock: vi.fn<SendImageMock>(async () => ({ messageId: 'image-1' })),
+  sendFileMock: vi.fn<SendFileMock>(async () => ({ messageId: 'file-1' })),
   replyMessageMock: vi.fn(async (_messageId: string, _content: string) => ({
     messageId: 'reply-1',
   })),
@@ -129,6 +131,7 @@ function makeService(pluginType: ChannelInstance['type'] = 'telegram'): Messagin
     },
     sendMessage: mocks.sendMessageMock,
     sendImage: mocks.sendImageMock,
+    sendFile: mocks.sendFileMock,
     async replyMessage(messageId: string, content: string) {
       return mocks.replyMessageMock(messageId, content);
     },
@@ -147,6 +150,7 @@ describe('channel tools', () => {
     mocks.metadataJson = makeChannelMetadata();
     mocks.sendMessageMock.mockClear();
     mocks.sendImageMock.mockClear();
+    mocks.sendFileMock.mockClear();
     mocks.replyMessageMock.mockClear();
     mocks.replyImageMock.mockClear();
     mocks.sqliteAllMock.mockClear();
@@ -532,6 +536,105 @@ describe('channel tools', () => {
     );
     expect(mocks.sendImageMock).not.toHaveBeenCalled();
   }, 15_000);
+
+  it('Given channel session When PluginSendFile executes Then it sends the file through current channel service', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-file',
+        toolName: 'PluginSendFile',
+        rawInput: {
+          file_path: WORKSPACE_PACKAGE_JSON,
+          content: '文件说明',
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'file-1' }));
+    expect(mocks.sendFileMock).toHaveBeenCalledTimes(1);
+    const sendFileCall = mocks.sendFileMock.mock.calls[0];
+    if (!sendFileCall) {
+      throw new Error('sendFile was not called');
+    }
+    expect(sendFileCall[0]).toBe('chat-1');
+    expect(sendFileCall[1]).toMatchObject({
+      fileName: 'package.json',
+      text: '文件说明',
+    });
+    expect(Buffer.isBuffer(sendFileCall[1].buffer)).toBe(true);
+  }, 15_000);
+
+  it('Given channel session When PluginSendFile omits content Then it sends the file without text', async () => {
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-file-without-content',
+        toolName: 'PluginSendFile',
+        rawInput: {
+          file_path: WORKSPACE_PACKAGE_JSON,
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe(JSON.stringify({ messageId: 'file-1' }));
+    expect(mocks.sendFileMock).toHaveBeenCalledTimes(1);
+    const sendFileCall = mocks.sendFileMock.mock.calls[0];
+    if (!sendFileCall) {
+      throw new Error('sendFile was not called');
+    }
+    expect(sendFileCall[0]).toBe('chat-1');
+    expect(sendFileCall[1]).not.toHaveProperty('text');
+  }, 15_000);
+
+  it('Given a channel service without file support When PluginSendFile executes Then it rejects before sending', async () => {
+    const { channelManager } = await import('../../channels/manager.js');
+    await channelManager.stopAll();
+    const { sendFile: _unusedSendFile, ...serviceWithoutFileSupport } = makeService('telegram');
+    channelManager.registerFactory('telegram', () => serviceWithoutFileSupport);
+    await channelManager.startPlugin(makeChannel(), (_event: ChannelEvent) => undefined);
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-file-unsupported',
+        toolName: 'PluginSendFile',
+        rawInput: { file_path: WORKSPACE_PACKAGE_JSON },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('does not support file sending');
+    expect(mocks.sendFileMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('Given normal session When PluginSendFile executes Then it is rejected before sending', async () => {
+    mocks.metadataJson = JSON.stringify({ source: 'desktop' });
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-file-normal-session',
+        toolName: 'PluginSendFile',
+        rawInput: { file_path: WORKSPACE_PACKAGE_JSON },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('not enabled for this session');
+    expect(mocks.sendFileMock).not.toHaveBeenCalled();
+  });
 
   it('Given cached current chat messages When PluginGetCurrentChatMessages executes Then it returns the active channel history', async () => {
     recordChannelMessage('channel-1', {

@@ -59,6 +59,12 @@ export const COMMON_CHANNEL_TOOLS: ChannelDescriptorTool[] = [
     defaultEnabled: true,
   },
   {
+    key: 'PluginSendFile',
+    label: '发送渠道文件',
+    description: '允许 Agent 向当前消息渠道会话发送文件附件。',
+    defaultEnabled: true,
+  },
+  {
     key: 'PluginGetGroupMessages',
     label: '读取群消息',
     description: '允许 Agent 读取当前渠道群聊或会话的近期消息。',

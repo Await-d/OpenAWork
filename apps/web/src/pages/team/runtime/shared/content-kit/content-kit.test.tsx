@@ -3,7 +3,7 @@
  * 260530-team-page · content-kit 原子 smoke 测试
  *
  * 覆盖：
- *   - StatCard：值/标签渲染、可点击下钻、active 态 aria-pressed
+ *   - StatCard：值/标签渲染、可点击下钻、active 态 aria-pressed、active 切换不触发样式告警
  *   - MiniBar：percent clamp（>100 / <0）
  *   - EmptyState：标题 + 说明渲染、SVG 图标优先级
  *   - Sparkline：空数组与正常数组都能渲染出 <svg>
@@ -37,6 +37,32 @@ describe('content-kit · StatCard', () => {
   it('不可点击时不是按钮', () => {
     render(<StatCard label="只读" value="1" />);
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('active 态切换时保持长写边框属性（不触发 React 样式告警）', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = render(<StatCard label="执行" value="3" onClick={() => undefined} active />);
+    const card = screen.getByRole('button');
+
+    expect(card.style.border).toBe('');
+    expect(card.style.borderWidth).toBe('1px');
+    expect(card.style.borderStyle).toBe('solid');
+    expect(card.style.borderColor).toContain('var(--accent)');
+
+    view.rerender(<StatCard label="执行" value="3" onClick={() => undefined} />);
+
+    expect(card.style.border).toBe('');
+    expect(card.style.borderColor).toContain('--border-default');
+    expect(
+      consoleError.mock.calls.some((call) =>
+        call.some(
+          (value) =>
+            typeof value === 'string' &&
+            value.includes('Removing a style property during rerender (borderColor)'),
+        ),
+      ),
+    ).toBe(false);
+    consoleError.mockRestore();
   });
 });
 

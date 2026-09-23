@@ -1,5 +1,15 @@
 import type { ChannelPermissions } from './types.js';
 
+/**
+ * 渠道用户 → 工作区用户的身份映射（**预留能力，尚未接入生产链路**）。
+ *
+ * 当前生效的渠道成员权限模型是 `channel-member-acl.ts`（按 `memberAclJson`
+ * 命中 senderId 后授予工具白名单）。本模块（`IdentityMapper` / `IdentityStore`
+ * / `InMemoryIdentityStore`）全仓暂无消费者——接入前需先设计：映射的写入入口
+ * （UI / CLI）、持久化存储（当前仅 InMemory 实现）、与 `channel-member-acl`
+ * 的优先级关系、以及 ACL 未命中时的默认拒绝语义。
+ */
+
 export interface ChannelUserId {
   pluginType: string;
   platformUserId: string;

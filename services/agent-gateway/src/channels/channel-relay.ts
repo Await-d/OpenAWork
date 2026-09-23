@@ -16,6 +16,12 @@ export interface ChannelRelayOptions {
   readonly parser: ChannelWsMessageParser;
   readonly notify: (event: ChannelEvent) => void;
   readonly staleMessageWindowMs?: number;
+  /**
+   * 入站媒体补全钩子：relay 形态现与 HTTP 入站一致地支持媒体 enrich——
+   * 在 parser 之后、notify 之前调用，用于下载媒体并附加到消息上（如 images）。
+   * 失败由本类兜底（告警 + 原样投递），绝不因 enrich 失败丢消息。
+   */
+  readonly enrich?: (message: ChannelMessage) => Promise<ChannelMessage>;
 }
 
 export class ChannelRelay {
@@ -23,6 +29,7 @@ export class ChannelRelay {
   private readonly parser: ChannelWsMessageParser;
   private readonly notify: (event: ChannelEvent) => void;
   private readonly staleMessageWindowMs: number;
+  private readonly enrich?: (message: ChannelMessage) => Promise<ChannelMessage>;
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
@@ -33,6 +40,7 @@ export class ChannelRelay {
     this.parser = options.parser;
     this.notify = options.notify;
     this.staleMessageWindowMs = options.staleMessageWindowMs ?? DEFAULT_STALE_MESSAGE_WINDOW_MS;
+    this.enrich = options.enrich;
   }
 
   start(): void {
@@ -120,7 +128,28 @@ export class ChannelRelay {
     if (!message || this.isStale(message)) {
       return;
     }
-    this.safeNotify({ type: 'message', pluginId: this.channel.id, message });
+    const enriched = await this.enrichOrFallback(message);
+    this.safeNotify({ type: 'message', pluginId: this.channel.id, message: enriched });
+  }
+
+  /**
+   * relay 入站媒体补全的调用侧兜底（第一层）：enrich 是「尽力而为」的装饰步骤，
+   * 任何失败都必须回退到原始消息，绝不能因为下载失败丢掉一条已经解析成功的入站消息。
+   */
+  private async enrichOrFallback(message: ChannelMessage): Promise<ChannelMessage> {
+    const enrich = this.enrich;
+    if (!enrich) {
+      return message;
+    }
+    try {
+      return await enrich(message);
+    } catch (error) {
+      console.warn('[channels] relay inbound media enrich failed', {
+        channelId: this.channel.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return message;
+    }
   }
 
   private async normalizeMessageData(data: unknown): Promise<unknown> {

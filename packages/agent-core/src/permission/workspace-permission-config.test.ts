@@ -71,6 +71,7 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('PluginSendMessage')).toBe('channel');
     expect(resolvePermissionCategory('PluginReplyMessage')).toBe('channel');
     expect(resolvePermissionCategory('PluginSendImage')).toBe('channel');
+    expect(resolvePermissionCategory('PluginSendFile')).toBe('channel');
     expect(resolvePermissionCategory('WeixinSendImage')).toBe('channel');
     expect(resolvePermissionCategory('WeixinSendFile')).toBe('channel');
     for (const toolName of FEISHU_CHANNEL_TOOL_NAMES) {

@@ -54,7 +54,9 @@ const BASE_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: CK_RADIUS,
-  border: `1px solid ${CK_BORDER}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: CK_BORDER,
   background: CK_SURFACE,
   textAlign: 'left',
   width: '100%',
@@ -79,7 +81,7 @@ export function StatCard({
     ...BASE_STYLE,
     ...(accentBar
       ? {
-          border: '1px solid var(--border-default)',
+          borderColor: 'var(--border-default)',
           background: 'var(--bg-raised)',
           boxShadow: 'var(--shadow-md)',
         }

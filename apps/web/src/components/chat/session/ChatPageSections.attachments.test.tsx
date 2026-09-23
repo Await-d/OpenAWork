@@ -14,34 +14,41 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { InputImageContent } from '@openAwork/shared';
 
-vi.mock('@openAwork/shared-ui', () => ({
-  BashTerminalCard: () => null,
-  GenerativeUIRenderer: () => null,
-  ToolGlyph: () => <span data-testid="tool-glyph" />,
-  UnifiedCodeDiff: () => null,
-  getProviderUiList: () => [],
-  resolveToolCallCardDisplayData: () => ({
-    displayToolName: 'tool',
-    summary: 'tool',
-    showInputField: true,
-    hasDetails: true,
-  }),
-  resolveToolVisualStatus: ({ status, isError }: { status?: string; isError?: boolean }) => {
-    if (isError === true) return 'failed';
-    switch ((status ?? '').trim().toLowerCase()) {
-      case 'completed':
-        return 'completed';
-      case 'failed':
-        return 'failed';
-      case 'paused':
-        return 'paused';
-      case 'running':
-        return 'running';
-      default:
-        return 'running';
-    }
-  },
-}));
+vi.mock('@openAwork/shared-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@openAwork/shared-ui')>();
+  return {
+    BashTerminalCard: () => null,
+    GenerativeUIRenderer: () => null,
+    ToolGlyph: () => <span data-testid="tool-glyph" />,
+    UnifiedCodeDiff: () => null,
+    getProviderUiList: () => [],
+    // 子代理工具名判定 / 子会话 id 提取转发真实实现（纯函数），
+    // 保证消息流 task 卡片路由与点击接线覆盖真实口径。
+    isSubagentToolName: actual.isSubagentToolName,
+    resolveSubagentSessionIdFromToolOutput: actual.resolveSubagentSessionIdFromToolOutput,
+    resolveToolCallCardDisplayData: () => ({
+      displayToolName: 'tool',
+      summary: 'tool',
+      showInputField: true,
+      hasDetails: true,
+    }),
+    resolveToolVisualStatus: ({ status, isError }: { status?: string; isError?: boolean }) => {
+      if (isError === true) return 'failed';
+      switch ((status ?? '').trim().toLowerCase()) {
+        case 'completed':
+          return 'completed';
+        case 'failed':
+          return 'failed';
+        case 'paused':
+          return 'paused';
+        case 'running':
+          return 'running';
+        default:
+          return 'running';
+      }
+    },
+  };
+});
 
 vi.mock('../tool-call/io/ToolCallImagePreview.js', () => ({
   ToolCallImagePreview: ({

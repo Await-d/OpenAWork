@@ -30,7 +30,7 @@ const MAX_CONTEXT_CACHE_SIZE = 500;
 
 export class WeixinChannelService implements MessagingChannelService {
   readonly pluginId: string;
-  readonly pluginType = 'weixin-official';
+  readonly pluginType = 'weixin';
 
   private readonly token: string;
   private readonly accountId: string;

@@ -105,6 +105,7 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendMessage', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendFile', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendImage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendFile', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('FeishuSendImage', metadata)).toBe(false);
@@ -189,6 +190,7 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendMessage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('PluginReplyMessage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('PluginSendImage', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('PluginSendFile', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendImage', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('WeixinSendFile', metadata)).toBe(false);
     for (const toolName of FEISHU_TOOL_NAMES) {

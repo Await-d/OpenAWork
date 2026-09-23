@@ -3,7 +3,7 @@ import '../message/chat-message.css';
 import './ChatPageSections.css';
 import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
 import type { InputImageContent } from '@openAwork/shared';
-import { GenerativeUIRenderer } from '@openAwork/shared-ui';
+import { GenerativeUIRenderer, isSubagentToolName } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { mergeReasoningDisplayBlocks } from '@openAwork/shared';
@@ -325,13 +325,7 @@ function renderToolCallContent(input: {
   toolName: string;
   toolInput: Record<string, unknown>;
 }) {
-  const normalizedToolName = input.toolName.trim().toLowerCase();
-  if (
-    normalizedToolName === 'task' ||
-    normalizedToolName === 'agent' ||
-    normalizedToolName === 'call_omo_agent' ||
-    normalizedToolName === 'delegate_task'
-  ) {
+  if (isSubagentToolName(input.toolName)) {
     return (
       <TaskToolInline
         key={input.reactKey}

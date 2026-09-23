@@ -6,6 +6,7 @@ import type {
   ChannelMessage,
   ChannelGroup,
   ChannelServiceFactory,
+  FeishuFileType,
 } from './types.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { QQApiClient } from './qq-api.js';
@@ -29,6 +30,7 @@ export class QQChannelService implements MessagingChannelService {
   private readonly webhookSecret: string;
   private readonly gatewayUrl: string | undefined;
   private readonly ownerUserId: string | undefined;
+  private readonly useSandbox: boolean;
   private readonly api: QQApiClient;
   private gateway: QQGatewayClient | null = null;
   private running = false;
@@ -41,10 +43,11 @@ export class QQChannelService implements MessagingChannelService {
     this.webhookSecret = instance.config['webhookSecret'] ?? '';
     this.gatewayUrl = instance.config['gatewayUrl']?.trim() || undefined;
     this.ownerUserId = instance.ownerUserId;
+    this.useSandbox = parseBooleanConfig(instance.config['useSandbox']);
     this.api = new QQApiClient({
       appId: this.appId,
       clientSecret: this.clientSecret,
-      useSandbox: parseBooleanConfig(instance.config['useSandbox']),
+      useSandbox: this.useSandbox,
       markdownSupport:
         instance.config['markdownSupport'] === undefined ||
         parseBooleanConfig(instance.config['markdownSupport']),
@@ -217,6 +220,45 @@ export class QQChannelService implements MessagingChannelService {
       ...(input.text ? { text: input.text } : {}),
     });
     channelLogInfo('qq image message sent', {
+      pluginId: this.pluginId,
+      chatId,
+      messageId: result.messageId,
+    });
+    return result;
+  }
+
+  /**
+   * 出站发文件：QQ 的图片与文件共用同一个富媒体上传接口，仅 `file_type`
+   * 不同（图片 1 / 文件 4），发送仍是 `msg_type: 7` + `media.file_info`。
+   * 委托 `QQApiClient.sendFile`（与 `sendImage` 同一条链路，共享 token 缓存与
+   * 沙箱 base）。`fileType` / `signal` 按接口保留但不使用——QQ 文件类型固定为
+   * 4，上传接口也不接受调用方的 signal。
+   */
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    void input.fileType;
+    void input.signal;
+    channelLogInfo('qq sending file message', {
+      pluginId: this.pluginId,
+      chatId,
+      fileName: input.fileName,
+      byteLength: input.buffer.byteLength,
+      textLength: input.text?.length ?? 0,
+    });
+    const result = await this.api.sendFile(parseQQChatId(chatId), {
+      buffer: input.buffer,
+      fileName: input.fileName,
+      ...(input.text ? { text: input.text } : {}),
+    });
+    channelLogInfo('qq file message sent', {
       pluginId: this.pluginId,
       chatId,
       messageId: result.messageId,

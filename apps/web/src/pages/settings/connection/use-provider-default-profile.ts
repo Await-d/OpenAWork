@@ -1,11 +1,17 @@
 import React from 'react';
 import type { ActiveSelectionRef, ImageGenerationDefaultsRef } from '@openAwork/shared-ui';
-import type { SubagentModelPolicyRef, ThinkingDefaultsRef } from '../state/settings-types.js';
+import type {
+  SubagentLimitsRef,
+  SubagentModelPolicyRef,
+  ThinkingDefaultsRef,
+} from '../state/settings-types.js';
 import {
   DEFAULT_IMAGE_GENERATION_DEFAULTS,
+  DEFAULT_SUBAGENT_LIMITS,
   DEFAULT_SUBAGENT_MODEL_POLICY,
   DEFAULT_THINKING_DEFAULTS,
   normalizeImageGenerationDefaults,
+  normalizeSubagentLimits,
   normalizeSubagentModelPolicy,
   normalizeThinkingDefaults,
 } from '../shared/settings-page-helpers.js';
@@ -50,6 +56,12 @@ export function useProviderDefaultProfile({
     React.useState<SubagentModelPolicyRef>({
       ...DEFAULT_SUBAGENT_MODEL_POLICY,
     });
+  const [subagentLimits, setSubagentLimitsState] = React.useState<SubagentLimitsRef>({
+    ...DEFAULT_SUBAGENT_LIMITS,
+  });
+  const [savedSubagentLimits, setSavedSubagentLimitsState] = React.useState<SubagentLimitsRef>({
+    ...DEFAULT_SUBAGENT_LIMITS,
+  });
   const [savingDefaultModelSettings, setSavingDefaultModelSettings] = React.useState(false);
 
   const activeSelectionRef = React.useRef<ActiveSelectionRef>(activeSelection);
@@ -64,6 +76,8 @@ export function useProviderDefaultProfile({
   const subagentModelPolicyRef = React.useRef<SubagentModelPolicyRef>(subagentModelPolicy);
   const savedSubagentModelPolicyRef =
     React.useRef<SubagentModelPolicyRef>(savedSubagentModelPolicy);
+  const subagentLimitsRef = React.useRef<SubagentLimitsRef>(subagentLimits);
+  const savedSubagentLimitsRef = React.useRef<SubagentLimitsRef>(savedSubagentLimits);
 
   React.useEffect(() => {
     activeSelectionRef.current = activeSelection;
@@ -97,12 +111,21 @@ export function useProviderDefaultProfile({
     savedSubagentModelPolicyRef.current = savedSubagentModelPolicy;
   }, [savedSubagentModelPolicy]);
 
+  React.useEffect(() => {
+    subagentLimitsRef.current = subagentLimits;
+  }, [subagentLimits]);
+
+  React.useEffect(() => {
+    savedSubagentLimitsRef.current = savedSubagentLimits;
+  }, [savedSubagentLimits]);
+
   const hasUnsavedDefaultModelChanges = React.useMemo(
     () =>
       JSON.stringify(activeSelection) !== JSON.stringify(savedActiveSelection) ||
       JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking) ||
       JSON.stringify(imageGenerationDefaults) !== JSON.stringify(savedImageGenerationDefaults) ||
-      JSON.stringify(subagentModelPolicy) !== JSON.stringify(savedSubagentModelPolicy),
+      JSON.stringify(subagentModelPolicy) !== JSON.stringify(savedSubagentModelPolicy) ||
+      JSON.stringify(subagentLimits) !== JSON.stringify(savedSubagentLimits),
     [
       activeSelection,
       savedActiveSelection,
@@ -112,6 +135,8 @@ export function useProviderDefaultProfile({
       savedImageGenerationDefaults,
       subagentModelPolicy,
       savedSubagentModelPolicy,
+      subagentLimits,
+      savedSubagentLimits,
     ],
   );
 
@@ -169,6 +194,18 @@ export function useProviderDefaultProfile({
     [],
   );
 
+  const setSubagentLimits = React.useCallback(
+    (updater: React.SetStateAction<SubagentLimitsRef>) => {
+      setSubagentLimitsState((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        const next = normalizeSubagentLimits(nextRaw);
+        subagentLimitsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
   const applyServerDefaults = React.useCallback(
     (
       input: {
@@ -176,6 +213,7 @@ export function useProviderDefaultProfile({
         defaultThinking?: ThinkingDefaultsRef | null;
         imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
         subagentModelPolicy?: SubagentModelPolicyRef | null;
+        subagentLimits?: SubagentLimitsRef | null;
       },
       options?: {
         syncDraft?: boolean;
@@ -235,6 +273,20 @@ export function useProviderDefaultProfile({
           setSavedSubagentModelPolicyState(normalizedSubagentModelPolicy);
         }
       }
+
+      // 与 subagentModelPolicy 同语义：字段缺失（旧版网关未返回）表示「未变更」，
+      // 不重置本地草稿，避免把用户已保存的并发/深度设置拉回默认。
+      if (input.subagentLimits !== undefined && input.subagentLimits !== null) {
+        const normalizedSubagentLimits = normalizeSubagentLimits(input.subagentLimits);
+        if (syncDraft) {
+          subagentLimitsRef.current = normalizedSubagentLimits;
+          setSubagentLimitsState(normalizedSubagentLimits);
+        }
+        if (syncSaved) {
+          savedSubagentLimitsRef.current = normalizedSubagentLimits;
+          setSavedSubagentLimitsState(normalizedSubagentLimits);
+        }
+      }
     },
     [normalizeSelection],
   );
@@ -252,6 +304,7 @@ export function useProviderDefaultProfile({
     savedDefaultThinkingRef,
     savedImageGenerationDefaultsRef,
     savedSubagentModelPolicyRef,
+    savedSubagentLimitsRef,
     savingDefaultModelSettings,
     setActiveSelection,
     setSavedActiveSelection,
@@ -259,7 +312,10 @@ export function useProviderDefaultProfile({
     setSavingDefaultModelSettings,
     setDefaultThinking,
     setSubagentModelPolicy,
+    setSubagentLimits,
     subagentModelPolicy,
     subagentModelPolicyRef,
+    subagentLimits,
+    subagentLimitsRef,
   };
 }

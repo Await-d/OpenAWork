@@ -167,6 +167,12 @@ export function useTerminalSession({
   const resizeSupported = terminal.supportsResize !== false;
   const resizeSupportedRef = useRef(resizeSupported);
   resizeSupportedRef.current = resizeSupported;
+  /**
+   * 是否为真实 PTY（显式 true 才算）。决定 `\x15`（删到行首）这类控制字符是否
+   * 值得下发：管道后端没有行编辑，控制字符会混进命令行文本。
+   */
+  const interactiveRef = useRef(terminal.interactive === true);
+  interactiveRef.current = terminal.interactive === true;
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [streamStatus, setStreamStatus] = useState<TerminalStreamStatus>('connecting');
@@ -373,6 +379,11 @@ export function useTerminalSession({
         // 保留 shell 自身的清屏语义（详见 terminal-key-handlers.ts 注释）。
         sendShellClear: () => {
           sendInput('\x0c');
+        },
+        // macOS ⌘+Backspace = 删到行首（readline 的 Ctrl+U）。只在真实 PTY 上下发：
+        // 管道后端没有行编辑，控制字符会混进命令行文本。
+        sendKillLine: () => {
+          if (interactiveRef.current) sendInput('\x15');
         },
       }),
     );

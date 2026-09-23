@@ -42,6 +42,7 @@ Thumbs.db
 *.suo
 *.user
 temp/
+@temp/
 bin/
 
 .serena/
@@ -73,3 +74,6 @@ apps/desktop/playwright-report/
 
 # 生成的富内容主题预览页（由 scripts/markdown-theme-demo.mjs 重新生成）
 demo/markdown-theme-matrix.html
+
+# 本地部署脚本与配置（可能含 JWT_SECRET 等密钥，仅本机使用，禁止提交）
+deploy/

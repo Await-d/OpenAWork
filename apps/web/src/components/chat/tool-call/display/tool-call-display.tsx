@@ -1,4 +1,5 @@
 import type { InputImageContent } from '@openAwork/shared';
+import { isSubagentToolName } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import { BatchToolCallCard } from '../cards/batch-tool-call-card.js';
 import { BlockToolCall } from './block-tool-call.js';
@@ -35,12 +36,7 @@ export interface ToolCallDisplayProps {
 export function ToolCallDisplay(props: ToolCallDisplayProps) {
   const normalized = props.toolName.trim().toLowerCase();
 
-  if (
-    normalized === 'task' ||
-    normalized === 'agent' ||
-    normalized === 'call_omo_agent' ||
-    normalized === 'delegate_task'
-  ) {
+  if (isSubagentToolName(normalized)) {
     return null; // Task tools handled separately by TaskToolInline
   }
 

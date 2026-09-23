@@ -1,5 +1,6 @@
 import { color } from '../tokens.js';
 import type { StatusMeta, ToolCardStatus, ToolKind } from './tool-call-card-shared.js';
+import { isSubagentToolName } from './subagent-tool-names.js';
 
 export type ToolVisualStatus = ToolCardStatus | 'cancelled' | 'idle' | 'pending';
 
@@ -86,8 +87,10 @@ const TOOL_TO_ICON: Record<string, ToolIconKey> = {
   websearch: 'window-cursor',
   google_search: 'window-cursor',
   task: 'task',
+  subagent: 'task',
   agent: 'task',
   call_omo_agent: 'task',
+  delegate_task: 'task',
   skill: 'brain',
   question: 'bubble-5',
   askuserquestion: 'bubble-5',
@@ -111,7 +114,7 @@ export function resolveToolKind(toolName: string, explicitKind?: ToolKind): Tool
   }
 
   const normalized = normalizeToolName(toolName);
-  if (normalized === 'task') return 'agent';
+  if (isSubagentToolName(normalized)) return 'agent';
   if (normalized.includes('mcp') || normalized.includes('context7')) return 'mcp';
   if (normalized.includes('skill') || normalized.includes('技能')) return 'skill';
   if (

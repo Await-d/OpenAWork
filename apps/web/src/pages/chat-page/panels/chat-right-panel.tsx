@@ -5,6 +5,7 @@ import {
   AgentDAGGraph,
   AgentVizPanel,
   MCPServerList,
+  isSubagentToolName,
 } from '@openAwork/shared-ui';
 import type {
   MCPServerStatus,
@@ -1255,9 +1256,7 @@ function ToolsPanel({
       </div>
       {filtered.length > 0 ? (
         filtered.map((toolCall, index) =>
-          ['task', 'agent', 'call_omo_agent', 'delegate_task'].includes(
-            toolCall.toolName.trim().toLowerCase(),
-          ) ? (
+          isSubagentToolName(toolCall.toolName) ? (
             <TaskToolInline
               key={`${toolCall.toolName}-${index}`}
               toolCallId={toolCall.toolCallId}

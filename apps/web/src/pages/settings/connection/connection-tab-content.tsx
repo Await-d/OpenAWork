@@ -10,12 +10,14 @@ import {
 } from '@openAwork/shared-ui';
 import type {
   ProviderEditData,
+  SubagentLimitsRef,
   SubagentModelPolicyRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
 } from '../state/settings-types.js';
 import { BP, IS, SS, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
+import { SubagentLimitsSection } from './SubagentLimitsSection.js';
 import { SubagentModelPolicySection } from './SubagentModelPolicySection.js';
 
 /** 区域分组标题——比 ST 更大，用于二级信息架构 */
@@ -74,12 +76,14 @@ interface ConnectionTabContentProps {
   defaultThinking: ThinkingDefaultsRef;
   imageGenerationDefaults: ImageGenerationDefaultsRef;
   subagentModelPolicy: SubagentModelPolicyRef;
+  subagentLimits: SubagentLimitsRef;
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
   setImageGenerationDefaults: React.Dispatch<React.SetStateAction<ImageGenerationDefaultsRef>>;
   setSubagentModelPolicy: React.Dispatch<React.SetStateAction<SubagentModelPolicyRef>>;
+  setSubagentLimits: React.Dispatch<React.SetStateAction<SubagentLimitsRef>>;
   saveDefaultModelSettings: () => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
@@ -148,12 +152,14 @@ export function ConnectionTabContent({
   defaultThinking,
   imageGenerationDefaults,
   subagentModelPolicy,
+  subagentLimits,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
   setImageGenerationDefaults,
   setSubagentModelPolicy,
+  setSubagentLimits,
   saveDefaultModelSettings,
   handleAddModel,
   handleRemoveModel,
@@ -371,7 +377,39 @@ export function ConnectionTabContent({
         />
       </div>
 
-      {/* ───── 区域三：模型与提供商 ───── */}
+      {/* ───── 区域三：子代理 ───── */}
+      <div style={GROUP_WRAPPER}>
+        <div style={GROUP_HEADER}>
+          <h3 style={GROUP_TITLE}>子代理</h3>
+          <p style={GROUP_DESC}>
+            控制 task
+            工具派生的子代理使用哪个模型，以及可同时运行的数量与嵌套深度；思考强度始终按任务自动决定。
+          </p>
+        </div>
+        <section style={SS_TIGHT}>
+          <SubagentModelPolicySection
+            policy={subagentModelPolicy}
+            onChange={setSubagentModelPolicy}
+            disabled={isSavingDefaultChanges}
+          />
+          <div
+            aria-hidden="true"
+            style={{ height: 1, background: 'var(--border-subtle)', margin: '10px 0' }}
+          />
+          <SubagentLimitsSection
+            limits={subagentLimits}
+            onChange={setSubagentLimits}
+            disabled={isSavingDefaultChanges}
+          />
+          {hasUnsavedDefaultChanges ? (
+            <p style={GROUP_HINT}>
+              子代理设置有未保存更改，将随「模型与提供商」的保存默认值一并提交。
+            </p>
+          ) : null}
+        </section>
+      </div>
+
+      {/* ───── 区域四：模型与提供商 ───── */}
       <div style={GROUP_WRAPPER}>
         <div style={GROUP_HEADER}>
           <h3 style={GROUP_TITLE}>模型与提供商</h3>
@@ -432,26 +470,6 @@ export function ConnectionTabContent({
             {...(onImportDiscoveredProvider ? { onImportDiscoveredProvider } : {})}
           />
         </div>
-      </div>
-
-      {/* ───── 区域四：子代理 ───── */}
-      <div style={GROUP_WRAPPER}>
-        <div style={GROUP_HEADER}>
-          <h3 style={GROUP_TITLE}>子代理</h3>
-          <p style={GROUP_DESC}>
-            控制 task 工具派生的子代理使用哪个模型；思考强度始终按任务自动决定。
-          </p>
-        </div>
-        <section style={SS_TIGHT}>
-          <SubagentModelPolicySection
-            policy={subagentModelPolicy}
-            onChange={setSubagentModelPolicy}
-            disabled={isSavingDefaultChanges}
-          />
-          {hasUnsavedDefaultChanges ? (
-            <p style={GROUP_HINT}>子代理设置有未保存更改，将随上方「保存默认值」一并提交。</p>
-          ) : null}
-        </section>
       </div>
     </div>
   );

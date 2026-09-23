@@ -7,7 +7,11 @@ import type {
   ImageGenerationDefaultsRef,
 } from '@openAwork/shared-ui';
 import { logger } from '../../../utils/log/logger.js';
-import type { SubagentModelPolicyRef, ThinkingDefaultsRef } from '../state/settings-types.js';
+import type {
+  SubagentLimitsRef,
+  SubagentModelPolicyRef,
+  ThinkingDefaultsRef,
+} from '../state/settings-types.js';
 import { normalizeActiveSelectionProviders } from './settings-page-helpers.js';
 import { useProviderDefaultProfile } from '../connection/use-provider-default-profile.js';
 import { useProviderCatalogActions } from './use-provider-catalog-actions.js';
@@ -44,6 +48,8 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     savedImageGenerationDefaultsRef,
     subagentModelPolicy,
     subagentModelPolicyRef,
+    subagentLimits,
+    subagentLimitsRef,
     savingDefaultModelSettings,
     setActiveSelection,
     setSavedActiveSelection,
@@ -51,6 +57,7 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     setImageGenerationDefaults,
     setSavingDefaultModelSettings,
     setSubagentModelPolicy,
+    setSubagentLimits,
   } = useProviderDefaultProfile({
     normalizeSelection: normalizeProviderSelection,
   });
@@ -89,12 +96,14 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
           defaultThinking: nextThinking,
           imageGenerationDefaults: nextImageGenerationDefaults,
           subagentModelPolicy: subagentModelPolicyRef.current,
+          subagentLimits: subagentLimitsRef.current,
         })) as {
           providers?: AIProviderRef[];
           activeSelection?: ActiveSelectionRef;
           defaultThinking?: ThinkingDefaultsRef;
           imageGenerationDefaults?: ImageGenerationDefaultsRef;
           subagentModelPolicy?: SubagentModelPolicyRef;
+          subagentLimits?: SubagentLimitsRef;
           error?: string;
         };
 
@@ -112,6 +121,7 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
             defaultThinking: data.defaultThinking,
             imageGenerationDefaults: data.imageGenerationDefaults,
             subagentModelPolicy: data.subagentModelPolicy,
+            subagentLimits: data.subagentLimits,
           },
           { syncDraft, syncSaved },
         );
@@ -219,12 +229,14 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     defaultThinking,
     imageGenerationDefaults,
     subagentModelPolicy,
+    subagentLimits,
     hasUnsavedDefaultModelChanges,
     savingDefaultModelSettings,
     setActiveSelection,
     setDefaultThinking,
     setImageGenerationDefaults,
     setSubagentModelPolicy,
+    setSubagentLimits,
     saveDefaultModelSettings,
     handleTestModel,
     handleSyncCatalog,

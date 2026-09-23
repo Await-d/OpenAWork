@@ -63,6 +63,19 @@ export function useChatKeyboardShortcuts(
         return;
       }
 
+      // Ctrl+` — 切换终端面板。终端面板内也要生效（VS Code 同款）：xterm 的隐藏
+      // textarea 会让通用 `isInput` 判定把这条全局快捷键挡掉，且 xterm 不理会
+      // `defaultPrevented`（仍会把按键送去 pty），所以在捕获阶段显式接管
+      // （preventDefault + stopPropagation），只在终端作用域内放开 `isInput` 限制。
+      if (mod && e.key === '`') {
+        if (!isInput || isWithinTerminalScope(e.target)) {
+          e.preventDefault();
+          e.stopPropagation();
+          handlers.onToggleTerminalPanel?.();
+          return;
+        }
+      }
+
       // Skip other shortcuts when in input fields
       if (isInput) return;
 
@@ -133,13 +146,6 @@ export function useChatKeyboardShortcuts(
       if (mod && e.shiftKey && e.key === 'R') {
         e.preventDefault();
         handlers.onToggleReviewPanel?.();
-        return;
-      }
-
-      // Ctrl+` — toggle terminal panel
-      if (mod && e.key === '`') {
-        e.preventDefault();
-        handlers.onToggleTerminalPanel?.();
         return;
       }
 

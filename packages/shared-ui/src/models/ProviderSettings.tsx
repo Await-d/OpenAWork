@@ -1262,7 +1262,9 @@ export function ProviderSettings({
 
     const chipBase: CSSProperties = {
       borderRadius: 999,
-      border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
       padding: '3px 10px',
       fontSize: 11,
       fontWeight: 500,

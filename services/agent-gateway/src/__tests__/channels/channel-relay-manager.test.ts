@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChannelRelay } from '../../channels/channel-relay.js';
 import { ChannelManager } from '../../channels/manager.js';
 import type {
   ChannelEvent,
   ChannelInstance,
   ChannelMessage,
   ChannelStatus,
+  ChannelWsMessageParser,
   MessagingChannelService,
 } from '../../channels/types.js';
 
@@ -134,6 +136,53 @@ class RecoverableService implements MessagingChannelService {
   }
 }
 
+class MediaService implements MessagingChannelService {
+  readonly pluginId: string;
+  readonly pluginType = 'telegram';
+  readonly enrichCalls: ChannelMessage[] = [];
+  private running = false;
+
+  constructor(
+    pluginId: string,
+    private readonly handleEnrich: (message: ChannelMessage) => Promise<ChannelMessage>,
+  ) {
+    this.pluginId = pluginId;
+  }
+
+  async start(): Promise<void> {
+    this.running = true;
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  async sendMessage(): Promise<{ messageId: string }> {
+    return { messageId: 'media' };
+  }
+
+  async replyMessage(): Promise<{ messageId: string }> {
+    return { messageId: 'media' };
+  }
+
+  async getGroupMessages(): Promise<ChannelMessage[]> {
+    return [];
+  }
+
+  async listGroups(): Promise<[]> {
+    return [];
+  }
+
+  async enrichInboundMessage(message: ChannelMessage): Promise<ChannelMessage> {
+    this.enrichCalls.push(message);
+    return this.handleEnrich(message);
+  }
+}
+
 function makeChannel(id: string): ChannelInstance {
   return {
     id,
@@ -152,6 +201,37 @@ function makeAutoStartChannel(id: string): ChannelInstance {
     ...makeChannel(id),
     features: { autoReply: true, streamingReply: false, autoStart: true },
   };
+}
+
+function makeEnvelopeParser(timestamp?: number): ChannelWsMessageParser {
+  return (raw) => {
+    if (typeof raw !== 'string') {
+      return null;
+    }
+    const data = JSON.parse(raw) as { chatId: string; content: string; messageId: string };
+    return {
+      id: data.messageId,
+      chatId: data.chatId,
+      senderId: 'relay-user',
+      senderName: 'Relay User',
+      content: data.content,
+      timestamp: timestamp ?? Date.now(),
+    };
+  };
+}
+
+function findMessageEvent(
+  events: readonly ChannelEvent[],
+): Extract<ChannelEvent, { type: 'message' }> | undefined {
+  return events.find(
+    (event): event is Extract<ChannelEvent, { type: 'message' }> => event.type === 'message',
+  );
+}
+
+async function flushRelayMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
 }
 
 afterEach(() => {
@@ -190,7 +270,7 @@ describe('ChannelManager relay wiring', () => {
 
     socket?.emitOpen();
     socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
-    await Promise.resolve();
+    await flushRelayMicrotasks();
 
     expect(events).toContainEqual({
       type: 'status',
@@ -319,6 +399,213 @@ describe('ChannelManager 自动恢复', () => {
       pluginId: 'auto-restart-3',
       error: 'transient poll hiccup',
     });
+
+    await manager.stopAll();
+  });
+});
+
+describe('ChannelRelay 入站媒体 enrich', () => {
+  it('提供 enrich 时调用一次并投递补全后的消息', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const events: ChannelEvent[] = [];
+    const enrichCalls: ChannelMessage[] = [];
+    const relay = new ChannelRelay({
+      channel: makeChannel('relay-enrich-direct'),
+      parser: makeEnvelopeParser(),
+      notify: (event) => {
+        events.push(event);
+      },
+      enrich: async (message) => {
+        enrichCalls.push(message);
+        return { ...message, images: [{ mediaType: 'image/jpeg', base64: 'aW1n' }] };
+      },
+    });
+
+    relay.start();
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+
+    await vi.waitFor(() => {
+      expect(findMessageEvent(events)).toBeDefined();
+    });
+
+    expect(enrichCalls).toHaveLength(1);
+    expect(enrichCalls[0]).toMatchObject({ id: 'm1', chatId: 'chat-1', content: 'hello' });
+    const messageEvent = findMessageEvent(events);
+    expect(messageEvent).toMatchObject({
+      type: 'message',
+      pluginId: 'relay-enrich-direct',
+      message: { id: 'm1', chatId: 'chat-1', content: 'hello' },
+    });
+    expect(messageEvent?.message.images).toEqual([{ mediaType: 'image/jpeg', base64: 'aW1n' }]);
+
+    relay.stop();
+  });
+
+  it('enrich 抛错时告警并原样投递，不产生未处理异常', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const events: ChannelEvent[] = [];
+    const relay = new ChannelRelay({
+      channel: makeChannel('relay-enrich-throw'),
+      parser: makeEnvelopeParser(),
+      notify: (event) => {
+        events.push(event);
+      },
+      enrich: async () => {
+        throw new Error('media download failed');
+      },
+    });
+
+    relay.start();
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+
+    await vi.waitFor(() => {
+      expect(findMessageEvent(events)).toBeDefined();
+    });
+
+    const messageEvent = findMessageEvent(events);
+    expect(messageEvent?.message).toMatchObject({ id: 'm1', chatId: 'chat-1', content: 'hello' });
+    expect(messageEvent?.message.images).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[channels] relay inbound media enrich failed',
+      expect.objectContaining({ channelId: 'relay-enrich-throw', error: 'media download failed' }),
+    );
+
+    relay.stop();
+  });
+
+  it('未提供 enrich 时行为与现状一致，直接投递原始消息', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const events: ChannelEvent[] = [];
+    const relay = new ChannelRelay({
+      channel: makeChannel('relay-no-enrich'),
+      parser: makeEnvelopeParser(),
+      notify: (event) => {
+        events.push(event);
+      },
+    });
+
+    relay.start();
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+
+    await vi.waitFor(() => {
+      expect(findMessageEvent(events)).toBeDefined();
+    });
+
+    const messageEvent = findMessageEvent(events);
+    expect(messageEvent).toMatchObject({
+      type: 'message',
+      pluginId: 'relay-no-enrich',
+      message: { id: 'm1', chatId: 'chat-1', content: 'hello' },
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    relay.stop();
+  });
+
+  it('stale 消息不调用 enrich 也不投递', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const events: ChannelEvent[] = [];
+    const enrichCalls: ChannelMessage[] = [];
+    const relay = new ChannelRelay({
+      channel: makeChannel('relay-stale'),
+      parser: makeEnvelopeParser(Date.now() - 60_000),
+      notify: (event) => {
+        events.push(event);
+      },
+      staleMessageWindowMs: 1_000,
+      enrich: async (message) => {
+        enrichCalls.push(message);
+        return message;
+      },
+    });
+
+    relay.start();
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+    await flushRelayMicrotasks();
+
+    expect(enrichCalls).toHaveLength(0);
+    expect(findMessageEvent(events)).toBeUndefined();
+
+    relay.stop();
+  });
+});
+
+describe('ChannelManager relay 入站媒体 enrich', () => {
+  it('relay 收到消息时调用 service 的 enrichInboundMessage 并投递补全后的消息', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const manager = new ChannelManager();
+    const events: ChannelEvent[] = [];
+    const service = new MediaService('relay-service-enrich', async (message) => ({
+      ...message,
+      images: [{ mediaType: 'image/jpeg', base64: 'aW1n' }],
+    }));
+    manager.registerFactory('telegram', () => service);
+    manager.registerParser('telegram', makeEnvelopeParser());
+
+    await manager.startPlugin(makeChannel('relay-service-enrich'), (event) => {
+      events.push(event);
+    });
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+
+    await vi.waitFor(() => {
+      expect(findMessageEvent(events)).toBeDefined();
+    });
+
+    expect(service.enrichCalls).toHaveLength(1);
+    expect(service.enrichCalls[0]).toMatchObject({ id: 'm1', chatId: 'chat-1', content: 'hello' });
+    const messageEvent = findMessageEvent(events);
+    expect(messageEvent).toMatchObject({
+      type: 'message',
+      pluginId: 'relay-service-enrich',
+      message: { id: 'm1', chatId: 'chat-1', content: 'hello' },
+    });
+    expect(messageEvent?.message.images).toEqual([{ mediaType: 'image/jpeg', base64: 'aW1n' }]);
+
+    await manager.stopAll();
+  });
+
+  it('service enrichInboundMessage 抛错时 manager 兜底告警并投递原始消息', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const manager = new ChannelManager();
+    const events: ChannelEvent[] = [];
+    const service = new MediaService('relay-service-throw', async () => {
+      throw new Error('service enrich failed');
+    });
+    manager.registerFactory('telegram', () => service);
+    manager.registerParser('telegram', makeEnvelopeParser());
+
+    await manager.startPlugin(makeChannel('relay-service-throw'), (event) => {
+      events.push(event);
+    });
+    const socket = FakeWebSocket.instances[0];
+    socket?.emitOpen();
+    socket?.emitMessage(JSON.stringify({ chatId: 'chat-1', content: 'hello', messageId: 'm1' }));
+
+    await vi.waitFor(() => {
+      expect(findMessageEvent(events)).toBeDefined();
+    });
+
+    expect(service.enrichCalls).toHaveLength(1);
+    const messageEvent = findMessageEvent(events);
+    expect(messageEvent?.message).toMatchObject({ id: 'm1', chatId: 'chat-1', content: 'hello' });
+    expect(messageEvent?.message.images).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[channels] relay inbound media enrich failed',
+      expect.objectContaining({ channelId: 'relay-service-throw', error: 'service enrich failed' }),
+    );
 
     await manager.stopAll();
   });

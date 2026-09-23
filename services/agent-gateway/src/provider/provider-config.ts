@@ -56,6 +56,50 @@ export const subagentModelPolicySchema = z.object({ modelMode: subagentModelMode
 export type SubagentModelPolicy = z.infer<typeof subagentModelPolicySchema>;
 export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicy = { modelMode: 'auto' };
 
+/**
+ * 子代理数量限制的护栏（用户级设置可调，但不允许越过此范围）。
+ *
+ * - `maxRunningPerRoot`：同一任务树中**同时运行**的子代理上限（默认 4）；
+ * - `maxTotalPerRoot`：同一任务树下累计创建的子代理上限（默认 24，含已完成）；
+ * - `maxNestingDepth`：子代理嵌套深度上限（主会话深度 0，默认 1，对齐上游
+ *   `experimental.subagent_depth`）。
+ */
+export const SUBAGENT_LIMITS_GUARDRAILS = {
+  maxRunningPerRoot: { min: 1, max: 16 },
+  maxTotalPerRoot: { min: 1, max: 200 },
+  maxNestingDepth: { min: 1, max: 8 },
+} as const;
+
+export const subagentLimitsSchema = z
+  .object({
+    maxRunningPerRoot: z
+      .number()
+      .int()
+      .min(SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.min)
+      .max(SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.max),
+    maxTotalPerRoot: z
+      .number()
+      .int()
+      .min(SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.min)
+      .max(SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.max),
+    maxNestingDepth: z
+      .number()
+      .int()
+      .min(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.min)
+      .max(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.max),
+  })
+  .refine((limits) => limits.maxTotalPerRoot >= limits.maxRunningPerRoot, {
+    message: '任务树累计上限不能小于同时运行上限。',
+    path: ['maxTotalPerRoot'],
+  });
+export type SubagentLimits = z.infer<typeof subagentLimitsSchema>;
+
+export const DEFAULT_SUBAGENT_LIMITS: SubagentLimits = {
+  maxRunningPerRoot: 4,
+  maxTotalPerRoot: 24,
+  maxNestingDepth: 1,
+};
+
 const imageGenerationSizeSchema = z
   .string()
   .trim()
@@ -227,6 +271,7 @@ export const providerSettingsBodySchema = z.object({
   defaultThinking: defaultThinkingSettingsSchema.optional(),
   imageGenerationDefaults: imageGenerationDefaultsSchema.optional(),
   subagentModelPolicy: subagentModelPolicySchema.optional(),
+  subagentLimits: subagentLimitsSchema.optional(),
 });
 
 export const providerSettingsQuerySchema = z.object({
@@ -357,6 +402,59 @@ export const parseStoredSubagentModelPolicy = (raw: unknown): SubagentModelPolic
   return parsed.success
     ? { modelMode: parsed.data.modelMode }
     : { ...DEFAULT_SUBAGENT_MODEL_POLICY };
+};
+
+function readLimitNumber(value: unknown, bounds: { min: number; max: number }): number | undefined {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  // 越界值收敛到最近的边界（与历史 `subagent_depth` 的护栏收敛语义一致），
+  // 只有完全无法解析的值才让调用方回落默认值。
+  return Math.min(Math.max(Math.trunc(parsed), bounds.min), bounds.max);
+}
+
+/**
+ * 容错解析已落库的子代理限制：
+ * - 字段缺失 / 无法解析 → 用 `options.fallbackNestingDepth`（深度，兼容历史
+ *   `subagent_depth` 键）或默认值；
+ * - 越界值收敛到最近的护栏边界（与历史深度设置的收敛语义一致）；
+ * - `maxTotalPerRoot < maxRunningPerRoot` 的坏数据自动抬升，避免保存后自相矛盾。
+ *
+ * 不使用 schema 的 `safeParse` 整体拒绝：单字段损坏不应把用户其余合法设置重置。
+ */
+export const parseStoredSubagentLimits = (
+  raw: unknown,
+  options?: { fallbackNestingDepth?: unknown },
+): SubagentLimits => {
+  const record =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : undefined;
+
+  const maxRunningPerRoot =
+    readLimitNumber(record?.['maxRunningPerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot) ??
+    DEFAULT_SUBAGENT_LIMITS.maxRunningPerRoot;
+  const maxTotalPerRoot =
+    readLimitNumber(record?.['maxTotalPerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot) ??
+    DEFAULT_SUBAGENT_LIMITS.maxTotalPerRoot;
+  const fallbackNestingDepth =
+    readLimitNumber(options?.fallbackNestingDepth, SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth) ??
+    DEFAULT_SUBAGENT_LIMITS.maxNestingDepth;
+  const maxNestingDepth =
+    readLimitNumber(record?.['maxNestingDepth'], SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth) ??
+    fallbackNestingDepth;
+
+  return {
+    maxRunningPerRoot,
+    maxTotalPerRoot: Math.max(maxTotalPerRoot, maxRunningPerRoot),
+    maxNestingDepth,
+  };
 };
 
 export const resolveStoredDefaultThinkingMode = (

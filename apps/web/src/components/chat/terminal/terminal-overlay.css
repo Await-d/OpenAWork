@@ -193,6 +193,26 @@
   background: var(--warning);
 }
 
+/* ── 降级模式提示（管道后端：无行编辑 / TUI）── */
+.terminal-degraded-chip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 9999px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+
 /* ── 右键菜单 ── */
 .terminal-context-menu {
   position: fixed;

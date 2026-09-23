@@ -1,6 +1,6 @@
 import { channelFetch } from './channel-http.js';
 import { parseJsonObject, readNumber, readString } from './qq-api-utils.js';
-import { sendQQImage } from './qq-media.js';
+import { sendQQFile, sendQQImage } from './qq-media.js';
 import type { QQChatTarget } from './qq-target.js';
 
 const QQ_TOKEN_URL = 'https://bots.qq.com/app/getAppAccessToken';
@@ -74,6 +74,28 @@ export class QQApiClient {
     },
   ): Promise<{ messageId: string }> {
     return sendQQImage(
+      {
+        apiBase: this.apiBase,
+        getAccessToken: () => this.getAccessToken(),
+        getNextMsgSeq: (messageId) => this.getNextMsgSeq(messageId),
+        sendMessageBody: (path, body) => this.apiRequest(path, body),
+      },
+      target,
+      input,
+    );
+  }
+
+  async sendFile(
+    target: QQChatTarget,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly replyToMessageId?: string;
+      readonly sourceUrl?: string;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendQQFile(
       {
         apiBase: this.apiBase,
         getAccessToken: () => this.getAccessToken(),

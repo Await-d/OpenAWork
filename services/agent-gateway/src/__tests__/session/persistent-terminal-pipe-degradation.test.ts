@@ -183,11 +183,11 @@ describe('Node pipe degradation', () => {
       expect(writes).toEqual([]);
 
       input.onData(new Uint8Array([0x24, 0x20])); // "$ "
-      expect(writes).toEqual(['echo GATED_OK\n']);
+      expect(writes).toEqual(['echo GATED_OK\r']);
 
       // Subsequent output chunks must not re-send the command.
       input.onData(new Uint8Array([0x0a]));
-      expect(writes).toEqual(['echo GATED_OK\n']);
+      expect(writes).toEqual(['echo GATED_OK\r']);
     } finally {
       persistent.closePersistentTerminal(terminal.terminalId);
     }
@@ -207,7 +207,7 @@ describe('Node pipe degradation', () => {
     try {
       expect(calls[0]!.writes).toEqual([]);
       await delay(400);
-      expect(calls[0]!.writes).toEqual(['echo FALLBACK_OK\n']);
+      expect(calls[0]!.writes).toEqual(['echo FALLBACK_OK\r']);
     } finally {
       persistent.closePersistentTerminal(terminal.terminalId);
     }

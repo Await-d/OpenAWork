@@ -1,3 +1,4 @@
+import type { Buffer } from 'node:buffer';
 import type {
   MessagingChannelService,
   ChannelInstance,
@@ -5,11 +6,21 @@ import type {
   ChannelMessage,
   ChannelGroup,
   ChannelServiceFactory,
+  FeishuFileType,
 } from './types.js';
 import { channelFetch } from './channel-http.js';
 import { parseWhatsAppInboundMessage } from './inbound-parsers/whatsapp.js';
-import { attachWhatsAppInboundImages } from './whatsapp-media.js';
+import { attachWhatsAppInboundImages, sendWhatsAppMedia } from './whatsapp-media.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
+
+/** 出站图片入参，与 `MessagingChannelService.sendImage` / `replyImage` 的契约一致。 */
+interface WhatsAppImageSendInput {
+  readonly buffer: Buffer;
+  readonly fileName?: string;
+  readonly signal?: AbortSignal;
+  readonly sourceUrl?: string;
+  readonly text?: string;
+}
 
 export class WhatsAppChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -115,6 +126,62 @@ export class WhatsAppChannelService implements MessagingChannelService {
   async replyMessage(messageId: string, content: string): Promise<{ messageId: string }> {
     const chatId = messageId.split(':')[0] ?? '';
     return this.sendMessage(chatId, content);
+  }
+
+  /**
+   * 出站发图：Cloud API 只接受媒体 ID，故走「先上传再发送」两步
+   * （`sendWhatsAppMedia`）。`sourceUrl` 按接口保留但不使用（调用方需先取成
+   * buffer）。
+   */
+  async sendImage(chatId: string, input: WhatsAppImageSendInput): Promise<{ messageId: string }> {
+    return sendWhatsAppMedia({
+      accessToken: this.accessToken,
+      phoneNumberId: this.phoneNumberId,
+      to: chatId,
+      buffer: input.buffer,
+      fileName: input.fileName ?? 'image.jpg',
+      kind: 'image',
+      ...(input.text ? { caption: input.text } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  }
+
+  /**
+   * 回复图片：WhatsApp 无引用回复语义，按 `messageId` 拆出的 chatId 重发
+   * （与既有 `replyMessage` 一致）。
+   */
+  async replyImage(
+    messageId: string,
+    input: WhatsAppImageSendInput,
+  ): Promise<{ messageId: string }> {
+    const chatId = messageId.split(':')[0] ?? '';
+    return this.sendImage(chatId, input);
+  }
+
+  /**
+   * 出站发文件：同样两步上传 + 发送，文件名随 document 消息下发。
+   * `fileType` 按接口保留但不使用——WhatsApp 由 `type=document` 自行处理。
+   */
+  async sendFile(
+    chatId: string,
+    input: {
+      readonly buffer: Buffer;
+      readonly fileName: string;
+      readonly fileType?: FeishuFileType;
+      readonly signal?: AbortSignal;
+      readonly text?: string;
+    },
+  ): Promise<{ messageId: string }> {
+    return sendWhatsAppMedia({
+      accessToken: this.accessToken,
+      phoneNumberId: this.phoneNumberId,
+      to: chatId,
+      buffer: input.buffer,
+      fileName: input.fileName,
+      kind: 'file',
+      ...(input.text ? { caption: input.text } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
   }
 
   handleWebhookVerification(mode: string, verifyToken: string, challenge: string): string | null {

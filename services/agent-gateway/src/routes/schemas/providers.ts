@@ -10,6 +10,7 @@ import {
   providerSettingsQuerySchema,
   defaultThinkingSettingsSchema,
   imageGenerationDefaultsSchema,
+  subagentLimitsSchema,
   subagentModelPolicySchema,
   aiProviderSchema,
   activeSelectionSchema,
@@ -24,6 +25,7 @@ export const getProvidersSchema = {
       defaultThinking: defaultThinkingSettingsSchema,
       imageGenerationDefaults: imageGenerationDefaultsSchema,
       subagentModelPolicy: subagentModelPolicySchema,
+      subagentLimits: subagentLimitsSchema,
     }),
   },
 } as const;
@@ -37,6 +39,7 @@ export const putProvidersSchema = {
       defaultThinking: defaultThinkingSettingsSchema,
       imageGenerationDefaults: imageGenerationDefaultsSchema,
       subagentModelPolicy: subagentModelPolicySchema,
+      subagentLimits: subagentLimitsSchema,
     }),
   },
 } as const;

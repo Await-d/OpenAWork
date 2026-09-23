@@ -31,6 +31,10 @@ import {
   ToolGlyph,
   type ToolVisualStatus,
 } from './tool-visual-meta.js';
+import {
+  isSubagentToolName,
+  resolveSubagentSessionIdFromToolOutput,
+} from './subagent-tool-names.js';
 
 export interface ToolCallCardProps {
   approvalActions?: {
@@ -125,8 +129,11 @@ const TOOL_DISPLAY_NAME_MAP: Record<string, string> = {
   skill: '技能',
   askuserquestion: '询问用户',
   question: '询问用户',
+  subagent: '代理委派',
+  task: '代理委派',
   agent: '代理委派',
   call_omo_agent: '代理委派',
+  delegate_task: '代理委派',
   enterplanmode: '进入规划模式',
   exitplanmode: '退出规划模式',
   generate_image: '生成图片',
@@ -211,8 +218,10 @@ function summarizeQuestionTool(input: Record<string, unknown>): string | undefin
 function summarizeAgentTool(input: Record<string, unknown>): string | undefined {
   const description = readNonEmptyString(input['description']);
   const prompt = readNonEmptyString(input['prompt']);
-  const agentType = readNonEmptyString(input['subagent_type']);
-  const mode = input['run_in_background'] === true ? '后台' : undefined;
+  const agentType =
+    readNonEmptyString(input['subagent_type']) ?? readNonEmptyString(input['agent']);
+  const mode =
+    input['run_in_background'] === true || input['background'] === true ? '后台' : undefined;
   const focus = description ?? prompt;
 
   const parts = [
@@ -265,7 +274,7 @@ function summarizeSpecialToolInput(
     return summarizeQuestionTool(input);
   }
 
-  if (normalizedToolName === 'agent' || normalizedToolName === 'call_omo_agent') {
+  if (isSubagentToolName(normalizedToolName)) {
     return summarizeAgentTool(input);
   }
 
@@ -436,11 +445,26 @@ function buildOutputReadHints(
     : ['read_tool_output {"useLatestReferenced":true}'];
 }
 
-function isTaskTool(toolName: string): boolean {
-  return toolName.trim().toLowerCase() === 'task';
-}
-
-const TASK_INPUT_KEYS = new Set(['command', 'description', 'prompt', 'subagent_type', 'task_id']);
+/**
+ * 子代理输入里已知的任务字段（含上游同名别名）。命中集合外的字段才会被
+ * 视为「额外输入」并触发「输入」区块展示，避免 `run_in_background` /
+ * `session_id` 这类标准字段把卡片撑成原始参数字典。
+ */
+const TASK_INPUT_KEYS = new Set([
+  'command',
+  'description',
+  'prompt',
+  'subagent_type',
+  'task_id',
+  // 规范名 `subagent` 的字段与上游别名
+  'agent',
+  'category',
+  'load_skills',
+  'run_in_background',
+  'background',
+  'session_id',
+  'sessionID',
+]);
 
 function detectReadonlyTask(meta: {
   command?: string;
@@ -516,11 +540,20 @@ function resolveTaskToolMeta(
   const command = readNonEmptyString(input['command']);
   const description = readNonEmptyString(input['description']);
   const prompt = readNonEmptyString(input['prompt']);
-  const agentType = readNonEmptyString(input['subagent_type']);
+  // `agent` 是上游 `subagent` 工具的 `subagent_type` 别名。
+  const agentType =
+    readNonEmptyString(input['subagent_type']) ?? readNonEmptyString(input['agent']);
   const requestedTaskId = readNonEmptyString(input['task_id']);
+  // resume 场景：输入侧显式指定要继续的子会话（`session_id` / 上游别名 `sessionID`）。
+  const requestedSessionId =
+    readNonEmptyString(input['session_id']) ?? readNonEmptyString(input['sessionID']);
   const hasAdditionalInputFields = Object.keys(input).some((key) => !TASK_INPUT_KEYS.has(key));
   const outputTaskId = readNonEmptyString(outputRecord?.['taskId']);
-  const outputSessionId = readNonEmptyString(outputRecord?.['sessionId']);
+  // 子代理输出可能是对象（`task` / `subagent`）或文本（`call_omo_agent` 的
+  // `<subagent sessionID="…">` 包裹 / 「会话 ID：…」行）：对象读不到时回落到文本提取。
+  const outputSessionId =
+    readNonEmptyString(outputRecord?.['sessionId']) ??
+    resolveSubagentSessionIdFromToolOutput(output);
   const outputStatus = readNonEmptyString(outputRecord?.['status']);
   const outputMessage = readNonEmptyString(outputRecord?.['message']);
   const outputResult = readNonEmptyString(outputRecord?.['result']);
@@ -553,6 +586,7 @@ function resolveTaskToolMeta(
     !prompt &&
     !agentType &&
     !requestedTaskId &&
+    !requestedSessionId &&
     !outputTaskId &&
     !outputSessionId &&
     !outputStatus &&
@@ -568,6 +602,7 @@ function resolveTaskToolMeta(
     description,
     prompt,
     requestedTaskId,
+    requestedSessionId,
     outputTaskId,
     outputSessionId,
     outputStatus,
@@ -998,7 +1033,7 @@ export function resolveToolCallCardDisplayData(input: {
   toolCallId?: string;
   toolName: string;
 }): ToolCallCardDisplayData {
-  const taskMeta = isTaskTool(input.toolName)
+  const taskMeta = isSubagentToolName(input.toolName)
     ? resolveTaskToolMeta(input.input, input.output)
     : undefined;
   const diffView = taskMeta ? undefined : resolveDiffView(input.output);

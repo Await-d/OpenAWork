@@ -158,7 +158,7 @@ describe('checkSubagentDepthAllowed（真实 SQLite 父链）', () => {
       throw new Error('应当被拒绝');
     }
     expect(result.message).toContain('子代理嵌套深度上限');
-    expect(result.message).toContain('subagent_depth');
+    expect(result.message).toContain('设置页');
   });
 
   it('提高用户设置后同一会话恢复允许', () => {

@@ -3,6 +3,13 @@ services:
     build:
       context: .
       dockerfile: services/agent-gateway/Dockerfile
+      args:
+        # 默认值与 Dockerfile / `.bun-version` 对齐（`bun run check:docker-versions`
+        # 校验漂移）；发布流水线通过同名环境变量注入真实版本。
+        BUN_VERSION: ${BUN_VERSION:-1.4.2}
+        NODE_VERSION: ${NODE_VERSION:-22}
+        OPENAWORK_VERSION: ${OPENAWORK_VERSION:-dev}
+        OPENAWORK_GIT_SHA: ${OPENAWORK_GIT_SHA:-unknown}
     ports:
       - '3000:3000'
     environment:
