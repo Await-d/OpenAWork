@@ -1,6 +1,6 @@
 {
   "name": "@openAwork/mobile",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
