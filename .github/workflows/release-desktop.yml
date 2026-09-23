@@ -675,18 +675,39 @@ jobs:
         if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-release-notes.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.resolve-release-notes.outputs.version }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${{ needs.resolve-release-notes.outputs.release_tag }}" > release.json
-          node scripts/build/build-tauri-updater-json.mjs \
-            --input-file release.json \
-            --output-file latest.json \
-            --notes-file temp/release-notes/release-notes.md \
-            --version "${{ needs.resolve-release-notes.outputs.version }}" \
-            --required-platform linux-x86_64 \
-            --required-platform windows-x86_64 \
-            --required-platform darwin-aarch64 \
-            --required-platform darwin-x86_64
-          gh release upload "${{ needs.resolve-release-notes.outputs.release_tag }}" latest.json --clobber
+          set -euo pipefail
+
+          # GitHub 的 release 对象是最终一致的：各平台刚上传完安装包时，
+          # `GET /releases/tags/<tag>` 仍可能返回「release 创建时的快照」（assets 为空）。
+          # 只读一次就判定会误报「必需平台全部缺失」，并连带跳过 latest-cn.json、
+          # 滚动 tag 镜像、历史回填与 release 正文更新等全部收尾动作（v1.1.9 即为此失败）。
+          # 故改为有界轮询：拿到齐备的必需平台后再上传，重试用尽才硬失败。
+          attempts=12
+          delay_seconds=15
+          for attempt in $(seq 1 "${attempts}"); do
+            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > release.json \
+              && node scripts/build/build-tauri-updater-json.mjs \
+                --input-file release.json \
+                --output-file latest.json \
+                --notes-file temp/release-notes/release-notes.md \
+                --version "${RELEASE_VERSION}" \
+                --required-platform linux-x86_64 \
+                --required-platform windows-x86_64 \
+                --required-platform darwin-aarch64 \
+                --required-platform darwin-x86_64; then
+              echo "updater JSON 已生成（第 ${attempt} 次尝试）"
+              gh release upload "${RELEASE_TAG}" latest.json --clobber
+              exit 0
+            fi
+            echo "::warning::updater JSON 第 ${attempt}/${attempts} 次尝试失败，${delay_seconds}s 后重试"
+            sleep "${delay_seconds}"
+          done
+
+          echo "::error::连续 ${attempts} 次无法从 release 资产生成 updater JSON（必需平台：linux-x86_64, windows-x86_64, darwin-aarch64, darwin-x86_64）"
+          exit 1
 
       - name: Publish proxied updater JSON for China users
         if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' }}
