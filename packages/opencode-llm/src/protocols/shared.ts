@@ -308,8 +308,8 @@ export const errorText = (error: unknown) => {
 
 /**
  * `framing` step for Server-Sent Events. Decodes UTF-8, runs the SSE channel
- * decoder, and drops empty / `[DONE]` keep-alive events so the downstream
- * `decodeChunk` sees one JSON string per element. The SSE channel emits a
+ * decoder, and drops empty / bare `null` / `[DONE]` keep-alive events so the
+ * downstream `decodeChunk` sees one JSON string per element. The SSE channel emits a
  * `Retry` control event on its error channel; we drop it here (we don't
  * implement client-driven retries) so the public error channel stays
  * `LLMError`.
@@ -321,7 +321,12 @@ export const sseFraming = (
     Stream.decodeText,
     Stream.pipeThroughChannel(Sse.decode()),
     Stream.catchTag('Retry', () => Stream.empty),
-    Stream.filter((event) => event.data.length > 0 && event.data !== '[DONE]'),
+    // Some OpenAI-compatible proxies serialize an empty flush as a bare
+    // `data: null`, between events or after `[DONE]`. No protocol has a null
+    // event, so it carries nothing and must not abort the stream.
+    Stream.filter(
+      (event) => event.data.length > 0 && event.data !== '[DONE]' && event.data !== 'null',
+    ),
     Stream.map((event) => {
       if (event.event === 'message') return event.data;
 
