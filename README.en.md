@@ -118,7 +118,6 @@ flowchart TB
 
     subgraph Storage["Storage"]
         SQLite[("SQLite")]
-        Redis[("Redis")]
         DataDir[("Platform Data Dir")]
     end
 
@@ -152,7 +151,6 @@ flowchart LR
 
     subgraph Server["Remote Deployment (optional)"]
         Remote["agent-gateway<br/>Docker / server"]
-        RemoteRedis[("Redis")]
         RemoteSQLite[("SQLite / Volume")]
     end
 
@@ -164,7 +162,6 @@ flowchart LR
     Shell -. switchable to remote .-> Remote
     Sidecar --> LocalDB
 
-    Remote --> RemoteRedis
     Remote --> RemoteSQLite
 ```
 
@@ -364,14 +361,13 @@ OpenAWork currently has two common ways to run:
 
 - **Docker**
   - `docker-compose.yml` is included
-  - starts `gateway + web + redis` by default
+  - starts `gateway + web` by default
   - useful for quickly bootstrapping the base environment
 
 Default ports:
 
 - **Gateway**: `3000`
 - **Web**: `5173`
-- **Redis**: `6379`
 
 ## Quick Start
 
@@ -390,7 +386,6 @@ cp .env.example .env
 At minimum, review:
 
 - `JWT_SECRET`
-- `REDIS_URL`
 - `AI_API_KEY`
 - `AI_API_BASE_URL`
 - `AI_DEFAULT_MODEL`

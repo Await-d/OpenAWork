@@ -50,7 +50,7 @@ import { appendSnapshotPart, appendPatchPart } from '../message/message-v2-adapt
 import type { MessageID, MessageWithParts } from '../message/message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../session/assistant-content-artifacts.js';
 import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
-import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import { resolveSnapshotWorkspaceRoot } from '../workspace/workspace-safety.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { buildChannelPersonaPromptFromMetadata } from '../channels/channel-persona-prompt.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
@@ -1018,9 +1018,12 @@ async function captureSnapshotTreeBestEffort(input: {
   diffFiles: FileDiffContent[];
 }): Promise<void> {
   try {
-    // 递归解析 workingDirectory：子 session 可能没有直接设置，
-    // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
-    const rawWorkspace = resolveSessionWorkspacePath({
+    // 解析快照采集根（统一口径，见 resolveSnapshotWorkspaceRoot）：
+    //   1. 会话绑定工作目录（含 team / task 子会话的父链继承）；
+    //   2. 未绑定的 chat 会话 → 回退到默认工作区（`~/Documents/OpenAWork`），
+    //      与工具执行根一致，使默认会话也能采集快照 / 恢复文件；
+    //   3. team 会话不回退（未绑定即不采集）。
+    const rawWorkspace = resolveSnapshotWorkspaceRoot({
       metadataJson: input.sessionContext.metadataJson,
       sessionId: input.sessionId,
       userId: input.userId,

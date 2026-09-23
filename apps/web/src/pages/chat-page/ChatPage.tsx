@@ -1,6 +1,6 @@
 import type { InputImageContent, SubagentNotice, WorkflowRuntimeState } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type { Session, SessionTask } from '@openAwork/web-client';
+import type { RollbackReceipt, Session, SessionTask } from '@openAwork/web-client';
 import {
   createArtifactsClient,
   createQuestionsClient,
@@ -150,6 +150,7 @@ import {
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
 
 import { useAssistantMessageProcessing } from './conversation/snapshot/use-assistant-message-processing.js';
+import { resolveRollbackDerivedState } from './conversation/snapshot/rollback-derived-state.js';
 import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js';
 
 import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
@@ -2535,6 +2536,36 @@ export default function ChatPage() {
 
   // ─── 重试与历史编辑域 — 抽到 useChatRetryAndEdit。
   // 参见 docs/architecture/chat-page-split-plan.md 域 E。
+  /**
+   * 回退（截断生效）后清理「子代理派生状态」：后端只删该回合的派生物（任务图节点 /
+   * run events / 团队记录…），**子会话本身保留**；这里把属于被作废回合的子会话、
+   * 任务与完成通知从展示中摘掉，避免回退后子代理信息仍挂在页面上。
+   */
+  const handleRollbackApplied = useCallback(
+    (receipt: RollbackReceipt | null) => {
+      const next = resolveRollbackDerivedState({
+        receipt,
+        childSessions,
+        subagentNotices,
+        sessionTasks,
+      });
+      const changed =
+        next.childSessions.length !== childSessions.length ||
+        next.sessionTasks.length !== sessionTasks.length ||
+        next.subagentNotices.length !== subagentNotices.length;
+      if (!changed) {
+        return;
+      }
+      setChildSessions(next.childSessions);
+      setSessionTasks(next.sessionTasks);
+      setSubagentNotices(next.subagentNotices);
+      setSelectedChildSessionId((previous) =>
+        previous && next.removedChildSessionIds.includes(previous) ? null : previous,
+      );
+    },
+    [childSessions, sessionTasks, subagentNotices],
+  );
+
   const { handleRetryInCurrentSession, handleEditResendInCurrentSession, handleRetryInNewSession } =
     useChatRetryAndEdit({
       gatewayUrl,
@@ -2550,6 +2581,7 @@ export default function ChatPage() {
       sendMessage,
       createBranchSessionFromMessage,
       onOpenFileChangesPanel: openFileChangesPanel,
+      onRollbackApplied: handleRollbackApplied,
     });
 
   useEffect(() => {

@@ -189,6 +189,13 @@ export function repairOrphanedSessionMessageSearchDocuments(): void {
 
 const sessionStore = new Map<string, boolean>();
 
+/**
+ * 进程内「会话活性」标记（历史命名保留）。
+ *
+ * 网关不连接真实 Redis：这里只有 setex/del/get 三个方法，数据存在进程内 Map，
+ * `_ttl` 被忽略、重启即清空；`REDIS_URL` 也不会被消费（仅终端面板做端口过滤）。
+ * 多实例部署前必须替换为真正的 Redis 适配。
+ */
 export const redis = {
   setex(key: string, _ttl: number, value: string) {
     sessionStore.set(key, value === '1');

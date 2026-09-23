@@ -65,7 +65,6 @@ cat .env.example
 
 - `JWT_SECRET` - JWT 签名密钥（至少 32 字符）
 - `OPENAWORK_DATA_DIR` - 数据目录
-- `REDIS_URL` - Redis 连接字符串
 - `AI_API_KEY` - AI 模型 API 密钥
 - `AI_API_BASE_URL` - AI 模型 API 地址
 - `AI_DEFAULT_MODEL` - 默认 AI 模型
@@ -75,9 +74,6 @@ cat .env.example
 ```bash
 # 检查 Gateway 是否运行
 bun run --filter @openAwork/agent-gateway dev
-
-# 检查 Redis 是否运行
-redis-cli ping
 
 # 检查数据库连接
 ls -la ~/.local/share/OpenAWork/agent-gateway/

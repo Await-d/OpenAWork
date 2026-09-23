@@ -15,7 +15,7 @@ OpenAWork 是跨平台 AI Agent 工作台，采用 TypeScript monorepo 架构：
 - **后端**：Fastify 5 网关（`services/agent-gateway`）
 - **前端**：React Web（Vite）、Tauri v2 桌面端、Expo 移动端
 - **核心包**：agent-core（状态机 + 工具）、multi-agent（DAG 编排）、skill-registry（技能沙箱）
-- **技术栈**：TypeScript（strict + NodeNext）、bun workspace、Zod 校验、SQLite + Postgres + Redis
+- **技术栈**：TypeScript（strict + NodeNext）、bun workspace、Zod 校验、SQLite + Postgres
 
 ## 目录结构
 
@@ -197,7 +197,7 @@ bun run --filter @openAwork/agent-core test -t "测试名称关键字"
 
 - `JWT_SECRET` — 最少 32 字符
 - `OPENAWORK_DATA_DIR` — Gateway 持久化数据根目录
-- `REDIS_URL` — Redis 连接字符串
+- `REDIS_URL` — **可选，未接入**：网关不连接真实 Redis（`services/agent-gateway/src/infra/db.ts` 的 `redis` 是进程内 Map 桩），该变量仅用于终端面板端口过滤
 - `AI_API_KEY`、`AI_API_BASE_URL`、`AI_DEFAULT_MODEL`
 - `GATEWAY_PORT`（默认 3000）、`GATEWAY_HOST`
 

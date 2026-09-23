@@ -118,7 +118,6 @@ flowchart TB
 
     subgraph Storage["持久化 / Storage"]
         SQLite[("SQLite")]
-        Redis[("Redis")]
         DataDir[("Platform Data Dir")]
     end
 
@@ -152,7 +151,6 @@ flowchart LR
 
     subgraph Server["远端部署 （可选）"]
         Remote["agent-gateway<br/>Docker / 服务器"]
-        RemoteRedis[("Redis")]
         RemoteSQLite[("SQLite / Volume")]
     end
 
@@ -164,7 +162,6 @@ flowchart LR
     Shell -. 可切换到远端 .-> Remote
     Sidecar --> LocalDB
 
-    Remote --> RemoteRedis
     Remote --> RemoteSQLite
 ```
 
@@ -366,14 +363,13 @@ OpenAWork 当前有两条最常见的运行方式：
 
 - **Docker 模式**
   - 仓库已提供 `docker-compose.yml`
-  - 默认启动 `gateway + web + redis`
+  - 默认启动 `gateway + web`
   - 适合快速拉起基础运行环境
 
 默认端口：
 
 - **Gateway**：`3000`
 - **Web**：`5173`（Docker 场景下由宿主 `5173` 映射到容器 `80`）
-- **Redis**：`6379`
 
 ### 快速开始
 
@@ -392,7 +388,6 @@ cp .env.example .env
 至少需要关注：
 
 - `JWT_SECRET`
-- `REDIS_URL`
 - `AI_API_KEY`
 - `AI_API_BASE_URL`
 - `AI_DEFAULT_MODEL`

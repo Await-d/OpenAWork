@@ -2,6 +2,19 @@
 
 ## 已完成的任务
 
+### ✅ 260923-子代理数量限制设置页可调 - 并发/累计/嵌套深度用户级可调（保存即生效）
+**状态**: ✅ 已交付（2026-09-23，Lightweight 模式串行实现）；网关 4355 用例、web 5243 用例全绿
+**复杂度**: Lightweight（score +3；无并行收益，串行实现 + workflow 跟踪）
+**归档位置**: [workflow/done/260923-子代理数量限制设置页可调.md](workflow/done/260923-子代理数量限制设置页可调.md)
+
+**成果总结**:
+- ✅ **网关**：新增 `user_settings.subagent_limits`（默认 4 / 24 / 1，护栏 16 / 200 / 8，越界收敛到边界）；新增 `task/subagent-limits.ts` 统一读取与判定（**每次派发读库 ⇒ 保存即生效、无需重启**）；历史 `subagent_depth` 仅作深度回落来源；**删除与 `subagent_depth` 叠加的链深 4 校验**（此前把深度调高也会被链深 4 拦住）；数量判定函数整体从 `tool-sandbox.ts` 迁入该模块（便于测试，`tool-sandbox` 引用导入）。
+- ✅ **API**：`GET/PUT /settings/providers` 增加 `subagentLimits` 字段（缺省 = 未变更；旧前端/旧网关双向兼容）。
+- ✅ **前端**：设置页「连接」tab「子代理」区域新增三项数字输入（hover / focus ring / disabled / 范围提示），随「保存默认值」一并提交；并按用户要求将该区域**前移到「模型与提供商」之前**（区域编号重排，未保存提示文案同步）。
+- ✅ **验证**：网关 564 文件 / 4355 用例全绿（单独运行）· web 530 文件 / 5243 用例全绿 · gateway / web / desktop typecheck 与 gateway ESLint 全绿；新增测试 24 例（网关 15 + 前端 9）。
+- ✅ **闭环他处记录的阻塞**：`task/subagent-limits.ts` 类型错误与 `subagent-depth.test.ts` 2 用例失败（在「渠道出站媒体」相关条目中被记为外部阻塞）已随本任务修复；深度上限错误文案由 `subagent_depth` 改为指向设置页。
+- 📌 **行为语义**：超限仍拒绝派发（中文提示携带动态上限值）；越界值统一收敛到护栏边界；已在运行的子代理不受设置变更影响。
+
 ### ✅ 260923-渠道收尾清理第五批（QQ 入站图片 / relay enrich / 三处小修复）
 **状态**: ✅ 已完成并验证（2026-09-23，3 任务 / 3 个并行代理 + 协调者）
 **复杂度**: Full orchestration（score +6）
@@ -729,7 +742,12 @@
 - [2026-09-06] 实时聊天重复/Thinking 错位 → 标准 WS/SSE 只保存 `lastSeq:0`，重挂载 attach 从头 replay → Gateway 在持久化事件后附加 `clientRequestId + seq`，Web 分发前推进并持久化游标；文本内容指纹不应替代协议游标。
 - [2026-09-21] **切勿据「源码 TODO/FIXME 字面量」给缺口定级** → 扫标记会得出错误的 P0。实证两项均为误判，**不要重复当待办**：① `packages/opencode-llm/src/index.ts:42` 的 `TODO: 错误处理模块需要更新以适配 Effect 4.0 API` 是**过期注释**——仓库依赖本就是 `effect@4.0.0-beta.83`（`pnpm-lock.yaml` 唯一版本，无 stable 4.0），`tsc --noEmit` **EXIT=0**、`vitest run src/error` **4 文件 38 例全绿**，且**零生产消费者**（唯一引用者是包内集成测试 `src/__tests__/integration/e2e-simple.test.ts`），子路径 `./error` 仍经 `package.json` exports 可用；② `packages/skill-registry/src/installer.ts:130` 的 `Signature verification not implemented in MVP` 属**不可适用控制**——全仓无签名产物/公钥/`cosign`/`gpg`/`createSign`（`SkillManifest` 无 signature 字段），`skipSignatureVerification` 7 处调用点**全为 `true`/`?? true`**，抛错分支运行时不可达。**判缺口必须先验证前提（版本/消费者/可复现失败），再定级。**
 
+- [2026-09-23] **不要并行跑网关与 web 的全量测试**：两者同时启动会让网关全量出现约 9 例偶发失败（资源竞争下的超时/竞态，报错点分散在 channels/handoff 等与改动无关的文件，看起来像真实回归）；单独重跑即全绿（564 文件 / 4355 用例）。判定「是否真回归」前先确认没有其它全量测试在并行跑，并优先用定向目录（`bunx vitest run src/__tests__/<dir>`）复现。
+- [2026-09-23] **改动错误提示文案会打破既有断言**：`subagent-depth.test.ts` 曾断言深度错误消息包含 `subagent_depth` 键名；设置页化后文案改为「设置页 → 子代理」，该断言即失败。改错误消息时同步 grep 全仓断言（`grep -rn "<消息片段>" src/__tests__ src/verification`）。
+
 ### 架构决策
+
+- [2026-09-23] **子代理数量限制 = 用户级可调（`subagent_limits`），判定每次派发读库**：同时运行 / 任务树累计 / 嵌套深度三项由 `services/agent-gateway/src/task/subagent-limits.ts` 统一读取与判定（默认 4 / 24 / 1，护栏 16 / 200 / 8，越界收敛到边界），设置页「连接 → 子代理」经 `PUT /settings/providers` 的 `subagentLimits` 字段写入 ⇒ **保存即生效、无需重启**（不要在启动期缓存）；历史键 `subagent_depth` 仅作深度回落来源；嵌套深度只由 `checkSubagentDepthAllowed` 一处判定（与它叠加的链深 4 校验已删除）；前端护栏常量在 `apps/web/src/pages/settings/shared/settings-page-helpers.ts`，与网关 `provider/provider-config.ts` 的 `SUBAGENT_LIMITS_GUARDRAILS` **必须成对维护**（改一处先 grep 另一处）。
 
 - [2026-09-23] **后台任务有「三个入口」，但只有一套动作语义**：`BackgroundTaskPanel`（完整面板）/ `BackgroundTaskQuickChip`（composer footer 常驻胶囊，仅活跃时）/ `SubAgentRunList`（左侧浮动栏，含可选 `shellItems` 第二组）三者都消费 `useBackgroundTaskPanel` 的同一份行模型，破坏性操作统一走 `background-task-confirm-dialog.tsx`，并统一复用 `handleStopChildSession` / `killTerminal` / 预览终端 / `openChildSessionInspector`。**新增入口时必须复用这三个共用件**，禁止再实现一套停止/终止语义；计数一律由**活跃行**（running + pending）派生（`summary` 只用于「全部停止」的目标数量）。
 

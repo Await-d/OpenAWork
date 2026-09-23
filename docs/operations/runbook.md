@@ -55,10 +55,7 @@ export OPENAWORK_DB_PATH="${OPENAWORK_DATABASE_PATH:-$OPENAWORK_DATA_ROOT/openAw
 ls -lah "$OPENAWORK_DATA_ROOT"
 sqlite3 "$OPENAWORK_DB_PATH" "SELECT 1;"
 
-# 4. If Redis unreachable
-redis-cli -u $REDIS_URL ping
-
-# 5. Rollback to previous image
+# 4. Rollback to previous image
 docker pull ghcr.io/openwork/agent-gateway:$PREVIOUS_TAG
 docker stop agent-gateway
 docker run -d --name agent-gateway ... ghcr.io/openwork/agent-gateway:$PREVIOUS_TAG

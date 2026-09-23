@@ -94,6 +94,33 @@ export function getSessionWorkspaceRoot(sessionId: string): string | null {
   return resolveWorkspaceRootForPath(workingDirectory);
 }
 
+/**
+ * 解析「快照采集 / 快照恢复」使用的工作区根。
+ *
+ * 与工具执行根（`routes/stream.ts` 的 `input.workspaceRoot ?? workingDirectory ??
+ * resolveUnboundSessionWorkspaceFallback()`）保持同一口径：
+ *   1. 会话绑定的工作目录（含 team / task 子会话的父链继承）；
+ *   2. 未绑定的 **chat** 会话 → 回退到默认工作区 `resolveUnboundSessionWorkspaceFallback()`；
+ *   3. **team 会话不回退**——它们必须绑定工作区（`requiresBoundSessionWorkspace`），
+ *      未绑定时返回 null（由调用方按「不可用」处理），避免影响 team 语义。
+ *
+ * 返回值仍需调用方过 `validateWorkspacePath`（restricted 模式下默认工作区可能不在白名单）。
+ */
+export function resolveSnapshotWorkspaceRoot(input: {
+  metadataJson: string;
+  sessionId: string;
+  userId: string;
+}): string | null {
+  const bound = resolveSessionWorkspacePath(input);
+  if (bound) {
+    return bound;
+  }
+  if (requiresBoundSessionWorkspace(input.sessionId)) {
+    return null;
+  }
+  return resolveUnboundSessionWorkspaceFallback();
+}
+
 export function requiresBoundSessionWorkspace(sessionId: string): boolean {
   const row = sqliteGet<SessionWorkspacePolicyRow>(
     `SELECT metadata_json, user_id, role_layer, team_parent_session_id

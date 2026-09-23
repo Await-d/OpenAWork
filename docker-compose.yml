@@ -18,7 +18,6 @@ services:
       JWT_SECRET: change-me-in-production-min-32-chars
       JWT_EXPIRES_IN: 15m
       OPENAWORK_DATA_DIR: /var/lib/openawork
-      REDIS_URL: redis://redis:6379
       # 浏览器实时预览（跨域页面也能采集控制台与网络）。
       # 默认关闭；开启前需保证容器内有 Chromium（系统 Chrome/Edge，或 npx playwright install chromium），
       # 否则 /browser-live/status 返回 browser-missing，前端回退 iframe 预览。
@@ -30,9 +29,6 @@ services:
       # FAKE_IP_CIDRS: '198.18.0.0/15'
     volumes:
       - gateway_data:/var/lib/openawork
-    depends_on:
-      redis:
-        condition: service_healthy
 
   web:
     build:
@@ -43,13 +39,9 @@ services:
     depends_on:
       - gateway
 
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 3s
-      retries: 5
+# 本栈不含 Redis：网关当前不连接真实 Redis（进程内 Map 桩，见
+# services/agent-gateway/src/infra/db.ts），REDIS_URL 仅用于终端面板的端口过滤。
+# 未来做多实例部署、真正接入 Redis 适配后，再在此追加 redis 服务与 depends_on。
 
 volumes:
   gateway_data:

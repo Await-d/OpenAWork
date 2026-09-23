@@ -21,6 +21,7 @@
 import { useCallback } from 'react';
 import type { InputImageContent, Message } from '@openAwork/shared';
 import { createSessionsClient } from '@openAwork/web-client';
+import type { RollbackReceipt } from '@openAwork/web-client';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 import { normalizeChatMessages } from '../../../components/conversation-runtime/messages/support.js';
@@ -65,6 +66,11 @@ export interface UseChatRetryAndEditOptions {
    * 回退成功后的「查看文件变更」入口（可选）。缺省时 toast 不带操作按钮。
    */
   onOpenFileChangesPanel?: () => void;
+  /**
+   * 回退成功（截断生效）后的派生状态清理钩子：调用方据此摘掉属于被作废回合的
+   * 子代理展示（子会话 / 任务 / 完成通知）。receipt 为 null（旧网关）时不得猜测删除。
+   */
+  onRollbackApplied?: (receipt: RollbackReceipt | null) => void;
 }
 
 export interface ChatRetryAndEdit {
@@ -109,6 +115,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
     sendMessage,
     createBranchSessionFromMessage,
     onOpenFileChangesPanel,
+    onRollbackApplied,
   } = options;
 
   /**
@@ -144,9 +151,11 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       if (rollback) {
         applyRollbackReceipt(rollback);
       }
+      // 派生状态清理：摘掉属于被作废回合的子代理展示（子会话 / 任务 / 完成通知）。
+      onRollbackApplied?.(rollback);
       return messages;
     },
-    [gatewayUrl, token],
+    [gatewayUrl, onRollbackApplied, token],
   );
 
   const trimMessagesFromSource = useCallback(

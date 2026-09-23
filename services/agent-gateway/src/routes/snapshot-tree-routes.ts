@@ -24,8 +24,8 @@ import { parseBody, parseParams } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { sqliteGet } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
-import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { resolveSnapshotWorkspaceRoot } from '../workspace/workspace-safety.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
 import {
@@ -137,27 +137,24 @@ function resolveWorkspaceRoot(
   metadataJson: string,
   options?: { sessionId?: string; userId?: string },
 ): string | null {
-  // 先尝试直接读取当前 session 的 workingDirectory
-  const metadata = parseSessionMetadataJson(metadataJson);
-  const value = metadata['workingDirectory'];
-  if (typeof value === 'string' && value.length > 0) {
-    // Defense in depth: only accept paths within the gateway's allowlist.
-    return validateWorkspacePath(value);
-  }
+  // 统一口径（与快照采集 / 工具执行根一致，见 resolveSnapshotWorkspaceRoot）：
+  //   1. 会话绑定工作目录（含父链继承）；
+  //   2. 未绑定的 chat 会话 → 回退到默认工作区（`~/Documents/OpenAWork`）；
+  //   3. team 会话不回退（未绑定即不可用）。
+  const resolved =
+    options?.sessionId && options?.userId
+      ? resolveSnapshotWorkspaceRoot({
+          metadataJson,
+          sessionId: options.sessionId,
+          userId: options.userId,
+        })
+      : (() => {
+          const metadata = parseSessionMetadataJson(metadataJson);
+          const value = metadata['workingDirectory'];
+          return typeof value === 'string' && value.length > 0 ? value : null;
+        })();
 
-  // 当前 session 没有 workingDirectory 时，递归向上查找父 session 链
-  if (options?.sessionId && options?.userId) {
-    const resolved = resolveSessionWorkspacePath({
-      metadataJson,
-      sessionId: options.sessionId,
-      userId: options.userId,
-    });
-    if (resolved) {
-      return validateWorkspacePath(resolved);
-    }
-  }
-
-  return null;
+  return resolved ? validateWorkspacePath(resolved) : null;
 }
 
 async function readWorkspaceFile(

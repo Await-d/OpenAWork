@@ -11,7 +11,7 @@
 ## 概述
 
 跨平台 AI Agent 工作台：Fastify 网关 + React Web + Tauri 桌面端 + Expo 移动端。
-技术栈：TypeScript（严格模式，NodeNext 模块），bun monorepo，Zod 校验，SQLite + Postgres + Redis。
+技术栈：TypeScript（严格模式，NodeNext 模块），bun monorepo，Zod 校验，SQLite + Postgres。
 
 ## 目录结构
 
@@ -209,11 +209,11 @@ cd packages/agent-core && bunx vitest
 - `OPENAWORK_DATA_DIR` — Gateway 持久化数据根目录；默认走平台数据目录（Linux: `~/.local/share/OpenAWork/agent-gateway`）
 - `OPENAWORK_DATABASE_PATH` — 可选，显式 SQLite 文件路径；优先级高于 `OPENAWORK_DATA_DIR`
 - `DATABASE_URL` — 兼容保留的 SQLite 路径覆盖项，**不是** Postgres 连接串
-- `REDIS_URL` — Redis 连接字符串
+- `REDIS_URL` — **可选，未接入**：网关不连接真实 Redis（`services/agent-gateway/src/infra/db.ts` 的 `redis` 是进程内 Map 桩，TTL 被忽略），该变量仅用于终端面板「监听端口」列表的端口过滤（默认 6379）；多实例部署前需先实现真正的 Redis 适配
 - `AI_API_KEY`、`AI_API_BASE_URL`、`AI_DEFAULT_MODEL`
 - `GATEWAY_PORT`（默认 3000）、`GATEWAY_HOST`
 
-Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable 数据挂到 `gateway_data` 卷。
+Docker：`docker-compose up` 启动网关 + Web，并把 Gateway durable 数据挂到 `gateway_data` 卷（不含 Redis，理由见上）。
 
 ## 代码组织规则
 

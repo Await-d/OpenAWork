@@ -411,13 +411,42 @@ describe('snapshot-tree routes', () => {
     });
   });
 
-  it('returns 400 when workspaceRoot is not configured', async () => {
+  it('未绑定工作区的 chat 会话回退到默认工作区（不再 400）', async () => {
     mocks.sqliteGet.mockImplementation((sql: string, params: unknown[] = []) => {
       if (/FROM\s+sessions/i.test(sql)) {
         const [sessionId] = params as [string];
         if (sessionId === SESSION_ID) {
           return {
             team_parent_session_id: null,
+            user_id: USER_ID,
+            metadata_json: JSON.stringify({}),
+          };
+        }
+      }
+      return null;
+    });
+    mocks.loadedTrees.push(makeTree({ treeHash: 'hash-no-ws' }));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/restore/to-tree`,
+      payload: { treeHash: 'hash-no-ws', mode: 'apply' },
+    });
+
+    // 与工具执行根一致：未绑定 chat 会话回退到默认工作区（~/Documents/OpenAWork）。
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ mode: 'apply' });
+  });
+
+  it('未绑定工作区的 team 会话仍返回 400（不回退默认工作区）', async () => {
+    mocks.sqliteGet.mockImplementation((sql: string, params: unknown[] = []) => {
+      if (/FROM\s+sessions/i.test(sql)) {
+        const [sessionId] = params as [string];
+        if (sessionId === SESSION_ID) {
+          return {
+            team_parent_session_id: null,
+            role_layer: 'pm1',
             user_id: USER_ID,
             metadata_json: JSON.stringify({}),
           };
