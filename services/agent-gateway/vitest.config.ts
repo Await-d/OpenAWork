@@ -22,6 +22,12 @@ export default defineConfig({
       '@openAwork/mcp-client': fileURLToPath(
         new URL('../../packages/mcp-client/src/index.ts', import.meta.url),
       ),
+      '@openAwork/opencode-llm/providers/openai': fileURLToPath(
+        new URL('../../packages/opencode-llm/src/providers/openai.ts', import.meta.url),
+      ),
+      '@openAwork/opencode-llm': fileURLToPath(
+        new URL('../../packages/opencode-llm/src/index.ts', import.meta.url),
+      ),
       '@openAwork/pairing': fileURLToPath(
         new URL('../../packages/pairing/src/index.ts', import.meta.url),
       ),
