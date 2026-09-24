@@ -412,6 +412,8 @@
 **本版发现一项适用本仓的缺口（待办）**：上游 `fix(ai): ignore bare null SSE frames` 修的正是我们同样存在的行为——`packages/opencode-llm/src/protocols/shared.ts` 的 `sseFraming` 只过滤空串与 `[DONE]`，裸 `data: null` 帧会走到 `stream/processor.ts` 的 `JSON.parse('null')` → `parseEventSync(null)` 抛错 → **整条上游流中断**（部分 OpenAI 兼容代理会在事件之间或 `[DONE]` 之后发 `data: null`；`sseFraming` 是 SSE 的唯一咽喉，单点修复即可）。修法同上游：过滤条件加 `event.data !== 'null'` + 补测试。
 **其余项经查不适用**：client 的「`new URL('/api/…', base)` 丢 base 路径前缀」我们无该拼接模式；技能安装走 `git clone` 不涉及 pacote 的 `::path:`/200+HTML 陷阱（但**不支持子目录 skill**，属特性缺口）；未发现 MCP OAuth 日志存在「只留分类、丢 message」的等价物。
 
+**副本重建与上游分支拓扑（2026-09-24）**: `temp/` 目录（含 `@temp/opencode`）已被清理，对照副本重建为 `temp/opencode-v2.0.15`（浅克隆 + 深化，含全部 v2.0.x tag 与 `origin/v2`）。**上游分支拓扑（避免重复踩坑）**：默认分支 `dev` 是 **1.x 线**（历史含 `sync release versions for v1.18.32`），**不是**对照对象；**2.0 线在 `v2` 分支**；`2.0` 分支是 2026-04 的旧探索分支（勿用）。发布 tag 是主线的旁支提交，算差集直接 `git log v2.0.15..origin/v2`（已验证发布点的父提交是 `v2` 的祖先，故该区间精确）。**当前未发布差集：39 提交 / 218 文件 / +14667−1093**，要点：ai 媒体面继续扩张（queued image routes + BFL/fal/Replicate/Stability、speech generation、transcription）、codemode（Uint8Array 回调方法、resources 作为 codemode 工具）、core（V1 会话迁移标注重命名工具、Copilot responses-only 路由、WS idle timeout 放宽并尊重 `chunkTimeout`、read 支持引号/重音变体、凭据脱敏）、client 错误信息带 detail。**待评估三项**：① `fix(ai): ignore Vertex keepalives sent as SSE data`——与已修的裸 `data: null` 同属 SSE keepalive 家族，需核查我们的解析是否也会把 keepalive 当事件；② `fix(core): relax websocket idle timeout and honor chunkTimeout`；③ 调试配置的**凭据脱敏**（我们的 devtools/调试导出是否有同类泄漏面）。
+
 **范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
 ### ✅ 260922-子代理对标opencode改造方案 - 子代理结果回流收敛为 Job → 合成消息 → 唤醒 单闭环
